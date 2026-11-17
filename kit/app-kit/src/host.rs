@@ -490,6 +490,29 @@ impl Host {
         self.update(cx, |h, cx| h.notify(notification, Rc::new(click), cx));
     }
 
+    /// Puts `view` in the side panel as this page's section: the panel at
+    /// the window's left, drawn on every page in the pages' order. While
+    /// the panel is open this page's channels stay on, as for a view it
+    /// lends beside another page.
+    pub fn lend_side(&self, view: AnyView, cx: &mut App) {
+        let page = self.page;
+        assert!(
+            !page.is_empty(),
+            "a side section is lent by a page's own host"
+        );
+        self.update(cx, |h, cx| h.set_side(page, Some(view), cx));
+    }
+
+    /// Whether the side panel is open.
+    pub fn side_open(&self, cx: &App) -> bool {
+        self.read(cx, |h| h.settings.side_open).unwrap_or(true)
+    }
+
+    /// Opens or puts away the side panel, kept for the next run.
+    pub fn set_side_open(&self, open: bool, cx: &mut App) {
+        self.update(cx, |h, cx| h.set_side_open(open, cx));
+    }
+
     /// Shows this page.
     pub fn show(&self, cx: &mut App) {
         let page = self.page;

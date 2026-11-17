@@ -601,12 +601,74 @@ fn render_toast(t: &Theme, toast: &Toast) -> AnyElement {
     }
 }
 
+impl Shell {
+    /// The side panel at the window's left, on every page: the sections
+    /// pages lent it, in the pages' order, each with an even share of its
+    /// height; put away, a narrow edge that brings it back. A page whose
+    /// area is off lends nothing here.
+    fn render_side(&self, t: &Theme, cx: &mut Context<Self>) -> Option<AnyElement> {
+        let hub = self.hub.read(cx);
+        let off = hub.areas_off();
+        let sections: Vec<gpui::AnyView> = self
+            .pages
+            .iter()
+            .filter(|p| !p.meta.area.is_some_and(|a| off.iter().any(|o| o == a)))
+            .filter_map(|p| hub.side(p.meta.id))
+            .collect();
+        if sections.is_empty() {
+            return None;
+        }
+        let column = div()
+            .id("side")
+            .debug_selector(|| "side".into())
+            .flex_none()
+            .h_full()
+            .flex()
+            .flex_col()
+            .bg(t.surface)
+            .border_r_1()
+            .border_color(t.divider);
+        if !hub.settings.side_open {
+            let hub = self.hub.clone();
+            return Some(
+                column
+                    .w(px(size::SIDE_SHUT))
+                    .items_center()
+                    .pt(px(8.))
+                    .child(
+                        kit::button(t, "side-open", "›", kit::Kind::Quiet)
+                            .debug_selector(|| "side-open".into())
+                            .tooltip(kit::tip("Show sessions and files  Alt+A"))
+                            .on_click(move |_, _, cx| {
+                                hub.update(cx, |h, cx| h.set_side_open(true, cx));
+                            }),
+                    )
+                    .into_any_element(),
+            );
+        }
+        let mut column = column.w(px(size::SIDE));
+        for (n, view) in sections.into_iter().enumerate() {
+            column = column.child(
+                div()
+                    .flex_1()
+                    .min_h_0()
+                    .flex()
+                    .flex_col()
+                    .when(n > 0, |d| d.border_t_1().border_color(t.divider))
+                    .child(view),
+            );
+        }
+        Some(column.into_any_element())
+    }
+}
+
 impl Render for Shell {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let t = theme(cx).clone();
         self.view_changed(cx);
         self.veils.note(self.shown, &t);
         let page = self.render_page(window, cx);
+        let side = self.render_side(&t, cx);
         div()
             .id("shell")
             .key_context("Shell")
@@ -622,7 +684,7 @@ impl Render for Shell {
             .capture_key_down(cx.listener(Self::capture_key))
             .child(self.render_tab_bar(window, cx))
             .child(
-                div().flex_1().min_h_0().flex().child(
+                div().flex_1().min_h_0().flex().children(side).child(
                     div()
                         .id("page")
                         .flex_1()

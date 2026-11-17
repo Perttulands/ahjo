@@ -9,6 +9,7 @@ use crate::store::selection::{Receipt, Sent};
 use crate::store::sessions::Key;
 use crate::store::{launch, session_copy};
 use gpui::{Context, KeyDownEvent, Window};
+use parvi_core::NodeId;
 
 /// How a click on a rail row changes the pick: Ctrl (or Cmd) flips it,
 /// Shift adds a range, a plain click empties it and peeks.
@@ -246,6 +247,15 @@ impl Terminals {
         cx: &mut Context<Self>,
     ) {
         let key = k.text();
+        // From another page a click goes to the session here, as a reveal
+        // of it does.
+        if !self.shown {
+            if let Some(id) = self.fleet.session(k).map(|s| s.id.clone()) {
+                self.host.show(cx);
+                self.reveal_session(&id, Some(NodeId(k.node.clone())), None, window, cx);
+            }
+            return;
+        }
         match gesture {
             Gesture::Plain => {
                 self.pick.plain(&key);

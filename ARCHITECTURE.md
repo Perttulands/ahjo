@@ -160,7 +160,18 @@ reserves, or whose `everywhere` chords share a key, naming both;
   `everywhere` chord): the same `Host::show_beside`, so it lies over the
   terminal windows and no shared session changes size. While a view a page
   lent is open beside another, that page's channels stay on, as while it
-  shows. There is no column at the window's side that narrows the page.
+  shows.
+- **Side panel.** The column at the window's left is the shell's, on every
+  page: each page may lend it one section (`Host::lend_side`), drawn in the
+  pages' order (Sessions, then Files), and the operator puts it away to a
+  narrow edge and back (`Host::set_side_open`, kept in `app.json`). On the
+  Sessions page that column is the rail that was always there; on other
+  pages it narrows the page. What still holds: a shared session's terminal
+  windows never change size because a panel opens or another page shows.
+  Only the operator's own act resizes them, as putting the panel away
+  does, the way putting the rail away always did. A lent section keeps its page's channels on while the panel is
+  open, and a section acts through its page (a session goes to Sessions, a
+  file opens in Files), so a page's own lists stay its own.
 - **Unsaved work.** The shell owns the window's one close handler. A page
   guards itself, or a view it shows beside another page, with
   `Host::guard_close`, which names what that view holds unsaved; while any

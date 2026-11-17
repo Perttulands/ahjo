@@ -55,7 +55,7 @@ fn chords(page: &WeakEntity<Terminals>, tabs: usize) -> Vec<Chord> {
         chord("-", "Remove the last empty window", Action::RemoveWindow).alt("-", None),
         chord("/", "Session search", Action::SearchSessions),
         chord("n", "Launcher in the focused window", Action::Launcher).alt("n", Some(false)),
-        chord("tab", "Sessions panel", Action::Sessions).alt("a", Some(false)),
+        chord("tab", "Sessions and files panel", Action::Sessions).alt("a", Some(false)),
         chord("s", "Send from the focused session", Action::Send).alt("s", Some(false)),
         // Parvi's own, on letters CHROTE leaves free: V for view, H for
         // history (Alt+F is the shell's forward-word).
@@ -158,9 +158,13 @@ impl Terminals {
                 cx.notify();
                 return;
             }
-            Action::Sessions => self.settings.sessions_open = !self.settings.sessions_open,
+            Action::Sessions => {
+                let open = self.host.side_open(cx);
+                self.host.set_side_open(!open, cx);
+                return;
+            }
             Action::SearchSessions => {
-                self.settings.sessions_open = true;
+                self.host.set_side_open(true, cx);
                 self.host.show(cx);
                 self.rail_search
                     .update(cx, |f, cx| f.set(&f.text.clone(), true, cx));
@@ -260,7 +264,7 @@ mod tests {
             ("+", false, Some("Add a window")),
             ("-", false, Some("Remove the last empty window")),
             ("n", false, Some("Launcher in the focused window")),
-            ("a", false, Some("Sessions panel")),
+            ("a", false, Some("Sessions and files panel")),
             ("s", false, Some("Send from the focused session")),
             ("2", false, Some("Sessions tab 2")),
             ("6", false, Some("Sessions tab 6")),
@@ -299,7 +303,7 @@ mod tests {
             after_leader(&bare("tab", "\t"), &all)
                 .map(|r| r.label)
                 .as_deref(),
-            Some("Sessions panel")
+            Some("Sessions and files panel")
         );
         assert!(
             after_leader(&bare("enter", "\r"), &all).is_none(),

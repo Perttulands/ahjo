@@ -1,8 +1,10 @@
 //! The Sessions rail and Peek. The rail lists every session the node
-//! follows, by device and environment, then in CHROTE's name groups; a
-//! click peeks, Ctrl+ and Shift+click pick rows to kill together, a drag
-//! puts the session in a window, the menu does the rest. Peek shows a
-//! session without sizing it.
+//! follows, by device and environment, then in CHROTE's name groups; it is
+//! this page's section of the side panel, so it shows on every page. On
+//! this page a click peeks, Ctrl+ and Shift+click pick rows to kill
+//! together, a drag puts the session in a window, the menu does the rest;
+//! on another page a click goes to the session here. Peek shows a session
+//! without sizing it.
 
 use super::page::{Act, MenuItem, Terminals};
 use super::place;
@@ -14,12 +16,44 @@ use crate::store::workspace::LinkState;
 use crate::term::paint::{self, Look};
 use crate::theme::{Theme, size, theme};
 use gpui::{
-    AnyElement, ContentMask, Context, FontWeight, MouseButton, MouseDownEvent, Window, canvas, div,
-    prelude::*, px,
+    AnyElement, ContentMask, Context, Entity, FontWeight, MouseButton, MouseDownEvent,
+    Subscription, WeakEntity, Window, canvas, div, prelude::*, px,
 };
 use parvi_app_kit::widgets::kit::{self, Kind};
 use parvi_app_kit::widgets::pane;
 use parvi_terminals_contract::{AgentEvent, EventKind, Session};
+
+/// The rail as the side panel holds it: the page draws it, and it draws
+/// again whenever the page does.
+pub struct Rail {
+    page: WeakEntity<Terminals>,
+    _page_changed: Subscription,
+}
+
+impl Rail {
+    pub fn new(page: &Entity<Terminals>, cx: &mut Context<Self>) -> Self {
+        Self {
+            page: page.downgrade(),
+            _page_changed: cx.observe(page, |_, _, cx| cx.notify()),
+        }
+    }
+}
+
+impl Render for Rail {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        self.page
+            .update(cx, |p, cx| {
+                // Acting here is looking at the page, as inside it.
+                div()
+                    .size_full()
+                    .capture_any_mouse_down(cx.listener(|s, _, _, _| s.acted = true))
+                    .capture_key_down(cx.listener(|s, _, _, _| s.acted = true))
+                    .child(p.render_rail(window, cx))
+                    .into_any_element()
+            })
+            .unwrap_or_else(|_| div().into_any_element())
+    }
+}
 
 impl Terminals {
     pub fn render_rail(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
@@ -37,7 +71,8 @@ impl Terminals {
             )
             .child(
                 kit::button(&t, "rail-close", "‹", Kind::Quiet)
-                    .tooltip(kit::tip("Hide the sessions  Alt+A"))
+                    .debug_selector(|| "rail-close".into())
+                    .tooltip(kit::tip("Hide sessions and files  Alt+A"))
                     .on_click(cx.listener(|s, _, window, cx| {
                         s.run(super::chords::Action::Sessions, window, cx);
                     })),
@@ -143,50 +178,12 @@ impl Terminals {
         div()
             .track_focus(&self.rail_focus)
             .on_key_down(cx.listener(Self::rail_key))
-            .flex_none()
-            .w(px(size::RAIL))
-            .h_full()
+            .size_full()
             .flex()
             .flex_col()
-            .bg(t.surface)
-            .border_r_1()
-            .border_color(t.divider)
             .child(header)
             .children(search)
             .child(list)
-            .into_any_element()
-    }
-
-    /// The rail put away: a narrow edge that brings it back, with the
-    /// count of sessions and the way to search them.
-    pub fn render_rail_shut(&mut self, cx: &mut Context<Self>) -> AnyElement {
-        let t = theme(cx).clone();
-        div()
-            .flex_none()
-            .w(px(size::RAIL_SHUT))
-            .h_full()
-            .flex()
-            .flex_col()
-            .items_center()
-            .pt(px(8.))
-            .gap(px(4.))
-            .bg(t.surface)
-            .border_r_1()
-            .border_color(t.divider)
-            .child(
-                kit::button(&t, "rail-open", "›", Kind::Quiet)
-                    .debug_selector(|| "rail-open".into())
-                    .tooltip(kit::tip("Show the sessions  Alt+A"))
-                    .on_click(cx.listener(|s, _, window, cx| {
-                        s.run(super::chords::Action::Sessions, window, cx);
-                    })),
-            )
-            .child(
-                div()
-                    .text_size(px(size::SMALL))
-                    .text_color(t.dim)
-                    .child(self.fleet.all.len().to_string()),
-            )
             .into_any_element()
     }
 

@@ -78,7 +78,8 @@ pub enum HubEvent {
     /// `app.json` was edited outside the app and read again: these pages'
     /// sections changed.
     SettingsReloaded(Vec<&'static str>),
-    /// A view page `page` lent beside a page opened or closed.
+    /// A view page `page` lent beside a page, or as its section of the
+    /// side panel, opened or closed.
     Lent(&'static str),
     /// The link to `node` changed state; `None` when the app no longer
     /// follows that node. Every page hears it.
@@ -123,6 +124,8 @@ pub struct Hub {
     /// those doing so now.
     widens: HashSet<&'static str>,
     whole: HashSet<&'static str>,
+    /// The sections of the side panel, by the page that lent each.
+    side: HashMap<&'static str, AnyView>,
     /// The views that may hold unsaved work, each with the page it is from.
     guards: Vec<Guard>,
 }
@@ -190,6 +193,7 @@ impl Hub {
             beside: HashMap::new(),
             widens: HashSet::new(),
             whole: HashSet::new(),
+            side: HashMap::new(),
             guards: vec![],
         }
     }
@@ -712,9 +716,41 @@ impl Hub {
         self.beside.get(page).map(|(_, view)| view.clone())
     }
 
-    /// Whether a view page `page` lent is open beside a page.
+    /// Whether a view page `page` lent shows on other pages: beside a
+    /// page, or as its section of the open side panel.
     pub fn lends(&self, page: &str) -> bool {
         self.beside.values().any(|(from, _)| *from == page)
+            || (self.settings.side_open && self.side.contains_key(page))
+    }
+
+    /// Page `page`'s section of the side panel.
+    pub fn side(&self, page: &str) -> Option<AnyView> {
+        self.side.get(page).cloned()
+    }
+
+    /// Puts `view` in the side panel as page `page`'s section, or takes
+    /// its section out.
+    pub fn set_side(&mut self, page: &'static str, view: Option<AnyView>, cx: &mut Context<Self>) {
+        match view {
+            Some(view) => self.side.insert(page, view),
+            None => self.side.remove(page),
+        };
+        cx.emit(HubEvent::Lent(page));
+        cx.notify();
+    }
+
+    /// Opens or puts away the side panel, kept for the next run.
+    pub fn set_side_open(&mut self, open: bool, cx: &mut Context<Self>) {
+        if self.settings.side_open == open {
+            return;
+        }
+        self.settings.side_open = open;
+        self.save(cx);
+        let lenders: Vec<&'static str> = self.side.keys().copied().collect();
+        for page in lenders {
+            cx.emit(HubEvent::Lent(page));
+        }
+        cx.notify();
     }
 
     /// Opens `view`, lent by page `from`, beside `page`, or closes what is

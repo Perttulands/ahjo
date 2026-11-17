@@ -32,6 +32,9 @@ pub struct Settings {
     pub show_keys: bool,
     /// The theme's direction, by its key (`theme::Direction::key`).
     pub theme: String,
+    /// The side panel (sessions and files, on every page) is open; put
+    /// away it is a narrow edge.
+    pub side_open: bool,
     /// The fleet as last seen: each node's device and environment, so an
     /// away device keeps its name until it answers again, across restarts
     /// too, and an address to serve through while the configured node is
@@ -65,6 +68,7 @@ impl Default for Settings {
             keys: true,
             show_keys: false,
             theme: crate::theme::Direction::default().key().into(),
+            side_open: true,
             places: Default::default(),
             sections: Map::new(),
         }

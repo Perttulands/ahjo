@@ -20,10 +20,10 @@ use gpui::{
 
 impl Terminals {
     /// The width the view beside takes, its edge left out.
-    pub(super) fn beside_width(&self, window: &Window) -> f32 {
+    pub(super) fn beside_width(&self, window: &Window, cx: &App) -> f32 {
         beside::width(
             self.settings.beside_width,
-            self.workspace_room(window) - size::BESIDE_SEAM,
+            self.workspace_room(window, cx) - size::BESIDE_SEAM,
         )
     }
 
@@ -35,7 +35,7 @@ impl Terminals {
         if self.host.beside(cx).is_none() || whole {
             return 0.;
         }
-        self.beside_width(window) + size::BESIDE_SEAM
+        self.beside_width(window, cx) + size::BESIDE_SEAM
     }
 
     /// The view beside with its edge, over the windows; `None` when nothing
@@ -48,7 +48,7 @@ impl Terminals {
         let view = self.host.beside(cx)?;
         let t = theme(cx).clone();
         let whole = self.host.whole_beside(crate::PAGE, cx) == Some(true);
-        let width = self.beside_width(window);
+        let width = self.beside_width(window, cx);
         let grip = div()
             .id("beside-grip")
             .debug_selector(|| "beside-grip".into())
@@ -126,7 +126,7 @@ impl Terminals {
                         s.beside_resizing = false;
                         s.save(cx);
                     } else {
-                        let room = s.workspace_room(window) - size::BESIDE_SEAM;
+                        let room = s.workspace_room(window, cx) - size::BESIDE_SEAM;
                         // The grip is on its left: the width runs from the
                         // pointer to the right edge.
                         let right = window.viewport_size().width / px(1.);

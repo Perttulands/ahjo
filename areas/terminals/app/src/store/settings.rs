@@ -14,7 +14,6 @@ pub struct Settings {
     pub font_size: f32,
     /// Copy a selection to the clipboard as the mouse is released.
     pub copy_on_select: bool,
-    pub sessions_open: bool,
     pub collapsed_groups: Vec<String>,
     pub recent_targets: Vec<String>,
     /// The Send drawer's width, as last dragged on this device.
@@ -92,7 +91,6 @@ impl Default for Settings {
         Self {
             font_size: size::TERM_DEFAULT,
             copy_on_select: true,
-            sessions_open: true,
             collapsed_groups: vec![],
             recent_targets: vec![],
             send_width: None,
@@ -201,7 +199,7 @@ mod tests {
                 _ => setting.stepped(kept, 1.),
             };
         }
-        changed["sessions_open"] = false.into();
+        changed["collapsed_groups"] = serde_json::json!(["mine"]);
         let fresh: Settings = serde_json::from_value(changed.clone()).unwrap();
         let mut mine = Settings::default();
         mine.take_declared(fresh);
@@ -209,7 +207,11 @@ mod tests {
         for setting in DECLARED {
             assert_eq!(taken[setting.key], changed[setting.key], "{}", setting.key);
         }
-        assert_eq!(taken["sessions_open"], true, "not declared, not taken");
+        assert_eq!(
+            taken["collapsed_groups"],
+            serde_json::json!([]),
+            "not declared, not taken"
+        );
     }
 
     #[test]

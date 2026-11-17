@@ -259,9 +259,6 @@ pub struct Terminals {
     /// The grid each window's body would hold at the terminal font,
     /// as last painted: what a launch into it asks the node for (#161).
     pub launch_grids: Rc<RefCell<[Option<Grid>; 4]>>,
-    /// Each window's launcher room as last painted, and the height its
-    /// launcher needs whole: shorter, it lies over the windows instead.
-    pub launcher_fit: Rc<RefCell<[super::tiles::LauncherFit; 4]>>,
     /// The window a drag selection started in.
     pub selecting: Option<usize>,
     /// Lines a selection drag held outside its grid scrolls each tick, and
@@ -422,7 +419,6 @@ impl Terminals {
             chips: Rc::default(),
             pictures: Default::default(),
             launch_grids: Rc::default(),
-            launcher_fit: Rc::default(),
             selecting: None,
             drag_scroll: 0,
             scroll_rest: (0, 0.),
@@ -478,6 +474,10 @@ impl Terminals {
                 s.link_changed(&n.id, Some(state), window, cx);
             }
         }
+        // The rail is this page's section of the side panel, on every page.
+        let page = cx.entity();
+        let rail = cx.new(|cx| super::rail::Rail::new(&page, cx));
+        s.host.lend_side(rail.into(), cx);
         s
     }
 
@@ -1376,7 +1376,7 @@ impl Terminals {
 
     /// Bring a session and optional immutable pane id into view. Resolve the
     /// whole request before changing the workspace, including a bad pane.
-    fn reveal_session(
+    pub(super) fn reveal_session(
         &mut self,
         id: &str,
         node: Option<NodeId>,
@@ -1782,8 +1782,8 @@ impl Page for Terminals {
 
     /// The terminal, or the rail while rows are picked there: it holds
     /// Delete and Escape, as CHROTE's panel does once its menu closes.
-    fn focus(&self, _cx: &App) -> Option<FocusHandle> {
-        if !self.pick.keys.is_empty() && self.settings.sessions_open {
+    fn focus(&self, cx: &App) -> Option<FocusHandle> {
+        if !self.pick.keys.is_empty() && self.host.side_open(cx) {
             Some(self.rail_focus.clone())
         } else {
             Some(self.term_focus.clone())

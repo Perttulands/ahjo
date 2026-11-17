@@ -17,9 +17,6 @@ pub mod size {
     pub const TAB_FIELD: f32 = 180.;
     /// A shell's `>_` mark, as a share of the mark's size.
     pub const SHELL_MARK: f32 = 0.8;
-    pub const RAIL: f32 = 260.;
-    /// The rail put away: the edge that brings it back.
-    pub const RAIL_SHUT: f32 = 36.;
     /// Name budget in the standard rail, leaving room for age and actions.
     pub const RAIL_NAME_COLUMNS: usize = 22;
     /// A rail row's room before its news dot, from the list's side, so

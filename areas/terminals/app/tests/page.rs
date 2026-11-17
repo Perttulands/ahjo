@@ -940,7 +940,8 @@ fn what_lies_over_the_windows_takes_every_click_inside_it(cx: &mut TestAppContex
     cx.run_until_parked();
     assert!(cx.debug_bounds("peek").is_none(), "Esc closed Peek");
 
-    // A launcher too big for its window lies over the others whole.
+    // A launcher too big for its window stays in it: its fields scroll
+    // under its button, and beta's window beside it stays whole.
     cx.update(|_, cx| {
         page.update(cx, |p, cx| {
             p.settings.workspace.set_windows(0, 4);
@@ -948,21 +949,22 @@ fn what_lies_over_the_windows_takes_every_click_inside_it(cx: &mut TestAppContex
             cx.notify();
         })
     });
-    until(cx, "the launcher over the windows", |cx| {
-        cx.debug_bounds("launcher-over-3").is_some()
+    until(cx, "the launcher in its window", |cx| {
+        cx.debug_bounds("launch-3").is_some()
     });
-    let over = cx.debug_bounds("launcher-over-3").expect("the launcher");
+    let window = cx.debug_bounds("window-3").expect("its window");
     let under = cx.debug_bounds("window-1").expect("beta's window");
-    assert!(
-        over.intersects(&under),
-        "{over:?} lies over beta's window {under:?}"
-    );
-    poke(
-        cx,
-        gpui::point(over.right() - px(4.), over.top() + px(4.)),
-        "window-1",
-    );
-    untouched(cx, "the launcher", 3);
+    for part in ["launcher-fields-3", "launch-3"] {
+        let b = cx.debug_bounds(part).expect(part);
+        assert!(
+            window.contains(&b.origin) && window.contains(&b.bottom_right()),
+            "{part} {b:?} lies in its window {window:?}"
+        );
+        assert!(
+            !b.intersects(&under),
+            "{part} {b:?} leaves beta's window {under:?}"
+        );
+    }
     let _ = std::fs::remove_dir_all(settings.parent().expect("its folder"));
 }
 
@@ -1117,21 +1119,15 @@ fn launches_use_each_tile_grid(cx: &mut TestAppContext) {
             cx.debug_bounds(selector).is_some()
         });
         // A quarter of the window is too short for the whole launcher: it
-        // lies over the windows at full size, its button in sight.
-        let over: &'static str = Box::leak(format!("launcher-over-{i}").into_boxed_str());
-        let app = cx.update(|window, _| {
-            gpui::Bounds::new(gpui::point(px(0.), px(0.)), window.viewport_size())
+        // stays in its window, its button in sight there.
+        let tile: &'static str = Box::leak(format!("window-{i}").into_boxed_str());
+        until(cx, &format!("the launch button inside tile {i}"), |cx| {
+            let (Some(tile), Some(button)) = (cx.debug_bounds(tile), cx.debug_bounds(selector))
+            else {
+                return false;
+            };
+            tile.contains(&button.origin) && tile.contains(&button.bottom_right())
         });
-        until(
-            cx,
-            &format!("the whole launcher over the windows in tile {i}"),
-            |cx| {
-                cx.debug_bounds(over).is_some()
-                    && cx
-                        .debug_bounds(selector)
-                        .is_some_and(|button| app.contains(&button.center()))
-            },
-        );
         click(cx, button);
         until(cx, &format!("session bound in tile {i}"), |cx| {
             page.read_with(cx, |p, _| p.settings.workspace.shown(i).is_some())

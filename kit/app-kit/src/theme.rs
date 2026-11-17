@@ -29,6 +29,10 @@ pub mod size {
     /// The keys panel and a menu: their widths.
     pub const KEYS: f32 = 520.;
     pub const MENU: f32 = 220.;
+    /// The side panel at the window's left (sessions, files), and the
+    /// edge it leaves when put away.
+    pub const SIDE: f32 = 260.;
+    pub const SIDE_SHUT: f32 = 36.;
     /// A tab card's gap above it.
     pub const TAB_CARD_TOP: f32 = 6.;
     /// The bar under the shown tab, and its inset from the tab's sides.
