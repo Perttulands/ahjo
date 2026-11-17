@@ -338,7 +338,9 @@ impl MissionsPage {
                 // Gates, ends and the mission's note are rarer than steps.
                 pane::act(t, "edit-more", "…")
                     .debug_selector(|| "edit-more".into())
-                    .tooltip(kit::tip("Add a gate or an end, or note the mission"))
+                    .tooltip(kit::tip(
+                        "Add a gate, a limit or an end, or note the mission",
+                    ))
                     .on_click(cx.listener(|p, e: &gpui::ClickEvent, _, cx| {
                         let page = cx.entity().downgrade();
                         let add = |label: &'static str, kind: board::Kind| {
@@ -349,6 +351,7 @@ impl MissionsPage {
                         };
                         let mut rows = vec![
                             add("Add gate", board::Kind::Gate),
+                            add("Add limit", board::Kind::Limit),
                             add("Add end", board::Kind::End),
                         ];
                         rows.push(MenuRow::new("Note on the mission", move |window, cx| {
@@ -429,7 +432,13 @@ impl MissionsPage {
                         let who = formation
                             .slots
                             .iter()
-                            .map(crate::store::words::who)
+                            .map(|slot| {
+                                format!(
+                                    "{} in {}",
+                                    crate::store::words::who(slot),
+                                    crate::store::words::session_of(mission, formation, slot)
+                                )
+                            })
                             .collect::<Vec<_>>()
                             .join(", ");
                         block = block.child(pane::meta(t, who, Some(t.text2)));

@@ -26,6 +26,8 @@ enum Doing {
 struct Form {
     doing: Doing,
     name: Entity<TextField>,
+    /// The example a new mission starts as a copy of; none starts empty.
+    example: Option<&'static parvi_missions_contract::Example>,
     problem: Option<String>,
     busy: bool,
 }
@@ -141,6 +143,7 @@ impl MissionsPage {
         self.manage.form = Some(Form {
             doing,
             name,
+            example: None,
             problem: None,
             busy: false,
         });
@@ -177,6 +180,12 @@ impl MissionsPage {
         }
         let title = form.name.read(cx).text.trim().to_owned();
         let doing = form.doing.clone();
+        let example = form.example;
+        // An example names the mission after itself until it is renamed.
+        let title = match example {
+            Some(e) if title.is_empty() => e.title.to_owned(),
+            _ => title,
+        };
         if matches!(doing, Doing::Create { .. }) && title.is_empty() {
             self.manage.form.as_mut().unwrap().problem = Some("A mission needs a name.".into());
             cx.notify();
@@ -198,7 +207,7 @@ impl MissionsPage {
         }
         let request = match &doing {
             Doing::Create { node } => Request::new("POST", NodeId(node.clone()), "/api/missions")
-                .json(&json!({"title":title, "updatedBy":"human:operator"})),
+                .json(&json!({"title":title, "example":example.map(|e| e.name).unwrap_or(""), "updatedBy":"human:operator"})),
             Doing::Rename {
                 node,
                 slug,
@@ -269,6 +278,60 @@ impl MissionsPage {
         }).detach();
         cx.notify();
     }
+    fn example_choice(
+        &self,
+        t: &Theme,
+        chosen: Option<&'static parvi_missions_contract::Example>,
+        cx: &mut Context<Self>,
+    ) -> Div {
+        let row = |id: String,
+                   title: &'static str,
+                   about: &'static str,
+                   on: bool,
+                   pick: Option<&'static parvi_missions_contract::Example>| {
+            let selector = id.clone();
+            div()
+                .id(SharedString::from(id))
+                .debug_selector(move || selector.clone())
+                .px(px(PAD))
+                .py(px(size::RADIUS))
+                .rounded(px(size::RADIUS))
+                .border_1()
+                .border_color(if on { t.accent } else { t.divider })
+                .cursor_pointer()
+                .hover(|d| d.bg(t.raised))
+                .child(div().font_weight(FontWeight::SEMIBOLD).child(title))
+                .child(
+                    div()
+                        .text_size(px(size::SMALL))
+                        .text_color(t.text2)
+                        .child(about),
+                )
+                .on_click(cx.listener(move |page, _, _, cx| {
+                    if let Some(form) = page.manage.form.as_mut() {
+                        form.example = pick;
+                    }
+                    cx.notify();
+                }))
+        };
+        let mut list = div().flex().flex_col().gap(px(size::RADIUS)).child(row(
+            "mission-example-empty".into(),
+            "Empty",
+            "Nothing yet: build it on the canvas.",
+            chosen.is_none(),
+            None,
+        ));
+        for e in parvi_missions_contract::EXAMPLES {
+            list = list.child(row(
+                format!("mission-example-{}", e.name),
+                e.title,
+                e.about,
+                chosen.is_some_and(|c| c.name == e.name),
+                Some(e),
+            ));
+        }
+        list
+    }
     pub(super) fn mission_form(&self, t: &Theme, cx: &mut Context<Self>) -> Option<Div> {
         let form = self.manage.form.as_ref()?;
         let title = match &form.doing {
@@ -334,6 +397,11 @@ impl MissionsPage {
                                     .debug_selector(|| "mission-form-name".into())
                                     .child(form.name.clone()),
                             )
+                        })
+                        // Start empty, or from an example that is staffed and
+                        // wired already.
+                        .when(matches!(form.doing, Doing::Create { .. }), |d| {
+                            d.child(kit::label(t, "Start from")).child(self.example_choice(t, form.example, cx))
                         })
                         .when_some(form.problem.clone(), |d, problem| {
                             d.child(

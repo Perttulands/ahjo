@@ -17,6 +17,11 @@ pub const GATE_W: f32 = 300.;
 pub const GATE_H: f32 = 84.;
 pub const END_W: f32 = 200.;
 pub const END_H: f32 = 56.;
+/// A Limit card: a sticky note under the card it caps.
+pub const LIMIT_W: f32 = 220.;
+pub const LIMIT_H: f32 = 64.;
+/// How far under its target a Limit card sits until it is placed.
+const LIMIT_GAP: f32 = 32.;
 /// An IN or OUT row.
 pub const IO_ROW: f32 = 34.;
 /// A step's head: number, title, two lines of brief; a run adds its chips.
@@ -51,6 +56,7 @@ pub enum Kind {
     Formation,
     Gate,
     End,
+    Limit,
 }
 
 /// One card on the canvas.
@@ -70,7 +76,8 @@ pub struct Wire {
     pub id: String,
     pub from: (f32, f32),
     pub to: (f32, f32),
-    /// `pass`, `fail`, `judge`, or blank for work.
+    /// `pass`, `fail`, `judge`, `limit` (a Limit card to what it caps),
+    /// or blank for work.
     pub route: String,
     pub from_node: String,
     pub to_node: String,
@@ -131,6 +138,9 @@ fn size(m: &Mission, id: &str, running: bool) -> Option<(Kind, f32, f32)> {
     }
     if m.ends.iter().any(|e| e.id == id) {
         return Some((Kind::End, END_W, END_H));
+    }
+    if m.limits.iter().any(|l| l.id == id) {
+        return Some((Kind::Limit, LIMIT_W, LIMIT_H));
     }
     None
 }
@@ -258,6 +268,7 @@ pub fn ports(m: &Mission, b: &Board) -> Vec<Port> {
                 add(c, "judge", true);
             }
             Kind::End => add(c, "in", false),
+            Kind::Limit => {}
         }
     }
     out
@@ -298,7 +309,7 @@ pub fn board(m: &Mission, flow: &Flow, layout: &[LayoutNode], running: bool) -> 
         .chain(m.formations.iter().map(|f| &f.id))
         .chain(m.gates.iter().map(|g| &g.id))
         .chain(m.ends.iter().map(|e| &e.id));
-    let cards: Vec<Card> = ids
+    let mut cards: Vec<Card> = ids
         .filter_map(|id| {
             let (kind, w, h) = size(m, id, running)?;
             let (x, y) = at.get(id.as_str()).copied().unwrap_or((MARGIN, MARGIN));
@@ -312,9 +323,36 @@ pub fn board(m: &Mission, flow: &Flow, layout: &[LayoutNode], running: bool) -> 
             })
         })
         .collect();
+    // A Limit card not yet placed sits under the card it caps, after any
+    // other limit there.
+    for l in &m.limits {
+        let placed = layout.iter().any(|p| p.id == l.id);
+        let under = cards.iter().find(|c| c.id == l.target).map(|c| {
+            let below = c.y + c.h + LIMIT_GAP;
+            let taken = cards
+                .iter()
+                .filter(|o| o.kind == Kind::Limit && o.x == c.x && o.y >= below)
+                .count() as f32;
+            (c.x, below + taken * (LIMIT_H + GAP_Y / 2.))
+        });
+        let (x, y) = if placed {
+            at[l.id.as_str()]
+        } else {
+            under.unwrap_or((MARGIN, MARGIN))
+        };
+        cards.push(Card {
+            id: l.id.clone(),
+            kind: Kind::Limit,
+            x,
+            y,
+            w: LIMIT_W,
+            h: LIMIT_H,
+        });
+    }
     let card = |id: &str| cards.iter().find(|c| c.id == id);
     let top = cards.iter().map(|c| c.y).fold(f32::MAX, f32::min);
-    let wires = m
+    let mut loops = 0.;
+    let mut wires: Vec<Wire> = m
         .connections
         .iter()
         .filter_map(|c| {
@@ -335,17 +373,42 @@ pub fn board(m: &Mission, flow: &Flow, layout: &[LayoutNode], running: bool) -> 
                 port_at(m, b, to_port, false)
             };
             let back = route != "judge" && to.0 < from.0;
+            // Each loop back has a lane of its own, the later ones higher.
+            let lane = back.then(|| {
+                loops += 1.;
+                top - LOOP * loops
+            });
             Some(Wire {
                 id: c.id.clone(),
                 from,
                 to,
-                lane: back.then_some(top - LOOP),
+                lane,
                 route,
                 from_node: from_node.to_string(),
                 to_node: to_node.to_string(),
             })
         })
         .collect();
+    for l in &m.limits {
+        let (Some(a), Some(b)) = (card(&l.id), card(&l.target)) else {
+            continue;
+        };
+        // From the note's top edge to the nearest edge of what it caps.
+        let to = if b.y + b.h <= a.y {
+            (b.x + b.w / 2., b.y + b.h)
+        } else {
+            (b.x + b.w / 2., b.y)
+        };
+        wires.push(Wire {
+            id: l.id.clone(),
+            from: (a.x + a.w / 2., a.y),
+            to,
+            route: "limit".into(),
+            from_node: l.id.clone(),
+            to_node: l.target.clone(),
+            lane: None,
+        });
+    }
     Board { cards, wires }
 }
 
@@ -357,6 +420,7 @@ pub fn new_size(kind: Kind) -> (f32, f32) {
         Kind::Formation => (STEP_W, 2. * IO_ROW + STEP_HEAD_EMPTY + body_h("solo", 1)),
         Kind::Gate => (GATE_W, GATE_H),
         Kind::End => (END_W, END_H),
+        Kind::Limit => (LIMIT_W, LIMIT_H),
     }
 }
 

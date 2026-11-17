@@ -4,8 +4,9 @@
 //!
 //! A colour carries one meaning, the same on every page: `accent` is what
 //! acts and what has focus; `running`, `done`, `needs` (waits for the
-//! operator) and `error` (failed) are states; `chart` draws data. No colour
-//! stands for two of them. The operator picks the theme
+//! operator) and `error` (failed) are states; `chart` draws data. A
+//! mission's wires have their own: `wire` carries work, `pass` and `fail`
+//! leave a gate. No colour stands for two of them. The operator picks the theme
 //! ([`Direction`], the `theme` setting); every direction fills every token.
 
 use gpui::{App, FontWeight, Global, Hsla, Image, ImageFormat, Rgba};
@@ -266,6 +267,13 @@ pub struct Theme {
     pub needs: Hsla,
     /// Data drawn: a chart's line and fill.
     pub chart: Hsla,
+    /// A mission's wire that carries work from one card to the next, and
+    /// its ports.
+    pub wire: Hsla,
+    /// A gate's pass route and port.
+    pub pass: Hsla,
+    /// A gate's fail route and port, and the loop back it makes.
+    pub fail: Hsla,
     pub term_bg: Hsla,
     pub term_fg: Hsla,
     pub cursor: Hsla,
@@ -318,6 +326,9 @@ struct Palette {
     done: u32,
     needs: u32,
     chart: u32,
+    wire: u32,
+    pass: u32,
+    fail: u32,
     term_bg: u32,
     term_fg: u32,
     ansi: [u32; 16],
@@ -338,6 +349,9 @@ const NIGHT: Palette = Palette {
     done: 0x5fd3a0,
     needs: 0xffbf5a,
     chart: 0xaab4c2,
+    wire: 0x8a9bb5,
+    pass: 0xb5e550,
+    fail: 0xff5fc8,
     term_bg: 0x080c14,
     term_fg: 0xd8e1ee,
     ansi: [
@@ -361,6 +375,9 @@ const SAGA: Palette = Palette {
     done: 0x9cbf6a,
     needs: 0x4fc3b5,
     chart: 0xc9c2b4,
+    wire: 0xa8997e,
+    pass: 0x6fcf7a,
+    fail: 0xd06a9a,
     term_bg: 0x0e0a07,
     term_fg: 0xe8dcc4,
     ansi: [
@@ -384,6 +401,9 @@ const SIGNAL: Palette = Palette {
     done: 0x9ee34a,
     needs: 0xff4fa0,
     chart: 0xcfcac0,
+    wire: 0x8a867e,
+    pass: 0x3ae0a0,
+    fail: 0xb06bff,
     term_bg: 0x080808,
     term_fg: 0xece8df,
     ansi: [
@@ -515,6 +535,9 @@ impl Theme {
             done: rgb(p.done),
             needs: rgb(p.needs),
             chart: rgb(p.chart),
+            wire: rgb(p.wire),
+            pass: rgb(p.pass),
+            fail: rgb(p.fail),
             term_bg: rgb(p.term_bg),
             term_fg: rgb(p.term_fg),
             cursor: rgb(p.accent),
@@ -588,6 +611,8 @@ mod tests {
                 ("done", t.done),
                 ("needs you", t.needs),
                 ("chart", t.chart),
+                ("pass", t.pass),
+                ("fail", t.fail),
             ];
             for (i, (a, ca)) in meanings.iter().enumerate() {
                 for (b, cb) in &meanings[i + 1..] {
@@ -596,6 +621,28 @@ mod tests {
                 assert!(
                     apart(*ca, t.text) || *a == "chart",
                     "{}: {a} looks like text",
+                    d.label()
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn a_wire_is_told_from_what_acts_and_from_every_state() {
+        for d in Direction::ALL {
+            let t = Theme::new(d);
+            for (meaning, colour) in [
+                ("action", t.accent),
+                ("failed", t.error),
+                ("running", t.running),
+                ("done", t.done),
+                ("needs you", t.needs),
+                ("pass", t.pass),
+                ("fail", t.fail),
+            ] {
+                assert!(
+                    apart(t.wire, colour),
+                    "{}: wire and {meaning} look alike",
                     d.label()
                 );
             }

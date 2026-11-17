@@ -410,7 +410,10 @@ fn accept_editor_operation(
         accept(0..2);
         accept(3..7);
     }
-    if patch.get("updateFormation").is_some() {
+    if patch
+        .get("updateFormation")
+        .is_some_and(|v| v.get("device").is_some())
+    {
         accept(2..3);
     }
     if patch.get("assignSlot").is_some() {

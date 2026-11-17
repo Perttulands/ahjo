@@ -160,6 +160,23 @@ impl MissionsPage {
             .child(
                 pane::send(t, "run-send", &self.host, words::run_reference(run, place))
                     .debug_selector(|| "run-send".into()),
+            )
+            .child(
+                pane::act(
+                    t,
+                    "run-graph",
+                    if self.run.graph { "Steps" } else { "Graph" },
+                )
+                .debug_selector(|| "run-graph".into())
+                .tooltip(kit::tip(if self.run.graph {
+                    "The run as a table of its steps"
+                } else {
+                    "The run on its mission's canvas, each card in its step's state"
+                }))
+                .on_click(cx.listener(|page, _, _, cx| {
+                    page.run.graph = !page.run.graph;
+                    cx.notify();
+                })),
             );
         if !run.r#final {
             return head.child(

@@ -252,12 +252,24 @@ pub fn inverse(m: &Value, layout: &[Placed], step: &Step) -> Result<Vec<Step>, S
                     "files" | "inputs" | "outputs" | "kinds" => json!([]),
                     "rounds" | "seconds" | "warnSeconds" | "tokens" => json!(0),
                     "brief" => json!({}),
+                    "fresh" => json!(false),
                     _ => json!(""),
                 },
             };
             fields.insert(key.clone(), before);
         }
         return board(json!({ op: fields }));
+    }
+    if op == "nameAgent" {
+        let f = v["formationId"].as_str().unwrap_or("");
+        let slot = list(m, "formations")
+            .iter()
+            .find(|n| n["id"] == f)
+            .and_then(|n| list(n, "slots").iter().find(|s| s["id"] == v["slotId"]))
+            .ok_or("the named slot no longer exists")?;
+        return board(json!({"nameAgent": {
+            "formationId": f, "slotId": v["slotId"], "agent": slot["agent"].as_str().unwrap_or(""),
+        }}));
     }
     if op == "assignSlot" {
         let f = v["formationId"].as_str().unwrap_or("");
@@ -463,6 +475,24 @@ mod tests {
         };
         assert_eq!(p["assignSlot"]["harness"], "claude-code");
         assert_eq!(p["assignSlot"]["agentId"], "planner");
+        // Naming an agent is undone to no name, and switching a step to
+        // fresh sessions back to the agent's own.
+        let name = Step::Board(
+            json!({"nameAgent": {"formationId": "fmn_plan", "slotId": "s1", "agent": "writer"}}),
+        );
+        assert_eq!(
+            inverse(&m, &[], &name).unwrap(),
+            vec![Step::Board(
+                json!({"nameAgent": {"formationId": "fmn_plan", "slotId": "s1", "agent": ""}})
+            )]
+        );
+        let fresh = Step::Board(json!({"updateFormation": {"id": "fmn_plan", "fresh": true}}));
+        assert_eq!(
+            inverse(&m, &[], &fresh).unwrap(),
+            vec![Step::Board(
+                json!({"updateFormation": {"id": "fmn_plan", "fresh": false}})
+            )]
+        );
     }
 
     #[test]

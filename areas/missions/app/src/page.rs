@@ -59,6 +59,8 @@ pub struct MissionsPage {
     title: Entity<TextField>,
     goal: Entity<TextField>,
     extra: Entity<TextField>,
+    /// The selected slot's agent, written on its own by Name.
+    agent_name: Entity<TextField>,
     repository: Entity<TextField>,
     work: Entity<TextField>,
     files: Entity<TextField>,
@@ -175,6 +177,7 @@ impl MissionsPage {
             title: cx.new(|cx| TextField::new(cx, "Step title")),
             goal: cx.new(|cx| TextField::new(cx, "Description").prose()),
             extra: cx.new(|cx| TextField::new(cx, "Device or outcome")),
+            agent_name: cx.new(|cx| TextField::new(cx, "Named after the step")),
             repository: cx.new(|cx| TextField::new(cx, "Repository")),
             work: cx.new(|cx| TextField::new(cx, "Work reference")),
             files: cx.new(|cx| TextField::new(cx, "One file per line").prose()),
@@ -823,6 +826,82 @@ impl MissionsPage {
         }
         cx.notify();
     }
+    /// Where a step's agents work, written as soon as it is chosen: each
+    /// in its own session, used again run after run, or in fresh sessions
+    /// for every attempt (a best-of-n step).
+    fn session_choice(
+        &self,
+        t: &parvi_app_kit::theme::Theme,
+        f: &parvi_missions_contract::Formation,
+        cx: &mut Context<Self>,
+    ) -> Div {
+        let Some(m) = self.state.mission.as_ref() else {
+            return div();
+        };
+        let names: Vec<String> = f
+            .slots
+            .iter()
+            .map(|slot| crate::store::words::session_of(m, f, slot))
+            .collect();
+        let pick = |selector: &'static str, text: &'static str, fresh: bool| {
+            let id = f.id.clone();
+            kit::button(
+                t,
+                selector,
+                text,
+                if f.fresh == fresh {
+                    Kind::Plain
+                } else {
+                    Kind::Quiet
+                },
+            )
+            .debug_selector(move || selector.into())
+            .on_click(cx.listener(move |p, _, _, cx| {
+                p.write_board(
+                    json!({"updateFormation":{"id":id,"fresh":fresh}}),
+                    WriteMode::Edit,
+                    cx,
+                )
+            }))
+        };
+        div()
+            .flex()
+            .flex_col()
+            .gap(px(size::RADIUS))
+            .child(kit::label(t, "Sessions"))
+            .child(
+                div()
+                    .flex()
+                    .gap(px(TAB_GAP))
+                    .child(pick("step-sessions-kept", "Agent's own", false))
+                    .child(pick("step-sessions-fresh", "Fresh each attempt", true)),
+            )
+            .when(self.slot.is_some(), |d| {
+                d.child(
+                    div()
+                        .flex()
+                        .gap(px(TAB_GAP))
+                        .child(
+                            div()
+                                .flex_1()
+                                .debug_selector(|| "step-agent-name".into())
+                                .child(self.agent_name.clone()),
+                        )
+                        .child(
+                            kit::button(t, "step-agent-set", "Name", Kind::Quiet)
+                                .debug_selector(|| "step-agent-set".into())
+                                .on_click(cx.listener(|p, _, _, cx| p.name_agent(cx))),
+                        ),
+                )
+            })
+            .child(
+                div()
+                    .debug_selector(|| "step-session-names".into())
+                    .text_size(px(size::SMALL))
+                    .text_color(t.text2)
+                    .child(names.join(", ")),
+            )
+    }
     fn write_board(&mut self, patch: serde_json::Value, mode: WriteMode, cx: &mut Context<Self>) {
         if self.writing || self.editor.as_ref().is_some_and(|e| e.busy) {
             return;
@@ -1137,6 +1216,9 @@ impl MissionsPage {
         ] {
             field.update(cx, |field, cx| field.set(text, false, cx));
         }
+        let agent = slot.agent.clone();
+        self.agent_name
+            .update(cx, |field, cx| field.set(&agent, false, cx));
         self.slot = Some(id.to_owned());
         self.accept_group(10..14, cx);
         cx.notify();
@@ -1255,6 +1337,13 @@ impl MissionsPage {
             return;
         };
         let patch = json!({"setFormationType": {"id":ed.id, "type":kind, "keepSlotId":self.slot.clone().unwrap_or_default()}});
+        self.write_board(patch, WriteMode::Edit, cx);
+    }
+    fn name_agent(&mut self, cx: &mut Context<Self>) {
+        let (Some(ed), Some(slot)) = (&self.editor, &self.slot) else {
+            return;
+        };
+        let patch = json!({"nameAgent":{"formationId":ed.id,"slotId":slot,"agent":self.agent_name.read(cx).text.trim()}});
         self.write_board(patch, WriteMode::Edit, cx);
     }
     fn set_device(&mut self, cx: &mut Context<Self>) {
@@ -1499,7 +1588,36 @@ impl Render for MissionsPage {
                 ))
         });
         let detail: Div = if let Some((head, body)) = self.run_detail(&t, cx) {
-            pane::detail(&t, "missions-run", head, body.children(error))
+            match self
+                .run
+                .graph
+                .then(|| {
+                    self.run
+                        .frozen
+                        .clone()
+                        .or_else(|| self.state.mission.clone())
+                })
+                .flatten()
+            {
+                Some(m) => pane::detail_frame(
+                    head,
+                    div()
+                        .size_full()
+                        .flex()
+                        .flex_col()
+                        .child(
+                            div()
+                                .id("missions-run-graph")
+                                .debug_selector(|| "missions-run-graph".into())
+                                .flex_1()
+                                .min_h_0()
+                                .overflow_scroll()
+                                .child(self.render_canvas(&t, &m, true, cx)),
+                        )
+                        .children(error),
+                ),
+                None => pane::detail(&t, "missions-run", head, body.children(error)),
+            }
         } else if let Some(m) = self.state.mission.clone() {
             if self.mission_canvas_mode {
                 let head = self.edit_head(&t, &m, cx);
@@ -1704,6 +1822,7 @@ impl Render for MissionsPage {
                                     let id = slot.id.clone(); let selected = id.clone(); let selector = format!("slot-{id}");
                                     d = d.child(left(kit::button(&t, gpui::SharedString::from(format!("slot-{id}")), crate::store::words::slot_label(slot), Kind::Quiet).debug_selector(move || selector.clone()).on_click(cx.listener(move |p, _, _, cx| p.select_slot(&selected, cx)))));
                                 }
+                                d = d.child(self.session_choice(&t, f, cx));
                             }
                             d
                         })

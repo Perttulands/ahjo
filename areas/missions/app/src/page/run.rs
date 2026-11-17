@@ -32,6 +32,9 @@ pub(super) struct RunUi {
     pub(super) start_more: bool,
     /// A one-second redraw is pending so a shown running run's clock moves.
     pub(super) ticking: bool,
+    /// The run shows as its graph, each card in its step's state, instead
+    /// of the steps table.
+    pub(super) graph: bool,
     pub(super) fields: BTreeMap<String, Entity<TextField>>,
     pub(super) responses: BTreeMap<String, Entity<TextField>>,
     pub(super) error: Option<String>,
@@ -78,6 +81,7 @@ impl RunUi {
             stop_reason: cx.new(|cx| TextField::new(cx, "Why (optional)")),
             start_more: false,
             ticking: false,
+            graph: false,
             fields: BTreeMap::new(),
             responses: BTreeMap::new(),
             error: None,

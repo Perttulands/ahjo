@@ -94,6 +94,46 @@ pub fn role_name(agent: &str) -> String {
         .unwrap_or_default()
 }
 
+/// The session a slot's agent works in, as the session list shows it: the
+/// agent's own, or for a step that starts fresh, one per attempt.
+pub fn session_of(
+    m: &parvi_missions_contract::Mission,
+    f: &parvi_missions_contract::Formation,
+    slot: &Slot,
+) -> String {
+    let session = parvi_missions_contract::agent_session(&m.session_prefix(), &f.agent_of(slot));
+    if f.fresh {
+        format!("{session}-*")
+    } else {
+        session
+    }
+}
+
+/// What a Limit card caps and what happens when it is spent:
+/// `3 rounds · then the best`.
+pub fn limit_line(l: &parvi_missions_contract::Limit) -> String {
+    let mut caps = vec![];
+    if let Some(r) = l.rounds {
+        caps.push(format!("{r} round{}", if r == 1 { "" } else { "s" }));
+    }
+    if let Some(s) = l.seconds {
+        caps.push(span(s));
+    }
+    if let Some(t) = l.tokens {
+        caps.push(format!("{t} tokens"));
+    }
+    let spent = match l.when_spent.as_str() {
+        "best" => "then the best",
+        "fail" => "then fail",
+        _ => "then ask",
+    };
+    if caps.is_empty() {
+        "no cap yet".into()
+    } else {
+        format!("{} · {spent}", caps.join(" · "))
+    }
+}
+
 /// A human-readable slot label. Internal IDs are not names.
 pub fn slot_label(slot: &Slot) -> &str {
     if slot.label.trim().is_empty() {
