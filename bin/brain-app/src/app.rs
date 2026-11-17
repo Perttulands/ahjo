@@ -1,18 +1,12 @@
-//! The Brain's one window: the sky, the search over it and the reader
-//! beside it, in one of three takes on how they relate.
+//! Ahjo Brain's one window: the sky, the search over it and the reader
+//! beside it.
 //!
-//! - **Sky**: the sky is the place. A search lights what it found and the
-//!   camera flies there; a page opens in a sheet over the sky's right side
-//!   and the camera brings its star into the part still visible, its links
-//!   traced and the ones that leave the screen signposted at its edge.
-//! - **Gather**: the sky comes to you. The camera holds the whole brain;
-//!   a search pulls the pages it found out of their systems into a column
-//!   you read down, each with a thread back to where it lives. A page read
-//!   draws its links across the whole sky.
-//! - **Orbit**: you stand on a page. Reading turns the sky into the page's
-//!   own orbit: what it links and what links to it, one arc per subject,
-//!   each arc pointing the way its subject lies in the sky. A planet clicked
-//!   becomes the sun. Closing the page lets the sky back.
+//! The sky is the place. A search lights what it found and the camera flies
+//! there. Opening a page turns the sky into the page's own orbit: what it
+//! links and what links to it, one arc per subject, each arc pointing the
+//! way its subject lies in the sky, with the page in a sheet beside it and
+//! the ranked results still at hand. A planet clicked becomes the sun. Esc,
+//! or going back past the first page, lets the sky back where it was.
 //!
 //! The sky is drawn from the scene each frame while anything moves, and not
 //! at all while nothing does.
@@ -21,25 +15,27 @@ use crate::arrange::{self, Orbit};
 use crate::camera::{Camera, Flight, ease_in_out, ease_out};
 use crate::citadel::{self, Hit};
 use crate::corpus::{self, Corpus, Entry};
-use crate::paint::{self, Align, Dot, Label, Light, Line, Picture, Ring, Shape};
+use crate::history::{self, History};
+use crate::paint::{self, Align, Dot, Face, Label, Light, Line, Picture, Ring, Shape};
 use crate::reader::{self, Reader};
 use crate::sky::{self, Rect, Role, Sky};
 use crate::source::{self, Where};
-use crate::tokens::{self, chrome, gather, motion, search, sky as k, veil, whiten};
+use crate::tokens::{self, chrome, motion, search, sky as k, veil, whiten};
 use gpui::{
-    AnyView, App, AppContext, Context, Entity, FocusHandle, Focusable, FontWeight, Hsla,
-    KeyDownEvent, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, ScrollDelta,
-    ScrollEvent, SharedString, StyleRefinement, Window, canvas, div, linear_color_stop,
-    linear_gradient, prelude::*, px,
+    AnyElement, AnyView, App, AppContext, Context, Entity, FocusHandle, Focusable, FontWeight,
+    Hsla, KeyDownEvent, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, ScrollDelta,
+    ScrollEvent, SharedString, StyleRefinement, Window, canvas, div, img, prelude::*, px,
 };
-use parvi_app_kit::theme::{FAMILY, Theme, alpha, theme};
+use parvi_app_kit::theme::{Direction, FAMILY, Theme, alpha, art, theme, ty};
 use parvi_app_kit::widgets::field::{self, FieldEvent, TextField};
+use parvi_app_kit::widgets::{kit, pane};
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::rc::Rc;
 use std::time::{Instant, SystemTime};
 
 /// The brain as one launch holds it.
+#[derive(Clone)]
 pub struct Data {
     pub root: PathBuf,
     pub corpus: Corpus,
@@ -51,32 +47,22 @@ pub struct Data {
     /// Pages changed in the last days, newest first, which flare as the sky
     /// first lights.
     pub fresh: HashSet<usize>,
+    /// The pages whose files changed last, newest first, evidence aside.
+    pub recent: Vec<usize>,
+    /// Per system, how many of its pages moved this week.
+    pub moved: Vec<usize>,
     pub max_evidence: usize,
     pub strongest: u32,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Take {
-    Sky,
-    Gather,
-    Orbit,
-}
-
-impl Take {
-    pub const ALL: [Take; 3] = [Take::Sky, Take::Gather, Take::Orbit];
-
-    pub fn name(self) -> &'static str {
-        match self {
-            Take::Sky => "Sky",
-            Take::Gather => "Gather",
-            Take::Orbit => "Orbit",
-        }
-    }
-
-    pub fn parse(name: &str) -> Option<Take> {
-        Take::ALL
-            .into_iter()
-            .find(|t| t.name().eq_ignore_ascii_case(name))
+impl Data {
+    /// The subjects' hues in this theme.
+    fn hues(corpus: &Corpus, t: &Theme) -> Vec<Hsla> {
+        corpus
+            .subjects
+            .iter()
+            .map(|s| tokens::subject_hue(t, &s.id))
+            .collect()
     }
 }
 
@@ -85,18 +71,98 @@ struct Found {
     snippet: String,
 }
 
+/// The brain's history played over the sky: each day it was worked on, the
+/// pages touched flare and stay warm for a while, so the sky shows where the
+/// attention went and how it moved.
+struct Replay {
+    /// Oldest first: a day worked on (Julian) and the pages touched.
+    days: Vec<(i32, Vec<usize>)>,
+    /// Per page, the days (indices into `days`) it was touched, in order.
+    touched: Vec<Vec<u32>>,
+    reshuffles: usize,
+    /// Where it stands, in days worked on from the first.
+    at: f32,
+    /// Playing since then, from there.
+    playing: Option<(Instant, f32)>,
+}
+
+impl Replay {
+    fn new(history: History, corpus: &Corpus) -> Replay {
+        let mut touched = vec![vec![]; corpus.pages.len()];
+        let mut days = vec![];
+        for d in history.days {
+            let pages: Vec<usize> = d.paths.iter().filter_map(|p| corpus.by_path(p)).collect();
+            if pages.is_empty() {
+                continue;
+            }
+            for &p in &pages {
+                touched[p].push(days.len() as u32);
+            }
+            days.push((d.day, pages));
+        }
+        Replay {
+            days,
+            touched,
+            reshuffles: history.reshuffles,
+            at: 0.,
+            playing: Some((Instant::now(), 0.)),
+        }
+    }
+
+    fn last(&self) -> f32 {
+        self.days.len().saturating_sub(1) as f32
+    }
+
+    /// Days worked on since a page was last touched, as the replay stands;
+    /// none if it has not been yet.
+    fn since(&self, page: usize) -> Option<f32> {
+        let list = &self.touched[page];
+        let upto = list.partition_point(|&d| d as f32 <= self.at);
+        upto.checked_sub(1).map(|i| self.at - list[i] as f32)
+    }
+
+    /// Played on to now; whether it still plays.
+    fn advance(&mut self) -> bool {
+        let Some((since, from)) = self.playing else {
+            return false;
+        };
+        self.at =
+            (from + since.elapsed().as_secs_f32() * 1000. / motion::REPLAY_DAY).min(self.last());
+        if self.at >= self.last() {
+            self.playing = None;
+        }
+        self.playing.is_some()
+    }
+
+    fn play_pause(&mut self) {
+        self.playing = match self.playing {
+            Some(_) => None,
+            None => {
+                let from = if self.at >= self.last() { 0. } else { self.at };
+                self.at = from;
+                Some((Instant::now(), from))
+            }
+        };
+    }
+
+    fn seek(&mut self, day: usize) {
+        self.at = day as f32;
+        if self.playing.is_some() {
+            self.playing = Some((Instant::now(), self.at));
+        }
+    }
+}
+
+enum Replaying {
+    Reading,
+    Failed(String),
+    Ready(Replay),
+}
+
 struct Drag {
     at: (f32, f32),
     camera: Camera,
     moved: bool,
-}
-
-struct Signpost {
-    target: usize,
-    x: f32,
-    y: f32,
-    w: f32,
-    h: f32,
 }
 
 /// A scripted flight over the sky that measures its frames (`--bench`).
@@ -108,10 +174,13 @@ pub struct Bench {
     work: Vec<f32>,
     painted: Rc<std::cell::Cell<Option<Instant>>>,
     began: Option<Instant>,
+    /// When the process started, and how long until the sky first lit.
+    launched: Instant,
+    lit: Option<f32>,
 }
 
 impl Bench {
-    pub fn new(seconds: f32) -> Bench {
+    pub fn new(seconds: f32, launched: Instant) -> Bench {
         Bench {
             seconds,
             start: None,
@@ -120,6 +189,8 @@ impl Bench {
             work: vec![],
             painted: Rc::new(std::cell::Cell::new(None)),
             began: None,
+            launched,
+            lit: None,
         }
     }
 }
@@ -127,7 +198,8 @@ impl Bench {
 /// What the app is told at launch.
 pub struct Start {
     pub place: Where,
-    pub take: Take,
+    /// The app's settings file, what it held, and why it did not read.
+    pub settings: (Option<PathBuf>, source::Settings, Option<String>),
     pub query: Option<String>,
     pub open: Option<String>,
     pub bench: Option<Bench>,
@@ -139,13 +211,14 @@ pub struct BrainApp {
     entries: Vec<Entry>,
     marker: Option<SystemTime>,
     status: Option<String>,
-    take: Take,
     field: Entity<TextField>,
     query: String,
     asked: u64,
     answered: u64,
     results: Vec<Found>,
-    failed: Option<String>,
+    /// Why Citadel did not answer the last search, which was then matched
+    /// here against titles and aliases.
+    away: Option<String>,
     pick: Option<usize>,
     reading: Option<usize>,
     back: Vec<usize>,
@@ -171,11 +244,19 @@ pub struct BrainApp {
     first_light: Option<Instant>,
     trace: Option<(usize, Instant)>,
     last: Option<Instant>,
-    signposts: Vec<Signpost>,
     size: (f32, f32),
     bench: Option<Bench>,
     /// A page opened: the keyboard leaves the search for the page.
     leave_field: bool,
+    /// Evidence left out of a page's orbit, counted at its edge.
+    fold_evidence: bool,
+    replay: Option<Replaying>,
+    settings_path: Option<PathBuf>,
+    settings: source::Settings,
+    settings_seen: Option<SystemTime>,
+    /// Why the settings file did not read; while it does not, it is not
+    /// written over.
+    settings_broken: Option<String>,
 }
 
 impl Focusable for BrainApp {
@@ -212,19 +293,25 @@ impl BrainApp {
         if let Some(q) = &start.query {
             field.update(cx, |f, cx| f.set(q, false, cx));
         }
+        let (settings_path, settings, settings_broken) = start.settings;
         let mut app = BrainApp {
+            settings_seen: settings_path.as_deref().and_then(source::changed),
+            fold_evidence: true,
+            replay: None,
+            settings_path,
+            settings,
+            settings_broken,
             place: start.place,
             data: None,
             entries: vec![],
             marker: None,
             status: Some("Looking for the brain…".into()),
-            take: start.take,
             field,
             query: String::new(),
             asked: 0,
             answered: 0,
             results: vec![],
-            failed: None,
+            away: None,
             pick: None,
             reading: None,
             back: vec![],
@@ -253,7 +340,6 @@ impl BrainApp {
             first_light: None,
             trace: None,
             last: None,
-            signposts: vec![],
             size: (1440., 900.),
             bench: start.bench,
             leave_field: false,
@@ -343,8 +429,10 @@ impl BrainApp {
         .detach();
     }
 
-    /// The window came forward: if the brain's Git index moved, read again.
+    /// The window came forward: if the settings file or the brain's Git
+    /// index moved, read them again.
     fn look_again(&mut self, cx: &mut Context<Self>) {
+        self.settings_again(cx);
         let Some(root) = self.place.brain.clone() else {
             return;
         };
@@ -420,10 +508,29 @@ impl BrainApp {
         fresh.sort_by_key(|&p| std::cmp::Reverse(corpus.pages[p].updated));
         let data = Rc::new(Data {
             root: self.place.brain.clone().unwrap_or_default(),
-            hues: corpus
-                .subjects
+            hues: Data::hues(&corpus, &t),
+            recent: {
+                let mut r: Vec<usize> = (0..corpus.pages.len())
+                    .filter(|&p| !corpus.pages[p].is_evidence())
+                    .collect();
+                r.sort_by_key(|&p| std::cmp::Reverse(corpus.pages[p].modified));
+                r.truncate(search::ROWS);
+                r
+            },
+            moved: sky
+                .systems
                 .iter()
-                .map(|s| tokens::subject_hue(&t, &s.id))
+                .map(|s| {
+                    corpus.subjects[s.subject]
+                        .pages
+                        .iter()
+                        .filter(|&&p| {
+                            corpus.pages[p]
+                                .updated
+                                .is_some_and(|u| today - u < k::MOVED_DAYS)
+                        })
+                        .count()
+                })
                 .collect(),
             today,
             fresh: fresh.into_iter().take(40).collect(),
@@ -491,6 +598,9 @@ impl BrainApp {
             self.moving = vec![None; n];
             self.first_light = Some(now);
         }
+        if matches!(self.replay, Some(Replaying::Ready(_))) {
+            self.replay = None;
+        }
         self.system_light = vec![0.; data.sky.systems.len()];
         self.bridge_light = vec![0.; data.sky.bridges.len()];
         self.anchor = vec![None; n];
@@ -498,6 +608,11 @@ impl BrainApp {
         self.entries = entries;
         self.status = None;
         self.data = Some(data.clone());
+        if let Some(b) = &mut self.bench
+            && b.lit.is_none()
+        {
+            b.lit = Some(b.launched.elapsed().as_secs_f32() * 1000.);
+        }
         if !self.framed {
             self.framed = true;
             self.camera = Camera::fit(data.sky.bounds, self.free(), k::FIT_MOST, k::FIT_PAD);
@@ -520,6 +635,72 @@ impl BrainApp {
         cx.notify();
     }
 
+    // ---- The theme.
+
+    fn settings_again(&mut self, cx: &mut Context<Self>) {
+        let Some(path) = self.settings_path.clone() else {
+            return;
+        };
+        let now = source::changed(&path);
+        if now == self.settings_seen {
+            return;
+        }
+        self.settings_seen = now;
+        match source::read_settings(&path) {
+            Ok(s) => {
+                self.settings_broken = None;
+                let want = Direction::from_key(&s.theme);
+                self.settings = s;
+                if let Some(d) = want {
+                    self.restyle(d, cx);
+                }
+            }
+            Err(e) => self.settings_broken = Some(e),
+        }
+        cx.notify();
+    }
+
+    /// The next of the theme's directions, kept in the settings.
+    fn next_theme(&mut self, cx: &mut Context<Self>) {
+        let now = theme(cx).direction;
+        let at = Direction::ALL.iter().position(|d| *d == now).unwrap_or(0);
+        let next = Direction::ALL[(at + 1) % Direction::ALL.len()];
+        self.restyle(next, cx);
+        if self.settings_broken.is_some() {
+            return;
+        }
+        let Some(path) = self.settings_path.clone() else {
+            return;
+        };
+        self.settings.theme = next.key().into();
+        match source::write_settings(&path, &self.settings) {
+            Ok(()) => self.settings_seen = source::changed(&path),
+            Err(e) => {
+                self.settings_broken = Some(format!("{} was not written: {e}", path.display()))
+            }
+        }
+    }
+
+    /// The app in another of the theme's directions: its colours, its
+    /// letters and the sky's character.
+    fn restyle(&mut self, d: Direction, cx: &mut Context<Self>) {
+        if theme(cx).direction == d {
+            return;
+        }
+        cx.set_global(Theme::new(d));
+        let t = theme(cx).clone();
+        if let Some(old) = &self.data {
+            let mut data = (**old).clone();
+            data.hues = Data::hues(&data.corpus, &t);
+            let data = Rc::new(data);
+            self.data = Some(data.clone());
+            if let Some(p) = self.reading {
+                self.reader.update(cx, |r, cx| r.show(data, p, cx));
+            }
+        }
+        cx.refresh_windows();
+    }
+
     // ---- Search.
 
     fn typed(&mut self, cx: &mut Context<Self>) {
@@ -533,7 +714,7 @@ impl BrainApp {
         if q.is_empty() {
             self.answered = asked;
             self.results.clear();
-            self.failed = None;
+            self.away = None;
             self.pick = None;
             self.replanned = true;
             cx.notify();
@@ -578,29 +759,34 @@ impl BrainApp {
                         })
                     })
                     .collect();
-                self.failed = None;
+                self.away = None;
             }
             Err(e) => {
-                self.results.clear();
-                self.failed = Some(e);
+                // Citadel away: the titles and aliases still answer.
+                self.results = data
+                    .corpus
+                    .local_search(&self.query, search::LOCAL_MOST)
+                    .into_iter()
+                    .map(|page| Found {
+                        page,
+                        snippet: String::new(),
+                    })
+                    .collect();
+                self.away = Some(e);
             }
         }
         self.pick = (!self.results.is_empty()).then_some(0);
         self.replanned = true;
-        match self.take {
-            Take::Gather => self.frame_everything(),
-            _ if self.orbiting() => {}
-            _ => {
-                let stars = self
-                    .results
-                    .iter()
-                    .take(search::FLY_TO)
-                    .map(|f| data.sky.stars[f.page])
-                    .map(|s| (s.x, s.y));
-                if let Some(world) = Rect::around(stars, 60.) {
-                    let to = Camera::fit(world, self.free(), k::FIT_MOST, k::FIT_PAD);
-                    self.fly(to);
-                }
+        if !self.orbiting() {
+            let stars = self
+                .results
+                .iter()
+                .take(search::FLY_TO)
+                .map(|f| data.sky.stars[f.page])
+                .map(|s| (s.x, s.y));
+            if let Some(world) = Rect::around(stars, 60.) {
+                let to = Camera::fit(world, self.free(), k::FIT_MOST, k::FIT_PAD);
+                self.fly(to);
             }
         }
         cx.notify();
@@ -610,13 +796,10 @@ impl BrainApp {
         if self.results.is_empty() {
             return;
         }
-        let shown = match self.take {
-            Take::Gather => arrange::slots(self.size.1).min(self.results.len()),
-            _ => search::ROWS.min(self.results.len()),
-        };
+        let shown = search::ROWS.min(self.results.len());
         let at = self.pick.unwrap_or(0) as isize + by;
         self.pick = Some(at.rem_euclid(shown.max(1) as isize) as usize);
-        if matches!(self.take, Take::Sky) || (self.take == Take::Orbit && !self.orbiting()) {
+        if !self.orbiting() {
             let page = self.results[self.pick.unwrap_or(0)].page;
             self.fly_to_page(page);
         }
@@ -646,17 +829,16 @@ impl BrainApp {
         self.replanned = true;
         self.reader.update(cx, |r, cx| r.show(data, page, cx));
         self.leave_field = true;
-        match self.take {
-            Take::Sky => self.fly_to_page(page),
-            Take::Gather => self.frame_everything(),
-            Take::Orbit => {}
-        }
         cx.notify();
     }
 
+    /// The page read before this one; back past the first lets the sky
+    /// back.
     pub fn go_back(&mut self, cx: &mut Context<Self>) {
-        if let Some(p) = self.back.pop() {
-            self.show(p, cx);
+        match self.back.pop() {
+            Some(p) => self.show(p, cx),
+            None if self.reading.is_some() => self.close(cx),
+            None => {}
         }
     }
 
@@ -677,32 +859,89 @@ impl BrainApp {
         }
     }
 
-    fn switch(&mut self, take: Take, cx: &mut Context<Self>) {
-        if self.take == take {
+    /// Starts the replay, reading the brain's history first; or ends it.
+    fn toggle_replay(&mut self, cx: &mut Context<Self>) {
+        if self.replay.take().is_some() {
+            cx.notify();
             return;
         }
-        self.take = take;
-        self.replanned = true;
-        match take {
-            Take::Gather => self.frame_everything(),
-            Take::Sky => {
-                if let Some(p) = self.reading {
-                    self.fly_to_page(p);
+        let Some(data) = self.data.clone() else {
+            return;
+        };
+        self.replay = Some(Replaying::Reading);
+        self.frame_everything();
+        let root = data.root.clone();
+        cx.spawn(async move |me, cx| {
+            let read = cx
+                .background_spawn(async move { history::read(&root) })
+                .await;
+            let _ = me.update(cx, |me, cx| {
+                // Ended while it was read, or the brain changed under it.
+                if !matches!(me.replay, Some(Replaying::Reading)) {
+                    return;
                 }
-            }
-            Take::Orbit => {}
+                let Some(data) = me.data.clone() else { return };
+                me.replay = Some(match read {
+                    Ok(h) => Replaying::Ready(Replay::new(h, &data.corpus)),
+                    Err(e) => Replaying::Failed(e),
+                });
+                cx.notify();
+            });
+        })
+        .detach();
+        cx.notify();
+    }
+
+    fn replay_mut(&mut self) -> Option<&mut Replay> {
+        match &mut self.replay {
+            Some(Replaying::Ready(r)) => Some(r),
+            _ => None,
         }
+    }
+
+    fn toggle_evidence(&mut self, cx: &mut Context<Self>) {
+        self.fold_evidence = !self.fold_evidence;
+        self.replanned = true;
         cx.notify();
     }
 
     // ---- The camera.
 
+    /// The search, narrower in a narrow window so the switch still fits,
+    /// and narrow beside an orbit.
+    fn search_width(&self) -> f32 {
+        if self.aside() {
+            return search::ASIDE;
+        }
+        (self.size.0 - chrome::INSET * 3. - chrome::SWITCH_ROOM)
+            .clamp(chrome::SEARCH_LEAST, search::WIDTH)
+    }
+
+    /// Whether the ranked results stay beside the orbit of the page read:
+    /// only when there are some and the orbit keeps its room.
+    fn aside(&self) -> bool {
+        let w = self.size.0;
+        self.reading.is_some()
+            && !self.results.is_empty()
+            && w - reader::sheet_width(w) - search::ASIDE - chrome::INSET * 2.
+                >= search::ORBIT_LEAST
+    }
+
+    /// How many results stand beside the orbit.
+    fn aside_rows(&self) -> usize {
+        let room = self.size.1 - search::FIELD_HEIGHT - chrome::INSET * 4. - chrome::FOOT;
+        ((room / search::ASIDE_ROW).floor().max(0.) as usize)
+            .min(search::ASIDE_MOST)
+            .min(self.results.len())
+    }
+
+    /// A page open is the sky turned into its orbit.
     fn orbiting(&self) -> bool {
-        self.take == Take::Orbit && self.reading.is_some()
+        self.reading.is_some()
     }
 
     /// The part of the window the sky shows through: not under the reader,
-    /// the Gather column or the search.
+    /// the results beside it or the search.
     fn free(&self) -> Rect {
         let (w, h) = self.size;
         let right = if self.reading.is_some() {
@@ -710,15 +949,12 @@ impl BrainApp {
         } else {
             w
         };
-        let left = if self.results.is_empty() {
+        // The list under the search covers the sky's left; beside an
+        // orbit only when it stays there.
+        let left = if self.results.is_empty() || (self.reading.is_some() && !self.aside()) {
             0.
-        } else if self.take == Take::Gather {
-            gather::LEFT + gather::WIDTH
-        } else if self.reading.is_none() {
-            // The list under the search covers the sky's left.
-            search::WIDTH + chrome::INSET * 2.
         } else {
-            0.
+            self.search_width() + chrome::INSET * 2.
         };
         let top = search::FIELD_HEIGHT + chrome::INSET * 2.;
         Rect {
@@ -845,31 +1081,12 @@ impl BrainApp {
             return;
         }
         let (x, y) = (f32::from(e.position.x), f32::from(e.position.y));
-        if let Some(post) = self
-            .signposts
-            .iter()
-            .find(|s| x >= s.x && x <= s.x + s.w && y >= s.y && y <= s.y + s.h)
-        {
-            let target = post.target;
-            self.travel_to(target);
-        } else if let Some(p) = self.star_at(x, y) {
+        if let Some(p) = self.star_at(x, y) {
             self.open(p, cx);
         } else if let Some(s) = self.system_at(x, y) {
             self.fit_system(s);
         }
         cx.notify();
-    }
-
-    /// Follows a signpost: the camera takes in the page read and where the
-    /// link leads.
-    fn travel_to(&mut self, target: usize) {
-        let Some(data) = &self.data else { return };
-        let Some(from) = self.reading else { return };
-        let (a, b) = (data.sky.stars[from], data.sky.stars[target]);
-        if let Some(world) = Rect::around([(a.x, a.y), (b.x, b.y)].into_iter(), 60.) {
-            let to = Camera::fit(world, self.free(), self.camera.scale.max(0.9), 80.);
-            self.fly(to);
-        }
     }
 
     fn wheel(&mut self, e: &ScrollEvent, _: &mut Window, cx: &mut Context<Self>) {
@@ -893,13 +1110,12 @@ impl BrainApp {
         let m = &ks.modifiers;
         let typing = self.field.read(cx).is_focused(window);
         if m.control || m.platform {
-            if let Some(take) = match ks.key.as_str() {
-                "1" => Some(Take::Sky),
-                "2" => Some(Take::Gather),
-                "3" => Some(Take::Orbit),
-                _ => None,
-            } {
-                self.switch(take, cx);
+            if ks.key == "t" {
+                self.next_theme(cx);
+                cx.stop_propagation();
+            }
+            if ks.key == "r" {
+                self.toggle_replay(cx);
                 cx.stop_propagation();
             }
             if ks.key == "k" || ks.key == "f" {
@@ -919,7 +1135,9 @@ impl BrainApp {
         }
         match ks.key.as_str() {
             "escape" => {
-                if self.reading.is_some() {
+                if self.replay.is_some() {
+                    self.replay = None;
+                } else if self.reading.is_some() {
                     self.close(cx);
                 } else if !self.field.read(cx).text.is_empty() {
                     self.field.update(cx, |f, cx| f.set("", false, cx));
@@ -930,11 +1148,19 @@ impl BrainApp {
                 cx.stop_propagation();
                 cx.notify();
             }
-            "home" if !typing => {
+            "space" if !typing && self.replay_mut().is_some() => {
+                if let Some(r) = self.replay_mut() {
+                    r.play_pause();
+                }
+                cx.stop_propagation();
+                cx.notify();
+            }
+            // In an orbit the sky holds still, where it was left.
+            "home" if !typing && !self.orbiting() => {
                 self.frame_everything();
                 cx.notify();
             }
-            "+" | "=" | "-" if !typing => {
+            "+" | "=" | "-" if !typing && !self.orbiting() => {
                 let free = self.free();
                 let (cx_, cy_) = free.centre();
                 let factor = if ks.key == "-" { 0.8 } else { 1.25 };
@@ -942,7 +1168,7 @@ impl BrainApp {
                 self.fly(to);
                 cx.notify();
             }
-            "left" | "right" | "up" | "down" if !typing => {
+            "left" | "right" | "up" | "down" if !typing && !self.orbiting() => {
                 let p = motion::KEY_PAN;
                 let (dx, dy) = match ks.key.as_str() {
                     "left" => (p, 0.),
@@ -987,6 +1213,23 @@ fn same(a: &[Entry], b: &[Entry]) -> bool {
         .all(|e| index.get(e.path.as_str()).is_some_and(|o| *o == e))
 }
 
+/// A Julian day as a person writes it: `21 October 2026`.
+fn date(day: i32) -> String {
+    match time::Date::from_julian_day(day) {
+        Ok(d) => format!("{} {} {}", d.day(), d.month(), d.year()),
+        Err(_) => String::new(),
+    }
+}
+
+/// `1 page`, `3 pages`.
+fn pages(n: usize) -> String {
+    if n == 1 {
+        "1 page".into()
+    } else {
+        format!("{n} pages")
+    }
+}
+
 fn shorten(text: &str, most: usize) -> String {
     if text.chars().count() <= most {
         return text.to_string();
@@ -1019,17 +1262,18 @@ impl Boxes {
 // ---- The scene: what every star is doing this frame.
 
 impl BrainApp {
-    /// This frame's sky, what is drawn over the Gather column, and whether
-    /// anything is still moving.
-    fn scene(&mut self, window: &Window, t: &Theme) -> (Picture, Picture, bool) {
+    /// This frame's sky, and whether anything is still moving.
+    fn scene(&mut self, window: &Window, t: &Theme) -> (Picture, bool) {
+        let st = tokens::style(t.direction);
         let mut pic = Picture {
             halo: alpha(t.bg, k::HALO),
+            halo_blur: st.halo_blur,
+            halo_spread: st.halo_spread,
             ..Picture::default()
         };
         let Some(data) = self.data.clone() else {
-            return (pic, Picture::default(), false);
+            return (pic, false);
         };
-        let mut over = Picture::default();
         let now = Instant::now();
         let dt = self
             .last
@@ -1054,6 +1298,16 @@ impl BrainApp {
                 busy = true;
             }
         }
+        // The replay: how long since each page was touched, as it stands.
+        let replay: Option<Vec<Option<f32>>> = match &mut self.replay {
+            Some(Replaying::Ready(r)) => {
+                if r.advance() {
+                    busy = true;
+                }
+                Some((0..data.corpus.pages.len()).map(|p| r.since(p)).collect())
+            }
+            _ => None,
+        };
         let cam = self.camera;
         let fade = 1. - (-dt / motion::FADE).exp();
         let follow = |v: &mut f32, target: f32, busy: &mut bool| {
@@ -1070,7 +1324,8 @@ impl BrainApp {
         let sky = &data.sky;
         let free = self.free();
         let orbit: Option<Orbit> = if self.orbiting() {
-            self.reading.map(|p| arrange::orbit(corpus, sky, p, free))
+            self.reading
+                .map(|p| arrange::orbit(corpus, sky, p, free, !self.fold_evidence))
         } else {
             None
         };
@@ -1080,15 +1335,10 @@ impl BrainApp {
             .map(|p| corpus.neighbours(p).into_iter().collect())
             .unwrap_or_default();
         let matches: HashSet<usize> = self.results.iter().map(|f| f.page).collect();
-        let lit_search = !self.query.is_empty() && self.failed.is_none();
+        let lit_search = !self.query.is_empty();
 
         // Where pulled stars go.
         let mut anchors: HashMap<usize, ((f32, f32), usize)> = HashMap::new();
-        if self.take == Take::Gather {
-            for (i, f) in self.results.iter().take(arrange::slots(h)).enumerate() {
-                anchors.insert(f.page, (arrange::slot_star(i), i));
-            }
-        }
         if let Some(o) = &orbit {
             anchors.insert(o.sun, (o.centre, 0));
             for (i, p) in o.planets.iter().enumerate() {
@@ -1148,8 +1398,12 @@ impl BrainApp {
                         x: ox + (tx as f32 + fx) * tile,
                         y: oy + (ty as f32 + fy) * tile,
                         r: k::FIELD_SIZE * (0.6 + b),
-                        color: alpha(t.text2, k::FIELD_ALPHA * b * b * field_a),
-                        shape: Shape::Round,
+                        color: alpha(t.text2, k::FIELD_ALPHA * st.field * b * b * field_a),
+                        shape: if st.square {
+                            Shape::Square
+                        } else {
+                            Shape::Round
+                        },
                     });
                 }
             }
@@ -1175,12 +1429,16 @@ impl BrainApp {
                     .collect()
             })
             .unwrap_or_default();
-        let dimmed = lit_search || hot.is_some();
+        // Only a star pointed at in the sky dims gently; a search, a page
+        // read or a link in it dims firmly.
+        let glance = hot.is_some() && hot == self.hover && self.link.is_none();
         for (s, sys) in sky.systems.iter().enumerate() {
             let target = if orbit.is_some() {
                 0.
-            } else if dimmed {
-                0.55
+            } else if lit_search || replay.is_some() || (hot.is_some() && !glance) {
+                k::SYSTEMS_DIMMED
+            } else if glance {
+                k::SYSTEMS_HOVER
             } else {
                 1.
             } * gathering(sys);
@@ -1195,12 +1453,13 @@ impl BrainApp {
             }
             let hue = data.hues[sys.subject];
             let share = (sys.evidence as f32).ln_1p() / (data.max_evidence as f32).ln_1p();
-            let strength = (k::NEBULA_MIN + (k::NEBULA_MAX - k::NEBULA_MIN) * share) * a;
+            let strength =
+                (k::NEBULA_MIN + (k::NEBULA_MAX - k::NEBULA_MIN) * share) * a * st.nebula;
             pic.lights.push(Light {
                 x,
                 y,
-                r: r * 0.5,
-                blur: r * 0.42,
+                r: r * st.nebula_size,
+                blur: r * st.nebula_soft,
                 color: alpha(hue, strength),
             });
             let edge = if Some(s) == focus {
@@ -1224,7 +1483,7 @@ impl BrainApp {
         for (i, b) in sky.bridges.iter().enumerate() {
             let involved = Some(b.a) == focus || Some(b.b) == focus;
             let strength = (b.weight as f32).ln_1p() / (data.strongest as f32).ln_1p();
-            let target = if orbit.is_some() || first.is_some() {
+            let target = if orbit.is_some() || first.is_some() || replay.is_some() {
                 0.
             } else if hot.is_some() || lit_search {
                 if involved { 0.22 } else { 0. }
@@ -1243,7 +1502,7 @@ impl BrainApp {
             pic.lines.push(Line {
                 a: cam.screen(sa.x, sa.y),
                 b: cam.screen(sb.x, sb.y),
-                bend: k::BRIDGE_BEND,
+                bend: k::BRIDGE_BEND * st.bend,
                 color: alpha(data.hues[sa.subject], a),
                 width: if involved { 1.2 } else { 1. },
                 reach: 1.,
@@ -1264,6 +1523,10 @@ impl BrainApp {
             if orbit.is_some() {
                 target = if anchored.is_some() { 1. } else { 0. };
             } else {
+                if let Some(r) = &replay {
+                    let warm = r[i].map_or(0., |d| motion::REPLAY_COOL.powf(d));
+                    target *= k::REPLAY_BASE + (1. - k::REPLAY_BASE) * warm;
+                }
                 if lit_search && !matches.is_empty() && !matches.contains(&i) {
                     target *= k::UNMATCHED;
                 }
@@ -1272,7 +1535,11 @@ impl BrainApp {
                     && !related.contains(&i)
                     && anchored.is_none()
                 {
-                    target *= k::UNRELATED;
+                    target *= if glance {
+                        k::UNRELATED_HOVER
+                    } else {
+                        k::UNRELATED
+                    };
                 }
             }
             let sys = &sky.systems[star.system];
@@ -1343,17 +1610,10 @@ impl BrainApp {
                     let d = (sky.degree[i] as f32).ln_1p();
                     (tokens::orbit::PLANET_MIN + d).min(tokens::orbit::PLANET_MAX)
                 };
-            } else if anchored.is_some() {
-                size = size.max(tokens::gather::STAR);
             }
             let is_hot = hot == Some(i);
             let found = lit_search && matches.contains(&i);
-            // Gathered stars shine over the column's scrim.
-            let layer = if self.take == Take::Gather && anchored.is_some() {
-                &mut over
-            } else {
-                &mut pic
-            };
+            let layer = &mut pic;
             if star.role == Role::Stray && orbit.is_none() {
                 layer.rings.push(Ring {
                     x,
@@ -1365,17 +1625,19 @@ impl BrainApp {
                 });
             } else {
                 let white = match star.role {
-                    Role::Core => 0.75,
+                    Role::Core => st.core_white,
                     Role::Dust => 0.1,
                     _ => 0.35,
                 };
-                if star.role == Role::Core || is_hot || found || anchored.is_some() {
+                if st.glow > 0.
+                    && (star.role == Role::Core || is_hot || found || anchored.is_some())
+                {
                     layer.glows.push(Light {
                         x,
                         y,
                         r: size,
                         blur: size * k::GLOW * 0.5,
-                        color: alpha(hue, 0.55 * a),
+                        color: alpha(hue, (0.55 * a * st.glow).min(1.)),
                     });
                 }
                 layer.dots.push(Dot {
@@ -1386,14 +1648,16 @@ impl BrainApp {
                         whiten(hue, white),
                         a * if star.role == Role::Dust { 0.7 } else { 1. },
                     ),
-                    shape: if star.role == Role::Dust && cam.scale < k::NEAR && orbit.is_none() {
+                    shape: if st.square
+                        || (star.role == Role::Dust && cam.scale < k::NEAR && orbit.is_none())
+                    {
                         Shape::Square
                     } else {
                         Shape::Round
                     },
                 });
             }
-            if found && self.take != Take::Gather {
+            if found {
                 layer.rings.push(Ring {
                     x,
                     y,
@@ -1403,13 +1667,27 @@ impl BrainApp {
                     dashed: false,
                 });
             }
-            if is_hot || (self.take != Take::Gather && picked == Some(i)) {
+            if is_hot || picked == Some(i) {
                 layer.rings.push(Ring {
                     x,
                     y,
                     r: size + k::HOT_RING,
                     color: alpha(whiten(hue, 0.5), a),
                     width: 1.,
+                    dashed: false,
+                });
+            }
+            // A page touched on the replay's day flares.
+            if let Some(d) = replay.as_ref().and_then(|r| r[i])
+                && d < 1.
+                && orbit.is_none()
+            {
+                layer.rings.push(Ring {
+                    x,
+                    y,
+                    r: size + 2. + d * 16.,
+                    color: alpha(whiten(hue, 0.3), (1. - d) * 0.9),
+                    width: 1.5 * (1. - d) + 0.3,
                     dashed: false,
                 });
             }
@@ -1456,15 +1734,7 @@ impl BrainApp {
             }
         } else if let Some(hp) = hot {
             let hue = data.hues[corpus.pages[hp].subject];
-            // In Gather the links run between homes in the sky, which holds
-            // still, not out of the column.
-            let at = |p: usize| {
-                if self.take == Take::Gather {
-                    cam.screen(sky.stars[p].x, sky.stars[p].y)
-                } else {
-                    self.shown[p]
-                }
-            };
+            let at = |p: usize| self.shown[p];
             // Many links each draw fainter, so a hub reads as a hub and not
             // as a sheet of light; links leaving the view fainter still,
             // their way told by the signposts.
@@ -1476,68 +1746,41 @@ impl BrainApp {
                 pic.lines.push(Line {
                     a: at(hp),
                     b,
-                    bend: k::LINK_BEND,
+                    bend: k::LINK_BEND * st.bend,
                     color: alpha(hue, k::LINK_ALPHA * share * away * self.light[r].max(0.4)),
                     width: 1.,
                     reach: growth,
                 });
             }
         }
-        if self.take == Take::Gather && orbit.is_none() {
-            for f in self.results.iter().take(arrange::slots(h)) {
-                let star = sky.stars[f.page];
-                let home = cam.screen(star.x, star.y);
-                let hue = data.hues[corpus.pages[f.page].subject];
-                let lit = hot == Some(f.page);
-                let a = if lit { 0.85 } else { k::THREAD_ALPHA };
-                pic.lines.push(Line {
-                    a: self.shown[f.page],
-                    b: home,
-                    bend: 0.14,
-                    color: alpha(hue, a),
-                    width: if lit { 1.4 } else { 1. },
-                    reach: 1.,
-                });
-                pic.rings.push(Ring {
-                    x: home.0,
-                    y: home.1,
-                    r: if lit { 6. } else { 3.5 },
-                    color: alpha(hue, a),
-                    width: 1.,
-                    dashed: false,
-                });
-            }
-        }
-
         // ---- Names.
         let mut taken = Boxes(vec![]);
-        // Room the bar along the top (the search, the switch) and the
-        // column already use.
+        // Room the bar along the top (the search, the theme) already uses.
         taken
             .0
             .push((0., 0., w, search::FIELD_HEIGHT + chrome::INSET * 2.));
-        if self.take == Take::Gather && !self.results.is_empty() {
-            taken.0.push((0., 0., gather::LEFT + gather::WIDTH, h));
-        }
-        // Signposts first: they say where the page read leads.
-        self.signposts.clear();
-        if self.take == Take::Sky
-            && let Some(p) = self.reading
-        {
-            self.signposts(&data, p, free, &mut pic, &mut taken, window);
-        }
         if let Some(o) = &orbit {
             self.orbit_names(&data, o, hot, &mut pic, &mut taken, window, t);
         } else {
-            self.system_names(&data, focus, &mut pic, &mut taken, window);
+            self.system_names(&data, focus, &mut pic, &mut taken, window, t);
+            // Without a page pointed at, the replay names the day's work.
+            let today: HashSet<usize> = match (&replay, hot) {
+                (Some(r), None) => (0..r.len())
+                    .filter(|&p| r[p].is_some_and(|d| d < 1.))
+                    .collect(),
+                _ => HashSet::new(),
+            };
+            let named = if hot.is_some() { &related } else { &today };
             self.page_names(
-                &data, &on_screen, hot, &related, &matches, &anchors, &mut pic, &mut taken, window,
-                t,
+                &data, &on_screen, hot, named, &matches, &mut pic, &mut taken, window, t,
             );
         }
-        (pic, over, busy)
+        (pic, busy)
     }
 
+    /// Each system's name, in the theme's display face. Far out, the sky
+    /// is an overview: names sized by how much a subject holds, each with
+    /// its count and how much of it moved this week.
     fn system_names(
         &self,
         data: &Data,
@@ -1545,6 +1788,7 @@ impl BrainApp {
         pic: &mut Picture,
         taken: &mut Boxes,
         window: &Window,
+        t: &Theme,
     ) {
         let cam = self.camera;
         let mut order: Vec<usize> = (0..data.sky.systems.len()).collect();
@@ -1556,15 +1800,29 @@ impl BrainApp {
             )
         });
         let up = cam.scale >= k::NEAR;
+        let display = Face::display(t);
+        let biggest = data
+            .sky
+            .systems
+            .iter()
+            .map(|s| s.pages)
+            .max()
+            .unwrap_or(1)
+            .max(1) as f32;
         for s in order {
             let a = self.system_light[s];
             if a < 0.3 {
                 continue;
             }
             let sys = &data.sky.systems[s];
-            let name = &data.corpus.subjects[sys.subject].name;
-            let size = k::SYSTEM_NAME;
-            let tw = paint::measure(name, size, false, window);
+            let name = t.label_case(&data.corpus.subjects[sys.subject].name);
+            let share = (sys.pages as f32).ln_1p() / biggest.ln_1p();
+            let size = if up {
+                k::SYSTEM_NAME
+            } else {
+                k::SYSTEM_NAME_MIN + (k::SYSTEM_NAME_MAX - k::SYSTEM_NAME_MIN) * share
+            };
+            let tw = paint::measure(&name, size, &display, window);
             let (x, cy) = cam.screen(sys.x, sys.y);
             let y = if up {
                 cy - sys.radius * cam.scale - size
@@ -1582,43 +1840,43 @@ impl BrainApp {
             if !taken.take(bx, by, tw, size * 1.4, 6.) {
                 continue;
             }
-            let hue = self
-                .data
-                .as_ref()
-                .map(|d| d.hues[sys.subject])
-                .unwrap_or_default();
+            let hue = data.hues[sys.subject];
+            let lit = Some(s) == focus;
             pic.labels.push(Label {
-                text: name.clone().into(),
+                text: name.into(),
                 x,
                 y,
                 size,
-                color: alpha(
-                    whiten(hue, 0.25),
-                    if Some(s) == focus { 1. } else { 0.82 } * a,
-                ),
-                bold: Some(s) == focus,
+                color: alpha(whiten(hue, 0.25), if lit { 1. } else { 0.82 } * a),
+                face: display.clone(),
                 align: Align::Centre,
             });
-            if Some(s) == focus {
-                let kept = sys.pages - sys.evidence;
-                let count = if sys.evidence > 0 {
-                    format!("{kept} pages · {} evidence", sys.evidence)
-                } else {
-                    format!("{kept} pages")
-                };
-                let cy2 = y + size * 1.25;
-                let cw = paint::measure(&count, k::PAGE_NAME - 1., false, window);
-                if taken.take(x - cw / 2., cy2 - 8., cw, 14., 2.) {
-                    pic.labels.push(Label {
-                        text: count.into(),
-                        x,
-                        y: cy2,
-                        size: k::PAGE_NAME - 1.,
-                        color: alpha(hue, 0.6 * a),
-                        bold: false,
-                        align: Align::Centre,
-                    });
-                }
+            if !(lit || !up) {
+                continue;
+            }
+            let kept = sys.pages - sys.evidence;
+            let mut count = match (kept, sys.evidence) {
+                (0, e) => format!("{e} evidence"),
+                (n, e) if lit && e > 0 => format!("{} · {e} evidence", pages(n)),
+                (n, _) => pages(n),
+            };
+            let moved = data.moved[s];
+            if moved > 0 {
+                count.push_str(&format!(" · {moved} this week"));
+            }
+            let small = k::PAGE_NAME - 1.;
+            let cy2 = y + size * 0.7 + small * 0.85;
+            let cw = paint::measure(&count, small, &Face::mono(false), window);
+            if taken.take(x - cw / 2., cy2 - small * 0.6, cw, small * 1.2, 2.) {
+                pic.labels.push(Label {
+                    text: count.into(),
+                    x,
+                    y: cy2,
+                    size: small,
+                    color: alpha(hue, if lit { 0.75 } else { 0.5 } * a),
+                    face: Face::mono(false),
+                    align: Align::Centre,
+                });
             }
         }
     }
@@ -1631,7 +1889,6 @@ impl BrainApp {
         hot: Option<usize>,
         related: &HashSet<usize>,
         matches: &HashSet<usize>,
-        anchors: &HashMap<usize, ((f32, f32), usize)>,
         pic: &mut Picture,
         taken: &mut Boxes,
         window: &Window,
@@ -1660,7 +1917,10 @@ impl BrainApp {
             }
             _ => vec![],
         };
+        // Named near the page pointed at, nearest first; or, with none, the
+        // pages the replay names.
         let named_related: HashSet<usize> = match hot {
+            None => related.iter().copied().take(k::REPLAY_NAMES).collect(),
             Some(h) => {
                 let o = self.shown[h];
                 let mut list: Vec<usize> = related.iter().copied().collect();
@@ -1671,13 +1931,12 @@ impl BrainApp {
                 });
                 list.into_iter().take(14).collect()
             }
-            None => HashSet::new(),
         };
         let rank = |i: usize| -> u8 {
             let role = data.sky.stars[i].role;
             if Some(i) == hot {
                 0
-            } else if matches.contains(&i) && self.take != Take::Gather {
+            } else if matches.contains(&i) {
                 1
             } else if lantern.contains(&i) {
                 2
@@ -1691,10 +1950,7 @@ impl BrainApp {
                 6
             }
         };
-        let mut order: Vec<&(usize, f32, f32, f32)> = on_screen
-            .iter()
-            .filter(|e| !(self.take == Take::Gather && anchors.contains_key(&e.0)))
-            .collect();
+        let mut order: Vec<&(usize, f32, f32, f32)> = on_screen.iter().collect();
         order.sort_by_key(|e| rank(e.0));
         let mut count = 0;
         for &&(i, x, y, a) in &order {
@@ -1710,7 +1966,7 @@ impl BrainApp {
                 break;
             }
             let text = shorten(&data.corpus.pages[i].title, k::PAGE_NAME_MAX);
-            let tw = paint::measure(&text, k::PAGE_NAME, level == 0, window);
+            let tw = paint::measure(&text, k::PAGE_NAME, &Face::mono(level == 0), window);
             // A name runs right of its star, or left where the window ends.
             let lx = if x + 9. + tw > self.size.0 - 8. {
                 x - 9. - tw
@@ -1734,7 +1990,7 @@ impl BrainApp {
                 y,
                 size,
                 color: alpha(color, color.a * a.max(0.5)),
-                bold: level == 0,
+                face: Face::mono(level == 0),
                 align: Align::Left,
             });
         }
@@ -1754,7 +2010,7 @@ impl BrainApp {
         let (sx, sy) = self.shown[o.sun];
         let title = shorten(&data.corpus.pages[o.sun].title, 48);
         let size = k::SYSTEM_NAME;
-        let tw = paint::measure(&title, size, true, window);
+        let tw = paint::measure(&title, size, &Face::mono(true), window);
         taken.take(sx - tw / 2., sy + 14., tw, size * 1.4, 4.);
         pic.labels.push(Label {
             text: title.into(),
@@ -1762,7 +2018,7 @@ impl BrainApp {
             y: sy + 14. + size * 0.7,
             size,
             color: t.text,
-            bold: true,
+            face: Face::mono(true),
             align: Align::Centre,
         });
         // Names keep off the planets.
@@ -1811,7 +2067,7 @@ impl BrainApp {
                 y: ky,
                 size: k::PAGE_NAME,
                 color: alpha(whiten(hue, 0.25), 0.95),
-                bold: false,
+                face: Face::mono(false),
                 align: Align::Left,
             });
             taken.0.push((kx - 4., ky - 9., 260., 18.));
@@ -1824,7 +2080,7 @@ impl BrainApp {
                 y: ky,
                 size: k::PAGE_NAME,
                 color: t.dim,
-                bold: false,
+                face: Face::mono(false),
                 align: Align::Left,
             });
         }
@@ -1844,7 +2100,7 @@ impl BrainApp {
             let lit = Some(p.page) == hot;
             let text = shorten(&data.corpus.pages[p.page].title, tokens::orbit::NAME_MAX);
             let right = p.angle.cos() >= 0.;
-            let tw = paint::measure(&text, k::PAGE_NAME, lit, window);
+            let tw = paint::measure(&text, k::PAGE_NAME, &Face::mono(lit), window);
             let lx = if right { x + 10. } else { x - 10. - tw };
             if !lit && !taken.take(lx, y - 9., tw, 18., 2.) {
                 continue;
@@ -1855,112 +2111,8 @@ impl BrainApp {
                 y,
                 size: k::PAGE_NAME,
                 color: if lit { t.text } else { alpha(t.text2, 0.9 * a) },
-                bold: lit,
+                face: Face::mono(lit),
                 align: Align::Left,
-            });
-        }
-    }
-
-    /// Links from the page read that leave the visible sky, as signs at its
-    /// edge, one per subject they lead into.
-    fn signposts(
-        &mut self,
-        data: &Data,
-        page: usize,
-        free: Rect,
-        pic: &mut Picture,
-        taken: &mut Boxes,
-        window: &Window,
-    ) {
-        let inside = |(x, y): (f32, f32)| {
-            x >= free.x && x <= free.x + free.w && y >= free.y && y <= free.y + free.h
-        };
-        let origin = self.shown[page];
-        let (cx0, cy0) = if inside(origin) {
-            origin
-        } else {
-            free.centre()
-        };
-        let mut by_system: HashMap<usize, (usize, usize, f32)> = HashMap::new();
-        for p in data.corpus.neighbours(page) {
-            let at = self.shown[p];
-            if inside(at) {
-                continue;
-            }
-            let d = (at.0 - cx0).hypot(at.1 - cy0);
-            let s = data.sky.stars[p].system;
-            let e = by_system.entry(s).or_insert((0, p, f32::MAX));
-            e.0 += 1;
-            if d < e.2 {
-                e.1 = p;
-                e.2 = d;
-            }
-        }
-        let mut posts: Vec<(usize, (usize, usize, f32))> = by_system.into_iter().collect();
-        posts.sort_by(|a, b| b.1.0.cmp(&a.1.0).then(a.0.cmp(&b.0)));
-        let inset = k::SIGNPOST_INSET;
-        for (s, (count, target, _)) in posts.into_iter().take(k::SIGNPOSTS) {
-            let (tx, ty) = self.shown[target];
-            let ang = (ty - cy0).atan2(tx - cx0);
-            let (c, sn) = (ang.cos(), ang.sin());
-            let rx = if c.abs() > 1e-4 {
-                ((if c > 0. {
-                    free.x + free.w - inset
-                } else {
-                    free.x + inset
-                }) - cx0)
-                    / c
-            } else {
-                f32::MAX
-            };
-            let ry = if sn.abs() > 1e-4 {
-                ((if sn > 0. {
-                    free.y + free.h - inset
-                } else {
-                    free.y + inset
-                }) - cy0)
-                    / sn
-            } else {
-                f32::MAX
-            };
-            let reach = rx.min(ry);
-            let (x, y) = (cx0 + c * reach, cy0 + sn * reach);
-            let subject = data.sky.systems[s].subject;
-            let hue = data.hues[subject];
-            let arrow = match ((ang + std::f32::consts::PI) / (std::f32::consts::PI / 4.)).round()
-                as i32
-                % 8
-            {
-                0 => "←",
-                1 => "↖",
-                2 => "↑",
-                3 => "↗",
-                4 => "→",
-                5 => "↘",
-                6 => "↓",
-                _ => "↙",
-            };
-            let text = format!("{arrow} {} {count}", data.corpus.subjects[subject].name);
-            let tw = paint::measure(&text, k::PAGE_NAME, false, window);
-            let lx = (x - tw / 2.).clamp(free.x + 6., free.x + free.w - tw - 6.);
-            if !taken.take(lx - 4., y - 11., tw + 8., 22., 4.) {
-                continue;
-            }
-            pic.labels.push(Label {
-                text: text.into(),
-                x: lx,
-                y,
-                size: k::PAGE_NAME,
-                color: alpha(whiten(hue, 0.3), 0.95),
-                bold: false,
-                align: Align::Left,
-            });
-            self.signposts.push(Signpost {
-                target,
-                x: lx - 4.,
-                y: y - 11.,
-                w: tw + 8.,
-                h: 22.,
             });
         }
     }
@@ -2026,7 +2178,7 @@ impl Render for BrainApp {
             window.focus(&self.focus, cx);
         }
         let typing = self.field.read(cx).is_focused(window);
-        let (picture, over, busy) = self.scene(window, &t);
+        let (picture, busy) = self.scene(window, &t);
         if busy {
             window.request_animation_frame();
         }
@@ -2066,6 +2218,21 @@ impl Render for BrainApp {
         .absolute()
         .size_full();
 
+        // Launch: the theme's picture behind the window while the brain is
+        // read, fading as the sky gathers out of it.
+        let backdrop = match (&self.status, self.first_light) {
+            (Some(_), _) => 1.,
+            (None, Some(f)) => 1. - ease_out(f.elapsed().as_secs_f32() * 1000. / motion::GATHER),
+            _ => 0.,
+        };
+        let backdrop = (backdrop > 0.).then(|| {
+            img(t.art.window.clone())
+                .absolute()
+                .inset_0()
+                .size_full()
+                .object_fit(gpui::ObjectFit::Cover)
+                .opacity(t.art.window_show * backdrop * chrome::BACKDROP)
+        });
         let mut root = div()
             .id("brain")
             .key_context("Brain")
@@ -2083,32 +2250,17 @@ impl Render for BrainApp {
             .on_mouse_up_out(MouseButton::Left, cx.listener(Self::mouse_up))
             .on_scroll(cx.listener(Self::wheel))
             .when(self.hover.is_some(), |d| d.cursor_pointer())
+            .children(backdrop)
             .child(sky);
 
-        if self.take == Take::Gather && !self.results.is_empty() {
-            root = root.child(self.gather_column(&t, cx)).child(
-                canvas(
-                    |_, _, _| {},
-                    move |_, _, window, cx| paint::paint(&over, window, cx),
-                )
-                .absolute()
-                .size_full(),
-            );
-        }
         root = root.child(self.search_panel(&t, typing, cx));
-        root = root.child(self.switcher(&t, cx));
+        root = root.child(self.theme_button(&t, cx));
         if let Some(status) = &self.status {
-            root = root.child(
-                div()
-                    .absolute()
-                    .inset_0()
-                    .flex()
-                    .items_center()
-                    .justify_center()
-                    .text_size(px(search::TITLE))
-                    .text_color(t.text2)
-                    .child(status.clone()),
-            );
+            root = root.child(div().absolute().inset_0().child(pane::vacant(
+                &t,
+                status.clone(),
+                None,
+            )));
         } else if let Some(d) = &self.data {
             let counts = format!(
                 "{} pages · {} subjects · {} links",
@@ -2124,6 +2276,24 @@ impl Render for BrainApp {
                     .text_size(px(chrome::TEXT))
                     .text_color(t.dim)
                     .child(counts),
+            );
+        }
+        if self.status.is_none() && self.data.is_some() {
+            root = root.child(self.replay_bar(&t, cx));
+        }
+        if let Some(chip) = self.evidence_chip(&t, cx) {
+            root = root.child(chip);
+        }
+        if let Some(e) = &self.settings_broken {
+            root = root.child(
+                div()
+                    .absolute()
+                    .left(px(chrome::INSET))
+                    .bottom(px(chrome::INSET + chrome::FOOT))
+                    .max_w(px(self.search_width()))
+                    .text_size(px(chrome::TEXT))
+                    .text_color(t.error)
+                    .child(format!("Settings: {e}")),
             );
         }
         if self.reading.is_some() {
@@ -2156,7 +2326,8 @@ fn report(b: &Bench, pages: usize) {
         1000. * b.frames.len() as f32 / b.frames.iter().sum::<f32>()
     };
     eprintln!(
-        "bench: {pages} pages, {} frames, {fps:.1} fps\n  frame interval: {}\n  build+paint on the UI thread: {}",
+        "bench: {pages} pages, sky lit {:.0} ms after launch, {} frames, {fps:.1} fps\n  frame interval: {}\n  build+paint on the UI thread: {}",
+        b.lit.unwrap_or(f32::NAN),
         b.frames.len(),
         stats(&b.frames),
         stats(&b.work)
@@ -2173,7 +2344,7 @@ impl BrainApp {
             .absolute()
             .left(px(chrome::INSET))
             .top(px(chrome::INSET))
-            .w(px(search::WIDTH))
+            .w(px(self.search_width()))
             .flex()
             .flex_col()
             .gap(px(6.))
@@ -2190,36 +2361,50 @@ impl BrainApp {
             );
         let Some(data) = &self.data else { return panel };
         if self.query.is_empty() {
+            if typing && self.reading.is_none() && self.replay.is_none() && !data.recent.is_empty()
+            {
+                panel = panel.child(self.recent(data, t, cx));
+            }
             return panel;
         }
-        if let Some(e) = &self.failed {
-            return panel.child(
+        if let Some(e) = &self.away {
+            panel = panel.child(
                 div()
+                    .id("away")
+                    .flex()
+                    .gap(px(8.))
                     .px(px(search::ROW_PAD_X))
                     .py(px(search::ROW_PAD_Y))
                     .rounded(px(chrome::RADIUS))
                     .bg(veil(t, chrome::PANEL_ALPHA))
                     .text_size(px(search::SNIPPET))
-                    .text_color(t.error)
-                    .child(format!("Search did not answer: {e}")),
+                    .text_color(t.text2)
+                    .tooltip(kit::tip(e.clone()))
+                    .child(
+                        div()
+                            .flex_none()
+                            .mt(px(4.))
+                            .size(px(7.))
+                            .rounded(px(7.))
+                            .bg(t.error),
+                    )
+                    .child(
+                        "Citadel is not answering, so only titles and aliases are \
+                         matched here.",
+                    ),
             );
         }
         if self.results.is_empty() && self.answered == self.asked {
             return panel.child(
                 div()
-                    .px(px(search::ROW_PAD_X))
-                    .py(px(search::ROW_PAD_Y))
+                    .h(px(art::EMPTY_ROOM))
                     .rounded(px(chrome::RADIUS))
                     .bg(veil(t, chrome::PANEL_ALPHA))
-                    .text_size(px(search::SNIPPET))
-                    .text_color(t.dim)
-                    .child("Nothing in the brain matches."),
+                    .child(pane::vacant(t, "Nothing in the brain matches.", None)),
             );
         }
-        if self.results.is_empty()
-            || self.take == Take::Gather
-            || (self.reading.is_some() && !typing)
-        {
+        let aside = self.aside();
+        if self.results.is_empty() || (self.reading.is_some() && !typing && !aside) {
             return panel;
         }
         let mut list = div()
@@ -2228,24 +2413,92 @@ impl BrainApp {
             .py(px(4.))
             .rounded(px(chrome::RADIUS))
             .bg(veil(t, chrome::PANEL_ALPHA));
-        for (i, f) in self.results.iter().take(search::ROWS).enumerate() {
-            list = list.child(self.result_row(i, f, data, t, false, cx));
+        let rows = if aside {
+            self.aside_rows()
+        } else {
+            search::ROWS
+        };
+        for (i, f) in self.results.iter().take(rows).enumerate() {
+            list = list.child(self.result_row(i, f, data, t, aside, cx));
         }
-        if self.results.len() > search::ROWS {
+        if self.results.len() > rows {
+            let more = self.results.len() - rows;
             list = list.child(
                 div()
                     .px(px(search::ROW_PAD_X))
                     .py(px(4.))
                     .text_size(px(search::SNIPPET))
                     .text_color(t.dim)
-                    .child(format!(
-                        "{} more lit in the sky",
-                        self.results.len() - search::ROWS
-                    )),
+                    .child(if aside {
+                        format!("{more} more found")
+                    } else {
+                        format!("{more} more lit in the sky")
+                    }),
             );
         }
         panel = panel.child(list);
         panel
+    }
+
+    /// What changed last, as a way in before anything is asked.
+    fn recent(&self, data: &Data, t: &Theme, cx: &mut Context<Self>) -> impl IntoElement + use<> {
+        let now = SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos() as u64)
+            .unwrap_or(0);
+        let mut list = div()
+            .flex()
+            .flex_col()
+            .py(px(4.))
+            .rounded(px(chrome::RADIUS))
+            .bg(veil(t, chrome::PANEL_ALPHA))
+            .child(
+                kit::label(t, "Changed lately")
+                    .px(px(search::ROW_PAD_X))
+                    .pt(px(search::ROW_PAD_Y))
+                    .pb(px(2.)),
+            );
+        for &p in &data.recent {
+            let page = &data.corpus.pages[p];
+            let hue = data.hues[page.subject];
+            list = list.child(
+                div()
+                    .id(("recent", p))
+                    .flex()
+                    .items_center()
+                    .gap(px(10.))
+                    .px(px(search::ROW_PAD_X))
+                    .py(px(search::ROW_PAD_Y - 2.))
+                    .cursor_pointer()
+                    .hover(|s| s.bg(alpha(hue, 0.08)))
+                    .on_click(cx.listener(move |me, _, _, cx| me.open(p, cx)))
+                    .on_hover(cx.listener(move |me, on: &bool, _, cx| {
+                        let want = on.then_some(p);
+                        if me.hover != want && (*on || me.hover == Some(p)) {
+                            me.hover = want;
+                            cx.notify();
+                        }
+                    }))
+                    .child(div().flex_none().size(px(7.)).rounded(px(7.)).bg(hue))
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .truncate()
+                            .text_size(px(search::TITLE))
+                            .text_color(alpha(t.text, 0.9))
+                            .child(page.title.clone()),
+                    )
+                    .child(
+                        div()
+                            .flex_none()
+                            .text_size(px(search::SNIPPET))
+                            .text_color(t.dim)
+                            .child(reader::since(page.modified, now)),
+                    ),
+            );
+        }
+        list
     }
 
     fn result_row(
@@ -2254,13 +2507,17 @@ impl BrainApp {
         f: &Found,
         data: &Data,
         t: &Theme,
-        tall: bool,
+        compact: bool,
         cx: &mut Context<Self>,
     ) -> impl IntoElement + use<> {
         let page = &data.corpus.pages[f.page];
         let hue = data.hues[page.subject];
-        let picked = self.pick == Some(i);
         let p = f.page;
+        // Beside an orbit the row marked is the page read.
+        let picked = match self.reading {
+            Some(r) => r == p,
+            None => self.pick == Some(i),
+        };
         let snippet = snippet_text(&f.snippet, &page.summary, hue, t);
         div()
             .id(("result", i))
@@ -2268,8 +2525,10 @@ impl BrainApp {
             .gap(px(10.))
             .px(px(search::ROW_PAD_X))
             .py(px(search::ROW_PAD_Y))
-            .when(tall, |d| d.h(px(gather::SLOT)).py(px(6.)).px(px(0.)))
-            .when(picked && !tall, |d| d.bg(alpha(hue, 0.1)))
+            .when(compact, |d| {
+                d.h(px(search::ASIDE_ROW)).py(px(0.)).items_center()
+            })
+            .when(picked, |d| d.bg(alpha(hue, 0.1)))
             .cursor_pointer()
             .hover(|s| s.bg(alpha(hue, 0.08)))
             .on_click(cx.listener(move |me, _, _, cx| {
@@ -2283,19 +2542,14 @@ impl BrainApp {
                     cx.notify();
                 }
             }))
-            .when(!tall, |d| {
-                d.child(
-                    div()
-                        .flex_none()
-                        .mt(px(5.))
-                        .size(px(7.))
-                        .rounded(px(7.))
-                        .bg(hue),
-                )
-            })
-            .when(tall, |d| {
-                d.child(div().flex_none().w(px(gather::TEXT_X - 10.)))
-            })
+            .child(
+                div()
+                    .flex_none()
+                    .when(!compact, |d| d.mt(px(5.)))
+                    .size(px(7.))
+                    .rounded(px(7.))
+                    .bg(hue),
+            )
             .child(
                 div()
                     .flex_1()
@@ -2317,73 +2571,265 @@ impl BrainApp {
                                     .when(picked, |d| d.font_weight(FontWeight::BOLD))
                                     .child(page.title.clone()),
                             )
-                            .child(
-                                div()
-                                    .flex_none()
-                                    .text_size(px(search::SNIPPET))
-                                    .text_color(alpha(hue, 0.85))
-                                    .child(page.kind.clone()),
-                            ),
+                            .when(!compact, |d| {
+                                d.child(
+                                    div()
+                                        .flex_none()
+                                        .text_size(px(search::SNIPPET))
+                                        .text_color(alpha(hue, 0.85))
+                                        .child(page.kind.clone()),
+                                )
+                            }),
                     )
-                    .child(
-                        div()
-                            .text_size(px(search::SNIPPET))
-                            .line_height(px(search::SNIPPET * 1.45))
-                            .text_color(t.dim)
-                            .when(!tall, |d| d.truncate())
-                            .when(tall, |d| d.line_clamp(2))
-                            .child(snippet),
-                    ),
+                    .when(!compact, |d| {
+                        d.child(
+                            div()
+                                .text_size(px(search::SNIPPET))
+                                .line_height(px(search::SNIPPET * 1.45))
+                                .text_color(t.dim)
+                                .truncate()
+                                .child(snippet),
+                        )
+                    }),
             )
     }
 
-    fn gather_column(&self, t: &Theme, cx: &mut Context<Self>) -> impl IntoElement {
-        let (_, h) = self.size;
-        let mut col = div()
-            .absolute()
-            .left(px(0.))
-            .top(px(0.))
-            .w(px(gather::LEFT + gather::WIDTH + 80.))
-            .h_full()
-            .bg(linear_gradient(
-                90.,
-                linear_color_stop(alpha(t.bg, gather::SCRIM), 0.78),
-                linear_color_stop(alpha(t.bg, 0.), 1.),
-            ));
-        let Some(data) = &self.data else { return col };
-        let shown = arrange::slots(h);
-        for (i, f) in self.results.iter().take(shown).enumerate() {
-            col = col.child(
-                div()
-                    .absolute()
-                    .left(px(gather::LEFT))
-                    .top(px(gather::TOP + i as f32 * gather::SLOT))
-                    .w(px(gather::WIDTH))
-                    .occlude()
-                    .child(self.result_row(i, f, data, t, true, cx)),
-            );
-        }
-        if self.results.len() > shown {
-            col = col.child(
-                div()
-                    .absolute()
-                    .left(px(gather::LEFT + gather::TEXT_X))
-                    .top(px(gather::TOP + shown as f32 * gather::SLOT))
-                    .text_size(px(search::SNIPPET))
-                    .text_color(t.dim)
-                    .child(format!("{} more found", self.results.len() - shown)),
-            );
-        }
-        col
-    }
-
-    fn switcher(&self, t: &Theme, cx: &mut Context<Self>) -> impl IntoElement {
+    /// The replay's button, or the replay itself: the day it stands on, the
+    /// days worked on as a strip to pick from, and play and pause.
+    fn replay_bar(&self, t: &Theme, cx: &mut Context<Self>) -> AnyElement {
         let right = if self.reading.is_some() {
             reader::sheet_width(self.size.0) + chrome::INSET
         } else {
             chrome::INSET
         };
-        let mut row = div()
+        let button = |id: &'static str, words: String| {
+            div()
+                .id(id)
+                .flex_none()
+                .px(px(chrome::SWITCH_PAD_X))
+                .h(px(chrome::SWITCH_HEIGHT))
+                .flex()
+                .items_center()
+                .rounded(px(chrome::RADIUS))
+                .cursor_pointer()
+                .text_size(px(chrome::TEXT))
+                .text_color(t.text2)
+                .hover(|s| s.text_color(t.text).bg(t.raised))
+                .child(words)
+        };
+        let Some(state) = &self.replay else {
+            return div()
+                .absolute()
+                .right(px(right))
+                .bottom(px(chrome::INSET - 6.))
+                .rounded(px(chrome::RADIUS))
+                .bg(veil(t, chrome::PANEL_ALPHA))
+                .occlude()
+                .child(
+                    button("replay", "Replay the brain's history".into())
+                        .on_click(cx.listener(|me, _, _, cx| me.toggle_replay(cx))),
+                )
+                .into_any_element();
+        };
+        let close = button("end-replay", "×".into())
+            .on_click(cx.listener(|me, _, _, cx| me.toggle_replay(cx)));
+        let bar = div()
+            .absolute()
+            .left(px(chrome::INSET))
+            .right(px(right))
+            .bottom(px(chrome::INSET + chrome::FOOT))
+            .p(px(chrome::INSET))
+            .flex()
+            .flex_col()
+            .gap(px(10.))
+            .rounded(px(chrome::RADIUS))
+            .bg(veil(t, chrome::PANEL_ALPHA))
+            .occlude();
+        let r = match state {
+            Replaying::Reading => {
+                return bar
+                    .child(
+                        div()
+                            .flex()
+                            .justify_between()
+                            .items_center()
+                            .text_color(t.text2)
+                            .child("Reading the brain's history…")
+                            .child(close),
+                    )
+                    .into_any_element();
+            }
+            Replaying::Failed(e) => {
+                return bar
+                    .child(
+                        div()
+                            .flex()
+                            .justify_between()
+                            .items_center()
+                            .gap(px(12.))
+                            .child(div().text_color(t.error).child(e.clone()))
+                            .child(close),
+                    )
+                    .into_any_element();
+            }
+            Replaying::Ready(r) => r,
+        };
+        let Some(&(today, ref pages)) = r.days.get(r.at.floor() as usize) else {
+            return bar
+                .child(
+                    div()
+                        .flex()
+                        .justify_between()
+                        .items_center()
+                        .text_color(t.text2)
+                        .child("The brain's history names none of its pages.")
+                        .child(close),
+                )
+                .into_any_element();
+        };
+        let most = r.days.iter().map(|d| d.1.len()).max().unwrap_or(1).max(1) as f32;
+        let now = r.at.floor() as usize;
+        let mut strip = div()
+            .h(px(tokens::replay::STRIP))
+            .flex()
+            .items_end()
+            .gap(px(tokens::replay::GAP));
+        for (i, (_, touched)) in r.days.iter().enumerate() {
+            let share = (touched.len() as f32).ln_1p() / most.ln_1p();
+            let color = match i.cmp(&now) {
+                std::cmp::Ordering::Less => alpha(t.text2, 0.7),
+                std::cmp::Ordering::Equal => t.accent,
+                std::cmp::Ordering::Greater => alpha(t.dim, 0.5),
+            };
+            strip = strip.child(
+                div()
+                    .id(("day", i))
+                    .flex_1()
+                    .h_full()
+                    .flex()
+                    .items_end()
+                    .cursor_pointer()
+                    .on_click(cx.listener(move |me, _, _, cx| {
+                        if let Some(r) = me.replay_mut() {
+                            r.seek(i);
+                        }
+                        cx.notify();
+                    }))
+                    .child(
+                        div()
+                            .w_full()
+                            .h(px((tokens::replay::STRIP * share).max(2.)))
+                            .bg(color),
+                    ),
+            );
+        }
+        let first = r.days.first().map(|d| d.0).unwrap_or(today);
+        let last = r.days.last().map(|d| d.0).unwrap_or(today);
+        let play = button(
+            "play",
+            if r.playing.is_some() { "Pause" } else { "Play" }.into(),
+        )
+        .on_click(cx.listener(|me, _, _, cx| {
+            if let Some(r) = me.replay_mut() {
+                r.play_pause();
+            }
+            cx.notify();
+        }));
+        let mut note = format!("{} worked on", self::pages(pages.len()));
+        if r.reshuffles > 0 {
+            note.push_str(&format!(" · {} reorganisations left out", r.reshuffles));
+        }
+        bar.child(
+            div()
+                .flex()
+                .items_end()
+                .gap(px(16.))
+                .child(
+                    div()
+                        .font_family(t.ty.display)
+                        .font_weight(t.ty.display_weight)
+                        .text_size(px(ty::GLANCE))
+                        .line_height(px(ty::GLANCE * 1.1))
+                        .text_color(t.text)
+                        .child(date(today)),
+                )
+                .child(
+                    div()
+                        .flex_1()
+                        .pb(px(4.))
+                        .text_size(px(chrome::TEXT))
+                        .text_color(t.text2)
+                        .child(note),
+                )
+                .child(play)
+                .child(close),
+        )
+        .child(strip)
+        .child(
+            div()
+                .flex()
+                .justify_between()
+                .text_size(px(chrome::TEXT))
+                .text_color(t.dim)
+                .child(date(first))
+                .child(format!("{} days worked on", r.days.len()))
+                .child(date(last)),
+        )
+        .into_any_element()
+    }
+
+    /// In a page's orbit, its evidence: how much there is, folded out of
+    /// the ring or shown in it, and the switch between.
+    fn evidence_chip(&self, t: &Theme, cx: &mut Context<Self>) -> Option<impl IntoElement + use<>> {
+        let data = self.data.as_ref()?;
+        let page = self.reading.filter(|_| self.orbiting())?;
+        let n = data
+            .corpus
+            .neighbours(page)
+            .into_iter()
+            .filter(|&p| data.corpus.pages[p].is_evidence())
+            .count();
+        if n == 0 {
+            return None;
+        }
+        let free = self.free();
+        let (words, act) = if self.fold_evidence {
+            (format!("{n} evidence folded away"), "Show")
+        } else {
+            (format!("{n} evidence in the ring"), "Fold")
+        };
+        Some(
+            div()
+                .id("evidence")
+                .absolute()
+                .left(px(free.x + chrome::INSET))
+                .top(px(free.y))
+                .h(px(chrome::SWITCH_HEIGHT))
+                .flex()
+                .items_center()
+                .gap(px(10.))
+                .px(px(chrome::SWITCH_PAD_X))
+                .rounded(px(chrome::RADIUS))
+                .bg(veil(t, chrome::PANEL_ALPHA))
+                .occlude()
+                .cursor_pointer()
+                .text_size(px(chrome::TEXT))
+                .text_color(t.text2)
+                .on_click(cx.listener(|me, _, _, cx| me.toggle_evidence(cx)))
+                .child(words)
+                .child(div().text_color(t.accent).child(act)),
+        )
+    }
+
+    /// The theme's mark: the direction shown, and a click to the next.
+    fn theme_button(&self, t: &Theme, cx: &mut Context<Self>) -> impl IntoElement {
+        let right = if self.reading.is_some() {
+            reader::sheet_width(self.size.0) + chrome::INSET
+        } else {
+            chrome::INSET
+        };
+        div()
+            .id("theme")
             .absolute()
             .top(px(
                 chrome::INSET + (search::FIELD_HEIGHT - chrome::SWITCH_HEIGHT) / 2.
@@ -2392,32 +2838,19 @@ impl BrainApp {
             .h(px(chrome::SWITCH_HEIGHT))
             .flex()
             .items_center()
-            .p(px(3.))
-            .gap(px(2.))
+            .gap(px(6.))
+            .px(px(chrome::SWITCH_PAD_X))
             .rounded(px(chrome::RADIUS))
             .bg(veil(t, chrome::PANEL_ALPHA))
             .occlude()
-            .text_size(px(chrome::TEXT));
-        for (n, take) in Take::ALL.into_iter().enumerate() {
-            let on = self.take == take;
-            row = row.child(
-                div()
-                    .id(("take", n))
-                    .h_full()
-                    .flex()
-                    .items_center()
-                    .px(px(chrome::SWITCH_PAD_X))
-                    .rounded(px(chrome::RADIUS - 2.))
-                    .cursor_pointer()
-                    .when(on, |d| d.bg(alpha(t.accent, 0.28)).text_color(t.text))
-                    .when(!on, |d| {
-                        d.text_color(t.text2).hover(|s| s.text_color(t.text))
-                    })
-                    .on_click(cx.listener(move |me, _, _, cx| me.switch(take, cx)))
-                    .child(take.name()),
-            );
-        }
-        row
+            .cursor_pointer()
+            .text_size(px(chrome::TEXT))
+            .text_color(t.text2)
+            .hover(|s| s.text_color(t.text).bg(t.raised))
+            .tooltip(kit::tip("Next theme (Ctrl+T)"))
+            .on_click(cx.listener(|me, _, _, cx| me.next_theme(cx)))
+            .child(img(t.art.mark.clone()).size(px(chrome::MARK)))
+            .child(t.direction.label())
     }
 
     fn sheet(&self, t: &Theme, cx: &mut Context<Self>) -> impl IntoElement {
@@ -2528,7 +2961,7 @@ pub fn open_window(start: Start, cx: &mut App) {
         gpui::WindowOptions {
             window_bounds: Some(gpui::WindowBounds::Windowed(bounds)),
             titlebar: Some(gpui::TitlebarOptions {
-                title: Some("Brain".into()),
+                title: Some("Ahjo Brain".into()),
                 ..Default::default()
             }),
             app_id: Some("brain".into()),

@@ -84,6 +84,7 @@ impl Rect {
     }
 }
 
+#[derive(Clone)]
 pub struct Sky {
     /// One per subject, in the corpus's subject order.
     pub systems: Vec<System>,

@@ -16,6 +16,7 @@ use gpui::{
     WeakEntity, Window, div, prelude::*, px,
 };
 use parvi_app_kit::theme::{FAMILY, Theme, alpha, theme};
+use parvi_app_kit::widgets::kit;
 use parvi_app_kit::widgets::markdown::{Block, Span, inline, parse};
 use std::ops::Range;
 use std::rc::Rc;
@@ -187,6 +188,19 @@ pub fn without_title(body: &str, title: &str) -> String {
     body.to_string()
 }
 
+/// `5 min ago`, `3 h ago`, `yesterday`: how long since a file changed, in
+/// nanoseconds since 1970.
+pub fn since(then: u64, now: u64) -> String {
+    let minutes = now.saturating_sub(then) / 60_000_000_000;
+    match minutes {
+        0 => "just now".into(),
+        m if m < 60 => format!("{m} min ago"),
+        m if m < 24 * 60 => format!("{} h ago", m / 60),
+        m if m < 48 * 60 => "yesterday".into(),
+        m => format!("{} days ago", m / (24 * 60)),
+    }
+}
+
 /// `3 days ago`, from Julian days.
 pub fn age(updated: i32, today: i32) -> String {
     match today - updated {
@@ -302,7 +316,8 @@ impl Reader {
                     .pt(px(r::HEAD_GAP - r::PARA_GAP))
                     .text_size(px(size))
                     .line_height(px(size * 1.4))
-                    .font_weight(FontWeight::BOLD)
+                    .font_family(t.ty.display)
+                    .font_weight(t.ty.display_weight)
                     .text_color(color)
                     .child(self.styled(id(0), h, plain, t))
                     .into_any_element()
@@ -414,13 +429,13 @@ impl Reader {
         let Some(data) = &self.data else {
             return div();
         };
-        let mut col = div().flex().flex_col().gap(px(2.)).child(
-            div()
-                .pb(px(6.))
-                .text_size(px(r::META))
-                .text_color(t.dim)
-                .child(format!("{label} · {}", list.len())),
-        );
+        let mut col = div()
+            .flex()
+            .flex_col()
+            .gap(px(2.))
+            .font_family(FAMILY)
+            .text_size(px(r::LIST))
+            .child(kit::label(t, format!("{label} · {}", list.len())).pb(px(6.)));
         for &p in list.iter().take(r::NEIGHBOURS) {
             let page = &data.corpus.pages[p];
             let hue = data.hues[page.subject];
@@ -539,6 +554,7 @@ impl Render for Reader {
                     .flex()
                     .items_center()
                     .gap(px(8.))
+                    .font_family(FAMILY)
                     .text_size(px(r::META))
                     .text_color(t.dim)
                     .child(div().size(px(r::DOT)).rounded(px(r::DOT)).bg(hue))
@@ -549,7 +565,8 @@ impl Render for Reader {
                 div()
                     .text_size(px(r::TITLE))
                     .line_height(px(r::TITLE_LINE))
-                    .font_weight(FontWeight::BOLD)
+                    .font_family(t.ty.display)
+                    .font_weight(t.ty.display_weight)
                     .text_color(t.text)
                     .child(page.title.clone()),
             )
@@ -603,14 +620,20 @@ impl Render for Reader {
         sheet
             .px(px(r::PAD_X))
             .pt(px(r::PAD_TOP))
-            .font_family(FAMILY)
+            .font_family(t.ty.reading)
             .child(column)
     }
 }
 
 /// How wide the reader's sheet is in a window this wide.
 pub fn sheet_width(window_width: f32) -> f32 {
-    (window_width * r::SHARE).clamp(r::MIN, r::MAX.min(window_width))
+    let sheet = (window_width * r::SHARE).clamp(r::MIN, r::MAX);
+    // A sliver of sky beside it is no use: then the sheet is the window.
+    if window_width - sheet < r::SKY_LEAST {
+        window_width
+    } else {
+        sheet
+    }
 }
 
 #[cfg(test)]
@@ -629,6 +652,28 @@ mod tests {
     fn the_heading_that_repeats_the_title_goes() {
         assert_eq!(without_title("\n# Pace\nbody", "Pace"), "body");
         assert_eq!(without_title("# Other\nbody", "Pace"), "# Other\nbody");
+    }
+
+    #[test]
+    fn a_change_is_dated_as_a_person_says_it() {
+        let m = 60_000_000_000;
+        assert_eq!(since(0, 30_000_000_000), "just now");
+        assert_eq!(since(0, 5 * m), "5 min ago");
+        assert_eq!(since(0, 185 * m), "3 h ago");
+        assert_eq!(since(0, 30 * 60 * m), "yesterday");
+        assert_eq!(since(10 * m, 3 * 24 * 60 * m), "2 days ago");
+    }
+
+    #[test]
+    fn the_sheet_fits_any_window() {
+        for w in [0., 300., 600., 1456., 4000.] {
+            let s = sheet_width(w);
+            assert!(s <= w, "{w} gives {s}");
+            assert!(s == w || w - s >= r::SKY_LEAST, "{w} leaves a sliver");
+        }
+        assert_eq!(sheet_width(640.), 640.);
+        assert_eq!(sheet_width(1000.), r::MIN);
+        assert_eq!(sheet_width(4000.), r::MAX);
     }
 
     #[test]

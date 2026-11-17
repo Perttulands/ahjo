@@ -3,27 +3,117 @@
 //! are only mixed here, so a new theme reaches the sky and the reader.
 
 use gpui::Hsla;
-use parvi_app_kit::theme::{Theme, alpha};
+use parvi_app_kit::theme::{Direction, Theme, alpha};
 
-/// The sky's categorical hues: as many as the eye tells apart at a glance,
-/// turned around the colour wheel from the theme's accent, soft enough to
-/// read as light on the dark.
-pub mod hue {
-    pub const COUNT: usize = 9;
-    pub const SATURATION: f32 = 0.52;
-    pub const LIGHTNESS: f32 = 0.7;
+/// The sky's character in each of the theme's directions.
+///
+/// - Night flight: a cold sky over the fjords; subjects in the aurora's
+///   run from green through blue to violet, soft glows, deep nebulae.
+/// - Saga: a sky seen through hearth smoke; subjects in ember, gold and
+///   moss, warm light, the far field as drifting sparks.
+/// - Signal: the sky as a sign; flat colour, square stars, no glow, names
+///   on solid plates.
+pub struct Style {
+    /// Where on the colour wheel the subjects' hues start, and how far
+    /// round they run.
+    pub hue_from: f32,
+    pub hue_span: f32,
+    pub saturation: f32,
+    pub lightness: f32,
+    /// Neighbouring hues alternate their lightness by this much, so a
+    /// narrow run of the wheel still tells subjects apart.
+    pub lightness_step: f32,
+    /// How strongly stars glow and nebulae shine, as shares of the sky's
+    /// measures; how soft a nebula's edge is, as a share of its radius.
+    pub glow: f32,
+    pub nebula: f32,
+    pub nebula_soft: f32,
+    pub nebula_size: f32,
+    /// How much lines bow, as a share of the sky's bends.
+    pub bend: f32,
+    /// The far field's light, as a share of [`sky::FIELD_ALPHA`].
+    pub field: f32,
+    /// Stars and the far field drawn square.
+    pub square: bool,
+    /// The dark under a name: how far it spreads and how soft it is.
+    pub halo_blur: f32,
+    pub halo_spread: f32,
+    /// How far a star's core is lit towards white.
+    pub core_white: f32,
 }
+
+pub fn style(d: Direction) -> Style {
+    match d {
+        Direction::Night => Style {
+            hue_from: 0.4,
+            hue_span: 0.42,
+            saturation: 0.6,
+            lightness: 0.7,
+            lightness_step: 0.07,
+            glow: 1.,
+            nebula: 1.2,
+            nebula_soft: 0.45,
+            nebula_size: 0.5,
+            bend: 1.0,
+            field: 1.,
+            square: false,
+            halo_blur: sky::HALO_BLUR,
+            halo_spread: 2.,
+            core_white: 0.75,
+        },
+        Direction::Saga => Style {
+            hue_from: 0.98,
+            hue_span: 0.3,
+            saturation: 0.6,
+            lightness: 0.64,
+            lightness_step: 0.1,
+            glow: 1.1,
+            nebula: 1.,
+            nebula_soft: 0.55,
+            nebula_size: 0.5,
+            bend: 1.3,
+            field: 0.8,
+            square: false,
+            halo_blur: sky::HALO_BLUR + 3.,
+            halo_spread: 3.,
+            core_white: 0.6,
+        },
+        Direction::Signal => Style {
+            hue_from: 0.22,
+            hue_span: 0.86,
+            saturation: 0.8,
+            lightness: 0.62,
+            lightness_step: 0.06,
+            glow: 0.,
+            nebula: 0.55,
+            nebula_soft: 0.,
+            nebula_size: 0.95,
+            bend: 0.0,
+            field: 0.6,
+            square: true,
+            halo_blur: 0.,
+            halo_spread: 3.,
+            core_white: 0.3,
+        },
+    }
+}
+
+/// How many hues the subjects share: as many as the eye tells apart at a
+/// glance.
+pub const HUES: usize = 9;
 
 /// A subject's hue, stable while others come and go.
 pub fn subject_hue(t: &Theme, id: &str) -> Hsla {
+    let s = style(t.direction);
     let h = id
         .bytes()
         .fold(0u32, |h, b| h.wrapping_mul(31).wrapping_add(b as u32));
-    let i = (h % hue::COUNT as u32) as f32;
+    let i = h % HUES as u32;
+    let lift = if i.is_multiple_of(2) { 1. } else { -1. };
     Hsla {
-        h: (t.accent.h + i / hue::COUNT as f32).fract(),
-        s: hue::SATURATION,
-        l: hue::LIGHTNESS,
+        h: (s.hue_from + s.hue_span * i as f32 / (HUES - 1) as f32).fract(),
+        s: s.saturation,
+        l: s.lightness + lift * s.lightness_step / 2.,
         a: 1.,
     }
 }
@@ -54,8 +144,15 @@ pub mod sky {
     pub const STRONG: u32 = 4;
     /// How much a lit search dims everything it did not find.
     pub const UNMATCHED: f32 = 0.12;
-    /// How much a page pointed at or read dims what it does not link.
-    pub const UNRELATED: f32 = 0.28;
+    /// How much a page read, or a link in it pointed at, dims what it does
+    /// not link; a star only pointed at in the sky dims less, so passing
+    /// the pointer over the sky does not make it flicker.
+    pub const UNRELATED: f32 = 0.3;
+    pub const UNRELATED_HOVER: f32 = 0.62;
+    /// How much the systems dim under a search or a page read, and under a
+    /// star pointed at.
+    pub const SYSTEMS_DIMMED: f32 = 0.55;
+    pub const SYSTEMS_HOVER: f32 = 0.8;
     /// The light of a nebula, from none to the most evidenced subject's.
     pub const NEBULA_MIN: f32 = 0.05;
     pub const NEBULA_MAX: f32 = 0.24;
@@ -85,9 +182,13 @@ pub mod sky {
     pub const LINKS_FULL: f32 = 10.;
     /// A link leaving the view draws at this share.
     pub const LINK_AWAY: f32 = 0.4;
-    pub const THREAD_ALPHA: f32 = 0.3;
     /// Names.
     pub const SYSTEM_NAME: f32 = 14.;
+    /// Far out, a system's name grows with how much it holds.
+    pub const SYSTEM_NAME_MIN: f32 = 11.;
+    pub const SYSTEM_NAME_MAX: f32 = 17.;
+    /// What counts as moved lately, in days.
+    pub const MOVED_DAYS: i32 = 7;
     pub const PAGE_NAME: f32 = 12.;
     pub const PAGE_NAME_MAX: usize = 42;
     /// A system's name sits this share of its radius below its centre when
@@ -100,9 +201,10 @@ pub mod sky {
     pub const PAGE_SCALE: f32 = 1.6;
     pub const FIT_MOST: f32 = 1.5;
     pub const FIT_PAD: f32 = 48.;
-    /// The arrows at the edge for links that leave the screen.
-    pub const SIGNPOSTS: usize = 8;
-    pub const SIGNPOST_INSET: f32 = 26.;
+    /// In the replay, a page not touched lately keeps this much of its light,
+    /// and the most pages it names on a day.
+    pub const REPLAY_BASE: f32 = 0.16;
+    pub const REPLAY_NAMES: usize = 12;
 }
 
 /// Motion, in milliseconds.
@@ -128,6 +230,10 @@ pub mod motion {
     pub const FRESH_DAYS: i32 = 2;
     /// How long typing rests before it is searched.
     pub const SEARCH_WAIT: u64 = 110;
+    /// The replay: how long a day worked on lasts, and how much of its
+    /// warmth a page keeps a day later.
+    pub const REPLAY_DAY: f32 = 700.;
+    pub const REPLAY_COOL: f32 = 0.72;
     /// Wheel lines to zoom: each line zooms by this factor.
     pub const WHEEL_ZOOM: f32 = 1.12;
     /// Pixels a key press pans.
@@ -144,26 +250,20 @@ pub mod search {
     pub const ROW_PAD_Y: f32 = 8.;
     pub const TITLE: f32 = 14.;
     pub const SNIPPET: f32 = 12.;
+    /// The most a search matched here, without Citadel, shows.
+    pub const LOCAL_MOST: usize = 50;
     /// The best results a search flies the camera to.
     pub const FLY_TO: usize = 8;
+    /// While a page is read, the ranked results stay beside its orbit:
+    /// this wide, titles only, as many as fit up to the most, and only if
+    /// the orbit keeps at least this much room.
+    pub const ASIDE: f32 = 270.;
+    pub const ASIDE_ROW: f32 = 30.;
+    pub const ASIDE_MOST: usize = 16;
+    pub const ORBIT_LEAST: f32 = 680.;
 }
 
-/// The column a Gather search fills.
-pub mod gather {
-    pub const LEFT: f32 = 28.;
-    pub const WIDTH: f32 = 420.;
-    pub const TOP: f32 = 92.;
-    pub const SLOT: f32 = 70.;
-    /// A gathered star's least size.
-    pub const STAR: f32 = 4.;
-    /// Where in a slot its star sits, from the slot's left.
-    pub const STAR_X: f32 = 8.;
-    pub const TEXT_X: f32 = 28.;
-    pub const MOST: usize = 14;
-    pub const SCRIM: f32 = 0.86;
-}
-
-/// The orbit a page read in Orbit stands at the centre of.
+/// The orbit a page read stands at the centre of.
 pub mod orbit {
     /// Room left beside and above the outermost ring, for names.
     pub const ROOM_X: f32 = 196.;
@@ -185,12 +285,21 @@ pub mod orbit {
     pub const ARC_GAP: f32 = 0.16;
 }
 
+/// The replay's strip of days.
+pub mod replay {
+    pub const STRIP: f32 = 34.;
+    pub const GAP: f32 = 2.;
+}
+
 /// The reader.
 pub mod reader {
     /// The sheet's share of the window, its least and its most.
     pub const SHARE: f32 = 0.46;
     pub const MIN: f32 = 520.;
     pub const MAX: f32 = 820.;
+    /// Less sky than this beside the sheet is no use: the sheet takes the
+    /// whole window instead.
+    pub const SKY_LEAST: f32 = 380.;
     pub const PAD_X: f32 = 44.;
     pub const PAD_TOP: f32 = 36.;
     /// The widest a line of prose runs.
@@ -204,6 +313,8 @@ pub mod reader {
     pub const H2: f32 = 19.;
     pub const H3: f32 = 16.5;
     pub const META: f32 = 12.;
+    /// The pages listed under the prose.
+    pub const LIST: f32 = 13.5;
     pub const CODE: f32 = 13.;
     pub const PARA_GAP: f32 = 14.;
     pub const HEAD_GAP: f32 = 26.;
@@ -219,7 +330,7 @@ pub mod reader {
     pub const NEIGHBOURS: usize = 40;
 }
 
-/// Chrome over the sky: the counts, the switch between takes.
+/// Chrome over the sky: the counts, the theme button.
 pub mod chrome {
     pub const INSET: f32 = 16.;
     /// The line of counts along the bottom.
@@ -227,6 +338,14 @@ pub mod chrome {
     pub const TEXT: f32 = 12.;
     pub const SWITCH_PAD_X: f32 = 12.;
     pub const SWITCH_HEIGHT: f32 = 30.;
+    /// Room kept for the theme button beside the search in a narrow window.
+    pub const SWITCH_ROOM: f32 = 180.;
+    /// The search is never narrower than this.
+    pub const SEARCH_LEAST: f32 = 220.;
+    /// How much of the theme's window picture shows behind a launch.
+    pub const BACKDROP: f32 = 0.9;
+    /// The theme's mark in the switch.
+    pub const MARK: f32 = 18.;
     pub const PANEL_ALPHA: f32 = 0.88;
     pub const RADIUS: f32 = 8.;
 }

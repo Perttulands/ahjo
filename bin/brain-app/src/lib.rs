@@ -1,4 +1,4 @@
-//! The Brain: the company brain as a night sky, a search that moves you
+//! Ahjo Brain: the company brain as a night sky, a search that moves you
 //! through it and a reader beside it, in its own window.
 //!
 //! The pages and links come straight from the brain's Markdown files (they
@@ -9,18 +9,19 @@ mod arrange;
 mod camera;
 mod citadel;
 mod corpus;
+mod history;
 mod paint;
 mod reader;
 mod sky;
 mod source;
 mod tokens;
 
-use app::{Bench, Start, Take};
+use app::{Bench, Start};
 use gpui::App;
-use parvi_app_kit::theme::FONT_FILES;
+use parvi_app_kit::theme::{Direction, FONT_FILES, Theme};
 use std::borrow::Cow;
 
-const USAGE: &str = "brain-app [--brain <folder>] [--citadel <url>] [--take sky|gather|orbit] [--search <words>] [--open <page>] [--bench <seconds>] [--where]";
+const USAGE: &str = "brain-app [--brain <folder>] [--citadel <url>] [--theme night|saga|signal] [--search <words>] [--open <page>] [--bench <seconds>] [--where]";
 
 fn value(args: &[String], name: &str) -> Option<String> {
     args.iter()
@@ -29,6 +30,7 @@ fn value(args: &[String], name: &str) -> Option<String> {
 }
 
 pub fn run() {
+    let launched = std::time::Instant::now();
     let args: Vec<String> = std::env::args().collect();
     if args.iter().any(|a| a == "--help" || a == "-h") {
         println!("{USAGE}");
@@ -37,26 +39,34 @@ pub fn run() {
     if args.iter().any(|a| a == "--where") {
         std::process::exit(tell_where(&source::find(&args)));
     }
-    let take = match value(&args, "--take") {
-        Some(name) => match Take::parse(&name) {
-            Some(t) => t,
-            None => {
-                eprintln!("no take called {name}: {USAGE}");
-                std::process::exit(2);
-            }
-        },
-        None => Take::Sky,
-    };
     let bench = value(&args, "--bench").map(|s| match s.parse::<f32>() {
-        Ok(s) => Bench::new(s),
+        Ok(s) => Bench::new(s, launched),
         Err(_) => {
             eprintln!("--bench takes seconds: {USAGE}");
             std::process::exit(2);
         }
     });
+    let flag = match value(&args, "--theme") {
+        Some(key) => match Direction::from_key(&key) {
+            Some(d) => Some(d),
+            None => {
+                eprintln!("no theme called {key}: {USAGE}");
+                std::process::exit(2);
+            }
+        },
+        None => None,
+    };
+    // The theme: as asked, else as chosen here, else as chosen in Parvi.
+    let path = source::settings_path();
+    let (settings, broken) = match path.as_deref().map(source::read_settings) {
+        Some(Ok(s)) => (s, None),
+        Some(Err(e)) => (source::Settings::default(), Some(e)),
+        None => (source::Settings::default(), None),
+    };
+    let direction = flag.or_else(|| Direction::from_key(&settings.theme));
     let start = Start {
         place: source::find(&args),
-        take,
+        settings: (path, settings, broken),
         query: value(&args, "--search"),
         open: value(&args, "--open"),
         bench,
@@ -66,10 +76,16 @@ pub fn run() {
         if let Err(e) = cx.text_system().add_fonts(fonts) {
             panic!("the bundled fonts did not load: {e}");
         }
-        let (theme, notice) = parvi_app_kit::theme::chosen();
-        if let Some(notice) = notice {
-            eprintln!("brain-app: {notice}");
-        }
+        let theme = match direction {
+            Some(d) => Theme::new(d),
+            None => {
+                let (theme, notice) = parvi_app_kit::theme::chosen();
+                if let Some(notice) = notice {
+                    eprintln!("brain-app: {notice}");
+                }
+                theme
+            }
+        };
         cx.set_global(theme);
         parvi_app_kit::widgets::field::bind_keys(cx);
         app::open_window(start, cx);
@@ -104,6 +120,15 @@ fn tell_where(place: &source::Where) -> i32 {
                 started.elapsed().as_secs_f32(),
                 kept.entries.len()
             );
+            let started = std::time::Instant::now();
+            match history::read(root) {
+                Ok(h) => println!(
+                    "history: {} days worked on, read in {:.1} s",
+                    h.days.len(),
+                    started.elapsed().as_secs_f32()
+                ),
+                Err(e) => println!("history: {e}"),
+            }
             0
         }
         Err(e) => {

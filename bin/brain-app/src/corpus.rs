@@ -53,6 +53,8 @@ pub struct Page {
     pub kind: String,
     pub summary: String,
     pub updated: Option<i32>,
+    /// When its file last changed, in nanoseconds since 1970.
+    pub modified: u64,
     pub words: u32,
     pub aliases: Vec<String>,
     pub subject: usize,
@@ -75,7 +77,7 @@ pub struct Subject {
 }
 
 /// Every page, the links between them resolved, and the subjects they fall in.
-#[derive(Debug, Default)]
+#[derive(Clone, Debug, Default)]
 pub struct Corpus {
     pub pages: Vec<Page>,
     pub subjects: Vec<Subject>,
@@ -119,6 +121,7 @@ impl Corpus {
                 kind: e.kind.clone(),
                 summary: e.summary.clone(),
                 updated: e.updated,
+                modified: e.modified,
                 words: e.words,
                 aliases: e.aliases.clone(),
                 subject,
@@ -170,6 +173,43 @@ impl Corpus {
 
     pub fn by_path(&self, path: &str) -> Option<usize> {
         self.by_path.get(path).copied()
+    }
+
+    /// The pages whose title, aliases or name hold every word asked, best
+    /// first: a title that starts with the words, then one that holds them,
+    /// then an alias, then the file's name; understanding before evidence,
+    /// shorter titles before longer. The search for when Citadel is away.
+    pub fn local_search(&self, query: &str, most: usize) -> Vec<usize> {
+        let query = query.trim().to_lowercase();
+        let words: Vec<&str> = query.split_whitespace().collect();
+        if words.is_empty() {
+            return vec![];
+        }
+        let holds = |text: &str| {
+            let text = text.to_lowercase();
+            words.iter().all(|w| text.contains(w))
+        };
+        let mut found: Vec<(u8, bool, usize, usize)> = self
+            .pages
+            .iter()
+            .enumerate()
+            .filter_map(|(i, p)| {
+                let rank = if p.title.to_lowercase().starts_with(&query) {
+                    0
+                } else if holds(&p.title) {
+                    1
+                } else if p.aliases.iter().any(|a| holds(a)) {
+                    2
+                } else if holds(&p.slug.replace('-', " ")) {
+                    3
+                } else {
+                    return None;
+                };
+                Some((rank, p.is_evidence(), p.title.len(), i))
+            })
+            .collect();
+        found.sort();
+        found.into_iter().take(most).map(|f| f.3).collect()
     }
 
     /// The pages one link away either way, out first, each once.
@@ -633,6 +673,36 @@ fn percent_decode(s: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn local_search_ranks_titles_then_aliases_then_names() {
+        let corpus = Corpus::new(vec![
+            parse(
+                "evidence/sources/sea/tide-log.md",
+                "---\nkind: source\n---\n# Tide log",
+            ),
+            parse("knowledge/sea/tide-tables.md", "# Tables of the tide"),
+            parse(
+                "knowledge/sea/moon.md",
+                "---\naliases:\n  - tide maker\n---\n# Moon",
+            ),
+            parse("knowledge/sea/tide.md", "# Tide"),
+            parse("knowledge/sea/low-water.md", "# Ebb"),
+        ]);
+        let titles = |q: &str| -> Vec<String> {
+            corpus
+                .local_search(q, 10)
+                .into_iter()
+                .map(|i| corpus.pages[i].title.clone())
+                .collect()
+        };
+        assert_eq!(
+            titles("TIDE"),
+            ["Tide", "Tide log", "Tables of the tide", "Moon"]
+        );
+        assert_eq!(titles("water low"), ["Ebb"]);
+        assert!(titles("  ").is_empty());
+    }
 
     #[test]
     fn reads_the_fields_a_page_carries() {

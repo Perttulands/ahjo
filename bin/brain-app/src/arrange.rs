@@ -1,28 +1,11 @@
-//! Where stars go when they leave the sky: the column a Gather search fills,
-//! and the orbit a page read in Orbit stands at the centre of. Both are
-//! plain geometry in screen space, worked out again each frame from the
-//! window, so a resize simply moves them.
+//! Where stars go when they leave the sky: the orbit a page read stands at
+//! the centre of. Plain geometry in screen space, worked out again each
+//! frame from the window, so a resize simply moves it.
 
 use crate::corpus::Corpus;
 use crate::sky::{Rect, Sky};
-use crate::tokens::{gather, orbit};
+use crate::tokens::orbit;
 use std::f32::consts::{PI, TAU};
-
-/// A Gather slot's star, for the `i`th result.
-pub fn slot_star(i: usize) -> (f32, f32) {
-    (
-        gather::LEFT + gather::STAR_X,
-        gather::TOP + i as f32 * gather::SLOT + gather::SLOT * 0.32,
-    )
-}
-
-/// How many results the column has room for in a window `height` tall.
-pub fn slots(height: f32) -> usize {
-    (((height - gather::TOP - 24.) / gather::SLOT)
-        .floor()
-        .max(0.) as usize)
-        .min(gather::MOST)
-}
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Planet {
@@ -52,16 +35,20 @@ pub struct Orbit {
 }
 
 /// The page `sun` at the centre of `view`, the pages it links and that link
-/// to it around it, gathered into one arc per subject.
+/// to it around it, gathered into one arc per subject; its evidence too
+/// unless `evidence` is folded away.
 ///
 /// Each arc points the way its subject lies in the sky, as nearly as the
 /// arcs' widths allow, so north-east in the orbit is north-east in the sky.
 /// An arc's width is its share of the planets.
-pub fn orbit(corpus: &Corpus, sky: &Sky, sun: usize, view: Rect) -> Orbit {
+pub fn orbit(corpus: &Corpus, sky: &Sky, sun: usize, view: Rect, evidence: bool) -> Orbit {
     let centre = view.centre();
     let here = sky.stars[sun];
     let mut groups: Vec<(usize, Vec<usize>, f32)> = vec![];
     for p in corpus.neighbours(sun) {
+        if !evidence && corpus.pages[p].is_evidence() {
+            continue;
+        }
         let s = sky.stars[p].system;
         match groups.iter_mut().find(|g| g.0 == s) {
             Some(g) => g.1.push(p),
@@ -172,10 +159,25 @@ mod tests {
     use crate::sky::{Placement, layout};
 
     #[test]
-    fn the_column_fills_down_the_window_and_stops() {
-        assert!((slot_star(1).1 - slot_star(0).1 - gather::SLOT).abs() < 1e-3);
-        assert_eq!(slots(0.), 0);
-        assert_eq!(slots(10_000.), gather::MOST);
+    fn evidence_folds_out_of_the_ring() {
+        let corpus = crate::corpus::Corpus::new(vec![
+            parse("knowledge/hub/hub.md", "# Hub\n[[a1]] [[s1]] [[s2]]"),
+            parse("knowledge/hub/a1.md", "# A1"),
+            parse("evidence/sources/hub/s1.md", "---\nkind: source\n---\n# S1"),
+            parse("evidence/sources/hub/s2.md", "---\nkind: source\n---\n# S2"),
+        ]);
+        let sky = layout(&corpus, &Placement::new());
+        let hub = corpus.by_path("knowledge/hub/hub.md").unwrap();
+        let view = Rect {
+            x: 0.,
+            y: 0.,
+            w: 800.,
+            h: 600.,
+        };
+        let open = orbit(&corpus, &sky, hub, view, true);
+        assert_eq!(open.planets.len(), 3);
+        let folded = orbit(&corpus, &sky, hub, view, false);
+        assert_eq!(folded.planets.len(), 1);
     }
 
     #[test]
@@ -193,7 +195,7 @@ mod tests {
             w: 800.,
             h: 600.,
         };
-        let o = orbit(&corpus, &sky, hub, view);
+        let o = orbit(&corpus, &sky, hub, view, true);
         assert_eq!(o.planets.len(), 3);
         assert_eq!(o.arcs.len(), 2);
         let b1 = corpus.by_path("knowledge/b/b1.md").unwrap();

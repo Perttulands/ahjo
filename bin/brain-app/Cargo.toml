@@ -3,7 +3,7 @@ name = "brain-app"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
-description = "The Brain: the company brain as a night sky, with search that moves you through it and a reader."
+description = "Ahjo Brain: the company brain as a night sky, with search that moves you through it and a reader."
 publish = false
 
 [lints]

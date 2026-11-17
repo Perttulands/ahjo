@@ -6,12 +6,11 @@
 //! blurred shadow around one, a line is a tessellated curve and a name is a
 //! shaped line of text.
 
-use crate::tokens::sky::HALO_BLUR;
 use gpui::{
     App, BorderStyle, Bounds, BoxShadow, Corners, Edges, FontWeight, Hsla, PathBuilder, Pixels,
     SharedString, TextAlign, TextRun, Window, font, point, px, quad, size, transparent_black,
 };
-use parvi_app_kit::theme::FAMILY;
+use parvi_app_kit::theme::{FAMILY, Theme};
 
 #[derive(Clone, Debug)]
 pub struct Light {
@@ -78,6 +77,35 @@ pub enum Align {
     Centre,
 }
 
+/// The letters a name is set in.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Face {
+    pub family: SharedString,
+    pub weight: FontWeight,
+}
+
+impl Face {
+    /// The app's own letters, for a page's name.
+    pub fn mono(bold: bool) -> Face {
+        Face {
+            family: FAMILY.into(),
+            weight: if bold {
+                FontWeight::BOLD
+            } else {
+                FontWeight::NORMAL
+            },
+        }
+    }
+
+    /// The theme's display face, for a subject's name over the sky.
+    pub fn display(t: &Theme) -> Face {
+        Face {
+            family: t.ty.display.into(),
+            weight: t.ty.display_weight,
+        }
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct Label {
     pub text: SharedString,
@@ -85,7 +113,7 @@ pub struct Label {
     pub y: f32,
     pub size: f32,
     pub color: Hsla,
-    pub bold: bool,
+    pub face: Face,
     pub align: Align,
 }
 
@@ -99,8 +127,11 @@ pub struct Picture {
     pub dots: Vec<Dot>,
     pub rings: Vec<Ring>,
     pub labels: Vec<Label>,
-    /// The dark behind every name, so it reads over stars and lines.
+    /// The dark behind every name, so it reads over stars and lines: its
+    /// colour, how soft and how far it spreads.
     pub halo: Hsla,
+    pub halo_blur: f32,
+    pub halo_spread: f32,
 }
 
 fn bounds(x: f32, y: f32, w: f32, h: f32) -> Bounds<Pixels> {
@@ -207,15 +238,13 @@ pub fn start_of(align: Align, x: f32, width: f32) -> f32 {
 }
 
 /// The width a name will take, for placing names apart before painting.
-pub fn measure(text: &str, size: f32, bold: bool, window: &Window) -> f32 {
-    f32::from(shape(text, size, transparent_black(), bold, window).width)
+pub fn measure(text: &str, size: f32, face: &Face, window: &Window) -> f32 {
+    f32::from(shape(text, size, transparent_black(), face, window).width)
 }
 
-fn shape(text: &str, size: f32, color: Hsla, bold: bool, window: &Window) -> gpui::ShapedLine {
-    let mut f = font(FAMILY);
-    if bold {
-        f.weight = FontWeight::BOLD;
-    }
+fn shape(text: &str, size: f32, color: Hsla, face: &Face, window: &Window) -> gpui::ShapedLine {
+    let mut f = font(face.family.clone());
+    f.weight = face.weight;
     let text: SharedString = text.to_string().into();
     window.text_system().shape_line(
         text.clone(),
@@ -269,22 +298,27 @@ pub fn paint(picture: &Picture, window: &mut Window, cx: &mut App) {
     let shaped: Vec<_> = picture
         .labels
         .iter()
-        .map(|l| shape(&l.text, l.size, l.color, l.bold, window))
+        .map(|l| shape(&l.text, l.size, l.color, &l.face, window))
         .collect();
     for (l, s) in picture.labels.iter().zip(&shaped) {
         let w = f32::from(s.width);
         let x = start_of(l.align, l.x, w);
         window.paint_drop_shadows(
             bounds(x, l.y - l.size * 0.45, w, l.size * 0.9),
-            Corners::all(px(l.size * 0.45)),
+            // A soft halo is round; a hard one is a plate, square as a sign.
+            Corners::all(px(if picture.halo_blur > 0. {
+                l.size * 0.45
+            } else {
+                0.
+            })),
             &[BoxShadow {
                 color: Hsla {
                     a: picture.halo.a * l.color.a,
                     ..picture.halo
                 },
                 offset: point(px(0.), px(0.)),
-                blur_radius: px(HALO_BLUR),
-                spread_radius: px(2.),
+                blur_radius: px(picture.halo_blur),
+                spread_radius: px(picture.halo_spread),
                 inset: false,
             }],
         );
