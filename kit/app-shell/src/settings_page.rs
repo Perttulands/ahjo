@@ -9,7 +9,7 @@
 //! Typing in the search shows every setting that matches, from every group.
 
 use gpui::{
-    AnyElement, App, AppContext, Context, Entity, SharedString, Subscription, Window, div,
+    AnyElement, App, AppContext, Context, Div, Entity, SharedString, Subscription, Window, div,
     prelude::*, px,
 };
 use parvi_app_kit::ask::Ask;
@@ -230,20 +230,26 @@ impl SettingsPage {
                     continue;
                 }
                 any = true;
-                let mut lines = div().flex().flex_col();
-                for v in plain(value) {
-                    // Each named for tests by where it is and what it says.
-                    let selector = format!("node-config:{name}:{key}:{v}");
-                    lines = lines.child(
-                        div()
-                            .debug_selector(move || selector)
-                            .w_full()
-                            .min_w_0()
-                            .whitespace_normal()
-                            .text_color(t.text)
-                            .child(v),
-                    );
-                }
+                let items = plain(value);
+                let lines = if items.len() >= COMPACT_FROM {
+                    compact_list(t, name, key, &items)
+                } else {
+                    let mut lines = div().flex().flex_col();
+                    for v in items {
+                        // Each named for tests by where it is and what it says.
+                        let selector = format!("node-config:{name}:{key}:{v}");
+                        lines = lines.child(
+                            div()
+                                .debug_selector(move || selector)
+                                .w_full()
+                                .min_w_0()
+                                .whitespace_normal()
+                                .text_color(t.text)
+                                .child(v),
+                        );
+                    }
+                    lines
+                };
                 part = part.child(pane::line(t, label, lines).items_start());
             }
             if any {
@@ -564,6 +570,128 @@ fn words(key: &str, first: bool) -> String {
 
 /// A config value as plain lines: a string as written, a list one item a
 /// line, on and off for a switch.
+/// A list this long reads as a compact one: its kinds said once, its
+/// folders shown from where they share.
+const COMPACT_FROM: usize = 5;
+
+/// A long list's items in groups: the leading word they share (`beads`),
+/// the folder they all sit in, if any, and each item as it reads there.
+#[derive(Debug, PartialEq)]
+struct Bunch {
+    kind: String,
+    folder: Option<String>,
+    /// Each item whole, and as it reads under its kind and folder.
+    items: Vec<(String, String)>,
+}
+
+fn bunches(items: &[String]) -> Vec<Bunch> {
+    let mut out: Vec<(String, Vec<(String, String)>)> = vec![];
+    for item in items {
+        let (kind, rest) = item.split_once(' ').unwrap_or(("", item));
+        let rest = (item.clone(), rest.trim().to_string());
+        match out.iter_mut().find(|(k, _)| k == kind) {
+            Some((_, list)) => list.push(rest),
+            None => out.push((kind.to_string(), vec![rest])),
+        }
+    }
+    out.into_iter()
+        .map(|(kind, items)| {
+            let folder = common_folder(items.iter().map(|(_, r)| r.as_str()));
+            let items = match &folder {
+                Some(f) => items
+                    .into_iter()
+                    .map(|(whole, rest)| {
+                        let under = rest
+                            .strip_prefix(f.as_str())
+                            .and_then(|r| r.strip_prefix('/'))
+                            .filter(|r| !r.is_empty())
+                            .map_or(rest.clone(), str::to_string);
+                        (whole, under)
+                    })
+                    .collect(),
+                None => items,
+            };
+            Bunch {
+                kind,
+                folder,
+                items,
+            }
+        })
+        .collect()
+}
+
+/// The deepest folder every path sits in or is, when there are several
+/// paths and it is not the root.
+fn common_folder<'a>(paths: impl Iterator<Item = &'a str>) -> Option<String> {
+    let paths: Vec<&str> = paths.collect();
+    if paths.len() < 2 || !paths.iter().all(|p| p.starts_with('/')) {
+        return None;
+    }
+    let parts = |p: &'a str| p.split('/').filter(|s| !s.is_empty()).collect::<Vec<_>>();
+    let mut common = parts(paths[0]);
+    for p in &paths[1..] {
+        let other = parts(p);
+        let same = common
+            .iter()
+            .zip(&other)
+            .take_while(|(a, b)| a == b)
+            .count();
+        common.truncate(same);
+    }
+    // A path that is the folder itself stays whole; the folder is the one
+    // the others sit under.
+    if paths.iter().all(|p| parts(p).len() == common.len()) {
+        common.pop();
+    }
+    (!common.is_empty()).then(|| format!("/{}", common.join("/")))
+}
+
+/// A long list as its kinds, each with its folder and then its items in a
+/// wrapping flow; a folder that is itself listed is said in the head. Each
+/// item is named for tests by its whole value.
+fn compact_list(t: &Theme, name: &str, key: &str, items: &[String]) -> Div {
+    let mut out = div().flex().flex_col().gap(px(size::LABEL_BOTTOM));
+    for b in bunches(items) {
+        let itself = b.folder.as_ref().and_then(|f| {
+            b.items
+                .iter()
+                .find(|(_, shown)| shown == f)
+                .map(|(whole, _)| whole.clone())
+        });
+        let others: Vec<_> = b
+            .items
+            .iter()
+            .filter(|(whole, _)| Some(whole) != itself.as_ref())
+            .collect();
+        let count = others.len();
+        let mut words = vec![];
+        if !b.kind.is_empty() {
+            words.push(b.kind.clone());
+        }
+        words.push(match (&b.folder, &itself) {
+            (Some(f), Some(_)) => format!("{f} and {count} in it"),
+            (Some(f), None) => format!("{count} in {f}"),
+            (None, _) => format!("{count}"),
+        });
+        let mut head = div().text_color(t.dim).child(words.join(" · "));
+        if let Some(whole) = itself {
+            let selector = format!("node-config:{name}:{key}:{whole}");
+            head = head.debug_selector(move || selector);
+        }
+        let mut flow = div()
+            .flex()
+            .flex_wrap()
+            .gap_x(px(size::HEAD_GAP * 2.))
+            .text_color(t.text);
+        for (whole, shown) in others {
+            let selector = format!("node-config:{name}:{key}:{whole}");
+            flow = flow.child(div().debug_selector(move || selector).child(shown.clone()));
+        }
+        out = out.child(div().flex().flex_col().child(head).child(flow));
+    }
+    out
+}
+
 fn plain(value: &Value) -> Vec<String> {
     match value {
         Value::String(s) => vec![s.clone()],
@@ -664,5 +792,42 @@ impl Render for SettingsPage {
                     .children(body),
             ),
         )
+    }
+}
+
+#[cfg(test)]
+mod compact_tests {
+    use super::*;
+
+    #[test]
+    fn a_long_list_says_its_kind_once_and_its_folders_from_where_they_share() {
+        let items: Vec<String> = [
+            "beads /work",
+            "beads /work/alpha",
+            "beads /work/games/bravo",
+            "github owner/repo",
+            "beads /work/charlie",
+        ]
+        .map(String::from)
+        .into();
+        let b = bunches(&items);
+        assert_eq!(
+            (b[0].kind.as_str(), b[0].folder.as_deref()),
+            ("beads", Some("/work"))
+        );
+        let shown: Vec<&str> = b[0].items.iter().map(|(_, s)| s.as_str()).collect();
+        assert_eq!(shown, ["/work", "alpha", "games/bravo", "charlie"]);
+        assert_eq!(b[0].items[1].0, "beads /work/alpha");
+        assert_eq!(
+            (b[1].kind.as_str(), b[1].folder.as_deref()),
+            ("github", None)
+        );
+        assert_eq!(b[1].items[0].1, "owner/repo");
+        // Siblings sit in their parent; nothing shared is no folder.
+        assert_eq!(
+            common_folder(["/a/b", "/a/c"].into_iter()).as_deref(),
+            Some("/a")
+        );
+        assert_eq!(common_folder(["/a", "/b"].into_iter()), None);
     }
 }
