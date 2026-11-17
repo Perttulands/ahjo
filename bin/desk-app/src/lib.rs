@@ -1,0 +1,68 @@
+//! The Desk: where the operator answers what agents ask, in a window of its
+//! own, over each decision desk's HTTP API. `model` is the desk's asks as
+//! its server sends them, `desk` the server's calls, `answer` what an answer
+//! says, `video` and `player` the clips, `app` the window's state, and
+//! `stage` and `views` how it is drawn.
+
+pub mod answer;
+pub mod app;
+pub mod desk;
+pub mod model;
+pub mod player;
+pub mod stage;
+pub mod tokens;
+pub mod video;
+pub mod views;
+
+use gpui::{App, AppContext, Bounds, WindowBounds, WindowOptions, point, px, size};
+use parvi_app_kit::theme::Theme;
+use parvi_app_kit::widgets::field;
+use std::borrow::Cow;
+
+/// `PARVI_APP_BOUNDS=x,y,w,h` places the window exactly (runs on an
+/// invisible display); otherwise it opens centred.
+fn bounds(cx: &App) -> Bounds<gpui::Pixels> {
+    let given: Option<Vec<f32>> = std::env::var("PARVI_APP_BOUNDS")
+        .ok()
+        .map(|v| v.split(',').filter_map(|n| n.trim().parse().ok()).collect());
+    match given.as_deref() {
+        Some([x, y, w, h]) => Bounds::new(point(px(*x), px(*y)), size(px(*w), px(*h))),
+        _ => Bounds::centered(None, size(px(1440.), px(900.)), cx),
+    }
+}
+
+/// The app: `desk-app [--desk [Name=]http://127.0.0.1:8774]... [--variant focus|desk|verdict]`.
+pub fn run() {
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    let (config, notice) = desk::load(&args);
+    gpui_platform::application().run(move |cx: &mut App| {
+        let fonts = parvi_app_kit::theme::FAMILY_FILES
+            .iter()
+            .map(|f| Cow::Borrowed(*f))
+            .collect();
+        if let Err(e) = cx.text_system().add_fonts(fonts) {
+            panic!("the bundled fonts did not load: {e}");
+        }
+        cx.set_global(Theme::violet());
+        field::bind_keys(cx);
+        cx.set_app_identity("io.parvi.desk", "Desk");
+        let opened = cx.open_window(
+            WindowOptions {
+                window_bounds: Some(WindowBounds::Windowed(bounds(cx))),
+                titlebar: Some(gpui::TitlebarOptions {
+                    title: Some("Desk".into()),
+                    ..Default::default()
+                }),
+                app_id: Some("parvi-desk".into()),
+                ..Default::default()
+            },
+            |window, cx| {
+                cx.new(|cx| app::DeskApp::new(config.desks, &config.variant, notice, window, cx))
+            },
+        );
+        if let Err(e) = opened {
+            panic!("the window did not open: {e}");
+        }
+        cx.on_window_closed(|cx, _| cx.quit()).detach();
+    });
+}

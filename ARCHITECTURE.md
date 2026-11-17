@@ -3,6 +3,12 @@
 Two binaries. `parvi` is the node and the CLI. `parvi-app` is the native app; it
 talks to a node only over the node's WebSocket and HTTP interface.
 
+Apps with one purpose of their own are separate binaries on the same app kit,
+so they share Parvi's look but not its shell. `desk-app` is the Desk, where the
+operator answers what agents ask: it talks only to the decision desks' HTTP API
+(`/srv/desk`), never to a node, and decodes H.264 itself so clips step by the
+frame with nothing installed.
+
 ```
 areas/<area>/
     contract/   the area's wire types: requests, events, errors. No I/O.
@@ -18,6 +24,7 @@ kit/
 bin/
     parvi/      the node and CLI: a list of areas, install and upgrade
     parvi-app/  the native app: the shell in a window, and its list of pages
+    desk-app/   the Desk: answering agents' asks over the decision desks' API
 engine/         terminal engine, session holder, work references, mission model and engine
 ```
 
