@@ -13,6 +13,9 @@ use gpui::Hsla;
 ///   moss, warm light, the far field as drifting sparks.
 /// - Signal: the sky as a sign; flat colour, square stars, no glow, names
 ///   on solid plates.
+/// - A well-known theme: the whole wheel at even steps, the night's soft
+///   glow on a dark ground; on a light one, deeper colours and less glow,
+///   the sky as ink on paper.
 pub struct Style {
     /// Where on the colour wheel the subjects' hues start, and how far
     /// round they run.
@@ -42,8 +45,8 @@ pub struct Style {
     pub core_white: f32,
 }
 
-pub fn style(d: Direction) -> Style {
-    match d {
+pub fn style(t: &Theme) -> Style {
+    match t.direction {
         Direction::Night => Style {
             hue_from: 0.4,
             hue_span: 0.42,
@@ -95,6 +98,40 @@ pub fn style(d: Direction) -> Style {
             halo_spread: 3.,
             core_white: 0.3,
         },
+        _ if t.light => Style {
+            hue_from: 0.55,
+            hue_span: 0.86,
+            saturation: 0.7,
+            lightness: 0.4,
+            lightness_step: 0.08,
+            glow: 0.35,
+            nebula: 0.7,
+            nebula_soft: 0.45,
+            nebula_size: 0.5,
+            bend: 1.0,
+            field: 1.4,
+            square: false,
+            halo_blur: sky::HALO_BLUR,
+            halo_spread: 2.,
+            core_white: 0.35,
+        },
+        _ => Style {
+            hue_from: 0.55,
+            hue_span: 0.86,
+            saturation: 0.7,
+            lightness: 0.68,
+            lightness_step: 0.07,
+            glow: 0.9,
+            nebula: 1.,
+            nebula_soft: 0.45,
+            nebula_size: 0.5,
+            bend: 1.0,
+            field: 1.,
+            square: false,
+            halo_blur: sky::HALO_BLUR,
+            halo_spread: 2.,
+            core_white: 0.6,
+        },
     }
 }
 
@@ -104,7 +141,7 @@ pub const HUES: usize = 9;
 
 /// A subject's hue, stable while others come and go.
 pub fn subject_hue(t: &Theme, id: &str) -> Hsla {
-    let s = style(t.direction);
+    let s = style(t);
     let h = id
         .bytes()
         .fold(0u32, |h, b| h.wrapping_mul(31).wrapping_add(b as u32));
@@ -118,10 +155,12 @@ pub fn subject_hue(t: &Theme, id: &str) -> Hsla {
     }
 }
 
-/// A colour moved towards white, for star cores that should read as light.
-pub fn whiten(c: Hsla, share: f32) -> Hsla {
+/// A colour lifted off the sky, for star cores that should stand out:
+/// towards white on a dark ground, towards the ink on a light one.
+pub fn lift(t: &Theme, c: Hsla, share: f32) -> Hsla {
+    let to = if t.light { 0. } else { 1. };
     Hsla {
-        l: c.l + (1. - c.l) * share,
+        l: c.l + (to - c.l) * share * if t.light { 0.6 } else { 1. },
         s: c.s * (1. - share * 0.5),
         ..c
     }

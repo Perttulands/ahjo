@@ -649,10 +649,10 @@ pub fn highlight(lang: &Lang, text: &str) -> Vec<(Range<usize>, Token)> {
 /// The colour a token is drawn in.
 pub fn colour(t: &crate::theme::Theme, token: Token) -> gpui::Hsla {
     match token {
-        Token::Comment => t.dim,
-        Token::String => crate::theme::rgb(t.ansi[2]),
-        Token::Number => crate::theme::rgb(t.ansi[3]),
-        Token::Keyword => crate::theme::rgb(t.ansi[5]),
+        Token::Comment => t.syntax.comment,
+        Token::String => t.syntax.string,
+        Token::Number => t.syntax.number,
+        Token::Keyword => t.syntax.keyword,
     }
 }
 

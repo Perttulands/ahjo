@@ -8,7 +8,8 @@
 //! shows, and shown as named settings; it changes by editing its file.
 //! Typing in the search shows every setting that matches, from every group.
 
-use ahjo_app_kit::ask::Ask;
+use crate::theme_picker::{self, Key, Picker};
+use ahjo_app_kit::ask::{Answers, Ask};
 use ahjo_app_kit::host::{Request, Status};
 use ahjo_app_kit::link::client::LinkState;
 use ahjo_app_kit::page::Meta;
@@ -20,8 +21,8 @@ use ahjo_app_kit::widgets::pane;
 use ahjo_app_kit::{Control, Host, Hub, Page, Setting};
 use ahjo_core::NodeId;
 use gpui::{
-    AnyElement, App, AppContext, Context, Div, Entity, SharedString, Subscription, Window, div,
-    prelude::*, px,
+    AnyElement, App, AppContext, Context, Div, Entity, FocusHandle, KeyDownEvent, SharedString,
+    Subscription, Window, div, prelude::*, px,
 };
 use serde_json::Value;
 use std::collections::HashMap;
@@ -32,7 +33,7 @@ pub const ID: &str = "settings";
 /// The shell's own settings, kept outside any page's section.
 const APP: &[Setting] = &[
     Setting::choice("theme", "Theme", "night", Direction::CHOICES)
-        .note("Odin's ravens three ways: a moonlit night, a carved saga, a flat signal."),
+        .note("Odin's ravens three ways, or a colour theme from your editor."),
     Setting::text("node", "Node", DEFAULT_NODE)
         .note("The node this app talks to, as http://host:port. Enter connects."),
     Setting::toggle("keys", "Shortcuts", true)
@@ -78,16 +79,23 @@ pub struct SettingsPage {
     /// A field for each text setting.
     fields: HashMap<(Owner, &'static str), Entity<TextField>>,
     _fields: Vec<Subscription>,
+    /// The theme picker, while it is open, and what has the keyboard then.
+    picker: Option<Picker>,
+    picker_focus: FocusHandle,
 }
 
 impl Page for SettingsPage {
     const ID: &'static str = ID;
     const TITLE: &'static str = "Settings";
     const KEY: Option<char> = Some(',');
+    const ANSWERS: &'static [Answers] = &[Answers::Reveal("setting")];
 
     /// The fields show what is kept now, and the node's config is read.
     fn shown(&mut self, shown: bool, _: &mut Window, cx: &mut Context<Self>) {
         self.shown = shown;
+        if !shown {
+            self.picker_back(cx);
+        }
         if shown {
             self.refresh(cx);
             self.read_node_config(cx);
@@ -110,6 +118,32 @@ impl Page for SettingsPage {
     fn settings_changed(&mut self, _: &mut Window, cx: &mut Context<Self>) {
         self.refresh(cx);
         cx.notify();
+    }
+
+    /// Shows a setting by its key: its group, and for the theme, the
+    /// picker open.
+    fn answer(&mut self, ask: Ask, _: &'static str, window: &mut Window, cx: &mut Context<Self>) {
+        let Ask::Reveal { id, .. } = ask else {
+            return;
+        };
+        self.search.update(cx, |f, cx| f.set("", false, cx));
+        if APP.iter().any(|s| s.key == id) {
+            self.chosen = Group::App;
+        } else if let Some(m) = self
+            .pages
+            .iter()
+            .find(|m| m.settings.iter().any(|s| s.key == id))
+        {
+            self.chosen = Group::Page(m.id);
+        }
+        if id == "theme" {
+            self.picker_open(window, cx);
+        }
+        cx.notify();
+    }
+
+    fn focus(&self, _: &App) -> Option<FocusHandle> {
+        self.picker.as_ref().map(|_| self.picker_focus.clone())
     }
 }
 
@@ -166,7 +200,74 @@ impl SettingsPage {
             pages,
             fields,
             _fields: subscriptions,
+            picker: None,
+            picker_focus: cx.focus_handle(),
         }
+    }
+
+    fn picker_open(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let now = ahjo_app_kit::theme::theme(cx).direction;
+        self.picker = Some(Picker::open(now));
+        window.focus(&self.picker_focus, cx);
+        cx.notify();
+    }
+
+    /// The whole app drawn in `d` while the picker tries it; nothing kept.
+    fn picker_try(&mut self, d: Direction, cx: &mut Context<Self>) {
+        if theme(cx).direction != d {
+            cx.set_global(Theme::new(d));
+            cx.refresh_windows();
+        }
+        cx.notify();
+    }
+
+    /// Keeps `d` and closes the picker.
+    pub(crate) fn picker_keep(&mut self, d: Direction, cx: &mut Context<Self>) {
+        self.picker = None;
+        self.write(Owner::App, "theme", Value::from(d.key()), cx);
+    }
+
+    /// Closes the picker, back in the theme there was.
+    pub(crate) fn picker_back(&mut self, cx: &mut Context<Self>) {
+        if let Some(p) = self.picker.take() {
+            self.picker_try(p.was, cx);
+        }
+    }
+
+    pub(crate) fn picker_key(&mut self, e: &KeyDownEvent, cx: &mut Context<Self>) {
+        let Some(picker) = self.picker.as_mut() else {
+            return;
+        };
+        match picker.key(&e.keystroke.key) {
+            Key::Try(d) => self.picker_try(d, cx),
+            Key::Keep(d) => self.picker_keep(d, cx),
+            Key::Back(_) => self.picker_back(cx),
+            Key::Nothing => return,
+        }
+        cx.stop_propagation();
+    }
+
+    /// The theme's control: the theme drawn now, and the picker under it
+    /// while it is open.
+    fn theme_control(&self, t: &Theme, cx: &mut Context<Self>) -> AnyElement {
+        let button = theme_picker::button(t, "setting-app-theme").on_click(cx.listener(
+            |p, _, window, cx| {
+                if p.picker.is_none() {
+                    p.picker_open(window, cx);
+                }
+            },
+        ));
+        let list = self.picker.as_ref().map(|picker| {
+            theme_picker::list(t, picker, &self.picker_focus, cx.entity().downgrade())
+        });
+        div()
+            .flex()
+            .flex_col()
+            .child(button)
+            // gpui places an anchored element absolutely, at its parent's
+            // corner: this empty holder puts that corner under the button.
+            .child(div().children(list))
+            .into_any_element()
     }
 
     /// Asks the connected node for its config.
@@ -382,6 +483,9 @@ impl SettingsPage {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let key = setting.key;
+        if owner == Owner::App && key == "theme" {
+            return self.theme_control(t, cx);
+        }
         let id = format!("setting-{}-{key}", owner.name());
         let value = self.value(owner, key, cx);
         match setting.control {

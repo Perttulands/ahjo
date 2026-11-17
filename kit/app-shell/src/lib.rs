@@ -7,6 +7,7 @@ mod close;
 mod keys;
 mod settings_page;
 pub mod shell;
+mod theme_picker;
 mod veil;
 pub mod view_control;
 

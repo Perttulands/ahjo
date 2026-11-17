@@ -20,7 +20,7 @@ use crate::paint::{self, Align, Dot, Face, Label, Light, Line, Picture, Ring, Sh
 use crate::reader::{self, Reader};
 use crate::sky::{self, Rect, Role, Sky};
 use crate::source::{self, Where};
-use crate::tokens::{self, chrome, motion, search, sky as k, veil, whiten};
+use crate::tokens::{self, chrome, lift, motion, search, sky as k, veil};
 use ahjo_app_kit::theme::{Direction, FAMILY, Theme, alpha, art, theme, ty};
 use ahjo_app_kit::widgets::field::{self, FieldEvent, TextField};
 use ahjo_app_kit::widgets::{kit, pane};
@@ -662,9 +662,7 @@ impl BrainApp {
 
     /// The next of the theme's directions, kept in the settings.
     fn next_theme(&mut self, cx: &mut Context<Self>) {
-        let now = theme(cx).direction;
-        let at = Direction::ALL.iter().position(|d| *d == now).unwrap_or(0);
-        let next = Direction::ALL[(at + 1) % Direction::ALL.len()];
+        let next = theme(cx).direction.step(1);
         self.restyle(next, cx);
         if self.settings_broken.is_some() {
             return;
@@ -1264,7 +1262,7 @@ impl Boxes {
 impl BrainApp {
     /// This frame's sky, and whether anything is still moving.
     fn scene(&mut self, window: &Window, t: &Theme) -> (Picture, bool) {
-        let st = tokens::style(t.direction);
+        let st = tokens::style(t);
         let mut pic = Picture {
             halo: alpha(t.bg, k::HALO),
             halo_blur: st.halo_blur,
@@ -1645,7 +1643,7 @@ impl BrainApp {
                     y,
                     r: size,
                     color: alpha(
-                        whiten(hue, white),
+                        lift(t, hue, white),
                         a * if star.role == Role::Dust { 0.7 } else { 1. },
                     ),
                     shape: if st.square
@@ -1672,7 +1670,7 @@ impl BrainApp {
                     x,
                     y,
                     r: size + k::HOT_RING,
-                    color: alpha(whiten(hue, 0.5), a),
+                    color: alpha(lift(t, hue, 0.5), a),
                     width: 1.,
                     dashed: false,
                 });
@@ -1686,7 +1684,7 @@ impl BrainApp {
                     x,
                     y,
                     r: size + 2. + d * 16.,
-                    color: alpha(whiten(hue, 0.3), (1. - d) * 0.9),
+                    color: alpha(lift(t, hue, 0.3), (1. - d) * 0.9),
                     width: 1.5 * (1. - d) + 0.3,
                     dashed: false,
                 });
@@ -1847,7 +1845,7 @@ impl BrainApp {
                 x,
                 y,
                 size,
-                color: alpha(whiten(hue, 0.25), if lit { 1. } else { 0.82 } * a),
+                color: alpha(lift(t, hue, 0.25), if lit { 1. } else { 0.82 } * a),
                 face: display.clone(),
                 align: Align::Centre,
             });
@@ -2066,7 +2064,7 @@ impl BrainApp {
                 x: kx + 12.,
                 y: ky,
                 size: k::PAGE_NAME,
-                color: alpha(whiten(hue, 0.25), 0.95),
+                color: alpha(lift(t, hue, 0.25), 0.95),
                 face: Face::mono(false),
                 align: Align::Left,
             });
@@ -2900,7 +2898,7 @@ impl BrainApp {
             .border_l_1()
             .border_color(alpha(t.divider, 0.7))
             .shadow(vec![gpui::BoxShadow {
-                color: alpha(t.bg, 0.6),
+                color: t.shadow(),
                 offset: gpui::point(px(-8.), px(0.)),
                 blur_radius: px(tokens::reader::SHADOW),
                 spread_radius: px(0.),
@@ -2945,7 +2943,7 @@ fn snippet_text(snippet: &str, summary: &str, hue: Hsla, t: &Theme) -> gpui::Sty
             (
                 r,
                 gpui::HighlightStyle {
-                    color: Some(whiten(hue, 0.3)),
+                    color: Some(lift(t, hue, 0.3)),
                     ..Default::default()
                 },
             )

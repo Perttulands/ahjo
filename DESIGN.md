@@ -58,7 +58,9 @@ adds its own panel of missions and runs.
 
 - **Odin's ravens.** Ahjo's art and theme come from Huginn and Muninn,
   thought and memory, who fly out and report back. Empty places carry the
-  art; the theme is dark, with its own character.
+  art; the app's own themes are dark, with their own character. Beside
+  them stand the colour themes people know from their editors, two of them
+  light, with the raven drawn in their colours; every page reads in each.
 - **Colour has fixed meanings.** One colour for action and focus, one for
   done, one for failed, one for "needs you", one for running. A colour never
   carries two of them.

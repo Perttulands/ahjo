@@ -47,7 +47,7 @@ fn resolve(c: Color, colors: &Colors, bold: bool, t: &Theme) -> u32 {
                 }
                 NamedColor::Background => over(i).unwrap_or(t.term_bg_rgb),
                 NamedColor::Cursor => t.term_fg_rgb,
-                NamedColor::DimForeground => t.ansi[7],
+                NamedColor::DimForeground => t.term_dim_rgb(),
                 _ if i < 8 && bold => over(i + 8).unwrap_or(t.ansi[i + 8]),
                 _ if i < 16 => over(i).unwrap_or(t.ansi[i]),
                 _ => t.ansi[(i - NamedColor::DimBlack as usize).min(7)],

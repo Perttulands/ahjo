@@ -21,7 +21,7 @@ use app::{Bench, Start};
 use gpui::App;
 use std::borrow::Cow;
 
-const USAGE: &str = "ahjo-brain [--brain <folder>] [--citadel <url>] [--theme night|saga|signal] [--search <words>] [--open <page>] [--bench <seconds>] [--where]";
+const USAGE: &str = "ahjo-brain [--brain <folder>] [--citadel <url>] [--theme <theme, as app.json names it>] [--search <words>] [--open <page>] [--bench <seconds>] [--where]";
 
 fn value(args: &[String], name: &str) -> Option<String> {
     args.iter()

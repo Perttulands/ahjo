@@ -1,0 +1,5 @@
+Gruvbox, by Pavel Pertsev (morhetz).
+https://github.com/morhetz/gruvbox
+Its README states the licence as MIT/X11 and its package.json as MIT; the
+repository publishes no licence file and no copyright line. The colours are
+used on those terms, crediting their author.

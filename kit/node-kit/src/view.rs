@@ -24,7 +24,9 @@ const VIEW_DO: u8 = 0xb8;
 const WAIT: Duration = Duration::from_secs(5);
 
 /// The things `view_open` shows on a page, at most one at a time.
-const THINGS: &[&str] = &["path", "item", "run", "mission", "document", "session"];
+const THINGS: &[&str] = &[
+    "path", "item", "run", "mission", "document", "session", "setting",
+];
 
 /// The connected apps, by their client.
 #[derive(Default)]
@@ -198,7 +200,7 @@ pub(crate) fn commands(views: &Arc<Views>, node: NodeId) -> Vec<Command> {
         Command::new(
             "view_open",
             "Open a page in the operator's Ahjo Swarm app, and one thing on it: a path, item, run, \
-             mission, document or session. Answers with what the app shows now.",
+             mission, document, session or setting. Answers with what the app shows now.",
             move || schema.clone(),
             move |args: Value| {
                 let views = opening.clone();

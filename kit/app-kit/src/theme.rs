@@ -8,9 +8,18 @@
 //! mission's wires have their own: `wire` carries work, `pass` and `fail`
 //! leave a gate. No colour stands for two of them. The operator picks the theme
 //! ([`Direction`], the `theme` setting); every direction fills every token.
+//!
+//! Three directions are the app's own, Odin's ravens with their own art and
+//! type; ten are the colour themes people know from their editors and
+//! terminals (`theme/known.rs`), in the app's default faces, the raven drawn in
+//! their colours. Two of those are light: nothing here assumes a dark
+//! background ([`Theme::light`], [`Theme::shadow`], [`Theme::on_accent`]).
 
 use gpui::{App, FontWeight, Global, Hsla, Image, ImageFormat, Rgba};
 use std::sync::{Arc, OnceLock};
+
+mod drawn;
+mod known;
 
 /// Measures in pixels, from CHROTE's layout (DESIGN-SYSTEM.md and the
 /// dashboard as it renders). A page's own measures live with the page.
@@ -168,8 +177,10 @@ pub const FONT_FILES: [&[u8]; 16] = [
     include_bytes!("../assets/fonts/Archivo-ExtraBold.ttf"),
 ];
 
-/// The theme's three ideas of Odin's ravens, Huginn and Muninn, thought
-/// and memory, who fly out over the world and come back to report.
+/// A theme. The first three are the app's own ideas of Odin's ravens,
+/// Huginn and Muninn, thought and memory, who fly out over the world and
+/// come back to report; the rest are well-known colour themes, each from
+/// its published specification (`theme/known.rs`).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum Direction {
     /// Huginn's night flight: a cold moonlit sky over the fjords, aurora
@@ -182,37 +193,82 @@ pub enum Direction {
     /// The raven as a sign: flat black and bone, one signal yellow, heavy
     /// grotesk headers, nothing soft.
     Signal,
+    Dracula,
+    Nord,
+    GruvboxDark,
+    SolarizedDark,
+    SolarizedLight,
+    CatppuccinMocha,
+    TokyoNight,
+    OneDark,
+    Monokai,
+    GithubLight,
 }
 
 impl Direction {
-    pub const ALL: [Direction; 3] = [Direction::Night, Direction::Saga, Direction::Signal];
+    /// The app's own first, then the well-known, as the picker lists them.
+    pub const ALL: [Direction; 13] = [
+        Direction::Night,
+        Direction::Saga,
+        Direction::Signal,
+        Direction::Dracula,
+        Direction::Nord,
+        Direction::GruvboxDark,
+        Direction::SolarizedDark,
+        Direction::SolarizedLight,
+        Direction::CatppuccinMocha,
+        Direction::TokyoNight,
+        Direction::OneDark,
+        Direction::Monokai,
+        Direction::GithubLight,
+    ];
 
     /// Each direction's key and name, as a setting offers them.
     pub const CHOICES: &[(&str, &str)] = &[
         ("night", "Night flight"),
         ("saga", "Saga"),
         ("signal", "Signal"),
+        ("dracula", "Dracula"),
+        ("nord", "Nord"),
+        ("gruvbox-dark", "Gruvbox Dark"),
+        ("solarized-dark", "Solarized Dark"),
+        ("solarized-light", "Solarized Light"),
+        ("catppuccin-mocha", "Catppuccin Mocha"),
+        ("tokyo-night", "Tokyo Night"),
+        ("one-dark", "One Dark"),
+        ("monokai", "Monokai"),
+        ("github-light", "GitHub Light"),
     ];
+
+    fn index(self) -> usize {
+        Self::ALL
+            .iter()
+            .position(|d| *d == self)
+            .expect("every direction is in ALL")
+    }
 
     /// Its value in the `theme` setting.
     pub fn key(self) -> &'static str {
-        match self {
-            Direction::Night => "night",
-            Direction::Saga => "saga",
-            Direction::Signal => "signal",
-        }
+        Self::CHOICES[self.index()].0
     }
 
     pub fn label(self) -> &'static str {
-        match self {
-            Direction::Night => "Night flight",
-            Direction::Saga => "Saga",
-            Direction::Signal => "Signal",
-        }
+        Self::CHOICES[self.index()].1
     }
 
     pub fn from_key(key: &str) -> Option<Self> {
         Self::ALL.into_iter().find(|d| d.key() == key)
+    }
+
+    /// One of the app's own ravens, with art and type of its own.
+    pub fn own(self) -> bool {
+        matches!(self, Direction::Night | Direction::Saga | Direction::Signal)
+    }
+
+    /// The direction `steps` on in [`Direction::ALL`], round at the ends.
+    pub fn step(self, steps: isize) -> Self {
+        let n = Self::ALL.len() as isize;
+        Self::ALL[(self.index() as isize + steps).rem_euclid(n) as usize]
     }
 }
 
@@ -236,7 +292,8 @@ pub struct Type {
 }
 
 /// A direction's pictures: behind an empty terminal window, over an empty
-/// place, and the app's mark.
+/// place, and the app's mark. The ravens' own are painted; a well-known
+/// theme's are drawn in its colours ([`drawn`]).
 #[derive(Clone, Debug)]
 pub struct Art {
     pub window: Arc<Image>,
@@ -251,6 +308,9 @@ pub struct Art {
 #[derive(Clone, Debug)]
 pub struct Theme {
     pub direction: Direction,
+    /// Dark ink on a light ground. What lifts a thing off the ground
+    /// (a shadow, a glow, text on the accent) asks this, never assumes.
+    pub light: bool,
     pub bg: Hsla,
     pub surface: Hsla,
     pub raised: Hsla,
@@ -286,6 +346,8 @@ pub struct Theme {
     pub ansi: [u32; 16],
     pub term_bg_rgb: u32,
     pub term_fg_rgb: u32,
+    /// Code's colours, on [`Theme::bg`].
+    pub syntax: Syntax,
     pub identity: Vec<Hsla>,
     pub ty: Type,
     pub art: Art,
@@ -315,6 +377,45 @@ pub fn alpha(c: Hsla, a: f32) -> Hsla {
     Hsla { a, ..c }
 }
 
+/// `a` moved `share` of the way to `b`, as 0xRRGGBB.
+pub fn mix(a: u32, b: u32, share: f32) -> u32 {
+    let ch = |c: u32, s: u32| ((c >> s) & 0xff) as f32;
+    [16, 8, 0].iter().fold(0, |out, &s| {
+        let v = ch(a, s) + (ch(b, s) - ch(a, s)) * share;
+        out | ((v.round().clamp(0., 255.) as u32) << s)
+    })
+}
+
+/// How bright a colour is to the eye, from 0 (black) to 1 (white), as WCAG
+/// measures it; its alpha is not counted.
+pub fn luminance(c: Hsla) -> f32 {
+    let c = Rgba::from(c);
+    let lin = |v: f32| {
+        if v <= 0.04045 {
+            v / 12.92
+        } else {
+            ((v + 0.055) / 1.055).powf(2.4)
+        }
+    };
+    0.2126 * lin(c.r) + 0.7152 * lin(c.g) + 0.0722 * lin(c.b)
+}
+
+/// The WCAG contrast ratio of two opaque colours, from 1 to 21. Reading
+/// text wants 4.5 against what it stands on; a large label or a mark, 3.
+pub fn contrast(a: Hsla, b: Hsla) -> f32 {
+    let (la, lb) = (luminance(a), luminance(b));
+    (la.max(lb) + 0.05) / (la.min(lb) + 0.05)
+}
+
+/// Code's colours: the four kinds `widgets::syntax` tells apart.
+#[derive(Clone, Copy, Debug)]
+pub struct Syntax {
+    pub comment: Hsla,
+    pub string: Hsla,
+    pub number: Hsla,
+    pub keyword: Hsla,
+}
+
 /// One direction's values, as written.
 struct Palette {
     bg: u32,
@@ -335,7 +436,12 @@ struct Palette {
     fail: u32,
     term_bg: u32,
     term_fg: u32,
+    /// The terminal's cursor, and its selection with how much shows.
+    cursor: u32,
+    selection: (u32, f32),
     ansi: [u32; 16],
+    /// Comment, string, number, keyword.
+    syntax: [u32; 4],
     identity: [u32; 4],
 }
 
@@ -346,7 +452,7 @@ const NIGHT: Palette = Palette {
     divider: 0x243149,
     text: 0xe4ebf5,
     text2: 0xa3b1c6,
-    dim: 0x6b7a93,
+    dim: 0x7b889f,
     accent: 0x6cb6ff,
     error: 0xff6b7a,
     running: 0xa98bff,
@@ -358,10 +464,13 @@ const NIGHT: Palette = Palette {
     fail: 0xff5fc8,
     term_bg: 0x080c14,
     term_fg: 0xd8e1ee,
+    cursor: 0x6cb6ff,
+    selection: (0x6cb6ff, 0.28),
     ansi: [
         0x0a0f18, 0xff6b7a, 0x5fd3a0, 0xffbf5a, 0x6cb6ff, 0xc49bff, 0x4fd6d6, 0xa3b1c6, 0x55627a,
         0xff8c97, 0x86e3b8, 0xffd28a, 0x9acdff, 0xd8bfff, 0x7fe6e6, 0xf2f6fb,
     ],
+    syntax: [0x7b889f, 0x5fd3a0, 0xffbf5a, 0xc49bff],
     identity: [0x3f5f8a, 0x2f6b6b, 0x5b4f8a, 0x6a5a3a],
 };
 
@@ -372,7 +481,7 @@ const SAGA: Palette = Palette {
     divider: 0x3b2d20,
     text: 0xefe3cc,
     text2: 0xc2ad8c,
-    dim: 0x8a7659,
+    dim: 0x998363,
     accent: 0xe0a94a,
     error: 0xe5574b,
     running: 0x6fa8dc,
@@ -384,10 +493,13 @@ const SAGA: Palette = Palette {
     fail: 0xd06a9a,
     term_bg: 0x0e0a07,
     term_fg: 0xe8dcc4,
+    cursor: 0xe0a94a,
+    selection: (0xe0a94a, 0.28),
     ansi: [
         0x120e0a, 0xe5574b, 0x9cbf6a, 0xe0a94a, 0x6fa8dc, 0xc7849e, 0x4fc3b5, 0xc2ad8c, 0x6e5d46,
         0xf07a6e, 0xb6d68a, 0xf0c46e, 0x94c0ea, 0xdba3b9, 0x7fd8cd, 0xf5ecd9,
     ],
+    syntax: [0x998363, 0x9cbf6a, 0xe0a94a, 0xc7849e],
     identity: [0x7a5230, 0x4f6a3a, 0x7a3f36, 0x3f5a6a],
 };
 
@@ -398,7 +510,7 @@ const SIGNAL: Palette = Palette {
     divider: 0x2e2e2e,
     text: 0xf0ece3,
     text2: 0xb8b3a8,
-    dim: 0x77736b,
+    dim: 0x88847b,
     accent: 0xffd000,
     error: 0xff5a36,
     running: 0x3ad0ff,
@@ -410,10 +522,13 @@ const SIGNAL: Palette = Palette {
     fail: 0xb06bff,
     term_bg: 0x080808,
     term_fg: 0xece8df,
+    cursor: 0xffd000,
+    selection: (0xffd000, 0.28),
     ansi: [
         0x0b0b0b, 0xff5a36, 0x9ee34a, 0xffd000, 0x3a8dff, 0xff4fa0, 0x3ad0ff, 0xcfcac0, 0x5a5751,
         0xff7f61, 0xbdf27a, 0xffe14d, 0x6eadff, 0xff80bd, 0x7fe2ff, 0xffffff,
     ],
+    syntax: [0x88847b, 0x9ee34a, 0xffd000, 0xff4fa0],
     identity: [0x4a4a4a, 0x6b5a1e, 0x1e5a6b, 0x6b1e45],
 };
 
@@ -474,20 +589,25 @@ impl Default for Theme {
     }
 }
 
+/// Night flight's type, which the well-known themes share.
+fn default_type() -> Type {
+    Type {
+        display: "Space Grotesk",
+        display_weight: FontWeight::BOLD,
+        reading: "Inter",
+        group: 11.,
+        read: 15.,
+        labels_upper: true,
+        tracking: 1.5,
+    }
+}
+
 impl Theme {
     pub fn new(direction: Direction) -> Self {
         let (p, ty, art) = match direction {
             Direction::Night => (
                 &NIGHT,
-                Type {
-                    display: "Space Grotesk",
-                    display_weight: FontWeight::BOLD,
-                    reading: "Inter",
-                    group: 11.,
-                    read: 15.,
-                    labels_upper: true,
-                    tracking: 1.5,
-                },
+                default_type(),
                 Art {
                     empty_show: 0.85,
                     ..art!("night")
@@ -523,10 +643,17 @@ impl Theme {
                 },
                 art!("signal"),
             ),
+            known => {
+                let p = known::palette(known);
+                (p, default_type(), drawn::art(p))
+            }
         };
+        let bg = rgb(p.bg);
+        let [comment, string, number, keyword] = p.syntax.map(rgb);
         Self {
             direction,
-            bg: rgb(p.bg),
+            light: luminance(bg) > 0.4,
+            bg,
             surface: rgb(p.surface),
             raised: rgb(p.raised),
             divider: rgb(p.divider),
@@ -544,11 +671,17 @@ impl Theme {
             fail: rgb(p.fail),
             term_bg: rgb(p.term_bg),
             term_fg: rgb(p.term_fg),
-            cursor: rgb(p.accent),
-            selection: rgba(p.accent, 0.28),
+            cursor: rgb(p.cursor),
+            selection: rgba(p.selection.0, p.selection.1),
             ansi: p.ansi,
             term_bg_rgb: p.term_bg,
             term_fg_rgb: p.term_fg,
+            syntax: Syntax {
+                comment,
+                string,
+                number,
+                keyword,
+            },
             identity: p.identity.iter().map(|c| rgb(*c)).collect(),
             ty,
             art,
@@ -577,9 +710,37 @@ impl Theme {
         self.identity[h as usize % self.identity.len()]
     }
 
-    /// Text on an accent fill.
+    /// Text on an accent fill: the ground or the ink, whichever reads
+    /// better on it (a light accent on a dark ground takes the ground; a
+    /// mid blue on white takes white).
     pub fn on_accent(&self) -> Hsla {
-        self.bg
+        if contrast(self.bg, self.accent) >= contrast(self.text, self.accent) {
+            self.bg
+        } else {
+            self.text
+        }
+    }
+
+    /// What a raised thing's shadow falls in: the deep ground of a dark
+    /// theme, a soft grey on a light one, where a shadow of the ground
+    /// would be a glow.
+    pub fn shadow(&self) -> Hsla {
+        if self.light {
+            Hsla {
+                h: 0.,
+                s: 0.,
+                l: 0.,
+                a: 0.16,
+            }
+        } else {
+            alpha(self.bg, 0.6)
+        }
+    }
+
+    /// The terminal's faint text (SGR 2): its text two thirds of the way
+    /// from its ground, so it stays readable on a light ground too.
+    pub fn term_dim_rgb(&self) -> u32 {
+        mix(self.term_bg_rgb, self.term_fg_rgb, 0.66)
     }
 
     /// A group label's words in the theme's case.
@@ -651,6 +812,127 @@ mod tests {
                 );
             }
         }
+    }
+
+    /// WCAG AA: reading text 4.5:1 on every ground it stands on (the
+    /// page, a panel, a chosen row); a mark 3:1. The accent and the states
+    /// are read as words too ("failed", a waiting question), so they count
+    /// as text.
+    #[test]
+    fn every_direction_reads_at_wcag_aa() {
+        let mut low = vec![];
+        for d in Direction::ALL {
+            let t = Theme::new(d);
+            let mut need = |what: &str, ink: Hsla, ground: (&str, Hsla), least: f32| {
+                let c = contrast(ink, ground.1);
+                if c < least {
+                    low.push(format!("{}: {what} on {} is {c:.2}", d.label(), ground.0));
+                }
+            };
+            let grounds = [("bg", t.bg), ("surface", t.surface), ("raised", t.raised)];
+            let words = [
+                ("text", t.text),
+                ("text2", t.text2),
+                ("dim", t.dim),
+                ("accent", t.accent),
+                ("error", t.error),
+                ("running", t.running),
+                ("done", t.done),
+                ("needs", t.needs),
+            ];
+            for (what, ink) in words {
+                for g in grounds {
+                    need(what, ink, g, 4.5);
+                }
+            }
+            let code = [
+                ("comment", t.syntax.comment),
+                ("string", t.syntax.string),
+                ("number", t.syntax.number),
+                ("keyword", t.syntax.keyword),
+            ];
+            let marks = [
+                ("chart", t.chart),
+                ("wire", t.wire),
+                ("pass", t.pass),
+                ("fail", t.fail),
+            ];
+            for g in &grounds[..2] {
+                for (what, ink) in code {
+                    need(what, ink, *g, 4.5);
+                }
+                for (what, ink) in marks {
+                    need(what, ink, *g, 3.);
+                }
+            }
+            need("terminal text", t.term_fg, ("its ground", t.term_bg), 4.5);
+            need(
+                "text on the accent",
+                t.on_accent(),
+                ("accent", t.accent),
+                4.5,
+            );
+            for (i, square) in t.identity.iter().enumerate() {
+                need("text", t.text, (&format!("identity {i}"), *square), 4.5);
+            }
+            // A divider is seen, if only just, on the page and on a panel.
+            for g in &grounds[..2] {
+                need("divider", t.divider, *g, 1.3);
+            }
+        }
+        assert!(low.is_empty(), "under WCAG AA:\n{}", low.join("\n"));
+    }
+
+    #[test]
+    fn every_direction_fills_every_token() {
+        for d in Direction::ALL {
+            let t = Theme::new(d);
+            let colours = [
+                t.bg, t.surface, t.raised, t.divider, t.text, t.text2, t.dim, t.accent, t.error,
+                t.running, t.done, t.needs, t.chart, t.wire, t.pass, t.fail, t.term_bg, t.term_fg,
+                t.cursor,
+            ];
+            assert!(colours.iter().all(|c| c.a == 1.), "{}", d.label());
+            assert!(t.selection.a > 0., "{}", d.label());
+            assert_eq!(t.identity.len(), 4, "{}", d.label());
+            assert_eq!(rgb(t.term_bg_rgb), t.term_bg, "{}", d.label());
+            // The ground and the ink stand apart, whichever way round.
+            assert_eq!(
+                t.light,
+                luminance(t.bg) > luminance(t.text),
+                "{}",
+                d.label()
+            );
+            assert_eq!(
+                d.own(),
+                d.key() == "night" || d.key() == "saga" || d.key() == "signal"
+            );
+        }
+        let light: Vec<_> = Direction::ALL
+            .into_iter()
+            .filter(|d| Theme::new(*d).light)
+            .map(Direction::key)
+            .collect();
+        assert_eq!(light, ["solarized-light", "github-light"]);
+    }
+
+    #[test]
+    fn a_theme_drawn_without_art_draws_the_raven_in_its_colours() {
+        let p = known::palette(Direction::GithubLight);
+        let mark = drawn::mark_svg(p);
+        // A black raven on the blue disc: on a light theme the raven is
+        // the ink, not the white ground.
+        assert!(mark.contains(r##"fill="#0968d8""##), "{mark}");
+        assert!(mark.contains(r##"fill="#1f2328""##), "{mark}");
+        let p = known::palette(Direction::Dracula);
+        assert!(drawn::mark_svg(p).contains(r##"fill="#282a36""##));
+    }
+
+    #[test]
+    fn the_picker_steps_round_every_direction() {
+        assert_eq!(Direction::Night.step(-1), Direction::GithubLight);
+        assert_eq!(Direction::GithubLight.step(1), Direction::Night);
+        assert_eq!(Direction::Signal.step(1), Direction::Dracula);
     }
 
     #[test]
