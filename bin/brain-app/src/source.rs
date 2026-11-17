@@ -55,12 +55,12 @@ pub fn find(args: &[String]) -> Where {
 
 fn default_root() -> Option<PathBuf> {
     if cfg!(windows) {
+        // `\\wsl.localhost` itself cannot be listed, only a distribution's
+        // share under it, so ask WSL for their names, the default first.
+        let distros = wsl_distros();
         for share in [r"\\wsl.localhost", r"\\wsl$"] {
-            let Ok(distros) = std::fs::read_dir(share) else {
-                continue;
-            };
-            for d in distros.flatten() {
-                let root = d.path().join(WSL_ROOT);
+            for d in &distros {
+                let root = Path::new(share).join(d).join(WSL_ROOT);
                 if root.join("knowledge").is_dir() {
                     return Some(root);
                 }
@@ -71,6 +71,46 @@ fn default_root() -> Option<PathBuf> {
         let root = PathBuf::from(LINUX_ROOT);
         root.is_dir().then_some(root)
     }
+}
+
+/// The WSL distributions installed, from `wsl.exe --list --quiet`.
+#[cfg(windows)]
+fn wsl_distros() -> Vec<String> {
+    use std::os::windows::process::CommandExt;
+    // No console window flashes up for it.
+    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+    let Ok(out) = std::process::Command::new("wsl.exe")
+        .args(["--list", "--quiet"])
+        .creation_flags(CREATE_NO_WINDOW)
+        .output()
+    else {
+        return vec![];
+    };
+    distro_names(&out.stdout)
+}
+
+#[cfg(not(windows))]
+fn wsl_distros() -> Vec<String> {
+    vec![]
+}
+
+/// `wsl.exe` answers in UTF-16, one name a line.
+#[cfg(any(windows, test))]
+fn distro_names(raw: &[u8]) -> Vec<String> {
+    let wide: Vec<u16> = raw
+        .as_chunks::<2>()
+        .0
+        .iter()
+        .map(|c| u16::from_le_bytes(*c))
+        .collect();
+    String::from_utf16_lossy(&wide)
+        .lines()
+        .map(|l| {
+            l.trim_matches(|c: char| c.is_whitespace() || c == '\0')
+                .to_string()
+        })
+        .filter(|l| !l.is_empty())
+        .collect()
 }
 
 fn default_cache() -> Option<PathBuf> {
@@ -140,6 +180,15 @@ pub fn marker(root: &Path) -> Option<std::time::SystemTime> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn wsl_names_its_distributions_in_utf16() {
+        let raw: Vec<u8> = "Ubuntu\r\nDebian\r\n\r\n"
+            .encode_utf16()
+            .flat_map(|u| u.to_le_bytes())
+            .collect();
+        assert_eq!(distro_names(&raw), ["Ubuntu", "Debian"]);
+    }
 
     #[test]
     fn kept_state_returns_for_the_same_brain_only() {
