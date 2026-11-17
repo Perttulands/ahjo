@@ -332,7 +332,7 @@ impl Terminals {
             .and_then(|v| v.downcast::<DiagramView>().ok())
             .is_some_and(|v| v.read(cx).source == source);
         if shown {
-            self.host.close_beside(crate::NAME, cx);
+            self.host.close_beside(crate::PAGE, cx);
             return;
         }
         let colours = self.diagram_colours(cx);
@@ -352,7 +352,7 @@ impl Terminals {
                     Err(why) => (Arc::from(""), Err(why)),
                 };
                 let view = cx.new(|cx| DiagramView::new(host.clone(), source, svg, drawn, cx));
-                host.show_beside(crate::NAME, view.into(), cx);
+                host.show_beside(crate::PAGE, view.into(), cx);
             });
         })
         .detach();

@@ -13,7 +13,7 @@ use parvi_app_kit::widgets::field::{self, FieldEvent};
 use parvi_app_kit::widgets::{kit, pane};
 
 /// The page the Work panel opens beside.
-pub(crate) const PANEL_BESIDE: &str = "terminals";
+pub(crate) const PANEL_BESIDE: &str = "sessions";
 
 pub(crate) struct Panel {
     work: Entity<Work>,

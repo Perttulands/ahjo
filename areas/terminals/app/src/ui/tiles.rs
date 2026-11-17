@@ -1,4 +1,4 @@
-//! The Terminals page: the Sessions rail, the strip above the windows, and
+//! The Sessions page: the Sessions rail, the strip above the windows, and
 //! the windows themselves, each a session's terminal, a state, or the
 //! launcher. The terminal takes every key and the mouse.
 

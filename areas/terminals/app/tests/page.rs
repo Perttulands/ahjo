@@ -1,4 +1,4 @@
-//! The Terminals page in the app against a real node (terminals over a
+//! The Sessions page in the app against a real node (terminals over a
 //! scratch tmux, started through the testkit): a session attached to a
 //! window takes what is typed and shows its output, and a toy page hands a
 //! reference into that session through the Send ask and starts sessions
@@ -32,7 +32,7 @@ thread_local! {
     static ITEM_ASK: RefCell<Option<Ask>> = const { RefCell::new(None) };
 }
 
-/// The Terminals page, kept where the test can read what it shows.
+/// The Sessions page, kept where the test can read what it shows.
 fn terminals(host: Host, window: &mut Window, cx: &mut gpui::App) -> Mounted {
     mount(host, window, cx, |host, window, cx| {
         PAGE.with(|p| *p.borrow_mut() = Some(cx.entity()));
@@ -52,7 +52,11 @@ const REFERENCE: &str = "echo sent-$((40+2))";
 impl Page for Toy {
     const ID: &'static str = "toy";
     const TITLE: &'static str = "Toy";
-    const ANSWERS: &'static [Answers] = &[Answers::Reveal("item"), Answers::OpenPath];
+    const ANSWERS: &'static [Answers] = &[
+        Answers::Reveal("item"),
+        Answers::Reveal("agent"),
+        Answers::OpenPath,
+    ];
 
     fn answer(&mut self, ask: Ask, from: &'static str, _: &mut Window, cx: &mut Context<Self>) {
         if ask.beside() {
@@ -82,7 +86,7 @@ impl Render for Toy {
                                 reference: REFERENCE.into(),
                                 target: None,
                             };
-                            host.ask(ask, cx).expect("the Terminals page answers it");
+                            host.ask(ask, cx).expect("the Sessions page answers it");
                         }
                     }),
             )
@@ -104,7 +108,7 @@ impl Render for Toy {
                             reference: REFERENCE.into(),
                             target: Some(target),
                         };
-                        host.ask(ask, cx).expect("the Terminals page answers it");
+                        host.ask(ask, cx).expect("the Sessions page answers it");
                     }),
             )
     }
@@ -254,7 +258,7 @@ fn shown(cx: &mut VisualTestContext) -> String {
         .unwrap_or_default()
 }
 
-/// The app with the Terminals page and the toy against `running`, the
+/// The app with the Sessions page and the toy against `running`, the
 /// page shown and `alpha` attached to its first window.
 fn open_with_alpha<'a>(
     running: &Running,
@@ -287,8 +291,8 @@ fn open_pages_with_alpha<'a>(
             s.hub().read(cx).fleet.here().state == LinkState::Open
         })
     });
-    until(cx, "the Terminals page to show", |cx| {
-        shell.read_with(cx, |s, _| s.shown_page()) == Some("terminals")
+    until(cx, "the Sessions page to show", |cx| {
+        shell.read_with(cx, |s, _| s.shown_page()) == Some("sessions")
     });
     // The rail lists alpha; a click peeks, and Attach puts it in a window.
     let row = format!("row-{}::alpha", running.node);
@@ -332,15 +336,12 @@ fn a_page_hands_a_reference_into_a_session_through_send(cx: &mut TestAppContext)
         shell.read_with(cx, |s, _| s.shown_page()) == Some("toy")
     });
     click(cx, "toy-send".into());
-    // The ask brings the Terminals page forward with Send aimed at the
+    // The ask brings the Sessions page forward with Send aimed at the
     // session of the window that last had focus, named in the drawer.
     until(cx, "the Send drawer", |cx| {
         cx.debug_bounds("send-go").is_some()
     });
-    assert_eq!(
-        shell.read_with(cx, |s, _| s.shown_page()),
-        Some("terminals")
-    );
+    assert_eq!(shell.read_with(cx, |s, _| s.shown_page()), Some("sessions"));
     let page = PAGE.with(|p| p.borrow().clone()).expect("the page");
     let aimed = page.read_with(cx, |p, _| p.send_target.clone());
     assert_eq!(aimed.map(|k| k.name), Some("alpha".to_string()));
@@ -413,14 +414,14 @@ fn other_pages_read_the_sessions_and_open_views_beside_them(cx: &mut TestAppCont
     );
     assert!(cx.debug_bounds("terminals-beside").is_none());
     let note = cx.update(|_, cx| cx.new(|cx| Note(cx.focus_handle())));
-    cx.update(|_, cx| toy.show_beside("terminals", note.clone().into(), cx));
+    cx.update(|_, cx| toy.show_beside("sessions", note.clone().into(), cx));
     cx.run_until_parked();
     assert!(
         cx.debug_bounds("terminals-beside").is_some(),
         "drawn beside"
     );
     cx.update(|window, cx| window.focus(&note.read(cx).0.clone(), cx));
-    cx.update(|_, cx| toy.close_beside("terminals", cx));
+    cx.update(|_, cx| toy.close_beside("sessions", cx));
     cx.run_until_parked();
     assert!(cx.debug_bounds("terminals-beside").is_none(), "closed");
     // The view lives on, holding the focus; the terminal takes it back.
@@ -510,7 +511,7 @@ fn nothing_opened_on_the_page_resizes_a_session(cx: &mut TestAppContext) {
     }
 
     let note = cx.update(|_, cx| cx.new(|cx| Note(cx.focus_handle())));
-    cx.update(|_, cx| toy.show_beside("terminals", note.into(), cx));
+    cx.update(|_, cx| toy.show_beside("sessions", note.into(), cx));
     cx.run_until_parked();
     let beside = cx.debug_bounds("terminals-beside").expect("drawn over");
     let right = cx.update(|window, _| window.viewport_size().width);
@@ -565,7 +566,7 @@ fn nothing_opened_on_the_page_resizes_a_session(cx: &mut TestAppContext) {
     assert!(moved.x > grip.x + px(100.), "the edge followed the drag");
     unchanged(cx, "after dragging its edge");
 
-    cx.update(|_, cx| toy.toggle_whole_beside("terminals", cx));
+    cx.update(|_, cx| toy.toggle_whole_beside("sessions", cx));
     cx.run_until_parked();
     assert!(cx.debug_bounds("beside-grip").is_none(), "the whole area");
     unchanged(cx, "with the view given the whole area");
@@ -706,10 +707,10 @@ fn nothing_opened_on_the_page_resizes_a_session(cx: &mut TestAppContext) {
         assert_eq!(rt.block_on(opened).expect("its task"), 0, "{page_id}");
         assert_eq!(shell.read_with(cx, |s, _| s.shown_page()), Some(page_id));
         unchanged(cx, &format!("with {page_id} shown by parvi view open"));
-        let terminals = shell.read_with(cx, |s, _| Host::new(s.hub()).for_page("terminals", &[]));
+        let terminals = shell.read_with(cx, |s, _| Host::new(s.hub()).for_page("sessions", &[]));
         cx.update(|_, cx| terminals.show(cx));
         until(cx, "the terminals back", |cx| {
-            shell.read_with(cx, |s, _| s.shown_page()) == Some("terminals")
+            shell.read_with(cx, |s, _| s.shown_page()) == Some("sessions")
         });
         unchanged(cx, &format!("with the terminals back from {page_id}"));
     }
@@ -813,7 +814,7 @@ fn what_lies_over_the_windows_takes_every_click_inside_it(cx: &mut TestAppContex
     };
     assert!(term_focused(cx), "alpha's terminal has the keyboard");
     let note = cx.update(|_, cx| cx.new(|cx| Note(cx.focus_handle())));
-    cx.update(|_, cx| toy.show_beside("terminals", note.into(), cx));
+    cx.update(|_, cx| toy.show_beside("sessions", note.into(), cx));
     cx.run_until_parked();
     assert!(
         term_focused(cx),
@@ -983,7 +984,7 @@ fn a_page_starts_a_session_in_a_folder_through_launch(cx: &mut TestAppContext) {
         name: "alpha".into(),
     };
     cx.update(|_, cx| toy.ask(ask, cx))
-        .expect("the Terminals page answers it");
+        .expect("the Sessions page answers it");
     until(cx, "alpha-2 to be listed in the folder", |cx| {
         sessions.read_with(cx, |l, _| {
             l.sessions.iter().any(|s| {
@@ -993,6 +994,39 @@ fn a_page_starts_a_session_in_a_folder_through_launch(cx: &mut TestAppContext) {
             })
         })
     });
+    // Its row's menu asks what shapes an agent in its folder.
+    let page = PAGE.with(|p| p.borrow().clone()).unwrap();
+    let key = Key {
+        node: running.node.clone(),
+        user: String::new(),
+        name: "alpha-2".into(),
+    };
+    until(cx, "alpha-2's folder known to the page", |cx| {
+        page.read_with(cx, |p, _| {
+            p.fleet
+                .session(&key)
+                .is_some_and(|s| s.cwd.as_deref().is_some_and(|c| c.ends_with(&*folder)))
+        })
+    });
+    let sees = page.read_with(cx, |p, _| {
+        p.row_menu(&key)
+            .into_iter()
+            .find(|r| r.label == "What this agent sees")
+            .expect("the row menu offers it")
+            .act
+            .unwrap()
+    });
+    ITEM_ASK.with(|slot| *slot.borrow_mut() = None);
+    cx.update(|window, cx| page.update(cx, |p, cx| p.act(sees, window, cx)));
+    cx.run_until_parked();
+    match ITEM_ASK.with(|slot| slot.borrow().clone()) {
+        Some(Ask::Reveal { what, id, node, .. }) => {
+            assert_eq!(what, "agent");
+            assert!(id.ends_with(&*folder), "{id} is alpha-2's folder");
+            assert_eq!(node, Some(NodeId(running.node.clone())));
+        }
+        other => panic!("asked {other:?}"),
+    }
     // A node the app does not know: the status line says why.
     let ask = Ask::Launch {
         node: NodeId("nowhere".into()),
@@ -1000,7 +1034,7 @@ fn a_page_starts_a_session_in_a_folder_through_launch(cx: &mut TestAppContext) {
         name: "lost".into(),
     };
     cx.update(|_, cx| toy.ask(ask, cx))
-        .expect("the Terminals page answers it");
+        .expect("the Sessions page answers it");
     cx.run_until_parked();
     let said = shell.read_with(cx, |s, cx| {
         let status = s.hub().read(cx).status.clone();
@@ -1704,7 +1738,7 @@ fn reveal_session_shows_the_requested_session_and_pane(cx: &mut TestAppContext) 
     })
     .unwrap();
     until(cx, "beta revealed without a pane", |cx| {
-        shell.read_with(cx, |s, _| s.shown_page()) == Some("terminals")
+        shell.read_with(cx, |s, _| s.shown_page()) == Some("sessions")
             && page.read_with(cx, |p, _| {
                 p.settings.workspace.shown(0).is_some_and(|b| b.key == beta)
             })
@@ -1722,8 +1756,8 @@ fn reveal_session_shows_the_requested_session_and_pane(cx: &mut TestAppContext) 
         )
     })
     .unwrap();
-    until(cx, "beta on the terminals page", |cx| {
-        shell.read_with(cx, |s, _| s.shown_page()) == Some("terminals")
+    until(cx, "beta on the Sessions page", |cx| {
+        shell.read_with(cx, |s, _| s.shown_page()) == Some("sessions")
             && page.read_with(cx, |p, _| {
                 p.settings
                     .workspace
@@ -1899,10 +1933,7 @@ fn work_item_in_terminal_opens_beside_and_focus_is_published(cx: &mut TestAppCon
     until(cx, "item beside terminals", |cx| {
         cx.debug_bounds("terminals-beside").is_some()
     });
-    assert_eq!(
-        shell.read_with(cx, |s, _| s.shown_page()),
-        Some("terminals")
-    );
+    assert_eq!(shell.read_with(cx, |s, _| s.shown_page()), Some("sessions"));
     let beta = Key {
         node: running.node.clone(),
         user: String::new(),
@@ -2712,7 +2743,7 @@ fn arrange_tabs_preset_drag_and_sizing_on_a_live_node(cx: &mut TestAppContext) {
     });
     click(cx, "tab-add".into());
     until(cx, "second tab", |cx| {
-        cx.debug_bounds("tab-terminals-1").is_some()
+        cx.debug_bounds("tab-sessions-1").is_some()
     });
     run_item(cx, 1, "Rename tab");
     cx.simulate_input("Ops");

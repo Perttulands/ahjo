@@ -143,7 +143,7 @@ reserves, or whose `everywhere` chords share a key, naming both;
   reaches the shell as a hub event after the update that caused it, so a page
   may use its Host inside its own update.
 - **Tabs and chords.** A page may draw its own part of the tab bar (the
-  terminals draw their workspace tabs there). A chord marked `everywhere`
+  Sessions page, the terminals area's, draws its workspace tabs there). A chord marked `everywhere`
   works from every page, as CHROTE's terminal chords do, and brings its page
   forward when it acts.
 - **Asks.** Pages never depend on each other. An `Ask` (send a reference, open
@@ -176,7 +176,7 @@ reserves, or whose `everywhere` chords share a key, naming both;
   makes, applies at once and each page whose section changed hears
   `settings_changed`; the app's own writes are not edits, and a file that
   does not read is reported while the last good settings stay.
-- **Read models.** What one page knows that others show (the terminals' session
+- **Read models.** What one page knows that others show (the Sessions page's session
   list) is a plain type in its area's `contract`, published by that page
   (`Host::publish`) and read and observed by any page (`Host::model`), built in
   any order. A second publisher is refused.

@@ -17,7 +17,7 @@ use parvi_core::NodeId;
 use std::{cell::RefCell, rc::Rc, time::Duration};
 
 /// The page the Brain panel opens beside.
-const PANEL_BESIDE: &str = "terminals";
+const PANEL_BESIDE: &str = "sessions";
 
 pub struct BrainPage {
     pub(crate) host: Host,

@@ -238,7 +238,7 @@ fn files_panel_browses_sends_and_remembers_beside_the_terminals(cx: &mut TestApp
     tree(cx, "file-row-folder");
     assert_eq!(
         shell.read_with(cx, |s, _| s.shown_page()),
-        Some("terminals"),
+        Some("sessions"),
         "the terminals come forward with the panel beside them"
     );
     assert!(cx.debug_bounds("dock-files").is_none(), "no dock column");
@@ -339,10 +339,7 @@ fn terminal_panel_search_and_printed_path_open_beside(cx: &mut TestAppContext) {
     until(cx, "the panel at the session's folder", |cx| {
         cx.debug_bounds("file-row-note.txt").is_some() && cx.debug_bounds("picked-sub").is_some()
     });
-    assert_eq!(
-        shell.read_with(cx, |s, _| s.shown_page()),
-        Some("terminals")
-    );
+    assert_eq!(shell.read_with(cx, |s, _| s.shown_page()), Some("sessions"));
     assert!(
         cx.debug_bounds("file-row-other").is_some(),
         "the root shows"
@@ -409,10 +406,7 @@ fn terminal_panel_search_and_printed_path_open_beside(cx: &mut TestAppContext) {
         cx.debug_bounds("terminals-beside").is_some()
             && cx.debug_bounds("file-view-note.txt").is_some()
     });
-    assert_eq!(
-        shell.read_with(cx, |s, _| s.shown_page()),
-        Some("terminals")
-    );
+    assert_eq!(shell.read_with(cx, |s, _| s.shown_page()), Some("sessions"));
     drop(running);
     std::fs::remove_dir_all(root).unwrap();
 }
@@ -485,10 +479,7 @@ fn browse_find_edit_save_and_send_to_a_session(cx: &mut TestAppContext) {
     });
     click(cx, "files-send");
     until(cx, "send drawer", |cx| cx.debug_bounds("send-go").is_some());
-    assert_eq!(
-        shell.read_with(cx, |s, _| s.shown_page()),
-        Some("terminals")
-    );
+    assert_eq!(shell.read_with(cx, |s, _| s.shown_page()), Some("sessions"));
     click(cx, "send-go");
     let expected = format!("path {}", file.display());
     until(cx, "reference delivered to session", |_| {
@@ -1222,7 +1213,7 @@ struct TerminalPage {
     host: parvi_app_kit::Host,
 }
 impl parvi_app_kit::Page for TerminalPage {
-    const ID: &'static str = "terminals";
+    const ID: &'static str = "sessions";
     const TITLE: &'static str = "Terminals";
 }
 impl gpui::Render for TerminalPage {
@@ -1268,7 +1259,7 @@ fn markdown_beside_terminal_scrolls_inside_its_border(cx: &mut TestAppContext) {
         })
     });
     let host = shell.read_with(cx, |s, _| {
-        parvi_app_kit::Host::new(s.hub()).for_page("terminals", &[])
+        parvi_app_kit::Host::new(s.hub()).for_page("sessions", &[])
     });
     cx.update(|_, cx| {
         host.ask(
@@ -1325,7 +1316,7 @@ fn open_path_beside_keeps_the_terminal_and_the_draft(cx: &mut TestAppContext) {
         parvi_app_shell::start(&[terminal, parvi_files_app::build], Some(url), None, w, cx)
     });
     until(cx, "terminal shown", |cx| {
-        shell.read_with(cx, |s, _| s.shown_page()) == Some("terminals")
+        shell.read_with(cx, |s, _| s.shown_page()) == Some("sessions")
     });
     until(cx, "node linked", |cx| {
         shell.read_with(cx, |s, cx| {
@@ -1333,7 +1324,7 @@ fn open_path_beside_keeps_the_terminal_and_the_draft(cx: &mut TestAppContext) {
         })
     });
     let host = shell.read_with(cx, |s, _| {
-        parvi_app_kit::Host::new(s.hub()).for_page("terminals", &[])
+        parvi_app_kit::Host::new(s.hub()).for_page("sessions", &[])
     });
     let ask = |path: std::path::PathBuf| parvi_app_kit::Ask::OpenPath {
         node: parvi_core::NodeId(running.node.clone()),
@@ -1344,10 +1335,7 @@ fn open_path_beside_keeps_the_terminal_and_the_draft(cx: &mut TestAppContext) {
     until(cx, "first viewer", |cx| {
         cx.debug_bounds("file-view-first.txt").is_some() && cx.debug_bounds("files-edit").is_some()
     });
-    assert_eq!(
-        shell.read_with(cx, |s, _| s.shown_page()),
-        Some("terminals")
-    );
+    assert_eq!(shell.read_with(cx, |s, _| s.shown_page()), Some("sessions"));
     click(cx, "files-edit");
     cx.simulate_keystrokes("ctrl-a");
     cx.simulate_input("draft");
@@ -1365,7 +1353,7 @@ fn open_path_beside_keeps_the_terminal_and_the_draft(cx: &mut TestAppContext) {
     click(cx, "close-stay");
     cx.update(|window, cx| shell.update(cx, |shell, cx| shell.show(0, window, cx)));
     until(cx, "terminal restored", |cx| {
-        shell.read_with(cx, |s, _| s.shown_page()) == Some("terminals")
+        shell.read_with(cx, |s, _| s.shown_page()) == Some("sessions")
     });
     cx.update(|_, cx| host.ask(ask(root.join("second.txt")), cx).unwrap());
     until(cx, "second viewer", |cx| {

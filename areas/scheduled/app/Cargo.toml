@@ -12,7 +12,7 @@ workspace = true
 parvi-app-kit = { path = "../../../kit/app-kit" }
 parvi-core = { path = "../../../kit/core" }
 parvi-scheduled-contract = { path = "../contract" }
-# The sessions a task may send to, as the terminals page publishes them.
+# The sessions a task may send to, as the Sessions page publishes them.
 parvi-terminals-contract = { path = "../../terminals/contract" }
 gpui = { package = "gpui-pre", version = "=0.3.12" }
 jiff = { version = "0.2", features = ["serde"] }

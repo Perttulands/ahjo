@@ -1,6 +1,6 @@
 //! The Scheduled page opens in the app against a real node (terminals and
 //! scheduled over a scratch tmux, started through the testkit) and lists a
-//! task made through the CLI, and offers the sessions the terminals page
+//! task made through the CLI, and offers the sessions the Sessions page
 //! publishes. Linux and macOS only; skips without tmux
 //! unless `PARVI_REQUIRE_TMUX=1`.
 #![cfg(unix)]
@@ -209,7 +209,7 @@ fn the_page_lists_a_task_made_through_the_cli(cx: &mut TestAppContext) {
             .is_some()
     });
 
-    // Publish the two scratch tmux sessions as the terminals page does.
+    // Publish the two scratch tmux sessions as the Sessions page does.
     shell.update(cx, |s, cx| {
         let list = SessionList {
             sessions: ["alpha", "beta"]
@@ -222,7 +222,7 @@ fn the_page_lists_a_task_made_through_the_cli(cx: &mut TestAppContext) {
                 .collect(),
             ..Default::default()
         };
-        let terminals = Host::new(s.hub()).for_page("terminals", &[]);
+        let terminals = Host::new(s.hub()).for_page("sessions", &[]);
         terminals.publish(list, cx).expect("one publisher");
     });
     let new_button = cx.debug_bounds("scheduled-new").unwrap().center();

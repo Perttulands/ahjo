@@ -31,7 +31,7 @@ const RECENT_AGAIN: Duration = Duration::from_secs(60);
 /// A pause in typing this long sends the find.
 const TYPED: Duration = Duration::from_millis(90);
 /// The page the Files panel opens beside.
-const PANEL_BESIDE: &str = "terminals";
+const PANEL_BESIDE: &str = "sessions";
 
 struct Upload {
     source: PathBuf,

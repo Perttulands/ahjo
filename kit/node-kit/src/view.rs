@@ -172,7 +172,7 @@ pub(crate) fn commands(views: &Arc<Views>, node: NodeId) -> Vec<Command> {
     let mut properties = Map::new();
     properties.insert(
         "page".into(),
-        json!({ "type": "string", "description": "The page's id: files, work, terminals, …" }),
+        json!({ "type": "string", "description": "The page's id: sessions, files, work, …" }),
     );
     for thing in THINGS {
         properties.insert(

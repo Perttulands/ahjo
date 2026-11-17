@@ -295,7 +295,7 @@ fn work_column_and_terminal_links_open_cards_and_hand_off(cx: &mut TestAppContex
             && cx.debug_bounds("work-row-fixture-2").is_none()
     });
     cx.simulate_keystrokes("escape");
-    cx.update(|window, cx| shell.update(cx, |shell, cx| shell.show_id("terminals", window, cx)));
+    cx.update(|window, cx| shell.update(cx, |shell, cx| shell.show_id("sessions", window, cx)));
     let row = format!("row-{}::alpha", running.node);
     until(cx, "session", |cx| {
         cx.debug_bounds(Box::leak(row.clone().into_boxed_str()))
@@ -351,10 +351,7 @@ fn work_column_and_terminal_links_open_cards_and_hand_off(cx: &mut TestAppContex
             cx.debug_bounds(Box::leak(selector.clone().into_boxed_str()))
                 .is_some()
         });
-        assert_eq!(
-            shell.read_with(cx, |s, _| s.shown_page()),
-            Some("terminals")
-        );
+        assert_eq!(shell.read_with(cx, |s, _| s.shown_page()), Some("sessions"));
         cx.simulate_keystrokes("alt-i");
         until(cx, "linked card closed", |cx| {
             cx.debug_bounds("work-beside").is_none()
@@ -372,10 +369,7 @@ fn work_column_and_terminal_links_open_cards_and_hand_off(cx: &mut TestAppContex
         cx.debug_bounds("work-card-title-Read the fixture")
             .is_some()
     });
-    assert_eq!(
-        shell.read_with(cx, |s, _| s.shown_page()),
-        Some("terminals")
-    );
+    assert_eq!(shell.read_with(cx, |s, _| s.shown_page()), Some("sessions"));
     // Send in the panel hands the item to a session.
     click(cx, "work-send");
     until(cx, "send drawer", |cx| cx.debug_bounds("send-go").is_some());

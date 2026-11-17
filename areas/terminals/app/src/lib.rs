@@ -21,8 +21,11 @@ use parvi_app_kit::{Host, Mounted, mount};
 
 pub use ui::page::Terminals;
 
-/// The page's id in view control and settings, and the node area it needs.
-pub const NAME: &str = "terminals";
+/// The page's id in view control and settings.
+pub const PAGE: &str = "sessions";
+
+/// The node area the page needs.
+pub const AREA: &str = "terminals";
 
 /// Makes the page; the app lists this in its `PAGES`. The terminal's
 /// symbols font comes with it: box drawing and prompt glyphs the text

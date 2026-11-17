@@ -17,5 +17,5 @@ fn the_listed_pages_mount_together(cx: &mut TestAppContext) {
         mount(parvi_app::PAGES, &hub, window, cx).map(|pages| (pages.len(), pages[0].meta.id))
     });
     // Each listed page, and the shell's Settings page.
-    assert_eq!(mounted.unwrap(), (parvi_app::PAGES.len() + 1, "terminals"));
+    assert_eq!(mounted.unwrap(), (parvi_app::PAGES.len() + 1, "sessions"));
 }

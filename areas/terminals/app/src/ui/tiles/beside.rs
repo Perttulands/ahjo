@@ -31,7 +31,7 @@ impl Terminals {
     /// sight: its width with its edge, or nothing when there is none or it
     /// has the whole area.
     pub(in crate::ui) fn beside_inset(&self, window: &Window, cx: &App) -> f32 {
-        let whole = self.host.whole_beside(crate::NAME, cx) == Some(true);
+        let whole = self.host.whole_beside(crate::PAGE, cx) == Some(true);
         if self.host.beside(cx).is_none() || whole {
             return 0.;
         }
@@ -47,7 +47,7 @@ impl Terminals {
     ) -> Option<AnyElement> {
         let view = self.host.beside(cx)?;
         let t = theme(cx).clone();
-        let whole = self.host.whole_beside(crate::NAME, cx) == Some(true);
+        let whole = self.host.whole_beside(crate::PAGE, cx) == Some(true);
         let width = self.beside_width(window);
         let grip = div()
             .id("beside-grip")
@@ -99,7 +99,7 @@ impl Terminals {
             .shadow_lg()
             .on_key_down(cx.listener(|s, e: &KeyDownEvent, _, cx| {
                 if e.keystroke.key == "escape" && !e.keystroke.modifiers.modified() {
-                    s.host.close_beside(crate::NAME, cx);
+                    s.host.close_beside(crate::PAGE, cx);
                     cx.stop_propagation();
                 }
             }))

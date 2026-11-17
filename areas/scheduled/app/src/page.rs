@@ -59,7 +59,7 @@ pub struct ScheduledPage {
     pub(crate) host: Host,
     pub(crate) state: Scheduled,
     pub(crate) fields: Fields,
-    /// The sessions the terminals page hears, across nodes.
+    /// The sessions the Sessions page hears, across nodes.
     sessions: Option<Entity<SessionList>>,
     /// The page is on show.
     shown: bool,

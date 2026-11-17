@@ -9,7 +9,7 @@
 //! comes into reach (no timer reads the store); countdowns tick every 30 s.
 //! Nothing ticks while the page is not shown.
 //!
-//! The sessions to send to come from the terminals page's published read model.
+//! The sessions to send to come from the Sessions page's published read model.
 
 mod form;
 mod page;

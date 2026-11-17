@@ -39,9 +39,9 @@ fn chords(page: &WeakEntity<Terminals>, tabs: usize) -> Vec<Chord> {
         .enumerate()
         .map(|(i, key)| {
             let label = if i < tabs {
-                format!("Terminal tab {}", i + 1)
+                format!("Sessions tab {}", i + 1)
             } else {
-                format!("Terminal tab {} (not open)", i + 1)
+                format!("Sessions tab {} (not open)", i + 1)
             };
             chord(key, &label, Action::Tab(i)).alt(key, None)
         })
@@ -262,8 +262,8 @@ mod tests {
             ("n", false, Some("Launcher in the focused window")),
             ("a", false, Some("Sessions panel")),
             ("s", false, Some("Send from the focused session")),
-            ("2", false, Some("Terminal tab 2")),
-            ("6", false, Some("Terminal tab 6")),
+            ("2", false, Some("Sessions tab 2")),
+            ("6", false, Some("Sessions tab 6")),
             ("j", false, Some("Go to the session that asks or reported")),
             // Alt+F is the shell's forward-word.
             ("f", false, None),
@@ -286,7 +286,7 @@ mod tests {
             ("/", Some("Session search")),
             ("n", Some("Launcher in the focused window")),
             ("s", Some("Send from the focused session")),
-            ("3", Some("Terminal tab 3")),
+            ("3", Some("Sessions tab 3")),
             ("j", Some("Go to the session that asks or reported")),
             ("i", None),
             ("r", None),
@@ -312,7 +312,7 @@ mod tests {
         let all = chords(&WeakEntity::new_invalid(), 1);
         assert_eq!(
             direct(&alt("2", "2", false), &all).unwrap().label,
-            "Terminal tab 2 (not open)"
+            "Sessions tab 2 (not open)"
         );
         assert_eq!(
             direct(&alt("1", "1", false), &all).unwrap().caps,
@@ -323,7 +323,7 @@ mod tests {
     #[test]
     fn the_panel_lists_tabs_first_and_filters_by_words() {
         let r = rows(&chords(&WeakEntity::new_invalid(), 3));
-        assert_eq!(r[0].label, "Terminal tab 1");
+        assert_eq!(r[0].label, "Sessions tab 1");
         assert_eq!(filter(&r, "window add").len(), 1);
         assert_eq!(filter(&r, "alt shift").len(), 1);
     }

@@ -453,12 +453,12 @@ pub(super) fn mend(t: &mut Tab) {
     t.windows.resize_with(MAX_WINDOWS, Window::default);
 }
 
-/// The label a tab carries: its name as given, or Terminal, Terminal 2…
+/// The label a tab carries: its name as given, or Sessions, Sessions 2…
 pub fn tab_label(tab: &Tab, index: usize) -> String {
     match &tab.name {
         Some(n) => n.clone(),
-        None if index == 0 => "Terminal".into(),
-        None => format!("Terminal {}", index + 1),
+        None if index == 0 => "Sessions".into(),
+        None => format!("Sessions {}", index + 1),
     }
 }
 
@@ -610,7 +610,7 @@ mod tests {
         let mut ws = Workspace::default();
         while ws.add_tab() {}
         assert_eq!(ws.shown_tabs().len(), MAX_TABS);
-        assert_eq!(tab_label(&ws.tabs[2], 2), "Terminal 3");
+        assert_eq!(tab_label(&ws.tabs[2], 2), "Sessions 3");
         ws.show_tab(1);
         ws.rename_tab(1, "ops");
         ws.bind(0, key("a"), None);

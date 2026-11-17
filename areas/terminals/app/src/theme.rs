@@ -11,7 +11,7 @@ pub mod size {
 
     pub const STRIP: f32 = 44.;
     /// A tab's name field while it is renamed in place.
-    /// The least the terminal tabs shrink to on a narrow bar: one tab and
+    /// The least the Sessions tabs shrink to on a narrow bar: one tab and
     /// the `+` beside it.
     pub const TAB_STRIP_LEAST: f32 = 130.;
     pub const TAB_FIELD: f32 = 180.;
@@ -27,9 +27,11 @@ pub mod size {
     pub const RAIL_ROW_LEAD: f32 = 10.;
     /// The room a rail row keeps for its news dot.
     pub const DOT_SLOT: f32 = 12.;
+    /// The room a row keeps for its harness's mark before the name.
+    pub const HARNESS_SLOT: f32 = 16.;
     /// A session that waits for an answer: its mark, filling the dot slot.
     pub const ASK_MARK: f32 = 12.;
-    /// A rail row's menu button, shown over the row's end on hover.
+    /// A rail row's menu button, at the row's end.
     pub const ROW_MENU: f32 = 20.;
     /// The least a view beside the windows (a file a link named, a
     /// diagram) narrows to.

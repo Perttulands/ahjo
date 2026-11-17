@@ -61,7 +61,7 @@ pub(crate) fn commands(ctx: &Arc<Ctx>) -> Vec<Command> {
         command!(
             ctx,
             "session_list",
-            "List the terminal sessions on this node: id, name, panes, whether \
+            "List the sessions on this node: id, name, panes, whether \
         they are active, when they last wrote, and the question a pane waits on.",
             |_ctx| object(json!({}), &[]),
             list_sessions

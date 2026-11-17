@@ -15,7 +15,7 @@ use gpui::{
 use parvi_app_kit::widgets::kit::{self, Kind};
 
 impl Terminals {
-    /// The terminal tabs, in the page's place on the tab bar: a click shows
+    /// The Sessions tabs, in the page's place on the tab bar: a click shows
     /// one, a right click opens its menu, and renaming happens in the tab.
     pub fn render_tabs(
         &mut self,
@@ -85,7 +85,7 @@ impl Terminals {
             let marked = self.tab_marked(i);
             bar = bar.child(
                 kit::tab(&t, ("terminal-tab", i), active, cx)
-                    .debug_selector(|| format!("tab-terminals-{i}"))
+                    .debug_selector(|| format!("tab-sessions-{i}"))
                     .child(kit::tab_label(&tab_label(tb, i)))
                     .when(marked, |d| d.child(kit::waiting_dot(&t)))
                     .on_click(
@@ -151,7 +151,7 @@ impl Terminals {
                     .text_color(t.dim)
                     .hover(|d| d.text_color(t.text))
                     .child("+")
-                    .tooltip(kit::tip("New terminal tab"))
+                    .tooltip(kit::tip("New Sessions tab"))
                     .on_click(cx.listener(|s, _, window, cx| s.act(Act::NewTab, window, cx))),
             );
         }
@@ -165,7 +165,7 @@ impl Terminals {
         cx.on_next_frame(window, |_, _, cx| cx.notify());
     }
 
-    /// Every terminal tab's menu, CHROTE's: the tab, its layout and
+    /// Every Sessions tab's menu, CHROTE's: the tab, its layout and
     /// presets, then what acts on its windows.
     pub fn tab_menu(&self, i: usize) -> Vec<MenuItem> {
         tab_menu(&self.settings.workspace, i)

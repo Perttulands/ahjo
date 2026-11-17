@@ -11,7 +11,7 @@ Commands use `parvi <noun> <verb>`. Required arguments can be positional or name
 
 | Noun | Purpose and verbs |
 |---|---|
-| `session` | Terminal sessions: `list`, `read`, `history`, `search`, `send`, `keys`, `launch`, `copy`, `rename`, `kill`, `mouse`, `seen`. |
+| `session` | Sessions: `list`, `read`, `history`, `search`, `send`, `keys`, `launch`, `copy`, `rename`, `kill`, `mouse`, `seen`. |
 | `file` | Browse and change files: `list`, `read`, `diff`, `projects`, `download`, `upload`, `write`, `mkdir`, `move`, `delete`, `find`, `search`, `copy`, `resume`, `transfer`. Use the base version on writes to detect stale edits. |
 | `work` | Read the configured work board and item family, or file an item: `list`, `show`, `create`. |
 | `brain` | Find, read and save knowledge: `search`, `read`, `save`, `collections`, `changes`, `send`. |

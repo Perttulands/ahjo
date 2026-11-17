@@ -196,7 +196,7 @@ struct Toy {
     host: parvi_app_kit::Host,
 }
 impl parvi_app_kit::Page for Toy {
-    const ID: &'static str = "terminals";
+    const ID: &'static str = "sessions";
     const TITLE: &'static str = "Terminals";
     const ANSWERS: &'static [parvi_app_kit::Answers] = &[parvi_app_kit::Answers::Send];
     fn answer(
@@ -258,10 +258,7 @@ fn the_panel_searches_reads_sends_and_toggles_beside_the_terminals(cx: &mut Test
             s.hub().read(cx).fleet.here().state == LinkState::Open
         })
     });
-    assert_eq!(
-        shell.read_with(cx, |s, _| s.shown_page()),
-        Some("terminals")
-    );
+    assert_eq!(shell.read_with(cx, |s, _| s.shown_page()), Some("sessions"));
     let chords = shell.update_in(cx, |shell, _, cx| shell.chords(cx));
     assert!(
         parvi_app_kit::chords::rows(&chords)
@@ -327,9 +324,6 @@ fn the_panel_searches_reads_sends_and_toggles_beside_the_terminals(cx: &mut Test
     until(cx, "panel closed by Alt+L", |cx| {
         cx.debug_bounds("toy-beside").is_none()
     });
-    assert_eq!(
-        shell.read_with(cx, |s, _| s.shown_page()),
-        Some("terminals")
-    );
+    assert_eq!(shell.read_with(cx, |s, _| s.shown_page()), Some("sessions"));
     std::fs::remove_dir_all(settings).unwrap();
 }

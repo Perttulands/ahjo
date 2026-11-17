@@ -53,6 +53,9 @@ pub enum Act {
     /// The same harness again, in the session's folder (CHROTE's Copy).
     Copy(Key),
     Kill(Key),
+    /// What shapes the agent started in the session's folder, on the
+    /// Agents page.
+    Sees(Key),
     /// Kills the rail's picked rows that it shows.
     KillPicked,
     /// Takes a session's tag out of a window of the shown tab.
@@ -300,7 +303,7 @@ pub struct Terminals {
     pub overview_columns: Rc<Cell<usize>>,
     pub overview_scroll: ScrollHandle,
     pub find_scroll: ScrollHandle,
-    /// The terminal tabs' strip, and the active tab, tab count and window
+    /// The Sessions tabs' strip, and the active tab, tab count and window
     /// width it last brought the active tab into view at.
     pub tab_scroll: ScrollHandle,
     pub tab_scrolled: Option<(usize, usize, i32)>,
@@ -365,7 +368,7 @@ impl Terminals {
             }
             Err(e) => {
                 said.push(Status::failure(format!(
-                    "The terminals' settings did not read ({}): {}",
+                    "The Sessions settings did not read ({}): {}",
                     e.code, e.message
                 )));
                 Settings::default()
@@ -980,7 +983,7 @@ impl Terminals {
     pub fn save(&mut self, cx: &mut Context<Self>) {
         if let Err(e) = self.host.set_setting(&self.settings, cx) {
             self.report(
-                &format!("The terminals' settings were not kept: {}", e.message),
+                &format!("The Sessions settings were not kept: {}", e.message),
                 true,
                 None,
             );
@@ -1103,7 +1106,7 @@ impl Terminals {
             }
             Act::NewTab => {
                 if !ws.add_tab() {
-                    self.report("Six terminal tabs is the most.", false, None);
+                    self.report("Six Sessions tabs is the most.", false, None);
                 }
                 self.host.show(cx);
             }
@@ -1143,6 +1146,32 @@ impl Terminals {
             }
             Act::Send(k) => {
                 self.open_send(Some(k), window, cx);
+                return;
+            }
+            Act::Sees(k) => {
+                let Some(session) = self.fleet.session(&k) else {
+                    return;
+                };
+                let Some(folder) = session.cwd.clone() else {
+                    self.report(&format!("{} has no folder to read", k.name), true, None);
+                    return;
+                };
+                // The Agents page names harnesses by the tools report's ids.
+                let harness = match crate::store::sessions::running(session) {
+                    crate::store::sessions::Running::Harness("claude-code") => Some("claude"),
+                    crate::store::sessions::Running::Harness("codex") => Some("codex"),
+                    _ => None,
+                };
+                let ask = parvi_app_kit::Ask::Reveal {
+                    what: "agent".into(),
+                    id: folder,
+                    node: Some(parvi_core::NodeId(k.node.clone())),
+                    part: harness.map(str::to_string),
+                    beside: false,
+                };
+                if let Err(e) = self.host.ask(ask, cx) {
+                    self.report(&e.message, true, None);
+                }
                 return;
             }
             Act::Attach(k, w) => self.attach(k, w, window, cx),
@@ -1637,10 +1666,10 @@ impl Terminals {
 }
 
 impl Page for Terminals {
-    const ID: &'static str = crate::NAME;
-    const TITLE: &'static str = "Terminals";
+    const ID: &'static str = crate::PAGE;
+    const TITLE: &'static str = "Sessions";
     const KEY: Option<char> = Some('T');
-    const AREA: Option<&'static str> = Some(crate::NAME);
+    const AREA: Option<&'static str> = Some(crate::AREA);
     const KINDS: Kinds = parvi_terminals_contract::KINDS;
     const ANSWERS: &'static [Answers] =
         &[Answers::Send, Answers::Launch, Answers::Reveal("session")];
@@ -1651,7 +1680,7 @@ impl Page for Terminals {
         match self.host.setting::<Settings>(cx) {
             Ok(fresh) => self.settings.take_declared(fresh.mend()),
             Err(e) => self.report(
-                &format!("The terminals' settings did not read: {}", e.message),
+                &format!("The Sessions settings did not read: {}", e.message),
                 true,
                 None,
             ),

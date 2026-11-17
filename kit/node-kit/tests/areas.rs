@@ -646,7 +646,7 @@ async fn view_open_reaches_the_app_and_answers_its_answer() {
     // Not an app until it says what it shows.
     assert_eq!(tool(&client, "view_show", json!({})).await, Ok(json!([])));
     ws.send(Message::Binary(
-        [&[0xb0][..], br#"{"page":"terminals"}"#].concat().into(),
+        [&[0xb0][..], br#"{"page":"sessions"}"#].concat().into(),
     ))
     .await
     .unwrap();
@@ -657,7 +657,7 @@ async fn view_open_reaches_the_app_and_answers_its_answer() {
         }
         tokio::time::sleep(std::time::Duration::from_millis(20)).await;
     };
-    assert_eq!(shown[0]["page"], "terminals");
+    assert_eq!(shown[0]["page"], "sessions");
 
     // Two things at once are refused before reaching the app.
     let two = json!({ "page": "files", "path": "/a", "item": "x" });

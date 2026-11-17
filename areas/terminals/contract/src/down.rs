@@ -27,7 +27,7 @@ pub enum Seat {
     Other,
 }
 
-/// Every session the app follows, across nodes, as the terminals page last
+/// Every session the app follows, across nodes, as the Sessions page last
 /// heard them: the read model it publishes for other pages
 /// (`parvi_app_kit::Host::model`).
 #[derive(Clone, Debug, Default, PartialEq)]

@@ -231,8 +231,11 @@ impl Terminals {
         let g = name.to_string();
         let header = div()
             .id(gpui::SharedString::from(format!("group-{name}")))
-            .group(gpui::SharedString::from(format!("group-{name}")))
-            .px(px(12.))
+            .mx(px(size::ROW_INSET))
+            .border_t_1()
+            .border_color(t.divider)
+            .px(px(12. - size::ROW_INSET))
+            .hover(|d| d.bg(t.accent_soft()))
             .pt(px(size::LABEL_TOP))
             .pb(px(size::LABEL_BOTTOM))
             .flex()
@@ -246,13 +249,12 @@ impl Terminals {
                     .text_color(t.dim)
                     .child(if collapsed { "▶" } else { "▼" }),
             )
+            // A group's name reads before its rows: the label in full
+            // colour, under a rule that starts the group.
             .child(
                 kit::group_label(t, name.to_string())
                     .flex_1()
-                    .text_color(t.text2)
-                    .group_hover(gpui::SharedString::from(format!("group-{name}")), |d| {
-                        d.text_color(t.text)
-                    }),
+                    .text_color(t.text),
             )
             .child(kit::count(t, members.len()))
             .on_click(cx.listener(move |s, _, _, cx| {
@@ -343,6 +345,19 @@ impl Terminals {
                     }),
             )
             .when_some(s.user.clone(), |d, u| d.child(kit::user_square(t, &u)))
+            // What runs in it, before its name: the harness's mark, in a
+            // slot every row keeps so the names stand in one column.
+            .child(
+                div()
+                    .flex_none()
+                    .w(px(size::HARNESS_SLOT))
+                    .flex()
+                    .justify_center()
+                    .children(match sessions::running(s) {
+                        sessions::Running::Harness(h) => crate::harness::harness_mark(h, 14., cx),
+                        _ => None,
+                    }),
+            )
             .child(
                 div()
                     .flex_1()
@@ -379,9 +394,7 @@ impl Terminals {
                             .child(e.summary.clone())
                     })),
             )
-            .children(running_mark(t, s, cx).filter(
-                |_| !matches!(sessions::running(s), sessions::Running::Command(c) if c == s.name),
-            ))
+            .children(command_word(t, s))
             .children(
                 glyphs(s)
                     .into_iter()
@@ -399,24 +412,25 @@ impl Terminals {
                     })
                     .child(activity),
             )
-            // The menu shows over the row's end on hover, so its room goes
-            // to the name; a right click opens it too.
+            // The menu is always there at the row's end; a right click
+            // opens it too.
             .child(
                 div()
                     .id(gpui::SharedString::from(format!("rowmenu-{}", key.text())))
-                    .absolute()
-                    .right(px(4.))
+                    .debug_selector({
+                        let selector = format!("rowmenu-{}", key.text());
+                        move || selector
+                    })
+                    .flex_none()
                     .w(px(size::ROW_MENU))
                     .h(px(size::ROW_MENU))
                     .flex()
                     .items_center()
                     .justify_center()
                     .rounded(px(3.))
-                    .bg(t.raised)
                     .text_color(t.dim)
-                    .opacity(0.)
-                    .group_hover(group.clone(), |d| d.opacity(1.))
-                    .hover(|d| d.text_color(t.text))
+                    .group_hover(group.clone(), |d| d.text_color(t.text2))
+                    .hover(|d| d.bg(t.raised).text_color(t.text))
                     .child("…")
                     .on_mouse_down(
                         MouseButton::Left,
@@ -460,6 +474,7 @@ impl Terminals {
     pub fn row_menu(&self, key: &Key) -> Vec<MenuItem> {
         let mut items = vec![
             MenuItem::new("Peek", Act::Peek(key.clone())),
+            MenuItem::new("What this agent sees", Act::Sees(key.clone())),
             MenuItem::new("Send…", Act::Send(key.clone())).chord("Alt+S"),
             MenuItem::new("Rename…", Act::Rename(key.clone())),
             self.copy_row(key),
@@ -669,6 +684,26 @@ fn waiting_word(t: &Theme, away: bool) -> gpui::Div {
         .text_size(px(10.))
         .text_color(t.dim)
         .child("waiting")
+}
+
+/// A program the session runs that is no harness, by its name at the row's
+/// end; nothing for a shell or a harness, whose mark leads the row, or a
+/// program named as the session is.
+fn command_word(t: &Theme, s: &Session) -> Option<AnyElement> {
+    match sessions::running(s) {
+        sessions::Running::Command(c) if c != s.name => Some(
+            div()
+                .flex_none()
+                .max_w(px(64.))
+                .overflow_hidden()
+                .whitespace_nowrap()
+                .text_size(px(10.))
+                .text_color(t.dim)
+                .child(c.to_string())
+                .into_any_element(),
+        ),
+        _ => None,
+    }
 }
 
 /// What the session runs, as CHROTE's row shows it: the harness mark, the

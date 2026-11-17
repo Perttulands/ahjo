@@ -283,14 +283,14 @@ impl Render for DiagramView {
                             .debug_selector(|| "diagram-send".into()),
                     )
                     .when(self.drawn.is_ok(), |d| d.child(self.controls(cx)))
-                    .children(self.host.whole_beside(crate::NAME, cx).map(|whole| {
+                    .children(self.host.whole_beside(crate::PAGE, cx).map(|whole| {
                         kit::whole_button(&t, whole).on_click(
-                            cx.listener(|v, _, _, cx| v.host.toggle_whole_beside(crate::NAME, cx)),
+                            cx.listener(|v, _, _, cx| v.host.toggle_whole_beside(crate::PAGE, cx)),
                         )
                     }))
                     .child(
                         kit::button(&t, "diagram-close", "Close", Kind::Quiet).on_click(
-                            cx.listener(|v, _, _, cx| v.host.close_beside(crate::NAME, cx)),
+                            cx.listener(|v, _, _, cx| v.host.close_beside(crate::PAGE, cx)),
                         ),
                     ),
             )

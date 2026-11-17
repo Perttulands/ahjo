@@ -1274,14 +1274,14 @@ impl Work {
             );
         }
     }
-    /// Asks the terminals page to start a session in the shown item's
+    /// Asks the Sessions page to start a session in the shown item's
     /// checkout.
     pub fn start_session(&mut self, cx: &mut Context<Self>) {
         if let Some(row) = self.shown_row() {
             self.start_session_for(row, cx);
         }
     }
-    /// Asks the terminals page to start a session in a row's checkout.
+    /// Asks the Sessions page to start a session in a row's checkout.
     pub fn start_session_for(&mut self, row: usize, cx: &mut Context<Self>) {
         let item = &self.board.rows[row];
         let project = &self.board.projects[item.project];
