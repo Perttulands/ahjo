@@ -14,10 +14,14 @@ pub fn build(
     window: &mut gpui::Window,
     cx: &mut gpui::App,
 ) -> parvi_app_kit::Mounted {
-    let mounted = parvi_app_kit::mount(host.clone(), window, cx, FilesPage::new);
-    // Its section of the side panel, on every page, asking as the page.
-    let host = host.for_page(mounted.meta.id, mounted.meta.kinds);
-    let side = gpui::AppContext::new(cx, |cx| side::FilesSide::new(host.clone(), cx));
-    host.lend_side(side.into(), cx);
-    mounted
+    parvi_app_kit::mount(host, window, cx, |host, window, cx| {
+        let mut page = FilesPage::new(host, window, cx);
+        page.lends_side = true;
+        // Its tree, as its section of the side panel on the other pages.
+        let me = cx.entity();
+        let side = gpui::AppContext::new(cx, |cx| side::FilesSide::new(&me, cx));
+        page.host
+            .lend_side(side.into(), parvi_app_kit::hub::SideOn::OtherPages, cx);
+        page
+    })
 }

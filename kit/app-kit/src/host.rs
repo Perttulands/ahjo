@@ -491,16 +491,16 @@ impl Host {
     }
 
     /// Puts `view` in the side panel as this page's section: the panel at
-    /// the window's left, drawn on every page in the pages' order. While
-    /// the panel is open this page's channels stay on, as for a view it
-    /// lends beside another page.
-    pub fn lend_side(&self, view: AnyView, cx: &mut App) {
+    /// the window's left, drawn in the pages' order on the pages `on` says.
+    /// While the panel is open this page's channels stay on, as for a view
+    /// it lends beside another page.
+    pub fn lend_side(&self, view: AnyView, on: crate::hub::SideOn, cx: &mut App) {
         let page = self.page;
         assert!(
             !page.is_empty(),
             "a side section is lent by a page's own host"
         );
-        self.update(cx, |h, cx| h.set_side(page, Some(view), cx));
+        self.update(cx, |h, cx| h.set_side(page, Some((view, on)), cx));
     }
 
     /// Whether the side panel is open.

@@ -54,6 +54,16 @@ impl layers::Layer for Surface {
     }
 }
 
+/// The pages a page's section of the side panel shows on.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SideOn {
+    /// Every page, the lender's own too: it draws the section nowhere else.
+    EveryPage,
+    /// Every other page: on its own the lender shows the same thing itself,
+    /// so the panel would only show it twice.
+    OtherPages,
+}
+
 /// What the shell hears from the hub, after the update that caused it.
 pub enum HubEvent {
     /// A frame for the page whose kinds hold it.
@@ -124,8 +134,9 @@ pub struct Hub {
     /// those doing so now.
     widens: HashSet<&'static str>,
     whole: HashSet<&'static str>,
-    /// The sections of the side panel, by the page that lent each.
-    side: HashMap<&'static str, AnyView>,
+    /// The sections of the side panel, by the page that lent each, with
+    /// the pages each shows on.
+    side: HashMap<&'static str, (AnyView, SideOn)>,
     /// The views that may hold unsaved work, each with the page it is from.
     guards: Vec<Guard>,
 }
@@ -723,14 +734,19 @@ impl Hub {
             || (self.settings.side_open && self.side.contains_key(page))
     }
 
-    /// Page `page`'s section of the side panel.
-    pub fn side(&self, page: &str) -> Option<AnyView> {
+    /// Page `page`'s section of the side panel, and the pages it shows on.
+    pub fn side(&self, page: &str) -> Option<(AnyView, SideOn)> {
         self.side.get(page).cloned()
     }
 
-    /// Puts `view` in the side panel as page `page`'s section, or takes
-    /// its section out.
-    pub fn set_side(&mut self, page: &'static str, view: Option<AnyView>, cx: &mut Context<Self>) {
+    /// Puts `view` in the side panel as page `page`'s section, shown on
+    /// the pages `on` says, or takes its section out.
+    pub fn set_side(
+        &mut self,
+        page: &'static str,
+        view: Option<(AnyView, SideOn)>,
+        cx: &mut Context<Self>,
+    ) {
         match view {
             Some(view) => self.side.insert(page, view),
             None => self.side.remove(page),

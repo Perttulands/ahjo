@@ -133,6 +133,17 @@ pub struct FilesPage {
     pub(crate) name_room: crate::view::Width,
     pub(crate) list_room: crate::view::Width,
     pub list_scroll: UniformListScrollHandle,
+    /// Whether this is the page's own view, which lends the side panel its
+    /// Files section; and that section's scroll.
+    pub(crate) lends_side: bool,
+    /// A folder Down was pressed on before its contents came: the pick
+    /// steps into it when they do.
+    step_due: Option<String>,
+    pub(crate) side_scroll: UniformListScrollHandle,
+    /// The pick the side panel's section last brought into view.
+    pub(crate) side_scrolled_to: Option<Pick>,
+    /// The folder the side panel's section was last seen to start at.
+    side_at: Option<String>,
     /// A row to scroll to once its folder is read.
     scroll_pending: bool,
     /// The pick is a folder shown for what is in it: it scrolls to the
@@ -346,6 +357,9 @@ impl Page for FilesPage {
         if self.shown {
             self.start(cx);
             self.refresh_recent(cx);
+        } else if self.lends_side {
+            // Its tree shows in the side panel before the page does.
+            self.start(cx);
         }
         if !self.beside && !self.restored {
             self.restored = true;
@@ -406,6 +420,14 @@ impl FilesPage {
         if let Some(sessions) = &sessions {
             cx.observe(sessions, |p: &mut Self, list, cx| {
                 p.live = list.read(cx).sessions.clone();
+                // The side panel's tree follows the focused session, and
+                // shows the pick in each new folder.
+                let at = p.side_root(cx).map(|r| r.path);
+                if at != p.side_at {
+                    p.side_at = at;
+                    p.side_scrolled_to = None;
+                    p.read_unread(cx);
+                }
                 cx.notify()
             })
             .detach();
@@ -526,6 +548,11 @@ impl FilesPage {
             name_room: Default::default(),
             list_room: Default::default(),
             list_scroll: UniformListScrollHandle::new(),
+            lends_side: false,
+            step_due: None,
+            side_scroll: UniformListScrollHandle::new(),
+            side_scrolled_to: None,
+            side_at: None,
             scroll_pending: false,
             pick_at_top: false,
             newest_due: false,
@@ -680,6 +707,39 @@ impl FilesPage {
             })
             .and_then(|s| Some((s.node.clone(), s.cwd.clone()?)))
     }
+    /// The folder the side panel's Files section starts at: the focused
+    /// session's, while that session is on this tree's device.
+    pub(crate) fn side_root(&self, cx: &App) -> Option<parvi_files_contract::Root> {
+        if !self.lends_side {
+            return None;
+        }
+        let (node, folder) = self.session_folder(cx)?;
+        (node == self.tree.node).then(|| parvi_files_contract::Root {
+            name: paths::base_name(&folder).to_owned(),
+            path: folder,
+        })
+    }
+    /// A row clicked in the side panel: the page is not shown, so a folder
+    /// opens or closes in place (the panel's first one stays open) and a
+    /// file opens on the page.
+    pub(crate) fn side_pick(&mut self, path: &str, folder: bool, cx: &mut Context<Self>) {
+        self.tree.select(path);
+        self.pick = Some(Pick::Node(path.to_owned()));
+        if !folder {
+            let ask = Ask::OpenPath {
+                node: NodeId(self.tree.node.clone()),
+                path: path.to_owned(),
+                beside: false,
+            };
+            if let Err(e) = self.host.ask(ask, cx) {
+                self.fail(e.message, cx);
+            }
+        } else if self.side_root(cx).is_none_or(|r| r.path != path) && self.tree.toggle(path) {
+            self.list(path.to_owned(), cx);
+        }
+        self.keep(cx);
+        cx.notify();
+    }
     fn open_beside(
         &mut self,
         from: &'static str,
@@ -793,7 +853,8 @@ impl FilesPage {
     }
     /// Reads every open folder not yet read.
     fn read_unread(&mut self, cx: &mut Context<Self>) {
-        for folder in self.tree.unread() {
+        let side = self.side_root(cx);
+        for folder in self.tree.unread(side.as_ref()) {
             if !self.listing.contains(&folder) {
                 self.list(folder, cx);
             }
@@ -962,6 +1023,7 @@ impl FilesPage {
             Request::get(NodeId(node.clone()), route("folder", &path)),
             move |p, s, b, cx| {
                 p.listing.remove(&path);
+                let step_due = p.step_due.take_if(|due| *due == path).is_some();
                 if p.tree.node != node {
                     return;
                 }
@@ -975,6 +1037,9 @@ impl FilesPage {
                     }
                     // Folders kept or asked open inside it show now: read them.
                     p.read_unread(cx);
+                    if step_due && p.pick == Some(Pick::Node(path.clone())) {
+                        p.step(1, cx);
+                    }
                     // Listings landing above the pick move it: follow it
                     // until every folder asked for has answered.
                     if p.scroll_pending && p.scroll_to_pick() && p.listing.is_empty() {
@@ -1066,10 +1131,29 @@ impl FilesPage {
             cx,
         );
     }
-    /// The folder whose files' text a find searches: the picked one, or
-    /// the picked file's.
+    /// The folder a find looks in first, and whose files' text it
+    /// searches: a folder picked in the tree; else the workspace of the
+    /// file open, the repository it is in (or its folder outside one);
+    /// else the folder of the row picked.
     pub fn text_scope(&self) -> Option<String> {
-        self.tree.folder_here()
+        if let Some(row) = self.tree.selection().filter(|r| r.folder) {
+            return Some(row.path);
+        }
+        match self.opened.as_ref().filter(|o| o.node == self.tree.node) {
+            Some(o) => Some(
+                self.repository_of(&o.path)
+                    .unwrap_or_else(|| paths::parent(&o.path)),
+            ),
+            None => self.tree.folder_here(),
+        }
+    }
+    /// The repository `path` is in, as far as git has said.
+    pub fn repository_of(&self, path: &str) -> Option<String> {
+        self.repos
+            .keys()
+            .filter(|r| paths::inside(r, path))
+            .max_by_key(|r| r.len())
+            .cloned()
     }
     /// Looks for the query inside the files under the text scope; the
     /// names found stay above.
@@ -1461,6 +1545,10 @@ impl FilesPage {
         };
         let node = o.node.clone();
         let path = o.path.clone();
+        // Which repository it is in: a find inside files searches it.
+        if node == self.tree.node {
+            self.ask_status(&paths::parent(&path), cx);
+        }
         self.request(
             Request::get(
                 NodeId(node.clone()),
@@ -1755,7 +1843,14 @@ impl FilesPage {
         }
         match key.key.as_str() {
             "up" => self.step(-1, cx),
-            "down" => self.step(1, cx),
+            // Down on a folder just opened whose contents are still on
+            // their way goes into it once they come.
+            "down" => match self.tree.selection().filter(|r| r.reading) {
+                Some(r) if self.pick == Some(Pick::Node(r.path.clone())) => {
+                    self.step_due = Some(r.path)
+                }
+                _ => self.step(1, cx),
+            },
             "pageup" => self.step(-(self.list_page() as isize), cx),
             "pagedown" => self.step(self.list_page() as isize, cx),
             "home" => self.step(isize::MIN, cx),

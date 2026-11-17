@@ -86,13 +86,19 @@ impl Tree {
         }
     }
 
-    /// Open folders whose contents are not read yet.
-    pub fn unread(&self) -> Vec<String> {
-        self.rows()
+    /// Open folders whose contents are not read yet, of the rows from the
+    /// roots and of those from `inside` (see [`Tree::rows_in`]).
+    pub fn unread(&self, inside: Option<&Root>) -> Vec<String> {
+        let mut rows = self.rows();
+        rows.extend(inside.map(|r| self.rows_in(r)).unwrap_or_default());
+        let mut unread: Vec<String> = rows
             .into_iter()
             .filter(|r| r.reading)
             .map(|r| r.path)
-            .collect()
+            .collect();
+        unread.sort();
+        unread.dedup();
+        unread
     }
 
     /// The rows in order: each root, and inside every open folder what it
@@ -105,6 +111,22 @@ impl Tree {
         rows
     }
 
+    /// The rows with `folder` as their one root, always open: the same
+    /// folders open inside it as in the whole tree.
+    pub fn rows_in(&self, folder: &Root) -> Vec<Row> {
+        let mut rows = Vec::new();
+        self.push_open(
+            &mut rows,
+            folder.path.clone(),
+            folder.name.clone(),
+            0,
+            true,
+            0,
+            true,
+        );
+        rows
+    }
+
     fn push(
         &self,
         rows: &mut Vec<Row>,
@@ -114,7 +136,21 @@ impl Tree {
         folder: bool,
         size: u64,
     ) {
-        let open = folder && self.open.contains(&path);
+        self.push_open(rows, path, name, depth, folder, size, false);
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn push_open(
+        &self,
+        rows: &mut Vec<Row>,
+        path: String,
+        name: String,
+        depth: usize,
+        folder: bool,
+        size: u64,
+        opened: bool,
+    ) {
+        let open = folder && (opened || self.open.contains(&path));
         let entries = self.listings.get(&path);
         rows.push(Row {
             path: path.clone(),
@@ -300,7 +336,7 @@ mod tests {
     fn opening_a_folder_reads_it_once_and_shows_it_inside() {
         let mut t = tree();
         assert!(t.toggle("/home/p/src"), "first opening reads it");
-        assert_eq!(t.unread(), ["/home/p/src"]);
+        assert_eq!(t.unread(None), ["/home/p/src"]);
         t.listed("/home/p/src".into(), vec![e("main.rs", false)]);
         assert_eq!(names(&t), ["~", "  src", "    main.rs", "  b.md"]);
         assert!(!t.toggle("/home/p/src"), "closing reads nothing");
@@ -328,6 +364,35 @@ mod tests {
         t.step(isize::MAX);
         assert_eq!(t.selected.as_deref(), Some("/home/p/b.md"));
         assert_eq!(t.folder_here().as_deref(), Some("/home/p"));
+    }
+
+    #[test]
+    fn rows_in_a_folder_share_the_trees_open_folders() {
+        let mut t = tree();
+        let src = Root {
+            name: "src".into(),
+            path: "/home/p/src".into(),
+        };
+        assert_eq!(t.unread(Some(&src)), ["/home/p/src"], "its root is open");
+        t.listed("/home/p/src".into(), vec![e("world", true)]);
+        assert!(t.toggle("/home/p/src/world"));
+        assert_eq!(t.unread(Some(&src)), ["/home/p/src/world"]);
+        t.listed("/home/p/src/world".into(), vec![e("gen.rs", false)]);
+        let rows: Vec<_> = t
+            .rows_in(&src)
+            .into_iter()
+            .map(|r| (r.depth, r.name))
+            .collect();
+        assert_eq!(
+            rows,
+            [(0, "src".into()), (1, "world".into()), (2, "gen.rs".into())]
+        );
+        t.toggle("/home/p/src");
+        assert_eq!(
+            names(&t),
+            ["~", "  src", "    world", "      gen.rs", "  b.md"],
+            "opened in the whole tree, it shows the same folders open"
+        );
     }
 
     #[test]

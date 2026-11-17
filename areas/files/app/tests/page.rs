@@ -1116,6 +1116,8 @@ fn the_list_takes_the_key_map(cx: &mut TestAppContext) {
     let root = parvi_testkit::fresh_dir("files-keys");
     std::fs::create_dir(root.join("b")).unwrap();
     std::fs::write(root.join("b/inner.txt"), "inner").unwrap();
+    std::fs::create_dir(root.join("aa")).unwrap();
+    std::fs::write(root.join("aa/deep.txt"), "deep").unwrap();
     std::fs::write(root.join("a.txt"), "a").unwrap();
     std::fs::write(root.join("z.txt"), "z").unwrap();
     let running = start(root.clone());
@@ -1146,6 +1148,14 @@ fn the_list_takes_the_key_map(cx: &mut TestAppContext) {
     until(cx, "and closed", |cx| {
         cx.debug_bounds("file-row-inner.txt").is_none()
     });
+    // Down straight after a folder opens goes into it, however soon its
+    // contents come.
+    cx.simulate_keystrokes("up right down");
+    until(cx, "into the folder just opened", |cx| {
+        cx.debug_bounds("picked-deep.txt").is_some()
+    });
+    cx.simulate_keystrokes("up left down");
+    until(cx, "back on b", |cx| cx.debug_bounds("picked-b").is_some());
     cx.simulate_keystrokes("left left");
     until(cx, "the root closed", |cx| {
         cx.debug_bounds("file-row-z.txt").is_none()
@@ -2153,6 +2163,160 @@ fn moving_through_many_files_keeps_tabs_places_and_marks(cx: &mut TestAppContext
     until(cx, "found inside a.rs", |cx| {
         cx.debug_bounds("hit-file-a.rs").is_some()
     });
+    drop(running);
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+/// A repository of `files` (path, text) under a fresh folder, committed;
+/// then `changed` written over.
+fn repository(name: &str, files: &[(&str, &str)], changed: &[(&str, &str)]) -> std::path::PathBuf {
+    let root = parvi_testkit::fresh_dir(name);
+    let git = |args: &[&str]| {
+        let output = std::process::Command::new("git")
+            .current_dir(&root)
+            .args(args)
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    };
+    let write = |(path, text): &(&str, &str)| {
+        let path = root.join(path);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path, text).unwrap();
+    };
+    git(&["init", "-q"]);
+    files.iter().for_each(write);
+    git(&["add", "."]);
+    git(&[
+        "-c",
+        "user.name=Test",
+        "-c",
+        "user.email=test@example.com",
+        "commit",
+        "-qm",
+        "initial",
+    ]);
+    changed.iter().for_each(write);
+    root
+}
+
+/// The side panel's Files section is the page's own tree: on another page
+/// it shows the same marks and opens a file on the page; on the page it
+/// gives way to the list.
+#[gpui::test]
+fn the_side_panel_shows_the_pages_tree_on_the_other_pages(cx: &mut TestAppContext) {
+    let root = repository(
+        "files-side",
+        &[("a.rs", "a\n"), ("sub/b.txt", "b\n")],
+        &[("a.rs", "changed\n")],
+    );
+    let running = start(root.clone());
+    cx.executor().allow_parking();
+    cx.update(parvi_app_shell::prepare);
+    let url = running.url.clone();
+    let (shell, cx) = cx.add_window_view(move |window, cx| {
+        parvi_app_shell::start(&[toy, parvi_files_app::build], Some(url), None, window, cx)
+    });
+    assert_eq!(shell.read_with(cx, |s, _| s.shown_page()), Some("toy"));
+    until(cx, "the tree beside the toy page, marked", |cx| {
+        cx.debug_bounds("side-file-a.rs").is_some() && cx.debug_bounds("state-a.rs-M").is_some()
+    });
+    click(cx, "side-file-a.rs");
+    until(cx, "a.rs open on the Files page", |cx| {
+        cx.debug_bounds("file-view-a.rs").is_some()
+    });
+    assert_eq!(shell.read_with(cx, |s, _| s.shown_page()), Some("files"));
+    assert!(
+        cx.debug_bounds("picked-a.rs").is_some(),
+        "picked in the list"
+    );
+    assert!(
+        cx.debug_bounds("side-files-section").is_none(),
+        "one tree on the Files page"
+    );
+    click(cx, "tab-toy");
+    until(cx, "the same pick beside the toy page", |cx| {
+        cx.debug_bounds("side-picked-a.rs").is_some()
+    });
+    // A folder opened there is open on the page too.
+    click(cx, "side-file-sub");
+    until(cx, "sub opened in the panel", |cx| {
+        cx.debug_bounds("side-file-b.txt").is_some()
+    });
+    click(cx, "tab-files");
+    until(cx, "and on the page", |cx| {
+        cx.debug_bounds("file-row-b.txt").is_some()
+    });
+    drop(running);
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+/// A find inside files searches the repository of the file open, not only
+/// its folder, and says so; a folder picked narrows it to that folder.
+#[gpui::test]
+fn a_find_inside_files_searches_the_open_files_repository(cx: &mut TestAppContext) {
+    let root = repository(
+        "files-repo-find",
+        &[
+            ("top.md", "a needle on top\n"),
+            ("src/deep/x.rs", "// a needle deep down\n"),
+        ],
+        &[],
+    );
+    let running = start(root.clone());
+    cx.executor().allow_parking();
+    cx.update(parvi_app_shell::prepare);
+    let url = running.url.clone();
+    let (_, cx) = cx.add_window_view(move |w, cx| {
+        parvi_app_shell::start(&[observed_files], Some(url), None, w, cx)
+    });
+    let page = SEARCH_PAGE.with(|p| p.borrow().as_ref().unwrap().clone());
+    tree(cx, "file-row-top.md");
+    let deep = root.join("src/deep/x.rs").to_string_lossy().into_owned();
+    page.update_in(cx, |p, w, cx| p.open(deep, w, cx));
+    until(cx, "x.rs open", |cx| {
+        cx.debug_bounds("file-view-x.rs").is_some()
+    });
+    let scope = |cx: &mut VisualTestContext| {
+        page.read_with(cx, |p, _| {
+            p.find
+                .as_ref()
+                .and_then(|f| f.inside.as_ref())
+                .map(|i| i.folder.clone())
+        })
+    };
+    let repo = root.to_string_lossy().into_owned();
+    until(cx, "its repository known", |cx| {
+        page.read_with(cx, |p, _| p.text_scope()) == Some(repo.clone())
+    });
+    page.update_in(cx, |p, w, cx| w.focus(&p.focus, cx));
+    cx.simulate_keystrokes("ctrl-shift-f");
+    cx.simulate_input("needle");
+    cx.executor().advance_clock(Duration::from_millis(300));
+    until(cx, "found across the repository, by file", |cx| {
+        cx.debug_bounds("hit-file-top.md").is_some() && cx.debug_bounds("hit-file-x.rs").is_some()
+    });
+    assert_eq!(scope(cx), Some(repo));
+    // A folder picked in the tree is where the next find looks.
+    cx.simulate_keystrokes("escape");
+    let folder = root.join("src/deep").to_string_lossy().into_owned();
+    page.update_in(cx, |p, _, cx| p.show_in_tree(&folder, cx));
+    until(cx, "deep picked", |cx| {
+        cx.debug_bounds("picked-deep").is_some()
+    });
+    page.update_in(cx, |p, w, cx| w.focus(&p.focus, cx));
+    cx.simulate_keystrokes("ctrl-shift-f");
+    cx.simulate_input("needle");
+    cx.executor().advance_clock(Duration::from_millis(300));
+    until(cx, "found in that folder alone", |cx| {
+        cx.debug_bounds("hit-file-x.rs").is_some()
+    });
+    assert!(cx.debug_bounds("hit-file-top.md").is_none());
+    assert_eq!(scope(cx), Some(folder));
     drop(running);
     std::fs::remove_dir_all(root).unwrap();
 }

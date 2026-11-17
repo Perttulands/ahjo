@@ -171,7 +171,11 @@ reserves, or whose `everywhere` chords share a key, naming both;
   Only the operator's own act resizes them, as putting the panel away
   does, the way putting the rail away always did. A lent section keeps its page's channels on while the panel is
   open, and a section acts through its page (a session goes to Sessions, a
-  file opens in Files), so a page's own lists stay its own.
+  file opens in Files), so a page's own lists stay its own. A section says
+  where it shows (`SideOn`): Sessions' rail on every page, its own too,
+  since that page draws it nowhere else; Files' tree on the other pages
+  only, since on Files the list holds the same tree, drawn by the same page
+  from the same store, so the operator never sees two.
 - **Unsaved work.** The shell owns the window's one close handler. A page
   guards itself, or a view it shows beside another page, with
   `Host::guard_close`, which names what that view holds unsaved; while any

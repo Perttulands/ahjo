@@ -700,6 +700,43 @@ fn a_view_lent_beside_a_page_keeps_its_pages_channel_on(cx: &mut TestAppContext)
     let _ = std::fs::remove_dir_all(settings.parent().expect("its folder"));
 }
 
+/// A side panel section, found by its name.
+struct Section(&'static str);
+
+impl Render for Section {
+    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+        let name = self.0;
+        div().debug_selector(move || name.into()).child(name)
+    }
+}
+
+#[gpui::test]
+fn a_section_lent_for_the_other_pages_gives_way_on_its_own(cx: &mut TestAppContext) {
+    use parvi_app_kit::hub::SideOn;
+    let node = fake_node(Arc::new(Mutex::new(vec![])));
+    let settings = settings_path("side-on");
+    cx.executor().allow_parking();
+    cx.update(parvi_app_shell::prepare);
+    let path = settings.clone();
+    let (shell, cx) = cx.add_window_view(move |window, cx| {
+        parvi_app_shell::start(PAGES, Some(node), Some(path), window, cx)
+    });
+    let host = |page| shell.read_with(cx, |s, _| Host::new(s.hub()).for_page(page, &[]));
+    let (alpha_host, beta_host) = (host("toy-a"), host("toy-b"));
+    cx.update(|_, cx| {
+        alpha_host.lend_side(cx.new(|_| Section("side-a")).into(), SideOn::OtherPages, cx);
+        beta_host.lend_side(cx.new(|_| Section("side-b")).into(), SideOn::EveryPage, cx);
+    });
+    cx.run_until_parked();
+    let drawn = |cx: &mut VisualTestContext, name| cx.debug_bounds(name).is_some();
+    assert_eq!(shell.read_with(cx, |s, _| s.shown_page()), Some("toy-a"));
+    assert!(!drawn(cx, "side-a"), "Alpha shows the same thing itself");
+    assert!(drawn(cx, "side-b"), "Beta's is on every page");
+    click(cx, "tab-toy-b");
+    assert!(drawn(cx, "side-a") && drawn(cx, "side-b"), "both on Beta");
+    let _ = std::fs::remove_dir_all(settings.parent().expect("its folder"));
+}
+
 #[gpui::test]
 fn with_no_pages_the_shell_connects_to_its_node(cx: &mut TestAppContext) {
     let node = fake_node(Arc::new(Mutex::new(vec![])));

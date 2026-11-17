@@ -8,7 +8,7 @@ use gpui::{
     anchored, deferred, div, ease_out_quint, point, prelude::*, px,
 };
 use parvi_app_kit::host::{Cover, Status};
-use parvi_app_kit::hub::{Surface, Toast};
+use parvi_app_kit::hub::{SideOn, Surface, Toast};
 use parvi_app_kit::link::client::LinkState;
 use parvi_app_kit::menu::{Menu, MenuRow, Pick};
 use parvi_app_kit::theme::{self, Theme, alpha, motion, size, theme};
@@ -605,15 +605,20 @@ impl Shell {
     /// The side panel at the window's left, on every page: the sections
     /// pages lent it, in the pages' order, each with an even share of its
     /// height; put away, a narrow edge that brings it back. A page whose
-    /// area is off lends nothing here.
+    /// area is off lends nothing here, and a section lent for the other
+    /// pages gives way on its own.
     fn render_side(&self, t: &Theme, cx: &mut Context<Self>) -> Option<AnyElement> {
         let hub = self.hub.read(cx);
         let off = hub.areas_off();
         let sections: Vec<gpui::AnyView> = self
             .pages
             .iter()
-            .filter(|p| !p.meta.area.is_some_and(|a| off.iter().any(|o| o == a)))
-            .filter_map(|p| hub.side(p.meta.id))
+            .enumerate()
+            .filter(|(_, p)| !p.meta.area.is_some_and(|a| off.iter().any(|o| o == a)))
+            .filter_map(|(i, p)| match hub.side(p.meta.id)? {
+                (_, SideOn::OtherPages) if self.shown == Some(i) => None,
+                (view, _) => Some(view),
+            })
             .collect();
         if sections.is_empty() {
             return None;

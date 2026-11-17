@@ -144,8 +144,14 @@ pub fn lines(p: &FilesPage) -> Vec<Line> {
             .map(|i| i.folder.clone())
             .or_else(|| p.text_scope());
         if let Some(folder) = scope {
+            // Said, so it is plain what was searched and what was not.
+            let what = if p.repository_of(&folder).as_deref() == Some(folder.as_str()) {
+                "repository"
+            } else {
+                "folder"
+            };
             out.push(Line::Label(format!(
-                "Inside files in {}",
+                "Inside {what} {}",
                 paths::shown(&p.tree.roots, &folder)
             )));
             match &find.inside {
@@ -212,7 +218,16 @@ pub fn lines(p: &FilesPage) -> Vec<Line> {
     if !tree {
         return out;
     }
-    for row in p.tree.rows() {
+    out.extend(tree_lines(p, p.tree.rows()));
+    out
+}
+
+/// The tree's `rows`, each folder that could not be read or holds nothing
+/// saying so under it; while there are no roots yet, why.
+fn tree_lines(p: &FilesPage, rows: Vec<Row>) -> Vec<Line> {
+    let mut out = Vec::new();
+    let none = rows.is_empty();
+    for row in rows {
         let failed = p.tree.failed.get(&row.path).cloned();
         let empty = row.open
             && p.tree
@@ -235,7 +250,7 @@ pub fn lines(p: &FilesPage) -> Vec<Line> {
             });
         }
     }
-    if p.tree.roots.is_empty() {
+    if none {
         out.push(Line::Note {
             text: if p.tree.away {
                 "The device does not answer".into()
@@ -247,6 +262,24 @@ pub fn lines(p: &FilesPage) -> Vec<Line> {
         });
     }
     out
+}
+
+/// The lines of the side panel's Files section: the tree from the focused
+/// session's folder, or from the roots.
+pub fn side_lines(p: &FilesPage, cx: &gpui::App) -> Vec<Line> {
+    let rows = match p.side_root(cx) {
+        Some(root) => p.tree.rows_in(&root),
+        None => p.tree.rows(),
+    };
+    tree_lines(p, rows)
+}
+
+/// Where a tree row is drawn: in the page's list, or in its section of
+/// the side panel on the other pages.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum Place {
+    List,
+    Side,
 }
 
 /// The lines found inside files from `first` on, under a line for each
@@ -366,7 +399,7 @@ impl FilesPage {
         letters(width)
     }
 
-    fn line(&self, line: Line, t: &Theme, cx: &mut Context<Self>) -> AnyElement {
+    fn line(&self, line: Line, place: Place, t: &Theme, cx: &mut Context<Self>) -> AnyElement {
         let picked = line.pick().is_some_and(|l| self.pick.as_ref() == Some(&l));
         match line {
             Line::Label(text) => {
@@ -533,7 +566,7 @@ impl FilesPage {
                     p.activate(w, cx);
                 }))
                 .into_any_element(),
-            Line::Node(row) => self.tree_row(row, picked, t, cx),
+            Line::Node(row) => self.tree_row(row, picked, place, t, cx),
             Line::Group(folder, newest) => self.group_row(folder, newest, picked, t, cx),
             Line::HitFile(path, n) => {
                 let name = paths::base_name(&path).to_owned();
@@ -640,16 +673,35 @@ impl FilesPage {
             .children(age.map(|a| pane::meta(t, a, None)))
     }
 
-    fn tree_row(&self, row: Row, picked: bool, t: &Theme, cx: &mut Context<Self>) -> AnyElement {
+    fn tree_row(
+        &self,
+        row: Row,
+        picked: bool,
+        place: Place,
+        t: &Theme,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         let indent = row.depth as f32 * INDENT;
-        let room = self.row_letters(indent + DISCLOSURE);
+        let room = match place {
+            Place::List => self.row_letters(indent + DISCLOSURE),
+            Place::Side => letters(size::SIDE - 2. * size::ROW_PAD - indent - DISCLOSURE),
+        };
         let reading = self
             .opened
             .as_ref()
             .is_some_and(|o| o.path == row.path && o.node == self.tree.node);
         let path = row.path.clone();
         let folder = row.folder;
-        let selector = format!("file-row-{}", row.name);
+        let (selector, id) = match place {
+            Place::List => (
+                format!("file-row-{}", row.name),
+                format!("node-{}", row.path),
+            ),
+            Place::Side => (
+                format!("side-file-{}", row.name),
+                format!("side-{}", row.path),
+            ),
+        };
         let state = self.states.get(&row.path).copied();
         let holds = row.folder && self.holding.contains(&row.path);
         let state_colour = state.map(|s| state_colour(t, s));
@@ -658,13 +710,16 @@ impl FilesPage {
             (true, false) => "▸",
             _ => "",
         };
-        pane::row(t, SharedString::from(format!("node-{}", row.path)), picked)
+        let line = pane::row(t, SharedString::from(id), picked)
             .h(px(size::ROW))
             .gap_0()
             .debug_selector(move || selector.clone())
             .when(reading && !picked, |r| r.text_color(t.text))
             .when(picked, |r| {
-                let id = format!("picked-{}", row.name);
+                let id = match place {
+                    Place::List => format!("picked-{}", row.name),
+                    Place::Side => format!("side-picked-{}", row.name),
+                };
                 r.child(div().absolute().debug_selector(move || id))
             })
             .child(div().flex_none().w(px(indent)))
@@ -709,19 +764,27 @@ impl FilesPage {
                     p.upload_paths(destination.clone(), dropped.paths(), cx);
                     cx.stop_propagation();
                 }))
-            })
-            .on_mouse_down(MouseButton::Right, self.menu_at(path.clone(), folder, cx))
-            .on_click(cx.listener(move |p, e: &gpui::ClickEvent, w, cx| {
-                w.focus(&p.focus, cx);
-                p.set_pick(Pick::Node(path.clone()), cx);
-                // A click on a folder opens or closes it; a file previews,
-                // and a second click keeps it open.
-                if folder && e.click_count() > 1 {
-                    return;
-                }
-                p.activate_as(e.click_count() > 1, w, cx);
-            }))
-            .into_any_element()
+            });
+        match place {
+            Place::List => line
+                .on_mouse_down(MouseButton::Right, self.menu_at(path.clone(), folder, cx))
+                .on_click(cx.listener(move |p, e: &gpui::ClickEvent, w, cx| {
+                    w.focus(&p.focus, cx);
+                    p.set_pick(Pick::Node(path.clone()), cx);
+                    // A click on a folder opens or closes it; a file
+                    // previews, and a second click keeps it open.
+                    if folder && e.click_count() > 1 {
+                        return;
+                    }
+                    p.activate_as(e.click_count() > 1, w, cx);
+                })),
+            // The page is not drawn: a folder opens or closes in place, a
+            // file opens on the page.
+            Place::Side => line.on_click(cx.listener(move |p, _, _, cx| {
+                p.side_pick(&path, folder, cx);
+            })),
+        }
+        .into_any_element()
     }
 
     fn menu_at(
@@ -797,7 +860,7 @@ impl FilesPage {
                             .w_full()
                             .flex()
                             .flex_col()
-                            .child(p.line(line, &t, cx))
+                            .child(p.line(line, Place::List, &t, cx))
                             .into_any_element()
                     })
                     .collect::<Vec<_>>()
@@ -1274,6 +1337,63 @@ impl FilesPage {
                     .debug_selector(|| "files-viewer".into()),
             )
             .when(self.beside, |d| d.border_r_1().border_color(t.divider))
+    }
+}
+
+impl FilesPage {
+    /// This page's section of the side panel, drawn on the other pages:
+    /// the same tree as its list, from the focused session's folder.
+    pub fn render_side(&mut self, cx: &mut Context<Self>) -> AnyElement {
+        let t = theme(cx).clone();
+        let lines = side_lines(self, cx);
+        let n = lines.len();
+        // A new pick (a file opened on the page, most often) is brought into
+        // view here as well, once it is among the rows.
+        if self.side_scrolled_to != self.pick
+            && let Some(at) = lines
+                .iter()
+                .position(|l| l.pick().is_some() && l.pick() == self.pick)
+        {
+            self.side_scrolled_to = self.pick.clone();
+            self.side_scroll
+                .scroll_to_item(at, gpui::ScrollStrategy::Nearest);
+        }
+        let list = uniform_list(
+            "side-files",
+            n,
+            cx.processor(|p, range: std::ops::Range<usize>, _, cx| {
+                let t = theme(cx).clone();
+                let all = side_lines(p, cx);
+                range
+                    .filter_map(|at| all.get(at).cloned())
+                    .map(|line| {
+                        div()
+                            .w_full()
+                            .flex()
+                            .flex_col()
+                            .child(p.line(line, Place::Side, &t, cx))
+                            .into_any_element()
+                    })
+                    .collect::<Vec<_>>()
+            }),
+        )
+        .track_scroll(&self.side_scroll)
+        .flex_1()
+        .pb(px(8.));
+        div()
+            .debug_selector(|| "side-files-section".into())
+            .size_full()
+            .flex()
+            .flex_col()
+            .child(
+                div()
+                    .px(px(size::ROW_PAD))
+                    .pt(px(size::LABEL_TOP))
+                    .pb(px(size::LABEL_BOTTOM))
+                    .child(kit::group_label(&t, "Files").text_color(t.text)),
+            )
+            .child(list)
+            .into_any_element()
     }
 }
 

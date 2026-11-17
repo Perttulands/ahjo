@@ -477,7 +477,8 @@ impl Terminals {
         // The rail is this page's section of the side panel, on every page.
         let page = cx.entity();
         let rail = cx.new(|cx| super::rail::Rail::new(&page, cx));
-        s.host.lend_side(rail.into(), cx);
+        s.host
+            .lend_side(rail.into(), parvi_app_kit::hub::SideOn::EveryPage, cx);
         s
     }
 
