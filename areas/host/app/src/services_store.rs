@@ -76,13 +76,6 @@ impl Change {
             Change::Restart => "restarting…",
         }
     }
-    pub fn past(self) -> &'static str {
-        match self {
-            Change::Start => "started",
-            Change::Stop => "stopped",
-            Change::Restart => "restarted",
-        }
-    }
     /// The state the change aims at.
     fn aim(self) -> &'static str {
         match self {
@@ -137,8 +130,6 @@ impl Log {
 #[derive(Default)]
 pub struct Services {
     pub nodes: BTreeMap<String, NodeServices>,
-    /// The row the keys act on: (node, service id).
-    pub selected: Option<(String, String)>,
 }
 
 /// The word a state is shown with.
@@ -185,38 +176,28 @@ impl Group {
     }
 }
 
-impl Services {
-    /// Moves the chosen row through `order` (every row, in the page's
-    /// order). With none chosen, Down and Up choose the first.
-    pub fn step(&mut self, order: &[(String, String)], step: Step) {
-        if order.is_empty() {
-            return;
-        }
-        let at = self
-            .selected
-            .as_ref()
-            .and_then(|s| order.iter().position(|o| o == s));
-        let last = order.len() - 1;
-        let to = match (step, at) {
-            (Step::Home, _) | (Step::Up | Step::Down, None) => 0,
-            (Step::End, _) => last,
-            (Step::Down, Some(i)) => (i + 1).min(last),
-            (Step::Up, Some(i)) => i.saturating_sub(1),
-        };
-        self.selected = Some(order[to].clone());
+/// Where a key moves the chosen row in `order` (every row, in the page's
+/// order). With none chosen, Down and Up choose the first; an empty page
+/// moves nothing.
+pub fn step<T: Clone + PartialEq>(order: &[T], at: Option<&T>, step: Step) -> Option<T> {
+    if order.is_empty() {
+        return None;
     }
+    let at = at.and_then(|s| order.iter().position(|o| o == s));
+    let last = order.len() - 1;
+    let to = match (step, at) {
+        (Step::Home, _) | (Step::Up | Step::Down, None) => 0,
+        (Step::End, _) => last,
+        (Step::Down, Some(i)) => (i + 1).min(last),
+        (Step::Up, Some(i)) => i.saturating_sub(1),
+    };
+    Some(order[to].clone())
+}
 
+impl Services {
     /// The service on `node` with `id`, as last read.
     pub fn service(&self, node: &str, id: &str) -> Option<&Service> {
         self.nodes.get(node)?.row(id)
-    }
-
-    /// What Enter does to the chosen row: opens its address, if it has one
-    /// that answers.
-    pub fn enter(&self) -> Option<String> {
-        let (node, id) = self.selected.as_ref()?;
-        let s = self.service(node, id)?;
-        opens(s).then(|| s.link.clone())
     }
 }
 
@@ -224,6 +205,16 @@ impl Services {
 /// something may answer there (nothing does while it is stopped or failed).
 pub fn opens(s: &Service) -> bool {
     !s.link.is_empty() && !matches!(s.state.as_str(), "stopped" | "failed")
+}
+
+/// An address as a row has room for: no scheme, no closing slash, and
+/// shortened in its middle past `chars`, so its host and port both read.
+pub fn address(link: &str, chars: usize) -> String {
+    let bare = link
+        .trim_start_matches("https://")
+        .trim_start_matches("http://")
+        .trim_end_matches('/');
+    parvi_app_kit::widgets::pane::middle(bare, chars)
 }
 
 /// Whether systemd keeps restarting a service that keeps dying.
@@ -454,26 +445,38 @@ mod tests {
     }
 
     #[test]
-    fn keys_move_the_chosen_row_and_enter_opens_its_address() {
-        let mut s = Services::default();
-        s.nodes.insert("a".into(), node());
-        let row = |id: &str| ("a".to_string(), id.to_string());
-        let order = [row("example"), row("room")];
-        s.step(&order, Step::Up);
-        assert_eq!(s.selected, Some(row("example")), "none chosen: the first");
-        assert_eq!(s.enter(), None, "stopped: nothing answers there");
-        s.nodes.get_mut("a").unwrap().list.as_mut().unwrap()[0].state = "running".into();
-        assert_eq!(s.enter().as_deref(), Some("http://h:8080/x"));
-        s.step(&order, Step::Down);
-        s.step(&order, Step::Down);
-        assert_eq!(s.selected, Some(row("room")), "stays on the last");
-        assert_eq!(s.enter(), None, "no address");
-        s.step(&order, Step::Home);
-        assert_eq!(s.selected, Some(row("example")));
-        s.step(&order, Step::End);
-        assert_eq!(s.selected, Some(row("room")));
-        s.step(&[], Step::Home);
-        assert_eq!(s.selected, Some(row("room")), "an empty page moves nothing");
+    fn keys_move_the_chosen_row_and_stay_at_the_ends() {
+        let order = ["machine", "a", "b"];
+        assert_eq!(
+            step(&order, None, Step::Up),
+            Some("machine"),
+            "none chosen: the first"
+        );
+        assert_eq!(step(&order, Some(&"a"), Step::Down), Some("b"));
+        assert_eq!(
+            step(&order, Some(&"b"), Step::Down),
+            Some("b"),
+            "stays on the last"
+        );
+        assert_eq!(step(&order, Some(&"b"), Step::Home), Some("machine"));
+        assert_eq!(step(&order, Some(&"machine"), Step::Up), Some("machine"));
+        assert_eq!(step(&order, None, Step::End), Some("b"));
+        assert_eq!(
+            step::<&str>(&[], Some(&"a"), Step::Home),
+            None,
+            "an empty page moves nothing"
+        );
+    }
+
+    #[test]
+    fn an_address_reads_without_its_scheme_and_shortens_in_the_middle() {
+        assert_eq!(address("http://127.0.0.1:8091/", 30), "127.0.0.1:8091");
+        let long = address("http://landmass.tail1f2f3b.ts.net:18774/", 24);
+        assert_eq!(long.chars().count(), 24);
+        assert!(
+            long.starts_with("landmass.") && long.ends_with(":18774"),
+            "{long}"
+        );
     }
 
     #[test]

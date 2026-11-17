@@ -73,7 +73,7 @@ fn readings_and_services_render_node_data(cx: &mut TestAppContext) {
     let (url, settings) = (running.url.clone(), dir.join("app.json"));
     let (shell, cx) = cx.add_window_view(move |window, cx| {
         parvi_app_shell::start(
-            &[parvi_host_app::build_host, parvi_host_app::build_services],
+            &[parvi_host_app::build],
             Some(url),
             Some(settings),
             window,
@@ -85,20 +85,27 @@ fn readings_and_services_render_node_data(cx: &mut TestAppContext) {
             s.hub().read(cx).fleet.here().state == LinkState::Open
         })
     });
-    let metric = Box::leak(format!("host-row-{}-cpu", running.node).into_boxed_str());
-    until(cx, "a host reading", |cx| cx.debug_bounds(metric).is_some());
-    cx.update(|window, cx| shell.update(cx, |s, cx| s.show(1, window, cx)));
+    until(cx, "a host reading", |cx| {
+        cx.debug_bounds("host-chart").is_some()
+    });
     let row = Box::leak(format!("svc-row-{}-fixture", running.node).into_boxed_str());
     until(cx, "the fixture service", |cx| {
         cx.debug_bounds(row).is_some()
     });
     assert!(cx.debug_bounds("services-refresh").is_some());
-    until(cx, "the only service, chosen", |cx| {
+    let at = cx.debug_bounds(row).unwrap().center();
+    cx.simulate_click(at, gpui::Modifiers::none());
+    until(cx, "the service, chosen", |cx| {
         cx.debug_bounds("pane-title-Fixture service").is_some()
     });
     for verb in ["start", "stop", "restart"] {
-        let control = Box::leak(format!("svc-{verb}-{}-fixture", running.node).into_boxed_str());
-        assert!(cx.debug_bounds(control).is_none(), "read-only: no {verb}");
+        for control in [
+            format!("svc-{verb}-{}-fixture", running.node),
+            format!("svc-row-{verb}-{}-fixture", running.node),
+        ] {
+            let control = Box::leak(control.into_boxed_str());
+            assert!(cx.debug_bounds(control).is_none(), "read-only: no {verb}");
+        }
     }
     let _ = std::fs::remove_dir_all(dir);
 }

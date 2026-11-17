@@ -1,4 +1,4 @@
-//! The operator's Host and Services journeys, with a fake service manager
+//! The operator's Host journeys, with a fake service manager
 //! and controlled readings.
 use std::{
     sync::{
@@ -30,7 +30,6 @@ use tokio::sync::mpsc::{self as tokio_mpsc, UnboundedReceiver, UnboundedSender};
 struct Control {
     on: AtomicBool,
     forwards: AtomicUsize,
-    discarded: AtomicUsize,
     restarts: AtomicUsize,
     // One app socket: the test owns the sender and its channel takes the receiver.
     sender: Mutex<Option<UnboundedSender<Vec<u8>>>>,
@@ -156,7 +155,6 @@ impl Channel for FakeChannel {
                     self.control.forwards.fetch_add(1, Ordering::SeqCst);
                     return Some(frame);
                 }
-                self.control.discarded.fetch_add(1, Ordering::SeqCst);
             }
         })
     }
@@ -289,7 +287,7 @@ fn status(shell: &gpui::Entity<parvi_app_shell::Shell>, cx: &mut VisualTestConte
     })
 }
 #[gpui::test]
-fn host_and_services_journeys(cx: &mut TestAppContext) {
+fn host_journeys(cx: &mut TestAppContext) {
     let running = start();
     let dir = parvi_testkit::fresh_dir("parvi-host-journey");
     cx.executor().allow_parking();
@@ -297,7 +295,7 @@ fn host_and_services_journeys(cx: &mut TestAppContext) {
     let (url, settings) = (running.url.clone(), dir.join("app.json"));
     let (shell, cx) = cx.add_window_view(move |window, cx| {
         parvi_app_shell::start(
-            &[parvi_host_app::build_host, parvi_host_app::build_services],
+            &[parvi_host_app::build],
             Some(url),
             Some(settings),
             window,
@@ -316,20 +314,23 @@ fn host_and_services_journeys(cx: &mut TestAppContext) {
         running.control.on.load(Ordering::SeqCst)
     });
 
-    // Is this machine all right: the list says what is wrong and every
-    // figure now; the overview names each trouble.
+    // Is this machine all right: the list says how much is wrong, the
+    // machine names each trouble, and every figure reads now.
     let verdict = at(format!("host-verdict-{node}-2 to look at"));
     until(cx, "the verdict", |cx| shows(cx, verdict));
-    for figure in ["cpu-10%", "memory-50%", "gpu---", "vram---"] {
-        let row = at(format!("host-now-{node}-{figure}"));
-        until(cx, figure, |cx| shows(cx, row));
+    for figure in ["cpu-10%", "memory-50%"] {
+        let legend = at(format!("host-legend-{figure}"));
+        until(cx, figure, |cx| shows(cx, legend));
     }
-    let swapping = "host-trouble-Swapping 1.9 MB/s: memory is short";
+    assert!(!shows(cx, "host-legend-gpu-0%"), "no GPU was read");
+    let swapping = "host-trouble-Swapping 1.9 MiB/s: memory is short";
     until(cx, "swap churn", |cx| shows(cx, swapping));
     until(cx, "the failed service", |cx| {
         shows(cx, "host-trouble-Service Broken failed")
     });
     until(cx, "what is heavy", |cx| shows(cx, "host-heavy-rustc ×2"));
+    // Its failed service offers its one action on the row.
+    assert!(shows(cx, at(format!("svc-row-start-{node}-broken"))));
 
     // A reading as it comes.
     let mut gpu_sample = sample(31.0);
@@ -352,34 +353,26 @@ fn host_and_services_journeys(cx: &mut TestAppContext) {
             .unwrap()
     };
     send(frame(wire::HOST_READING, &gpu_sample));
-    let pushed = at(format!("host-now-{node}-cpu-31%"));
-    until(cx, "the pushed reading", |cx| shows(cx, pushed));
-    let gpu = at(format!("host-now-{node}-gpu-35%"));
-    until(cx, "the GPU reading", |cx| shows(cx, gpu));
+    until(cx, "the pushed reading", |cx| {
+        shows(cx, "host-legend-cpu-31%")
+    });
+    until(cx, "the GPU reading", |cx| shows(cx, "host-legend-gpu-35%"));
     assert_eq!(running.control.forwards.load(Ordering::SeqCst), 1);
 
-    // One click to a figure's day; its trouble leads there too.
-    click(cx, swapping);
-    until(cx, "memory's detail", |cx| {
-        shows(cx, "host-line-Now-2 B of 4 B (50%)") && shows(cx, "host-chart")
+    // The mouse over the figures reads one moment in all of them.
+    let chart = cx.debug_bounds("host-chart").expect("the figures").center();
+    cx.simulate_mouse_move(chart, None, Modifiers::none());
+    until(cx, "the moment under the mouse", |cx| {
+        shows(cx, "host-hover")
     });
-    click(cx, at(format!("host-row-{node}-overview")));
-    until(cx, "the overview again", |cx| shows(cx, swapping));
 
-    // A failed service on Host opens it on Services, where the host
-    // channel closes.
+    // A failed service is a click from its log; the machine's readings
+    // keep coming while its services are looked at.
     click(cx, "host-trouble-Service Broken failed");
     until(cx, "the failed service's detail", |cx| {
         shows(cx, "pane-title-Broken") && shows(cx, "svc-log-broken logged this")
     });
-    until(cx, "host channel off", |_| {
-        !running.control.on.load(Ordering::SeqCst)
-    });
-    send(frame(wire::HOST_READING, &sample(88.0)));
-    until(cx, "closed channel discards a reading", |_| {
-        running.control.discarded.load(Ordering::SeqCst) == 1
-    });
-    assert_eq!(running.control.forwards.load(Ordering::SeqCst), 1);
+    assert!(running.control.on.load(Ordering::SeqCst));
 
     // One action per state: a failed or stopped service starts; a
     // running one restarts or stops.

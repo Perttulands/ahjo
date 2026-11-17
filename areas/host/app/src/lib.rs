@@ -1,17 +1,20 @@
-//! Host readings and services pages.
+//! The Host page: is this machine all right now, with its services as part
+//! of the answer.
 mod chart;
 mod host_store;
-mod readings;
-mod services;
+mod machine;
+mod page;
+mod service;
 mod services_store;
 mod tokens;
+mod view;
 
 use gpui::{App, Window};
 use parvi_app_kit::{Host, Mounted, mount};
 
-pub fn build_host(host: Host, window: &mut Window, cx: &mut App) -> Mounted {
-    mount(host, window, cx, readings::ReadingsPage::new)
-}
-pub fn build_services(host: Host, window: &mut Window, cx: &mut App) -> Mounted {
-    mount(host, window, cx, services::ServicesPage::new)
+pub use page::HostPage;
+
+/// Makes the page; the app lists this in its `PAGES`.
+pub fn build(host: Host, window: &mut Window, cx: &mut App) -> Mounted {
+    mount(host, window, cx, page::HostPage::new)
 }

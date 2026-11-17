@@ -118,6 +118,7 @@ impl NodeHost {
 pub enum Figure {
     Cpu,
     Memory,
+    Swap,
     Gpu,
     Vram,
     /// The reading's disk at this place.
@@ -129,6 +130,7 @@ impl Figure {
         match self {
             Figure::Cpu => p.cpu,
             Figure::Memory => p.memory,
+            Figure::Swap => p.swap,
             Figure::Gpu => p.gpu,
             Figure::Vram => p.vram,
             Figure::Disk(i) => p.disks.get(i).copied().flatten(),
@@ -140,6 +142,7 @@ impl Figure {
         match self {
             Figure::Cpu => "CPU".into(),
             Figure::Memory => "Memory".into(),
+            Figure::Swap => "Swap".into(),
             Figure::Gpu => "GPU".into(),
             Figure::Vram => "GPU memory".into(),
             Figure::Disk(i) => {
@@ -156,6 +159,7 @@ impl Figure {
         match self {
             Figure::Cpu => r.cpu,
             Figure::Memory => r.memory.and_then(Usage::percent),
+            Figure::Swap => r.swap.and_then(Usage::percent),
             Figure::Gpu => r.gpus.first().and_then(|g| g.util),
             Figure::Vram => r.gpus.first().and_then(|g| g.memory?.percent()),
             Figure::Disk(i) => r.disks.get(i).and_then(|d| d.usage().percent()),
@@ -167,11 +171,36 @@ impl Figure {
     pub fn fills(self) -> bool {
         !matches!(self, Figure::Cpu | Figure::Gpu)
     }
+
+    /// What it fills, in bytes, as the reading has it now.
+    pub fn whole(self, r: &Reading) -> Option<Usage> {
+        match self {
+            Figure::Memory => r.memory,
+            Figure::Swap => r.swap,
+            Figure::Vram => r.gpus.first().and_then(|g| g.memory),
+            Figure::Disk(i) => r.disks.get(i).map(Disk::usage),
+            Figure::Cpu | Figure::Gpu => None,
+        }
+        .filter(|u| u.total > 0)
+    }
 }
 
 /// The rows a node's host has: the GPU's only where a GPU is or was read.
 pub fn figures(r: Option<&Reading>) -> Vec<Figure> {
+    let mut out = bands(r);
+    let disks = r.map_or(0, |r| r.disks.len());
+    out.extend((0..disks).map(Figure::Disk));
+    out
+}
+
+/// The figures drawn over time, as bands on one axis: CPU and memory, swap
+/// where there is any, the GPU's only where a GPU is or was read. Disks
+/// change by the day and stand apart as bars.
+pub fn bands(r: Option<&Reading>) -> Vec<Figure> {
     let mut out = vec![Figure::Cpu, Figure::Memory];
+    if r.is_some_and(|r| r.swap.is_some_and(|s| s.total > 0)) {
+        out.push(Figure::Swap);
+    }
     let gpu = r.is_some_and(|r| {
         !r.gpus.is_empty()
             || r.gpu_reason
@@ -181,8 +210,6 @@ pub fn figures(r: Option<&Reading>) -> Vec<Figure> {
     if gpu {
         out.extend([Figure::Gpu, Figure::Vram]);
     }
-    let disks = r.map_or(0, |r| r.disks.len());
-    out.extend((0..disks).map(Figure::Disk));
     out
 }
 
@@ -223,6 +250,16 @@ pub fn peak(points: &[(u64, f32)]) -> Option<(u64, f32)> {
             Some((_, b)) if b >= v => best,
             _ => Some((at, v)),
         })
+}
+
+/// The mean of `points`.
+pub fn average(points: &[(u64, f32)]) -> Option<f32> {
+    (!points.is_empty()).then(|| points.iter().map(|(_, v)| v).sum::<f32>() / points.len() as f32)
+}
+
+/// A share of a whole, in bytes.
+pub fn share_of(percent: f32, whole: Usage) -> u64 {
+    (percent.clamp(0., 100.) as f64 / 100. * whole.total as f64) as u64
 }
 
 /// A chart's top: the whole for what fills up; for what is busy, its peak
@@ -280,7 +317,7 @@ pub fn troubles(s: &State, now: u64) -> Vec<Trouble> {
         if e.kind == "host" && e.failure && e.at + DAY > now {
             out.push(Trouble {
                 figure: Some(Figure::Memory),
-                text: format!("{} at {}", e.text, crate::readings::hhmm(e.at)),
+                text: format!("{} at {}", e.text, parvi_app_kit::clock::hhmm(e.at)),
             });
             break;
         }
@@ -341,12 +378,12 @@ pub fn percent(v: Option<f32>) -> String {
     }
 }
 
-/// Bytes in 1024s: B, KB, MB, GB, TB; one decimal below 10.
+/// Bytes in 1024s: B, KiB, MiB, GiB, TiB; one decimal below 10.
 pub fn bytes(n: u64) -> String {
     if n == 0 {
         return "0 B".into();
     }
-    let units = ["B", "KB", "MB", "GB", "TB"];
+    let units = ["B", "KiB", "MiB", "GiB", "TiB"];
     let mut v = n as f64;
     let mut i = 0;
     while v >= 1024. && i < units.len() - 1 {
@@ -362,7 +399,7 @@ pub fn bytes(n: u64) -> String {
     }
 }
 
-/// `2.9 GB of 31 GB`.
+/// `2.9 GiB of 31 GiB`.
 pub fn of(u: Usage) -> String {
     format!("{} of {}", bytes(u.used), bytes(u.total))
 }
@@ -419,16 +456,10 @@ pub fn program(h: &Heavy) -> String {
     }
 }
 
-/// What one figure reads now, in words: `2.9 GB of 31 GB (9.4%)`.
+/// What one figure reads now, in words: `2.9 GiB of 31 GiB (9.4%)`.
 pub fn reading_words(figure: Figure, r: &Reading) -> String {
     let p = percent(figure.now(r));
-    let used = match figure {
-        Figure::Memory => r.memory,
-        Figure::Vram => r.gpus.first().and_then(|g| g.memory),
-        Figure::Disk(i) => r.disks.get(i).map(Disk::usage),
-        Figure::Cpu | Figure::Gpu => None,
-    };
-    match used {
+    match figure.whole(r) {
         Some(u) => format!("{} ({p})", of(u)),
         None => p,
     }
@@ -464,40 +495,6 @@ pub fn reference(device: &str, environment: &str, s: &State, now: u64) -> String
     let heavy: Vec<String> = r.heavy.iter().take(3).map(heavy_words).collect();
     if !heavy.is_empty() {
         out.push_str(&format!(". Heaviest: {}", heavy.join("; ")));
-    }
-    out
-}
-
-/// One figure handed over: now, and its highest today.
-pub fn figure_reference(
-    device: &str,
-    environment: &str,
-    s: &State,
-    figure: Figure,
-    start: u64,
-) -> String {
-    let r = s.latest.as_ref();
-    let name = figure.name(r).to_lowercase();
-    let now = r.map_or_else(|| "no reading".into(), |r| reading_words(figure, r));
-    let mut out = format!("host {device} ({environment}) {name}: {now}");
-    if let Some((at, v)) = peak(&line(&s.minutes, figure, start)) {
-        out.push_str(&format!(
-            ", highest {} at {}",
-            percent(Some(v)),
-            crate::readings::hhmm(at)
-        ));
-    }
-    if matches!(figure, Figure::Cpu | Figure::Memory)
-        && let Some(r) = r
-    {
-        let heavy: Vec<String> = sorted(&r.heavy, figure)
-            .into_iter()
-            .take(3)
-            .map(heavy_words)
-            .collect();
-        if !heavy.is_empty() {
-            out.push_str(&format!(". Heaviest: {}", heavy.join("; ")));
-        }
     }
     out
 }
@@ -712,7 +709,7 @@ mod tests {
         let t = troubles(&s, 0);
         assert_eq!(t.len(), 1, "{t:?}");
         assert_eq!(t[0].figure, Some(Figure::Disk(1)));
-        assert_eq!(t[0].text, "Disk C: 100% full: 5.0 GB free");
+        assert_eq!(t[0].text, "Disk C: 100% full: 5.0 GiB free");
         s.latest.as_mut().unwrap().disks.pop();
         assert!(troubles(&s, 0).is_empty());
 
@@ -780,8 +777,8 @@ mod tests {
         };
         assert_eq!(
             reference("rig", "wsl", &s, 0),
-            "host rig (wsl): all right. CPU 12%, Memory 4.0 GB of 16 GB (25%), \
-             Disk / 100 GB of 400 GB (25%), up 3d 4h. Heaviest: rustc ×2 in /srv/x 2.0 GB 40% CPU"
+            "host rig (wsl): all right. CPU 12%, Memory 4.0 GiB of 16 GiB (25%), \
+             Disk / 100 GiB of 400 GiB (25%), up 3d 4h. Heaviest: rustc ×2 in /srv/x 2.0 GiB 40% CPU"
         );
         assert_eq!(
             reference("pad", "windows", &State::default(), 0),
@@ -808,8 +805,8 @@ mod tests {
         assert_eq!(grew(&s, 1, 0), None);
         let tb = 1u64 << 40;
         assert_eq!(change(-(129 << 20), 2 * tb), "unchanged", "within rounding");
-        assert_eq!(change(40 << 30, 2 * tb), "+40 GB");
-        assert_eq!(change(-(5 << 30), 2 * tb), "−5.0 GB");
+        assert_eq!(change(40 << 30, 2 * tb), "+40 GiB");
+        assert_eq!(change(-(5 << 30), 2 * tb), "−5.0 GiB");
     }
 
     #[test]
@@ -836,7 +833,7 @@ mod tests {
         assert_eq!(percent(Some(30.4)), "30%");
         assert_eq!(percent(None), "--");
         assert_eq!(bytes(512), "512 B");
-        assert_eq!(bytes(280 * 1024u64.pow(3)), "280 GB");
+        assert_eq!(bytes(280 * 1024u64.pow(3)), "280 GiB");
         assert_eq!(uptime(4 * 3600 + 12 * 60), "4h 12m");
         assert_eq!(folder("/home/me/x", Some("/home/me")), "~/x");
         assert_eq!(folder("/srv/x", Some("/home/me")), "/srv/x");

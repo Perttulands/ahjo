@@ -12,14 +12,13 @@ use std::borrow::Cow;
 /// operator spends the day.
 pub const PAGES: &[Build] = &[
     parvi_terminals_app::build,
-    parvi_agents_app::build,
-    parvi_scheduled_app::build,
     parvi_files_app::build,
-    parvi_host_app::build_host,
-    parvi_host_app::build_services,
+    parvi_agents_app::build,
     parvi_work_app::build,
     parvi_brain_app::build,
     parvi_missions_app::build,
+    parvi_scheduled_app::build,
+    parvi_host_app::build,
 ];
 
 fn fonts() -> Vec<Cow<'static, [u8]>> {

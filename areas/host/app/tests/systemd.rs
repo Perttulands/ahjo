@@ -167,20 +167,13 @@ fn disposable_systemd_service_and_host_health_journey(cx: &mut TestAppContext) {
     let url = node.url.clone();
     let settings = temp.join("app.json");
     let (shell, cx) = cx.add_window_view(move |w, cx| {
-        parvi_app_shell::start(
-            &[parvi_host_app::build_host, parvi_host_app::build_services],
-            Some(url),
-            Some(settings),
-            w,
-            cx,
-        )
+        parvi_app_shell::start(&[parvi_host_app::build], Some(url), Some(settings), w, cx)
     });
     until(cx, "node link", |cx| {
         shell.read_with(cx, |s, cx| {
             s.hub().read(cx).fleet.here().state == LinkState::Open
         })
     });
-    click(cx, "tab-services");
     let state = |s| selector(format!("svc-state-{}-single-{s}", node.id));
     let action = |s| selector(format!("svc-{s}-{}-single", node.id));
     until(cx, "stopped unit and group", |cx| {
@@ -211,13 +204,14 @@ fn disposable_systemd_service_and_host_health_journey(cx: &mut TestAppContext) {
         cx.debug_bounds(state("running")).is_some() && cx.debug_bounds(action("restart")).is_some()
     });
     click(cx, action("restart"));
+    // The node's event of it says so on the status line.
     until(cx, "app restart", |cx| {
         shell.read_with(cx, |s, cx| {
             s.hub()
                 .read(cx)
-                .toast
+                .status
                 .as_ref()
-                .is_some_and(|v| v.text.contains("restarted"))
+                .is_some_and(|v| v.text.contains("restart done"))
         })
     });
     // A running unit keeps Stop under More.
@@ -286,7 +280,7 @@ fn disposable_systemd_service_and_host_health_journey(cx: &mut TestAppContext) {
     })
     .join()
     .unwrap();
-    click(cx, "tab-host");
+    click(cx, selector(format!("host-row-{}-machine", node.id)));
     until(cx, "service action in Host events", |cx| {
         cx.debug_bounds("host-event-Disposable: stop done")
             .is_some()
