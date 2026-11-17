@@ -284,15 +284,17 @@ async fn role_routes_and_commands_keep_versions_and_usage() {
 #[cfg(unix)]
 #[tokio::test(flavor = "multi_thread")]
 async fn watching_does_not_fetch_and_sync_failures_survive_refresh_and_other_watchers() {
-    use std::os::unix::fs::{PermissionsExt, symlink};
+    use std::os::unix::fs::symlink;
     let home = fresh_dir("agents-no-fetch-watch");
     let bin = home.join("bin");
     let links = home.join(".agents/skills");
     std::fs::create_dir_all(&bin).unwrap();
     std::fs::create_dir_all(&links).unwrap();
     let git = bin.join("git");
-    std::fs::write(&git, "#!/bin/sh\nif [ \"$3\" = fetch ]; then printf '%s\\n' \"$2\" >> \"$HOME/fetch-log\"; case \"$2\" in */first) if [ -f \"$HOME/block-fetch\" ]; then : > \"$HOME/fetch-started\"; while [ ! -f \"$HOME/continue-fetch\" ]; do :; done; fi;; esac; echo 'fatal: credentials unavailable' >&2; exit 1; fi\nexit 0\n").unwrap();
-    std::fs::set_permissions(&git, std::fs::Permissions::from_mode(0o755)).unwrap();
+    ahjo_testkit::tmux::write_script(
+        &git,
+        "#!/bin/sh\nif [ \"$3\" = fetch ]; then printf '%s\\n' \"$2\" >> \"$HOME/fetch-log\"; case \"$2\" in */first) if [ -f \"$HOME/block-fetch\" ]; then : > \"$HOME/fetch-started\"; while [ ! -f \"$HOME/continue-fetch\" ]; do :; done; fi;; esac; echo 'fatal: credentials unavailable' >&2; exit 1; fi\nexit 0\n",
+    );
     for name in ["first", "second"] {
         let checkout = home.join(name);
         std::fs::create_dir_all(checkout.join(".git")).unwrap();

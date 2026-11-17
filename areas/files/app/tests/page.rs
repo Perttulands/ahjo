@@ -473,6 +473,11 @@ fn browse_find_edit_save_and_send_to_a_session(cx: &mut TestAppContext) {
     until(cx, "saved file", |_| {
         std::fs::read(&file).ok().as_deref() == Some(b"after")
     });
+    // The file is on disk before the node's answer reaches the page; until
+    // then the edit is still unsaved there, and Esc asks to discard it.
+    until(cx, "the save answered", |cx| {
+        cx.debug_bounds("files-unsaved").is_none()
+    });
     cx.simulate_keystrokes("escape");
     until(cx, "reading again", |cx| {
         cx.debug_bounds("files-send").is_some()

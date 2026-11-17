@@ -51,11 +51,11 @@ fn write(path: &Path, text: &str) {
     std::fs::write(path, text).unwrap();
 }
 
+/// Written without this process holding it open, so a fork in another
+/// test cannot make running it fail with ETXTBSY.
 fn executable(path: &Path, script: &str) {
     std::fs::create_dir_all(path.parent().unwrap()).unwrap();
-    use std::os::unix::fs::PermissionsExt;
-    std::fs::write(path, script).unwrap();
-    std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o755)).unwrap();
+    ahjo_testkit::tmux::write_script(path, script);
 }
 
 fn skill(dir: &Path, name: &str, description: &str) {

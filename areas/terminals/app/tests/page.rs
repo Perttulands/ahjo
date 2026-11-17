@@ -1067,6 +1067,25 @@ fn tmux(running: &Running, args: &[&str]) -> String {
     String::from_utf8_lossy(&out.stdout).trim().to_string()
 }
 
+/// Waits for a launched session's window to take `grid`: tmux lists the
+/// session the moment it exists, at its default size, and the launch sizes
+/// it after that.
+fn sized_to(cx: &mut VisualTestContext, running: &Running, session: &str, grid: (u16, u16)) {
+    let want = format!("{}x{}", grid.0, grid.1);
+    until(cx, &format!("{session} at {want}"), |_| {
+        tmux(
+            running,
+            &[
+                "display-message",
+                "-p",
+                "-t",
+                session,
+                "#{window_width}x#{window_height}",
+            ],
+        ) == want
+    });
+}
+
 fn scroll_to_launch(cx: &mut VisualTestContext, scroll: &str) {
     let selector: &'static str = Box::leak(scroll.to_string().into_boxed_str());
     let point = cx.debug_bounds(selector).unwrap().center();
@@ -1192,19 +1211,7 @@ fn launches_use_each_tile_grid(cx: &mut TestAppContext) {
             .lines()
             .any(|s| s == "asked-size")
     });
-    assert_eq!(
-        tmux(
-            &running,
-            &[
-                "display-message",
-                "-p",
-                "-t",
-                "asked-size",
-                "#{window_width}x#{window_height}"
-            ]
-        ),
-        format!("{}x{}", grid.0, grid.1)
-    );
+    sized_to(cx, &running, "asked-size", grid);
     let before = tmux(&running, &["list-sessions", "-F", "#{session_name}"]);
     let submitted = running.fixture.join("send-was-submitted");
     let reference = format!("touch {}", submitted.display());
@@ -1245,24 +1252,14 @@ fn launches_use_each_tile_grid(cx: &mut TestAppContext) {
             false
         }
     });
-    assert_eq!(
-        tmux(
-            &running,
-            &[
-                "display-message",
-                "-p",
-                "-t",
-                &new_name,
-                "#{window_width}x#{window_height}"
-            ]
-        ),
-        format!("{}x{}", grid.0, grid.1)
-    );
+    sized_to(cx, &running, &new_name, grid);
     until(cx, "new agent paste completed", |cx| {
         cx.debug_bounds("send-body").is_none()
     });
+    // The new session runs the login shell, whose prompt and the reference
+    // can be wider than the tile's grid: read the wrapped line joined.
     until(cx, "reference pasted into the new agent", |_cx| {
-        tmux(&running, &["capture-pane", "-p", "-t", &new_name]).contains(&reference)
+        tmux(&running, &["capture-pane", "-p", "-J", "-t", &new_name]).contains(&reference)
     });
     assert!(
         !submitted.exists(),
@@ -1463,7 +1460,10 @@ fn restart_of_external_session_uses_last_folder_and_says_shell(cx: &mut TestAppC
             .lines()
             .any(|name| name == "alpha")
     });
-    assert_eq!(
+    // tmux lists the session as soon as it forks the pane's child, which
+    // has the server's folder until it changes to the restart's and execs.
+    let want = folder.display().to_string();
+    until(cx, &format!("alpha's shell in {want}"), |_| {
         tmux(
             &running,
             &[
@@ -1471,11 +1471,10 @@ fn restart_of_external_session_uses_last_folder_and_says_shell(cx: &mut TestAppC
                 "-p",
                 "-t",
                 "alpha",
-                "#{pane_current_path}"
-            ]
-        ),
-        folder.display().to_string()
-    );
+                "#{pane_current_path}",
+            ],
+        ) == want
+    });
     let _ = std::fs::remove_dir_all(settings.parent().unwrap());
 }
 

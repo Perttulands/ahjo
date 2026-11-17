@@ -97,7 +97,9 @@ impl Server {
         String::from_utf8_lossy(&output.stdout).into_owned()
     }
 
-    /// A detached session running a plain shell with a fixed prompt.
+    /// A detached session running a plain shell with a fixed prompt. It
+    /// returns once the shell runs: until then the pane's program is tmux's
+    /// own child, then `env`, and a test reading it would see those.
     pub fn new_session(&self, name: &str, cols: u16, rows: u16) {
         self.run(&[
             "new-session",
@@ -110,6 +112,14 @@ impl Server {
             &rows.to_string(),
             "env PS1='$ ' sh",
         ]);
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while self.display(&format!("={name}:"), "#{pane_current_command}") != "sh" {
+            assert!(
+                Instant::now() < deadline,
+                "the shell in {name} never started"
+            );
+            std::thread::sleep(Duration::from_millis(10));
+        }
     }
 
     pub fn window_size(&self, target: &str) -> String {

@@ -5,7 +5,7 @@
 use ahjo_mission_engine::{Dispatch, LocalSeats, TranscriptRoots};
 use ahjo_testkit::{
     node::Node,
-    tmux::{Server, stubbed_path, write_script},
+    tmux::{Server, eventually, stubbed_path, write_script},
 };
 
 fn dispatch(id: &str, name: &str, keep: bool) -> Dispatch {
@@ -119,12 +119,12 @@ async fn an_agents_live_session_is_used_and_outlives_the_run() {
     let started = seat("dsp_4");
     assert_eq!(started.session_name, "demo-reviewer");
     assert_eq!(started.cwd, None);
-    assert_eq!(
-        server
-            .display("demo-reviewer", "#{pane_current_command}")
-            .trim(),
-        "sleep"
-    );
+    // The session exists before its program does: tmux's child, then `env`
+    // and the fake's shell each run there before the fake execs `sleep`.
+    eventually("the fake harness running in demo-reviewer", || {
+        (server.display("demo-reviewer", "#{pane_current_command}") == "sleep").then_some(())
+    })
+    .await;
     assert_eq!(seats.end_seat("dsp_4", "run_final").await.unwrap(), "kept");
     assert!(live(&server, "demo-reviewer"));
     node.stop().await;
