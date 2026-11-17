@@ -129,7 +129,7 @@ mod tests {
         assert_eq!(inline(text, false).text, "Some em and strong with code.");
         assert!(matches!(&blocks[2], Block::List(items) if items.len() == 2));
         assert!(matches!(&blocks[3], Block::Quote(_)));
-        assert_eq!(blocks[4], Block::Code("fn x() {}".into()));
+        assert_eq!(blocks[4], Block::Code("fn x() {}".into(), None));
         assert_eq!(blocks[5], Block::Rule);
         assert!(matches!(&blocks[6], Block::Table(rows) if rows.len() == 2 && rows[1][1] == "2"));
     }

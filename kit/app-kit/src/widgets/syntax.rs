@@ -602,9 +602,72 @@ pub fn carries<'a>(lang: &Lang, lines: impl Iterator<Item = &'a str>) -> Vec<Car
         .collect()
 }
 
+/// The language a Markdown fence names (```` ```rust ````), by its word or
+/// the extension it stands for.
+pub fn fence(word: &str) -> Option<&'static Lang> {
+    let word = word.trim().to_lowercase();
+    let ext = match word.as_str() {
+        "" => return None,
+        "rust" => "rs",
+        "python" | "python3" => "py",
+        "shell" | "console" | "shellscript" => "sh",
+        "javascript" | "typescript" => "js",
+        "golang" => "go",
+        "c++" | "csharp" | "kotlin" => "cpp",
+        "ruby" => "rb",
+        "yml" => "yaml",
+        other => other,
+    };
+    lang(&format!("x.{ext}"))
+}
+
+/// The coloured stretches of a whole text, as byte ranges into it.
+pub fn highlight(lang: &Lang, text: &str) -> Vec<(Range<usize>, Token)> {
+    let mut out = vec![];
+    let mut carry = Carry::Nothing;
+    let mut at = 0;
+    for line in text.split('\n') {
+        let (found, next) = spans(lang, line, carry);
+        out.extend(
+            found
+                .into_iter()
+                .map(|(r, t)| (at + r.start..at + r.end, t)),
+        );
+        carry = next;
+        at += line.len() + 1;
+    }
+    out
+}
+
+/// The colour a token is drawn in.
+pub fn colour(t: &crate::theme::Theme, token: Token) -> gpui::Hsla {
+    match token {
+        Token::Comment => t.dim,
+        Token::String => crate::theme::rgb(t.ansi[2]),
+        Token::Number => crate::theme::rgb(t.ansi[3]),
+        Token::Keyword => t.accent,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_fence_names_its_language_by_word_or_extension() {
+        assert!(fence("rust").is_some());
+        assert!(fence("rs").is_some());
+        assert!(fence("bash").is_some());
+        assert!(fence("").is_none());
+        assert!(fence("text").is_none());
+        let text = "let a = 1; // one\n\"two\"";
+        let found: Vec<_> = highlight(fence("rust").unwrap(), text)
+            .into_iter()
+            .map(|(r, t)| (&text[r], t))
+            .collect();
+        assert!(found.contains(&("// one", Token::Comment)));
+        assert!(found.contains(&("\"two\"", Token::String)));
+    }
 
     fn tokens<'a>(lang: &Lang, line: &'a str) -> Vec<(&'a str, Token)> {
         spans(lang, line, Carry::Nothing)

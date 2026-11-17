@@ -57,6 +57,8 @@ pub struct Opened {
     pub source: bool,
     /// What its repository says changed in it, when anything did.
     pub diff: Option<parvi_files_contract::Diff>,
+    /// The same, line by line: what the reader marks.
+    pub changes: Option<crate::store::marks::Changes>,
     pub diff_open: bool,
     /// The file changed on disk under an unsaved edit.
     pub changed_on_disk: bool,
@@ -77,6 +79,7 @@ impl Opened {
             saving: false,
             source: false,
             diff: None,
+            changes: None,
             diff_open: false,
             changed_on_disk: false,
         }

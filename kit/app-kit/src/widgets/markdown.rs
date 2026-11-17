@@ -22,7 +22,10 @@ pub enum Block {
     /// numbered) and their checkbox if any.
     List(Vec<Item>),
     Quote(String),
-    Code(String),
+    /// Fenced code and the language its fence names, if any.
+    Code(String, Option<String>),
+    /// YAML front matter: its fields as written.
+    FrontMatter(Vec<(String, String)>),
     Rule,
     Table(Vec<Vec<String>>),
 }
@@ -118,52 +121,113 @@ fn underline(t: &str) -> Option<u8> {
 }
 
 pub fn parse(text: &str) -> Vec<Block> {
+    parse_lines(text).into_iter().map(|(b, _)| b).collect()
+}
+
+/// YAML front matter at the very start (`---` lines around `key: value`
+/// lines): its fields as written, and the line after it. A value that
+/// goes on in indented or listed lines keeps them, joined.
+fn front_matter(lines: &[&str]) -> Option<(Vec<(String, String)>, usize)> {
+    if lines.first()?.trim_end() != "---" {
+        return None;
+    }
+    let end = lines[1..]
+        .iter()
+        .position(|l| matches!(l.trim_end(), "---" | "..."))?
+        + 1;
+    let mut fields: Vec<(String, String)> = vec![];
+    for line in &lines[1..end] {
+        let more = line.starts_with([' ', '\t']) || line.trim_start().starts_with("- ");
+        match line.split_once(':') {
+            Some((key, value)) if !more && !key.trim().is_empty() => {
+                fields.push((key.trim().to_string(), unquote(value.trim())));
+            }
+            _ if line.trim().is_empty() => {}
+            _ => {
+                let (_, value) = fields.last_mut()?;
+                if !value.is_empty() {
+                    value.push_str(if more { ", " } else { " " });
+                }
+                value.push_str(line.trim().trim_start_matches("- "));
+            }
+        }
+    }
+    Some((fields, end + 1))
+}
+
+/// A YAML scalar without the quotes around it; a list written in
+/// brackets, its items.
+fn unquote(v: &str) -> String {
+    if let Some(inner) = v.strip_prefix('[').and_then(|v| v.strip_suffix(']')) {
+        return inner.trim().to_string();
+    }
+    for q in ['"', '\''] {
+        if v.len() >= 2 && v.starts_with(q) && v.ends_with(q) {
+            return v[1..v.len() - 1].to_string();
+        }
+    }
+    v.to_string()
+}
+
+/// The blocks, each with the lines (0-based) of the text it came from.
+pub fn parse_lines(text: &str) -> Vec<(Block, Range<usize>)> {
     let mut out = vec![];
     let mut para: Vec<&str> = vec![];
+    let mut para_at = 0;
     let lines: Vec<&str> = text.lines().collect();
-    let flush = |para: &mut Vec<&str>, out: &mut Vec<Block>| {
+    let flush = |para: &mut Vec<&str>, at: usize, out: &mut Vec<(Block, Range<usize>)>| {
         if !para.is_empty() {
-            out.push(Block::Paragraph(para.join(" ")));
+            out.push((Block::Paragraph(para.join(" ")), at..at + para.len()));
             para.clear();
         }
     };
     let mut i = 0;
+    if let Some((fields, end)) = front_matter(&lines) {
+        out.push((Block::FrontMatter(fields), 0..end));
+        i = end;
+    }
     while i < lines.len() {
         let line = lines[i];
         let t = line.trim();
+        let from = i;
         if let Some(fence) = ["```", "~~~"].into_iter().find(|f| t.starts_with(f)) {
-            flush(&mut para, &mut out);
+            flush(&mut para, para_at, &mut out);
+            let word = t[fence.len()..].split_whitespace().next().unwrap_or("");
+            let lang = (!word.is_empty()).then(|| word.to_string());
             let mut code = vec![];
             i += 1;
             while i < lines.len() && !lines[i].trim().starts_with(fence) {
                 code.push(lines[i]);
                 i += 1;
             }
-            out.push(Block::Code(code.join("\n")));
+            out.push((
+                Block::Code(code.join("\n"), lang),
+                from..(i + 1).min(lines.len()),
+            ));
         } else if t.is_empty() {
-            flush(&mut para, &mut out);
+            flush(&mut para, para_at, &mut out);
         } else if para.is_empty()
             && list_item(line).is_none()
             && let Some(level) = lines.get(i + 1).and_then(|n| underline(n.trim()))
         {
             // A setext heading: the line underlined with `===` or `---`.
-            out.push(Block::Heading(level, t.to_string()));
             i += 1;
+            out.push((Block::Heading(level, t.to_string()), from..i + 1));
         } else if let Some((level, h)) = heading(t) {
-            flush(&mut para, &mut out);
-            out.push(Block::Heading(level, h));
+            flush(&mut para, para_at, &mut out);
+            out.push((Block::Heading(level, h), from..i + 1));
         } else if rule(t) && para.is_empty() {
-            out.push(Block::Rule);
+            out.push((Block::Rule, from..i + 1));
         } else if let Some(q) = t.strip_prefix('>') {
-            flush(&mut para, &mut out);
+            flush(&mut para, para_at, &mut out);
             let mut quote = vec![q.trim()];
             while i + 1 < lines.len() && lines[i + 1].trim().starts_with('>') {
                 i += 1;
                 quote.push(lines[i].trim()[1..].trim());
             }
-            out.push(Block::Quote(quote.join(" ")));
+            out.push((Block::Quote(quote.join(" ")), from..i + 1));
         } else if let Some(item) = list_item(line) {
-            flush(&mut para, &mut out);
+            flush(&mut para, para_at, &mut out);
             let mut items = vec![item];
             while i + 1 < lines.len() {
                 let next = lines[i + 1];
@@ -180,9 +244,9 @@ pub fn parse(text: &str) -> Vec<Block> {
                 }
                 i += 1;
             }
-            out.push(Block::List(items));
+            out.push((Block::List(items), from..i + 1));
         } else if let Some(row) = table_row(t) {
-            flush(&mut para, &mut out);
+            flush(&mut para, para_at, &mut out);
             let mut rows = vec![row];
             while i + 1 < lines.len()
                 && let Some(r) = table_row(lines[i + 1])
@@ -192,13 +256,16 @@ pub fn parse(text: &str) -> Vec<Block> {
                 }
                 i += 1;
             }
-            out.push(Block::Table(rows));
+            out.push((Block::Table(rows), from..i + 1));
         } else {
+            if para.is_empty() {
+                para_at = i;
+            }
             para.push(t);
         }
         i += 1;
     }
-    flush(&mut para, &mut out);
+    flush(&mut para, para_at, &mut out);
     out
 }
 
@@ -432,6 +499,39 @@ fn merge(mut h: Vec<(Range<usize>, HighlightStyle)>) -> Vec<(Range<usize>, Highl
 
 /// The document as elements, one column.
 pub fn render(look: &Look, id: &str, blocks: &[Block]) -> Div {
+    render_marked(look, id, blocks, &[])
+}
+
+/// What changed in each block since the last commit, by the lines it came
+/// from (`parse_lines`): new where any of its lines is, else gone where
+/// lines were taken out inside it or just before it.
+pub fn block_marks(
+    ranges: &[Range<usize>],
+    marks: &[(usize, super::code::Mark)],
+) -> Vec<Option<super::code::Mark>> {
+    use super::code::Mark;
+    ranges
+        .iter()
+        .map(|r| {
+            let here = marks.iter().filter(|(line, _)| r.contains(line));
+            let mut kinds = here.map(|(_, m)| *m);
+            if kinds.clone().any(|m| m == Mark::New) {
+                Some(Mark::New)
+            } else {
+                kinds.next()
+            }
+        })
+        .collect()
+}
+
+/// [`render`], each block with a bar in the margin to its left in the
+/// colour of its mark, when it has one.
+pub fn render_marked(
+    look: &Look,
+    id: &str,
+    blocks: &[Block],
+    marks: &[Option<super::code::Mark>],
+) -> Div {
     let t = look.t;
     let mut col = div().flex().flex_col().gap(px(10.)).text_color(t.text);
     if let Some(s) = &look.select {
@@ -441,7 +541,8 @@ pub fn render(look: &Look, id: &str, blocks: &[Block]) -> Div {
     }
     for (n, b) in blocks.iter().enumerate() {
         let eid = ElementId::Name(format!("{id}-{n}").into());
-        col = col.child(match b {
+        let mark = marks.get(n).copied().flatten();
+        let block = match b {
             Block::Heading(level, h) => {
                 let sz = match level {
                     1 => 22.,
@@ -471,14 +572,69 @@ pub fn render(look: &Look, id: &str, blocks: &[Block]) -> Div {
                 .border_color(t.divider)
                 .text_color(t.text2)
                 .child(styled(look, eid, q, HighlightStyle::default(), BLOCK)),
-            Block::Code(c) => div()
-                .p(px(10.))
-                .bg(t.surface)
-                .rounded(px(size::RADIUS))
-                .font_family(FAMILY)
-                .text_size(px(size::SMALL + 1.))
-                .whitespace_nowrap()
-                .child(text(look, c.replace('\t', "    "), vec![], BLOCK)),
+            Block::Code(c, lang) => {
+                let c = c.replace('\t', "    ");
+                let colours = lang
+                    .as_deref()
+                    .and_then(super::syntax::fence)
+                    .filter(|_| c.len() <= super::syntax::MAX_BYTES)
+                    .map(|l| {
+                        super::syntax::highlight(l, &c)
+                            .into_iter()
+                            .map(|(r, token)| {
+                                let style = HighlightStyle {
+                                    color: Some(super::syntax::colour(t, token)),
+                                    ..Default::default()
+                                };
+                                (r, style)
+                            })
+                            .collect()
+                    })
+                    .unwrap_or_default();
+                // Long lines wrap inside the block: nothing runs past its
+                // edge, where it could not be read.
+                div()
+                    .p(px(CODE_PAD))
+                    .bg(t.surface)
+                    .rounded(px(size::RADIUS))
+                    .font_family(FAMILY)
+                    .text_size(px(size::SMALL + 1.))
+                    .child(text(look, c, colours, BLOCK))
+            }
+            Block::FrontMatter(fields) => {
+                // A small table of what the file says of itself, quiet
+                // beside the document it heads.
+                let mut table = div()
+                    .flex()
+                    .flex_col()
+                    .gap(px(2.))
+                    .pb(px(CODE_PAD))
+                    .border_b_1()
+                    .border_color(t.divider)
+                    .text_size(px(size::SMALL + 1.));
+                for (k, (key, value)) in fields.iter().enumerate() {
+                    table = table.child(
+                        div()
+                            .flex()
+                            .gap(px(size::HEAD_GAP))
+                            .child(
+                                div()
+                                    .flex_none()
+                                    .w(px(FIELD_COL))
+                                    .overflow_hidden()
+                                    .text_color(t.dim)
+                                    .child(key.clone()),
+                            )
+                            .child(div().flex_1().min_w_0().text_color(t.text2).child(text(
+                                look,
+                                value.clone(),
+                                vec![],
+                                if k == 0 { BLOCK } else { LINE },
+                            ))),
+                    );
+                }
+                table
+            }
             Block::Rule => div().h(px(1.)).bg(t.divider),
             Block::List(items) => {
                 let mut list = div().flex().flex_col().gap(px(4.));
@@ -560,10 +716,34 @@ pub fn render(look: &Look, id: &str, blocks: &[Block]) -> Div {
                 }
                 table
             }
+        };
+        col = col.child(match mark {
+            Some(m) => div()
+                .relative()
+                .child(
+                    div()
+                        .absolute()
+                        .top_0()
+                        .bottom_0()
+                        .left(px(-MARK_GAP))
+                        .w(px(MARK_W))
+                        .rounded(px(MARK_W / 2.))
+                        .bg(m.colour(t)),
+                )
+                .child(block),
+            None => block,
         });
     }
     col
 }
+
+/// Fenced code's padding, and the room a front matter field's name has.
+const CODE_PAD: f32 = 10.;
+const FIELD_COL: f32 = 120.;
+/// A changed block's bar: its width and how far left of the text it
+/// stands.
+const MARK_W: f32 = 3.;
+const MARK_GAP: f32 = 14.;
 
 #[cfg(test)]
 mod tests {
@@ -582,7 +762,7 @@ mod tests {
         assert_eq!(items[0].checked, Some(false));
         assert_eq!(items[1].text, "done more");
         assert_eq!(items[2].number, Some(1));
-        assert_eq!(b[3], Block::Code("code".into()));
+        assert_eq!(b[3], Block::Code("code".into(), None));
         assert_eq!(b[4], Block::Quote("quote".into()));
         assert_eq!(b[5], Block::Rule);
         assert_eq!(
@@ -616,6 +796,47 @@ mod tests {
         assert_eq!(
             s.copied().as_deref(),
             Some("tle\n\nSome bold link.\n\none\ntwo\n\nlet a = 1;\n    b\n\na\tb\n1\t2")
+        );
+    }
+
+    #[test]
+    fn front_matter_reads_as_fields_and_blocks_know_their_lines() {
+        let doc = "---\nkind: [plan]\ntitle: \"Files: read\"\ntags:\n  - a\n  - b\n---\n\n# Plan\n\nOne\ntwo.\n\n```rust\nfn x() {}\n```\n";
+        let b = parse_lines(doc);
+        assert_eq!(
+            b[0],
+            (
+                Block::FrontMatter(vec![
+                    ("kind".into(), "plan".into()),
+                    ("title".into(), "Files: read".into()),
+                    ("tags".into(), "a, b".into()),
+                ]),
+                0..7
+            )
+        );
+        assert_eq!(b[1], (Block::Heading(1, "Plan".into()), 8..9));
+        assert_eq!(b[2], (Block::Paragraph("One two.".into()), 10..12));
+        assert_eq!(
+            b[3],
+            (Block::Code("fn x() {}".into(), Some("rust".into())), 13..16)
+        );
+        // A rule at the top with no closing one is not front matter.
+        assert_eq!(parse("---\nplain")[0], Block::Rule);
+    }
+
+    #[test]
+    fn a_block_is_marked_by_the_lines_it_came_from() {
+        use super::super::code::Mark;
+        let ranges = [0..2, 2..5, 5..6, 6..9];
+        let marks = [
+            (1, Mark::Gone),
+            (3, Mark::New),
+            (4, Mark::Gone),
+            (7, Mark::Gone),
+        ];
+        assert_eq!(
+            block_marks(&ranges, &marks),
+            vec![Some(Mark::Gone), Some(Mark::New), None, Some(Mark::Gone)]
         );
     }
 

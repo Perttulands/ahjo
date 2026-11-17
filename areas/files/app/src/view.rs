@@ -1,7 +1,10 @@
 //! Drawing the page: the list (recent changes, the tree, or what a find
 //! found) beside the opened file, in the shared page skeleton.
+mod reader;
+
 use crate::open::Show;
 use crate::page::{FilesPage, Pick};
+use crate::store::Layout;
 use crate::store::{format, paths, tree::Row};
 use gpui::{
     AnyElement, Context, Div, MouseButton, MouseMoveEvent, Render, ScrollDelta, SharedString,
@@ -27,6 +30,15 @@ const INDENT: f32 = 12.;
 const DISCLOSURE: f32 = 12.;
 /// Letters kept for a row's age.
 const AGE: usize = 4;
+
+/// Room left above a change or heading scrolled to, in pixels and lines.
+pub const GO_ROOM: f32 = 24.;
+pub const GO_LINES: usize = 3;
+
+/// Whether the open file shows as rendered Markdown.
+pub fn rendered(p: &FilesPage) -> bool {
+    p.reading()
+}
 
 /// A width as last laid out.
 pub type Width = std::rc::Rc<std::cell::Cell<Option<f32>>>;
@@ -70,6 +82,9 @@ pub enum Line {
     Node(Row),
     Hit(usize, Match),
     InText(String),
+    /// Review: a folder where things changed (as a group of the lines
+    /// after it), its newest change.
+    Group(String, u64),
 }
 
 impl Line {
@@ -81,6 +96,7 @@ impl Line {
             Line::Node(r) => Some(Pick::Node(r.path.clone())),
             Line::Hit(i, _) => Some(Pick::Hit(*i)),
             Line::InText(_) => Some(Pick::InText),
+            Line::Group(folder, _) => Some(Pick::Group(folder.clone())),
             Line::Label(_) | Line::Note { .. } => None,
         }
     }
@@ -131,11 +147,18 @@ pub fn lines(p: &FilesPage) -> Vec<Line> {
         }
         return out;
     }
+    let main = !p.beside;
+    if main && p.layout == Layout::Review {
+        return reader::review_lines(p);
+    }
+    // The Reader's find shows what changed; folders are reached by the
+    // path over the file.
+    let tree = !(main && p.layout == Layout::Reader);
     if let Some(Ok(recent)) = &p.recent
         && !recent.is_empty()
     {
         out.push(Line::Label("Recent".into()));
-        let shown = if p.recent_more {
+        let shown = if p.recent_more || !tree {
             recent.len()
         } else {
             RECENT_FIRST.min(recent.len())
@@ -165,7 +188,12 @@ pub fn lines(p: &FilesPage) -> Vec<Line> {
         if shown < recent.len() {
             out.push(Line::More(recent.len() - shown));
         }
-        out.push(Line::Label("Folders".into()));
+        if tree {
+            out.push(Line::Label("Folders".into()));
+        }
+    }
+    if !tree {
+        return out;
     }
     for row in p.tree.rows() {
         let failed = p.tree.failed.get(&row.path).cloned();
@@ -386,6 +414,7 @@ impl FilesPage {
                 }))
                 .into_any_element(),
             Line::Node(row) => self.tree_row(row, picked, t, cx),
+            Line::Group(folder, newest) => self.group_row(folder, newest, picked, t, cx),
         }
     }
 
@@ -536,7 +565,7 @@ impl FilesPage {
                     .debug_selector(|| "files-name-apply".into())
                     .on_click(cx.listener(|p, _, w, cx| p.apply_naming(w, cx))),
             );
-        } else if self.tree.writable() {
+        } else if self.tree.writable() && !self.palette {
             head = head.child(
                 pane::act(t, "files-new", "New")
                     .debug_selector(|| "files-new".into())
@@ -576,7 +605,12 @@ impl FilesPage {
         .flex_1()
         .debug_selector(|| "files-list".into());
         let drop_into = self.tree.folder_here();
-        pane::list_frame(t, head, body)
+        let frame = if !self.beside && self.layout == Layout::Review {
+            pane::list_wide_frame(t, head, body)
+        } else {
+            pane::list_frame(t, head, body)
+        };
+        frame
             .when(self.beside, |l| l.flex_1().min_w_0().border_r_0())
             .on_drop(cx.listener(move |p, dropped: &gpui::ExternalPaths, _, cx| {
                 if let Some(folder) = drop_into.clone() {
@@ -600,8 +634,13 @@ impl FilesPage {
                     .on_click(cx.listener(|p, _, _, cx| p.back_to_list(cx))),
             );
         }
+        if !self.beside {
+            head = head.children(self.head_lead(t, cx));
+        }
         let Some(o) = &self.opened else {
-            return head.child(div().flex_1());
+            return head
+                .child(div().flex_1())
+                .when(!self.beside, |h| h.child(self.layout_switch(t, cx)));
         };
         // A narrow header leaves out the picture's pixel size and 1:1, then
         // the percentage, then the zoom steps; the name gives way in the
@@ -611,9 +650,8 @@ impl FilesPage {
         });
         let room = self.name_room.get().map(letters);
         let name = room.map_or(o.name.clone(), |n| paths::elide_name(&o.name, n));
-        let folder = paths::shown(&self.tree.roots, &paths::parent(&o.path));
-        let folder_fits =
-            room.is_none_or(|n| n >= o.name.chars().count() + folder.chars().count().min(12));
+        let folder = paths::parent(&o.path);
+        let folder_fits = room.is_none_or(|n| n >= o.name.chars().count() + 12);
         head = head.child(
             div()
                 .id("opened-name")
@@ -629,16 +667,9 @@ impl FilesPage {
                     move || id.clone()
                 })
                 .child(measure(self.name_room.clone()))
+                .items_center()
                 .when(!folder.is_empty() && folder_fits, |d| {
-                    d.child(
-                        div()
-                            .min_w_0()
-                            .flex_shrink_1()
-                            .overflow_hidden()
-                            .text_ellipsis()
-                            .text_color(t.dim)
-                            .child(format!("{folder}/")),
-                    )
+                    d.child(self.crumbs(&folder, t, cx))
                 })
                 .child(
                     div()
@@ -683,6 +714,11 @@ impl FilesPage {
                 );
             return head;
         }
+        head = head.children(self.change_count(t, cx));
+        if narrow < 1 {
+            let path = o.path.clone();
+            head = head.children(self.provenance(&path, t, cx));
+        }
         if narrow < 3 || !self.beside {
             head = head.child(
                 pane::act(t, "files-send", "Send")
@@ -709,7 +745,7 @@ impl FilesPage {
                 .tooltip(kit::tip(if o.diff_open {
                     "Back to the file"
                 } else {
-                    "What changed since the last commit"
+                    "Every change since the last commit, line by line"
                 }))
                 .on_click(cx.listener(|p, _, _, cx| p.toggle_diff(cx))),
             );
@@ -731,6 +767,9 @@ impl FilesPage {
                     cx.listener(|p, e: &gpui::ClickEvent, _, cx| p.file_menu(e.position(), cx)),
                 ),
         );
+        if !self.beside {
+            head = head.child(self.layout_switch(t, cx));
+        }
         head.children(self.beside_acts(t, cx))
     }
 
@@ -897,39 +936,7 @@ impl FilesPage {
             Show::Text {
                 markdown: Some(blocks),
             } if !o.editing && !o.source && !self.drafts.contains_key(&o.key()) => {
-                let node = o.node.clone();
-                let folder = paths::parent(&o.path);
-                let me = cx.entity().downgrade();
-                let on_link =
-                    std::rc::Rc::new(move |link: &str, window: &mut Window, cx: &mut gpui::App| {
-                        let _ = me.update(cx, |page, cx| {
-                            page.follow_link(&node, &folder, link, window, cx)
-                        });
-                    });
-                let look = parvi_app_kit::widgets::markdown::Look {
-                    t,
-                    refs: false,
-                    on_link: Some(on_link),
-                    select: None,
-                };
-                div()
-                    .id("files-markdown-scroll")
-                    .size_full()
-                    .overflow_y_scroll()
-                    .debug_selector(|| "files-markdown-rendered".into())
-                    .child(
-                        div()
-                            .w_full()
-                            .max_w(px(size::READING))
-                            .p(px(size::PAD))
-                            .debug_selector(|| "files-markdown-content".into())
-                            .child(parvi_app_kit::widgets::markdown::render(
-                                &look,
-                                "file-markdown",
-                                blocks,
-                            )),
-                    )
-                    .into_any_element()
+                self.markdown_body(t, blocks, cx)
             }
             Show::Text { .. }
                 if o.pretty.is_some()
@@ -1059,7 +1066,7 @@ impl FilesPage {
 
     /// Whether the file shows as text set to a reading width: Markdown,
     /// rendered.
-    fn reading(&self) -> bool {
+    pub(crate) fn reading(&self) -> bool {
         self.opened.as_ref().is_some_and(|o| {
             matches!(o.show, Show::Text { markdown: Some(_) })
                 && !o.editing
@@ -1071,21 +1078,8 @@ impl FilesPage {
     fn viewer(&self, t: &Theme, cx: &mut Context<Self>) -> Div {
         let mut head = self.viewer_head(t, cx);
         if self.reading() {
-            // The head shares the text's column, so its actions stand at
-            // the right edge of what they act on (as pane::detail's do).
-            head = div()
-                .flex_none()
-                .w_full()
-                .h(px(size::TAB_BAR))
-                .border_b_1()
-                .border_color(t.divider)
-                .child(
-                    head.border_0()
-                        .h_full()
-                        .w_full()
-                        .max_w(px(size::READING))
-                        .px(px(size::PAD)),
-                );
+            // Over the centred text the head keeps its words in line with it.
+            head = head.px(px(size::PAD));
         }
         let body = div()
             .size_full()
@@ -1125,10 +1119,14 @@ impl Render for FilesPage {
                 self.list_column(&t, cx)
             });
         }
-        root.child(pane::page(
-            &t,
-            self.list_column(&t, cx),
-            self.viewer(&t, cx),
-        ))
+        match self.layout {
+            Layout::Tree => root.child(pane::page(
+                &t,
+                self.list_column(&t, cx),
+                self.viewer(&t, cx),
+            )),
+            Layout::Reader => root.child(self.reader_page(&t, cx)),
+            Layout::Review => root.child(self.review_page(&t, cx)),
+        }
     }
 }

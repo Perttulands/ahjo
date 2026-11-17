@@ -26,6 +26,10 @@ const UNDO_GROUP: Duration = Duration::from_millis(700);
 const UNDO_DEPTH: usize = 200;
 /// Lines kept in view above a line gone to.
 const GO_TO_CONTEXT: usize = 3;
+/// A change mark's width beside the line numbers, and the wash a new
+/// line's text lies on.
+const MARK_W: f32 = 3.;
+const MARK_WASH: f32 = 0.07;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum CodeEvent {
@@ -35,8 +39,43 @@ pub enum CodeEvent {
     Escape,
 }
 
+/// What changed at a line since the last commit, marked beside its number.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Mark {
+    /// The line is new or changed.
+    New,
+    /// Lines were taken out just before this one.
+    Gone,
+}
+
+impl Mark {
+    pub fn colour(self, t: &Theme) -> Hsla {
+        match self {
+            Mark::New => rgb(t.ansi[2]),
+            Mark::Gone => rgb(t.ansi[1]),
+        }
+    }
+}
+
+/// Where each run of changes starts: the first line of a run of marked
+/// lines, in order. A change in view is a run's start, not its every line.
+pub fn change_starts(marks: &[(usize, Mark)]) -> Vec<usize> {
+    let mut out: Vec<usize> = vec![];
+    let mut last: Option<usize> = None;
+    for &(line, _) in marks {
+        if last.is_none_or(|l| line > l + 1) {
+            out.push(line);
+        }
+        last = Some(line);
+    }
+    out.dedup();
+    out
+}
+
 pub struct Code {
     focus: FocusHandle,
+    /// Lines changed since the last commit, by line (0-based), in order.
+    marks: Vec<(usize, Mark)>,
     text: String,
     /// Where each line starts.
     starts: Vec<usize>,
@@ -142,6 +181,7 @@ impl Code {
     pub fn new(cx: &mut Context<Self>) -> Self {
         Self {
             focus: cx.focus_handle().tab_stop(true),
+            marks: vec![],
             text: String::new(),
             starts: vec![0],
             lang: None,
@@ -335,6 +375,40 @@ impl Code {
     pub fn show_line(&mut self, n: usize, cx: &mut Context<Self>) {
         self.top = self.row_starts[n.min(self.starts.len().saturating_sub(1))] as f32;
         cx.notify();
+    }
+
+    /// Marks the lines changed since the last commit (0-based, in order).
+    pub fn set_marks(&mut self, mut marks: Vec<(usize, Mark)>, cx: &mut Context<Self>) {
+        marks.sort_by_key(|m| m.0);
+        if self.marks != marks {
+            self.marks = marks;
+            cx.notify();
+        }
+    }
+
+    pub fn marks(&self) -> &[(usize, Mark)] {
+        &self.marks
+    }
+
+    /// Scrolls to the next change below the lines in view's top (or the one
+    /// above it), a few lines of what is around it above. False when there
+    /// is none that way.
+    pub fn step_change(&mut self, forward: bool, cx: &mut Context<Self>) -> bool {
+        let starts = change_starts(&self.marks);
+        // The change shown now stands GO_TO_CONTEXT lines under the top.
+        let here = self.top_line() + GO_TO_CONTEXT;
+        let next = if forward {
+            starts.into_iter().find(|&s| s > here)
+        } else {
+            starts.into_iter().rev().find(|&s| s < here)
+        };
+        match next {
+            Some(line) => {
+                self.show_line(line.saturating_sub(GO_TO_CONTEXT), cx);
+                true
+            }
+            None => false,
+        }
     }
 
     /// Goes to line `n` (0-based): it is selected, with a few lines above
@@ -855,16 +929,6 @@ fn shape(
         .shape_line(text, px(size::TEXT), &runs, None)
 }
 
-/// A token's colour in the theme.
-fn token_colour(t: &Theme, token: Token) -> Hsla {
-    match token {
-        Token::Comment => t.dim,
-        Token::String => rgb(t.ansi[2]),
-        Token::Number => rgb(t.ansi[3]),
-        Token::Keyword => t.accent,
-    }
-}
-
 impl EntityInputHandler for Code {
     fn text_for_range(
         &mut self,
@@ -980,6 +1044,8 @@ struct CodeElement {
 
 struct Painted {
     gutter: Vec<(Point<Pixels>, ShapedLine)>,
+    /// The change marks beside the line numbers.
+    bars: Vec<gpui::PaintQuad>,
     lines: Vec<(Point<Pixels>, ShapedLine)>,
     quads: Vec<gpui::PaintQuad>,
     caret: Option<gpui::PaintQuad>,
@@ -1041,6 +1107,8 @@ impl Element for CodeElement {
         let mut gutter = vec![];
         let mut lines = vec![];
         let mut quads = vec![];
+        let mut bars = vec![];
+        let bar_x = area.origin.x - px(8.) - px(MARK_W);
         let mut caret = None;
         let caret_line = c.line_of(caret_at);
         let x0 = area.origin.x - c.left;
@@ -1057,7 +1125,7 @@ impl Element for CodeElement {
                 .map(|(s, token)| {
                     (
                         to_shown(line, s.start)..to_shown(line, s.end),
-                        token_colour(&t, token),
+                        syntax::colour(&t, token),
                     )
                 })
                 .collect();
@@ -1086,6 +1154,34 @@ impl Element for CodeElement {
                     })
                     .collect();
                 let shaped = shape(window, &shown[seg.clone()], t.text, &part);
+                let mark = c
+                    .marks
+                    .binary_search_by_key(&n, |m| m.0)
+                    .ok()
+                    .map(|i| c.marks[i].1);
+                match mark {
+                    Some(Mark::New) => {
+                        bars.push(fill(
+                            Bounds::new(point(bar_x, y), sz(px(MARK_W), lh)),
+                            Mark::New.colour(&t),
+                        ));
+                        quads.insert(
+                            0,
+                            fill(
+                                Bounds::new(point(area.origin.x, y), sz(area.size.width, lh)),
+                                alpha(Mark::New.colour(&t), MARK_WASH),
+                            ),
+                        );
+                    }
+                    Some(Mark::Gone) if k == 0 => bars.push(fill(
+                        Bounds::new(
+                            point(bar_x, y - px(MARK_W)),
+                            sz(px(MARK_W * 2.), px(MARK_W * 2.)),
+                        ),
+                        Mark::Gone.colour(&t),
+                    )),
+                    _ => {}
+                }
                 if k == 0 {
                     let num = shape(
                         window,
@@ -1139,6 +1235,7 @@ impl Element for CodeElement {
         }
         Painted {
             gutter,
+            bars,
             lines,
             quads,
             caret,
@@ -1177,6 +1274,9 @@ impl Element for CodeElement {
             ));
             for (o, l) in &p.gutter {
                 let _ = l.paint(*o, lh, gpui::TextAlign::Left, None, window, cx);
+            }
+            for q in p.bars.drain(..) {
+                window.paint_quad(q);
             }
             window.with_content_mask(Some(gpui::ContentMask { bounds: p.area }), |window| {
                 for q in p.quads.drain(..) {
@@ -1254,6 +1354,20 @@ impl Render for Code {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_run_of_changed_lines_is_one_change() {
+        let marks = [
+            (2, Mark::New),
+            (3, Mark::New),
+            (4, Mark::New),
+            (9, Mark::Gone),
+            (12, Mark::New),
+            (13, Mark::New),
+        ];
+        assert_eq!(change_starts(&marks), vec![2, 9, 12]);
+        assert!(change_starts(&[]).is_empty());
+    }
 
     #[test]
     fn a_long_line_wraps_into_rows_of_whole_letters() {

@@ -1836,3 +1836,98 @@ fn picture_zoom_can_switch_between_fit_and_actual_size(cx: &mut TestAppContext) 
     drop(running);
     std::fs::remove_dir_all(root).unwrap();
 }
+
+/// The layouts are chosen on the page and kept. Review groups what changed
+/// by where and opens a group as a place; the Reader has the file alone
+/// and opens its find over it, Escape closing it again.
+#[gpui::test]
+fn layouts_are_chosen_on_the_page_and_each_reaches_files(cx: &mut TestAppContext) {
+    let root = parvi_testkit::fresh_dir("files-layouts");
+    std::fs::create_dir_all(root.join("proj/docs")).unwrap();
+    for (name, text, ago) in [
+        ("proj/README.md", "# Proj\n\nWhat it is.\n", 50),
+        ("proj/docs/plan.md", "---\nkind: plan\n---\n# Plan\n", 10),
+        ("loose.txt", "loose", 20),
+    ] {
+        std::fs::write(root.join(name), text).unwrap();
+        modified(&root.join(name), ago);
+    }
+    let running = start(root.clone());
+    cx.executor().allow_parking();
+    cx.update(parvi_app_shell::prepare);
+    let url = running.url.clone();
+    let (shell, cx) = cx.add_window_view(move |w, cx| {
+        parvi_app_shell::start(&[parvi_files_app::build], Some(url), None, w, cx)
+    });
+    until(cx, "the newest file shown", |cx| {
+        cx.debug_bounds("file-view-plan.md").is_some()
+    });
+    assert_eq!(
+        kept(&shell, cx).layout,
+        parvi_files_app::store::Layout::Tree
+    );
+
+    click(cx, "files-layout");
+    until(cx, "the layout menu", |cx| {
+        cx.debug_bounds("menu-label-Review").is_some()
+    });
+    menu(cx, "Review");
+    until(cx, "changes grouped by project", |cx| {
+        cx.debug_bounds("group-proj").is_some()
+    });
+    assert_eq!(
+        kept(&shell, cx).layout,
+        parvi_files_app::store::Layout::Review
+    );
+    let group = cx.debug_bounds("group-proj").unwrap();
+    let plan = cx.debug_bounds("recent-plan.md").unwrap();
+    assert!(group.top() < plan.top(), "a group heads its files");
+    click(cx, "group-proj");
+    until(cx, "the project as a place", |cx| {
+        cx.debug_bounds("files-place").is_some()
+            && cx.debug_bounds("place-recent-plan.md").is_some()
+            && cx.debug_bounds("place-doc-README.md").is_some()
+    });
+    click(cx, "place-doc-README.md");
+    until(cx, "a document opened from the place", |cx| {
+        cx.debug_bounds("file-view-README.md").is_some()
+    });
+
+    click(cx, "files-layout");
+    until(cx, "the layout menu", |cx| {
+        cx.debug_bounds("menu-label-Reader").is_some()
+    });
+    menu(cx, "Reader");
+    until(cx, "the file alone", |cx| {
+        cx.debug_bounds("files-list").is_none() && cx.debug_bounds("files-find").is_some()
+    });
+    click(cx, "files-find");
+    until(cx, "the find over the file", |cx| {
+        cx.debug_bounds("files-palette").is_some()
+    });
+    cx.simulate_input("plan");
+    cx.run_until_parked();
+    cx.executor().advance_clock(Duration::from_millis(300));
+    until(cx, "a name found", |cx| {
+        cx.debug_bounds("hit-plan.md").is_some()
+    });
+    cx.simulate_keystrokes("enter");
+    until(cx, "opened, the find gone", |cx| {
+        cx.debug_bounds("file-view-plan.md").is_some() && cx.debug_bounds("files-palette").is_none()
+    });
+    // Back goes to the file read before.
+    cx.simulate_keystrokes("alt-left");
+    until(cx, "back to the README", |cx| {
+        cx.debug_bounds("file-view-README.md").is_some()
+    });
+    click(cx, "files-find");
+    until(cx, "the find again", |cx| {
+        cx.debug_bounds("files-palette").is_some()
+    });
+    cx.simulate_keystrokes("escape");
+    until(cx, "Escape closes it", |cx| {
+        cx.debug_bounds("files-palette").is_none()
+    });
+    drop(running);
+    std::fs::remove_dir_all(root).unwrap();
+}

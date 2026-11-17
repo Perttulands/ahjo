@@ -1,7 +1,7 @@
 //! Page state, file requests and user actions.
 use crate::{
     open::{self, Draft, Opened, Show},
-    store::{self, find::Find, paths, tree::Tree},
+    store::{self, Layout, find::Find, paths, tree::Tree},
 };
 use gpui::{
     App, AppContext, Context, Entity, FocusHandle, KeyDownEvent, UniformListScrollHandle,
@@ -84,6 +84,8 @@ pub enum Pick {
     Node(String),
     Hit(usize),
     InText,
+    /// Review: a folder where things changed, and who works there.
+    Group(String),
 }
 
 /// What changed, as the node answered, or why it could not say.
@@ -145,14 +147,42 @@ pub struct FilesPage {
     beside_view: Option<Entity<FilesPage>>,
     restored: bool,
     pub(crate) beside_from: &'static str,
-    me: WeakEntity<FilesPage>,
+    pub(crate) me: WeakEntity<FilesPage>,
     pub(crate) sessions: Option<Entity<parvi_terminals_contract::SessionList>>,
+    /// The sessions as last told, for the views that group by them.
+    pub(crate) live: Vec<parvi_terminals_contract::Session>,
     uploads: VecDeque<Upload>,
     uploading: bool,
     upload_conflict: Option<UploadConflict>,
     /// The watch is running, and when each watched path last changed.
     watching: bool,
     seen: HashMap<String, Option<u64>>,
+    /// How the page is laid out (Tree, Reader or Review).
+    pub layout: Layout,
+    /// Reader: the find lies open over the file.
+    pub palette: bool,
+    /// Files opened before and after the one open, to go back and forth.
+    back: Vec<String>,
+    forward: Vec<String>,
+    travelling: bool,
+    /// Review and Reader: a folder shown as a place (its sessions, what
+    /// changed in it, its documents) instead of a file.
+    pub place: Option<String>,
+    /// What changed under the place, once read.
+    pub place_recent: Option<Changes>,
+    /// The rendered Markdown's scroll and where each block was laid out,
+    /// for the outline; its words, to be selected.
+    pub md_scroll: gpui::ScrollHandle,
+    pub md_blocks: std::rc::Rc<std::cell::RefCell<Vec<gpui::Bounds<gpui::Pixels>>>>,
+    pub md_select: std::rc::Rc<std::cell::RefCell<parvi_app_kit::widgets::select::Selectable>>,
+    /// A block to scroll to once laid out.
+    pub md_go: std::rc::Rc<std::cell::Cell<Option<usize>>>,
+    /// The viewer's body as last laid out: room for the outline or not.
+    pub(crate) body_room: crate::view::Width,
+    /// Review: the file opened goes to its first change once read.
+    jump_due: bool,
+    /// The place's README, rendered, when it has one.
+    pub place_readme: Option<Vec<parvi_app_kit::widgets::markdown::Block>>,
 }
 
 fn enc(s: &str) -> String {
@@ -204,6 +234,8 @@ impl Page for FilesPage {
         &[
             parvi_app_kit::Setting::text("download_folder", "Download folder", "")
                 .note("Leave empty to use Downloads in your home folder."),
+            parvi_app_kit::Setting::text("layout", "Layout", "tree")
+                .note("tree, reader or review: the list beside the file, the file alone with a find over it, or what changed by session."),
         ];
     fn chords(&self, _: &App) -> Vec<parvi_app_kit::chords::Chord> {
         let me = self.me.clone();
@@ -217,6 +249,13 @@ impl Page for FilesPage {
     }
     fn focus(&self, _: &App) -> Option<FocusHandle> {
         Some(self.focus.clone())
+    }
+    fn settings_changed(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let kept: store::Kept = self.host.setting(cx).unwrap_or_default();
+        if kept.layout != self.layout {
+            self.layout = kept.layout;
+            self.laid_out(window, cx);
+        }
     }
     fn shown(&mut self, on: bool, window: &mut Window, cx: &mut Context<Self>) {
         self.shown = on;
@@ -310,7 +349,11 @@ impl FilesPage {
         let kept: store::Kept = host.setting(cx).unwrap_or_default();
         let sessions = host.model::<parvi_terminals_contract::SessionList>(cx);
         if let Some(sessions) = &sessions {
-            cx.observe(sessions, |_, _, cx| cx.notify()).detach();
+            cx.observe(sessions, |p: &mut Self, list, cx| {
+                p.live = list.read(cx).sessions.clone();
+                cx.notify()
+            })
+            .detach();
         }
         let wrap = !kept.unwrapped;
         let code = cx.new(|cx| {
@@ -414,12 +457,30 @@ impl FilesPage {
             restored: false,
             beside_from: "",
             me: cx.weak_entity(),
+            live: sessions
+                .as_ref()
+                .map(|s| s.read(cx).sessions.clone())
+                .unwrap_or_default(),
             sessions,
             uploads: VecDeque::new(),
             uploading: false,
             upload_conflict: None,
             watching: false,
             seen: HashMap::new(),
+            layout: kept.layout,
+            palette: false,
+            back: vec![],
+            forward: vec![],
+            travelling: false,
+            place: None,
+            place_recent: None,
+            md_scroll: gpui::ScrollHandle::new(),
+            md_blocks: Default::default(),
+            md_select: Default::default(),
+            md_go: Default::default(),
+            body_room: Default::default(),
+            jump_due: false,
+            place_readme: None,
         }
     }
 
@@ -1015,6 +1076,7 @@ impl FilesPage {
                 }
             }
             Pick::InText => self.find_in_text(cx),
+            Pick::Group(folder) => self.show_place(folder, cx),
         }
         cx.notify();
     }
@@ -1031,6 +1093,21 @@ impl FilesPage {
     }
     /// Opens a file in the viewer, and shows it in the tree.
     pub fn open(&mut self, path: String, window: &mut Window, cx: &mut Context<Self>) {
+        if !self.travelling
+            && let Some(was) = self.opened.as_ref().map(|o| o.path.clone())
+            && was != path
+        {
+            self.back.push(was);
+            self.forward.clear();
+        }
+        if std::mem::take(&mut self.palette) {
+            window.focus(&self.focus, cx);
+        }
+        self.place = None;
+        self.jump_due = self.layout == Layout::Review && !self.beside;
+        self.md_go.set(None);
+        self.md_scroll.set_offset(gpui::Point::default());
+        self.md_select.borrow_mut().selection.clear();
         self.pending_line = None;
         self.confirm_discard = false;
         self.conflict = false;
@@ -1214,8 +1291,13 @@ impl FilesPage {
                     .then(|| serde_json::from_slice::<parvi_files_contract::Diff>(&body).ok())
                     .flatten()
                     .filter(|d| d.error.is_none() && !d.diff.trim().is_empty());
+                o.changes = o.diff.as_ref().map(|d| store::marks::of_diff(&d.diff));
                 if o.diff.is_none() {
                     o.diff_open = false;
+                }
+                page.apply_marks(cx);
+                if std::mem::take(&mut page.jump_due) {
+                    page.first_change(cx);
                 }
                 cx.notify();
             },
@@ -1252,6 +1334,7 @@ impl FilesPage {
             o.diff_open = false;
             self.code.update(cx, |c, cx| c.edit(true, w, cx));
         }
+        self.apply_marks(cx);
         cx.notify()
     }
     fn finish_edit(&mut self, w: &mut Window, cx: &mut Context<Self>) {
@@ -1273,6 +1356,7 @@ impl FilesPage {
         } else if let Some(o) = self.opened.as_mut() {
             o.editing = false;
             self.code.update(cx, |c, cx| c.edit(false, w, cx));
+            self.apply_marks(cx);
         }
         cx.notify()
     }
@@ -1407,6 +1491,11 @@ impl FilesPage {
             cx.stop_propagation();
             return;
         }
+        if e.keystroke.key == "escape" && self.palette {
+            self.close_palette(window, cx);
+            cx.stop_propagation();
+            return;
+        }
         if e.keystroke.key == "escape" && self.query.read(cx).is_focused(window) {
             self.clear_find(cx);
             window.focus(&self.focus, cx);
@@ -1416,11 +1505,43 @@ impl FilesPage {
     }
     /// The list's keys.
     pub fn key(&mut self, e: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
-        if !self.focus.is_focused(window) {
+        let reading = !self.opened.as_ref().is_some_and(|o| o.editing)
+            && (self.code.read(cx).is_focused(window)
+                || self.pretty_code.read(cx).is_focused(window));
+        if !self.focus.is_focused(window) && !reading {
             return;
         }
         let key = &e.keystroke;
         let m = key.modifiers;
+        // Back and forth through the files opened, as a browser goes.
+        if m.alt && !m.control && !m.shift && matches!(key.key.as_str(), "left" | "right") {
+            self.travel(key.key == "left", window, cx);
+            cx.stop_propagation();
+            return;
+        }
+        if m.control && !m.alt && !m.shift && key.key == "p" {
+            self.find_anywhere(window, cx);
+            cx.stop_propagation();
+            return;
+        }
+        // The next change in the file, or the one before.
+        if !m.alt && !m.control && !m.platform && key.key.eq_ignore_ascii_case("n") {
+            self.step_change(!m.shift, cx);
+            cx.stop_propagation();
+            return;
+        }
+        if m.control
+            && !m.shift
+            && key.key == "c"
+            && let Some(text) = self.md_select.borrow().copied()
+        {
+            parvi_app_kit::widgets::select::copy(text, cx);
+            cx.stop_propagation();
+            return;
+        }
+        if reading {
+            return;
+        }
         if m.alt || m.platform || (m.control && key.key != "c") {
             return;
         }
@@ -1450,7 +1571,7 @@ impl FilesPage {
                 }
                 self.refresh_recent(cx);
             }
-            "/" => parvi_app_kit::widgets::field::focus(&self.query, window, cx),
+            "/" => self.find_anywhere(window, cx),
             "f2" => self.start_rename(window, cx),
             // Beside another page, Esc takes the view away (its drafts are
             // asked about first), with a find under the file shown too.
@@ -1482,6 +1603,7 @@ impl FilesPage {
                 .find
                 .as_ref()
                 .and_then(|f| f.matches().get(*i).map(|m| m.path.clone())),
+            Pick::Group(p) => Some(p.clone()),
             Pick::More | Pick::InText => None,
         }
     }
@@ -1502,6 +1624,7 @@ impl FilesPage {
                 self.read(node, path, true, cx);
             }
         }
+        self.apply_marks(cx);
         cx.notify();
     }
 
@@ -2177,5 +2300,238 @@ impl FilesPage {
             },
             cx,
         );
+    }
+}
+
+/// The layouts being compared, and what reading needs in each of them:
+/// the find over the file, going back and forth, the changes in a file and
+/// a folder shown as a place.
+impl FilesPage {
+    /// The layout changed: start it as it starts.
+    pub(crate) fn laid_out(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.palette = false;
+        if self.layout == Layout::Tree {
+            self.place = None;
+        }
+        if self.layout == Layout::Reader && self.opened.is_none() && self.place.is_none() {
+            self.find_anywhere(window, cx);
+        }
+        cx.notify();
+    }
+
+    pub fn set_layout(&mut self, layout: Layout, window: &mut Window, cx: &mut Context<Self>) {
+        self.layout = layout;
+        let mut kept: store::Kept = self.host.setting(cx).unwrap_or_default();
+        if kept.layout != layout {
+            kept.layout = layout;
+            let _ = self.host.set_setting(&kept, cx);
+        }
+        self.laid_out(window, cx);
+    }
+
+    /// The find takes the keyboard: in the list, or (Reader) opened over
+    /// the file.
+    pub fn find_anywhere(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.layout == Layout::Reader && !self.beside {
+            self.palette = true;
+        }
+        parvi_app_kit::widgets::field::focus(&self.query, window, cx);
+        cx.notify();
+    }
+
+    pub fn close_palette(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.palette = false;
+        self.clear_find(cx);
+        window.focus(&self.focus, cx);
+        cx.notify();
+    }
+
+    /// Back to the file opened before this one, or forward again.
+    pub fn travel(&mut self, back: bool, window: &mut Window, cx: &mut Context<Self>) {
+        let (from, to) = if back {
+            (&mut self.back, &mut self.forward)
+        } else {
+            (&mut self.forward, &mut self.back)
+        };
+        let Some(path) = from.pop() else {
+            return;
+        };
+        if let Some(now) = self.opened.as_ref().map(|o| o.path.clone()) {
+            to.push(now);
+        }
+        self.travelling = true;
+        self.show_in_tree(&path, cx);
+        self.open(path, window, cx);
+        self.travelling = false;
+    }
+
+    pub fn can_travel(&self, back: bool) -> bool {
+        !if back { &self.back } else { &self.forward }.is_empty()
+    }
+
+    /// The open file's change marks on its lines, none while it is being
+    /// edited (its lines move as you type).
+    pub(crate) fn apply_marks(&self, cx: &mut Context<Self>) {
+        let marks = match &self.opened {
+            Some(o) if !o.editing => {
+                let last = o.saved.lines().count().saturating_sub(1);
+                o.changes.as_ref().map_or(vec![], |c| {
+                    c.marks.iter().map(|&(l, m)| (l.min(last), m)).collect()
+                })
+            }
+            _ => vec![],
+        };
+        self.code.update(cx, |c, cx| c.set_marks(marks, cx));
+    }
+
+    /// The rendered Markdown's blocks with what changed in each.
+    pub fn block_marks(&self) -> Vec<Option<parvi_app_kit::widgets::code::Mark>> {
+        let Some(o) = &self.opened else {
+            return vec![];
+        };
+        let Some(changes) = &o.changes else {
+            return vec![];
+        };
+        let ranges: Vec<_> = parvi_app_kit::widgets::markdown::parse_lines(&o.saved)
+            .into_iter()
+            .map(|(_, r)| r)
+            .collect();
+        parvi_app_kit::widgets::markdown::block_marks(&ranges, &changes.marks)
+    }
+
+    /// Scrolls to the next change (or the one before): in the code, or to
+    /// the next changed block of rendered Markdown.
+    pub fn step_change(&mut self, forward: bool, cx: &mut Context<Self>) {
+        let Some(o) = &self.opened else {
+            return;
+        };
+        if o.diff_open || o.changes.as_ref().is_none_or(|c| c.marks.is_empty()) {
+            return;
+        }
+        if !crate::view::rendered(self) {
+            self.code.update(cx, |c, cx| {
+                c.step_change(forward, cx);
+            });
+            return;
+        }
+        let marked: Vec<usize> = self
+            .block_marks()
+            .iter()
+            .enumerate()
+            .filter_map(|(i, m)| m.map(|_| i))
+            .collect();
+        let top = self.md_scroll.bounds().top();
+        // The block at the top of the view now, a little room given.
+        let here = self
+            .md_blocks
+            .borrow()
+            .iter()
+            .position(|b| b.bottom() > top + gpui::px(crate::view::GO_ROOM + 1.))
+            .unwrap_or(0);
+        let next = if forward {
+            marked.into_iter().find(|&i| i > here)
+        } else {
+            marked.into_iter().rev().find(|&i| i < here)
+        };
+        if let Some(i) = next {
+            self.md_go.set(Some(i));
+            cx.notify();
+        }
+    }
+
+    /// Scrolls to the open file's first change.
+    fn first_change(&mut self, cx: &mut Context<Self>) {
+        if crate::view::rendered(self) {
+            if let Some(i) = self.block_marks().iter().position(Option::is_some) {
+                self.md_go.set(Some(i));
+            }
+            return;
+        }
+        let first = self
+            .code
+            .read(cx)
+            .marks()
+            .first()
+            .map(|m| m.0.saturating_sub(crate::view::GO_LINES));
+        if let Some(line) = first {
+            self.code.update(cx, |c, cx| c.show_line(line, cx));
+        }
+    }
+
+    /// Shows a folder as a place: who works there, what changed in it, its
+    /// documents.
+    pub fn show_place(&mut self, folder: String, cx: &mut Context<Self>) {
+        if self.place.as_deref() == Some(folder.as_str()) {
+            return;
+        }
+        self.place = Some(folder.clone());
+        self.place_recent = None;
+        self.place_readme = None;
+        self.palette = false;
+        let readme = paths::join(&folder, "README.md");
+        self.request(
+            Request::get(self.node(), route("file", &readme)),
+            move |p, s, b, cx| {
+                if s == 200 && p.place.as_deref() == Some(paths::parent(&readme).as_str()) {
+                    let text = String::from_utf8_lossy(&b);
+                    p.place_readme = Some(parvi_app_kit::widgets::markdown::parse(&text));
+                    cx.notify();
+                }
+            },
+            cx,
+        );
+        if !self.tree.listings.contains_key(&folder) {
+            self.list(folder.clone(), cx);
+        }
+        let node = self.tree.node.clone();
+        self.request(
+            Request::get(NodeId(node.clone()), route("recent", &folder)),
+            move |p, s, b, cx| {
+                if p.tree.node != node || p.place.as_deref() != Some(folder.as_str()) {
+                    return;
+                }
+                p.place_recent = Some(if s == 200 {
+                    serde_json::from_slice::<parvi_files_contract::Recent>(&b)
+                        .map(|r| r.files)
+                        .map_err(|e| e.to_string())
+                } else {
+                    Err(message(s, &b))
+                });
+                cx.notify();
+            },
+            cx,
+        );
+        cx.notify();
+    }
+
+    /// The live sessions on this node working where `path` is.
+    pub fn sessions_at(&self, path: &str) -> Vec<&parvi_terminals_contract::Session> {
+        store::who::working_at(&self.live, &self.tree.node, path)
+    }
+
+    /// Brings a session forward in the terminals.
+    pub fn reveal_session(&self, s: &parvi_terminals_contract::Session, cx: &mut Context<Self>) {
+        let ask = Ask::Reveal {
+            what: "session".into(),
+            id: s.name.clone(),
+            node: Some(NodeId(s.node.clone())),
+            part: None,
+            beside: false,
+        };
+        if let Err(e) = self.host.ask(ask, cx) {
+            self.fail(e.message, cx);
+        }
+    }
+
+    /// Starts a session in `folder`.
+    pub fn launch_in(&self, folder: &str, cx: &mut Context<Self>) {
+        let ask = Ask::Launch {
+            node: self.node(),
+            folder: folder.to_owned(),
+            name: paths::base_name(folder).to_owned(),
+        };
+        if let Err(e) = self.host.ask(ask, cx) {
+            self.fail(e.message, cx);
+        }
     }
 }
