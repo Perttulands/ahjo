@@ -172,7 +172,9 @@ pub async fn log(component: &Component, lines: usize) -> Result<Vec<LogLine>, St
 }
 
 /// One `journalctl -o json` entry: its time, message and priority. A
-/// message journald keeps as bytes is read as text.
+/// message journald keeps as bytes is read as text. A line is an error at
+/// priority `err` or worse, or when it says so itself: most services write
+/// their errors to standard output, which journald keeps at `info`.
 pub fn journal_line(json: &str) -> Option<LogLine> {
     let entry: serde_json::Value = serde_json::from_str(json).ok()?;
     let at = entry["__REALTIME_TIMESTAMP"]
@@ -195,11 +197,34 @@ pub fn journal_line(json: &str) -> Option<LogLine> {
     let priority = entry["PRIORITY"]
         .as_str()
         .and_then(|p| p.parse::<u8>().ok());
+    let text = text.trim_end().to_owned();
     Some(LogLine {
         at,
-        text: text.trim_end().to_owned(),
-        error: priority.is_some_and(|p| p <= 3),
+        error: priority.is_some_and(|p| p <= 3) || reads_as_error(&text),
+        text,
     })
+}
+
+/// A line that names itself an error: its first word (after any time or
+/// bracket a logger puts first) is error, fatal, panic or critical, or it
+/// starts a Python traceback or a Rust panic.
+fn reads_as_error(text: &str) -> bool {
+    const WORDS: [&str; 7] = [
+        "error",
+        "err",
+        "fatal",
+        "panic",
+        "critical",
+        "crit",
+        "exception",
+    ];
+    if text.starts_with("Traceback (most recent call last)") || text.contains("panicked at") {
+        return true;
+    }
+    text.split(|c: char| c.is_whitespace() || matches!(c, '[' | ']' | ':' | '|' | '='))
+        .filter(|w| !w.is_empty() && !w.starts_with(|c: char| c.is_ascii_digit()))
+        .take(3)
+        .any(|w| WORDS.contains(&w.to_ascii_lowercase().as_str()))
 }
 
 fn now_ms() -> u64 {
@@ -374,5 +399,24 @@ mod tests {
             None
         );
         assert_eq!(journal_line("not json"), None);
+    }
+
+    #[test]
+    fn a_line_that_says_it_is_an_error_is_one_at_any_priority() {
+        let at = |m: &str| {
+            journal_line(&format!(
+                r#"{{"__REALTIME_TIMESTAMP":"1000","MESSAGE":"{m}","PRIORITY":"6"}}"#
+            ))
+            .unwrap()
+            .error
+        };
+        assert!(at("error: upstream timed out after 30 s"));
+        assert!(at("2026-11-17 10:00:01 [ERROR] db: refused"));
+        assert!(at("level=error msg=refused"));
+        assert!(at("Traceback (most recent call last):"));
+        assert!(at("thread 'main' panicked at src/main.rs:3:5"));
+        assert!(!at("tick 3: queue empty"));
+        assert!(!at("retrying after 0 errors"));
+        assert!(!at("GET /errors 200"));
     }
 }
