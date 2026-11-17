@@ -1,8 +1,9 @@
 //! What the operator has said on an ask so far, and the answer it makes:
-//! the JSON the desk's `/api/asks/<id>/answer` takes. Pure, so the payload
-//! for each kind of ask is tested here and nowhere needs a server.
+//! the JSON the desk's `/api/asks/<id>/answer` takes. His words are the
+//! answer; a pick, a "looks good" or a grill's picks come with them when he
+//! wants. Pure, so each payload is tested here and nowhere needs a server.
 
-use crate::model::{Ask, Form, Question};
+use crate::model::{Ask, Form, Mark, Question};
 use serde_json::{Value, json};
 use std::collections::BTreeMap;
 
@@ -10,6 +11,7 @@ use std::collections::BTreeMap;
 /// it goes back to the agent as his answer to that question.
 pub const UNCLEAR: &str = "Unclear: this question is not complete in itself. Ask it again with what it refers to, what is being decided and why it matters now.";
 
+/// What he said on one question of a grill.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Said {
     pub pick: Option<usize>,
@@ -28,27 +30,16 @@ impl Said {
 /// A draft answer to one round of one ask.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Draft {
-    /// The option picked, for an ask with options.
+    /// The option he leans to, when the ask has options: never needed.
     pub pick: Option<usize>,
-    /// The note on the whole ask.
-    pub note: String,
+    /// His words on the whole ask (on a grill, on the whole round).
+    pub words: String,
     /// Each question's answer, by question id.
     pub grill: BTreeMap<String, Said>,
-    /// The question in front of the operator.
-    pub at: usize,
-}
-
-/// What the operator chose to send.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Verdict {
-    /// Looks good, Done, the picked option or the recommendation.
-    Yes,
-    /// Needs work, Not yet, None of these: words required.
-    No,
-    /// The grill as answered so far.
-    Grill,
-    /// Every question left gets its recommendation, then the grill goes.
-    GrillRest,
+    /// The grill's question his words go to; none, the round.
+    pub at: Option<usize>,
+    /// The marks as he has them now; none, as the desk has them.
+    pub marks: Option<Vec<Mark>>,
 }
 
 impl Draft {
@@ -62,22 +53,50 @@ impl Draft {
             .filter(|q| self.said(q).answered())
             .count()
     }
+
+    /// The marks he would send: his, else the desk's.
+    pub fn marks<'a>(&'a self, ask: &'a Ask) -> &'a [Mark] {
+        self.marks.as_deref().unwrap_or(&ask.marks)
+    }
+
+    /// Whether anything is written, picked or marked that sending would
+    /// lose.
+    pub fn touched(&self) -> bool {
+        self.pick.is_some()
+            || !self.words.trim().is_empty()
+            || self.grill.values().any(Said::answered)
+            || self.marks.is_some()
+    }
+}
+
+/// How he sends what he has.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Verdict {
+    /// His words and marks, with his pick if he made one; a grill as
+    /// answered so far.
+    Send,
+    /// The work is right as it is (a document: move on), words optional.
+    LooksGood,
+    /// A grill: every question he left takes its recommendation.
+    GrillRest,
+    /// He answered in the agent's session or by voice; any words say how.
+    Elsewhere,
 }
 
 /// The answer's JSON for the desk, or the words saying what is missing.
-pub fn payload(ask: &Ask, draft: &Draft, verdict: Verdict) -> Result<Value, String> {
-    let note = draft.note.trim();
+/// `marks` is how many marks go with it (already on the desk).
+pub fn payload(ask: &Ask, draft: &Draft, verdict: Verdict, marks: usize) -> Result<Value, String> {
+    let words = draft.words.trim();
     let round = ask.round();
-    let words_needed = |what: &str| {
-        if note.is_empty() {
-            Err(format!("{what} needs a word on what should change"))
-        } else {
-            Ok(())
-        }
-    };
-    let (v, options) = match (ask.form(), verdict) {
-        (Form::Web, _) => return Err("This ask is answered on the web desk".into()),
-        (Form::Grill, Verdict::Grill | Verdict::GrillRest) => {
+    let with = |v: &str, options: Vec<String>| json!({"round": round, "verdict": v, "options": options, "comment": words});
+    if verdict == Verdict::Elsewhere {
+        return Ok(with("elsewhere", vec![]));
+    }
+    match ask.form() {
+        Form::Grill => {
+            if verdict == Verdict::LooksGood {
+                return Err("A grilling round is answered question by question".into());
+            }
             let mut answers = serde_json::Map::new();
             for q in &ask.questions {
                 let mut said = draft.said(q);
@@ -85,54 +104,45 @@ pub fn payload(ask: &Ask, draft: &Draft, verdict: Verdict) -> Result<Value, Stri
                     said.pick = crate::model::recommended(&q.options, &q.recommend);
                     said.rec = said.pick.is_some();
                 }
-                let mut words = said.words.trim().to_string();
+                let mut text = said.words.trim().to_string();
                 if said.unclear {
-                    words = if words.is_empty() {
+                    text = if text.is_empty() {
                         UNCLEAR.into()
                     } else {
-                        format!("{UNCLEAR} {words}")
+                        format!("{UNCLEAR} {text}")
                     };
                 }
                 let pick = said.pick.and_then(|i| q.options.get(i)).map(|o| &o.name);
-                if pick.is_none() && words.is_empty() {
+                if pick.is_none() && text.is_empty() {
                     continue;
                 }
-                let mut a = json!({"pick": pick, "comment": words});
+                let mut a = json!({"pick": pick, "comment": text});
                 if said.rec && pick.is_some() {
                     a["rec"] = json!(true);
                 }
                 answers.insert(q.id.clone(), a);
             }
-            if answers.is_empty() && note.is_empty() {
-                return Err("Answer a question, or write a word on the round".into());
+            if answers.is_empty() && words.is_empty() && marks == 0 {
+                return Err("Answer a question, mark something or write a word first".into());
             }
-            return Ok(json!({"round": round, "verdict": "grill", "options": [],
-                "comment": note, "answers": answers}));
+            let mut p = with("grill", vec![]);
+            p["answers"] = Value::Object(answers);
+            Ok(p)
         }
-        (Form::Grill, _) => return Err("A grilling round is sent as a whole".into()),
-        (Form::Pick, Verdict::Yes) => {
-            let i = draft
-                .pick
-                .or_else(|| ask.recommended())
-                .ok_or("Pick an option first")?;
-            ("pick", vec![ask.options[i].name.clone()])
-        }
-        (Form::Pick, _) => {
-            words_needed("None of these")?;
-            ("send back", vec![])
-        }
-        (Form::Look, Verdict::Yes) => ("accept", vec![]),
-        (Form::Do, Verdict::Yes) => ("acknowledge", vec![]),
-        (Form::Look | Form::Do, _) => {
-            words_needed(if ask.form() == Form::Do {
-                "Not yet"
-            } else {
-                "Needs work"
-            })?;
-            ("send back", vec![])
-        }
-    };
-    Ok(json!({"round": round, "verdict": v, "options": options, "comment": note}))
+        Form::Hands => match verdict {
+            Verdict::Send if !words.is_empty() => Ok(with("send back", vec![])),
+            Verdict::Send => Err("Say what stops the job, or mark it answered elsewhere".into()),
+            _ => Err("A job for your hands is done where the job is (Open on web)".into()),
+        },
+        Form::Open => match verdict {
+            Verdict::LooksGood => Ok(with("accept", vec![])),
+            _ => match draft.pick.and_then(|i| ask.options.get(i)) {
+                Some(o) => Ok(with("pick", vec![o.name.clone()])),
+                None if !words.is_empty() || marks > 0 => Ok(with("marks", vec![])),
+                None => Err("Write what you think, or mark something, first".into()),
+            },
+        },
+    }
 }
 
 #[cfg(test)]
@@ -144,48 +154,88 @@ mod tests {
     }
 
     #[test]
-    fn a_pick_takes_the_recommendation_when_nothing_is_picked() {
+    fn words_are_the_answer_and_a_pick_only_comes_with_them() {
         let a = ask(
-            r#"{"id":"AQ2","kind":"decide","status":"open","round":1,"options":[{"name":"Quiet"},{"name":"Bright"}],"recommend":"Quiet: calm"}"#,
+            r#"{"id":"AQ2","kind":"decide","status":"open","round":2,"options":[{"name":"Quiet"},{"name":"Bright"}],"recommend":"Quiet: calm"}"#,
         );
         let mut d = Draft::default();
-        let p = payload(&a, &d, Verdict::Yes).unwrap();
-        assert_eq!(p["verdict"], "pick");
-        assert_eq!(p["options"], json!(["Quiet"]));
-        assert_eq!(p["round"], 1);
-        d.pick = Some(1);
-        assert_eq!(
-            payload(&a, &d, Verdict::Yes).unwrap()["options"],
-            json!(["Bright"])
-        );
         assert!(
-            payload(&a, &d, Verdict::No).is_err(),
-            "None of these needs words"
+            payload(&a, &d, Verdict::Send, 0).is_err(),
+            "nothing said, nothing sent: the recommendation is never taken for him"
         );
-        d.note = "Neither; darker".into();
-        let p = payload(&a, &d, Verdict::No).unwrap();
+        d.words = "Neither yet: try the quiet one at dusk".into();
+        let p = payload(&a, &d, Verdict::Send, 0).unwrap();
         assert_eq!(
-            (p["verdict"].as_str(), p["comment"].as_str()),
-            (Some("send back"), Some("Neither; darker"))
+            (
+                p["verdict"].as_str(),
+                p["comment"].as_str(),
+                p["round"].as_u64()
+            ),
+            (
+                Some("marks"),
+                Some("Neither yet: try the quiet one at dusk"),
+                Some(2)
+            )
+        );
+        d.pick = Some(1);
+        let p = payload(&a, &d, Verdict::Send, 0).unwrap();
+        assert_eq!(
+            (p["verdict"].as_str(), &p["options"]),
+            (Some("pick"), &json!(["Bright"]))
+        );
+        assert_eq!(p["comment"], "Neither yet: try the quiet one at dusk");
+    }
+
+    #[test]
+    fn marks_alone_answer_and_looks_good_needs_no_words() {
+        let a = ask(r#"{"id":"AQ1","kind":"look","status":"open","round":1}"#);
+        let d = Draft::default();
+        assert_eq!(
+            payload(&a, &d, Verdict::Send, 2).unwrap()["verdict"],
+            "marks"
+        );
+        assert_eq!(
+            payload(&a, &d, Verdict::LooksGood, 0).unwrap()["verdict"],
+            "accept"
         );
     }
 
     #[test]
-    fn a_look_is_accepted_or_sent_back_with_words() {
-        let a = ask(r#"{"id":"AQ1","kind":"look","status":"open","round":3}"#);
+    fn any_ask_can_be_answered_elsewhere_with_or_without_a_note() {
+        let grill = ask(
+            r#"{"id":"BQ1","kind":"grill","status":"open","questions":[{"id":"q1","title":"Sky?"}]}"#,
+        );
+        let hands = ask(r#"{"id":"BQ2","kind":"hands","status":"open"}"#);
         let mut d = Draft::default();
-        assert_eq!(payload(&a, &d, Verdict::Yes).unwrap()["verdict"], "accept");
-        assert!(payload(&a, &d, Verdict::No).is_err());
-        d.note = "The rim floats".into();
-        let p = payload(&a, &d, Verdict::No).unwrap();
+        for a in [&grill, &hands] {
+            let p = payload(a, &d, Verdict::Elsewhere, 0).unwrap();
+            assert_eq!(
+                (p["verdict"].as_str(), p["comment"].as_str()),
+                (Some("elsewhere"), Some(""))
+            );
+        }
+        d.words = "Told it in the session".into();
+        d.pick = Some(0);
+        let p = payload(&hands, &d, Verdict::Elsewhere, 0).unwrap();
+        assert_eq!(p["comment"], "Told it in the session");
+        assert_eq!(p["options"], json!([]), "a pick does not go with it");
+    }
+
+    #[test]
+    fn a_hands_job_is_sent_back_in_words_only() {
+        let a = ask(r#"{"id":"BQ2","kind":"hands","status":"open"}"#);
+        let mut d = Draft::default();
+        assert!(payload(&a, &d, Verdict::Send, 0).is_err());
+        assert!(payload(&a, &d, Verdict::LooksGood, 0).is_err());
+        d.words = "The laptop is away this week".into();
         assert_eq!(
-            (p["verdict"].as_str(), p["round"].as_u64()),
-            (Some("send back"), Some(3))
+            payload(&a, &d, Verdict::Send, 0).unwrap()["verdict"],
+            "send back"
         );
     }
 
     #[test]
-    fn a_grill_sends_what_was_said_and_lgtm_fills_the_rest() {
+    fn a_grill_sends_what_was_said_and_the_rest_can_take_its_recommendations() {
         let a = ask(
             r#"{"id":"BQ1","kind":"grill","status":"open","round":1,"questions":[
             {"id":"q1","title":"Sky?","options":[{"name":"Ember"},{"name":"Moss"}],"recommend":"Moss: older"},
@@ -194,7 +244,14 @@ mod tests {
             {"id":"q4","title":"Hands?","options":[{"name":"Hammer"}]}]}"#,
         );
         let mut d = Draft::default();
-        assert!(payload(&a, &d, Verdict::Grill).is_err(), "nothing said yet");
+        assert!(
+            payload(&a, &d, Verdict::Send, 0).is_err(),
+            "nothing said yet"
+        );
+        assert!(
+            payload(&a, &d, Verdict::Send, 1).is_ok(),
+            "a mark is something"
+        );
         d.grill.insert(
             "q1".into(),
             Said {
@@ -209,7 +266,7 @@ mod tests {
                 ..Default::default()
             },
         );
-        let p = payload(&a, &d, Verdict::Grill).unwrap();
+        let p = payload(&a, &d, Verdict::Send, 0).unwrap();
         assert_eq!(p["verdict"], "grill");
         assert_eq!(p["answers"]["q1"], json!({"pick": "Ember", "comment": ""}));
         assert_eq!(p["answers"]["q3"]["pick"], Value::Null);
@@ -220,12 +277,13 @@ mod tests {
                 .starts_with("Unclear")
         );
         assert!(p["answers"].get("q2").is_none(), "skipped");
-        let p = payload(&a, &d, Verdict::GrillRest).unwrap();
+        let p = payload(&a, &d, Verdict::GrillRest, 0).unwrap();
         assert_eq!(
             p["answers"]["q2"],
             json!({"pick": "Never", "comment": "", "rec": true})
         );
         assert_eq!(p["answers"]["q1"]["pick"], "Ember", "a pick stands");
         assert!(p["answers"].get("q4").is_none(), "no recommendation: left");
+        assert!(payload(&a, &d, Verdict::LooksGood, 0).is_err());
     }
 }

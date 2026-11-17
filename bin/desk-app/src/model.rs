@@ -2,7 +2,8 @@
 //! `/srv/desk/store.py`), read leniently: a field the store adds later is
 //! ignored, a missing one is empty. Nothing here does I/O.
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
+use serde_json::{Map, Value};
 use std::collections::BTreeMap;
 
 #[derive(Clone, Debug, Default, Deserialize, PartialEq)]
@@ -21,6 +22,8 @@ pub enum MediaKind {
     Video,
     /// Another clip (WebM, MOV) the app hands to the system's player.
     OtherVideo,
+    /// A page the agent made (a prototype), rendered from the desk.
+    Page,
     Other,
 }
 
@@ -32,6 +35,7 @@ impl Media {
             "png" | "jpg" | "jpeg" | "webp" | "gif" | "bmp" => MediaKind::Image,
             "mp4" | "m4v" => MediaKind::Video,
             "webm" | "mov" | "ogv" => MediaKind::OtherVideo,
+            "html" | "htm" => MediaKind::Page,
             _ => MediaKind::Other,
         }
     }
@@ -91,8 +95,49 @@ pub struct Comment {
     pub at: String,
 }
 
-/// A document to mark: the app shows that one is there, and the web desk
-/// marks it.
+/// A mark the operator made, in the store's one format the web desk and the
+/// agents read: on a picture, a clip's frame or a page's element (`media`,
+/// `points` from 0 to 1 across it), or on a passage of the document
+/// (`start` and `end`, characters into its text). Fields this app does not
+/// know (the store's anchors) are kept as they came and sent back.
+#[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq)]
+#[serde(default)]
+pub struct Mark {
+    pub id: String,
+    pub kind: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub media: Option<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub points: Vec<[f64; 2]>,
+    pub text: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub color: Option<String>,
+    /// Seconds into the clip, and its frame, when marked on a paused one.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub time: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub frame: Option<u64>,
+    /// The page's element: a CSS selector, and its words.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub selector: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub quote: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub start: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub end: Option<usize>,
+    #[serde(flatten)]
+    pub rest: Map<String, Value>,
+}
+
+impl Mark {
+    /// On the document's text rather than on a picture, clip or page.
+    pub fn on_text(&self) -> bool {
+        matches!(self.kind.as_str(), "tick" | "strike" | "rewrite" | "note")
+    }
+}
+
+/// A document the ask is about: read here, its passages marked.
 #[derive(Clone, Debug, Default, Deserialize, PartialEq)]
 #[serde(default)]
 pub struct Doc {
@@ -120,6 +165,7 @@ pub struct Ask {
     pub folder: Option<String>,
     pub answer: Option<Answer>,
     pub comments: Vec<Comment>,
+    pub marks: Vec<Mark>,
     pub round: u32,
     pub history: Vec<Ask>,
     pub revision: u64,
@@ -127,19 +173,16 @@ pub struct Ask {
     pub updated_at: String,
 }
 
-/// How the app answers an ask.
+/// How the app answers an ask. Every one is answered in words first; what
+/// differs is what may come with them.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Form {
-    /// A judgement on what is shown: looks good, or needs work.
-    Look,
-    /// Something to do: done, or not yet.
-    Do,
-    /// One of the options.
-    Pick,
+    /// Words and marks, with a pick when it has options.
+    Open,
     /// A grilling round: each question picked, written or left.
     Grill,
-    /// A document to mark or a job for the hands: the web desk does those.
-    Web,
+    /// A job for his hands: Done is checked where the job is.
+    Hands,
 }
 
 impl Ask {
@@ -152,16 +195,12 @@ impl Ask {
     }
 
     pub fn form(&self) -> Form {
-        if self.doc.is_some() || self.kind == "hands" {
-            Form::Web
-        } else if !self.questions.is_empty() {
+        if !self.questions.is_empty() {
             Form::Grill
-        } else if !self.options.is_empty() {
-            Form::Pick
-        } else if self.kind == "do" {
-            Form::Do
+        } else if self.kind == "hands" {
+            Form::Hands
         } else {
-            Form::Look
+            Form::Open
         }
     }
 
@@ -308,11 +347,10 @@ pub fn effort(ask: &Ask) -> u32 {
         .filter(|m| m.kind() == MediaKind::Video)
         .count() as u32;
     let base = match ask.form() {
-        Form::Look | Form::Do => 2,
-        Form::Pick => 2 + ask.options.len() as u32,
+        Form::Open => 2 + ask.options.len() as u32 + if ask.doc.is_some() { 6 } else { 0 },
         Form::Grill => 3 * ask.questions.len() as u32,
-        // Out of the app: after everything it can answer.
-        Form::Web => 1000,
+        // Done where the job is: after everything answered here.
+        Form::Hands => 1000,
     };
     base + 2 * clips
 }
@@ -366,12 +404,34 @@ mod tests {
             {"id":"AQ2","kind":"grill","title":"g","status":"open","questions":[{"id":"q1","title":"x","options":[{"name":"A"}]}]},
             {"id":"AQ3","kind":"look","title":"d","status":"open","doc":{"name":"V.md","text":"..."}}]"#;
         let asks: Vec<Ask> = serde_json::from_str(json).unwrap();
-        assert_eq!(asks[0].form(), Form::Look);
+        assert_eq!(asks[0].form(), Form::Open);
         assert_eq!(asks[0].media[0].kind(), MediaKind::Image);
         assert_eq!(asks[1].form(), Form::Grill);
         assert_eq!(asks[1].round(), 1);
-        assert_eq!(asks[2].form(), Form::Web);
+        assert_eq!(asks[2].form(), Form::Open);
         assert!(effort(&asks[0]) < effort(&asks[1]));
+        assert!(effort(&asks[0]) < effort(&asks[2]));
+    }
+
+    #[test]
+    fn a_mark_goes_back_as_it_came_with_what_the_app_does_not_know() {
+        let json = r#"{"id":"t1","kind":"note","start":3,"end":9,"text":"why?","quote":"lorem ","line":2,"before":"ab"}"#;
+        let m: Mark = serde_json::from_str(json).unwrap();
+        assert!(m.on_text());
+        let back = serde_json::to_value(&m).unwrap();
+        assert_eq!(back, serde_json::from_str::<Value>(json).unwrap());
+        let pin = Mark {
+            id: "n1".into(),
+            kind: "pin".into(),
+            media: Some("m1".into()),
+            points: vec![[0.5, 0.25]],
+            frame: Some(33),
+            ..Default::default()
+        };
+        let v = serde_json::to_value(&pin).unwrap();
+        assert_eq!(v["points"][0][1], 0.25);
+        assert_eq!(v["frame"], 33);
+        assert!(v.get("selector").is_none() && v.get("start").is_none());
     }
 
     #[test]

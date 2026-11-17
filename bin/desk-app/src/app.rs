@@ -1,12 +1,14 @@
-//! The Desk's window: every desk's open asks in one queue, the one in front
-//! of the operator, what he has said on each so far, and the stage that
-//! shows its pictures and clips. The three ways of answering (`Variant`)
-//! share all of this and differ only in how they lay it out and what Enter
-//! means first (`views`).
+//! The Desk's window: the shared surface where an agent's ask is shown (its
+//! pictures, clips, page or document) and the operator answers it in his
+//! own words, marking what he sees. Every desk's open asks in one queue; the
+//! one in front, its rounds as a dialogue, what he has written and marked
+//! on it so far, and the surface that shows and takes marks.
 
 use crate::answer::{self, Draft, Said, Verdict};
 use crate::desk::{self, Place};
-use crate::model::{self, Ask, Form, Media, MediaKind};
+use crate::marks::{self, Tool};
+use crate::model::{self, Ask, Form, Mark, Media, MediaKind};
+use crate::page::{self, FromPage};
 use crate::player::{Out, Player};
 use crate::tokens;
 use crate::video::Clip;
@@ -15,60 +17,14 @@ use gpui::{
     KeyDownEvent, Pixels, Point, RenderImage, WeakEntity, Window,
 };
 use parvi_app_kit::widgets::field::{self, FieldEvent, TextField};
+use parvi_app_kit::widgets::markdown::{self, Block};
+use parvi_app_kit::widgets::select::Selectable;
 use std::cell::RefCell;
 use std::collections::{HashMap, VecDeque};
 use std::rc::Rc;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
-
-/// Three takes on answering, switchable while the app runs (V).
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Variant {
-    /// One ask at a time, the whole window for its evidence; the queue is
-    /// a count and the next title.
-    Focus,
-    /// The queue beside the ask: choose what to answer, then answer it.
-    Desk,
-    /// The agent's recommendation first: agree with Enter, or compare and
-    /// overrule. A grill is a list of proposals to confirm.
-    Verdict,
-}
-
-impl Variant {
-    pub const ALL: [Variant; 3] = [Variant::Focus, Variant::Desk, Variant::Verdict];
-
-    pub fn name(self) -> &'static str {
-        match self {
-            Variant::Focus => "Focus",
-            Variant::Desk => "Desk",
-            Variant::Verdict => "Verdict",
-        }
-    }
-
-    pub fn key(self) -> &'static str {
-        match self {
-            Variant::Focus => "focus",
-            Variant::Desk => "desk",
-            Variant::Verdict => "verdict",
-        }
-    }
-
-    pub fn why(self) -> &'static str {
-        match self {
-            Variant::Focus => "One ask at a time, the window for its evidence",
-            Variant::Desk => "The queue beside the ask",
-            Variant::Verdict => "The recommendation first: agree, or compare and overrule",
-        }
-    }
-
-    fn from_key(k: &str) -> Self {
-        Self::ALL
-            .into_iter()
-            .find(|v| v.key() == k)
-            .unwrap_or(Variant::Focus)
-    }
-}
 
 /// Where a desk's asks stand.
 pub enum Reach {
@@ -101,7 +57,8 @@ impl DeskState {
 /// An ask: its desk and its number.
 pub type Key = (usize, String);
 
-/// One thing the stage can show: a picture or clip, and what it belongs to.
+/// One thing the surface can show: a picture, clip or page and what it
+/// belongs to, or the ask's document.
 #[derive(Clone, Debug)]
 pub struct Item {
     pub media: Media,
@@ -109,11 +66,19 @@ pub struct Item {
     pub option: Option<usize>,
     /// The option's letter, or empty for the ask's own.
     pub tag: String,
+    /// The ask's document rather than a media file.
+    pub doc: bool,
+}
+
+impl Item {
+    pub fn kind(&self) -> Option<MediaKind> {
+        (!self.doc).then(|| self.media.kind())
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct View {
-    /// The item shown, and in Side the one beside it.
+    /// The item shown, and whether the one beside it shows too.
     pub item: usize,
     pub side: bool,
     /// Fit to the room, or `scale` device pixels to an image pixel.
@@ -147,61 +112,105 @@ pub enum Pic {
     Failed(String),
 }
 
-/// Where the note field's words go.
-#[derive(Clone, Debug, PartialEq)]
-pub enum NoteFor {
-    Ask,
-    Question(String),
+/// A mark being drawn: with what, on which media, through which points.
+#[derive(Clone, Debug)]
+pub struct Drawing {
+    pub tool: Tool,
+    pub media: String,
+    pub points: Vec<[f64; 2]>,
+    /// The clip's time and frame it is drawn on.
+    pub at: Option<(f64, u64)>,
 }
+
+/// Where the keyboard goes once the window is drawn next.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Aim {
+    Words,
+    MarkNote,
+    Surface,
+}
+
+type DraftKey = (usize, String, u32);
 
 pub struct DeskApp {
     pub focus: FocusHandle,
     pub desks: Vec<DeskState>,
     pub current: Option<Key>,
-    pub drafts: HashMap<(usize, String, u32), Draft>,
-    pub variant: Variant,
+    pub drafts: HashMap<DraftKey, Draft>,
     pub view: View,
     pub pictures: HashMap<String, Pic>,
     picture_order: VecDeque<String>,
     pub player: Option<(String, Player)>,
     pub clip_failed: HashMap<String, String>,
     clip_loading: Option<String>,
-    pub note: Entity<TextField>,
-    pub note_for: NoteFor,
-    /// What Enter in the note sends.
-    pub intent: Verdict,
+    /// His words: always there, the keyboard's home.
+    pub words: Entity<TextField>,
+    /// The selected mark's words.
+    pub mark_note: Entity<TextField>,
+    pub selected: Option<String>,
+    pub tool: Tool,
+    pub drawing: Option<Drawing>,
+    /// A page takes clicks as marks rather than following them.
+    pub page_comment: bool,
+    aim: Option<Aim>,
     pub toast: Option<(String, bool)>,
     toast_gen: u64,
     pub sending: bool,
     pub notice: Option<String>,
     live: Arc<AtomicU64>,
-    /// Where each stage panel was laid out, and the video track.
+    /// Where each surface panel was laid out, where its picture was drawn
+    /// in it, and the clip's track.
     pub rooms: Rc<RefCell<Vec<Bounds<Pixels>>>>,
+    pub drawn_at: Rc<RefCell<Vec<Option<Bounds<Pixels>>>>>,
     pub track: Rc<RefCell<Option<Bounds<Pixels>>>>,
     pub held: Option<(Point<Pixels>, (f32, f32))>,
-    /// A grill's summary, before it is sent.
-    pub review: bool,
     play_gen: u64,
-    /// The keyboard is in the note.
-    pub writing: bool,
     /// He has chosen an ask; until then the queue's first is in front.
     chosen: bool,
+    /// The document's text as selectable blocks, kept per ask and round.
+    pub doc_select: Rc<RefCell<Selectable>>,
+    pub doc_blocks: Option<(String, Rc<Vec<Block>>)>,
+    /// The page view and what the page says to the app.
+    #[cfg(windows)]
+    pub page: Rc<RefCell<Option<page::WebPage>>>,
+    #[cfg_attr(not(windows), allow(dead_code))]
+    pub page_said: async_channel::Sender<String>,
+    #[cfg(windows)]
+    pub page_failed: Rc<RefCell<Option<String>>>,
 }
 
 impl DeskApp {
     pub fn new(
         places: Vec<Place>,
-        variant: &str,
         notice: Option<String>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
-        let note = cx.new(|cx| TextField::new(cx, "A word for the agent").multiline());
-        cx.subscribe_in(&note, window, Self::on_note).detach();
+        let words = cx.new(|cx| {
+            TextField::new(cx, "Your thoughts, in your words")
+                .prose()
+                .reading()
+        });
+        cx.subscribe_in(&words, window, Self::on_words).detach();
+        let mark_note = cx.new(|cx| TextField::new(cx, "What about it?").multiline().reading());
+        cx.subscribe_in(&mark_note, window, Self::on_mark_note)
+            .detach();
         cx.observe_window_activation(window, |this, window, cx| {
             this.follow(window.is_window_active(), cx);
             if window.is_window_active() {
                 this.refresh_all(cx);
+            }
+        })
+        .detach();
+        let (page_said, heard) = async_channel::unbounded::<String>();
+        cx.spawn(async move |this, cx| {
+            while let Ok(message) = heard.recv().await {
+                if this
+                    .update(cx, |app, cx| app.on_page(&message, cx))
+                    .is_err()
+                {
+                    break;
+                }
             }
         })
         .detach();
@@ -217,32 +226,41 @@ impl DeskApp {
                 .collect(),
             current: None,
             drafts: HashMap::new(),
-            variant: Variant::from_key(variant),
             view: View::default(),
             pictures: HashMap::new(),
             picture_order: VecDeque::new(),
             player: None,
             clip_failed: HashMap::new(),
             clip_loading: None,
-            note,
-            note_for: NoteFor::Ask,
-            intent: Verdict::Yes,
+            words,
+            mark_note,
+            selected: None,
+            tool: Tool::Look,
+            drawing: None,
+            page_comment: false,
+            aim: Some(Aim::Words),
             toast: None,
             toast_gen: 0,
             sending: false,
             notice,
             live: Arc::new(AtomicU64::new(0)),
             rooms: Rc::new(RefCell::new(vec![])),
+            drawn_at: Rc::new(RefCell::new(vec![])),
             track: Rc::new(RefCell::new(None)),
             held: None,
-            review: false,
             play_gen: 0,
-            writing: false,
             chosen: false,
+            doc_select: Rc::default(),
+            doc_blocks: None,
+            #[cfg(windows)]
+            page: Rc::new(RefCell::new(None)),
+            page_said,
+            #[cfg(windows)]
+            page_failed: Rc::default(),
         };
+        app.discover(cx);
         app.refresh_all(cx);
         app.follow(true, cx);
-        window.focus(&app.focus, cx);
         app
     }
 
@@ -250,7 +268,7 @@ impl DeskApp {
 
     /// Every open ask, quickest first, then the longest waiting: each
     /// answer frees an agent, and the quick ones first free the most
-    /// agents soonest. What the app cannot answer comes last.
+    /// agents soonest.
     pub fn queue(&self) -> Vec<Key> {
         let mut open: Vec<(&Ask, usize)> = self
             .desks
@@ -274,7 +292,7 @@ impl DeskApp {
         self.current.as_ref().and_then(|k| self.ask(k))
     }
 
-    fn draft_key(&self) -> Option<(usize, String, u32)> {
+    fn draft_key(&self) -> Option<DraftKey> {
         let k = self.current.as_ref()?;
         Some((k.0, k.1.clone(), self.ask(k)?.round()))
     }
@@ -290,66 +308,68 @@ impl DeskApp {
         Some(self.drafts.entry(k).or_default())
     }
 
-    /// Opens the ask he chose, with the keyboard on it.
-    pub fn open(&mut self, key: Option<Key>, window: &mut Window, cx: &mut Context<Self>) {
+    /// Opens the ask he chose, with the keyboard in his words.
+    pub fn open(&mut self, key: Option<Key>, cx: &mut Context<Self>) {
         self.chosen = true;
         self.show(key, cx);
-        self.leave_note(window, cx);
+        self.aim(Aim::Words, cx);
     }
 
-    /// Points the note at what is in front, a grill's question or else the
-    /// ask (a grill's whole round in its summary), showing what was written
-    /// to it.
-    fn point_note(&mut self, cx: &mut Context<Self>) {
+    /// Where the keyboard goes when the window is next drawn.
+    pub fn aim(&mut self, aim: Aim, cx: &mut Context<Self>) {
+        self.aim = Some(aim);
+        cx.notify();
+    }
+
+    /// Moves the keyboard where it was aimed; the window calls it as it
+    /// draws.
+    pub fn take_aim(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        match self.aim.take() {
+            Some(Aim::Words) => field::focus(&self.words, window, cx),
+            Some(Aim::MarkNote) => field::focus(&self.mark_note, window, cx),
+            Some(Aim::Surface) => window.focus(&self.focus, cx),
+            None => {}
+        }
+    }
+
+    /// Points his words at what they answer: a grill's question, or the
+    /// ask (a grill's whole round).
+    fn point_words(&mut self, cx: &mut Context<Self>) {
         let draft = self.draft();
-        let question = self
-            .current_ask()
-            .filter(|a| a.form() == Form::Grill && !self.review)
-            .and_then(|a| {
-                a.questions
-                    .get(draft.at.min(a.questions.len().saturating_sub(1)))
-            })
-            .cloned();
-        let (target, text, hint) = match question {
-            Some(q) => (
-                NoteFor::Question(q.id.clone()),
-                draft.said(&q).words,
-                if q.options.is_empty() {
-                    "Your answer"
-                } else {
-                    "Your words on this question"
-                },
+        let ask = self.current_ask().cloned();
+        let (text, hint) = match (ask, draft.at) {
+            (Some(a), Some(i)) if a.form() == Form::Grill && i < a.questions.len() => {
+                let q = &a.questions[i];
+                (
+                    draft.said(q).words,
+                    format!("Your thoughts on {}", q.title.trim()),
+                )
+            }
+            (Some(a), _) if a.form() == Form::Grill => {
+                (draft.words, "Your thoughts on the whole round".into())
+            }
+            (Some(a), _) if a.form() == Form::Hands => (
+                draft.words,
+                "What stops the job, or a note on how it went".into(),
             ),
-            None if self.review => (NoteFor::Ask, draft.note, "A word on the whole round"),
-            None => (NoteFor::Ask, draft.note, "A word for the agent"),
+            _ => (draft.words, "Your thoughts, in your words".into()),
         };
-        self.note_for = target;
-        self.note.update(cx, |f, cx| {
-            f.set_placeholder(hint);
+        self.words.update(cx, |f, cx| {
+            f.set_placeholder(&hint);
             f.set(&text, false, cx);
         });
-    }
-
-    /// The keyboard back from the note to the ask.
-    pub fn leave_note(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        self.writing = false;
-        window.focus(&self.focus, cx);
-        cx.notify();
     }
 
     /// Puts an ask in front: its draft, its first picture, and the next
     /// ask's pictures fetched behind it so moving on is instant.
     fn show(&mut self, key: Option<Key>, cx: &mut Context<Self>) {
-        self.writing = false;
         self.current = key;
         self.view = View::default();
-        self.review = false;
         self.held = None;
-        if self.variant == Variant::Verdict {
-            self.view.item = self.recommended_item().unwrap_or(0);
-        }
-        self.intent = Verdict::Yes;
-        self.point_note(cx);
+        self.drawing = None;
+        self.selected = None;
+        self.page_comment = false;
+        self.point_words(cx);
         let queue = self.queue();
         let next = self
             .current
@@ -370,7 +390,7 @@ impl DeskApp {
         cx.notify();
     }
 
-    pub fn step_ask(&mut self, by: i64, window: &mut Window, cx: &mut Context<Self>) {
+    pub fn step_ask(&mut self, by: i64, cx: &mut Context<Self>) {
         let queue = self.queue();
         if queue.is_empty() {
             return;
@@ -382,22 +402,22 @@ impl DeskApp {
             .map(|i| i as i64)
             .unwrap_or(-1);
         let to = (at + by).clamp(0, queue.len() as i64 - 1) as usize;
-        self.open(Some(queue[to].clone()), window, cx);
+        self.open(Some(queue[to].clone()), cx);
     }
 
-    // ---- What the stage shows ----
+    // ---- What the surface shows ----
 
-    /// The pictures and clips in front of the operator: the ask's own, then
-    /// each option's; in a grill, the current question's.
+    /// What is in front of the operator: the ask's document, its own
+    /// media, then each option's; in a grill, the chosen question's.
     pub fn items(&self) -> Vec<Item> {
         let Some(ask) = self.current_ask() else {
             return vec![];
         };
         let (own, options) = if ask.form() == Form::Grill {
-            let draft = self.draft();
+            let at = self.draft().at.unwrap_or(0);
             match ask
                 .questions
-                .get(draft.at.min(ask.questions.len().saturating_sub(1)))
+                .get(at.min(ask.questions.len().saturating_sub(1)))
             {
                 Some(q) => (&q.media, &q.options),
                 None => return vec![],
@@ -405,36 +425,43 @@ impl DeskApp {
         } else {
             (&ask.media, &ask.options)
         };
-        let mut items: Vec<Item> = own
-            .iter()
-            .map(|m| Item {
-                media: m.clone(),
+        let mut items = vec![];
+        if let Some(doc) = &ask.doc {
+            items.push(Item {
+                media: Media {
+                    id: "doc".into(),
+                    path: doc.name.clone(),
+                    caption: String::new(),
+                },
                 option: None,
                 tag: String::new(),
-            })
-            .collect();
+                doc: true,
+            });
+        }
+        items.extend(own.iter().map(|m| Item {
+            media: m.clone(),
+            option: None,
+            tag: String::new(),
+            doc: false,
+        }));
         for (i, o) in options.iter().enumerate() {
             for m in &o.media {
                 items.push(Item {
                     media: m.clone(),
                     option: Some(i),
                     tag: model::letter(options, i),
+                    doc: false,
                 });
             }
         }
         items
     }
 
-    /// The item showing the recommended option, for Verdict to open on.
-    pub fn recommended_item(&self) -> Option<usize> {
-        let ask = self.current_ask()?;
-        let rec = if ask.form() == Form::Grill {
-            let q = ask.questions.get(self.draft().at)?;
-            model::recommended(&q.options, &q.recommend)
-        } else {
-            ask.recommended()
-        }?;
-        self.items().iter().position(|i| i.option == Some(rec))
+    pub fn shown_item(&self) -> Option<Item> {
+        let items = self.items();
+        items
+            .get(self.view.item.min(items.len().saturating_sub(1)))
+            .cloned()
     }
 
     /// The item beside the shown one when comparing: the next that shows
@@ -447,8 +474,245 @@ impl DeskApp {
         let n = items.len();
         (1..n)
             .map(|k| (at + k) % n)
-            .find(|&j| items[j].option != items[at].option)
+            .find(|&j| items[j].option != items[at].option && !items[j].doc)
             .or(Some((at + 1) % n))
+    }
+
+    /// The document's blocks, parsed once per ask and round.
+    pub fn doc_blocks(&mut self) -> Option<Rc<Vec<Block>>> {
+        let ask = self.current_ask()?;
+        let doc = ask.doc.as_ref()?;
+        let key = format!("{}/{}", ask.id, ask.round());
+        if self.doc_blocks.as_ref().map(|(k, _)| k) != Some(&key) {
+            let blocks = Rc::new(markdown::parse(&doc.text));
+            self.doc_blocks = Some((key, blocks));
+        }
+        self.doc_blocks.as_ref().map(|(_, b)| b.clone())
+    }
+
+    // ---- Marks ----
+
+    /// His marks on this round as they stand.
+    pub fn marks(&self) -> Vec<Mark> {
+        match self.current_ask() {
+            Some(a) => self.draft().marks(a).to_vec(),
+            None => vec![],
+        }
+    }
+
+    fn edit_marks(&mut self, f: impl FnOnce(&mut Vec<Mark>)) {
+        let Some(ask) = self.current_ask().cloned() else {
+            return;
+        };
+        if let Some(d) = self.draft_mut() {
+            let marks = d.marks.get_or_insert_with(|| ask.marks.clone());
+            f(marks);
+        }
+    }
+
+    /// A new mark: selected, with the keyboard in its words.
+    pub fn add_mark(&mut self, mut mark: Mark, cx: &mut Context<Self>) {
+        let id = marks::next_id(&self.marks());
+        mark.id = id.clone();
+        self.edit_marks(|m| m.push(mark));
+        self.select_mark(Some(id), false, cx);
+        self.aim(Aim::MarkNote, cx);
+    }
+
+    /// Selects a mark (none: none), and with `jump` shows where it is: its
+    /// picture or page, its clip at its frame.
+    pub fn select_mark(&mut self, id: Option<String>, jump: bool, cx: &mut Context<Self>) {
+        self.selected = id.clone();
+        let mark = id.and_then(|id| self.marks().into_iter().find(|m| m.id == id));
+        let text = mark.as_ref().map(|m| m.text.clone()).unwrap_or_default();
+        self.mark_note.update(cx, |f, cx| f.set(&text, false, cx));
+        if jump
+            && let Some(m) = &mark
+            && let Some(media) = &m.media
+            && let Some(i) = self.items().iter().position(|it| &it.media.id == media)
+        {
+            if i != self.view.item {
+                self.show_item(i, cx);
+            }
+            if let (Some(f), Some((_, p))) = (m.frame, self.player.as_mut()) {
+                p.seek(f as usize);
+            }
+        }
+        if jump
+            && mark.as_ref().is_some_and(Mark::on_text)
+            && let Some(i) = self.items().iter().position(|it| it.doc)
+            && i != self.view.item
+        {
+            self.show_item(i, cx);
+        }
+        self.tell_page();
+        cx.notify();
+    }
+
+    pub fn delete_mark(&mut self, id: &str, cx: &mut Context<Self>) {
+        self.edit_marks(|m| m.retain(|m| m.id != id));
+        if self.selected.as_deref() == Some(id) {
+            self.select_mark(None, false, cx);
+        }
+        self.tell_page();
+        cx.notify();
+    }
+
+    /// The marks numbered as the list shows them.
+    pub fn numbered(&self) -> Vec<(usize, Mark)> {
+        self.marks()
+            .into_iter()
+            .enumerate()
+            .map(|(i, m)| (i + 1, m))
+            .collect()
+    }
+
+    /// Picks the tool; a page takes Comment for any drawing tool.
+    pub fn set_tool(&mut self, tool: Tool, cx: &mut Context<Self>) {
+        self.tool = tool;
+        self.drawing = None;
+        let page = self.shown_item().and_then(|i| i.kind()) == Some(MediaKind::Page);
+        if page {
+            self.page_comment = tool != Tool::Look;
+            self.tell_page();
+        }
+        cx.notify();
+    }
+
+    /// Where the clip is, when the shown item is a clip: seconds and frame.
+    pub fn clip_at(&self) -> Option<(f64, u64)> {
+        let (_, p) = self.player.as_ref()?;
+        Some((p.seconds(p.at), p.at as u64))
+    }
+
+    /// Starts a mark at `n` (0 to 1 across the shown media).
+    pub fn draw_start(&mut self, n: [f64; 2], cx: &mut Context<Self>) {
+        let Some(item) = self.shown_item() else {
+            return;
+        };
+        if let Some((_, p)) = self.player.as_mut()
+            && p.playing
+        {
+            p.pause();
+        }
+        self.drawing = Some(Drawing {
+            tool: self.tool,
+            media: item.media.id.clone(),
+            points: vec![n],
+            at: self.clip_at(),
+        });
+        cx.notify();
+    }
+
+    pub fn draw_move(&mut self, n: [f64; 2], cx: &mut Context<Self>) {
+        let Some(d) = self.drawing.as_mut() else {
+            return;
+        };
+        match d.tool {
+            Tool::Pen => {
+                let last = d.points.last().copied().unwrap_or(n);
+                if (last[0] - n[0]).hypot(last[1] - n[1]) > 0.002 {
+                    d.points.push(n);
+                }
+            }
+            _ => {
+                d.points.truncate(1);
+                d.points.push(n);
+            }
+        }
+        cx.notify();
+    }
+
+    pub fn draw_end(&mut self, cx: &mut Context<Self>) {
+        let Some(d) = self.drawing.take() else {
+            return;
+        };
+        if let Some(mark) = marks::drawn(String::new(), d.tool, &d.media, &d.points, d.at) {
+            self.add_mark(mark, cx);
+        }
+    }
+
+    /// The document's words he selected: a mark on that passage.
+    pub fn mark_passage(&mut self, selected: String, cx: &mut Context<Self>) {
+        let Some(doc) = self.current_ask().and_then(|a| a.doc.clone()) else {
+            return;
+        };
+        if selected.trim().is_empty() {
+            return;
+        }
+        match marks::locate(&doc.text, &selected) {
+            Some((start, end)) => self.add_mark(marks::on_text(String::new(), start, end), cx),
+            None => self.say(
+                "That passage could not be found in the document's text: say it in your words",
+                true,
+                cx,
+            ),
+        }
+    }
+
+    // ---- The page ----
+
+    /// The page's URL on its desk.
+    pub fn page_url(&self, item: &Item) -> Option<String> {
+        let key = self.current.as_ref()?;
+        let ask = self.ask(key)?;
+        Some(self.media_url(key.0, ask, &item.media))
+    }
+
+    fn on_page(&mut self, message: &str, cx: &mut Context<Self>) {
+        match page::parse(message) {
+            Some(FromPage::Ready) => self.tell_page(),
+            Some(FromPage::Mark {
+                selector,
+                quote,
+                x,
+                y,
+            }) => {
+                let Some(item) = self
+                    .shown_item()
+                    .filter(|i| i.kind() == Some(MediaKind::Page))
+                else {
+                    return;
+                };
+                let mark = marks::on_page(String::new(), &item.media.id, &selector, &quote, x, y);
+                self.add_mark(mark, cx);
+            }
+            None => log::warn!("the page said something the app does not read: {message}"),
+        }
+    }
+
+    /// Draws the page's marks on it and sets its mode.
+    pub fn tell_page(&self) {
+        #[cfg(windows)]
+        {
+            let Some(item) = self
+                .shown_item()
+                .filter(|i| i.kind() == Some(MediaKind::Page))
+            else {
+                return;
+            };
+            let numbered = self.numbered();
+            let on: Vec<(usize, &Mark)> = numbered
+                .iter()
+                .filter(|(_, m)| m.media.as_deref() == Some(item.media.id.as_str()))
+                .map(|(n, m)| (*n, m))
+                .collect();
+            let script = page::show_script(&on, self.selected.as_deref(), self.page_comment);
+            if let Some(p) = self.page.borrow().as_ref() {
+                p.run(&script);
+            }
+        }
+    }
+
+    /// Hides the page view unless the surface shows a page: it lies over
+    /// whatever the window draws there.
+    pub fn keep_page(&self) {
+        #[cfg(windows)]
+        if self.shown_item().and_then(|i| i.kind()) != Some(MediaKind::Page)
+            && let Some(p) = self.page.borrow_mut().as_mut()
+        {
+            p.hide();
+        }
     }
 
     pub fn media_key(&self, desk: usize, ask: &Ask, m: &Media) -> String {
@@ -806,7 +1070,39 @@ impl DeskApp {
 
     // ---- Answering ----
 
-    fn on_note(
+    fn on_words(
+        &mut self,
+        _: &Entity<TextField>,
+        e: &FieldEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        match e {
+            FieldEvent::Changed => self.words_changed(cx),
+            FieldEvent::SubmitAlt => self.send(Verdict::Send, window, cx),
+            _ => {}
+        }
+    }
+
+    /// His words, kept with what they answer.
+    fn words_changed(&mut self, cx: &mut Context<Self>) {
+        let text = self.words.read(cx).text.clone();
+        let at = self.draft().at;
+        let question = self
+            .current_ask()
+            .filter(|a| a.form() == Form::Grill)
+            .and_then(|a| at.and_then(|i| a.questions.get(i)))
+            .map(|q| q.id.clone());
+        if let Some(d) = self.draft_mut() {
+            match question {
+                Some(q) => d.grill.entry(q).or_default().words = text,
+                None => d.words = text,
+            }
+        }
+        cx.notify();
+    }
+
+    fn on_mark_note(
         &mut self,
         _: &Entity<TextField>,
         e: &FieldEvent,
@@ -815,65 +1111,40 @@ impl DeskApp {
     ) {
         match e {
             FieldEvent::Changed => {
-                let text = self.note.read(cx).text.clone();
-                let target = self.note_for.clone();
-                if let Some(d) = self.draft_mut() {
-                    match target {
-                        NoteFor::Ask => d.note = text,
-                        NoteFor::Question(q) => d.grill.entry(q).or_default().words = text,
-                    }
+                let text = self.mark_note.read(cx).text.clone();
+                if let Some(id) = self.selected.clone() {
+                    self.edit_marks(|m| {
+                        if let Some(m) = m.iter_mut().find(|m| m.id == id) {
+                            m.text = text;
+                        }
+                    });
                 }
                 cx.notify();
             }
-            FieldEvent::Focused => {
-                self.writing = true;
-                cx.notify();
-            }
-            FieldEvent::Submit | FieldEvent::SubmitAlt => {
-                self.leave_note(window, cx);
-                match self.note_for.clone() {
-                    NoteFor::Question(_) => self.next_question(window, cx),
-                    NoteFor::Ask => self.send(self.intent, window, cx),
-                }
-            }
+            // Enter: the mark is said; back to his words.
+            FieldEvent::Submit => self.aim(Aim::Words, cx),
+            FieldEvent::SubmitAlt => self.send(Verdict::Send, window, cx),
             _ => {}
         }
     }
 
-    /// Moves the keyboard into the note, for the ask or the question in
-    /// front, so Enter there sends `intent`.
-    pub fn write(&mut self, intent: Verdict, window: &mut Window, cx: &mut Context<Self>) {
-        if self.current.is_none() {
-            return;
-        }
-        self.point_note(cx);
-        self.intent = intent;
-        if intent == Verdict::No && self.note_for == NoteFor::Ask {
-            self.note.update(cx, |f, _| {
-                f.set_placeholder("What should change? Enter sends it back")
-            });
-        }
-        self.writing = true;
-        field::focus(&self.note, window, cx);
-        cx.notify();
-    }
-
-    pub fn pick(&mut self, i: usize, window: &mut Window, cx: &mut Context<Self>) {
+    /// Leans to option `i` (again: no longer), of the ask or of the grill's
+    /// question his words are on.
+    pub fn pick(&mut self, i: usize, cx: &mut Context<Self>) {
         let Some(ask) = self.current_ask().cloned() else {
             return;
         };
         match ask.form() {
-            Form::Pick if i < ask.options.len() => {
+            Form::Open if i < ask.options.len() => {
                 if let Some(d) = self.draft_mut() {
                     d.pick = if d.pick == Some(i) { None } else { Some(i) };
                 }
-                // Show what was picked.
                 if let Some(at) = self.items().iter().position(|it| it.option == Some(i)) {
                     self.show_item(at, cx);
                 }
             }
             Form::Grill => {
-                let at = self.draft().at;
+                let at = self.draft().at.unwrap_or(0);
                 let Some(q) = ask.questions.get(at) else {
                     return;
                 };
@@ -881,128 +1152,69 @@ impl DeskApp {
                     return;
                 }
                 if let Some(d) = self.draft_mut() {
+                    d.at = Some(at);
                     let s = d.grill.entry(q.id.clone()).or_default();
                     s.pick = if s.pick == Some(i) { None } else { Some(i) };
                     s.rec = false;
+                    s.unclear = false;
                 }
                 if let Some(at) = self.items().iter().position(|it| it.option == Some(i)) {
                     self.show_item(at, cx);
                 }
-                if self.variant != Variant::Verdict && self.draft().said(q).pick.is_some() {
-                    // Picking answers the question: on to the next.
-                    self.next_question(window, cx);
-                }
             }
             _ => {}
         }
+        // A pick is part of answering: what he types next is his words,
+        // not a tool key on the picture.
+        self.aim(Aim::Words, cx);
         cx.notify();
     }
 
-    pub fn goto_question(&mut self, at: usize, window: &mut Window, cx: &mut Context<Self>) {
+    /// Puts his words on a grill's question (none: on the whole round).
+    pub fn goto_question(&mut self, at: Option<usize>, cx: &mut Context<Self>) {
         let Some(ask) = self.current_ask().cloned() else {
             return;
         };
         if ask.questions.is_empty() {
             return;
         }
-        self.review = false;
+        let at = at.map(|i| i.min(ask.questions.len() - 1));
+        if self.draft().at != at {
+            if let Some(d) = self.draft_mut() {
+                d.at = at;
+            }
+            self.view = View::default();
+            self.sync_player(cx);
+        }
+        self.point_words(cx);
+        self.aim(Aim::Words, cx);
+    }
+
+    pub fn toggle_unclear(&mut self, cx: &mut Context<Self>) {
+        let Some(ask) = self.current_ask().cloned() else {
+            return;
+        };
+        let Some(q) = self.draft().at.and_then(|i| ask.questions.get(i)).cloned() else {
+            return;
+        };
         if let Some(d) = self.draft_mut() {
-            d.at = at.min(ask.questions.len() - 1);
+            let s = d.grill.entry(q.id.clone()).or_default();
+            s.unclear = !s.unclear;
+            if s.unclear {
+                s.pick = None;
+            }
         }
-        self.view = View::default();
-        if self.variant == Variant::Verdict {
-            self.view.item = self.recommended_item().unwrap_or(0);
-        }
-        self.point_note(cx);
-        self.leave_note(window, cx);
-        self.sync_player(cx);
+        self.aim(Aim::Words, cx);
         cx.notify();
     }
 
-    /// On from the question in front; past the last, the round's summary.
-    pub fn next_question(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(ask) = self.current_ask().cloned() else {
-            return;
-        };
-        let at = self.draft().at;
-        if at + 1 >= ask.questions.len() {
-            self.review = true;
-            self.point_note(cx);
-            self.stop_player(cx);
-            self.leave_note(window, cx);
-            cx.notify();
-        } else {
-            self.goto_question(at + 1, window, cx);
-        }
+    /// The question's state as he has answered it.
+    pub fn said(&self, q: &model::Question) -> Said {
+        self.draft().said(q)
     }
 
-    /// Enter on a grill question: what was said stands; with nothing said,
-    /// the recommendation is taken; a question with no options asks for
-    /// words.
-    pub fn accept_question(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(ask) = self.current_ask().cloned() else {
-            return;
-        };
-        let at = self.draft().at;
-        let Some(q) = ask.questions.get(at) else {
-            return;
-        };
-        let said = self.draft().said(q);
-        if !said.answered() {
-            match model::recommended(&q.options, &q.recommend) {
-                Some(r) => {
-                    if let Some(d) = self.draft_mut() {
-                        d.grill.insert(
-                            q.id.clone(),
-                            Said {
-                                pick: Some(r),
-                                rec: true,
-                                ..Default::default()
-                            },
-                        );
-                    }
-                }
-                None if q.options.is_empty() => return self.write(Verdict::Yes, window, cx),
-                None => {}
-            }
-        }
-        self.next_question(window, cx);
-    }
-
-    pub fn toggle_unclear(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(ask) = self.current_ask().cloned() else {
-            return;
-        };
-        if ask.form() == Form::Grill && !self.review {
-            let at = self.draft().at;
-            let Some(q) = ask.questions.get(at) else {
-                return;
-            };
-            let unclear = if let Some(d) = self.draft_mut() {
-                let s = d.grill.entry(q.id.clone()).or_default();
-                s.unclear = !s.unclear;
-                if s.unclear {
-                    s.pick = None;
-                }
-                s.unclear
-            } else {
-                false
-            };
-            if unclear && self.variant != Variant::Verdict {
-                self.next_question(window, cx);
-            }
-            cx.notify();
-        } else if ask.form() != Form::Grill && ask.form() != Form::Web {
-            if let Some(d) = self.draft_mut()
-                && !d.note.starts_with("Unclear")
-            {
-                d.note = format!("{} {}", answer::UNCLEAR, d.note).trim().to_string();
-            }
-            self.write(Verdict::No, window, cx);
-        }
-    }
-
-    /// Sends the answer, and opens the next ask while the desk keeps it.
+    /// Sends his answer (his marks first when he changed them), and opens
+    /// the next ask while the desk keeps it.
     pub fn send(&mut self, verdict: Verdict, window: &mut Window, cx: &mut Context<Self>) {
         if self.sending {
             return;
@@ -1014,15 +1226,12 @@ impl DeskApp {
             return;
         };
         let draft = self.draft();
-        let payload = match answer::payload(&ask, &draft, verdict) {
+        let marks = draft.marks(&ask).to_vec();
+        let payload = match answer::payload(&ask, &draft, verdict, marks.len()) {
             Ok(p) => p,
-            Err(why) => {
-                if matches!(verdict, Verdict::No) && draft.note.trim().is_empty() {
-                    self.write(Verdict::No, window, cx);
-                }
-                return self.say(why, true, cx);
-            }
+            Err(why) => return self.say(why, true, cx),
         };
+        let changed = draft.marks.as_ref().is_some_and(|m| *m != ask.marks);
         self.sending = true;
         let queue = self.queue();
         let next = queue
@@ -1032,12 +1241,19 @@ impl DeskApp {
             .cloned();
         let base = self.desks[key.0].place.url.clone();
         let title = ask.title.clone();
+        let revision = ask.revision;
         cx.spawn_in(window, async move |this, cx| {
+            let id = key.1.clone();
             let sent = desk::runtime()
-                .spawn(desk::answer(base, key.1.clone(), payload))
+                .spawn(async move {
+                    if changed {
+                        desk::save_marks(base.clone(), id.clone(), &marks, revision).await?;
+                    }
+                    desk::answer(base, id, payload).await
+                })
                 .await
                 .unwrap_or_else(|e| Err(e.to_string()));
-            let _ = this.update_in(cx, |app, window, cx| {
+            let _ = this.update_in(cx, |app, _, cx| {
                 app.sending = false;
                 match sent {
                     Ok(now) => {
@@ -1047,11 +1263,7 @@ impl DeskApp {
                         app.drafts.retain(|k, _| !(k.0 == key.0 && k.1 == key.1));
                         app.say(format!("Sent · {title}"), false, cx);
                         if app.current.as_ref() == Some(&key) {
-                            app.open(
-                                next.filter(|n| app.ask(n).is_some_and(|a| a.is_open())),
-                                window,
-                                cx,
-                            );
+                            app.open(next.filter(|n| app.ask(n).is_some_and(|a| a.is_open())), cx);
                         }
                     }
                     Err(e) => app.say(format!("Not sent: {e}"), true, cx),
@@ -1152,11 +1364,42 @@ impl DeskApp {
         }
     }
 
-    pub fn set_variant(&mut self, v: Variant, window: &mut Window, cx: &mut Context<Self>) {
-        self.variant = v;
-        desk::save_variant(v.key());
-        let current = self.current.clone();
-        self.open(current, window, cx);
+    /// Adds the desks the configured ones name (`/api/desks`) on the same
+    /// host, so naming one desk finds the rest.
+    fn discover(&mut self, cx: &mut Context<Self>) {
+        let given: Vec<String> = self.desks.iter().map(|d| d.place.url.clone()).collect();
+        for base in given {
+            cx.spawn(async move |this, cx| {
+                let got = desk::runtime()
+                    .spawn(desk::desks(base.clone()))
+                    .await
+                    .unwrap_or_else(|e| Err(e.to_string()));
+                let Ok(found) = got else {
+                    // An older desk has no list: the configured ones stand.
+                    return;
+                };
+                let _ = this.update(cx, |app, cx| {
+                    for place in desk::siblings(&base, &found) {
+                        if app
+                            .desks
+                            .iter()
+                            .any(|d| desk::same_place(&d.place.url, &place.url))
+                        {
+                            continue;
+                        }
+                        app.desks.push(DeskState {
+                            place,
+                            asks: vec![],
+                            reach: Reach::Loading,
+                        });
+                        let d = app.desks.len() - 1;
+                        app.refresh(d, cx);
+                    }
+                    app.follow(true, cx);
+                });
+            })
+            .detach();
+        }
     }
 
     pub fn open_on_web(&mut self, cx: &mut Context<Self>) {
@@ -1166,33 +1409,48 @@ impl DeskApp {
         }
     }
 
+    /// Opens the shown media (a page, a clip the app does not play) in the
+    /// browser.
+    pub fn open_media(&mut self, cx: &mut Context<Self>) {
+        if let Some(url) = self.shown_item().and_then(|i| self.page_url(&i)) {
+            cx.open_url(&url);
+        }
+    }
+
     // ---- Keys ----
 
+    /// The window's keys. In his words or a mark's, keys type; Escape gives
+    /// the keyboard to the surface, where letters pick tools and arrows
+    /// step. Ctrl+Enter sends from anywhere.
     pub fn on_key(&mut self, e: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
         let key = e.keystroke.key.as_str();
         let m = &e.keystroke.modifiers;
-        if self.note.read(cx).is_focused(window) {
+        if m.control && !m.alt {
+            match key {
+                "pagedown" => return self.step_ask(1, cx),
+                "pageup" => return self.step_ask(-1, cx),
+                "enter" if !self.typing(window, cx) => return self.send(Verdict::Send, window, cx),
+                _ => {}
+            }
+        }
+        if self.typing(window, cx) {
             if key == "escape" {
-                self.leave_note(window, cx);
-                cx.notify();
+                self.aim(Aim::Surface, cx);
             }
             return;
         }
         if m.control || m.alt || m.platform {
             return;
         }
-        let form = self.current_ask().map(|a| a.form());
         let video = self.player.is_some();
         match key {
-            "j" | "pagedown" => self.step_ask(1, window, cx),
-            "k" | "pageup" => self.step_ask(-1, window, cx),
-            "v" => {
-                let i = Variant::ALL
-                    .iter()
-                    .position(|v| *v == self.variant)
-                    .unwrap_or(0);
-                self.set_variant(Variant::ALL[(i + 1) % 3], window, cx);
-            }
+            "j" | "pagedown" => self.step_ask(1, cx),
+            "k" | "pageup" => self.step_ask(-1, cx),
+            "v" => self.set_tool(Tool::Look, cx),
+            "p" => self.set_tool(Tool::Pin, cx),
+            "b" => self.set_tool(Tool::Box, cx),
+            "a" => self.set_tool(Tool::Arrow, cx),
+            "d" => self.set_tool(Tool::Pen, cx),
             "r" => self.refresh_all(cx),
             "o" => self.open_on_web(cx),
             "c" => {
@@ -1237,16 +1495,40 @@ impl DeskApp {
             }
             "left" => self.step_item(-1, cx),
             "right" => self.step_item(1, cx),
+            "delete" | "backspace" => {
+                if let Some(id) = self.selected.clone() {
+                    self.delete_mark(&id, cx);
+                }
+            }
             "escape" => {
-                if self.view.side {
+                if self.drawing.is_some() {
+                    self.drawing = None;
+                } else if self.tool != Tool::Look {
+                    self.set_tool(Tool::Look, cx);
+                } else if self.view.side {
                     self.view.side = false;
-                } else if self.review {
-                    self.review = false;
+                } else {
+                    self.select_mark(None, false, cx);
                 }
                 cx.notify();
             }
-            _ => self.on_answer_key(key, m.shift, form, window, cx),
+            // Anything else is him starting to write.
+            "enter" | "tab" => self.aim(Aim::Words, cx),
+            _ => {
+                if let Some(ch) = e.keystroke.key_char.clone() {
+                    self.words.update(cx, |f, cx| {
+                        let text = f.text.clone() + &ch;
+                        f.set(&text, false, cx);
+                    });
+                    self.words_changed(cx);
+                    self.aim(Aim::Words, cx);
+                }
+            }
         }
+    }
+
+    fn typing(&self, window: &Window, cx: &App) -> bool {
+        self.words.read(cx).is_focused(window) || self.mark_note.read(cx).is_focused(window)
     }
 
     fn fps_frames(&self) -> i64 {
@@ -1255,59 +1537,6 @@ impl DeskApp {
             .map(|(_, p)| p.clip.fps.round() as i64)
             .unwrap_or(1)
             .max(1)
-    }
-
-    fn on_answer_key(
-        &mut self,
-        key: &str,
-        shift: bool,
-        form: Option<Form>,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        let Some(form) = form else { return };
-        if form == Form::Web {
-            if key == "enter" {
-                self.open_on_web(cx);
-            }
-            return;
-        }
-        if let Some(n) = key.parse::<usize>().ok().filter(|n| (1..=9).contains(n)) {
-            return self.pick(n - 1, window, cx);
-        }
-        let grill = form == Form::Grill;
-        match key {
-            "enter" if grill && (shift || self.variant == Variant::Verdict) => {
-                self.send(Verdict::GrillRest, window, cx)
-            }
-            "enter" if grill && self.review => self.send(Verdict::Grill, window, cx),
-            "enter" if grill => self.accept_question(window, cx),
-            "enter" => self.send(Verdict::Yes, window, cx),
-            "s" if grill => self.send(Verdict::Grill, window, cx),
-            "down" if grill => self.next_question(window, cx),
-            "up" if grill => {
-                let at = if self.review {
-                    self.current_ask().map(|a| a.questions.len()).unwrap_or(1)
-                } else {
-                    self.draft().at
-                };
-                self.goto_question(at.saturating_sub(1), window, cx)
-            }
-            "x" if !grill => {
-                if self.draft().note.trim().is_empty() {
-                    self.write(Verdict::No, window, cx)
-                } else {
-                    self.send(Verdict::No, window, cx)
-                }
-            }
-            "n" | "w" => self.write(
-                if grill { Verdict::Grill } else { Verdict::Yes },
-                window,
-                cx,
-            ),
-            "u" => self.toggle_unclear(window, cx),
-            _ => {}
-        }
     }
 }
 

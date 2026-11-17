@@ -1,28 +1,43 @@
-//! The stage: what the ask shows, as big as the room allows, on the dark
-//! ground pictures read true on. One picture or two side by side (C), the
-//! two always at the same zoom and place so a difference is where the eye
-//! already is; F swaps to the other in place. The wheel zooms about the
-//! pointer, a drag moves, a double click goes between fit and 1:1. A clip
-//! plays, scrubs and steps by the frame.
+//! The surface: what the agent published, as big as the room allows, and
+//! where the operator marks it. Pictures and clips sit on the dark ground
+//! they read true on, one or two side by side (C) at the same zoom and
+//! place; the wheel zooms about the pointer, a drag moves, a double click
+//! goes between fit and 1:1, and a clip plays, scrubs and steps by the
+//! frame. With a drawing tool a press marks instead: a pin, a box, an arrow
+//! or a line, on a paused clip's frame. A page renders here (Windows) and a
+//! click in Comment mode marks its element; the document reads here and
+//! selecting words marks the passage.
 
-use crate::app::{DeskApp, Item, Pic, fit_scale};
-use crate::model::{Ask, MediaKind};
+use crate::app::{DeskApp, Drawing, Item, Pic, fit_scale};
+use crate::marks::{self, Tool};
+use crate::model::{Ask, Mark, MediaKind};
 use crate::tokens::{self, GAP, GAP_SMALL, SMALL, TEXT};
 use gpui::{
-    AnyElement, Bounds, ClickEvent, ContentMask, Context, Corners, FontWeight, MouseButton,
-    MouseDownEvent, MouseMoveEvent, ObjectFit, Pixels, RenderImage, ScrollDelta, ScrollEvent,
-    SharedString, StyledImage, Window, canvas, div, img, point, prelude::*, px, relative,
+    AnyElement, App, BorderStyle, Bounds, ClickEvent, ContentMask, Context, Corners, Font,
+    FontWeight, Hsla, MouseButton, MouseDownEvent, MouseMoveEvent, ObjectFit, PathBuilder, Pixels,
+    Point, RenderImage, ScrollDelta, ScrollEvent, SharedString, StyledImage, TextAlign, TextRun,
+    Window, canvas, div, fill, font, img, point, prelude::*, px, quad, relative, transparent_black,
 };
-use parvi_app_kit::theme::{Theme, alpha, theme};
+use parvi_app_kit::theme::{FAMILY, Theme, alpha, rgb, theme};
+use parvi_app_kit::widgets::kit::{self, Kind};
+use parvi_app_kit::widgets::{markdown, select};
 use std::sync::Arc;
 
-/// What one panel of the stage draws.
+/// What one panel of the surface draws.
 enum Shown {
     Picture(Arc<RenderImage>, (f32, f32)),
     Waiting(String),
     Failed(String),
-    /// A clip the app does not decode: the browser plays it.
+    /// What the app does not show itself: the browser does.
     Elsewhere(String),
+}
+
+/// The marks one panel draws: each with its number, whether it is the
+/// selected one, and the one being drawn.
+#[derive(Clone, Default)]
+struct Ink {
+    marks: Vec<(usize, Mark, bool)>,
+    drawing: Option<Drawing>,
 }
 
 impl DeskApp {
@@ -58,17 +73,16 @@ impl DeskApp {
             }
             MediaKind::Video => Shown::Elsewhere("F shows this clip here".into()),
             MediaKind::OtherVideo => Shown::Elsewhere(format!(
-                "{}: this kind of clip plays in the browser (P)",
+                "{}: this kind of clip plays in the browser (O on the shown item)",
                 item.media.file_name()
             )),
-            MediaKind::Other => Shown::Elsewhere(format!(
-                "{}: opens in the browser (P)",
-                item.media.file_name()
-            )),
+            MediaKind::Page | MediaKind::Other => {
+                Shown::Elsewhere(format!("{}: opens in the browser", item.media.file_name()))
+            }
         }
     }
 
-    /// The stage for the ask in front, filling what it is given.
+    /// The surface for the ask in front, filling what it is given.
     pub fn stage(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         let t = theme(cx).clone();
         let items = self.items();
@@ -79,46 +93,177 @@ impl DeskApp {
             return div().size_full().bg(t.term_bg).into_any_element();
         };
         if items.is_empty() {
-            return div()
-                .size_full()
-                .bg(t.term_bg)
-                .flex()
-                .items_center()
-                .justify_center()
-                .text_color(t.dim)
-                .text_size(px(TEXT))
-                .child("Nothing to look at: the words are the ask")
-                .into_any_element();
+            return div().size_full().bg(t.term_bg).into_any_element();
         }
         let at = self.view.item.min(items.len() - 1);
-        let mut slots = vec![at];
-        if self.view.side
-            && let Some(p) = self.partner(&items)
-        {
-            slots.push(p);
-        }
+        let shown_item = items[at].clone();
         let rec = if ask.questions.is_empty() {
             ask.recommended()
         } else {
             ask.questions
-                .get(self.draft().at)
+                .get(self.draft().at.unwrap_or(0))
                 .and_then(|q| crate::model::recommended(&q.options, &q.recommend))
         };
+        let (body, zoom, slots) = if shown_item.doc {
+            (self.doc_surface(&t, cx), None, vec![at])
+        } else if shown_item.kind() == Some(MediaKind::Page) {
+            (self.page_surface(&t, &shown_item, cx), None, vec![at])
+        } else {
+            self.pictures_surface(&t, &ask, key.0, &items, at, rec, window, cx)
+        };
+        let video = shown_item.kind() == Some(MediaKind::Video);
+        div()
+            .size_full()
+            .flex()
+            .flex_col()
+            .bg(t.term_bg)
+            .child(self.tools(&t, &shown_item, cx))
+            .child(div().flex_1().min_h_0().w_full().child(body))
+            .when(video, |d| d.child(self.transport(&t, &shown_item, cx)))
+            .child(self.film(&t, &ask, key.0, &items, &slots, rec, zoom, cx))
+            .into_any_element()
+    }
+
+    /// The tools over the surface: how a press marks, for what can be
+    /// marked here.
+    fn tools(&mut self, t: &Theme, item: &Item, cx: &mut Context<Self>) -> AnyElement {
+        let bar = div()
+            .h(px(tokens::TOOLS))
+            .flex_none()
+            .px(px(GAP))
+            .flex()
+            .items_center()
+            .gap(px(GAP_SMALL))
+            .bg(t.surface)
+            .border_b_1()
+            .border_color(t.divider)
+            .text_size(px(SMALL))
+            .text_color(t.text2);
+        if item.doc {
+            return bar
+                .child(format!(
+                    "{} · select words to comment on them",
+                    item.media.path
+                ))
+                .into_any_element();
+        }
+        if item.kind() == Some(MediaKind::Page) {
+            let comment = self.page_comment;
+            let inside = crate::page::INSIDE;
+            return bar
+                .when(inside, |d| {
+                    d.child(segment(t, "browse", "Browse", "V", !comment).on_click(
+                        cx.listener(|app, _: &ClickEvent, _, cx| app.set_tool(Tool::Look, cx)),
+                    ))
+                    .child(segment(t, "comment", "Comment", "P", comment).on_click(
+                        cx.listener(|app, _: &ClickEvent, _, cx| app.set_tool(Tool::Pin, cx)),
+                    ))
+                    .child(div().pl(px(GAP_SMALL)).child(if comment {
+                        "Click an element to comment on it"
+                    } else {
+                        "The page works as it would in a browser"
+                    }))
+                })
+                .child(div().flex_1())
+                .child(
+                    kit::button(t, "open-page", "Open in browser", Kind::Quiet)
+                        .on_click(cx.listener(|app, _: &ClickEvent, _, cx| app.open_media(cx))),
+                )
+                .into_any_element();
+        }
+        let markable = matches!(item.kind(), Some(MediaKind::Image | MediaKind::Video));
+        if !markable {
+            return bar
+                .child(item.media.file_name().to_string())
+                .into_any_element();
+        }
+        let mut bar = bar.child(
+            segment(
+                t,
+                "tool-look",
+                Tool::Look.name(),
+                Tool::Look.key(),
+                self.tool == Tool::Look,
+            )
+            .on_click(cx.listener(|app, _: &ClickEvent, _, cx| app.set_tool(Tool::Look, cx))),
+        );
+        for tool in Tool::DRAW {
+            bar = bar.child(
+                segment(
+                    t,
+                    SharedString::from(format!("tool-{}", tool.name())),
+                    tool.name(),
+                    tool.key(),
+                    self.tool == tool,
+                )
+                .on_click(cx.listener(move |app, _: &ClickEvent, _, cx| app.set_tool(tool, cx))),
+            );
+        }
+        let hint = match (self.tool, item.kind()) {
+            (Tool::Look, Some(MediaKind::Video)) => "Pause anywhere and mark that frame",
+            (Tool::Look, _) => "Pick a tool to mark what you see",
+            (Tool::Pin, _) => "Click to pin a comment",
+            (Tool::Box, _) => "Drag a box around it",
+            (Tool::Arrow, _) => "Drag from the comment to the thing",
+            (Tool::Pen, _) => "Draw",
+        };
+        bar.child(div().pl(px(GAP_SMALL)).child(hint))
+            .into_any_element()
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn pictures_surface(
+        &mut self,
+        t: &Theme,
+        ask: &Ask,
+        desk: usize,
+        items: &[Item],
+        at: usize,
+        rec: Option<usize>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> (AnyElement, Option<String>, Vec<usize>) {
+        let mut slots = vec![at];
+        if self.view.side
+            && let Some(p) = self.partner(items)
+            && !items[p].doc
+            && items[p].kind() != Some(MediaKind::Page)
+        {
+            slots.push(p);
+        }
         self.rooms
             .borrow_mut()
             .resize(slots.len(), Bounds::default());
         self.rooms.borrow_mut().truncate(slots.len());
+        self.drawn_at.borrow_mut().resize(slots.len(), None);
+        self.drawn_at.borrow_mut().truncate(slots.len());
+        let numbered = self.numbered();
+        let frame = self.player.as_ref().map(|(_, p)| p.at);
         let mut panels = Vec::new();
         let mut natural = None;
         for (slot, &i) in slots.iter().enumerate() {
             let item = &items[i];
-            let shown = self.shown(&ask, key.0, item, slot == 0, cx);
+            let shown = self.shown(ask, desk, item, slot == 0, cx);
             if slot == 0
                 && let Shown::Picture(_, n) = &shown
             {
                 natural = Some(*n);
             }
-            panels.push(self.panel(&t, slot, item, shown, rec, slots.len() > 1));
+            let video = item.kind() == Some(MediaKind::Video);
+            let ink = Ink {
+                marks: numbered
+                    .iter()
+                    .filter(|(_, m)| {
+                        marks::shows_on(m, &item.media.id, if video { frame } else { None })
+                    })
+                    .map(|(n, m)| (*n, m.clone(), self.selected.as_deref() == Some(&m.id)))
+                    .collect(),
+                drawing: self
+                    .drawing
+                    .clone()
+                    .filter(|d| slot == 0 && d.media == item.media.id),
+            };
+            panels.push(self.panel(t, slot, item, shown, rec, slots.len() > 1, ink));
         }
         let shown_natural = natural;
         let natural = natural.unwrap_or((1., 1.));
@@ -130,16 +275,22 @@ impl DeskApp {
                 format!("{pct}%")
             }
         });
+        let drawing = self.tool != Tool::Look && shown_natural.is_some();
         let stage = div()
             .id("stage")
-            .flex_1()
-            .min_h_0()
-            .w_full()
+            .size_full()
             .flex()
             .gap(px(2.))
             .bg(t.term_bg)
-            .cursor_grab()
-            .when(self.held.is_some(), |d| d.cursor_grabbing())
+            .map(|d| {
+                if drawing {
+                    d.cursor_crosshair()
+                } else if self.held.is_some() {
+                    d.cursor_grabbing()
+                } else {
+                    d.cursor_grab()
+                }
+            })
             .children(panels)
             .on_scroll(cx.listener(move |app, e: &ScrollEvent, window, cx| {
                 // A wheel's notch is one step however many lines it says;
@@ -162,6 +313,13 @@ impl DeskApp {
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(move |app, e: &MouseDownEvent, window, cx| {
+                    window.focus(&app.focus, cx);
+                    if drawing {
+                        if let Some(n) = app.on_picture(e.position, false) {
+                            app.draw_start(n, cx);
+                        }
+                        return;
+                    }
                     if e.click_count == 2 {
                         if app.view.fit {
                             let s = app.scale_now(natural, window);
@@ -184,6 +342,15 @@ impl DeskApp {
                 }),
             )
             .on_mouse_move(cx.listener(|app, e: &MouseMoveEvent, _, cx| {
+                if app.drawing.is_some() {
+                    if e.pressed_button != Some(MouseButton::Left) {
+                        return app.draw_end(cx);
+                    }
+                    if let Some(n) = app.on_picture(e.position, true) {
+                        app.draw_move(n, cx);
+                    }
+                    return;
+                }
                 let Some((from, pan)) = app.held else { return };
                 if e.pressed_button != Some(MouseButton::Left) {
                     app.held = None;
@@ -199,22 +366,29 @@ impl DeskApp {
             .on_mouse_up(
                 MouseButton::Left,
                 cx.listener(|app, _, _, cx| {
+                    if app.drawing.is_some() {
+                        return app.draw_end(cx);
+                    }
                     app.held = None;
                     cx.notify();
                 }),
             );
-        let video = items[at].media.kind() == MediaKind::Video;
-        div()
-            .size_full()
-            .flex()
-            .flex_col()
-            .bg(t.term_bg)
-            .child(stage)
-            .when(video, |d| d.child(self.transport(&t, cx)))
-            .child(self.film(&t, &ask, key.0, &items, &slots, rec, zoom, cx))
-            .into_any_element()
+        (stage.into_any_element(), zoom, slots)
     }
 
+    /// Where `p` falls on the first panel's picture, 0 to 1 across it;
+    /// off it, nothing (or, `clamp`ed, its nearest edge).
+    fn on_picture(&self, p: Point<Pixels>, clamp: bool) -> Option<[f64; 2]> {
+        let b = (*self.drawn_at.borrow().first()?)?;
+        let x = f64::from(f32::from(p.x - b.origin.x) / f32::from(b.size.width).max(1.));
+        let y = f64::from(f32::from(p.y - b.origin.y) / f32::from(b.size.height).max(1.));
+        if clamp {
+            return Some([x.clamp(0., 1.), y.clamp(0., 1.)]);
+        }
+        ((0. ..=1.).contains(&x) && (0. ..=1.).contains(&y)).then_some([x, y])
+    }
+
+    #[allow(clippy::too_many_arguments)]
     fn panel(
         &self,
         t: &Theme,
@@ -223,13 +397,17 @@ impl DeskApp {
         shown: Shown,
         rec: Option<usize>,
         two: bool,
+        ink: Ink,
     ) -> AnyElement {
         let rooms = self.rooms.clone();
+        let drawn_at = self.drawn_at.clone();
         let view = self.view;
+        let edge = alpha(t.term_bg, 0.85);
+        let badge_text = t.term_bg;
         let body = match shown {
             Shown::Picture(image, natural) => canvas(
                 move |b, _, _| b,
-                move |_, b: Bounds<Pixels>, window, _| {
+                move |_, b: Bounds<Pixels>, window, cx| {
                     if let Some(r) = rooms.borrow_mut().get_mut(slot) {
                         *r = b;
                     }
@@ -246,8 +424,13 @@ impl DeskApp {
                         point(c.x + px(pan.0 - w / 2.), c.y + px(pan.1 - h / 2.)),
                         gpui::size(px(w), px(h)),
                     );
-                    window.with_content_mask(Some(ContentMask { bounds: b }), |w| {
-                        let _ = w.paint_image(to, to, Corners::default(), image.clone(), 0, false);
+                    if let Some(d) = drawn_at.borrow_mut().get_mut(slot) {
+                        *d = Some(to);
+                    }
+                    window.with_content_mask(Some(ContentMask { bounds: b }), |window| {
+                        let _ =
+                            window.paint_image(to, to, Corners::default(), image.clone(), 0, false);
+                        paint_ink(&ink, to, edge, badge_text, window, cx);
                     });
                 },
             )
@@ -301,9 +484,130 @@ impl DeskApp {
             .into_any_element()
     }
 
-    /// Play, step and the track of a clip, under the stage.
-    fn transport(&mut self, t: &Theme, cx: &mut Context<Self>) -> AnyElement {
+    /// The document, to read and to mark by selecting its words.
+    fn doc_surface(&mut self, t: &Theme, cx: &mut Context<Self>) -> AnyElement {
+        let Some(blocks) = self.doc_blocks() else {
+            return quiet("The document is empty".into(), t.dim);
+        };
+        let look = markdown::Look {
+            t,
+            refs: false,
+            on_link: None,
+            select: Some(self.doc_select.clone()),
+        };
+        let column = markdown::render(&look, "doc", &blocks);
+        let this = cx.entity().downgrade();
+        let body = div()
+            .id("doc")
+            .size_full()
+            .overflow_y_scroll()
+            .bg(t.bg)
+            .cursor_text()
+            .flex()
+            .justify_center()
+            .child(
+                div()
+                    .w_full()
+                    .max_w(px(tokens::READING))
+                    .px(px(tokens::PAD))
+                    .py(px(tokens::PAD))
+                    .child(column),
+            );
+        select::track(body, &self.doc_select, cx.entity_id(), move |text, cx| {
+            let _ = this.update(cx, |app, cx| app.mark_passage(text, cx));
+        })
+        .into_any_element()
+    }
+
+    /// The page the agent made: inside the window where the system has a
+    /// web view the app can lay there, else a way to the browser.
+    fn page_surface(&mut self, t: &Theme, item: &Item, cx: &mut Context<Self>) -> AnyElement {
+        let Some(url) = self.page_url(item) else {
+            return quiet("The page has no address".into(), t.error);
+        };
+        #[cfg(windows)]
+        {
+            if let Some(e) = self.page_failed.borrow().clone() {
+                return self.page_outside(t, format!("The page did not open here: {e}"), cx);
+            }
+            let page = self.page.clone();
+            let failed = self.page_failed.clone();
+            let said = self.page_said.clone();
+            canvas(
+                move |b, _, _| b,
+                move |_, b: Bounds<Pixels>, window, _| {
+                    let mut slot = page.borrow_mut();
+                    if slot.is_none() {
+                        let said = said.clone();
+                        match crate::page::WebPage::new(window, &url, move |m| {
+                            let _ = said.try_send(m);
+                        }) {
+                            Ok(p) => *slot = Some(p),
+                            Err(e) => {
+                                log::error!("{e}");
+                                *failed.borrow_mut() = Some(e);
+                                return;
+                            }
+                        }
+                    }
+                    if let Some(p) = slot.as_mut() {
+                        p.show(&url, b);
+                    }
+                },
+            )
+            .size_full()
+            .into_any_element()
+        }
+        #[cfg(not(windows))]
+        {
+            let _ = url;
+            self.page_outside(
+                t,
+                "This page renders inside the Desk on Windows. Here it opens in your browser: say what you think of it in your words.".into(),
+                cx,
+            )
+        }
+    }
+
+    fn page_outside(&self, t: &Theme, why: String, cx: &mut Context<Self>) -> AnyElement {
+        div()
+            .size_full()
+            .flex()
+            .flex_col()
+            .items_center()
+            .justify_center()
+            .gap(px(GAP))
+            .p(px(tokens::PAD))
+            .child(
+                div()
+                    .max_w(px(tokens::READING / 1.6))
+                    .text_size(px(TEXT))
+                    .text_color(t.text2)
+                    .child(why),
+            )
+            .child(
+                kit::button(t, "open-page-big", "Open the page", Kind::Primary)
+                    .on_click(cx.listener(|app, _: &ClickEvent, _, cx| app.open_media(cx))),
+            )
+            .into_any_element()
+    }
+
+    /// Play, step and the track of a clip, under the surface; the clip's
+    /// marks are ticks on its track.
+    fn transport(&mut self, t: &Theme, item: &Item, cx: &mut Context<Self>) -> AnyElement {
         let track = self.track.clone();
+        let ticks: Vec<(u64, Hsla, bool)> = self
+            .marks()
+            .iter()
+            .filter(|m| m.media.as_deref() == Some(item.media.id.as_str()))
+            .filter_map(|m| {
+                Some((
+                    m.frame?,
+                    rgb(tokens::ink(m.color.as_deref())),
+                    self.selected.as_deref() == Some(&m.id),
+                ))
+            })
+            .collect();
         let Some((_, p)) = self.player.as_ref() else {
             return div().h(px(tokens::TRANSPORT)).into_any_element();
         };
@@ -311,15 +615,29 @@ impl DeskApp {
         let at = p.at;
         let played = (at as f32 + 1.) / n as f32;
         let words = format!(
-            "frame {} of {}  ·  {:.2} s of {:.2} s  ·  {:.0} fps",
+            "frame {} of {}  ·  {} of {}  ·  {:.0} fps",
             at + 1,
             n,
-            p.seconds(at),
-            p.seconds(n),
+            marks::clock(p.seconds(at)),
+            marks::clock(p.seconds(n)),
             p.clip.fps
         );
         let playing = p.playing;
         let (accent, divider) = (t.accent, t.divider);
+        let ticks = ticks.into_iter().map(|(f, c, on)| {
+            div()
+                .absolute()
+                .top(px(-4.))
+                .h(px(tokens::TRACK_H + 8.))
+                .w(px(if on {
+                    tokens::TICK_W * 2.
+                } else {
+                    tokens::TICK_W
+                }))
+                .left(relative(f as f32 / n as f32))
+                .rounded(px(1.))
+                .bg(c)
+        });
         div()
             .h(px(tokens::TRANSPORT))
             .flex_none()
@@ -331,16 +649,24 @@ impl DeskApp {
             .border_t_1()
             .border_color(t.divider)
             .child(
-                parvi_app_kit::widgets::kit::button(
+                kit::button(
                     t,
                     "play",
                     if playing { "Pause" } else { "Play" },
-                    parvi_app_kit::widgets::kit::Kind::Plain,
+                    Kind::Plain,
                 )
-                .tooltip(parvi_app_kit::widgets::kit::tip(
-                    "Space · ← → a frame · Shift a second",
-                ))
+                .tooltip(kit::tip("Space · ← → a frame · Shift a second"))
                 .on_click(cx.listener(|app, _: &ClickEvent, _, cx| app.toggle_play(cx))),
+            )
+            .child(
+                kit::button(t, "back", "‹", Kind::Quiet)
+                    .tooltip(kit::tip("A frame back (←)"))
+                    .on_click(cx.listener(|app, _: &ClickEvent, _, cx| app.step_frames(-1, cx))),
+            )
+            .child(
+                kit::button(t, "on", "›", Kind::Quiet)
+                    .tooltip(kit::tip("A frame on (→)"))
+                    .on_click(cx.listener(|app, _: &ClickEvent, _, cx| app.step_frames(1, cx))),
             )
             .child(
                 div()
@@ -374,7 +700,8 @@ impl DeskApp {
                                     .w(relative(played))
                                     .rounded_full()
                                     .bg(accent),
-                            ),
+                            )
+                            .children(ticks),
                     )
                     .on_mouse_down(
                         MouseButton::Left,
@@ -410,8 +737,8 @@ impl DeskApp {
             .into_any_element()
     }
 
-    /// Every picture and clip of the ask, small, under the stage: the one
-    /// shown is outlined, the one beside it fainter.
+    /// Everything the ask shows, small, under the surface: the one shown
+    /// is outlined, the one beside it fainter.
     #[allow(clippy::too_many_arguments)]
     fn film(
         &mut self,
@@ -426,13 +753,14 @@ impl DeskApp {
     ) -> AnyElement {
         let mut thumbs = Vec::new();
         let many = items.len() > 1;
+        let marked: Vec<String> = self.marks().into_iter().filter_map(|m| m.media).collect();
         for (i, item) in items.iter().enumerate().filter(|_| many) {
-            let pic = match item.media.kind() {
-                MediaKind::Image => match self.picture(desk, ask, &item.media, cx) {
+            let pic = match item.kind() {
+                Some(MediaKind::Image) => match self.picture(desk, ask, &item.media, cx) {
                     Some(Pic::Ready { image, .. }) => Some(image.clone()),
                     _ => None,
                 },
-                MediaKind::Video => self
+                Some(MediaKind::Video) => self
                     .player
                     .as_mut()
                     .filter(|(k, _)| {
@@ -444,14 +772,18 @@ impl DeskApp {
             let on = slots.first() == Some(&i);
             let beside = slots.get(1) == Some(&i);
             let is_rec = item.option.is_some() && item.option == rec;
-            let label: SharedString = if item.tag.is_empty() {
-                match item.media.kind() {
-                    MediaKind::Video | MediaKind::OtherVideo => "clip".into(),
-                    _ => "".into(),
-                }
-            } else {
-                item.tag.clone().into()
+            let word = match item.kind() {
+                None => "Doc",
+                Some(MediaKind::Video | MediaKind::OtherVideo) => "Clip",
+                Some(MediaKind::Page) => "Page",
+                _ => "",
             };
+            let label: SharedString = match (item.tag.is_empty(), word.is_empty()) {
+                (true, _) => word.into(),
+                (false, true) => item.tag.clone().into(),
+                (false, false) => format!("{} {word}", item.tag).into(),
+            };
+            let has_marks = marked.contains(&item.media.id);
             thumbs.push(
                 div()
                     .id(("film", i))
@@ -487,19 +819,37 @@ impl DeskApp {
                                 .child(label),
                         )
                     })
-                    .tooltip(parvi_app_kit::widgets::kit::tip(
-                        if item.media.caption.is_empty() {
-                            item.media.file_name().to_string()
-                        } else {
-                            item.media.caption.clone()
-                        },
-                    ))
+                    .when(has_marks, |d| {
+                        d.child(
+                            div()
+                                .absolute()
+                                .right(px(4.))
+                                .top(px(4.))
+                                .size(px(tokens::PIN))
+                                .rounded_full()
+                                .bg(rgb(tokens::MARK_INK)),
+                        )
+                    })
+                    .tooltip(kit::tip(if item.media.caption.is_empty() {
+                        item.media.file_name().to_string()
+                    } else {
+                        item.media.caption.clone()
+                    }))
                     .on_click(cx.listener(move |app, _: &ClickEvent, _, cx| app.show_item(i, cx))),
             );
         }
         let side = self.view.side;
+        let comparable = items
+            .iter()
+            .filter(|i| matches!(i.kind(), Some(MediaKind::Image | MediaKind::Video)))
+            .count()
+            > 1;
         div()
-            .h(px(if many { tokens::STRIP_H + 2. * GAP_SMALL } else { tokens::TRANSPORT }))
+            .h(px(if many {
+                tokens::STRIP_H + 2. * GAP_SMALL
+            } else {
+                tokens::TRANSPORT
+            }))
             .flex_none()
             .px(px(GAP))
             .py(px(GAP_SMALL))
@@ -520,30 +870,231 @@ impl DeskApp {
                             .id("zoom")
                             .text_size(px(SMALL))
                             .text_color(t.text2)
-                            .tooltip(parvi_app_kit::widgets::kit::tip(
+                            .tooltip(kit::tip(
                                 "Wheel zooms at the pointer · drag moves · Z fits · 0 is 1:1 · double click goes between",
                             ))
                             .child(z)
                     }))
-                    .when(many, |d| d.child(
-                        parvi_app_kit::widgets::kit::button(
-                            t,
-                            "compare",
-                            if side { "One" } else { "Side by side" },
-                            parvi_app_kit::widgets::kit::Kind::Quiet,
+                    .when(comparable, |d| {
+                        d.child(
+                            kit::button(
+                                t,
+                                "compare",
+                                if side { "One" } else { "Side by side" },
+                                Kind::Quiet,
+                            )
+                            .tooltip(kit::tip("C · F swaps the two in place"))
+                            .on_click(cx.listener(|app, _: &ClickEvent, _, cx| {
+                                app.view.side = !app.view.side;
+                                cx.notify();
+                            })),
                         )
-                        .tooltip(parvi_app_kit::widgets::kit::tip("C · F swaps the two in place"))
-                        .on_click(cx.listener(|app, _: &ClickEvent, _, cx| {
-                            app.view.side = !app.view.side;
-                            cx.notify();
-                        })),
-                    )),
+                    }),
             )
             .into_any_element()
     }
 }
 
-fn quiet(words: String, colour: gpui::Hsla) -> AnyElement {
+/// A tool's button: on, or not; its key beside its name.
+fn segment(
+    t: &Theme,
+    id: impl Into<gpui::ElementId>,
+    name: &str,
+    key: &str,
+    on: bool,
+) -> gpui::Stateful<gpui::Div> {
+    kit::button(
+        t,
+        id,
+        name.to_string(),
+        if on { Kind::Primary } else { Kind::Quiet },
+    )
+    .gap(px(GAP_SMALL))
+    .child(
+        div()
+            .text_size(px(SMALL))
+            .text_color(if on { alpha(t.on_accent(), 0.7) } else { t.dim })
+            .child(key.to_string()),
+    )
+}
+
+/// A mark as drawn: its kind, its points on the window, its ink, whether
+/// it is selected, its number (none while being drawn).
+type Shape = (String, Vec<Point<Pixels>>, Hsla, bool, Option<usize>);
+
+/// The marks over a picture drawn at `to`: each in its ink over a dark
+/// edge so it reads on any picture, the selected one heavier, each with
+/// its number.
+fn paint_ink(
+    ink: &Ink,
+    to: Bounds<Pixels>,
+    edge: Hsla,
+    badge_text: Hsla,
+    window: &mut Window,
+    cx: &mut App,
+) {
+    let at = |p: [f64; 2]| {
+        point(
+            to.origin.x + to.size.width * p[0] as f32,
+            to.origin.y + to.size.height * p[1] as f32,
+        )
+    };
+    let mut shapes: Vec<Shape> = ink
+        .marks
+        .iter()
+        .map(|(n, m, on)| {
+            (
+                m.kind.clone(),
+                m.points.iter().map(|p| at(*p)).collect(),
+                rgb(tokens::ink(m.color.as_deref())),
+                *on,
+                Some(*n),
+            )
+        })
+        .collect();
+    if let Some(d) = &ink.drawing {
+        let kind = match d.tool {
+            Tool::Box => "box",
+            Tool::Arrow => "arrow",
+            Tool::Pen => "pen",
+            _ => "pin",
+        };
+        shapes.push((
+            kind.into(),
+            d.points.iter().map(|p| at(*p)).collect(),
+            rgb(tokens::MARK_INK),
+            true,
+            None,
+        ));
+    }
+    for (kind, points, color, on, n) in shapes {
+        let w = if on {
+            tokens::MARK_LINE_ON
+        } else {
+            tokens::MARK_LINE
+        };
+        for (width, c) in [(w + tokens::MARK_EDGE, edge), (w, color)] {
+            match (kind.as_str(), points.as_slice()) {
+                ("box" | "region", [a, b, ..]) => {
+                    let r = Bounds::from_corners(
+                        point(a.x.min(b.x), a.y.min(b.y)),
+                        point(a.x.max(b.x), a.y.max(b.y)),
+                    );
+                    let grow = px((width - w) / 2.);
+                    let r = Bounds::from_corners(
+                        point(r.origin.x - grow, r.origin.y - grow),
+                        point(
+                            r.origin.x + r.size.width + grow,
+                            r.origin.y + r.size.height + grow,
+                        ),
+                    );
+                    window.paint_quad(quad(
+                        r,
+                        px(2.),
+                        transparent_black(),
+                        px(width),
+                        c,
+                        BorderStyle::Solid,
+                    ));
+                }
+                ("arrow", [a, b, ..]) => {
+                    stroke(&[*a, *b], width, c, window);
+                    let (dx, dy) = (f32::from(b.x - a.x), f32::from(b.y - a.y));
+                    let len = dx.hypot(dy).max(1.);
+                    let (ux, uy) = (dx / len, dy / len);
+                    let head = 6. * w;
+                    for side in [-1f32, 1.] {
+                        let tip = point(
+                            b.x - px(head * ux - side * head * 0.5 * uy),
+                            b.y - px(head * uy + side * head * 0.5 * ux),
+                        );
+                        stroke(&[tip, *b], width, c, window);
+                    }
+                }
+                (_, [_, _, ..]) => stroke(&points, width, c, window),
+                (_, [p]) => {
+                    let r = tokens::PIN + (width - w) / 2.;
+                    window.paint_quad(
+                        fill(
+                            Bounds::new(
+                                point(p.x - px(r), p.y - px(r)),
+                                gpui::size(px(2. * r), px(2. * r)),
+                            ),
+                            c,
+                        )
+                        .corner_radii(px(r)),
+                    );
+                }
+                _ => {}
+            }
+        }
+        if let (Some(n), Some(p)) = (n, points.first()) {
+            badge(n, *p, color, badge_text, edge, window, cx);
+        }
+    }
+}
+
+fn stroke(points: &[Point<Pixels>], width: f32, color: Hsla, window: &mut Window) {
+    let mut path = PathBuilder::stroke(px(width));
+    path.move_to(points[0]);
+    for p in &points[1..] {
+        path.line_to(*p);
+    }
+    if let Ok(path) = path.build() {
+        window.paint_path(path, color);
+    }
+}
+
+/// A mark's number on a round plate beside where it starts.
+fn badge(
+    n: usize,
+    at: Point<Pixels>,
+    color: Hsla,
+    text: Hsla,
+    edge: Hsla,
+    window: &mut Window,
+    cx: &mut App,
+) {
+    let size = tokens::BADGE;
+    let origin = point(at.x + px(tokens::PIN), at.y - px(size + tokens::PIN / 2.));
+    let plate = Bounds::new(origin, gpui::size(px(size), px(size)));
+    window.paint_quad(quad(
+        plate,
+        px(size / 2.),
+        color,
+        px(1.),
+        edge,
+        BorderStyle::Solid,
+    ));
+    let words: SharedString = n.to_string().into();
+    let run = TextRun {
+        len: words.len(),
+        font: Font {
+            weight: FontWeight::BOLD,
+            ..font(FAMILY)
+        },
+        color: text,
+        background_color: None,
+        underline: None,
+        strikethrough: None,
+    };
+    let line = window
+        .text_system()
+        .shape_line(words, px(tokens::BADGE_TEXT), &[run], None);
+    let _ = line.paint(
+        point(
+            origin.x,
+            origin.y + px((size - tokens::BADGE_TEXT * 1.3) / 2.),
+        ),
+        px(tokens::BADGE_TEXT * 1.3),
+        TextAlign::Center,
+        Some(px(size)),
+        window,
+        cx,
+    );
+}
+
+fn quiet(words: String, colour: Hsla) -> AnyElement {
     div()
         .size_full()
         .flex()

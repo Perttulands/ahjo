@@ -5,7 +5,7 @@ name = "parvi-desk-app"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
-description = "The Desk: where the operator answers what agents ask, in its own window, over the decision desk's HTTP API."
+description = "The Desk: the shared surface where agents publish and the operator answers in his words and marks, in its own window, over the decision desk's HTTP API."
 publish = false
 
 [lints]
@@ -33,6 +33,11 @@ time = { version = "0.3", features = ["parsing", "formatting"] }
 image = { version = "0.25", default-features = false }
 async-channel = "2"
 log = "0.4"
+
+# A published page renders inside the window on Windows, in WebView2 (part
+# of Windows), laid over the surface as a child window.
+[target.'cfg(windows)'.dependencies]
+wry = { version = "0.57", default-features = false }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 gpui_platform = { package = "gpui-pre-platform", version = "=0.3.12", features = ["x11"] }

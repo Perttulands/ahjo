@@ -1,47 +1,80 @@
-//! How the window is laid out in each variant. Every view reads the same
-//! state (`app`) and acts through the same calls; what differs is what the
-//! window gives its room to, and what Enter means first.
-//!
-//! - **Focus**: the evidence takes the window, the ask's words and the
-//!   answer sit in a band under it, the queue is a count and the next
-//!   title. A grill goes one question at a time, then a summary.
-//! - **Desk**: the queue on the left, the stage, the ask's words and the
-//!   answer in a column on the right: for choosing what to answer.
-//! - **Verdict**: the agent's recommendation leads. Its picture is on the
-//!   stage, its words are the question ("Take Quiet?"), Enter agrees. A
-//!   grill is the list of what the agent proposes, each changed in place.
+//! How the window is laid out: the queue on the left, the surface (what
+//! the agent published, where he marks) in the middle, and the
+//! conversation on the right: each round as a turn of the agent's, his
+//! answer to it as his turn, their comments between, and at its foot his
+//! words, always there, with his marks above them. Options and the
+//! agent's recommendation stand in the agent's turn as an aid: he can lean
+//! to one, but his words are the answer.
 
-use crate::answer::{Draft, Verdict};
-use crate::app::{DeskApp, Reach, Variant};
+use crate::answer::{Said, Verdict};
+use crate::app::{Aim, DeskApp, Reach};
+use crate::marks;
 use crate::model::{self, Ask, Choice, Form, MediaKind, Question};
 use crate::tokens::{self, BODY, GAP, GAP_SMALL, PAD, SMALL, TEXT};
 use gpui::{
-    AnyElement, ClickEvent, Context, Div, FontWeight, IntoElement, ObjectFit, Render, SharedString,
-    Stateful, StyledImage, Window, div, img, prelude::*, px, relative,
+    AnyElement, ClickEvent, Context, Div, FontWeight, Hsla, IntoElement, ObjectFit, Render,
+    SharedString, Stateful, StyledImage, Window, div, img, prelude::*, px, relative,
 };
-use parvi_app_kit::theme::{FAMILY, Theme, alpha, theme};
+use parvi_app_kit::theme::{FAMILY, Theme, alpha, rgb, theme};
 use parvi_app_kit::widgets::kit::{self, Kind};
 
 impl Render for DeskApp {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        self.take_aim(window, cx);
+        self.keep_page();
         let t = theme(cx).clone();
         let body = if self.desks.is_empty() {
             no_desks(&t)
-        } else if self.current.is_none() {
-            self.all_clear(&t)
         } else {
-            match self.variant {
-                Variant::Focus => self.focus_view(&t, window, cx),
-                Variant::Desk => self.desk_view(&t, window, cx),
-                Variant::Verdict => self.verdict_view(&t, window, cx),
-            }
+            let main = match self.current_ask().cloned() {
+                None => self.all_clear(&t),
+                Some(ask) if self.items().is_empty() => div()
+                    .size_full()
+                    .flex()
+                    .justify_center()
+                    .child(
+                        div()
+                            .h_full()
+                            .w_full()
+                            .max_w(px(tokens::READING))
+                            .border_x_1()
+                            .border_color(t.divider)
+                            .child(self.conversation(&t, &ask, window, cx)),
+                    )
+                    .into_any_element(),
+                Some(ask) => div()
+                    .size_full()
+                    .flex()
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .h_full()
+                            .child(self.stage(window, cx)),
+                    )
+                    .child(
+                        div()
+                            .w(px(tokens::COLUMN))
+                            .flex_none()
+                            .h_full()
+                            .border_l_1()
+                            .border_color(t.divider)
+                            .child(self.conversation(&t, &ask, window, cx)),
+                    )
+                    .into_any_element(),
+            };
+            div()
+                .size_full()
+                .flex()
+                .child(self.rail(&t, cx))
+                .child(div().flex_1().min_w_0().h_full().child(main))
+                .into_any_element()
         };
         div()
             .id("desk")
             .track_focus(&self.focus)
             .on_key_down(cx.listener(|app, e, window, cx| app.on_key(e, window, cx)))
             .size_full()
-            .relative()
             .flex()
             .flex_col()
             .bg(t.bg)
@@ -50,22 +83,6 @@ impl Render for DeskApp {
             .text_size(px(TEXT))
             .child(self.header(&t, cx))
             .child(div().flex_1().min_h_0().child(body))
-            .children(self.toast.as_ref().map(|(words, error)| {
-                div()
-                    .absolute()
-                    .top(px(tokens::BAR + GAP_SMALL))
-                    .left_0()
-                    .right_0()
-                    .flex()
-                    .justify_center()
-                    .child(
-                        kit::panel(&t)
-                            .px(px(GAP))
-                            .py(px(GAP_SMALL))
-                            .text_color(if *error { t.error } else { t.text })
-                            .child(words.clone()),
-                    )
-            }))
     }
 }
 
@@ -73,8 +90,7 @@ impl DeskApp {
     // ---- The header ----
 
     fn header(&mut self, t: &Theme, cx: &mut Context<Self>) -> Div {
-        let queue = self.queue();
-        let waiting = queue.len();
+        let waiting = self.queue().len();
         let mut desks = div().flex().items_center().gap(px(GAP));
         for d in &self.desks {
             let n = d.asks.iter().filter(|a| a.is_open()).count();
@@ -97,29 +113,23 @@ impl DeskApp {
                     }),
             );
         }
-        let mut switch = div()
-            .flex()
-            .items_center()
-            .gap(px(2.))
-            .p(px(2.))
-            .rounded(px(tokens::RADIUS))
-            .border_1()
-            .border_color(t.divider);
-        for v in Variant::ALL {
-            let on = v == self.variant;
-            switch = switch.child(
-                kit::button(
-                    t,
-                    SharedString::from(v.key()),
-                    v.name(),
-                    if on { Kind::Primary } else { Kind::Quiet },
-                )
-                .tooltip(kit::tip(format!("{} · V switches", v.why())))
-                .on_click(cx.listener(move |app, _: &ClickEvent, window, cx| {
-                    app.set_variant(v, window, cx)
-                })),
-            );
-        }
+        // The notice lives in the bar: a page view lies over the surface
+        // and would hide anything drawn there.
+        let toast = self.toast.as_ref().map(|(words, error)| {
+            div()
+                .min_w_0()
+                .truncate()
+                .px(px(GAP))
+                .py(px(2.))
+                .rounded(px(tokens::RADIUS))
+                .bg(if *error {
+                    alpha(t.error, 0.15)
+                } else {
+                    t.raised
+                })
+                .text_color(if *error { t.error } else { t.text })
+                .child(words.clone())
+        });
         div()
             .h(px(tokens::BAR))
             .flex_none()
@@ -136,9 +146,10 @@ impl DeskApp {
                     .gap(px(GAP))
                     .child(
                         div()
-                            .font_weight(FontWeight::BOLD)
+                            .font_family(t.ty.display)
+                            .font_weight(t.ty.display_weight)
                             .text_size(px(BODY))
-                            .child("Desk"),
+                            .child(t.label_case("Desk")),
                     )
                     .child(
                         div()
@@ -149,18 +160,20 @@ impl DeskApp {
                                 div()
                                     .text_size(px(tokens::COUNT))
                                     .font_weight(FontWeight::SEMIBOLD)
-                                    .text_color(if waiting > 0 {
-                                        tokens::needs_you(t)
-                                    } else {
-                                        tokens::done(t)
-                                    })
+                                    .text_color(if waiting > 0 { t.needs } else { t.done })
                                     .child(waiting.to_string()),
                             )
                             .child(div().text_color(t.text2).child("waiting")),
                     ),
             )
-            .child(switch)
-            .child(div().flex_1())
+            .child(
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .flex()
+                    .justify_center()
+                    .children(toast),
+            )
             .child(desks)
             .child(
                 kit::button(t, "refresh", "Refresh", Kind::Quiet)
@@ -188,8 +201,9 @@ impl DeskApp {
             .gap(px(GAP))
             .child(
                 div()
+                    .font_family(t.ty.display)
+                    .font_weight(t.ty.display_weight)
                     .text_size(px(tokens::TITLE))
-                    .font_weight(FontWeight::SEMIBOLD)
                     .child(if reached {
                         "All clear"
                     } else {
@@ -199,739 +213,23 @@ impl DeskApp {
             .child(div().text_color(t.text2).child(if reached {
                 "Nobody is waiting on you. New asks appear here as agents post them."
             } else {
-                ""
+                "The desks have not answered yet."
             }))
             .children(
                 failed
                     .into_iter()
                     .map(|f| div().text_color(t.error).child(f)),
             )
-            .into_any_element()
-    }
-
-    // ---- Focus ----
-
-    fn focus_view(&mut self, t: &Theme, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
-        let Some(ask) = self.current_ask().cloned() else {
-            return div().into_any_element();
-        };
-        // Nothing to look at: the words take the window.
-        let looking = !self.items().is_empty() && !self.review;
-        let stage = looking.then(|| self.stage(window, cx));
-        let band = match ask.form() {
-            Form::Grill if self.review => self.grill_review(t, &ask, cx).into_any_element(),
-            Form::Grill => self.grill_band(t, &ask, cx).into_any_element(),
-            _ => self.ask_band(t, &ask, cx).into_any_element(),
-        };
-        div()
-            .size_full()
-            .flex()
-            .flex_col()
-            .child(self.context_row(t, &ask))
-            .children(stage.map(|s| div().flex_1().min_h_0().child(s)))
-            .child(
-                div()
-                    .id("band")
-                    .when(looking, |d| {
-                        d.flex_none().max_h(px(tokens::STRIP_PANEL_MAX_H))
-                    })
-                    .when(!looking, |d| d.flex_1().min_h_0())
-                    .overflow_y_scroll()
-                    .border_t_1()
-                    .border_color(t.divider)
-                    .bg(t.surface)
-                    .child(
-                        div()
-                            .w_full()
-                            .when(!looking, |d| {
-                                d.max_w(px(tokens::READING)).mx_auto().pt(px(PAD))
-                            })
-                            .child(band),
-                    ),
+            .children(
+                self.notice
+                    .clone()
+                    .map(|n| div().text_color(t.error).child(n)),
             )
             .into_any_element()
     }
 
-    /// Where this ask sits: its project and number, and what comes next.
-    fn context_row(&self, t: &Theme, ask: &Ask) -> Div {
-        let queue = self.queue();
-        let at = self
-            .current
-            .as_ref()
-            .and_then(|k| queue.iter().position(|q| q == k))
-            .unwrap_or(0);
-        let next = queue
-            .get(at + 1)
-            .and_then(|k| self.ask(k))
-            .map(|a| a.title.clone());
-        div()
-            .h(px(tokens::BAR - 8.))
-            .flex_none()
-            .px(px(GAP))
-            .flex()
-            .items_center()
-            .gap(px(GAP))
-            .text_size(px(SMALL))
-            .text_color(t.text2)
-            .child(self.eyebrow(t, ask))
-            .child(div().flex_1())
-            .child(format!("{} of {}", at + 1, queue.len()))
-            .children(next.map(|n| {
-                div()
-                    .flex()
-                    .items_center()
-                    .gap(px(GAP_SMALL))
-                    .max_w(px(tokens::COLUMN))
-                    .child(div().text_color(t.dim).child("next"))
-                    .child(div().truncate().child(n))
-                    .child(cap(t, "J"))
-            }))
-    }
+    // ---- The queue ----
 
-    /// Project, number, kind, round and age, in a line.
-    fn eyebrow(&self, t: &Theme, ask: &Ask) -> Div {
-        let desk = self
-            .current
-            .as_ref()
-            .map(|k| self.desks[k.0].name())
-            .unwrap_or_default();
-        let mut bits = vec![ask.id.clone(), kind_word(ask).to_string()];
-        if ask.round() > 1 {
-            bits.push(format!("round {}", ask.round()));
-        }
-        if !ask.asked_by.is_empty() {
-            bits.push(format!("from {}", ask.asked_by));
-        }
-        bits.push(age(&ask.created_at));
-        div()
-            .flex()
-            .items_center()
-            .gap(px(GAP_SMALL))
-            .text_size(px(SMALL))
-            .child(
-                div()
-                    .px(px(6.))
-                    .rounded(px(3.))
-                    .bg(t.identity_of(&desk))
-                    .text_color(t.text)
-                    .font_weight(FontWeight::SEMIBOLD)
-                    .child(desk),
-            )
-            .child(div().text_color(t.text2).child(bits.join(" · ")))
-    }
-
-    /// The ask's words and its answer, as a band under the stage.
-    fn ask_band(&mut self, t: &Theme, ask: &Ask, cx: &mut Context<Self>) -> Div {
-        let draft = self.draft();
-        div()
-            .p(px(PAD))
-            .flex()
-            .gap(px(PAD))
-            .child(
-                div()
-                    .flex_1()
-                    .min_w_0()
-                    .max_w(px(tokens::COLUMN * 1.4))
-                    .flex()
-                    .flex_col()
-                    .gap(px(GAP))
-                    .child(title(t, &ask.title))
-                    .when(!ask.question.is_empty() && ask.question != ask.title, |d| {
-                        d.child(body(t, &ask.question))
-                    })
-                    .child(self.recommendation(t, ask))
-                    .children(
-                        ask.doc
-                            .as_ref()
-                            .filter(|d| !d.text.trim().is_empty())
-                            .map(|d| doc_text(t, &d.name, &d.text)),
-                    ),
-            )
-            .child(if ask.form() == Form::Web {
-                div().flex_1().min_w_0().child(self.web_only(t, ask, cx))
-            } else {
-                div()
-                    .flex_1()
-                    .min_w_0()
-                    .flex()
-                    .flex_col()
-                    .gap(px(GAP))
-                    .when(!ask.options.is_empty(), |d| {
-                        d.child(self.options(
-                            t,
-                            &ask.options,
-                            &ask.recommend,
-                            draft.pick,
-                            false,
-                            cx,
-                        ))
-                    })
-                    .child(self.note_box(t, cx))
-                    .child(self.actions(t, ask, &draft, cx))
-            })
-    }
-
-    fn recommendation(&self, t: &Theme, ask: &Ask) -> AnyElement {
-        if ask.recommend.trim().is_empty() {
-            return div().into_any_element();
-        }
-        recommend_box(t, "The agent recommends", &ask.recommend).into_any_element()
-    }
-
-    /// The options, lettered with the key that picks each. With pictures,
-    /// each its first; without, one line each, as the film strip under the
-    /// stage already shows them.
-    fn options(
-        &mut self,
-        t: &Theme,
-        options: &[Choice],
-        recommend: &str,
-        picked: Option<usize>,
-        pictures: bool,
-        cx: &mut Context<Self>,
-    ) -> Div {
-        let rec = model::recommended(options, recommend);
-        let thumbs = pictures.then(|| self.option_pictures(options, cx));
-        let mut list = div()
-            .flex()
-            .flex_col()
-            .gap(px(if pictures { GAP_SMALL } else { 4. }));
-        for (i, o) in options.iter().enumerate() {
-            let on = picked == Some(i);
-            let thumb = thumbs.as_ref().and_then(|v| v.get(i).cloned().flatten());
-            let name = div()
-                .flex()
-                .items_center()
-                .gap(px(GAP_SMALL))
-                .child(
-                    div()
-                        .flex_none()
-                        .font_weight(FontWeight::SEMIBOLD)
-                        .text_size(px(BODY))
-                        .child(model::label(options, i)),
-                )
-                .when(rec == Some(i), |d| {
-                    d.child(
-                        div()
-                            .flex_none()
-                            .text_size(px(SMALL))
-                            .text_color(t.accent)
-                            .child("Recommended"),
-                    )
-                });
-            let words = if pictures {
-                div()
-                    .flex_1()
-                    .min_w_0()
-                    .flex()
-                    .flex_col()
-                    .gap(px(2.))
-                    .child(name)
-                    .when(!o.why.is_empty(), |d| {
-                        d.child(div().text_color(t.text2).child(o.why.clone()))
-                    })
-            } else {
-                name.flex_1().min_w_0().when(!o.why.is_empty(), |d| {
-                    d.child(
-                        div()
-                            .min_w_0()
-                            .truncate()
-                            .text_color(t.text2)
-                            .child(o.why.clone()),
-                    )
-                })
-            };
-            list = list.child(
-                div()
-                    .id(("option", i))
-                    .flex()
-                    .when(pictures, |d| d.items_start())
-                    .when(!pictures, |d| d.items_center())
-                    .gap(px(GAP))
-                    .px(px(GAP_SMALL + 2.))
-                    .py(px(if pictures { GAP_SMALL + 2. } else { 4. }))
-                    .rounded(px(tokens::RADIUS))
-                    .border_1()
-                    .border_color(if on { t.accent } else { t.divider })
-                    .when(on, |d| d.bg(t.accent_light()))
-                    .cursor_pointer()
-                    .hover(|d| d.bg(t.accent_soft()))
-                    .child(key_letter(t, &model::letter(options, i), on))
-                    .child(words)
-                    .children(thumb.map(|image| {
-                        img(image)
-                            .flex_none()
-                            .w(px(tokens::OPTION_THUMB_W))
-                            .h(px(tokens::OPTION_THUMB_H))
-                            .rounded(px(tokens::RADIUS))
-                            .object_fit(ObjectFit::Cover)
-                    }))
-                    .child(cap(t, &(i + 1).to_string()))
-                    .on_click(
-                        cx.listener(move |app, _: &ClickEvent, window, cx| app.pick(i, window, cx)),
-                    ),
-            );
-        }
-        list
-    }
-
-    /// Each option's first picture, decoded, for lists of options.
-    fn option_pictures(
-        &mut self,
-        options: &[Choice],
-        cx: &mut Context<Self>,
-    ) -> Vec<Option<std::sync::Arc<gpui::RenderImage>>> {
-        let Some(key) = self.current.clone() else {
-            return vec![];
-        };
-        let Some(ask) = self.ask(&key).cloned() else {
-            return vec![];
-        };
-        options
-            .iter()
-            .map(|o| {
-                let m = o.media.iter().find(|m| m.kind() == MediaKind::Image)?;
-                match self.picture(key.0, &ask, m, cx)? {
-                    crate::app::Pic::Ready { image, .. } => Some(image.clone()),
-                    _ => None,
-                }
-            })
-            .collect()
-    }
-
-    /// The words for the agent: the field while writing or once written,
-    /// else a line saying the key that opens it.
-    fn note_box(&mut self, t: &Theme, cx: &mut Context<Self>) -> Div {
-        let empty = self.note.read(cx).text.trim().is_empty();
-        if !self.writing && empty {
-            return div().child(
-                div()
-                    .id("note-closed")
-                    .flex()
-                    .items_center()
-                    .gap(px(GAP_SMALL))
-                    .px(px(GAP_SMALL))
-                    .h(px(tokens::CAP + 8.))
-                    .rounded(px(tokens::RADIUS))
-                    .text_color(t.dim)
-                    .cursor_text()
-                    .hover(|d| d.bg(t.accent_soft()))
-                    .child(cap(t, "N"))
-                    .child("A word for the agent")
-                    .on_click(cx.listener(|app, _: &ClickEvent, window, cx| {
-                        let v = if app.current_ask().is_some_and(|a| a.form() == Form::Grill) {
-                            Verdict::Grill
-                        } else {
-                            Verdict::Yes
-                        };
-                        app.write(v, window, cx)
-                    })),
-            );
-        }
-        div()
-            .rounded(px(tokens::RADIUS))
-            .border_1()
-            .border_color(if self.writing { t.accent } else { t.divider })
-            .bg(t.bg)
-            .px(px(GAP_SMALL))
-            .py(px(4.))
-            .child(self.note.clone())
-    }
-
-    /// The answer's buttons, each with its key.
-    fn actions(&mut self, t: &Theme, ask: &Ask, draft: &Draft, cx: &mut Context<Self>) -> Div {
-        let (yes, no): (String, &str) = match ask.form() {
-            Form::Pick => (
-                match draft.pick.or(ask.recommended()) {
-                    Some(i) => format!("Choose {}", model::letter(&ask.options, i)),
-                    None => "Pick an option".into(),
-                },
-                "None of these",
-            ),
-            Form::Do => ("Done".into(), "Not yet"),
-            _ => ("Looks good".into(), "Needs work"),
-        };
-        let sending = self.sending;
-        div()
-            .flex()
-            .items_center()
-            .gap(px(GAP))
-            .child(
-                action(t, "unclear", "Unclear", "U", Kind::Quiet)
-                    .tooltip(kit::tip("Send it back: it is not complete in itself"))
-                    .on_click(cx.listener(|app, _: &ClickEvent, window, cx| {
-                        app.toggle_unclear(window, cx)
-                    })),
-            )
-            .child(div().flex_1())
-            .child(action(t, "no", no, "X", Kind::Plain).on_click(
-                cx.listener(|app, _: &ClickEvent, window, cx| app.send(Verdict::No, window, cx)),
-            ))
-            .child(
-                action(
-                    t,
-                    "yes",
-                    &if sending { "Sending".to_string() } else { yes },
-                    "Enter",
-                    Kind::Primary,
-                )
-                .on_click(
-                    cx.listener(|app, _: &ClickEvent, window, cx| {
-                        app.send(Verdict::Yes, window, cx)
-                    }),
-                ),
-            )
-    }
-
-    // ---- A grilling round, one question at a time ----
-
-    fn grill_band(&mut self, t: &Theme, ask: &Ask, cx: &mut Context<Self>) -> Div {
-        let draft = self.draft();
-        let at = draft.at.min(ask.questions.len().saturating_sub(1));
-        let Some(q) = ask.questions.get(at).cloned() else {
-            return div();
-        };
-        let said = draft.said(&q);
-        div()
-            .p(px(PAD))
-            .flex()
-            .gap(px(PAD))
-            .child(
-                div()
-                    .flex_1()
-                    .min_w_0()
-                    .max_w(px(tokens::COLUMN * 1.4))
-                    .flex()
-                    .flex_col()
-                    .gap(px(GAP))
-                    .child(self.question_chips(t, ask, &draft, cx))
-                    .child(self.question_words(t, ask, &q)),
-            )
-            .child(
-                div()
-                    .flex_1()
-                    .min_w_0()
-                    .flex()
-                    .flex_col()
-                    .gap(px(GAP))
-                    .when(!q.options.is_empty(), |d| {
-                        d.child(self.options(t, &q.options, &q.recommend, said.pick, false, cx))
-                    })
-                    .when(said.unclear, |d| {
-                        d.child(
-                            div()
-                                .text_color(tokens::needs_you(t))
-                                .child("Marked unclear: it goes back to be asked again"),
-                        )
-                    })
-                    .child(self.note_box(t, cx))
-                    .child(self.grill_actions(t, ask, &q, &draft, cx)),
-            )
-    }
-
-    /// Q1 Q2 … with what is answered; a click goes there.
-    fn question_chips(&self, t: &Theme, ask: &Ask, draft: &Draft, cx: &mut Context<Self>) -> Div {
-        let mut row = div().flex().items_center().gap(px(4.));
-        for (i, q) in ask.questions.iter().enumerate() {
-            let said = draft.said(q);
-            let here = i == draft.at && !self.review;
-            let colour = if said.unclear {
-                tokens::needs_you(t)
-            } else if said.answered() {
-                tokens::done(t)
-            } else {
-                t.dim
-            };
-            row = row.child(
-                div()
-                    .id(("q", i))
-                    .px(px(6.))
-                    .h(px(tokens::CAP))
-                    .flex()
-                    .items_center()
-                    .rounded(px(3.))
-                    .border_1()
-                    .border_color(if here { t.accent } else { t.divider })
-                    .text_size(px(SMALL))
-                    .text_color(colour)
-                    .font_weight(if here {
-                        FontWeight::BOLD
-                    } else {
-                        FontWeight::NORMAL
-                    })
-                    .cursor_pointer()
-                    .child(format!("Q{}", i + 1))
-                    .tooltip(kit::tip(q.title.clone()))
-                    .on_click(cx.listener(move |app, _: &ClickEvent, window, cx| {
-                        app.goto_question(i, window, cx)
-                    })),
-            );
-        }
-        row.child(
-            div()
-                .pl(px(GAP_SMALL))
-                .text_size(px(SMALL))
-                .text_color(t.text2)
-                .child(format!(
-                    "{} of {} answered",
-                    draft.answered(ask),
-                    ask.questions.len()
-                )),
-        )
-    }
-
-    /// A question with what it needs to stand alone: the round it is in,
-    /// its own words, the agent's recommendation, and what was answered to
-    /// it last round.
-    fn question_words(&self, t: &Theme, ask: &Ask, q: &Question) -> Div {
-        let followed = ask.followed_up(q);
-        let thin = q.question.trim().is_empty()
-            && q.media.is_empty()
-            && q.options
-                .iter()
-                .all(|o| o.why.is_empty() && o.media.is_empty());
-        div()
-            .flex()
-            .flex_col()
-            .gap(px(GAP))
-            .child(div().text_size(px(SMALL)).text_color(t.dim).child(format!(
-                "{}{}",
-                ask.title,
-                if ask.question.is_empty() || ask.question == ask.title {
-                    String::new()
-                } else {
-                    format!(" — {}", ask.question)
-                }
-            )))
-            .child(
-                div()
-                    .text_size(px(tokens::QUESTION_TITLE))
-                    .font_weight(FontWeight::SEMIBOLD)
-                    .line_height(relative(1.25))
-                    .child(q.title.clone()),
-            )
-            .when(!q.question.is_empty(), |d| d.child(body(t, &q.question)))
-            .when(!q.recommend.trim().is_empty(), |d| {
-                d.child(recommend_box(t, "Recommended", &q.recommend))
-            })
-            .children(followed.map(|(round, old, said)| {
-                let then = match said {
-                    Some(s) => match &s.pick {
-                        Some(p) => {
-                            format!(
-                                "you {} {p}",
-                                if s.rec {
-                                    "took the recommendation,"
-                                } else {
-                                    "picked"
-                                }
-                            ) + &if s.comment.is_empty() {
-                                String::new()
-                            } else {
-                                format!(" — “{}”", s.comment)
-                            }
-                        }
-                        None => format!("you wrote “{}”", s.comment),
-                    },
-                    None => "you skipped it".into(),
-                };
-                div()
-                    .text_size(px(SMALL))
-                    .text_color(t.text2)
-                    .child(format!(
-                        "Round {round}{}: {then}",
-                        if old.title.trim() != q.title.trim() {
-                            format!(" ({})", old.title)
-                        } else {
-                            String::new()
-                        }
-                    ))
-            }))
-            .when(thin, |d| {
-                d.child(
-                    div()
-                        .text_size(px(SMALL))
-                        .text_color(tokens::needs_you(t))
-                        .child("This question says little on its own. U sends it back as unclear."),
-                )
-            })
-    }
-
-    fn grill_actions(
-        &mut self,
-        t: &Theme,
-        ask: &Ask,
-        q: &Question,
-        draft: &Draft,
-        cx: &mut Context<Self>,
-    ) -> Div {
-        let said = draft.said(q);
-        let rec = model::recommended(&q.options, &q.recommend);
-        let last = draft.at + 1 >= ask.questions.len();
-        let enter = if said.answered() {
-            if last {
-                "Review".to_string()
-            } else {
-                "Next".to_string()
-            }
-        } else if let Some(r) = rec {
-            format!("Take {}", model::letter(&q.options, r))
-        } else if q.options.is_empty() {
-            "Write".to_string()
-        } else {
-            "Skip".to_string()
-        };
-        // Two groups that wrap apart when the column is narrow: the quiet
-        // ones stay left, the answer right.
-        div()
-            .flex()
-            .flex_wrap()
-            .items_center()
-            .justify_end()
-            .gap(px(GAP))
-            .child(
-                div()
-                    .flex_1()
-                    .flex()
-                    .items_center()
-                    .gap(px(GAP))
-                    .child(
-                        action(t, "unclear", if said.unclear { "Clear" } else { "Unclear" }, "U", Kind::Quiet)
-                            .tooltip(kit::tip("This question is not complete in itself: ask it again"))
-                            .on_click(cx.listener(|app, _: &ClickEvent, window, cx| app.toggle_unclear(window, cx))),
-                    )
-                    .child(
-                        action(t, "words", "Words", "W", Kind::Quiet)
-                            .on_click(cx.listener(|app, _: &ClickEvent, window, cx| app.write(Verdict::Grill, window, cx))),
-                    ),
-            )
-            .child(
-                div()
-                    .flex()
-                    .items_center()
-                    .gap(px(GAP))
-                    .child(
-                        action(t, "rest", "Rest as recommended", "Shift Enter", Kind::Plain)
-                            .tooltip(kit::tip("Every question left takes the agent's recommendation, and the round goes"))
-                            .on_click(cx.listener(|app, _: &ClickEvent, window, cx| app.send(Verdict::GrillRest, window, cx))),
-                    )
-                    .child(
-                        action(t, "enter", &enter, "Enter", Kind::Primary)
-                            .on_click(cx.listener(|app, _: &ClickEvent, window, cx| app.accept_question(window, cx))),
-                    ),
-            )
-    }
-
-    /// The round as he answered it, before it goes.
-    fn grill_review(&mut self, t: &Theme, ask: &Ask, cx: &mut Context<Self>) -> Div {
-        let draft = self.draft();
-        let mut rows = div().flex().flex_col().gap(px(GAP_SMALL));
-        for (i, q) in ask.questions.iter().enumerate() {
-            let said = draft.said(q);
-            let (words, colour) = said_words(t, q, &said);
-            rows = rows.child(
-                div()
-                    .id(("review", i))
-                    .flex()
-                    .gap(px(GAP))
-                    .cursor_pointer()
-                    .hover(|d| d.bg(t.accent_soft()))
-                    .px(px(GAP_SMALL))
-                    .py(px(2.))
-                    .rounded(px(tokens::RADIUS))
-                    .child(
-                        div()
-                            .w(px(32.))
-                            .flex_none()
-                            .text_color(t.dim)
-                            .child(format!("Q{}", i + 1)),
-                    )
-                    .child(div().flex_1().min_w_0().truncate().child(q.title.clone()))
-                    .child(
-                        div()
-                            .flex_none()
-                            .max_w(px(tokens::COLUMN))
-                            .truncate()
-                            .text_color(colour)
-                            .child(words),
-                    )
-                    .on_click(cx.listener(move |app, _: &ClickEvent, window, cx| {
-                        app.goto_question(i, window, cx)
-                    })),
-            );
-        }
-        let n = draft.answered(ask);
-        div()
-            .p(px(PAD))
-            .flex()
-            .flex_col()
-            .gap(px(GAP))
-            .child(title(t, &format!("{} · your answers", ask.title)))
-            .child(rows)
-            .child(self.note_box(t, cx))
-            .child(
-                div()
-                    .flex()
-                    .items_center()
-                    .gap(px(GAP))
-                    .child(div().text_color(t.text2).child("↑ goes back to a question"))
-                    .child(div().flex_1())
-                    .child(
-                        action(t, "rest", "Rest as recommended", "Shift Enter", Kind::Plain)
-                            .on_click(cx.listener(|app, _: &ClickEvent, window, cx| {
-                                app.send(Verdict::GrillRest, window, cx)
-                            })),
-                    )
-                    .child(
-                        action(
-                            t,
-                            "send",
-                            &format!("Send · {n} of {}", ask.questions.len()),
-                            "Enter",
-                            Kind::Primary,
-                        )
-                        .on_click(cx.listener(
-                            |app, _: &ClickEvent, window, cx| app.send(Verdict::Grill, window, cx),
-                        )),
-                    ),
-            )
-    }
-
-    // ---- Desk ----
-
-    fn desk_view(&mut self, t: &Theme, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
-        let Some(ask) = self.current_ask().cloned() else {
-            return div().into_any_element();
-        };
-        let rail = self.rail(t, cx);
-        let stage = self.stage(window, cx);
-        let column = match ask.form() {
-            Form::Grill if self.review => self.grill_review(t, &ask, cx),
-            Form::Grill => self.grill_column(t, &ask, cx),
-            _ => self.ask_column(t, &ask, cx),
-        };
-        div()
-            .size_full()
-            .flex()
-            .child(rail)
-            .child(div().flex_1().min_w_0().h_full().child(stage))
-            .child(
-                div()
-                    .id("column")
-                    .w(px(tokens::COLUMN))
-                    .flex_none()
-                    .h_full()
-                    .overflow_y_scroll()
-                    .border_l_1()
-                    .border_color(t.divider)
-                    .bg(t.surface)
-                    .child(column),
-            )
-            .into_any_element()
-    }
-
-    /// The queue, quickest first: each row its project, kind, title, age
-    /// and first picture.
     fn rail(&mut self, t: &Theme, cx: &mut Context<Self>) -> AnyElement {
         let queue = self.queue();
         let mut rows = Vec::new();
@@ -951,17 +249,35 @@ impl DeskApp {
             });
             let desk = self.desks[k.0].name();
             let mut meta = vec![kind_word(&ask).to_string()];
+            if ask.round() > 1 {
+                meta.push(format!("round {}", ask.round()));
+            }
             match ask.form() {
                 Form::Grill => meta.push(format!("{} questions", ask.questions.len())),
-                Form::Pick => meta.push(format!("{} options", ask.options.len())),
-                Form::Web => meta.push("on the web desk".into()),
+                Form::Open if !ask.options.is_empty() => {
+                    meta.push(format!("{} options", ask.options.len()))
+                }
                 _ => {}
             }
-            if ask.all_media().iter().any(|m| m.kind() == MediaKind::Video) {
+            let all = ask.all_media();
+            if ask.doc.is_some() {
+                meta.push("document".into());
+            }
+            if all.iter().any(|m| m.kind() == MediaKind::Page) {
+                meta.push("page".into());
+            }
+            if all
+                .iter()
+                .any(|m| matches!(m.kind(), MediaKind::Video | MediaKind::OtherVideo))
+            {
                 meta.push("clip".into());
             }
             meta.push(age(&ask.created_at));
             let key = k.clone();
+            let started = self
+                .drafts
+                .iter()
+                .any(|((d, id, _), draft)| *d == k.0 && *id == k.1 && draft.touched());
             rows.push(
                 div()
                     .id(("row", i))
@@ -998,7 +314,10 @@ impl DeskApp {
                                         div()
                                             .text_color(t.text2)
                                             .child(format!("{desk} {}", ask.id)),
-                                    ),
+                                    )
+                                    .when(started, |d| {
+                                        d.child(div().text_color(t.accent).child("· your draft"))
+                                    }),
                             )
                             .child(
                                 div()
@@ -1018,22 +337,20 @@ impl DeskApp {
                                     .child(meta.join(" · ")),
                             ),
                     )
-                    .child(
-                        div()
-                            .flex_none()
-                            .w(px(tokens::ROW_THUMB_W))
-                            .h(px(tokens::ROW_THUMB_H))
-                            .rounded(px(tokens::RADIUS))
-                            .overflow_hidden()
-                            .bg(t.raised)
-                            .children(
-                                thumb.map(|image| {
-                                    img(image).size_full().object_fit(ObjectFit::Cover)
-                                }),
-                            ),
-                    )
-                    .on_click(cx.listener(move |app, _: &ClickEvent, window, cx| {
-                        app.open(Some(key.clone()), window, cx)
+                    .when_some(thumb, |d, image| {
+                        d.child(
+                            div()
+                                .flex_none()
+                                .w(px(tokens::ROW_THUMB_W))
+                                .h(px(tokens::ROW_THUMB_H))
+                                .rounded(px(tokens::RADIUS))
+                                .overflow_hidden()
+                                .bg(t.raised)
+                                .child(img(image).size_full().object_fit(ObjectFit::Cover)),
+                        )
+                    })
+                    .on_click(cx.listener(move |app, _: &ClickEvent, _, cx| {
+                        app.open(Some(key.clone()), cx)
                     })),
             );
         }
@@ -1057,8 +374,8 @@ impl DeskApp {
                     .text_color(t.dim)
                     .child("Quickest first")
                     .child(div().flex_1())
-                    .child(cap(t, "J"))
-                    .child(cap(t, "K")),
+                    .child("Ctrl")
+                    .child(cap(t, "PgDn")),
             )
             .child(
                 div()
@@ -1071,447 +388,666 @@ impl DeskApp {
             .into_any_element()
     }
 
-    fn ask_column(&mut self, t: &Theme, ask: &Ask, cx: &mut Context<Self>) -> Div {
-        let draft = self.draft();
-        div()
-            .p(px(PAD))
-            .flex()
-            .flex_col()
-            .gap(px(GAP))
-            .child(self.eyebrow(t, ask))
-            .child(title(t, &ask.title))
-            .when(!ask.question.is_empty() && ask.question != ask.title, |d| {
-                d.child(body(t, &ask.question))
-            })
-            .child(self.recommendation(t, ask))
-            .children(
-                ask.doc
-                    .as_ref()
-                    .filter(|d| !d.text.trim().is_empty())
-                    .map(|d| doc_text(t, &d.name, &d.text)),
-            )
-            .when(ask.form() == Form::Web, |d| {
-                d.child(self.web_only(t, ask, cx))
-            })
-            .when(!ask.options.is_empty() && ask.form() != Form::Web, |d| {
-                d.child(self.options(t, &ask.options, &ask.recommend, draft.pick, true, cx))
-            })
-            .when(ask.form() != Form::Web, |d| {
-                d.child(self.note_box(t, cx))
-                    .child(self.actions(t, ask, &draft, cx))
-            })
-    }
+    // ---- The conversation ----
 
-    fn grill_column(&mut self, t: &Theme, ask: &Ask, cx: &mut Context<Self>) -> Div {
-        let draft = self.draft();
-        let at = draft.at.min(ask.questions.len().saturating_sub(1));
-        let Some(q) = ask.questions.get(at).cloned() else {
-            return div();
-        };
-        let said = draft.said(&q);
-        div()
-            .p(px(PAD))
-            .flex()
-            .flex_col()
-            .gap(px(GAP))
-            .child(self.eyebrow(t, ask))
-            .child(self.question_chips(t, ask, &draft, cx))
-            .child(self.question_words(t, ask, &q))
-            .when(!q.options.is_empty(), |d| {
-                d.child(self.options(t, &q.options, &q.recommend, said.pick, true, cx))
-            })
-            .when(said.unclear, |d| {
-                d.child(
-                    div()
-                        .text_color(tokens::needs_you(t))
-                        .child("Marked unclear: it goes back to be asked again"),
-                )
-            })
-            .child(self.note_box(t, cx))
-            .child(self.grill_actions(t, ask, &q, &draft, cx))
-    }
-
-    fn web_only(&self, t: &Theme, ask: &Ask, cx: &mut Context<Self>) -> Div {
-        let what = if ask.doc.is_some() {
-            "A page to read and mark: the web desk marks text."
-        } else {
-            "A job for your hands: the web desk runs its check."
-        };
-        div()
-            .flex()
-            .flex_col()
-            .items_start()
-            .gap(px(GAP))
-            .child(div().text_color(t.text2).child(what))
-            .child(
-                action(t, "web", "Open on the web desk", "Enter", Kind::Primary)
-                    .on_click(cx.listener(|app, _: &ClickEvent, _, cx| app.open_on_web(cx))),
-            )
-    }
-
-    // ---- Verdict ----
-
-    fn verdict_view(
+    fn conversation(
         &mut self,
         t: &Theme,
+        ask: &Ask,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let Some(ask) = self.current_ask().cloned() else {
-            return div().into_any_element();
-        };
-        if ask.form() == Form::Grill {
-            let stage = self.stage(window, cx);
-            let list = self.proposals(t, &ask, cx);
-            return div()
-                .size_full()
-                .flex()
-                .flex_col()
-                .child(self.context_row(t, &ask))
-                .child(
-                    div()
-                        .flex_1()
-                        .min_h_0()
-                        .flex()
-                        .child(
-                            div()
-                                .id("proposals")
-                                .w(relative(0.42))
-                                .flex_none()
-                                .h_full()
-                                .overflow_y_scroll()
-                                .border_r_1()
-                                .border_color(t.divider)
-                                .bg(t.surface)
-                                .child(list),
-                        )
-                        .child(div().flex_1().min_w_0().h_full().child(stage)),
-                )
-                .into_any_element();
+        let key = self.current.clone();
+        let desk = key
+            .as_ref()
+            .map(|k| self.desks[k.0].name())
+            .unwrap_or_default();
+        let mut turns = div().flex().flex_col().gap(px(GAP + 4.)).p(px(GAP));
+        for past in &ask.history {
+            turns = turns
+                .child(self.agent_turn(t, past, false, cx))
+                .children(past.answer.as_ref().map(|_| his_turn(t, past)))
+                .children(past.comments.iter().map(|c| comment(t, c)));
         }
-        let stage = self.stage(window, cx);
-        let band = self.verdict_band(t, &ask, cx);
+        turns = turns
+            .child(self.agent_turn(t, ask, true, cx))
+            .children(ask.comments.iter().map(|c| comment(t, c)));
+        let head = div()
+            .flex_none()
+            .h(px(tokens::TOOLS))
+            .px(px(GAP))
+            .flex()
+            .items_center()
+            .gap(px(GAP_SMALL))
+            .bg(t.surface)
+            .border_b_1()
+            .border_color(t.divider)
+            .text_size(px(SMALL))
+            .text_color(t.text2)
+            .child(div().size(px(8.)).rounded(px(2.)).bg(t.identity_of(&desk)))
+            .child(format!(
+                "{desk} {} · {} · {}",
+                ask.id,
+                kind_word(ask),
+                ask.bead
+            ))
+            .child(div().flex_1())
+            .child(
+                kit::button(t, "web", "Open on web", Kind::Quiet)
+                    .tooltip(kit::tip("O · the web desk, on this ask"))
+                    .on_click(cx.listener(|app, _: &ClickEvent, _, cx| app.open_on_web(cx))),
+            );
         div()
             .size_full()
             .flex()
             .flex_col()
-            .child(self.context_row(t, &ask))
-            .child(div().flex_1().min_h_0().child(stage))
+            .bg(t.bg)
+            .child(head)
             .child(
                 div()
-                    .flex_none()
-                    .border_t_1()
-                    .border_color(t.divider)
-                    .bg(t.surface)
-                    .child(band),
+                    .id("turns")
+                    .flex_1()
+                    .min_h_0()
+                    .overflow_y_scroll()
+                    .child(turns),
             )
+            .child(self.marks_list(t, ask, window, cx))
+            .child(self.composer(t, ask, window, cx))
             .into_any_element()
     }
 
-    /// "Take Quiet?": the recommendation as the question, and the answer
-    /// one key away.
-    fn verdict_band(&mut self, t: &Theme, ask: &Ask, cx: &mut Context<Self>) -> Div {
-        let draft = self.draft();
-        let rec = ask.recommended();
-        let chosen = draft.pick.or(rec);
-        let (headline, why): (String, String) = match (ask.form(), chosen) {
-            (Form::Pick, Some(i)) => (
-                format!(
-                    "{} {}: {}?",
-                    if draft.pick.is_some() && draft.pick != rec {
-                        "Choose"
-                    } else {
-                        "Take"
-                    },
-                    model::letter(&ask.options, i),
-                    model::label(&ask.options, i)
-                ),
-                if draft.pick.is_some() && draft.pick != rec {
-                    ask.options[i].why.clone()
-                } else {
-                    rest_of(&ask.recommend, &ask.options[i].name)
-                },
-            ),
-            (Form::Pick, None) => ("No recommendation: pick one".into(), String::new()),
-            (Form::Web, _) => ("This one is answered on the web desk".into(), String::new()),
-            _ if !ask.recommend.trim().is_empty() => {
-                (format!("The agent says: {}", ask.recommend), String::new())
-            }
-            _ => (ask.title.clone(), String::new()),
+    /// What the agent put to him in one round.
+    fn agent_turn(&mut self, t: &Theme, round: &Ask, now: bool, cx: &mut Context<Self>) -> Div {
+        let by = if round.asked_by.is_empty() {
+            "The agent"
+        } else {
+            round.asked_by.as_str()
         };
-        let mut alternatives = div().flex().items_center().gap(px(GAP_SMALL));
-        for (i, _) in ask.options.iter().enumerate() {
-            let on = chosen == Some(i);
-            alternatives = alternatives.child(
-                div()
-                    .id(("alt", i))
-                    .flex()
-                    .items_center()
-                    .gap(px(4.))
-                    .px(px(GAP_SMALL))
-                    .h(px(tokens::CAP + 6.))
-                    .rounded(px(tokens::RADIUS))
-                    .border_1()
-                    .border_color(if on { t.accent } else { t.divider })
-                    .cursor_pointer()
-                    .child(cap(t, &(i + 1).to_string()))
-                    .child(
-                        div()
-                            .text_color(if on { t.text } else { t.text2 })
-                            .child(format!(
-                                "{} {}",
-                                model::letter(&ask.options, i),
-                                model::label(&ask.options, i)
-                            )),
-                    )
-                    .on_click(
-                        cx.listener(move |app, _: &ClickEvent, window, cx| app.pick(i, window, cx)),
-                    ),
-            );
-        }
-        let form = ask.form();
-        let yes = match (self.sending, draft.pick) {
-            (true, _) => "Sending".to_string(),
-            (false, Some(i)) if Some(i) != rec => {
-                format!("Choose {}", model::letter(&ask.options, i))
-            }
-            _ => "Agree".to_string(),
-        };
-        div()
-            .p(px(PAD))
+        let mut turn = div()
             .flex()
             .flex_col()
-            .gap(px(GAP))
+            .gap(px(GAP_SMALL + 2.))
+            .child(div().text_size(px(SMALL)).text_color(t.dim).child(format!(
+                "{by} · round {} · {}",
+                round.round(),
+                age(&round.created_at)
+            )))
+            .child(
+                div()
+                    .font_family(t.ty.reading)
+                    .text_size(px(tokens::TITLE))
+                    .font_weight(FontWeight::SEMIBOLD)
+                    .line_height(relative(1.25))
+                    .when(!now, |d| d.text_color(t.text2))
+                    .child(round.title.clone()),
+            );
+        if !round.question.trim().is_empty() && round.question.trim() != round.title.trim() {
+            turn = turn.child(prose(t, &round.question, !now));
+        }
+        if let Some(doc) = &round.doc {
+            turn = turn.child(
+                div()
+                    .text_size(px(SMALL))
+                    .text_color(t.text2)
+                    .child(format!("Document: {}", doc.name)),
+            );
+        }
+        if !now {
+            let shown: Vec<String> = round
+                .all_media()
+                .iter()
+                .map(|m| {
+                    if m.caption.is_empty() {
+                        m.file_name().to_string()
+                    } else {
+                        m.caption.clone()
+                    }
+                })
+                .collect();
+            if !shown.is_empty() {
+                turn = turn.child(
+                    div()
+                        .text_size(px(SMALL))
+                        .text_color(t.dim)
+                        .child(format!("Showed: {}", shown.join(" · "))),
+                );
+            }
+        }
+        match round.form() {
+            Form::Grill => {
+                let at = self.draft().at;
+                for (i, q) in round.questions.iter().enumerate() {
+                    turn = turn.child(self.question_card(
+                        t,
+                        round,
+                        i,
+                        q,
+                        now && at == Some(i),
+                        now,
+                        cx,
+                    ));
+                }
+            }
+            _ => {
+                if !round.options.is_empty() {
+                    turn = turn.child(self.options(t, round, now, cx));
+                }
+                if !round.recommend.trim().is_empty() && round.recommended().is_none() {
+                    turn = turn.child(recommend_box(t, "The agent recommends", &round.recommend));
+                }
+            }
+        }
+        turn
+    }
+
+    /// The options as the agent made them, its recommendation marked; in
+    /// the open round a click leans to one (and shows it).
+    fn options(&mut self, t: &Theme, ask: &Ask, now: bool, cx: &mut Context<Self>) -> Div {
+        let rec = ask.recommended();
+        let picked = if now { self.draft().pick } else { None };
+        let answered: Vec<String> = ask
+            .answer
+            .as_ref()
+            .map(|a| a.options.clone())
+            .unwrap_or_default();
+        let mut list = div().flex().flex_col().gap(px(GAP_SMALL));
+        for (i, o) in ask.options.iter().enumerate() {
+            let on = picked == Some(i) || (!now && answered.contains(&o.name));
+            let row = option_row(
+                t,
+                &ask.options,
+                i,
+                o,
+                rec == Some(i),
+                on,
+                rest_of(&ask.recommend, &o.name),
+            );
+            list = list.child(if now {
+                row.id(("option", i))
+                    .cursor_pointer()
+                    .hover(|d| d.bg(t.accent_soft()))
+                    .tooltip(kit::tip(if picked == Some(i) {
+                        "You lean to this one: click again to take it back"
+                    } else {
+                        "Lean to this one: it goes with your words"
+                    }))
+                    .on_click(cx.listener(move |app, _: &ClickEvent, _, cx| app.pick(i, cx)))
+                    .into_any_element()
+            } else {
+                row.into_any_element()
+            });
+        }
+        list
+    }
+
+    /// A grill's question: what it asks, its options, what he has said on
+    /// it; in the open round a click puts his words on it.
+    #[allow(clippy::too_many_arguments)]
+    fn question_card(
+        &mut self,
+        t: &Theme,
+        ask: &Ask,
+        i: usize,
+        q: &Question,
+        active: bool,
+        now: bool,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let said = if now {
+            self.said(q)
+        } else {
+            ask.answer
+                .as_ref()
+                .and_then(|a| a.answers.get(&q.id))
+                .map(|a| Said {
+                    pick: a
+                        .pick
+                        .as_ref()
+                        .and_then(|p| q.options.iter().position(|o| &o.name == p)),
+                    words: a.comment.clone(),
+                    rec: a.rec,
+                    unclear: false,
+                })
+                .unwrap_or_default()
+        };
+        let rec = model::recommended(&q.options, &q.recommend);
+        let mut card = div()
+            .flex()
+            .flex_col()
+            .gap(px(GAP_SMALL))
+            .p(px(GAP))
+            .rounded(px(tokens::RADIUS))
+            .border_1()
+            .border_color(if active { t.accent } else { t.divider })
+            .when(active, |d| d.bg(t.accent_light()))
             .child(
                 div()
                     .flex()
-                    .items_start()
-                    .gap(px(PAD))
+                    .gap(px(GAP_SMALL))
+                    .child(div().text_color(t.dim).child(format!("{}.", i + 1)))
                     .child(
                         div()
                             .flex_1()
                             .min_w_0()
-                            .flex()
-                            .flex_col()
-                            .gap(px(GAP_SMALL))
-                            .child(
-                                div()
-                                    .text_size(px(SMALL))
-                                    .text_color(t.dim)
-                                    .child(ask.title.clone()),
-                            )
-                            .child(
-                                div()
-                                    .text_size(px(tokens::TITLE))
-                                    .font_weight(FontWeight::SEMIBOLD)
-                                    .line_height(relative(1.2))
-                                    .child(headline),
-                            )
-                            .when(!why.is_empty(), |d| d.child(body(t, &why)))
-                            .when(!ask.question.is_empty() && ask.question != ask.title, |d| {
-                                d.child(div().text_color(t.text2).child(ask.question.clone()))
-                            }),
-                    )
-                    .when(form == Form::Web, |d| {
-                        d.child(
-                            action(t, "web", "Open on the web desk", "Enter", Kind::Primary)
-                                .on_click(
-                                    cx.listener(|app, _: &ClickEvent, _, cx| app.open_on_web(cx)),
-                                ),
-                        )
-                    })
-                    .when(form != Form::Web, |d| {
-                        d.child(
-                            div()
-                                .flex()
-                                .items_center()
-                                .gap(px(GAP))
-                                .child(
-                                    action(
-                                        t,
-                                        "no",
-                                        if form == Form::Pick {
-                                            "None of these"
-                                        } else {
-                                            "Disagree"
-                                        },
-                                        "X",
-                                        Kind::Plain,
-                                    )
-                                    .on_click(cx.listener(
-                                        |app, _: &ClickEvent, window, cx| {
-                                            app.send(Verdict::No, window, cx)
-                                        },
-                                    )),
-                                )
-                                .child(action(t, "yes", &yes, "Enter", Kind::Primary).on_click(
-                                    cx.listener(|app, _: &ClickEvent, window, cx| {
-                                        app.send(Verdict::Yes, window, cx)
-                                    }),
-                                )),
-                        )
-                    }),
-            )
-            .when(ask.options.len() > 1, |d| {
-                d.child(
-                    div()
-                        .flex()
-                        .items_center()
-                        .gap(px(GAP))
-                        .child(alternatives)
-                        .child(div().flex_1())
-                        .child(
-                            div()
-                                .text_size(px(SMALL))
-                                .text_color(t.dim)
-                                .child("C sets them side by side · F swaps"),
-                        ),
+                            .font_weight(FontWeight::SEMIBOLD)
+                            .child(q.title.clone()),
+                    ),
+            );
+        if !q.question.trim().is_empty() && q.question.trim() != q.title.trim() {
+            card = card.child(prose(t, &q.question, false));
+        }
+        if let Some((round, old, answer)) = ask.followed_up(q) {
+            let was = answer
+                .map(|a| {
+                    let pick = a.pick.clone().unwrap_or_default();
+                    match (pick.is_empty(), a.comment.trim().is_empty()) {
+                        (false, true) => pick,
+                        (true, false) => format!("“{}”", a.comment.trim()),
+                        (false, false) => format!("{pick} — “{}”", a.comment.trim()),
+                        _ => "nothing".into(),
+                    }
+                })
+                .unwrap_or_else(|| "nothing".into());
+            card = card.child(div().text_size(px(SMALL)).text_color(t.dim).child(format!(
+                "Round {round} asked “{}”; you said {was}",
+                old.title.trim()
+            )));
+        }
+        for (k, o) in q.options.iter().enumerate() {
+            let on = said.pick == Some(k);
+            let row = option_row(
+                t,
+                &q.options,
+                k,
+                o,
+                rec == Some(k),
+                on,
+                rest_of(&q.recommend, &o.name),
+            );
+            card = card.child(if now {
+                row.id(SharedString::from(format!("q{i}-o{k}")))
+                    .cursor_pointer()
+                    .hover(|d| d.bg(t.accent_soft()))
+                    .on_click(cx.listener(move |app, _: &ClickEvent, _, cx| {
+                        app.goto_question(Some(i), cx);
+                        app.pick(k, cx);
+                    }))
+                    .into_any_element()
+            } else {
+                row.into_any_element()
+            });
+        }
+        if !q.recommend.trim().is_empty() && rec.is_none() {
+            card = card.child(recommend_box(t, "The agent recommends", &q.recommend));
+        }
+        let (words, colour) = said_words(t, q, &said);
+        card = card.child(div().text_size(px(SMALL)).text_color(colour).child(if now {
+            format!("You: {words}")
+        } else {
+            format!("You said: {words}")
+        }));
+        if now {
+            card.id(("question", i))
+                .cursor_pointer()
+                .on_click(
+                    cx.listener(move |app, _: &ClickEvent, _, cx| app.goto_question(Some(i), cx)),
                 )
-            })
-            .when(form != Form::Web, |d| d.child(self.note_box(t, cx)))
+                .into_any_element()
+        } else {
+            card.into_any_element()
+        }
     }
 
-    /// What the agent proposes for each question, each changed in place:
-    /// the selected one opens with its words and options.
-    fn proposals(&mut self, t: &Theme, ask: &Ask, cx: &mut Context<Self>) -> Div {
-        let draft = self.draft();
-        let mut list = div().flex().flex_col();
-        for (i, q) in ask.questions.iter().enumerate() {
-            let said = draft.said(q);
-            let rec = model::recommended(&q.options, &q.recommend);
-            let here = i == draft.at;
-            let (words, colour) = if said.answered() {
-                said_words(t, q, &said)
-            } else if let Some(r) = rec {
-                (
-                    format!(
-                        "{} {}",
-                        model::letter(&q.options, r),
-                        model::label(&q.options, r)
-                    ),
-                    t.text2,
-                )
-            } else {
-                ("needs your words".to_string(), tokens::needs_you(t))
-            };
-            let state = if said.unclear {
-                ("?", tokens::needs_you(t))
-            } else if said.answered() {
-                ("✓", tokens::done(t))
-            } else if rec.is_some() {
-                ("·", t.dim)
-            } else {
-                ("!", tokens::needs_you(t))
-            };
-            let mut row = div()
-                .id(("proposal", i))
+    // ---- His marks ----
+
+    fn marks_list(
+        &mut self,
+        t: &Theme,
+        ask: &Ask,
+        _: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let numbered = self.numbered();
+        if numbered.is_empty() {
+            return div().into_any_element();
+        }
+        let doc = ask.doc.as_ref().map(|d| d.text.as_str());
+        let items = self.items();
+        let mut rows = div().flex().flex_col();
+        for (n, m) in numbered {
+            let on = self.selected.as_deref() == Some(&m.id);
+            let ink = rgb(tokens::ink(m.color.as_deref()));
+            let place = m
+                .media
+                .as_ref()
+                .and_then(|id| items.iter().find(|i| &i.media.id == id))
+                .map(|i| {
+                    if i.tag.is_empty() {
+                        String::new()
+                    } else {
+                        format!("{} · ", i.tag)
+                    }
+                })
+                .unwrap_or_default();
+            let what = format!("{place}{}", marks::what(&m, doc));
+            let id = m.id.clone();
+            let gone = m.id.clone();
+            let row = div()
+                .id(SharedString::from(format!("mark-{}", m.id)))
                 .flex()
                 .flex_col()
-                .gap(px(GAP_SMALL))
-                .px(px(PAD))
-                .py(px(GAP))
-                .border_b_1()
-                .border_color(t.rule())
-                .when(here, |d| d.bg(t.accent_soft()))
+                .gap(px(4.))
+                .px(px(GAP))
+                .py(px(GAP_SMALL))
+                .when(on, |d| d.bg(t.accent_light()))
+                .hover(|d| d.bg(t.accent_soft()))
                 .cursor_pointer()
                 .child(
                     div()
                         .flex()
                         .items_center()
-                        .gap(px(GAP))
+                        .gap(px(GAP_SMALL))
+                        .child(number(t, n, ink))
+                        .child(div().text_size(px(SMALL)).text_color(t.text2).child(what))
+                        .child(div().flex_1())
                         .child(
-                            div()
-                                .w(px(14.))
-                                .flex_none()
-                                .text_color(state.1)
-                                .font_weight(FontWeight::BOLD)
-                                .child(state.0),
-                        )
-                        .child(
-                            div()
-                                .w(px(28.))
-                                .flex_none()
-                                .text_color(t.dim)
-                                .child(format!("Q{}", i + 1)),
-                        )
-                        .child(
-                            div()
-                                .flex_1()
-                                .min_w_0()
-                                .truncate()
-                                .when(here, |d| d.text_color(t.dim))
-                                .child(if here { String::new() } else { q.title.clone() }),
-                        )
-                        .child(
-                            div()
-                                .flex_none()
-                                .max_w(px(180.))
-                                .truncate()
-                                .text_color(colour)
-                                .child(words),
+                            kit::button(
+                                t,
+                                SharedString::from(format!("drop-{}", m.id)),
+                                "Remove",
+                                Kind::Quiet,
+                            )
+                            .text_size(px(SMALL))
+                            .on_click(cx.listener(
+                                move |app, _: &ClickEvent, _, cx| {
+                                    cx.stop_propagation();
+                                    app.delete_mark(&gone, cx)
+                                },
+                            )),
                         ),
                 )
-                .on_click(cx.listener(move |app, _: &ClickEvent, window, cx| {
-                    app.goto_question(i, window, cx)
+                .child(if on {
+                    div().child(self.mark_note.clone()).into_any_element()
+                } else if m.text.trim().is_empty() {
+                    div()
+                        .text_color(t.dim)
+                        .text_size(px(SMALL))
+                        .child("No words on it yet")
+                        .into_any_element()
+                } else {
+                    div().line_clamp(2).child(m.text.clone()).into_any_element()
+                })
+                .on_click(cx.listener(move |app, _: &ClickEvent, _, cx| {
+                    app.select_mark(Some(id.clone()), true, cx);
+                    app.aim(Aim::MarkNote, cx);
                 }));
-            if here {
-                row = row
-                    .child(div().pl(px(54.)).child(self.question_words(t, ask, q)))
-                    .when(!q.options.is_empty(), |d| d.child(div().pl(px(54.)).child(self.options(t, &q.options, &q.recommend, said.pick.or(if said.answered() { None } else { rec }), false, cx))))
-                    .child(div().pl(px(54.)).flex().gap(px(GAP)).child(
-                        action(t, "unclear", if said.unclear { "Clear" } else { "Unclear" }, "U", Kind::Quiet)
-                            .on_click(cx.listener(|app, _: &ClickEvent, window, cx| app.toggle_unclear(window, cx))),
-                    ).child(
-                        action(t, "words", "Words", "W", Kind::Quiet)
-                            .on_click(cx.listener(|app, _: &ClickEvent, window, cx| app.write(Verdict::Grill, window, cx))),
-                    ))
-                    .when(matches!(self.note_for, crate::app::NoteFor::Question(ref id) if *id == q.id), |d| d.child(div().pl(px(54.)).child(self.note_box(t, cx))));
-            }
-            list = list.child(row);
+            rows = rows.child(row);
         }
-        let open = ask
-            .questions
-            .iter()
-            .filter(|q| {
-                !draft.said(q).answered() && model::recommended(&q.options, &q.recommend).is_none()
-            })
-            .count();
         div()
+            .flex_none()
+            .border_t_1()
+            .border_color(t.divider)
+            .bg(t.surface)
+            .child(
+                div()
+                    .px(px(GAP))
+                    .pt(px(GAP_SMALL))
+                    .text_size(px(SMALL))
+                    .text_color(t.dim)
+                    .child("Your marks · they go with your words"),
+            )
+            .child(
+                div()
+                    .id("marks")
+                    .max_h(px(tokens::MARKS_MAX_H))
+                    .overflow_y_scroll()
+                    .child(rows),
+            )
+            .into_any_element()
+    }
+
+    // ---- His words ----
+
+    fn composer(
+        &mut self,
+        t: &Theme,
+        ask: &Ask,
+        _: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let draft = self.draft();
+        let form = ask.form();
+        let mut top = div().flex().flex_wrap().items_center().gap(px(GAP_SMALL));
+        let mut has_top = false;
+        if form == Form::Grill {
+            has_top = true;
+            top = top.child(
+                chip(t, "q-round", "Whole round", draft.at.is_none(), None).on_click(
+                    cx.listener(|app, _: &ClickEvent, _, cx| app.goto_question(None, cx)),
+                ),
+            );
+            for (i, q) in ask.questions.iter().enumerate() {
+                let answered = draft.said(q).answered();
+                top =
+                    top.child(
+                        chip(
+                            t,
+                            SharedString::from(format!("q-{i}")),
+                            &format!("{}", i + 1),
+                            draft.at == Some(i),
+                            answered.then_some(t.done),
+                        )
+                        .tooltip(kit::tip(q.title.clone()))
+                        .on_click(cx.listener(
+                            move |app, _: &ClickEvent, _, cx| app.goto_question(Some(i), cx),
+                        )),
+                    );
+            }
+            if let Some(q) = draft.at.and_then(|i| ask.questions.get(i)) {
+                let unclear = draft.said(q).unclear;
+                top = top.child(div().w(px(GAP_SMALL))).child(
+                    chip(t, "unclear", "Unclear", unclear, None)
+                        .tooltip(kit::tip(answer_unclear_tip()))
+                        .on_click(cx.listener(|app, _: &ClickEvent, _, cx| app.toggle_unclear(cx))),
+                );
+            }
+        } else if form == Form::Open && !ask.options.is_empty() {
+            has_top = true;
+            top = top.child(
+                div()
+                    .text_size(px(SMALL))
+                    .text_color(t.dim)
+                    .child("Lean to"),
+            );
+            for (i, _) in ask.options.iter().enumerate() {
+                let letter = model::letter(&ask.options, i);
+                let label = model::label(&ask.options, i);
+                top = top.child(
+                    chip(
+                        t,
+                        SharedString::from(format!("lean-{i}")),
+                        &format!("{letter} {}", clip_words(&label, 18)),
+                        draft.pick == Some(i),
+                        None,
+                    )
+                    .on_click(cx.listener(move |app, _: &ClickEvent, _, cx| app.pick(i, cx))),
+                );
+            }
+            top = top.child(
+                div()
+                    .text_size(px(SMALL))
+                    .text_color(t.dim)
+                    .child("· optional"),
+            );
+        }
+        let marks = draft.marks(ask).len();
+        let send_word = match (form, draft.pick.and_then(|i| ask.options.get(i).map(|_| i))) {
+            (Form::Hands, _) => "Send back".to_string(),
+            (Form::Grill, _) => {
+                format!("Send · {} of {}", draft.answered(ask), ask.questions.len())
+            }
+            (_, Some(i)) => format!("Send · {}", model::letter(&ask.options, i)),
+            _ => "Send".to_string(),
+        };
+        let mut actions = div()
+            .flex()
+            .flex_wrap()
+            .items_center()
+            .gap(px(GAP_SMALL))
+            .child(
+                action(t, "send", &send_word, "Ctrl Enter", Kind::Primary)
+                    .when(self.sending, |d| d.opacity(0.5))
+                    .on_click(cx.listener(|app, _: &ClickEvent, window, cx| {
+                        app.send(Verdict::Send, window, cx)
+                    })),
+            );
+        if form == Form::Open {
+            actions = actions.child(
+                kit::button(t, "good", "Looks good", Kind::Plain)
+                    .tooltip(kit::tip(
+                        "Accept it as it is; your words, if any, go with it",
+                    ))
+                    .on_click(cx.listener(|app, _: &ClickEvent, window, cx| {
+                        app.send(Verdict::LooksGood, window, cx)
+                    })),
+            );
+        }
+        if form == Form::Grill {
+            actions = actions.child(
+                kit::button(t, "rest", "Rest as recommended", Kind::Plain)
+                    .tooltip(kit::tip(
+                        "Every question you left takes the agent's recommendation",
+                    ))
+                    .on_click(cx.listener(|app, _: &ClickEvent, window, cx| {
+                        app.send(Verdict::GrillRest, window, cx)
+                    })),
+            );
+        }
+        actions = actions.child(div().flex_1()).child(
+            kit::button(t, "elsewhere", "Answered elsewhere", Kind::Quiet)
+                .tooltip(kit::tip(
+                    "You told the agent in its session or by voice: this closes the ask with your words as a note",
+                ))
+                .on_click(cx.listener(|app, _: &ClickEvent, window, cx| app.send(Verdict::Elsewhere, window, cx))),
+        );
+        let status = match marks {
+            0 => String::new(),
+            1 => "1 mark goes with it".into(),
+            n => format!("{n} marks go with it"),
+        };
+        div()
+            .flex_none()
             .flex()
             .flex_col()
+            .gap(px(GAP_SMALL))
+            .p(px(GAP))
+            .border_t_1()
+            .border_color(t.divider)
+            .bg(t.surface)
+            .when(has_top, |d| d.child(top))
             .child(
                 div()
-                    .px(px(PAD))
-                    .pt(px(PAD))
-                    .pb(px(GAP))
-                    .flex()
-                    .flex_col()
-                    .gap(px(GAP_SMALL))
-                    .child(title(t, &ask.title))
-                    .child(div().text_color(t.text2).child(format!(
-                        "The agent proposes an answer to {} of {}. ↑ ↓ to go through, a number to change one, Enter to send them all.",
-                        ask.questions.iter().filter(|q| model::recommended(&q.options, &q.recommend).is_some()).count(),
-                        ask.questions.len()
-                    ))),
+                    .id("words")
+                    .max_h(px(tokens::WORDS_MAX_H))
+                    .overflow_y_scroll()
+                    .child(self.words.clone()),
             )
-            .child(list)
-            .child(
-                div()
-                    .p(px(PAD))
-                    .flex()
-                    .items_center()
-                    .gap(px(GAP))
-                    .when(open > 0, |d| d.child(div().text_color(tokens::needs_you(t)).child(format!("{open} left without an answer"))))
-                    .child(div().flex_1())
-                    .child(
-                        action(t, "send-all", "Send the round", "Enter", Kind::Primary)
-                            .on_click(cx.listener(|app, _: &ClickEvent, window, cx| app.send(Verdict::GrillRest, window, cx))),
-                    ),
-            )
+            .child(actions)
+            .when(!status.is_empty(), |d| {
+                d.child(div().text_size(px(SMALL)).text_color(t.text2).child(status))
+            })
+            .into_any_element()
     }
 }
 
-// ---- Small pieces ----
+fn answer_unclear_tip() -> String {
+    "The question does not say enough to answer: it goes back to be asked again".into()
+}
+
+/// His answer to a round, as the desk keeps it: his turn in the dialogue.
+fn his_turn(t: &Theme, round: &Ask) -> AnyElement {
+    let Some(a) = &round.answer else {
+        return div().into_any_element();
+    };
+    let what = match a.verdict.as_str() {
+        "pick" => format!("Chose {}", a.options.join(", ")),
+        "accept" => "Looks good".into(),
+        "send back" => "Sent back".into(),
+        "acknowledge" => "Done".into(),
+        "reject" => "Rejected".into(),
+        "marks" => "His words and marks".into(),
+        "elsewhere" => "Answered elsewhere".into(),
+        "grill" => format!("Answered {} of {}", a.answers.len(), round.questions.len()),
+        v => v.to_string(),
+    };
+    let doc = round.doc.as_ref().map(|d| d.text.as_str());
+    let marks: Vec<String> = round
+        .marks
+        .iter()
+        .enumerate()
+        .map(|(i, m)| {
+            let words = m.text.trim();
+            format!(
+                "#{} {}{}",
+                i + 1,
+                marks::what(m, doc),
+                if words.is_empty() {
+                    String::new()
+                } else {
+                    format!(": {words}")
+                }
+            )
+        })
+        .collect();
+    div()
+        .ml(px(tokens::REPLY_INDENT))
+        .flex()
+        .flex_col()
+        .gap(px(4.))
+        .p(px(GAP))
+        .rounded(px(tokens::RADIUS))
+        .bg(t.accent_light())
+        .border_1()
+        .border_color(alpha(t.accent, 0.35))
+        .child(
+            div()
+                .text_size(px(SMALL))
+                .text_color(t.text2)
+                .child(format!("You · {what} · {}", age(&a.at))),
+        )
+        .when(!a.comment.trim().is_empty(), |d| {
+            d.child(prose(t, &a.comment, false))
+        })
+        .children(
+            marks
+                .into_iter()
+                .map(|m| div().text_size(px(SMALL)).text_color(t.text2).child(m)),
+        )
+        .into_any_element()
+}
+
+/// A word in the thread between rounds: his to the right, the agent's
+/// to the left.
+fn comment(t: &Theme, c: &model::Comment) -> AnyElement {
+    let his = c.author == "WisQi";
+    div()
+        .when(his, |d| d.ml(px(tokens::REPLY_INDENT)))
+        .when(!his, |d| d.mr(px(tokens::REPLY_INDENT)))
+        .flex()
+        .flex_col()
+        .gap(px(2.))
+        .p(px(GAP_SMALL + 2.))
+        .rounded(px(tokens::RADIUS))
+        .border_1()
+        .border_color(t.divider)
+        .child(div().text_size(px(SMALL)).text_color(t.dim).child(format!(
+            "{} · {}",
+            if his { "You" } else { c.author.as_str() },
+            age(&c.at)
+        )))
+        .child(prose(t, &c.text, false))
+        .into_any_element()
+}
 
 fn no_desks(t: &Theme) -> AnyElement {
     div()
@@ -1522,50 +1058,82 @@ fn no_desks(t: &Theme) -> AnyElement {
         .justify_center()
         .gap(px(GAP))
         .child(div().text_size(px(tokens::TITLE)).font_weight(FontWeight::SEMIBOLD).child("No desks yet"))
-        .child(div().text_color(t.text2).child("Name them with --desk Name=http://127.0.0.1:8774 (repeated), DESK_APP_DESKS, or \"desks\" in desk-app.json."))
+        .child(div().text_color(t.text2).child("Name one with --desk Name=http://127.0.0.1:8774, DESK_APP_DESKS, or \"desks\" in desk-app.json: the others on its host are found from it."))
         .into_any_element()
 }
 
-/// A page the ask is about, to read here; marking it is the web desk's.
-fn doc_text(t: &Theme, name: &str, text: &str) -> Div {
+/// Words to read: the theme's reading face.
+fn prose(t: &Theme, words: &str, faint: bool) -> Div {
     div()
-        .flex()
-        .flex_col()
-        .gap(px(GAP_SMALL))
-        .p(px(GAP))
-        .rounded(px(tokens::RADIUS))
-        .border_1()
-        .border_color(t.divider)
-        .bg(t.bg)
-        .child(
-            div()
-                .text_size(px(SMALL))
-                .text_color(t.dim)
-                .child(name.to_string()),
-        )
-        .child(
-            div()
-                .text_size(px(BODY))
-                .line_height(relative(tokens::BODY_LINE))
-                .child(text.to_string()),
-        )
-}
-
-fn title(t: &Theme, words: &str) -> Div {
-    div()
-        .text_size(px(tokens::TITLE))
-        .font_weight(FontWeight::SEMIBOLD)
-        .line_height(relative(1.2))
-        .text_color(t.text)
-        .child(words.to_string())
-}
-
-fn body(t: &Theme, words: &str) -> Div {
-    div()
+        .font_family(t.ty.reading)
         .text_size(px(BODY))
         .line_height(relative(tokens::BODY_LINE))
-        .text_color(t.text)
-        .child(words.to_string())
+        .text_color(if faint { t.text2 } else { t.text })
+        .child(words.trim().to_string())
+}
+
+/// An option as the agent made it: its letter, name and why, the one it
+/// recommends marked, the one he leans to (or chose) filled.
+#[allow(clippy::too_many_arguments)]
+fn option_row(
+    t: &Theme,
+    options: &[Choice],
+    i: usize,
+    o: &Choice,
+    rec: bool,
+    on: bool,
+    why_rec: String,
+) -> Div {
+    let letter = model::letter(options, i);
+    let label = model::label(options, i);
+    div()
+        .flex()
+        .gap(px(GAP_SMALL + 2.))
+        .p(px(GAP_SMALL))
+        .rounded(px(tokens::RADIUS))
+        .child(key_letter(t, &letter, on))
+        .child(
+            div()
+                .flex_1()
+                .min_w_0()
+                .flex()
+                .flex_col()
+                .gap(px(2.))
+                .child(
+                    div()
+                        .flex()
+                        .flex_wrap()
+                        .gap(px(GAP_SMALL))
+                        .child(div().font_weight(FontWeight::SEMIBOLD).child(label))
+                        .when(rec, |d| {
+                            d.child(
+                                div()
+                                    .text_size(px(SMALL))
+                                    .text_color(t.accent)
+                                    .child("Recommended"),
+                            )
+                        }),
+                )
+                .when(!o.why.trim().is_empty(), |d| {
+                    d.child(
+                        div()
+                            .text_size(px(SMALL))
+                            .text_color(t.text2)
+                            .child(o.why.clone()),
+                    )
+                })
+                .when(
+                    rec && !why_rec.trim().is_empty() && why_rec.trim() != o.why.trim(),
+                    |d| {
+                        d.child(
+                            div()
+                                .text_size(px(SMALL))
+                                .text_color(t.text2)
+                                .child(why_rec),
+                        )
+                    },
+                ),
+        )
 }
 
 fn recommend_box(t: &Theme, label: &str, words: &str) -> Div {
@@ -1592,13 +1160,50 @@ fn recommend_box(t: &Theme, label: &str, words: &str) -> Div {
                         .text_color(t.accent)
                         .child(label.to_string()),
                 )
-                .child(
-                    div()
-                        .text_size(px(BODY))
-                        .line_height(relative(tokens::BODY_LINE))
-                        .child(words.to_string()),
-                ),
+                .child(prose(t, words, false)),
         )
+}
+
+/// A small toggle: on, filled; a dot in `state`'s colour when given.
+fn chip(
+    t: &Theme,
+    id: impl Into<gpui::ElementId>,
+    words: &str,
+    on: bool,
+    state: Option<Hsla>,
+) -> Stateful<Div> {
+    div()
+        .id(id)
+        .flex()
+        .items_center()
+        .gap(px(4.))
+        .h(px(tokens::CAP + 4.))
+        .px(px(GAP_SMALL + 2.))
+        .rounded(px(tokens::RADIUS))
+        .border_1()
+        .border_color(if on { t.accent } else { t.divider })
+        .when(on, |d| d.bg(t.accent).text_color(t.on_accent()))
+        .when(!on, |d| d.hover(|d| d.bg(t.accent_soft())))
+        .cursor_pointer()
+        .text_size(px(SMALL))
+        .children(state.map(|c| div().size(px(6.)).rounded_full().bg(c)))
+        .child(words.to_string())
+}
+
+/// A number on a mark's ink, as the surface draws it.
+fn number(t: &Theme, n: usize, ink: Hsla) -> Div {
+    div()
+        .flex_none()
+        .size(px(tokens::BADGE))
+        .rounded_full()
+        .flex()
+        .items_center()
+        .justify_center()
+        .bg(ink)
+        .text_color(t.term_bg)
+        .text_size(px(tokens::BADGE_TEXT))
+        .font_weight(FontWeight::BOLD)
+        .child(n.to_string())
 }
 
 /// A key cap: the key that does it.
@@ -1623,7 +1228,7 @@ fn cap(t: &Theme, key: &str) -> Div {
 fn key_letter(t: &Theme, letter: &str, on: bool) -> Div {
     div()
         .flex_none()
-        .size(px(26.))
+        .size(px(24.))
         .rounded_full()
         .flex()
         .items_center()
@@ -1632,6 +1237,7 @@ fn key_letter(t: &Theme, letter: &str, on: bool) -> Div {
         .border_color(if on { t.accent } else { t.text2 })
         .when(on, |d| d.bg(t.accent).text_color(t.on_accent()))
         .font_weight(FontWeight::BOLD)
+        .text_size(px(SMALL))
         .child(letter.to_string())
 }
 
@@ -1654,9 +1260,9 @@ fn action(t: &Theme, id: &'static str, words: &str, key: &str, kind: Kind) -> St
         )
 }
 
-fn said_words(t: &Theme, q: &Question, said: &crate::answer::Said) -> (String, gpui::Hsla) {
+fn said_words(t: &Theme, q: &Question, said: &Said) -> (String, Hsla) {
     if said.unclear {
-        return ("unclear: asked again".into(), tokens::needs_you(t));
+        return ("unclear: asked again".into(), t.needs);
     }
     let pick = said.pick.and_then(|i| {
         q.options.get(i).map(|_| {
@@ -1669,9 +1275,18 @@ fn said_words(t: &Theme, q: &Question, said: &crate::answer::Said) -> (String, g
     });
     match (pick, said.words.trim()) {
         (Some(p), "") => (p, t.text),
-        (Some(p), w) => (format!("{p} — “{w}”"), t.text),
-        (None, "") => ("skipped".into(), t.dim),
-        (None, w) => (format!("“{w}”"), t.text),
+        (Some(p), w) => (format!("{p} — “{}”", clip_words(w, 80)), t.text),
+        (None, "") => ("nothing yet".into(), t.dim),
+        (None, w) => (format!("“{}”", clip_words(w, 80)), t.text),
+    }
+}
+
+fn clip_words(s: &str, n: usize) -> String {
+    let s = s.split_whitespace().collect::<Vec<_>>().join(" ");
+    if s.chars().count() <= n {
+        s
+    } else {
+        format!("{}…", s.chars().take(n).collect::<String>().trim_end())
     }
 }
 
@@ -1698,10 +1313,9 @@ fn kind_word(ask: &Ask) -> &'static str {
     }
 }
 
-/// How long it has waited, in the largest unit that says it.
-fn age(created: &str) -> String {
-    let Ok(at) =
-        time::OffsetDateTime::parse(created, &time::format_description::well_known::Rfc3339)
+/// How long ago, in the largest unit that says it.
+fn age(at: &str) -> String {
+    let Ok(at) = time::OffsetDateTime::parse(at, &time::format_description::well_known::Rfc3339)
     else {
         return String::new();
     };
@@ -1710,8 +1324,8 @@ fn age(created: &str) -> String {
         .max(0);
     match mins {
         0 => "just now".into(),
-        m if m < 60 => format!("{m} min"),
-        m if m < 60 * 48 => format!("{} h", m / 60),
-        m => format!("{} d", m / (60 * 24)),
+        m if m < 60 => format!("{m} min ago"),
+        m if m < 60 * 48 => format!("{} h ago", m / 60),
+        m => format!("{} d ago", m / (60 * 24)),
     }
 }

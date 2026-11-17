@@ -107,6 +107,8 @@ pub struct TextField {
     attachments: bool,
     /// Enter starts a new line, as in a text area, instead of submitting.
     prose: bool,
+    /// Written in the theme's reading face, for prose, not the mono face.
+    reading: bool,
     /// A mono, smaller field for paths and flags looks like the rest.
     text_size: f32,
     lines: Vec<(usize, WrappedLine)>,
@@ -138,6 +140,7 @@ impl TextField {
             multiline: false,
             attachments: false,
             prose: false,
+            reading: false,
             text_size: size::TEXT,
             lines: vec![],
             bounds: None,
@@ -161,6 +164,12 @@ impl TextField {
     pub fn prose(mut self) -> Self {
         self.multiline = true;
         self.prose = true;
+        self
+    }
+
+    /// Prose in the theme's reading face rather than the mono face.
+    pub fn reading(mut self) -> Self {
+        self.reading = true;
         self
     }
 
@@ -680,7 +689,8 @@ impl TextElement {
         } else {
             (f.text.clone(), t.text)
         };
-        let font = gpui::font(FAMILY);
+        let family = if f.reading { t.ty.reading } else { FAMILY };
+        let font = gpui::font(family);
         let mut runs = vec![];
         let base = TextRun {
             len: 0,
@@ -724,7 +734,7 @@ impl TextElement {
         if runs.is_empty() {
             runs.push(TextRun {
                 len: 1,
-                font: gpui::font(FAMILY),
+                font: gpui::font(family),
                 color,
                 background_color: None,
                 underline: None,

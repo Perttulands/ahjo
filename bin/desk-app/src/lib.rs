@@ -1,13 +1,18 @@
-//! The Desk: where the operator answers what agents ask, in a window of its
-//! own, over each decision desk's HTTP API. `model` is the desk's asks as
-//! its server sends them, `desk` the server's calls, `answer` what an answer
-//! says, `video` and `player` the clips, `app` the window's state, and
+//! The Desk: the shared surface where an agent publishes something (a
+//! picture, a clip, a page, a document, a question) and the operator
+//! answers it freely, in his words and by marking what he sees, in a window
+//! of its own over each decision desk's HTTP API. `model` is the desk's
+//! asks as its server sends them, `desk` the server's calls, `answer` what
+//! an answer says, `marks` his marks, `page` a published page inside the
+//! window, `video` and `player` the clips, `app` the window's state, and
 //! `stage` and `views` how it is drawn.
 
 pub mod answer;
 pub mod app;
 pub mod desk;
+pub mod marks;
 pub mod model;
+pub mod page;
 pub mod player;
 pub mod stage;
 pub mod tokens;
@@ -31,7 +36,7 @@ fn bounds(cx: &App) -> Bounds<gpui::Pixels> {
     }
 }
 
-/// The app: `desk-app [--desk [Name=]http://127.0.0.1:8774]... [--variant focus|desk|verdict]`.
+/// The app: `desk-app [--desk [Name=]http://127.0.0.1:8774]...`.
 pub fn run() {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let (config, notice) = desk::load(&args);
@@ -56,9 +61,7 @@ pub fn run() {
                 app_id: Some("parvi-desk".into()),
                 ..Default::default()
             },
-            |window, cx| {
-                cx.new(|cx| app::DeskApp::new(config.desks, &config.variant, notice, window, cx))
-            },
+            |window, cx| cx.new(|cx| app::DeskApp::new(config.desks, notice, window, cx)),
         );
         if let Err(e) = opened {
             panic!("the window did not open: {e}");

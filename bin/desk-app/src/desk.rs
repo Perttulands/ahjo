@@ -1,6 +1,7 @@
 //! The decision desks this app answers for, each one project's desk server
-//! (`/srv/desk/server.py`), reached over its HTTP API: `/api/asks` for the
-//! asks, `/media/` and `/thumb/` for what they show, and
+//! (`/srv/desk/server.py`), reached over its HTTP API: `/api/desks` for the
+//! other desks on its host, `/api/asks` for the asks, `/media/` and
+//! `/thumb/` for what they show, `/api/asks/<id>/marks` for his marks and
 //! `/api/asks/<id>/answer` to answer. The server validates every answer,
 //! keeps it, and passes it on to Beads and the brain, so the app does none
 //! of that and the agents' side never changes.
@@ -38,12 +39,11 @@ impl Place {
     }
 }
 
-/// What the app keeps: the desks and how it answers (the variant).
+/// What the app keeps: the desks it starts from.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Config {
     pub desks: Vec<Place>,
-    pub variant: String,
 }
 
 /// `DESK_APP_CONFIG`, else `desk-app.json` beside Parvi's `app.json`
@@ -70,9 +70,6 @@ pub fn load(args: &[String]) -> (Config, Option<String>) {
         .filter(|w| w[0] == "--desk")
         .map(|w| Place::parse(&w[1]))
         .collect();
-    if let Some(w) = args.windows(2).find(|w| w[0] == "--variant") {
-        config.variant = w[1].clone();
-    }
     if !given.is_empty() {
         config.desks = given;
     } else if let Ok(list) = std::env::var("DESK_APP_DESKS") {
@@ -83,24 +80,6 @@ pub fn load(args: &[String]) -> (Config, Option<String>) {
             .collect();
     }
     (config, notice)
-}
-
-/// Keeps the variant chosen, leaving the desks as the file has them.
-pub fn save_variant(variant: &str) {
-    let Some(path) = config_path() else { return };
-    let mut config = std::fs::read_to_string(&path)
-        .ok()
-        .and_then(|t| serde_json::from_str::<Config>(&t).ok())
-        .unwrap_or_default();
-    config.variant = variant.into();
-    if let Some(dir) = path.parent() {
-        let _ = std::fs::create_dir_all(dir);
-    }
-    if let Ok(text) = serde_json::to_string_pretty(&config)
-        && let Err(e) = std::fs::write(&path, text + "\n")
-    {
-        log::warn!("desk-app.json was not written: {e}");
-    }
 }
 
 /// The runtime the requests run on, off the UI thread.
@@ -144,6 +123,69 @@ async fn request(
 pub async fn asks(base: String) -> Result<Vec<Ask>, String> {
     let bytes = request(&base, "GET", "/api/asks", None, Duration::from_secs(10)).await?;
     serde_json::from_slice(&bytes).map_err(|e| format!("the asks do not read: {e}"))
+}
+
+/// A desk on another project, as `/api/desks` names it.
+#[derive(Clone, Debug, Default, Deserialize, PartialEq)]
+#[serde(default)]
+pub struct Listed {
+    pub name: String,
+    pub port: u16,
+}
+
+pub async fn desks(base: String) -> Result<Vec<Listed>, String> {
+    let bytes = request(&base, "GET", "/api/desks", None, Duration::from_secs(10)).await?;
+    serde_json::from_slice(&bytes).map_err(|e| format!("the desks do not read: {e}"))
+}
+
+/// The listed desks as places on the host `base` is on: the app reaches
+/// them where it reaches that one.
+pub fn siblings(base: &str, listed: &[Listed]) -> Vec<Place> {
+    let (scheme, rest) = base.split_once("://").unwrap_or(("http", base));
+    let host = rest.split('/').next().unwrap_or(rest);
+    let host = match host.rsplit_once(':') {
+        Some((h, port)) if port.chars().all(|c| c.is_ascii_digit()) => h,
+        _ => host,
+    };
+    listed
+        .iter()
+        .filter(|d| d.port != 0)
+        .map(|d| Place {
+            name: d.name.clone(),
+            url: format!("{scheme}://{host}:{}", d.port),
+        })
+        .collect()
+}
+
+/// Two addresses of the same desk (`localhost` is `127.0.0.1`).
+pub fn same_place(a: &str, b: &str) -> bool {
+    let norm = |u: &str| {
+        u.trim_end_matches('/')
+            .replace("://localhost", "://127.0.0.1")
+            .to_ascii_lowercase()
+    };
+    norm(a) == norm(b)
+}
+
+/// Puts his marks on an ask (the whole list), refused when the ask moved
+/// on since `revision`.
+pub async fn save_marks(
+    base: String,
+    id: String,
+    marks: &[crate::model::Mark],
+    revision: u64,
+) -> Result<Ask, String> {
+    let body = serde_json::to_vec(&serde_json::json!({"marks": marks, "revision": revision}))
+        .map_err(|e| e.to_string())?;
+    let bytes = request(
+        &base,
+        "POST",
+        &format!("/api/asks/{id}/marks"),
+        Some(body),
+        Duration::from_secs(15),
+    )
+    .await?;
+    serde_json::from_slice(&bytes).map_err(|e| format!("the desk's answer does not read: {e}"))
 }
 
 /// The bytes of one of an ask's media, whole (`/media/`) or as the desk's
@@ -224,6 +266,23 @@ mod tests {
             }
         );
         assert_eq!(Place::parse("http://127.0.0.1:8774").name, "");
+        let listed = [
+            Listed {
+                name: "Korpi".into(),
+                port: 8778,
+            },
+            Listed {
+                name: "Broken".into(),
+                port: 0,
+            },
+        ];
+        let found = siblings("http://100.64.0.7:8774", &listed);
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0].url, "http://100.64.0.7:8778");
+        assert!(same_place(
+            "http://localhost:8778/",
+            "http://127.0.0.1:8778"
+        ));
         assert_eq!(
             media_path("KQ3", 2, "m1", true),
             "/thumb/KQ3/r2/m1".to_string()
