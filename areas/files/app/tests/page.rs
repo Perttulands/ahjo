@@ -1070,9 +1070,11 @@ fn opening_another_file_keeps_the_previous_files_draft(cx: &mut TestAppContext) 
         cx.debug_bounds("file-view-other.txt").is_some()
     });
     click(cx, "file-row-draft.txt");
-    until(cx, "reopened", |cx| cx.debug_bounds("files-edit").is_some());
-    click(cx, "files-edit");
-    cx.simulate_keystrokes("ctrl-s");
+    // The tab comes back as it was left: still editing, the draft in it.
+    until(cx, "reopened", |cx| {
+        cx.debug_bounds("files-unsaved").is_some()
+    });
+    click(cx, "files-save");
     until(cx, "draft saved", |_| {
         std::fs::read(root.join("draft.txt")).ok().as_deref() == Some(b"kept draft")
     });
@@ -1131,11 +1133,12 @@ fn the_list_takes_the_key_map(cx: &mut TestAppContext) {
     until(cx, "viewer", |cx| {
         cx.debug_bounds("file-view-z.txt").is_some()
     });
-    cx.simulate_keystrokes("up enter");
+    // Enter took the keyboard to the file; Ctrl+Shift+E brings it back.
+    cx.simulate_keystrokes("ctrl-shift-e up enter");
     until(cx, "the row above", |cx| {
         cx.debug_bounds("file-view-a.txt").is_some()
     });
-    cx.simulate_keystrokes("up right");
+    cx.simulate_keystrokes("ctrl-shift-e up right");
     until(cx, "a folder opened by key", |cx| {
         cx.debug_bounds("file-row-inner.txt").is_some()
     });
@@ -1360,11 +1363,12 @@ fn open_path_beside_keeps_the_terminal_and_the_draft(cx: &mut TestAppContext) {
         cx.debug_bounds("file-view-second.txt").is_some() && cx.debug_bounds("files-edit").is_some()
     });
     cx.update(|_, cx| host.ask(ask(root.join("first.txt")), cx).unwrap());
+    // The tab comes back as it was left: still editing, the draft in it.
     until(cx, "first again", |cx| {
-        cx.debug_bounds("file-view-first.txt").is_some() && cx.debug_bounds("files-edit").is_some()
+        cx.debug_bounds("file-view-first.txt").is_some()
+            && cx.debug_bounds("files-unsaved").is_some()
     });
-    click(cx, "files-edit");
-    cx.simulate_keystrokes("ctrl-s");
+    click(cx, "files-save");
     until(cx, "draft saved", |_| {
         std::fs::read(root.join("first.txt")).ok().as_deref() == Some(b"draft")
     });
@@ -1738,12 +1742,13 @@ fn create_rename_delete_and_diff_in_the_files_page(cx: &mut TestAppContext) {
         "nothing to show"
     );
     click(cx, "file-row-tracked.txt");
-    until(cx, "Changes offered", |cx| {
+    until(cx, "Changes offered again", |cx| {
         cx.debug_bounds("files-changes").is_some()
     });
     click(cx, "files-changes");
     until(cx, "diff against HEAD", |cx| {
-        cx.debug_bounds("files-diff").is_some()
+        (cx.debug_bounds("files-diff-inline").is_some()
+            || cx.debug_bounds("files-diff-sides").is_some())
             && page.read_with(cx, |p, _| {
                 p.opened
                     .as_ref()
@@ -1825,12 +1830,12 @@ fn picture_zoom_can_switch_between_fit_and_actual_size(cx: &mut TestAppContext) 
     std::fs::remove_dir_all(root).unwrap();
 }
 
-/// The layouts are chosen on the page and kept. Review groups what changed
-/// by where and opens a group as a place; the Reader has the file alone
-/// and opens its find over it, Escape closing it again.
+/// The side shows the folders or what changed by where, and is kept;
+/// Changes opens a group as a place; Ctrl+B hides the side, the find
+/// opening over the files, and shows it again as it was.
 #[gpui::test]
-fn layouts_are_chosen_on_the_page_and_each_reaches_files(cx: &mut TestAppContext) {
-    let root = parvi_testkit::fresh_dir("files-layouts");
+fn the_side_switches_views_and_hides(cx: &mut TestAppContext) {
+    let root = parvi_testkit::fresh_dir("files-side");
     std::fs::create_dir_all(root.join("proj/docs")).unwrap();
     for (name, text, ago) in [
         ("proj/README.md", "# Proj\n\nWhat it is.\n", 50),
@@ -1850,23 +1855,13 @@ fn layouts_are_chosen_on_the_page_and_each_reaches_files(cx: &mut TestAppContext
     until(cx, "the newest file shown", |cx| {
         cx.debug_bounds("file-view-plan.md").is_some()
     });
-    assert_eq!(
-        kept(&shell, cx).layout,
-        parvi_files_app::store::Layout::Tree
-    );
+    assert_eq!(kept(&shell, cx).side, parvi_files_app::store::Side::Folders);
 
-    click(cx, "files-layout");
-    until(cx, "the layout menu", |cx| {
-        cx.debug_bounds("menu-label-Review").is_some()
-    });
-    menu(cx, "Review");
+    click(cx, "files-side-changes");
     until(cx, "changes grouped by project", |cx| {
         cx.debug_bounds("group-proj").is_some()
     });
-    assert_eq!(
-        kept(&shell, cx).layout,
-        parvi_files_app::store::Layout::Review
-    );
+    assert_eq!(kept(&shell, cx).side, parvi_files_app::store::Side::Changes);
     let group = cx.debug_bounds("group-proj").unwrap();
     let plan = cx.debug_bounds("recent-plan.md").unwrap();
     assert!(group.top() < plan.top(), "a group heads its files");
@@ -1881,15 +1876,12 @@ fn layouts_are_chosen_on_the_page_and_each_reaches_files(cx: &mut TestAppContext
         cx.debug_bounds("file-view-README.md").is_some()
     });
 
-    click(cx, "files-layout");
-    until(cx, "the layout menu", |cx| {
-        cx.debug_bounds("menu-label-Reader").is_some()
+    cx.simulate_keystrokes("ctrl-b");
+    until(cx, "the files alone", |cx| {
+        cx.debug_bounds("files-list").is_none() && cx.debug_bounds("files-side-show").is_some()
     });
-    menu(cx, "Reader");
-    until(cx, "the file alone", |cx| {
-        cx.debug_bounds("files-list").is_none() && cx.debug_bounds("files-find").is_some()
-    });
-    click(cx, "files-find");
+    assert_eq!(kept(&shell, cx).side, parvi_files_app::store::Side::Hidden);
+    cx.simulate_keystrokes("ctrl-p");
     until(cx, "the find over the file", |cx| {
         cx.debug_bounds("files-palette").is_some()
     });
@@ -1903,18 +1895,263 @@ fn layouts_are_chosen_on_the_page_and_each_reaches_files(cx: &mut TestAppContext
     until(cx, "opened, the find gone", |cx| {
         cx.debug_bounds("file-view-plan.md").is_some() && cx.debug_bounds("files-palette").is_none()
     });
-    // Back goes to the file read before.
-    cx.simulate_keystrokes("alt-left");
-    until(cx, "back to the README", |cx| {
-        cx.debug_bounds("file-view-README.md").is_some()
-    });
-    click(cx, "files-find");
+    cx.simulate_keystrokes("ctrl-p");
     until(cx, "the find again", |cx| {
         cx.debug_bounds("files-palette").is_some()
     });
     cx.simulate_keystrokes("escape");
     until(cx, "Escape closes it", |cx| {
         cx.debug_bounds("files-palette").is_none()
+    });
+    click(cx, "files-side-show");
+    until(cx, "the side as it was", |cx| {
+        cx.debug_bounds("group-proj").is_some()
+    });
+    drop(running);
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+/// Moving through many files as an editor does: a click previews and the
+/// next preview takes its place, Enter keeps it; Ctrl+G and Ctrl+Shift+O go
+/// to a line and a symbol, Back returns to the line left; Ctrl+Tab goes to
+/// the file shown last, Ctrl+W closes and Ctrl+Shift+T opens it again; the
+/// tree marks what git says changed and its keys find a name by typing; a
+/// find in the file replaces every one as one edit, and its tab, unsaved,
+/// asks before it closes.
+#[gpui::test]
+fn moving_through_many_files_keeps_tabs_places_and_marks(cx: &mut TestAppContext) {
+    let root = parvi_testkit::fresh_dir("files-many");
+    let git = |args: &[&str]| {
+        let output = std::process::Command::new("git")
+            .current_dir(&root)
+            .args(args)
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    };
+    git(&["init", "-q"]);
+    let code: String = (1..=60)
+        .map(|n| match n {
+            10 => "fn first() {\n".to_owned(),
+            40 => "fn second() {\n".to_owned(),
+            12 | 42 | 50 => format!("    let needle = {n};\n"),
+            _ => format!("    // line {n}\n"),
+        })
+        .collect();
+    std::fs::write(root.join("a.rs"), &code).unwrap();
+    std::fs::write(root.join("b.txt"), "bee\n").unwrap();
+    std::fs::write(root.join("c.txt"), "sea\n").unwrap();
+    git(&["add", "."]);
+    git(&[
+        "-c",
+        "user.name=Test",
+        "-c",
+        "user.email=test@example.com",
+        "commit",
+        "-qm",
+        "initial",
+    ]);
+    std::fs::write(
+        root.join("a.rs"),
+        code.replace("// line 30", "// line thirty"),
+    )
+    .unwrap();
+    std::fs::write(root.join("e.txt"), "new\n").unwrap();
+    let running = start(root.clone());
+    cx.executor().allow_parking();
+    cx.update(parvi_app_shell::prepare);
+    let url = running.url.clone();
+    let (_, cx) = cx.add_window_view(move |w, cx| {
+        parvi_app_shell::start(&[observed_files], Some(url), None, w, cx)
+    });
+    tree(cx, "file-row-a.rs");
+    let page = SEARCH_PAGE.with(|p| p.borrow().as_ref().unwrap().clone());
+    until(cx, "what git says changed, marked", |cx| {
+        cx.debug_bounds("state-a.rs-M").is_some() && cx.debug_bounds("state-e.txt-?").is_some()
+    });
+    assert!(
+        cx.debug_bounds("state-b.txt-M").is_none(),
+        "an unchanged file is not marked"
+    );
+    let tabs = |cx: &mut VisualTestContext| {
+        page.read_with(cx, |p, _| {
+            p.tabs
+                .open
+                .iter()
+                .map(|t| {
+                    (
+                        parvi_files_app::store::paths::base_name(&t.key.1).to_owned(),
+                        t.preview,
+                    )
+                })
+                .collect::<Vec<_>>()
+        })
+    };
+    let shown = |cx: &mut VisualTestContext| {
+        page.read_with(cx, |p, _| {
+            p.opened
+                .as_ref()
+                .map(|o| o.name.clone())
+                .unwrap_or_default()
+        })
+    };
+    let line =
+        |cx: &mut VisualTestContext| page.read_with(cx, |p, cx| p.code.read(cx).cursor_line());
+
+    // A click previews; the next preview takes its tab; Enter keeps it.
+    click(cx, "file-row-b.txt");
+    until(cx, "b previewed", |cx| shown(cx) == "b.txt");
+    click(cx, "file-row-c.txt");
+    until(cx, "c in b's place", |cx| shown(cx) == "c.txt");
+    assert_eq!(tabs(cx), [("c.txt".into(), true)]);
+    cx.simulate_keystrokes("enter");
+    cx.run_until_parked();
+    assert_eq!(tabs(cx), [("c.txt".into(), false)]);
+    click(cx, "file-row-a.rs");
+    until(cx, "a read", |cx| {
+        shown(cx) == "a.rs" && cx.debug_bounds("files-edit").is_some()
+    });
+    page.update_in(cx, |p, w, cx| w.focus(&p.focus, cx));
+    cx.simulate_keystrokes("enter");
+    cx.run_until_parked();
+    assert_eq!(tabs(cx), [("c.txt".into(), false), ("a.rs".into(), false)]);
+
+    // To a line, to a symbol; Back to the line left.
+    cx.simulate_keystrokes("ctrl-g");
+    cx.simulate_input("30");
+    cx.run_until_parked();
+    cx.simulate_keystrokes("enter");
+    until(cx, "at line 30", |cx| line(cx) == 29);
+    cx.simulate_keystrokes("ctrl-shift-o");
+    cx.simulate_input("sec");
+    cx.run_until_parked();
+    until(cx, "the symbol found", |cx| {
+        cx.debug_bounds("files-symbol-second").is_some()
+    });
+    cx.simulate_keystrokes("enter");
+    until(cx, "at the symbol", |cx| line(cx) == 39);
+    assert_eq!(
+        page.read_with(cx, |p, cx| p.symbol_here(cx).map(|s| s.name.clone())),
+        Some("second".into())
+    );
+    cx.simulate_keystrokes("alt-left");
+    until(cx, "back at line 30", |cx| line(cx) == 29);
+
+    // Another file, then Ctrl+Tab to the one shown before it.
+    click(cx, "file-row-b.txt");
+    until(cx, "b previewed", |cx| shown(cx) == "b.txt");
+    cx.simulate_keystrokes("ctrl-tab");
+    until(cx, "the switch", |cx| {
+        cx.debug_bounds("files-switch-a.rs-lit").is_some()
+    });
+    cx.simulate_modifiers_change(Modifiers::none());
+    until(cx, "a again, where it was", |cx| {
+        shown(cx) == "a.rs" && line(cx) == 29
+    });
+    page.update(cx, |p, cx| {
+        let b = p
+            .tabs
+            .open
+            .iter()
+            .find(|t| t.key.1.ends_with("b.txt"))
+            .unwrap()
+            .key
+            .clone();
+        p.tabs.keep(&b);
+        cx.notify();
+    });
+    cx.simulate_keystrokes("ctrl-pagedown");
+    until(cx, "the next tab", |cx| shown(cx) == "b.txt");
+    cx.simulate_keystrokes("ctrl-w");
+    until(cx, "closed, the one before shown", |cx| shown(cx) == "a.rs");
+    assert_eq!(tabs(cx).len(), 2);
+    cx.simulate_keystrokes("ctrl-shift-t");
+    until(cx, "open again", |cx| {
+        shown(cx) == "b.txt" && tabs(cx).len() == 3
+    });
+
+    // Finding in the file and replacing every one, as one edit.
+    click(cx, "files-tab-a.rs");
+    until(cx, "a", |cx| shown(cx) == "a.rs");
+    cx.simulate_keystrokes("ctrl-h");
+    cx.simulate_input("needle");
+    until(cx, "three found", |cx| {
+        page.read_with(cx, |p, _| {
+            p.infile.as_ref().is_some_and(|f| f.found.len() == 3)
+        })
+    });
+    page.update(cx, |p, cx| {
+        p.infile_with.update(cx, |f, cx| f.set("pin", false, cx))
+    });
+    click(cx, "files-replace-all");
+    until(cx, "replaced", |cx| {
+        page.read_with(cx, |p, cx| {
+            p.code.read(cx).text().matches("let pin").count() == 3
+        })
+    });
+    until(cx, "the tab unsaved", |cx| {
+        cx.debug_bounds("files-tab-close-a.rs").is_some()
+    });
+    assert!(page.read_with(cx, |p, _| p.drafts.len() == 1));
+    cx.simulate_keystrokes("escape");
+    page.update_in(cx, |p, w, cx| w.focus(&p.focus, cx));
+    cx.simulate_keystrokes("ctrl-w");
+    until(cx, "asked before closing", |cx| {
+        cx.debug_bounds("files-closing").is_some()
+    });
+    click(cx, "files-close-lose");
+    until(cx, "closed, the edit dropped", |cx| {
+        tabs(cx).len() == 2 && shown(cx) != "a.rs"
+    });
+    assert!(
+        std::fs::read_to_string(root.join("a.rs"))
+            .unwrap()
+            .contains("needle")
+    );
+
+    // An edit that renames a function, discarded: the outline is the
+    // file's again.
+    let names = |cx: &mut VisualTestContext| {
+        page.read_with(cx, |p, _| {
+            p.symbols.iter().map(|s| s.name.clone()).collect::<Vec<_>>()
+        })
+    };
+    click(cx, "file-row-a.rs");
+    until(cx, "a again", |cx| {
+        shown(cx) == "a.rs" && cx.debug_bounds("files-edit").is_some()
+    });
+    cx.simulate_keystrokes("ctrl-h");
+    cx.simulate_input("second");
+    page.update(cx, |p, cx| {
+        p.infile_with.update(cx, |f, cx| f.set("other", false, cx))
+    });
+    click(cx, "files-replace-all");
+    until(cx, "renamed", |cx| names(cx).contains(&"other".to_owned()));
+    click(cx, "files-discard");
+    until(cx, "the outline as saved", |cx| {
+        names(cx).contains(&"second".to_owned()) && !names(cx).contains(&"other".to_owned())
+    });
+
+    // Typing a name in the tree goes to it; Space previews it.
+    page.update_in(cx, |p, w, cx| w.focus(&p.focus, cx));
+    cx.simulate_keystrokes("e");
+    until(cx, "e picked", |cx| {
+        cx.debug_bounds("picked-e.txt").is_some()
+    });
+    cx.simulate_keystrokes("space");
+    until(cx, "e previewed", |cx| shown(cx) == "e.txt");
+    assert!(tabs(cx).contains(&("e.txt".into(), true)));
+
+    // Ctrl+Shift+F looks inside the files as you type, by file.
+    cx.simulate_keystrokes("ctrl-shift-f");
+    cx.simulate_input("needle");
+    cx.executor().advance_clock(Duration::from_millis(300));
+    until(cx, "found inside a.rs", |cx| {
+        cx.debug_bounds("hit-file-a.rs").is_some()
     });
     drop(running);
     std::fs::remove_dir_all(root).unwrap();

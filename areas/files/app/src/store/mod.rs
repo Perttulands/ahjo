@@ -7,6 +7,8 @@ pub mod kinds;
 pub mod listing;
 pub mod marks;
 pub mod paths;
+pub mod symbols;
+pub mod tabs;
 pub mod tree;
 pub mod who;
 pub mod zoom;
@@ -30,55 +32,60 @@ pub struct Kept {
     pub unwrapped: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub zoom: zoom::Level,
-    /// How the page is laid out: being chosen by using each.
-    pub layout: Layout,
+    /// What the side of the page shows, or that it is hidden.
+    pub side: Side,
+    /// The files open in tabs, in their order, to open again.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub tabs: Vec<String>,
 }
 
-/// The ways the page can be laid out, to compare by using them.
-/// Kept by its word; a word not known is the tree.
+/// What the side of the page shows beside the open files: the folders, or
+/// what changed by who works there; or nothing, the files across the page.
+/// Kept by its word; a word not known is the folders.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(from = "String", into = "String")]
-pub enum Layout {
-    /// The list of recent changes and folders beside the file.
+pub enum Side {
+    /// Recent changes and the folders.
     #[default]
-    Tree,
-    /// The file alone across the page; a find over it, the path above it.
-    Reader,
-    /// What changed, by the sessions working where it changed, beside the
-    /// file with its changes marked.
-    Review,
+    Folders,
+    /// What changed, grouped by the sessions working where it changed.
+    Changes,
+    /// No side: the files across the page, Ctrl+P to find another.
+    Hidden,
 }
 
-impl From<String> for Layout {
+impl From<String> for Side {
     fn from(word: String) -> Self {
-        Layout::ALL
+        Side::ALL
             .into_iter()
             .find(|l| l.word().eq_ignore_ascii_case(&word))
             .unwrap_or_default()
     }
 }
 
-impl From<Layout> for String {
-    fn from(layout: Layout) -> Self {
-        layout.word().to_lowercase()
+impl From<Side> for String {
+    fn from(side: Side) -> Self {
+        side.word().to_lowercase()
     }
 }
 
-impl Layout {
-    pub const ALL: [Layout; 3] = [Layout::Tree, Layout::Reader, Layout::Review];
+impl Side {
+    pub const ALL: [Side; 3] = [Side::Folders, Side::Changes, Side::Hidden];
+    /// The views the side switches between.
+    pub const SHOWN: [Side; 2] = [Side::Folders, Side::Changes];
     /// What it is for, in a line.
     pub fn what(self) -> &'static str {
         match self {
-            Layout::Tree => "The list of folders beside the file",
-            Layout::Reader => "The file alone; Ctrl+P finds another",
-            Layout::Review => "What changed, by who works there",
+            Side::Folders => "Recent changes and the folders",
+            Side::Changes => "What changed, by who works there",
+            Side::Hidden => "The files alone; Ctrl+B shows the side",
         }
     }
     pub fn word(self) -> &'static str {
         match self {
-            Layout::Tree => "Tree",
-            Layout::Reader => "Reader",
-            Layout::Review => "Review",
+            Side::Folders => "Folders",
+            Side::Changes => "Changes",
+            Side::Hidden => "Hidden",
         }
     }
 }
@@ -88,11 +95,11 @@ mod tests {
     use super::*;
 
     #[test]
-    fn a_layout_is_kept_by_its_word_and_an_unknown_one_is_the_tree() {
-        let kept: Kept = serde_json::from_str(r#"{"layout":"review"}"#).unwrap();
-        assert_eq!(kept.layout, Layout::Review);
-        let kept: Kept = serde_json::from_str(r#"{"layout":"columns","unwrapped":true}"#).unwrap();
-        assert_eq!(kept.layout, Layout::Tree);
+    fn the_side_is_kept_by_its_word_and_an_unknown_one_is_the_folders() {
+        let kept: Kept = serde_json::from_str(r#"{"side":"changes"}"#).unwrap();
+        assert_eq!(kept.side, Side::Changes);
+        let kept: Kept = serde_json::from_str(r#"{"side":"columns","unwrapped":true}"#).unwrap();
+        assert_eq!(kept.side, Side::Folders);
         assert!(kept.unwrapped, "the rest still reads");
     }
 }

@@ -1,12 +1,14 @@
 //! Page state, file requests and user actions.
+mod nav;
 use crate::{
     open::{self, Draft, Opened, Show},
-    store::{self, Layout, find::Find, paths, tree::Tree},
+    store::{self, Side, find::Find, paths, tree::Tree},
 };
 use gpui::{
     App, AppContext, Context, Entity, FocusHandle, KeyDownEvent, UniformListScrollHandle,
     WeakEntity, Window,
 };
+pub use nav::{InFile, Jump, Spot};
 use parvi_app_kit::{
     Answers, Ask, Host, Page,
     host::{Request, Status},
@@ -86,6 +88,12 @@ pub enum Pick {
     InText,
     /// Review: a folder where things changed, and who works there.
     Group(String),
+    /// The find going to a line of the open file, or to a symbol (by its
+    /// line).
+    Go(usize),
+    Symbol(usize),
+    /// A file that lines inside files were found in.
+    HitFile(String),
 }
 
 /// What changed, as the node answered, or why it could not say.
@@ -133,6 +141,11 @@ pub struct FilesPage {
     /// The first Recent arrived with no file open: the newest opens at the
     /// next draw, where there is a window to open it in.
     pub(crate) newest_due: bool,
+    /// The keyboard goes to the file once it has been read and shows.
+    pub(crate) focus_file_due: bool,
+    /// The find looks inside the files as well as at their names
+    /// (Ctrl+Shift+F), until it ends.
+    pub(crate) search_inside: bool,
     /// The open file is the newest, shown unasked: not kept as the file
     /// to come back to.
     shown_newest: bool,
@@ -157,14 +170,52 @@ pub struct FilesPage {
     /// The watch is running, and when each watched path last changed.
     watching: bool,
     seen: HashMap<String, Option<u64>>,
-    /// How the page is laid out (Tree, Reader or Review).
-    pub layout: Layout,
+    /// What the side shows (or that it is hidden), and what it showed
+    /// before it was hidden.
+    pub side: Side,
+    side_before: Side,
     /// Reader: the find lies open over the file.
     pub palette: bool,
-    /// Files opened before and after the one open, to go back and forth.
-    back: Vec<String>,
-    forward: Vec<String>,
+    /// Where the reader was before and after now, to go back and forth.
+    back: Vec<Spot>,
+    forward: Vec<Spot>,
     travelling: bool,
+    /// The files open in tabs, and each tab not shown as it was left.
+    pub tabs: store::tabs::Tabs,
+    tab_kept: HashMap<store::tabs::Key, nav::TabKept>,
+    pub tabs_scroll: gpui::ScrollHandle,
+    /// Ctrl+Tab held: the tab it is on among those shown last.
+    pub switching: Option<usize>,
+    /// A tab with unsaved changes asked to close: what to do with them.
+    pub closing: Option<store::tabs::Key>,
+    close_after_save: Option<store::tabs::Key>,
+    /// A place to go to once the file is read.
+    pending_place: Option<parvi_app_kit::widgets::code::Place>,
+    /// The open file's symbols.
+    pub symbols: Vec<store::symbols::Symbol>,
+    /// The find inside the open file, and its two fields.
+    pub infile: Option<InFile>,
+    pub infile_query: Entity<TextField>,
+    pub infile_with: Entity<TextField>,
+    /// The find box going to a line or a symbol instead.
+    pub jump: Option<Jump>,
+    /// Letters typed in the list to go to a name, and when.
+    typed_ahead: (String, Option<std::time::Instant>),
+    /// What git says differs from HEAD: by repository, then by path, and
+    /// the folders holding any of it.
+    repos: HashMap<String, Vec<parvi_files_contract::FileState>>,
+    no_repo: std::collections::HashSet<String>,
+    status_asked: std::collections::HashSet<String>,
+    pub states: HashMap<String, char>,
+    pub holding: std::collections::HashSet<String>,
+    /// The second group of tabs beside the first, and (in it) the page it
+    /// is beside.
+    pub split: Option<Entity<FilesPage>>,
+    pub split_of: Option<WeakEntity<FilesPage>>,
+    /// The diff's list, and whether it is shown inline when there is room
+    /// for both sides.
+    pub diff_scroll: UniformListScrollHandle,
+    pub diff_inline: bool,
     /// Review and Reader: a folder shown as a place (its sessions, what
     /// changed in it, its documents) instead of a file.
     pub place: Option<String>,
@@ -234,8 +285,8 @@ impl Page for FilesPage {
         &[
             parvi_app_kit::Setting::text("download_folder", "Download folder", "")
                 .note("Leave empty to use Downloads in your home folder."),
-            parvi_app_kit::Setting::text("layout", "Layout", "tree")
-                .note("tree, reader or review: the list beside the file, the file alone with a find over it, or what changed by session."),
+            parvi_app_kit::Setting::text("side", "Side", "folders")
+                .note("folders, changes or hidden: the folder tree beside the open files, what changed by session, or the open files alone."),
         ];
     fn chords(&self, _: &App) -> Vec<parvi_app_kit::chords::Chord> {
         let me = self.me.clone();
@@ -252,8 +303,8 @@ impl Page for FilesPage {
     }
     fn settings_changed(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let kept: store::Kept = self.host.setting(cx).unwrap_or_default();
-        if kept.layout != self.layout {
-            self.layout = kept.layout;
+        if kept.side != self.side {
+            self.side = kept.side;
             self.laid_out(window, cx);
         }
     }
@@ -299,6 +350,10 @@ impl Page for FilesPage {
         if !self.beside && !self.restored {
             self.restored = true;
             let kept: store::Kept = self.host.setting(cx).unwrap_or_default();
+            let here = self.tree.node.clone();
+            for tab in &kept.tabs {
+                self.tabs.show((here.clone(), tab.clone()), true, None);
+            }
             if let Some(file) = kept.file.clone() {
                 self.show_in_tree(&file, cx);
                 self.open(file, window, cx);
@@ -366,7 +421,33 @@ impl FilesPage {
             c.set_wrap(wrap, cx);
             c
         });
-        let query = cx.new(|cx| TextField::new(cx, "Find a file"));
+        let query = cx.new(|cx| TextField::new(cx, "Find a file  (: a line, @ a symbol)"));
+        let infile_query = cx.new(|cx| TextField::new(cx, "Find in the file"));
+        let infile_with = cx.new(|cx| TextField::new(cx, "Replace with"));
+        cx.subscribe_in(
+            &infile_query,
+            window,
+            move |page, _, event, window, cx| match event {
+                FieldEvent::Changed => page.refind(true, cx),
+                FieldEvent::Submit | FieldEvent::Down => page.infile_step(true, cx),
+                FieldEvent::Up => page.infile_step(false, cx),
+                FieldEvent::Tab if page.infile.as_ref().is_some_and(|f| f.replace) => {
+                    parvi_app_kit::widgets::field::focus(&page.infile_with, window, cx);
+                }
+                _ => {}
+            },
+        )
+        .detach();
+        cx.subscribe_in(
+            &infile_with,
+            window,
+            move |page, _, event, window, cx| match event {
+                FieldEvent::Submit => page.replace_one(window, cx),
+                FieldEvent::SubmitAlt => page.replace_every(window, cx),
+                _ => {}
+            },
+        )
+        .detach();
         let name_field = cx.new(|cx| TextField::new(cx, "New name"));
         cx.subscribe_in(
             &code,
@@ -375,6 +456,7 @@ impl FilesPage {
                 CodeEvent::Save => page.save(cx),
                 CodeEvent::Changed => page.changed(cx),
                 CodeEvent::Escape => page.finish_edit(window, cx),
+                CodeEvent::Moved => cx.notify(),
             },
         )
         .detach();
@@ -447,6 +529,8 @@ impl FilesPage {
             scroll_pending: false,
             pick_at_top: false,
             newest_due: false,
+            focus_file_due: false,
+            search_inside: false,
             shown_newest: false,
             before_find: None,
             reveal_pending: None,
@@ -467,11 +551,38 @@ impl FilesPage {
             upload_conflict: None,
             watching: false,
             seen: HashMap::new(),
-            layout: kept.layout,
+            side: kept.side,
+            side_before: if kept.side == Side::Hidden {
+                Side::Folders
+            } else {
+                kept.side
+            },
             palette: false,
             back: vec![],
             forward: vec![],
             travelling: false,
+            tabs: Default::default(),
+            tab_kept: HashMap::new(),
+            tabs_scroll: gpui::ScrollHandle::new(),
+            switching: None,
+            closing: None,
+            close_after_save: None,
+            pending_place: None,
+            symbols: vec![],
+            infile: None,
+            infile_query,
+            infile_with,
+            jump: None,
+            typed_ahead: (String::new(), None),
+            repos: HashMap::new(),
+            no_repo: Default::default(),
+            status_asked: Default::default(),
+            states: HashMap::new(),
+            holding: Default::default(),
+            split: None,
+            split_of: None,
+            diff_scroll: UniformListScrollHandle::new(),
+            diff_inline: false,
             place: None,
             place_recent: None,
             md_scroll: gpui::ScrollHandle::new(),
@@ -772,7 +883,8 @@ impl FilesPage {
         };
         if let Some(path) = newest.map(|c| c.path.clone()) {
             self.pick = Some(Pick::Recent(path.clone()));
-            self.open(path, window, cx);
+            // Shown unasked, so a preview the next file takes the place of.
+            self.open_as(path, false, window, cx);
             self.shown_newest = true;
             self.keep(cx);
         }
@@ -855,7 +967,10 @@ impl FilesPage {
                 }
                 if s == 200 {
                     match serde_json::from_slice::<Listing>(&b) {
-                        Ok(l) => p.tree.listed(path.clone(), l.entries),
+                        Ok(l) => {
+                            p.tree.listed(path.clone(), l.entries);
+                            p.ask_status(&path, cx);
+                        }
                         Err(e) => p.tree.failed(path.clone(), e.to_string()),
                     }
                     // Folders kept or asked open inside it show now: read them.
@@ -884,15 +999,25 @@ impl FilesPage {
     /// you type.
     fn typed(&mut self, query: String, cx: &mut Context<Self>) {
         self.find_revision += 1;
+        let jump = Jump::read(&query);
         if query.trim().is_empty() {
             self.find = None;
+            self.jump = None;
             self.back_from_find();
             return;
         }
-        if self.find.is_none() {
+        if self.find.is_none() && self.jump.is_none() {
             let place = self.list_scroll.0.borrow().base_handle.offset();
             self.before_find = Some((self.pick.take(), place));
         }
+        if let Some(jump) = jump {
+            self.find = None;
+            self.jump = Some(jump);
+            self.pick = self.picks().into_iter().next();
+            cx.notify();
+            return;
+        }
+        self.jump = None;
         let revision = self.find_revision;
         self.find = Some(Find::new(&query, revision));
         self.pick = Some(Pick::Hit(0));
@@ -911,6 +1036,10 @@ impl FilesPage {
                         page.ask_find(beside, revision, Part::Beside, cx);
                     }
                     page.ask_find(Request::get(NodeId(node), uri), revision, Part::Names, cx);
+                    // Ctrl+Shift+F looks inside the files as you type.
+                    if page.search_inside {
+                        page.find_in_text(cx);
+                    }
                 }
             });
         })
@@ -966,6 +1095,8 @@ impl FilesPage {
         if self.find.is_some() || !self.query.read(cx).text.is_empty() {
             self.query.update(cx, |field, cx| field.set("", false, cx));
             self.find = None;
+            self.jump = None;
+            self.search_inside = false;
             self.find_revision += 1;
             self.back_from_find();
         }
@@ -1032,8 +1163,13 @@ impl FilesPage {
         }
         true
     }
-    /// Enter on the picked row, or a click on it.
+    /// Enter on the picked row: a file opens in a tab of its own.
     pub fn activate(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.activate_as(true, window, cx)
+    }
+    /// The picked row opened: a file kept in its tab, or (`keep` false, a
+    /// click or Space) previewed.
+    pub fn activate_as(&mut self, keep: bool, window: &mut Window, cx: &mut Context<Self>) {
         let pick = match &self.pick {
             Some(p) => p.clone(),
             None if self.find.is_some() => Pick::Hit(0),
@@ -1051,7 +1187,7 @@ impl FilesPage {
                     self.read_recent_inside(path, cx);
                 }
             }
-            Pick::Recent(path) => self.open(path, window, cx),
+            Pick::Recent(path) => self.open_as(path, keep, window, cx),
             Pick::More => {
                 self.recent_more = true;
                 cx.notify();
@@ -1063,7 +1199,7 @@ impl FilesPage {
                     }
                     self.keep(cx);
                 }
-                Some(_) => self.open(path, window, cx),
+                Some(_) => self.open_as(path, keep, window, cx),
                 None => {}
             },
             Pick::Hit(i) => {
@@ -1076,7 +1212,12 @@ impl FilesPage {
                 }
             }
             Pick::InText => self.find_in_text(cx),
-            Pick::Group(folder) => self.show_place(folder, cx),
+            Pick::Group(folder) => {
+                self.remember(cx);
+                self.show_place(folder, cx)
+            }
+            Pick::Go(line) | Pick::Symbol(line) => self.go_to(line, window, cx),
+            Pick::HitFile(path) => self.open_as(path, keep, window, cx),
         }
         cx.notify();
     }
@@ -1088,23 +1229,58 @@ impl FilesPage {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        let same = self
+            .opened
+            .as_ref()
+            .is_some_and(|o| o.path == path && o.node == self.tree.node);
         self.open(path, window, cx);
-        self.pending_line = line;
-    }
-    /// Opens a file in the viewer, and shows it in the tree.
-    pub fn open(&mut self, path: String, window: &mut Window, cx: &mut Context<Self>) {
-        if !self.travelling
-            && let Some(was) = self.opened.as_ref().map(|o| o.path.clone())
-            && was != path
-        {
-            self.back.push(was);
-            self.forward.clear();
+        match line {
+            Some(line) if same => self.go_to(line.saturating_sub(1), window, cx),
+            _ => self.pending_line = line,
         }
+    }
+    /// Opens a file in a tab of its own, and shows it in the tree.
+    pub fn open(&mut self, path: String, window: &mut Window, cx: &mut Context<Self>) {
+        self.open_as(path, true, window, cx)
+    }
+    /// Opens a file in a tab, kept or (`keep` false) a preview the next
+    /// one previewed replaces; a tab left before comes back as it was.
+    pub fn open_as(
+        &mut self,
+        path: String,
+        keep: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let key = (self.tree.node.clone(), path.clone());
+        let same = self.opened.as_ref().is_some_and(|o| o.key() == key);
+        if !same {
+            self.remember(cx);
+            self.stash(cx);
+        }
+        let after = self.opened.as_ref().and_then(|o| self.tabs.at(&o.key()));
+        self.tabs.show(key.clone(), keep, after);
+        let tabs = &self.tabs;
+        self.tab_kept.retain(|k, _| tabs.at(k).is_some());
+        self.tab_into_view(&key);
         if std::mem::take(&mut self.palette) {
             window.focus(&self.focus, cx);
         }
+        self.jump = None;
         self.place = None;
-        self.jump_due = self.layout == Layout::Review && !self.beside;
+        if same {
+            // Asked for now, so it is the file to come back to.
+            self.shown_newest = false;
+            self.follow_open(&path);
+            self.keep(cx);
+            cx.notify();
+            return;
+        }
+        if let Some(kept) = self.tab_kept.remove(&key) {
+            self.restore(kept, window, cx);
+            return;
+        }
+        self.jump_due = self.side == Side::Changes && !self.beside;
         self.md_go.set(None);
         self.md_scroll.set_offset(gpui::Point::default());
         self.md_select.borrow_mut().selection.clear();
@@ -1117,12 +1293,13 @@ impl FilesPage {
         let node = self.tree.node.clone();
         let name = paths::base_name(&path).to_string();
         self.seen.remove(&path);
+        self.symbols.clear();
         self.opened = Some(Opened::reading(node.clone(), path.clone()));
         // Beside, the file takes the list's place: the keys go with it.
         if self.beside && self.query.read(cx).is_focused(window) {
             window.focus(&self.focus, cx);
         }
-        self.tree.select(&path);
+        self.follow_open(&path);
         self.keep(cx);
         let kind = store::kinds::kind(&name);
         if matches!(
@@ -1209,7 +1386,9 @@ impl FilesPage {
                 o.changed_on_disk = false;
                 let lang = syntax::lang(&name);
                 let line = p.pending_line.take();
+                let place = p.pending_place.take();
                 let log = store::kinds::extension(&name) == "log";
+                p.symbols = store::symbols::of(&name, draft.as_ref().map_or(&text, |d| &d.text));
                 p.pretty_code.update(cx, |code, cx| {
                     code.set_lang(lang, cx);
                     if again {
@@ -1225,7 +1404,9 @@ impl FilesPage {
                         code.reload(shown, cx);
                     } else {
                         code.set(shown, cx);
-                        if let Some(line) = line {
+                        if let Some(place) = place.as_ref() {
+                            code.set_place(place, cx);
+                        } else if let Some(line) = line {
                             code.go_to_line(line.saturating_sub(1), cx);
                         } else if log {
                             code.show_end(cx);
@@ -1239,6 +1420,9 @@ impl FilesPage {
                 }
                 if is_text && !again {
                     p.read_changes(cx);
+                }
+                if p.infile.is_some() {
+                    p.refind(false, cx);
                 }
                 cx.notify()
             },
@@ -1278,7 +1462,10 @@ impl FilesPage {
         let node = o.node.clone();
         let path = o.path.clone();
         self.request(
-            Request::get(NodeId(node.clone()), route("diff", &path)),
+            Request::get(
+                NodeId(node.clone()),
+                format!("{}&whole=true", route("diff", &path)),
+            ),
             move |page, status, body, cx| {
                 let Some(o) = page
                     .opened
@@ -1292,6 +1479,10 @@ impl FilesPage {
                     .flatten()
                     .filter(|d| d.error.is_none() && !d.diff.trim().is_empty());
                 o.changes = o.diff.as_ref().map(|d| store::marks::of_diff(&d.diff));
+                o.sides = o
+                    .diff
+                    .as_ref()
+                    .map(|d| std::rc::Rc::new(open::Sides::of(&d.diff)));
                 if o.diff.is_none() {
                     o.diff_open = false;
                 }
@@ -1315,6 +1506,15 @@ impl FilesPage {
             return;
         };
         let text = self.code.read(cx).text().to_owned();
+        let key = o.key();
+        self.tabs.keep(&key);
+        self.symbols = store::symbols::of(&o.name, &text);
+        if self.infile.is_some() {
+            self.refind(false, cx);
+        }
+        let Some(o) = self.opened.as_ref() else {
+            return;
+        };
         if text != o.saved {
             self.drafts.insert(
                 o.key(),
@@ -1467,8 +1667,17 @@ impl FilesPage {
                         code.reload(pretty.as_deref().unwrap_or(&sent), cx)
                     });
                     p.drafts.remove(&old_key);
+                    p.tabs.moved(&old_key, new_key.clone());
                     if let Some(d) = open::acknowledged(&now, &sent) {
-                        p.drafts.insert(new_key, d);
+                        p.drafts.insert(new_key.clone(), d);
+                    }
+                    p.refresh_status(cx);
+                    if p.close_after_save.take() == Some(new_key.clone())
+                        && !p.drafts.contains_key(&new_key)
+                    {
+                        p.close_now(new_key, cx);
+                        cx.notify();
+                        return;
                     }
                     if p.tree.listings.contains_key(&folder) {
                         p.list(folder.clone(), cx);
@@ -1503,8 +1712,14 @@ impl FilesPage {
             cx.notify();
         }
     }
-    /// The list's keys.
+    /// The page's keys: those that move between files wherever the
+    /// keyboard is in the page, then the list's.
     pub fn key(&mut self, e: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
+        if self.files_key(e, window, cx) {
+            cx.stop_propagation();
+            cx.notify();
+            return;
+        }
         let reading = !self.opened.as_ref().is_some_and(|o| o.editing)
             && (self.code.read(cx).is_focused(window)
                 || self.pretty_code.read(cx).is_focused(window));
@@ -1513,29 +1728,22 @@ impl FilesPage {
         }
         let key = &e.keystroke;
         let m = key.modifiers;
-        // Back and forth through the files opened, as a browser goes.
-        if m.alt && !m.control && !m.shift && matches!(key.key.as_str(), "left" | "right") {
-            self.travel(key.key == "left", window, cx);
-            cx.stop_propagation();
-            return;
-        }
-        if m.control && !m.alt && !m.shift && key.key == "p" {
-            self.find_anywhere(window, cx);
-            cx.stop_propagation();
-            return;
-        }
-        // The next change in the file, or the one before.
-        if !m.alt && !m.control && !m.platform && key.key.eq_ignore_ascii_case("n") {
-            self.step_change(!m.shift, cx);
-            cx.stop_propagation();
-            return;
-        }
         if m.control
             && !m.shift
             && key.key == "c"
             && let Some(text) = self.md_select.borrow().copied()
         {
             parvi_app_kit::widgets::select::copy(text, cx);
+            cx.stop_propagation();
+            return;
+        }
+        let plain = !m.alt && !m.control && !m.platform;
+        // Reading: the next change in the file, or the one before.
+        if (reading || self.opened.is_some() && self.focus.is_focused(window) && self.reading())
+            && plain
+            && key.key.eq_ignore_ascii_case("n")
+        {
+            self.step_change(!m.shift, cx);
             cx.stop_propagation();
             return;
         }
@@ -1546,16 +1754,18 @@ impl FilesPage {
             return;
         }
         match key.key.as_str() {
-            "up" | "k" => self.step(-1, cx),
-            "down" | "j" => self.step(1, cx),
+            "up" => self.step(-1, cx),
+            "down" => self.step(1, cx),
+            "pageup" => self.step(-(self.list_page() as isize), cx),
+            "pagedown" => self.step(self.list_page() as isize, cx),
             "home" => self.step(isize::MIN, cx),
             "end" => self.step(isize::MAX, cx),
-            "left" | "h" if matches!(self.pick, Some(Pick::Node(_))) => {
+            "left" if matches!(self.pick, Some(Pick::Node(_))) => {
                 self.tree.left();
                 let path = self.tree.selected.clone().unwrap_or_default();
                 self.set_pick(Pick::Node(path), cx);
             }
-            "right" | "l" if matches!(self.pick, Some(Pick::Node(_))) => {
+            "right" if matches!(self.pick, Some(Pick::Node(_))) => {
                 if self.tree.right()
                     && let Some(path) = self.tree.selected.clone()
                 {
@@ -1564,12 +1774,24 @@ impl FilesPage {
                 let path = self.tree.selected.clone().unwrap_or_default();
                 self.set_pick(Pick::Node(path), cx);
             }
-            "enter" => self.activate(window, cx),
+            // Enter opens to read; Space previews and keeps the keyboard
+            // in the list.
+            "enter" => {
+                self.activate(window, cx);
+                if self.opened.is_some() && self.place.is_none() && !self.picked_folder() {
+                    self.focus_file(window, cx);
+                }
+            }
+            "space" => {
+                self.typed_ahead.0.clear();
+                self.activate_as(false, window, cx)
+            }
             "f5" => {
                 for folder in self.tree.open_folders() {
                     self.list(folder, cx);
                 }
                 self.refresh_recent(cx);
+                self.refresh_status(cx);
             }
             "/" => self.find_anywhere(window, cx),
             "f2" => self.start_rename(window, cx),
@@ -1590,7 +1812,16 @@ impl FilesPage {
                     cx.write_to_clipboard(gpui::ClipboardItem::new_string(path))
                 }
             }
-            _ => return,
+            "backspace" => self.up(window, cx),
+            _ => {
+                // Letters typed go to the next row whose name starts so.
+                match key.key_char.as_deref() {
+                    Some(ch) if !m.control && ch.chars().all(|c| !c.is_control()) => {
+                        self.type_ahead(ch, cx)
+                    }
+                    _ => return,
+                }
+            }
         }
         cx.stop_propagation();
         cx.notify();
@@ -1603,8 +1834,8 @@ impl FilesPage {
                 .find
                 .as_ref()
                 .and_then(|f| f.matches().get(*i).map(|m| m.path.clone())),
-            Pick::Group(p) => Some(p.clone()),
-            Pick::More | Pick::InText => None,
+            Pick::Group(p) | Pick::HitFile(p) => Some(p.clone()),
+            Pick::More | Pick::InText | Pick::Go(_) | Pick::Symbol(_) => None,
         }
     }
     pub fn discard(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -1615,10 +1846,14 @@ impl FilesPage {
             let stale = std::mem::take(&mut opened.changed_on_disk);
             opened.editing = false;
             let (node, path) = (opened.node.clone(), opened.path.clone());
+            self.symbols = store::symbols::of(&opened.name, &saved);
             self.code.update(cx, |code, cx| {
                 code.reload(&saved, cx);
                 code.edit(false, window, cx)
             });
+            if self.infile.is_some() {
+                self.refind(false, cx);
+            }
             if stale {
                 // What is on disk now, not what the edit began from.
                 self.read(node, path, true, cx);
@@ -1703,6 +1938,19 @@ impl FilesPage {
                 }
                 if let Some((from, to)) = &moved {
                     store::drafts::move_drafts(&mut p.drafts, &node, from, to);
+                    // Tabs follow what they show.
+                    let under: Vec<store::tabs::Key> = p
+                        .tabs
+                        .open
+                        .iter()
+                        .map(|t| t.key.clone())
+                        .filter(|k| k.0 == node && paths::inside(from, &k.1))
+                        .collect();
+                    for k in under {
+                        p.tab_kept.remove(&k);
+                        let path = format!("{to}{}", &k.1[from.len()..]);
+                        p.tabs.moved(&k, (node.clone(), path));
+                    }
                     if let Some(opened) = p
                         .opened
                         .as_mut()
@@ -1744,6 +1992,17 @@ impl FilesPage {
                 if !(200..300).contains(&s) {
                     p.fail(message(s, &b), cx);
                 } else {
+                    let gone: Vec<store::tabs::Key> = p
+                        .tabs
+                        .open
+                        .iter()
+                        .map(|t| t.key.clone())
+                        .filter(|k| k.0 == node && paths::inside(&path, &k.1))
+                        .collect();
+                    for k in gone {
+                        p.drafts.remove(&k);
+                        p.close_now(k, cx);
+                    }
                     if p.opened
                         .as_ref()
                         .is_some_and(|o| o.node == node && paths::inside(&path, &o.path))
@@ -2182,6 +2441,9 @@ impl FilesPage {
         self.send_path(path, cx);
     }
     pub(crate) fn keep(&self, cx: &mut Context<Self>) {
+        if self.split_of.is_some() {
+            return;
+        }
         let mut k: store::Kept = self.host.setting(cx).unwrap_or_default();
         if self.beside {
             k.beside = self.tree.kept();
@@ -2193,6 +2455,13 @@ impl FilesPage {
                 .as_ref()
                 .filter(|_| !self.shown_newest)
                 .map(|o| o.path.clone());
+            k.tabs = self
+                .tabs
+                .open
+                .iter()
+                .filter(|t| !t.preview && t.key.0 == self.tree.node)
+                .map(|t| t.key.1.clone())
+                .collect();
         }
         if k != self.host.setting(cx).unwrap_or_default() {
             let _ = self.host.set_setting(&k, cx);
@@ -2201,6 +2470,12 @@ impl FilesPage {
 
     /// Whether anyone sees this view now.
     fn seen_now(&self, cx: &App) -> bool {
+        if let Some(of) = &self.split_of {
+            return of.upgrade().is_some_and(|p| {
+                let p = p.read(cx);
+                p.split.is_some() && p.seen_now(cx)
+            });
+        }
         if self.beside {
             self.host
                 .beside_of(self.beside_from, cx)
@@ -2294,6 +2569,9 @@ impl FilesPage {
                 }
                 // Recent changes walk every root: a change seen here asks
                 // for them again only now and then.
+                if any {
+                    p.refresh_status(cx);
+                }
                 if any && p.recent_at.is_none_or(|at| at.elapsed() >= RECENT_AGAIN) {
                     p.refresh_recent(cx);
                 }
@@ -2310,20 +2588,20 @@ impl FilesPage {
     /// The layout changed: start it as it starts.
     pub(crate) fn laid_out(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.palette = false;
-        if self.layout == Layout::Tree {
-            self.place = None;
+        if self.side != Side::Hidden {
+            self.side_before = self.side;
         }
-        if self.layout == Layout::Reader && self.opened.is_none() && self.place.is_none() {
+        if self.side == Side::Hidden && self.opened.is_none() && self.place.is_none() {
             self.find_anywhere(window, cx);
         }
         cx.notify();
     }
 
-    pub fn set_layout(&mut self, layout: Layout, window: &mut Window, cx: &mut Context<Self>) {
-        self.layout = layout;
+    pub fn set_side(&mut self, layout: Side, window: &mut Window, cx: &mut Context<Self>) {
+        self.side = layout;
         let mut kept: store::Kept = self.host.setting(cx).unwrap_or_default();
-        if kept.layout != layout {
-            kept.layout = layout;
+        if kept.side != layout {
+            kept.side = layout;
             let _ = self.host.set_setting(&kept, cx);
         }
         self.laid_out(window, cx);
@@ -2332,7 +2610,7 @@ impl FilesPage {
     /// The find takes the keyboard: in the list, or (Reader) opened over
     /// the file.
     pub fn find_anywhere(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if self.layout == Layout::Reader && !self.beside {
+        if self.side == Side::Hidden && !self.beside {
             self.palette = true;
         }
         parvi_app_kit::widgets::field::focus(&self.query, window, cx);
@@ -2344,29 +2622,6 @@ impl FilesPage {
         self.clear_find(cx);
         window.focus(&self.focus, cx);
         cx.notify();
-    }
-
-    /// Back to the file opened before this one, or forward again.
-    pub fn travel(&mut self, back: bool, window: &mut Window, cx: &mut Context<Self>) {
-        let (from, to) = if back {
-            (&mut self.back, &mut self.forward)
-        } else {
-            (&mut self.forward, &mut self.back)
-        };
-        let Some(path) = from.pop() else {
-            return;
-        };
-        if let Some(now) = self.opened.as_ref().map(|o| o.path.clone()) {
-            to.push(now);
-        }
-        self.travelling = true;
-        self.show_in_tree(&path, cx);
-        self.open(path, window, cx);
-        self.travelling = false;
-    }
-
-    pub fn can_travel(&self, back: bool) -> bool {
-        !if back { &self.back } else { &self.forward }.is_empty()
     }
 
     /// The open file's change marks on its lines, none while it is being
@@ -2405,7 +2660,11 @@ impl FilesPage {
         let Some(o) = &self.opened else {
             return;
         };
-        if o.diff_open || o.changes.as_ref().is_none_or(|c| c.marks.is_empty()) {
+        if o.diff_open {
+            self.step_diff(forward, cx);
+            return;
+        }
+        if o.changes.as_ref().is_none_or(|c| c.marks.is_empty()) {
             return;
         }
         if !crate::view::rendered(self) {

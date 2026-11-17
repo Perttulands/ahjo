@@ -9,7 +9,13 @@ const LIMIT: u64 = 1 << 20;
 
 pub use parvi_files_contract::Diff;
 
-pub fn read(roots: &Roots, requested: &str) -> Result<Diff, FilesError> {
+/// Lines around each change when the whole file is asked for: more than
+/// any file the limit lets through has.
+const WHOLE: &str = "--unified=1000000";
+
+/// The diff of `requested`; `whole` gives every line of the file around
+/// its changes, not three.
+pub fn read(roots: &Roots, requested: &str, whole: bool) -> Result<Diff, FilesError> {
     let path = roots.existing(requested)?;
     if roots
         .list()
@@ -45,9 +51,9 @@ pub fn read(roots: &Roots, requested: &str) -> Result<Diff, FilesError> {
             "diff",
             "--no-ext-diff",
             "--no-textconv",
-            "HEAD",
-            "--",
         ])
+        .args(whole.then_some(WHOLE))
+        .args(["HEAD", "--"])
         .arg(relative)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())

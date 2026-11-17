@@ -1,10 +1,12 @@
 //! Drawing the page: the list (recent changes, the tree, or what a find
 //! found) beside the opened file, in the shared page skeleton.
+mod diffs;
 mod reader;
+mod tabs;
 
 use crate::open::Show;
 use crate::page::{FilesPage, Pick};
-use crate::store::Layout;
+use crate::store::Side;
 use crate::store::{format, paths, tree::Row};
 use gpui::{
     AnyElement, Context, Div, MouseButton, MouseMoveEvent, Render, ScrollDelta, SharedString,
@@ -85,6 +87,13 @@ pub enum Line {
     /// Review: a folder where things changed (as a group of the lines
     /// after it), its newest change.
     Group(String, u64),
+    /// The find going to a line of the open file: the line, and what the
+    /// row says.
+    Go(usize, String),
+    /// A symbol of the open file the find found.
+    Symbol(crate::store::symbols::Symbol),
+    /// A file lines were found in, and how many.
+    HitFile(String, usize),
 }
 
 impl Line {
@@ -97,6 +106,9 @@ impl Line {
             Line::Hit(i, _) => Some(Pick::Hit(*i)),
             Line::InText(_) => Some(Pick::InText),
             Line::Group(folder, _) => Some(Pick::Group(folder.clone())),
+            Line::Go(line, _) => Some(Pick::Go(*line)),
+            Line::Symbol(s) => Some(Pick::Symbol(s.line)),
+            Line::HitFile(path, _) => Some(Pick::HitFile(path.clone())),
             Line::Label(_) | Line::Note { .. } => None,
         }
     }
@@ -105,6 +117,9 @@ impl Line {
 /// The lines the list shows now.
 pub fn lines(p: &FilesPage) -> Vec<Line> {
     let mut out = Vec::new();
+    if p.jump.is_some() {
+        return p.jump_lines();
+    }
     if let Some(find) = &p.find {
         // Names first, then the lines inside files, each under its label.
         let quoted = format!("\u{201c}{}\u{201d}", find.query.trim());
@@ -135,12 +150,14 @@ pub fn lines(p: &FilesPage) -> Vec<Line> {
             )));
             match &find.inside {
                 Some(inside) => {
+                    let first = out.len();
                     found_lines(
                         &inside.found,
                         names,
                         format!("No file here has {quoted}"),
                         &mut out,
                     );
+                    group_by_file(&mut out, first);
                 }
                 None => out.push(Line::InText(quoted)),
             }
@@ -148,12 +165,12 @@ pub fn lines(p: &FilesPage) -> Vec<Line> {
         return out;
     }
     let main = !p.beside;
-    if main && p.layout == Layout::Review {
+    if main && p.side == Side::Changes {
         return reader::review_lines(p);
     }
     // The Reader's find shows what changed; folders are reached by the
     // path over the file.
-    let tree = !(main && p.layout == Layout::Reader);
+    let tree = !(main && p.side == Side::Hidden);
     if let Some(Ok(recent)) = &p.recent
         && !recent.is_empty()
     {
@@ -232,6 +249,28 @@ pub fn lines(p: &FilesPage) -> Vec<Line> {
     out
 }
 
+/// The lines found inside files from `first` on, under a line for each
+/// file they are in, with how many.
+fn group_by_file(out: &mut Vec<Line>, first: usize) {
+    let hits = out.split_off(first);
+    let mut i = 0;
+    while i < hits.len() {
+        let Line::Hit(_, hit) = &hits[i] else {
+            out.push(hits[i].clone());
+            i += 1;
+            continue;
+        };
+        let path = hit.path.clone();
+        let n = hits[i..]
+            .iter()
+            .take_while(|l| matches!(l, Line::Hit(_, h) if h.path == path))
+            .count();
+        out.push(Line::HitFile(path, n));
+        out.extend(hits[i..i + n].iter().cloned());
+        i += n;
+    }
+}
+
 /// One group of hits, numbered from `first`: still looking, why not, none,
 /// or the hits (with a word first when there were more). Answers how many.
 fn found_lines(
@@ -271,6 +310,52 @@ fn found_lines(
             }
             m.matches.len()
         }
+    }
+}
+
+/// Letters kept before what was found when a found line is cut short to
+/// show it.
+const LEAD: usize = 12;
+
+/// A found line from a little before its first find: a long line's find
+/// stays in view.
+fn lead_to_found<'a>(text: &'a str, query: &str) -> std::borrow::Cow<'a, str> {
+    let Some(at) = crate::store::find::in_text(text, query)
+        .first()
+        .map(|r| r.start)
+    else {
+        return text.into();
+    };
+    let before = text[..at].chars().count();
+    if before <= LEAD {
+        return text.into();
+    }
+    let from = text[..at]
+        .char_indices()
+        .nth(before - LEAD)
+        .map_or(0, |(i, _)| i);
+    format!("\u{2026}{}", &text[from..]).into()
+}
+
+/// The colour a file's state against HEAD shows in, by the theme's
+/// meanings: new is done work, taken out an error's colour, changed and not
+/// committed waits on the operator.
+pub fn state_colour(t: &Theme, state: char) -> gpui::Hsla {
+    match state {
+        '?' | 'A' => t.done,
+        'D' => t.error,
+        _ => t.needs,
+    }
+}
+
+/// The letter a file's state shows as: U for a file git does not know yet.
+pub fn state_word(state: char) -> &'static str {
+    match state {
+        '?' => "U",
+        'A' => "A",
+        'D' => "D",
+        'R' => "R",
+        _ => "M",
     }
 }
 
@@ -346,9 +431,9 @@ impl FilesPage {
                     MouseButton::Right,
                     self.menu_at(c.path.clone(), c.files.is_some(), cx),
                 )
-                .on_click(cx.listener(move |p, _, w, cx| {
+                .on_click(cx.listener(move |p, e: &gpui::ClickEvent, w, cx| {
                     p.set_pick(Pick::Recent(path.clone()), cx);
-                    p.activate(w, cx);
+                    p.activate_as(e.click_count() > 1, w, cx);
                 }))
                 .into_any_element()
             }
@@ -371,15 +456,50 @@ impl FilesPage {
                 let room = self.row_letters(0.);
                 let selector = format!("hit-{name}");
                 let row = match hit.text.as_deref().map(str::trim) {
-                    // A hit in the text shows the line it is in after the name.
-                    Some(text) => pane::row(t, SharedString::from(format!("hit-{i}")), picked)
-                        .h(px(size::ROW))
-                        .child(
-                            div()
-                                .flex_none()
-                                .child(pane::middle(&name, room.min(name.len()).max(room / 2))),
-                        )
-                        .child(pane::cell(text.to_owned()).text_color(t.dim)),
+                    // A hit in the text, under its file: its line's number
+                    // and the line, what was found in it marked.
+                    Some(text) => {
+                        let query = self.find.as_ref().map_or("", |f| f.query.trim());
+                        let text = &*lead_to_found(text, query);
+                        let marked: Vec<_> = crate::store::find::in_text(text, query)
+                            .into_iter()
+                            .map(|r| {
+                                (
+                                    r,
+                                    gpui::HighlightStyle {
+                                        color: Some(t.text),
+                                        background_color: Some(t.accent_light()),
+                                        ..Default::default()
+                                    },
+                                )
+                            })
+                            .collect();
+                        pane::row(t, SharedString::from(format!("hit-{i}")), picked)
+                            .h(px(size::ROW))
+                            .pl(px(size::ROW_PAD - size::ROW_INSET + DISCLOSURE))
+                            .child(
+                                div()
+                                    .flex_none()
+                                    .min_w(px(size::COUNT * 2.))
+                                    .text_size(px(size::SMALL))
+                                    .text_color(t.dim)
+                                    .child(hit.line.map(|l| l.to_string()).unwrap_or_default()),
+                            )
+                            .child(
+                                div()
+                                    .flex_1()
+                                    .min_w_0()
+                                    .overflow_hidden()
+                                    .whitespace_nowrap()
+                                    .text_ellipsis()
+                                    .text_color(t.text2)
+                                    .font_weight(gpui::FontWeight::NORMAL)
+                                    .child(
+                                        gpui::StyledText::new(SharedString::from(text.to_owned()))
+                                            .with_highlights(marked),
+                                    ),
+                            )
+                    }
                     None => self.file_row(
                         t,
                         SharedString::from(format!("hit-{i}")),
@@ -415,6 +535,63 @@ impl FilesPage {
                 .into_any_element(),
             Line::Node(row) => self.tree_row(row, picked, t, cx),
             Line::Group(folder, newest) => self.group_row(folder, newest, picked, t, cx),
+            Line::HitFile(path, n) => {
+                let name = paths::base_name(&path).to_owned();
+                let folder = paths::shown(&self.tree.roots, &paths::parent(&path));
+                let room = self.row_letters(0.).saturating_sub(4);
+                let selector = format!("hit-file-{name}");
+                let open = path.clone();
+                self.file_row(
+                    t,
+                    SharedString::from(format!("hit-file-{path}")),
+                    picked,
+                    &name,
+                    Some(folder),
+                    room,
+                    Some(n.to_string()),
+                    cx,
+                )
+                .debug_selector(move || selector.clone())
+                .tooltip(kit::tip(path.clone()))
+                .on_mouse_down(MouseButton::Right, self.menu_at(path.clone(), false, cx))
+                .on_click(cx.listener(move |p, e: &gpui::ClickEvent, w, cx| {
+                    p.set_pick(Pick::HitFile(open.clone()), cx);
+                    p.activate_as(e.click_count() > 1, w, cx);
+                }))
+                .into_any_element()
+            }
+            Line::Go(line, words) => pane::row(t, "files-go-line", picked)
+                .h(px(size::ROW))
+                .debug_selector(|| "files-go-line".into())
+                .child(pane::cell(words))
+                .on_click(cx.listener(move |p, _, w, cx| {
+                    p.set_pick(Pick::Go(line), cx);
+                    p.activate(w, cx);
+                }))
+                .into_any_element(),
+            Line::Symbol(sym) => {
+                let line = sym.line;
+                let selector = format!("files-symbol-{}", sym.name);
+                pane::row(t, SharedString::from(format!("symbol-{line}")), picked)
+                    .h(px(size::ROW))
+                    .debug_selector(move || selector.clone())
+                    .child(div().flex_none().w(px(sym.depth as f32 * INDENT)))
+                    .child(
+                        div()
+                            .flex_none()
+                            .min_w(px(size::COUNT * 3.))
+                            .text_size(px(size::SMALL))
+                            .text_color(t.dim)
+                            .child(sym.kind),
+                    )
+                    .child(pane::cell(sym.name.clone()))
+                    .child(pane::meta(t, (line + 1).to_string(), None))
+                    .on_click(cx.listener(move |p, _, w, cx| {
+                        p.set_pick(Pick::Symbol(line), cx);
+                        p.activate(w, cx);
+                    }))
+                    .into_any_element()
+            }
         }
     }
 
@@ -473,6 +650,9 @@ impl FilesPage {
         let path = row.path.clone();
         let folder = row.folder;
         let selector = format!("file-row-{}", row.name);
+        let state = self.states.get(&row.path).copied();
+        let holds = row.folder && self.holding.contains(&row.path);
+        let state_colour = state.map(|s| state_colour(t, s));
         let disclosure = match (row.folder, row.open) {
             (true, true) => "▾",
             (true, false) => "▸",
@@ -502,9 +682,27 @@ impl FilesPage {
                     .min_w_0()
                     .overflow_hidden()
                     .whitespace_nowrap()
-                    .child(pane::middle(&row.name, room)),
+                    .when_some(state_colour, |d, c| d.text_color(c))
+                    .when(state == Some('D'), |d| d.line_through())
+                    .child(pane::middle(&row.name, room.saturating_sub(2))),
             )
             .when(row.reading, |r| r.child(pane::meta(t, "…", None)))
+            .when_some(state, |r, s| {
+                let selector = format!("state-{}-{}", row.name, s);
+                r.child(
+                    pane::meta(t, state_word(s), state_colour)
+                        .debug_selector(move || selector.clone()),
+                )
+            })
+            .when(holds, |r| {
+                r.child(
+                    div()
+                        .flex_none()
+                        .size(px(size::DOT - 2.))
+                        .rounded_full()
+                        .bg(t.needs),
+                )
+            })
             .when(folder, |r| {
                 let destination = path.clone();
                 r.on_drop(cx.listener(move |p, dropped: &gpui::ExternalPaths, _, cx| {
@@ -513,11 +711,15 @@ impl FilesPage {
                 }))
             })
             .on_mouse_down(MouseButton::Right, self.menu_at(path.clone(), folder, cx))
-            .on_click(cx.listener(move |p, _, w, cx| {
+            .on_click(cx.listener(move |p, e: &gpui::ClickEvent, w, cx| {
                 w.focus(&p.focus, cx);
                 p.set_pick(Pick::Node(path.clone()), cx);
-                // A click on a folder opens or closes it; a file opens.
-                p.activate(w, cx);
+                // A click on a folder opens or closes it; a file previews,
+                // and a second click keeps it open.
+                if folder && e.click_count() > 1 {
+                    return;
+                }
+                p.activate_as(e.click_count() > 1, w, cx);
             }))
             .into_any_element()
     }
@@ -605,7 +807,15 @@ impl FilesPage {
         .flex_1()
         .debug_selector(|| "files-list".into());
         let drop_into = self.tree.folder_here();
-        let frame = if !self.beside && self.layout == Layout::Review {
+        let side = (!self.beside && !self.palette).then(|| self.side_switch(t, cx));
+        let body = div()
+            .flex_1()
+            .min_h_0()
+            .flex()
+            .flex_col()
+            .children(side)
+            .child(body);
+        let frame = if !self.beside && self.side == Side::Changes {
             pane::list_wide_frame(t, head, body)
         } else {
             pane::list_frame(t, head, body)
@@ -624,6 +834,7 @@ impl FilesPage {
     /// what can be done with it now.
     fn viewer_head(&self, t: &Theme, cx: &mut Context<Self>) -> Div {
         let mut head = pane::head(t)
+            .h(px(size::CONTROL + size::HEAD_GAP))
             .relative()
             .child(measure(self.head_room.clone()));
         if self.beside {
@@ -638,9 +849,7 @@ impl FilesPage {
             head = head.children(self.head_lead(t, cx));
         }
         let Some(o) = &self.opened else {
-            return head
-                .child(div().flex_1())
-                .when(!self.beside, |h| h.child(self.layout_switch(t, cx)));
+            return head.child(div().flex_1());
         };
         // A narrow header leaves out the picture's pixel size and 1:1, then
         // the percentage, then the zoom steps; the name gives way in the
@@ -676,7 +885,8 @@ impl FilesPage {
                         .flex_none()
                         .font_weight(gpui::FontWeight::SEMIBOLD)
                         .child(name),
-                ),
+                )
+                .children(self.symbol_crumb(t, cx)),
         );
         let text = matches!(o.show, Show::Text { .. });
         let dirty = self.drafts.contains_key(&o.key());
@@ -767,9 +977,6 @@ impl FilesPage {
                     cx.listener(|p, e: &gpui::ClickEvent, _, cx| p.file_menu(e.position(), cx)),
                 ),
         );
-        if !self.beside {
-            head = head.child(self.layout_switch(t, cx));
-        }
         head.children(self.beside_acts(t, cx))
     }
 
@@ -892,9 +1099,10 @@ impl FilesPage {
             return pane::vacant(t, "No file open", None).into_any_element();
         };
         if o.diff_open
-            && let Some(diff) = &o.diff
+            && let Some(sides) = o.sides.clone()
         {
-            return self.diff(t, diff).into_any_element();
+            let truncated = o.diff.as_ref().is_some_and(|d| d.truncated);
+            return self.diff_view(t, sides, truncated, cx);
         }
         match &o.show {
             Show::Reading => pane::empty(t, "Reading…", None).into_any_element(),
@@ -952,58 +1160,14 @@ impl FilesPage {
             }
             Show::Text { .. } => {
                 let selector = format!("files-code-top-{}", self.code.read(cx).top_line() + 1);
-                div()
+                let code = div()
                     .size_full()
                     .debug_selector(move || selector.clone())
                     .child(self.code.clone())
-                    .into_any_element()
+                    .into_any_element();
+                self.with_outline(t, code, cx)
             }
         }
-    }
-
-    fn diff(&self, t: &Theme, diff: &parvi_files_contract::Diff) -> Div {
-        let mut rows = div()
-            .id("file-diff")
-            .debug_selector(|| "files-diff".into())
-            .size_full()
-            .overflow_scroll()
-            .p(px(size::HEAD_PAD))
-            .flex()
-            .flex_col();
-        for row in crate::store::diff::rows(&diff.diff) {
-            let (prefix, colour, fill) = match row.kind {
-                crate::store::diff::Kind::Add => (
-                    "+",
-                    parvi_app_kit::theme::rgb(t.ansi[2]),
-                    Some(parvi_app_kit::theme::alpha(
-                        parvi_app_kit::theme::rgb(t.ansi[2]),
-                        0.08,
-                    )),
-                ),
-                crate::store::diff::Kind::Delete => (
-                    "-",
-                    parvi_app_kit::theme::rgb(t.ansi[1]),
-                    Some(parvi_app_kit::theme::alpha(
-                        parvi_app_kit::theme::rgb(t.ansi[1]),
-                        0.08,
-                    )),
-                ),
-                crate::store::diff::Kind::Hunk => ("", t.dim, None),
-                crate::store::diff::Kind::Context => (" ", t.text2, None),
-            };
-            rows = rows.child(
-                div()
-                    .flex_none()
-                    .whitespace_nowrap()
-                    .text_color(colour)
-                    .when_some(fill, |d, f| d.bg(f))
-                    .child(format!("{prefix}{}", row.text)),
-            );
-        }
-        if diff.truncated {
-            rows = rows.child(pane::meta(t, "The rest is not shown", None));
-        }
-        div().size_full().child(rows)
     }
 
     fn model(&self, t: &Theme, m: &crate::model::Preview, cx: &mut Context<Self>) -> AnyElement {
@@ -1085,10 +1249,30 @@ impl FilesPage {
             .size_full()
             .flex()
             .flex_col()
+            .children(self.closing_line(t, cx))
             .children(self.decision(t, cx))
+            .children(self.infile_bar(t, cx))
             .child(div().flex_1().min_h_0().child(self.viewer_body(t, cx)));
-        pane::detail_frame(head, body)
-            .debug_selector(|| "files-viewer".into())
+        let tabs = (!self.beside).then(|| {
+            div()
+                .flex_none()
+                .flex()
+                .children(self.side_show(t, cx))
+                .child(div().flex_1().min_w_0().child(self.tab_strip(t, cx)))
+        });
+        div()
+            .flex_1()
+            .min_w_0()
+            .h_full()
+            .flex()
+            .flex_col()
+            .children(tabs)
+            .child(
+                pane::detail_frame(head, body)
+                    .flex_1()
+                    .min_h_0()
+                    .debug_selector(|| "files-viewer".into()),
+            )
             .when(self.beside, |d| d.border_r_1().border_color(t.divider))
     }
 }
@@ -1099,6 +1283,20 @@ impl Render for FilesPage {
         if self.newest_due {
             cx.defer_in(window, |page, window, cx| page.open_newest(window, cx));
         }
+        if self.focus_file_due
+            && !self
+                .opened
+                .as_ref()
+                .is_some_and(|o| matches!(o.show, Show::Reading))
+        {
+            cx.defer_in(window, |page, window, cx| {
+                // Unless the keyboard went elsewhere meanwhile.
+                if page.focus_file_due && page.focus.is_focused(window) {
+                    page.focus_file(window, cx);
+                }
+                page.focus_file_due = false;
+            });
+        }
         if self.find.as_ref().is_some_and(|f| f.open_first) {
             cx.defer_in(window, |page, window, cx| page.open_first_found(window, cx));
         }
@@ -1106,10 +1304,18 @@ impl Render for FilesPage {
         let root = div()
             .debug_selector(|| "files-page".into())
             .size_full()
+            .relative()
             .track_focus(&self.focus)
             .on_key_down(cx.listener(Self::key))
+            .on_modifiers_changed(cx.listener(Self::modifiers))
             .bg(t.bg)
             .text_color(t.text);
+        if self.split_of.is_some() {
+            return root
+                .flex()
+                .child(self.viewer(&t, cx))
+                .children(self.switcher(&t));
+        }
         if self.beside {
             // Beside another page it is one column: the list, or the file
             // opened from it.
@@ -1119,14 +1325,25 @@ impl Render for FilesPage {
                 self.list_column(&t, cx)
             });
         }
-        match self.layout {
-            Layout::Tree => root.child(pane::page(
-                &t,
-                self.list_column(&t, cx),
-                self.viewer(&t, cx),
-            )),
-            Layout::Reader => root.child(self.reader_page(&t, cx)),
-            Layout::Review => root.child(self.review_page(&t, cx)),
-        }
+        let page = match self.side {
+            Side::Hidden => self.reader_page(&t, cx),
+            Side::Folders | Side::Changes => self.side_page(&t, cx),
+        };
+        root.child(page).children(self.switcher(&t))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn a_long_found_line_starts_a_little_before_its_find() {
+        let line = "matches!(self.show, Show::Text { .. }) && self.saved.len() <= MAX_EDIT";
+        let shown = super::lead_to_found(line, "MAX_EDIT");
+        assert_eq!(shown, "\u{2026}ed.len() <= MAX_EDIT");
+        assert_eq!(
+            super::lead_to_found("short MAX_EDIT", "max_edit"),
+            "short MAX_EDIT"
+        );
+        assert_eq!(super::lead_to_found("nothing", "zz"), "nothing");
     }
 }

@@ -59,6 +59,13 @@ pub struct Lang {
     caseless: bool,
 }
 
+impl Lang {
+    /// What starts a line comment, when the language has one.
+    pub fn comment(&self) -> Option<&'static str> {
+        self.line.first().copied()
+    }
+}
+
 /// Larger text is shown plain: a rescan per keystroke stays well under a
 /// frame up to here.
 pub const MAX_BYTES: usize = 1 << 20;

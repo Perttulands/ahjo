@@ -5,7 +5,7 @@
 use super::*;
 use crate::store::who;
 use gpui::{Bounds, Pixels, Point, point};
-use parvi_app_kit::theme::{alpha, rgb};
+use parvi_app_kit::theme::alpha;
 use parvi_app_kit::widgets::markdown::{self, Block};
 use parvi_app_kit::widgets::select;
 
@@ -204,7 +204,7 @@ impl FilesPage {
         use parvi_app_kit::menu::MenuRow;
         let me = self.me.clone();
         let here = folder.clone();
-        let tree = self.layout == Layout::Tree;
+        let tree = self.side == Side::Folders;
         let mut rows = vec![
             MenuRow::new(
                 if tree {
@@ -214,7 +214,7 @@ impl FilesPage {
                 },
                 move |_, cx| {
                     let _ = me.update(cx, |p, cx| {
-                        if p.layout == Layout::Tree {
+                        if p.side == Side::Folders {
                             p.show_in_tree(&here, cx);
                         } else {
                             p.show_place(here.clone(), cx);
@@ -247,7 +247,7 @@ impl FilesPage {
                         let _ = me.update(cx, |p, cx| {
                             if !is_folder {
                                 p.open(path.clone(), w, cx);
-                            } else if p.layout == Layout::Tree {
+                            } else if p.side == Side::Folders {
                                 p.show_in_tree(&path, cx);
                             } else {
                                 p.show_place(path.clone(), cx);
@@ -270,7 +270,7 @@ impl FilesPage {
         }
         if c.new_file {
             return Some(
-                pane::meta(t, "New, not committed", Some(rgb(t.ansi[2])))
+                pane::meta(t, "New, not committed", Some(t.done))
                     .debug_selector(|| "files-new-file".into())
                     .into_any_element(),
             );
@@ -293,14 +293,10 @@ impl FilesPage {
                 .cursor_pointer()
                 .hover(|s| s.bg(t.raised))
                 .tooltip(kit::tip(tip))
+                .child(div().text_color(t.done).child(format!("+{}", c.added)))
                 .child(
                     div()
-                        .text_color(rgb(t.ansi[2]))
-                        .child(format!("+{}", c.added)),
-                )
-                .child(
-                    div()
-                        .text_color(rgb(t.ansi[1]))
+                        .text_color(t.error)
                         .child(format!("\u{2212}{}", c.removed)),
                 )
                 .on_click(cx.listener(|p, _, _, cx| p.step_change(true, cx)))
@@ -360,7 +356,7 @@ impl FilesPage {
     /// in the Reader the find, which has no list to sit in.
     pub(super) fn head_lead(&self, t: &Theme, cx: &mut Context<Self>) -> Vec<AnyElement> {
         let mut lead = vec![];
-        if self.layout == Layout::Reader && !self.beside {
+        if self.side == Side::Hidden && !self.beside {
             lead.push(
                 pane::act(t, "files-find", "Find")
                     .debug_selector(|| "files-find".into())
@@ -371,48 +367,7 @@ impl FilesPage {
                     .into_any_element(),
             );
         }
-        for (back, word, id, tip) in [
-            (true, "\u{2190}", "files-go-back", "Back (Alt+Left)"),
-            (false, "\u{2192}", "files-go-forward", "Forward (Alt+Right)"),
-        ] {
-            if !self.can_travel(back) || self.beside {
-                continue;
-            }
-            lead.push(
-                pane::act(t, id, word)
-                    .debug_selector(move || id.into())
-                    .tooltip(kit::tip(tip))
-                    .on_click(cx.listener(move |p, _, w, cx| p.travel(back, w, cx)))
-                    .into_any_element(),
-            );
-        }
         lead
-    }
-
-    /// The choice of layout, at the head's right end.
-    pub(super) fn layout_switch(&self, t: &Theme, cx: &mut Context<Self>) -> AnyElement {
-        pane::act(
-            t,
-            "files-layout",
-            format!("{} \u{25be}", self.layout.word()),
-        )
-        .debug_selector(|| "files-layout".into())
-        .tooltip(kit::tip("How this page is laid out"))
-        .on_click(cx.listener(|p, e: &gpui::ClickEvent, _, cx| {
-            use parvi_app_kit::menu::MenuRow;
-            let rows = Layout::ALL
-                .into_iter()
-                .map(|l| {
-                    let me = p.me.clone();
-                    MenuRow::new(l.word(), move |w, cx| {
-                        let _ = me.update(cx, |p, cx| p.set_layout(l, w, cx));
-                    })
-                    .checked(l == p.layout)
-                })
-                .collect();
-            p.host.menu(rows, e.position(), cx);
-        }))
-        .into_any_element()
     }
 
     /// Rendered Markdown: one column centred, the changed blocks barred,
@@ -632,14 +587,40 @@ impl FilesPage {
             )
     }
 
-    /// Reader: the file alone across the page, the find over it when
-    /// asked for (or when nothing is open).
-    pub(super) fn reader_page(&self, t: &Theme, cx: &mut Context<Self>) -> Div {
+    /// The open files, or the place shown, and the second group of tabs
+    /// beside them.
+    fn main_view(&self, t: &Theme, cx: &mut Context<Self>) -> Div {
         let main = if self.place.is_some() {
-            self.place_view(t, cx)
+            div()
+                .flex()
+                .flex_col()
+                .children((!self.beside).then(|| {
+                    div()
+                        .flex_none()
+                        .flex()
+                        .children(self.side_show(t, cx))
+                        .child(div().flex_1().min_w_0().child(self.tab_strip(t, cx)))
+                }))
+                .child(self.place_view(t, cx).flex_1().min_h_0())
         } else {
             self.viewer(t, cx)
         };
+        let Some(split) = self.split.clone() else {
+            return main.flex_1().min_w_0();
+        };
+        div()
+            .flex_1()
+            .min_w_0()
+            .h_full()
+            .flex()
+            .child(main.flex_1().min_w_0().border_r_1().border_color(t.divider))
+            .child(div().flex_1().min_w_0().h_full().flex().child(split))
+    }
+
+    /// Hidden side: the files across the page, the find over them when
+    /// asked for (or when nothing is open).
+    pub(super) fn reader_page(&self, t: &Theme, cx: &mut Context<Self>) -> Div {
+        let main = self.main_view(t, cx);
         let open = self.palette || (self.opened.is_none() && self.place.is_none());
         div()
             .relative()
@@ -649,16 +630,12 @@ impl FilesPage {
             .when(open, |d| d.child(self.palette(t, cx)))
     }
 
-    /// Review: what changed, grouped by where, wide beside the file or the
-    /// place a group is.
-    pub(super) fn review_page(&self, t: &Theme, cx: &mut Context<Self>) -> Div {
+    /// The side (the folders, or what changed by where) beside the open
+    /// files or the place shown.
+    pub(super) fn side_page(&self, t: &Theme, cx: &mut Context<Self>) -> Div {
         let list = self.list_column(t, cx);
-        let detail = if self.place.is_some() {
-            self.place_view(t, cx)
-        } else {
-            self.viewer(t, cx)
-        };
-        pane::page(t, list, detail.flex_1().min_w_0())
+        let detail = self.main_view(t, cx);
+        pane::page(t, list, detail)
     }
 
     /// A folder as a place: who works there and what changed in it, its
@@ -670,6 +647,7 @@ impl FilesPage {
         let name = paths::base_name(&folder).to_owned();
         let parent = paths::parent(&folder);
         let head = pane::head(t)
+            .h(px(size::CONTROL + size::HEAD_GAP))
             .relative()
             .child(measure(self.head_room.clone()))
             .children(self.head_lead(t, cx))
@@ -698,8 +676,7 @@ impl FilesPage {
                     .debug_selector(|| "place-launch".into())
                     .tooltip(kit::tip(format!("Start a session in {folder}")))
                     .on_click(cx.listener(move |p, _, _, cx| p.launch_in(&here, cx)))
-            })
-            .child(self.layout_switch(t, cx));
+            });
         let section = |title: &str| {
             div()
                 .pt(px(size::SECTION_GAP))
@@ -840,9 +817,5 @@ impl FilesPage {
 
 /// The small dot that says a session is live.
 fn live_dot(t: &Theme) -> Div {
-    div()
-        .flex_none()
-        .size(px(DOT))
-        .rounded_full()
-        .bg(rgb(t.ansi[2]))
+    div().flex_none().size(px(DOT)).rounded_full().bg(t.done)
 }

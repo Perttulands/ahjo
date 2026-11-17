@@ -123,7 +123,7 @@ impl BrainPage {
         cx.subscribe_in(&editor, window, |page, _, event, window, cx| match event {
             CodeEvent::Save => page.brain_save(cx),
             CodeEvent::Escape => page.brain_discard(window, cx),
-            CodeEvent::Changed => {}
+            CodeEvent::Changed | CodeEvent::Moved => {}
         })
         .detach();
         let summary = cx.new(|cx| TextField::new(cx, "What this edit changes"));

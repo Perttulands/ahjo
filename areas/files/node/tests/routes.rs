@@ -397,3 +397,90 @@ async fn diff_reports_head_changes_no_repository_and_git_errors() {
         StatusCode::NOT_FOUND
     );
 }
+
+#[tokio::test]
+async fn status_names_every_file_that_differs_from_head_and_a_whole_diff_has_every_line() {
+    use std::process::Command;
+    let scratch = Scratch::new("status");
+    let repo = scratch.0.join("repo");
+    std::fs::create_dir_all(repo.join("docs")).unwrap();
+    let git = |args: &[&str]| {
+        assert!(
+            Command::new("git")
+                .current_dir(&repo)
+                .args(args)
+                .status()
+                .unwrap()
+                .success()
+        );
+    };
+    git(&["init", "-q"]);
+    let lines: String = (1..=20).map(|n| format!("line {n}\n")).collect();
+    std::fs::write(repo.join("kept.txt"), &lines).unwrap();
+    std::fs::write(repo.join("docs/gone.md"), "gone\n").unwrap();
+    git(&["add", "."]);
+    git(&[
+        "-c",
+        "user.name=Test",
+        "-c",
+        "user.email=test@example.com",
+        "commit",
+        "-qm",
+        "initial",
+    ]);
+    std::fs::write(
+        repo.join("kept.txt"),
+        lines.replace("line 10\n", "line ten\n"),
+    )
+    .unwrap();
+    std::fs::remove_file(repo.join("docs/gone.md")).unwrap();
+    std::fs::write(repo.join("docs/new.md"), "new\n").unwrap();
+    let app = app(&scratch.0);
+    let (status, body, _) = call(
+        &app,
+        "GET",
+        &at("status", &repo.join("docs")),
+        Body::empty(),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let result: parvi_files_contract::RepoStatus = serde_json::from_slice(&body).unwrap();
+    assert_eq!(result.repository, repo.to_str().unwrap());
+    let mut states: Vec<_> = result
+        .files
+        .iter()
+        .map(|f| {
+            (
+                f.path
+                    .strip_prefix(repo.to_str().unwrap())
+                    .unwrap()
+                    .to_owned(),
+                f.state,
+            )
+        })
+        .collect();
+    states.sort();
+    assert_eq!(
+        states,
+        [
+            ("/docs/gone.md".to_owned(), 'D'),
+            ("/docs/new.md".to_owned(), '?'),
+            ("/kept.txt".to_owned(), 'M')
+        ]
+    );
+    let file = repo.join("kept.txt");
+    let (_, body, _) = call(&app, "GET", &at("diff", &file), Body::empty()).await;
+    let some: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert!(!some["diff"].as_str().unwrap().contains("line 1\n"));
+    let whole = format!("{}&whole=true", at("diff", &file));
+    let (_, body, _) = call(&app, "GET", &whole, Body::empty()).await;
+    let all: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    let diff = all["diff"].as_str().unwrap();
+    assert!(diff.contains(" line 1\n") && diff.contains(" line 20\n"));
+    assert!(diff.contains("-line 10\n+line ten\n"));
+    let plain = scratch.0.join("plain");
+    std::fs::create_dir(&plain).unwrap();
+    let (_, body, _) = call(&app, "GET", &at("status", &plain), Body::empty()).await;
+    let none: parvi_files_contract::RepoStatus = serde_json::from_slice(&body).unwrap();
+    assert_eq!(none, Default::default());
+}

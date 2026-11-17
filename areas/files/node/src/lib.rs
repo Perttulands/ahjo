@@ -13,6 +13,7 @@ mod recent;
 pub mod roots;
 #[cfg(test)]
 mod scratch;
+pub mod status;
 
 pub use disk::version;
 pub use error::FilesError;
@@ -122,7 +123,7 @@ impl Files {
         disk::stat(&self.roots, paths)
     }
     pub fn diff(&self, path: &str) -> Result<parvi_files_contract::Diff, FilesError> {
-        diff::read(&self.roots, path)
+        diff::read(&self.roots, path, false)
     }
     pub fn copy(
         self: &Arc<Self>,

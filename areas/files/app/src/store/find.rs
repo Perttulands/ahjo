@@ -98,6 +98,33 @@ impl Find {
     }
 }
 
+/// Where `query` is in `text`, apart and in order: letters of either case
+/// alike when it is written in small letters, exactly as written when it
+/// has a capital (as editors find).
+pub fn in_text(text: &str, query: &str) -> Vec<std::ops::Range<usize>> {
+    if query.is_empty() {
+        return vec![];
+    }
+    let exact = query.chars().any(char::is_uppercase) || !query.is_ascii();
+    let (t, q) = (text.as_bytes(), query.as_bytes());
+    let mut out = vec![];
+    let mut i = 0;
+    while i + q.len() <= t.len() {
+        let here = &t[i..i + q.len()];
+        if if exact {
+            here == q
+        } else {
+            here.eq_ignore_ascii_case(q)
+        } {
+            out.push(i..i + q.len());
+            i += q.len();
+        } else {
+            i += 1;
+        }
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -162,5 +189,14 @@ mod tests {
         f.answer(2, Ok(hits(&[])));
         assert_eq!(f.take_first(), None);
         assert!(!f.open_first);
+    }
+
+    #[test]
+    fn a_query_in_small_letters_finds_either_case_and_a_capital_finds_its_own() {
+        let text = "Open, open, OPEN; läpi open";
+        assert_eq!(super::in_text(text, "open").len(), 4);
+        assert_eq!(super::in_text(text, "Open"), [0..4]);
+        assert_eq!(super::in_text(text, "läpi"), [18..23]);
+        assert!(super::in_text(text, "").is_empty());
     }
 }

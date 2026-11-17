@@ -6,7 +6,7 @@
 //! (`cx.new(Code::new)`) and hear its [`CodeEvent`]s.
 
 use super::syntax::{self, Carry, Lang, Token};
-use crate::theme::{FAMILY, Theme, alpha, rgb, size, theme};
+use crate::theme::{FAMILY, Theme, alpha, size, theme};
 use gpui::{
     App, Bounds, ClipboardItem, Context, CursorStyle, ElementId, ElementInputHandler, Entity,
     EntityInputHandler, EventEmitter, FocusHandle, Focusable, GlobalElementId, Hsla, KeyDownEvent,
@@ -30,6 +30,11 @@ const GO_TO_CONTEXT: usize = 3;
 /// line's text lies on.
 const MARK_W: f32 = 3.;
 const MARK_WASH: f32 = 0.07;
+/// The ruler at the right edge: the whole file's changes and finds at a
+/// glance, where the view is in it, and a click away.
+const RULER_W: f32 = 10.;
+/// A found stretch's wash, in the terminal's yellow as finds are elsewhere.
+const FOUND_WASH: f32 = 0.22;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum CodeEvent {
@@ -37,6 +42,17 @@ pub enum CodeEvent {
     Save,
     /// Escape: the owner asks or closes.
     Escape,
+    /// Another line is at the top of the view, or the caret moved to
+    /// another line: what follows the place read (an outline) looks again.
+    Moved,
+}
+
+/// Where a reader was in the text: the row at the top and what was
+/// selected, to come back to.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Place {
+    pub top: f32,
+    pub selected: Range<usize>,
 }
 
 /// What changed at a line since the last commit, marked beside its number.
@@ -51,8 +67,8 @@ pub enum Mark {
 impl Mark {
     pub fn colour(self, t: &Theme) -> Hsla {
         match self {
-            Mark::New => rgb(t.ansi[2]),
-            Mark::Gone => rgb(t.ansi[1]),
+            Mark::New => t.done,
+            Mark::Gone => t.error,
         }
     }
 }
@@ -99,6 +115,8 @@ pub struct Code {
     end_pending: bool,
     /// Where the text (after the gutter) was last drawn, and its metrics.
     area: Option<Bounds<Pixels>>,
+    /// Where the ruler was drawn, to take a click.
+    ruler: Option<Bounds<Pixels>>,
     char_w: Pixels,
     /// Long lines go on in rows under them instead of past the edge.
     wrap: bool,
@@ -106,6 +124,10 @@ pub struct Code {
     cols: usize,
     /// The first row of each line, and the count of rows after the last.
     row_starts: Vec<usize>,
+    /// Stretches a find found, washed in the text and marked on the ruler.
+    found: Vec<Range<usize>>,
+    /// The line at the top and the caret's line as last told (`Moved`).
+    told: (usize, usize),
 }
 
 impl EventEmitter<CodeEvent> for Code {}
@@ -149,6 +171,17 @@ fn starts_of(text: &str) -> Vec<usize> {
     std::iter::once(0)
         .chain(text.match_indices('\n').map(|(i, _)| i + 1))
         .collect()
+}
+
+/// Where `pos` stands once `cut` bytes at `at` are taken out.
+fn shift_back(pos: usize, at: usize, cut: usize) -> usize {
+    if pos >= at + cut {
+        pos - cut
+    } else if pos > at {
+        at
+    } else {
+        pos
+    }
 }
 
 /// A line as shown (tabs as spaces), and how a byte in it maps to a shown
@@ -202,6 +235,209 @@ impl Code {
             wrap: false,
             cols: 0,
             row_starts: vec![0, 1],
+            found: vec![],
+            told: (0, 0),
+            ruler: None,
+        }
+    }
+
+    /// Where the reader is: to come back to with [`Code::set_place`].
+    pub fn place(&self) -> Place {
+        Place {
+            top: self.top,
+            selected: self.selected.clone(),
+        }
+    }
+
+    /// Back where the reader was, as far as the text still reaches.
+    pub fn set_place(&mut self, place: &Place, cx: &mut Context<Self>) {
+        let len = self.text.len();
+        let s = self.text.floor_char_boundary(place.selected.start.min(len));
+        let e = self.text.floor_char_boundary(place.selected.end.min(len));
+        self.selected = s..e;
+        self.reversed = false;
+        self.top = place
+            .top
+            .clamp(0., self.rows_total().saturating_sub(1) as f32);
+        cx.notify();
+    }
+
+    /// The line the caret is on (0-based).
+    pub fn cursor_line(&self) -> usize {
+        self.line_of(self.cursor())
+    }
+
+    /// What is selected, as text.
+    pub fn selected_text(&self) -> &str {
+        &self.text[self.selected.clone()]
+    }
+
+    pub fn selection(&self) -> Range<usize> {
+        self.selected.clone()
+    }
+
+    /// Washes the stretches a find found (in order, apart), none to clear.
+    pub fn set_found(&mut self, found: Vec<Range<usize>>, cx: &mut Context<Self>) {
+        if self.found != found {
+            self.found = found;
+            cx.notify();
+        }
+    }
+
+    /// Selects `r` and brings it into view, a few lines above it.
+    pub fn select(&mut self, r: Range<usize>, cx: &mut Context<Self>) {
+        let len = self.text.len();
+        self.selected = self.text.floor_char_boundary(r.start.min(len))
+            ..self.text.floor_char_boundary(r.end.min(len));
+        self.reversed = false;
+        let n = self.line_of(self.selected.start);
+        let row = self.row_starts[n] as f32;
+        let rows = self.rows_in_view() as f32;
+        if row < self.top || row >= self.top + rows - 1. {
+            self.top = (row - GO_TO_CONTEXT as f32).max(0.);
+        }
+        self.reveal();
+        self.tell_moved(cx);
+        cx.notify();
+    }
+
+    /// Puts `with` in place of each of `ranges` (in order, apart) as one
+    /// step to undo. Only while editing.
+    pub fn replace_all(&mut self, ranges: &[Range<usize>], with: &str, cx: &mut Context<Self>) {
+        if !self.editable || ranges.is_empty() {
+            return;
+        }
+        self.snapshot(false);
+        for r in ranges.iter().rev() {
+            if r.end <= self.text.len() {
+                self.text.replace_range(r.clone(), with);
+            }
+        }
+        let at = ranges[0].start + with.len();
+        self.after_change(at..at, cx);
+    }
+
+    /// The text was changed in place: find its lines again, select `sel`.
+    fn after_change(&mut self, sel: Range<usize>, cx: &mut Context<Self>) {
+        self.reindex();
+        let len = self.text.len();
+        self.selected = sel.start.min(len)..sel.end.min(len);
+        self.reversed = false;
+        self.last_edit = None;
+        self.reveal();
+        cx.emit(CodeEvent::Changed);
+        cx.notify();
+    }
+
+    /// The lines the selection touches (or the caret's line), 0-based.
+    fn touched_lines(&self) -> Range<usize> {
+        let first = self.line_of(self.selected.start);
+        let mut last = self.line_of(self.selected.end);
+        if last > first && self.starts[last] == self.selected.end {
+            last -= 1;
+        }
+        first..last + 1
+    }
+
+    /// Indents the touched lines by one step, or takes one step out.
+    fn indent_lines(&mut self, out: bool, cx: &mut Context<Self>) {
+        let lines = self.touched_lines();
+        let caret = self.selected.is_empty();
+        self.snapshot(false);
+        let (mut start, mut end) = (self.selected.start, self.selected.end);
+        // From the last line up, so the earlier lines' starts still hold.
+        for n in lines.rev() {
+            let at = self.starts[n];
+            let line = &self.text[self.line_range(n)];
+            if out {
+                let cut = if line.starts_with('\t') {
+                    1
+                } else {
+                    (line.len() - line.trim_start_matches(' ').len()).min(INDENT.len())
+                };
+                if cut == 0 {
+                    continue;
+                }
+                self.text.replace_range(at..at + cut, "");
+                start = shift_back(start, at, cut);
+                end = shift_back(end, at, cut);
+            } else {
+                if line.is_empty() && !caret {
+                    continue;
+                }
+                self.text.insert_str(at, INDENT);
+                if start > at || (start == at && caret) {
+                    start += INDENT.len();
+                }
+                if end > at || (end == at && caret) {
+                    end += INDENT.len();
+                }
+            }
+        }
+        self.after_change(start..end, cx);
+    }
+
+    /// Comments the touched lines out with the language's line comment, or
+    /// back in when every one of them is commented.
+    fn toggle_comment(&mut self, cx: &mut Context<Self>) {
+        let Some(mark) = self.lang.and_then(|l| l.comment()) else {
+            return;
+        };
+        let lines = self.touched_lines();
+        let filled: Vec<usize> = lines
+            .clone()
+            .filter(|&n| !self.text[self.line_range(n)].trim().is_empty())
+            .collect();
+        if filled.is_empty() {
+            return;
+        }
+        let commented = filled
+            .iter()
+            .all(|&n| self.text[self.line_range(n)].trim_start().starts_with(mark));
+        // Comments go in at the least indent, so a block stays lined up.
+        let indent = filled
+            .iter()
+            .map(|&n| {
+                let l = &self.text[self.line_range(n)];
+                l.len() - l.trim_start().len()
+            })
+            .min()
+            .unwrap_or(0);
+        self.snapshot(false);
+        let (mut start, mut end) = (self.selected.start, self.selected.end);
+        for &n in filled.iter().rev() {
+            let r = self.line_range(n);
+            if commented {
+                let line = &self.text[r.clone()];
+                let at = r.start + (line.len() - line.trim_start().len());
+                let mut cut = mark.len();
+                if self.text[at + cut..].starts_with(' ') {
+                    cut += 1;
+                }
+                self.text.replace_range(at..at + cut, "");
+                start = shift_back(start, at, cut);
+                end = shift_back(end, at, cut);
+            } else {
+                let at = r.start + indent;
+                let put = format!("{mark} ");
+                self.text.insert_str(at, &put);
+                if start > at {
+                    start += put.len();
+                }
+                if end >= at {
+                    end += put.len();
+                }
+            }
+        }
+        self.after_change(start..end, cx);
+    }
+
+    /// Tells the owner when another line is at the top or holds the caret.
+    fn tell_moved(&mut self, cx: &mut Context<Self>) {
+        let now = (self.top_line(), self.cursor_line());
+        if now != self.told {
+            self.told = now;
+            cx.emit(CodeEvent::Moved);
         }
     }
 
@@ -306,6 +542,7 @@ impl Code {
         self.selected = 0..0;
         self.reversed = false;
         self.marked = None;
+        self.found.clear();
         self.top = 0.;
         self.left = px(0.);
         self.end_pending = false;
@@ -374,6 +611,7 @@ impl Code {
     /// Scrolls so line `n` (0-based) is the first in view.
     pub fn show_line(&mut self, n: usize, cx: &mut Context<Self>) {
         self.top = self.row_starts[n.min(self.starts.len().saturating_sub(1))] as f32;
+        self.tell_moved(cx);
         cx.notify();
     }
 
@@ -698,12 +936,36 @@ impl Code {
                 self.restore(false, cx);
                 true
             }
-            ("tab", false, false) if self.editable && !shift => {
+            ("tab", false, false) if self.editable && shift => {
+                self.indent_lines(true, cx);
+                true
+            }
+            ("tab", false, false) if self.editable && self.touched_lines().len() > 1 => {
+                self.indent_lines(false, cx);
+                true
+            }
+            ("tab", false, false) if self.editable => {
                 self.insert(INDENT, cx);
                 true
             }
+            ("]", true, false) if self.editable => {
+                self.indent_lines(false, cx);
+                true
+            }
+            ("[", true, false) if self.editable => {
+                self.indent_lines(true, cx);
+                true
+            }
+            ("/", true, false) if self.editable => {
+                self.toggle_comment(cx);
+                true
+            }
             ("enter", false, false) if self.editable && !shift => {
-                self.insert("\n", cx);
+                // A new line starts where the one before it did.
+                let r = self.line_range(self.line_of(self.selected.start));
+                let line = &self.text[r.start..self.selected.start.max(r.start)];
+                let indent = &line[..line.len() - line.trim_start().len()];
+                self.insert(&format!("\n{indent}"), cx);
                 true
             }
             ("backspace", _, false) => {
@@ -802,12 +1064,14 @@ impl Code {
         if handled {
             cx.stop_propagation();
             window.prevent_default();
+            self.tell_moved(cx);
         }
     }
 
     fn scroll_lines(&mut self, by: f32, cx: &mut Context<Self>) {
         let max = (self.rows_total() as f32 - self.rows_in_view() as f32).max(0.);
         self.top = (self.top + by).clamp(0., max);
+        self.tell_moved(cx);
         cx.notify();
     }
 
@@ -842,6 +1106,15 @@ impl Code {
 
     fn mouse_down(&mut self, e: &MouseDownEvent, window: &mut Window, cx: &mut Context<Self>) {
         window.focus(&self.focus, cx);
+        if let Some(r) = self.ruler.filter(|r| r.contains(&e.position)) {
+            let at = ((e.position.y - r.origin.y) / r.size.height).clamp(0., 1.);
+            let rows = self.rows_in_view() as f32;
+            let max = (self.rows_total() as f32 - rows).max(0.);
+            self.top = (at * self.rows_total() as f32 - rows / 2.).clamp(0., max);
+            self.tell_moved(cx);
+            cx.notify();
+            return;
+        }
         let at = self.index_at(e.position, window);
         if e.click_count >= 2 {
             let s = self.word_left(self.next(at));
@@ -853,6 +1126,7 @@ impl Code {
         }
         self.selecting = true;
         self.move_to(at, e.modifiers.shift, cx);
+        self.tell_moved(cx);
     }
 
     fn mouse_move(&mut self, e: &MouseMoveEvent, window: &mut Window, cx: &mut Context<Self>) {
@@ -1049,6 +1323,8 @@ struct Painted {
     lines: Vec<(Point<Pixels>, ShapedLine)>,
     quads: Vec<gpui::PaintQuad>,
     caret: Option<gpui::PaintQuad>,
+    /// The ruler at the right edge and what it marks.
+    ruler: Option<(Bounds<Pixels>, Vec<gpui::PaintQuad>)>,
     area: Bounds<Pixels>,
     char_w: Pixels,
 }
@@ -1096,10 +1372,57 @@ impl Element for CodeElement {
         let digits = c.starts.len().to_string().len().max(3);
         let char_w = shape(window, "0", t.text, &[]).width;
         let gutter_w = char_w * digits as f32 + px(24.);
+        let all = c.rows_total().max(1) as f32;
+        let ruled = !c.marks.is_empty() || !c.found.is_empty() || all * lh > bounds.size.height;
+        let ruler_w = if ruled { px(RULER_W) } else { px(0.) };
         let area = Bounds::new(
             point(bounds.origin.x + gutter_w, bounds.origin.y),
-            sz(bounds.size.width - gutter_w, bounds.size.height),
+            sz(bounds.size.width - gutter_w - ruler_w, bounds.size.height),
         );
+        let ruler = ruled.then(|| {
+            let r = Bounds::new(
+                point(
+                    bounds.origin.x + bounds.size.width - ruler_w,
+                    bounds.origin.y,
+                ),
+                sz(ruler_w, bounds.size.height),
+            );
+            let h = r.size.height;
+            let y_of = |row: usize| r.origin.y + h * (row as f32 / all);
+            let tall = (h / all).max(px(2.));
+            let mut marks = vec![fill(r, t.surface)];
+            let view = (bounds.size.height / lh).min(all);
+            marks.push(fill(
+                Bounds::new(
+                    point(r.origin.x, r.origin.y + h * (c.top / all)),
+                    sz(ruler_w, (h * (view / all)).max(px(8.))),
+                ),
+                alpha(t.text, 0.12),
+            ));
+            for &(n, mark) in &c.marks {
+                let y = y_of(c.row_starts[n.min(c.starts.len() - 1)]);
+                marks.push(fill(
+                    Bounds::new(point(r.origin.x, y), sz(ruler_w / 2., tall)),
+                    mark.colour(&t),
+                ));
+            }
+            let mut last = None;
+            for f in &c.found {
+                let n = c.line_of(f.start);
+                if last == Some(n) {
+                    continue;
+                }
+                last = Some(n);
+                marks.push(fill(
+                    Bounds::new(
+                        point(r.origin.x + ruler_w / 2., y_of(c.row_starts[n])),
+                        sz(ruler_w / 2., tall),
+                    ),
+                    t.accent,
+                ));
+            }
+            (r, marks)
+        });
         let first = c.top.max(0.) as usize;
         let offset = (c.top - first as f32) * lh;
         let rows = (bounds.size.height / lh).ceil() as usize + 1;
@@ -1210,6 +1533,23 @@ impl Element for CodeElement {
                         alpha(t.accent, 0.3),
                     ));
                 }
+                let lo = c.found.partition_point(|f| f.end <= r.start);
+                for f in c.found[lo..].iter().take_while(|f| f.start <= r.end) {
+                    let fs = to_shown(line, f.start.max(r.start) - r.start);
+                    let fe = to_shown(line, f.end.min(r.end) - r.start);
+                    if fe <= seg.start || fs >= seg.end {
+                        continue;
+                    }
+                    let xs = shaped.x_for_index(fs.max(seg.start) - seg.start);
+                    let xe = shaped.x_for_index(fe.min(seg.end) - seg.start);
+                    quads.insert(
+                        0,
+                        fill(
+                            Bounds::new(point(x0 + xs, y), sz((xe - xs).max(px(2.)), lh)),
+                            alpha(t.accent, FOUND_WASH),
+                        ),
+                    );
+                }
                 if let Some(cs) = caret_shown {
                     if cs >= seg.start && (cs < seg.end || last) {
                         let x = shaped.x_for_index(cs - seg.start);
@@ -1239,6 +1579,7 @@ impl Element for CodeElement {
             lines,
             quads,
             caret,
+            ruler,
             area,
             char_w,
         }
@@ -1291,10 +1632,17 @@ impl Element for CodeElement {
                     window.paint_quad(c);
                 }
             });
+            if let Some((_, marks)) = p.ruler.as_mut() {
+                for q in marks.drain(..) {
+                    window.paint_quad(q);
+                }
+            }
         });
         let (area, char_w) = (p.area, p.char_w);
+        let ruler = p.ruler.as_ref().map(|r| r.0);
         let moved = self.code.update(cx, |c, _| {
             c.area = Some(area);
+            c.ruler = ruler;
             c.char_w = char_w;
             // The width the rows were found for changed: find them again,
             // keeping the line in view.
@@ -1455,6 +1803,62 @@ mod tests {
             c.insert("y", cx);
             assert_eq!(c.text(), "one\n  two\nthree", "reading does not type");
         });
+    }
+
+    /// Small edits as an editor makes them: a block in and out, comments
+    /// toggled, a new line keeping its indent, every find replaced as one
+    /// undo, and the place kept.
+    #[gpui::test]
+    fn block_edits_each_undo_as_one(cx: &mut gpui::TestAppContext) {
+        cx.update(|cx| cx.set_global(crate::theme::Theme::default()));
+        let (code, cx) = cx.add_window_view(|_, cx| Code::new(cx));
+        cx.update(|window, cx| {
+            code.update(cx, |c, cx| {
+                c.set("fn a() {\n    one();\n\n    two();\n}", cx);
+                c.set_lang(syntax::lang("a.rs"), cx);
+                c.edit(true, window, cx);
+                c.selected = 9..30;
+            });
+            Code::focus(&code, window, cx);
+        });
+        let text =
+            |cx: &mut gpui::VisualTestContext| code.read_with(cx, |c, _| c.text().to_owned());
+        cx.simulate_keystrokes("tab");
+        assert_eq!(text(cx), "fn a() {\n      one();\n\n      two();\n}");
+        cx.simulate_keystrokes("shift-tab shift-tab");
+        assert_eq!(text(cx), "fn a() {\n  one();\n\n  two();\n}");
+        cx.simulate_keystrokes("ctrl-/");
+        assert_eq!(text(cx), "fn a() {\n  // one();\n\n  // two();\n}");
+        cx.simulate_keystrokes("ctrl-/");
+        assert_eq!(text(cx), "fn a() {\n  one();\n\n  two();\n}");
+        cx.simulate_keystrokes("ctrl-z ctrl-z ctrl-z");
+        assert_eq!(text(cx), "fn a() {\n    one();\n\n    two();\n}");
+        code.update(cx, |c, cx| {
+            let at = c.text().find("one();").unwrap() + "one();".len();
+            c.selected = at..at;
+            let found: Vec<_> = c
+                .text()
+                .match_indices("()")
+                .map(|(i, m)| i..i + m.len())
+                .collect();
+            c.set_found(found.clone(), cx);
+            c.replace_all(&found, "(x)", cx);
+        });
+        assert_eq!(text(cx), "fn a(x) {\n    one(x);\n\n    two(x);\n}");
+        cx.simulate_keystrokes("ctrl-z");
+        assert_eq!(text(cx), "fn a() {\n    one();\n\n    two();\n}");
+        code.update(cx, |c, cx| {
+            let at = c.text().find("one();").unwrap() + "one();".len();
+            c.selected = at..at;
+            c.top = 1.;
+            let place = c.place();
+            let again = c.text().to_owned();
+            c.set(&again, cx);
+            c.set_place(&place, cx);
+            assert_eq!((c.top, c.selected.clone()), (1., at..at));
+        });
+        cx.simulate_keystrokes("enter");
+        assert_eq!(text(cx), "fn a() {\n    one();\n    \n\n    two();\n}");
     }
 
     /// What a page that owns an editor hears: an edit, a save, an Escape.

@@ -48,6 +48,38 @@ pub struct Diff {
     pub error: Option<String>,
 }
 
+/// What a diff is asked for: a file, and whether to see all of it around
+/// its changes (as a side-by-side view needs) or only some lines.
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
+pub struct DiffAt {
+    #[serde(default)]
+    pub node: String,
+    pub path: String,
+    #[serde(default)]
+    pub whole: bool,
+}
+
+/// How a file stands against its repository's HEAD: changed (`M`), new to
+/// it (`A`, or `?` when not even staged), taken out (`D`) or renamed in
+/// (`R`).
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
+pub struct FileState {
+    pub path: String,
+    pub state: char,
+}
+
+/// Every file of a folder's repository that differs from its HEAD. A
+/// folder outside a repository has none, and `repository` is empty.
+#[derive(Clone, Debug, Default, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
+pub struct RepoStatus {
+    pub repository: String,
+    pub files: Vec<FileState>,
+    #[serde(default)]
+    pub truncated: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+}
+
 /// Roots exposed by a node.
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
 pub struct NodeRoots {

@@ -47,7 +47,7 @@ impl Inputs {
         cx.subscribe_in(&reader, window, |page, _, event, window, cx| match event {
             CodeEvent::Save => page.file_save(cx),
             CodeEvent::Escape => page.file_discard(window, cx),
-            CodeEvent::Changed => {}
+            CodeEvent::Changed | CodeEvent::Moved => {}
         })
         .detach();
         let field = |cx: &mut Context<AgentsPage>, hint: &str| {

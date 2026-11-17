@@ -10,7 +10,7 @@ use axum::http::header::{CACHE_CONTROL, CONTENT_SECURITY_POLICY, CONTENT_TYPE, H
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
-use parvi_files_contract::{At, DropAt, Dropped, Job, Move, NodeRoots, SaveAt, Search};
+use parvi_files_contract::{At, DiffAt, DropAt, Dropped, Job, Move, NodeRoots, SaveAt, Search};
 
 use super::Files;
 use super::disk::{self, Listing};
@@ -27,6 +27,7 @@ pub fn routes(files: Arc<Files>, drops: Arc<Drops>) -> Router {
         .route("/api/files/stat", post(stat))
         .route("/api/files/find", get(find))
         .route("/api/files/diff", get(diff))
+        .route("/api/files/status", get(status))
         .route("/api/files/search", get(search))
         .route("/api/files/bridge/start", post(bridge_start))
         .route("/api/files/bridge/events", get(bridge_events))
@@ -130,10 +131,21 @@ async fn bridge_events(
 
 async fn diff(
     State(files): Shared,
-    Query(at): Query<At>,
+    Query(at): Query<DiffAt>,
 ) -> Result<Json<super::diff::Diff>, FilesError> {
     let result = blocking(&files, &at.node, move |f| {
-        super::diff::read(&f.roots, &at.path)
+        super::diff::read(&f.roots, &at.path, at.whole)
+    })
+    .await?;
+    Ok(Json(result))
+}
+
+async fn status(
+    State(files): Shared,
+    Query(at): Query<At>,
+) -> Result<Json<super::status::RepoStatus>, FilesError> {
+    let result = blocking(&files, &at.node, move |f| {
+        super::status::read(&f.roots, &at.path)
     })
     .await?;
     Ok(Json(result))

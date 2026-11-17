@@ -59,9 +59,26 @@ pub struct Opened {
     pub diff: Option<parvi_files_contract::Diff>,
     /// The same, line by line: what the reader marks.
     pub changes: Option<crate::store::marks::Changes>,
+    /// The diff read into lines and paired side by side, for its view.
+    pub sides: Option<std::rc::Rc<Sides>>,
     pub diff_open: bool,
     /// The file changed on disk under an unsaved edit.
     pub changed_on_disk: bool,
+}
+
+/// A diff's lines, and the same paired side by side.
+#[derive(Debug)]
+pub struct Sides {
+    pub rows: Vec<crate::store::diff::Row>,
+    pub pairs: Vec<crate::store::diff::Pair>,
+}
+
+impl Sides {
+    pub fn of(diff: &str) -> Self {
+        let rows = crate::store::diff::rows(diff);
+        let pairs = crate::store::diff::pairs(&rows);
+        Sides { rows, pairs }
+    }
 }
 
 impl Opened {
@@ -80,6 +97,7 @@ impl Opened {
             source: false,
             diff: None,
             changes: None,
+            sides: None,
             diff_open: false,
             changed_on_disk: false,
         }
