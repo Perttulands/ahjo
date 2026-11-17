@@ -88,7 +88,7 @@ impl Work {
             let what = match (self.layout, self.moved) {
                 (Layout::Time, Moved::Opened) => "Nothing was opened",
                 (Layout::Time, Moved::Closed) => "Nothing was finished",
-                (Layout::Time, Moved::Stuck) => "Nothing sat untouched",
+                (Layout::Time, Moved::Idle) => "Nothing sat idle",
                 _ => "Nothing moved",
             };
             return match self.range {
@@ -203,7 +203,74 @@ impl Work {
                 .flex_1(),
             );
         }
+        // As wide as the operator dragged it, never more than most of
+        // the room beside the facets.
         pane::list_wide_frame(t, head, body)
+            .w(px(self.list_w))
+            .max_w(gpui::relative(LIST_SHARE))
+            .relative()
+            .child(self.grip(t, cx))
+    }
+
+    /// The list's edge, dragged to widen or narrow it: a press on it holds
+    /// the width it had, the drag moves it, the release keeps it.
+    fn grip(&self, t: &Theme, cx: &mut Context<Self>) -> impl IntoElement {
+        let page = cx.weak_entity();
+        div()
+            .id("work-grip")
+            .debug_selector(|| "work-grip".into())
+            .absolute()
+            .top_0()
+            .bottom_0()
+            .right(px(-GRIP / 2.))
+            .w(px(GRIP))
+            .cursor(gpui::CursorStyle::ResizeLeftRight)
+            .hover(|d| {
+                d.bg(gpui::Hsla {
+                    a: GRIP_INK,
+                    ..t.accent
+                })
+            })
+            .child(
+                gpui::canvas(
+                    |_, _, _| (),
+                    move |b, _, window, _| {
+                        let (down, moving, up) = (page.clone(), page.clone(), page);
+                        window.on_mouse_event(move |e: &MouseDownEvent, phase, _, cx| {
+                            if phase == gpui::DispatchPhase::Bubble
+                                && e.button == MouseButton::Left
+                                && b.contains(&e.position)
+                            {
+                                let x = f32::from(e.position.x);
+                                let _ = down.update(cx, |w, _| w.grip = Some((x, w.list_w)));
+                            }
+                        });
+                        window.on_mouse_event(move |e: &gpui::MouseMoveEvent, phase, _, cx| {
+                            if phase == gpui::DispatchPhase::Bubble
+                                && e.pressed_button == Some(MouseButton::Left)
+                            {
+                                let x = f32::from(e.position.x);
+                                let _ = moving.update(cx, |w, cx| {
+                                    if let Some((from, width)) = w.grip {
+                                        w.drag_list(width + x - from, cx);
+                                    }
+                                });
+                            }
+                        });
+                        window.on_mouse_event(move |e: &gpui::MouseUpEvent, phase, _, cx| {
+                            if phase == gpui::DispatchPhase::Bubble && e.button == MouseButton::Left
+                            {
+                                let _ = up.update(cx, |w, cx| {
+                                    if w.grip.take().is_some() {
+                                        w.keep_list(cx);
+                                    }
+                                });
+                            }
+                        });
+                    },
+                )
+                .size_full(),
+            )
     }
 
     fn list_head(&self, t: &Theme, cx: &mut Context<Self>) -> Div {
@@ -245,7 +312,7 @@ impl Work {
     fn layout_act(&self, t: &Theme, cx: &mut Context<Self>) -> Stateful<Div> {
         pane::act(t, "work-layout", self.layout.name())
             .debug_selector(|| "work-layout".into())
-            .tooltip(kit::tip("Layout: tree, strip or time (V)"))
+            .tooltip(kit::tip("Layout: strip, time or tree (V)"))
             .on_click(cx.listener(|w, _, _, cx| w.set_layout(w.layout.next(), true, cx)))
     }
 
@@ -761,7 +828,11 @@ impl Work {
             )
             .child(
                 div()
+                    .w_full()
+                    .min_w_0()
+                    .overflow_hidden()
                     .line_clamp(2)
+                    .text_ellipsis()
                     .text_color(if done { t.dim } else { t.text })
                     .child(r.title.clone()),
             )

@@ -14,22 +14,65 @@ pub type Day = i64;
 
 const DAY_MS: i64 = 86_400_000;
 
-/// Turns a time into its local day: one offset for the whole board, taken
-/// when it was read (a summer-time change moves a day's edge by an hour).
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+/// Turns a time into its local day in this machine's zone, with the
+/// zone's offset at that time: a day before a summer-time change and a day
+/// after it each end at their own midnight.
+#[derive(Clone, Debug)]
 pub struct Clock {
-    pub offset_ms: i64,
+    zone: jiff::tz::TimeZone,
 }
 
 impl Clock {
-    pub fn local(now: u64) -> Clock {
+    /// This machine's zone; UTC when it cannot be told.
+    pub fn local() -> Clock {
         Clock {
-            offset_ms: super::when::local_offset(now) * 1000,
+            zone: jiff::tz::TimeZone::try_system().unwrap_or(jiff::tz::TimeZone::UTC),
         }
     }
-    pub fn day(self, ms: u64) -> Day {
-        (ms as i64 + self.offset_ms).div_euclid(DAY_MS)
+    pub fn utc() -> Clock {
+        Clock {
+            zone: jiff::tz::TimeZone::UTC,
+        }
     }
+    #[cfg(test)]
+    pub fn zone(zone: jiff::tz::TimeZone) -> Clock {
+        Clock { zone }
+    }
+    pub fn day(&self, ms: u64) -> Day {
+        let at =
+            jiff::Timestamp::from_millisecond(ms as i64).unwrap_or(jiff::Timestamp::UNIX_EPOCH);
+        let offset = self.zone.to_offset(at).seconds() as i64 * 1000;
+        (ms as i64 + offset).div_euclid(DAY_MS)
+    }
+}
+
+/// A row's days: when it was opened, last touched and finished.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Dated {
+    pub created: Option<Day>,
+    pub updated: Option<Day>,
+    pub finished: Option<Day>,
+}
+
+/// Every row's days, in the board's order: counted once per board, so a
+/// drag across the chart only compares numbers.
+pub fn dated(board: &Board, clock: &Clock) -> Vec<Dated> {
+    board
+        .rows
+        .iter()
+        .map(|r| {
+            let created = r.created.map(|c| clock.day(c));
+            Dated {
+                created,
+                updated: r.updated.map(|u| clock.day(u)),
+                // Never finished before it was opened.
+                finished: finished(r).map(|f| {
+                    let d = clock.day(f);
+                    created.map_or(d, |c| d.max(c))
+                }),
+            }
+        })
+        .collect()
 }
 
 /// Days `from` to `to`, both included.
@@ -75,7 +118,7 @@ impl Timeline {
     /// The `days` days ending `today`, over `rows` of `board`. The open
     /// count starts from everything opened before the first day and not
     /// finished by then, so the line starts at its true height.
-    pub fn of(board: &Board, rows: &[usize], clock: Clock, today: Day, days: usize) -> Timeline {
+    pub fn of(dated: &[Dated], rows: &[usize], today: Day, days: usize) -> Timeline {
         let n = days.max(1);
         let first = today - n as i64 + 1;
         let mut t = Timeline {
@@ -93,8 +136,8 @@ impl Timeline {
                 .then(|| (day - first) as usize)
         };
         for &i in rows {
-            let r = &board.rows[i];
-            let Some(created) = r.created.map(|c| clock.day(c)) else {
+            let r = &dated[i];
+            let Some(created) = r.created else {
                 continue;
             };
             match at(created) {
@@ -105,7 +148,7 @@ impl Timeline {
                 None if created < first => before += 1,
                 None => {}
             }
-            if let Some(done) = finished(r).map(|c| clock.day(c).max(created)) {
+            if let Some(done) = r.finished {
                 match at(done) {
                     Some(d) => {
                         t.closed[d] += 1;
@@ -149,37 +192,41 @@ impl Timeline {
 }
 
 /// What moved in a range: what was opened, what was finished, and what
-/// stayed open without anyone touching it.
+/// sat open and idle.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Movement {
     /// Opened in the range, newest first.
     pub opened: Vec<usize>,
     /// Finished in the range, newest first.
     pub closed: Vec<usize>,
-    /// Open through the whole range and last touched before it: under way
-    /// first (claimed and left), then the longest untouched.
-    pub stuck: Vec<usize>,
+    /// Open at the range's end and not touched for the idle days before
+    /// it, as far as the last touch tells: under way first (claimed and
+    /// left), then the longest idle. Deferred work is meant to wait.
+    pub idle: Vec<usize>,
 }
 
-/// What moved among `rows` in `range`.
-pub fn movement(board: &Board, rows: &[usize], clock: Clock, range: Range) -> Movement {
+/// What moved among `rows` in `range`, and what sat `idle` days or more.
+pub fn movement(
+    board: &Board,
+    dated: &[Dated],
+    rows: &[usize],
+    range: Range,
+    idle: i64,
+) -> Movement {
     let mut m = Movement::default();
     for &i in rows {
-        let r = &board.rows[i];
-        let created = r.created.map(|c| clock.day(c));
-        let done = finished(r).map(|c| clock.day(c));
-        if created.is_some_and(|d| range.holds(d)) {
+        let d = &dated[i];
+        if d.created.is_some_and(|c| range.holds(c)) {
             m.opened.push(i);
         }
-        if done.is_some_and(|d| range.holds(d)) {
+        if d.finished.is_some_and(|f| range.holds(f)) {
             m.closed.push(i);
         }
-        let open_through = created.is_some_and(|d| d < range.from)
-            && done.is_none_or(|d| d > range.to)
-            && r.status != Status::Deferred;
-        let untouched = r.updated.is_some_and(|u| clock.day(u) < range.from);
-        if open_through && untouched {
-            m.stuck.push(i);
+        let open_at_end =
+            d.created.is_some_and(|c| c <= range.to) && d.finished.is_none_or(|f| f > range.to);
+        let left = d.updated.is_some_and(|u| u <= range.to - idle);
+        if open_at_end && left && board.rows[i].status != Status::Deferred {
+            m.idle.push(i);
         }
     }
     let rows = &board.rows;
@@ -187,7 +234,7 @@ pub fn movement(board: &Board, rows: &[usize], clock: Clock, range: Range) -> Mo
         .sort_by(|&a, &b| rows[b].created.cmp(&rows[a].created));
     m.closed
         .sort_by(|&a, &b| finished(&rows[b]).cmp(&finished(&rows[a])));
-    m.stuck.sort_by(|&a, &b| {
+    m.idle.sort_by(|&a, &b| {
         (rows[b].status == Status::InProgress)
             .cmp(&(rows[a].status == Status::InProgress))
             .then(rows[a].updated.cmp(&rows[b].updated))
@@ -196,11 +243,11 @@ pub fn movement(board: &Board, rows: &[usize], clock: Clock, range: Range) -> Mo
 }
 
 /// Whether a row was opened, touched or finished in `range`.
-pub fn touched(r: &Row, clock: Clock, range: Range) -> bool {
-    [r.created, r.updated, finished(r)]
+pub fn touched(d: &Dated, range: Range) -> bool {
+    [d.created, d.updated, d.finished]
         .into_iter()
         .flatten()
-        .any(|t| range.holds(clock.day(t)))
+        .any(|day| range.holds(day))
 }
 
 /// The day as the strip's axis says it: `Nov 3`.
@@ -229,7 +276,6 @@ mod tests {
     use super::*;
     use parvi_work_contract::{Item, ProjectView, Snapshot, StoreView};
 
-    const UTC: Clock = Clock { offset_ms: 0 };
     /// 2026-11-10 in days since the epoch.
     const TODAY: Day = 20_402;
 
@@ -257,7 +303,7 @@ mod tests {
         }
     }
 
-    fn board(items: Vec<Item>) -> (Board, Vec<usize>) {
+    fn board(items: Vec<Item>) -> (Board, Vec<Dated>, Vec<usize>) {
         let b = Board::from_snapshot(&Snapshot {
             refreshed: 0,
             projects: vec![ProjectView::Beads(StoreView {
@@ -267,18 +313,24 @@ mod tests {
             })],
         });
         let all = (0..b.rows.len()).collect();
-        (b, all)
+        let d = dated(&b, &Clock::utc());
+        (b, d, all)
     }
 
     #[test]
-    fn a_day_is_local() {
-        let helsinki = Clock {
-            offset_ms: 2 * 3_600_000,
-        };
+    fn a_day_is_local_and_keeps_its_midnight_across_summer_time() {
+        // Helsinki: two hours east in winter, three in summer; summer time
+        // ended at 04:00 local on 2026-10-25 (day 20_386).
+        let helsinki =
+            Clock::zone(jiff::tz::TimeZone::posix("EET-2EEST,M3.5.0/3,M10.5.0/4").unwrap());
+        let ms = |day: Day, utc_hour: i64| ((day * 86_400 + utc_hour * 3_600) * 1000) as u64;
         // 23:00 UTC on day 20402 is already the next day two hours east.
-        let late = (TODAY * 86_400 + 23 * 3_600) as u64 * 1000;
-        assert_eq!(UTC.day(late), TODAY);
-        assert_eq!(helsinki.day(late), TODAY + 1);
+        assert_eq!(Clock::utc().day(ms(TODAY, 23)), TODAY);
+        assert_eq!(helsinki.day(ms(TODAY, 23)), TODAY + 1);
+        // In summer, 21:30 UTC is 00:30 the next day; in winter, 23:30.
+        let summer = 20_380;
+        assert_eq!(helsinki.day(ms(summer, 21) + 1_800_000), summer + 1);
+        assert_eq!(helsinki.day(ms(TODAY, 21) + 1_800_000), TODAY);
         assert_eq!(day_label(TODAY), "Nov 10");
         assert_eq!(
             range_label(Range::between(TODAY, TODAY - 6)),
@@ -288,7 +340,7 @@ mod tests {
 
     #[test]
     fn the_open_line_starts_at_its_true_height() {
-        let (b, all) = board(vec![
+        let (_, d, all) = board(vec![
             // Opened long before the strip and still open: counts all along.
             bead("x-1", "open", TODAY - 100, TODAY - 100, None),
             // Opened and finished before the strip: never counts.
@@ -300,7 +352,7 @@ mod tests {
             // Closed without a closed time: its last update stands for it.
             bead("x-5", "closed", TODAY - 1, TODAY, None),
         ]);
-        let t = Timeline::of(&b, &all, UTC, TODAY, 5);
+        let t = Timeline::of(&d, &all, TODAY, 5);
         assert_eq!(t.first, TODAY - 4);
         assert_eq!(t.opened, vec![0, 1, 0, 1, 0]);
         assert_eq!(t.closed, vec![0, 0, 1, 0, 1]);
@@ -311,28 +363,32 @@ mod tests {
     }
 
     #[test]
-    fn a_range_says_what_opened_closed_and_stayed_stuck() {
+    fn a_range_says_what_opened_closed_and_sat_idle() {
         let week = Range::between(TODAY - 6, TODAY);
-        let (b, all) = board(vec![
+        let (b, d, all) = board(vec![
             bead("new", "open", TODAY - 1, TODAY - 1, None),
             bead("done", "closed", TODAY - 30, TODAY - 2, Some(TODAY - 2)),
             bead("quick", "closed", TODAY - 3, TODAY - 3, Some(TODAY - 3)),
             bead("idle", "open", TODAY - 40, TODAY - 20, None),
-            bead("claimed", "in_progress", TODAY - 40, TODAY - 10, None),
+            bead("claimed", "in_progress", TODAY - 40, TODAY - 15, None),
+            bead("recent", "open", TODAY - 40, TODAY - 10, None),
             bead("busy", "open", TODAY - 40, TODAY - 1, None),
             bead("parked", "deferred", TODAY - 40, TODAY - 30, None),
             bead("old", "closed", TODAY - 40, TODAY - 30, Some(TODAY - 30)),
         ]);
         let ids =
             |rows: &[usize]| -> Vec<&str> { rows.iter().map(|&i| b.rows[i].id.as_str()).collect() };
-        let m = movement(&b, &all, UTC, week);
+        let m = movement(&b, &d, &all, week, 14);
         assert_eq!(ids(&m.opened), ["new", "quick"]);
         assert_eq!(ids(&m.closed), ["done", "quick"]);
-        // Claimed and left first, then the longest untouched; touched,
-        // deferred and finished work is not stuck.
-        assert_eq!(ids(&m.stuck), ["claimed", "idle"]);
-        let busy = &b.rows[all[5]];
-        assert!(touched(busy, UTC, week));
-        assert!(!touched(&b.rows[all[3]], UTC, week));
+        // Idle 14 days by the range's end: claimed and left first, then
+        // the longest idle; recently touched, deferred and finished work
+        // is not idle.
+        assert_eq!(ids(&m.idle), ["claimed", "idle"]);
+        // Fewer days take in what was touched ten days ago.
+        let m = movement(&b, &d, &all, week, 7);
+        assert_eq!(ids(&m.idle), ["claimed", "idle", "recent"]);
+        assert!(touched(&d[6], week));
+        assert!(!touched(&d[3], week));
     }
 }

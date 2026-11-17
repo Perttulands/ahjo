@@ -23,18 +23,29 @@ pub const AGE_W: f32 = 34.;
 pub const AWAY_W: f32 = 120.;
 
 /// The facets column beside the list.
-pub const FACETS_W: f32 = 220.;
+pub const FACETS_W: f32 = 184.;
+/// The list's width until its edge is dragged, and the least and most a
+/// drag gives it; the grip at its edge.
+pub const LIST_W: f32 = 520.;
+pub const LIST_MIN: f32 = 320.;
+pub const LIST_MAX: f32 = 960.;
+pub const GRIP: f32 = 6.;
+/// The most of its row the list takes, and the grip's ink when the mouse
+/// is on it.
+pub const LIST_SHARE: f32 = 0.6;
+pub const GRIP_INK: f32 = 0.5;
 
 /// The time strip over the list: its height, and the room its axis
-/// labels take on the left (counts), right (open count) and below (days).
-pub const STRIP_H: f32 = 132.;
+/// labels take on the left (counts), right (open count) and below (days);
+/// above, the hovered day's plate has a lane of its own.
+pub const STRIP_H: f32 = 150.;
 pub const AXIS_LEFT: f32 = 40.;
 pub const AXIS_RIGHT: f32 = 64.;
 pub const AXIS_BOTTOM: f32 = 22.;
-pub const AXIS_TOP: f32 = 14.;
+pub const AXIS_TOP: f32 = 30.;
 /// The time page's chart: the open level over the daily flow, each band
 /// this share of the chart, with this gap between them.
-pub const CHART_H: f32 = 260.;
+pub const CHART_H: f32 = 276.;
 pub const LEVEL_SHARE: f32 = 0.42;
 pub const BAND_GAP: f32 = 14.;
 /// The widest a day's bar grows, the narrowest gap between two days, and
@@ -46,9 +57,24 @@ pub const LABEL_EVERY: f32 = 64.;
 /// The open line, and the wash under it.
 pub const STROKE: f32 = 1.5;
 pub const LEVEL_WASH: f32 = 0.10;
-/// The selected range's wash, and the hover day's.
-pub const BRUSH_WASH: f32 = 0.16;
-pub const HOVER_WASH: f32 = 0.06;
+/// The selected range's wash, its edges' width and ink, and how far the
+/// days outside it step back.
+pub const BRUSH_WASH: f32 = 0.12;
+pub const EDGE: f32 = 1.5;
+pub const EDGE_INK: f32 = 0.85;
+pub const OUTSIDE: f32 = 0.35;
+/// The hovered day: its guide's ink, the mark on the open line, and the
+/// plate of its numbers (padding, and gap from the guide).
+pub const GUIDE: f32 = 0.55;
+pub const DOT: f32 = 7.;
+pub const PLATE_PAD: f32 = 6.;
+pub const PLATE_GAP: f32 = 8.;
+pub const PLATE_H: f32 = 22.;
+/// How far the range's wash and the hover guide reach above the plot.
+pub const BRUSH_RISE: f32 = 6.;
+/// A bar's rounded end, and the strip's open line against the chart's.
+pub const BAR_RADIUS: f32 = 1.5;
+pub const STRIP_LINE: f32 = 0.55;
 pub const HAIRLINE: f32 = 1.;
 /// A colour's mark in the chart's key.
 pub const SWATCH: f32 = 8.;
@@ -61,6 +87,9 @@ pub const STRIP_DAYS: usize = 60;
 pub const CHART_DAYS: usize = 90;
 /// The range the time page opens on: the last week.
 pub const OPENING_RANGE: i64 = 7;
+/// Days untouched that make open work idle: the choices, and the first.
+pub const IDLE_DAYS: [i64; 4] = [7, 14, 30, 60];
+pub const IDLE_DEFAULT: i64 = 14;
 
 /// A number worth reading at a glance (the time page's totals).
 pub const NUMBER: f32 = 24.;
@@ -75,7 +104,9 @@ pub const CARD_PAD: f32 = 10.;
 
 // Finished and under way are the theme's own `done` and `running`.
 
-/// Work being opened: not a meaning of its own, so the text's own grey.
+/// Work being opened: data with no state of its own, so the theme's chart
+/// ink, a step back from the open line drawn in it.
 pub fn opened(t: &Theme) -> Hsla {
-    alpha(t.text2, 0.75)
+    alpha(t.chart, OPENED_INK)
 }
+pub const OPENED_INK: f32 = 0.6;

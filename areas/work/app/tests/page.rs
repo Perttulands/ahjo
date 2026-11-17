@@ -265,7 +265,7 @@ fn work_column_and_terminal_links_open_cards_and_hand_off(cx: &mut TestAppContex
     // The project is chosen by name on the page, and its tree lists.
     click(cx, "tab-work");
     until(cx, "Work page", |cx| {
-        cx.debug_bounds("work-project").is_some()
+        cx.debug_bounds("work-layout").is_some()
     });
     cx.simulate_keystrokes("p");
     cx.simulate_input("fixture");

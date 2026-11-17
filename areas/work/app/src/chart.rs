@@ -105,32 +105,32 @@ fn draw(
     let day_w = plot.size.width / n as f32;
     let x_of = |day: Day| plot.origin.x + day_w * (day - tl.first) as f32;
     let grid = alpha(t.divider, t.divider.a * GRID);
+    // With days chosen, the days outside them step back.
+    let held = |d: usize| p.range.is_none_or(|r| r.holds(tl.first + d as i64));
+    let ink = |c: Hsla, d: usize| {
+        if held(d) { c } else { alpha(c, c.a * OUTSIDE) }
+    };
+    let opened_ink = tokens::opened(t);
 
-    // The range and the hovered day, under everything.
+    // The range: a wash under everything, its edges ruled in the accent.
     if let Some(r) = p.range {
         let from = r.from.max(tl.first);
         let to = r.to.min(tl.last());
         if from <= to {
+            let (x0, x1) = (x_of(from), x_of(to + 1));
+            let top = plot.origin.y - px(BRUSH_RISE);
+            let high = plot.size.height + px(BRUSH_RISE);
             window.paint_quad(fill(
-                Bounds::new(
-                    point(x_of(from), plot.origin.y - px(AXIS_TOP / 2.)),
-                    size(
-                        day_w * (to - from + 1) as f32,
-                        plot.size.height + px(AXIS_TOP / 2.),
-                    ),
-                ),
+                Bounds::new(point(x0, top), size(x1 - x0, high)),
                 alpha(t.accent, BRUSH_WASH),
             ));
+            for x in [x0, x1 - px(EDGE)] {
+                window.paint_quad(fill(
+                    Bounds::new(point(x, top), size(px(EDGE), high)),
+                    alpha(t.accent, EDGE_INK),
+                ));
+            }
         }
-    }
-    if let Some(day) = p.hover.filter(|d| tl.index(*d).is_some()) {
-        window.paint_quad(fill(
-            Bounds::new(
-                point(x_of(day), plot.origin.y),
-                size(day_w, plot.size.height),
-            ),
-            alpha(t.text, HOVER_WASH),
-        ));
     }
 
     let (level, flow) = match p.shape {
@@ -152,16 +152,20 @@ fn draw(
     let (open_top, open_step) = nice(most_open);
     let level_y = |v: u32| level.origin.y + level.size.height * (1. - v as f32 / open_top as f32);
     let base = level.origin.y + level.size.height;
+    let mid = |d: usize| level.origin.x + day_w * (d as f32 + 0.5);
     if p.shape == Shape::Chart {
         gridlines(t, level, open_top, open_step, grid, window, cx);
     }
+    let line_ink = match p.shape {
+        Shape::Strip => alpha(t.chart, STRIP_LINE),
+        Shape::Chart => t.chart,
+    };
     if most_open > 0 {
         let mut under = PathBuilder::fill();
         let mut line = PathBuilder::stroke(px(STROKE));
         under.move_to(point(level.origin.x, base));
         for (d, v) in tl.open.iter().enumerate() {
-            let x = level.origin.x + day_w * (d as f32 + 0.5);
-            let at = point(x, level_y(*v));
+            let at = point(mid(d), level_y(*v));
             if d == 0 {
                 under.line_to(point(level.origin.x, at.y));
                 line.move_to(point(level.origin.x, at.y));
@@ -175,15 +179,11 @@ fn draw(
         line.line_to(point(end, last));
         under.line_to(point(end, base));
         under.close();
-        let ink = match p.shape {
-            Shape::Strip => alpha(t.text2, 0.35),
-            Shape::Chart => t.text2,
-        };
         if let Ok(path) = under.build() {
-            window.paint_path(path, alpha(t.text2, LEVEL_WASH));
+            window.paint_path(path, alpha(t.chart, LEVEL_WASH));
         }
         if let Ok(path) = line.build() {
-            window.paint_path(path, ink);
+            window.paint_path(path, line_ink);
         }
         // The open count's scale: at the right of the strip, whose left
         // scale counts the bars. The chart's level band has its own.
@@ -212,6 +212,25 @@ fn draw(
         .unwrap_or(0);
     let (top, step) = nice(most);
     let bar = |w: Pixels| w.min(px(BAR_MAX)).max(px(1.));
+    let rounded = |q: gpui::PaintQuad, up: bool| {
+        let r = px(BAR_RADIUS);
+        let z = px(0.);
+        q.corner_radii(if up {
+            gpui::Corners {
+                top_left: r,
+                top_right: r,
+                bottom_left: z,
+                bottom_right: z,
+            }
+        } else {
+            gpui::Corners {
+                top_left: z,
+                top_right: z,
+                bottom_left: r,
+                bottom_right: r,
+            }
+        })
+    };
     match p.shape {
         Shape::Strip => {
             gridlines(t, flow, top, step, grid, window, cx);
@@ -219,18 +238,23 @@ fn draw(
             let y = |v: u32| flow.origin.y + flow.size.height * (1. - v as f32 / top as f32);
             let floor = flow.origin.y + flow.size.height;
             for d in 0..n {
-                let mid = flow.origin.x + day_w * (d as f32 + 0.5);
                 let (o, c) = (tl.opened[d], tl.closed[d]);
                 if o > 0 {
-                    window.paint_quad(fill(
-                        Bounds::new(point(mid - bw, y(o)), size(bw, floor - y(o))),
-                        tokens::opened(t),
+                    window.paint_quad(rounded(
+                        fill(
+                            Bounds::new(point(mid(d) - bw, y(o)), size(bw, floor - y(o))),
+                            ink(opened_ink, d),
+                        ),
+                        true,
                     ));
                 }
                 if c > 0 {
-                    window.paint_quad(fill(
-                        Bounds::new(point(mid, y(c)), size(bw, floor - y(c))),
-                        t.done,
+                    window.paint_quad(rounded(
+                        fill(
+                            Bounds::new(point(mid(d), y(c)), size(bw, floor - y(c))),
+                            ink(t.done, d),
+                        ),
+                        true,
                     ));
                 }
             }
@@ -257,16 +281,22 @@ fn draw(
                 v += step;
             }
             for d in 0..n {
-                let x = flow.origin.x + day_w * (d as f32 + 0.5) - bw / 2.;
+                let x = mid(d) - bw / 2.;
                 let (o, c) = (tl.opened[d], tl.closed[d]);
                 if o > 0 {
-                    window.paint_quad(fill(
-                        Bounds::new(point(x, mid_y - h(o)), size(bw, h(o))),
-                        tokens::opened(t),
+                    window.paint_quad(rounded(
+                        fill(
+                            Bounds::new(point(x, mid_y - h(o)), size(bw, h(o))),
+                            ink(opened_ink, d),
+                        ),
+                        true,
                     ));
                 }
                 if c > 0 {
-                    window.paint_quad(fill(Bounds::new(point(x, mid_y), size(bw, h(c))), t.done));
+                    window.paint_quad(rounded(
+                        fill(Bounds::new(point(x, mid_y), size(bw, h(c))), ink(t.done, d)),
+                        false,
+                    ));
                 }
             }
             window.paint_quad(fill(
@@ -301,18 +331,107 @@ fn draw(
         ));
     }
     let every = ((px(LABEL_EVERY) / day_w).ceil() as usize).max(1);
+    let label_y = b.origin.y + b.size.height - px(AXIS_BOTTOM - 4.);
     let mut d = n as i64 - 1;
     while d >= 0 {
-        let x = plot.origin.x + day_w * (d as f32 + 0.5);
         text(
             &day_label(tl.first + d),
-            point(x, b.origin.y + b.size.height - px(AXIS_BOTTOM - 4.)),
+            point(mid(d as usize), label_y),
             TextAlign::Center,
             t.dim,
             window,
             cx,
         );
         d -= every as i64;
+    }
+
+    // The day under the mouse: a guide through it, a mark on the open
+    // line, and a plate saying the day's numbers beside it.
+    if let Some(d) = p.hover.and_then(|day| tl.index(day)) {
+        let x = mid(d);
+        window.paint_quad(fill(
+            Bounds::new(
+                point(x - px(HAIRLINE / 2.), plot.origin.y - px(BRUSH_RISE)),
+                size(px(HAIRLINE), plot.size.height + px(BRUSH_RISE)),
+            ),
+            alpha(t.text2, GUIDE),
+        ));
+        if most_open > 0 {
+            let y = level_y(tl.open[d]);
+            let r = px(DOT / 2.);
+            window.paint_quad(
+                fill(
+                    Bounds::new(point(x - r, y - r), size(px(DOT), px(DOT))),
+                    t.surface,
+                )
+                .corner_radii(r)
+                .border_widths(px(STROKE))
+                .border_color(t.chart),
+            );
+        }
+        plate(t, tl, d, x, plot, window, cx);
+    }
+}
+
+/// The hovered day's numbers on a raised plate at the plot's top, beside
+/// the guide, on whichever side has the room.
+#[allow(clippy::too_many_arguments)]
+fn plate(
+    t: &Theme,
+    tl: &Timeline,
+    d: usize,
+    x: Pixels,
+    plot: Bounds<Pixels>,
+    window: &mut Window,
+    cx: &mut App,
+) {
+    let opened = tl.opened[d].to_string();
+    let closed = tl.closed[d].to_string();
+    let open = tl.open[d].to_string();
+    let day = day_label(tl.first + d as i64);
+    let parts: [(&str, Hsla); 8] = [
+        (&day, t.text),
+        ("   ", t.dim),
+        (&opened, tokens::opened(t)),
+        (" opened  ", t.dim),
+        (&closed, t.done),
+        (" finished  ", t.dim),
+        (&open, t.text),
+        (" open", t.dim),
+    ];
+    let lines: Vec<gpui::ShapedLine> = parts
+        .iter()
+        .map(|(w, ink)| shaped(w, *ink, window))
+        .collect();
+    let words: Pixels = lines.iter().map(|l| l.width).sum();
+    let w = words + px(PLATE_PAD * 2.);
+    let h = px(PLATE_H);
+    let left = if x + px(PLATE_GAP) + w <= plot.origin.x + plot.size.width {
+        x + px(PLATE_GAP)
+    } else {
+        x - px(PLATE_GAP) - w
+    };
+    // In the lane over the plot, clear of the bars.
+    let top = plot.origin.y - px(AXIS_TOP) + px((AXIS_TOP - PLATE_H) / 2. - 2.);
+    window.paint_quad(
+        fill(Bounds::new(point(left, top), size(w, h)), t.raised)
+            .corner_radii(px(kit::RADIUS))
+            .border_widths(px(HAIRLINE))
+            .border_color(t.divider),
+    );
+    let mut at = left + px(PLATE_PAD);
+    let y = top + (px(PLATE_H) - px(kit::SMALL + 3.)) / 2.;
+    for line in lines {
+        let width = line.width;
+        let _ = line.paint(
+            point(at, y),
+            px(kit::SMALL + 3.),
+            TextAlign::Left,
+            None,
+            window,
+            cx,
+        );
+        at += width;
     }
 }
 
@@ -349,6 +468,21 @@ fn rule(band: Bounds<Pixels>, y: Pixels, ink: Hsla, window: &mut Window) {
     ));
 }
 
+/// Words shaped in the chart's small type.
+fn shaped(words: &str, ink: Hsla, window: &mut Window) -> gpui::ShapedLine {
+    let run = gpui::TextRun {
+        len: words.len(),
+        font: gpui::font(FAMILY),
+        color: ink,
+        background_color: None,
+        underline: None,
+        strikethrough: None,
+    };
+    window
+        .text_system()
+        .shape_line(words.to_string().into(), px(kit::SMALL), &[run], None)
+}
+
 /// One small label. Right- and centre-aligned text ends at, or centres
 /// on, `at.x`.
 fn text(
@@ -359,18 +493,7 @@ fn text(
     window: &mut Window,
     cx: &mut App,
 ) {
-    let run = gpui::TextRun {
-        len: words.len(),
-        font: gpui::font(FAMILY),
-        color: ink,
-        background_color: None,
-        underline: None,
-        strikethrough: None,
-    };
-    let line =
-        window
-            .text_system()
-            .shape_line(words.to_string().into(), px(kit::SMALL), &[run], None);
+    let line = shaped(words, ink, window);
     let x = match align {
         TextAlign::Left => at.x,
         TextAlign::Right => at.x - line.width,

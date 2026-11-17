@@ -471,7 +471,8 @@ fn on(layout: crate::Layout, cx: &mut TestAppContext) -> (Entity<Work>, &mut Vis
     let (work, cx) = page(cx);
     cx.update(|_, cx| {
         work.update(cx, |w, cx| {
-            w.clock = crate::Clock { offset_ms: 0 };
+            w.clock = crate::Clock::utc();
+            w.rebuild(cx);
             w.today = day("2026-10-21");
             w.set_layout(layout, false, cx);
         })
@@ -482,7 +483,7 @@ fn on(layout: crate::Layout, cx: &mut TestAppContext) -> (Entity<Work>, &mut Vis
 
 fn day(date: &str) -> crate::Day {
     let ms = crate::store::work::when::parse(&format!("{date}T12:00:00Z")).unwrap();
-    crate::Clock { offset_ms: 0 }.day(ms)
+    crate::Clock::utc().day(ms)
 }
 
 fn ids(work: &Entity<Work>, cx: &mut VisualTestContext) -> Vec<String> {
@@ -537,6 +538,16 @@ fn a_drag_on_the_strip_lists_what_moved_and_a_click_on_the_day_lets_it_go(cx: &m
     let counted: usize = work.read_with(cx, |w, _| w.project_counts.iter().sum());
     assert_eq!(counted, 3);
     assert!(cx.debug_bounds("work-range").is_some());
+    // A state chosen narrows the list and what each project counts.
+    cx.update(|_, cx| {
+        work.update(cx, |w, cx| {
+            w.show_state(Some(crate::store::work::Status::Closed), cx)
+        })
+    });
+    assert_eq!(ids(&work, cx), ["ctx-xvl"]);
+    let counted: usize = work.read_with(cx, |w, _| w.project_counts.iter().sum());
+    assert_eq!(counted, 1);
+    cx.update(|_, cx| work.update(cx, |w, cx| w.show_state(None, cx)));
     // A press on one day takes it; a press on it again lets it go, and the
     // trees of every project come back under their names.
     cx.update(|_, cx| work.update(cx, |w, cx| w.range_press(day("2026-10-20"), cx)));
@@ -550,18 +561,23 @@ fn a_drag_on_the_strip_lists_what_moved_and_a_click_on_the_day_lets_it_go(cx: &m
 }
 
 #[gpui::test]
-fn the_time_page_says_what_a_range_opened_finished_and_left_untouched(cx: &mut TestAppContext) {
+fn the_time_page_says_what_a_range_opened_finished_and_left_idle(cx: &mut TestAppContext) {
     // It opens on the last week. In the chosen project nothing was opened or
-    // finished then, so it lists what stayed untouched instead of nothing.
+    // finished then, so it lists what sat idle instead of nothing.
     let (work, cx) = on(crate::Layout::Time, cx);
     let range = work.read_with(cx, |w, _| w.range).unwrap();
     assert_eq!(
         range,
         crate::Range::between(day("2026-10-15"), day("2026-10-21"))
     );
-    let mut stuck = ids(&work, cx);
-    stuck.sort();
-    assert_eq!(stuck, ["library-zvi", "library-zvi.1", "library-zvi.2"]);
+    let mut idle = ids(&work, cx);
+    idle.sort();
+    assert_eq!(idle, ["library-zvi", "library-zvi.1", "library-zvi.2"]);
+    // Untouched since Oct 1: idle for 14 days by Oct 21, not for 30.
+    assert_eq!(work.read_with(cx, |w, _| w.idle_days), 14);
+    cx.update(|_, cx| work.update(cx, |w, cx| w.set_idle_days(30, cx)));
+    assert!(ids(&work, cx).is_empty());
+    cx.update(|_, cx| work.update(cx, |w, cx| w.set_idle_days(14, cx)));
     // Every project: the pull request opened in those days.
     cx.update(|_, cx| {
         work.update(cx, |w, cx| {
@@ -572,8 +588,8 @@ fn the_time_page_says_what_a_range_opened_finished_and_left_untouched(cx: &mut T
     assert_eq!(ids(&work, cx), ["#11"]);
     cx.update(|_, cx| work.update(cx, |w, cx| w.show_moved(crate::Moved::Closed, cx)));
     assert_eq!(ids(&work, cx), ["ctx-xvl"]);
-    cx.update(|_, cx| work.update(cx, |w, cx| w.show_moved(crate::Moved::Stuck, cx)));
-    let stuck = ids(&work, cx);
-    assert!(stuck.contains(&"ctx-old".to_string()), "{stuck:?}");
-    assert!(!stuck.contains(&"ctx-xvl".to_string()), "{stuck:?}");
+    cx.update(|_, cx| work.update(cx, |w, cx| w.show_moved(crate::Moved::Idle, cx)));
+    let idle = ids(&work, cx);
+    assert!(idle.contains(&"ctx-old".to_string()), "{idle:?}");
+    assert!(!idle.contains(&"ctx-xvl".to_string()), "{idle:?}");
 }

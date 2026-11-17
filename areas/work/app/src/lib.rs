@@ -27,7 +27,7 @@ use std::collections::BTreeMap;
 use std::rc::Rc;
 use std::sync::Arc;
 use store::work::outline::{self, Found, Line};
-use store::work::timeline::{self, Clock, Day, Movement, Range, Timeline};
+use store::work::timeline::{self, Clock, Dated, Day, Movement, Range, Timeline};
 use store::work::{Board, RowKey, Status, prose};
 
 pub const NAME: &str = "work";
@@ -51,22 +51,22 @@ pub enum Entry {
     More(usize),
 }
 
-/// How the page lays out the work: three takes on one purpose, to be
-/// settled by using them (DESIGN.md, Work).
+/// How the page lays out the work (DESIGN.md, Work): the strip first, the
+/// time page second, and the bare tree for those who want only that.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Layout {
-    /// One project's open work as a tree, the item beside it.
-    Tree,
     /// The tree under a strip of the last weeks, the projects and states
     /// counted beside it; a range on the strip lists what moved in it.
     Strip,
-    /// The chart is the page: a range says what opened, closed and stayed
-    /// stuck, across every project or one.
+    /// The chart is the page: a range says what opened, finished and sat
+    /// idle, across every project or one.
     Time,
+    /// One project's open work as a tree, the item beside it.
+    Tree,
 }
 
 impl Layout {
-    pub const ALL: [Layout; 3] = [Layout::Tree, Layout::Strip, Layout::Time];
+    pub const ALL: [Layout; 3] = [Layout::Strip, Layout::Time, Layout::Tree];
     pub fn key(self) -> &'static str {
         match self {
             Layout::Tree => "tree",
@@ -85,13 +85,13 @@ impl Layout {
         Layout::ALL
             .into_iter()
             .find(|l| l.key() == key)
-            .unwrap_or(Layout::Tree)
+            .unwrap_or(Layout::Strip)
     }
     fn next(self) -> Layout {
         match self {
-            Layout::Tree => Layout::Strip,
             Layout::Strip => Layout::Time,
             Layout::Time => Layout::Tree,
+            Layout::Tree => Layout::Strip,
         }
     }
 }
@@ -101,7 +101,7 @@ impl Layout {
 pub enum Moved {
     Opened,
     Closed,
-    Stuck,
+    Idle,
 }
 
 pub struct Work {
@@ -170,6 +170,14 @@ pub struct Work {
     hover: Option<Day>,
     clock: Clock,
     today: Day,
+    /// Each row's days, counted once per board.
+    dated: Rc<Vec<Dated>>,
+    /// How many days untouched makes open work idle on the time page; kept.
+    idle_days: i64,
+    /// The list's width, dragged at its edge; kept. While the edge is
+    /// held: where the press was, and the width then.
+    list_w: f32,
+    grip: Option<(f32, f32)>,
     /// The strip and the time page show every project, not the chosen one.
     every: bool,
     /// The strip's state facet: only work in this state.
@@ -204,8 +212,8 @@ impl Page for Work {
         parvi_app_kit::declared::Setting {
             key: "layout",
             label: "Layout",
-            note: "tree, strip or time: the project's tree, the tree under a time strip, or the chart as the page (V on the page)",
-            control: parvi_app_kit::declared::Control::Text { default: "tree" },
+            note: "strip, time or tree: the tree under a time strip, the chart as the page, or the tree alone (V on the page)",
+            control: parvi_app_kit::declared::Control::Text { default: "strip" },
         },
     ];
     fn settings_changed(&mut self, _: &mut Window, cx: &mut Context<Self>) {
@@ -304,7 +312,8 @@ impl Work {
         }
         let settings: serde_json::Value = host.setting(cx).unwrap_or_default();
         let now = parvi_app_kit::hub::now_ms();
-        let clock = Clock::local(now);
+        let clock = Clock::local();
+        let today = clock.day(now);
         let layout = Layout::of(settings["layout"].as_str().unwrap_or(""));
         Self {
             host,
@@ -342,11 +351,20 @@ impl Work {
             list_scroll: gpui::ScrollHandle::new(),
             reveal: false,
             layout,
-            range: opening_range(layout, clock.day(now)),
+            range: opening_range(layout, today),
             anchor: None,
             hover: None,
             clock,
-            today: clock.day(now),
+            today,
+            dated: Rc::default(),
+            idle_days: settings["idle_days"]
+                .as_i64()
+                .filter(|d| tokens::IDLE_DAYS.contains(d))
+                .unwrap_or(tokens::IDLE_DEFAULT),
+            list_w: settings["list_width"]
+                .as_f64()
+                .map_or(tokens::LIST_W, |w| w as f32),
+            grip: None,
             every: layout == Layout::Time,
             state: None,
             moved: Moved::Opened,
@@ -413,6 +431,7 @@ impl Work {
     }
 
     fn set_board(&mut self, board: Board, cx: &mut Context<Self>) {
+        self.dated = Rc::new(timeline::dated(&board, &self.clock));
         self.board = Rc::new(board);
         self.today = self.clock.day(parvi_app_kit::hub::now_ms());
         self.settle();
@@ -545,14 +564,7 @@ impl Work {
         let Some(path) = self.board.projects.get(project).map(|p| p.path.clone()) else {
             return;
         };
-        let mut settings: serde_json::Value = self.host.setting(cx).unwrap_or_default();
-        if !settings.is_object() {
-            settings = serde_json::json!({});
-        }
-        settings["project"] = serde_json::json!(path);
-        if let Err(e) = self.host.set_setting(&settings, cx) {
-            self.host.toast(&e.message, cx);
-        }
+        self.keep("project", serde_json::json!(path), cx);
         self.project = Some(path);
         self.stop_picking(cx);
         self.selected = None;
@@ -635,7 +647,7 @@ impl Work {
                     let rows = match self.moved {
                         Moved::Opened => &self.movement.opened,
                         Moved::Closed => &self.movement.closed,
-                        Moved::Stuck => &self.movement.stuck,
+                        Moved::Idle => &self.movement.idle,
                     };
                     rows.iter()
                         .map(|&row| Entry::Item {
@@ -707,17 +719,13 @@ impl Work {
             || self.timeline.opened.len() != days
             || self.counted != (project, self.every, Rc::as_ptr(&self.board))
         {
-            self.timeline = Rc::new(Timeline::of(
-                &self.board,
-                &rows,
-                self.clock,
-                self.today,
-                days,
-            ));
+            self.timeline = Rc::new(Timeline::of(&self.dated, &rows, self.today, days));
             self.counted = (project, self.every, Rc::as_ptr(&self.board));
         }
         self.movement = match self.range {
-            Some(range) => timeline::movement(&self.board, &rows, self.clock, range),
+            Some(range) => {
+                timeline::movement(&self.board, &self.dated, &rows, range, self.idle_days)
+            }
             None => Movement::default(),
         };
         // New days or another scope: the time page lists the first of the
@@ -729,35 +737,36 @@ impl Work {
             let held = |which: Moved| match which {
                 Moved::Opened => !m.opened.is_empty(),
                 Moved::Closed => !m.closed.is_empty(),
-                Moved::Stuck => !m.stuck.is_empty(),
+                Moved::Idle => !m.idle.is_empty(),
             };
             if !held(self.moved)
-                && let Some(first) = [Moved::Opened, Moved::Closed, Moved::Stuck]
+                && let Some(first) = [Moved::Opened, Moved::Closed, Moved::Idle]
                     .into_iter()
                     .find(|&w| held(w))
             {
                 self.moved = first;
             }
         }
-        // What counts: work moved in the range, else open work.
+        // What counts: work moved in the range, else open work; a project
+        // counts only work in the state chosen, a state only the work in
+        // view.
         let counts = |i: usize| match self.range {
-            Some(range) => timeline::touched(&self.board.rows[i], self.clock, range),
-            None => outline::open(&self.board, i),
+            Some(range) => timeline::touched(&self.dated[i], range),
+            None => self.state.is_some() || outline::open(&self.board, i),
         };
         self.project_counts = vec![0; self.board.projects.len()];
-        for i in 0..self.board.rows.len() {
-            if counts(i) {
-                self.project_counts[self.board.rows[i].project] += 1;
+        for (i, r) in self.board.rows.iter().enumerate() {
+            if self.state.is_none_or(|s| r.status == s) && counts(i) {
+                self.project_counts[r.project] += 1;
             }
         }
         self.state_counts = [0; 5];
         for &i in &rows {
-            let r = &self.board.rows[i];
             if self
                 .range
-                .is_none_or(|range| timeline::touched(r, self.clock, range))
+                .is_none_or(|range| timeline::touched(&self.dated[i], range))
             {
-                self.state_counts[r.status as usize] += 1;
+                self.state_counts[self.board.rows[i].status as usize] += 1;
             }
         }
     }
@@ -788,7 +797,7 @@ impl Work {
                 self.state.is_none_or(|s| r.status == s)
                     && self
                         .range
-                        .is_none_or(|range| timeline::touched(r, self.clock, range))
+                        .is_none_or(|range| timeline::touched(&self.dated[i], range))
             })
             .collect();
         let last = |i: usize| {
@@ -812,14 +821,7 @@ impl Work {
             self.range = opening_range(layout, self.today);
         }
         if keep {
-            let mut settings: serde_json::Value = self.host.setting(cx).unwrap_or_default();
-            if !settings.is_object() {
-                settings = serde_json::json!({});
-            }
-            settings["layout"] = serde_json::json!(layout.key());
-            if let Err(e) = self.host.set_setting(&settings, cx) {
-                self.host.toast(&e.message, cx);
-            }
+            self.keep("layout", serde_json::json!(layout.key()), cx);
         }
         self.relist(cx);
         cx.notify();
@@ -887,6 +889,42 @@ impl Work {
         self.state = state;
         self.relist(cx);
         cx.notify();
+    }
+
+    /// How many days untouched makes open work idle; kept.
+    pub fn set_idle_days(&mut self, days: i64, cx: &mut Context<Self>) {
+        self.idle_days = days;
+        self.keep("idle_days", serde_json::json!(days), cx);
+        self.moved = Moved::Idle;
+        self.selected = None;
+        self.relist(cx);
+        cx.notify();
+    }
+
+    /// The list's edge dragged to `width`, held between its least and the
+    /// most it may take; kept when the drag ends.
+    pub fn drag_list(&mut self, width: f32, cx: &mut Context<Self>) {
+        let width = width.clamp(tokens::LIST_MIN, tokens::LIST_MAX);
+        if width != self.list_w {
+            self.list_w = width;
+            cx.notify();
+        }
+    }
+
+    pub fn keep_list(&mut self, cx: &mut Context<Self>) {
+        self.keep("list_width", serde_json::json!(self.list_w.round()), cx);
+    }
+
+    /// One of the page's settings, kept for the next run.
+    fn keep(&self, key: &str, value: serde_json::Value, cx: &mut Context<Self>) {
+        let mut settings: serde_json::Value = self.host.setting(cx).unwrap_or_default();
+        if !settings.is_object() {
+            settings = serde_json::json!({});
+        }
+        settings[key] = value;
+        if let Err(e) = self.host.set_setting(&settings, cx) {
+            self.host.toast(&e.message, cx);
+        }
     }
 
     pub fn show_moved(&mut self, moved: Moved, cx: &mut Context<Self>) {

@@ -49,14 +49,6 @@ pub fn parse(s: &str) -> Option<u64> {
     u64::try_from(at.unix_timestamp_nanos() / 1_000_000).ok()
 }
 
-/// Seconds east of UTC in this machine's zone at `ms`.
-pub fn local_offset(ms: u64) -> i64 {
-    OffsetDateTime::from_unix_timestamp((ms / 1000) as i64)
-        .ok()
-        .and_then(|at| UtcOffset::local_offset_at(at).ok())
-        .map_or(0, |o| o.whole_seconds().into())
-}
-
 /// How long ago, as the footer says it: `moments`, `40 min`, `3 h`,
 /// `2 days` (CHROTE's `ageLabel`).
 pub fn age(ms: u64, now: u64) -> String {

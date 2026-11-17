@@ -3,7 +3,7 @@
 //! ([`crate::chart`]) and answer a range at once; they differ in what
 //! leads. The strip keeps the tree first and counts the projects and
 //! states beside it; the time page leads with the chart and says what a
-//! range opened, finished and left untouched.
+//! range opened and finished, and what sat idle.
 
 use crate::chart::{self, Picture, Shape};
 use crate::store::work::Status;
@@ -106,7 +106,8 @@ impl Work {
     }
 
     /// The line over the chart: what it is scoped to (the time page's),
-    /// the range chosen, the day under the mouse, and the key.
+    /// the range chosen, and the key. The day under the mouse says its
+    /// numbers on the chart.
     fn band_head(&self, t: &Theme, scope: Option<Div>, cx: &mut Context<Self>) -> Div {
         let mut head = div()
             .h(px(size::TAB_BAR))
@@ -129,7 +130,7 @@ impl Work {
                 .child(
                     div()
                         .text_color(t.text2)
-                        .child(format!("{opened} opened · {closed} closed")),
+                        .child(format!("{opened} opened · {closed} finished")),
                 )
             }
             None => head.child(
@@ -138,22 +139,10 @@ impl Work {
                     .child("Drag across the days to see what moved"),
             ),
         };
-        if let Some(day) = self.hover
-            && let Some(d) = self.timeline.index(day)
-        {
-            let tl = &self.timeline;
-            head = head.child(div().text_color(t.text2).child(format!(
-                "· {}: {} opened, {} closed, {} open",
-                day_label(day),
-                tl.opened[d],
-                tl.closed[d],
-                tl.open[d]
-            )));
-        }
         head.child(div().flex_1())
             .child(swatch(t, tokens::opened(t), "Opened", false))
-            .child(swatch(t, t.done, "Closed", false))
-            .child(swatch(t, t.text2, "Open", true))
+            .child(swatch(t, t.done, "Finished", false))
+            .child(swatch(t, t.chart, "Open", true))
     }
 
     /// The time page's scope: every project, or the one chosen.
@@ -205,7 +194,7 @@ impl Work {
                     .items_center()
                     .px(px(TOTAL_PAD))
                     .text_color(t.dim)
-                    .child("Choose days on the chart: what they opened, finished and left untouched lists here."),
+                    .child("Choose days on the chart: what they opened and finished, and what sat idle, lists here."),
             );
         };
         let m = &self.movement;
@@ -225,11 +214,11 @@ impl Work {
                 "Finished in these days",
             ),
             (
-                Moved::Stuck,
-                m.stuck.len(),
-                "untouched",
+                Moved::Idle,
+                m.idle.len(),
+                "idle",
                 t.text2,
-                "Open all through these days and not touched in them: under way first, then the longest untouched",
+                "Open at the end of these days and untouched for the days chosen beside: under way first, then the longest idle",
             ),
         ];
         let mut row = row;
@@ -265,6 +254,7 @@ impl Work {
                     .on_click(cx.listener(move |w, _, _, cx| w.show_moved(moved, cx))),
             );
         }
+        row = row.child(self.idle_days(t, cx));
         // The open work at the range's end, and how it changed across it.
         let tl = &self.timeline;
         if let Some(end) = tl.index(r.to.min(tl.last())) {
@@ -305,6 +295,32 @@ impl Work {
             );
         }
         row
+    }
+
+    /// How long untouched makes open work idle: the days, each a choice.
+    fn idle_days(&self, t: &Theme, cx: &mut Context<Self>) -> Div {
+        let mut days = div()
+            .flex()
+            .items_center()
+            .gap(px(SPACE_XS))
+            .pb(px(SPACE_XS))
+            .text_size(px(size::SMALL))
+            .text_color(t.dim)
+            .child("untouched");
+        for d in IDLE_DAYS {
+            let id: &'static str = match d {
+                7 => "work-idle-7",
+                14 => "work-idle-14",
+                30 => "work-idle-30",
+                _ => "work-idle-60",
+            };
+            days = days.child(
+                choice(t, id, d.to_string(), self.idle_days == d)
+                    .tooltip(kit::tip(format!("Idle: untouched for {d} days or more")))
+                    .on_click(cx.listener(move |w, _, _, cx| w.set_idle_days(d, cx))),
+            );
+        }
+        days.child("days or more")
     }
 
     /// The strip's facets: the projects, then the states, each counted;
