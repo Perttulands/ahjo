@@ -31,12 +31,23 @@ pub struct History {
 
 /// Reads the brain's log with Git. Blocking: run it off the UI.
 pub fn read(root: &Path) -> Result<History, String> {
-    let mut git = std::process::Command::new("git");
-    git.arg("-C")
-        .arg(root)
-        // A brain reached across WSL's share is owned by another user as
-        // Windows sees it; reading its log is all this does.
-        .args(["-c", "safe.directory=*"])
+    // A brain on a WSL share is read by git inside that distribution: the
+    // same log through the share takes tens of seconds.
+    let mut git = match in_wsl(&root.to_string_lossy()) {
+        Some((distro, path)) => {
+            let mut wsl = std::process::Command::new("wsl.exe");
+            wsl.args(["-d", &distro, "--exec", "git", "-C", &path]);
+            wsl
+        }
+        None => {
+            let mut git = std::process::Command::new("git");
+            git.arg("-C").arg(root);
+            git
+        }
+    };
+    // A brain reached across WSL's share is owned by another user as
+    // Windows sees it; reading its log is all this does.
+    git.args(["-c", "safe.directory=*"])
         .args(["-c", "diff.renameLimit=20000", "-c", "core.quotePath=false"])
         .args(["log", "-M", "--format=@%at", "--name-status", "--", "*.md"]);
     #[cfg(windows)]
@@ -55,6 +66,19 @@ pub fn read(root: &Path) -> Result<History, String> {
         ));
     }
     Ok(parse(&String::from_utf8_lossy(&out.stdout)))
+}
+
+/// A Windows path into a WSL distribution (`\\wsl.localhost\<distro>\…` or
+/// `\\wsl$\<distro>\…`) as the distribution and the path inside it.
+fn in_wsl(path: &str) -> Option<(String, String)> {
+    let rest = path
+        .strip_prefix(r"\\wsl.localhost\")
+        .or_else(|| path.strip_prefix(r"\\wsl$\"))?;
+    let (distro, inside) = rest.split_once('\\')?;
+    Some((
+        distro.to_string(),
+        format!("/{}", inside.replace('\\', "/")),
+    ))
 }
 
 /// `git log -M --format=@%at --name-status`, newest first, as days.
@@ -113,6 +137,18 @@ pub fn parse(log: &str) -> History {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_brain_on_a_wsl_share_is_read_inside_its_distribution() {
+        let inside = |d: &str, p: &str| Some((d.to_string(), p.to_string()));
+        assert_eq!(
+            in_wsl(r"\\wsl.localhost\Ubuntu\srv\data\context"),
+            inside("Ubuntu", "/srv/data/context")
+        );
+        assert_eq!(in_wsl(r"\\wsl$\Debian\home\b"), inside("Debian", "/home/b"));
+        assert_eq!(in_wsl(r"C:\brain"), None);
+        assert_eq!(in_wsl("/srv/data/context"), None);
+    }
 
     #[test]
     fn work_is_told_by_day_under_the_names_pages_have_now() {
