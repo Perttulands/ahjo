@@ -467,7 +467,7 @@ mod tests {
         );
     }
 
-    /// parvi-7rc: a fragment finds a project nobody launched in yet.
+    /// ahjo-7rc: a fragment finds a project nobody launched in yet.
     #[test]
     fn a_fragment_finds_the_nodes_projects_after_the_offered_folders() {
         let offered = [

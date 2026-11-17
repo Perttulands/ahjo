@@ -42,7 +42,7 @@ async fn ahjo(node: SocketAddr, args: &[&str]) -> Output {
 
 /// Waits until the node lists session `name` with its panes. A node serves
 /// at once and finds its sessions just after; until a command waits for
-/// that itself (parvi-iay), a test that uses one waits here.
+/// that itself (ahjo-iay), a test that uses one waits here.
 async fn listed(node: SocketAddr, name: &str) {
     let deadline = Instant::now() + Duration::from_secs(10);
     loop {

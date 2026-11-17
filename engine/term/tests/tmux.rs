@@ -1096,7 +1096,7 @@ async fn a_failed_stream_reports_what_tmux_said() {
 }
 
 /// Right after start the engine has not listed anything; once ready, every
-/// session the server held is there with its panes (parvi-iay).
+/// session the server held is there with its panes (ahjo-iay).
 #[tokio::test(flavor = "multi_thread")]
 async fn ready_lists_every_session_with_its_panes() {
     let Some(server) = Server::start() else {

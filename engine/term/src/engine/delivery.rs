@@ -757,7 +757,7 @@ mod tests {
         assert!(deliveries.readying().is_none());
     }
 
-    /// parvi-cdi: a launch's command line goes into its fresh shell the
+    /// ahjo-cdi: a launch's command line goes into its fresh shell the
     /// moment the line editor reads, and Enter follows at once.
     #[test]
     fn a_fresh_shell_takes_its_command_line_without_a_fixed_wait() {
