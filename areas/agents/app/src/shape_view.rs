@@ -123,6 +123,13 @@ impl AgentsPage {
             return;
         };
         if v.dir != dir || v.node != node {
+            if v.editing {
+                self.host.report(
+                    Status::failure("Save or discard the open file first (Ctrl+S, Escape)"),
+                    cx,
+                );
+                return;
+            }
             v.pick = Pick::None;
             v.file = None;
             v.editing = false;

@@ -188,6 +188,26 @@ impl Page for AgentsPage {
     const AREA: Option<&'static str> = Some("agents");
     const KINDS: parvi_core::frame::Kinds = &[0x80..=0x8f];
     const CHANNELS: &'static [u8] = &[WATCH];
+    /// "What this agent sees": a folder (`id`) on a node, by a harness
+    /// (`part`, "claude" or "codex", else the one shown).
+    const ANSWERS: &'static [parvi_app_kit::ask::Answers] =
+        &[parvi_app_kit::ask::Answers::Reveal("agent")];
+    fn answer(
+        &mut self,
+        ask: parvi_app_kit::Ask,
+        _: &'static str,
+        _: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let parvi_app_kit::Ask::Reveal { id, node, part, .. } = ask else {
+            return;
+        };
+        self.started = true;
+        self.show_sub(Sub::Agent, cx);
+        if self.sub == Sub::Agent {
+            self.shape_open(node.map(|n| n.to_string()), id, part, cx);
+        }
+    }
     fn frame(
         &mut self,
         node: &NodeId,

@@ -1,6 +1,7 @@
 //! The Agents page reads an isolated node and offers its tool details.
 use gpui::{Modifiers, TestAppContext, VisualTestContext};
 use parvi_app_kit::link::client::LinkState;
+use parvi_app_kit::{Ask, Host};
 use parvi_testkit::{fresh_dir, node::Node, sessions};
 use std::path::PathBuf;
 use std::sync::mpsc;
@@ -197,6 +198,55 @@ fn agent_view_reads_a_folder_and_saves_an_instruction_in_place(cx: &mut TestAppC
     until(cx, "the folder kept in app.json", |cx| {
         cx.executor().advance_clock(Duration::from_millis(300));
         std::fs::read_to_string(settings.join("app.json")).is_ok_and(|s| s.contains("proj"))
+    });
+    std::fs::remove_dir_all(settings).unwrap();
+}
+
+#[gpui::test]
+fn a_reveal_of_an_agent_opens_its_folder_by_its_harness(cx: &mut TestAppContext) {
+    let running = start();
+    let settings = fresh_dir("parvi-agents-page-reveal");
+    cx.executor().allow_parking();
+    cx.update(parvi_app_shell::prepare);
+    let url = running.url.clone();
+    let path = settings.join("app.json");
+    let (shell, cx) = cx.add_window_view(move |window, cx| {
+        parvi_app_shell::start(
+            &[parvi_agents_app::build],
+            Some(url),
+            Some(path),
+            window,
+            cx,
+        )
+    });
+    until(cx, "the node connection", |cx| {
+        shell.read_with(cx, |s, cx| {
+            s.hub().read(cx).fleet.here().state == LinkState::Open
+        })
+    });
+    // The operator is on another subpage when Sessions asks.
+    click(cx, "agents-sub-skills");
+    let node = shell.read_with(cx, |s, cx| s.hub().read(cx).live_nodes()[0].id.clone());
+    let sessions = shell.read_with(cx, |s, _| Host::new(s.hub()).for_page("sessions", &[]));
+    let proj = running.home.join("proj").to_string_lossy().into_owned();
+    let ask = Ask::Reveal {
+        what: "agent".into(),
+        id: proj.clone(),
+        node: Some(node),
+        part: Some("codex".into()),
+        beside: false,
+    };
+    cx.update(|_, cx| sessions.ask(ask, cx)).unwrap();
+    // Codex reads only the project's AGENTS.md; Claude Code would read
+    // the operator's CLAUDE.md first.
+    until(cx, "the Codex instructions", |cx| {
+        cx.debug_bounds("shape-instruction-0").is_some()
+    });
+    assert!(cx.debug_bounds("shape-instruction-1").is_none());
+    until(cx, "the folder and harness kept", |cx| {
+        cx.executor().advance_clock(Duration::from_millis(300));
+        std::fs::read_to_string(settings.join("app.json"))
+            .is_ok_and(|s| s.contains(&proj) && s.contains("\"codex\""))
     });
     std::fs::remove_dir_all(settings).unwrap();
 }
