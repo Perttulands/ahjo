@@ -12,3 +12,7 @@ pub const TOGGLE_GAP: f32 = 6.;
 /// Recent runs' columns: when it started and what started it.
 pub const RUN_WHEN_W: f32 = 130.;
 pub const RUN_BY_W: f32 = 90.;
+/// A task's row: its name and when it runs next, then its cadence and how
+/// its last run went; the second line starts under the name.
+pub const TASK_ROW: f32 = 44.;
+pub const SECOND_LINE_INDENT: f32 = 14.;

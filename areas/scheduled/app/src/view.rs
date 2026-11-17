@@ -41,7 +41,15 @@ impl Render for ScheduledPage {
         let chosen = shown
             .as_ref()
             .map(|(n, task)| (n.as_str(), task.id.as_str()));
-        let list = pane::list(&t, "scheduled-list", list_head, self.list(&t, chosen, cx));
+        // Each row says when, how often and how the last run went: the
+        // wide list, so the names have room.
+        let rows = div()
+            .id("scheduled-list")
+            .flex_1()
+            .min_h_0()
+            .overflow_y_scroll()
+            .child(self.list(&t, chosen, cx));
+        let list = pane::list_wide_frame(&t, list_head, rows);
         let detail = if self.state.form.is_some() {
             self.form(&t, cx)
         } else if let Some((node, task)) = &shown {
@@ -169,10 +177,9 @@ impl ScheduledPage {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let on = self.state.form.is_none() && chosen == Some((node, task.id.as_str()));
-        let (meta, colour) = if !task.held.is_empty() {
+        // When it runs next, or why it will not.
+        let (next, next_colour) = if !task.held.is_empty() {
             ("held".to_string(), Some(t.error))
-        } else if !task.last_status.is_empty() && task.last_status != SUCCESS {
-            ("failed".to_string(), Some(t.error))
         } else if task.paused {
             ("paused".to_string(), None)
         } else if !task.enabled {
@@ -180,16 +187,77 @@ impl ScheduledPage {
         } else {
             (form::countdown(task.next_run, now), None)
         };
+        // How the last run went: its mark, and since when.
+        let failed = !task.last_status.is_empty() && task.last_status != SUCCESS;
+        let (mark, last, last_colour) = match task.last_run {
+            None => (None, "never run".to_string(), t.dim),
+            Some(at) if failed => (
+                Some(t.error),
+                format!("failed {}", form::ago(at, now)),
+                t.error,
+            ),
+            Some(at) => (Some(t.done), format!("ran {}", form::ago(at, now)), t.dim),
+        };
+        let mark = match mark {
+            Some(c) => kit::state_dot(c),
+            None => kit::state_dot(t.dim)
+                .bg(gpui::transparent_black())
+                .border_1()
+                .border_color(t.dim),
+        };
         let (pick_node, pick_id) = (node.to_string(), task.id.clone());
         let selector = format!("task-{node}-{}", task.id);
         let name = task.name.clone();
+        let result_selector = format!("task-last-{node}-{}-{last}", task.id);
         pane::row(t, SharedString::from(selector.clone()), on)
             .debug_selector(move || selector)
+            .h(px(TASK_ROW))
             .child(
-                pane::cell(task.name.clone())
-                    .debug_selector(move || format!("scheduled-task-name-{name}")),
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .flex()
+                    .flex_col()
+                    .child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .gap(px(size::HEAD_GAP))
+                            .child(mark)
+                            .child(
+                                pane::cell(task.name.clone())
+                                    .debug_selector(move || format!("scheduled-task-name-{name}")),
+                            )
+                            .child(pane::meta(t, next, next_colour)),
+                    )
+                    .child(
+                        div()
+                            .pl(px(SECOND_LINE_INDENT))
+                            .flex()
+                            .gap(px(size::HEAD_GAP))
+                            .min_w_0()
+                            .overflow_hidden()
+                            .whitespace_nowrap()
+                            .text_size(px(size::SMALL))
+                            .font_weight(FontWeight::NORMAL)
+                            .child(
+                                div()
+                                    .flex_1()
+                                    .min_w_0()
+                                    .overflow_hidden()
+                                    .text_ellipsis()
+                                    .text_color(t.dim)
+                                    .child(form::describe(&task.schedule)),
+                            )
+                            .child(
+                                div()
+                                    .flex_none()
+                                    .debug_selector(move || result_selector)
+                                    .text_color(last_colour)
+                                    .child(last),
+                            ),
+                    ),
             )
-            .child(pane::meta(t, meta, colour))
             .on_click(cx.listener(move |page, e: &ClickEvent, _, cx| {
                 let key = (pick_node.clone(), pick_id.clone());
                 if page.state.form.is_some() {
@@ -354,7 +422,7 @@ impl ScheduledPage {
                     .child(task.prompt.clone()),
             ),
         );
-        if task.recent_runs.len() > 1 {
+        if !task.recent_runs.is_empty() {
             let rows = task
                 .recent_runs
                 .iter()
@@ -378,11 +446,20 @@ impl ScheduledPage {
                     } else {
                         "schedule"
                     };
+                    let selector =
+                        format!("task-run-{}-{}", r.status, form::when(Some(r.started_at)));
                     pane::table_row(
                         t,
                         &RUNS,
                         vec![
-                            pane::cell(form::when(Some(r.started_at))).into_any_element(),
+                            div()
+                                .debug_selector(move || selector)
+                                .flex()
+                                .items_center()
+                                .gap(px(size::HEAD_GAP))
+                                .child(kit::state_dot(if ok { t.done } else { t.error }))
+                                .child(pane::cell(form::when(Some(r.started_at))))
+                                .into_any_element(),
                             pane::cell(by).text_color(t.text2).into_any_element(),
                             pane::cell(result)
                                 .text_color(if ok { t.text2 } else { t.error })
@@ -392,7 +469,8 @@ impl ScheduledPage {
                     .into_any_element()
                 })
                 .collect();
-            body = body.child(pane::section(t, "Recent runs").child(pane::table(t, &RUNS, rows)));
+            body = body
+                .child(pane::section(t, "Runs, newest first").child(pane::table(t, &RUNS, rows)));
         }
         pane::detail(t, "scheduled-detail", head, body)
     }

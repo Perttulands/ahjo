@@ -194,14 +194,18 @@ fn daily_or_weekly(expression: &str) -> Option<(u32, u32, Option<Vec<u8>>)> {
     if f[4] == "*" {
         return Some((h, m, None));
     }
-    let days: Option<Vec<u8>> = f[4]
-        .split(',')
-        .map(|d| match d.as_bytes() {
-            [c @ b'0'..=b'7'] => Some(c - b'0'),
-            _ => None,
-        })
-        .collect();
-    Some((h, m, Some(days?)))
+    // Days as a list (`1,3`) or ranges (`1-5`), or both.
+    let mut days = vec![];
+    for d in f[4].split(',') {
+        match d.as_bytes() {
+            [c @ b'0'..=b'7'] => days.push(c - b'0'),
+            [a @ b'0'..=b'7', b'-', b @ b'0'..=b'7'] if a <= b => {
+                days.extend((a - b'0')..=(b - b'0'))
+            }
+            _ => return None,
+        }
+    }
+    Some((h, m, Some(days)))
 }
 
 impl ScheduleForm {
@@ -386,6 +390,21 @@ pub fn countdown(at: Option<Timestamp>, now: Timestamp) -> String {
         format!("in {m}m")
     } else {
         "in <1m".into()
+    }
+}
+
+/// `2h ago`, `just now`: how long since a run.
+pub fn ago(at: Timestamp, now: Timestamp) -> String {
+    let seconds = (now.as_millisecond() - at.as_millisecond()).div_euclid(1000);
+    let (d, h, m) = (seconds / 86_400, seconds / 3_600, seconds / 60);
+    if d > 0 {
+        format!("{d}d ago")
+    } else if h > 0 {
+        format!("{h}h ago")
+    } else if m > 0 {
+        format!("{m}m ago")
+    } else {
+        "just now".into()
     }
 }
 
@@ -628,7 +647,12 @@ mod tests {
     #[test]
     fn schedules_read_as_words() {
         assert_eq!(describe(&cron("0 9 * * 1")), "Mon at 09:00");
-        assert_eq!(describe(&cron("0 9 * * 1-5")), "Cron 0 9 * * 1-5");
+        assert_eq!(describe(&cron("0 9 * * 1-5")), "Weekdays at 09:00");
+        assert_eq!(
+            describe(&cron("0 9 * * 1-3,5")),
+            "Mon, Tue, Wed, Fri at 09:00"
+        );
+        assert_eq!(describe(&cron("0 9 * * 5-1")), "Cron 0 9 * * 5-1");
         assert_eq!(describe(&cron("0 9 * * 1,2,3,4,5")), "Weekdays at 09:00");
         assert_eq!(describe(&cron("0 9 * * 0,6")), "Sat, Sun at 09:00");
         assert_eq!(describe(&cron("15 16 * * *")), "Daily at 16:15");
@@ -667,5 +691,10 @@ mod tests {
         assert_eq!(countdown(at("2026-06-29T15:00:00Z"), now), "in 2d 1h");
         assert_eq!(countdown(at("2026-06-27T13:00:00Z"), now), "due now");
         assert_eq!(countdown(at("2026-06-27T14:00:20Z"), now), "in <1m");
+        let ran = |s: &str| ago(s.parse().unwrap(), now);
+        assert_eq!(ran("2026-06-27T13:59:40Z"), "just now");
+        assert_eq!(ran("2026-06-27T13:15:00Z"), "45m ago");
+        assert_eq!(ran("2026-06-27T11:00:00Z"), "3h ago");
+        assert_eq!(ran("2026-06-25T13:00:00Z"), "2d ago");
     }
 }
