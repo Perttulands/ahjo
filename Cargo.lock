@@ -784,6 +784,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "brain-app"
+version = "0.0.1"
+dependencies = [
+ "gpui-pre",
+ "gpui-pre-platform",
+ "parvi-app-kit",
+ "serde",
+ "serde_json",
+ "time",
+]
+
+[[package]]
 name = "built"
 version = "0.8.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"

@@ -164,6 +164,12 @@ impl TextField {
         self
     }
 
+    /// Text at `size` rather than the kit's body size.
+    pub fn text_size(mut self, size: f32) -> Self {
+        self.text_size = size;
+        self
+    }
+
     /// Where the field was last drawn, in window coordinates.
     pub fn bounds(&self) -> Option<Bounds<Pixels>> {
         self.bounds
