@@ -4931,8 +4931,11 @@ dependencies = [
  "parvi-testkit",
  "serde",
  "serde_json",
+ "sha2 0.11.1",
  "tokio",
  "tokio-tungstenite 0.30.0",
+ "toml 1.2.1+spec-1.1.0",
+ "toml_edit 0.25.19+spec-1.1.0",
  "windows-sys 0.61.2",
 ]
 
@@ -4947,6 +4950,7 @@ dependencies = [
  "parvi-app-shell",
  "parvi-core",
  "parvi-node-kit",
+ "parvi-terminals-contract",
  "parvi-testkit",
  "serde",
  "serde_json",

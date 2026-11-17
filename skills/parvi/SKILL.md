@@ -19,7 +19,7 @@ Commands use `parvi <noun> <verb>`. Required arguments can be positional or name
 | `service` | Inspect and control services: `list`, `show`, `start`, `stop`, `restart`. |
 | `scheduled` | Manage prompts sent into sessions: `list`, `show`, `create`, `edit`, `copy`, `pause`, `resume`, `run`, `delete`. |
 | `role` | Manage the role library: `list`, `inspect`, `usage`, `new`, `edit`, `retire`, `restore`, `delete`, `characters`. |
-| `agents` | Inspect agent tools, skills and checkouts with `show`; `sync` a skills checkout. |
+| `agents` | Inspect agent tools, skills and checkouts with `show`; `sync` a skills checkout. `shape --dir D [--harness claude\|codex]` shows what an agent started in D gets (instructions in load order, skills, hooks, settings, servers, each with its file); `read`/`write` an instruction or skill file (write names the etag read); `hook-add`, `hook-set`, `hook-remove`, `hook-switch` and `setting-set` change the file `shape` lists. |
 | `mission`, `formation`, `layout`, `gate`, `end`, `limit`, `run` | Author mission graphs and drive runs; read [missions](references/missions.md). |
 | `view` | Inspect connected apps with `show` and open a page or item with `open`. |
 | `config` | Read the node configuration with `show`. |

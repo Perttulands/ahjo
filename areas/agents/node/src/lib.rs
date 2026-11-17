@@ -6,6 +6,7 @@ mod link;
 mod report;
 mod roles;
 mod run;
+pub mod shape;
 mod skills;
 mod sync;
 mod tools;
@@ -37,6 +38,14 @@ pub const LISTING: Listing = Listing {
         "agents_show",
         "agents_sync",
         "agents_link",
+        "agents_shape",
+        "agents_read",
+        "agents_write",
+        "agents_hook_add",
+        "agents_hook_set",
+        "agents_hook_remove",
+        "agents_hook_switch",
+        "agents_setting_set",
         "role_list",
         "role_inspect",
         "role_usage",
@@ -56,6 +65,7 @@ struct AgentsArea {
     node: String,
     roles: Arc<roles::Service>,
     sync_state: Arc<SyncState>,
+    shapes: Option<Arc<shape::Roots>>,
 }
 
 struct SyncState {
@@ -153,8 +163,12 @@ pub fn build(setup: &Setup) -> Result<Built> {
     let roles = Arc::new(roles::Service::new(root, fixture_codex));
     let node = setup.node.id.to_string();
     let sync_state = Arc::new(SyncState::default());
+    let shapes = home
+        .clone()
+        .map(|h| Arc::new(shape::Roots::new(h, &setup.dir)));
     Built::then(move |provided| {
         Ok(Arc::new(AgentsArea {
+            shapes,
             home,
             node,
             roles,
@@ -168,7 +182,11 @@ pub fn build(setup: &Setup) -> Result<Built> {
 
 impl Area for AgentsArea {
     fn routes(&self) -> axum::Router {
-        roles::routes(self.roles.clone())
+        let router = roles::routes(self.roles.clone());
+        match &self.shapes {
+            Some(roots) => router.merge(shape::routes::routes(roots.clone())),
+            None => router,
+        }
     }
     fn channel(&self, _: Client) -> Option<Box<dyn Channel>> {
         let (out, incoming) = mpsc::channel(32);
@@ -261,6 +279,10 @@ impl Area for AgentsArea {
             },
         );
         let mut commands = vec![show, sync, link];
+        commands.extend(shape::routes::commands(
+            self.shapes.clone(),
+            self.node.clone(),
+        ));
         commands.extend(roles::commands(self.roles.clone(), self.node.clone()));
         commands
     }

@@ -11,14 +11,7 @@ use parvi_app_kit::widgets::kit::{self, Kind};
 use parvi_app_kit::widgets::pane;
 
 impl AgentsPage {
-    pub(crate) fn render_agents(
-        &mut self,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        if self.library.open {
-            return self.render_role_library(window, cx);
-        }
+    pub(crate) fn render_agents(&mut self, _: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         let t = theme(cx).clone();
         let reports = self.agents_reports();
         let several = reports.len() > 1;
@@ -42,22 +35,23 @@ impl AgentsPage {
             .flat_map(|(n, r)| agents::off(r).into_iter().map(move |o| (*n, o)))
             .collect();
 
-        let list_head = pane::list_head(&t, None)
+        let list_head = pane::list_head(&t, Some(self.sub_switch(&t, cx).into_any_element()))
             .child(
-                pane::act(&t, "agents-refresh", "Check again")
+                pane::act(&t, "agents-refresh", "↻")
                     .debug_selector(|| "agents-refresh".into())
-                    .tooltip(kit::tip("Read the tools and checkouts again"))
-                    .on_click(cx.listener(|s, _, _, cx| s.agents_refresh(cx))),
-            )
-            .child(
-                pane::act(&t, "agents-library", "Roles")
-                    .debug_selector(|| "agents-library".into())
+                    .tooltip(kit::tip("Read the tools, checkouts and skills again"))
                     .on_click(cx.listener(|s, _, _, cx| {
-                        s.library.open = true;
-                        s.load_role_library(cx);
+                        s.agents_refresh(cx);
+                        s.catalog_load(cx);
                     })),
             );
-        let mut rows = div().flex().flex_col();
+        let mut rows = div().flex().flex_col().child(
+            div()
+                .px(px(size::ROW_PAD))
+                .pb(px(size::HEAD_GAP))
+                .debug_selector(|| "skill-find".into())
+                .child(self.inputs.find.clone()),
+        );
         if !reports.is_empty() {
             let (meta, colour) = if off.is_empty() {
                 ("ready".to_string(), None)
@@ -140,6 +134,8 @@ impl AgentsPage {
                 ));
             }
         }
+        // Below the short groups, so its rows arriving move nothing.
+        rows = rows.child(self.catalog_rows(&t, cx));
         let list = pane::list(&t, "agents-list", list_head, rows);
 
         let detail = if reports.is_empty() {
@@ -155,6 +151,8 @@ impl AgentsPage {
                 pane::head(&t),
                 pane::empty(&t, words, None).p_0(),
             )
+        } else if let Some(path) = self.catalog.chosen.clone() {
+            self.catalog_detail(&t, &path, cx)
         } else {
             match self.state.chosen.clone() {
                 Chosen::Tool(id) if tools.iter().any(|x| x.id == id) => {
@@ -183,7 +181,7 @@ impl AgentsPage {
         pick: Chosen,
         cx: &mut Context<Self>,
     ) -> gpui::Stateful<Div> {
-        let chosen = self.state.chosen == pick;
+        let chosen = self.catalog.chosen.is_none() && self.state.chosen == pick;
         let selector = id.to_string();
         pane::row(t, SharedString::from(id.to_string()), chosen)
             .debug_selector(move || selector)
@@ -193,7 +191,11 @@ impl AgentsPage {
             )
             .children(meta.map(|(m, c)| pane::meta(t, m, c)))
             .on_click(cx.listener(move |s, _, _, cx| {
+                if s.shape.editing {
+                    return;
+                }
                 s.state.chosen = pick.clone();
+                s.catalog.chosen = None;
                 cx.notify();
             }))
     }
@@ -220,10 +222,14 @@ impl AgentsPage {
                 .collect();
             div()
                 .debug_selector(|| "agents-ready".into())
-                .child(format!(
-                    "Ready: {}. Every skill is linked and level with its checkout.",
-                    running.join(", ")
-                ))
+                .child(if running.is_empty() {
+                    "Nothing to fix: every skill is linked and level with its checkout.".to_string()
+                } else {
+                    format!(
+                        "Ready: {}. Every skill is linked and level with its checkout.",
+                        running.join(", ")
+                    )
+                })
         } else {
             let count = off.len();
             let mut rows = div()

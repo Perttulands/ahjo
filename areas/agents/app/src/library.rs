@@ -13,17 +13,40 @@ use serde_json::json;
 
 #[derive(Default)]
 pub(crate) struct Library {
-    pub open: bool,
     node: String,
     roles: Vec<Role>,
     unreadable: Vec<role_library::Unreadable>,
     selected: Option<Role>,
     wanted: String,
     usage: Option<Usage>,
+    /// Every role's usage, for the list.
+    uses: std::collections::BTreeMap<String, Usage>,
     form: Option<Form>,
     error: Option<String>,
     busy: bool,
     note: Option<Entity<TextField>>,
+}
+/// A role's mark: its initials on its own colour, the same wherever the
+/// role is named.
+fn role_mark(t: &parvi_app_kit::theme::Theme, id: &str, side: f32) -> gpui::Div {
+    let initials: String = id
+        .split(['-', '_', ' '])
+        .filter_map(|w| w.chars().next())
+        .take(2)
+        .flat_map(char::to_uppercase)
+        .collect();
+    div()
+        .flex_none()
+        .size(px(side))
+        .rounded(px(side / 4.))
+        .bg(t.identity_of(id))
+        .flex()
+        .items_center()
+        .justify_center()
+        .text_size(px(side * 0.45))
+        .font_weight(gpui::FontWeight::BOLD)
+        .text_color(t.text)
+        .child(initials)
 }
 pub(crate) struct Form {
     creating: bool,
@@ -36,7 +59,7 @@ pub(crate) struct Form {
 fn role_path(id: &str) -> String {
     format!("/api/roles/{}", id)
 }
-fn response<T: serde::de::DeserializeOwned>(
+pub(crate) fn response<T: serde::de::DeserializeOwned>(
     answer: Result<(u16, Vec<u8>), parvi_core::Error>,
 ) -> Result<T, String> {
     match answer {
@@ -55,7 +78,7 @@ struct Call {
     wait: std::time::Duration,
 }
 impl AgentsPage {
-    fn mission_call(
+    pub(crate) fn mission_call(
         &mut self,
         node: &str,
         method: &'static str,
@@ -141,6 +164,7 @@ impl AgentsPage {
                     }
                     Err(e) => l.error = Some(e),
                 }
+                s.load_role_uses(cx);
                 // The library opens on a role, the first until one is chosen.
                 let l = &s.library;
                 if l.form.is_none() && !l.roles.iter().any(|r| r.id == l.wanted) {
@@ -152,6 +176,24 @@ impl AgentsPage {
                 cx.notify();
             },
         );
+    }
+    /// Reads where each role is used, for the list's marks.
+    fn load_role_uses(&mut self, cx: &mut Context<Self>) {
+        let node = self.library.node.clone();
+        let ids: Vec<String> = self.library.roles.iter().map(|r| r.id.clone()).collect();
+        for id in ids {
+            let n = node.clone();
+            let path = format!("{}/usage", role_path(&id));
+            self.mission_call(&node, "GET", &path, None, cx, move |s, answer, cx| {
+                if s.library.node != n {
+                    return;
+                }
+                if let Ok(usage) = response::<Usage>(answer) {
+                    s.library.uses.insert(id, usage);
+                    cx.notify();
+                }
+            });
+        }
     }
     fn inspect_role(&mut self, id: String, cx: &mut Context<Self>) {
         if self.library.busy {
@@ -409,13 +451,7 @@ impl AgentsPage {
     ) -> AnyElement {
         let t = theme(cx).clone();
         let l = &self.library;
-        let list_head = pane::list_head(&t, None)
-            .child(
-                pane::act(&t, "library-back", "← Agents").on_click(cx.listener(|s, _, _, cx| {
-                    s.library.open = false;
-                    cx.notify();
-                })),
-            )
+        let list_head = pane::list_head(&t, Some(self.sub_switch(&t, cx).into_any_element()))
             .child(
                 pane::act(&t, "role-new", "New")
                     .on_click(cx.listener(|s, _, _, cx| s.role_form(true, cx))),
@@ -462,10 +498,17 @@ impl AgentsPage {
                 role.display_name.clone()
             };
             let selector = format!("role-{id}");
+            let used = l.uses.get(&id).map(|u| match u.usage.len() {
+                0 if u.complete => "unused".to_string(),
+                1 => "1 slot".to_string(),
+                n => format!("{n} slots"),
+            });
             rows = rows.child(
                 pane::row(&t, SharedString::from(selector.clone()), l.wanted == id)
                     .debug_selector(move || selector)
+                    .child(role_mark(&t, &id, tokens::MARK))
                     .child(pane::cell(name))
+                    .children(used.map(|u| pane::meta(&t, u, None)))
                     .when(role.status == "retired", |d| {
                         d.child(pane::meta(&t, "retired", None))
                     })
@@ -535,6 +578,7 @@ impl AgentsPage {
             (head, body)
         } else if let Some(role) = &l.selected {
             let head = pane::head(&t)
+                .child(role_mark(&t, &role.id, tokens::MARK_BIG))
                 .child(pane::title(&t, role.display_name.clone()).debug_selector({
                     let shown = format!("role-{}-shown", role.id);
                     move || shown

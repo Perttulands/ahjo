@@ -56,6 +56,14 @@ async fn commands_and_channel_work_over_the_node() {
             "agents_show",
             "agents_sync",
             "agents_link",
+            "agents_shape",
+            "agents_read",
+            "agents_write",
+            "agents_hook_add",
+            "agents_hook_set",
+            "agents_hook_remove",
+            "agents_hook_switch",
+            "agents_setting_set",
             "role_list",
             "role_inspect",
             "role_usage",
@@ -257,7 +265,7 @@ async fn role_routes_and_commands_keep_versions_and_usage() {
         "role_delete",
         "role_characters",
     ];
-    assert_eq!(&parvi_agents::LISTING.commands[3..], names);
+    assert!(parvi_agents::LISTING.commands.ends_with(&names));
     let role = node
         .call("role_new", json!({"role":"editor","display_name":"Editor"}))
         .await

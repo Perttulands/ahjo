@@ -340,13 +340,14 @@ async fn sync_fetches_fast_forwards_and_runs_setup_in_a_session() {
 
 #[test]
 fn commands_match_the_old_agents_tools() {
-    assert_eq!(
-        parvi_agents::LISTING
-            .commands
-            .iter()
-            .copied()
-            .filter(|n| n.starts_with("agents_"))
-            .collect::<Vec<_>>(),
-        &["agents_show", "agents_sync", "agents_link"]
+    let agents: Vec<&str> = parvi_agents::LISTING
+        .commands
+        .iter()
+        .copied()
+        .filter(|n| n.starts_with("agents_"))
+        .collect();
+    assert!(
+        agents.starts_with(&["agents_show", "agents_sync", "agents_link"]),
+        "{agents:?}"
     );
 }

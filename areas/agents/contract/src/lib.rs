@@ -6,6 +6,8 @@
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
+pub mod shape;
+
 pub const FAILED: &str = "agents_failed";
 pub const FETCH_FAILED: &str = "agents_fetch_failed";
 

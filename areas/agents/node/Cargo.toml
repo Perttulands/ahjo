@@ -17,7 +17,10 @@ parvi-mission-engine = { path = "../../../engine/missions" }
 axum = { version = "0.8", default-features = false, features = ["json"] }
 parvi-term = { path = "../../../engine/term" }
 serde = { version = "1", features = ["derive"] }
-serde_json = "1"
+serde_json = { version = "1", features = ["preserve_order"] }
+sha2 = "0.11"
+toml = { version = "1", default-features = false, features = ["parse", "serde", "std"] }
+toml_edit = "0.25"
 tokio = { version = "1", features = ["full"] }
 
 [target.'cfg(windows)'.dependencies]

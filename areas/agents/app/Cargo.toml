@@ -11,6 +11,7 @@ workspace = true
 [dependencies]
 parvi-core = { path = "../../../kit/core" }
 parvi-agents-contract = { path = "../contract" }
+parvi-terminals-contract = { path = "../../terminals/contract" }
 parvi-app-kit = { path = "../../../kit/app-kit" }
 gpui = { package = "gpui-pre", version = "=0.3.12" }
 serde = "1"

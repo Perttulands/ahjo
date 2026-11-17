@@ -123,6 +123,9 @@ fn failed_fetch_is_reported_once_without_marking_available_harnesses_broken(
             shell.hub().read(cx).fleet.here().state == LinkState::Open
         })
     });
+    // The checkouts are on the Skills view.
+    let at = cx.debug_bounds("agents-sub-skills").unwrap().center();
+    cx.simulate_click(at, Modifiers::none());
     until(cx, "local checkout report", |cx| {
         cx.debug_bounds("agents-checkout-kit").is_some()
             && cx.debug_bounds("agents-checkout-extras").is_some()
