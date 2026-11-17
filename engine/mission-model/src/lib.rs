@@ -6,6 +6,7 @@
 //! and runs it.
 
 mod authoring;
+mod examples;
 mod finding;
 mod layout;
 mod mission;
@@ -14,11 +15,13 @@ mod notes;
 mod run;
 mod run_attempts;
 mod run_projection;
+mod sessions;
 
 pub use authoring::{
     Edit, EndUpdate, GateUpdate, InputCardUpdate, LayoutEdit, LayoutPatch, LimitUpdate,
     MissionDeletion, NotePatch, NotesEdit, Patch, Precondition, RestoredNode,
 };
+pub use examples::{EXAMPLES, Example, example};
 pub use finding::{Code, Finding, Report};
 pub use layout::{LAYOUT_SCHEMA, Layout, LayoutEdge, LayoutNode};
 pub use mission::{MISSION_SCHEMA, Mission, MissionListing};
@@ -40,3 +43,4 @@ pub use run_projection::{
     Escalation, GateInput, GateRequest, PublicEvent, PublicInputRef, PublicOrigin, RunProjection,
     WaitingGate, plain_reason,
 };
+pub use sessions::{agent_session, fresh_session, valid_agent, valid_prefix};

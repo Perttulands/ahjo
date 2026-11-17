@@ -14,9 +14,12 @@ use std::sync::{
 #[derive(Clone, Debug)]
 pub struct FormationExecution {
     pub run_id: String,
-    /// What its seats are called where people see them: the mission, the
-    /// run's number and the step, as `plan-then-review-3-review`.
-    pub seat_name: String,
+    /// What the mission's agent sessions are named under
+    /// ([`parvi_mission_model::agent_session`]); blank names seats by ids.
+    pub prefix: String,
+    /// The run's number as the Missions list shows it, naming a fresh
+    /// attempt's sessions.
+    pub run_number: u64,
     pub formation: Formation,
     pub bindings: BindingsSnapshot,
     pub cwd: PathBuf,

@@ -30,7 +30,7 @@ pub(crate) fn end(c: &Coordinator, id: &str, node: Option<&str>, cause: &str) ->
                 }
             } else if matches!(
                 event.data.get("outcome").and_then(|v| v.as_str()),
-                Some("ended" | "gone")
+                Some("ended" | "gone" | "kept")
             ) {
                 left.remove(&key);
             }
@@ -77,7 +77,7 @@ pub(crate) fn end(c: &Coordinator, id: &str, node: Option<&str>, cause: &str) ->
         );
         event.slot_id = seat.slot_id;
         c.append(id, event)?;
-        if outcome != "ended" && outcome != "gone" {
+        if !["ended", "gone", "kept"].contains(&outcome.as_str()) {
             failures.push(format!("seat cleanup {outcome}: {detail}"));
         }
     }

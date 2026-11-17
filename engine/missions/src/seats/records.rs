@@ -27,6 +27,10 @@ pub struct Dispatch {
     pub brief: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reuse_dispatch: Option<String>,
+    /// The session is an agent's own, named `name` exactly: a live one is
+    /// used, and it outlives the run for the next one to use.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub keep: bool,
     /// The environment the seat runs on, `<device>/<environment>`; blank is
     /// the coordinator's own.
     #[serde(default, skip_serializing_if = "String::is_empty")]
@@ -61,6 +65,19 @@ pub struct SeatId {
     pub node: String,
     pub session_name: String,
     pub session: parvi_term::SessionRef,
+    /// Where the harness in a session that was already live runs, which is
+    /// where it records its turns; a started seat runs in its dispatch's.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cwd: Option<PathBuf>,
+}
+
+impl SeatId {
+    /// The same session, wherever its harness runs.
+    pub fn same(&self, other: &SeatId) -> bool {
+        self.node == other.node
+            && self.session_name == other.session_name
+            && self.session == other.session
+    }
 }
 
 /// Public location and state of one seat; server-generation proof stays private.
@@ -186,11 +203,17 @@ impl SeatRecords {
             };
             match self.with_record(&id, |record| {
                 Ok((
-                    record.seat.as_ref() == Some(seat),
+                    record.seat.as_ref().is_some_and(|own| own.same(seat)),
                     record.dispatch.reuse_dispatch.is_none(),
+                    record
+                        .events
+                        .iter()
+                        .any(|event| event.key == "seat-cleanup"),
                 ))
             }) {
-                Ok((true, original)) => matches.push((!original, id)),
+                // An agent's kept session serves one run after another, so
+                // the dispatch it answers for is the one still open.
+                Ok((true, original, ended)) => matches.push((ended, !original, id)),
                 Ok(_) => (),
                 Err(error)
                     if matches!(
@@ -204,7 +227,7 @@ impl SeatRecords {
         matches
             .into_iter()
             .next()
-            .map(|(_, id)| id)
+            .map(|(_, _, id)| id)
             .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "unknown seat"))
     }
     pub fn seats(&self, run_id: &str) -> Result<Vec<AgentSeat>, crate::Error> {
@@ -535,6 +558,7 @@ mod tests {
             cwd: "/tmp".into(),
             brief: "private brief".into(),
             reuse_dispatch: None,
+            keep: false,
             place: String::new(),
             turn: None,
         }
@@ -577,6 +601,7 @@ mod tests {
                     start_time: 4,
                 },
             },
+            cwd: None,
         };
         store.bind_seat(&req.id, seat.clone()).unwrap();
         store.bind_seat(&req.id, seat.clone()).unwrap();

@@ -37,7 +37,7 @@ fn parse_document(raw: &str) -> Result<DocumentMut, Error> {
 
 fn editable_arrays(patch: &Patch) -> &'static [&'static str] {
     match patch {
-        Patch::Title(_) => &[],
+        Patch::Title(_) | Patch::Prefix(_) => &[],
         Patch::UpdateInputCard(_) | Patch::CreateInputCard { .. } => &["inputCard"],
         Patch::CreateFormation { .. }
         | Patch::SetBrief { .. }
@@ -45,6 +45,7 @@ fn editable_arrays(patch: &Patch) -> &'static [&'static str] {
         | Patch::UpdateFormation { .. }
         | Patch::EditFormation { .. }
         | Patch::AssignSlot { .. }
+        | Patch::NameAgent { .. }
         | Patch::SwapSlots { .. }
         | Patch::MakeController { .. }
         | Patch::SetFormationType { .. } => &["formation"],
@@ -103,6 +104,35 @@ impl Store {
     }
 
     pub fn create_mission(&self, slug: &str, title: &str, actor: &str) -> Result<Edit, Error> {
+        self.create_from(DocumentMut::new(), slug, title, actor)
+    }
+
+    /// A new mission that starts as a copy of one of the
+    /// [`crate::EXAMPLES`], under its own id, slug and title.
+    pub fn create_example(
+        &self,
+        slug: &str,
+        title: &str,
+        example: &str,
+        actor: &str,
+    ) -> Result<Edit, Error> {
+        let example = crate::examples::find(example)?;
+        let doc = parse_document(example.definition)?;
+        let title = if title.trim().is_empty() {
+            example.title
+        } else {
+            title
+        };
+        self.create_from(doc, slug, title, actor)
+    }
+
+    fn create_from(
+        &self,
+        mut doc: DocumentMut,
+        slug: &str,
+        title: &str,
+        actor: &str,
+    ) -> Result<Edit, Error> {
         crate::store::check_slug(slug)?;
         let locks = crate::write::locks(self.root(), &format!("mission:{slug}"));
         let _reference_guard = locks.references.read().unwrap_or_else(|e| e.into_inner());
@@ -115,7 +145,6 @@ impl Store {
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => (),
             Err(error) => return Err(crate::error::io(error)),
         }
-        let mut doc = DocumentMut::new();
         doc["schema"] = value(1);
         doc["id"] = value(id("msn")?);
         doc["slug"] = value(slug);
@@ -173,6 +202,20 @@ impl Store {
                 doc["title"] = updated;
                 None
             }
+            Patch::Prefix(prefix) => {
+                let prefix = prefix.trim().to_ascii_lowercase();
+                if !prefix.is_empty() && !parvi_mission_model::valid_prefix(&prefix) {
+                    return Err(Error::new(
+                        "invalid_prefix",
+                        "a prefix is letters and digits only, at most 24 of them",
+                    ));
+                }
+                if current.mission.prefix == prefix {
+                    return Ok(current);
+                }
+                crate::authoring_staff::set(doc.as_table_mut(), "prefix", &prefix);
+                None
+            }
             patch @ (Patch::SetGateJudge { .. } | Patch::DetachGateJudge { .. }) => {
                 if !crate::authoring_judge::apply(&mut doc, &current.mission, patch)? {
                     return Ok(current);
@@ -223,6 +266,7 @@ impl Store {
             patch @ (Patch::UpdateFormation { .. }
             | Patch::EditFormation { .. }
             | Patch::AssignSlot { .. }
+            | Patch::NameAgent { .. }
             | Patch::SwapSlots { .. }
             | Patch::MakeController { .. }
             | Patch::SetBrief { .. }

@@ -97,13 +97,19 @@ pub(crate) fn apply(doc: &mut DocumentMut, mission: &Mission, patch: Patch) -> R
                 table.remove("brief");
             }
         }
-        Patch::UpdateFormation { id, title, device } => {
+        Patch::UpdateFormation {
+            id,
+            title,
+            device,
+            fresh,
+        } => {
             let formation = mission.formation(&id).ok_or_else(not_found)?;
             let title = title.filter(|t| *t != formation.title);
             let device = device
                 .map(|d| d.trim().to_string())
                 .filter(|d| *d != formation.device);
-            if title.is_none() && device.is_none() {
+            let fresh = fresh.filter(|f| *f != formation.fresh);
+            if title.is_none() && device.is_none() && fresh.is_none() {
                 return Ok(false);
             }
             let table = formation_table(doc, &id)?;
@@ -118,6 +124,38 @@ pub(crate) fn apply(doc: &mut DocumentMut, mission: &Mission, patch: Patch) -> R
                 Some(d) => crate::write::set(table, "device", value(d)),
                 None => {}
             }
+            match fresh {
+                Some(true) => crate::write::set(table, "fresh", value(true)),
+                Some(false) => {
+                    table.remove("fresh");
+                }
+                None => {}
+            }
+        }
+        Patch::NameAgent {
+            formation_id,
+            slot_id,
+            agent,
+        } => {
+            let formation = mission.formation(&formation_id).ok_or_else(not_found)?;
+            let slot = formation
+                .slots
+                .iter()
+                .find(|s| s.id == slot_id)
+                .ok_or_else(not_found)?;
+            let agent = agent.trim();
+            if !agent.is_empty() && !parvi_mission_model::valid_agent(agent) {
+                return Err(Error::new(
+                    "invalid_agent",
+                    "an agent's name is lower-case words of letters and digits joined by dashes",
+                ));
+            }
+            if slot.agent == agent {
+                return Ok(false);
+            }
+            let table = formation_table(doc, &formation_id)?;
+            let item = table.get_mut("slot").ok_or_else(not_found)?;
+            set(slot_table(item, &slot_id)?, "agent", agent);
         }
         Patch::AssignSlot {
             formation_id,

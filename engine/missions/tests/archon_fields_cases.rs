@@ -102,6 +102,7 @@ fn input_and_formation_titles_and_hint_can_be_set_and_cleared() {
                     id: formation.clone(),
                     title: Some(title.into()),
                     device: None,
+                    fresh: None,
                 },
                 "",
             )
@@ -394,6 +395,7 @@ fn repeated_node_type_port_and_judge_edits_keep_bytes_and_check_etags() {
             id: f.id.clone(),
             title: Some("Renamed".into()),
             device: None,
+            fresh: None,
         },
         Patch::SetFormationType {
             id: f.id.clone(),

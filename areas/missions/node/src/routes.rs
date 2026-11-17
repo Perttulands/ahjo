@@ -175,7 +175,14 @@ async fn create(State(m): State<Missions>, input: JsonBody<Value>) -> ResultResp
         } else {
             format!("{title} {suffix}")
         };
-        match m.store.create_mission(&name, &display, s(&v, "updatedBy")) {
+        // A mission may start as a copy of an example.
+        let created = match s(&v, "example") {
+            "" => m.store.create_mission(&name, &display, s(&v, "updatedBy")),
+            example => m
+                .store
+                .create_example(&name, &display, example, s(&v, "updatedBy")),
+        };
+        match created {
             Ok(edit) => {
                 result = Some(edit);
                 break;

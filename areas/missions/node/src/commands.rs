@@ -17,6 +17,7 @@ pub const NAMES: &[&str] = &[
     "mission_inspect",
     "mission_validate",
     "mission_new",
+    "mission_examples",
     "mission_edit",
     "mission_notes",
     "mission_note",
@@ -42,6 +43,7 @@ pub const NAMES: &[&str] = &[
     "gate_pick",
     "mission_arrange",
     "mission_rename",
+    "mission_prefix",
     "mission_move",
     "mission_create",
     "mission_update",
@@ -58,6 +60,8 @@ pub const NAMES: &[&str] = &[
     "formation_set_slots",
     "formation_assign",
     "formation_unassign",
+    "formation_agent",
+    "formation_fresh",
     "formation_set_brief",
     "formation_add_input",
     "formation_add_output",
@@ -105,7 +109,10 @@ fn description(name: &str) -> &'static str {
         }
         "mission_inspect" => "Read a mission and its graph.",
         "mission_validate" => "Report errors and warnings on a mission.",
-        "mission_new" => "Create an empty mission.",
+        "mission_new" => {
+            "Create a mission: empty, or with --example a copy of a staffed, wired example to start from (mission examples lists them)."
+        }
+        "mission_examples" => "List the example missions a new mission can start from.",
         "mission_edit" => "Apply one mission authoring operation.",
         "mission_notes" => "Read mission note threads.",
         "mission_note" => "Append, edit or delete a mission note.",
@@ -145,7 +152,8 @@ fn schema(name: &str) -> Value {
         "mission_purge_archive" => {
             object(json!({"slug":s,"archive_id":s}), &["slug", "archive_id"])
         }
-        "mission_new" => object(json!({"slug":s,"title":s}), &["slug"]),
+        "mission_new" => object(json!({"slug":s,"title":s,"example":s}), &["slug"]),
+        "mission_examples" => object(json!({}), &[]),
         "mission_edit" => object(
             json!({"mission":s,"change":obj,"rev":i}),
             &["mission", "change"],
@@ -305,11 +313,30 @@ async fn call(m: Missions, name: &str, a: Value) -> Result<Value, Error> {
         }
         "mission_new" => {
             let slug = required(&a, "slug")?;
-            let edit = m
-                .store
-                .create_mission(slug, optional(&a, "title", slug)?, "agent:parvi")?;
+            let edit = match maybe_text(&a, "example").map_err(bad)? {
+                Some(example) => m.store.create_example(
+                    slug,
+                    optional(&a, "title", "")?,
+                    example,
+                    "agent:parvi",
+                )?,
+                None => {
+                    m.store
+                        .create_mission(slug, optional(&a, "title", slug)?, "agent:parvi")?
+                }
+            };
             m.changed();
             Ok(json!({"node":node,"mission":document(edit.mission,edit.etag)?}))
+        }
+        "mission_examples" => {
+            if a.as_object().is_some_and(|v| !v.is_empty()) {
+                return Err(bad("no arguments expected"));
+            }
+            let examples: Vec<_> = parvi_missions_contract::EXAMPLES
+                .iter()
+                .map(|e| json!({"name":e.name,"title":e.title,"about":e.about}))
+                .collect();
+            Ok(json!({"node":node,"examples":examples}))
         }
         "mission_inspect" => {
             let edit = m.store.mission_edit(required(&a, "mission")?)?;

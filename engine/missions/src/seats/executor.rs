@@ -169,12 +169,14 @@ impl SeatExecutor {
         sink: &ExecutionSink,
     ) -> Result<(SeatId, String), String> {
         let id = dispatch_id(request, slot, phase);
+        let (name, keep) = seat_session(request, slot);
         let dispatch = Dispatch {
             id: id.clone(),
             run_id: request.run_id.clone(),
             node_id: request.formation.id.clone(),
             slot_id: slot.id.clone(),
-            name: seat_name(request, slot),
+            name,
+            keep,
             harness: slot.harness.clone(),
             model: slot.model.clone(),
             effort: slot.effort.clone(),
@@ -545,7 +547,7 @@ impl SeatExecutor {
                     break;
                 }
             }
-            if outcome != "ended" && outcome != "gone" {
+            if !["ended", "gone", "kept"].contains(&outcome.as_str()) {
                 return Err(format!("seat_cleanup: {outcome}"));
             }
             Ok(())
@@ -852,7 +854,7 @@ impl Executor for SeatExecutor {
                 if invalid_judge {
                     let slot = request.formation.slots.iter().find(|slot| slot.id == request.slot_id).cloned().ok_or("slot missing")?;
                     let execution = FormationExecution {
-                        run_id: request.run_id.clone(), seat_name: persisted.name.clone(), formation: request.formation.clone(),
+                        run_id: request.run_id.clone(), prefix: String::new(), run_number: 0, formation: request.formation.clone(),
                         bindings: crate::BindingsSnapshot { schema: 1, run_id: request.run_id.clone(), mission_id: String::new(), mission_slug: String::new(), mission_rev: 0, input_card_id: String::new(), bindings: Vec::new(), gate_bindings: Vec::new() },
                         cwd: persisted.cwd, turn: persisted.turn.clone(), artifact_dir: request.artifact_dir.clone(), context_paths: Vec::new(), work: String::new(), inputs: Vec::new(), input_text: String::new(), attempt: request.attempt, judge: true, pick_attempts: Vec::new(),
                         canceled: request.canceled.clone().unwrap_or_default(), stopping: request.stopping.clone().unwrap_or_default(), limits: Default::default(),
@@ -861,7 +863,7 @@ impl Executor for SeatExecutor {
                     return Ok(replay);
                 }
                 let outcome = self.seats.end_seat(&seat, "run_final").await.map_err(|error| error.message)?;
-                if outcome != "ended" && outcome != "gone" {
+                if !["ended", "gone", "kept"].contains(&outcome.as_str()) {
                     return Err(format!("seat_cleanup: {outcome}"));
                 }
                 let data = json!({"dispatchId":request.dispatch_id,"sessionName":seat.session_name,"outcome":outcome,"cause":"run_final"});
@@ -895,6 +897,7 @@ impl Executor for SeatExecutor {
                     generation: serde_json::from_value(get("generation")?)
                         .map_err(|e| e.to_string())?,
                 },
+                cwd: None,
             };
             self.runtime
                 .block_on(self.seats.end_seat(&seat, &left.cause))
@@ -1212,15 +1215,26 @@ async fn published_turn(
     })
 }
 
-/// A seat's readable name: the step's, and the slot's label on a team.
-fn seat_name(request: &FormationExecution, slot: &Slot) -> String {
-    if request.seat_name.is_empty() {
-        return String::new();
+/// The session a slot's seat works in, and whether it is the agent's own
+/// to keep: `<prefix>-<agent>`, or for a step that starts fresh one of the
+/// attempt's own.
+fn seat_session(request: &FormationExecution, slot: &Slot) -> (String, bool) {
+    if request.prefix.is_empty() {
+        return (String::new(), false);
     }
-    let label = slot.label.trim();
-    if request.formation.slots.len() > 1 && !label.is_empty() {
-        format!("{}-{label}", request.seat_name)
+    let agent = request.formation.agent_of(slot);
+    if request.formation.fresh {
+        let name = parvi_mission_model::fresh_session(
+            &request.prefix,
+            &agent,
+            request.run_number,
+            request.attempt,
+        );
+        (name, false)
     } else {
-        request.seat_name.clone()
+        (
+            parvi_mission_model::agent_session(&request.prefix, &agent),
+            true,
+        )
     }
 }

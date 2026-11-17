@@ -73,6 +73,7 @@ impl SeatSide for Kept {
                 cwd: PathBuf::from("/w"),
                 brief: "Answer.".into(),
                 reuse_dispatch: None,
+                keep: false,
                 place: String::new(),
                 turn: None,
             });

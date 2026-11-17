@@ -22,6 +22,9 @@ pub struct Edit {
 #[derive(Clone, Debug)]
 pub enum Patch {
     Title(String),
+    /// What the mission's agent sessions are named under; blank is its
+    /// slug's ([`crate::Mission::session_prefix`]).
+    Prefix(String),
     SetGateJudge {
         gate_id: String,
         chain: Vec<String>,
@@ -80,6 +83,8 @@ pub enum Patch {
         title: Option<String>,
         /// Where the step runs (#124); blank runs it on the coordinator.
         device: Option<String>,
+        /// Whether each attempt starts its agents in sessions of their own.
+        fresh: Option<bool>,
     },
     EditFormation {
         id: String,
@@ -93,6 +98,13 @@ pub enum Patch {
         harness: String,
         model: String,
         effort: String,
+    },
+    /// The agent who works a slot, naming its session; blank names it
+    /// after the step.
+    NameAgent {
+        formation_id: String,
+        slot_id: String,
+        agent: String,
     },
     SwapSlots {
         from_formation: String,

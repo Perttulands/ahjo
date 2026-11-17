@@ -358,7 +358,7 @@ impl Coordinator {
                                 });
                             }
                         } else if event.kind == "seat_cleanup"
-                            && ["ended", "gone"].contains(&event.outcome.as_str())
+                            && ["ended", "gone", "kept"].contains(&event.outcome.as_str())
                         {
                             sessions.retain(|s| s.session_name != event.session_name);
                         }

@@ -196,6 +196,7 @@ fn set_node_flag(v: &mut Value, args: &Args, key: &str) {
 pub const NAMES: &[&str] = &[
     "mission_arrange",
     "mission_rename",
+    "mission_prefix",
     "mission_move",
     "mission_create",
     "mission_update",
@@ -212,6 +213,8 @@ pub const NAMES: &[&str] = &[
     "formation_set_slots",
     "formation_assign",
     "formation_unassign",
+    "formation_agent",
+    "formation_fresh",
     "formation_set_brief",
     "formation_add_input",
     "formation_add_output",
@@ -235,6 +238,9 @@ pub fn description(name: &str) -> &'static str {
     match name {
         "mission_arrange" => "Replace saved canvas positions with compact reading rows.",
         "mission_rename" => "Change the mission's title, as the app's Rename does. The slug stays.",
+        "mission_prefix" => {
+            "Name the prefix the mission's agent sessions go under, as <prefix>-<agent>, so the session list groups them: letters and digits only. Without one, the prefix is the slug's letters and digits."
+        }
         "mission_move" => {
             "Move one card on the canvas: the Input card, a step, gate, End node or Limit card, by id or title."
         }
@@ -269,6 +275,12 @@ pub fn description(name: &str) -> &'static str {
             "Staff a slot. A slot owns its harness, model and effort; --role adds optional role text, and a slot without one is a vanilla agent. --character stamps a saved character's role, harness, model and effort, each replaced by its own flag when given; the slot keeps no link to it."
         }
         "formation_unassign" => "Empty a slot.",
+        "formation_agent" => {
+            "Name the agent who works a slot (--slot on a team). A run uses the agent's live session <prefix>-<agent> where it runs, starts it when it is not live, and leaves it for the next run. Without a name the agent is named after the step."
+        }
+        "formation_fresh" => {
+            "Turn on or off whether each attempt of the step starts its agents in sessions of their own, <prefix>-<agent>-<run>-<attempt>, ended with the attempt. A best-of-n step starts fresh."
+        }
         "formation_set_brief" => "Write the step's brief.",
         "formation_add_input" => "Add an input port.",
         "formation_add_output" => {
@@ -310,6 +322,7 @@ fn allowed(name: &str) -> &'static [&'static str] {
     match name {
         "mission_arrange" => &["mission"],
         "mission_rename" => &["mission", "title", "updated_by"],
+        "mission_prefix" => &["mission", "prefix", "updated_by"],
         "mission_move" => &["mission", "card", "x", "y"],
         "mission_create" => &[
             "mission",
@@ -373,6 +386,8 @@ fn allowed(name: &str) -> &'static [&'static str] {
             "updated_by",
         ],
         "formation_unassign" => &["mission", "formation", "slot", "updated_by"],
+        "formation_agent" => &["mission", "formation", "agent", "slot", "updated_by"],
+        "formation_fresh" => &["mission", "formation", "fresh", "updated_by"],
         "formation_set_brief" => &[
             "mission",
             "formation",
@@ -506,6 +521,9 @@ pub fn schema(name: &str) -> Value {
         "warn",
         "updated_by",
         "character",
+        "prefix",
+        "agent",
+        "fresh",
     ] {
         props.insert(key.into(), s.clone());
     }
@@ -525,7 +543,10 @@ pub fn schema(name: &str) -> Value {
     for key in ["file", "link", "slot"] {
         props.insert(key.into(), json!({"type":"array","items":s}));
     }
-    if matches!(name, "formation_assign" | "formation_unassign") {
+    if matches!(
+        name,
+        "formation_assign" | "formation_unassign" | "formation_agent"
+    ) {
         props.insert("slot".into(), s.clone());
     }
     props.retain(|key, _| allowed(name).contains(&key.as_str()));
@@ -537,6 +558,7 @@ pub fn schema(name: &str) -> Value {
         "formation_create" => &["mission"],
         "formation_rename" => &["mission", "formation", "title"],
         "formation_place" => &["mission", "formation", "place"],
+        "formation_fresh" => &["mission", "formation", "fresh"],
         "formation_set_type" => &["mission", "formation", "type"],
         "formation_set_port" => &["mission", "formation", "port"],
         "formation_wire" | "formation_unwire" => &["mission", "from", "to"],
@@ -544,6 +566,7 @@ pub fn schema(name: &str) -> Value {
         | "formation_set_slots"
         | "formation_assign"
         | "formation_unassign"
+        | "formation_agent"
         | "formation_set_brief"
         | "formation_add_input"
         | "formation_add_output"
@@ -578,12 +601,15 @@ fn args(name: &str, value: &Value) -> std::result::Result<Args, Error> {
     let mut pos = vec![mission];
     let fields: &[&str] = match name {
         "mission_rename" => &["title"],
+        "mission_prefix" => &["prefix"],
         "mission_move" => &["card"],
         "mission_update" => &["input"],
         "mission_input" | "mission_output" => &["name"],
         "formation_create" => &["type"],
         "formation_rename" => &["formation", "title"],
         "formation_place" => &["formation", "place"],
+        "formation_fresh" => &["formation", "fresh"],
+        "formation_agent" => &["formation", "agent"],
         "formation_set_type" => &["formation", "type"],
         "formation_set_port" => &["formation", "port"],
         "formation_wire" | "formation_unwire" => &["from", "to"],
@@ -764,6 +790,9 @@ pub fn call(m: &Missions, name: &str, input: &Value) -> std::result::Result<Valu
     }
     let (operation, mut fields, created) = if name == "mission_rename" {
         ("title", json!(required(input, "title")?), None)
+    } else if name == "mission_prefix" {
+        let prefix = input.get("prefix").and_then(Value::as_str).unwrap_or("");
+        ("prefix", json!(prefix), None)
     } else {
         let (noun, verb) = name.split_once('_').ok_or_else(|| bad("invalid command"))?;
         let verb = verb.replace('_', "-");

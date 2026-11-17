@@ -1,0 +1,100 @@
+schema = 1
+id = "msn_example"
+slug = "write-and-review"
+title = "Write and review"
+rev = 1
+
+[[inputCard]]
+id = "inp_task"
+title = "Task"
+goal = "A writer does the work in its own session and a reviewer sends it back until it is right, at most three times."
+inputs = [
+  { name = "brief", kind = "text", required = true, description = "What to write or change, and for whom." },
+]
+outputs = [{ name = "result", description = "The work the reviewer passed.", kind = "text", required = false, from = "fmn_write:port_write_out" }]
+
+[[formation]]
+id = "fmn_write"
+type = "solo"
+title = "Write"
+[formation.brief]
+goal = "Do this work in the run's folder:\n\n{brief}\n\nWhen the reviewer sent it back, its reason arrives on your input: fix that. Return what you changed and where on your output."
+[[formation.input]]
+id = "port_write_in"
+label = "Brief"
+[[formation.output]]
+id = "port_write_out"
+label = "Draft"
+[[formation.slot]]
+id = "slot_write"
+label = "Writer"
+agent = "writer"
+harness = "claude-code"
+effort = "medium"
+
+[[formation]]
+id = "fmn_review"
+type = "solo"
+title = "Review"
+[formation.brief]
+goal = "Review the draft on your input against this work:\n\n{brief}\n\nRead what changed. Pass it when it is correct and clear; fail it with the specific changes it needs."
+[[formation.input]]
+id = "port_review_in"
+label = "Draft"
+[[formation.output]]
+id = "port_review_out"
+label = "Verdict"
+[[formation.slot]]
+id = "slot_review"
+label = "Reviewer"
+agent = "reviewer"
+harness = "claude-code"
+effort = "high"
+
+[[gate]]
+id = "gate_review"
+title = "Reviewed"
+kinds = ["formation"]
+criterion = "The draft does what the brief asks, correctly and clearly."
+
+[[limit]]
+id = "lim_rounds"
+title = "Three rounds"
+target = "fmn_write"
+rounds = 3
+whenSpent = "fail"
+
+[[end]]
+id = "end_done"
+title = "Done"
+outcome = "done"
+
+[[connection]]
+id = "edge_task"
+from = "inp_task:out"
+to = "fmn_write:port_write_in"
+
+[[connection]]
+id = "edge_draft"
+from = "fmn_write:port_write_out"
+to = "gate_review:in"
+
+[[connection]]
+id = "edge_judge_start"
+from = "gate_review:judge"
+to = "fmn_review:port_review_in"
+
+[[connection]]
+id = "edge_judge_return"
+from = "fmn_review:port_review_out"
+to = "gate_review:judge"
+
+[[connection]]
+id = "edge_back"
+from = "gate_review:fail"
+to = "fmn_write:port_write_in"
+
+[[connection]]
+id = "edge_done"
+from = "gate_review:pass"
+to = "end_done:in"

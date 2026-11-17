@@ -68,6 +68,10 @@ pub struct Formation {
     /// The environment the step runs on; blank runs it on the coordinator.
     #[serde(skip_serializing_if = "String::is_empty")]
     pub device: String,
+    /// Each attempt starts its agents in sessions of their own, ended with
+    /// the attempt, instead of using the agents' live sessions.
+    #[serde(skip_serializing_if = "is_false")]
+    pub fresh: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub brief: Option<Brief>,
     #[serde(rename = "input")]
@@ -133,6 +137,10 @@ impl Port {
 pub struct Slot {
     pub id: String,
     pub label: String,
+    /// The agent who works the slot: its session is `<prefix>-<agent>`
+    /// ([`crate::agent_session`]). Blank names it after the step.
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub agent: String,
     /// The slot's optional role card; none is a vanilla agent.
     #[serde(skip_serializing_if = "String::is_empty")]
     pub agent_id: String,
@@ -233,6 +241,10 @@ pub struct Connection {
     pub id: String,
     pub from: String,
     pub to: String,
+}
+
+fn is_false(value: &bool) -> bool {
+    !value
 }
 
 /// An Input card's only port.

@@ -16,6 +16,8 @@ pub struct LocalSeats {
     node: String,
     roots: TranscriptRoots,
     creation: Arc<Mutex<()>>,
+    /// Each kept session in use, by name, and the dispatch using it.
+    kept: Arc<std::sync::Mutex<std::collections::HashMap<String, String>>>,
     pub(super) turns: crate::TurnWorktrees,
     pub(super) running: Arc<std::sync::Mutex<std::collections::HashSet<String>>>,
     pub(super) runtime: tokio::runtime::Handle,
@@ -35,6 +37,7 @@ impl LocalSeats {
             node,
             roots,
             creation: Arc::new(Mutex::new(())),
+            kept: Default::default(),
             running: Arc::new(std::sync::Mutex::new(std::collections::HashSet::new())),
             runtime: tokio::runtime::Handle::current(),
         }
@@ -54,10 +57,27 @@ impl LocalSeats {
     pub fn roots(&self) -> &TranscriptRoots {
         &self.roots
     }
-    /// Create once, or verify the identity of the existing owned seat.
+    /// Create once, or verify the identity of the existing owned seat. A
+    /// kept seat is the agent's own session: a live one is used as it is,
+    /// unless another dispatch holds it, when this one gets its own.
     pub async fn dispatch(&self, request: Dispatch) -> Result<String, crate::Error> {
+        let id = request.id.clone();
+        let answer = self.dispatch_held(request).await;
+        if answer.is_err() {
+            self.release(&id);
+        }
+        answer
+    }
+    async fn dispatch_held(&self, request: Dispatch) -> Result<String, crate::Error> {
         (async {
             let _creation = self.creation.lock().await;
+            let hash = hex::encode(Sha256::digest(request.id.as_bytes()));
+            let request = match self.records.dispatch(&request.id) {
+                // A retry is the dispatch as first recorded.
+                Ok(recorded) => recorded,
+                Err(_) if request.keep => self.hold(request, &hash[..4]),
+                Err(_) => request,
+            };
             self.records.create(&request).map_err(|e| e.to_string())?;
             let _guard = self.creation_guard(&request.id).await?;
             if let Some(seat) = self.records.seat(&request.id).map_err(|e| e.to_string())? {
@@ -94,9 +114,9 @@ impl LocalSeats {
             let launch = adapter
                 .launch(&binding, &request.cwd, shell, &self.roots)
                 .map_err(|e| e.to_string())?;
-            // The name is derived from the dispatch, so a session found under it
-            // was created by an earlier attempt that crashed before binding it.
-            let hash = hex::encode(Sha256::digest(request.id.as_bytes()));
+            // The name is derived from the dispatch, so a session found under
+            // it is the agent's own, or one an earlier attempt created and
+            // crashed before binding.
             let name = if request.name.is_empty() {
                 format!(
                     "parvi-{}-{}-{}",
@@ -105,10 +125,15 @@ impl LocalSeats {
                     &hash[..8]
                 )
             } else {
-                format!("{}-{}", readable(&request.name), &hash[..4])
+                request.name.clone()
             };
             if let Some(session) = self.engine.find(&name).await.map_err(|e| e.to_string())? {
-                return self.bind_created(&request.id, name, session).await;
+                let cwd = if request.keep {
+                    self.folder(&session).await
+                } else {
+                    None
+                };
+                return self.bind(&request.id, name, session, cwd, false).await;
             }
             let mut env = BTreeMap::new();
             if request.harness == "claude-code" {
@@ -131,26 +156,64 @@ impl LocalSeats {
                 })
                 .await
                 .map_err(|e| e.to_string())?;
-            self.bind_created(&request.id, name, session).await
+            self.bind(&request.id, name, session, None, true).await
         })
         .await
         .map_err(|message: String| crate::Error::new("seat_error", message))
     }
-    async fn bind_created(
+    /// Claims a kept seat's session for this dispatch; one another open
+    /// dispatch holds leaves this one a session of its own, ended with it.
+    fn hold(&self, mut request: Dispatch, tag: &str) -> Dispatch {
+        let Ok(mut held) = self.kept.lock() else {
+            return request;
+        };
+        match held.get(&request.name) {
+            Some(holder) if *holder != request.id => {
+                request.name = format!("{}-{tag}", request.name);
+                request.keep = false;
+            }
+            _ => {
+                held.insert(request.name.clone(), request.id.clone());
+            }
+        }
+        request
+    }
+    /// Lets go of the kept session a dispatch held.
+    fn release(&self, id: &str) {
+        if let Ok(mut held) = self.kept.lock() {
+            held.retain(|_, holder| holder != id);
+        }
+    }
+    /// The folder a live session's harness runs in, as tmux last reported it.
+    async fn folder(&self, session: &parvi_term::SessionRef) -> Option<PathBuf> {
+        let listed = self.engine.listed().await.ok()?;
+        let info = listed.iter().find(|s| s.id == session.session_id)?;
+        let path = &info.facts.as_ref()?.path;
+        (!path.is_empty()).then(|| PathBuf::from(path))
+    }
+    async fn bind(
         &self,
         id: &str,
         name: String,
         session: parvi_term::SessionRef,
+        cwd: Option<PathBuf>,
+        started: bool,
     ) -> Result<String, String> {
         let seat = SeatId {
             node: self.node.clone(),
             session_name: name,
             session,
+            cwd,
         };
         if let Err(error) = self.records.bind_seat(id, seat.clone()) {
-            let cleanup = self.engine.kill(&seat.session).await;
+            // Only a session this dispatch started is its to end.
+            let cleanup = if started {
+                format!("{:?}", self.engine.kill(&seat.session).await)
+            } else {
+                "the session was already there and stays".into()
+            };
             return Err(format!(
-                "cannot persist owned seat: {error}; cleanup: {cleanup:?}"
+                "cannot persist owned seat: {error}; cleanup: {cleanup}"
             ));
         }
         self.record_created(id, &seat)?;
@@ -215,8 +278,11 @@ impl LocalSeats {
             .seat(dispatch_id)
             .map_err(|e| e.to_string())?
             .ok_or("dispatch has no seat")?;
+        let keep = self.records.dispatch(dispatch_id).is_ok_and(|d| d.keep);
         let found = self.engine.find(&seat.session_name).await;
         let (outcome, detail) = match found {
+            // The agent's own session stays for the next run.
+            Ok(Some(_)) if keep => ("kept", String::new()),
             Ok(None) => ("gone", String::new()),
             Ok(Some(current)) if current != seat.session => ("left_socket_changed", "seat identity changed".into()),
             Err(error) => ("left_cleanup_failed", error.to_string()),
@@ -235,6 +301,7 @@ impl LocalSeats {
                 data.as_object().cloned().unwrap_or_default(),
             )
             .map_err(|e| e.to_string())?;
+        self.release(dispatch_id);
         Ok(outcome.into())
      }).await.map_err(|message: String| crate::Error::new("seat_error", message))
     }
@@ -340,28 +407,6 @@ pub(crate) fn adapter(name: &str) -> Result<(Harness, Arc<dyn HarnessAdapter>), 
         _ => Err(format!("unknown harness {name:?}")),
     }
 }
-/// A name people read in a session list: lower case words joined by
-/// dashes, at most 48 characters.
-fn readable(text: &str) -> String {
-    let words: Vec<String> = text
-        .to_lowercase()
-        .split(|c: char| !c.is_ascii_alphanumeric())
-        .filter(|word| !word.is_empty())
-        .map(str::to_owned)
-        .collect();
-    let mut name = String::new();
-    for word in words {
-        if !name.is_empty() && name.len() + 1 + word.len() > 48 {
-            break;
-        }
-        if !name.is_empty() {
-            name.push('-');
-        }
-        name.push_str(&word);
-    }
-    if name.is_empty() { "seat".into() } else { name }
-}
-
 fn component(text: &str) -> String {
     let value: String = text
         .chars()
@@ -381,18 +426,6 @@ fn component(text: &str) -> String {
 }
 #[cfg(test)]
 mod tests {
-    #[test]
-    fn a_seat_is_named_so_a_person_can_read_it() {
-        assert_eq!(
-            super::readable("Plan then review-3-Review: the plan"),
-            "plan-then-review-3-review-the-plan"
-        );
-        assert_eq!(
-            super::readable("a very long mission title that goes on-12-and a step"),
-            "a-very-long-mission-title-that-goes-on-12-and-a"
-        );
-        assert_eq!(super::readable("ÄÖ"), "seat");
-    }
     #[test]
     fn encodes_base64_with_padding() {
         assert_eq!(super::base64(b"Man"), "TWFu");

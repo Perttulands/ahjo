@@ -33,6 +33,7 @@ workspace = true
 anyhow = "1"
 tokio = { version = "1", features = ["full"] }
 parvi-missions = { path = "../../areas/missions/node" }
+parvi-terminals = { path = "../../areas/terminals/node" }
 parvi-work = { path = "../../areas/work/node" }
 parvi-node-kit = { path = "../../kit/node-kit" }
 parvi-testkit = { path = "../../kit/testkit" }

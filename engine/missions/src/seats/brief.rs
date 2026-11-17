@@ -124,7 +124,8 @@ mod tests {
     fn execution(run_work: &str, brief_work: &str) -> FormationExecution {
         FormationExecution {
             run_id: "run_1".into(),
-            seat_name: String::new(),
+            prefix: String::new(),
+            run_number: 0,
             formation: Formation {
                 id: "fmn_work".into(),
                 title: "Work".into(),

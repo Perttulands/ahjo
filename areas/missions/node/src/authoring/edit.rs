@@ -172,6 +172,25 @@ pub(super) fn operation<'a>(
             v = json!({"formationId":id,"slotId":slot,"agentId":a.flag("role").unwrap_or(""),"harness":a.flag("harness").unwrap_or(""),"model":a.flag("model").unwrap_or(""),"effort":a.flag("effort").unwrap_or("")});
             ("assignSlot", None)
         }
+        ("formation", "agent") => {
+            let id = node("formations")?;
+            let slot = match a.flag("slot") {
+                Some(selector) => slot_id(m, &id, selector)?,
+                None => only_slot(m, &id)?,
+            };
+            let agent = a.pos.get(2).map(String::as_str).unwrap_or("");
+            v = json!({"formationId":id,"slotId":slot,"agent":agent});
+            ("nameAgent", None)
+        }
+        ("formation", "fresh") => {
+            let fresh = match a.arg(2)? {
+                "on" | "true" => true,
+                "off" | "false" => false,
+                _ => bail!("fresh is on or off"),
+            };
+            v = json!({"id":node("formations")?,"fresh":fresh});
+            ("updateFormation", None)
+        }
         ("formation", "set-brief") => {
             if let Some(repository) = a.flag("repository") {
                 v["repository"] = json!(repository);

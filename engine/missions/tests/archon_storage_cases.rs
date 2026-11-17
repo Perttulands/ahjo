@@ -524,6 +524,7 @@ fn empty_and_populated_inline_node_arrays_are_editable() {
                 id: formation.clone(),
                 title: Some("Renamed".into()),
                 device: None,
+                fresh: None,
             },
             "",
         )
@@ -581,6 +582,7 @@ fn populated_inline_formations_and_connections_can_be_updated_and_deleted() {
                 id: "fmn_a".into(),
                 title: Some("Updated".into()),
                 device: None,
+                fresh: None,
             },
             "",
         )
@@ -596,6 +598,7 @@ fn populated_inline_formations_and_connections_can_be_updated_and_deleted() {
                     id: "fmn_a".into(),
                     title: None,
                     device: Some(device.into()),
+                    fresh: None,
                 },
                 "",
             )

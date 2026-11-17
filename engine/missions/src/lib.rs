@@ -26,6 +26,7 @@ mod contract_outputs;
 mod contract_verdict;
 mod coordinator;
 mod error;
+mod examples;
 mod executor;
 mod gate_replay;
 mod gate_request;

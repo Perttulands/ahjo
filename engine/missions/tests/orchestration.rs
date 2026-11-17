@@ -60,6 +60,7 @@ impl SeatSide for LabSeats {
                         start_time: 1,
                     },
                 },
+                cwd: None,
             };
             let path = self.root.join(format!("{}.md", request.slot_id));
             std::fs::write(&path, &request.brief)

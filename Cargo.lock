@@ -5230,6 +5230,7 @@ dependencies = [
  "parvi-missions",
  "parvi-node-kit",
  "parvi-term",
+ "parvi-terminals",
  "parvi-testkit",
  "parvi-work",
  "parvi-work-ref",

@@ -16,6 +16,7 @@ const EXPECTED: &[&str] = &[
     "mission_inspect",
     "mission_validate",
     "mission_new",
+    "mission_examples",
     "mission_edit",
     "mission_notes",
     "mission_note",
@@ -41,6 +42,7 @@ const EXPECTED: &[&str] = &[
     "gate_pick",
     "mission_arrange",
     "mission_rename",
+    "mission_prefix",
     "mission_move",
     "mission_create",
     "mission_update",
@@ -57,6 +59,8 @@ const EXPECTED: &[&str] = &[
     "formation_set_slots",
     "formation_assign",
     "formation_unassign",
+    "formation_agent",
+    "formation_fresh",
     "formation_set_brief",
     "formation_add_input",
     "formation_add_output",
@@ -104,7 +108,9 @@ async fn command_list_and_coded_failures() {
         .unwrap();
     for &command in EXPECTED {
         let args = match command {
-            "mission_list" | "mission_archives" => json!({"unexpected":true}),
+            "mission_list" | "mission_archives" | "mission_examples" => {
+                json!({"unexpected":true})
+            }
             "run_list" => json!({"mission":9}),
             _ => json!({}),
         };

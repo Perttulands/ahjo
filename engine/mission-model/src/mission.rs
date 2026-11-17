@@ -22,6 +22,10 @@ pub struct Mission {
     pub id: String,
     pub slug: String,
     pub title: String,
+    /// What its agents' sessions are named under; blank is the slug's
+    /// letters and digits ([`Mission::session_prefix`]).
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub prefix: String,
     pub rev: i64,
     #[serde(skip_serializing_if = "String::is_empty")]
     pub updated_by: String,

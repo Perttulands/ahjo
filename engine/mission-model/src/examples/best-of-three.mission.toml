@@ -1,0 +1,101 @@
+schema = 1
+id = "msn_example"
+slug = "best-of-three"
+title = "Best of three"
+rev = 1
+
+[[inputCard]]
+id = "inp_task"
+title = "Task"
+goal = "Three fresh attempts at one piece of work; a judge passes the first that meets the bar, and when none does the best of the three goes on."
+inputs = [
+  { name = "brief", kind = "text", required = true, description = "The work to do, and what a good result looks like." },
+]
+outputs = [{ name = "result", description = "The attempt the judge passed, or the best of the three.", kind = "text", required = false, from = "fmn_attempt:port_attempt_out" }]
+
+[[formation]]
+id = "fmn_attempt"
+type = "solo"
+title = "Attempt"
+fresh = true
+[formation.brief]
+goal = "Do this work in the run's folder, starting from nothing:\n\n{brief}\n\nWhen the judge sent an earlier attempt back, its reason arrives on your input: do better on that point, without copying the earlier attempt. Return what you made and where it is on your output."
+[[formation.input]]
+id = "port_attempt_in"
+label = "Brief"
+[[formation.output]]
+id = "port_attempt_out"
+label = "Result"
+[[formation.slot]]
+id = "slot_attempt"
+label = "Maker"
+agent = "maker"
+harness = "claude-code"
+effort = "medium"
+
+[[formation]]
+id = "fmn_judge"
+type = "solo"
+title = "Judge"
+[formation.brief]
+goal = "Judge the attempt on your input against this work:\n\n{brief}\n\nRead what it made. Pass it only when it does the work well; fail it with the one thing that would most improve it."
+[[formation.input]]
+id = "port_judge_in"
+label = "Attempt"
+[[formation.output]]
+id = "port_judge_out"
+label = "Verdict"
+[[formation.slot]]
+id = "slot_judge"
+label = "Judge"
+agent = "judge"
+harness = "claude-code"
+effort = "high"
+
+[[gate]]
+id = "gate_best"
+title = "Good enough?"
+kinds = ["formation"]
+criterion = "The attempt does the work the brief asks for, and does it well."
+
+[[limit]]
+id = "lim_three"
+title = "Three attempts"
+target = "fmn_attempt"
+rounds = 3
+whenSpent = "best"
+
+[[end]]
+id = "end_done"
+title = "Done"
+outcome = "done"
+
+[[connection]]
+id = "edge_task"
+from = "inp_task:out"
+to = "fmn_attempt:port_attempt_in"
+
+[[connection]]
+id = "edge_attempt"
+from = "fmn_attempt:port_attempt_out"
+to = "gate_best:in"
+
+[[connection]]
+id = "edge_judge_start"
+from = "gate_best:judge"
+to = "fmn_judge:port_judge_in"
+
+[[connection]]
+id = "edge_judge_return"
+from = "fmn_judge:port_judge_out"
+to = "gate_best:judge"
+
+[[connection]]
+id = "edge_again"
+from = "gate_best:fail"
+to = "fmn_attempt:port_attempt_in"
+
+[[connection]]
+id = "edge_done"
+from = "gate_best:pass"
+to = "end_done:in"

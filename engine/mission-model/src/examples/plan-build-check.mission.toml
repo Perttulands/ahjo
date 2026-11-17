@@ -1,0 +1,125 @@
+schema = 1
+id = "msn_example"
+slug = "plan-build-check"
+title = "Plan, build, check"
+rev = 1
+
+[[inputCard]]
+id = "inp_task"
+title = "Change"
+goal = "A planner writes the plan, a builder carries it out, and a checker runs the checks: a failed check goes back to the builder. The run stops after an hour."
+inputs = [
+  { name = "brief", kind = "text", required = true, description = "The change to make, and how to know it works." },
+]
+outputs = [{ name = "result", description = "What the builder changed, once the checks pass.", kind = "text", required = false, from = "fmn_build:port_build_out" }]
+
+[[formation]]
+id = "fmn_plan"
+type = "solo"
+title = "Plan"
+[formation.brief]
+goal = "Plan this change in the run's folder:\n\n{brief}\n\nRead the code it touches. Write plan.md: the steps, the files, and the checks that prove it works. Change no code. Return the plan's path and a short summary on your output."
+[[formation.input]]
+id = "port_plan_in"
+label = "Change"
+[[formation.output]]
+id = "port_plan_out"
+label = "Plan"
+[[formation.slot]]
+id = "slot_plan"
+label = "Planner"
+agent = "planner"
+harness = "claude-code"
+effort = "high"
+
+[[formation]]
+id = "fmn_build"
+type = "solo"
+title = "Build"
+[formation.brief]
+goal = "Carry out the plan on your input for this change:\n\n{brief}\n\nWhen the checker sent it back, its findings arrive on your input: fix them. Return what you changed on your output."
+[[formation.input]]
+id = "port_build_in"
+label = "Plan"
+[[formation.output]]
+id = "port_build_out"
+label = "Change"
+[[formation.slot]]
+id = "slot_build"
+label = "Builder"
+agent = "builder"
+harness = "claude-code"
+effort = "medium"
+
+[[formation]]
+id = "fmn_check"
+type = "solo"
+title = "Check"
+[formation.brief]
+goal = "Run the checks plan.md names, and the project's own tests, against the change on your input. Pass it only when they all pass; fail it with what failed and the output that shows it."
+[[formation.input]]
+id = "port_check_in"
+label = "Change"
+[[formation.output]]
+id = "port_check_out"
+label = "Verdict"
+[[formation.slot]]
+id = "slot_check"
+label = "Checker"
+agent = "checker"
+harness = "claude-code"
+effort = "medium"
+
+[[gate]]
+id = "gate_checks"
+title = "Checks pass"
+kinds = ["formation"]
+criterion = "The checks the plan names and the project's tests all pass."
+
+[[limit]]
+id = "lim_hour"
+title = "One hour"
+target = "inp_task"
+seconds = 3600
+warnSeconds = 600
+whenSpent = "fail"
+
+[[end]]
+id = "end_done"
+title = "Done"
+outcome = "done"
+
+[[connection]]
+id = "edge_task"
+from = "inp_task:out"
+to = "fmn_plan:port_plan_in"
+
+[[connection]]
+id = "edge_plan"
+from = "fmn_plan:port_plan_out"
+to = "fmn_build:port_build_in"
+
+[[connection]]
+id = "edge_change"
+from = "fmn_build:port_build_out"
+to = "gate_checks:in"
+
+[[connection]]
+id = "edge_judge_start"
+from = "gate_checks:judge"
+to = "fmn_check:port_check_in"
+
+[[connection]]
+id = "edge_judge_return"
+from = "fmn_check:port_check_out"
+to = "gate_checks:judge"
+
+[[connection]]
+id = "edge_back"
+from = "gate_checks:fail"
+to = "fmn_build:port_build_in"
+
+[[connection]]
+id = "edge_done"
+from = "gate_checks:pass"
+to = "end_done:in"

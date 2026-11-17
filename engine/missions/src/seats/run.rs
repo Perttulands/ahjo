@@ -62,7 +62,8 @@ impl LocalSeats {
         let pid = self.engine().pid(pane).await.ok();
         let mut pointer = Pointer {
             text: text.clone(),
-            cwd: dispatch.cwd.clone(),
+            // A session that was already live records its turns where it runs.
+            cwd: seat.cwd.clone().unwrap_or_else(|| dispatch.cwd.clone()),
             pid,
             not_before: std::fs::metadata(&path)
                 .and_then(|m| m.modified())

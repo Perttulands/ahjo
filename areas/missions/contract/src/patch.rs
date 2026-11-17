@@ -65,6 +65,7 @@ fn fields_are_typed(v: &Value) -> Result<(), String> {
             "target",
             "whenSpent",
             "updatedBy",
+            "agent",
         ];
         let numbers = [
             "expectedRev",
@@ -76,7 +77,7 @@ fn fields_are_typed(v: &Value) -> Result<(), String> {
             "tokens",
             "index",
         ];
-        let flags = ["joinIfOccupied", "removePreviousInput"];
+        let flags = ["joinIfOccupied", "removePreviousInput", "fresh"];
         if strings.contains(&key.as_str()) && !value.is_string()
             || numbers.contains(&key.as_str()) && value.as_i64().is_none()
             || flags.contains(&key.as_str()) && !value.is_boolean()
@@ -111,7 +112,7 @@ pub fn decode(body: &Value) -> Result<Patch, String> {
     }
     let op = ops[0].as_str();
     let v = &body[op];
-    if op != "title" {
+    if op != "title" && op != "prefix" {
         fields_are_typed(v)?;
     }
     let id = || s(v, "id");
@@ -119,6 +120,7 @@ pub fn decode(body: &Value) -> Result<Patch, String> {
     let xy = || (n(v, "x"), n(v, "y"));
     Ok(match op {
         "title" => Patch::Title(v.as_str().ok_or("title must be a string")?.into()),
+        "prefix" => Patch::Prefix(v.as_str().ok_or("prefix must be a string")?.into()),
         "createInputCard" => {
             let (x, y) = xy();
             Patch::CreateInputCard {
@@ -160,6 +162,7 @@ pub fn decode(body: &Value) -> Result<Patch, String> {
             id: id(),
             title: o(v, "title"),
             device: o(v, "device"),
+            fresh: v["fresh"].as_bool(),
         },
         "setFormationType" => Patch::SetFormationType {
             id: id(),
@@ -174,6 +177,11 @@ pub fn decode(body: &Value) -> Result<Patch, String> {
             harness: s(v, "harness"),
             model: s(v, "model"),
             effort: s(v, "effort"),
+        },
+        "nameAgent" => Patch::NameAgent {
+            formation_id: fid(),
+            slot_id: s(v, "slotId"),
+            agent: s(v, "agent"),
         },
         "swapSlots" => Patch::SwapSlots {
             from_formation: s(v, "fromFormation"),
