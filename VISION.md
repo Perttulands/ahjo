@@ -62,6 +62,8 @@ without rework.
 Resident agents and compute admission (`heavy` and `gpu-lock` own it).
 
 The brain and the decision desk are their own apps, each with one purpose:
-exploring what we know, and answering what agents ask. They share Parvi's
+exploring what we know, and the shared surface where an agent publishes
+something (a picture, a video, a rendered page, a question) and the operator
+responds freely, in prose and by marking what he sees. They share Parvi's
 look and are not opened from it. Parvi's Brain tab goes when the brain app
 replaces it.
