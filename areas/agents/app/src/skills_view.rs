@@ -6,7 +6,7 @@
 use crate::AgentsPage;
 use crate::shape_state::{self as sh, Load, Pick, Shape};
 use gpui::{Context, Div, SharedString, div, prelude::*, px};
-use parvi_app_kit::theme::{Theme, size, ty};
+use parvi_app_kit::theme::{Theme, size};
 use parvi_app_kit::widgets::kit::{self, Kind};
 use parvi_app_kit::widgets::{markdown, pane};
 
@@ -241,7 +241,7 @@ impl AgentsPage {
             .child(
                 div()
                     .font_family(t.ty.reading)
-                    .text_size(px(ty::READ))
+                    .text_size(px(t.ty.read))
                     .whitespace_normal()
                     .child(e.description.clone()),
             );
@@ -297,7 +297,7 @@ impl AgentsPage {
                         .overflow_y_scroll()
                         .p(px(size::PAD))
                         .font_family(t.ty.reading)
-                        .text_size(px(ty::READ))
+                        .text_size(px(t.ty.read))
                         .child(
                             markdown::render(&look, "skill-prose", &blocks)
                                 .max_w(px(size::READING)),

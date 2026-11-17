@@ -11,7 +11,7 @@ use gpui::{
     prelude::*, px, relative,
 };
 use parvi_app_kit::host::Status;
-use parvi_app_kit::theme::{Theme, size, theme, ty};
+use parvi_app_kit::theme::{Theme, size, theme};
 use parvi_app_kit::widgets::code::{Code, CodeEvent};
 use parvi_app_kit::widgets::field::{FieldEvent, TextField};
 use parvi_app_kit::widgets::kit::{self, Kind};
@@ -1161,7 +1161,7 @@ impl AgentsPage {
                         .overflow_y_scroll()
                         .p(px(size::PAD))
                         .font_family(t.ty.reading)
-                        .text_size(px(ty::READ))
+                        .text_size(px(t.ty.read))
                         .child(
                             markdown::render(&look, "shape-prose", &blocks)
                                 .max_w(px(size::READING)),
