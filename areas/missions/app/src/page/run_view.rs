@@ -830,15 +830,15 @@ fn standing(
                 "{} · {span}",
                 sentence(&phrases.join("; ")).trim_end_matches('.')
             ),
-            rgb(t.ansi[3]).into(),
+            t.needs,
         ),
-        _ if phrases.is_empty() => (format!("Starting · {span}"), t.accent),
+        _ if phrases.is_empty() => (format!("Starting · {span}"), t.running),
         _ => (
             format!(
                 "{} · {span}",
                 sentence(&phrases.join("; ")).trim_end_matches('.')
             ),
-            t.accent,
+            t.running,
         ),
     }
 }
@@ -966,12 +966,12 @@ fn state_word(state: Option<run_state::NodeState>, asks_you: bool) -> &'static s
 fn state_colour(t: &Theme, state: Option<run_state::NodeState>, word: &str) -> gpui::Hsla {
     use run_state::NodeState;
     if word == "needs you" {
-        return rgb(t.ansi[3]).into();
+        return t.needs;
     }
     match state {
-        Some(NodeState::Running) => t.accent,
+        Some(NodeState::Running) => t.running,
         Some(NodeState::Failed) => t.error,
-        Some(NodeState::Blocked | NodeState::Waiting) => rgb(t.ansi[3]).into(),
+        Some(NodeState::Blocked | NodeState::Waiting) => t.needs,
         Some(NodeState::Done) => t.text2,
         Some(NodeState::Canceled) | None => t.dim,
     }

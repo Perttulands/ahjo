@@ -152,7 +152,7 @@ impl Work {
         }
         head.child(div().flex_1())
             .child(swatch(t, tokens::opened(t), "Opened", false))
-            .child(swatch(t, tokens::done(t), "Closed", false))
+            .child(swatch(t, t.done, "Closed", false))
             .child(swatch(t, t.text2, "Open", true))
     }
 
@@ -221,7 +221,7 @@ impl Work {
                 Moved::Closed,
                 m.closed.len(),
                 "finished",
-                tokens::done(t),
+                t.done,
                 "Finished in these days",
             ),
             (

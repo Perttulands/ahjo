@@ -230,7 +230,7 @@ fn draw(
                 if c > 0 {
                     window.paint_quad(fill(
                         Bounds::new(point(mid, y(c)), size(bw, floor - y(c))),
-                        tokens::done(t),
+                        t.done,
                     ));
                 }
             }
@@ -266,10 +266,7 @@ fn draw(
                     ));
                 }
                 if c > 0 {
-                    window.paint_quad(fill(
-                        Bounds::new(point(x, mid_y), size(bw, h(c))),
-                        tokens::done(t),
-                    ));
+                    window.paint_quad(fill(Bounds::new(point(x, mid_y), size(bw, h(c))), t.done));
                 }
             }
             window.paint_quad(fill(

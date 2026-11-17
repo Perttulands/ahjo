@@ -32,6 +32,11 @@ pub enum Control {
     Text {
         default: &'static str,
     },
+    /// One of `options`, each its value and the words it shows as.
+    Choice {
+        default: &'static str,
+        options: &'static [(&'static str, &'static str)],
+    },
 }
 
 impl Setting {
@@ -72,6 +77,20 @@ impl Setting {
         }
     }
 
+    pub const fn choice(
+        key: &'static str,
+        label: &'static str,
+        default: &'static str,
+        options: &'static [(&'static str, &'static str)],
+    ) -> Self {
+        Self {
+            key,
+            label,
+            note: "",
+            control: Control::Choice { default, options },
+        }
+    }
+
     pub const fn note(mut self, note: &'static str) -> Self {
         self.note = note;
         self
@@ -82,19 +101,22 @@ impl Setting {
         match self.control {
             Control::Toggle { default } => Value::from(default),
             Control::Number { default, .. } => Value::from(default),
-            Control::Text { default } => Value::from(default),
+            Control::Text { default } | Control::Choice { default, .. } => Value::from(default),
         }
     }
 
     /// What `kept` holds for it, or its default where it holds nothing of
     /// the setting's kind.
     pub fn read(&self, kept: Option<&Value>) -> Value {
-        let fits = matches!(
-            (self.control, kept),
+        let fits = match (self.control, kept) {
             (Control::Toggle { .. }, Some(Value::Bool(_)))
-                | (Control::Number { .. }, Some(Value::Number(_)))
-                | (Control::Text { .. }, Some(Value::String(_)))
-        );
+            | (Control::Number { .. }, Some(Value::Number(_)))
+            | (Control::Text { .. }, Some(Value::String(_))) => true,
+            (Control::Choice { options, .. }, Some(Value::String(v))) => {
+                options.iter().any(|(o, _)| o == v)
+            }
+            _ => false,
+        };
         match kept {
             Some(v) if fits => v.clone(),
             _ => self.default_value(),
@@ -136,5 +158,8 @@ mod tests {
         assert_eq!(loud.read(Some(&Value::from(false))), Value::from(false));
         assert_eq!(twice(&[loud, size, loud]), Some("loud"));
         assert_eq!(twice(&[loud, size]), None);
+        let look = Setting::choice("look", "Look", "a", &[("a", "A"), ("b", "B")]);
+        assert_eq!(look.read(Some(&Value::from("b"))), Value::from("b"));
+        assert_eq!(look.read(Some(&Value::from("c"))), Value::from("a"));
     }
 }

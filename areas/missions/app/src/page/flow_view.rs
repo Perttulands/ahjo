@@ -1,7 +1,7 @@
 //! A mission as defined, read top to bottom, and the head it wears while
 //! its steps are changed on the canvas.
 use super::*;
-use gpui::{SharedString, rgb};
+use gpui::SharedString;
 use parvi_app_kit::menu::MenuRow;
 use parvi_app_kit::theme::Theme;
 use parvi_app_kit::widgets::pane::{self, Col};
@@ -563,8 +563,8 @@ impl MissionsPage {
             .map(|row| {
                 let colour = match row.run.status.as_str() {
                     "failed" => t.error,
-                    "waiting_human" | "blocked" => rgb(t.ansi[3]).into(),
-                    _ if !row.run.r#final => t.accent,
+                    "waiting_human" | "blocked" => t.needs,
+                    _ if !row.run.r#final => t.running,
                     _ => t.text2,
                 };
                 let word = match row.run.status.as_str() {

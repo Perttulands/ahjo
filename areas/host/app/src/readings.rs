@@ -289,7 +289,7 @@ impl ReadingsPage {
                 end,
                 ticks: vec![],
                 hover: None,
-                ink: if warn { t.error } else { t.accent },
+                ink: if warn { t.error } else { t.chart },
                 grid: t.divider,
             };
             out = out.child(
@@ -323,6 +323,47 @@ impl ReadingsPage {
             );
         }
         out
+    }
+
+    /// Every figure now, at a glance: its number large, its name under
+    /// it; one in trouble in the failed colour. A click opens its day.
+    fn glances(&self, t: &Theme, id: &str, s: &State, cx: &mut Context<Self>) -> Div {
+        let latest = s.latest.as_ref();
+        let troubles = store::troubles(s, now_ms());
+        let mut row = div().flex().flex_wrap().gap(px(size::HEAD_GAP));
+        for figure in figures(latest) {
+            let k = key(figure, s);
+            let now = percent(latest.and_then(|r| figure.now(r)));
+            let (value, unit) = match now.strip_suffix('%') {
+                Some(v) => (v.to_string(), "%"),
+                None => (now.clone(), ""),
+            };
+            let warn = store::warns(&troubles, figure);
+            let at = id.to_owned();
+            let selector = format!("host-glance-{id}-{k}");
+            row = row.child(
+                div()
+                    .id(SharedString::from(selector.clone()))
+                    .debug_selector(move || selector)
+                    .w(px(tokens::GLANCE_W))
+                    .p(px(size::HEAD_PAD))
+                    .flex()
+                    .flex_col()
+                    .gap(px(size::LABEL_BOTTOM))
+                    .bg(t.surface)
+                    .border_1()
+                    .border_color(t.divider)
+                    .rounded(px(size::RADIUS))
+                    .cursor_pointer()
+                    .hover(|d| d.border_color(t.accent))
+                    .child(kit::glance(t, value, unit, warn.then_some(t.error)))
+                    .child(kit::label(t, figure.name(latest)))
+                    .on_click(cx.listener(move |page, _, _, cx| {
+                        page.choose(&at, Choice::Figure(figure), cx)
+                    })),
+            );
+        }
+        row
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -377,10 +418,11 @@ impl ReadingsPage {
                 div()
                     .debug_selector(|| "host-all-right".into())
                     .flex()
-                    .gap(px(size::HEAD_GAP))
-                    .child("All right")
+                    .items_baseline()
+                    .gap(px(size::HEAD_GAP * 2.))
+                    .child(kit::page_title(t, "All right"))
                     .when_some(up.clone(), |d, up| {
-                        d.child(div().text_color(t.dim).child(up))
+                        d.child(div().text_color(t.text2).child(up))
                     }),
             );
         } else {
@@ -435,7 +477,8 @@ impl ReadingsPage {
             .flex()
             .flex_col()
             .gap(px(size::SECTION_GAP))
-            .child(verdict);
+            .child(verdict)
+            .child(self.glances(t, id, s, cx));
         // Named only while something weighs on the machine.
         let weighing = store::weighing(s.latest.as_ref().expect("a reading"));
         if !weighing.is_empty() {
@@ -683,7 +726,7 @@ impl ReadingsPage {
                     pane::label(t, r)
                         .px_0()
                         .pt_0()
-                        .text_color(t.accent)
+                        .text_color(t.chart)
                         .debug_selector(|| "host-hover".into()),
                 )
             });
@@ -694,7 +737,7 @@ impl ReadingsPage {
             end,
             ticks: ticks.clone(),
             hover: self.hover,
-            ink: if warn { t.error } else { t.accent },
+            ink: if warn { t.error } else { t.chart },
             grid: t.divider,
         };
         let width = end.saturating_sub(start).max(1) as f32;

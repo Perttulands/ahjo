@@ -17,7 +17,7 @@ use parvi_app_kit::host::{Request, Status};
 use parvi_app_kit::link::client::LinkState;
 use parvi_app_kit::page::Meta;
 use parvi_app_kit::settings::DEFAULT_NODE;
-use parvi_app_kit::theme::{Theme, size, theme};
+use parvi_app_kit::theme::{Direction, Theme, size, theme};
 use parvi_app_kit::widgets::field::{FieldEvent, TextField};
 use parvi_app_kit::widgets::kit::{self, Kind};
 use parvi_app_kit::widgets::pane;
@@ -31,6 +31,8 @@ pub const ID: &str = "settings";
 
 /// The shell's own settings, kept outside any page's section.
 const APP: &[Setting] = &[
+    Setting::choice("theme", "Theme", "night", Direction::CHOICES)
+        .note("Odin's ravens three ways: a moonlit night, a carved saga, a flat signal."),
     Setting::text("node", "Node", DEFAULT_NODE)
         .note("The node this app talks to, as http://host:port. Enter connects."),
     Setting::toggle("keys", "Shortcuts", true)
@@ -309,6 +311,7 @@ impl SettingsPage {
             Owner::App => match key {
                 "node" => Value::from(hub.settings.node.clone()),
                 "show_keys" => Value::from(hub.settings.show_keys),
+                "theme" => Value::from(hub.settings.theme.clone()),
                 _ => Value::from(hub.settings.keys),
             },
             Owner::Page(id) => {
@@ -345,6 +348,9 @@ impl SettingsPage {
                         node.into()
                     };
                     h.connect(cx);
+                } else if key == "theme" {
+                    h.settings.theme = value.as_str().unwrap_or_default().into();
+                    h.apply_theme(cx);
                 } else if key == "show_keys" {
                     h.settings.show_keys = value.as_bool().unwrap_or(false);
                 } else {
@@ -413,6 +419,31 @@ impl SettingsPage {
                     )
                     .child(step(1., "+", cx))
                     .into_any_element()
+            }
+            Control::Choice { options, .. } => {
+                let now = value.as_str().unwrap_or_default().to_string();
+                let mut row = div()
+                    .flex()
+                    .flex_wrap()
+                    .items_center()
+                    .gap(px(size::HEAD_GAP));
+                for &(option, words) in options {
+                    let name = format!("{id}-{option}");
+                    let selector = name.clone();
+                    let kind = if option == now {
+                        Kind::Primary
+                    } else {
+                        Kind::Plain
+                    };
+                    row = row.child(
+                        kit::button(t, SharedString::from(name), words, kind)
+                            .debug_selector(move || selector)
+                            .on_click(cx.listener(move |p, _, _, cx| {
+                                p.write(owner, key, Value::from(option), cx)
+                            })),
+                    );
+                }
+                row.into_any_element()
             }
             Control::Text { .. } => {
                 let field = self.fields[&(owner, key)].clone();

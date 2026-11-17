@@ -61,9 +61,11 @@ impl Render for ScheduledPage {
                 &t,
                 "scheduled-detail",
                 pane::head(&t),
-                div()
-                    .children(self.notices(&t))
-                    .child(pane::empty(&t, words, action).p_0()),
+                div().children(self.notices(&t)).child(if self.reading() {
+                    pane::empty(&t, words, action).p_0()
+                } else {
+                    pane::vacant(&t, words, action)
+                }),
             )
         };
         pane::page(&t, list, detail).text_color(t.text)

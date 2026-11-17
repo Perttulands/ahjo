@@ -19,9 +19,9 @@
 
 use crate::ask::Ask;
 use crate::host::{Host, Status};
-use crate::theme::{Theme, size};
+use crate::theme::{Theme, art, size, ty};
 use gpui::{
-    AnyElement, Div, ElementId, FontWeight, Hsla, ScrollHandle, SharedString, Stateful, div,
+    AnyElement, Div, ElementId, FontWeight, Hsla, ScrollHandle, SharedString, Stateful, div, img,
     prelude::*, px, relative,
 };
 
@@ -194,7 +194,8 @@ pub fn title(t: &Theme, text: impl Into<SharedString>) -> Div {
         .overflow_hidden()
         .whitespace_nowrap()
         .text_ellipsis()
-        .font_weight(FontWeight::SEMIBOLD)
+        .text_size(px(ty::TITLE))
+        .font_weight(FontWeight::BOLD)
         .text_color(t.text)
         .child(text)
 }
@@ -223,17 +224,16 @@ pub fn send(t: &Theme, id: impl Into<ElementId>, host: &Host, reference: String)
         })
 }
 
-/// A group's label in a list, or a section's over part of a detail: small,
-/// dim, its words as written.
+/// A group's label in a list, or a section's over part of a detail: the
+/// theme's group label ([`crate::widgets::kit::group_label`]).
 pub fn label(t: &Theme, text: impl Into<SharedString>) -> Div {
     div()
         .flex_none()
+        .flex()
         .px(px(size::ROW_PAD))
         .pt(px(size::LABEL_TOP))
         .pb(px(size::LABEL_BOTTOM))
-        .text_size(px(size::SMALL))
-        .text_color(t.dim)
-        .child(text.into())
+        .child(crate::widgets::kit::group_label(t, text))
 }
 
 /// A section of a detail: its [`label`] over its parts.
@@ -383,8 +383,8 @@ pub fn line(t: &Theme, name: impl Into<SharedString>, value: impl IntoElement) -
 /// The most of a narrow line its name takes.
 const NAME_SHARE: f32 = 0.3;
 
-/// An empty list or detail, or one still loading: one short line, and the
-/// action that fills it if there is one.
+/// An empty list or detail, or one still loading: one short line in the
+/// reading face, and the action that fills it if there is one.
 pub fn empty(t: &Theme, words: impl Into<SharedString>, action: Option<AnyElement>) -> Div {
     let words: SharedString = words.into();
     let selector = format!("empty-{words}");
@@ -396,7 +396,47 @@ pub fn empty(t: &Theme, words: impl Into<SharedString>, action: Option<AnyElemen
         .flex_col()
         .items_start()
         .gap(px(size::HEAD_GAP))
-        .child(div().text_color(t.dim).child(words))
+        .child(
+            div()
+                .font_family(t.ty.reading)
+                .text_size(px(ty::READ))
+                .text_color(t.text2)
+                .child(words),
+        )
+        .children(action)
+}
+
+/// A whole detail with nothing in it (nothing chosen, nothing yet): the
+/// theme's raven over its words, in the middle of the room, and the action
+/// that fills it. In a room too small for the picture, the words alone.
+pub fn vacant(t: &Theme, words: impl Into<SharedString>, action: Option<AnyElement>) -> Div {
+    let words: SharedString = words.into();
+    let selector = format!("empty-{words}");
+    div()
+        .debug_selector(move || selector)
+        .size_full()
+        .min_h(px(art::EMPTY_ROOM))
+        .p(px(size::PAD))
+        .flex()
+        .flex_col()
+        .items_center()
+        .justify_center()
+        .gap(px(size::SECTION_GAP))
+        .child(
+            img(t.art.empty.clone())
+                .flex_none()
+                .size(px(art::EMPTY))
+                .opacity(t.art.empty_show),
+        )
+        .child(
+            div()
+                .max_w(px(size::NOTICE))
+                .text_center()
+                .font_family(t.ty.reading)
+                .text_size(px(ty::EMPTY))
+                .text_color(t.text2)
+                .child(words),
+        )
         .children(action)
 }
 

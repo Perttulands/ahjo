@@ -331,7 +331,7 @@ mod tests {
         let path = dir.join("picked.txt");
         std::fs::write(&path, b"picked").unwrap();
         cx.update(|cx| {
-            cx.set_global(crate::theme::Theme::violet());
+            cx.set_global(crate::theme::Theme::default());
             crate::widgets::field::bind_keys(cx);
         });
         let (tx, _rx) = async_channel::unbounded();

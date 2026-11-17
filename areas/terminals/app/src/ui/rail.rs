@@ -231,16 +231,14 @@ impl Terminals {
         let g = name.to_string();
         let header = div()
             .id(gpui::SharedString::from(format!("group-{name}")))
+            .group(gpui::SharedString::from(format!("group-{name}")))
             .px(px(12.))
-            .pt(px(8.))
-            .pb(px(3.))
+            .pt(px(size::LABEL_TOP))
+            .pb(px(size::LABEL_BOTTOM))
             .flex()
             .items_center()
             .gap(px(6.))
             .cursor_pointer()
-            .text_size(px(11.))
-            .text_color(t.text2)
-            .hover(|s| s.text_color(t.text))
             .child(
                 div()
                     .w(px(10.))
@@ -249,16 +247,14 @@ impl Terminals {
                     .child(if collapsed { "▶" } else { "▼" }),
             )
             .child(
-                div()
-                    .font_weight(FontWeight::SEMIBOLD)
-                    .child(name.to_string()),
-            )
-            .child(
-                div()
+                kit::group_label(t, name.to_string())
                     .flex_1()
-                    .text_color(t.dim)
-                    .child(members.len().to_string()),
+                    .text_color(t.text2)
+                    .group_hover(gpui::SharedString::from(format!("group-{name}")), |d| {
+                        d.text_color(t.text)
+                    }),
             )
+            .child(kit::count(t, members.len()))
             .on_click(cx.listener(move |s, _, _, cx| {
                 let list = &mut s.settings.collapsed_groups;
                 if let Some(i) = list.iter().position(|x| *x == g) {
@@ -366,7 +362,7 @@ impl Terminals {
                         div()
                             .debug_selector(|| "row-asks".into())
                             .text_size(px(11.))
-                            .text_color(t.accent)
+                            .text_color(t.needs)
                             .overflow_hidden()
                             .text_ellipsis()
                             .child(match question {
@@ -397,7 +393,7 @@ impl Terminals {
                     .flex_none()
                     .text_size(px(10.))
                     .text_color(if activity == "active" {
-                        t.accent
+                        t.running
                     } else {
                         t.dim
                     })
@@ -737,22 +733,23 @@ fn glyphs(s: &Session) -> Vec<(&'static str, String)> {
 }
 
 /// A badge as one glyph, its explanation on hover.
-/// An agent's report, while it is news: the accent dot, saying which.
+/// An agent's report, while it is news: a dot in the colour of what it
+/// said, done or waiting for the operator.
 fn event_dot(t: &Theme, key: &Key, e: &AgentEvent) -> AnyElement {
-    let why = match e.kind {
-        EventKind::Finished => "Its agent finished",
-        EventKind::NeedsInput => "Its agent needs input",
+    let (why, colour) = match e.kind {
+        EventKind::Finished => ("Its agent finished", t.done),
+        EventKind::NeedsInput => ("Its agent needs input", t.needs),
     };
     div()
         .id(gpui::SharedString::from(format!("event-{}", key.text())))
         .flex_none()
-        .child(kit::waiting_dot(t))
+        .child(kit::state_dot(colour))
         .tooltip(move |_, cx| cx.new(|_| kit::Tip(why.into())).into())
         .into_any_element()
 }
 
 /// A session waiting for the operator's answer: a question mark on the
-/// accent, unlike a finished report's dot.
+/// colour of what waits for them, unlike a finished report's dot.
 fn ask_mark(t: &Theme, key: &Key) -> AnyElement {
     div()
         .id(gpui::SharedString::from(format!("asks-{}", key.text())))
@@ -763,8 +760,8 @@ fn ask_mark(t: &Theme, key: &Key) -> AnyElement {
         .flex_none()
         .size(px(size::ASK_MARK))
         .rounded_full()
-        .bg(t.accent)
-        .text_color(t.on_accent())
+        .bg(t.needs)
+        .text_color(t.bg)
         .text_size(px(10.))
         .font_weight(gpui::FontWeight::BOLD)
         .flex()

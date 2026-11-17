@@ -6,7 +6,7 @@
 use crate::state::{self as agents, Checkout, Chosen, Fix, Off, Report, Tone, Tool};
 use crate::{AgentsPage, tokens};
 use gpui::{AnyElement, Context, Div, Hsla, SharedString, Window, div, prelude::*, px};
-use parvi_app_kit::theme::{Theme, rgb, size, theme};
+use parvi_app_kit::theme::{Theme, size, theme};
 use parvi_app_kit::widgets::kit::{self, Kind};
 use parvi_app_kit::widgets::pane;
 
@@ -571,11 +571,11 @@ impl AgentsPage {
     }
 }
 
-/// Needs the operator in the theme's warm colour (ANSI yellow), broken in
-/// its error colour, the rest quiet.
+/// Needs the operator in the theme's colour for it, broken in its error
+/// colour, the rest quiet.
 fn tone_colour(t: &Theme, tone: Tone) -> Hsla {
     match tone {
-        Tone::Behind | Tone::Unlinked => rgb(t.ansi[3]),
+        Tone::Behind | Tone::Unlinked => t.needs,
         Tone::Error => t.error,
         Tone::Plain => t.dim,
         Tone::Ok => t.text2,

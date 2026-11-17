@@ -38,6 +38,16 @@ pub(super) mod pictures;
 /// not at every frame.
 const RESIZE_SETTLE: std::time::Duration = std::time::Duration::from_millis(120);
 
+/// The theme's ravens behind an empty window, covering it from its middle.
+fn window_art(t: &Theme) -> gpui::Img {
+    gpui::img(t.art.window.clone())
+        .absolute()
+        .inset_0()
+        .size_full()
+        .object_fit(gpui::ObjectFit::Cover)
+        .opacity(t.art.window_show)
+}
+
 /// What a window says while a drop on it would land there.
 fn drop_note(t: &Theme) -> gpui::Div {
     div()
@@ -404,14 +414,21 @@ impl Terminals {
             TileState::Empty if !focused => div()
                 .flex_1()
                 .min_h_0()
+                .relative()
                 .flex()
                 .items_center()
                 .justify_center()
                 .p(px(12.))
                 .bg(t.term_bg)
-                .text_color(t.dim)
+                .text_color(t.text2)
                 .debug_selector(move || format!("empty-window-{i}"))
-                .child("Drag a session here, or click to start one")
+                .child(window_art(&t))
+                .child(
+                    kit::panel(&t)
+                        .px(px(14.))
+                        .py(px(8.))
+                        .child("Drag a session here, or click to start one"),
+                )
                 .into_any_element(),
             TileState::Empty => {
                 let launcher = self.launchers[i].clone();
@@ -473,6 +490,7 @@ impl Terminals {
                     .min_h_0()
                     .relative()
                     .bg(t.term_bg)
+                    .child(window_art(&t))
                     .child(
                         div()
                             .id(("launcher-scroll", i))
@@ -496,9 +514,9 @@ impl Terminals {
                                 div()
                                     .flex_none()
                                     .pt(px(14.))
-                                    .text_size(px(12.))
-                                    .italic()
-                                    .text_color(t.dim)
+                                    .font_family(t.ty.reading)
+                                    .text_size(px(size::TEXT))
+                                    .text_color(t.text2)
                                     .child("or drag a session here"),
                             )
                             .child(div().flex_1().min_h(px(0.))),

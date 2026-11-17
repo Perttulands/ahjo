@@ -763,15 +763,15 @@ fn glyph(t: &Theme, state: &str) -> Div {
         .rounded_full()
         .overflow_hidden();
     match state {
-        "running" => dot.bg(t.accent),
-        "starting" => dot.bg(theme::alpha(t.accent, tokens::FADED)),
+        "running" => dot.bg(t.running),
+        "starting" => dot.bg(theme::alpha(t.running, tokens::FADED)),
         "partial" => dot
             .border_1()
             .border_color(t.error)
             .child(div().w(px(tokens::GLYPH / 2.)).h_full().bg(t.error)),
         "failed" => dot.bg(t.error),
         "unknown" => dot.border_1().border_dashed().border_color(t.error),
-        "stopping" => dot.border_1().border_color(t.accent),
+        "stopping" => dot.border_1().border_color(t.running),
         _ => dot.border_1().border_color(t.dim),
     }
 }

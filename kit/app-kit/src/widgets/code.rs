@@ -1430,7 +1430,7 @@ mod tests {
 
     #[gpui::test]
     fn editing_by_keyboard(cx: &mut gpui::TestAppContext) {
-        cx.update(|cx| cx.set_global(crate::theme::Theme::violet()));
+        cx.update(|cx| cx.set_global(crate::theme::Theme::default()));
         let code = cx.new(Code::new);
         code.update(cx, |c, cx| {
             c.set("one\ntwo\nthree", cx);
@@ -1461,7 +1461,7 @@ mod tests {
     #[gpui::test]
     fn its_owner_hears_edits_saves_and_escape(cx: &mut gpui::TestAppContext) {
         use std::{cell::RefCell, rc::Rc};
-        cx.update(|cx| cx.set_global(crate::theme::Theme::violet()));
+        cx.update(|cx| cx.set_global(crate::theme::Theme::default()));
         let (code, cx) = cx.add_window_view(|_, cx| Code::new(cx));
         let heard = Rc::new(RefCell::new(vec![]));
         let keep = heard.clone();
@@ -1486,7 +1486,7 @@ mod tests {
 
     #[gpui::test]
     fn colours_follow_edits_across_lines(cx: &mut gpui::TestAppContext) {
-        cx.update(|cx| cx.set_global(crate::theme::Theme::violet()));
+        cx.update(|cx| cx.set_global(crate::theme::Theme::default()));
         let code = cx.new(Code::new);
         code.update(cx, |c, cx| {
             c.set_lang(syntax::lang("main.rs"), cx);

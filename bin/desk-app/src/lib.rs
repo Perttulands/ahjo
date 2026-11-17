@@ -36,14 +36,14 @@ pub fn run() {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let (config, notice) = desk::load(&args);
     gpui_platform::application().run(move |cx: &mut App| {
-        let fonts = parvi_app_kit::theme::FAMILY_FILES
+        let fonts = parvi_app_kit::theme::FONT_FILES
             .iter()
             .map(|f| Cow::Borrowed(*f))
             .collect();
         if let Err(e) = cx.text_system().add_fonts(fonts) {
             panic!("the bundled fonts did not load: {e}");
         }
-        cx.set_global(Theme::violet());
+        cx.set_global(Theme::default());
         field::bind_keys(cx);
         cx.set_app_identity("io.parvi.desk", "Desk");
         let opened = cx.open_window(

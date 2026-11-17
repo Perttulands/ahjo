@@ -1,10 +1,15 @@
-//! Every visual value the app draws with: colours from a CHROTE theme
-//! (schema 1, the file CHROTE's `/api/theme` serves and a node's `/theme`
-//! passes on), and the fixed measures of the chrome. Views read these and
-//! never write a colour or size of their own.
+//! Every visual value the app draws with: the theme's colours, type and
+//! art, and the fixed measures of the chrome. Views read these and never
+//! write a colour or size of their own.
+//!
+//! A colour carries one meaning, the same on every page: `accent` is what
+//! acts and what has focus; `running`, `done`, `needs` (waits for the
+//! operator) and `error` (failed) are states; `chart` draws data. No colour
+//! stands for two of them. The operator picks the theme
+//! ([`Direction`], the `theme` setting); every direction fills every token.
 
-use gpui::{App, Global, Hsla, Rgba};
-use serde::Deserialize;
+use gpui::{App, FontWeight, Global, Hsla, Image, ImageFormat, Rgba};
+use std::sync::{Arc, OnceLock};
 
 /// Measures in pixels, from CHROTE's layout (DESIGN-SYSTEM.md and the
 /// dashboard as it renders). A page's own measures live with the page.
@@ -25,6 +30,13 @@ pub mod size {
     pub const MENU: f32 = 220.;
     /// A tab card's gap above it.
     pub const TAB_CARD_TOP: f32 = 6.;
+    /// The bar under the shown tab, and its inset from the tab's sides.
+    pub const TAB_MARK: f32 = 2.;
+    pub const TAB_MARK_INSET: f32 = 8.;
+    /// A state's dot.
+    pub const DOT: f32 = 7.;
+    /// The plate a group's count stands on.
+    pub const COUNT: f32 = 18.;
     /// A list row's inset from its list's sides.
     pub const ROW_INSET: f32 = 6.;
     /// The page skeleton (`widgets::pane`): the list's width, as the
@@ -82,18 +94,140 @@ pub mod motion {
     pub const TOAST_OUT: u64 = 200;
 }
 
+/// The type scale: what is read first is largest. Body text is
+/// [`size::TEXT`] and its small companion [`size::SMALL`].
+pub mod ty {
+    /// A page's own name at its head, in the theme's display face.
+    pub const PAGE: f32 = 22.;
+    /// The name of the thing a detail shows, in its head.
+    pub const TITLE: f32 = 15.;
+    /// A group's or a section's label: the display face, small, in the
+    /// theme's case and tracking.
+    pub const GROUP: f32 = 11.;
+    /// A number worth reading at a glance (a reading, a count).
+    pub const GLANCE: f32 = 30.;
+    /// What an empty place says, under its art.
+    pub const EMPTY: f32 = 16.;
+    /// Prose: a document, a work item's description, a brain page.
+    pub const READ: f32 = 15.;
+    /// The line height of prose, as a share of its size.
+    pub const READ_LEADING: f32 = 1.55;
+}
+
+/// How the art sits behind the interface.
+pub mod art {
+    /// The widest an empty place's picture is drawn, and the least room
+    /// it needs to be drawn at all (a narrow list says its words alone).
+    pub const EMPTY: f32 = 220.;
+    pub const EMPTY_ROOM: f32 = 360.;
+    /// The app's mark at the tab bar's start, and its room.
+    pub const MARK: f32 = 26.;
+    pub const MARK_PAD: f32 = 12.;
+}
+
 pub const FAMILY: &str = "JetBrains Mono";
 
-/// The family's files, regular and bold, as the app registers them and
-/// anything that draws text off the UI (a diagram) loads them: the same
-/// letters on every system.
+/// The family's files, regular and bold, as anything that draws text off
+/// the UI (a diagram) loads them: the same letters on every system.
 pub const FAMILY_FILES: [&[u8]; 2] = [
     include_bytes!("../assets/fonts/JetBrainsMono-Regular.ttf"),
     include_bytes!("../assets/fonts/JetBrainsMono-Bold.ttf"),
 ];
 
+/// Every face the app registers: the family, and each direction's display
+/// and reading faces (all under the SIL Open Font License, beside them).
+pub const FONT_FILES: [&[u8]; 12] = [
+    FAMILY_FILES[0],
+    FAMILY_FILES[1],
+    include_bytes!("../assets/fonts/SpaceGrotesk-Medium.ttf"),
+    include_bytes!("../assets/fonts/SpaceGrotesk-Bold.ttf"),
+    include_bytes!("../assets/fonts/Inter-Regular.ttf"),
+    include_bytes!("../assets/fonts/Inter-Bold.ttf"),
+    include_bytes!("../assets/fonts/Cinzel-SemiBold.ttf"),
+    include_bytes!("../assets/fonts/Cinzel-Bold.ttf"),
+    include_bytes!("../assets/fonts/EBGaramond-Regular.ttf"),
+    include_bytes!("../assets/fonts/EBGaramond-Bold.ttf"),
+    include_bytes!("../assets/fonts/Archivo-Regular.ttf"),
+    include_bytes!("../assets/fonts/Archivo-ExtraBold.ttf"),
+];
+
+/// The theme's three ideas of Odin's ravens, Huginn and Muninn, thought
+/// and memory, who fly out over the world and come back to report.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Direction {
+    /// Huginn's night flight: a cold moonlit sky over the fjords, aurora
+    /// in it; a clean grotesk over the mono.
+    #[default]
+    Night,
+    /// Muninn's saga: what is remembered, carved and engraved; hearth gold
+    /// on smoked wood, inscribed capitals, a book face for reading.
+    Saga,
+    /// The raven as a sign: flat black and bone, one signal yellow, heavy
+    /// grotesk headers, nothing soft.
+    Signal,
+}
+
+impl Direction {
+    pub const ALL: [Direction; 3] = [Direction::Night, Direction::Saga, Direction::Signal];
+
+    /// Each direction's key and name, as a setting offers them.
+    pub const CHOICES: &[(&str, &str)] = &[
+        ("night", "Night flight"),
+        ("saga", "Saga"),
+        ("signal", "Signal"),
+    ];
+
+    /// Its value in the `theme` setting.
+    pub fn key(self) -> &'static str {
+        match self {
+            Direction::Night => "night",
+            Direction::Saga => "saga",
+            Direction::Signal => "signal",
+        }
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Direction::Night => "Night flight",
+            Direction::Saga => "Saga",
+            Direction::Signal => "Signal",
+        }
+    }
+
+    pub fn from_key(key: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|d| d.key() == key)
+    }
+}
+
+/// A direction's type: the display face for page names, group labels,
+/// numbers read at a glance and empty places; the reading face for prose.
+/// Rows, fields and terminals stay in [`FAMILY`].
+#[derive(Clone, Debug)]
+pub struct Type {
+    pub display: &'static str,
+    pub display_weight: FontWeight,
+    pub reading: &'static str,
+    /// Group labels in capitals, and the room between their letters.
+    pub labels_upper: bool,
+    pub tracking: f32,
+}
+
+/// A direction's pictures: behind an empty terminal window, over an empty
+/// place, and the app's mark.
+#[derive(Clone, Debug)]
+pub struct Art {
+    pub window: Arc<Image>,
+    pub empty: Arc<Image>,
+    pub mark: Arc<Image>,
+    /// How much of the window's picture shows behind what stands on it.
+    pub window_show: f32,
+    /// How much of an empty place's picture shows.
+    pub empty_show: f32,
+}
+
 #[derive(Clone, Debug)]
 pub struct Theme {
+    pub direction: Direction,
     pub bg: Hsla,
     pub surface: Hsla,
     pub raised: Hsla,
@@ -101,8 +235,19 @@ pub struct Theme {
     pub text: Hsla,
     pub text2: Hsla,
     pub dim: Hsla,
+    /// What acts and what has focus: the primary button, a focused field
+    /// or window, a link, the tab shown.
     pub accent: Hsla,
+    /// Failed.
     pub error: Hsla,
+    /// Running now.
+    pub running: Hsla,
+    /// Done, passed, finished well.
+    pub done: Hsla,
+    /// Waits for the operator.
+    pub needs: Hsla,
+    /// Data drawn: a chart's line and fill.
+    pub chart: Hsla,
     pub term_bg: Hsla,
     pub term_fg: Hsla,
     pub cursor: Hsla,
@@ -112,8 +257,8 @@ pub struct Theme {
     pub term_bg_rgb: u32,
     pub term_fg_rgb: u32,
     pub identity: Vec<Hsla>,
-    /// Art file names the node serves under `/theme/art/`.
-    pub art: Vec<String>,
+    pub ty: Type,
+    pub art: Art,
 }
 
 impl Global for Theme {}
@@ -140,131 +285,202 @@ pub fn alpha(c: Hsla, a: f32) -> Hsla {
     Hsla { a, ..c }
 }
 
-/// `#rgb`, `#rrggbb` or `#rrggbbaa`.
-pub fn parse_hex(s: &str) -> Option<(u32, f32)> {
-    let h = s.trim().strip_prefix('#')?;
-    let full: String = match h.len() {
-        3 => h.chars().flat_map(|c| [c, c]).collect(),
-        6 | 8 => h.into(),
-        _ => return None,
-    };
-    let v = u32::from_str_radix(&full[..6], 16).ok()?;
-    let a = if full.len() == 8 {
-        u8::from_str_radix(&full[6..], 16).ok()? as f32 / 255.
-    } else {
-        1.
-    };
-    Some((v, a))
+/// One direction's values, as written.
+struct Palette {
+    bg: u32,
+    surface: u32,
+    raised: u32,
+    divider: u32,
+    text: u32,
+    text2: u32,
+    dim: u32,
+    accent: u32,
+    error: u32,
+    running: u32,
+    done: u32,
+    needs: u32,
+    chart: u32,
+    term_bg: u32,
+    term_fg: u32,
+    ansi: [u32; 16],
+    identity: [u32; 4],
 }
 
-#[derive(Deserialize)]
-struct File {
-    schema: u32,
-    ui: FileUi,
-    terminal: FileTerm,
-    #[serde(default)]
-    identity: Vec<String>,
-    #[serde(default)]
-    art: Vec<String>,
+const NIGHT: Palette = Palette {
+    bg: 0x0a0f18,
+    surface: 0x0f1622,
+    raised: 0x172133,
+    divider: 0x243149,
+    text: 0xe4ebf5,
+    text2: 0xa3b1c6,
+    dim: 0x6b7a93,
+    accent: 0x6cb6ff,
+    error: 0xff6b7a,
+    running: 0xa98bff,
+    done: 0x5fd3a0,
+    needs: 0xffbf5a,
+    chart: 0xaab4c2,
+    term_bg: 0x080c14,
+    term_fg: 0xd8e1ee,
+    ansi: [
+        0x0a0f18, 0xff6b7a, 0x5fd3a0, 0xffbf5a, 0x6cb6ff, 0xc49bff, 0x4fd6d6, 0xa3b1c6, 0x55627a,
+        0xff8c97, 0x86e3b8, 0xffd28a, 0x9acdff, 0xd8bfff, 0x7fe6e6, 0xf2f6fb,
+    ],
+    identity: [0x3f5f8a, 0x2f6b6b, 0x5b4f8a, 0x6a5a3a],
+};
+
+const SAGA: Palette = Palette {
+    bg: 0x120e0a,
+    surface: 0x1a140f,
+    raised: 0x261d15,
+    divider: 0x3b2d20,
+    text: 0xefe3cc,
+    text2: 0xc2ad8c,
+    dim: 0x8a7659,
+    accent: 0xe0a94a,
+    error: 0xe5574b,
+    running: 0x6fa8dc,
+    done: 0x9cbf6a,
+    needs: 0x4fc3b5,
+    chart: 0xc9c2b4,
+    term_bg: 0x0e0a07,
+    term_fg: 0xe8dcc4,
+    ansi: [
+        0x120e0a, 0xe5574b, 0x9cbf6a, 0xe0a94a, 0x6fa8dc, 0xc7849e, 0x4fc3b5, 0xc2ad8c, 0x6e5d46,
+        0xf07a6e, 0xb6d68a, 0xf0c46e, 0x94c0ea, 0xdba3b9, 0x7fd8cd, 0xf5ecd9,
+    ],
+    identity: [0x7a5230, 0x4f6a3a, 0x7a3f36, 0x3f5a6a],
+};
+
+const SIGNAL: Palette = Palette {
+    bg: 0x0b0b0b,
+    surface: 0x121212,
+    raised: 0x1d1d1d,
+    divider: 0x2e2e2e,
+    text: 0xf0ece3,
+    text2: 0xb8b3a8,
+    dim: 0x77736b,
+    accent: 0xffd000,
+    error: 0xff5a36,
+    running: 0x3ad0ff,
+    done: 0x9ee34a,
+    needs: 0xff4fa0,
+    chart: 0xcfcac0,
+    term_bg: 0x080808,
+    term_fg: 0xece8df,
+    ansi: [
+        0x0b0b0b, 0xff5a36, 0x9ee34a, 0xffd000, 0x3a8dff, 0xff4fa0, 0x3ad0ff, 0xcfcac0, 0x5a5751,
+        0xff7f61, 0xbdf27a, 0xffe14d, 0x6eadff, 0xff80bd, 0x7fe2ff, 0xffffff,
+    ],
+    identity: [0x4a4a4a, 0x6b5a1e, 0x1e5a6b, 0x6b1e45],
+};
+
+macro_rules! art {
+    ($name:literal) => {{
+        static ART: OnceLock<Art> = OnceLock::new();
+        ART.get_or_init(|| Art {
+            window: picture(
+                ImageFormat::Jpeg,
+                include_bytes!(concat!("../assets/art/", $name, "-window.jpg")),
+            ),
+            empty: picture(
+                ImageFormat::Webp,
+                include_bytes!(concat!("../assets/art/", $name, "-empty.webp")),
+            ),
+            mark: picture(
+                ImageFormat::Png,
+                include_bytes!(concat!("../assets/art/", $name, "-mark.png")),
+            ),
+            window_show: 1.,
+            empty_show: 1.,
+        })
+        .clone()
+    }};
 }
 
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct FileUi {
-    background: String,
-    surface: String,
-    surface_raised: String,
-    divider: String,
-    text: String,
-    text_secondary: String,
-    text_dim: String,
-    accent: String,
-    error: String,
+fn picture(format: ImageFormat, bytes: &[u8]) -> Arc<Image> {
+    Arc::new(Image::from_bytes(format, bytes.to_vec()))
 }
 
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct FileTerm {
-    background: String,
-    foreground: String,
-    #[serde(default)]
-    cursor: Option<String>,
-    #[serde(default)]
-    selection_background: Option<String>,
-    ansi: Vec<String>,
+impl Default for Theme {
+    fn default() -> Self {
+        Self::new(Direction::default())
+    }
 }
 
 impl Theme {
-    /// Parvi's own palette, chrote-violet (ui/src/styles/tokens.css), for a
-    /// node that serves no theme.
-    pub fn violet() -> Self {
-        Self::parse(include_str!("../assets/chrote-violet.json"))
-            .expect("the embedded theme parses")
-    }
-
-    pub fn parse(json: &str) -> Result<Self, String> {
-        let f: File = serde_json::from_str(json).map_err(|e| format!("theme: {e}"))?;
-        if f.schema != 1 {
-            return Err(format!("theme schema {} is not 1", f.schema));
-        }
-        let c = |s: &str| {
-            parse_hex(s)
-                .map(|(v, a)| rgba(v, a))
-                .ok_or_else(|| format!("theme colour {s:?}"))
+    pub fn new(direction: Direction) -> Self {
+        let (p, ty, art) = match direction {
+            Direction::Night => (
+                &NIGHT,
+                Type {
+                    display: "Space Grotesk",
+                    display_weight: FontWeight::BOLD,
+                    reading: "Inter",
+                    labels_upper: true,
+                    tracking: 1.5,
+                },
+                Art {
+                    empty_show: 0.85,
+                    ..art!("night")
+                },
+            ),
+            Direction::Saga => (
+                &SAGA,
+                Type {
+                    display: "Cinzel",
+                    display_weight: FontWeight::BOLD,
+                    reading: "EB Garamond",
+                    labels_upper: true,
+                    tracking: 1.,
+                },
+                Art {
+                    window_show: 0.85,
+                    empty_show: 0.55,
+                    ..art!("saga")
+                },
+            ),
+            Direction::Signal => (
+                &SIGNAL,
+                Type {
+                    display: "Archivo",
+                    display_weight: FontWeight::EXTRA_BOLD,
+                    reading: FAMILY,
+                    labels_upper: true,
+                    tracking: 2.,
+                },
+                Art {
+                    window_show: 0.7,
+                    ..art!("signal")
+                },
+            ),
         };
-        let v = |s: &str| {
-            parse_hex(s)
-                .map(|(v, _)| v)
-                .ok_or_else(|| format!("theme colour {s:?}"))
-        };
-        if f.terminal.ansi.len() != 16 {
-            return Err("theme terminal.ansi needs 16 colours".into());
+        Self {
+            direction,
+            bg: rgb(p.bg),
+            surface: rgb(p.surface),
+            raised: rgb(p.raised),
+            divider: rgb(p.divider),
+            text: rgb(p.text),
+            text2: rgb(p.text2),
+            dim: rgb(p.dim),
+            accent: rgb(p.accent),
+            error: rgb(p.error),
+            running: rgb(p.running),
+            done: rgb(p.done),
+            needs: rgb(p.needs),
+            chart: rgb(p.chart),
+            term_bg: rgb(p.term_bg),
+            term_fg: rgb(p.term_fg),
+            cursor: rgb(p.accent),
+            selection: rgba(p.accent, 0.28),
+            ansi: p.ansi,
+            term_bg_rgb: p.term_bg,
+            term_fg_rgb: p.term_fg,
+            identity: p.identity.iter().map(|c| rgb(*c)).collect(),
+            ty,
+            art,
         }
-        let mut ansi = [0u32; 16];
-        for (i, a) in f.terminal.ansi.iter().enumerate() {
-            ansi[i] = v(a)?;
-        }
-        let accent = c(&f.ui.accent)?;
-        let selection = match &f.terminal.selection_background {
-            Some(s) => c(s)?,
-            None => alpha(accent, 0.25),
-        };
-        let mut identity = f
-            .identity
-            .iter()
-            .map(|s| c(s))
-            .collect::<Result<Vec<_>, _>>()?;
-        if identity.is_empty() {
-            identity.push(c(&f.ui.text_dim)?);
-        }
-        Ok(Self {
-            bg: c(&f.ui.background)?,
-            surface: c(&f.ui.surface)?,
-            raised: c(&f.ui.surface_raised)?,
-            divider: c(&f.ui.divider)?,
-            text: c(&f.ui.text)?,
-            text2: c(&f.ui.text_secondary)?,
-            dim: c(&f.ui.text_dim)?,
-            accent,
-            error: c(&f.ui.error)?,
-            term_bg: c(&f.terminal.background)?,
-            term_fg: c(&f.terminal.foreground)?,
-            cursor: c(f
-                .terminal
-                .cursor
-                .as_deref()
-                .unwrap_or(&f.terminal.foreground))?,
-            selection,
-            ansi,
-            term_bg_rgb: v(&f.terminal.background)?,
-            term_fg_rgb: v(&f.terminal.foreground)?,
-            identity,
-            art: f
-                .art
-                .into_iter()
-                .filter(|a| !a.contains('/') && !a.contains('\\'))
-                .collect(),
-        })
     }
 
     /// The accent at the washes CHROTE mixes: 12% for a chosen thing, 7% for
@@ -293,34 +509,61 @@ impl Theme {
     pub fn on_accent(&self) -> Hsla {
         self.bg
     }
+
+    /// A group label's words in the theme's case.
+    pub fn label_case(&self, words: &str) -> String {
+        if self.ty.labels_upper {
+            words.to_uppercase()
+        } else {
+            words.to_string()
+        }
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    #[test]
-    fn hex_forms() {
-        assert_eq!(parse_hex("#fff"), Some((0xffffff, 1.)));
-        assert_eq!(parse_hex("#6b9fff"), Some((0x6b9fff, 1.)));
-        let (v, a) = parse_hex("#6b9fff40").unwrap();
-        assert_eq!(v, 0x6b9fff);
-        assert!((a - 0.25).abs() < 0.01);
-        assert_eq!(parse_hex("6b9fff"), None);
+    /// Two colours are told apart when they differ this much in hue, in
+    /// lightness, or in how coloured they are (a grey ink beside a vivid
+    /// accent of the same hue).
+    fn apart(a: Hsla, b: Hsla) -> bool {
+        let dh = (a.h - b.h).abs().min(1. - (a.h - b.h).abs());
+        dh > 0.04 || (a.l - b.l).abs() > 0.12 || (a.s - b.s).abs() > 0.5
     }
 
     #[test]
-    fn the_embedded_theme_and_chrote_dark_parse() {
-        let t = Theme::violet();
-        assert_eq!(t.ansi[1], 0xf87171);
-        let dark = r##"{"schema":1,"name":"chrote-dark","ui":{"background":"#0f0f0f","surface":"#1a1a1a","surfaceRaised":"#252525","divider":"#3a3a3a","text":"#e5e5e5","textSecondary":"#a3a3a3","textDim":"#737373","accent":"#6b9fff","error":"#f87171"},"terminal":{"background":"#0a0a0a","foreground":"#e5e5e5","cursor":"#e5e5e5","selectionBackground":"#6b9fff40","ansi":["#0f0f0f","#f87171","#8bd450","#e5c07b","#6b9fff","#c084fc","#45d6d6","#a3a3a3","#737373","#ff8a8a","#a6e37a","#f0d48a","#8fb5ff","#d3a4ff","#7ae2e2","#ffffff"]},"identity":["#4f6d8f"],"art":["town.webp","../x.webp"]}"##;
-        let t = Theme::parse(dark).unwrap();
-        assert_eq!(t.term_bg_rgb, 0x0a0a0a);
-        assert_eq!(t.art, vec!["town.webp".to_string()]);
+    fn every_direction_gives_each_meaning_its_own_colour() {
+        for d in Direction::ALL {
+            let t = Theme::new(d);
+            let meanings = [
+                ("action", t.accent),
+                ("failed", t.error),
+                ("running", t.running),
+                ("done", t.done),
+                ("needs you", t.needs),
+                ("chart", t.chart),
+            ];
+            for (i, (a, ca)) in meanings.iter().enumerate() {
+                for (b, cb) in &meanings[i + 1..] {
+                    assert!(apart(*ca, *cb), "{}: {a} and {b} look alike", d.label());
+                }
+                assert!(
+                    apart(*ca, t.text) || *a == "chart",
+                    "{}: {a} looks like text",
+                    d.label()
+                );
+            }
+        }
     }
 
     #[test]
-    fn another_schema_is_refused() {
-        assert!(Theme::parse(r#"{"schema":2,"ui":{},"terminal":{}}"#).is_err());
+    fn a_direction_is_named_by_its_key() {
+        for d in Direction::ALL {
+            assert_eq!(Direction::from_key(d.key()), Some(d));
+        }
+        assert_eq!(Direction::from_key("violet"), None);
+        let named: Vec<_> = Direction::ALL.map(|d| (d.key(), d.label())).into();
+        assert_eq!(named, Direction::CHOICES);
     }
 }

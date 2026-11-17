@@ -1577,7 +1577,7 @@ impl Render for MissionsPage {
                 "missions-detail",
                 pane::head(&t),
                 if none {
-                    pane::empty(
+                    pane::vacant(
                         &t,
                         "No missions yet. A mission is steps that agents carry out, one after another.",
                         Some(
@@ -1588,7 +1588,12 @@ impl Render for MissionsPage {
                     )
                     .debug_selector(|| "missions-landing".into())
                 } else {
-                    div().debug_selector(|| "missions-landing".into())
+                    pane::vacant(
+                        &t,
+                        "Choose a mission to change it, or a run to follow it.",
+                        None,
+                    )
+                    .debug_selector(|| "missions-landing".into())
                 },
             )
         };

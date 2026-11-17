@@ -581,7 +581,7 @@ impl MissionsPage {
         match (self.run_tried, error) {
             (false, _) => t.text2,
             (true, true) => t.error,
-            (true, false) => parvi_app_kit::theme::rgb(t.ansi[3]),
+            (true, false) => t.needs,
         }
     }
     #[allow(clippy::too_many_arguments)]
@@ -608,15 +608,13 @@ impl MissionsPage {
             .collect();
         let issue_color = self.finding_color(t, issues.iter().any(|(_, error)| *error));
         let color = match state {
-            Some(crate::store::run_state::NodeState::Done) => parvi_app_kit::theme::rgb(t.ansi[2]),
+            Some(crate::store::run_state::NodeState::Done) => t.done,
             Some(
                 crate::store::run_state::NodeState::Failed
                 | crate::store::run_state::NodeState::Blocked,
             ) => t.error,
-            Some(
-                crate::store::run_state::NodeState::Running
-                | crate::store::run_state::NodeState::Waiting,
-            ) => t.accent,
+            Some(crate::store::run_state::NodeState::Running) => t.running,
+            Some(crate::store::run_state::NodeState::Waiting) => t.needs,
             _ if card.kind == board::Kind::End => {
                 if mission
                     .ends
@@ -625,7 +623,7 @@ impl MissionsPage {
                 {
                     t.error
                 } else {
-                    parvi_app_kit::theme::rgb(t.ansi[2])
+                    t.done
                 }
             }
             _ => t.divider,
@@ -757,7 +755,7 @@ impl MissionsPage {
         let z = view.zoom;
         let diameter = board::PORT * z;
         let colour = if port.endpoint.ends_with(":pass") {
-            parvi_app_kit::theme::rgb(t.ansi[2])
+            t.done
         } else if port.endpoint.ends_with(":fail") {
             t.error
         } else if port.out {
@@ -967,12 +965,7 @@ fn wires(
         .map(|(finding, _)| finding.node_id.clone())
         .collect();
     let accent = t.accent;
-    let colors = (
-        t.text2,
-        t.error,
-        t.dim,
-        parvi_app_kit::theme::rgb(t.ansi[2]),
-    );
+    let colors = (t.text2, t.error, t.dim, t.done);
     let bounds = view.bounds.clone();
     let loose = match &view.drag {
         Some(Drag::Wire { start, now, .. }) => Some((*start, *now)),
@@ -1439,7 +1432,7 @@ fn card_face(
                         .flex_col()
                         .pt(px(size::CONTROL * z))
                         .child(
-                            label("✓ PASS".into(), parvi_app_kit::theme::rgb(t.ansi[2]))
+                            label("✓ PASS".into(), t.done)
                                 .debug_selector(|| "canvas-gate-pass-label".into()),
                         )
                         .child(
@@ -1455,7 +1448,7 @@ fn card_face(
             let colour = if e.outcome == "rejected" {
                 t.error
             } else {
-                parvi_app_kit::theme::rgb(t.ansi[2])
+                t.done
             };
             div()
                 .size_full()
@@ -1492,9 +1485,9 @@ fn state_words(
 ) -> (&'static str, Hsla) {
     use crate::store::run_state::NodeState;
     match state {
-        Some(NodeState::Done) => ("done", parvi_app_kit::theme::rgb(t.ansi[2])),
-        Some(NodeState::Running) => ("running", t.accent),
-        Some(NodeState::Waiting) => ("needs you", t.accent),
+        Some(NodeState::Done) => ("done", t.done),
+        Some(NodeState::Running) => ("running", t.running),
+        Some(NodeState::Waiting) => ("needs you", t.needs),
         Some(NodeState::Blocked) => ("blocked", t.error),
         Some(NodeState::Failed) => ("failed", t.error),
         Some(NodeState::Canceled) => ("canceled", t.dim),

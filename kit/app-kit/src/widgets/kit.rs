@@ -1,28 +1,110 @@
 //! The shared kit: every control is drawn from here, at CHROTE's measures,
 //! never improvised in a view.
 
-use crate::theme::{Theme, size};
-use gpui::{App, Div, ElementId, FontWeight, Hsla, SharedString, Stateful, div, prelude::*, px};
+use crate::theme::{Theme, art, size, ty};
+use gpui::{
+    App, Div, ElementId, FontWeight, Hsla, SharedString, Stateful, div, img, prelude::*, px,
+};
 
-/// A section label: small and dim, its words as written.
+/// A field's or a section's label: the theme's group label, quieter.
 pub fn label(t: &Theme, text: impl Into<SharedString>) -> Div {
-    div()
-        .text_size(px(size::SMALL))
-        .text_color(t.dim)
-        .child(text.into())
+    group_label(t, text).text_color(t.dim)
 }
 
-/// A page's name at the head of the page: every page draws it the same.
+/// A group's name: the display face, small and weighted, in the theme's
+/// case, its letters spaced by the theme's tracking. It clips rather than
+/// wraps.
+pub fn group_label(t: &Theme, text: impl Into<SharedString>) -> Div {
+    let text: SharedString = text.into();
+    let words = t.label_case(&text);
+    let d = div()
+        .flex()
+        .flex_none()
+        .min_w_0()
+        .overflow_hidden()
+        .whitespace_nowrap()
+        .font_family(t.ty.display)
+        .font_weight(t.ty.display_weight)
+        .text_size(px(ty::GROUP))
+        .text_color(t.text2);
+    if t.ty.tracking <= 0. {
+        return d.child(words);
+    }
+    // Text has no letter spacing of its own: each letter stands apart.
+    d.gap(px(t.ty.tracking)).children(words.chars().map(|c| {
+        if c == ' ' {
+            div().w(px(ty::GROUP * 0.3))
+        } else {
+            div().flex_none().child(c.to_string())
+        }
+    }))
+}
+
+/// A page's name at the head of the page: every page draws it the same,
+/// in the theme's display face.
 pub fn page_title(t: &Theme, text: impl Into<SharedString>) -> Div {
     let text = text.into();
     let selector = format!("page-title-{text}");
     div()
         .debug_selector(move || selector)
         .flex_none()
-        .text_size(px(crate::theme::board::HEADING))
-        .font_weight(FontWeight::SEMIBOLD)
+        .font_family(t.ty.display)
+        .font_weight(t.ty.display_weight)
+        .text_size(px(ty::PAGE))
         .text_color(t.text)
         .child(text)
+}
+
+/// A number worth reading at a glance, in `colour` (the text's unless it
+/// is a state), with its unit small after it.
+pub fn glance(
+    t: &Theme,
+    value: impl Into<SharedString>,
+    unit: impl Into<SharedString>,
+    colour: Option<Hsla>,
+) -> Div {
+    div()
+        .flex()
+        .items_baseline()
+        .gap(px(4.))
+        .child(
+            div()
+                .font_family(t.ty.display)
+                .font_weight(t.ty.display_weight)
+                .text_size(px(ty::GLANCE))
+                .line_height(px(ty::GLANCE * 1.1))
+                .text_color(colour.unwrap_or(t.text))
+                .child(value.into()),
+        )
+        .child(
+            div()
+                .font_family(t.ty.display)
+                .text_size(px(ty::TITLE))
+                .text_color(t.text2)
+                .child(unit.into()),
+        )
+}
+
+/// How many a group holds: a small number on a quiet plate.
+pub fn count(t: &Theme, n: usize) -> Div {
+    div()
+        .flex_none()
+        .min_w(px(size::COUNT))
+        .h(px(size::COUNT))
+        .px(px(4.))
+        .flex()
+        .items_center()
+        .justify_center()
+        .rounded(px(size::RADIUS))
+        .bg(t.raised)
+        .text_size(px(size::SMALL - 1.))
+        .text_color(t.text2)
+        .child(n.to_string())
+}
+
+/// The app's mark, the theme's ravens.
+pub fn mark(t: &Theme) -> gpui::Img {
+    img(t.art.mark.clone()).flex_none().size(px(art::MARK))
 }
 
 /// The bar at a page's head, as high as the tab bar: its title, a note,
@@ -101,13 +183,13 @@ pub fn tab_label(title: &str) -> Div {
         .child(title.to_string())
 }
 
-/// One tab on the tab bar: the active one a card of the page's surface,
-/// joined to the page over the bar's rule; the others words. It never
-/// shrinks.
+/// One tab on the tab bar: the active one in weight over a bar of the
+/// accent, standing on the bar's rule; the others words. It never shrinks.
 pub fn tab(t: &Theme, id: impl Into<ElementId>, active: bool, cx: &App) -> Stateful<Div> {
     let text = t.text;
     div()
         .id(id)
+        .relative()
         .flex_none()
         .px(px(if compact(cx) {
             TAB_PAD_COMPACT
@@ -126,15 +208,17 @@ pub fn tab(t: &Theme, id: impl Into<ElementId>, active: bool, cx: &App) -> State
         })
         .text_color(if active { t.text } else { t.text2 })
         .hover(move |d| d.text_color(text))
-        .rounded_t(px(size::RADIUS))
-        .border_1()
-        .border_b_0()
-        .border_color(if active {
-            t.divider
-        } else {
-            gpui::transparent_black()
+        .when(active, |d| {
+            d.child(
+                div()
+                    .absolute()
+                    .left(px(size::TAB_MARK_INSET))
+                    .right(px(size::TAB_MARK_INSET))
+                    .bottom_0()
+                    .h(px(size::TAB_MARK))
+                    .bg(t.accent),
+            )
         })
-        .when(active, |d| d.bg(t.surface))
 }
 
 /// The bar tabs sit on: its rule along the bottom, drawn first so the
@@ -271,9 +355,19 @@ pub fn device_label(t: &Theme, device: &str, environment: &str) -> Div {
         .child(note(t, environment.to_string(), Some(t.dim)))
 }
 
-/// The mark of a session that waits for an answer: an accent dot.
+/// The mark of a session with news for the operator: a dot in the colour
+/// of what waits for them.
 pub fn waiting_dot(t: &Theme) -> Div {
-    div().flex_none().size(px(7.)).rounded_full().bg(t.accent)
+    state_dot(t.needs)
+}
+
+/// A state's dot: running, done, failed or waiting, in its colour.
+pub fn state_dot(colour: Hsla) -> Div {
+    div()
+        .flex_none()
+        .size(px(size::DOT))
+        .rounded_full()
+        .bg(colour)
 }
 
 /// A popover's frame: raised surface, hairline, shadow.
@@ -380,7 +474,7 @@ mod tests {
 
     impl Render for Labelled {
         fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
-            let t = Theme::violet();
+            let t = Theme::default();
             div()
                 .child(device_label(&t, "landmass", "wsl").debug_selector(|| "device-label".into()))
         }

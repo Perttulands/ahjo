@@ -20,7 +20,7 @@ use std::path::PathBuf;
 
 /// What every window of the app needs before it opens.
 pub fn prepare(cx: &mut App) {
-    cx.set_global(Theme::violet());
+    cx.set_global(Theme::default());
     field::bind_keys(cx);
 }
 
@@ -37,6 +37,7 @@ pub fn start(
 ) -> Shell {
     let (tx, rx) = async_channel::unbounded();
     let hub = cx.new(|_| Hub::new(Net::start(), tx, settings));
+    hub.update(cx, |h, cx| h.apply_theme(cx));
     let weak = hub.downgrade();
     window
         .spawn(cx, async move |cx| {

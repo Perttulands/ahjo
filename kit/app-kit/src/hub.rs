@@ -15,7 +15,7 @@ use crate::link::fleet::Fleet;
 use crate::link::socket::{Event, Net};
 use crate::menu::Menu;
 use crate::settings::Settings;
-use crate::theme::motion;
+use crate::theme::{Direction, Theme, motion};
 use gpui::{
     AnyEntity, AnyView, AnyWeakEntity, App, AppContext, Context, Entity, EventEmitter,
     SystemNotification, Task,
@@ -191,6 +191,23 @@ impl Hub {
             widens: HashSet::new(),
             whole: HashSet::new(),
             guards: vec![],
+        }
+    }
+
+    /// Draws the app in the theme the settings name, when it is not the
+    /// one drawn: every window draws again. A name no direction has is
+    /// reported, and the theme stays.
+    pub fn apply_theme(&mut self, cx: &mut Context<Self>) {
+        let Some(direction) = Direction::from_key(&self.settings.theme) else {
+            let text = format!(
+                "No theme is called {:?}; the theme stays as it was",
+                self.settings.theme
+            );
+            return self.report(Status::failure(text), cx);
+        };
+        if cx.try_global::<Theme>().map(|t| t.direction) != Some(direction) {
+            cx.set_global(Theme::new(direction));
+            cx.refresh_windows();
         }
     }
 
@@ -589,6 +606,9 @@ impl Hub {
             .collect();
         if old.node != self.settings.node {
             self.connect(cx);
+        }
+        if old.theme != self.settings.theme {
+            self.apply_theme(cx);
         }
         cx.emit(HubEvent::SettingsReloaded(changed));
         self.report(

@@ -268,7 +268,12 @@ impl BrainPage {
             let head = head
                 .child(div().flex_1())
                 .children(beside.then(|| self.close(t, cx)));
-            return pane::detail(t, "brain-reader", head, pane::empty(t, why, None).p_0());
+            let body = if self.state.page_error.is_none() && self.state.arrivals_read {
+                pane::vacant(t, why, None)
+            } else {
+                pane::empty(t, why, None).p_0()
+            };
+            return pane::detail(t, "brain-reader", head, body);
         };
         head = head
             .child(pane::title(t, page.title.clone()).debug_selector(|| "brain-page-title".into()));

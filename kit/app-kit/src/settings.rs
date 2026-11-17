@@ -30,6 +30,8 @@ pub struct Settings {
     /// A shortcut's keys show at the foot of the window as it runs: for
     /// showing someone the app, so off unless turned on.
     pub show_keys: bool,
+    /// The theme's direction, by its key (`theme::Direction::key`).
+    pub theme: String,
     /// The fleet as last seen: each node's device and environment, so an
     /// away device keeps its name until it answers again, across restarts
     /// too, and an address to serve through while the configured node is
@@ -62,6 +64,7 @@ impl Default for Settings {
             node: DEFAULT_NODE.into(),
             keys: true,
             show_keys: false,
+            theme: crate::theme::Direction::default().key().into(),
             places: Default::default(),
             sections: Map::new(),
         }

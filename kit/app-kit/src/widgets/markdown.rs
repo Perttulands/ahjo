@@ -5,7 +5,7 @@
 //! Files and Work both draw bodies with it.
 
 use super::select::Selectable;
-use crate::theme::{FAMILY, Theme, alpha, size};
+use crate::theme::{FAMILY, Theme, alpha, size, ty};
 use gpui::{
     AnyElement, App, Div, ElementId, FontStyle, FontWeight, HighlightStyle, InteractiveText,
     SharedString, StyledText, Window, div, prelude::*, px,
@@ -533,7 +533,13 @@ pub fn render_marked(
     marks: &[Option<super::code::Mark>],
 ) -> Div {
     let t = look.t;
-    let mut col = div().flex().flex_col().gap(px(10.)).text_color(t.text);
+    let mut col = div()
+        .flex()
+        .flex_col()
+        .gap(px(10.))
+        .font_family(t.ty.reading)
+        .text_size(px(ty::READ))
+        .text_color(t.text);
     if let Some(s) = &look.select {
         s.borrow_mut().begin();
         let s = s.clone();
@@ -545,27 +551,26 @@ pub fn render_marked(
         let block = match b {
             Block::Heading(level, h) => {
                 let sz = match level {
-                    1 => 22.,
-                    2 => 18.,
-                    3 => 15.,
-                    _ => size::TEXT,
+                    1 => ty::PAGE,
+                    2 => ty::PAGE - 4.,
+                    3 => ty::READ + 1.,
+                    _ => ty::READ,
                 };
                 div()
                     .pt(px(if *level <= 2 { 8. } else { 4. }))
                     .text_size(px(sz))
                     .font_weight(FontWeight::BOLD)
                     .when(*level <= 2, |d| {
+                        d.font_family(t.ty.display).font_weight(t.ty.display_weight)
+                    })
+                    .when(*level <= 2, |d| {
                         d.pb(px(4.)).border_b_1().border_color(t.divider)
                     })
                     .child(styled(look, eid, h, HighlightStyle::default(), BLOCK))
             }
-            Block::Paragraph(p) => div().line_height(px(20.)).child(styled(
-                look,
-                eid,
-                p,
-                HighlightStyle::default(),
-                BLOCK,
-            )),
+            Block::Paragraph(p) => div()
+                .line_height(px(ty::READ * ty::READ_LEADING))
+                .child(styled(look, eid, p, HighlightStyle::default(), BLOCK)),
             Block::Quote(q) => div()
                 .pl(px(12.))
                 .border_l_2()
@@ -663,11 +668,7 @@ pub fn render_marked(
                                 div()
                                     .flex_none()
                                     .min_w(px(16.))
-                                    .text_color(if it.checked.is_some() {
-                                        t.accent
-                                    } else {
-                                        t.text2
-                                    })
+                                    .text_color(if done { t.done } else { t.text2 })
                                     .child(marker),
                             )
                             .child(div().flex_1().min_w_0().child(styled(
@@ -778,7 +779,7 @@ mod tests {
     fn a_selection_across_the_blocks_copies_their_words_as_laid_out() {
         use crate::text::text_select::Spot;
         let doc = "# Title\n\nSome **bold** [link](x.md).\n\n- one\n- two\n\n```\nlet a = 1;\n\tb\n```\n\n| a | b |\n|---|---|\n| 1 | 2 |\n";
-        let t = Theme::violet();
+        let t = Theme::default();
         let select = Rc::new(RefCell::new(Selectable::default()));
         let look = Look {
             t: &t,

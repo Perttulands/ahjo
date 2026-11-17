@@ -17,7 +17,7 @@ mod tokens;
 
 use app::{Bench, Start, Take};
 use gpui::App;
-use parvi_app_kit::theme::{FAMILY_FILES, Theme};
+use parvi_app_kit::theme::{FONT_FILES, Theme};
 use std::borrow::Cow;
 
 const USAGE: &str = "brain-app [--brain <folder>] [--citadel <url>] [--take sky|gather|orbit] [--search <words>] [--open <page>] [--bench <seconds>] [--where]";
@@ -62,11 +62,11 @@ pub fn run() {
         bench,
     };
     gpui_platform::application().run(move |cx: &mut App| {
-        let fonts = FAMILY_FILES.iter().map(|f| Cow::Borrowed(*f)).collect();
+        let fonts = FONT_FILES.iter().map(|f| Cow::Borrowed(*f)).collect();
         if let Err(e) = cx.text_system().add_fonts(fonts) {
             panic!("the bundled fonts did not load: {e}");
         }
-        cx.set_global(Theme::violet());
+        cx.set_global(Theme::default());
         parvi_app_kit::widgets::field::bind_keys(cx);
         app::open_window(start, cx);
         cx.on_window_closed(|cx, _| cx.quit()).detach();

@@ -5,7 +5,7 @@
 
 use crate::store::work::timeline::{Range, range_label};
 use crate::store::work::{Row, Status, Tracker, prose, when};
-use crate::tokens::{self, *};
+use crate::tokens::*;
 use crate::{Entry, Layout, Moved, Work};
 use gpui::{
     AnyElement, ClickEvent, Context, Div, FontWeight, Hsla, MouseButton, MouseDownEvent,
@@ -32,7 +32,7 @@ pub(crate) enum Place {
 /// said, ready is not.
 pub(crate) fn status_meta(t: &Theme, r: &Row) -> Option<(String, Hsla)> {
     match r.status {
-        Status::InProgress => Some(("in progress".into(), tokens::running(t))),
+        Status::InProgress => Some(("in progress".into(), t.running)),
         Status::Blocked => Some(("blocked".into(), t.text2)),
         Status::Deferred => Some(("deferred".into(), t.dim)),
         Status::Closed => Some((raw_label(r), t.dim)),
@@ -215,7 +215,7 @@ impl Work {
                     .on_click(cx.listener(|w, _, _, cx| w.refresh(cx)))
                     .into_any_element()
             } else {
-                pane::meta(t, "Reading…", Some(t.accent))
+                pane::meta(t, "Reading…", None)
                     .debug_selector(|| "w-refreshing".into())
                     .into_any_element()
             };
@@ -469,11 +469,7 @@ impl Work {
                 .gap(px(size::HEAD_GAP))
                 .text_color(t.text2)
                 .child(format!("{} → {}", pf.head, pf.base))
-                .child(
-                    div()
-                        .text_color(t.accent)
-                        .child(format!("+{}", pf.additions)),
-                )
+                .child(div().text_color(t.done).child(format!("+{}", pf.additions)))
                 .child(
                     div()
                         .text_color(t.error)
@@ -826,10 +822,10 @@ pub(crate) fn raw_label(r: &Row) -> String {
 pub(crate) fn glyph(t: &Theme, r: &Row) -> Div {
     let (mark, ink) = match r.status {
         Status::Open => ("○", t.dim),
-        Status::InProgress => ("◐", tokens::running(t)),
+        Status::InProgress => ("◐", t.running),
         Status::Blocked => ("●", t.text2),
         Status::Deferred => ("–", t.dim),
-        Status::Closed => ("✓", tokens::done(t)),
+        Status::Closed => ("✓", t.done),
     };
     div().flex_none().w(px(GLYPH_W)).text_color(ink).child(mark)
 }

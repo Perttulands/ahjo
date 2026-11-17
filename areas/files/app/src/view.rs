@@ -889,7 +889,7 @@ impl FilesPage {
 
     fn viewer_body(&self, t: &Theme, cx: &mut Context<Self>) -> AnyElement {
         let Some(o) = &self.opened else {
-            return pane::empty(t, "No file open", None).into_any_element();
+            return pane::vacant(t, "No file open", None).into_any_element();
         };
         if o.diff_open
             && let Some(diff) = &o.diff

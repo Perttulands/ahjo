@@ -120,6 +120,8 @@ impl Shell {
         let keys_words = if keys_on { "Keys" } else { "Keys off" };
         let end_w = Self::words_w(window, keys_words)
             + END_PAD * 2.
+            + theme::art::MARK
+            + theme::art::MARK_PAD * 2.
             + link.map_or(0., |(w, _)| Self::words_w(window, w) + END_PAD * 2.);
         // The pages with a tab, and whether each draws its own.
         let mut drawn: Vec<(usize, Option<gpui::AnyElement>)> = vec![];
@@ -142,7 +144,17 @@ impl Shell {
             .flex_1()
             .min_w_0()
             .flex()
-            .items_stretch();
+            .items_stretch()
+            .child(
+                div()
+                    .flex_none()
+                    .px(px(theme::art::MARK_PAD))
+                    .pb(px(size::TAB_CARD_TOP))
+                    .flex()
+                    .items_center()
+                    .debug_selector(|| "app-mark".into())
+                    .child(kit::mark(&t)),
+            );
         for (i, own) in drawn {
             if let Some(tabs) = own {
                 bar = bar.child(tabs);

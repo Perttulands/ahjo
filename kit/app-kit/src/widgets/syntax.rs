@@ -645,7 +645,7 @@ pub fn colour(t: &crate::theme::Theme, token: Token) -> gpui::Hsla {
         Token::Comment => t.dim,
         Token::String => crate::theme::rgb(t.ansi[2]),
         Token::Number => crate::theme::rgb(t.ansi[3]),
-        Token::Keyword => t.accent,
+        Token::Keyword => crate::theme::rgb(t.ansi[5]),
     }
 }
 

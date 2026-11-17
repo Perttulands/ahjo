@@ -12,6 +12,8 @@ pub const FIGURE_COL: f32 = 72.;
 pub const TIME_COL: f32 = 64.;
 /// A time with its day before it (`13 Nov 23:48`).
 pub const DAY_TIME_COL: f32 = 104.;
+/// A figure's tile at a glance on the overview.
+pub const GLANCE_W: f32 = 116.;
 /// A service's state mark.
 pub const GLYPH: f32 = 8.;
 pub const HAIRLINE: f32 = 1.;

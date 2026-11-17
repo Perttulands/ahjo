@@ -1,7 +1,7 @@
 //! Work page's visual measures, and the colours it gives meanings.
 
 use gpui::Hsla;
-use parvi_app_kit::theme::{Theme, alpha, rgb};
+use parvi_app_kit::theme::{Theme, alpha};
 
 pub const SPACE_XS: f32 = 4.;
 pub const SPACE_XL: f32 = 12.;
@@ -73,18 +73,8 @@ pub const CARD_MIN: f32 = 240.;
 pub const CARD_MAX: f32 = 320.;
 pub const CARD_PAD: f32 = 10.;
 
-// The colours with fixed meanings (DESIGN.md, One app). The kit's theme
-// does not carry them yet; until it does they come from the theme's own
-// terminal palette, so a theme still sets them.
+// Finished and under way are the theme's own `done` and `running`.
 
-/// Finished.
-pub fn done(t: &Theme) -> Hsla {
-    rgb(t.ansi[2])
-}
-/// Under way.
-pub fn running(t: &Theme) -> Hsla {
-    rgb(t.ansi[4])
-}
 /// Work being opened: not a meaning of its own, so the text's own grey.
 pub fn opened(t: &Theme) -> Hsla {
     alpha(t.text2, 0.75)

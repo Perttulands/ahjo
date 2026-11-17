@@ -996,7 +996,7 @@ mod tests {
 
     #[gpui::test]
     fn typing_moving_and_deleting(cx: &mut gpui::TestAppContext) {
-        cx.update(|cx| cx.set_global(crate::theme::Theme::violet()));
+        cx.update(|cx| cx.set_global(crate::theme::Theme::default()));
         let f = cx.new(|cx| TextField::new(cx, ""));
         f.update(cx, |f, cx| {
             f.set("hello brave world", false, cx);
@@ -1013,7 +1013,7 @@ mod tests {
     #[gpui::test]
     fn send_field_pastes_text_and_emits_clipboard_attachments(cx: &mut gpui::TestAppContext) {
         use std::{cell::RefCell, rc::Rc};
-        cx.update(|cx| cx.set_global(crate::theme::Theme::violet()));
+        cx.update(|cx| cx.set_global(crate::theme::Theme::default()));
         let (f, cx) = cx.add_window_view(|_, cx| TextField::new(cx, "").multiline().attachments());
         let received = Rc::new(RefCell::new(Vec::new()));
         let seen = received.clone();
@@ -1068,7 +1068,7 @@ mod tests {
 
     #[gpui::test]
     fn a_drawn_field_scrolls_with_its_caret(cx: &mut gpui::TestAppContext) {
-        cx.update(|cx| cx.set_global(crate::theme::Theme::violet()));
+        cx.update(|cx| cx.set_global(crate::theme::Theme::default()));
         let (f, cx) = cx.add_window_view(|_, cx| TextField::new(cx, ""));
         let long = "/srv/.claude/worktrees/agent/projects/beta".repeat(20);
         f.update(cx, |f, cx| f.set(&long, false, cx));

@@ -2,7 +2,7 @@
 //! lately, then the missions to set off.
 use super::*;
 use crate::store::{navigator as model, words};
-use gpui::{SharedString, rgb};
+use gpui::SharedString;
 use parvi_app_kit::theme::Theme;
 use parvi_app_kit::widgets::pane;
 
@@ -121,11 +121,11 @@ impl MissionsPage {
         );
         let selector = format!("run-row-{id}");
         let (meta, colour) = match row.run.status.as_str() {
-            "waiting_human" => ("your answer".to_owned(), Some(rgb(t.ansi[3]).into())),
-            "blocked" => ("blocked".to_owned(), Some(rgb(t.ansi[3]).into())),
+            "waiting_human" => ("your answer".to_owned(), Some(t.needs)),
+            "blocked" => ("blocked".to_owned(), Some(t.needs)),
             "failed" => ("failed".to_owned(), Some(t.error)),
             "canceled" => ("stopped".to_owned(), None),
-            _ if !row.run.r#final => (words::run_span(&row.run, now), Some(t.accent)),
+            _ if !row.run.r#final => (words::run_span(&row.run, now), Some(t.running)),
             _ => (words::short_time(&row.run.updated_at, now), None),
         };
         // What the run was given tells two runs of one mission apart.

@@ -23,7 +23,7 @@ pub const PAGES: &[Build] = &[
 ];
 
 fn fonts() -> Vec<Cow<'static, [u8]>> {
-    parvi_app_kit::theme::FAMILY_FILES
+    parvi_app_kit::theme::FONT_FILES
         .iter()
         .map(|f| Cow::Borrowed(*f))
         .collect()
