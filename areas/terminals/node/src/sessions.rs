@@ -65,6 +65,7 @@ impl Sessions for Provided {
                     flags: String::new(),
                 }],
                 folders: Vec::new(),
+                roots: Vec::new(),
                 cols: launcher.cols,
                 rows: launcher.rows,
             };

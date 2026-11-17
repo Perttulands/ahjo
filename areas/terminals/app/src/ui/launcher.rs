@@ -528,7 +528,7 @@ impl Render for Launcher {
         let field_empty = self.folder.read(cx).text(cx).is_empty();
         let field_focused = self.folder.read(cx).field.read(cx).is_focused(window);
         self.folder.update(cx, |f, cx| {
-            f.serve(&at, &self.user, offered);
+            f.serve(&at, &self.user, offered, cx);
             if field_empty {
                 f.field
                     .update(cx, |field, _| field.set_placeholder(&folder));

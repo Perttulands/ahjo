@@ -1,6 +1,7 @@
 //! The launcher's Folder field, as CHROTE's FolderField: one input that
 //! takes a folder three ways. Untouched, the list under it offers the
-//! launcher's folders; a fragment ranks them; a path lists the folders
+//! launcher's folders; a fragment ranks them with every project on the
+//! node; a path lists the folders
 //! under what is typed, on the launcher's node. Tab completes the lit row,
 //! the arrows move, Enter takes the lit row or the typed path. The list
 //! keeps one height whatever it holds, so nothing moves under the pointer.
@@ -54,6 +55,11 @@ pub struct FolderField {
     listing: Option<Listing>,
     /// The (node, folder) being read now.
     reading: Option<(String, String)>,
+    /// Every project on the node, which a fragment searches with what is
+    /// offered: the node's last walk, for the node it came from.
+    projects: Option<(String, Vec<String>)>,
+    /// The node whose projects are being asked for.
+    asking: Option<String>,
 }
 
 /// Keep existing rows in place while a launcher is open; new choices join
@@ -86,6 +92,8 @@ impl FolderField {
             lit: None,
             listing: None,
             reading: None,
+            projects: None,
+            asking: None,
         }
     }
 
@@ -101,10 +109,15 @@ impl FolderField {
     }
 
     /// Where paths are listed and what is offered: the launcher's node now.
-    pub fn serve(&mut self, node: &str, user: &str, offered: Vec<String>) {
+    pub fn serve(&mut self, node: &str, user: &str, offered: Vec<String>, cx: &mut Context<Self>) {
         if self.node != node || self.offered_user != user {
             self.listing = None;
             self.offered.clear();
+        }
+        let asked = self.projects.as_ref().map(|p| p.0.as_str()) == Some(node)
+            || self.asking.as_deref() == Some(node);
+        if !asked {
+            self.ask_projects(node, cx);
         }
         self.node = node.to_string();
         self.offered_user = user.to_string();
@@ -134,7 +147,13 @@ impl FolderField {
                     complete: p.clone(),
                 })
                 .collect(),
-            FolderList::Matching => launch::matching(&self.value(cx), &self.offered),
+            FolderList::Matching => {
+                let projects = match &self.projects {
+                    Some((node, projects)) if *node == self.node => &projects[..],
+                    _ => &[],
+                };
+                launch::matching(&self.value(cx), &launch::searched(&self.offered, projects))
+            }
             FolderList::Inside { dir, segment } => match &self.listing {
                 Some(l) if l.node == self.node && l.dir == *dir => {
                     launch::inside(dir, segment, l.folders.as_deref().unwrap_or_default())
@@ -163,8 +182,12 @@ impl FolderField {
                 self.read(cx);
                 cx.emit(FolderEvent::Changed);
             }
-            // Folders made since the last look show on the next.
-            FieldEvent::Focused => self.listing = None,
+            // Folders and projects made since the last look show on the next.
+            FieldEvent::Focused => {
+                self.listing = None;
+                let node = self.node.clone();
+                self.ask_projects(&node, cx);
+            }
             FieldEvent::Up | FieldEvent::Down => {
                 let list = self.list(cx);
                 let rows = self.suggestions(&list, cx).len();
@@ -248,6 +271,34 @@ impl FolderField {
                     folders,
                 });
                 cx.notify();
+            });
+        })
+        .detach();
+    }
+
+    /// Asks the node for its projects. Its answer is its last walk, so it
+    /// comes at once; one made since shows on the next ask.
+    fn ask_projects(&mut self, node: &str, cx: &mut Context<Self>) {
+        if node.is_empty() || self.asking.as_deref() == Some(node) {
+            return;
+        }
+        self.asking = Some(node.to_string());
+        let task = self.host.request(
+            Request::get(NodeId(node.to_string()), "/api/terminal/projects"),
+            cx,
+        );
+        let node = node.to_string();
+        cx.spawn(async move |this, cx| {
+            let answer = http::json::<Vec<String>>(task.await);
+            let _ = this.update(cx, |f, cx| {
+                if f.asking.as_deref() == Some(node.as_str()) {
+                    f.asking = None;
+                }
+                // A node that could not say keeps what it said last.
+                if let Ok(projects) = answer {
+                    f.projects = Some((node, projects));
+                    cx.notify();
+                }
             });
         })
         .detach();

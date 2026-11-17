@@ -124,9 +124,8 @@ pub fn place(
 
 /// What the Folder field's list holds, as CHROTE's FolderField decides it:
 /// the offered folders until something is typed; for a path, the folders
-/// under the folder typed so far; for a fragment, the offered folders it
-/// matches. (CHROTE ranks the host's workspaces there; a node lists no
-/// workspaces, so the fragment searches what the launcher offers.)
+/// under the folder typed so far; for a fragment, the offered folders and
+/// the node's projects it matches.
 #[derive(Debug, PartialEq)]
 pub enum FolderList {
     Offered,
@@ -189,15 +188,21 @@ pub fn inside(dir: &str, segment: &str, folders: &[String]) -> Vec<Suggestion> {
         .collect()
 }
 
+/// A letter as the search compares it, case aside.
+fn fold(c: char) -> char {
+    c.to_lowercase().next().unwrap_or(c)
+}
+
 /// CHROTE's fuzzy score for a word. Scores are doubled to keep the gap
 /// penalty (1.5 per skipped character) integral.
 fn word_score(word: &str, candidate: &str) -> Option<i64> {
     let text: Vec<char> = candidate.chars().collect();
+    let lowered: Vec<char> = text.iter().map(|c| fold(*c)).collect();
     let mut previous = vec![None; text.len()];
-    for (letter_index, letter) in word.chars().enumerate() {
+    for (letter_index, letter) in word.chars().map(fold).enumerate() {
         let mut next = vec![None; text.len()];
         for (i, ch) in text.iter().enumerate() {
-            if ch.to_lowercase().to_string() != letter.to_lowercase().to_string() {
+            if lowered[i] != letter {
                 continue;
             }
             let start = i == 0
@@ -254,6 +259,21 @@ pub fn matching(fragment: &str, offered: &[String]) -> Vec<Suggestion> {
             complete: f.clone(),
         })
         .collect()
+}
+
+/// What a fragment searches: the offered folders first, so they win ties,
+/// then the node's projects not already among them.
+/// A folder written with a closing separator, as Tab completes it, is the
+/// same folder.
+pub fn searched(offered: &[String], projects: &[String]) -> Vec<String> {
+    let same = |f: &str| f.trim_end_matches(['/', '\\']).to_string();
+    let mut all: Vec<String> = Vec::new();
+    for folder in offered.iter().chain(projects) {
+        if !all.iter().any(|a| same(a) == same(folder)) {
+            all.push(folder.clone());
+        }
+    }
+    all
 }
 
 /// The row lit before the arrows move: the best match for a fragment, and
@@ -445,6 +465,36 @@ mod tests {
                 .collect::<Vec<_>>(),
             ties
         );
+    }
+
+    /// parvi-7rc: a fragment finds a project nobody launched in yet.
+    #[test]
+    fn a_fragment_finds_the_nodes_projects_after_the_offered_folders() {
+        let offered = [
+            "/srv/parvi".to_string(),
+            "~".to_string(),
+            "/home/operator/wealth/".to_string(),
+        ];
+        let projects = [
+            "/home/operator/wealth".to_string(),
+            "/srv/games/korpi".to_string(),
+            "/srv/parvi".to_string(),
+        ];
+        let all = searched(&offered, &projects);
+        assert_eq!(
+            all,
+            [
+                "/srv/parvi",
+                "~",
+                "/home/operator/wealth/",
+                "/srv/games/korpi"
+            ],
+            "a folder Tab completed is the project it names"
+        );
+        let first = |q| matching(q, &all).into_iter().next().map(|s| s.path);
+        assert_eq!(first("wealth").as_deref(), Some("/home/operator/wealth/"));
+        assert_eq!(first("kor").as_deref(), Some("/srv/games/korpi"));
+        assert_eq!(first("KOR").as_deref(), Some("/srv/games/korpi"));
     }
 
     #[test]

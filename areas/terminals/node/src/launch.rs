@@ -37,6 +37,9 @@ const MAX_FLAGS: usize = 4096;
 pub struct Config {
     pub harnesses: Vec<Harness>,
     pub folders: Vec<String>,
+    /// Where the launcher's folder search looks for projects; the folders
+    /// offered when none is named.
+    pub roots: Vec<String>,
     /// The size a new session's window is given once, at creation.
     pub cols: u16,
     pub rows: u16,
@@ -61,6 +64,7 @@ impl Default for Config {
                 flags: String::new(),
             }],
             folders: vec!["~".into()],
+            roots: Vec::new(),
             cols: 200,
             rows: 50,
         }
@@ -69,7 +73,8 @@ impl Default for Config {
 
 impl Config {
     /// Parses lines of `harness <id> <command> [default flags]`,
-    /// `folder <path>` and `size <cols>x<rows>`. `#` starts a comment line.
+    /// `folder <path>`, `root <path>` and `size <cols>x<rows>`. `#` starts
+    /// a comment line.
     pub fn parse(text: &str) -> Result<Config> {
         let mut config = Config::default();
         let mut folders = Vec::new();
@@ -110,15 +115,19 @@ impl Config {
                         flags: flags.into(),
                     });
                 }
-                "folder" => {
+                "folder" | "root" => {
                     if !(rest == "~"
                         || rest.starts_with("~/")
                         || rest.starts_with("~\\")
                         || Path::new(rest).is_absolute())
                     {
-                        bail!("{}: a folder is absolute or starts with ~", at());
+                        bail!("{}: a {key} is absolute or starts with ~", at());
                     }
-                    folders.push(rest.to_owned());
+                    if key == "root" {
+                        config.roots.push(rest.to_owned());
+                    } else {
+                        folders.push(rest.to_owned());
+                    }
                 }
                 "size" => {
                     let size = rest
@@ -138,6 +147,20 @@ impl Config {
             config.folders = folders;
         }
         Ok(config)
+    }
+
+    /// Where the folder search walks: the roots named, else the folders
+    /// offered, each `~` resolved under `home`.
+    pub fn search_roots(&self, home: Option<&Path>) -> Vec<PathBuf> {
+        let named = if self.roots.is_empty() {
+            &self.folders
+        } else {
+            &self.roots
+        };
+        named
+            .iter()
+            .filter_map(|f| resolve_folder(f, home, false).ok())
+            .collect()
     }
 
     /// `{"harnesses":[{"id":…,"command":…,"flags":…}],"folders":[…],"cols":…,"rows":…}`
@@ -401,7 +424,7 @@ pub async fn launch(
             }
             if let Some(pane) = pane {
                 engine
-                    .deliver_when_ready(pane, line, true, Duration::from_secs(30))
+                    .start_in_fresh_shell(pane, line, Duration::from_secs(30))
                     .await?
                     .await
             } else {
@@ -522,6 +545,8 @@ async fn run(backend: &dyn Backend, args: &[&str]) -> Result<String> {
 mod tests {
     use super::*;
 
+    const SRV: &str = if cfg!(windows) { r"C:\srv" } else { "/srv" };
+
     #[test]
     fn launch_warnings_keep_hooks_and_attachment_failures() {
         let mut warning = Some("no completion notices: hooks failed".to_owned());
@@ -557,6 +582,18 @@ mod tests {
         assert_eq!(config.harnesses[2].flags, "");
         assert_eq!(config.folders, ["~/work/api", "~/agents"]);
         assert_eq!((config.cols, config.rows), (160, 48));
+        let home = Path::new(SRV).join("me");
+        assert_eq!(
+            config.search_roots(Some(&home)),
+            [home.join("work/api"), home.join("agents")],
+            "with no root named, the search walks the offered folders"
+        );
+        let rooted = Config::parse(&format!("folder ~\nroot ~\nroot {SRV}")).unwrap();
+        assert_eq!(rooted.folders, ["~"]);
+        assert_eq!(
+            rooted.search_roots(Some(&home)),
+            [home.clone(), PathBuf::from(SRV)]
+        );
         assert_eq!(Config::parse("").unwrap(), Config::default());
     }
 
@@ -575,6 +612,7 @@ mod tests {
             ("harness codex", "needs a command"),
             ("harness a x\nharness a y", "twice"),
             ("folder work", "absolute"),
+            ("root work", "a root is absolute"),
             ("size 40x10", "at least"),
             ("colour red", "unknown"),
         ] {

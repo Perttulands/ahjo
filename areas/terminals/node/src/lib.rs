@@ -23,6 +23,7 @@ mod frames;
 mod hub;
 mod launch;
 mod launcher;
+mod projects;
 mod sessions;
 
 use std::collections::BTreeMap;
@@ -191,6 +192,7 @@ impl Area for Terminals {
             .with_state(self.ctx.hub.clone())
             .merge(agent_events::routes(self.ctx.hub.clone()))
             .merge(flags::routes(self.ctx.launcher.clone()))
+            .merge(projects::routes(self.ctx.launcher.clone()))
     }
 
     fn commands(&self) -> Vec<Command> {

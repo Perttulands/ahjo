@@ -665,6 +665,21 @@ impl Engine {
             .await
     }
 
+    /// Types a command line into a shell that was just started, and
+    /// submits it: as soon as its line editor reads (bracketed paste on,
+    /// nothing asked), with no quiet wait and no settle before Enter, which
+    /// only an agent's TUI needs. A shell that does not get there in `wait`
+    /// gets nothing, and the delivery resolves to [`NotReady`].
+    pub async fn start_in_fresh_shell(
+        &self,
+        pane: PaneId,
+        line: String,
+        wait: Duration,
+    ) -> Result<Delivering> {
+        self.queue(Delivery::into_fresh_shell(pane, line, wait))
+            .await
+    }
+
     async fn queue(&self, (delivery, delivering): (Delivery, Delivering)) -> Result<Delivering> {
         let requests = {
             let mut state = self.shared.state.lock().unwrap();

@@ -53,6 +53,33 @@ pub(super) const SUBMIT_SETTLE: Duration = Duration::from_millis(1200);
 /// drawing its first screen.
 pub(super) const READY_QUIET: Duration = Duration::from_millis(800);
 
+/// How a delivery paces itself: an agent's TUI needs its screen quiet
+/// before a paste and a settled paste before Enter; a shell that was just
+/// started for a launch needs neither, since its line editor reads the
+/// moment it turns bracketed paste on and takes a paste and Enter in one
+/// burst.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(super) enum Pace {
+    Agent,
+    FreshShell,
+}
+
+impl Pace {
+    fn quiet(self) -> Duration {
+        match self {
+            Pace::Agent => READY_QUIET,
+            Pace::FreshShell => Duration::ZERO,
+        }
+    }
+
+    fn settle(self) -> Duration {
+        match self {
+            Pace::Agent => SUBMIT_SETTLE,
+            Pace::FreshShell => Duration::ZERO,
+        }
+    }
+}
+
 /// What became of a delivery.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(super) enum Heard {
@@ -116,6 +143,7 @@ pub(super) struct Delivery {
     pub enter: bool,
     /// Wait up to this long for the pane to get ready for a paste.
     pub ready: Option<Duration>,
+    pub pace: Pace,
     pub done: oneshot::Sender<Heard>,
     /// [`WAITING`], then [`STARTED`] when its turn comes or [`WITHDRAWN`]
     /// if its waiter gives up first: whichever happens first holds.
@@ -134,6 +162,22 @@ impl Delivery {
         enter: bool,
         ready: Option<Duration>,
     ) -> (Delivery, Delivering) {
+        Delivery::paced(pane, text, enter, ready, Pace::Agent)
+    }
+
+    /// A delivery into a shell just started for a launch: it waits up to
+    /// `wait` for the shell's line editor, then pastes and submits at once.
+    pub fn into_fresh_shell(pane: PaneId, text: String, wait: Duration) -> (Delivery, Delivering) {
+        Delivery::paced(pane, text, true, Some(wait), Pace::FreshShell)
+    }
+
+    fn paced(
+        pane: PaneId,
+        text: String,
+        enter: bool,
+        ready: Option<Duration>,
+        pace: Pace,
+    ) -> (Delivery, Delivering) {
         let (done, heard) = oneshot::channel();
         let turn = Arc::new(AtomicU8::new(WAITING));
         let delivering = Delivering {
@@ -146,6 +190,7 @@ impl Delivery {
                 text,
                 enter,
                 ready,
+                pace,
                 done,
                 turn,
             },
@@ -247,6 +292,7 @@ struct Current {
     /// The text, held here while the pane gets ready.
     text: String,
     enter: bool,
+    pace: Pace,
     done: oneshot::Sender<Heard>,
     phase: Phase,
     /// Replies still to come in this phase.
@@ -347,7 +393,7 @@ impl Deliveries {
         } = &mut current.phase
         {
             *quiet_since = now;
-            *check = (now + READY_QUIET).min(*deadline);
+            *check = (now + current.pace.quiet()).min(*deadline);
         }
     }
 
@@ -373,7 +419,8 @@ impl Deliveries {
         else {
             return;
         };
-        let quiet = now >= quiet_since + READY_QUIET;
+        let quiet_for = current.pace.quiet();
+        let quiet = now >= quiet_since + quiet_for;
         let heard = match readiness {
             Readiness::Gone => Heard::Refused,
             Readiness::Ready if quiet => {
@@ -388,7 +435,7 @@ impl Deliveries {
                 let next = if quiet {
                     deadline
                 } else {
-                    (quiet_since + READY_QUIET).min(deadline)
+                    (quiet_since + quiet_for).min(deadline)
                 };
                 current.phase = Phase::Readying {
                     deadline,
@@ -471,7 +518,7 @@ impl Deliveries {
             {
                 current.failed = true;
             } else {
-                current.phase = Phase::Settling(Instant::now() + SUBMIT_SETTLE);
+                current.phase = Phase::Settling(Instant::now() + current.pace.settle());
                 return;
             }
         }
@@ -487,6 +534,7 @@ impl Deliveries {
             text,
             enter,
             ready,
+            pace,
             done,
             turn,
         }) = self.queue.pop_front()
@@ -502,6 +550,7 @@ impl Deliveries {
                 pane,
                 text,
                 enter,
+                pace,
                 done,
                 phase: Phase::Pasting,
                 outstanding: 0,
@@ -517,7 +566,7 @@ impl Deliveries {
                     current.phase = Phase::Readying {
                         deadline: now + wait,
                         quiet_since: now,
-                        check: now + READY_QUIET.min(wait),
+                        check: now + pace.quiet().min(wait),
                     };
                 }
                 None => current.paste(session, out, pending),
@@ -706,6 +755,44 @@ mod tests {
             "{out}"
         );
         assert!(deliveries.readying().is_none());
+    }
+
+    /// parvi-cdi: a launch's command line goes into its fresh shell the
+    /// moment the line editor reads, and Enter follows at once.
+    #[test]
+    fn a_fresh_shell_takes_its_command_line_without_a_fixed_wait() {
+        let mut deliveries = Deliveries::default();
+        let mut out = String::new();
+        let mut pending = VecDeque::new();
+        let (delivery, heard) =
+            Delivery::into_fresh_shell(4, "claude --x".into(), Duration::from_secs(30));
+        let start = Instant::now();
+        deliveries.push("$1", delivery, &mut out, &mut pending);
+        assert!(
+            deliveries.readying().unwrap().1 <= Instant::now(),
+            "looked at once"
+        );
+        // The shell is still reading its rc files.
+        deliveries.looked("$1", Readiness::NotYet, start, &mut out, &mut pending);
+        assert!(out.is_empty());
+        // Its prompt turns bracketed paste on: looked at with no quiet wait.
+        deliveries.heard_output(4, start);
+        assert_eq!(deliveries.readying().unwrap().1, start);
+        deliveries.looked("$1", Readiness::Ready, start, &mut out, &mut pending);
+        assert!(out.contains("claude --x"), "{out}");
+        let lines = ["7".to_string()];
+        for step in [Step::Pid, Step::Paste, Step::Paste] {
+            deliveries.replied("$1", step, true, &lines, &mut out, &mut pending);
+        }
+        assert!(
+            deliveries.due().is_some_and(|at| at <= Instant::now()),
+            "Enter is due at once"
+        );
+        deliveries.settled(&mut out, &mut pending);
+        assert!(out.contains("send-keys -t %4 Enter"), "{out}");
+        deliveries.replied("$1", Step::Guard, true, &[], &mut out, &mut pending);
+        deliveries.replied("$1", Step::GuardResult, true, &[], &mut out, &mut pending);
+        assert!(futures_block(heard).is_ok());
     }
 
     #[test]

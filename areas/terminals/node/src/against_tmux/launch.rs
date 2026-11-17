@@ -27,9 +27,14 @@ async fn launches_in_the_folder_at_the_size_and_deletes_exactly_one() {
         size: None,
     };
     let engine = parvi_term::engine::Engine::start(server.socket());
+    let started = std::time::Instant::now();
     let first = crate::launch::launch(&engine, &config, &launch, NO_HOOKS)
         .await
         .unwrap();
+    // parvi-cdi: a fresh shell takes the command line as soon as it reads,
+    // with none of the 2 s of quiet and settle a running agent needs.
+    let took = started.elapsed();
+    assert!(took < std::time::Duration::from_millis(1500), "{took:?}");
     assert!(first.id.starts_with('$'), "{first:?}");
     assert_eq!(first.warning, None, "notify was not asked for");
     let id = first.id;
