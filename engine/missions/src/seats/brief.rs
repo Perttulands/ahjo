@@ -1,6 +1,6 @@
 //! Render the complete, private instructions a seat reads by pointer.
 use crate::FormationExecution;
-use parvi_mission_model::Slot;
+use ahjo_mission_model::Slot;
 use std::fmt::Write;
 
 pub(super) fn render(request: &FormationExecution, slot: &Slot) -> String {
@@ -38,17 +38,17 @@ fn render_for(request: &FormationExecution, slot: &Slot, final_output: bool) -> 
     );
     let _ = writeln!(
         brief,
-        "Work in the working directory and write what you make there, unless the goal names another place. The attempt directory is Parvi's record of this attempt, not where results go.\n"
+        "Work in the working directory and write what you make there, unless the goal names another place. The attempt directory is Ahjo's record of this attempt, not where results go.\n"
     );
     if let Some(turn) = &request.turn {
         let _ = writeln!(brief, "Starting commit: {}", turn.commit);
     }
-    if let Ok(work) = parvi_work_ref::parse(&request.work) {
+    if let Ok(work) = ahjo_work_ref::parse(&request.work) {
         let _ = writeln!(brief, "Mission {}: {}", work.noun(), work.describe());
     }
     if let Some(details) = &request.formation.brief {
         let _ = writeln!(brief, "Goal:\n{}\n", details.goal);
-        if let Ok(work) = parvi_work_ref::parse(&details.work) {
+        if let Ok(work) = ahjo_work_ref::parse(&details.work) {
             let _ = writeln!(brief, "Brief {}: {}", work.noun(), work.describe());
         }
         for file in &details.files {
@@ -76,7 +76,7 @@ fn render_for(request: &FormationExecution, slot: &Slot, final_output: bool) -> 
         request.input_text
     );
     if final_output && !request.formation.outputs.is_empty() {
-        brief.push_str("Return all and only these output ports in one fenced `parvi-outputs` JSON block. Each port maps to an object with `text`; file and folder outputs must also carry an absolute `ref` path.\n");
+        brief.push_str("Return all and only these output ports in one fenced `ahjo-outputs` JSON block. Each port maps to an object with `text`; file and folder outputs must also carry an absolute `ref` path.\n");
         for port in &request.formation.outputs {
             let _ = writeln!(brief, "- {} ({})", port.id, port.kind());
         }
@@ -95,7 +95,7 @@ fn render_for(request: &FormationExecution, slot: &Slot, final_output: bool) -> 
             .collect();
         let _ = writeln!(
             brief,
-            "Example shape (replace values):\n```parvi-outputs\n{}\n```",
+            "Example shape (replace values):\n```ahjo-outputs\n{}\n```",
             serde_json::Value::Object(example)
         );
     }
@@ -105,11 +105,11 @@ fn render_for(request: &FormationExecution, slot: &Slot, final_output: bool) -> 
             &request.pick_attempts,
         ));
     } else if final_output && request.judge {
-        brief.push_str("Return exactly one fenced `parvi-verdict` block containing JSON with exactly `verdict` (pass or fail), `reason` (string), and `evidence` (array of strings).\n");
+        brief.push_str("Return exactly one fenced `ahjo-verdict` block containing JSON with exactly `verdict` (pass or fail), `reason` (string), and `evidence` (array of strings).\n");
     }
     let _ = writeln!(
         brief,
-        "\nWhen finished, end your response with this line, ARTIFACT replaced by the path or port id you produced and the closing >>> kept:\n<<<PARVI-DONE run-id={} status=ok artifact=ARTIFACT>>>",
+        "\nWhen finished, end your response with this line, ARTIFACT replaced by the path or port id you produced and the closing >>> kept:\n<<<AHJO-DONE run-id={} status=ok artifact=ARTIFACT>>>",
         request.run_id
     );
     brief
@@ -119,7 +119,7 @@ fn render_for(request: &FormationExecution, slot: &Slot, final_output: bool) -> 
 mod tests {
     use super::*;
     use crate::BindingsSnapshot;
-    use parvi_mission_model::{Brief, Formation};
+    use ahjo_mission_model::{Brief, Formation};
 
     fn execution(run_work: &str, brief_work: &str) -> FormationExecution {
         FormationExecution {
@@ -162,7 +162,7 @@ mod tests {
         }
     }
 
-    /// Archon's brief names the mission bead and the brief bead; Parvi says
+    /// Archon's brief names the mission bead and the brief bead; Ahjo says
     /// bead or issue by tracker, with a Bead's store so bd runs in it.
     #[test]
     fn names_the_runs_work_item_and_the_briefs_own() {

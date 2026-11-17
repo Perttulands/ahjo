@@ -16,7 +16,7 @@ use std::time::SystemTime;
 
 use anyhow::{Context, Result};
 
-use parvi_core::NodeId;
+use ahjo_core::NodeId;
 
 /// Who this node is.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -46,19 +46,19 @@ impl Identity {
         })
     }
 
-    /// Where this node keeps its settings: `%APPDATA%\Parvi` on Windows,
-    /// else `$XDG_CONFIG_HOME/parvi` or `~/.config/parvi`.
+    /// Where this node keeps its settings: `%APPDATA%\Ahjo` on Windows,
+    /// else `$XDG_CONFIG_HOME/ahjo` or `~/.config/ahjo`.
     pub fn config_dir() -> Result<PathBuf> {
         let var = |name| std::env::var_os(name).filter(|value| !value.is_empty());
         if cfg!(windows) {
             let appdata = var("APPDATA").context("APPDATA is not set")?;
-            return Ok(PathBuf::from(appdata).join("Parvi"));
+            return Ok(PathBuf::from(appdata).join("Ahjo"));
         }
         let base = match var("XDG_CONFIG_HOME") {
             Some(dir) => PathBuf::from(dir),
             None => PathBuf::from(var("HOME").context("HOME is not set")?).join(".config"),
         };
-        Ok(base.join("parvi"))
+        Ok(base.join("ahjo"))
     }
 }
 
@@ -129,7 +129,7 @@ mod tests {
 
     fn scratch(name: &str) -> PathBuf {
         let dir =
-            std::env::temp_dir().join(format!("parvi-node-test-{name}-{}", std::process::id()));
+            std::env::temp_dir().join(format!("ahjo-node-test-{name}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         dir
     }
@@ -174,7 +174,7 @@ mod tests {
         for round in 0..20 {
             let dir = scratch(&format!("race-{round}"));
             let barrier = std::sync::Barrier::new(8);
-            let ids: Vec<parvi_core::NodeId> = std::thread::scope(|scope| {
+            let ids: Vec<ahjo_core::NodeId> = std::thread::scope(|scope| {
                 let starts: Vec<_> = (0..8)
                     .map(|_| {
                         scope.spawn(|| {

@@ -1,4 +1,4 @@
-use parvi_mission_engine::Workspaces;
+use ahjo_mission_engine::Workspaces;
 use std::{
     collections::BTreeMap,
     path::{Path, PathBuf},
@@ -10,10 +10,8 @@ impl Scratch {
     fn new() -> Self {
         let mut bytes = [0; 8];
         getrandom::fill(&mut bytes).unwrap();
-        let root = std::env::temp_dir().join(format!(
-            "parvi-103-workspaces-{}",
-            u64::from_ne_bytes(bytes)
-        ));
+        let root =
+            std::env::temp_dir().join(format!("ahjo-103-workspaces-{}", u64::from_ne_bytes(bytes)));
         std::fs::create_dir_all(root.join("checkout")).unwrap();
         let repo = root.join("checkout");
         git(&repo, &["init", "-b", "main"]);
@@ -86,7 +84,7 @@ fn failed_add_removes_its_worktree_and_branch_but_preserves_existing_resources()
     scratch.failing_hook();
     assert!(workspaces.prepare("run_hook", "owner/repo", "").is_err());
     assert!(!scratch.0.join("worktrees/run_hook").exists());
-    assert!(git(&scratch.repo(), &["branch", "--list", "parvi/run-run_hook"]).is_empty());
+    assert!(git(&scratch.repo(), &["branch", "--list", "ahjo/run-run_hook"]).is_empty());
     assert_eq!(
         git(&scratch.repo(), &["worktree", "list", "--porcelain"])
             .matches("worktree ")
@@ -101,12 +99,12 @@ fn failed_add_removes_its_worktree_and_branch_but_preserves_existing_resources()
             .is_err()
     );
     assert!(scratch.0.join("worktrees/run_existing/keep").exists());
-    git(&scratch.repo(), &["branch", "parvi/run-run_branch"]);
+    git(&scratch.repo(), &["branch", "ahjo/run-run_branch"]);
     assert!(workspaces.prepare("run_branch", "owner/repo", "").is_err());
     assert!(
         !git(
             &scratch.repo(),
-            &["branch", "--list", "parvi/run-run_branch"]
+            &["branch", "--list", "ahjo/run-run_branch"]
         )
         .is_empty()
     );
@@ -117,7 +115,7 @@ fn failed_landing_checkout_cleans_its_temporary_worktree() {
     let scratch = Scratch::new();
     let workspaces = scratch.workspaces();
     let tree = workspaces.prepare("run_land", "owner/repo", "").unwrap();
-    let temporary = scratch.0.join("worktrees/.land-parvi-run-run_land");
+    let temporary = scratch.0.join("worktrees/.land-ahjo-run-run_land");
     std::fs::create_dir(&temporary).unwrap();
     std::fs::write(temporary.join("keep"), "keep").unwrap();
     assert!(
@@ -134,12 +132,7 @@ fn failed_landing_checkout_cleans_its_temporary_worktree() {
             .is_err()
     );
     assert!(tree.path.exists());
-    assert!(
-        !scratch
-            .0
-            .join("worktrees/.land-parvi-run-run_land")
-            .exists()
-    );
+    assert!(!scratch.0.join("worktrees/.land-ahjo-run-run_land").exists());
     assert_eq!(
         git(&scratch.repo(), &["worktree", "list", "--porcelain"])
             .matches("worktree ")

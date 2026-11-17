@@ -5,7 +5,7 @@
 use std::path::Path;
 
 use super::possessive;
-use parvi_mission_model::{Code, Finding, Mission};
+use ahjo_mission_model::{Code, Finding, Mission};
 
 pub fn findings(mission: &Mission) -> Vec<Finding> {
     let cards = mission

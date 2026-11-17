@@ -1,7 +1,7 @@
 //! Delivery to this node's sessions through Send's guarded path: the text
 //! is pasted as one paste, Enter waits for it to settle, and Enter is
 //! pressed only if the pane still runs the process the text went to
-//! (`parvi_term::engine::delivery`). The prompt never reaches a shell or an
+//! (`ahjo_term::engine::delivery`). The prompt never reaches a shell or an
 //! argv.
 //!
 //! The pane is CHROTE's, chosen by `Sessions::active_pane`. A send not under way by its deadline is
@@ -12,10 +12,10 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use parvi_node_kit::BoxFuture;
-use parvi_scheduled_contract::Target;
-use parvi_term::Sessions;
-use parvi_term::engine::{Delivering, SessionInfo};
+use ahjo_node_kit::BoxFuture;
+use ahjo_scheduled_contract::Target;
+use ahjo_term::Sessions;
+use ahjo_term::engine::{Delivering, SessionInfo};
 
 use crate::service::Runner;
 

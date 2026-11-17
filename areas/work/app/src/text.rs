@@ -1,9 +1,9 @@
 //! Items' text, which the snapshot leaves out: read from the item's node
 //! when the item shows, and searched on the nodes when the search changes.
 use crate::Work;
+use ahjo_app_kit::host::Request;
+use ahjo_core::NodeId;
 use gpui::Context;
-use parvi_app_kit::host::Request;
-use parvi_core::NodeId;
 use std::collections::HashSet;
 use std::time::Duration;
 
@@ -110,7 +110,7 @@ impl Work {
         if self.text_hits.0 != query {
             self.text_hits = (query.clone(), HashSet::new());
         }
-        if parvi_work_contract::text::terms(&query).is_empty() {
+        if ahjo_work_contract::text::terms(&query).is_empty() {
             return;
         }
         for node in self.snapshots.keys() {

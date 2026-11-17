@@ -1,11 +1,11 @@
 //! A two-step mission authored and driven through the same CLI as an operator.
 #![cfg(unix)]
-use parvi_mission_engine::{
+use ahjo_mission_engine::{
     ExecutionSink, Executor, FormationExecution, FormationResult, LabExecutor,
 };
-use parvi_node_kit::{Built, Listing, Setup};
-use parvi_term::Sessions;
-use parvi_testkit::{
+use ahjo_node_kit::{Built, Listing, Setup};
+use ahjo_term::Sessions;
+use ahjo_testkit::{
     node::Node,
     sessions::{self, FakeSessions},
 };
@@ -14,7 +14,7 @@ use std::sync::{Arc, Mutex};
 
 // The executor delivers each step to the testkit's fake Sessions, then uses
 // the deterministic lab answer. It runs no real terminal or model.
-static LOG: Mutex<Option<Arc<parvi_node_kit::events::Log>>> = Mutex::new(None);
+static LOG: Mutex<Option<Arc<ahjo_node_kit::events::Log>>> = Mutex::new(None);
 static FAKE: Mutex<Option<Arc<FakeSessions>>> = Mutex::new(None);
 struct FakeSeatLab {
     runtime: tokio::runtime::Handle,
@@ -24,15 +24,15 @@ impl Executor for FakeSeatLab {
         &self,
         execution: FormationExecution,
         sink: ExecutionSink,
-    ) -> Result<FormationResult, parvi_core::Error> {
+    ) -> Result<FormationResult, ahjo_core::Error> {
         if execution.formation.title == "Break" {
-            return Err(parvi_core::Error::new("test_failure", "test block"));
+            return Err(ahjo_core::Error::new("test_failure", "test block"));
         }
         let sessions = FAKE
             .lock()
             .unwrap()
             .clone()
-            .ok_or_else(|| parvi_core::Error::new("test", "fake Sessions unavailable"))?;
+            .ok_or_else(|| ahjo_core::Error::new("test", "fake Sessions unavailable"))?;
         let id = sessions.add(&format!("seat-{}", execution.formation.id));
         self.runtime
             .block_on(async {
@@ -42,11 +42,12 @@ impl Executor for FakeSeatLab {
                     .await?;
                 Ok::<_, anyhow::Error>(())
             })
-            .map_err(|e| parvi_core::Error::new("test", e.to_string()))?;
+            .map_err(|e| ahjo_core::Error::new("test", e.to_string()))?;
         let judge = execution.formation.title == "Judge";
         let mut result = LabExecutor.execute_formation(execution, sink)?;
         if judge {
-            let verdict = "```parvi-verdict\n{\"verdict\":\"pass\",\"reason\":\"ready\",\"evidence\":[]}\n```";
+            let verdict =
+                "```ahjo-verdict\n{\"verdict\":\"pass\",\"reason\":\"ready\",\"evidence\":[]}\n```";
             result.text = verdict.into();
             for output in result.outputs.values_mut() {
                 output["text"] = verdict.into();
@@ -57,7 +58,7 @@ impl Executor for FakeSeatLab {
 }
 fn build(setup: &Setup) -> anyhow::Result<Built> {
     *LOG.lock().unwrap() = Some(setup.events.clone());
-    parvi_missions::build_with_executor(
+    ahjo_missions::build_with_executor(
         setup,
         Some(Box::new(FakeSeatLab {
             runtime: tokio::runtime::Handle::current(),
@@ -66,13 +67,13 @@ fn build(setup: &Setup) -> anyhow::Result<Built> {
 }
 const MISSIONS: Listing = Listing {
     build,
-    ..parvi_missions::LISTING
+    ..ahjo_missions::LISTING
 };
 async fn cli(node: &Node, noun: &str, args: &[&str]) -> Value {
     let mut args: Vec<String> = args.iter().map(|s| (*s).into()).collect();
     args.extend(["--node".into(), format!("{}/", node.url()), "--json".into()]);
     let mut output = Vec::new();
-    let exit = parvi_node_kit::cli::run(noun, &args, &mut output)
+    let exit = ahjo_node_kit::cli::run(noun, &args, &mut output)
         .await
         .unwrap();
     assert_eq!(exit, 0, "{noun} {args:?}");
@@ -81,7 +82,7 @@ async fn cli(node: &Node, noun: &str, args: &[&str]) -> Value {
 #[tokio::test(flavor = "multi_thread")]
 async fn cli_authors_two_steps_answers_gate_and_finishes_with_fake_sessions() {
     use std::os::unix::fs::PermissionsExt;
-    let scratch = parvi_testkit::fresh_dir("mission-notify-cli");
+    let scratch = ahjo_testkit::fresh_dir("mission-notify-cli");
     let output = scratch.join("sent.jsonl");
     let command = scratch.join("notify");
     std::fs::write(
@@ -95,7 +96,7 @@ async fn cli_authors_two_steps_answers_gate_and_finishes_with_fake_sessions() {
     .unwrap();
     std::fs::set_permissions(&command, std::fs::Permissions::from_mode(0o700)).unwrap();
     let config = format!("[missions]\nnotify_command = '{}'\n", command.display());
-    let node = Node::start(&[sessions::LISTING, parvi_work::LISTING, MISSIONS], &config)
+    let node = Node::start(&[sessions::LISTING, ahjo_work::LISTING, MISSIONS], &config)
         .await
         .unwrap();
     let fake = node.fake_sessions();
@@ -284,7 +285,7 @@ async fn cli_authors_two_steps_answers_gate_and_finishes_with_fake_sessions() {
     let cursor = waiting["cursor"].as_u64().unwrap();
     let status = cli(&node, "run", &["status", run]).await;
     let seq = status["waitingGates"][0]["requestedSeq"].as_u64().unwrap();
-    let expected = format!("parvi gate approve {run} {gate} --requested-seq {seq}");
+    let expected = format!("ahjo gate approve {run} {gate} --requested-seq {seq}");
     assert!(
         waiting["next"]
             .as_array()
@@ -302,7 +303,7 @@ async fn cli_authors_two_steps_answers_gate_and_finishes_with_fake_sessions() {
         format!("{}/", node.url()),
     ];
     assert_eq!(
-        parvi_node_kit::cli::run("run", &args, &mut output)
+        ahjo_node_kit::cli::run("run", &args, &mut output)
             .await
             .unwrap(),
         0
@@ -363,7 +364,7 @@ async fn cli_authors_two_steps_answers_gate_and_finishes_with_fake_sessions() {
         "--json".into(),
     ];
     assert_eq!(
-        parvi_node_kit::cli::run("gate", &args, &mut output)
+        ahjo_node_kit::cli::run("gate", &args, &mut output)
             .await
             .unwrap(),
         1

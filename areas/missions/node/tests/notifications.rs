@@ -1,6 +1,6 @@
 #![cfg(unix)]
-use parvi_node_kit::{Built, Config, Listing, Options, Running, Setup};
-use parvi_testkit::sessions;
+use ahjo_node_kit::{Built, Config, Listing, Options, Running, Setup};
+use ahjo_testkit::sessions;
 use serde_json::Value;
 use std::{
     os::unix::fs::PermissionsExt,
@@ -9,23 +9,23 @@ use std::{
     time::Duration,
 };
 
-static LOG: Mutex<Option<Arc<parvi_node_kit::events::Log>>> = Mutex::new(None);
+static LOG: Mutex<Option<Arc<ahjo_node_kit::events::Log>>> = Mutex::new(None);
 fn lab(setup: &Setup) -> anyhow::Result<Built> {
     *LOG.lock().unwrap() = Some(setup.events.clone());
-    parvi_missions::build_with_executor(setup, Some(Box::new(parvi_mission_engine::LabExecutor)))
+    ahjo_missions::build_with_executor(setup, Some(Box::new(ahjo_mission_engine::LabExecutor)))
 }
 const LAB: Listing = Listing {
     build: lab,
-    ..parvi_missions::LISTING
+    ..ahjo_missions::LISTING
 };
 async fn start(root: &Path, config: &str) -> Running {
-    parvi_node_kit::start(
+    ahjo_node_kit::start(
         Options {
             dir: root.into(),
             config: Config::parse(config, root.into()).unwrap(),
             listen: Some("127.0.0.1:0".into()),
         },
-        &[sessions::LISTING, parvi_work::LISTING, LAB],
+        &[sessions::LISTING, ahjo_work::LISTING, LAB],
     )
     .await
     .unwrap()
@@ -39,7 +39,7 @@ async fn cli(node: &Running, noun: &str, args: &[&str]) -> Value {
     ]);
     let mut out = Vec::new();
     assert_eq!(
-        parvi_node_kit::cli::run(noun, &args, &mut out)
+        ahjo_node_kit::cli::run(noun, &args, &mut out)
             .await
             .unwrap(),
         0
@@ -57,7 +57,7 @@ async fn until(mut condition: impl FnMut() -> bool) {
 }
 #[tokio::test(flavor = "multi_thread")]
 async fn node_restart_does_not_resend_and_old_final_runs_are_ignored() {
-    let root = parvi_testkit::fresh_dir("notify-restart-node");
+    let root = ahjo_testkit::fresh_dir("notify-restart-node");
     let folder = root.join("missions/missions");
     std::fs::create_dir_all(&folder).unwrap();
     let base = include_str!(

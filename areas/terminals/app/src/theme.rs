@@ -2,12 +2,12 @@
 //! only the terminal workspace draws with. Views read these and never write
 //! a colour or size of their own.
 
-pub use parvi_app_kit::theme::*;
+pub use ahjo_app_kit::theme::*;
 
 /// Measures in pixels, from CHROTE's layout (DESIGN-SYSTEM.md and the
 /// dashboard as it renders), and the app's own.
 pub mod size {
-    pub use parvi_app_kit::theme::size::*;
+    pub use ahjo_app_kit::theme::size::*;
 
     pub const STRIP: f32 = 44.;
     /// A tab's name field while it is renamed in place.

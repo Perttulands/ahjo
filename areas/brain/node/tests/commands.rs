@@ -1,5 +1,5 @@
-use parvi_node_kit::cli;
-use parvi_testkit::{fresh_dir, node::Node};
+use ahjo_node_kit::cli;
+use ahjo_testkit::{fresh_dir, node::Node};
 use serde_json::json;
 use std::path::Path;
 
@@ -29,7 +29,7 @@ async fn run(node: &Node, args: &[&str]) -> (i32, String) {
 #[tokio::test]
 async fn brain_commands_save_and_read_changes() {
     assert_eq!(
-        parvi_brain::LISTING.commands,
+        ahjo_brain::LISTING.commands,
         &[
             "brain_search",
             "brain_read",
@@ -62,14 +62,14 @@ async fn brain_commands_save_and_read_changes() {
         format!("http://{addr}")
     );
     let node = Node::start(
-        &[parvi_brain::LISTING, parvi_testkit::sessions::LISTING],
+        &[ahjo_brain::LISTING, ahjo_testkit::sessions::LISTING],
         &config,
     )
     .await
     .unwrap();
     let (_, help) = run(&node, &[]).await;
     for verb in ["search", "read", "save", "collections", "changes", "send"] {
-        assert!(help.contains(&format!("parvi brain {verb}")), "{help}");
+        assert!(help.contains(&format!("ahjo brain {verb}")), "{help}");
     }
     let (status, search) = run(&node, &["search", "First"]).await;
     assert_eq!(status, 0);
@@ -87,7 +87,7 @@ async fn brain_commands_save_and_read_changes() {
     let file = root.canonicalize().unwrap().join("notes/page.md");
     assert_eq!(
         sessions.delivered(),
-        vec![parvi_testkit::sessions::Delivered {
+        vec![ahjo_testkit::sessions::Delivered {
             session: "alpha".into(),
             text: format!("brain page {}", file.display()),
             enter: true,

@@ -1,5 +1,5 @@
 [package]
-name = "parvi-brain-contract"
+name = "ahjo-brain-contract"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

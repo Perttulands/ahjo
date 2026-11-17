@@ -11,7 +11,7 @@ use vt100::{Color, Screen};
 /// The background is not carried: erases paint with it, so a wrong guess
 /// floods the screen. Codex's composer sits on a gray band and its redraw
 /// after a resize erases the whole screen before setting any colour, which
-/// left Parvi gray where tmux was not.
+/// left Ahjo gray where tmux was not.
 pub(crate) fn before_cursor(screen: &Screen, row: u16, col: u16) -> Vec<u8> {
     let Some(mut col) = col.checked_sub(1) else {
         return b"\x1b[0m".to_vec();

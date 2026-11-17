@@ -48,7 +48,7 @@ impl Workspaces {
                 .checkout(repository)
                 .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "no checkout"))?
                 .to_path_buf();
-            let branch = format!("parvi/run-{run}");
+            let branch = format!("ahjo/run-{run}");
             let base = if base.is_empty() {
                 git(&checkout, ["symbolic-ref", "--quiet", "--short", "HEAD"])?
             } else {
@@ -136,7 +136,7 @@ impl Workspaces {
     /// Removes the run's worktree and branch, and the refs the run shared on
     /// origin: its branch, and each turn ref in `published` (reference to the
     /// commit its node pushed). A shared ref is deleted only while it still
-    /// points where Parvi pushed it; one that moved or that Parvi has no
+    /// points where Ahjo pushed it; one that moved or that Ahjo has no
     /// record of is left, and said in the notes returned.
     pub fn remove(
         &self,
@@ -248,14 +248,14 @@ impl Workspaces {
 /// A run with steps on other environments pushed its branch and their turns
 /// to the checkout's `origin` (`run_workspace::prepare_placed_turn`); landing
 /// or removing the run deletes them there too, each with a lease on the
-/// object Parvi pushed, so nobody's later push is lost. A run that never
+/// object Ahjo pushed, so nobody's later push is lost. A run that never
 /// pushed has no remote-tracking branch and touches no remote.
 fn remove_shared_refs(
     tree: &Worktree,
     published: &BTreeMap<String, String>,
 ) -> io::Result<Vec<String>> {
     let tracking = format!("refs/remotes/origin/{}", tree.branch);
-    // Pushing the run branch set its remote-tracking ref: where Parvi last
+    // Pushing the run branch set its remote-tracking ref: where Ahjo last
     // pushed it. Without one, this run shared nothing.
     let Ok(pushed) = git(
         &tree.checkout,
@@ -268,8 +268,8 @@ fn remove_shared_refs(
     ) else {
         return Ok(Vec::new());
     };
-    let run = tree.branch.trim_start_matches("parvi/run-");
-    let turns = format!("refs/parvi/turns/{run}/*");
+    let run = tree.branch.trim_start_matches("ahjo/run-");
+    let turns = format!("refs/ahjo/turns/{run}/*");
     let branch = format!("refs/heads/{}", tree.branch);
     let mut expected = published.clone();
     expected.insert(branch.clone(), pushed);
@@ -284,10 +284,10 @@ fn remove_shared_refs(
                 branch_left |= reference == branch;
                 notes.push(match other {
                     Some(want) => format!(
-                        "left {reference} on origin: it moved to {oid} since Parvi pushed {want}"
+                        "left {reference} on origin: it moved to {oid} since Ahjo pushed {want}"
                     ),
                     None => {
-                        format!("left {reference} on origin: Parvi has no record of pushing it")
+                        format!("left {reference} on origin: Ahjo has no record of pushing it")
                     }
                 });
             }

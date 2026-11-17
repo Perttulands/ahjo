@@ -40,12 +40,12 @@ pub struct PublishedTurn {
 impl TurnWorkspace {
     /// The run branch every node shares through the remote.
     pub fn branch(&self) -> String {
-        format!("parvi/run-{}", self.run_id)
+        format!("ahjo/run-{}", self.run_id)
     }
     /// The remote ref a published turn is pushed to.
     pub fn reference(&self) -> String {
         format!(
-            "refs/parvi/turns/{}/{}-{}",
+            "refs/ahjo/turns/{}/{}-{}",
             self.run_id,
             &step_hash(&self.node_id)[..12],
             self.attempt

@@ -1,5 +1,5 @@
 //! Validation answers are usable only for the exact definition they describe.
-use parvi_missions_contract::{Code, Mission, ValidationResponse};
+use ahjo_missions_contract::{Code, Mission, ValidationResponse};
 use std::collections::HashMap;
 
 /// Render validation prose using known titles and labels while retaining the
@@ -7,7 +7,7 @@ use std::collections::HashMap;
 /// One thing a mission still lacks, said as what to do: "Choose who works
 /// Write", "Connect Input to a first step". Findings without a plainer
 /// form keep the node's own words, with names for ids.
-pub fn todo_line(mission: &Mission, finding: &parvi_missions_contract::Finding) -> String {
+pub fn todo_line(mission: &Mission, finding: &ahjo_missions_contract::Finding) -> String {
     let name = mission.node_name(&finding.node_id);
     let step = mission.formations.iter().any(|f| f.id == finding.node_id);
     match finding.code {
@@ -22,7 +22,7 @@ pub fn todo_line(mission: &Mission, finding: &parvi_missions_contract::Finding) 
         Code::UnreachableNode => format!("Connect {name} after the Input or an earlier step"),
         _ => readable_message(
             mission,
-            &parvi_missions_contract::plain_reason(&finding.message),
+            &ahjo_missions_contract::plain_reason(&finding.message),
         ),
     }
 }
@@ -32,9 +32,9 @@ pub fn todo_line(mission: &Mission, finding: &parvi_missions_contract::Finding) 
 /// list's length.
 pub fn todo_lines(
     mission: &Mission,
-    blocking: impl IntoIterator<Item = parvi_missions_contract::Finding>,
-) -> Vec<(String, Vec<parvi_missions_contract::Finding>)> {
-    let mut lines: Vec<(String, Vec<parvi_missions_contract::Finding>)> = Vec::new();
+    blocking: impl IntoIterator<Item = ahjo_missions_contract::Finding>,
+) -> Vec<(String, Vec<ahjo_missions_contract::Finding>)> {
+    let mut lines: Vec<(String, Vec<ahjo_missions_contract::Finding>)> = Vec::new();
     for finding in blocking {
         let finding = &finding;
         let line = todo_line(mission, finding);
@@ -49,7 +49,7 @@ pub fn todo_lines(
 /// An error from the node as the editor says it: no codes, names instead
 /// of ids, and the effort policy's long explanation cut to what to do.
 pub fn plain_error(mission: Option<&Mission>, text: &str) -> String {
-    let text = parvi_missions_contract::plain_reason(text);
+    let text = ahjo_missions_contract::plain_reason(text);
     if text.contains("needs an effort") {
         return "Choose an effort for this agent.".into();
     }
@@ -202,7 +202,7 @@ impl Validation {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use parvi_missions_contract::Finding;
+    use ahjo_missions_contract::Finding;
     #[test]
     fn findings_use_known_names_without_replacing_parts_of_other_words() {
         let mission: Mission = toml_fixture();

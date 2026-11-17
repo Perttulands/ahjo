@@ -2,8 +2,8 @@
 
 use std::path::PathBuf;
 
+use ahjo_holder::{Connection, Endpoint, connect_or_start};
 use anyhow::{Result, bail};
-use parvi_holder::{Connection, Endpoint, connect_or_start};
 
 use super::{Attaching, Backend, ControlClient, Reply, Stream};
 
@@ -31,12 +31,12 @@ impl Holder {
         }
         Self::new(
             Endpoint::scratch(name),
-            Some(std::env::temp_dir().join(format!("parvi-holder-{name}.log"))),
+            Some(std::env::temp_dir().join(format!("ahjo-holder-{name}.log"))),
         )
     }
 
     fn new(endpoint: Endpoint, log: Option<PathBuf>) -> Result<Self> {
-        let executable = std::env::current_exe()?.with_file_name("parvi-holder.exe");
+        let executable = std::env::current_exe()?.with_file_name("ahjo-holder.exe");
         Ok(Self {
             endpoint,
             executable,
@@ -63,15 +63,7 @@ impl Backend for Holder {
             let env = serde_json::to_string(&spec.env.iter().collect::<Vec<_>>())?;
             let mut connection = self.connect().await?;
             let reply = connection
-                .command(&[
-                    "parvi-create",
-                    &spec.name,
-                    cwd,
-                    &cols,
-                    &rows,
-                    &command,
-                    &env,
-                ])
+                .command(&["ahjo-create", &spec.name, cwd, &cols, &rows, &command, &env])
                 .await?
                 .map_err(anyhow::Error::msg)?;
             crate::owned::parse_ref(&reply)
@@ -83,7 +75,7 @@ impl Backend for Holder {
             let mut connection = self.connect().await?;
             connection
                 .command(&[
-                    "parvi-kill",
+                    "ahjo-kill",
                     &session.session_id,
                     &session.generation.pid.to_string(),
                     &session.generation.start_time.to_string(),

@@ -1,6 +1,6 @@
 //! Revision-checked edits of mission definitions.
 use crate::{Error, Store};
-use parvi_mission_model::{Edit, Mission, MissionDeletion, Patch, Precondition};
+use ahjo_mission_model::{Edit, Mission, MissionDeletion, Patch, Precondition};
 use sha2::{Digest, Sha256};
 use std::path::PathBuf;
 use toml_edit::{DocumentMut, value};
@@ -204,7 +204,7 @@ impl Store {
             }
             Patch::Prefix(prefix) => {
                 let prefix = prefix.trim().to_ascii_lowercase();
-                if !prefix.is_empty() && !parvi_mission_model::valid_prefix(&prefix) {
+                if !prefix.is_empty() && !ahjo_mission_model::valid_prefix(&prefix) {
                     return Err(Error::new(
                         "invalid_prefix",
                         "a prefix is letters and digits only, at most 24 of them",
@@ -372,7 +372,7 @@ impl Store {
         // Only archive notes that identify this mission. Refuse an unreadable
         // notes file: its ownership cannot safely be inferred from the slug.
         let archive_notes = match crate::links::read_definition(&notes) {
-            Ok(raw) => parvi_mission_model::Notes::parse(&raw)?.mission_id == current.mission.id,
+            Ok(raw) => ahjo_mission_model::Notes::parse(&raw)?.mission_id == current.mission.id,
             Err(error) if error.code == "not_found" => false,
             Err(error) => return Err(error),
         };

@@ -4,10 +4,10 @@
 //! guard their views through `Host::guard_close`.
 
 use crate::shell::Shell;
+use ahjo_app_kit::Host;
+use ahjo_app_kit::theme::{board, size, theme};
+use ahjo_app_kit::widgets::kit::{self, Kind};
 use gpui::{Context, FocusHandle, MouseButton, WeakEntity, Window, div, prelude::*, px};
-use parvi_app_kit::Host;
-use parvi_app_kit::theme::{board, size, theme};
-use parvi_app_kit::widgets::kit::{self, Kind};
 
 /// The guard's layer on the stack.
 pub const LAYER: &str = "close";
@@ -48,7 +48,7 @@ impl Render for CloseGuard {
             [one] => format!("{one} is not saved."),
             all => format!("{} things are not saved.", all.len()),
         };
-        let loses = format!("Closing Parvi now loses: {}.", self.unsaved.join(", "));
+        let loses = format!("Closing Ahjo Swarm now loses: {}.", self.unsaved.join(", "));
         let outside = self.host.clone();
         let stay = self.host.clone();
         let shell = self.shell.clone();

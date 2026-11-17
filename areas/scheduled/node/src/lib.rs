@@ -1,8 +1,8 @@
 //! The scheduled area: tasks that paste a prompt into named sessions on a
 //! schedule (#189), CHROTE's scheduler ported (`docs/scheduled-tasks.md`).
-//! It serves CHROTE's HTTP API ([`parvi_scheduled_contract`]) and the
+//! It serves CHROTE's HTTP API ([`ahjo_scheduled_contract`]) and the
 //! `scheduled_*` commands, and delivers through the node's
-//! [`parvi_term::Sessions`], so a node needs an area providing them.
+//! [`ahjo_term::Sessions`], so a node needs an area providing them.
 //!
 //! What differs from CHROTE: it re-reads every task every 30 seconds. Here
 //! the node keeps when each task is next due, and its one timer sleeps until
@@ -36,10 +36,10 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+use ahjo_node_kit::{Area, BoxFuture, Built, Channel, Client, Command, Listing, Setup};
+use ahjo_term::Sessions;
 use anyhow::{Context, Result};
 use axum::Router;
-use parvi_node_kit::{Area, BoxFuture, Built, Channel, Client, Command, Listing, Setup};
-use parvi_term::Sessions;
 use serde::Deserialize;
 use tokio::task::JoinHandle;
 
@@ -50,10 +50,10 @@ pub use service::{Create, Error, Invalid, Patch, Runner, Scheduled};
 /// The area's name and config section.
 pub const NAME: &str = "scheduled";
 
-/// How `bin/parvi` lists the area.
+/// How `bin/ahjo` lists the area.
 pub const LISTING: Listing = Listing {
     name: NAME,
-    kinds: parvi_scheduled_contract::KINDS,
+    kinds: ahjo_scheduled_contract::KINDS,
     commands: &[
         "scheduled_list",
         "scheduled_show",
@@ -157,12 +157,12 @@ impl Channel for Changes {
     fn receive(&mut self, frame: Vec<u8>) -> BoxFuture<'_, ()> {
         Box::pin(async move {
             match frame.as_slice() {
-                [parvi_scheduled_contract::WATCH, 1] => {
+                [ahjo_scheduled_contract::WATCH, 1] => {
                     let mut watching = self.scheduled.updates();
                     watching.mark_changed();
                     self.watching = Some(watching);
                 }
-                [parvi_scheduled_contract::WATCH, 0] => self.watching = None,
+                [ahjo_scheduled_contract::WATCH, 0] => self.watching = None,
                 _ => {}
             }
         })
@@ -173,7 +173,7 @@ impl Channel for Changes {
             match &mut self.watching {
                 Some(watching) => {
                     watching.changed().await.ok()?;
-                    Some(vec![parvi_scheduled_contract::CHANGED])
+                    Some(vec![ahjo_scheduled_contract::CHANGED])
                 }
                 None => std::future::pending().await,
             }

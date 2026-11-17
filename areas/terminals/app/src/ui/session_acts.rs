@@ -8,8 +8,8 @@ use super::page::{Act, MenuItem, Terminals};
 use crate::store::selection::{Receipt, Sent};
 use crate::store::sessions::Key;
 use crate::store::{launch, session_copy};
+use ahjo_core::NodeId;
 use gpui::{Context, KeyDownEvent, Window};
-use parvi_core::NodeId;
 
 /// How a click on a rail row changes the pick: Ctrl (or Cmd) flips it,
 /// Shift adds a range, a plain click empties it and peeks.
@@ -82,7 +82,7 @@ impl Terminals {
             .map(|o| o.name.as_str())
             .collect();
         let name = session_copy::next_name(&k.name, &taken);
-        let launch = parvi_terminals_contract::Launch {
+        let launch = ahjo_terminals_contract::Launch {
             harness: harness.id.clone(),
             folder: s.cwd.clone().unwrap_or_default(),
             name: name.clone(),
@@ -148,7 +148,7 @@ impl Terminals {
         };
         let flags = (self.settings.flags.get(&harness.id).cloned())
             .unwrap_or_else(|| harness.flags.clone());
-        let launch = parvi_terminals_contract::Launch {
+        let launch = ahjo_terminals_contract::Launch {
             harness: harness.id.clone(),
             folder: folder.to_string(),
             name: name.clone(),

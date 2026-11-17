@@ -3,7 +3,7 @@
 use serde::{Deserialize, Serialize};
 
 /// Stable codes for validation findings. Most follow Archon; unsupported
-/// capabilities use Parvi-specific codes.
+/// capabilities use Ahjo-specific codes.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Code {

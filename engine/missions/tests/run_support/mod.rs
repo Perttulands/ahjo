@@ -6,7 +6,7 @@ impl Scratch {
     pub fn new() -> Self {
         let mut b = [0; 8];
         getrandom::fill(&mut b).unwrap();
-        let p = std::env::temp_dir().join(format!("parvi-99-run-parity-{}", u64::from_ne_bytes(b)));
+        let p = std::env::temp_dir().join(format!("ahjo-99-run-parity-{}", u64::from_ne_bytes(b)));
         std::fs::create_dir_all(p.join("missions")).unwrap();
         std::fs::create_dir_all(p.join("roles")).unwrap();
         std::fs::write(
@@ -90,8 +90,8 @@ fn payload_parity(root: &Scratch, id: &str, expected: &str, concurrent: bool) {
             Value::String(text) => {
                 *text = text
                     .replace(&format!("ledger://{id}/"), "ledger://<run>/")
-                    .replace("archon-verdict", "parvi-verdict")
-                    .replace("archon-outputs", "parvi-outputs")
+                    .replace("archon-verdict", "ahjo-verdict")
+                    .replace("archon-outputs", "ahjo-outputs")
             }
             Value::Array(values) => values.iter_mut().for_each(|v| stable(v, id)),
             Value::Object(values) => {

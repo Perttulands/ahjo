@@ -155,7 +155,7 @@ pub struct HookAt {
     pub event: String,
     pub group: usize,
     pub index: usize,
-    /// Switched off: kept aside by Parvi (`index` in its list), for a
+    /// Switched off: kept aside by Ahjo (`index` in its list), for a
     /// harness that has no switch of its own.
     pub parked: bool,
 }
@@ -246,7 +246,7 @@ pub enum HookChange {
         at: HookAt,
         was: String,
     },
-    /// Off keeps the hook where Parvi can put it back.
+    /// Off keeps the hook where Ahjo can put it back.
     Switch {
         at: HookAt,
         was: String,

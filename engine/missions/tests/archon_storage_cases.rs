@@ -1,12 +1,12 @@
-use parvi_mission_engine::Store;
-use parvi_mission_model::{Patch, Precondition};
+use ahjo_mission_engine::Store;
+use ahjo_mission_model::{Patch, Precondition};
 use std::sync::atomic::{AtomicU64, Ordering};
 static NEXT: AtomicU64 = AtomicU64::new(0);
 struct Scratch(std::path::PathBuf);
 impl Scratch {
     fn new() -> Self {
         let path = std::env::temp_dir().join(format!(
-            "parvi-97-mission-{}-{}",
+            "ahjo-97-mission-{}-{}",
             std::process::id(),
             NEXT.fetch_add(1, Ordering::Relaxed)
         ));
@@ -19,7 +19,7 @@ impl Drop for Scratch {
         std::fs::remove_dir_all(&self.0).unwrap();
     }
 }
-fn pre(edit: &parvi_mission_model::Edit) -> Precondition {
+fn pre(edit: &ahjo_mission_model::Edit) -> Precondition {
     Precondition {
         rev: edit.mission.rev,
         etag: edit.etag.clone(),
@@ -52,7 +52,7 @@ fn create_mission_defaults_title_and_refuses_duplicate_without_clobber() {
 // Ported from store_test.go: wildcard can recreate only the missing layout.
 #[test]
 fn missing_layout_can_be_recreated_without_dirtying_the_mission() {
-    use parvi_mission_model::{LayoutNode, LayoutPatch};
+    use ahjo_mission_model::{LayoutNode, LayoutPatch};
     let dir = Scratch::new();
     let store = Store::new(&dir.0);
     let edit = store.create_mission("layout", "Layout", "").unwrap();
@@ -135,7 +135,7 @@ Line \u0023 two
 }
 
 // Archon's unknown-field preservation cases are represented as strict-source
-// refusal: Parvi's established schema deliberately rejects unknown fields.
+// refusal: Ahjo's established schema deliberately rejects unknown fields.
 #[test]
 fn invalid_definition_source_is_never_changed_by_an_edit() {
     let dir = Scratch::new();
@@ -185,7 +185,7 @@ fn writes_follow_a_symlinked_definition_directory() {
 // Ported from notes_test.go: competing editors cannot overwrite a note thread.
 #[test]
 fn notes_append_in_order_and_stale_writers_do_not_clobber() {
-    use parvi_mission_model::NotePatch;
+    use ahjo_mission_model::NotePatch;
     let dir = Scratch::new();
     let store = Store::new(&dir.0);
     let mission = store.create_mission("notes", "Notes", "").unwrap();
@@ -332,7 +332,7 @@ fn invalid_layout_blocks_every_paired_node_create_and_delete() {
 // Port of TestBoardNoteThreadsAppendAndLimitEditsToTheAuthor.
 #[test]
 fn note_threads_allow_only_the_author_to_edit_or_delete() {
-    use parvi_mission_model::NotePatch;
+    use ahjo_mission_model::NotePatch;
     let dir = Scratch::new();
     let store = Store::new(&dir.0);
     let edit = store.create_mission("thread", "Thread", "").unwrap();
@@ -433,7 +433,7 @@ fn note_threads_allow_only_the_author_to_edit_or_delete() {
 
 #[test]
 fn partial_layout_patches_keep_other_nodes_and_edges() {
-    use parvi_mission_model::{LayoutEdge, LayoutNode, LayoutPatch};
+    use ahjo_mission_model::{LayoutEdge, LayoutNode, LayoutPatch};
     let dir = Scratch::new();
     let store = Store::new(&dir.0);
     store.create_mission("canvas", "Canvas", "").unwrap();
@@ -534,7 +534,7 @@ fn empty_and_populated_inline_node_arrays_are_editable() {
         .patch(
             "inline",
             pre(&edit),
-            Patch::UpdateGate(parvi_mission_model::GateUpdate {
+            Patch::UpdateGate(ahjo_mission_model::GateUpdate {
                 id: "gate_existing".into(),
                 criterion: Some("Approved".into()),
                 ..Default::default()
@@ -589,7 +589,7 @@ fn populated_inline_formations_and_connections_can_be_updated_and_deleted() {
         .unwrap();
     assert_eq!(edit.mission.formations[0].title, "Updated");
     // A step is placed on an environment and back on the coordinator (#124).
-    let place = |edit: &parvi_mission_model::Edit, device: &str| {
+    let place = |edit: &ahjo_mission_model::Edit, device: &str| {
         store
             .patch(
                 "inline",
@@ -623,7 +623,7 @@ fn populated_inline_formations_and_connections_can_be_updated_and_deleted() {
 
 #[test]
 fn inline_note_entries_can_be_edited_and_deleted() {
-    use parvi_mission_model::NotePatch;
+    use ahjo_mission_model::NotePatch;
     let dir = Scratch::new();
     let store = Store::new(&dir.0);
     let mission = store.create_mission("inline-notes", "Notes", "").unwrap();
@@ -660,7 +660,7 @@ fn inline_note_entries_can_be_edited_and_deleted() {
 
 #[test]
 fn inline_layout_nodes_and_edges_accept_partial_updates() {
-    use parvi_mission_model::{LayoutEdge, LayoutNode, LayoutPatch};
+    use ahjo_mission_model::{LayoutEdge, LayoutNode, LayoutPatch};
     let dir = Scratch::new();
     let store = Store::new(&dir.0);
     let mission = store.create_mission("inline-layout", "Layout", "").unwrap();

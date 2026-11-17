@@ -1,6 +1,6 @@
 //! What changed in a file since its last commit, line by line, read from
 //! its unified diff: the marks the reader shows beside the lines.
-use parvi_app_kit::widgets::code::Mark;
+use ahjo_app_kit::widgets::code::Mark;
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Changes {
@@ -17,7 +17,7 @@ pub struct Changes {
 impl Changes {
     /// How many separate changes there are to step through.
     pub fn count(&self) -> usize {
-        parvi_app_kit::widgets::code::change_starts(&self.marks).len()
+        ahjo_app_kit::widgets::code::change_starts(&self.marks).len()
     }
 }
 

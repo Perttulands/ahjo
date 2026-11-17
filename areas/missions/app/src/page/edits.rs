@@ -110,17 +110,16 @@ impl MissionsPage {
             );
             return;
         };
-        let before =
-            match serde_json::to_value(parvi_missions_contract::document::MissionDocument {
-                mission: mission.clone(),
-                etag: None,
-            }) {
-                Ok(value) => value,
-                Err(error) => {
-                    self.history_finished(pending, Some(error.to_string()), false, cx);
-                    return;
-                }
-            };
+        let before = match serde_json::to_value(ahjo_missions_contract::document::MissionDocument {
+            mission: mission.clone(),
+            etag: None,
+        }) {
+            Ok(value) => value,
+            Err(error) => {
+                self.history_finished(pending, Some(error.to_string()), false, cx);
+                return;
+            }
+        };
         let layout = self
             .state
             .layout
@@ -148,7 +147,7 @@ impl MissionsPage {
                 };
                 let mut body = patch.clone();
                 body["expectedRev"] = json!(mission.rev);
-                body["updatedBy"] = json!("user:parvi-app");
+                body["updatedBy"] = json!("user:ahjo-swarm");
                 Request::new("PATCH", NodeId(pending.node.clone()), path)
                     .header("If-Match", etag)
                     .json(&body)

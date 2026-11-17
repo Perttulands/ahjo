@@ -1,12 +1,12 @@
+use ahjo_node_kit::{Listing, NodeClient, NodeError};
+use ahjo_testkit::{node::Node, sessions};
 use axum::http::Method;
-use parvi_node_kit::{Listing, NodeClient, NodeError};
-use parvi_testkit::{node::Node, sessions};
 use serde_json::json;
 
 const AREAS: &[Listing] = &[
     sessions::LISTING,
-    parvi_work::LISTING,
-    parvi_missions::LISTING,
+    ahjo_work::LISTING,
+    ahjo_missions::LISTING,
 ];
 
 #[tokio::test(flavor = "multi_thread")]
@@ -220,19 +220,19 @@ async fn mission_routes_on_a_node_with_fake_sessions() {
     node.stop().await;
 }
 
-fn lab(setup: &parvi_node_kit::Setup) -> anyhow::Result<parvi_node_kit::Built> {
-    parvi_missions::build_with_executor(setup, Some(Box::new(parvi_mission_engine::LabExecutor)))
+fn lab(setup: &ahjo_node_kit::Setup) -> anyhow::Result<ahjo_node_kit::Built> {
+    ahjo_missions::build_with_executor(setup, Some(Box::new(ahjo_mission_engine::LabExecutor)))
 }
 const LAB: Listing = Listing {
     build: lab,
-    ..parvi_missions::LISTING
+    ..ahjo_missions::LISTING
 };
 
 #[tokio::test(flavor = "multi_thread")]
 async fn run_changes_arrive_on_the_socket_through_completion() {
     use futures_util::{SinkExt, StreamExt};
     use tokio_tungstenite::{connect_async, tungstenite::Message};
-    let node = Node::start(&[sessions::LISTING, parvi_work::LISTING, LAB], "")
+    let node = Node::start(&[sessions::LISTING, ahjo_work::LISTING, LAB], "")
         .await
         .unwrap();
     let folder = node.dir().join("missions/missions");
@@ -297,7 +297,7 @@ async fn run_changes_arrive_on_the_socket_through_completion() {
     let (mut socket, _) = connect_async(node.ws()).await.unwrap();
     socket
         .send(Message::Binary(
-            vec![parvi_missions_contract::WATCH_RUNS, 1].into(),
+            vec![ahjo_missions_contract::WATCH_RUNS, 1].into(),
         ))
         .await
         .unwrap();
@@ -305,7 +305,7 @@ async fn run_changes_arrive_on_the_socket_through_completion() {
         let Message::Binary(frame) = socket.next().await.unwrap().unwrap() else {
             continue;
         };
-        if frame.first() == Some(&parvi_missions_contract::RUNS_SNAPSHOT) {
+        if frame.first() == Some(&ahjo_missions_contract::RUNS_SNAPSHOT) {
             break;
         }
     }
@@ -317,10 +317,10 @@ async fn run_changes_arrive_on_the_socket_through_completion() {
             let Message::Binary(frame) = socket.next().await.unwrap().unwrap() else {
                 continue;
             };
-            if frame.first() != Some(&parvi_missions_contract::RUNS_SNAPSHOT) {
+            if frame.first() != Some(&ahjo_missions_contract::RUNS_SNAPSHOT) {
                 continue;
             }
-            let runs: Vec<parvi_missions_contract::RunProjection> =
+            let runs: Vec<ahjo_missions_contract::RunProjection> =
                 serde_json::from_slice(&frame[1..]).unwrap();
             for run in runs.into_iter().filter(|r| r.run_id == id) {
                 if let Some(gate) = run.waiting_gates.first() && !answered {
@@ -348,8 +348,8 @@ async fn run_changes_arrive_on_the_socket_through_completion() {
     .await
     .expect("run reaches a final projection");
     assert!(answered);
-    let ledger = parvi_mission_engine::Ledger::new(
-        parvi_mission_engine::Store::root_in(node.dir()).join(format!("runs/{id}.ndjson")),
+    let ledger = ahjo_mission_engine::Ledger::new(
+        ahjo_mission_engine::Store::root_in(node.dir()).join(format!("runs/{id}.ndjson")),
         id,
     );
     let events = ledger.read().unwrap();
@@ -379,7 +379,7 @@ async fn run_changes_arrive_on_the_socket_through_completion() {
         .request(Method::GET, "/api/runs", None, None)
         .await
         .unwrap();
-    let _: Vec<parvi_missions_contract::RunSummary> = serde_json::from_value(listed).unwrap();
+    let _: Vec<ahjo_missions_contract::RunSummary> = serde_json::from_value(listed).unwrap();
     for suffix in [
         "",
         "/events",
@@ -401,13 +401,13 @@ async fn run_changes_arrive_on_the_socket_through_completion() {
 async fn default_role_store_is_shared_and_isolated() {
     let areas = &[
         sessions::LISTING,
-        parvi_work::LISTING,
-        parvi_agents::LISTING,
+        ahjo_work::LISTING,
+        ahjo_agents::LISTING,
         LAB,
     ];
     let node = Node::start(areas, "").await.unwrap();
     let other = Node::start(areas, "").await.unwrap();
-    let root = parvi_mission_engine::Store::root_in(node.dir());
+    let root = ahjo_mission_engine::Store::root_in(node.dir());
     let client = NodeClient::new(Some(&format!("{}/", node.url()))).unwrap();
     client
         .request(

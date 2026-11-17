@@ -1,5 +1,5 @@
 //! Services: the host's catalog of services with their state and log,
-//! started and stopped through systemd. Parvi owns this itself, with CHROTE's
+//! started and stopped through systemd. Ahjo owns this itself, with CHROTE's
 //! catalog, group and partial-state rules; it reads only when asked, so it
 //! costs nothing while nobody looks.
 //!
@@ -24,12 +24,12 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
+use ahjo_host_contract::{Outcome, Service, ServiceLog};
 use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
-use parvi_host_contract::{Outcome, Service, ServiceLog};
 use tokio::sync::Mutex;
 
 use catalog::Entry;
@@ -42,7 +42,7 @@ pub const ACTION: Duration = Duration::from_secs(40);
 /// The node's services: where its catalog is, and one action at a time.
 pub struct Services {
     catalog: PathBuf,
-    events: std::sync::Arc<parvi_node_kit::events::Log>,
+    events: std::sync::Arc<ahjo_node_kit::events::Log>,
     acting: Mutex<()>,
 }
 
@@ -86,7 +86,7 @@ async fn status(e: &Entry) -> Service {
 pub const LOG_LINES: usize = 40;
 
 impl Services {
-    pub fn with_events(mut self, events: std::sync::Arc<parvi_node_kit::events::Log>) -> Self {
+    pub fn with_events(mut self, events: std::sync::Arc<ahjo_node_kit::events::Log>) -> Self {
         self.events = events;
         self
     }
@@ -175,7 +175,7 @@ impl Services {
         let entry = self.entry(id)?;
         if entry.read_only {
             return Err(bad(
-                "This service is read-only: the host shows it but does not let Parvi change it.",
+                "This service is read-only: the host shows it but does not let Ahjo change it.",
             ));
         }
         let _one = self.acting.lock().await;
@@ -248,13 +248,13 @@ impl std::fmt::Display for Refused {
 }
 
 impl Refused {
-    pub fn error(&self) -> parvi_core::Error {
+    pub fn error(&self) -> ahjo_core::Error {
         let code = match self.0 {
-            StatusCode::BAD_REQUEST => parvi_host_contract::BAD_REQUEST,
-            StatusCode::NOT_FOUND => parvi_host_contract::NOT_FOUND,
-            _ => parvi_host_contract::UNAVAILABLE,
+            StatusCode::BAD_REQUEST => ahjo_host_contract::BAD_REQUEST,
+            StatusCode::NOT_FOUND => ahjo_host_contract::NOT_FOUND,
+            _ => ahjo_host_contract::UNAVAILABLE,
         };
-        parvi_core::Error::new(code, &self.1)
+        ahjo_core::Error::new(code, &self.1)
     }
 }
 
@@ -277,14 +277,14 @@ pub fn routes<S: Clone + Send + Sync + 'static>(services: Arc<Services>) -> Rout
 
 async fn list(State(s): State<Arc<Services>>) -> Response {
     match s.list().await {
-        Ok(services) => Json(parvi_host_contract::ServiceList { services }).into_response(),
+        Ok(services) => Json(ahjo_host_contract::ServiceList { services }).into_response(),
         Err(r) => r.into_response(),
     }
 }
 
 async fn one(State(s): State<Arc<Services>>, Path(id): Path<String>) -> Response {
     match s.one(&id).await {
-        Ok(service) => Json(parvi_host_contract::ServiceOne { service }).into_response(),
+        Ok(service) => Json(ahjo_host_contract::ServiceOne { service }).into_response(),
         Err(r) => r.into_response(),
     }
 }
@@ -317,9 +317,9 @@ async fn act(
                 Outcome::Unconfirmed => StatusCode::ACCEPTED,
             };
             let error = (outcome == Outcome::Failed).then(|| {
-                parvi_core::Error::new(parvi_host_contract::SERVICE_FAILED, errors.join("; "))
+                ahjo_core::Error::new(ahjo_host_contract::SERVICE_FAILED, errors.join("; "))
             });
-            let body = parvi_host_contract::ServiceAction {
+            let body = ahjo_host_contract::ServiceAction {
                 service,
                 errors,
                 outcome,
@@ -353,7 +353,7 @@ mod tests {
 
     #[tokio::test]
     async fn refuses_an_unknown_action_an_unknown_id_and_a_read_only_service() {
-        let dir = std::env::temp_dir().join(format!("parvi-services-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("ahjo-services-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let file = dir.join("services.json");
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -394,9 +394,9 @@ mod tests {
 
     #[tokio::test]
     async fn without_a_catalog_the_node_says_where_to_write_one() {
-        let s = Services::new(PathBuf::from("/nonexistent/parvi/services.json"));
+        let s = Services::new(PathBuf::from("/nonexistent/ahjo/services.json"));
         let r = s.list().await.unwrap_err();
         assert_eq!(r.0, StatusCode::SERVICE_UNAVAILABLE);
-        assert!(r.1.contains("/nonexistent/parvi/services.json"));
+        assert!(r.1.contains("/nonexistent/ahjo/services.json"));
     }
 }

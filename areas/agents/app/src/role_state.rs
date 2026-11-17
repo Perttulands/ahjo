@@ -1,4 +1,4 @@
-pub use parvi_agents_contract::roles::{Unreadable, Usage};
+pub use ahjo_agents_contract::roles::{Unreadable, Usage};
 
 /// The text fields accepted by the role API. Launch settings belong to slots.
 pub fn role_change(name: &str, kind: &str, summary: &str, capabilities: &str) -> serde_json::Value {
@@ -28,7 +28,7 @@ pub fn usage_words(usage: Option<&Usage>) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use parvi_agents_contract::roles::Use;
+    use ahjo_agents_contract::roles::Use;
     #[test]
     fn role_edits_contain_only_role_text() {
         let change = role_change("Writer", "specialist", "Writes", " draft, , review ");

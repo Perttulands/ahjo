@@ -8,12 +8,12 @@ mod common;
 use std::process::{Child, Command};
 use std::time::{Duration, Instant};
 
+use ahjo_holder::{Endpoint, connect};
 use common::{Scratch, new_session, run, type_line, wait_for};
-use parvi_holder::{Endpoint, connect};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt};
 
-const PIPE: &str = "PARVI_HOLDER_TEST_PIPE";
-const SESSION: &str = "PARVI_HOLDER_TEST_SESSION";
+const PIPE: &str = "AHJO_HOLDER_TEST_PIPE";
+const SESSION: &str = "AHJO_HOLDER_TEST_SESSION";
 
 #[tokio::test(flavor = "multi_thread")]
 async fn powershell_5_survives_killing_the_attached_client() {
@@ -76,7 +76,7 @@ async fn survives(shell: &str, major: u32) {
 }
 
 /// Waits until the clients attached to `s` pass `done`.
-async fn wait_until(c: &mut parvi_holder::Connection, what: &str, done: impl Fn(&str) -> bool) {
+async fn wait_until(c: &mut ahjo_holder::Connection, what: &str, done: impl Fn(&str) -> bool) {
     let deadline = Instant::now() + Duration::from_secs(30);
     while !done(&run(c, &["list-clients", "-t", "s"]).await) {
         assert!(Instant::now() < deadline, "{what}: timed out");
@@ -103,7 +103,7 @@ fn attached_client() {
     let (Ok(pipe), Ok(session)) = (std::env::var(PIPE), std::env::var(SESSION)) else {
         return;
     };
-    let name = pipe.trim_start_matches(r"\\.\pipe\parvi-holder-");
+    let name = pipe.trim_start_matches(r"\\.\pipe\ahjo-holder-");
     tokio::runtime::Runtime::new().unwrap().block_on(async {
         let connection = connect(&Endpoint::scratch(name)).await.unwrap();
         let mut attached = connection

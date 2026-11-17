@@ -1,11 +1,11 @@
 //! Mission canvas interaction, adapted from the original Missions page.
 use super::*;
+use ahjo_app_kit::widgets::boundary;
+use ahjo_missions_contract::{LayoutNode, Mission};
 use gpui::{
     AnyElement, Bounds, Hsla, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent,
     PathBuilder, Pixels, Point, ScrollEvent, SharedString, Stateful, canvas, point,
 };
-use parvi_app_kit::widgets::boundary;
-use parvi_missions_contract::{LayoutNode, Mission};
 use std::{cell::Cell, rc::Rc};
 
 /// Far enough out to see a long mission whole.
@@ -184,7 +184,7 @@ impl View {
 impl MissionsPage {
     pub(super) fn render_canvas(
         &mut self,
-        t: &parvi_app_kit::theme::Theme,
+        t: &ahjo_app_kit::theme::Theme,
         mission: &Mission,
         running: bool,
         cx: &mut Context<Self>,
@@ -550,11 +550,11 @@ impl MissionsPage {
     /// outside the card, so it covers none of the card's words.
     fn card_badge(
         &self,
-        t: &parvi_app_kit::theme::Theme,
+        t: &ahjo_app_kit::theme::Theme,
         mission: &Mission,
         card: &board::Card,
         view: &View,
-        findings: &[(parvi_missions_contract::Finding, bool)],
+        findings: &[(ahjo_missions_contract::Finding, bool)],
     ) -> Option<AnyElement> {
         let issues: Vec<_> = findings
             .iter()
@@ -599,7 +599,7 @@ impl MissionsPage {
 
     /// A finding's colour: red or amber once a run was asked for, a quiet
     /// to-do while the mission is being built.
-    fn finding_color(&self, t: &parvi_app_kit::theme::Theme, error: bool) -> gpui::Hsla {
+    fn finding_color(&self, t: &ahjo_app_kit::theme::Theme, error: bool) -> gpui::Hsla {
         match (self.run_tried, error) {
             (false, _) => t.text2,
             (true, true) => t.error,
@@ -609,14 +609,14 @@ impl MissionsPage {
     #[allow(clippy::too_many_arguments)]
     fn canvas_card(
         &self,
-        t: &parvi_app_kit::theme::Theme,
+        t: &ahjo_app_kit::theme::Theme,
         mission: &Mission,
         card: &board::Card,
         view: &View,
         running: bool,
         state: Option<crate::store::run_state::NodeState>,
         attempts: Option<i64>,
-        findings: &[(parvi_missions_contract::Finding, bool)],
+        findings: &[(ahjo_missions_contract::Finding, bool)],
         cx: &mut Context<Self>,
     ) -> Stateful<Div> {
         let z = view.zoom;
@@ -772,7 +772,7 @@ impl MissionsPage {
     }
     fn canvas_port(
         &self,
-        t: &parvi_app_kit::theme::Theme,
+        t: &ahjo_app_kit::theme::Theme,
         mission: &Mission,
         port: &board::Port,
         view: &View,
@@ -942,7 +942,7 @@ impl MissionsPage {
     }
     fn canvas_menu(
         &self,
-        t: &parvi_app_kit::theme::Theme,
+        t: &ahjo_app_kit::theme::Theme,
         mission: &Mission,
         at: (f32, f32),
         view: &View,
@@ -976,12 +976,12 @@ impl MissionsPage {
 }
 
 fn wires(
-    t: &parvi_app_kit::theme::Theme,
+    t: &ahjo_app_kit::theme::Theme,
     board: &board::Board,
     view: View,
     entity: gpui::WeakEntity<MissionsPage>,
     generation: u64,
-    findings: &[(parvi_missions_contract::Finding, bool)],
+    findings: &[(ahjo_missions_contract::Finding, bool)],
     ready_to_fit: bool,
 ) -> impl IntoElement {
     let fit_board = board.clone();
@@ -1119,7 +1119,7 @@ fn wires(
 }
 
 fn card_face(
-    t: &parvi_app_kit::theme::Theme,
+    t: &ahjo_app_kit::theme::Theme,
     mission: &Mission,
     card: &board::Card,
     z: f32,
@@ -1545,7 +1545,7 @@ fn card_face(
 }
 
 fn state_words(
-    t: &parvi_app_kit::theme::Theme,
+    t: &ahjo_app_kit::theme::Theme,
     state: Option<crate::store::run_state::NodeState>,
 ) -> (&'static str, Hsla) {
     use crate::store::run_state::NodeState;
@@ -1565,17 +1565,17 @@ fn chip(z: f32, text: &str, colour: Hsla) -> Div {
         .px(px(GAP * z))
         .py(px(EDGE * z))
         .rounded(px(size::RADIUS * z))
-        .bg(parvi_app_kit::theme::alpha(colour, CHIP_ALPHA))
+        .bg(ahjo_app_kit::theme::alpha(colour, CHIP_ALPHA))
         .text_size(px(size::SMALL * z))
         .text_color(colour)
         .child(text.to_uppercase())
 }
 
 fn slot_row(
-    t: &parvi_app_kit::theme::Theme,
+    t: &ahjo_app_kit::theme::Theme,
     mission: &Mission,
-    f: &parvi_missions_contract::Formation,
-    slot: &parvi_missions_contract::Slot,
+    f: &ahjo_missions_contract::Formation,
+    slot: &ahjo_missions_contract::Slot,
     z: f32,
 ) -> Div {
     let role = (!slot.agent_id.is_empty()).then(|| crate::store::words::role_name(&slot.agent_id));
@@ -1593,7 +1593,7 @@ fn slot_row(
         .rounded_full()
         .border_2()
         .border_color(if slot.controller {
-            parvi_app_kit::theme::rgb(t.ansi[3])
+            ahjo_app_kit::theme::rgb(t.ansi[3])
         } else {
             t.text2
         })
@@ -1836,7 +1836,7 @@ impl MissionsPage {
     /// The "+" beside a card: add the step that comes next.
     fn canvas_next(
         &self,
-        t: &parvi_app_kit::theme::Theme,
+        t: &ahjo_app_kit::theme::Theme,
         card: &board::Card,
         view: &View,
         cx: &mut Context<Self>,

@@ -174,7 +174,7 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn copy_does_not_hide_link_or_its_checkout() {
-        let dir = std::env::temp_dir().join(format!("parvi-82-mixed-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("ahjo-82-mixed-{}", std::process::id()));
         let kit = dir.join("kit");
         std::fs::create_dir_all(kit.join(".git")).unwrap();
         std::fs::create_dir_all(kit.join("skills/shared")).unwrap();
@@ -198,7 +198,7 @@ mod tests {
 
     #[test]
     fn reads_the_description_from_front_matter() {
-        let dir = std::env::temp_dir().join(format!("parvi-82-skill-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("ahjo-82-skill-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(
             dir.join("SKILL.md"),

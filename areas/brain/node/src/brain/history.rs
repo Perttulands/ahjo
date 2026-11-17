@@ -8,7 +8,7 @@
 //! said beside what it could read, and the page itself is read off disk
 //! whatever git says.
 
-use parvi_brain_contract::Commit;
+use ahjo_brain_contract::Commit;
 use std::collections::HashMap;
 use std::path::Path;
 use std::process::Stdio;

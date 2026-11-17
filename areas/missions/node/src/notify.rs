@@ -1,6 +1,6 @@
 //! Reconcile open asks with the sent receipt; one worker serializes delivery.
-use parvi_mission_engine::Coordinator;
-use parvi_node_kit::events::Log;
+use ahjo_mission_engine::Coordinator;
+use ahjo_node_kit::events::Log;
 use serde_json::Value;
 use std::{
     collections::{BTreeMap, BTreeSet},
@@ -34,7 +34,7 @@ async fn run(
     root: PathBuf,
     command: Option<PathBuf>,
     log: Arc<Log>,
-    mut changes: broadcast::Receiver<parvi_missions_contract::RunProjection>,
+    mut changes: broadcast::Receiver<ahjo_missions_contract::RunProjection>,
     old_final: BTreeSet<String>,
 ) {
     let mut state = Dispatch {
@@ -88,7 +88,7 @@ impl Dispatch {
         let mut sent = match read_receipts(&path) {
             Ok(sent) => sent,
             Err(e) => {
-                eprintln!("parvi: needs-you receipts {id}: {e}");
+                eprintln!("ahjo: needs-you receipts {id}: {e}");
                 if self.command.is_some() {
                     for ask in &asks {
                         if let Some(seq) = ask["seq"].as_u64() {
@@ -102,7 +102,7 @@ impl Dispatch {
         if let Some(delivered) = self.delivered.get(id) {
             sent.extend(delivered);
             if let Err(error) = write_receipts(&path, &sent) {
-                eprintln!("parvi: needs-you receipt {id}: {error}");
+                eprintln!("ahjo: needs-you receipt {id}: {error}");
                 for ((run, _), at) in &mut self.failures {
                     if run == id {
                         *at = now + RETRY;
@@ -138,13 +138,13 @@ impl Dispatch {
                 continue;
             }
             if let Err(error) = send(self.command.as_ref().unwrap(), &ask).await {
-                eprintln!("parvi: needs-you {id} {seq}: {error}");
+                eprintln!("ahjo: needs-you {id} {seq}: {error}");
                 self.failures.insert(key, now + RETRY);
                 continue;
             }
             sent.insert(seq);
             if let Err(error) = write_receipts(&path, &sent) {
-                eprintln!("parvi: needs-you receipt {id} {seq}: {error}");
+                eprintln!("ahjo: needs-you receipt {id} {seq}: {error}");
                 // Keep the success in memory even if disk is temporarily unavailable.
                 self.delivered.entry(id.into()).or_default().insert(seq);
                 self.failures.insert(key, now + RETRY);
@@ -208,7 +208,7 @@ async fn send(path: &Path, ask: &Value) -> std::io::Result<()> {
 #[cfg(all(test, unix))]
 mod tests {
     use super::*;
-    use parvi_mission_engine::{LabExecutor, Ledger, RunEvent, RunSettings};
+    use ahjo_mission_engine::{LabExecutor, Ledger, RunEvent, RunSettings};
     use std::os::unix::fs::PermissionsExt;
 
     fn fixture(root: &Path, id: &str, final_run: bool) {
@@ -256,7 +256,7 @@ mod tests {
     }
     #[tokio::test]
     async fn retries_on_schedule_and_receipts_survive_restart() {
-        let root = parvi_testkit::fresh_dir("needs-you-retry");
+        let root = ahjo_testkit::fresh_dir("needs-you-retry");
         let coordinator =
             Coordinator::open(&root, RunSettings::default(), Box::new(LabExecutor)).unwrap();
         fixture(&root, "run_live", false);
@@ -295,7 +295,7 @@ mod tests {
             payload["body"]
                 .as_str()
                 .unwrap()
-                .contains("parvi gate approve run_live review --requested-seq 3")
+                .contains("ahjo gate approve run_live review --requested-seq 3")
         );
         assert!(
             log.listen()

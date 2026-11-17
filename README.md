@@ -1,12 +1,16 @@
-# Parvi
+# Ahjo
 
-Where you run your agents: sessions, files, work, brain, host and missions in
-one Rust binary, with a native app for you and a CLI for your agent.
+Ahjo is a family of three apps on one app kit: Ahjo Swarm, where you run your
+agents; Ahjo Brain, for exploring what we know; and Ahjo Desk, where agents
+publish and you answer.
 
-`VISION.md` says what it is for. `ARCHITECTURE.md` says how it is built.
+Ahjo Swarm holds sessions, files, work, brain, host and missions in one Rust
+binary, `ahjo`, with a native app for you and a CLI for your agent.
 
-To run it on Linux or WSL, build `cargo build --release -p parvi -p parvi-app`,
-then `target/release/parvi install --app target/release/parvi-app` makes the
-node the systemd user unit `parvi`, and a later build goes in with
-`target/release/parvi upgrade --app target/release/parvi-app`; terminal
+`VISION.md` says what Swarm is for. `ARCHITECTURE.md` says how it is built.
+
+To run it on Linux or WSL, build `cargo build --release -p ahjo -p ahjo-app-swarm`,
+then `target/release/ahjo install --app target/release/ahjo-swarm` makes the
+node the systemd user unit `ahjo`, and a later build goes in with
+`target/release/ahjo upgrade --app target/release/ahjo-swarm`; terminal
 sessions live on through both.

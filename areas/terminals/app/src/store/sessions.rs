@@ -1,7 +1,7 @@
 //! Finding and describing sessions: the rail's groups and search, the marks
 //! a row carries, and Send's ranking. Pure, so it is tested on its own.
 
-use parvi_terminals_contract::{AgentEvent, EventKind, Session};
+use ahjo_terminals_contract::{AgentEvent, EventKind, Session};
 use serde::{Deserialize, Serialize};
 
 /// Which node and session, across tmux restarts: tmux's ids start over when
@@ -216,7 +216,7 @@ pub fn badges(s: &Session) -> Vec<Badge> {
         add(
             "⊞",
             format!("{windows} windows"),
-            format!("{windows} tmux windows; Parvi shows the current one."),
+            format!("{windows} tmux windows; Ahjo shows the current one."),
         );
     }
     let foreign = s.foreign.unwrap_or(0);
@@ -449,7 +449,7 @@ pub fn screen_tail(text: &str, n: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use parvi_terminals_contract::Pane;
+    use ahjo_terminals_contract::Pane;
 
     fn s(name: &str) -> Session {
         Session {
@@ -692,12 +692,12 @@ mod tests {
     #[test]
     fn rail_names_keep_whole_words_and_the_distinguishing_end() {
         assert_eq!(
-            rail_name("parvi-move-fin-control", 22),
-            "parvi-move-fin-control"
+            rail_name("ahjo-move-fin-control", 22),
+            "ahjo-move-fin-control"
         );
         assert_eq!(
-            rail_name("parvi-move-fin-terminals", 22),
-            "parvi-…fin-terminals"
+            rail_name("ahjo-move-fin-terminals", 22),
+            "ahjo-…fin-terminals"
         );
         assert_eq!(rail_name("short", 22), "short");
     }

@@ -1,9 +1,9 @@
 //! Commands use the same store and coordinator as the node's routes.
 use crate::Missions;
-use parvi_core::Error;
-use parvi_mission_engine::{AdmissionFailure, Harnesses, validate};
-use parvi_missions_contract::{self as wire, LayoutPatch, NotePatch, Precondition, RunStart};
-use parvi_node_kit::{
+use ahjo_core::Error;
+use ahjo_mission_engine::{AdmissionFailure, Harnesses, validate};
+use ahjo_missions_contract::{self as wire, LayoutPatch, NotePatch, Precondition, RunStart};
+use ahjo_node_kit::{
     Command,
     args::{flag, maybe_text, object, text},
 };
@@ -133,7 +133,7 @@ fn description(name: &str) -> &'static str {
         "run_resume" => "Resume a blocked run.",
         "run_land" => "Land a finished repository run.",
         "run_delete" => {
-            "Delete a finished run, its kept outputs and the folder Parvi made for it; land a repository run first."
+            "Delete a finished run, its kept outputs and the folder Ahjo made for it; land a repository run first."
         }
         "gate_approve" => "Approve a pending human gate.",
         "gate_reject" => "Reject a pending human gate.",
@@ -228,9 +228,9 @@ fn optional<'a>(a: &'a Value, key: &str, default: &'a str) -> Result<&'a str, Er
     Ok(maybe_text(a, key).map_err(bad)?.unwrap_or(default))
 }
 fn command_actor(a: &Value) -> Result<String, Error> {
-    let actor = optional(a, "actor", "agent:parvi")?.trim();
+    let actor = optional(a, "actor", "agent:ahjo")?.trim();
     Ok(if actor.is_empty() {
-        "agent:parvi"
+        "agent:ahjo"
     } else {
         actor
     }
@@ -318,12 +318,11 @@ async fn call(m: Missions, name: &str, a: Value) -> Result<Value, Error> {
                     slug,
                     optional(&a, "title", "")?,
                     example,
-                    "agent:parvi",
+                    "agent:ahjo",
                 )?,
-                None => {
-                    m.store
-                        .create_mission(slug, optional(&a, "title", slug)?, "agent:parvi")?
-                }
+                None => m
+                    .store
+                    .create_mission(slug, optional(&a, "title", slug)?, "agent:ahjo")?,
             };
             m.changed();
             Ok(json!({"node":node,"mission":document(edit.mission,edit.etag)?}))
@@ -332,7 +331,7 @@ async fn call(m: Missions, name: &str, a: Value) -> Result<Value, Error> {
             if a.as_object().is_some_and(|v| !v.is_empty()) {
                 return Err(bad("no arguments expected"));
             }
-            let examples: Vec<_> = parvi_missions_contract::EXAMPLES
+            let examples: Vec<_> = ahjo_missions_contract::EXAMPLES
                 .iter()
                 .map(|e| json!({"name":e.name,"title":e.title,"about":e.about}))
                 .collect();
@@ -371,7 +370,7 @@ async fn call(m: Missions, name: &str, a: Value) -> Result<Value, Error> {
                     etag: current.etag,
                 },
                 patch,
-                "agent:parvi",
+                "agent:ahjo",
             )?;
             m.changed();
             let after = document(edited.mission, edited.etag)?;
@@ -409,7 +408,7 @@ async fn call(m: Missions, name: &str, a: Value) -> Result<Value, Error> {
             let current = m.store.notes_edit(id)?;
             let etag = optional(&a, "etag", &current.etag)?;
             let target = optional(&a, "target", "mission")?.into();
-            let author = optional(&a, "author", "agent:parvi")?.into();
+            let author = optional(&a, "author", "agent:ahjo")?.into();
             let patch = match optional(&a, "action", "append")? {
                 "append" => NotePatch::Append {
                     target,
@@ -447,7 +446,7 @@ async fn call(m: Missions, name: &str, a: Value) -> Result<Value, Error> {
             let etag = optional(&a, "etag", &current.etag)?;
             let patch = if change["arrange"] == true {
                 let mission = m.store.read_mission(id)?;
-                LayoutPatch::Nodes(parvi_mission_engine::arrange(&mission, &current.layout).nodes)
+                LayoutPatch::Nodes(ahjo_mission_engine::arrange(&mission, &current.layout).nodes)
             } else if let Some(v) = change.get("nodes") {
                 LayoutPatch::Nodes(serde_json::from_value(v.clone()).map_err(bad)?)
             } else if let Some(v) = change.get("edges") {
@@ -518,7 +517,7 @@ async fn call(m: Missions, name: &str, a: Value) -> Result<Value, Error> {
         }
         "run_abort" => {
             let id = required(&a, "run")?.to_owned();
-            let actor = optional(&a, "actor", "agent:parvi")?.to_owned();
+            let actor = optional(&a, "actor", "agent:ahjo")?.to_owned();
             let reason = optional(&a, "reason", "operator abort")?.to_owned();
             let coordinator = m.coordinator.clone();
             let run = blocking(move || coordinator.abort(&id, &actor, &reason)).await?;
@@ -643,7 +642,7 @@ async fn start(m: Missions, name: &str, a: &Value) -> Result<Value, Error> {
         mission: selector.into(),
         expected_rev: mission.rev,
         expected_etag: edit.etag,
-        actor: optional(a, "actor", "agent:parvi")?.into(),
+        actor: optional(a, "actor", "agent:ahjo")?.into(),
         cwd: optional(a, "cwd", "")?.into(),
         repository: optional(a, "repository", "")?.into(),
         base: optional(a, "base", "")?.into(),
@@ -706,7 +705,7 @@ fn shell_word(value: &str) -> String {
     }
 }
 async fn wait(m: Missions, a: &Value) -> Result<Value, Error> {
-    use parvi_mission_engine::WaitUntil;
+    use ahjo_mission_engine::WaitUntil;
     let id = required(a, "run")?;
     let until = match optional(a, "until", "needs-you")? {
         "needs-you" => WaitUntil::NeedsYou,
@@ -734,7 +733,7 @@ async fn wait(m: Missions, a: &Value) -> Result<Value, Error> {
     let run_arg = shell_word(id);
     for gate in &run.waiting_gates {
         let gate_arg = shell_word(&gate.gate_id);
-        let prefix = "parvi gate";
+        let prefix = "ahjo gate";
         let commands: Vec<String> = if let Some(pick) = &gate.pick {
             pick["candidates"].as_array().into_iter().flatten().filter_map(|candidate| {
                 candidate.as_i64().or_else(|| candidate["attempt"].as_i64()).map(|attempt| format!("{prefix} pick {run_arg} {gate_arg} --requested-seq {} --attempt {attempt}", gate.requested_seq))
@@ -766,9 +765,9 @@ async fn wait(m: Missions, a: &Value) -> Result<Value, Error> {
             } else {
                 ""
             };
-            commands.push(format!("parvi run resume {run_arg}{extra}"));
+            commands.push(format!("ahjo run resume {run_arg}{extra}"));
             if run.resume_policy == "grant_or_pick" {
-                commands.push(format!("parvi run resume {run_arg} --pick-best"));
+                commands.push(format!("ahjo run resume {run_arg} --pick-best"));
             }
         }
         let why = match wire::plain_reason(&event.detail) {

@@ -3,8 +3,8 @@
 
 use std::path::PathBuf;
 
-use parvi_mission_engine::{Error, Store};
-use parvi_mission_model::Mission;
+use ahjo_mission_engine::{Error, Store};
+use ahjo_mission_model::Mission;
 
 const HELLO: &str = r#"schema = 1
 id = "msn_hello"
@@ -59,8 +59,7 @@ struct Scratch(PathBuf);
 
 impl Scratch {
     fn new(name: &str) -> Scratch {
-        let dir =
-            std::env::temp_dir().join(format!("parvi-64-store-{name}-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("ahjo-64-store-{name}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         for sub in ["missions", "notes", "layout"] {
             std::fs::create_dir_all(dir.join(sub)).unwrap();
@@ -131,7 +130,7 @@ fn one_unreadable_mission_never_hides_the_rest() {
     scratch.write("missions/README.md", "not a mission");
     #[cfg(unix)]
     std::os::unix::fs::symlink(
-        "/nonexistent/parvi-64/moved.mission.toml",
+        "/nonexistent/ahjo-64/moved.mission.toml",
         scratch.0.join("missions/moved.mission.toml"),
     )
     .unwrap();
@@ -159,7 +158,7 @@ fn one_unreadable_mission_never_hides_the_rest() {
     #[cfg(unix)]
     {
         let words = format!(
-            "{} is a symlink to /nonexistent/parvi-64/moved.mission.toml, which does not exist",
+            "{} is a symlink to /nonexistent/ahjo-64/moved.mission.toml, which does not exist",
             scratch.0.join("missions/moved.mission.toml").display()
         );
         assert_eq!(listings[2].broken.as_deref(), Some(words.as_str()));

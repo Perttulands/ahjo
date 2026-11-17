@@ -1,6 +1,6 @@
-# parvi-holder
+# ahjo-holder
 
-Parvi's Windows session holder: a detached per-user process that owns ConPTY
+Ahjo's Windows session holder: a detached per-user process that owns ConPTY
 sessions, as tmux owns them on Linux. A Windows node attaches to it over a
 named pipe, and sessions survive the node's restarts, upgrades and crashes.
 They end when the holder does: at log off, at reboot, or on `kill-server`.
@@ -8,9 +8,9 @@ Design and measurements behind it: `docs/research/windows-sessions.md`.
 
 ## Interface
 
-The crate is a program, `parvi-holder.exe`, and a client library:
+The crate is a program, `ahjo-holder.exe`, and a client library:
 
-- `Endpoint::for_user()` names this user's pipe, `\\.\pipe\parvi-holder-<SID>`.
+- `Endpoint::for_user()` names this user's pipe, `\\.\pipe\ahjo-holder-<SID>`.
   `Endpoint::scratch(name)` names a holder of its own for tests.
 - `connect_or_start(endpoint, exe, log)` connects, first starting the holder
   hidden and detached if none is running. `connect` only connects.
@@ -18,13 +18,13 @@ The crate is a program, `parvi-holder.exe`, and a client library:
   flags)` attaches. After that the connection is a tmux control-mode client
   whose reply bodies are decoded before they reach the engine's control events.
 
-`parvi-holder [--pipe <path>] [--log <path>]` serves until `kill-server`. It
-logs to `%LOCALAPPDATA%\Parvi\holder.log` unless given `--log`.
+`ahjo-holder [--pipe <path>] [--log <path>]` serves until `kill-server`. It
+logs to `%LOCALAPPDATA%\Ahjo\holder.log` unless given `--log`.
 
 ## Protocol
 
-Every connection opens with `parvi-holder <protocol>`. The holder answers
-`parvi-holder <protocol> <version> <pid>`, or `%exit protocol <n> wanted,
+Every connection opens with `ahjo-holder <protocol>`. The holder answers
+`ahjo-holder <protocol> <version> <pid>`, or `%exit protocol <n> wanted,
 holder speaks <m>` and hangs up. The protocol number changes only when the
 wire format does, because a running holder outlives the node that started it.
 Protocol 2 escapes a reply-body line beginning with `%` by prefixing another
@@ -36,7 +36,7 @@ end.
 After the greeting the connection speaks tmux control mode: commands in,
 replies between `%begin` and `%end`/`%error`, and `%output`,
 `%layout-change`, `%sessions-changed`, `%pause`, `%continue` and `%exit`
-out. The holder answers the subset that Parvi's engine, launcher and search
+out. The holder answers the subset that Ahjo's engine, launcher and search
 send: `attach-session`, `capture-pane` (`-e`, `-J`, `-S -`),
 `display-message`, `has-session`, the guarded `if-shell -F` submit, `kill-server`, `kill-session`,
 `list-clients`, `list-panes`, `list-sessions`, `new-session`, `paste-buffer`,
@@ -78,9 +78,9 @@ for the holder's lifetime.
 
 The holder runs on Windows. Its plain logic (handshake, flow control, screen,
 words) builds and is tested by the workspace's `cargo test` on Linux. On a
-Windows machine with WSL, `crates/parvi-holder/check-windows.sh` copies the
+Windows machine with WSL, `crates/ahjo-holder/check-windows.sh` copies the
 crate to a scratch directory under `%TEMP%` and runs fmt, clippy and every
-test there with the Windows toolchain. Set `PARVI_HOLDER_SCRATCH` to a unique
+test there with the Windows toolchain. Set `AHJO_HOLDER_SCRATCH` to a unique
 directory name when other agents may run it at the same time. Each test starts
 its own holder on a scratch pipe and ends it, so the operator's holder and
 sessions are untouched.
@@ -107,4 +107,4 @@ Enterprise 10.0.26200, with other agents' builds running.
 | Shell per session | cmd 6.8 / 12.1 MB, Windows PowerShell 5.1 58 / 81 MB, PowerShell 7 37 / 102 MB (private / working set) |
 | Flood, three sessions with stuck clients | 20.8 MB in 5 s reached the reading clients. The slowest round on a quiet session was 111 ms over 49 rounds: a `display-message`, then a typed line, polling the screen every 100 ms until it echoed. Holder private memory went from 3.2 to 45.8 MB: three full histories plus bounded queues |
 | ConPTY throughput | 0.2 to 0.9 MB/s per session, in passthrough and plain modes alike, read in pieces of about 260 bytes. The holder held each pane's lock for about 10% of that time, so ConPTY sets the pace |
-| `parvi-holder.exe` | 864 KB release without the workspace's LTO and strip |
+| `ahjo-holder.exe` | 864 KB release without the workspace's LTO and strip |

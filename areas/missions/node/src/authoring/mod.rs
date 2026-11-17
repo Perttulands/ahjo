@@ -1,9 +1,9 @@
 //! CLI authoring operations, shared by the node's MCP and CLI commands.
 mod edit;
 use crate::Missions;
+use ahjo_core::Error;
+use ahjo_missions_contract::{self as wire, LayoutPatch, Precondition};
 use anyhow::{Context, Result, bail};
-use parvi_core::Error;
-use parvi_missions_contract::{self as wire, LayoutPatch, Precondition};
 use serde_json::{Value, json};
 use std::collections::HashMap;
 
@@ -245,7 +245,7 @@ pub fn description(name: &str) -> &'static str {
             "Move one card on the canvas: the Input card, a step, gate, End node or Limit card, by id or title."
         }
         "mission_create" => {
-            "Add the Input card to a mission that has none. Create the mission itself with parvi mission new <slug>."
+            "Add the Input card to a mission that has none. Create the mission itself with ahjo mission new <slug>."
         }
         "mission_update" => {
             "Change the Input card. Only the flags you give change it, and an empty value clears that field."
@@ -303,7 +303,7 @@ pub fn description(name: &str) -> &'static str {
             "Remove a gate and its routes, including its judge attachment; judge formations remain."
         }
         "end_create" => {
-            "Add an End node. --outcome is done (the default) or rejected. Wire a route into it with parvi formation wire <mission> <node:port> <end-id>:in."
+            "Add an End node. --outcome is done (the default) or rejected. Wire a route into it with ahjo formation wire <mission> <node:port> <end-id>:in."
         }
         "end_update" => "Change an End node's title or outcome.",
         "end_delete" => "Remove an End node.",
@@ -576,7 +576,7 @@ pub fn schema(name: &str) -> Value {
         "limit_update" | "limit_delete" => &["mission", "limit"],
         _ => &["mission"],
     };
-    parvi_node_kit::args::object(props, required)
+    ahjo_node_kit::args::object(props, required)
 }
 fn bad(error: impl std::fmt::Display) -> Error {
     Error::new("bad_request", error.to_string())
@@ -737,7 +737,7 @@ pub fn call(m: &Missions, name: &str, input: &Value) -> std::result::Result<Valu
     if name == "mission_arrange" || name == "mission_move" {
         let current_layout = m.store.layout_edit(selector)?;
         let nodes = if name == "mission_arrange" {
-            parvi_mission_engine::arrange(&current.mission, &current_layout.layout).nodes
+            ahjo_mission_engine::arrange(&current.mission, &current_layout.layout).nodes
         } else {
             let card = required(input, "card")?;
             let matches: Vec<_> = ["inputCards", "formations", "gates", "ends", "limits"]
@@ -801,7 +801,7 @@ pub fn call(m: &Missions, name: &str, input: &Value) -> std::result::Result<Valu
     if created.is_some() && input.get("x").is_none() && input.get("y").is_none() {
         let layout = m.store.layout_edit(selector)?;
         let preferred = if name == "formation_create" { 120 } else { 0 };
-        let position = parvi_mission_engine::free_layout_position(
+        let position = ahjo_mission_engine::free_layout_position(
             &current.mission,
             Some(&layout.layout),
             preferred,
@@ -820,7 +820,7 @@ pub fn call(m: &Missions, name: &str, input: &Value) -> std::result::Result<Valu
             v
         };
         layout.nodes.is_empty()
-            || place(&parvi_mission_engine::arrange(&current.mission, &layout).nodes)
+            || place(&ahjo_mission_engine::arrange(&current.mission, &layout).nodes)
                 == place(&layout.nodes)
     };
     let change = json!({operation:fields});
@@ -832,11 +832,11 @@ pub fn call(m: &Missions, name: &str, input: &Value) -> std::result::Result<Valu
             etag: current.etag,
         },
         patch,
-        args.flag("updated-by").unwrap_or("agent:parvi"),
+        args.flag("updated-by").unwrap_or("agent:ahjo"),
     )?;
     if arranged {
         let layout = m.store.layout_edit(selector)?;
-        let nodes = parvi_mission_engine::arrange(&result.mission, &layout.layout).nodes;
+        let nodes = ahjo_mission_engine::arrange(&result.mission, &layout.layout).nodes;
         m.store
             .patch_layout(selector, &layout.etag, LayoutPatch::Nodes(nodes))?;
     }
@@ -847,7 +847,7 @@ pub fn call(m: &Missions, name: &str, input: &Value) -> std::result::Result<Valu
 
 /// An edit answers with what it changed, not the whole mission: the cards
 /// and connections that are new or different, and the ids of those removed.
-/// `parvi mission inspect` shows the whole.
+/// `ahjo mission inspect` shows the whole.
 fn brief_answer(node: &str, before: &Value, after: &Value, created: Option<&str>) -> Value {
     let mut answer = json!({"node":node,"mission":after["slug"],"title":after["title"],"rev":after["rev"],"etag":after["etag"]});
     let mut changed = Vec::new();

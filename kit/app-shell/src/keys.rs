@@ -2,15 +2,15 @@
 //! away. It opens with the leader or its own chord, as a layer over the
 //! window.
 
+use ahjo_app_kit::Host;
+use ahjo_app_kit::chords::{self, Chord, Row};
+use ahjo_app_kit::theme::{size, theme};
+use ahjo_app_kit::widgets::field::{FieldEvent, TextField};
+use ahjo_app_kit::widgets::{kit, pane};
 use gpui::{
     AnyElement, Context, Entity, FocusHandle, Focusable, MouseButton, Subscription, Window, div,
     prelude::*, px,
 };
-use parvi_app_kit::Host;
-use parvi_app_kit::chords::{self, Chord, Row};
-use parvi_app_kit::theme::{size, theme};
-use parvi_app_kit::widgets::field::{FieldEvent, TextField};
-use parvi_app_kit::widgets::{kit, pane};
 
 /// The panel's layer on the stack.
 pub const LAYER: &str = "keys";

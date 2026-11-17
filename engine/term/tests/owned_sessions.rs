@@ -1,16 +1,16 @@
 #![cfg(unix)]
-use parvi_term::{Engine, SessionSpec};
-use parvi_testkit::tmux::{Server, capture, eventually};
+use ahjo_term::{Engine, SessionSpec};
+use ahjo_testkit::tmux::{Server, capture, eventually};
 
 fn spec(name: &str) -> SessionSpec {
     SessionSpec {
         name: name.to_owned(),
         cwd: std::env::temp_dir(),
-        env: [("PARVI_OWNED_TEST".into(), "yes".into())].into(),
+        env: [("AHJO_OWNED_TEST".into(), "yes".into())].into(),
         command: vec![
             "sh".into(),
             "-c".into(),
-            "printf '\\033[2mghost\\033[22mtyped %s' \"$PARVI_OWNED_TEST\"; exec sleep 120".into(),
+            "printf '\\033[2mghost\\033[22mtyped %s' \"$AHJO_OWNED_TEST\"; exec sleep 120".into(),
         ],
         cols: 160,
         rows: 48,
@@ -149,7 +149,7 @@ async fn seeded_cursor_visibility_matches_tmux() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn output_keeps_active_style_after_attach_and_resize_reseed() {
-    use parvi_term::engine::PaneUpdate;
+    use ahjo_term::engine::PaneUpdate;
     use std::time::Duration;
 
     let Some(server) = Server::start() else {

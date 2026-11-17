@@ -22,13 +22,13 @@ use crate::http;
 use crate::store::send;
 use crate::store::sessions::{self, Key};
 use crate::theme::{alpha, size, theme};
+use ahjo_app_kit::widgets::kit::{self, Kind};
+use ahjo_core::NodeId;
+use ahjo_terminals_contract::Outcome;
 use gpui::{
     AnyElement, AsyncApp, ClickEvent, Context, ExternalPaths, FontWeight, MouseButton,
     MouseMoveEvent, WeakEntity, Window, div, prelude::*, px,
 };
-use parvi_app_kit::widgets::kit::{self, Kind};
-use parvi_core::NodeId;
-use parvi_terminals_contract::Outcome;
 use std::path::PathBuf;
 
 /// The drawer's state besides its fields: what it hands over and how the
@@ -97,7 +97,7 @@ impl Terminals {
         )
     }
 
-    pub(super) fn send_targets(&self, query: &str) -> Vec<&parvi_terminals_contract::Session> {
+    pub(super) fn send_targets(&self, query: &str) -> Vec<&ahjo_terminals_contract::Session> {
         sessions::targets(&self.fleet.all, &self.settings.recent_targets, query)
             .into_iter()
             .filter(|s| {
@@ -168,7 +168,7 @@ impl Terminals {
             l.update(cx, |l, cx| l.focus_first(window, cx));
         } else {
             self.send_target = target;
-            parvi_app_kit::widgets::field::focus(&self.send_note, window, cx);
+            ahjo_app_kit::widgets::field::focus(&self.send_note, window, cx);
         }
         self.send.said = None;
         self.send.stuck = false;
@@ -194,7 +194,7 @@ impl Terminals {
             return;
         }
         let Some(k) = self.send_target.clone() else {
-            parvi_app_kit::widgets::field::focus(&self.send_query, window, cx);
+            ahjo_app_kit::widgets::field::focus(&self.send_query, window, cx);
             return;
         };
         self.deliver(k, enter, false, cx);
@@ -388,7 +388,7 @@ impl Terminals {
     }
 
     fn pick_files(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        parvi_app_kit::widgets::path_picker::pick(
+        ahjo_app_kit::widgets::path_picker::pick(
             self.host.clone(),
             "Attach",
             window,

@@ -5,9 +5,9 @@
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 
+use ahjo_core::Error;
+use ahjo_node_kit::{Config, Listing, NodeClient, Options, Running};
 use axum::http::Method;
-use parvi_core::Error;
-use parvi_node_kit::{Config, Listing, NodeClient, Options, Running};
 use serde_json::{Value, json};
 
 use crate::fresh_dir;
@@ -24,7 +24,7 @@ impl Node {
     /// of its own on loopback. Refused as the node refuses: an unknown
     /// section, a bad one, or areas that conflict.
     pub async fn start(areas: &[Listing], config: &str) -> anyhow::Result<Node> {
-        let dir = fresh_dir("parvi-node");
+        let dir = fresh_dir("ahjo-node");
         let started = async {
             let config = Config::parse(config, dir.clone())?;
             let options = Options {
@@ -32,7 +32,7 @@ impl Node {
                 config,
                 listen: Some("127.0.0.1:0".into()),
             };
-            parvi_node_kit::start(options, areas).await
+            ahjo_node_kit::start(options, areas).await
         };
         let running = started.await;
         let running = match running {
@@ -72,10 +72,10 @@ impl Node {
     }
 
     /// The node's sessions, as the area providing them provides them.
-    pub fn sessions(&self) -> std::sync::Arc<dyn parvi_term::Sessions> {
+    pub fn sessions(&self) -> std::sync::Arc<dyn ahjo_term::Sessions> {
         self.running()
             .provided
-            .get::<dyn parvi_term::Sessions>()
+            .get::<dyn ahjo_term::Sessions>()
             .expect("an area provides sessions")
     }
 

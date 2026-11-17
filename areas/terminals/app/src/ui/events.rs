@@ -9,8 +9,8 @@
 
 use super::page::Terminals;
 use crate::store::sessions::{self, Key};
+use ahjo_terminals_contract::{AgentEvent, Session};
 use gpui::{Context, SystemNotification, Window};
-use parvi_terminals_contract::{AgentEvent, Session};
 
 impl Terminals {
     /// The sessions whose agent just reported.

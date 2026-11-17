@@ -321,7 +321,7 @@ pub struct ServiceAction {
     pub errors: Vec<String>,
     pub outcome: Outcome,
     #[serde(skip_serializing_if = "Option::is_none", default)]
-    pub error: Option<parvi_core::Error>,
+    pub error: Option<ahjo_core::Error>,
 }
 /// One line of a service's log.
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]

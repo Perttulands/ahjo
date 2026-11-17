@@ -1,5 +1,5 @@
 //! Installing a harness's completion hooks at launch. Each runs
-//! `parvi hook` (`parvi_node_kit::hook`) with the address to report to.
+//! `ahjo hook` (`ahjo_node_kit::hook`) with the address to report to.
 //!
 //! Each harness is told its own way, as CHROTE tells it: Claude Code reads a
 //! Stop and a Notification hook from a settings file named with
@@ -17,8 +17,8 @@ use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
+use ahjo_node_kit::hook::{THEN, VERB};
 use anyhow::{Context, Result, bail};
-use parvi_node_kit::hook::{THEN, VERB};
 use serde_json::json;
 
 use super::{Kind, PATH};
@@ -72,7 +72,7 @@ pub fn takes_hooks(command: &str) -> bool {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Plan {
     harness: Harness,
-    /// The operator's own Codex notify command, run after Parvi's report.
+    /// The operator's own Codex notify command, run after Ahjo's report.
     then: Vec<String>,
 }
 
@@ -118,7 +118,7 @@ fn codex_notify(config: &Path) -> Result<Vec<String>> {
 }
 
 /// Whether a Codex flag line sets `notify` itself (`-c notify=…`,
-/// `--config notify=…`): a later `-c` wins, so it would replace Parvi's.
+/// `--config notify=…`): a later `-c` wins, so it would replace Ahjo's.
 fn sets_codex_notify(flags: &str) -> bool {
     let flags = flags.replace(['\'', '"'], "");
     flags.match_indices("notify").any(|(at, word)| {
@@ -211,11 +211,11 @@ impl Hooks {
         let then = match harness {
             Harness::Claude if sets_claude_settings(flags) => {
                 return Err(
-                    "the flags name their own --settings, which Parvi's hooks would need".into(),
+                    "the flags name their own --settings, which Ahjo's hooks would need".into(),
                 );
             }
             Harness::Codex if sets_codex_notify(flags) => {
-                return Err("the flags set Codex's notify, which Parvi's hook would need".into());
+                return Err("the flags set Codex's notify, which Ahjo's hook would need".into());
             }
             Harness::Claude => {
                 std::fs::create_dir_all(&self.dir)
@@ -320,7 +320,7 @@ mod tests {
     use super::*;
 
     fn scratch(name: &str) -> PathBuf {
-        let dir = std::env::temp_dir().join(format!("parvi-hooks-{name}-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("ahjo-hooks-{name}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         dir
@@ -328,7 +328,7 @@ mod tests {
 
     fn hooks(dir: &Path) -> Hooks {
         Hooks::new(
-            Path::new("/opt/parvi/parvi"),
+            Path::new("/opt/ahjo/ahjo"),
             "0.0.0.0:7300".parse().unwrap(),
             dir.join("agent-hooks"),
             dir.join("codex/config.toml"),
@@ -346,10 +346,10 @@ mod tests {
         let dir = scratch("codex");
         let h = hooks(&dir);
         let expected = if cfg!(windows) {
-            "-c \"notify=['/opt/parvi/parvi','hook',\
+            "-c \"notify=['/opt/ahjo/ahjo','hook',\
              'http://127.0.0.1:7300/api/agent/event?session=%243%40alice&event=finished']\""
         } else {
-            "-c 'notify=[\"/opt/parvi/parvi\",\"hook\",\
+            "-c 'notify=[\"/opt/ahjo/ahjo\",\"hook\",\
              \"http://127.0.0.1:7300/api/agent/event?session=%243%40alice&event=finished\"]'"
         };
         assert_eq!(flags(&h, "codex", "", "$3@alice").unwrap(), expected);
@@ -359,7 +359,7 @@ mod tests {
     }
 
     #[test]
-    fn the_operators_own_codex_notify_runs_after_parvis_report() {
+    fn the_operators_own_codex_notify_runs_after_ahjos_report() {
         let dir = scratch("compose");
         let h = hooks(&dir);
         std::fs::create_dir_all(dir.join("codex")).unwrap();
@@ -400,7 +400,7 @@ mod tests {
     #[test]
     fn backslashes_in_codex_notify_reach_it_through_the_shell_as_written() {
         let dir = scratch("backslash");
-        let exe = r"/opt/a\\b\c/parvi";
+        let exe = r"/opt/a\\b\c/ahjo";
         let h = Hooks::new(
             Path::new(exe),
             "127.0.0.1:7300".parse().unwrap(),
@@ -471,7 +471,7 @@ mod tests {
             serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
         assert_eq!(
             doc["hooks"]["Notification"][0]["hooks"][0]["command"],
-            "'/opt/parvi/parvi' hook \
+            "'/opt/ahjo/ahjo' hook \
              'http://127.0.0.1:7300/api/agent/event?session=%247&event=needs-input'"
         );
         assert_eq!(
@@ -493,7 +493,7 @@ mod tests {
     #[test]
     fn a_hook_reaches_a_node_bound_to_every_ipv6_address_on_ipv6_loopback() {
         let h = Hooks::new(
-            Path::new("/opt/parvi"),
+            Path::new("/opt/ahjo"),
             "[::]:7300".parse().unwrap(),
             "/tmp".into(),
             "/tmp/config.toml".into(),
@@ -508,13 +508,13 @@ mod tests {
         let codex = PathBuf::from("/tmp/config.toml");
         assert!(
             Hooks::new(
-                Path::new("/home/o'neil/parvi"),
+                Path::new("/home/o'neil/ahjo"),
                 addr,
                 "/tmp".into(),
                 codex.clone()
             )
             .is_err()
         );
-        assert!(Hooks::new(Path::new("/opt/parvi"), addr, "/tmp/$x".into(), codex).is_err());
+        assert!(Hooks::new(Path::new("/opt/ahjo"), addr, "/tmp/$x".into(), codex).is_err());
     }
 }

@@ -111,8 +111,7 @@ mod tests {
     #[test]
     fn ports_fenced_bare_and_terminal_wrapped_payloads() {
         let (clean, result) =
-            parse_outputs("hello\n```parvi-outputs\n{\"out\":{\"text\":\"ok\"}}\n```\nend")
-                .unwrap();
+            parse_outputs("hello\n```ahjo-outputs\n{\"out\":{\"text\":\"ok\"}}\n```\nend").unwrap();
         assert_eq!(clean, "hello\n\nend");
         assert_eq!(result["out"].text, "ok");
         let (clean, output) =
@@ -128,6 +127,6 @@ mod tests {
         let (_, output) =
             parse_outputs("{\"port_report\":{\"ref\":\"/tmp/long/\n path.md\"}}").unwrap();
         assert_eq!(output["port_report"].r#ref, "/tmp/long/path.md");
-        assert!(parse_outputs("```parvi-outputs\n{}\n```").is_err());
+        assert!(parse_outputs("```ahjo-outputs\n{}\n```").is_err());
     }
 }

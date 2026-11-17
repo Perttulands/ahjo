@@ -5,10 +5,10 @@
 
 use crate::AgentsPage;
 use crate::shape_state::{self as sh, Load, Pick, Shape};
+use ahjo_app_kit::theme::{Theme, size};
+use ahjo_app_kit::widgets::kit::{self, Kind};
+use ahjo_app_kit::widgets::{markdown, pane};
 use gpui::{Context, Div, SharedString, div, prelude::*, px};
-use parvi_app_kit::theme::{Theme, size};
-use parvi_app_kit::widgets::kit::{self, Kind};
-use parvi_app_kit::widgets::{markdown, pane};
 
 /// What the catalog read: each harness's view of one folder.
 #[derive(Default)]
@@ -126,7 +126,7 @@ impl AgentsPage {
     pub(crate) fn catalog_open(&mut self, path: String, cx: &mut Context<Self>) {
         if self.shape.editing {
             self.host.report(
-                parvi_app_kit::host::Status::failure(
+                ahjo_app_kit::host::Status::failure(
                     "Save or discard the open file first (Ctrl+S, Escape)",
                 ),
                 cx,

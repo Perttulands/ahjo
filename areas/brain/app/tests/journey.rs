@@ -1,8 +1,8 @@
 //! The operator searches the corpus, opens a result and follows its prose link.
+use ahjo_app_kit::link::client::LinkState;
+use ahjo_testkit::{fresh_dir, node::Node};
 use axum::{Json, routing::post};
 use gpui::{Modifiers, TestAppContext, VisualTestContext, point, px};
-use parvi_app_kit::link::client::LinkState;
-use parvi_testkit::{fresh_dir, node::Node};
 use serde_json::{Value, json};
 use std::{
     sync::mpsc,
@@ -56,7 +56,7 @@ fn start() -> Running {
             let addr = listener.local_addr().unwrap();
             let server = tokio::spawn(async move { axum::serve(listener, citadel).await.unwrap() });
             let config = format!("[brain]\ncorpus = {:?}\ncitadel = {:?}\n", corpus.to_str().unwrap(), format!("http://{addr}"));
-            let node = Node::start(&[parvi_brain::LISTING], &config).await.unwrap();
+            let node = Node::start(&[ahjo_brain::LISTING], &config).await.unwrap();
             ready.send(node.url()).unwrap();
             while stopped.try_recv().is_err() { tokio::time::sleep(Duration::from_millis(20)).await; }
             node.stop().await;
@@ -95,10 +95,10 @@ fn search_open_and_follow_a_link_in_the_reader(cx: &mut TestAppContext) {
     let running = start();
     let settings = fresh_dir("brain-journey-settings");
     cx.executor().allow_parking();
-    cx.update(parvi_app_shell::prepare);
+    cx.update(ahjo_app_shell::prepare);
     let (shell, cx) = cx.add_window_view(|window, cx| {
-        parvi_app_shell::start(
-            &[parvi_brain_app::build],
+        ahjo_app_shell::start(
+            &[ahjo_brain_app::build],
             Some(running.url.clone()),
             Some(settings.join("app.json")),
             window,
@@ -188,20 +188,20 @@ fn search_open_and_follow_a_link_in_the_reader(cx: &mut TestAppContext) {
 }
 
 thread_local! {
-    static SENT: std::cell::RefCell<Option<parvi_app_kit::Ask>> = const { std::cell::RefCell::new(None) };
+    static SENT: std::cell::RefCell<Option<ahjo_app_kit::Ask>> = const { std::cell::RefCell::new(None) };
 }
 
 /// A stand-in for the terminals: it draws what is beside it.
 struct Toy {
-    host: parvi_app_kit::Host,
+    host: ahjo_app_kit::Host,
 }
-impl parvi_app_kit::Page for Toy {
+impl ahjo_app_kit::Page for Toy {
     const ID: &'static str = "sessions";
     const TITLE: &'static str = "Terminals";
-    const ANSWERS: &'static [parvi_app_kit::Answers] = &[parvi_app_kit::Answers::Send];
+    const ANSWERS: &'static [ahjo_app_kit::Answers] = &[ahjo_app_kit::Answers::Send];
     fn answer(
         &mut self,
-        ask: parvi_app_kit::Ask,
+        ask: ahjo_app_kit::Ask,
         _: &'static str,
         _: &mut gpui::Window,
         _: &mut gpui::Context<Self>,
@@ -230,11 +230,11 @@ impl gpui::Render for Toy {
     }
 }
 fn toy(
-    host: parvi_app_kit::Host,
+    host: ahjo_app_kit::Host,
     window: &mut gpui::Window,
     cx: &mut gpui::App,
-) -> parvi_app_kit::Mounted {
-    parvi_app_kit::mount(host, window, cx, |host, _, _| Toy { host })
+) -> ahjo_app_kit::Mounted {
+    ahjo_app_kit::mount(host, window, cx, |host, _, _| Toy { host })
 }
 
 #[gpui::test]
@@ -243,10 +243,10 @@ fn the_panel_searches_reads_sends_and_toggles_beside_the_terminals(cx: &mut Test
     let settings = fresh_dir("brain-panel-settings");
     SENT.with(|sent| *sent.borrow_mut() = None);
     cx.executor().allow_parking();
-    cx.update(parvi_app_shell::prepare);
+    cx.update(ahjo_app_shell::prepare);
     let (shell, cx) = cx.add_window_view(|window, cx| {
-        parvi_app_shell::start(
-            &[toy, parvi_brain_app::build],
+        ahjo_app_shell::start(
+            &[toy, ahjo_brain_app::build],
             Some(running.url.clone()),
             Some(settings.join("app.json")),
             window,
@@ -261,7 +261,7 @@ fn the_panel_searches_reads_sends_and_toggles_beside_the_terminals(cx: &mut Test
     assert_eq!(shell.read_with(cx, |s, _| s.shown_page()), Some("sessions"));
     let chords = shell.update_in(cx, |shell, _, cx| shell.chords(cx));
     assert!(
-        parvi_app_kit::chords::rows(&chords)
+        ahjo_app_kit::chords::rows(&chords)
             .iter()
             .any(|row| row.label == "Brain")
     );
@@ -297,7 +297,7 @@ fn the_panel_searches_reads_sends_and_toggles_beside_the_terminals(cx: &mut Test
     click(cx, "brain-send");
     let sent = SENT.with(|sent| sent.borrow().clone());
     assert!(
-        matches!(&sent, Some(parvi_app_kit::Ask::Send { reference, target: None })
+        matches!(&sent, Some(ahjo_app_kit::Ask::Send { reference, target: None })
             if reference.starts_with("brain page /") && reference.ends_with("/notes/first.md")),
         "{sent:?}"
     );

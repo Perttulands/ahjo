@@ -1,6 +1,6 @@
-//! Names the build: `PARVI_VERSION` is the package version and, when built
+//! Names the build: `AHJO_VERSION` is the package version and, when built
 //! from a Git checkout, the commit (`0.0.1+8cdb58b`), so two builds of one
-//! version tell apart in `/api/health` and `parvi --version`.
+//! version tell apart in `/api/health` and `ahjo --version`.
 
 use std::path::PathBuf;
 use std::process::Command;
@@ -15,7 +15,7 @@ fn main() {
     let version = std::env::var("CARGO_PKG_VERSION").unwrap();
     let commit = git(&["rev-parse", "--short=7", "HEAD"]);
     println!(
-        "cargo:rustc-env=PARVI_VERSION={}",
+        "cargo:rustc-env=AHJO_VERSION={}",
         match &commit {
             Some(commit) => format!("{version}+{commit}"),
             None => version,

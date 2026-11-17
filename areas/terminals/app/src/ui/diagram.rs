@@ -5,14 +5,14 @@
 
 use crate::store::zoom::{self, Level, Px};
 use crate::theme::{size, theme};
+use ahjo_app_kit::host::Host;
+use ahjo_app_kit::widgets::kit::{self, Kind};
+use ahjo_app_kit::widgets::pane;
 use gpui::{
     Bounds, Context, FontWeight, IntoElement, MouseButton, MouseDownEvent, MouseMoveEvent,
     ParentElement, Pixels, Point, Render, RenderImage, ScrollDelta, ScrollEvent, Styled, Window,
     canvas, div, point, prelude::*, px,
 };
-use parvi_app_kit::host::Host;
-use parvi_app_kit::widgets::kit::{self, Kind};
-use parvi_app_kit::widgets::pane;
 use std::cell::Cell;
 use std::rc::Rc;
 use std::sync::Arc;

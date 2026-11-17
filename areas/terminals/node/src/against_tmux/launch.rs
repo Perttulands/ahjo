@@ -2,8 +2,8 @@
 
 use std::path::Path;
 
-use parvi_term::engine::Engine;
-use parvi_testkit::tmux::*;
+use ahjo_term::engine::Engine;
+use ahjo_testkit::tmux::*;
 
 use crate::agent_events::hooks::Hooks;
 use crate::launch::{Config, Launch, command_line};
@@ -26,7 +26,7 @@ async fn launches_in_the_folder_at_the_size_and_deletes_exactly_one() {
         notify: false,
         size: None,
     };
-    let engine = parvi_term::engine::Engine::start(server.socket());
+    let engine = ahjo_term::engine::Engine::start(server.socket());
     let started = std::time::Instant::now();
     let first = crate::launch::launch(&engine, &config, &launch, NO_HOOKS)
         .await
@@ -60,7 +60,7 @@ async fn launches_in_the_folder_at_the_size_and_deletes_exactly_one() {
     // Hooks that can't be installed don't stop a launch: it runs without
     // them and says why, and no session is left behind by a failure.
     let hooks = Hooks::new(
-        Path::new("/opt/parvi"),
+        Path::new("/opt/ahjo"),
         "127.0.0.1:1".parse().unwrap(),
         "/dev/null/agent-hooks".into(),
         "/dev/null/config.toml".into(),

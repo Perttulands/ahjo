@@ -2,7 +2,7 @@ use super::{
     adapter::{Pointer, TokenUsage},
     transcript::{pointer_matches, records, s, text},
 };
-use parvi_term::waiting::harness::Harness;
+use ahjo_term::waiting::harness::Harness;
 use serde_json::Value;
 use std::{collections::HashMap, fs, io, path::Path};
 use time::{OffsetDateTime, format_description::well_known::Rfc3339};

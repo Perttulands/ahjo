@@ -1,12 +1,12 @@
-//! `parvi <noun> <verb> [args]`: every command of the node's areas. The
+//! `ahjo <noun> <verb> [args]`: every command of the node's areas. The
 //! command line is a client of the node's MCP tools: it reads `tools/list`
 //! for the tool `<noun>_<verb>` and its arguments, and calls it through
 //! `tools/call`, so the CLI and MCP cannot drift apart. Required arguments
 //! may be given in order; every argument is also `--name value`.
 
+use ahjo_core::Error;
 use anyhow::{Context, Result, bail};
 use axum::http::Method;
-use parvi_core::Error;
 use serde_json::{Map, Value, json};
 use std::io::Write;
 
@@ -86,8 +86,8 @@ pub async fn run(noun: &str, args: &[String], out: &mut impl Write) -> Result<i3
     if failed {
         match serde_json::from_str::<Error>(text) {
             Ok(error) if json_out => eprintln!("{}", json!({ "error": error })),
-            Ok(error) => eprintln!("parvi {noun} {verb}: {error}"),
-            Err(_) => eprintln!("parvi {noun} {verb}: {text}"),
+            Ok(error) => eprintln!("ahjo {noun} {verb}: {error}"),
+            Err(_) => eprintln!("ahjo {noun} {verb}: {text}"),
         }
         return Ok(1);
     }
@@ -100,7 +100,7 @@ pub async fn run(noun: &str, args: &[String], out: &mut impl Write) -> Result<i3
     Ok(0)
 }
 
-/// The commands, one line each, for `parvi help`.
+/// The commands, one line each, for `ahjo help`.
 pub async fn overview(node: Option<&str>) -> Result<String> {
     Ok(listing(&list(&NodeClient::new(node)?).await?))
 }
@@ -112,7 +112,7 @@ fn listing(tools: &[Value]) -> String {
     for t in tools {
         let (noun, verb) = name(t).split_once('_').unwrap_or((name(t), ""));
         let line = format!(
-            "  parvi {noun} {}  {}",
+            "  ahjo {noun} {}  {}",
             verb.replace('_', "-"),
             first_line(t)
         );
@@ -149,7 +149,7 @@ async fn rpc(client: &NodeClient, method: &str, params: Value) -> Result<Value> 
     let (answer, _) = client
         .request(Method::POST, "/mcp", Some(body), None)
         .await
-        .context("is the Parvi node running? (parvi serve)")?;
+        .context("is the Ahjo node running? (ahjo serve)")?;
     if let Some(error) = answer.get("error") {
         bail!(
             "{}",
@@ -206,10 +206,10 @@ fn verbs(noun: &str, tools: &[&Value]) -> String {
         .join("\n")
 }
 
-/// `parvi noun verb <required>... [--optional value]...`
+/// `ahjo noun verb <required>... [--optional value]...`
 fn usage(noun: &str, verb: &str, tool: &Value) -> String {
     let schema = &tool["inputSchema"];
-    let mut line = format!("parvi {noun} {verb}");
+    let mut line = format!("ahjo {noun} {verb}");
     for r in required(schema) {
         line.push_str(&format!(" <{r}>"));
     }
@@ -521,10 +521,10 @@ mod tests {
         assert_eq!(
             verbs,
             [
-                "parvi mission list",
-                "parvi mission create",
-                "parvi run list",
-                "parvi run wait"
+                "ahjo mission list",
+                "ahjo mission create",
+                "ahjo run list",
+                "ahjo run wait"
             ]
         );
     }

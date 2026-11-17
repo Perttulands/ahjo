@@ -7,10 +7,10 @@
 use crate::store::sessions;
 use crate::store::workspace::LinkState;
 use crate::term::screen::Screen;
-use parking_lot::Mutex;
-use parvi_terminals_contract::{
+use ahjo_terminals_contract::{
     Down, Launch, Launcher, MAX_SEND, Outcome, Seat, Session, Up, encode_up,
 };
+use parking_lot::Mutex;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU32, Ordering};
@@ -615,7 +615,7 @@ mod tests {
             node: "node".into(),
             id: "$1".into(),
             name: "agent".into(),
-            panes: vec![parvi_terminals_contract::Pane {
+            panes: vec![ahjo_terminals_contract::Pane {
                 id: 7,
                 cols: 80,
                 rows: 24,
@@ -663,7 +663,7 @@ mod tests {
         client.frame(Down::Sessions(vec![session.clone()]));
         client.frame(Down::PaneGone(7));
         let changed_pane = Session {
-            panes: vec![parvi_terminals_contract::Pane {
+            panes: vec![ahjo_terminals_contract::Pane {
                 id: 8,
                 cols: 80,
                 rows: 24,
@@ -714,7 +714,7 @@ mod tests {
         client
             .out
             .drain(..)
-            .filter_map(|f| parvi_terminals_contract::decode_up(&f).ok())
+            .filter_map(|f| ahjo_terminals_contract::decode_up(&f).ok())
             .filter(|up| matches!(up, Up::Claim(..)))
             .collect()
     }

@@ -1,14 +1,15 @@
-# Parvi
+# Ahjo
 
-Parvi is the operator's agent workspace: terminals, files, work, brain, host and
-missions in one Rust binary, used through a native app and the `parvi` CLI.
-`VISION.md` says what it is for, `DESIGN.md` what good looks like in the app and
-`ARCHITECTURE.md` how it is built.
+Ahjo is three apps on one app kit. Ahjo Swarm is the operator's agent
+workspace: terminals, files, work, brain, host and missions in one Rust binary,
+used through a native app and the `ahjo` CLI. Ahjo Brain and Ahjo Desk are
+standalone apps. `VISION.md` says what Swarm is for, `DESIGN.md` what good
+looks like in the app and `ARCHITECTURE.md` how it is built.
 
 ## The operator works on this machine while you do
 
 - The operator's tmux sessions survive everything you do. Tests start their own
-  tmux servers and Parvi nodes through `kit/testkit` and act only on those,
+  tmux servers and Ahjo nodes through `kit/testkit` and act only on those,
   never on the real fleet or the real Tailscale. A test needs only Rust and
   tmux: any other program (`bd`, `gh`, a harness) is a fake the test writes.
 - Other agents run at the same time. Pick unique scratch names and ports.
@@ -39,8 +40,8 @@ is good.
 ## Checks
 
 Before pushing: `cargo fmt --check`, then `cargo clippy -- -D warnings` and
-`PARVI_REQUIRE_TMUX=1 cargo test` for the crates you changed (`-p <crate>`).
-If `tmux` on `PATH` is a wrapper that refuses `kill-server`, set `PARVI_TMUX` to
+`AHJO_REQUIRE_TMUX=1 cargo test` for the crates you changed (`-p <crate>`).
+If `tmux` on `PATH` is a wrapper that refuses `kill-server`, set `AHJO_TMUX` to
 the real binary. Write a test for behaviour that could break again, not for how
 something looks. Chase a flake by reading the code and writing a deterministic
 test, not by rerunning.

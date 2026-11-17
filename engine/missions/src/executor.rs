@@ -1,7 +1,7 @@
 //! Formation-level execution boundary. Executors report events; they never
 //! write a run ledger, so this boundary can later be placed on another node.
 use crate::BindingsSnapshot;
-use parvi_mission_model::{Formation, RunInput};
+use ahjo_mission_model::{Formation, RunInput};
 use serde_json::{Map, Value, json};
 use sha2::{Digest, Sha256};
 use std::path::PathBuf;
@@ -15,7 +15,7 @@ use std::sync::{
 pub struct FormationExecution {
     pub run_id: String,
     /// What the mission's agent sessions are named under
-    /// ([`parvi_mission_model::agent_session`]); blank names seats by ids.
+    /// ([`ahjo_mission_model::agent_session`]); blank names seats by ids.
     pub prefix: String,
     /// The run's number as the Missions list shows it, naming a fresh
     /// attempt's sessions.
@@ -37,7 +37,7 @@ pub struct FormationExecution {
     pub judge: bool,
     /// For a judge picking the best attempt of a step whose Limit card is
     /// spent, the candidate attempts: the final judge picks with the
-    /// `parvi-pick` contract, earlier judges recommend.
+    /// `ahjo-pick` contract, earlier judges recommend.
     pub pick_attempts: Vec<i64>,
     pub canceled: Arc<AtomicBool>,
     pub stopping: Arc<AtomicBool>,
@@ -511,15 +511,15 @@ mod tests {
     use super::collapse_lab_blocks;
     #[test]
     fn identical_lab_verdicts_collapse_but_conflicts_remain() {
-        let a = "```parvi-verdict\n{\"verdict\":\"pass\"}\n```";
+        let a = "```ahjo-verdict\n{\"verdict\":\"pass\"}\n```";
         let duplicate = format!("first\n{a}\nsecond\n{a}");
         assert_eq!(
-            collapse_lab_blocks(&duplicate, "parvi-verdict")
-                .matches("```parvi-verdict")
+            collapse_lab_blocks(&duplicate, "ahjo-verdict")
+                .matches("```ahjo-verdict")
                 .count(),
             1
         );
         let conflict = format!("{a}\n{}", a.replace("pass", "fail"));
-        assert_eq!(collapse_lab_blocks(&conflict, "parvi-verdict"), conflict);
+        assert_eq!(collapse_lab_blocks(&conflict, "ahjo-verdict"), conflict);
     }
 }

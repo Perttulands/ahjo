@@ -36,7 +36,7 @@ fn broken_link(path: &Path, err: &std::io::Error) -> Error {
         std::fs::read_link(path).map_or_else(|_| "?".to_owned(), |t| t.display().to_string());
     let problem = match err.kind() {
         ErrorKind::NotFound => "does not exist".to_owned(),
-        ErrorKind::PermissionDenied => "Parvi's user may not reach".to_owned(),
+        ErrorKind::PermissionDenied => "Ahjo's user may not reach".to_owned(),
         _ => format!("cannot be reached: {err}"),
     };
     Error::new(

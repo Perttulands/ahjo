@@ -17,8 +17,8 @@ mod state;
 mod tokens;
 mod view;
 
+use ahjo_app_kit::{Mounted, mount};
 use gpui::App;
-use parvi_app_kit::{Mounted, mount};
 
 pub use page::ScheduledPage;
 
@@ -26,9 +26,9 @@ pub use page::ScheduledPage;
 pub const NAME: &str = "scheduled";
 
 /// The actor the app writes as.
-pub const ACTOR: &str = "user:parvi-app";
+pub const ACTOR: &str = "user:ahjo-swarm";
 
 /// Makes the page; the app lists this in its `PAGES`.
-pub fn build(host: parvi_app_kit::Host, window: &mut gpui::Window, cx: &mut App) -> Mounted {
+pub fn build(host: ahjo_app_kit::Host, window: &mut gpui::Window, cx: &mut App) -> Mounted {
     mount(host, window, cx, ScheduledPage::new)
 }

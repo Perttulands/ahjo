@@ -5,10 +5,10 @@
 
 use crate::state::{self as agents, Checkout, Chosen, Fix, Off, Report, Tone, Tool};
 use crate::{AgentsPage, tokens};
+use ahjo_app_kit::theme::{Theme, size, theme};
+use ahjo_app_kit::widgets::kit::{self, Kind};
+use ahjo_app_kit::widgets::pane;
 use gpui::{AnyElement, Context, Div, Hsla, SharedString, Window, div, prelude::*, px};
-use parvi_app_kit::theme::{Theme, size, theme};
-use parvi_app_kit::widgets::kit::{self, Kind};
-use parvi_app_kit::widgets::pane;
 
 impl AgentsPage {
     pub(crate) fn render_agents(&mut self, _: &mut Window, cx: &mut Context<Self>) -> AnyElement {

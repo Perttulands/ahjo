@@ -15,13 +15,13 @@ use crate::store::sessions::{self, Key};
 use crate::store::workspace::LinkState;
 use crate::term::paint::{self, Look};
 use crate::theme::{Theme, size, theme};
+use ahjo_app_kit::widgets::kit::{self, Kind};
+use ahjo_app_kit::widgets::pane;
+use ahjo_terminals_contract::{AgentEvent, EventKind, Session};
 use gpui::{
     AnyElement, ContentMask, Context, Entity, FontWeight, MouseButton, MouseDownEvent,
     Subscription, WeakEntity, Window, canvas, div, prelude::*, px,
 };
-use parvi_app_kit::widgets::kit::{self, Kind};
-use parvi_app_kit::widgets::pane;
-use parvi_terminals_contract::{AgentEvent, EventKind, Session};
 
 /// The rail as the side panel holds it: the page draws it, and it draws
 /// again whenever the page does.

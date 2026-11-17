@@ -13,6 +13,10 @@ use crate::term::paint::{self, Look};
 use crate::term::screen::Screen;
 use crate::term::{keys, mouse};
 use crate::theme::{Theme, alpha, size, theme};
+use ahjo_app_kit::Ask;
+use ahjo_app_kit::host::Request;
+use ahjo_app_kit::widgets::kit::{self, Kind};
+use ahjo_core::NodeId;
 use alacritty_terminal::index::{Column, Line, Point as GridPoint, Side};
 use alacritty_terminal::selection::{Selection, SelectionType};
 use alacritty_terminal::term::TermMode;
@@ -22,10 +26,6 @@ use gpui::{
     Pixels, ScrollDelta, ScrollEvent, UTF16Selection, Window, canvas, deferred, div, point,
     prelude::*, px, relative,
 };
-use parvi_app_kit::Ask;
-use parvi_app_kit::host::Request;
-use parvi_app_kit::widgets::kit::{self, Kind};
-use parvi_core::NodeId;
 use std::ops::Range;
 use std::sync::Arc;
 
@@ -291,7 +291,7 @@ impl Terminals {
         &self,
         i: usize,
         pane: u32,
-        session: &parvi_terminals_contract::Session,
+        session: &ahjo_terminals_contract::Session,
     ) -> Option<Source> {
         let at = PaneAt {
             node: session.node.clone(),
@@ -699,8 +699,8 @@ impl Terminals {
             }
         };
         let seat = session.as_ref().and_then(|s| match s.seat {
-            Some(parvi_terminals_contract::Seat::Mine) => None,
-            Some(parvi_terminals_contract::Seat::Other) => Some("viewing"),
+            Some(ahjo_terminals_contract::Seat::Mine) => None,
+            Some(ahjo_terminals_contract::Seat::Other) => Some("viewing"),
             None if s.pinned == Some(true) => Some("viewing"),
             None => None,
         });

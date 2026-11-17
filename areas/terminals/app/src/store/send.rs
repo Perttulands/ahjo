@@ -8,7 +8,7 @@
 
 use crate::store::sessions::Key;
 use crate::theme::size;
-use parvi_terminals_contract::{Outcome, Session};
+use ahjo_terminals_contract::{Outcome, Session};
 
 /// The message as the session receives it: the reference, the note, then
 /// the attached files' paths there, as CHROTE composes it.
@@ -29,7 +29,7 @@ pub fn message(reference: Option<&str>, note: &str, files: &[String]) -> String 
 }
 
 /// The line naming a session handed over, in words the receiving agent can
-/// act on: `parvi session read <name> --node <device/environment>` reads
+/// act on: `ahjo session read <name> --node <device/environment>` reads
 /// it. Where the device is not known the node's id stands in, which
 /// `--node` takes as well.
 pub fn session_reference(name: &str, place: Option<(&str, &str)>, node: &str) -> String {

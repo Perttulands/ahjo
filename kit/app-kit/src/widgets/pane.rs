@@ -444,7 +444,7 @@ pub fn vacant(t: &Theme, words: impl Into<SharedString>, action: Option<AnyEleme
 }
 
 /// A name shortened in its middle to `chars`, so both its start and its
-/// end (a path's file) still read: `parvi-own…/src/main.rs`.
+/// end (a path's file) still read: `ahjo-own…/src/main.rs`.
 pub fn middle(text: &str, chars: usize) -> String {
     let n = text.chars().count();
     if n <= chars || chars < 3 {

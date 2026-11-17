@@ -5,7 +5,7 @@
 use serde_json::{Value, json};
 
 use super::{Mcp, call_log};
-use parvi_core::Error;
+use ahjo_core::Error;
 
 /// The protocol versions this server speaks, newest first. Tools here use
 /// only what all of them share.
@@ -63,9 +63,9 @@ fn initialize(params: &Value) -> Value {
     json!({
         "protocolVersion": version,
         "capabilities": { "tools": { "listChanged": false } },
-        "serverInfo": { "name": "parvi", "version": crate::VERSION },
-        "instructions": "Parvi: the operator's node. Each tool is one of its commands, \
-            also run as `parvi <noun> <verb>`.",
+        "serverInfo": { "name": "ahjo", "version": crate::VERSION },
+        "instructions": "Ahjo: the operator's node. Each tool is one of its commands, \
+            also run as `ahjo <noun> <verb>`.",
     })
 }
 

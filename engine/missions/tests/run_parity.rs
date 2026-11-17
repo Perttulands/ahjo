@@ -1,5 +1,5 @@
-use parvi_mission_engine::{AdmissionFailure, Coordinator, LabExecutor, RunSettings};
-use parvi_mission_model::RunStart;
+use ahjo_mission_engine::{AdmissionFailure, Coordinator, LabExecutor, RunSettings};
+use ahjo_mission_model::RunStart;
 use serde_json::{Map, Value};
 use std::{
     collections::BTreeMap,
@@ -11,7 +11,7 @@ impl Scratch {
     fn new() -> Self {
         let mut b = [0; 8];
         getrandom::fill(&mut b).unwrap();
-        let p = std::env::temp_dir().join(format!("parvi-99-run-parity-{}", u64::from_ne_bytes(b)));
+        let p = std::env::temp_dir().join(format!("ahjo-99-run-parity-{}", u64::from_ne_bytes(b)));
         std::fs::create_dir_all(p.join("missions")).unwrap();
         std::fs::create_dir_all(p.join("roles")).unwrap();
         std::fs::write(
@@ -98,11 +98,11 @@ fn solo_lab_ledger_and_admission_findings_match_archon() {
         panic!("admission did not reject")
     };
     assert!(findings.iter().any(|finding| finding.code
-        == parvi_mission_model::Code::UnsupportedFormation
+        == ahjo_mission_model::Code::UnsupportedFormation
         && finding.node_id == "staff"));
     let comparable: Vec<_> = findings
         .into_iter()
-        .filter(|finding| finding.code != parvi_mission_model::Code::UnsupportedFormation)
+        .filter(|finding| finding.code != ahjo_mission_model::Code::UnsupportedFormation)
         .collect();
     let actual = serde_json::to_value(comparable).unwrap();
     let expected: Value = serde_json::from_str(include_str!(

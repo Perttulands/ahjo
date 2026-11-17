@@ -1,15 +1,15 @@
 #![cfg(unix)]
+use ahjo_app_kit::{Ask, Host, Mounted, Page, ask::Answers, mount};
+use ahjo_core::NodeId;
+use ahjo_mission_engine::{
+    ExecutionSink, Executor, FormationExecution, FormationResult, LabExecutor,
+};
+use ahjo_node_kit::{Built, Listing, Setup};
+use ahjo_testkit::{node::Node, sessions};
 use gpui::{
     App, AppContext, Context, IntoElement, Modifiers, ParentElement, TestAppContext,
     VisualTestContext, Window, div, point, px,
 };
-use parvi_app_kit::{Ask, Host, Mounted, Page, ask::Answers, mount};
-use parvi_core::NodeId;
-use parvi_mission_engine::{
-    ExecutionSink, Executor, FormationExecution, FormationResult, LabExecutor,
-};
-use parvi_node_kit::{Built, Listing, Setup};
-use parvi_testkit::{node::Node, sessions};
 use serde_json::{Value, json};
 use std::{
     sync::{Mutex, mpsc},
@@ -52,7 +52,7 @@ impl Executor for Scripted {
         &self,
         request: FormationExecution,
         sink: ExecutionSink,
-    ) -> Result<FormationResult, parvi_core::Error> {
+    ) -> Result<FormationResult, ahjo_core::Error> {
         let judge = request.formation.id == "fmn_judge";
         let attempt = request.attempt;
         let path = request.artifact_dir.join("result.png");
@@ -65,7 +65,7 @@ impl Executor for Scripted {
                 "covered"
             };
             let text = format!(
-                "```parvi-verdict\n{}\n```",
+                "```ahjo-verdict\n{}\n```",
                 json!({"verdict":verdict,"reason":reason,"evidence":[]})
             );
             result.text = text.clone();
@@ -80,11 +80,11 @@ impl Executor for Scripted {
     }
 }
 fn build(setup: &Setup) -> anyhow::Result<Built> {
-    parvi_missions::build_with_executor(setup, Some(Box::new(Scripted)))
+    ahjo_missions::build_with_executor(setup, Some(Box::new(Scripted)))
 }
 const MISSIONS: Listing = Listing {
     build,
-    ..parvi_missions::LISTING
+    ..ahjo_missions::LISTING
 };
 fn mission() -> String {
     let solo = include_str!("fixtures/solo-lab.mission.toml");
@@ -125,7 +125,7 @@ fn start() -> Running {
     let (stop, stopped) = mpsc::channel();
     let thread = std::thread::spawn(move || {
         tokio::runtime::Runtime::new().unwrap().block_on(async move {
-        let node = Node::start(&[sessions::LISTING, parvi_work::LISTING, parvi_files::LISTING, MISSIONS], "[files]\nroots = ['/tmp']\n").await.unwrap();
+        let node = Node::start(&[sessions::LISTING, ahjo_work::LISTING, ahjo_files::LISTING, MISSIONS], "[files]\nroots = ['/tmp']\n").await.unwrap();
         let dir = node.dir().join("missions/missions");
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(dir.join("hello.mission.toml"), mission()).unwrap();
@@ -202,17 +202,17 @@ fn evidence_links_and_attempt_images(cx: &mut TestAppContext) {
     let running = start();
     cx.executor().allow_parking();
     cx.update(|cx| {
-        parvi_app_shell::prepare(cx);
-        cx.set_app_identity("io.parvi.evidence-test", "Parvi evidence test");
+        ahjo_app_shell::prepare(cx);
+        cx.set_app_identity("io.ahjo.evidence-test", "Ahjo evidence test");
     });
     let settings = std::env::temp_dir()
-        .join(format!("parvi-evidence-{}", std::process::id()))
+        .join(format!("ahjo-evidence-{}", std::process::id()))
         .join("app.json");
     std::fs::create_dir_all(settings.parent().unwrap()).unwrap();
     let url = running.url.clone();
     let (shell, cx) = cx.add_window_view(move |window, cx| {
-        parvi_app_shell::start(
-            &[parvi_missions_app::build, toy_files],
+        ahjo_app_shell::start(
+            &[ahjo_missions_app::build, toy_files],
             Some(url),
             Some(settings),
             window,

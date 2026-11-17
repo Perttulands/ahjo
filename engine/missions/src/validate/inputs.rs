@@ -4,9 +4,7 @@
 use std::collections::HashSet;
 
 use super::possessive;
-use parvi_mission_model::{
-    Code, Finding, KIND_FILE, KIND_FOLDER, KIND_TEXT, Mission, MissionInput,
-};
+use ahjo_mission_model::{Code, Finding, KIND_FILE, KIND_FOLDER, KIND_TEXT, Mission, MissionInput};
 
 /// The input of a mission that declares none.
 pub const IMPLICIT_INPUT: &str = "brief";

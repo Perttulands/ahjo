@@ -1,6 +1,6 @@
 //! Formation titles, staffing and controller selection.
 use crate::Error;
-use parvi_mission_model::{Mission, Patch};
+use ahjo_mission_model::{Mission, Patch};
 use toml_edit::{DocumentMut, Item, TableLike, Value, value};
 fn not_found() -> Error {
     Error::new("not_found", "formation or slot")
@@ -45,7 +45,7 @@ pub(crate) fn check_work(work: &str) -> Result<(), Error> {
     if work.is_empty() {
         return Ok(());
     }
-    parvi_work_ref::parse(work)
+    ahjo_work_ref::parse(work)
         .map(|_| ())
         .map_err(|invalid| Error::new("invalid_bead_id", invalid.to_string()))
 }
@@ -144,7 +144,7 @@ pub(crate) fn apply(doc: &mut DocumentMut, mission: &Mission, patch: Patch) -> R
                 .find(|s| s.id == slot_id)
                 .ok_or_else(not_found)?;
             let agent = agent.trim();
-            if !agent.is_empty() && !parvi_mission_model::valid_agent(agent) {
+            if !agent.is_empty() && !ahjo_mission_model::valid_agent(agent) {
                 return Err(Error::new(
                     "invalid_agent",
                     "an agent's name is lower-case words of letters and digits joined by dashes",
@@ -224,7 +224,7 @@ pub(crate) fn apply(doc: &mut DocumentMut, mission: &Mission, patch: Patch) -> R
             };
             let from = find(&from_formation, &from_slot)?;
             let to = find(&to_formation, &to_slot)?;
-            let settings = |s: &parvi_mission_model::Slot| {
+            let settings = |s: &ahjo_mission_model::Slot| {
                 [
                     s.agent_id.clone(),
                     s.harness.clone(),

@@ -1,15 +1,15 @@
 #![cfg(unix)]
+use ahjo_app_kit::link::client::LinkState;
+use ahjo_node_kit::{Listing, NodeClient};
+use ahjo_testkit::{node::Node, sessions};
 use gpui::{Modifiers, TestAppContext, VisualTestContext};
-use parvi_app_kit::link::client::LinkState;
-use parvi_node_kit::{Listing, NodeClient};
-use parvi_testkit::{node::Node, sessions};
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
 const AREAS: &[Listing] = &[
     sessions::LISTING,
-    parvi_work::LISTING,
-    parvi_missions::LISTING,
+    ahjo_work::LISTING,
+    ahjo_missions::LISTING,
 ];
 struct Running {
     url: String,
@@ -78,15 +78,15 @@ fn until(
 fn canvas_shows_exact_findings_on_cards_and_edges_and_clears_them(cx: &mut TestAppContext) {
     let running = start();
     let settings = std::env::temp_dir()
-        .join(format!("parvi-canvas-findings-{}", std::process::id()))
+        .join(format!("ahjo-canvas-findings-{}", std::process::id()))
         .join("app.json");
     std::fs::create_dir_all(settings.parent().unwrap()).unwrap();
     cx.executor().allow_parking();
-    cx.update(parvi_app_shell::prepare);
+    cx.update(ahjo_app_shell::prepare);
     let url = running.url.clone();
     let (shell, cx) = cx.add_window_view(move |window, cx| {
-        parvi_app_shell::start(
-            &[parvi_missions_app::build],
+        ahjo_app_shell::start(
+            &[ahjo_missions_app::build],
             Some(url),
             Some(settings),
             window,
@@ -154,7 +154,7 @@ fn canvas_shows_exact_findings_on_cards_and_edges_and_clears_them(cx: &mut TestA
             None,
         ))
         .unwrap();
-    let mission = parvi_missions_contract::Mission::parse(include_str!(
+    let mission = ahjo_missions_contract::Mission::parse(include_str!(
         "fixtures/validation-clean.mission.toml"
     ))
     .unwrap();
@@ -167,9 +167,8 @@ fn canvas_shows_exact_findings_on_cards_and_edges_and_clears_them(cx: &mut TestA
                 && finding["message"].as_str().unwrap().contains("step_work")
         })
         .unwrap();
-    let finding: parvi_missions_contract::Finding =
-        serde_json::from_value(finding.clone()).unwrap();
-    let text = parvi_missions_app::store::validation::todo_line(&mission, &finding);
+    let finding: ahjo_missions_contract::Finding = serde_json::from_value(finding.clone()).unwrap();
+    let text = ahjo_missions_app::store::validation::todo_line(&mission, &finding);
     assert!(!text.contains("step_work") && !text.contains(finding.code.as_str()));
     let selector = Box::leak(format!("validation-display-{text}").into_boxed_str());
     assert!(cx.debug_bounds(selector).is_some(), "{selector}");

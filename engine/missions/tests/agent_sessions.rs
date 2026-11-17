@@ -2,8 +2,8 @@
 //! prefix: a live one is used where it already runs and outlives the run;
 //! a dispatch that wants it while another holds it gets a session of its
 //! own, ended with it.
-use parvi_mission_engine::{Dispatch, LocalSeats, TranscriptRoots};
-use parvi_testkit::{
+use ahjo_mission_engine::{Dispatch, LocalSeats, TranscriptRoots};
+use ahjo_testkit::{
     node::Node,
     tmux::{Server, stubbed_path, write_script},
 };
@@ -65,7 +65,7 @@ async fn an_agents_live_session_is_used_and_outlives_the_run() {
         .to_owned();
 
     let config = format!("[terminals]\nsocket = {:?}\n", server.socket_path());
-    let node = Node::start(&[parvi_terminals::LISTING], &config)
+    let node = Node::start(&[ahjo_terminals::LISTING], &config)
         .await
         .unwrap();
     let seats = LocalSeats::new(

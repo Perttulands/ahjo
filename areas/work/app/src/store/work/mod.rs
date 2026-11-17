@@ -14,8 +14,8 @@ pub mod tests;
 
 pub use links::Links;
 
-use parvi_work_contract::text::haystack;
-use parvi_work_contract::{Family, ProjectView as Project, Snapshot};
+use ahjo_work_contract::text::haystack;
+use ahjo_work_contract::{Family, ProjectView as Project, Snapshot};
 use std::collections::HashMap;
 
 /// The status partition, in the order a sort ranks it.
@@ -87,7 +87,7 @@ pub struct PullFacts {
     pub additions: u32,
     pub deletions: u32,
     pub closes: Vec<u32>,
-    pub checks: Option<parvi_work_contract::Checks>,
+    pub checks: Option<ahjo_work_contract::Checks>,
 }
 
 /// One item: a Bead, an issue or a pull request.
@@ -180,7 +180,7 @@ fn base_name(path: &str) -> &str {
 
 /// The prefix most of a store's ids carry: a Bead moved in from another
 /// store keeps its own.
-fn common_prefix(items: &[parvi_work_contract::Item]) -> Option<String> {
+fn common_prefix(items: &[ahjo_work_contract::Item]) -> Option<String> {
     let mut n: HashMap<&str, usize> = HashMap::new();
     for i in items {
         *n.entry(prefix(&i.id)).or_default() += 1;
@@ -257,8 +257,7 @@ impl Board {
                         read: r.work.is_some(),
                         total: issues.len() + pulls.len(),
                     });
-                    let reference =
-                        |n: u32| parvi_work_contract::text::github_reference(&r.name, n);
+                    let reference = |n: u32| ahjo_work_contract::text::github_reference(&r.name, n);
                     for i in issues {
                         let n = i.number;
                         b.rows.push(Row {
@@ -269,12 +268,12 @@ impl Board {
                             number: Some(n),
                             kind: "issue".into(),
                             status: Status::of(match i.state {
-                                parvi_work_contract::IssueState::Open => "open",
-                                parvi_work_contract::IssueState::Closed => "closed",
+                                ahjo_work_contract::IssueState::Open => "open",
+                                ahjo_work_contract::IssueState::Closed => "closed",
                             }),
                             raw_status: match i.state {
-                                parvi_work_contract::IssueState::Open => "open",
-                                parvi_work_contract::IssueState::Closed => "closed",
+                                ahjo_work_contract::IssueState::Open => "open",
+                                ahjo_work_contract::IssueState::Closed => "closed",
                             }
                             .into(),
                             title: i.title,
@@ -305,16 +304,16 @@ impl Board {
                             number: Some(n),
                             kind: "pull".into(),
                             status: Status::of(match p.state {
-                                parvi_work_contract::PullState::Open => "open",
-                                parvi_work_contract::PullState::Draft => "draft",
-                                parvi_work_contract::PullState::Merged => "merged",
-                                parvi_work_contract::PullState::Closed => "closed",
+                                ahjo_work_contract::PullState::Open => "open",
+                                ahjo_work_contract::PullState::Draft => "draft",
+                                ahjo_work_contract::PullState::Merged => "merged",
+                                ahjo_work_contract::PullState::Closed => "closed",
                             }),
                             raw_status: match p.state {
-                                parvi_work_contract::PullState::Open => "open",
-                                parvi_work_contract::PullState::Draft => "draft",
-                                parvi_work_contract::PullState::Merged => "merged",
-                                parvi_work_contract::PullState::Closed => "closed",
+                                ahjo_work_contract::PullState::Open => "open",
+                                ahjo_work_contract::PullState::Draft => "draft",
+                                ahjo_work_contract::PullState::Merged => "merged",
+                                ahjo_work_contract::PullState::Closed => "closed",
                             }
                             .into(),
                             title: p.title,
@@ -354,7 +353,7 @@ impl Board {
 
     /// A board for one item read on demand, with the projects that hold
     /// the rows its family names. The item read wins over an older copy.
-    pub fn from_item(item: parvi_work_contract::Item, projects: &[Project]) -> Board {
+    pub fn from_item(item: ahjo_work_contract::Item, projects: &[Project]) -> Board {
         let reference = item.reference.clone();
         let github = reference
             .strip_prefix("gh:")
@@ -368,7 +367,7 @@ impl Board {
             .unwrap_or_default();
         let snapshot = Snapshot {
             refreshed: 0,
-            projects: vec![Project::Beads(parvi_work_contract::StoreView {
+            projects: vec![Project::Beads(ahjo_work_contract::StoreView {
                 folder,
                 items: Some(vec![item]),
                 ..Default::default()

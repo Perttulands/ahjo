@@ -262,8 +262,7 @@ mod tests {
     use super::*;
 
     fn scratch(name: &str) -> PathBuf {
-        let dir =
-            std::env::temp_dir().join(format!("parvi-64-roles-{name}-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("ahjo-64-roles-{name}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         dir
@@ -271,7 +270,7 @@ mod tests {
 
     #[test]
     fn built_in_roles_answer_without_a_directory() {
-        let store = RoleStore::new("/nonexistent/parvi-64");
+        let store = RoleStore::new("/nonexistent/ahjo-64");
         let judge = store.read("judge").unwrap();
         assert!(judge.builtin);
         assert_eq!(judge.kind, "judge");

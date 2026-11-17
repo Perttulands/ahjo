@@ -420,7 +420,7 @@ fn names_a_file(word: &str) -> bool {
 /// Recognize complete tokens, so a path or a larger word is never offered as
 /// a partial item id. Soft-wrapped rows have already been joined by `Text`.
 fn work_items(t: &[char]) -> Vec<(usize, usize)> {
-    use parvi_work_contract::work_ref::{is_bead_id, is_repo_part};
+    use ahjo_work_contract::work_ref::{is_bead_id, is_repo_part};
     let token = |c: char| c.is_ascii_alphanumeric() || "_./-#".contains(c);
     let mut found = Vec::new();
     let mut i = 0;
@@ -549,9 +549,9 @@ mod tests {
 
     #[test]
     fn a_path_opens_without_its_line_number_or_punctuation() {
-        let s = screen(60, 2, "wrote /srv/parvi/src/main.rs:12, done");
+        let s = screen(60, 2, "wrote /srv/ahjo/src/main.rs:12, done");
         let l = link(&s, 0, 8).unwrap();
-        assert_eq!(l.target, Target::Path("/srv/parvi/src/main.rs".into()));
+        assert_eq!(l.target, Target::Path("/srv/ahjo/src/main.rs".into()));
         assert_eq!(link(&s, 0, 3), None);
         // A lone slash, or a word with slashes but no file in it, is not a link.
         let s = screen(60, 2, "a/b and / alone");
@@ -591,22 +591,22 @@ mod tests {
     #[test]
     fn a_quoted_path_broken_at_the_margin_opens_whole() {
         // Claude Code breaks a long line itself and indents what follows.
-        let s = screen(20, 4, "  Read(\"/srv/parvi/c\n  rates/app/x.rs\")\n");
-        let want = Target::Path("/srv/parvi/crates/app/x.rs".into());
+        let s = screen(19, 4, "  Read(\"/srv/ahjo/c\n  rates/app/x.rs\")\n");
+        let want = Target::Path("/srv/ahjo/crates/app/x.rs".into());
         assert_eq!(link(&s, 0, 10).unwrap().target, want);
         let l = link(&s, 1, 4).unwrap();
         assert_eq!(l.target, want);
-        assert_eq!(l.cells.len(), "/srv/parvi/crates/app/x.rs".chars().count());
+        assert_eq!(l.cells.len(), "/srv/ahjo/crates/app/x.rs".chars().count());
         // The indentation is not part of it.
         assert_eq!(link(&s, 1, 0), None);
     }
 
     #[test]
     fn a_hard_break_not_at_the_margin_is_not_joined() {
-        let s = screen(30, 4, "  Read(\"/srv/parvi/c\n  rates/app/x.rs\")\n");
+        let s = screen(30, 4, "  Read(\"/srv/ahjo/c\n  rates/app/x.rs\")\n");
         assert_eq!(
             link(&s, 0, 10).unwrap().target,
-            Target::Path("/srv/parvi/c".into())
+            Target::Path("/srv/ahjo/c".into())
         );
         assert_eq!(link(&s, 1, 4), None);
     }
@@ -624,10 +624,10 @@ mod tests {
         let s = screen(
             80,
             3,
-            "parvi-abc parvi-pnu.7.3 #42 octo/repo#42 word /srv/parvi-abc",
+            "ahjo-abc parvi-pnu.7.3 #42 octo/repo#42 word /srv/ahjo-abc",
         );
         for (col, id) in [
-            (0, "parvi-abc"),
+            (0, "ahjo-abc"),
             (11, "parvi-pnu.7.3"),
             (25, "#42"),
             (30, "octo/repo#42"),

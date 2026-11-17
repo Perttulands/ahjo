@@ -1,7 +1,7 @@
 //! Rebuild pending deliveries and open work in ledger order.
 use crate::graph::{endpoint_node, endpoint_port, judge_chain, outgoing, outgoing_from_port};
 use crate::{GateFeedback, GateResponse, RoutedInput, RunEvent, merge_port_inputs};
-use parvi_mission_model::{Mission, PublicOrigin};
+use ahjo_mission_model::{Mission, PublicOrigin};
 use std::collections::{BTreeMap, BTreeSet, HashSet, VecDeque};
 
 #[derive(Default)]
@@ -338,7 +338,7 @@ pub(crate) fn note_waiting(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use parvi_mission_model::{Connection, Formation, Gate, Port};
+    use ahjo_mission_model::{Connection, Formation, Gate, Port};
     use serde_json::json;
     fn ev(seq: u64, kind: &str, node: &str, data: serde_json::Value) -> RunEvent {
         RunEvent {
@@ -445,7 +445,7 @@ mod tests {
                 id: "gate".into(),
                 ..Default::default()
             }],
-            ends: vec![parvi_mission_model::End {
+            ends: vec![ahjo_mission_model::End {
                 id: "end".into(),
                 title: "No".into(),
                 outcome: "rejected".into(),

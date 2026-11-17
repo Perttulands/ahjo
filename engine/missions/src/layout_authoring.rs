@@ -1,6 +1,6 @@
 //! Revision-associated canvas positions and wire lanes.
 use crate::{Error, Store};
-use parvi_mission_model::{Layout, LayoutEdit, LayoutPatch};
+use ahjo_mission_model::{Layout, LayoutEdit, LayoutPatch};
 use toml_edit::{DocumentMut, value};
 
 impl Store {

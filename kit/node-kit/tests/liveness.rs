@@ -6,9 +6,9 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
+use ahjo_core::frame::Kinds;
+use ahjo_node_kit::{Area, BoxFuture, Built, Channel, Client, Config, Listing, Options, Setup};
 use futures_util::StreamExt;
-use parvi_core::frame::Kinds;
-use parvi_node_kit::{Area, BoxFuture, Built, Channel, Client, Config, Listing, Options, Setup};
 
 /// Whether each client's holding has been given back, in connection order.
 static HELD: std::sync::Mutex<Vec<Arc<AtomicBool>>> = std::sync::Mutex::new(Vec::new());
@@ -50,8 +50,8 @@ fn holding(_: &Setup) -> anyhow::Result<Built> {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn a_silent_client_is_let_go_and_an_answering_one_kept() {
-    parvi_node_kit::set_liveness(Duration::from_millis(100), Duration::from_millis(400));
-    let dir = std::env::temp_dir().join(format!("parvi-liveness-{}", std::process::id()));
+    ahjo_node_kit::set_liveness(Duration::from_millis(100), Duration::from_millis(400));
+    let dir = std::env::temp_dir().join(format!("ahjo-liveness-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     let listing = Listing {
         name: "holding",
@@ -59,7 +59,7 @@ async fn a_silent_client_is_let_go_and_an_answering_one_kept() {
         commands: &[],
         build: holding,
     };
-    let node = parvi_node_kit::start(
+    let node = ahjo_node_kit::start(
         Options {
             config: Config::parse("", dir.clone()).unwrap(),
             dir,

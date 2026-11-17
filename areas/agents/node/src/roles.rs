@@ -1,4 +1,8 @@
 //! Role cards share the mission engine's storage and reference locks.
+use ahjo_agents_contract::roles::{Note, PATH, Role, Roles, Unreadable, Usage};
+use ahjo_core::Error;
+use ahjo_mission_engine::{RoleCard, RoleEdit, RoleStore};
+use ahjo_node_kit::{Command, args::object};
 use axum::{
     Router,
     body::Bytes,
@@ -7,10 +11,6 @@ use axum::{
     response::{IntoResponse, Response},
     routing::get,
 };
-use parvi_agents_contract::roles::{Note, PATH, Role, Roles, Unreadable, Usage};
-use parvi_core::Error;
-use parvi_mission_engine::{RoleCard, RoleEdit, RoleStore};
-use parvi_node_kit::{Command, args::object};
 use serde_json::{Value, json};
 use std::{path::PathBuf, sync::Arc};
 
@@ -21,7 +21,7 @@ pub struct Service {
 impl Service {
     pub fn new(root: PathBuf, codex_home: Option<PathBuf>) -> Self {
         Self {
-            store: parvi_mission_engine::Store::new(root).roles(),
+            store: ahjo_mission_engine::Store::new(root).roles(),
             codex_home,
         }
     }
@@ -59,8 +59,8 @@ impl Service {
             cards.retain(|c| c.status != "retired");
         }
         let harnesses = self.codex_home.as_deref().map_or_else(
-            parvi_mission_engine::Harnesses::from_host,
-            parvi_mission_engine::Harnesses::from_codex_home,
+            ahjo_mission_engine::Harnesses::from_host,
+            ahjo_mission_engine::Harnesses::from_codex_home,
         );
         let harnesses = [
             (
@@ -74,7 +74,7 @@ impl Service {
             ("pi", &["low", "medium", "high", "xhigh", "max"][..]),
         ]
         .into_iter()
-        .map(|(id, efforts)| parvi_agents_contract::roles::Harness {
+        .map(|(id, efforts)| ahjo_agents_contract::roles::Harness {
             id: id.into(),
             efforts: efforts.iter().map(|s| (*s).into()).collect(),
             models: harnesses.models(id),
@@ -101,7 +101,7 @@ impl Service {
             ]
             .into_iter()
             .map(
-                |(effort, usage)| parvi_agents_contract::roles::EffortPolicy {
+                |(effort, usage)| ahjo_agents_contract::roles::EffortPolicy {
                     effort: effort.into(),
                     usage: usage.into(),
                 },
@@ -363,7 +363,7 @@ pub fn commands(s: Arc<Service>, node: String) -> Vec<Command> {
                     "role_edit" => json!(s.edit(id, &version()?, &args["change"])?),
                     "role_retire" | "role_restore" => { let usage = s.usage(id)?; let mut role = json!(s.edit(id, &version()?, &json!({"retire":name == "role_retire"}))?); role["usage"] = json!(usage); role },
                     "role_delete" => s.delete(id, &version()?)?,
-                    "role_characters" => json!({"characters": parvi_mission_engine::CharacterStore::new(s.store.dir()).list()?}),
+                    "role_characters" => json!({"characters": ahjo_mission_engine::CharacterStore::new(s.store.dir()).list()?}),
                     _ => unreachable!(),
                 };
                 result["node"] = json!(node);

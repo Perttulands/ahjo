@@ -363,8 +363,7 @@ mod tests {
     fn scratch() -> PathBuf {
         let mut id = [0u8; 8];
         getrandom::fill(&mut id).unwrap();
-        let root =
-            std::env::temp_dir().join(format!("parvi-102-copy-{:x}", u64::from_ne_bytes(id)));
+        let root = std::env::temp_dir().join(format!("ahjo-102-copy-{:x}", u64::from_ne_bytes(id)));
         fs::create_dir(&root).unwrap();
         root
     }

@@ -1,4 +1,4 @@
-//! `parvi hook <url> [--then <command…>] [payload]`: what a program's own
+//! `ahjo hook <url> [--then <command…>] [payload]`: what a program's own
 //! hook runs to tell the node something. It posts the payload to `url` on
 //! this machine's node and exits 0 whatever happens: no notice is worth
 //! stalling the program that sent it. The payload is the last argument, or
@@ -55,13 +55,13 @@ pub fn report(args: &[String]) {
         }
     };
     if let Err(error) = post(url, &payload) {
-        eprintln!("parvi {VERB}: {error:#}");
+        eprintln!("ahjo {VERB}: {error:#}");
     }
     match theirs {
         Some(Ok(mut child)) => {
             let _ = child.wait();
         }
-        Some(Err(error)) => eprintln!("parvi {VERB}: {error:#}"),
+        Some(Err(error)) => eprintln!("ahjo {VERB}: {error:#}"),
         None => {}
     }
 }
@@ -102,7 +102,7 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn the_command_after_then_gets_the_payload_when_the_node_is_gone() {
-        let dir = std::env::temp_dir().join(format!("parvi-hook-then-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("ahjo-hook-then-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let out = dir.join("theirs");
         let script = format!("printf %s \"$1\" > '{}'", out.display());

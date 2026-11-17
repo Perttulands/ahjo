@@ -3,7 +3,7 @@
 
 use super::outline::{self, Line};
 use super::*;
-use parvi_work_contract::{Item, RepoView as Repo, StoreView as Store};
+use ahjo_work_contract::{Item, RepoView as Repo, StoreView as Store};
 
 /// Noon UTC on 2026-10-21, the day CHROTE's cases are written for.
 const NOW: u64 = 1_792_584_000_000;

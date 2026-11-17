@@ -1,7 +1,7 @@
 //! What the host is, read once at start: names that do not change while the
 //! node runs.
 
-pub use parvi_host_contract::Facts;
+pub use ahjo_host_contract::Facts;
 
 #[cfg(not(windows))]
 pub fn read() -> Facts {

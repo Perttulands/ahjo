@@ -1,14 +1,14 @@
 use crate::{AgentsPage, role_state as role_library, tokens};
-use gpui::{AnyElement, AppContext, Context, Entity, SharedString, Window, div, prelude::*, px};
-use parvi_agents_contract::roles::{Role, Roles, Usage};
-use parvi_app_kit::link::http::ANSWER;
-use parvi_app_kit::menu::MenuRow;
-use parvi_app_kit::theme::{size, theme};
-use parvi_app_kit::widgets::{
+use ahjo_agents_contract::roles::{Role, Roles, Usage};
+use ahjo_app_kit::link::http::ANSWER;
+use ahjo_app_kit::menu::MenuRow;
+use ahjo_app_kit::theme::{size, theme};
+use ahjo_app_kit::widgets::{
     field::TextField,
     kit::{self, Kind},
     pane,
 };
+use gpui::{AnyElement, AppContext, Context, Entity, SharedString, Window, div, prelude::*, px};
 use serde_json::json;
 
 #[derive(Default)]
@@ -28,7 +28,7 @@ pub(crate) struct Library {
 }
 /// A role's mark: its initials on its own colour, the same wherever the
 /// role is named.
-fn role_mark(t: &parvi_app_kit::theme::Theme, id: &str, side: f32) -> gpui::Div {
+fn role_mark(t: &ahjo_app_kit::theme::Theme, id: &str, side: f32) -> gpui::Div {
     let initials: String = id
         .split(['-', '_', ' '])
         .filter_map(|w| w.chars().next())
@@ -60,13 +60,13 @@ fn role_path(id: &str) -> String {
     format!("/api/roles/{}", id)
 }
 pub(crate) fn response<T: serde::de::DeserializeOwned>(
-    answer: Result<(u16, Vec<u8>), parvi_core::Error>,
+    answer: Result<(u16, Vec<u8>), ahjo_core::Error>,
 ) -> Result<T, String> {
     match answer {
         Ok((status, body)) if (200..300).contains(&status) => {
             serde_json::from_slice(&body).map_err(|e| e.to_string())
         }
-        Ok((status, body)) => Err(parvi_app_kit::host::Answer { status, body }.error_text()),
+        Ok((status, body)) => Err(ahjo_app_kit::host::Answer { status, body }.error_text()),
         Err(e) => Err(e.to_string()),
     }
 }
@@ -85,7 +85,7 @@ impl AgentsPage {
         path: &str,
         body: Option<serde_json::Value>,
         cx: &mut Context<Self>,
-        done: impl FnOnce(&mut Self, Result<(u16, Vec<u8>), parvi_core::Error>, &mut Context<Self>)
+        done: impl FnOnce(&mut Self, Result<(u16, Vec<u8>), ahjo_core::Error>, &mut Context<Self>)
         + 'static,
     ) {
         self.mission_request(
@@ -106,12 +106,12 @@ impl AgentsPage {
         node: &str,
         call: Call,
         cx: &mut Context<Self>,
-        done: impl FnOnce(&mut Self, Result<(u16, Vec<u8>), parvi_core::Error>, &mut Context<Self>)
+        done: impl FnOnce(&mut Self, Result<(u16, Vec<u8>), ahjo_core::Error>, &mut Context<Self>)
         + 'static,
     ) {
-        let mut req = parvi_app_kit::host::Request::new(
+        let mut req = ahjo_app_kit::host::Request::new(
             call.method,
-            parvi_core::NodeId(node.into()),
+            ahjo_core::NodeId(node.into()),
             call.path,
         )
         .within(call.wait);
@@ -638,10 +638,10 @@ impl AgentsPage {
                             .tooltip(kit::tip("Show it in Missions"))
                             .on_click(cx.listener(move |s, _, _, cx| {
                                 let _ = s.host.ask(
-                                    parvi_app_kit::Ask::Reveal {
+                                    ahjo_app_kit::Ask::Reveal {
                                         what: "mission".into(),
                                         id: slug.clone(),
-                                        node: Some(parvi_core::NodeId(node.clone())),
+                                        node: Some(ahjo_core::NodeId(node.clone())),
                                         part: None,
                                         beside: false,
                                     },

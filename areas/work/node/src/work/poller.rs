@@ -3,13 +3,13 @@
 //! the last, so an unwatched Work tab costs nothing (AGENTS.md: timers run
 //! only while something subscribes). A Beads store is read as soon as
 //! watching starts and then again only when its Dolt manifest changed since
-//! the last attempt, failed or not; a store without a manifest Parvi can
+//! the last attempt, failed or not; a store without a manifest Ahjo can
 //! read is not read again until watching starts anew, and says so. GitHub
 //! is read when watching starts (unless it was read less than [`EVERY`]
 //! ago, across watches) and again only when a watcher asks for it with
 //! [`Work::refresh`]: nothing rereads a remote store on a timer
 //! (`/srv/AGENTS.md`, Background work). A refresh, as a Refresh press or
-//! `parvi work list` asks, reads a Beads store only if its marker moved or
+//! `ahjo work list` asks, reads a Beads store only if its marker moved or
 //! it has none. Each read is kept beside the node's configuration with its
 //! marker, so a node that starts again shows the stores at once.
 
@@ -135,9 +135,9 @@ impl Work {
     /// File an item and return its canonical reference.
     pub async fn create(
         &self,
-        request: &parvi_work_contract::Create,
-    ) -> Result<String, parvi_core::Error> {
-        use parvi_core::Error;
+        request: &ahjo_work_contract::Create,
+    ) -> Result<String, ahjo_core::Error> {
+        use ahjo_core::Error;
         if !["bug", "task", "feature"].contains(&request.kind.as_str()) {
             return Err(Error::new(
                 "bad_request",
@@ -519,7 +519,7 @@ pub(super) mod tests {
 
     impl Fake {
         pub fn new(test: &str, gh: &str, bd: &str) -> Fake {
-            let dir = std::env::temp_dir().join(format!("parvi-179-{test}-{}", std::process::id()));
+            let dir = std::env::temp_dir().join(format!("ahjo-179-{test}-{}", std::process::id()));
             let _ = std::fs::remove_dir_all(&dir);
             std::fs::create_dir_all(dir.join("store/.beads/embeddeddolt/tst/.dolt/noms")).unwrap();
             let fake = Fake { dir };
@@ -579,10 +579,10 @@ pub(super) mod tests {
         format!("cat '{path}{name}'")
     }
 
-    fn parvi() -> Project {
+    fn ahjo() -> Project {
         Project::GitHub(Repo {
-            name: "example-owner/parvi".into(),
-            checkout: Some("~/parvi".into()),
+            name: "example-owner/ahjo".into(),
+            checkout: Some("~/ahjo".into()),
         })
     }
 
@@ -662,9 +662,9 @@ pub(super) mod tests {
 
     #[tokio::test]
     async fn reads_only_while_watched() {
-        let fake = Fake::new("watched", &fixture("parvi.json"), &fixture("beads.json"));
+        let fake = Fake::new("watched", &fixture("ahjo.json"), &fixture("beads.json"));
         let work = fake.work(vec![
-            parvi(),
+            ahjo(),
             Project::Beads(Store {
                 folder: fake.store(),
             }),
@@ -677,14 +677,14 @@ pub(super) mod tests {
 
         let mut watching = work.subscribe();
         let first = watching.next().await;
-        assert_eq!(repo(&first, 0).checkout.as_deref(), Some("~/parvi"));
+        assert_eq!(repo(&first, 0).checkout.as_deref(), Some("~/ahjo"));
         assert_eq!(store(&first, 1).items, None);
         let mut read = watching.next().await;
         // The two reads run at once and either may land first.
         while store(&read, 1).items.is_none() || repo(&read, 0).synced.is_none() {
             read = watching.next().await;
         }
-        assert_eq!(fake.runs("gh"), vec!["owner=example-owner name=parvi"]);
+        assert_eq!(fake.runs("gh"), vec!["owner=example-owner name=ahjo"]);
         assert_eq!(fake.runs("bd"), vec!["--json list --status all --limit 0"]);
         assert!(repo(&read, 0).synced.is_some());
         assert_eq!(repo(&read, 0).work.as_ref().unwrap().open_issues, 15);
@@ -829,7 +829,7 @@ pub(super) mod tests {
             "echo 'Error: database locked' >&2; exit 1",
         );
         let work = fake.work(vec![
-            parvi(),
+            ahjo(),
             Project::Beads(Store {
                 folder: fake.store(),
             }),
@@ -892,10 +892,10 @@ pub(super) mod tests {
     /// read, which waits for its round.
     #[tokio::test]
     async fn a_new_watch_reads_the_stores_at_once() {
-        let fake = Fake::new("rewatch", &fixture("parvi.json"), &fixture("beads.json"));
+        let fake = Fake::new("rewatch", &fixture("ahjo.json"), &fixture("beads.json"));
         std::fs::remove_dir_all(fake.dir.join("store/.beads/embeddeddolt")).unwrap();
         let work = fake.work(vec![
-            parvi(),
+            ahjo(),
             Project::Beads(Store {
                 folder: fake.store(),
             }),
@@ -924,8 +924,8 @@ pub(super) mod tests {
 
     #[tokio::test]
     async fn github_is_read_again_on_a_refresh_and_never_on_a_timer() {
-        let fake = Fake::new("refresh", &fixture("parvi.json"), &fixture("beads.json"));
-        let work = fake.work(vec![parvi()]);
+        let fake = Fake::new("refresh", &fixture("ahjo.json"), &fixture("beads.json"));
+        let work = fake.work(vec![ahjo()]);
         let mut watching = work.subscribe();
         let mut read = watching.next().await;
         while repo(&read, 0).synced.is_none() {
@@ -968,7 +968,7 @@ mod create_tests {
     use super::super::config::Repo;
     use super::tests::Fake;
     use super::*;
-    use parvi_work_contract::Create;
+    use ahjo_work_contract::Create;
 
     #[tokio::test]
     async fn creates_github_and_reports_tracker_and_project_errors() {

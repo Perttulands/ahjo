@@ -38,7 +38,7 @@ impl Endpoint {
         }
     }
 
-    /// The pipe's path, `\\.\pipe\parvi-holder-…`.
+    /// The pipe's path, `\\.\pipe\ahjo-holder-…`.
     pub fn path(&self) -> &str {
         &self.path
     }

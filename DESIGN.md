@@ -1,6 +1,6 @@
 # Design
 
-What good looks like in the app. `VISION.md` says what Parvi is for; this says
+What good looks like in the app. `VISION.md` says what Ahjo Swarm is for; this says
 how a page earns its place and how the pages become one app.
 
 ## The aim
@@ -56,7 +56,7 @@ adds its own panel of missions and runs.
 
 ## One app
 
-- **Odin's ravens.** Parvi's art and theme come from Huginn and Muninn,
+- **Odin's ravens.** Ahjo's art and theme come from Huginn and Muninn,
   thought and memory, who fly out and report back. Empty places carry the
   art; the theme is dark, with its own character.
 - **Colour has fixed meanings.** One colour for action and focus, one for

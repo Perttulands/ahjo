@@ -3,16 +3,16 @@
 //! chord was typed with.
 
 use crate::shell::Shell;
+use ahjo_app_kit::host::{Cover, Status};
+use ahjo_app_kit::hub::{SideOn, Surface, Toast};
+use ahjo_app_kit::link::client::LinkState;
+use ahjo_app_kit::menu::{Menu, MenuRow, Pick};
+use ahjo_app_kit::theme::{self, Theme, alpha, motion, size, theme};
+use ahjo_app_kit::widgets::{boundary, kit};
 use gpui::{
     Animation, AnimationExt, AnyElement, Context, ElementId, MouseButton, MouseDownEvent, Window,
     anchored, deferred, div, ease_out_quint, point, prelude::*, px,
 };
-use parvi_app_kit::host::{Cover, Status};
-use parvi_app_kit::hub::{SideOn, Surface, Toast};
-use parvi_app_kit::link::client::LinkState;
-use parvi_app_kit::menu::{Menu, MenuRow, Pick};
-use parvi_app_kit::theme::{self, Theme, alpha, motion, size, theme};
-use parvi_app_kit::widgets::{boundary, kit};
 use std::time::Duration;
 
 /// The padding of the words at the bar's right end (Keys, a link that is
@@ -227,7 +227,7 @@ impl Shell {
                     .tooltip(kit::tip(if keys_on {
                         "Every shortcut  Alt+K"
                     } else {
-                        "Parvi's shortcuts are off: every key goes to the terminal. Click to turn them on."
+                        "Ahjo Swarm's shortcuts are off: every key goes to the terminal. Click to turn them on."
                     }))
                     .child(keys_words)
                     .on_click(cx.listener(move |s, _, window, cx| {

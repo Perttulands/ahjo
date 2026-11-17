@@ -64,7 +64,7 @@ pub struct DispatchResult {
 pub struct SeatId {
     pub node: String,
     pub session_name: String,
-    pub session: parvi_term::SessionRef,
+    pub session: ahjo_term::SessionRef,
     /// Where the harness in a session that was already live runs, which is
     /// where it records its turns; a started seat runs in its dispatch's.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -89,7 +89,7 @@ pub struct AgentSeat {
     pub node: String,
     pub session: String,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub pane: Option<parvi_term::control::PaneId>,
+    pub pane: Option<ahjo_term::control::PaneId>,
     pub session_name: String,
     pub outcome: String,
     pub available: bool,
@@ -538,7 +538,7 @@ mod tests {
     use std::sync::Arc;
     fn scratch() -> PathBuf {
         let path = std::env::temp_dir().join(format!(
-            "parvi-105-seat-records-{}-{}",
+            "ahjo-105-seat-records-{}-{}",
             std::process::id(),
             NEXT_TEMP.fetch_add(1, Ordering::Relaxed)
         ));
@@ -592,11 +592,11 @@ mod tests {
         store.create(&req).unwrap();
         let seat = SeatId {
             node: "local".into(),
-            session_name: "parvi-run-worker".into(),
-            session: parvi_term::SessionRef {
+            session_name: "ahjo-run-worker".into(),
+            session: ahjo_term::SessionRef {
                 session_id: "$1".into(),
                 pane_id: 2,
-                generation: parvi_term::Generation {
+                generation: ahjo_term::Generation {
                     pid: 3,
                     start_time: 4,
                 },

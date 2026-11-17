@@ -2,9 +2,9 @@
 //! zone, as CHROTE's `schedule.go` reads them (both day fields must match;
 //! 7 is Sunday too).
 
+use ahjo_scheduled_contract::Schedule;
 use jiff::tz::TimeZone;
 use jiff::{SignedDuration, Timestamp};
-use parvi_scheduled_contract::Schedule;
 
 use crate::Invalid;
 

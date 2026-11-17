@@ -1,9 +1,9 @@
-//! Parvi's mission engine. This crate holds the state directory that stores
+//! Ahjo's mission engine. This crate holds the state directory that stores
 //! missions, notes, layouts, role cards and characters, the validation that
 //! names what stops a run, and the runs. The data it reads, writes and
-//! answers with is `parvi-mission-model`'s.
+//! answers with is `ahjo-mission-model`'s.
 //!
-//! Mission definitions and run state use Parvi's schema and validation codes.
+//! Mission definitions and run state use Ahjo's schema and validation codes.
 
 mod arrange;
 mod attempt_limits;
@@ -86,6 +86,7 @@ mod verdict;
 mod workspaces;
 mod write;
 
+pub use ahjo_core::Error;
 pub use arrange::arrange;
 pub use attempt_limits::{AttemptLimits, TokenMeter};
 pub use characters::{Character, CharacterStore};
@@ -107,7 +108,6 @@ pub use layout_placement::free_layout_position;
 pub use ledger::{Ledger, RunEvent, validate as validate_ledger};
 pub use limits::{LimitUse, LimitWarning};
 pub use mission_archives::MissionArchive;
-pub use parvi_core::Error;
 pub use port_delivery::{GateEvidence, GateFeedback, GateResponse, RoutedInput, merge_port_inputs};
 pub use roles::{RoleCard, RoleNote, RoleStore, RoleUsage, RoleUse, Unreadable};
 pub use roles_authoring::RoleEdit;
@@ -131,6 +131,6 @@ pub use turn_worktrees::{PublishedTurn, TurnWorkspace, TurnWorktrees};
 pub use validate::validate;
 pub use workspaces::{Workspaces, Worktree};
 
-/// Who acted when a request names no one: Parvi itself, as Archon's
+/// Who acted when a request names no one: Ahjo itself, as Archon's
 /// `agent:archon` named Archon.
-pub const DEFAULT_ACTOR: &str = "agent:parvi";
+pub const DEFAULT_ACTOR: &str = "agent:ahjo";

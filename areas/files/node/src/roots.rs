@@ -12,7 +12,7 @@ use std::path::{Component, Path, PathBuf};
 use super::error::FilesError;
 
 /// One configured root: its canonical path and the word it shows as.
-pub use parvi_files_contract::Root;
+pub use ahjo_files_contract::Root;
 
 #[derive(Debug, Clone)]
 pub struct Roots {

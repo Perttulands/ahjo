@@ -3,7 +3,7 @@
 
 use crate::harness::Harnesses;
 use crate::roles::{RETIRED, RoleStore};
-use parvi_mission_model::{Code, Finding, Mission};
+use ahjo_mission_model::{Code, Finding, Mission};
 
 pub fn findings(mission: &Mission, roles: &RoleStore, harnesses: &Harnesses) -> Vec<Finding> {
     let mut findings = Vec::new();

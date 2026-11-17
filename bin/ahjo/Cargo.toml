@@ -1,0 +1,31 @@
+[package]
+name = "ahjo"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[lints]
+workspace = true
+
+[dependencies]
+ahjo-node-kit = { path = "../../kit/node-kit" }
+ahjo-core = { path = "../../kit/core" }
+anyhow = "1"
+axum = { version = "0.8", default-features = false }
+serde_json = "1"
+tokio = { version = "1", features = ["full"] }
+# The areas, one line each, as in AREAS.
+ahjo-agents = { path = "../../areas/agents/node" }
+ahjo-terminals = { path = "../../areas/terminals/node" }
+ahjo-scheduled = { path = "../../areas/scheduled/node" }
+ahjo-host = { path = "../../areas/host/node" }
+ahjo-work = { path = "../../areas/work/node" }
+ahjo-brain = { path = "../../areas/brain/node" }
+ahjo-files = { path = "../../areas/files/node" }
+ahjo-missions = { path = "../../areas/missions/node" }
+
+[dev-dependencies]
+ahjo-testkit = { path = "../../kit/testkit" }
+jiff = "0.2"
+toml = { version = "1", default-features = false, features = ["parse", "std"] }

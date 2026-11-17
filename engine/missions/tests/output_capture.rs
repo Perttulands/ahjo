@@ -1,8 +1,8 @@
-use parvi_mission_engine::{
+use ahjo_mission_engine::{
     Coordinator, ExecutionEvent, ExecutionSink, Executor, FormationExecution, FormationResult,
     RunSettings,
 };
-use parvi_mission_model::{ResumeRequest, RunStart};
+use ahjo_mission_model::{ResumeRequest, RunStart};
 use serde_json::json;
 use std::{
     path::PathBuf,
@@ -18,8 +18,7 @@ impl Scratch {
     fn new(kind: &str) -> Self {
         let mut b = [0; 8];
         getrandom::fill(&mut b).unwrap();
-        let root =
-            std::env::temp_dir().join(format!("parvi-102-capture-{}", u64::from_ne_bytes(b)));
+        let root = std::env::temp_dir().join(format!("ahjo-102-capture-{}", u64::from_ne_bytes(b)));
         std::fs::create_dir_all(root.join("missions")).unwrap();
         let output_name = if kind == "folder" { "site" } else { "report" };
         let mission = include_str!("parity/runs/missions/solo-lab.mission.toml")
@@ -68,7 +67,7 @@ impl Executor for Output {
         &self,
         req: FormationExecution,
         sink: ExecutionSink,
-    ) -> Result<FormationResult, parvi_mission_engine::Error> {
+    ) -> Result<FormationResult, ahjo_mission_engine::Error> {
         (|| -> Result<FormationResult, String> {
             self.count.fetch_add(1, Ordering::SeqCst);
             let slot = req.formation.slots[0].id.clone();
@@ -95,12 +94,12 @@ impl Executor for Output {
                     .clone(),
             })
         })()
-        .map_err(|message: String| parvi_mission_engine::Error::new("executor_error", message))
+        .map_err(|message: String| ahjo_mission_engine::Error::new("executor_error", message))
     }
     fn reattach(
         &self,
-        _: parvi_mission_engine::OpenDispatch,
-    ) -> Result<FormationResult, parvi_mission_engine::Error> {
+        _: ahjo_mission_engine::OpenDispatch,
+    ) -> Result<FormationResult, ahjo_mission_engine::Error> {
         Ok(FormationResult {
             status: "done".into(),
             text: "done".into(),
@@ -109,7 +108,7 @@ impl Executor for Output {
                 .unwrap()
                 .clone(),
         })
-        .map_err(|message: String| parvi_mission_engine::Error::new("executor_error", message))
+        .map_err(|message: String| ahjo_mission_engine::Error::new("executor_error", message))
     }
 }
 
@@ -158,9 +157,7 @@ fn failed_capture_after_reattach_remains_redispatchable() {
         assert!(Instant::now() < deadline);
         std::thread::sleep(Duration::from_millis(5));
     }
-    let events = parvi_mission_engine::Ledger::new(&path, &id)
-        .read()
-        .unwrap();
+    let events = ahjo_mission_engine::Ledger::new(&path, &id).read().unwrap();
     assert_eq!(
         events.last().unwrap().data["pendingOutput"]["nodeId"],
         "fmn_work"
@@ -170,7 +167,7 @@ fn failed_capture_after_reattach_remains_redispatchable() {
         match c.resume(
             &id,
             ResumeRequest {
-                mode: parvi_mission_model::ResumeMode::Redispatch,
+                mode: ahjo_mission_model::ResumeMode::Redispatch,
                 ..Default::default()
             },
         ) {
@@ -206,7 +203,7 @@ fn start(root: &Scratch, source: PathBuf) -> (Coordinator, String, Arc<AtomicUsi
         .unwrap();
     (c, id, count)
 }
-fn wait(c: &Coordinator, id: &str, status: &str) -> parvi_mission_model::RunProjection {
+fn wait(c: &Coordinator, id: &str, status: &str) -> ahjo_mission_model::RunProjection {
     let until = Instant::now() + Duration::from_secs(15);
     loop {
         let p = c.run(id).unwrap();
@@ -303,7 +300,7 @@ fn redispatch_runs_a_new_attempt_instead_of_keeping_the_pending_one() {
     let run = wait(&c, &id, "blocked");
     assert_eq!(run.block_code, "output_not_kept");
     let ledger =
-        parvi_mission_engine::Ledger::new(root.0.join("runs").join(format!("{id}.ndjson")), &id)
+        ahjo_mission_engine::Ledger::new(root.0.join("runs").join(format!("{id}.ndjson")), &id)
             .read()
             .unwrap();
     let block = ledger
@@ -317,7 +314,7 @@ fn redispatch_runs_a_new_attempt_instead_of_keeping_the_pending_one() {
         match c.resume(
             &id,
             ResumeRequest {
-                mode: parvi_mission_model::ResumeMode::Redispatch,
+                mode: ahjo_mission_model::ResumeMode::Redispatch,
                 ..Default::default()
             },
         ) {
@@ -337,12 +334,12 @@ fn redispatch_runs_a_new_attempt_instead_of_keeping_the_pending_one() {
 fn restart_blocks_an_interrupted_copy_with_its_pending_output() {
     let root = Scratch::new("file");
     std::fs::create_dir_all(root.0.join("runs")).unwrap();
-    let ledger = parvi_mission_engine::Ledger::new(
+    let ledger = ahjo_mission_engine::Ledger::new(
         root.0.join("runs/run_interrupted.ndjson"),
         "run_interrupted",
     );
     ledger
-        .create(parvi_mission_engine::RunEvent {
+        .create(ahjo_mission_engine::RunEvent {
             kind: "run_started".into(),
             timestamp: "2026-11-06T00:00:00Z".into(),
             actor: "agent:test".into(),
@@ -350,7 +347,7 @@ fn restart_blocks_an_interrupted_copy_with_its_pending_output() {
         })
         .unwrap();
     ledger
-        .append(parvi_mission_engine::RunEvent {
+        .append(ahjo_mission_engine::RunEvent {
             kind: "output_capture_pending".into(),
             node_id: "fmn_work".into(),
             attempt: 1,
@@ -365,7 +362,7 @@ fn restart_blocks_an_interrupted_copy_with_its_pending_output() {
     let c = Coordinator::open(
         &root.0,
         RunSettings::default(),
-        Box::new(parvi_mission_engine::LabExecutor),
+        Box::new(ahjo_mission_engine::LabExecutor),
     )
     .unwrap();
     let run = c.run("run_interrupted").unwrap();
@@ -407,7 +404,7 @@ impl Executor for InvalidOnce {
         &self,
         req: FormationExecution,
         sink: ExecutionSink,
-    ) -> Result<FormationResult, parvi_mission_engine::Error> {
+    ) -> Result<FormationResult, ahjo_mission_engine::Error> {
         (|| -> Result<FormationResult, String> {
             let mut result = self
                 .0
@@ -418,7 +415,7 @@ impl Executor for InvalidOnce {
             }
             Ok(result)
         })()
-        .map_err(|message: String| parvi_mission_engine::Error::new("executor_error", message))
+        .map_err(|message: String| ahjo_mission_engine::Error::new("executor_error", message))
     }
 }
 #[test]
@@ -447,7 +444,7 @@ fn invalid_reference_can_resume_by_running_the_step_again() {
         .unwrap();
     assert_eq!(wait(&c, &id, "blocked").block_code, "invalid_output_ref");
     let ledger =
-        parvi_mission_engine::Ledger::new(root.0.join("runs").join(format!("{id}.ndjson")), &id);
+        ahjo_mission_engine::Ledger::new(root.0.join("runs").join(format!("{id}.ndjson")), &id);
     assert!(
         !ledger
             .read()
@@ -478,7 +475,7 @@ fn interrupted_replacement_restores_the_original_source_before_recapture() {
     let (c, id, _) = start(&root, source);
     wait(&c, &id, "succeeded");
     let original =
-        parvi_mission_engine::Ledger::new(root.0.join("runs").join(format!("{id}.ndjson")), &id)
+        ahjo_mission_engine::Ledger::new(root.0.join("runs").join(format!("{id}.ndjson")), &id)
             .read()
             .unwrap();
     drop(c);
@@ -495,7 +492,7 @@ fn interrupted_replacement_restores_the_original_source_before_recapture() {
     let saved = outputs.join("old/source");
     std::fs::create_dir_all(saved.parent().unwrap()).unwrap();
     std::fs::write(&saved, "original").unwrap();
-    let ledger = parvi_mission_engine::Ledger::new(
+    let ledger = ahjo_mission_engine::Ledger::new(
         root.0.join("runs").join(format!("{new_id}.ndjson")),
         new_id,
     );
@@ -512,7 +509,7 @@ fn interrupted_replacement_restores_the_original_source_before_recapture() {
         .find(|e| e.kind == "node_started" && e.node_id == "fmn_work")
         .unwrap();
     ledger.append(started.clone()).unwrap();
-    let event = |kind: &str, data: serde_json::Value| parvi_mission_engine::RunEvent {
+    let event = |kind: &str, data: serde_json::Value| ahjo_mission_engine::RunEvent {
         kind: kind.into(),
         node_id: "fmn_work".into(),
         attempt: 1,
@@ -533,7 +530,7 @@ fn interrupted_replacement_restores_the_original_source_before_recapture() {
     let c = Coordinator::open(
         &root.0,
         RunSettings::default(),
-        Box::new(parvi_mission_engine::LabExecutor),
+        Box::new(ahjo_mission_engine::LabExecutor),
     )
     .unwrap();
     let blocks: Vec<_> = ledger

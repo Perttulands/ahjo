@@ -1,9 +1,9 @@
 //! A message to a running seat goes to its pane only after the seat's
 //! session is proven to be the one recorded: after a tmux server restart
 //! the recorded `%N` can be another program's pane.
-use parvi_mission_engine::{Dispatch, LocalSeats, SeatId, SeatSide, TranscriptRoots};
-use parvi_term::{Generation, SessionRef, Sessions};
-use parvi_testkit::{node::Node, sessions};
+use ahjo_mission_engine::{Dispatch, LocalSeats, SeatId, SeatSide, TranscriptRoots};
+use ahjo_term::{Generation, SessionRef, Sessions};
+use ahjo_testkit::{node::Node, sessions};
 use std::sync::Arc;
 
 #[tokio::test(flavor = "multi_thread")]
@@ -36,7 +36,7 @@ async fn a_message_is_not_pasted_into_a_pane_the_seat_no_longer_owns() {
     seats.records().create(&dispatch).unwrap();
     let seat = SeatId {
         node: "local".into(),
-        session_name: "parvi-run-worker".into(),
+        session_name: "ahjo-run-worker".into(),
         session: SessionRef {
             session_id: "$9".into(),
             pane_id: pane,

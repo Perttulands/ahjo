@@ -3,8 +3,8 @@
 //! keeps its place and its last list, so nothing moves when it comes back.
 
 use super::settings::Kept;
-use parvi_app_kit::settings::Place;
-use parvi_terminals_contract::Session;
+use ahjo_app_kit::settings::Place;
+use ahjo_terminals_contract::Session;
 use std::collections::BTreeMap;
 
 #[derive(Debug, PartialEq)]

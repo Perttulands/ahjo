@@ -3,15 +3,15 @@
 use crate::page::BrainPage;
 use crate::state::PageRef;
 use crate::tokens::*;
+use ahjo_app_kit::menu::MenuRow;
+use ahjo_app_kit::theme::{FAMILY, Theme, alpha, size, theme};
+use ahjo_app_kit::widgets::{
+    kit::{self, Kind},
+    markdown, pane, select,
+};
 use gpui::{
     AnyElement, ClickEvent, Context, Div, FontWeight, HighlightStyle, KeyDownEvent, MouseButton,
     SharedString, StyledText, Window, div, prelude::*, px,
-};
-use parvi_app_kit::menu::MenuRow;
-use parvi_app_kit::theme::{FAMILY, Theme, alpha, size, theme};
-use parvi_app_kit::widgets::{
-    kit::{self, Kind},
-    markdown, pane, select,
 };
 
 impl Render for BrainPage {

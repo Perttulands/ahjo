@@ -1,15 +1,15 @@
 //! A harness's own hook reports to the node, over the socket, against a
 //! real tmux. Alone in its binary: it points `CODEX_HOME` away from the
 //! operator's. Linux and macOS only; skips without tmux unless
-//! `PARVI_REQUIRE_TMUX=1`.
+//! `AHJO_REQUIRE_TMUX=1`.
 #![cfg(unix)]
 
 use std::time::{Duration, Instant};
 
+use ahjo_terminals_contract::{self as protocol, Up};
+use ahjo_testkit::node::Node;
+use ahjo_testkit::tmux::Server as Tmux;
 use futures_util::{SinkExt, StreamExt};
-use parvi_terminals_contract::{self as protocol, Up};
-use parvi_testkit::node::Node;
-use parvi_testkit::tmux::Server as Tmux;
 use tokio_tungstenite::tungstenite::Message;
 
 type Ws =
@@ -50,7 +50,7 @@ async fn an_agents_report_reaches_the_client_until_it_is_seen() {
         return;
     };
     tmux.run(&["new-session", "-d", "-s", "keep"]);
-    let dir = parvi_testkit::fresh_dir("parvi-hooks");
+    let dir = ahjo_testkit::fresh_dir("ahjo-hooks");
     // No Codex config of the operator's: its own notify would be passed on.
     // SAFETY: this test is alone in its binary, and sets it before any
     // thread that could read the environment starts.
@@ -58,7 +58,7 @@ async fn an_agents_report_reaches_the_client_until_it_is_seen() {
     // A fake by its path: the node hooks it as Codex by its name, and the
     // real one is never typed (#215).
     let codex = dir.join("codex");
-    parvi_testkit::tmux::write_script(&codex, "#!/bin/sh\nexit 0\n");
+    ahjo_testkit::tmux::write_script(&codex, "#!/bin/sh\nexit 0\n");
     let launch = dir.join("launch.conf");
     std::fs::write(
         &launch,
@@ -70,7 +70,7 @@ async fn an_agents_report_reaches_the_client_until_it_is_seen() {
         tmux.socket_path(),
         launch
     );
-    let node = Node::start(&[parvi_terminals::LISTING], &config)
+    let node = Node::start(&[ahjo_terminals::LISTING], &config)
         .await
         .unwrap();
     let addr = node.address();
@@ -120,7 +120,7 @@ async fn an_agents_report_reaches_the_client_until_it_is_seen() {
         url,
         r#"{"type":"agent-turn-complete","last-assistant-message":"All done."}"#.to_owned(),
     ];
-    tokio::task::spawn_blocking(move || parvi_node_kit::hook::report(&args))
+    tokio::task::spawn_blocking(move || ahjo_node_kit::hook::report(&args))
         .await
         .unwrap();
     let event = r#""event":{"kind":"finished","at":"#;

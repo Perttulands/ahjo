@@ -1,6 +1,6 @@
 use super::super::adapter::{Pointer, Turn, TurnState};
 use super::{changed, matches_sentinel, native_pointer, pointer_matches, s, text};
-use parvi_term::waiting::harness::Harness;
+use ahjo_term::waiting::harness::Harness;
 use serde_json::Value;
 use std::{collections::HashSet, io};
 

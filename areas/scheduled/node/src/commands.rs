@@ -1,21 +1,21 @@
-//! The scheduled commands, each an MCP tool and a `parvi scheduled <verb>`:
+//! The scheduled commands, each an MCP tool and an `ahjo scheduled <verb>`:
 //! list, show, create, edit, copy, pause, resume, run and delete, as the
 //! Scheduled view lists, makes, edits, pauses, resumes, runs and deletes
 //! them.
 
 use std::sync::Arc;
 
+use ahjo_core::{Error, NodeId};
+use ahjo_node_kit::Command;
+use ahjo_node_kit::args::{flag, maybe_text, object, text};
+use ahjo_scheduled_contract::{BAD_REQUEST, Schedule, Target};
 use anyhow::{Context, Result, bail};
-use parvi_core::{Error, NodeId};
-use parvi_node_kit::Command;
-use parvi_node_kit::args::{flag, maybe_text, object, text};
-use parvi_scheduled_contract::{BAD_REQUEST, Schedule, Target};
 use serde_json::{Value, json};
 
 use crate::service::{Create, Patch, Scheduled};
 
 /// Who the task's audit says made a change.
-const ACTOR: &str = "parvi";
+const ACTOR: &str = "ahjo";
 
 /// What the commands reach.
 pub(crate) struct Ctx {

@@ -1,11 +1,11 @@
 //! The same definitions provide the CLI verbs and MCP tools.
 use crate::{Files, FilesError};
-use base64::{Engine as _, engine::general_purpose::STANDARD};
-use parvi_core::Error;
-use parvi_node_kit::{
+use ahjo_core::Error;
+use ahjo_node_kit::{
     Command,
     args::{flag, maybe_text, object, text},
 };
+use base64::{Engine as _, engine::general_purpose::STANDARD};
 use serde_json::{Value, json};
 use std::{
     path::{Path, PathBuf},

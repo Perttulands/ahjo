@@ -1,9 +1,9 @@
 //! The host and service commands shared by CLI and MCP.
 use std::{sync::Arc, time::Duration};
 
-use parvi_core::Error;
-use parvi_host_contract::{BAD_REQUEST, SERVICE_FAILED};
-use parvi_node_kit::{
+use ahjo_core::Error;
+use ahjo_host_contract::{BAD_REQUEST, SERVICE_FAILED};
+use ahjo_node_kit::{
     Command,
     args::{object, text},
     events::Log,

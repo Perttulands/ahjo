@@ -1,5 +1,8 @@
 //! HTTP authoring routes. Writes publish after the store commits them.
 use super::Missions;
+use ahjo_mission_engine::{Harnesses, validate};
+use ahjo_missions_contract::patch;
+use ahjo_missions_contract::{LayoutPatch, NotePatch, Precondition};
 use axum::{
     Json, Router,
     body::Bytes,
@@ -11,9 +14,6 @@ use axum::{
     response::{IntoResponse, Response},
     routing::get,
 };
-use parvi_mission_engine::{Harnesses, validate};
-use parvi_missions_contract::patch;
-use parvi_missions_contract::{LayoutPatch, NotePatch, Precondition};
 use serde_json::{Value, json};
 
 pub fn routes(m: Missions) -> Router {
@@ -53,15 +53,15 @@ impl IntoResponse for ApiError {
     fn into_response(self) -> Response {
         (
             self.0,
-            Json(parvi_missions_contract::ErrorResponse {
-                error: parvi_core::Error::new(self.1, self.2),
+            Json(ahjo_missions_contract::ErrorResponse {
+                error: ahjo_core::Error::new(self.1, self.2),
             }),
         )
             .into_response()
     }
 }
-impl From<parvi_core::Error> for ApiError {
-    fn from(e: parvi_core::Error) -> Self {
+impl From<ahjo_core::Error> for ApiError {
+    fn from(e: ahjo_core::Error) -> Self {
         let status = match e.code.as_str() {
             "not_found" | "unknown_run" => StatusCode::NOT_FOUND,
             "note_author_mismatch" => StatusCode::FORBIDDEN,
@@ -107,22 +107,22 @@ fn etag(h: &HeaderMap) -> &str {
 fn s<'a>(v: &'a Value, k: &str) -> &'a str {
     v[k].as_str().unwrap_or("")
 }
-fn mission(v: parvi_missions_contract::Mission) -> Value {
-    serde_json::to_value(parvi_missions_contract::document::MissionDocument {
+fn mission(v: ahjo_missions_contract::Mission) -> Value {
+    serde_json::to_value(ahjo_missions_contract::document::MissionDocument {
         mission: v,
         etag: None,
     })
     .expect("mission serializes")
 }
-fn tagged_mission(v: parvi_missions_contract::Mission, etag: &str) -> Value {
-    serde_json::to_value(parvi_missions_contract::document::MissionDocument {
+fn tagged_mission(v: ahjo_missions_contract::Mission, etag: &str) -> Value {
+    serde_json::to_value(ahjo_missions_contract::document::MissionDocument {
         mission: v,
         etag: Some(etag.into()),
     })
     .expect("mission serializes")
 }
-fn layout_value(v: parvi_missions_contract::Layout, etag: &str) -> Value {
-    serde_json::to_value(parvi_missions_contract::document::LayoutDocument {
+fn layout_value(v: ahjo_missions_contract::Layout, etag: &str) -> Value {
+    serde_json::to_value(ahjo_missions_contract::document::LayoutDocument {
         layout: v,
         etag: etag.into(),
     })
@@ -315,10 +315,11 @@ async fn validation(State(m): State<Missions>, Path(id): Path<String>) -> Result
         &e.etag,
     ))
 }
-fn notes_value(notes: parvi_missions_contract::Notes, etag: &str) -> Value {
-    serde_json::to_value(
-        parvi_missions_contract::document::NotesDocument::from_notes(notes, etag.into()),
-    )
+fn notes_value(notes: ahjo_missions_contract::Notes, etag: &str) -> Value {
+    serde_json::to_value(ahjo_missions_contract::document::NotesDocument::from_notes(
+        notes,
+        etag.into(),
+    ))
     .expect("notes serialize")
 }
 async fn notes(State(m): State<Missions>, Path(id): Path<String>) -> ResultResponse {
@@ -386,7 +387,7 @@ async fn edit_layout(
     let p = if v["arrange"].as_bool() == Some(true) {
         let e = m.store.mission_edit(&id)?;
         let l = m.store.layout_edit(&id)?;
-        LayoutPatch::Nodes(parvi_mission_engine::arrange(&e.mission, &l.layout).nodes)
+        LayoutPatch::Nodes(ahjo_mission_engine::arrange(&e.mission, &l.layout).nodes)
     } else if let Some(nodes) = v.get("nodes") {
         LayoutPatch::Nodes(serde_json::from_value(nodes.clone()).map_err(|e| bad(e.to_string()))?)
     } else if let Some(edges) = v.get("edges") {
@@ -402,11 +403,11 @@ async fn edit_layout(
     ))
 }
 
-fn character_store(m: &Missions) -> parvi_mission_engine::CharacterStore {
-    parvi_mission_engine::CharacterStore::new(m.store.roles().dir())
+fn character_store(m: &Missions) -> ahjo_mission_engine::CharacterStore {
+    ahjo_mission_engine::CharacterStore::new(m.store.roles().dir())
 }
-fn engine_character(c: parvi_missions_contract::Character) -> parvi_mission_engine::Character {
-    parvi_mission_engine::Character {
+fn engine_character(c: ahjo_missions_contract::Character) -> ahjo_mission_engine::Character {
+    ahjo_mission_engine::Character {
         id: c.id,
         name: c.name,
         description: c.description,
@@ -417,8 +418,8 @@ fn engine_character(c: parvi_missions_contract::Character) -> parvi_mission_engi
         effort: c.effort,
     }
 }
-fn wire_character(c: parvi_mission_engine::Character) -> parvi_missions_contract::Character {
-    parvi_missions_contract::Character {
+fn wire_character(c: ahjo_mission_engine::Character) -> ahjo_missions_contract::Character {
+    ahjo_missions_contract::Character {
         id: c.id,
         name: c.name,
         description: c.description,
@@ -435,11 +436,11 @@ async fn characters(State(m): State<Missions>) -> ResultResponse {
         .into_iter()
         .map(wire_character)
         .collect();
-    Ok(Json(parvi_missions_contract::Characters { characters }).into_response())
+    Ok(Json(ahjo_missions_contract::Characters { characters }).into_response())
 }
 async fn create_character(
     State(m): State<Missions>,
-    input: JsonBody<parvi_missions_contract::Character>,
+    input: JsonBody<ahjo_missions_contract::Character>,
 ) -> ResultResponse {
     let c = engine_character(body(input, "invalid_character")?);
     let c = wire_character(character_store(&m).create(c)?);
@@ -449,7 +450,7 @@ async fn create_character(
 async fn put_character(
     State(m): State<Missions>,
     Path(id): Path<String>,
-    input: JsonBody<parvi_missions_contract::Character>,
+    input: JsonBody<ahjo_missions_contract::Character>,
 ) -> ResultResponse {
     let mut c = body(input, "invalid_character")?;
     if !c.id.is_empty() && c.id != id {
@@ -467,14 +468,14 @@ async fn put_character(
 async fn delete_character(State(m): State<Missions>, Path(id): Path<String>) -> ResultResponse {
     character_store(&m).delete(&id)?;
     m.changed();
-    Ok(Json(parvi_missions_contract::Deleted { deleted: id }).into_response())
+    Ok(Json(ahjo_missions_contract::Deleted { deleted: id }).into_response())
 }
 /// The repositories a step may name, as configured on this node.
 async fn repositories(State(m): State<Missions>) -> Response {
     Json(json!({"repositories": m.coordinator.repositories()})).into_response()
 }
 async fn gate_profiles() -> Response {
-    let profiles: parvi_missions_contract::GateProfiles =
+    let profiles: ahjo_missions_contract::GateProfiles =
         serde_json::from_str(include_str!("gate_profiles.json")).expect("gate profiles are valid");
     Json(profiles).into_response()
 }
@@ -494,7 +495,7 @@ mod error_tests {
             ("self_wire", StatusCode::UNPROCESSABLE_ENTITY),
         ] {
             assert_eq!(
-                ApiError::from(parvi_core::Error::new(code, "test")).0,
+                ApiError::from(ahjo_core::Error::new(code, "test")).0,
                 status,
                 "{code}"
             );

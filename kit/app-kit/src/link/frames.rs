@@ -2,8 +2,8 @@
 //! the body, numbers little-endian. Every other kind belongs to a page,
 //! which decodes its own. Pure: decoding and encoding only.
 
-pub use parvi_core::frame::NODES;
-use parvi_core::frame::NODES_ON;
+pub use ahjo_core::frame::NODES;
+use ahjo_core::frame::NODES_ON;
 use serde::Deserialize;
 
 #[derive(Clone, Debug, Deserialize, PartialEq)]

@@ -3,7 +3,7 @@
 //! this is who most likely changed the file; it is a guess the page shows
 //! as one, never a record.
 use super::paths;
-use parvi_terminals_contract::Session;
+use ahjo_terminals_contract::Session;
 
 /// The sessions on `node` whose folder holds `path` (or is it), the
 /// deepest folder first, then the one active most recently.
@@ -70,25 +70,25 @@ mod tests {
     fn the_nearest_session_folder_holding_a_file_comes_first() {
         let all = [
             session("wide", "/srv", 9),
-            session("near", "/srv/parvi", 1),
-            session("near-later", "/srv/parvi", 5),
+            session("near", "/srv/ahjo", 1),
+            session("near-later", "/srv/ahjo", 5),
             session("other", "/srv/korpi", 9),
         ];
-        let names: Vec<_> = working_at(&all, "n", "/srv/parvi/DESIGN.md")
+        let names: Vec<_> = working_at(&all, "n", "/srv/ahjo/DESIGN.md")
             .iter()
             .map(|s| s.name.as_str())
             .collect();
         assert_eq!(names, ["near-later", "near", "wide"]);
-        assert!(working_at(&all, "elsewhere", "/srv/parvi/DESIGN.md").is_empty());
+        assert!(working_at(&all, "elsewhere", "/srv/ahjo/DESIGN.md").is_empty());
         assert!(working_at(&all, "n", "/srv/parvi-archive/x").len() == 1);
     }
 
     #[test]
     fn a_change_is_grouped_by_its_session_or_its_project_under_the_root() {
-        let all = [session("a", "/srv/parvi", 1)];
+        let all = [session("a", "/srv/ahjo", 1)];
         assert_eq!(
-            group_of(&all, "n", Some("/srv"), "/srv/parvi/a/b.rs"),
-            "/srv/parvi"
+            group_of(&all, "n", Some("/srv"), "/srv/ahjo/a/b.rs"),
+            "/srv/ahjo"
         );
         assert_eq!(
             group_of(&all, "n", Some("/srv"), "/srv/korpi/docs/x.md"),

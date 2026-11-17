@@ -1,10 +1,10 @@
 //! An area as the binary lists it: its name, the frame kinds it owns and
 //! the commands it has, known before anything is built, so the list can be
-//! checked and its kinds tabled (`parvi kinds`) without starting a node.
+//! checked and its kinds tabled (`ahjo kinds`) without starting a node.
 //! The node holds a built area to its listing.
 
-use parvi_core::Error;
-use parvi_core::frame::{self, Kinds, RESERVED};
+use ahjo_core::Error;
+use ahjo_core::frame::{self, Kinds, RESERVED};
 
 use crate::{Build, own};
 
@@ -67,7 +67,7 @@ pub fn check(areas: &[Listing]) -> Result<(), Error> {
 }
 
 /// Whether a command's name reads as `noun_verb`: a noun, then a verb of
-/// one or more words (`formation_set_type` is `parvi formation set-type`),
+/// one or more words (`formation_set_type` is `ahjo formation set-type`),
 /// lowercase letters and digits between single underscores.
 pub fn well_named(name: &str) -> bool {
     let word = |w: &str| {

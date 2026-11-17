@@ -1,4 +1,4 @@
-//! The session commands, each an MCP tool and a `parvi session <verb>`,
+//! The session commands, each an MCP tool and an `ahjo session <verb>`,
 //! through the hub: list, read a screen or the whole history, search, send
 //! text or keys, launch or copy, rename, kill, mark a report seen, and turn
 //! tmux's mouse mode on or off.
@@ -6,19 +6,19 @@
 use std::sync::Arc;
 use std::time::UNIX_EPOCH;
 
+use ahjo_core::{Error, NodeId};
+use ahjo_node_kit::Command;
+use ahjo_node_kit::args::{flag, maybe_text, object, text};
+use ahjo_terminals_contract::{COMMAND_FAILED, MAX_SEND};
 use anyhow::{Context, Result, bail};
-use parvi_core::{Error, NodeId};
-use parvi_node_kit::Command;
-use parvi_node_kit::args::{flag, maybe_text, object, text};
-use parvi_terminals_contract::{COMMAND_FAILED, MAX_SEND};
 use serde_json::{Value, json};
 
 use crate::hub::Hub;
 use crate::launch::Launch;
 use crate::launcher::Launcher;
-use parvi_term::control::PaneId;
-use parvi_term::engine::SessionInfo;
-use parvi_term::search::{self, Target};
+use ahjo_term::control::PaneId;
+use ahjo_term::engine::SessionInfo;
+use ahjo_term::search::{self, Target};
 
 /// What the commands reach.
 pub(crate) struct Ctx {
@@ -255,7 +255,7 @@ async fn copy(ctx: &Ctx, args: &Value) -> Result<Value> {
         bail!("Working directory unavailable");
     }
     let launcher = ctx.launcher.get();
-    let index = parvi_terminals_contract::session_copy::harness_index(
+    let index = ahjo_terminals_contract::session_copy::harness_index(
         &facts.command,
         launcher.harnesses.iter().map(|h| h.command.as_str()),
     )
@@ -267,7 +267,7 @@ async fn copy(ctx: &Ctx, args: &Value) -> Result<Value> {
         .filter(|s| s.user == source.user)
         .map(|s| s.name.as_str())
         .collect();
-    let name = parvi_terminals_contract::session_copy::next_name(&source.name, &taken);
+    let name = ahjo_terminals_contract::session_copy::next_name(&source.name, &taken);
     let launch = Launch {
         harness: harness.id.clone(),
         folder: facts.path.clone(),

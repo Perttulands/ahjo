@@ -64,7 +64,7 @@ pub struct Host {
 }
 
 struct Shared {
-    events: Arc<parvi_node_kit::events::Log>,
+    events: Arc<ahjo_node_kit::events::Log>,
     facts: Facts,
     kept: Mutex<Kept>,
     /// Each reading's frame, for the browsers streaming.
@@ -93,11 +93,7 @@ impl Host {
     /// Reads the facts and starts sampling, every `idle` while nobody looks
     /// and every `every` while someone does, keeping a day of minutes. The
     /// first reading is taken at once.
-    pub fn start(
-        every: Duration,
-        idle: Duration,
-        events: Arc<parvi_node_kit::events::Log>,
-    ) -> Host {
+    pub fn start(every: Duration, idle: Duration, events: Arc<ahjo_node_kit::events::Log>) -> Host {
         let shared = Arc::new(Shared {
             events,
             facts: facts::read(),
@@ -156,10 +152,10 @@ impl Host {
     }
 }
 
-/// The host now, as `parvi host show` tells it: its facts, a reading taken
+/// The host now, as `ahjo host show` tells it: its facts, a reading taken
 /// over `window` (CPU, and what is heavy, measured across it), and the
 /// recent events.
-pub async fn now(window: Duration, log: &parvi_node_kit::events::Log) -> serde_json::Value {
+pub async fn now(window: Duration, log: &ahjo_node_kit::events::Log) -> serde_json::Value {
     let facts = facts::read();
     let mut probe = reading::Probe::new(disk::mounts(), facts.threads);
     probe.read(true).await;
@@ -189,7 +185,7 @@ impl Shared {
     ) -> (
         Vec<u8>,
         broadcast::Receiver<Arc<Vec<u8>>>,
-        broadcast::Receiver<parvi_node_kit::events::Event>,
+        broadcast::Receiver<ahjo_node_kit::events::Event>,
     ) {
         let kept = self.kept.lock().unwrap();
         let (logged, events) = self.events.listen();
@@ -243,7 +239,7 @@ async fn sample(shared: Arc<Shared>, every: Duration, idle: Duration) {
         let frame = Arc::new(channel::reading(&reading));
         {
             let mut kept = shared.kept.lock().unwrap();
-            kept.history.push(&parvi_host_contract::Point::of(&reading));
+            kept.history.push(&ahjo_host_contract::Point::of(&reading));
             kept.latest = Some(reading);
         }
         let _ = shared.readings.send(frame);
@@ -265,7 +261,7 @@ mod tests {
             ..Reading::default()
         };
         let mut kept = shared.kept.lock().unwrap();
-        kept.history.push(&parvi_host_contract::Point::of(&reading));
+        kept.history.push(&ahjo_host_contract::Point::of(&reading));
         kept.latest = Some(reading.clone());
         let _ = shared.readings.send(Arc::new(channel::reading(&reading)));
     }
@@ -316,10 +312,10 @@ mod tests {
 
     #[tokio::test]
     async fn node_streams_keep_snapshots_and_live_events_isolated() {
-        let first_log = Arc::new(parvi_node_kit::events::Log::default());
-        let second_log = Arc::new(parvi_node_kit::events::Log::default());
-        first_log.record(parvi_node_kit::events::NODE, false, "first before");
-        second_log.record(parvi_node_kit::events::NODE, false, "second before");
+        let first_log = Arc::new(ahjo_node_kit::events::Log::default());
+        let second_log = Arc::new(ahjo_node_kit::events::Log::default());
+        first_log.record(ahjo_node_kit::events::NODE, false, "first before");
+        second_log.record(ahjo_node_kit::events::NODE, false, "second before");
         let first = Host::start(
             Duration::from_secs(60),
             Duration::from_secs(60),

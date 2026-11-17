@@ -3,6 +3,7 @@
 
 use std::sync::Arc;
 
+use ahjo_files_contract::{At, DiffAt, DropAt, Dropped, Job, Move, NodeRoots, SaveAt, Search};
 use axum::body::Bytes;
 use axum::extract::{DefaultBodyLimit, Query, State};
 use axum::http::StatusCode;
@@ -10,7 +11,6 @@ use axum::http::header::{CACHE_CONTROL, CONTENT_SECURITY_POLICY, CONTENT_TYPE, H
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
-use parvi_files_contract::{At, DiffAt, DropAt, Dropped, Job, Move, NodeRoots, SaveAt, Search};
 
 use super::Files;
 use super::disk::{self, Listing};
@@ -70,7 +70,7 @@ struct RecentQuery {
 async fn recent(
     State(files): Shared,
     Query(at): Query<RecentQuery>,
-) -> Result<Json<parvi_files_contract::Recent>, FilesError> {
+) -> Result<Json<ahjo_files_contract::Recent>, FilesError> {
     let result = blocking(&files, &at.node, move |f| f.recent(at.path.as_deref())).await?;
     Ok(Json(result))
 }
@@ -78,7 +78,7 @@ async fn recent(
 async fn stat(
     State(files): Shared,
     Query(at): Query<NodeQuery>,
-    Json(asked): Json<parvi_files_contract::Stat>,
+    Json(asked): Json<ahjo_files_contract::Stat>,
 ) -> Result<Json<Vec<Option<u64>>>, FilesError> {
     Ok(Json(
         blocking(&files, &at.node, move |f| Ok(f.stat(&asked.paths))).await?,
@@ -299,7 +299,7 @@ impl IntoResponse for FilesError {
             FilesError::TooLarge => StatusCode::PAYLOAD_TOO_LARGE,
             FilesError::Io(_) => StatusCode::INTERNAL_SERVER_ERROR,
         };
-        parvi_node_kit::serve::Failure(status, parvi_core::Error::from(self)).into_response()
+        ahjo_node_kit::serve::Failure(status, ahjo_core::Error::from(self)).into_response()
     }
 }
 
@@ -318,14 +318,14 @@ async fn drop_file(
     let result = tokio::task::spawn_blocking(move || drops.write(&at.name, &at.user, &body)).await;
     match result {
         Ok(Ok(path)) => (StatusCode::CREATED, Json(Dropped { path })).into_response(),
-        Ok(Err(error)) => parvi_node_kit::serve::Failure(
+        Ok(Err(error)) => ahjo_node_kit::serve::Failure(
             StatusCode::BAD_REQUEST,
-            parvi_core::Error::new("drop_failed", format!("{error:#}")),
+            ahjo_core::Error::new("drop_failed", format!("{error:#}")),
         )
         .into_response(),
-        Err(error) => parvi_node_kit::serve::Failure(
+        Err(error) => ahjo_node_kit::serve::Failure(
             StatusCode::INTERNAL_SERVER_ERROR,
-            parvi_core::Error::new("io_error", error.to_string()),
+            ahjo_core::Error::new("io_error", error.to_string()),
         )
         .into_response(),
     }
@@ -352,5 +352,5 @@ async fn coded_rejection(response: Response) -> Response {
     } else {
         "bad_request"
     };
-    parvi_node_kit::serve::Failure(status, parvi_core::Error::new(code, message)).into_response()
+    ahjo_node_kit::serve::Failure(status, ahjo_core::Error::new(code, message)).into_response()
 }

@@ -118,7 +118,7 @@ mod tests {
     }
     #[test]
     fn reads_the_blocks_a_page_uses() {
-        use parvi_app_kit::widgets::markdown::{Block, inline, parse};
+        use ahjo_app_kit::widgets::markdown::{Block, inline, parse};
         let blocks = parse(
             "# Title\n\nSome *em* and **strong** with `code`.\n\n- one\n- two\n\n> quoted\n\n```\nfn x() {}\n```\n\n---\n\n| a | b |\n|---|---|\n| 1 | 2 |\n",
         );
@@ -136,13 +136,13 @@ mod tests {
     #[test]
     fn reads_wiki_links_with_anchor_and_label() {
         let source = wiki_links("See [[self/pace#Notes|the pace]] and [[decision-models]].");
-        let runs = parvi_app_kit::widgets::markdown::inline(&source, false);
+        let runs = ahjo_app_kit::widgets::markdown::inline(&source, false);
         assert_eq!(runs.text, "See the pace and decision-models.");
         assert_eq!(runs.links, ["self/pace#Notes", "decision-models"]);
     }
     #[test]
     fn a_markdown_link_keeps_its_target_and_anchor() {
-        let runs = parvi_app_kit::widgets::markdown::inline("[Pace](self/pace.md#top)", false);
+        let runs = ahjo_app_kit::widgets::markdown::inline("[Pace](self/pace.md#top)", false);
         assert_eq!(runs.links, ["self/pace.md#top"]);
         assert_eq!(runs.links[0].split('#').next(), Some("self/pace.md"));
     }

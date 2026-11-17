@@ -32,7 +32,7 @@ mod tests {
     use super::parse_completion_sentinel;
     #[test]
     fn accepts_only_latest_sentinel_for_the_run() {
-        let text = "<<<PARVI-DONE run-id=run_a status=ok artifact=first>>> <<<PARVI-DONE run-id=other status=ok artifact=wrong>>> <<<PARVI-DONE run-id=run_a status=ok artifact=second>>>";
+        let text = "<<<AHJO-DONE run-id=run_a status=ok artifact=first>>> <<<AHJO-DONE run-id=other status=ok artifact=wrong>>> <<<AHJO-DONE run-id=run_a status=ok artifact=second>>>";
         assert_eq!(
             parse_completion_sentinel(text, "run_a").unwrap().artifact,
             "second"
@@ -43,7 +43,7 @@ mod tests {
     fn a_sentinel_left_unclosed_still_ends_with_its_line() {
         // Codex read `artifact=<path-or-ref>>>` as one placeholder and
         // dropped the closer; the seat had finished all the same.
-        let text = "{\"port\":{\"text\":\"ok\"}}\n<<<PARVI-DONE run-id=run_a status=ok artifact=port_1\nWorked for 18s";
+        let text = "{\"port\":{\"text\":\"ok\"}}\n<<<AHJO-DONE run-id=run_a status=ok artifact=port_1\nWorked for 18s";
         let found = parse_completion_sentinel(text, "run_a").unwrap();
         assert_eq!(
             (found.status.as_str(), found.artifact.as_str()),

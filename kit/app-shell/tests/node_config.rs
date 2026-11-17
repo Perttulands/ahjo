@@ -2,9 +2,9 @@
 //! loaded it, read-only, against a testkit node holding one area defined
 //! here.
 
+use ahjo_node_kit::{Area, Built, Listing, Setup};
+use ahjo_testkit::node::Node;
 use gpui::{TestAppContext, VisualTestContext};
-use parvi_node_kit::{Area, Built, Listing, Setup};
-use parvi_testkit::node::Node;
 use std::time::{Duration, Instant};
 
 /// An area that reads its section and does nothing else.
@@ -36,14 +36,14 @@ fn the_settings_page_shows_the_nodes_config_file(cx: &mut TestAppContext) {
         .block_on(Node::start(&[FILES], &config))
         .expect("the node starts");
     let file = node.dir().join("config.toml");
-    let settings = parvi_testkit::fresh_dir("parvi-app-node-config").join("app.json");
+    let settings = ahjo_testkit::fresh_dir("ahjo-app-node-config").join("app.json");
     // The node and the link run on their own threads.
     cx.executor().allow_parking();
-    cx.update(parvi_app_shell::prepare);
+    cx.update(ahjo_app_shell::prepare);
     let (url, path) = (node.url(), settings.clone());
     let field = format!("setting-app-node:{url}");
     let (shell, cx) = cx.add_window_view(move |window, cx| {
-        parvi_app_shell::start(&[], Some(url), Some(path), window, cx)
+        ahjo_app_shell::start(&[], Some(url), Some(path), window, cx)
     });
     assert_eq!(shell.read_with(cx, |s, _| s.shown_page()), Some("settings"));
 

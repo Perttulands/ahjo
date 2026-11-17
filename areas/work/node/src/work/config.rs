@@ -55,7 +55,7 @@ impl Config {
             let project = match key {
                 "beads" => {
                     let folder = trim_separators(rest);
-                    if !parvi_work_ref::is_absolute(folder) {
+                    if !ahjo_work_ref::is_absolute(folder) {
                         bail!(
                             "{}: a Beads store is named by its absolute project folder",
                             at()
@@ -145,7 +145,7 @@ fn is_windows_absolute(path: &str) -> bool {
 }
 
 fn is_repo_name(name: &str) -> bool {
-    matches!(name.split_once('/'), Some((owner, repo)) if parvi_work_ref::is_repo_part(owner) && parvi_work_ref::is_repo_part(repo))
+    matches!(name.split_once('/'), Some((owner, repo)) if ahjo_work_ref::is_repo_part(owner) && ahjo_work_ref::is_repo_part(repo))
 }
 
 #[cfg(test)]
@@ -162,7 +162,7 @@ mod tests {
     #[test]
     fn parses_stores_and_repositories_in_order() {
         let config = Config::parse(
-            "# mine\nbeads /srv/example-project\ngithub example-owner/parvi ~/parvi\n\ngithub cli/cli\nbeads /srv/my project/\n",
+            "# mine\nbeads /srv/example-project\ngithub example-owner/ahjo ~/ahjo\n\ngithub cli/cli\nbeads /srv/my project/\n",
         )
         .unwrap();
         assert_eq!(
@@ -171,7 +171,7 @@ mod tests {
                 Project::Beads(Store {
                     folder: "/srv/example-project".into()
                 }),
-                github("example-owner/parvi", Some("~/parvi")),
+                github("example-owner/ahjo", Some("~/ahjo")),
                 github("cli/cli", None),
                 Project::Beads(Store {
                     folder: "/srv/my project".into()
@@ -211,8 +211,8 @@ mod tests {
     #[test]
     fn rejects_what_would_reach_gh_or_bd_wrongly() {
         for bad in [
-            "github parvi",
-            "github /parvi",
+            "github ahjo",
+            "github /ahjo",
             "github a/b/c",
             "github -F/x",
             "github a/b relative/path",

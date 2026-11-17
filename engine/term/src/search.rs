@@ -1,4 +1,4 @@
-//! Searching every pane's scrollback (issue #22). Parvi holds no
+//! Searching every pane's scrollback (issue #22). Ahjo holds no
 //! scrollback of its own, so a search reads tmux's history on demand with
 //! `capture-pane -p -J -S -`. Captures run independently of the sessions'
 //! control clients: tmux uses a separate process and the holder a separate

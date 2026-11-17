@@ -2,7 +2,7 @@
 //! into it from both skills folders, stand-in harness commands, and a
 //! credentials file whose content must never come out. Sync runs on a
 //! scratch tmux server. Linux and macOS only; the sync test skips without
-//! tmux unless `PARVI_REQUIRE_TMUX=1`.
+//! tmux unless `AHJO_REQUIRE_TMUX=1`.
 #![cfg(unix)]
 
 use std::os::unix::fs::symlink;
@@ -10,7 +10,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::atomic::{AtomicU32, Ordering};
 
-use parvi_agents::{Fetch, Home, gather};
+use ahjo_agents::{Fetch, Home, gather};
 
 const SECRET: &str = "sk-82-do-not-show";
 
@@ -70,7 +70,7 @@ fn skill(dir: &Path, name: &str, description: &str) {
 fn scratch() -> Scratch {
     static NEXT: AtomicU32 = AtomicU32::new(0);
     let root = std::env::temp_dir().join(format!(
-        "parvi-82-agents-{}-{}",
+        "ahjo-82-agents-{}-{}",
         std::process::id(),
         NEXT.fetch_add(1, Ordering::Relaxed)
     ));
@@ -294,18 +294,18 @@ async fn a_failed_fetch_says_why_and_keeps_the_last_counts() {
 
 #[tokio::test]
 async fn sync_fetches_fast_forwards_and_runs_setup_in_a_session() {
-    use parvi_testkit::node::Node;
-    use parvi_testkit::tmux::{Server, eventually};
+    use ahjo_testkit::node::Node;
+    use ahjo_testkit::tmux::{Server, eventually};
     let Some(tmux) = Server::start_in("agents-sync") else {
         assert!(
-            std::env::var_os("PARVI_REQUIRE_TMUX").is_none(),
+            std::env::var_os("AHJO_REQUIRE_TMUX").is_none(),
             "tmux is required"
         );
         return;
     };
     tmux.new_session("sync-kit", 100, 30);
     let config = format!("[terminals]\nsocket = {:?}\n", tmux.socket_path());
-    let node = Node::start(&[parvi_terminals::LISTING, parvi_agents::LISTING], &config)
+    let node = Node::start(&[ahjo_terminals::LISTING, ahjo_agents::LISTING], &config)
         .await
         .unwrap();
     let sessions = node.sessions();
@@ -320,11 +320,11 @@ async fn sync_fetches_fast_forwards_and_runs_setup_in_a_session() {
     let scratch = scratch();
     let home = &scratch.home;
     assert!(
-        parvi_agents::sync(home, sessions.as_ref(), "/tmp")
+        ahjo_agents::sync(home, sessions.as_ref(), "/tmp")
             .await
             .is_err()
     );
-    let session = parvi_agents::sync(home, sessions.as_ref(), "~/kit")
+    let session = ahjo_agents::sync(home, sessions.as_ref(), "~/kit")
         .await
         .unwrap();
     assert_eq!(session, "sync-kit-2");
@@ -340,7 +340,7 @@ async fn sync_fetches_fast_forwards_and_runs_setup_in_a_session() {
 
 #[test]
 fn commands_match_the_old_agents_tools() {
-    let agents: Vec<&str> = parvi_agents::LISTING
+    let agents: Vec<&str> = ahjo_agents::LISTING
         .commands
         .iter()
         .copied()

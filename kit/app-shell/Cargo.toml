@@ -1,17 +1,17 @@
 [package]
-name = "parvi-app-shell"
+name = "ahjo-app-shell"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
-description = "Parvi's app shell: the window around the pages areas register."
+description = "Ahjo Swarm's app shell: the window around the pages areas register."
 publish = false
 
 [lints]
 workspace = true
 
 [dependencies]
-parvi-app-kit = { path = "../app-kit" }
-parvi-core = { path = "../core" }
+ahjo-app-kit = { path = "../app-kit" }
+ahjo-core = { path = "../core" }
 gpui = { package = "gpui-pre", version = "=0.3.12" }
 async-channel = "2"
 log = "0.4"
@@ -21,8 +21,8 @@ serde_json = "1"
 [dev-dependencies]
 gpui = { package = "gpui-pre", version = "=0.3.12", features = ["test-support"] }
 tokio = { version = "1", features = ["rt", "rt-multi-thread", "net", "macros", "time", "io-util"] }
-parvi-node-kit = { path = "../node-kit" }
-parvi-testkit = { path = "../testkit" }
+ahjo-node-kit = { path = "../node-kit" }
+ahjo-testkit = { path = "../testkit" }
 anyhow = "1"
 tokio-tungstenite = "0.30"
 futures-util = { version = "0.3", default-features = false, features = ["sink", "std"] }

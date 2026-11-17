@@ -7,9 +7,9 @@
 use super::{Entry, Work};
 use crate::store::work::prose::BEAD_LINK;
 use crate::store::work::tests::{Bead, b, repo, store};
+use ahjo_terminals_contract::{FocusedSession, Session, SessionList};
+use ahjo_work_contract::{ProjectView as Project, RepoView as Repo, Snapshot, StoreView as Store};
 use gpui::{AppContext, Entity, TestAppContext, VisualTestContext};
-use parvi_terminals_contract::{FocusedSession, Session, SessionList};
-use parvi_work_contract::{ProjectView as Project, RepoView as Repo, Snapshot, StoreView as Store};
 use std::sync::Arc;
 
 /// Two stores linked across, a repository, and one that failed.
@@ -54,13 +54,13 @@ fn snapshot() -> Snapshot {
 
 fn page(cx: &mut TestAppContext) -> (Entity<Work>, &mut VisualTestContext) {
     cx.update(|cx| {
-        parvi_app_shell::prepare(cx);
+        ahjo_app_shell::prepare(cx);
     });
     let (work, cx) = cx.add_window_view(|window, cx| {
         let (tx, _) = async_channel::unbounded();
-        let hub = cx
-            .new(|_| parvi_app_kit::Hub::new(parvi_app_kit::link::socket::Net::start(), tx, None));
-        Work::new(parvi_app_kit::Host::new(&hub), window, cx)
+        let hub =
+            cx.new(|_| ahjo_app_kit::Hub::new(ahjo_app_kit::link::socket::Net::start(), tx, None));
+        Work::new(ahjo_app_kit::Host::new(&hub), window, cx)
     });
     cx.update(|window, cx| {
         work.update(cx, |w, cx| {
@@ -364,10 +364,10 @@ fn a_snapshot_frame_is_read_off_the_window_and_lists_when_it_lands(cx: &mut Test
     let body = serde_json::to_vec(&next).unwrap();
     cx.update(|window, cx| {
         work.update(cx, |w, cx| {
-            parvi_app_kit::Page::frame(
+            ahjo_app_kit::Page::frame(
                 w,
-                &parvi_core::NodeId("node".into()),
-                parvi_work_contract::SNAPSHOT,
+                &ahjo_core::NodeId("node".into()),
+                ahjo_work_contract::SNAPSHOT,
                 &body,
                 window,
                 cx,
@@ -412,12 +412,12 @@ fn reveal_shows_the_named_nodes_copy(cx: &mut TestAppContext) {
             }
             w.snapshots.insert("other".into(), Arc::new(second));
             w.rebuild(cx);
-            <Work as parvi_app_kit::Page>::answer(
+            <Work as ahjo_app_kit::Page>::answer(
                 w,
-                parvi_app_kit::Ask::Reveal {
+                ahjo_app_kit::Ask::Reveal {
                     what: "item".into(),
                     id: "bead:n:/srv/data/context#library-zvi".into(),
-                    node: Some(parvi_core::NodeId("other".into())),
+                    node: Some(ahjo_core::NodeId("other".into())),
                     part: None,
                     beside: false,
                 },
@@ -456,7 +456,7 @@ fn says_it_is_reading_while_no_project_has_answered(cx: &mut TestAppContext) {
 
 #[test]
 fn session_names() {
-    use parvi_terminals_contract::session_copy::next_name;
+    use ahjo_terminals_contract::session_copy::next_name;
     assert_eq!(super::session_name("example/project", "#42"), "project-42");
     assert_eq!(super::session_name("ctx", "ctx-1a.2"), "ctx-1a-2");
     assert_eq!(
@@ -492,12 +492,12 @@ fn ids(work: &Entity<Work>, cx: &mut VisualTestContext) -> Vec<String> {
 
 #[gpui::test]
 fn the_time_page_draws_before_any_work_is_read(cx: &mut TestAppContext) {
-    cx.update(parvi_app_shell::prepare);
+    cx.update(ahjo_app_shell::prepare);
     let (work, cx) = cx.add_window_view(|window, cx| {
         let (tx, _) = async_channel::unbounded();
-        let hub = cx
-            .new(|_| parvi_app_kit::Hub::new(parvi_app_kit::link::socket::Net::start(), tx, None));
-        let mut w = Work::new(parvi_app_kit::Host::new(&hub), window, cx);
+        let hub =
+            cx.new(|_| ahjo_app_kit::Hub::new(ahjo_app_kit::link::socket::Net::start(), tx, None));
+        let mut w = Work::new(ahjo_app_kit::Host::new(&hub), window, cx);
         w.set_layout(crate::Layout::Time, false, cx);
         w
     });

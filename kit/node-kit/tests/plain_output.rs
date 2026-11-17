@@ -1,5 +1,5 @@
 //! Plain and JSON CLI output of representative node responses.
-use parvi_node_kit::{Area, Built, Command, Config, Listing, Options, Setup, cli};
+use ahjo_node_kit::{Area, Built, Command, Config, Listing, Options, Setup, cli};
 use serde_json::{Value, json};
 
 struct Responses;
@@ -47,9 +47,9 @@ const AREA: Listing = Listing {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn plain_cli_formats_nested_responses_and_json_stays_the_same() {
-    let dir = std::env::temp_dir().join(format!("parvi-plain-output-{}", std::process::id()));
+    let dir = std::env::temp_dir().join(format!("ahjo-plain-output-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
-    let node = parvi_node_kit::start(
+    let node = ahjo_node_kit::start(
         Options {
             config: Config::parse("", dir.clone()).unwrap(),
             dir: dir.clone(),

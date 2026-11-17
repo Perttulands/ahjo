@@ -14,7 +14,7 @@ use std::{
 };
 use tokio::{io::AsyncReadExt, sync::watch};
 
-pub use parvi_files_contract::{Progress, TransferRequest as Start};
+pub use ahjo_files_contract::{Progress, TransferRequest as Start};
 /// Each transfer this node started, with what started it, so a failed one
 /// can be resumed by its id alone.
 pub type Jobs = Mutex<HashMap<String, Job>>;
@@ -433,7 +433,7 @@ mod tests {
         assert_eq!(fs::read(destination.join("file.txt")).unwrap(), b"original");
         assert!(
             !destination
-                .join(format!(".parvi-transfer-{id}/data"))
+                .join(format!(".ahjo-transfer-{id}/data"))
                 .exists()
         );
     }

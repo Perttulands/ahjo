@@ -12,15 +12,15 @@
 use serde::Deserialize;
 use std::collections::{BTreeMap, HashMap};
 
-pub use parvi_host_contract::{LogLine, Service};
-use parvi_host_contract::{ServiceList as List, ServiceLog, ServiceOne as One};
+pub use ahjo_host_contract::{LogLine, Service};
+use ahjo_host_contract::{ServiceList as List, ServiceLog, ServiceOne as One};
 
 #[derive(Deserialize)]
 struct Answer {
     service: Option<Service>,
     #[serde(default)]
     errors: Vec<String>,
-    error: Option<parvi_core::Error>,
+    error: Option<ahjo_core::Error>,
     #[serde(default)]
     outcome: String,
 }
@@ -214,7 +214,7 @@ pub fn address(link: &str, chars: usize) -> String {
         .trim_start_matches("https://")
         .trim_start_matches("http://")
         .trim_end_matches('/');
-    parvi_app_kit::widgets::pane::middle(bare, chars)
+    ahjo_app_kit::widgets::pane::middle(bare, chars)
 }
 
 /// Whether systemd keeps restarting a service that keeps dying.
@@ -416,7 +416,7 @@ impl NodeServices {
 pub fn words(status: u16, body: &[u8]) -> String {
     #[derive(Deserialize)]
     struct E {
-        error: parvi_core::Error,
+        error: ahjo_core::Error,
     }
     if let Ok(e) = serde_json::from_slice::<E>(body) {
         return e.error.message;

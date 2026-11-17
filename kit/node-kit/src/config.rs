@@ -9,7 +9,7 @@
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
-use parvi_core::Error;
+use ahjo_core::Error;
 use serde::Deserialize;
 use serde::de::DeserializeOwned;
 
@@ -93,7 +93,7 @@ impl Config {
         &self.file
     }
 
-    /// What `parvi config show` answers: the file and each section's keys
+    /// What `ahjo config show` answers: the file and each section's keys
     /// and values as the file has them, or only `section`'s. A section is
     /// the node's or one of `areas`; another is `unknown_section`.
     pub fn show(&self, section: Option<&str>, areas: &[&str]) -> Result<serde_json::Value, Error> {
@@ -194,7 +194,7 @@ mod tests {
 
     #[test]
     fn every_section_reads_and_relative_paths_live_beside_the_file() {
-        let dir = std::env::temp_dir().join(format!("parvi-config-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("ahjo-config-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join(FILE);
         // An absolute folder on this platform, as a TOML literal string.
@@ -241,11 +241,11 @@ rooms = ['{srv}', "notes", "~/notes"]
     #[test]
     fn show_answers_the_file_and_its_sections_as_read() {
         let config =
-            Config::parse("[lights]\nrooms = [\"a\"]\n", PathBuf::from("/etc/parvi")).unwrap();
+            Config::parse("[lights]\nrooms = [\"a\"]\n", PathBuf::from("/etc/ahjo")).unwrap();
         let all = config.show(None, &["lights", "dark"]).unwrap();
         assert_eq!(
             all["path"],
-            Path::new("/etc/parvi").join(FILE).to_str().unwrap()
+            Path::new("/etc/ahjo").join(FILE).to_str().unwrap()
         );
         assert_eq!(
             all["sections"],

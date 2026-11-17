@@ -1,5 +1,7 @@
 //! Run and gate routes over the local coordinator.
 use crate::{Missions, routes::ApiError};
+use ahjo_mission_engine::{AdmissionFailure, Coordinator};
+use ahjo_missions_contract::{self as contract, HumanPick, HumanVerdict, ResumeRequest, RunStart};
 use axum::{
     Json, Router,
     extract::{
@@ -10,8 +12,6 @@ use axum::{
     response::{IntoResponse, Response},
     routing::get,
 };
-use parvi_mission_engine::{AdmissionFailure, Coordinator};
-use parvi_missions_contract::{self as contract, HumanPick, HumanVerdict, ResumeRequest, RunStart};
 use serde_json::json;
 
 impl FromRef<Missions> for Coordinator {
@@ -46,9 +46,9 @@ pub fn routes(missions: Missions) -> Router {
 }
 type ResultResponse = Result<Response, ApiError>;
 fn bad_json(e: JsonRejection) -> ApiError {
-    parvi_core::Error::new("bad_request", e.body_text()).into()
+    ahjo_core::Error::new("bad_request", e.body_text()).into()
 }
-fn response<T: serde::Serialize>(result: Result<T, parvi_core::Error>) -> ResultResponse {
+fn response<T: serde::Serialize>(result: Result<T, ahjo_core::Error>) -> ResultResponse {
     Ok(Json(result?).into_response())
 }
 /// Runs a coordinator call that may wait on seats (a tmux command, a seat
@@ -60,13 +60,13 @@ async fn off<T: Send + 'static>(
 ) -> Result<T, ApiError> {
     tokio::task::spawn_blocking(move || call(c))
         .await
-        .map_err(|e| parvi_core::Error::new("internal", e.to_string()).into())
+        .map_err(|e| ahjo_core::Error::new("internal", e.to_string()).into())
 }
 async fn list(
     State(c): State<Coordinator>,
     q: Result<Query<contract::RunsQuery>, QueryRejection>,
 ) -> ResultResponse {
-    let Query(q) = q.map_err(|e| parvi_core::Error::new("bad_request", e.body_text()))?;
+    let Query(q) = q.map_err(|e| ahjo_core::Error::new("bad_request", e.body_text()))?;
     response(c.list(q.mission.as_deref(), q.needs.as_deref() == Some("you")))
 }
 async fn read(State(c): State<Coordinator>, Path(id): Path<String>) -> ResultResponse {
@@ -116,7 +116,7 @@ async fn evidence(
     Path(id): Path<String>,
     q: Result<Query<contract::AttemptsQuery>, QueryRejection>,
 ) -> ResultResponse {
-    let Query(q) = q.map_err(|e| parvi_core::Error::new("bad_request", e.body_text()))?;
+    let Query(q) = q.map_err(|e| ahjo_core::Error::new("bad_request", e.body_text()))?;
     Ok(Json(json!({"evidence": c.evidence(&id, q.step.as_deref())?})).into_response())
 }
 async fn attempts(
@@ -124,7 +124,7 @@ async fn attempts(
     Path(id): Path<String>,
     q: Result<Query<contract::AttemptsQuery>, QueryRejection>,
 ) -> ResultResponse {
-    let Query(q) = q.map_err(|e| parvi_core::Error::new("bad_request", e.body_text()))?;
+    let Query(q) = q.map_err(|e| ahjo_core::Error::new("bad_request", e.body_text()))?;
     Ok(Json(json!({"attempts":c.attempts(&id, q.step.as_deref())?})).into_response())
 }
 async fn gate_request(
@@ -192,7 +192,7 @@ async fn start(
     headers: HeaderMap,
     body: Result<Json<RunStart>, JsonRejection>,
 ) -> ResultResponse {
-    let Json(mut req) = body.map_err(|e| parvi_core::Error::new("bad_request", e.body_text()))?;
+    let Json(mut req) = body.map_err(|e| ahjo_core::Error::new("bad_request", e.body_text()))?;
     if !req.work.is_empty() {
         req.work = m.resolver.resolve(&req.work).await?.to_string();
     }
@@ -203,7 +203,7 @@ async fn start(
         || (req.input_card_id.is_empty() == req.formation_id.is_empty())
         || req.expected_rev <= 0
     {
-        return Err(parvi_core::Error::new(
+        return Err(ahjo_core::Error::new(
             "bad_request",
             "mission, one run target and expectedRev required",
         )
@@ -227,7 +227,7 @@ async fn start(
         Err(AdmissionFailure::Findings(findings)) => Ok((
             StatusCode::UNPROCESSABLE_ENTITY,
             Json(contract::AdmissionRejection {
-                error: parvi_core::Error::new(
+                error: ahjo_core::Error::new(
                     contract::error::RUN_ADMISSION_FAILED,
                     "run admission failed",
                 ),
@@ -236,16 +236,16 @@ async fn start(
         )
             .into_response()),
         Err(AdmissionFailure::NotFound(message)) => {
-            Err(parvi_core::Error::new("not_found", message).into())
+            Err(ahjo_core::Error::new("not_found", message).into())
         }
         Err(AdmissionFailure::Conflict) => {
-            Err(parvi_core::Error::new("conflict", "mission changed").into())
+            Err(ahjo_core::Error::new("conflict", "mission changed").into())
         }
         Err(AdmissionFailure::Invalid(message)) => {
-            Err(parvi_core::Error::new("bad_request", message).into())
+            Err(ahjo_core::Error::new("bad_request", message).into())
         }
         Err(AdmissionFailure::Io(error)) => {
-            Err(parvi_core::Error::new("io", error.to_string()).into())
+            Err(ahjo_core::Error::new("io", error.to_string()).into())
         }
     }
 }

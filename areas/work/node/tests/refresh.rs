@@ -2,24 +2,24 @@
 //! a write moves the store's marker, and the next refresh reads it.
 #![cfg(unix)]
 
+use ahjo_node_kit::{Built, Listing, Setup};
+use ahjo_testkit::node::Node;
 use futures_util::{SinkExt, StreamExt};
-use parvi_node_kit::{Built, Listing, Setup};
-use parvi_testkit::node::Node;
 use serde_json::{Value, json};
 use std::{os::unix::fs::PermissionsExt, sync::OnceLock, time::Duration};
 use tokio_tungstenite::tungstenite::Message;
 
 static BD: OnceLock<String> = OnceLock::new();
 fn build(setup: &Setup) -> anyhow::Result<Built> {
-    parvi_work::build_with(
+    ahjo_work::build_with(
         setup,
-        parvi_work::Bd::new(BD.get().unwrap()),
-        parvi_work::Gh::default(),
+        ahjo_work::Bd::new(BD.get().unwrap()),
+        ahjo_work::Gh::default(),
     )
 }
 const WORK: Listing = Listing {
     build,
-    ..parvi_work::LISTING
+    ..ahjo_work::LISTING
 };
 
 fn status_file(path: &std::path::Path, status: &str) {
@@ -37,7 +37,7 @@ async fn next_status(
     tokio::time::timeout(Duration::from_secs(10), async {
         loop {
             let data = ws.next().await.unwrap().unwrap().into_data();
-            if data.first() == Some(&parvi_work_contract::SNAPSHOT) {
+            if data.first() == Some(&ahjo_work_contract::SNAPSHOT) {
                 let value: Value = serde_json::from_slice(&data[1..]).unwrap();
                 if value["projects"][0]["items"][0]["status"] == expected {
                     return;
@@ -51,7 +51,7 @@ async fn next_status(
 
 #[tokio::test(flavor = "multi_thread")]
 async fn cli_list_and_page_refresh_read_the_changed_store() {
-    let dir = parvi_testkit::fresh_dir("parvi-work-refresh");
+    let dir = ahjo_testkit::fresh_dir("ahjo-work-refresh");
     std::fs::create_dir_all(dir.join(".beads/embeddeddolt/fixture/.dolt/noms")).unwrap();
     let manifest = dir.join(".beads/embeddeddolt/fixture/.dolt/noms/manifest");
     std::fs::write(&manifest, "first").unwrap();
@@ -68,7 +68,7 @@ async fn cli_list_and_page_refresh_read_the_changed_store() {
     let node = Node::start(&[WORK], &config).await.unwrap();
     let (mut ws, _) = tokio_tungstenite::connect_async(node.ws()).await.unwrap();
     ws.next().await.unwrap().unwrap();
-    ws.send(Message::Binary(vec![parvi_work_contract::WATCH, 1].into()))
+    ws.send(Message::Binary(vec![ahjo_work_contract::WATCH, 1].into()))
         .await
         .unwrap();
     next_status(&mut ws, "open").await;
@@ -87,7 +87,7 @@ async fn cli_list_and_page_refresh_read_the_changed_store() {
     next_status(&mut ws, "closed").await;
     status_file(&items, "in_progress");
     std::fs::write(&manifest, "after starting").unwrap();
-    ws.send(Message::Binary(vec![parvi_work_contract::WATCH, 2].into()))
+    ws.send(Message::Binary(vec![ahjo_work_contract::WATCH, 2].into()))
         .await
         .unwrap();
     next_status(&mut ws, "in_progress").await;

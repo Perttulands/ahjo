@@ -4,12 +4,12 @@
 
 use anyhow::{Result, bail};
 
-use parvi_host_contract::{
+use ahjo_host_contract::{
     Event as WireEvent, EventFrame, Facts, Point, Reading, ReadingFrame, State,
 };
-use parvi_node_kit::events::Event;
+use ahjo_node_kit::events::Event;
 
-pub use parvi_host_contract::{HOST, HOST_EVENT, HOST_READING, HOST_STATE, encode_on};
+pub use ahjo_host_contract::{HOST, HOST_EVENT, HOST_READING, HOST_STATE, encode_on};
 
 /// Whether a client frame belongs to this channel.
 pub fn owns(frame: &[u8]) -> bool {

@@ -23,16 +23,16 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use anyhow::Context;
-use jiff::Timestamp;
-use parvi_node_kit::BoxFuture;
-use parvi_node_kit::events::Log;
-use parvi_scheduled_contract::{
+use ahjo_node_kit::BoxFuture;
+use ahjo_node_kit::events::Log;
+use ahjo_scheduled_contract::{
     Attempt, AuditEntry, BAD_REQUEST, CONFLICT, ERROR, INTERNAL, NOT_FOUND, PARTIAL, RunEntry,
     SUBMIT_KEY_DISPATCHED, SUCCESS, Schedule, TARGET_NOT_FOUND, Target, TargetRun, Task,
     normalize_targets,
 };
-use parvi_term::Sessions;
+use ahjo_term::Sessions;
+use anyhow::Context;
+use jiff::Timestamp;
 use tokio::sync::{Notify, Semaphore, watch};
 
 use crate::schedule;
@@ -103,8 +103,8 @@ impl From<anyhow::Error> for Error {
     }
 }
 
-impl From<Error> for parvi_core::Error {
-    fn from(e: Error) -> parvi_core::Error {
+impl From<Error> for ahjo_core::Error {
+    fn from(e: Error) -> ahjo_core::Error {
         let code = match &e {
             Error::NotFound => NOT_FOUND,
             Error::Invalid(_) => BAD_REQUEST,
@@ -112,7 +112,7 @@ impl From<Error> for parvi_core::Error {
             Error::Conflict(_) => CONFLICT,
             Error::Internal(_) => INTERNAL,
         };
-        parvi_core::Error::new(code, e.to_string())
+        ahjo_core::Error::new(code, e.to_string())
     }
 }
 
@@ -252,7 +252,7 @@ impl Scheduled {
         self.due.lock().unwrap().remove(id);
         self.events
             .record(EVENT, true, format!("Scheduled task {id} held back: {why}"));
-        eprintln!("parvi: scheduled task {id} held back: {why}");
+        eprintln!("ahjo: scheduled task {id} held back: {why}");
         self.held.lock().unwrap().insert(id.to_string(), why);
         self.announce();
         self.changed.notify_one();
@@ -322,7 +322,7 @@ impl Scheduled {
             audit(
                 &mut task,
                 now,
-                "parvi",
+                "ahjo",
                 "updated",
                 &format!("session {from} renamed to {to}"),
             );
@@ -866,7 +866,7 @@ impl Scheduled {
                     tokio::select! {
                         _ = tokio::time::sleep(wait) => {
                             if let Err(e) = self.run_due().await {
-                                eprintln!("parvi: scheduled tasks: {e}");
+                                eprintln!("ahjo: scheduled tasks: {e}");
                             }
                         }
                         _ = changed => {}

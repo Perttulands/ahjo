@@ -1,4 +1,4 @@
-//! `parvi mcp`: MCP over stdio for agents that start their servers as
+//! `ahjo mcp`: MCP over stdio for agents that start their servers as
 //! processes. It relays each line to the local node's `/mcp` and prints the
 //! answer, so the node serves and logs every call either way.
 
@@ -19,7 +19,7 @@ pub async fn stdio(node: &str) -> Result<()> {
         }
         let answer = match post(node, &line).await {
             Ok(answer) => answer,
-            Err(error) => failed(&line, &format!("parvi node at {node}: {error:#}")),
+            Err(error) => failed(&line, &format!("ahjo node at {node}: {error:#}")),
         };
         if let Some(answer) = answer {
             stdout.write_all(answer.trim_end().as_bytes()).await?;
@@ -34,7 +34,7 @@ pub async fn stdio(node: &str) -> Result<()> {
 async fn post(node: &str, message: &str) -> Result<Option<String>> {
     let mut stream = TcpStream::connect(node).await.context("connecting")?;
     let request = format!(
-        "POST {PATH} HTTP/1.1\r\nHost: {node}\r\nUser-Agent: parvi-mcp-stdio\r\n\
+        "POST {PATH} HTTP/1.1\r\nHost: {node}\r\nUser-Agent: ahjo-mcp-stdio\r\n\
          Content-Type: application/json\r\nAccept: application/json, text/event-stream\r\n\
          Content-Length: {}\r\nConnection: close\r\n\r\n{message}",
         message.len()

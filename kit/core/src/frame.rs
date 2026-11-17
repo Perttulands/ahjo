@@ -18,7 +18,7 @@ pub const NODES_ON: u8 = 0x1b;
 /// The app's view control, both ways: what it shows, and what it is told to.
 pub const VIEW: Kinds = &[0xb0..=0xbf];
 
-/// The kinds no area or page takes, each with what owns it: `parvi kinds`
+/// The kinds no area or page takes, each with what owns it: `ahjo kinds`
 /// lists them with the areas'.
 pub const RESERVED: &[(&str, Kinds)] = &[
     ("the node's hello", &[HELLO..=HELLO]),

@@ -15,14 +15,14 @@ mod text;
 pub(crate) mod tokens;
 mod view;
 
+use ahjo_app_kit::ask::{Answers, Ask};
+use ahjo_app_kit::widgets::field::{self, FieldEvent, TextField};
+use ahjo_app_kit::widgets::select::Selectable;
+use ahjo_app_kit::{Host, Mounted, Page, mount};
+use ahjo_core::NodeId;
+use ahjo_terminals_contract::SessionList;
+use ahjo_work_contract::{SNAPSHOT, Snapshot, WATCH};
 use gpui::{App, AppContext, Context, Entity, FocusHandle, KeyDownEvent, WeakEntity, Window};
-use parvi_app_kit::ask::{Answers, Ask};
-use parvi_app_kit::widgets::field::{self, FieldEvent, TextField};
-use parvi_app_kit::widgets::select::Selectable;
-use parvi_app_kit::{Host, Mounted, Page, mount};
-use parvi_core::NodeId;
-use parvi_terminals_contract::SessionList;
-use parvi_work_contract::{SNAPSHOT, Snapshot, WATCH};
 use std::cell::RefCell;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::rc::Rc;
@@ -211,15 +211,15 @@ impl Page for Work {
     const TITLE: &'static str = "Work";
     const KEY: Option<char> = Some('O');
     const AREA: Option<&'static str> = Some(NAME);
-    const KINDS: parvi_core::frame::Kinds = &[SNAPSHOT..=SNAPSHOT];
+    const KINDS: ahjo_core::frame::Kinds = &[SNAPSHOT..=SNAPSHOT];
     const CHANNELS: &'static [u8] = &[WATCH];
     const ANSWERS: &'static [Answers] = &[Answers::Reveal("item")];
-    const SETTINGS: &'static [parvi_app_kit::declared::Setting] = &[
-        parvi_app_kit::declared::Setting {
+    const SETTINGS: &'static [ahjo_app_kit::declared::Setting] = &[
+        ahjo_app_kit::declared::Setting {
             key: "layout",
             label: "Layout",
             note: "strip, time or tree: the tree under a time strip, the chart as the page, or the tree alone (V on the page)",
-            control: parvi_app_kit::declared::Control::Text { default: "strip" },
+            control: ahjo_app_kit::declared::Control::Text { default: "strip" },
         },
     ];
     fn settings_changed(&mut self, _: &mut Window, cx: &mut Context<Self>) {
@@ -237,7 +237,7 @@ impl Page for Work {
     fn link(
         &mut self,
         node: &NodeId,
-        state: Option<parvi_app_kit::link::client::LinkState>,
+        state: Option<ahjo_app_kit::link::client::LinkState>,
         _: &mut Window,
         cx: &mut Context<Self>,
     ) {
@@ -269,17 +269,17 @@ impl Page for Work {
             self.open_wanted(cx);
         }
     }
-    fn chords(&self, _: &App) -> Vec<parvi_app_kit::chords::Chord> {
+    fn chords(&self, _: &App) -> Vec<ahjo_app_kit::chords::Chord> {
         let me = self.me.clone();
         let close = self.me.clone();
         let report = self.me.clone();
         vec![
-            parvi_app_kit::chords::Chord::new("r", "Report", move |window, cx| {
+            ahjo_app_kit::chords::Chord::new("r", "Report", move |window, cx| {
                 let _ = report.update(cx, |work, cx| work.open_report(window, cx));
             })
             .alt("r", Some(false))
             .everywhere(),
-            parvi_app_kit::chords::Chord::new("i", "Close the item", move |_, cx| {
+            ahjo_app_kit::chords::Chord::new("i", "Close the item", move |_, cx| {
                 let _ = close.update(cx, |work, cx| {
                     if let Some(from) = work.beside_from.take() {
                         work.host.close_beside(from, cx);
@@ -288,7 +288,7 @@ impl Page for Work {
             })
             .alt("i", Some(false))
             .everywhere(),
-            parvi_app_kit::chords::Chord::new("b", "Work beside", move |window, cx| {
+            ahjo_app_kit::chords::Chord::new("b", "Work beside", move |window, cx| {
                 let _ = me.update(cx, |work, cx| work.toggle_panel(window, cx));
             })
             .alt("b", Some(false))
@@ -317,7 +317,7 @@ impl Work {
             cx.observe(s, |_, _, cx| cx.notify()).detach();
         }
         let settings: serde_json::Value = host.setting(cx).unwrap_or_default();
-        let now = parvi_app_kit::hub::now_ms();
+        let now = ahjo_app_kit::hub::now_ms();
         let clock = Clock::local();
         let today = clock.day(now);
         let layout = Layout::of(settings["layout"].as_str().unwrap_or(""));
@@ -441,7 +441,7 @@ impl Work {
     fn set_board(&mut self, board: Board, cx: &mut Context<Self>) {
         self.dated = Rc::new(timeline::dated(&board, &self.clock));
         self.board = Rc::new(board);
-        self.today = self.clock.day(parvi_app_kit::hub::now_ms());
+        self.today = self.clock.day(ahjo_app_kit::hub::now_ms());
         if !self.text_hits.0.is_empty() {
             self.search_text(&self.text_hits.0.clone(), cx);
         }
@@ -1212,8 +1212,8 @@ impl Work {
         }
     }
 
-    pub(crate) fn item_menu(&self, row: usize) -> Vec<parvi_app_kit::menu::MenuRow> {
-        use parvi_app_kit::menu::MenuRow;
+    pub(crate) fn item_menu(&self, row: usize) -> Vec<ahjo_app_kit::menu::MenuRow> {
+        use ahjo_app_kit::menu::MenuRow;
         let r = &self.board.rows[row];
         let id = r.written_id(&self.board);
         let title = format!("{id}: {}", r.title);
@@ -1226,10 +1226,10 @@ impl Work {
         }
         rows.extend([
             MenuRow::new("Copy id", move |_, cx| {
-                parvi_app_kit::widgets::select::copy(id.clone(), cx)
+                ahjo_app_kit::widgets::select::copy(id.clone(), cx)
             }),
             MenuRow::new("Copy id and title", move |_, cx| {
-                parvi_app_kit::widgets::select::copy(title.clone(), cx)
+                ahjo_app_kit::widgets::select::copy(title.clone(), cx)
             }),
         ]);
         if let Some(url) = r.url.clone() {
@@ -1243,7 +1243,7 @@ impl Work {
         let Some(text) = self.prose.borrow().copied() else {
             return false;
         };
-        parvi_app_kit::widgets::select::copy(text, cx);
+        ahjo_app_kit::widgets::select::copy(text, cx);
         true
     }
     /// The line that names the item shown to an agent.

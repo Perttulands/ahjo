@@ -17,7 +17,7 @@ use crate::limits::LimitUse;
 use crate::run_limit::LimitStop;
 use crate::run_worker::event;
 use crate::{Coordinator, RoutedInput, RunEvent};
-use parvi_mission_model::{Gate, HumanPick, Mission, RunProjection, RunStart};
+use ahjo_mission_model::{Gate, HumanPick, Mission, RunProjection, RunStart};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::{collections::BTreeMap, io};
@@ -27,7 +27,7 @@ pub(crate) const PICK_STARTED: &str = "pick_started";
 /// judge again.
 pub(crate) const INVALID_JUDGE_PICK: &str = "invalid_judge_pick";
 /// Who decides a pick with only one candidate (Archon says `archon`).
-const DECIDED_BY_PARVI: &str = "parvi";
+const DECIDED_BY_AHJO: &str = "ahjo";
 
 /// An attempt a pick may take: the step's output was accepted (`outputSeq`)
 /// and its selecting gate judged it (`verdictSeq`). An attempt a limit cut
@@ -104,7 +104,7 @@ pub(crate) fn candidates(events: &[RunEvent], step: &str, gate: &str) -> Vec<Can
                 let origin = (data(event).get("inputRef"))
                     .and_then(|input| input.get("origin"))
                     .and_then(|origin| {
-                        serde_json::from_value::<parvi_mission_model::PublicOrigin>(origin.clone())
+                        serde_json::from_value::<ahjo_mission_model::PublicOrigin>(origin.clone())
                             .ok()
                     });
                 let Some(origin) = origin.filter(|origin| origin.node_id == step) else {
@@ -338,7 +338,7 @@ pub(crate) fn attempt_words(attempts: &[i64]) -> String {
 }
 
 /// What a judge in a pick returns: the final judge picks with a fenced
-/// `parvi-pick` block, the judges before it recommend in plain output.
+/// `ahjo-pick` block, the judges before it recommend in plain output.
 pub(crate) fn contract(final_judge: bool, attempts: &[i64]) -> String {
     let pick = crate::contract_names::PICK;
     if !final_judge {
@@ -549,7 +549,7 @@ pub(crate) fn advance(
                 attempt: only.attempt,
                 reason: format!("the only attempt {} judged", mission.node_name(&gate.id)),
                 evidence: Vec::new(),
-                decided_by: DECIDED_BY_PARVI.into(),
+                decided_by: DECIDED_BY_AHJO.into(),
             };
             resolve(c, id, control, mission, started, &choice, None)?;
             return Ok(PickAction::Acted);
@@ -620,7 +620,7 @@ struct Judging<'a> {
     req: &'a RunStart,
     workspace: &'a std::path::Path,
     control: &'a Control,
-    inputs: &'a [parvi_mission_model::RunInput],
+    inputs: &'a [ahjo_mission_model::RunInput],
 }
 
 impl Judging<'_> {
@@ -934,7 +934,7 @@ mod tests {
 
     #[test]
     fn a_judge_pick_is_one_fenced_block_naming_a_candidate() {
-        let block = |body: &str| format!("```parvi-pick\n{body}\n```");
+        let block = |body: &str| format!("```ahjo-pick\n{body}\n```");
         let choice = parse_pick(
             &block(r#"{"attempt":2,"reason":"tests pass","evidence":["retry"]}"#),
             &[1, 2, 3],

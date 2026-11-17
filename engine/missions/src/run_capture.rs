@@ -1,6 +1,6 @@
 //! Capture a finished attempt before routing it, and retry a pending capture.
 use crate::{Coordinator, RunEvent, coordinator::Control, run_worker::append_live};
-use parvi_mission_model::{Mission, RunStart};
+use ahjo_mission_model::{Mission, RunStart};
 use serde_json::json;
 use std::{
     collections::HashSet,
@@ -53,7 +53,7 @@ pub(crate) fn publish(
     accept(c, id, mission, req, workspace, control, output)
 }
 
-fn validate_refs(formation: &parvi_mission_model::Formation, output: &RunEvent) -> io::Result<()> {
+fn validate_refs(formation: &ahjo_mission_model::Formation, output: &RunEvent) -> io::Result<()> {
     let payloads = output
         .data
         .get("outputs")

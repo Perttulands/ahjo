@@ -5,14 +5,14 @@
 //!
 //! `agent_seats_submit` drives a real Claude Code or Codex seat and needs a
 //! signed-in harness, so it runs only when asked:
-//! `PARVI_AGENT_SEATS=claude,codex cargo test -p parvi-terminals agent_seats_submit`.
+//! `AHJO_AGENT_SEATS=claude,codex cargo test -p ahjo-terminals agent_seats_submit`.
 //! Linux and macOS only, as tmux is.
 
 use std::time::{Duration, Instant};
 
-use parvi_term::engine::{Engine, NotReady, NotSubmitted};
-use parvi_testkit::fresh_dir;
-use parvi_testkit::tmux::{Server, eventually, write_script};
+use ahjo_term::engine::{Engine, NotReady, NotSubmitted};
+use ahjo_testkit::fresh_dir;
+use ahjo_testkit::tmux::{Server, eventually, write_script};
 
 /// The pane of the only session, once seeded.
 async fn seeded_pane(engine: &Engine) -> u32 {
@@ -390,7 +390,7 @@ async fn a_paste_into_a_fresh_agent_waits_until_it_is_ready() {
     let Some(server) = Server::start() else {
         return;
     };
-    let dir = fresh_dir("parvi-242-ready");
+    let dir = fresh_dir("ahjo-242-ready");
     let harness = fake_harness(&dir, "\\033[?2004h> ");
     let file = dir.join("read");
     let engine = Engine::start(server.socket());
@@ -429,7 +429,7 @@ async fn a_fresh_pane_that_never_gets_ready_gets_nothing() {
     let Some(server) = Server::start() else {
         return;
     };
-    let dir = fresh_dir("parvi-242-never");
+    let dir = fresh_dir("ahjo-242-never");
     let harness = fake_harness(&dir, "> ");
     let file = dir.join("read");
     let engine = Engine::start(server.socket());
@@ -458,7 +458,7 @@ async fn a_fresh_agent_asking_a_question_gets_nothing() {
     let Some(server) = Server::start() else {
         return;
     };
-    let dir = fresh_dir("parvi-242-asks");
+    let dir = fresh_dir("ahjo-242-asks");
     let question = "\\033[?2004h Do you trust the files in this folder?\\r\\n\\r\\n ❯ 1. Yes, proceed\\r\\n   2. No, exit\\r\\n\\r\\n Enter to confirm · Esc to cancel\\r\\n";
     let harness = fake_harness(&dir, question);
     let file = dir.join("read");
@@ -488,7 +488,7 @@ async fn an_unrecognised_harness_question_receives_nothing() {
     let Some(server) = Server::start() else {
         return;
     };
-    let dir = fresh_dir("parvi-242-unrecognised");
+    let dir = fresh_dir("ahjo-242-unrecognised");
     let harness = fake_harness(&dir, "Continue? [y/N] ");
     let file = dir.join("read");
     let engine = Engine::start(server.socket());
@@ -663,8 +663,8 @@ fn prompt(round: u32, padding: usize) -> (String, String) {
 /// bracketed paste included.
 #[tokio::test(flavor = "multi_thread")]
 async fn agent_seats_submit() {
-    let Ok(wanted) = std::env::var("PARVI_AGENT_SEATS") else {
-        eprintln!("skipping: set PARVI_AGENT_SEATS=claude,codex to drive real agent seats");
+    let Ok(wanted) = std::env::var("AHJO_AGENT_SEATS") else {
+        eprintln!("skipping: set AHJO_AGENT_SEATS=claude,codex to drive real agent seats");
         return;
     };
     for name in wanted.split(',').map(str::trim).filter(|n| !n.is_empty()) {

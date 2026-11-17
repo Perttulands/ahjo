@@ -1,9 +1,9 @@
 //! Evidence and attempts through the same CLI and HTTP node as an operator.
-use parvi_mission_engine::{
+use ahjo_mission_engine::{
     ExecutionSink, Executor, FormationExecution, FormationResult, LabExecutor,
 };
-use parvi_node_kit::{Built, Listing, Setup};
-use parvi_testkit::{node::Node, sessions};
+use ahjo_node_kit::{Built, Listing, Setup};
+use ahjo_testkit::{node::Node, sessions};
 use serde_json::{Value, json};
 use std::time::Duration;
 
@@ -13,7 +13,7 @@ impl Executor for Scripted {
         &self,
         request: FormationExecution,
         sink: ExecutionSink,
-    ) -> Result<FormationResult, parvi_core::Error> {
+    ) -> Result<FormationResult, ahjo_core::Error> {
         let judge = request.formation.id == "fmn_judge";
         let attempt = request.attempt;
         let pick = !request.pick_attempts.is_empty();
@@ -25,11 +25,11 @@ impl Executor for Scripted {
         let mut result = LabExecutor.execute_formation(request, sink)?;
         if judge {
             let text = if pick {
-                "```parvi-pick\n{\"attempt\":2,\"reason\":\"best\",\"evidence\":[]}\n```"
+                "```ahjo-pick\n{\"attempt\":2,\"reason\":\"best\",\"evidence\":[]}\n```"
             } else if attempt == 1 || best {
-                "```parvi-verdict\n{\"verdict\":\"fail\",\"reason\":\"add coverage\",\"evidence\":[]}\n```"
+                "```ahjo-verdict\n{\"verdict\":\"fail\",\"reason\":\"add coverage\",\"evidence\":[]}\n```"
             } else {
-                "```parvi-verdict\n{\"verdict\":\"pass\",\"reason\":\"covered\",\"evidence\":[]}\n```"
+                "```ahjo-verdict\n{\"verdict\":\"pass\",\"reason\":\"covered\",\"evidence\":[]}\n```"
             };
             result.text = text.into();
             for output in result.outputs.values_mut() {
@@ -40,11 +40,11 @@ impl Executor for Scripted {
     }
 }
 fn build(setup: &Setup) -> anyhow::Result<Built> {
-    parvi_missions::build_with_executor(setup, Some(Box::new(Scripted)))
+    ahjo_missions::build_with_executor(setup, Some(Box::new(Scripted)))
 }
 const LAB: Listing = Listing {
     build,
-    ..parvi_missions::LISTING
+    ..ahjo_missions::LISTING
 };
 fn mission(best: bool) -> String {
     let solo = include_str!(
@@ -80,7 +80,7 @@ async fn cli(node: &Node, args: &[&str]) -> Value {
     args.extend(["--node".into(), format!("{}/", node.url()), "--json".into()]);
     let mut out = Vec::new();
     assert_eq!(
-        parvi_node_kit::cli::run("run", &args, &mut out)
+        ahjo_node_kit::cli::run("run", &args, &mut out)
             .await
             .unwrap(),
         0
@@ -118,7 +118,7 @@ async fn run(node: &Node, best: bool) -> String {
 }
 #[tokio::test(flavor = "multi_thread")]
 async fn cli_and_http_report_problems_briefs_files_and_picked_attempts() {
-    let node = Node::start(&[sessions::LISTING, parvi_work::LISTING, LAB], "")
+    let node = Node::start(&[sessions::LISTING, ahjo_work::LISTING, LAB], "")
         .await
         .unwrap();
     let id = run(&node, false).await;
@@ -162,7 +162,7 @@ async fn cli_and_http_report_problems_briefs_files_and_picked_attempts() {
             .iter()
             .all(|b| b["nodeId"] == "fmn_judge")
     );
-    let client = parvi_node_kit::NodeClient::new(Some(&format!("{}/", node.url()))).unwrap();
+    let client = ahjo_node_kit::NodeClient::new(Some(&format!("{}/", node.url()))).unwrap();
     let (http, _) = client
         .request(
             axum::http::Method::GET,
@@ -187,7 +187,7 @@ async fn cli_and_http_report_problems_briefs_files_and_picked_attempts() {
         "--json".into(),
     ];
     assert_eq!(
-        parvi_node_kit::cli::run("run", &args, &mut out)
+        ahjo_node_kit::cli::run("run", &args, &mut out)
             .await
             .unwrap(),
         1

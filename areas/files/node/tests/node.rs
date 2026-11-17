@@ -1,11 +1,11 @@
+use ahjo_node_kit::{NodeClient, cli};
+use ahjo_testkit::node::Node;
 use axum::{
     body::Body,
     http::{Method, Request, StatusCode},
 };
 use http_body_util::BodyExt;
 use hyper_util::rt::TokioIo;
-use parvi_node_kit::{NodeClient, cli};
-use parvi_testkit::node::Node;
 use serde_json::{Value, json};
 
 fn enc(s: &str) -> String {
@@ -64,12 +64,12 @@ async fn request(
 
 #[tokio::test]
 async fn node_routes_and_local_copy_stream() {
-    let root = parvi_testkit::fresh_dir("files-node");
+    let root = ahjo_testkit::fresh_dir("files-node");
     let conf = format!(
         "[files]\nroots = [{}]\n",
         serde_json::to_string(root.to_str().unwrap()).unwrap()
     );
-    let node = Node::start(&[parvi_files::LISTING], &conf).await.unwrap();
+    let node = Node::start(&[ahjo_files::LISTING], &conf).await.unwrap();
     let (status, bytes) = request(&node, "GET", "/api/files/roots", Body::empty(), false).await;
     assert_eq!(status, StatusCode::OK);
     let roots: Value = serde_json::from_slice(&bytes).unwrap();
@@ -203,12 +203,12 @@ async fn node_routes_and_local_copy_stream() {
 
 #[tokio::test]
 async fn exact_commands_are_exposed_to_mcp_and_cli_and_operate_on_files() {
-    let root = parvi_testkit::fresh_dir("files-commands");
+    let root = ahjo_testkit::fresh_dir("files-commands");
     let config = format!(
         "[files]\nroots = [{}]\n",
         serde_json::to_string(root.to_str().unwrap()).unwrap()
     );
-    let node = Node::start(&[parvi_files::LISTING], &config).await.unwrap();
+    let node = Node::start(&[ahjo_files::LISTING], &config).await.unwrap();
     let client = NodeClient::new(Some(&node.url())).unwrap();
     let (answer, _) = client
         .request(
@@ -224,7 +224,7 @@ async fn exact_commands_are_exposed_to_mcp_and_cli_and_operate_on_files() {
         .unwrap()
         .iter()
         .map(|v| v["name"].as_str().unwrap())
-        .filter(|name| !parvi_node_kit::own::COMMANDS.contains(name))
+        .filter(|name| !ahjo_node_kit::own::COMMANDS.contains(name))
         .collect();
     actual.sort();
     let mut expected = vec![
@@ -254,7 +254,7 @@ async fn exact_commands_are_exposed_to_mcp_and_cli_and_operate_on_files() {
     for name in &expected {
         assert!(
             verbs.contains(&format!(
-                "parvi file {}",
+                "ahjo file {}",
                 name.strip_prefix("file_").unwrap()
             )),
             "{name}: {verbs}"
@@ -292,7 +292,7 @@ async fn exact_commands_are_exposed_to_mcp_and_cli_and_operate_on_files() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn file_diff_command_matches_the_route_and_prints_unified_lines() {
-    let root = parvi_testkit::fresh_dir("files-diff-command");
+    let root = ahjo_testkit::fresh_dir("files-diff-command");
     let repo = root.join("repo");
     std::fs::create_dir(&repo).unwrap();
     let git = |args: &[&str]| {
@@ -327,7 +327,7 @@ async fn file_diff_command_matches_the_route_and_prints_unified_lines() {
         "[files]\nroots = [{}]\n",
         serde_json::to_string(root.to_str().unwrap()).unwrap()
     );
-    let node = Node::start(&[parvi_files::LISTING], &config).await.unwrap();
+    let node = Node::start(&[ahjo_files::LISTING], &config).await.unwrap();
     let (status, body) = request(&node, "GET", &at("diff", &file), Body::empty(), false).await;
     assert_eq!(status, StatusCode::OK);
     let route: Value = serde_json::from_slice(&body).unwrap();
@@ -391,12 +391,12 @@ async fn files_cli_browses_finds_edits_and_deletes() {
         );
         serde_json::from_slice(&out).unwrap()
     }
-    let root = parvi_testkit::fresh_dir("files-cli-journey");
+    let root = ahjo_testkit::fresh_dir("files-cli-journey");
     let config = format!(
         "[files]\nroots = [{}]\n",
         serde_json::to_string(root.to_str().unwrap()).unwrap()
     );
-    let node = Node::start(&[parvi_files::LISTING], &config).await.unwrap();
+    let node = Node::start(&[ahjo_files::LISTING], &config).await.unwrap();
     let folder = root.join("folder");
     let file = folder.join("note.txt");
     let renamed = folder.join("renamed.txt");
@@ -441,7 +441,7 @@ async fn files_cli_browses_finds_edits_and_deletes() {
 #[tokio::test(flavor = "multi_thread")]
 async fn files_cli_finds_recent_changes_and_names_and_round_trips_binary() {
     use base64::{Engine as _, engine::general_purpose::STANDARD};
-    let root = parvi_testkit::fresh_dir("files-cli-binary");
+    let root = ahjo_testkit::fresh_dir("files-cli-binary");
     let project = root.join("repo");
     std::fs::create_dir_all(project.join(".git")).unwrap();
     std::fs::write(project.join("README.md"), "readme").unwrap();
@@ -449,7 +449,7 @@ async fn files_cli_finds_recent_changes_and_names_and_round_trips_binary() {
         "[files]\nroots = [{}]\n",
         serde_json::to_string(root.to_str().unwrap()).unwrap()
     );
-    let node = Node::start(&[parvi_files::LISTING], &config).await.unwrap();
+    let node = Node::start(&[ahjo_files::LISTING], &config).await.unwrap();
     let mut out = Vec::new();
     assert_eq!(
         cli::run(
@@ -538,7 +538,7 @@ async fn files_cli_finds_recent_changes_and_names_and_round_trips_binary() {
             .unwrap(),
         bytes
     );
-    let outside = root.parent().unwrap().join("outside-parvi-file");
+    let outside = root.parent().unwrap().join("outside-ahjo-file");
     assert_eq!(
         node.call("file_upload", json!({"path":outside,"data":data}))
             .await
@@ -552,7 +552,7 @@ async fn files_cli_finds_recent_changes_and_names_and_round_trips_binary() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn files_work_as_the_files_view_does_under_the_roots() {
-    let scratch = parvi_testkit::fresh_dir("files-mcp");
+    let scratch = ahjo_testkit::fresh_dir("files-mcp");
     let folder = scratch.join("root");
     let other = scratch.join("other");
     std::fs::create_dir(&folder).unwrap();
@@ -561,7 +561,7 @@ async fn files_work_as_the_files_view_does_under_the_roots() {
         "[files]\nroots = [{}]\n",
         serde_json::to_string(folder.to_str().unwrap()).unwrap()
     );
-    let node = Node::start(&[parvi_files::LISTING], &config).await.unwrap();
+    let node = Node::start(&[ahjo_files::LISTING], &config).await.unwrap();
     std::fs::create_dir(folder.join("sub")).unwrap();
     std::fs::write(folder.join("notes.md"), "# Notes\nhello\n").unwrap();
     std::fs::write(folder.join("blob"), [0xff, 0xfe, 0x00]).unwrap();

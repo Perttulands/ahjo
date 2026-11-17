@@ -9,8 +9,8 @@ mod services_store;
 mod tokens;
 mod view;
 
+use ahjo_app_kit::{Host, Mounted, mount};
 use gpui::{App, Window};
-use parvi_app_kit::{Host, Mounted, mount};
 
 pub use page::HostPage;
 

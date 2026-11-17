@@ -1,9 +1,9 @@
 //! A Brain reference travels through the real Send drawer into a scratch tmux session.
 #![cfg(unix)]
+use ahjo_app_kit::{Host, Mounted, link::client::LinkState, mount};
+use ahjo_terminals_app::Terminals;
+use ahjo_testkit::{fresh_dir, node::Node, tmux::Server};
 use gpui::{Entity, Modifiers, TestAppContext, VisualTestContext, Window};
-use parvi_app_kit::{Host, Mounted, link::client::LinkState, mount};
-use parvi_terminals_app::Terminals;
-use parvi_testkit::{fresh_dir, node::Node, tmux::Server};
 use std::{
     cell::RefCell,
     sync::mpsc,
@@ -71,7 +71,7 @@ fn start() -> Option<Running> {
                     corpus,
                     tmux.socket_path()
                 );
-                let node = Node::start(&[parvi_terminals::LISTING, parvi_brain::LISTING], &config)
+                let node = Node::start(&[ahjo_terminals::LISTING, ahjo_brain::LISTING], &config)
                     .await
                     .unwrap();
                 ready.send(Some((node.url(), node.id()))).unwrap();
@@ -129,10 +129,10 @@ fn brain_send_reaches_a_real_session(cx: &mut TestAppContext) {
     };
     let settings = fresh_dir("brain-send-settings");
     cx.executor().allow_parking();
-    cx.update(parvi_app_shell::prepare);
+    cx.update(ahjo_app_shell::prepare);
     let (shell, cx) = cx.add_window_view(|window, cx| {
-        parvi_app_shell::start(
-            &[terminals, parvi_brain_app::build],
+        ahjo_app_shell::start(
+            &[terminals, ahjo_brain_app::build],
             Some(running.url.clone()),
             Some(settings.join("app.json")),
             window,

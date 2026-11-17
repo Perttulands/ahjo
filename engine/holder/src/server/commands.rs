@@ -1,4 +1,4 @@
-//! The tmux commands the holder answers: the subset Parvi's engine, launcher
+//! The tmux commands the holder answers: the subset Ahjo's engine, launcher
 //! and search send, with tmux's flags and replies.
 //!
 //! A handler answers through its [`Reply`] and returns the [`Sent`] only
@@ -69,8 +69,8 @@ pub fn run(holder: &Arc<Holder>, client: &Arc<Client>, number: u64, words: &[Str
         "list-panes" | "lsp" => cx.list_panes(rest, reply),
         "list-sessions" | "ls" => cx.list_sessions(rest, reply),
         "new-session" | "new" => cx.new_session(rest, reply),
-        "parvi-create" => cx.create_owned(rest, reply),
-        "parvi-kill" => cx.kill_owned(rest, reply),
+        "ahjo-create" => cx.create_owned(rest, reply),
+        "ahjo-kill" => cx.kill_owned(rest, reply),
         "paste-buffer" | "pasteb" => cx.paste(rest, reply),
         "refresh-client" | "refresh" => cx.refresh(rest, reply),
         "send-keys" | "send" => cx.send_keys(rest, reply),

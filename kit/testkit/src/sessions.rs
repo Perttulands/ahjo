@@ -9,12 +9,12 @@
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
 
+use ahjo_node_kit::{Area, BoxFuture, Built, Listing, Setup};
+use ahjo_term::backend::Reply;
+use ahjo_term::control::PaneId;
+use ahjo_term::engine::{Activity, Delivering, PaneStream, SessionInfo};
+use ahjo_term::{Renames, Screen, SessionRef, SessionSpec, Sessions, Start};
 use anyhow::bail;
-use parvi_node_kit::{Area, BoxFuture, Built, Listing, Setup};
-use parvi_term::backend::Reply;
-use parvi_term::control::PaneId;
-use parvi_term::engine::{Activity, Delivering, PaneStream, SessionInfo};
-use parvi_term::{Renames, Screen, SessionRef, SessionSpec, Sessions, Start};
 use tokio::sync::{broadcast, watch};
 
 /// The stand-in as a test lists it: no frame kinds, no commands.

@@ -1,6 +1,6 @@
 //! Follow a dispatched turn in the harness's native transcript.
 use crate::{HarnessAdapter, Pointer, TranscriptRoots, Turn, TurnState, stage_pointer};
-use parvi_term::{
+use ahjo_term::{
     Sessions,
     control::PaneId,
     waiting::harness::{self, Harness},
@@ -142,7 +142,7 @@ impl TurnWatch<'_> {
                 }
                 Some(super::state::Nudge::Remind) => {
                     let instruction = format!(
-                        "Your last reply did not end with the done line, so this step is still open. If the work is finished, reply with only the done line; otherwise finish it first. The done line, ARTIFACT replaced by the path or port id you produced and the closing >>> kept: <<<PARVI-DONE run-id={run_id} status=ok artifact=ARTIFACT>>>"
+                        "Your last reply did not end with the done line, so this step is still open. If the work is finished, reply with only the done line; otherwise finish it first. The done line, ARTIFACT replaced by the path or port id you produced and the closing >>> kept: <<<AHJO-DONE run-id={run_id} status=ok artifact=ARTIFACT>>>"
                     );
                     state_event(
                         "seat_idle_recovery",

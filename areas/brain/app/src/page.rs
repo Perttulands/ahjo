@@ -1,10 +1,7 @@
 //! Brain's page entity and its requests; state and drawing stay separate.
 use crate::state::{self, Brain, SETTLE_MS};
-use gpui::{
-    App, AppContext, Context, Entity, FocusHandle, Focusable, ScrollHandle, WeakEntity, Window,
-};
-use parvi_app_kit::widgets::select::Selectable;
-use parvi_app_kit::{
+use ahjo_app_kit::widgets::select::Selectable;
+use ahjo_app_kit::{
     Answers, Ask, Host, Page,
     host::Request,
     link::client::LinkState,
@@ -13,7 +10,10 @@ use parvi_app_kit::{
         field::{FieldEvent, TextField},
     },
 };
-use parvi_core::NodeId;
+use ahjo_core::NodeId;
+use gpui::{
+    App, AppContext, Context, Entity, FocusHandle, Focusable, ScrollHandle, WeakEntity, Window,
+};
 use std::{cell::RefCell, rc::Rc, time::Duration};
 
 /// The page the Brain panel opens beside.
@@ -50,10 +50,10 @@ impl Page for BrainPage {
     const AREA: Option<&'static str> = Some("brain");
     const ANSWERS: &'static [Answers] = &[Answers::Reveal("brain")];
 
-    fn chords(&self, _: &App) -> Vec<parvi_app_kit::chords::Chord> {
+    fn chords(&self, _: &App) -> Vec<ahjo_app_kit::chords::Chord> {
         let me = self.me.clone();
         vec![
-            parvi_app_kit::chords::Chord::new("l", "Brain", move |window, cx| {
+            ahjo_app_kit::chords::Chord::new("l", "Brain", move |window, cx| {
                 let _ = me.update(cx, |page, cx| page.toggle_panel(window, cx));
             })
             .alt("l", Some(false))

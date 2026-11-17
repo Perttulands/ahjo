@@ -1,6 +1,6 @@
 //! Immutable identity and limits for a run's pure code-gate profile.
 use crate::{GateEvidence, JudgeVerdict};
-use parvi_mission_model::Gate;
+use ahjo_mission_model::Gate;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
@@ -106,7 +106,7 @@ impl CodeGateBinding {
 /// differs from the pure evaluator before a later route can use it.
 pub(crate) fn validate_results(
     run: &str,
-    mission: &parvi_mission_model::Mission,
+    mission: &ahjo_mission_model::Mission,
     bindings: &crate::BindingsSnapshot,
     events: &[crate::RunEvent],
 ) -> Result<(), String> {
@@ -258,7 +258,7 @@ pub(crate) fn validate_run(
     if !has_code && (!has_aggregate || !snapshot.exists()) {
         return Ok(());
     }
-    let mission = parvi_mission_model::Mission::parse(&std::fs::read_to_string(snapshot)?)
+    let mission = ahjo_mission_model::Mission::parse(&std::fs::read_to_string(snapshot)?)
         .map_err(std::io::Error::other)?;
     let bindings: crate::BindingsSnapshot = toml::from_str(&std::fs::read_to_string(
         root.join(format!("{run}.bindings.toml")),

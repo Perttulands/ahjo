@@ -5,19 +5,19 @@
 //! this test starts. A third,
 //! whose area every node turned off, has no tab.
 
+use ahjo_app_kit::chords::Chord;
+use ahjo_app_kit::host::{Layer, Request};
+use ahjo_app_kit::link::client::LinkState;
+use ahjo_app_kit::link::socket::Tap;
+use ahjo_app_kit::menu::MenuRow;
+use ahjo_app_kit::{Answers, Ask, Build, Host, Mounted, Page, Setting, mount};
+use ahjo_app_shell::Shell;
+use ahjo_core::NodeId;
 use futures_util::{SinkExt, StreamExt};
 use gpui::{
     Entity, Modifiers, TestAppContext, VisualTestContext, WeakEntity, Window, div, point,
     prelude::*, px,
 };
-use parvi_app_kit::chords::Chord;
-use parvi_app_kit::host::{Layer, Request};
-use parvi_app_kit::link::client::LinkState;
-use parvi_app_kit::link::socket::Tap;
-use parvi_app_kit::menu::MenuRow;
-use parvi_app_kit::{Answers, Ask, Build, Host, Mounted, Page, Setting, mount};
-use parvi_app_shell::Shell;
-use parvi_core::NodeId;
 use std::cell::RefCell;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -85,7 +85,7 @@ impl Alpha {
 impl Page for Alpha {
     const ID: &'static str = "toy-a";
     const TITLE: &'static str = "Alpha";
-    const KINDS: parvi_core::frame::Kinds = &[TOY..=TOY];
+    const KINDS: ahjo_core::frame::Kinds = &[TOY..=TOY];
     const CHANNELS: &'static [u8] = &[TOY];
     const ANSWERS: &'static [Answers] = &[Answers::Reveal("toy")];
     const SETTINGS: &'static [Setting] = &[
@@ -261,7 +261,7 @@ impl Beta {
 impl Page for Beta {
     const ID: &'static str = "toy-b";
     const TITLE: &'static str = "Beta";
-    const KINDS: parvi_core::frame::Kinds = &[BETA_KIND..=BETA_KIND];
+    const KINDS: ahjo_core::frame::Kinds = &[BETA_KIND..=BETA_KIND];
     const ANSWERS: &'static [Answers] = &[Answers::OpenPath, Answers::Reveal("item")];
 
     fn frame(&mut self, _: &NodeId, _: u8, body: &[u8], _: &mut Window, cx: &mut Context<Self>) {
@@ -451,7 +451,7 @@ fn click(cx: &mut VisualTestContext, selector: &'static str) {
 }
 
 fn settings_path(name: &str) -> std::path::PathBuf {
-    let dir = std::env::temp_dir().join(format!("parvi-app-{name}-{}", std::process::id()));
+    let dir = std::env::temp_dir().join(format!("ahjo-app-{name}-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).expect("a scratch folder");
     dir.join("app.json")
@@ -491,11 +491,11 @@ fn two_toy_pages_plug_in_through_their_host(cx: &mut TestAppContext) {
     let settings = settings_path("toy-pages");
     // The fake node and the link run on their own threads.
     cx.executor().allow_parking();
-    cx.update(parvi_app_shell::prepare);
+    cx.update(ahjo_app_shell::prepare);
     let path = settings.clone();
     let address = node.clone();
     let (shell, cx) = cx.add_window_view(move |window, cx| {
-        parvi_app_shell::start(PAGES, Some(node), Some(path), window, cx)
+        ahjo_app_shell::start(PAGES, Some(node), Some(path), window, cx)
     });
 
     until(cx, "the link to open", |cx| {
@@ -663,10 +663,10 @@ fn a_view_lent_beside_a_page_keeps_its_pages_channel_on(cx: &mut TestAppContext)
     let settings = settings_path("lent");
     // The fake node and the link run on their own threads.
     cx.executor().allow_parking();
-    cx.update(parvi_app_shell::prepare);
+    cx.update(ahjo_app_shell::prepare);
     let path = settings.clone();
     let (shell, cx) = cx.add_window_view(move |window, cx| {
-        parvi_app_shell::start(PAGES, Some(node), Some(path), window, cx)
+        ahjo_app_shell::start(PAGES, Some(node), Some(path), window, cx)
     });
     until(cx, "Alpha's channel on", |_| toy_channel(&heard, true) == 1);
     click(cx, "tab-toy-b");
@@ -712,14 +712,14 @@ impl Render for Section {
 
 #[gpui::test]
 fn a_section_lent_for_the_other_pages_gives_way_on_its_own(cx: &mut TestAppContext) {
-    use parvi_app_kit::hub::SideOn;
+    use ahjo_app_kit::hub::SideOn;
     let node = fake_node(Arc::new(Mutex::new(vec![])));
     let settings = settings_path("side-on");
     cx.executor().allow_parking();
-    cx.update(parvi_app_shell::prepare);
+    cx.update(ahjo_app_shell::prepare);
     let path = settings.clone();
     let (shell, cx) = cx.add_window_view(move |window, cx| {
-        parvi_app_shell::start(PAGES, Some(node), Some(path), window, cx)
+        ahjo_app_shell::start(PAGES, Some(node), Some(path), window, cx)
     });
     let host = |page| shell.read_with(cx, |s, _| Host::new(s.hub()).for_page(page, &[]));
     let (alpha_host, beta_host) = (host("toy-a"), host("toy-b"));
@@ -743,10 +743,10 @@ fn with_no_pages_the_shell_connects_to_its_node(cx: &mut TestAppContext) {
     let settings = settings_path("no-pages");
     // The fake node and the link run on their own threads.
     cx.executor().allow_parking();
-    cx.update(parvi_app_shell::prepare);
+    cx.update(ahjo_app_shell::prepare);
     let path = settings.clone();
     let (shell, cx) = cx.add_window_view(move |window, cx| {
-        parvi_app_shell::start(&[], Some(node), Some(path), window, cx)
+        ahjo_app_shell::start(&[], Some(node), Some(path), window, cx)
     });
     until(cx, "the link to open", |cx| {
         shell.read_with(cx, |s, cx| {
@@ -767,8 +767,8 @@ fn with_no_pages_the_shell_connects_to_its_node(cx: &mut TestAppContext) {
 const SAVED: Duration = Duration::from_millis(300);
 
 /// The settings file as it is now.
-fn on_disk(path: &std::path::Path) -> Option<parvi_app_kit::settings::Settings> {
-    parvi_app_kit::settings::Settings::parse(&std::fs::read_to_string(path).ok()?)
+fn on_disk(path: &std::path::Path) -> Option<ahjo_app_kit::settings::Settings> {
+    ahjo_app_kit::settings::Settings::parse(&std::fs::read_to_string(path).ok()?)
 }
 
 #[gpui::test]
@@ -779,10 +779,10 @@ fn an_agents_edit_to_app_json_reaches_the_page_and_the_apps_own_writes_do_not(
     let settings = settings_path("reload");
     // The fake node, the link and the file watcher run on their own threads.
     cx.executor().allow_parking();
-    cx.update(parvi_app_shell::prepare);
+    cx.update(ahjo_app_shell::prepare);
     let path = settings.clone();
     let (shell, cx) = cx.add_window_view(move |window, cx| {
-        parvi_app_shell::start(PAGES, Some(node), Some(path), window, cx)
+        ahjo_app_shell::start(PAGES, Some(node), Some(path), window, cx)
     });
     let hub = shell.read_with(cx, |s, _| s.hub().clone());
     let in_app = |cx: &mut VisualTestContext| hub.read_with(cx, |h, _| h.settings.clone());
@@ -867,17 +867,17 @@ fn a_reveal_marked_beside_is_answered_beside_the_asker(cx: &mut TestAppContext) 
     let settings = settings_path("reveal-beside");
     // The fake node and the link run on their own threads.
     cx.executor().allow_parking();
-    cx.update(parvi_app_shell::prepare);
+    cx.update(ahjo_app_shell::prepare);
     let path = settings.clone();
     let (shell, cx) = cx.add_window_view(move |window, cx| {
-        parvi_app_shell::start(PAGES, Some(node), Some(path), window, cx)
+        ahjo_app_shell::start(PAGES, Some(node), Some(path), window, cx)
     });
     cx.run_until_parked();
     assert_eq!(shell.read_with(cx, |s, _| s.shown_page()), Some("toy-a"));
     let alpha_host = shell.read_with(cx, |s, _| Host::new(s.hub()).for_page("toy-a", &[]));
     let item = |beside| Ask::Reveal {
         what: "item".into(),
-        id: "parvi-7".into(),
+        id: "ahjo-7".into(),
         node: None,
         part: None,
         beside,
@@ -891,7 +891,7 @@ fn a_reveal_marked_beside_is_answered_beside_the_asker(cx: &mut TestAppContext) 
     assert_eq!(shell.read_with(cx, |s, _| s.shown_page()), Some("toy-a"));
     assert_eq!(
         b.read_with(cx, |b, _| b.opened.clone()),
-        Some(("parvi-7".into(), "toy-a"))
+        Some(("ahjo-7".into(), "toy-a"))
     );
     assert!(cx.update(|_, cx| alpha_host.beside(cx)).is_some());
     assert!(

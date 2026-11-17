@@ -15,13 +15,13 @@ use crate::term::paint::Metrics;
 use crate::term::screen::Screen;
 use crate::theme::theme;
 use crate::theme::{Theme, size};
+use ahjo_app_kit::host::{Answer, Request};
+use ahjo_core::NodeId;
 use alacritty_terminal::index::{Column, Line, Point as GridPoint};
 use gpui::{
     App, BorderStyle, Bounds, Context, Entity, Pixels, RenderImage, Window, point, px, quad,
 };
 use gpui::{AppContext, ImageFormat, Task};
-use parvi_app_kit::host::{Answer, Request};
-use parvi_core::NodeId;
 use std::sync::Arc;
 
 /// The most pictures one window draws small at a time.
@@ -187,7 +187,7 @@ pub fn paint(
 fn chip_label(word: &'static str, row: Pixels, t: &Theme, window: &mut Window) -> gpui::ShapedLine {
     let run = gpui::TextRun {
         len: word.len(),
-        font: gpui::font(parvi_app_kit::theme::FAMILY),
+        font: gpui::font(ahjo_app_kit::theme::FAMILY),
         color: t.text2,
         background_color: None,
         underline: None,
@@ -310,7 +310,7 @@ fn shrunk(buffer: image::RgbaImage) -> Arc<RenderImage> {
 
 /// How a picture's bytes come: read from its device, or drawn here.
 enum Read {
-    File(Task<Result<Answer, parvi_core::Error>>),
+    File(Task<Result<Answer, ahjo_core::Error>>),
     Drawn(Task<Option<Arc<RenderImage>>>),
 }
 

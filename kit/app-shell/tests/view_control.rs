@@ -1,9 +1,9 @@
-//! View control end to end: `parvi view show` and `parvi view open` against a
+//! View control end to end: `ahjo view show` and `ahjo view open` against a
 //! testkit node, with the headless shell connected to it showing two toy
 //! pages defined here.
 
+use ahjo_app_kit::{Answers, Ask, Host, Mounted, Page, mount};
 use gpui::{Context, TestAppContext, Window, div, prelude::*};
-use parvi_app_kit::{Answers, Ask, Host, Mounted, Page, mount};
 use serde_json::{Value, json};
 use std::cell::RefCell;
 use std::time::{Duration, Instant};
@@ -53,9 +53,9 @@ fn files(host: Host, window: &mut Window, cx: &mut gpui::App) -> Mounted {
     mount(host, window, cx, |_, _, _| Files)
 }
 
-/// `parvi view <args> --json` against `url`, run on `rt` while the app
+/// `ahjo view <args> --json` against `url`, run on `rt` while the app
 /// runs: its exit code and what it printed.
-fn parvi(
+fn ahjo(
     rt: &tokio::runtime::Runtime,
     cx: &mut gpui::VisualTestContext,
     url: &str,
@@ -65,7 +65,7 @@ fn parvi(
     args.extend(["--json".into(), "--node".into(), url.into()]);
     let running = rt.spawn(async move {
         let mut out = Vec::new();
-        let code = parvi_node_kit::cli::run("view", &args, &mut out)
+        let code = ahjo_node_kit::cli::run("view", &args, &mut out)
             .await
             .expect("the command runs");
         (code, serde_json::from_slice(&out).unwrap_or(Value::Null))
@@ -73,7 +73,7 @@ fn parvi(
     let deadline = Instant::now() + Duration::from_secs(10);
     while !running.is_finished() {
         cx.run_until_parked();
-        assert!(Instant::now() < deadline, "parvi view did not finish");
+        assert!(Instant::now() < deadline, "ahjo view did not finish");
         std::thread::sleep(Duration::from_millis(10));
     }
     rt.block_on(running).expect("the command's task")
@@ -83,23 +83,23 @@ fn parvi(
 fn an_agent_opens_a_page_and_a_path_on_it_in_the_app(cx: &mut TestAppContext) {
     let rt = tokio::runtime::Runtime::new().expect("a runtime");
     let node = rt
-        .block_on(parvi_testkit::node::Node::start(&[], ""))
+        .block_on(ahjo_testkit::node::Node::start(&[], ""))
         .expect("the node starts");
     let url = node.url();
-    let settings = parvi_testkit::fresh_dir("parvi-app-view").join("app.json");
+    let settings = ahjo_testkit::fresh_dir("ahjo-app-view").join("app.json");
     // The node, the link and the command run on their own threads.
     cx.executor().allow_parking();
-    cx.update(parvi_app_shell::prepare);
+    cx.update(ahjo_app_shell::prepare);
     let path = settings.clone();
     let dial = url.clone();
     let (shell, cx) = cx.add_window_view(move |window, cx| {
-        parvi_app_shell::start(&[other, files], Some(dial), Some(path), window, cx)
+        ahjo_app_shell::start(&[other, files], Some(dial), Some(path), window, cx)
     });
 
     // The app says what it shows once its link opens.
     let deadline = Instant::now() + Duration::from_secs(10);
     let shown = loop {
-        let (code, shown) = parvi(&rt, cx, &url, &["show"]);
+        let (code, shown) = ahjo(&rt, cx, &url, &["show"]);
         assert_eq!(code, 0);
         if shown != json!([]) {
             break shown;
@@ -114,7 +114,7 @@ fn an_agent_opens_a_page_and_a_path_on_it_in_the_app(cx: &mut TestAppContext) {
 
     // Opened by an agent: the page comes forward and is asked to reveal
     // the path.
-    let (code, opened) = parvi(
+    let (code, opened) = ahjo(
         &rt,
         cx,
         &url,

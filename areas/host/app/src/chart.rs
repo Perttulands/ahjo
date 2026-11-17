@@ -6,11 +6,11 @@
 
 use crate::page::HostPage;
 use crate::tokens;
+use ahjo_app_kit::widgets::boundary;
 use gpui::{
     Bounds, Hsla, MouseMoveEvent, PathBuilder, Pixels, WeakEntity, canvas, fill, point, prelude::*,
     px, size,
 };
-use parvi_app_kit::widgets::boundary;
 
 /// One figure's band.
 pub struct Band {

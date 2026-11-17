@@ -1,13 +1,13 @@
 //! What the app remembers on this device: the node it talks to, whether
 //! keys are on, the fleet as last seen, and each page's own section, by
-//! page id. One JSON file in the config folder (`%APPDATA%\Parvi\app.json`,
-//! `$XDG_CONFIG_HOME/parvi/app.json`), or the file `PARVI_APP_CONFIG` names.
+//! page id. One JSON file in the config folder (`%APPDATA%\Ahjo\app.json`,
+//! `$XDG_CONFIG_HOME/ahjo/app.json`), or the file `AHJO_SWARM_CONFIG` names.
 //! A file that doesn't read is reported and set aside, never silently
 //! replaced; what it holds that this app does not know is kept as it reads.
 //! The running app watches the file: an edit made outside it applies at once
 //! (`Hub::watch`).
 
-use parvi_core::Error;
+use ahjo_core::Error;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
@@ -76,16 +76,16 @@ impl Default for Settings {
 }
 
 pub fn path() -> Option<PathBuf> {
-    if let Some(p) = std::env::var_os("PARVI_APP_CONFIG") {
+    if let Some(p) = std::env::var_os("AHJO_SWARM_CONFIG") {
         return Some(p.into());
     }
     let dir = if cfg!(windows) {
-        std::env::var_os("APPDATA").map(|d| PathBuf::from(d).join("Parvi"))
+        std::env::var_os("APPDATA").map(|d| PathBuf::from(d).join("Ahjo"))
     } else {
         std::env::var_os("XDG_CONFIG_HOME")
             .map(PathBuf::from)
             .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".config")))
-            .map(|d| d.join("parvi"))
+            .map(|d| d.join("ahjo"))
     }?;
     Some(dir.join("app.json"))
 }
@@ -225,7 +225,7 @@ mod tests {
 
     #[test]
     fn a_broken_file_is_set_aside_not_lost() {
-        let dir = std::env::temp_dir().join(format!("parvi-app-settings-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("ahjo-app-settings-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let p = dir.join("app.json");
         std::fs::write(&p, "{not json").unwrap();

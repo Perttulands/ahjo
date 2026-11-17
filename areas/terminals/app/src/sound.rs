@@ -3,7 +3,7 @@
 //! build runs only on invisible test displays and logs instead.
 
 use crate::store::tones;
-use parvi_terminals_contract::EventKind;
+use ahjo_terminals_contract::EventKind;
 
 #[cfg(any(windows, test))]
 fn worker<T: Send + 'static>(

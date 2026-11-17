@@ -3,13 +3,13 @@
 //! `tests/parity` is a state directory: missions, a retired role card and a
 //! Codex model cache. `archon-findings.json` holds what Archon's own
 //! `mission validate --json` reported on each mission, recorded by
-//! `archon-findings.sh`; this test holds Parvi to every code and node.
+//! `archon-findings.sh`; this test holds Ahjo to every code and node.
 
 use std::collections::BTreeMap;
 use std::path::Path;
 
-use parvi_mission_engine::{Harnesses, Store, validate};
-use parvi_mission_model::Finding;
+use ahjo_mission_engine::{Harnesses, Store, validate};
+use ahjo_mission_model::Finding;
 use serde::Deserialize;
 
 #[derive(Deserialize)]
@@ -52,7 +52,7 @@ fn findings_match_archons_on_every_parity_mission() {
         // missing and relative cases using paths native to the test host.
         if slug == "cards" {
             let existing = std::env::temp_dir();
-            let missing = existing.join(format!("parvi-135-absent-{}", std::process::id()));
+            let missing = existing.join(format!("ahjo-135-absent-{}", std::process::id()));
             assert!(!missing.exists());
             for files in mission
                 .input_cards
@@ -81,12 +81,12 @@ fn findings_match_archons_on_every_parity_mission() {
         let report = validate(&mission, &store.roles(), &harnesses);
         let mut sorted = archon.errors.clone();
         sorted.sort();
-        // Parvi deliberately refuses peer formations that Archon accepts.
+        // Ahjo deliberately refuses peer formations that Archon accepts.
         let (unsupported, comparable): (Vec<_>, Vec<_>) = report
             .errors
             .iter()
             .cloned()
-            .partition(|f| f.code == parvi_mission_model::Code::UnsupportedFormation);
+            .partition(|f| f.code == ahjo_mission_model::Code::UnsupportedFormation);
         if slug == "formations" {
             assert_eq!(
                 located(&unsupported),

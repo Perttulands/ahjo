@@ -444,7 +444,7 @@ fn picture(format: ImageFormat, bytes: &[u8]) -> Arc<Image> {
     Arc::new(Image::from_bytes(format, bytes.to_vec()))
 }
 
-/// The theme chosen in Parvi's settings, for an app of the kit that runs
+/// The theme chosen in Ahjo Swarm's settings, for an app of the kit that runs
 /// on its own (Brain, Desk) and draws as the operator chose. No settings,
 /// or settings that do not read, give the default; so does a theme no
 /// direction is called, with a notice that says so. The file is only read.

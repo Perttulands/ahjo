@@ -1,5 +1,5 @@
 [package]
-name = "parvi-app-kit"
+name = "ahjo-app-kit"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -10,7 +10,7 @@ publish = false
 workspace = true
 
 [dependencies]
-parvi-core = { path = "../core" }
+ahjo-core = { path = "../core" }
 gpui = { package = "gpui-pre", version = "=0.3.12" }
 async-channel = "2"
 futures-util = { version = "0.3", default-features = false, features = ["sink", "std"] }

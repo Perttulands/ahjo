@@ -1,7 +1,7 @@
 //! File viewer state and decoding rules.
 use crate::store::{format, kinds, zoom};
+use ahjo_app_kit::widgets::markdown::{self, Block};
 use gpui::{ImageFormat, RenderImage};
-use parvi_app_kit::widgets::markdown::{self, Block};
 use sha2::{Digest, Sha256};
 use std::sync::Arc;
 
@@ -56,7 +56,7 @@ pub struct Opened {
     /// line.
     pub source: bool,
     /// What its repository says changed in it, when anything did.
-    pub diff: Option<parvi_files_contract::Diff>,
+    pub diff: Option<ahjo_files_contract::Diff>,
     /// The same, line by line: what the reader marks.
     pub changes: Option<crate::store::marks::Changes>,
     /// The diff read into lines and paired side by side, for its view.

@@ -8,7 +8,7 @@ pub(super) fn record(caller: &Caller, tool: &str, target: &str, outcome: &str) {
 
 fn line(caller: &Caller, tool: &str, target: &str, outcome: &str) -> String {
     format!(
-        "parvi: mcp {:?} {tool} target={:?} {outcome}",
+        "ahjo: mcp {:?} {tool} target={:?} {outcome}",
         caller.who, target
     )
 }
@@ -24,7 +24,7 @@ mod tests {
         };
         assert_eq!(
             line(&caller, "session_send", "node-a", "failed"),
-            "parvi: mcp \"client\" session_send target=\"node-a\" failed"
+            "ahjo: mcp \"client\" session_send target=\"node-a\" failed"
         );
     }
 }

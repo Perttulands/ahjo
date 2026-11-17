@@ -1,7 +1,7 @@
 [workspace]
 resolver = "3"
 # Every crate is found where the layout puts it, so a new area needs no
-# line here (bin/parvi/tests/layout.rs).
+# line here (bin/ahjo/tests/layout.rs).
 members = ["kit/*", "engine/*", "areas/*/*", "bin/*"]
 
 [workspace.package]
@@ -13,13 +13,13 @@ license = "MIT"
 vt100 = { path = "vendor/vt100" }
 
 [workspace.lints.clippy]
-# Frame kinds are slices of ranges (`parvi_core::frame::Kinds`): an area
+# Frame kinds are slices of ranges (`ahjo_core::frame::Kinds`): an area
 # owning one range writes `&[0x60..=0x61]`, which this lint misreads.
 single_range_in_vec_init = "allow"
 
 # The desktop app unwinds, so a page that fails to draw is caught by its
 # boundary and the rest of the window carries on:
-# `cargo build --profile app -p parvi-app`.
+# `cargo build --profile app -p ahjo-app-swarm`.
 [profile.app]
 inherits = "release"
 panic = "unwind"

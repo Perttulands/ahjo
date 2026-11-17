@@ -1,17 +1,19 @@
 # Architecture
 
-Two binaries. `parvi` is the node and the CLI. `parvi-app` is the native app; it
-talks to a node only over the node's WebSocket and HTTP interface.
+This repository holds Ahjo's three apps. Ahjo Swarm is two binaries: `ahjo` is
+the node and the CLI, and `ahjo-swarm` is the native app; it talks to a node
+only over the node's WebSocket and HTTP interface.
 
 Apps with one purpose of their own are separate binaries on the same app kit,
-so they share Parvi's look but not its shell. `desk-app` is the Desk, the
-surface where agents publish and the operator answers in his words and marks:
-it talks only to the decision desks' HTTP API (`/srv/desk`), never to a node,
-keeps marks in the desk's one format, and decodes H.264 itself so clips step by
-the frame with nothing installed. A published page renders inside its window
-only on Windows, in WebView2 (`wry`) laid over the surface as a child window;
-on Linux a system web view would need GTK's loop, which a GPUI window does not
-run, so there the page opens in the browser.
+so they share Swarm's look but not its shell. `ahjo-brain` is Ahjo Brain, the
+company brain as a night sky with its search and reader. `ahjo-desk` is Ahjo
+Desk, the surface where agents publish and the operator answers in his words
+and marks: it talks only to the decision desks' HTTP API (`/srv/desk`), never
+to a node, keeps marks in the desk's one format, and decodes H.264 itself so
+clips step by the frame with nothing installed. A published page renders inside
+its window only on Windows, in WebView2 (`wry`) laid over the surface as a
+child window; on Linux a system web view would need GTK's loop, which a GPUI
+window does not run, so there the page opens in the browser.
 
 ```
 areas/<area>/
@@ -26,17 +28,20 @@ kit/
     app-shell/  the app's shell: window chrome, tab bar, keys, view control
     testkit/    starts a node holding only the areas a test names
 bin/
-    parvi/      the node and CLI: a list of areas, install and upgrade
-    parvi-app/  the native app: the shell in a window, and its list of pages
-    desk-app/   the Desk: agents' asks answered in words and marks, over the desks' API
+    ahjo/        the node and CLI: a list of areas, install and upgrade
+    ahjo-swarm/  Swarm's native app: the shell in a window, and its list of pages
+    ahjo-brain/  Ahjo Brain: the brain's sky, search and reader
+    ahjo-desk/   Ahjo Desk: agents' asks answered in words and marks, over the desks' API
 engine/         terminal engine, session holder, work references, mission model and engine
 ```
 
-Each directory under an area, `kit/`, `bin/` and `engine/` is one crate. The
-areas are terminals, files, work, brain, host, scheduled, agents and missions;
-fleet becomes one after the first release. Launching sessions and agent events
-live in terminals. Settings is not an area: the shell's Settings page lists
-what pages declare.
+Each directory under an area, `kit/`, `bin/` and `engine/` is one crate. An
+app's package is `ahjo-app-<name>` (`ahjo-app-swarm`, `ahjo-app-brain`,
+`ahjo-app-desk`), since `ahjo-brain` is the brain area's node crate; its
+binary is the name the operator runs. The areas are terminals, files, work,
+brain, host, scheduled, agents and missions; fleet becomes one after the first
+release. Launching sessions and agent events live in terminals. Settings is not
+an area: the shell's Settings page lists what pages declare.
 
 ## Rules the compiler holds
 
@@ -50,7 +55,7 @@ what pages declare.
    The binaries hold only the list of areas. Adding to an area touches that
    area's directory and nothing else; adding an area adds one line to each list
    and one dependency line to that binary's `Cargo.toml`; the workspace finds
-   crates by where they sit, and CI by their names (`parvi-<area>-app`).
+   crates by where they sit, and CI by their names (`ahjo-<area>-app`).
 3. **Dependencies point one way.** `contract` depends on `core` and on plain
    data in `engine/` that has no dependencies (`work-ref`, a work item's
    reference, shared by the work area and the mission engine). The one other
@@ -60,25 +65,25 @@ what pages declare.
    area that needs another uses that area's `contract` or an interface it
    provides, never its `node` or `app` crate (tests may). `kit/` and `engine/`
    use no area. Node crates never depend on the GUI toolkit, and app crates
-   never depend on the web server. `bin/parvi/tests/layout.rs` holds this.
+   never depend on the web server. `bin/ahjo/tests/layout.rs` holds this.
 
 ## Node areas
 
-A node area is a `Listing` in `bin/parvi`'s `AREAS`: its name, frame kinds,
+A node area is a `Listing` in `bin/ahjo`'s `AREAS`: its name, frame kinds,
 command names and build function, known without building it. Built from the
 node's `Setup` (its identity, folder, address, config and event log), it
 answers with an `Area`: HTTP routes, commands, a channel for each `/ws` client,
 and a stop. Before building, `node-kit` refuses listings that share a name, a
 frame kind or a command, naming both, or that take a kind `core` reserves
 (the hello, the fleet's peer list, view control); a built area whose commands
-are not the ones listed is refused too. `bin/parvi/tests/areas.rs` checks the
-real list, and `parvi kinds` prints who owns which kinds.
+are not the ones listed is refused too. `bin/ahjo/tests/areas.rs` checks the
+real list, and `ahjo kinds` prints who owns which kinds.
 
 - **Frames.** The first byte of a `/ws` frame is its kind. A client's frame
   goes to the channel of the area owning its kind; each channel pushes its own.
-- **Commands.** A command is a `noun_verb` name (the verb may be several words: `formation_set_type` is `parvi formation set-type`), a description, an input
+- **Commands.** A command is a `noun_verb` name (the verb may be several words: `formation_set_type` is `ahjo formation set-type`), a description, an input
   schema and a call answering JSON or the error shape. `node-kit` serves it as
-  an MCP tool on `/mcp` and as the CLI verb `parvi noun verb`. A `node`
+  an MCP tool on `/mcp` and as the CLI verb `ahjo noun verb`. A `node`
   argument names where it runs.
 - **One node at a time.** A request names its node with `?node=` on any route
   and on `/ws`, a command call with its `node` argument. Relaying to other
@@ -87,7 +92,7 @@ real list, and `parvi kinds` prints who owns which kinds.
 - **Config.** `config.toml` in the node's folder has a `[node]` section and one
   section per area, read by that area. `enabled = false` leaves an area unbuilt
   and listed as off in `/api/health`; a section no area reads refuses to start.
-  `parvi config show [--section]` and `GET /api/config` answer the file's
+  `ahjo config show [--section]` and `GET /api/config` answer the file's
   path and each section as the node loaded it, and the Settings page shows
   the connected node's read-only; an agent edits the file and a restart
   applies it.
@@ -95,8 +100,8 @@ real list, and `parvi kinds` prints who owns which kinds.
   it serves (`node-kit`'s `own::COMMANDS`: `config_show`, `view_show`,
   `view_open`); a listing that names one is refused.
 - **View control.** The node keeps the view-control kinds itself: a client
-  that reports the page it shows (0xb0) is an app until it goes. `parvi view
-  show` lists what each app shows; `parvi view open --page <id> [--path|item|
+  that reports the page it shows (0xb0) is an app until it goes. `ahjo view
+  show` lists what each app shows; `ahjo view open --page <id> [--path|item|
   run|mission|document|session <id>] [--step]` sends the apps a view command
   (0xb8) and answers the first answer (0xb1): `no_app` with none connected,
   `timeout` after 5 s. The app shows the page and hands it the thing as an
@@ -111,14 +116,14 @@ real list, and `parvi kinds` prints who owns which kinds.
   is the first; terminals provides it. `Resolver` (in `areas/work/contract`:
   the canonical reference for a written one, a bare Bead id placed by the
   node's Work configuration) is provided by work.
-- **Hooks.** `parvi hook <url> [--then command...]` is how an outside
+- **Hooks.** `ahjo hook <url> [--then command...]` is how an outside
   program's own hook reports to the node: it posts its payload to the URL an
   area gave it and runs `--then` regardless. The URL carries what the area
   needs, such as the session and event.
 
 ## App pages
 
-A page is a build function in `bin/parvi-app`'s `PAGES`, held by the shell in
+A page is a build function in `bin/ahjo-swarm`'s `PAGES`, held by the shell in
 `kit/app-shell`. Built from a `Host`, it answers with one entity implementing
 `app-kit`'s `Page`: an id, a title, the node area it needs (its tab hides while
 every node has that area off), its frame kinds, the channels it turns on while
@@ -126,7 +131,7 @@ shown, the asks it answers and its chords. The shell owns the window, the tab
 bar, the dismissal stack, the leader, the status line and the node connection,
 and refuses pages that share an id or a frame kind, take a kind `core`
 reserves, or whose `everywhere` chords share a key, naming both;
-`bin/parvi-app/tests/pages.rs` mounts the real list.
+`bin/ahjo-swarm/tests/pages.rs` mounts the real list.
 
 - **Host and Hub.** A `Host` is a cheap handle on the `Hub`, the state the
   shell and every page share: the fleet link, settings, status line, toast and
@@ -195,12 +200,28 @@ reserves, or whose `everywhere` chords share a key, naming both;
   list) is a plain type in its area's `contract`, published by that page
   (`Host::publish`) and read and observed by any page (`Host::model`), built in
   any order. A second publisher is refused.
-- **Tests.** An app area's test drives `parvi-app-shell` with its own page, or
+- **Tests.** An app area's test drives `ahjo-app-shell` with its own page, or
   pages it defines, against a testkit or fake node, building no other area.
+
+## One repository
+
+Swarm, Brain and Desk live in one repository. Brain and Desk each depend on
+exactly one crate here, the app kit (theme, fonts, art, widgets), and that kit
+is still changing fast: it changed in 9 of the 29 commits before this section was written, and 4 commits
+in one week changed the kit and a standalone app together. In separate
+repositories each of those would be a release, a pin bump and three CI runs.
+One repository gives the three one theme, one check, one install procedure and
+one Windows build checkout.
+
+The boundary that matters is held by the build: a standalone app depends on
+the app kit and nothing else of Swarm (`bin/ahjo/tests/layout.rs`), so either
+can leave without taking Swarm along. Revisit this when a product gets users
+outside this machine with its own release rhythm, or when the kit has been
+stable long enough to version.
 
 ## Why this shape
 
-Work on Parvi is done by many agents at once. The shape keeps one piece of work
+Work on Ahjo is done by many agents at once. The shape keeps one piece of work
 inside one directory, keeps a build to the area being changed, and turns the
 boundaries from a convention into something the build refuses to break.
 
@@ -213,17 +234,17 @@ carry that shape; nothing returns a bare string.
 ## Sessions survive
 
 Terminal sessions belong to the holder process, not to the node. Installing,
-upgrading or restarting Parvi never stops a session.
-tmux records a session as active when a node attaches a control client; Parvi preserves the pane's earlier output time until it writes again.
+upgrading or restarting Ahjo never stops a session.
+tmux records a session as active when a node attaches a control client; Ahjo preserves the pane's earlier output time until it writes again.
 
 ## Install and upgrade
 
-`parvi install` and `parvi upgrade` are the binary's own verbs, not an area's
+`ahjo install` and `ahjo upgrade` are the binary's own verbs, not an area's
 commands: they put the binary itself in place and restart the node, so no
 node can own them. They have no MCP tool, because a node upgrading itself
 would be stopped by its own restart before it could answer. On Linux and WSL
-the node is a systemd user unit (`parvi` unless `--unit` names another) that
-runs `<root>/bin/parvi serve --listen <addr>`, with `KillMode=process` so a
+the node is a systemd user unit (`ahjo` unless `--unit` names another) that
+runs `<root>/bin/ahjo serve --listen <addr>`, with `KillMode=process` so a
 restart signals only the node and a tmux server it started lives on.
 
 - **Install** copies the build (and `--app`) to `<root>/bin` (`~/.local` by
@@ -238,22 +259,22 @@ restart signals only the node and a tmux server it started lives on.
   once the new node is healthy the old build is deleted.
   A unit without `KillMode=process` is refused before anything changes.
 - **Version.** A build's version is the package version and its commit
-  (`0.0.1+8cdb58b`), in `parvi --version`, `parvi version` and the health.
+  (`0.0.1+8cdb58b`), in `ahjo --version`, `ahjo version` and the health.
 - **The address.** A node records the address it bound in its config folder
-  (`listen`), so `parvi` commands on the same machine reach it with no
+  (`listen`), so `ahjo` commands on the same machine reach it with no
   `--node`.
 
-`deploy/` is the operator's own machine: `parvi.service` as
-`parvi install --root ~/.local/share/parvi` wrote it there (listening on
+`deploy/` is the operator's own machine: `ahjo.service` as
+`ahjo install --root ~/.local/share/ahjo` wrote it there (listening on
 127.0.0.1:7310, which Windows Tailscale serves as tailnet port 7300), linked
 into `~/.config/systemd/user`, and the ChatGPT tunnel's unit and profile,
-which reach the node's `/mcp`. The `change-parvi` skill has the steps.
+which reach the node's `/mcp`. The `change-ahjo` skill has the steps.
 
-`bin/parvi/tests/install.rs` runs both against a stand-in `systemctl` on
+`bin/ahjo/tests/install.rs` runs both against a stand-in `systemctl` on
 `PATH`, with a node, a tmux server and a session of the test's own.
 
 ## Tests
 
 An area's tests live in its crates and run against `testkit`, which starts a
-node with only the named areas on a port and tmux server of its own. `bin/parvi`
+node with only the named areas on a port and tmux server of its own. `bin/ahjo`
 holds the few tests that need the whole binary.

@@ -12,7 +12,7 @@ use axum::routing::get;
 use serde_json::{Value, json};
 
 use crate::Command;
-use parvi_core::NodeId;
+use ahjo_core::NodeId;
 
 use crate::config::Config;
 use crate::serve::Failure;
@@ -32,7 +32,7 @@ pub(crate) struct Own {
 }
 
 impl Own {
-    fn config(&self, section: Option<&str>) -> Result<Value, parvi_core::Error> {
+    fn config(&self, section: Option<&str>) -> Result<Value, ahjo_core::Error> {
         self.config.show(section, &self.areas)
     }
 }

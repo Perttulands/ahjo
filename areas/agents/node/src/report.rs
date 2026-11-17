@@ -7,7 +7,7 @@ use super::Home;
 use super::checkout::{self, Checkout, Fetch};
 use super::skills::{self, FOLDERS, Skill};
 use super::tools::{self, Found, TOOLS};
-use parvi_agents_contract as wire;
+use ahjo_agents_contract as wire;
 
 pub struct Report {
     pub tools: Vec<Found>,

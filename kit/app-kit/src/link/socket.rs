@@ -3,8 +3,8 @@
 //! It knows nothing about stores or views: it hands frames to its caller,
 //! after the taps a page set have had their pick.
 
+use ahjo_core::{Hello, PROTOCOL};
 use futures_util::{SinkExt, StreamExt};
-use parvi_core::{Hello, PROTOCOL};
 use std::sync::{Arc, RwLock};
 use std::time::Duration;
 use tokio::sync::{Notify, mpsc};
@@ -63,7 +63,7 @@ impl Net {
     pub fn start() -> Self {
         let (tx, rx) = std::sync::mpsc::channel();
         std::thread::Builder::new()
-            .name("parvi-net".into())
+            .name("ahjo-net".into())
             .spawn(move || {
                 let rt = tokio::runtime::Builder::new_current_thread()
                     .enable_all()
@@ -275,17 +275,17 @@ async fn session(
 /// Why this client cannot talk to the node that sent `hello`.
 pub fn refusal(hello: Option<&Hello>) -> String {
     let Some(h) = hello else {
-        return "The node did not say hello: it runs an older Parvi. Upgrade Parvi there.".into();
+        return "The node did not say hello: it runs an older Ahjo. Upgrade Ahjo there.".into();
     };
     let at = format!("{} ({})", h.device, h.environment);
     if h.protocol > PROTOCOL {
         format!(
-            "{at} runs Parvi {}, protocol {}; this app speaks protocol {PROTOCOL}. Upgrade this app.",
+            "{at} runs Ahjo {}, protocol {}; this app speaks protocol {PROTOCOL}. Upgrade this app.",
             h.version, h.protocol
         )
     } else {
         format!(
-            "{at} runs Parvi {}, protocol {}; this app speaks protocol {PROTOCOL}. Upgrade Parvi on {}.",
+            "{at} runs Ahjo {}, protocol {}; this app speaks protocol {PROTOCOL}. Upgrade Ahjo on {}.",
             h.version, h.protocol, h.device
         )
     }
@@ -364,6 +364,6 @@ mod tests {
             protocol: PROTOCOL - 1,
             ..h
         };
-        assert!(refusal(Some(&h)).contains("Upgrade Parvi on rig"));
+        assert!(refusal(Some(&h)).contains("Upgrade Ahjo on rig"));
     }
 }

@@ -63,49 +63,44 @@ pub fn passport(t: &Theme, device: &str, environment: &str) -> Div {
 fn texture_canvas(texture: Texture, ink: Hsla) -> impl IntoElement {
     canvas(
         |_, _, _| (),
-        parvi_app_kit::widgets::boundary::paint(
-            move |b: Bounds<gpui::Pixels>, _: (), window, _| {
-                let (x0, y0) = (b.origin.x, b.origin.y);
-                let (w, h) = (b.size.width, b.size.height);
-                match texture {
-                    Texture::Hatch => {
-                        let mut x = px(0.);
-                        while x < w {
-                            let mut p = PathBuilder::stroke(px(1.));
-                            p.move_to(point(x0 + x, y0 + h));
-                            p.line_to(point(x0 + x + h * 0.6, y0));
-                            if let Ok(path) = p.build() {
-                                window.paint_path(path, ink);
-                            }
-                            x += px(4.);
+        ahjo_app_kit::widgets::boundary::paint(move |b: Bounds<gpui::Pixels>, _: (), window, _| {
+            let (x0, y0) = (b.origin.x, b.origin.y);
+            let (w, h) = (b.size.width, b.size.height);
+            match texture {
+                Texture::Hatch => {
+                    let mut x = px(0.);
+                    while x < w {
+                        let mut p = PathBuilder::stroke(px(1.));
+                        p.move_to(point(x0 + x, y0 + h));
+                        p.line_to(point(x0 + x + h * 0.6, y0));
+                        if let Ok(path) = p.build() {
+                            window.paint_path(path, ink);
                         }
+                        x += px(4.);
                     }
-                    Texture::Rules => {
-                        for y in [h * 0.35, h * 0.65] {
+                }
+                Texture::Rules => {
+                    for y in [h * 0.35, h * 0.65] {
+                        window.paint_quad(gpui::fill(
+                            Bounds::new(point(x0, y0 + y), gpui::size(w, px(1.))),
+                            ink,
+                        ));
+                    }
+                }
+                Texture::Dots => {
+                    let mut x = px(1.);
+                    while x < w {
+                        for y in [h * 0.3, h * 0.7] {
                             window.paint_quad(gpui::fill(
-                                Bounds::new(point(x0, y0 + y), gpui::size(w, px(1.))),
+                                Bounds::new(point(x0 + x, y0 + y), gpui::size(px(1.5), px(1.5))),
                                 ink,
                             ));
                         }
-                    }
-                    Texture::Dots => {
-                        let mut x = px(1.);
-                        while x < w {
-                            for y in [h * 0.3, h * 0.7] {
-                                window.paint_quad(gpui::fill(
-                                    Bounds::new(
-                                        point(x0 + x, y0 + y),
-                                        gpui::size(px(1.5), px(1.5)),
-                                    ),
-                                    ink,
-                                ));
-                            }
-                            x += px(4.);
-                        }
+                        x += px(4.);
                     }
                 }
-            },
-        ),
+            }
+        }),
     )
     .size_full()
 }

@@ -4,12 +4,12 @@
 use super::run::sentence;
 use super::*;
 use crate::store::{run_state, words};
+use ahjo_app_kit::menu::MenuRow;
+use ahjo_app_kit::theme::Theme;
+use ahjo_app_kit::widgets::pane::{self, Col};
+use ahjo_app_kit::{Host, ask::Ask};
+use ahjo_missions_contract::{Mission, RunOutput, RunProjection};
 use gpui::{ClickEvent, SharedString, rgb};
-use parvi_app_kit::menu::MenuRow;
-use parvi_app_kit::theme::Theme;
-use parvi_app_kit::widgets::pane::{self, Col};
-use parvi_app_kit::{Host, ask::Ask};
-use parvi_missions_contract::{Mission, RunOutput, RunProjection};
 
 const STATE_W: f32 = 72.;
 const STEP_ACTS_W: f32 = 150.;
@@ -188,7 +188,7 @@ impl MissionsPage {
                             .stop_reason
                             .update(cx, |field, cx| field.set("", false, cx));
                         page.run.abort_armed = true;
-                        parvi_app_kit::widgets::field::focus(&page.run.stop_reason, window, cx);
+                        ahjo_app_kit::widgets::field::focus(&page.run.stop_reason, window, cx);
                         cx.notify();
                     })),
             );
@@ -619,7 +619,7 @@ impl MissionsPage {
                 .flat_map(|e| &e.problems)
                 .rfind(|p| p.node_id == step.id || p.gate_id == step.id)
             {
-                let reason = parvi_missions_contract::plain_reason(&run_state::problem_now(
+                let reason = ahjo_missions_contract::plain_reason(&run_state::problem_now(
                     &run.events,
                     problem.seq,
                     &problem.reason.text,
@@ -769,7 +769,7 @@ impl MissionsPage {
                         cx,
                     ) {
                         host.report(
-                            parvi_app_kit::host::Status::failure(format!(
+                            ahjo_app_kit::host::Status::failure(format!(
                                 "Not shown: {}",
                                 error.message
                             )),
@@ -869,7 +869,7 @@ impl MissionsPage {
         name_of: &dyn Fn(&str) -> String,
     ) -> Option<(String, bool)> {
         let problem = self.run.evidence.evidence.as_ref()?.problems.last()?;
-        let reason = parvi_missions_contract::plain_reason(&run_state::problem_now(
+        let reason = ahjo_missions_contract::plain_reason(&run_state::problem_now(
             &run.events,
             problem.seq,
             &problem.reason.text,

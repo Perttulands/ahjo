@@ -6,13 +6,13 @@
 use crate::page::HostPage;
 use crate::services_store::{self as services, Change, Group, Log, Service};
 use crate::tokens;
-use gpui::{ClipboardItem, Context, Div, SharedString, div, prelude::*, px};
-use parvi_app_kit::{
+use ahjo_app_kit::{
     hub::now_ms,
     menu::MenuRow,
     theme::{Theme, size},
     widgets::{kit, pane},
 };
+use gpui::{ClipboardItem, Context, Div, SharedString, div, prelude::*, px};
 
 impl HostPage {
     pub(crate) fn service(
@@ -210,7 +210,7 @@ impl HostPage {
                 "Control",
                 div()
                     .text_color(t.dim)
-                    .child("Read-only: the catalog does not let Parvi start or stop it"),
+                    .child("Read-only: the catalog does not let Ahjo start or stop it"),
             ));
         }
         let key = (node.to_owned(), s.id.clone());
@@ -265,17 +265,17 @@ impl HostPage {
         let now = now_ms();
         let earlier = services::earlier(&log.lines, running_since);
         let (before, run) = log.lines.split_at(earlier);
-        let stamps = |lines: &[parvi_host_contract::LogLine]| -> Vec<String> {
+        let stamps = |lines: &[ahjo_host_contract::LogLine]| -> Vec<String> {
             lines
                 .iter()
-                .map(|l| parvi_app_kit::clock::stamp(l.at, now))
+                .map(|l| ahjo_app_kit::clock::stamp(l.at, now))
                 .collect()
         };
         let time_col = match stamps(&log.lines).iter().any(|s| s.len() > 5) {
             true => tokens::DAY_TIME_COL,
             false => tokens::TIME_COL,
         };
-        let line = |l: &parvi_host_contract::LogLine, stamp: String| {
+        let line = |l: &ahjo_host_contract::LogLine, stamp: String| {
             let selector = format!("svc-log-{}", l.text);
             div()
                 .debug_selector(move || selector)

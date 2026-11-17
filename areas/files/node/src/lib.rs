@@ -15,10 +15,10 @@ pub mod roots;
 mod scratch;
 pub mod status;
 
+pub use ahjo_files_contract::{Listing, Matches, Progress, Root};
+use ahjo_node_kit::events::Log;
 pub use disk::version;
 pub use error::FilesError;
-pub use parvi_files_contract::{Listing, Matches, Progress, Root};
-use parvi_node_kit::events::Log;
 use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
@@ -106,7 +106,7 @@ impl Files {
     }
     /// The files changed most recently under the roots, or with a folder
     /// the files changed most recently under it, each as itself.
-    pub fn recent(&self, under: Option<&str>) -> Result<parvi_files_contract::Recent, FilesError> {
+    pub fn recent(&self, under: Option<&str>) -> Result<ahjo_files_contract::Recent, FilesError> {
         let files = match under {
             Some(folder) => {
                 let folder = self.roots.existing(folder)?;
@@ -117,12 +117,12 @@ impl Files {
             }
             None => self.index.recent(&self.roots),
         };
-        Ok(parvi_files_contract::Recent { files })
+        Ok(ahjo_files_contract::Recent { files })
     }
     pub fn stat(&self, paths: &[String]) -> Vec<Option<u64>> {
         disk::stat(&self.roots, paths)
     }
-    pub fn diff(&self, path: &str) -> Result<parvi_files_contract::Diff, FilesError> {
+    pub fn diff(&self, path: &str) -> Result<ahjo_files_contract::Diff, FilesError> {
         diff::read(&self.roots, path, false)
     }
     pub fn copy(
@@ -131,10 +131,10 @@ impl Files {
         target: &str,
         folder: &str,
     ) -> Result<String, FilesError> {
-        let id = parvi_node_kit::identity::new_id();
+        let id = ahjo_node_kit::identity::new_id();
         bridge::start(
             self.clone(),
-            parvi_files_contract::TransferRequest {
+            ahjo_files_contract::TransferRequest {
                 node: self.node.clone(),
                 path: path.into(),
                 target_node: target.into(),
@@ -156,7 +156,7 @@ mod commands;
 mod routes;
 pub use routes::{MAX_BYTES, routes};
 
-use parvi_node_kit::{Area, Built, Listing as AreaListing, Setup};
+use ahjo_node_kit::{Area, Built, Listing as AreaListing, Setup};
 use serde::Deserialize;
 
 pub const NAME: &str = "files";
@@ -212,7 +212,7 @@ pub fn build(setup: &Setup) -> anyhow::Result<Built> {
     let home = setup.home.clone();
     Built::then(move |provided| {
         let users = provided
-            .get::<dyn parvi_term::Sessions>()
+            .get::<dyn ahjo_term::Sessions>()
             .map(|sessions| sessions.users())
             .unwrap_or_default();
         Ok(Arc::new(FilesArea {
@@ -227,7 +227,7 @@ impl Area for FilesArea {
     fn routes(&self) -> axum::Router {
         routes::routes(self.files.clone(), self.drops.clone())
     }
-    fn commands(&self) -> Vec<parvi_node_kit::Command> {
+    fn commands(&self) -> Vec<ahjo_node_kit::Command> {
         commands::commands(self.files.clone(), self.home.clone())
     }
 }

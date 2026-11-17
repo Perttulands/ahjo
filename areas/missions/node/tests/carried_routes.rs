@@ -1,15 +1,15 @@
 //! Route regressions carried from the former Missions node.
+use ahjo_node_kit::{NodeClient, NodeError};
+use ahjo_testkit::{node::Node, sessions};
 use axum::http::{Method, StatusCode};
-use parvi_node_kit::{NodeClient, NodeError};
-use parvi_testkit::{node::Node, sessions};
 use serde_json::{Value, json};
 
 async fn start() -> (Node, NodeClient) {
     let node = Node::start(
         &[
             sessions::LISTING,
-            parvi_work::LISTING,
-            parvi_missions::LISTING,
+            ahjo_work::LISTING,
+            ahjo_missions::LISTING,
         ],
         "",
     )
@@ -195,14 +195,14 @@ async fn edits_are_checked_and_pushed_to_subscribers() {
     let (mut socket, _) = connect_async(node.ws()).await.unwrap();
     socket
         .send(Message::Binary(
-            vec![parvi_missions_contract::WATCH, 1].into(),
+            vec![ahjo_missions_contract::WATCH, 1].into(),
         ))
         .await
         .unwrap();
     tokio::time::timeout(std::time::Duration::from_secs(5), async {
         while let Some(Ok(message)) = socket.next().await {
             if let Message::Binary(frame) = message
-                && frame.first() == Some(&parvi_missions_contract::SNAPSHOT)
+                && frame.first() == Some(&ahjo_missions_contract::SNAPSHOT)
             {
                 break;
             }
@@ -265,7 +265,7 @@ async fn edits_are_checked_and_pushed_to_subscribers() {
     tokio::time::timeout(std::time::Duration::from_secs(5), async {
         while let Some(Ok(message)) = socket.next().await {
             if let Message::Binary(frame) = message
-                && frame.first() == Some(&parvi_missions_contract::SNAPSHOT)
+                && frame.first() == Some(&ahjo_missions_contract::SNAPSHOT)
             {
                 let data: Value = serde_json::from_slice(&frame[1..]).unwrap();
                 if data.to_string().contains("Renamed") {

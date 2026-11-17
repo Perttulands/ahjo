@@ -1,10 +1,10 @@
 [package]
-name = "parvi-holder"
+name = "ahjo-holder"
 version = "0.0.1"
 edition = "2024"
 license = "MIT"
-description = "Parvi's Windows session holder: a detached per-user process that owns ConPTY sessions."
-repository = "https://github.com/Perttulands/parvi"
+description = "Ahjo's Windows session holder: a detached per-user process that owns ConPTY sessions."
+repository = "https://github.com/Perttulands/ahjo"
 publish = false
 
 [lints]

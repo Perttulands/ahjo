@@ -1,7 +1,7 @@
 //! Three-way editor save: only fields changed by the operator are written,
 //! and a simultaneous edit of the same field is refused.
 use super::*;
-use parvi_missions_contract::{Mission, MissionOutput};
+use ahjo_missions_contract::{Mission, MissionOutput};
 
 fn changed<T: PartialEq>(
     name: &str,
@@ -450,10 +450,10 @@ mod tests {
         let mut draft = base.clone();
         draft.fields[1] = "My goal".into();
         let mut mission = Mission::default();
-        mission.formations.push(parvi_missions_contract::Formation {
+        mission.formations.push(ahjo_missions_contract::Formation {
             id: "work".into(),
             title: "Concurrent title".into(),
-            brief: Some(parvi_missions_contract::Brief {
+            brief: Some(ahjo_missions_contract::Brief {
                 goal: "Original goal".into(),
                 repository: "kept elsewhere".into(),
                 ..Default::default()

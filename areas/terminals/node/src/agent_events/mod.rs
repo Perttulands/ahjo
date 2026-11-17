@@ -4,7 +4,7 @@
 //! events). Nothing here guesses from the screen; that is `waiting`.
 //!
 //! A launch asked to notify installs the hooks ([`hooks`]); each runs
-//! `parvi hook`, which posts to [`routes`] with the session's hub id and
+//! `ahjo hook`, which posts to [`routes`] with the session's hub id and
 //! the event in the address. The node keeps the report in memory: a restart forgets,
 //! which is what a notice should do. A report is dropped with its session.
 
@@ -14,24 +14,24 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use ahjo_core::Error;
+use ahjo_node_kit::Failure;
 use axum::Router;
 use axum::body::Bytes;
 use axum::extract::{Query, State};
 use axum::http::StatusCode;
 use axum::routing::post;
-use parvi_core::Error;
-use parvi_node_kit::Failure;
 use serde::Deserialize;
 use serde_json::Value;
 
 use crate::hub::Hub;
-use parvi_term::engine::SessionInfo;
+use ahjo_term::engine::SessionInfo;
 
 /// The most a summary says: a hint for a toast, not a transcript.
 const SUMMARY_CHARS: usize = 200;
 
 /// The most of a hook's payload that is read.
-pub use parvi_node_kit::hook::MAX_PAYLOAD;
+pub use ahjo_node_kit::hook::MAX_PAYLOAD;
 
 /// The path hooks post to.
 pub const PATH: &str = "/api/agent/event";

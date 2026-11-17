@@ -1,14 +1,14 @@
 //! The session tools over MCP against a real tmux on a scratch socket, on a
 //! node holding only terminals. Linux and macOS only; skips without tmux
-//! unless `PARVI_REQUIRE_TMUX=1`.
+//! unless `AHJO_REQUIRE_TMUX=1`.
 #![cfg(unix)]
 
 use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::time::Duration;
 
-use parvi_testkit::node::Node as TestNode;
-use parvi_testkit::tmux::{Server, capture, eventually, session_text};
+use ahjo_testkit::node::Node as TestNode;
+use ahjo_testkit::tmux::{Server, capture, eventually, session_text};
 use serde_json::{Value, json};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
@@ -39,7 +39,7 @@ impl Node {
             tmux.socket_path(),
             launch
         );
-        let node = TestNode::start(&[parvi_terminals::LISTING], &config)
+        let node = TestNode::start(&[ahjo_terminals::LISTING], &config)
             .await
             .unwrap();
         let sessions = node.sessions();
@@ -122,7 +122,7 @@ async fn speaks_the_mcp_lifecycle_and_offers_every_session_tool() {
     assert_eq!(status, 200);
     assert_eq!(answer["id"], 0);
     assert_eq!(answer["result"]["protocolVersion"], "2025-06-18");
-    assert_eq!(answer["result"]["serverInfo"]["name"], "parvi");
+    assert_eq!(answer["result"]["serverInfo"]["name"], "ahjo");
     assert!(answer["result"]["capabilities"]["tools"].is_object());
 
     let initialized = json!({ "jsonrpc": "2.0", "method": "notifications/initialized" });
@@ -143,7 +143,7 @@ async fn speaks_the_mcp_lifecycle_and_offers_every_session_tool() {
             assert_eq!(tool["inputSchema"]["type"], "object", "{tool}");
             tool["name"].as_str().unwrap()
         })
-        .filter(|name| !parvi_node_kit::own::COMMANDS.contains(name))
+        .filter(|name| !ahjo_node_kit::own::COMMANDS.contains(name))
         .collect();
     assert_eq!(
         names,
@@ -573,7 +573,7 @@ async fn launches_an_agent_in_any_folder() {
         args.extend(dimensions);
         let args: Vec<String> = args.into_iter().map(str::to_owned).collect();
         assert_eq!(
-            parvi_node_kit::cli::run("session", &args, &mut Vec::new())
+            ahjo_node_kit::cli::run("session", &args, &mut Vec::new())
                 .await
                 .unwrap(),
             0
@@ -607,7 +607,7 @@ async fn launches_an_agent_in_any_folder() {
         node.folder.display().to_string()
     );
 
-    // No permissions in Parvi: any folder the node's user reaches will do.
+    // No permissions in Ahjo: any folder the node's user reaches will do.
     node.call(
         "session_launch",
         json!({ "harness": "shell", "folder": node.other, "name": "outside" }),
@@ -639,7 +639,7 @@ async fn seats_run_through_the_sessions_terminals_provide() {
         return;
     };
     let sessions = node.node.sessions();
-    let spec = parvi_term::SessionSpec {
+    let spec = ahjo_term::SessionSpec {
         name: "seat".into(),
         cwd: node.folder.clone(),
         env: [("SEAT_WORD".to_string(), "kept".to_string())].into(),
@@ -697,7 +697,7 @@ async fn cli_manages_and_reads_a_session_on_the_test_node() {
             args.extend(["--node".into(), url, "--json".into()]);
             let mut output = Vec::new();
             assert_eq!(
-                parvi_node_kit::cli::run("session", &args, &mut output)
+                ahjo_node_kit::cli::run("session", &args, &mut output)
                     .await
                     .unwrap(),
                 0
@@ -775,7 +775,7 @@ async fn cli_launches_on_the_offered_users_scratch_server() {
     };
     own.new_session("keep", 80, 24);
     other.new_session("other-keep", 80, 24);
-    let user = parvi_testkit::tmux::whoami();
+    let user = ahjo_testkit::tmux::whoami();
     let launch = own.dir().join("launch.conf");
     std::fs::write(&launch, "folder /tmp").unwrap();
     let config = format!(
@@ -784,7 +784,7 @@ async fn cli_launches_on_the_offered_users_scratch_server() {
         launch,
         other.socket_path()
     );
-    let node = TestNode::start(&[parvi_terminals::LISTING], &config)
+    let node = TestNode::start(&[ahjo_terminals::LISTING], &config)
         .await
         .unwrap();
     let url = node.url();
@@ -800,7 +800,7 @@ async fn cli_launches_on_the_offered_users_scratch_server() {
     ]
     .map(str::to_owned);
     assert_eq!(
-        parvi_node_kit::cli::run("session", &args, &mut Vec::new())
+        ahjo_node_kit::cli::run("session", &args, &mut Vec::new())
             .await
             .unwrap(),
         0
@@ -825,7 +825,7 @@ async fn launcher_lists_accessible_folders_and_explains_missing_ones() {
         return;
     };
     std::fs::create_dir(node.other.join("inside")).unwrap();
-    let client = parvi_node_kit::NodeClient::new(Some(&node.node.url())).unwrap();
+    let client = ahjo_node_kit::NodeClient::new(Some(&node.node.url())).unwrap();
     let path = format!("/api/terminal/folders?path={}", node.other.display());
     let (answer, _) = client
         .request(axum::http::Method::GET, &path, None, None)

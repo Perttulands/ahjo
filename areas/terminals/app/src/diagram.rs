@@ -3,6 +3,7 @@
 //! and drawn in the app's own JetBrains Mono, from the files the app
 //! carries, so a diagram looks the same on every system.
 
+use ahjo_app_kit::theme::{FAMILY, FAMILY_FILES};
 use merman::svg::SvgPipeline;
 use merman::{
     MermaidEngine, OperationControl, RenderOutput, RenderRequest, Renderer,
@@ -13,7 +14,6 @@ use merman_render::environment::{
     TextMeasurementProfileIdentity,
 };
 use merman_render::text::{TextMeasurer, TextMetrics, TextStyle, WrapMode};
-use parvi_app_kit::theme::{FAMILY, FAMILY_FILES};
 use std::sync::{Arc, OnceLock};
 
 /// The terminal's colours the diagram is drawn in, as 0xRRGGBB.
@@ -113,7 +113,7 @@ impl TextMeasurer for Mono {
 }
 
 fn measured() -> Result<SvgEnvironment, String> {
-    let id = MeasurementProfileId::new("parvi.jetbrains-mono").map_err(|e| e.to_string())?;
+    let id = MeasurementProfileId::new("ahjo.jetbrains-mono").map_err(|e| e.to_string())?;
     let identity = TextMeasurementProfileIdentity::new(id, "1").map_err(|e| e.to_string())?;
     let profile = TextMeasurementProfile::new(identity, Arc::new(Mono));
     Ok(SvgEnvironment::deterministic()

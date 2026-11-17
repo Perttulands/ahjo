@@ -1,11 +1,11 @@
 //! Run controls and views; the channel projection remains in the store.
 use super::*;
 use crate::store::run_state;
-use gpui::{FocusHandle, KeyDownEvent, SharedString, Subscription};
-use parvi_app_kit::{ask::Ask, theme::Theme};
-use parvi_missions_contract::{
+use ahjo_app_kit::{ask::Ask, theme::Theme};
+use ahjo_missions_contract::{
     AdmissionRejection, AttemptsResponse, Mission, RunId, RunProjection, RunStart,
 };
+use gpui::{FocusHandle, KeyDownEvent, SharedString, Subscription};
 use std::collections::BTreeMap;
 
 pub(super) struct RunUi {
@@ -50,7 +50,7 @@ pub(super) struct RunUi {
         String,
         (
             u64,
-            Result<Option<parvi_missions_contract::GateRequest>, String>,
+            Result<Option<ahjo_missions_contract::GateRequest>, String>,
         ),
     >,
 }
@@ -271,7 +271,7 @@ impl MissionsPage {
                     }
                     match result {
                         Ok(a) if a.ok() => match serde_json::from_slice::<
-                            parvi_missions_contract::GateRequestResponse,
+                            ahjo_missions_contract::GateRequestResponse,
                         >(&a.body)
                         {
                             Ok(v) if v.request.requested_seq == seq => {
@@ -343,14 +343,14 @@ impl MissionsPage {
         let folder = self.run.cwd.read(cx).text.trim().to_owned();
         if !repository.is_empty() {
             return format!(
-                "Files go to a new branch of {repository}, in a checkout Parvi makes for this run."
+                "Files go to a new branch of {repository}, in a checkout Ahjo makes for this run."
             );
         }
         if !folder.is_empty() {
             // The folder field already says where.
             return String::new();
         }
-        // Parvi makes a folder named after the run; where earlier ones are
+        // Ahjo makes a folder named after the run; where earlier ones are
         // shows where.
         match self
             .node_runs()
@@ -359,7 +359,7 @@ impl MissionsPage {
             .and_then(|run| run.cwd.rsplit_once('/').map(|(root, _)| root.to_owned()))
         {
             Some(root) => format!("Files go to a new folder for this run in {root}."),
-            None => "Files go to a new folder Parvi makes for this run.".into(),
+            None => "Files go to a new folder Ahjo makes for this run.".into(),
         }
     }
     pub(super) fn prepare_run(&mut self, cx: &mut Context<Self>) {
@@ -571,7 +571,7 @@ impl MissionsPage {
                 window,
                 move |page, _, event: &FieldEvent, window, cx| match event {
                     FieldEvent::Submit | FieldEvent::SubmitAlt => page.start_run(cx),
-                    FieldEvent::Tab => parvi_app_kit::widgets::field::focus(
+                    FieldEvent::Tab => ahjo_app_kit::widgets::field::focus(
                         &order[(index + 1) % order.len()],
                         window,
                         cx,
@@ -581,7 +581,7 @@ impl MissionsPage {
             ));
         }
         if let Some(first) = order.first() {
-            parvi_app_kit::widgets::field::focus(first, window, cx);
+            ahjo_app_kit::widgets::field::focus(first, window, cx);
         }
     }
     pub(super) fn escape_run(&mut self, cx: &mut Context<Self>) -> bool {
@@ -1101,7 +1101,7 @@ impl MissionsPage {
                 .debug_selector(move || selector.clone())
                 .on_click(cx.listener(move |p, _, window, cx| {
                     let field = field.clone();
-                    parvi_app_kit::widgets::path_picker::pick(
+                    ahjo_app_kit::widgets::path_picker::pick(
                         p.host.clone(),
                         "Choose a file",
                         window,
@@ -1242,7 +1242,7 @@ impl MissionsPage {
                                 .debug_selector(|| "run-cwd-choose".into())
                                 .on_click(cx.listener(move |p, _, window, cx| {
                                     let cwd = cwd.clone();
-                                    parvi_app_kit::widgets::path_picker::pick_folder(
+                                    ahjo_app_kit::widgets::path_picker::pick_folder(
                                         p.host.clone(),
                                         "Choose the working folder",
                                         window,
@@ -1378,7 +1378,7 @@ impl MissionsPage {
                     .absolute()
                     .inset_0()
                     .occlude()
-                    .bg(parvi_app_kit::theme::alpha(t.bg, SCRIM))
+                    .bg(ahjo_app_kit::theme::alpha(t.bg, SCRIM))
                     .flex()
                     .justify_center()
                     .items_start()
@@ -1473,7 +1473,7 @@ impl MissionsPage {
                 .absolute()
                 .inset_0()
                 .occlude()
-                .bg(parvi_app_kit::theme::alpha(t.bg, SCRIM))
+                .bg(ahjo_app_kit::theme::alpha(t.bg, SCRIM))
                 .flex()
                 .justify_center()
                 .items_start()
@@ -1772,7 +1772,7 @@ impl MissionsPage {
                     .absolute()
                     .inset_0()
                     .occlude()
-                    .bg(parvi_app_kit::theme::alpha(t.bg, SCRIM))
+                    .bg(ahjo_app_kit::theme::alpha(t.bg, SCRIM))
                     .flex()
                     .justify_center()
                     .items_center()
@@ -1862,10 +1862,10 @@ pub(super) fn target_words(targets: &[flow::Target]) -> String {
 
 enum StartAnswer {
     Started(String),
-    Refused(parvi_app_kit::host::Answer),
+    Refused(ahjo_app_kit::host::Answer),
     Unknown(String),
 }
-fn start_answer(result: Result<parvi_app_kit::host::Answer, parvi_core::Error>) -> StartAnswer {
+fn start_answer(result: Result<ahjo_app_kit::host::Answer, ahjo_core::Error>) -> StartAnswer {
     match result {
         Ok(answer) if answer.ok() => match serde_json::from_slice::<RunId>(&answer.body) {
             Ok(run) if !run.run_id.is_empty() => StartAnswer::Started(run.run_id),
@@ -1875,18 +1875,18 @@ fn start_answer(result: Result<parvi_app_kit::host::Answer, parvi_core::Error>) 
         Err(error) => StartAnswer::Unknown(error.message),
     }
 }
-/// A run in the folder Parvi made for it, named after the run.
+/// A run in the folder Ahjo made for it, named after the run.
 fn made_for(run: &RunProjection) -> bool {
     run.repository.is_empty() && run.cwd.ends_with(&format!("/{}", run.run_id))
 }
 #[cfg(test)]
 mod tests {
     use super::*;
-    use parvi_app_kit::host::Answer;
+    use ahjo_app_kit::host::Answer;
     #[test]
     fn a_start_without_an_answer_stays_unknown_until_the_node_answers() {
         assert!(matches!(
-            start_answer(Err(parvi_core::Error::new("offline", "lost"))),
+            start_answer(Err(ahjo_core::Error::new("offline", "lost"))),
             StartAnswer::Unknown(_)
         ));
         assert!(matches!(

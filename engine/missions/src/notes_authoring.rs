@@ -1,6 +1,6 @@
 //! Author-owned note threads, protected by a notes ETag.
 use crate::{Error, Store};
-use parvi_mission_model::{NoteEntry, NotePatch, Notes, NotesEdit};
+use ahjo_mission_model::{NoteEntry, NotePatch, Notes, NotesEdit};
 use toml_edit::{DocumentMut, Item, value};
 
 impl Store {
@@ -75,7 +75,7 @@ impl Store {
             target.trim()
         };
         let author = author.trim();
-        if !parvi_mission_model::valid_author(author) || text.is_some_and(|s| s.trim().is_empty()) {
+        if !ahjo_mission_model::valid_author(author) || text.is_some_and(|s| s.trim().is_empty()) {
             return Err(Error::new(
                 "invalid_note_patch",
                 "invalid author or empty text",

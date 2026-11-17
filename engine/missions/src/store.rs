@@ -11,7 +11,7 @@
 //! mission kept in a repository. One file that cannot be read never hides the
 //! rest: it is listed as broken, with the reason.
 
-use parvi_mission_model::{Layout, Mission, MissionListing, Notes};
+use ahjo_mission_model::{Layout, Mission, MissionListing, Notes};
 use std::path::{Path, PathBuf};
 
 use crate::Error;

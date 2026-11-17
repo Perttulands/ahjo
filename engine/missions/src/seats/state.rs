@@ -54,7 +54,7 @@ impl WaitTracker {
 
 /// Why a seat that never took its brief stopped the step, in plain words
 /// with what its screen says.
-pub(super) fn stuck_reason(state: &str, screen: Option<&parvi_term::Screen>) -> String {
+pub(super) fn stuck_reason(state: &str, screen: Option<&ahjo_term::Screen>) -> String {
     let why = match state {
         "brief_not_taken" => "the agent did not take its brief",
         "seat_not_ready" => "the agent never reached its prompt",
@@ -70,7 +70,7 @@ pub(super) fn stuck_reason(state: &str, screen: Option<&parvi_term::Screen>) -> 
 
 /// The lines of a seat's screen that say what went wrong: the last one that
 /// reads as an error, or else its last few lines.
-pub(super) fn screen_words(screen: &parvi_term::Screen) -> String {
+pub(super) fn screen_words(screen: &ahjo_term::Screen) -> String {
     let lines: Vec<String> = screen
         .rows
         .iter()
@@ -111,7 +111,7 @@ pub(super) fn screen_words(screen: &parvi_term::Screen) -> String {
     }
 }
 /// How long a seat may sit at an empty prompt, after its harness recorded the
-/// end of its turn, before Parvi reminds it to finish.
+/// end of its turn, before Ahjo reminds it to finish.
 pub(super) const ENDED_GRACE: Duration = Duration::from_secs(20);
 /// The same when only the screen shows an empty prompt: the harness's own
 /// record has not said the turn ended.
@@ -230,11 +230,11 @@ mod tests {
 
         let row = |text: &str| {
             text.chars()
-                .map(|c| parvi_term::Cell {
+                .map(|c| ahjo_term::Cell {
                     text: c.to_string(),
                     width: 1,
-                    foreground: parvi_term::Color::Default,
-                    background: parvi_term::Color::Default,
+                    foreground: ahjo_term::Color::Default,
+                    background: ahjo_term::Color::Default,
                     bold: false,
                     dim: false,
                     italic: false,
@@ -242,7 +242,7 @@ mod tests {
                 })
                 .collect()
         };
-        let screen = parvi_term::Screen {
+        let screen = ahjo_term::Screen {
             rows: [
                 "OpenAI Codex",
                 "",
@@ -252,7 +252,7 @@ mod tests {
             ]
             .map(row)
             .to_vec(),
-            cursor: parvi_term::Cursor {
+            cursor: ahjo_term::Cursor {
                 row: 4,
                 column: 2,
                 visible: true,

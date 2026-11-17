@@ -1,4 +1,4 @@
-pub(crate) fn io(error: std::io::Error) -> parvi_core::Error {
+pub(crate) fn io(error: std::io::Error) -> ahjo_core::Error {
     use std::io::ErrorKind;
     let code = match error.kind() {
         ErrorKind::NotFound => "not_found",
@@ -10,10 +10,10 @@ pub(crate) fn io(error: std::io::Error) -> parvi_core::Error {
         ErrorKind::TimedOut => "timed_out",
         _ => "io",
     };
-    parvi_core::Error::new(code, error.to_string())
+    ahjo_core::Error::new(code, error.to_string())
 }
 
-pub(crate) fn to_io(error: parvi_core::Error) -> std::io::Error {
+pub(crate) fn to_io(error: ahjo_core::Error) -> std::io::Error {
     use std::io::ErrorKind;
     let kind = match error.code.as_str() {
         "not_found" => ErrorKind::NotFound,

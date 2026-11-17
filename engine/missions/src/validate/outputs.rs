@@ -6,7 +6,7 @@ use std::collections::HashSet;
 use super::inputs::valid_name;
 use super::possessive;
 use crate::graph::split_endpoint;
-use parvi_mission_model::{
+use ahjo_mission_model::{
     Code, Finding, KIND_FILE, KIND_FOLDER, KIND_TEXT, Mission, MissionOutput, Port,
 };
 

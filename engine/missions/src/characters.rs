@@ -208,7 +208,7 @@ mod tests {
 
     #[test]
     fn characters_read_from_the_roles_directory() {
-        let dir = std::env::temp_dir().join(format!("parvi-64-characters-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("ahjo-64-characters-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         assert_eq!(read_characters(&dir).unwrap(), Vec::new());
         std::fs::write(

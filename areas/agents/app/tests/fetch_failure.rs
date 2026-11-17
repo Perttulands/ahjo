@@ -1,8 +1,8 @@
 //! A failed checkout fetch must not make installed harnesses look broken.
 #![cfg(unix)]
+use ahjo_app_kit::link::client::LinkState;
+use ahjo_testkit::{fresh_dir, node::Node, sessions};
 use gpui::{Modifiers, TestAppContext, VisualTestContext};
-use parvi_app_kit::link::client::LinkState;
-use parvi_testkit::{fresh_dir, node::Node, sessions};
 use std::os::unix::fs::{PermissionsExt, symlink};
 use std::path::{Path, PathBuf};
 use std::sync::mpsc;
@@ -29,7 +29,7 @@ fn executable(path: &Path, script: &str) {
     std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o755)).unwrap();
 }
 fn start() -> Running {
-    let home = fresh_dir("parvi-agents-fetch-page");
+    let home = fresh_dir("ahjo-agents-fetch-page");
     let bin = home.join("bin");
     let links = home.join(".agents/skills");
     std::fs::create_dir_all(&bin).unwrap();
@@ -65,7 +65,7 @@ fn start() -> Running {
                     worker_home,
                     worker_home.join("bin")
                 );
-                let node = Node::start(&[sessions::LISTING, parvi_agents::LISTING], &config)
+                let node = Node::start(&[sessions::LISTING, ahjo_agents::LISTING], &config)
                     .await
                     .unwrap();
                 ready.send((node.url(), node.id())).unwrap();
@@ -104,19 +104,13 @@ fn failed_fetch_is_reported_once_without_marking_available_harnesses_broken(
     cx: &mut TestAppContext,
 ) {
     let running = start();
-    let settings = fresh_dir("parvi-agents-fetch-settings");
+    let settings = fresh_dir("ahjo-agents-fetch-settings");
     cx.executor().allow_parking();
-    cx.update(parvi_app_shell::prepare);
+    cx.update(ahjo_app_shell::prepare);
     let url = running.url.clone();
     let path = settings.join("app.json");
     let (shell, cx) = cx.add_window_view(move |window, cx| {
-        parvi_app_shell::start(
-            &[parvi_agents_app::build],
-            Some(url),
-            Some(path),
-            window,
-            cx,
-        )
+        ahjo_app_shell::start(&[ahjo_agents_app::build], Some(url), Some(path), window, cx)
     });
     until(cx, "node link", |cx| {
         shell.read_with(cx, |shell, cx| {

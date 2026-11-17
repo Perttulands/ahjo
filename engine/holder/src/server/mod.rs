@@ -1,4 +1,4 @@
-//! The holder process: `parvi-holder [--pipe <path>] [--log <path>]`.
+//! The holder process: `ahjo-holder [--pipe <path>] [--log <path>]`.
 //!
 //! It owns every session of this user and serves them on a named pipe until
 //! it is told `kill-server`, or Windows ends it at log off.
@@ -19,12 +19,12 @@ use crate::sys::{conpty, pipe};
 use holder::Holder;
 use log::Log;
 
-/// Where the holder logs when not told: `%LOCALAPPDATA%\Parvi\holder.log`.
+/// Where the holder logs when not told: `%LOCALAPPDATA%\Ahjo\holder.log`.
 fn default_log() -> PathBuf {
     let base = std::env::var_os("LOCALAPPDATA")
         .or_else(|| std::env::var_os("TEMP"))
         .unwrap_or_else(|| ".".into());
-    PathBuf::from(base).join("Parvi").join("holder.log")
+    PathBuf::from(base).join("Ahjo").join("holder.log")
 }
 
 struct Options {

@@ -8,11 +8,11 @@ use super::surface::{self, Surface};
 use crate::store::sessions::{self, Key};
 use crate::store::workspace::{MAX_WINDOWS, Workspace, tab_label};
 use crate::theme::{Theme, size, theme};
+use ahjo_app_kit::widgets::kit::{self, Kind};
 use gpui::{
     AnyElement, Context, FontWeight, KeyDownEvent, MouseButton, MouseDownEvent, Window, anchored,
     canvas, deferred, div, point, prelude::*, px,
 };
-use parvi_app_kit::widgets::kit::{self, Kind};
 
 impl Terminals {
     /// The Sessions tabs, in the page's place on the tab bar: a click shows
@@ -578,7 +578,7 @@ impl Terminals {
         .when(!compact, |d| d.bottom_0())
         // Shift+Enter steps back; the field would take it as Enter.
         .capture_action(cx.listener(
-            |s, _: &parvi_app_kit::widgets::field::ShiftEnter, window, cx| {
+            |s, _: &ahjo_app_kit::widgets::field::ShiftEnter, window, cx| {
                 s.step_match(false, window, cx);
                 cx.stop_propagation();
             },

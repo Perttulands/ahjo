@@ -7,7 +7,7 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
-use parvi_core::Error;
+use ahjo_core::Error;
 
 use crate::config::Config;
 use crate::events::Log;

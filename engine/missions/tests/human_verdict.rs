@@ -1,5 +1,5 @@
-use parvi_mission_engine::{Coordinator, LabExecutor, Ledger, RunEvent, RunSettings};
-use parvi_mission_model::HumanVerdict;
+use ahjo_mission_engine::{Coordinator, LabExecutor, Ledger, RunEvent, RunSettings};
+use ahjo_mission_model::HumanVerdict;
 use std::sync::{Arc, Barrier};
 
 #[test]
@@ -7,7 +7,7 @@ fn verdicts_are_atomic_and_preserve_response() {
     let mut random = [0; 8];
     getrandom::fill(&mut random).unwrap();
     let root =
-        std::env::temp_dir().join(format!("parvi-100-verdict-{}", u64::from_ne_bytes(random)));
+        std::env::temp_dir().join(format!("ahjo-100-verdict-{}", u64::from_ne_bytes(random)));
     let coordinator =
         Coordinator::open(&root, RunSettings::default(), Box::new(LabExecutor)).unwrap();
     let ledger = Ledger::new(root.join("runs/run_test.ndjson"), "run_test");

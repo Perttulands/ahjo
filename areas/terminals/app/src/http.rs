@@ -2,8 +2,8 @@
 //! folder's listing for the launcher, a harness's flags, tmux's windows of
 //! a session, and drops for Send's attachments (docs/protocol.md).
 
-use parvi_app_kit::host::{Answer, Request};
-use parvi_core::{Error, NodeId};
+use ahjo_app_kit::host::{Answer, Request};
+use ahjo_core::{Error, NodeId};
 use std::time::Duration;
 
 /// The most one attachment carries, as the node takes it.

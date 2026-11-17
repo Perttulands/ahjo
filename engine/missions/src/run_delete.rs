@@ -1,11 +1,11 @@
-//! Deleting a finished run: its record and what Parvi made for it.
+//! Deleting a finished run: its record and what Ahjo made for it.
 use crate::Coordinator;
 use std::io;
 use std::path::PathBuf;
 
 impl Coordinator {
     /// Delete a finished run: its event record, frozen mission, bindings,
-    /// kept outputs and the folder Parvi made for it. A folder the operator
+    /// kept outputs and the folder Ahjo made for it. A folder the operator
     /// gave stays, and a repository run is landed first so its branch is
     /// not lost.
     pub fn delete_run(&self, id: &str) -> Result<(), crate::Error> {

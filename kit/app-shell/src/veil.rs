@@ -3,8 +3,8 @@
 //! new content is drawn and clickable from the first frame, the veil never
 //! takes the mouse, and once it has faded it is no longer drawn.
 
+use ahjo_app_kit::theme::{Direction, Theme, motion};
 use gpui::{Animation, AnimationExt, AnyElement, Hsla, div, ease_out_quint, prelude::*};
-use parvi_app_kit::theme::{Direction, Theme, motion};
 use std::time::{Duration, Instant};
 
 #[derive(Default)]

@@ -1,4 +1,4 @@
-use parvi_mission_engine::{
+use ahjo_mission_engine::{
     Claude, Codex, HarnessAdapter, Pi, Pointer, Shell, SlotBinding, TokenUsage, TranscriptRoots,
     TurnState,
 };
@@ -128,7 +128,7 @@ fn token_readers_count_the_recorded_transcripts() {
 }
 #[test]
 fn pi_native_stop_and_tokens() {
-    let temp = std::env::temp_dir().join(format!("parvi-104-pi-test-{}", std::process::id()));
+    let temp = std::env::temp_dir().join(format!("ahjo-104-pi-test-{}", std::process::id()));
     fs::create_dir_all(&temp).unwrap();
     let path = temp.join("session.jsonl");
     let p = Pointer {
@@ -141,7 +141,7 @@ fn pi_native_stop_and_tokens() {
     let head = "{\"type\":\"session\",\"id\":\"s\",\"cwd\":\"/work\"}\n{\"type\":\"message\",\"message\":{\"role\":\"user\",\"content\":\"pointer\"}}\n";
     for stop in ["toolUse", "length", "error", "aborted", "stop"] {
         let body = format!(
-            "{{\"type\":\"message\",\"message\":{{\"role\":\"assistant\",\"content\":[{{\"type\":\"text\",\"text\":\"<<<PARVI-DONE run-id=run_1 status=ok>>>\"}}],\"stopReason\":\"{stop}\",\"usage\":{{\"input\":10,\"output\":20,\"cacheRead\":100,\"cacheWrite\":5}}}}}}\n"
+            "{{\"type\":\"message\",\"message\":{{\"role\":\"assistant\",\"content\":[{{\"type\":\"text\",\"text\":\"<<<AHJO-DONE run-id=run_1 status=ok>>>\"}}],\"stopReason\":\"{stop}\",\"usage\":{{\"input\":10,\"output\":20,\"cacheRead\":100,\"cacheWrite\":5}}}}}}\n"
         );
         fs::write(&path, format!("{head}{body}")).unwrap();
         let result = Pi.turn(&TranscriptRoots::default(), &p, "run_1").unwrap();
@@ -203,7 +203,7 @@ fn launch_quotes_both_shells_and_trusts_only_this_launch() {
 
 #[test]
 fn real_native_sessions_match_archon_readers() {
-    let prompt = "Reply exactly: <<<PARVI-DONE run-id=run_parity status=ok artifact=none>>>";
+    let prompt = "Reply exactly: <<<AHJO-DONE run-id=run_parity status=ok artifact=none>>>";
     let cases: [(&dyn HarnessAdapter, &str, TokenUsage); 3] = [
         (
             &Claude,
@@ -263,7 +263,7 @@ fn real_native_sessions_match_archon_readers() {
         assert_eq!(
             turn.state,
             TurnState::Completed {
-                text: "<<<PARVI-DONE run-id=run_parity status=ok artifact=none>>>".into()
+                text: "<<<AHJO-DONE run-id=run_parity status=ok artifact=none>>>".into()
             },
             "{name}"
         );
@@ -274,7 +274,7 @@ fn real_native_sessions_match_archon_readers() {
 #[test]
 fn completed_turn_must_match_the_selected_model_and_effort() {
     let mut p = Pointer {
-        text: "Reply exactly: <<<PARVI-DONE run-id=run_parity status=ok artifact=none>>>".into(),
+        text: "Reply exactly: <<<AHJO-DONE run-id=run_parity status=ok artifact=none>>>".into(),
         cwd: "/work".into(),
         transcript: Some(fixture("real/codex.jsonl")),
         binding: Some(SlotBinding {
@@ -300,7 +300,7 @@ fn completed_turn_must_match_the_selected_model_and_effort() {
 
 #[test]
 fn growing_transcripts_never_complete_before_the_native_end() {
-    let scratch = std::env::temp_dir().join(format!("parvi-104-growing-{}", std::process::id()));
+    let scratch = std::env::temp_dir().join(format!("ahjo-104-growing-{}", std::process::id()));
     fs::create_dir_all(&scratch).unwrap();
     for (adapter, id) in [
         (&Claude as &dyn HarnessAdapter, "claude"),
@@ -329,7 +329,7 @@ fn growing_transcripts_never_complete_before_the_native_end() {
         let completion = completed_at.expect("eventually completed");
         let line = fixture.lines().nth(completion).unwrap();
         if id == "claude" {
-            assert!(line.contains("<<<PARVI-DONE"));
+            assert!(line.contains("<<<AHJO-DONE"));
         } else {
             assert!(line.contains("task_complete"));
         }
@@ -339,7 +339,7 @@ fn growing_transcripts_never_complete_before_the_native_end() {
 
 #[test]
 fn claude_reports_background_work_until_native_notice() {
-    let scratch = std::env::temp_dir().join(format!("parvi-104-background-{}", std::process::id()));
+    let scratch = std::env::temp_dir().join(format!("ahjo-104-background-{}", std::process::id()));
     fs::create_dir_all(&scratch).unwrap();
     let path = scratch.join("turn.jsonl");
     let source =
@@ -374,7 +374,7 @@ fn claude_reports_background_work_until_native_notice() {
 
 #[test]
 fn claude_only_consumes_a_human_pointer_in_the_dispatch_cwd() {
-    let scratch = std::env::temp_dir().join(format!("parvi-104-pointer-{}", std::process::id()));
+    let scratch = std::env::temp_dir().join(format!("ahjo-104-pointer-{}", std::process::id()));
     fs::create_dir_all(&scratch).unwrap();
     let path = scratch.join("turn.jsonl");
     let pointer_text = "brief";
@@ -408,7 +408,7 @@ fn claude_only_consumes_a_human_pointer_in_the_dispatch_cwd() {
         (wrapped.as_str(), "/work", "session", "human", true, false),
     ] {
         let user = serde_json::json!({"type":"user","cwd":cwd,"sessionId":session,"origin":{"kind":origin},"isMeta":meta,"message":{"content":content}});
-        let answer = serde_json::json!({"type":"assistant","cwd":"/work","sessionId":"session","message":{"model":"claude-opus-5","stop_reason":"end_turn","content":[{"type":"text","text":"<<<PARVI-DONE run-id=run_1 status=ok>>>"}]}});
+        let answer = serde_json::json!({"type":"assistant","cwd":"/work","sessionId":"session","message":{"model":"claude-opus-5","stop_reason":"end_turn","content":[{"type":"text","text":"<<<AHJO-DONE run-id=run_1 status=ok>>>"}]}});
         fs::write(&path, format!("{user}\n{answer}\n")).unwrap();
         let result = Claude
             .turn(&TranscriptRoots::default(), &p, "run_1")
@@ -425,7 +425,7 @@ fn claude_only_consumes_a_human_pointer_in_the_dispatch_cwd() {
 #[test]
 fn claude_detects_replaced_conversation_and_pi_reports_unknown() {
     let scratch =
-        std::env::temp_dir().join(format!("parvi-104-conversation-{}", std::process::id()));
+        std::env::temp_dir().join(format!("ahjo-104-conversation-{}", std::process::id()));
     let sessions = scratch.join("sessions");
     fs::create_dir_all(&sessions).unwrap();
     let roots = TranscriptRoots {
@@ -458,7 +458,7 @@ fn transcript_discovery_skips_files_older_than_the_dispatch() {
     let mut nonce = [0u8; 8];
     getrandom::fill(&mut nonce).unwrap();
     let dir = std::env::temp_dir().join(format!(
-        "parvi-105-transcripts-{}",
+        "ahjo-105-transcripts-{}",
         u64::from_ne_bytes(nonce)
     ));
     fs::create_dir_all(&dir).unwrap();
@@ -479,7 +479,7 @@ fn transcript_discovery_skips_files_older_than_the_dispatch() {
     )
     .unwrap();
     let pointer = Pointer {
-        text: "Reply exactly: <<<PARVI-DONE run-id=run_parity status=ok artifact=none>>>".into(),
+        text: "Reply exactly: <<<AHJO-DONE run-id=run_parity status=ok artifact=none>>>".into(),
         cwd: "/work".into(),
         not_before: Some(SystemTime::now() - Duration::from_secs(10)),
         binding: Some(SlotBinding {

@@ -2,8 +2,8 @@
 //! inside the open file, and a code file's outline of its symbols.
 use super::*;
 use crate::store::tabs::Key;
+use ahjo_app_kit::{menu::MenuRow, widgets::field::TextField};
 use gpui::{App, Entity};
-use parvi_app_kit::{menu::MenuRow, widgets::field::TextField};
 
 /// The Ctrl+Tab switch: its width, and its top from the page's.
 const SWITCH_W: f32 = 420.;
@@ -98,7 +98,7 @@ impl FilesPage {
                 pane::act(t, id, word)
                     .debug_selector(move || id.into())
                     .tooltip(kit::tip(tip))
-                    .when(!can, |a| a.opacity(parvi_app_kit::theme::fade::IDLE))
+                    .when(!can, |a| a.opacity(ahjo_app_kit::theme::fade::IDLE))
                     .on_click(cx.listener(move |p, _, w, cx| p.travel(back, w, cx))),
             );
         }

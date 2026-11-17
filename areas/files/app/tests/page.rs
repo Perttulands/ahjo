@@ -1,6 +1,6 @@
 //! The Files page draws a node's real listing.
+use ahjo_testkit::node::Node;
 use gpui::{Modifiers, ParentElement, TestAppContext, VisualTestContext};
-use parvi_testkit::node::Node;
 use std::{
     sync::mpsc,
     time::{Duration, Instant},
@@ -8,45 +8,45 @@ use std::{
 
 thread_local! {
     static SENT: std::cell::RefCell<Option<String>> = const { std::cell::RefCell::new(None) };
-    static SEARCH_PAGE: std::cell::RefCell<Option<gpui::Entity<parvi_files_app::FilesPage>>> = const { std::cell::RefCell::new(None) };
-    static TERMINAL_PAGE: std::cell::RefCell<Option<gpui::Entity<parvi_terminals_app::Terminals>>> = const { std::cell::RefCell::new(None) };
+    static SEARCH_PAGE: std::cell::RefCell<Option<gpui::Entity<ahjo_files_app::FilesPage>>> = const { std::cell::RefCell::new(None) };
+    static TERMINAL_PAGE: std::cell::RefCell<Option<gpui::Entity<ahjo_terminals_app::Terminals>>> = const { std::cell::RefCell::new(None) };
 }
 
 fn observed_terminals(
-    host: parvi_app_kit::Host,
+    host: ahjo_app_kit::Host,
     window: &mut gpui::Window,
     cx: &mut gpui::App,
-) -> parvi_app_kit::Mounted {
-    parvi_app_kit::mount(host, window, cx, |host, window, cx| {
+) -> ahjo_app_kit::Mounted {
+    ahjo_app_kit::mount(host, window, cx, |host, window, cx| {
         TERMINAL_PAGE.with(|page| *page.borrow_mut() = Some(cx.entity()));
-        parvi_terminals_app::Terminals::new(host, window, cx)
+        ahjo_terminals_app::Terminals::new(host, window, cx)
     })
 }
 
 fn observed_files(
-    host: parvi_app_kit::Host,
+    host: ahjo_app_kit::Host,
     window: &mut gpui::Window,
     cx: &mut gpui::App,
-) -> parvi_app_kit::Mounted {
-    parvi_app_kit::mount(host, window, cx, |host, window, cx| {
+) -> ahjo_app_kit::Mounted {
+    ahjo_app_kit::mount(host, window, cx, |host, window, cx| {
         SEARCH_PAGE.with(|page| *page.borrow_mut() = Some(cx.entity()));
-        parvi_files_app::FilesPage::new(host, window, cx)
+        ahjo_files_app::FilesPage::new(host, window, cx)
     })
 }
 
 struct Toy;
-impl parvi_app_kit::Page for Toy {
+impl ahjo_app_kit::Page for Toy {
     const ID: &'static str = "toy";
     const TITLE: &'static str = "Toy";
-    const ANSWERS: &'static [parvi_app_kit::Answers] = &[parvi_app_kit::Answers::Send];
+    const ANSWERS: &'static [ahjo_app_kit::Answers] = &[ahjo_app_kit::Answers::Send];
     fn answer(
         &mut self,
-        ask: parvi_app_kit::Ask,
+        ask: ahjo_app_kit::Ask,
         _: &'static str,
         _: &mut gpui::Window,
         _: &mut gpui::Context<Self>,
     ) {
-        if let parvi_app_kit::Ask::Send { reference, .. } = ask {
+        if let ahjo_app_kit::Ask::Send { reference, .. } = ask {
             SENT.with(|sent| *sent.borrow_mut() = Some(reference));
         }
     }
@@ -61,11 +61,11 @@ impl gpui::Render for Toy {
     }
 }
 fn toy(
-    host: parvi_app_kit::Host,
+    host: ahjo_app_kit::Host,
     window: &mut gpui::Window,
     cx: &mut gpui::App,
-) -> parvi_app_kit::Mounted {
-    parvi_app_kit::mount(host, window, cx, |_, _, _| Toy)
+) -> ahjo_app_kit::Mounted {
+    ahjo_app_kit::mount(host, window, cx, |_, _, _| Toy)
 }
 
 struct Running {
@@ -97,9 +97,9 @@ fn start_with_terminal(root: std::path::PathBuf, socket: Option<std::path::PathB
             );
             let areas = if let Some(socket) = socket {
                 config.push_str(&format!("[terminals]\nsocket = {:?}\n", socket));
-                vec![parvi_files::LISTING, parvi_terminals::LISTING]
+                vec![ahjo_files::LISTING, ahjo_terminals::LISTING]
             } else {
-                vec![parvi_files::LISTING]
+                vec![ahjo_files::LISTING]
             };
             let node = Node::start(&areas, &config).await.unwrap();
             ready.send((node.url(), node.id())).unwrap();
@@ -164,7 +164,7 @@ fn drop_files(cx: &mut VisualTestContext, row: &'static str, files: Vec<std::pat
     cx.simulate_event(gpui::FileDropEvent::Submit { position });
 }
 /// What the window's status says now.
-fn status(shell: &gpui::Entity<parvi_app_shell::Shell>, cx: &mut VisualTestContext) -> String {
+fn status(shell: &gpui::Entity<ahjo_app_shell::Shell>, cx: &mut VisualTestContext) -> String {
     shell.read_with(cx, |s, cx| {
         s.hub()
             .read(cx)
@@ -184,14 +184,14 @@ fn watch_once(cx: &mut VisualTestContext) {
     cx.run_until_parked();
 }
 fn kept(
-    shell: &gpui::Entity<parvi_app_shell::Shell>,
+    shell: &gpui::Entity<ahjo_app_shell::Shell>,
     cx: &mut VisualTestContext,
-) -> parvi_files_app::store::Kept {
+) -> ahjo_files_app::store::Kept {
     shell.read_with(cx, |s, cx| {
         s.hub()
             .read(cx)
             .settings
-            .section::<parvi_files_app::store::Kept>("files")
+            .section::<ahjo_files_app::store::Kept>("files")
             .unwrap_or_default()
     })
 }
@@ -205,18 +205,18 @@ fn modified(path: &std::path::Path, seconds_ago: u64) {
 /// same view a printed path opens, which browses, sends and remembers.
 #[gpui::test]
 fn files_panel_browses_sends_and_remembers_beside_the_terminals(cx: &mut TestAppContext) {
-    let root = parvi_testkit::fresh_dir("files-dock");
+    let root = ahjo_testkit::fresh_dir("files-dock");
     std::fs::create_dir(root.join("folder")).unwrap();
     let file = root.join("folder/note.txt");
     std::fs::write(&file, "hello").unwrap();
     let running = start(root.clone());
     cx.executor().allow_parking();
-    cx.update(parvi_app_shell::prepare);
+    cx.update(ahjo_app_shell::prepare);
     let url = running.url.clone();
     let settings = root.join("settings.json");
     let (shell, cx) = cx.add_window_view(move |w, cx| {
-        parvi_app_shell::start(
-            &[toy, terminal, parvi_files_app::build],
+        ahjo_app_shell::start(
+            &[toy, terminal, ahjo_files_app::build],
             Some(url),
             Some(settings),
             w,
@@ -225,12 +225,12 @@ fn files_panel_browses_sends_and_remembers_beside_the_terminals(cx: &mut TestApp
     });
     until(cx, "node connected", |cx| {
         shell.read_with(cx, |s, cx| {
-            !parvi_app_kit::Host::new(s.hub()).nodes(cx).is_empty()
+            !ahjo_app_kit::Host::new(s.hub()).nodes(cx).is_empty()
         })
     });
     assert_eq!(shell.read_with(cx, |s, _| s.shown_page()), Some("toy"));
     assert!(shell.update(cx, |s, cx| {
-        parvi_app_kit::chords::rows(&s.chords(cx))
+        ahjo_app_kit::chords::rows(&s.chords(cx))
             .iter()
             .any(|row| row.label == "Files panel")
     }));
@@ -281,11 +281,11 @@ fn files_panel_browses_sends_and_remembers_beside_the_terminals(cx: &mut TestApp
 #[cfg(unix)]
 #[gpui::test]
 fn terminal_panel_search_and_printed_path_open_beside(cx: &mut TestAppContext) {
-    let Some(tmux) = parvi_testkit::tmux::Server::start_in("files-finish-terminal") else {
-        assert!(std::env::var_os("PARVI_REQUIRE_TMUX").is_none());
+    let Some(tmux) = ahjo_testkit::tmux::Server::start_in("files-finish-terminal") else {
+        assert!(std::env::var_os("AHJO_REQUIRE_TMUX").is_none());
         return;
     };
-    let root = parvi_testkit::fresh_dir("files-finish-terminal-root");
+    let root = ahjo_testkit::fresh_dir("files-finish-terminal-root");
     std::fs::create_dir(root.join("sub")).unwrap();
     std::fs::create_dir(root.join("other")).unwrap();
     let file = root.join("sub/note.txt");
@@ -314,11 +314,11 @@ fn terminal_panel_search_and_printed_path_open_beside(cx: &mut TestAppContext) {
     ]);
     let running = start_with_terminal(root.clone(), Some(tmux.socket_path()));
     cx.executor().allow_parking();
-    cx.update(parvi_app_shell::prepare);
+    cx.update(ahjo_app_shell::prepare);
     let url = running.url.clone();
     let (shell, cx) = cx.add_window_view(move |w, cx| {
-        parvi_app_shell::start(
-            &[observed_terminals, parvi_files_app::build],
+        ahjo_app_shell::start(
+            &[observed_terminals, ahjo_files_app::build],
             Some(url),
             None,
             w,
@@ -415,11 +415,11 @@ fn terminal_panel_search_and_printed_path_open_beside(cx: &mut TestAppContext) {
 #[cfg(unix)]
 #[gpui::test]
 fn browse_find_edit_save_and_send_to_a_session(cx: &mut TestAppContext) {
-    let Some(tmux) = parvi_testkit::tmux::Server::start_in("files-journey") else {
-        assert!(std::env::var_os("PARVI_REQUIRE_TMUX").is_none());
+    let Some(tmux) = ahjo_testkit::tmux::Server::start_in("files-journey") else {
+        assert!(std::env::var_os("AHJO_REQUIRE_TMUX").is_none());
         return;
     };
-    let root = parvi_testkit::fresh_dir("files-journey-root");
+    let root = ahjo_testkit::fresh_dir("files-journey-root");
     std::fs::create_dir(root.join("folder")).unwrap();
     let file = root.join("folder/needle.txt");
     std::fs::write(&file, "before").unwrap();
@@ -434,11 +434,11 @@ fn browse_find_edit_save_and_send_to_a_session(cx: &mut TestAppContext) {
     ]);
     let running = start_with_terminal(root.clone(), Some(tmux.socket_path()));
     cx.executor().allow_parking();
-    cx.update(parvi_app_shell::prepare);
+    cx.update(ahjo_app_shell::prepare);
     let url = running.url.clone();
     let (shell, cx) = cx.add_window_view(move |window, cx| {
-        parvi_app_shell::start(
-            &[parvi_terminals_app::build, parvi_files_app::build],
+        ahjo_app_shell::start(
+            &[ahjo_terminals_app::build, ahjo_files_app::build],
             Some(url),
             None,
             window,
@@ -495,7 +495,7 @@ fn browse_find_edit_save_and_send_to_a_session(cx: &mut TestAppContext) {
 /// back to where the list was.
 #[gpui::test]
 fn a_recent_folder_opens_to_its_files_and_a_find_covers_where_you_stand(cx: &mut TestAppContext) {
-    let root = parvi_testkit::fresh_dir("files-recent-folder");
+    let root = ahjo_testkit::fresh_dir("files-recent-folder");
     std::fs::create_dir_all(root.join("batch")).unwrap();
     std::fs::create_dir_all(root.join(".cache/walk")).unwrap();
     for n in 0..5u64 {
@@ -506,10 +506,10 @@ fn a_recent_folder_opens_to_its_files_and_a_find_covers_where_you_stand(cx: &mut
     std::fs::write(root.join(".cache/walk/pic.txt"), "picture").unwrap();
     let running = start(root.clone());
     cx.executor().allow_parking();
-    cx.update(parvi_app_shell::prepare);
+    cx.update(ahjo_app_shell::prepare);
     let url = running.url.clone();
     let (shell, cx) = cx.add_window_view(move |w, cx| {
-        parvi_app_shell::start(&[parvi_files_app::build], Some(url), None, w, cx)
+        ahjo_app_shell::start(&[ahjo_files_app::build], Some(url), None, w, cx)
     });
     until(cx, "the folder's line", |cx| {
         cx.debug_bounds("recent-batch/").is_some()
@@ -544,9 +544,9 @@ fn a_recent_folder_opens_to_its_files_and_a_find_covers_where_you_stand(cx: &mut
     cx.simulate_keystrokes("escape");
     let walk = root.join(".cache/walk");
     let host = shell.read_with(cx, |s, _| {
-        parvi_app_kit::Host::new(s.hub()).for_page("files", &[])
+        ahjo_app_kit::Host::new(s.hub()).for_page("files", &[])
     });
-    let reveal = parvi_app_kit::Ask::Reveal {
+    let reveal = ahjo_app_kit::Ask::Reveal {
         what: "path".into(),
         id: walk.to_string_lossy().into_owned(),
         node: None,
@@ -586,7 +586,7 @@ fn a_recent_folder_opens_to_its_files_and_a_find_covers_where_you_stand(cx: &mut
 /// in one click; the files it names show where they are only when asked.
 #[gpui::test]
 fn recent_changes_come_first_and_open_in_one_click(cx: &mut TestAppContext) {
-    let root = parvi_testkit::fresh_dir("files-recent");
+    let root = ahjo_testkit::fresh_dir("files-recent");
     std::fs::create_dir_all(root.join("deep/down")).unwrap();
     std::fs::create_dir(root.join(".hidden")).unwrap();
     for (name, ago) in [
@@ -600,10 +600,10 @@ fn recent_changes_come_first_and_open_in_one_click(cx: &mut TestAppContext) {
     }
     let running = start(root.clone());
     cx.executor().allow_parking();
-    cx.update(parvi_app_shell::prepare);
+    cx.update(ahjo_app_shell::prepare);
     let url = running.url.clone();
     let (shell, cx) = cx.add_window_view(move |w, cx| {
-        parvi_app_shell::start(&[parvi_files_app::build], Some(url), None, w, cx)
+        ahjo_app_shell::start(&[ahjo_files_app::build], Some(url), None, w, cx)
     });
     until(cx, "recent changes", |cx| {
         cx.debug_bounds("recent-report.md").is_some()
@@ -652,14 +652,14 @@ fn recent_changes_come_first_and_open_in_one_click(cx: &mut TestAppContext) {
 /// a file, an open file reads again in place, an edit is never replaced.
 #[gpui::test]
 fn changes_on_disk_show_without_asking_and_never_replace_an_edit(cx: &mut TestAppContext) {
-    let root = parvi_testkit::fresh_dir("files-live");
+    let root = ahjo_testkit::fresh_dir("files-live");
     std::fs::write(root.join("note.txt"), "first").unwrap();
     let running = start(root.clone());
     cx.executor().allow_parking();
-    cx.update(parvi_app_shell::prepare);
+    cx.update(ahjo_app_shell::prepare);
     let url = running.url.clone();
     let (_, cx) = cx.add_window_view(move |w, cx| {
-        parvi_app_shell::start(&[observed_files], Some(url), None, w, cx)
+        ahjo_app_shell::start(&[observed_files], Some(url), None, w, cx)
     });
     tree(cx, "file-row-note.txt");
     // The page looks only while its window is the one in use.
@@ -704,18 +704,18 @@ fn changes_on_disk_show_without_asking_and_never_replace_an_edit(cx: &mut TestAp
 /// here, and says so.
 #[gpui::test]
 fn a_long_log_opens_at_its_end(cx: &mut TestAppContext) {
-    let root = parvi_testkit::fresh_dir("files-log");
+    let root = ahjo_testkit::fresh_dir("files-log");
     let log: String = (1..=60_000)
         .map(|n| format!("line {n} of the build\n"))
         .collect();
-    assert!(log.len() > parvi_files_app::open::MAX_EDIT);
+    assert!(log.len() > ahjo_files_app::open::MAX_EDIT);
     std::fs::write(root.join("build.log"), &log).unwrap();
     let running = start(root.clone());
     cx.executor().allow_parking();
-    cx.update(parvi_app_shell::prepare);
+    cx.update(ahjo_app_shell::prepare);
     let url = running.url.clone();
     let (_, cx) = cx.add_window_view(move |w, cx| {
-        parvi_app_shell::start(&[observed_files], Some(url), None, w, cx)
+        ahjo_app_shell::start(&[observed_files], Some(url), None, w, cx)
     });
     tree(cx, "file-row-build.log");
     let page = SEARCH_PAGE.with(|p| p.borrow().as_ref().unwrap().clone());
@@ -736,8 +736,8 @@ fn a_long_log_opens_at_its_end(cx: &mut TestAppContext) {
 #[gpui::test]
 fn upload_drop_conflicts_picker_and_node_error(cx: &mut TestAppContext) {
     use std::os::unix::fs::PermissionsExt;
-    let root = parvi_testkit::fresh_dir("files-upload-root");
-    let sources = parvi_testkit::fresh_dir("files-upload-sources");
+    let root = ahjo_testkit::fresh_dir("files-upload-root");
+    let sources = ahjo_testkit::fresh_dir("files-upload-sources");
     std::fs::create_dir(root.join("target")).unwrap();
     std::fs::create_dir(root.join("locked")).unwrap();
     std::fs::set_permissions(root.join("locked"), std::fs::Permissions::from_mode(0o555)).unwrap();
@@ -747,10 +747,10 @@ fn upload_drop_conflicts_picker_and_node_error(cx: &mut TestAppContext) {
     std::fs::write(&second, b"second file").unwrap();
     let running = start(root.clone());
     cx.executor().allow_parking();
-    cx.update(parvi_app_shell::prepare);
+    cx.update(ahjo_app_shell::prepare);
     let url = running.url.clone();
     let (shell, cx) = cx.add_window_view(move |w, cx| {
-        parvi_app_shell::start(&[parvi_files_app::build], Some(url), None, w, cx)
+        ahjo_app_shell::start(&[ahjo_files_app::build], Some(url), None, w, cx)
     });
     until(cx, "folder rows", |cx| {
         cx.debug_bounds("file-row-target").is_some() && cx.debug_bounds("file-row-locked").is_some()
@@ -813,8 +813,8 @@ fn upload_drop_conflicts_picker_and_node_error(cx: &mut TestAppContext) {
 /// file open are kept across a restart.
 #[gpui::test]
 fn file_menu_copies_and_downloads_and_the_tree_is_kept(cx: &mut TestAppContext) {
-    let root = parvi_testkit::fresh_dir("files-menu-journey");
-    let downloads = parvi_testkit::fresh_dir("files-menu-downloads");
+    let root = ahjo_testkit::fresh_dir("files-menu-journey");
+    let downloads = ahjo_testkit::fresh_dir("files-menu-downloads");
     std::fs::create_dir(root.join("folder")).unwrap();
     let bytes = b"\x00\xffdownload\n";
     std::fs::write(root.join("folder/note.bin"), bytes).unwrap();
@@ -827,12 +827,12 @@ fn file_menu_copies_and_downloads_and_the_tree_is_kept(cx: &mut TestAppContext) 
     )
     .unwrap();
     cx.executor().allow_parking();
-    cx.update(parvi_app_shell::prepare);
+    cx.update(ahjo_app_shell::prepare);
     let url = running.url.clone();
     let saved = settings.clone();
     let test_cx = cx;
     let (shell, cx) = test_cx.add_window_view(move |w, cx| {
-        parvi_app_shell::start(&[parvi_files_app::build], Some(url), Some(saved), w, cx)
+        ahjo_app_shell::start(&[ahjo_files_app::build], Some(url), Some(saved), w, cx)
     });
     tree(cx, "file-row-folder");
     click(cx, "file-row-folder");
@@ -864,7 +864,7 @@ fn file_menu_copies_and_downloads_and_the_tree_is_kept(cx: &mut TestAppContext) 
     let url = running.url.clone();
     let saved = settings.clone();
     let (_, again) = test_cx.add_window_view(move |w, cx| {
-        parvi_app_shell::start(&[parvi_files_app::build], Some(url), Some(saved), w, cx)
+        ahjo_app_shell::start(&[ahjo_files_app::build], Some(url), Some(saved), w, cx)
     });
     until(again, "the same tree and file after a restart", |cx| {
         cx.debug_bounds("file-view-read.txt").is_some()
@@ -878,16 +878,16 @@ fn file_menu_copies_and_downloads_and_the_tree_is_kept(cx: &mut TestAppContext) 
 
 #[gpui::test]
 fn page_renders_node_data(cx: &mut TestAppContext) {
-    let root = parvi_testkit::fresh_dir("files-page");
+    let root = ahjo_testkit::fresh_dir("files-page");
     std::fs::write(root.join("note.txt"), "hello").unwrap();
     let running = start(root.clone());
     cx.executor().allow_parking();
-    cx.update(parvi_app_shell::prepare);
+    cx.update(ahjo_app_shell::prepare);
     let url = running.url.clone();
     let settings = root.join("app.json");
     let (shell, cx) = cx.add_window_view(move |window, cx| {
-        parvi_app_shell::start(
-            &[parvi_files_app::build],
+        ahjo_app_shell::start(
+            &[ahjo_files_app::build],
             Some(url),
             Some(settings),
             window,
@@ -944,30 +944,30 @@ fn page_renders_node_data(cx: &mut TestAppContext) {
 /// and a folder whose name looks like a media file.
 #[gpui::test]
 fn reveal_opens_files_and_lists_folders(cx: &mut TestAppContext) {
-    let root = parvi_testkit::fresh_dir("files-reveal");
+    let root = ahjo_testkit::fresh_dir("files-reveal");
     let folder = root.join("clips.pdf");
     std::fs::create_dir(&folder).unwrap();
     std::fs::write(folder.join("note.txt"), "hello reveal").unwrap();
     std::fs::write(root.join("outside.txt"), "outside").unwrap();
     let running = start(root.clone());
     cx.executor().allow_parking();
-    cx.update(parvi_app_shell::prepare);
+    cx.update(ahjo_app_shell::prepare);
     let url = running.url.clone();
     let (shell, cx) = cx.add_window_view(move |window, cx| {
-        parvi_app_shell::start(&[toy, parvi_files_app::build], Some(url), None, window, cx)
+        ahjo_app_shell::start(&[toy, ahjo_files_app::build], Some(url), None, window, cx)
     });
     until(cx, "node linked", |cx| {
         shell.read_with(cx, |s, cx| {
-            s.hub().read(cx).fleet.here().state == parvi_app_kit::link::client::LinkState::Open
+            s.hub().read(cx).fleet.here().state == ahjo_app_kit::link::client::LinkState::Open
         })
     });
     let host = shell.read_with(cx, |s, _| {
-        parvi_app_kit::Host::new(s.hub()).for_page("toy", &[])
+        ahjo_app_kit::Host::new(s.hub()).for_page("toy", &[])
     });
-    let reveal = |path: &std::path::Path| parvi_app_kit::Ask::Reveal {
+    let reveal = |path: &std::path::Path| ahjo_app_kit::Ask::Reveal {
         what: "path".into(),
         id: path.to_string_lossy().into_owned(),
-        node: Some(parvi_core::NodeId(running.node.clone())),
+        node: Some(ahjo_core::NodeId(running.node.clone())),
         part: None,
         beside: false,
     };
@@ -996,14 +996,14 @@ fn reveal_opens_files_and_lists_folders(cx: &mut TestAppContext) {
 /// Carries the old editor's discard/keep interaction through the node.
 #[gpui::test]
 fn editing_by_keyboard_keeps_the_work_and_discard_restores_it(cx: &mut TestAppContext) {
-    let root = parvi_testkit::fresh_dir("files-draft");
+    let root = ahjo_testkit::fresh_dir("files-draft");
     std::fs::write(root.join("draft.txt"), "original").unwrap();
     let running = start(root.clone());
     cx.executor().allow_parking();
-    cx.update(parvi_app_shell::prepare);
+    cx.update(ahjo_app_shell::prepare);
     let url = running.url.clone();
     let (_, cx) = cx.add_window_view(move |window, cx| {
-        parvi_app_shell::start(&[parvi_files_app::build], Some(url), None, window, cx)
+        ahjo_app_shell::start(&[ahjo_files_app::build], Some(url), None, window, cx)
     });
     tree(cx, "file-row-draft.txt");
     click(cx, "file-row-draft.txt");
@@ -1044,16 +1044,16 @@ fn editing_by_keyboard_keeps_the_work_and_discard_restores_it(cx: &mut TestAppCo
 /// back to it.
 #[gpui::test]
 fn opening_another_file_keeps_the_previous_files_draft(cx: &mut TestAppContext) {
-    let root = parvi_testkit::fresh_dir("files-draft-navigation");
+    let root = ahjo_testkit::fresh_dir("files-draft-navigation");
     std::fs::write(root.join("draft.txt"), "original").unwrap();
     std::fs::write(root.join("other.txt"), "other").unwrap();
     std::fs::create_dir(root.join("folder")).unwrap();
     let running = start(root.clone());
     cx.executor().allow_parking();
-    cx.update(parvi_app_shell::prepare);
+    cx.update(ahjo_app_shell::prepare);
     let url = running.url.clone();
     let (_, cx) = cx.add_window_view(move |window, cx| {
-        parvi_app_shell::start(&[parvi_files_app::build], Some(url), None, window, cx)
+        ahjo_app_shell::start(&[ahjo_files_app::build], Some(url), None, window, cx)
     });
     tree(cx, "file-row-draft.txt");
     click(cx, "file-row-draft.txt");
@@ -1085,16 +1085,16 @@ fn opening_another_file_keeps_the_previous_files_draft(cx: &mut TestAppContext) 
 /// Media is shown immediately, without reading its bytes first.
 #[gpui::test]
 fn sound_video_and_pdf_open_to_play_without_reading(cx: &mut TestAppContext) {
-    let root = parvi_testkit::fresh_dir("files-media");
+    let root = ahjo_testkit::fresh_dir("files-media");
     for name in ["clip.mp4", "voice.mp3", "paper.pdf"] {
         std::fs::write(root.join(name), b"").unwrap();
     }
     let running = start(root.clone());
     cx.executor().allow_parking();
-    cx.update(parvi_app_shell::prepare);
+    cx.update(ahjo_app_shell::prepare);
     let url = running.url.clone();
     let (_, cx) = cx.add_window_view(move |window, cx| {
-        parvi_app_shell::start(&[parvi_files_app::build], Some(url), None, window, cx)
+        ahjo_app_shell::start(&[ahjo_files_app::build], Some(url), None, window, cx)
     });
     for name in ["clip.mp4", "voice.mp3", "paper.pdf"] {
         let id = leak(format!("file-row-{name}"));
@@ -1113,7 +1113,7 @@ fn sound_video_and_pdf_open_to_play_without_reading(cx: &mut TestAppContext) {
 /// a path.
 #[gpui::test]
 fn the_list_takes_the_key_map(cx: &mut TestAppContext) {
-    let root = parvi_testkit::fresh_dir("files-keys");
+    let root = ahjo_testkit::fresh_dir("files-keys");
     std::fs::create_dir(root.join("b")).unwrap();
     std::fs::write(root.join("b/inner.txt"), "inner").unwrap();
     std::fs::create_dir(root.join("aa")).unwrap();
@@ -1122,10 +1122,10 @@ fn the_list_takes_the_key_map(cx: &mut TestAppContext) {
     std::fs::write(root.join("z.txt"), "z").unwrap();
     let running = start(root.clone());
     cx.executor().allow_parking();
-    cx.update(parvi_app_shell::prepare);
+    cx.update(ahjo_app_shell::prepare);
     let url = running.url.clone();
     let (_, cx) = cx.add_window_view(move |w, cx| {
-        parvi_app_shell::start(&[parvi_files_app::build], Some(url), None, w, cx)
+        ahjo_app_shell::start(&[ahjo_files_app::build], Some(url), None, w, cx)
     });
     tree(cx, "file-row-z.txt");
     cx.simulate_keystrokes("end ctrl-shift-c");
@@ -1167,14 +1167,14 @@ fn the_list_takes_the_key_map(cx: &mut TestAppContext) {
 /// Escape, or a click elsewhere, closes the menu without acting.
 #[gpui::test]
 fn escape_or_a_click_elsewhere_closes_the_menu(cx: &mut TestAppContext) {
-    let root = parvi_testkit::fresh_dir("files-menu");
+    let root = ahjo_testkit::fresh_dir("files-menu");
     std::fs::write(root.join("note.txt"), "text").unwrap();
     let running = start(root.clone());
     cx.executor().allow_parking();
-    cx.update(parvi_app_shell::prepare);
+    cx.update(ahjo_app_shell::prepare);
     let url = running.url.clone();
     let (_, cx) = cx.add_window_view(move |w, cx| {
-        parvi_app_shell::start(&[parvi_files_app::build], Some(url), None, w, cx)
+        ahjo_app_shell::start(&[ahjo_files_app::build], Some(url), None, w, cx)
     });
     tree(cx, "file-row-note.txt");
     menu_on(cx, "file-row-note.txt");
@@ -1194,7 +1194,7 @@ fn escape_or_a_click_elsewhere_closes_the_menu(cx: &mut TestAppContext) {
 
 #[gpui::test]
 fn a_reload_keeps_the_tree_on_its_device(cx: &mut TestAppContext) {
-    let root = parvi_testkit::fresh_dir("files-reload");
+    let root = ahjo_testkit::fresh_dir("files-reload");
     let running = start(root.clone());
     let settings = root.join("settings.json");
     let saved = serde_json::json!({"files":{"tree":
@@ -1202,10 +1202,10 @@ fn a_reload_keeps_the_tree_on_its_device(cx: &mut TestAppContext) {
     }});
     std::fs::write(&settings, serde_json::to_vec(&saved).unwrap()).unwrap();
     cx.executor().allow_parking();
-    cx.update(parvi_app_shell::prepare);
+    cx.update(ahjo_app_shell::prepare);
     let url = running.url.clone();
     let (shell, cx) = cx.add_window_view(move |w, cx| {
-        parvi_app_shell::start(&[parvi_files_app::build], Some(url), Some(settings), w, cx)
+        ahjo_app_shell::start(&[ahjo_files_app::build], Some(url), Some(settings), w, cx)
     });
     until(cx, "Files", |cx| {
         shell.read_with(cx, |s, _| s.shown_page()) == Some("files")
@@ -1223,9 +1223,9 @@ fn a_reload_keeps_the_tree_on_its_device(cx: &mut TestAppContext) {
 }
 
 struct TerminalPage {
-    host: parvi_app_kit::Host,
+    host: ahjo_app_kit::Host,
 }
-impl parvi_app_kit::Page for TerminalPage {
+impl ahjo_app_kit::Page for TerminalPage {
     const ID: &'static str = "sessions";
     const TITLE: &'static str = "Terminals";
 }
@@ -1240,17 +1240,17 @@ impl gpui::Render for TerminalPage {
     }
 }
 fn terminal(
-    host: parvi_app_kit::Host,
+    host: ahjo_app_kit::Host,
     window: &mut gpui::Window,
     cx: &mut gpui::App,
-) -> parvi_app_kit::Mounted {
-    parvi_app_kit::mount(host, window, cx, |host, _, _| TerminalPage { host })
+) -> ahjo_app_kit::Mounted {
+    ahjo_app_kit::mount(host, window, cx, |host, _, _| TerminalPage { host })
 }
 
 /// A long rendered document stays in the terminal's side pane and scrolls.
 #[gpui::test]
 fn markdown_beside_terminal_scrolls_inside_its_border(cx: &mut TestAppContext) {
-    let root = parvi_testkit::fresh_dir("files-beside-markdown");
+    let root = ahjo_testkit::fresh_dir("files-beside-markdown");
     let file = root.join("long.md");
     std::fs::write(
         &file,
@@ -1261,23 +1261,23 @@ fn markdown_beside_terminal_scrolls_inside_its_border(cx: &mut TestAppContext) {
     .unwrap();
     let running = start(root.clone());
     cx.executor().allow_parking();
-    cx.update(parvi_app_shell::prepare);
+    cx.update(ahjo_app_shell::prepare);
     let url = running.url.clone();
     let (shell, cx) = cx.add_window_view(move |w, cx| {
-        parvi_app_shell::start(&[terminal, parvi_files_app::build], Some(url), None, w, cx)
+        ahjo_app_shell::start(&[terminal, ahjo_files_app::build], Some(url), None, w, cx)
     });
     until(cx, "node linked", |cx| {
         shell.read_with(cx, |s, cx| {
-            s.hub().read(cx).fleet.here().state == parvi_app_kit::link::client::LinkState::Open
+            s.hub().read(cx).fleet.here().state == ahjo_app_kit::link::client::LinkState::Open
         })
     });
     let host = shell.read_with(cx, |s, _| {
-        parvi_app_kit::Host::new(s.hub()).for_page("sessions", &[])
+        ahjo_app_kit::Host::new(s.hub()).for_page("sessions", &[])
     });
     cx.update(|_, cx| {
         host.ask(
-            parvi_app_kit::Ask::OpenPath {
-                node: parvi_core::NodeId(running.node.clone()),
+            ahjo_app_kit::Ask::OpenPath {
+                node: ahjo_core::NodeId(running.node.clone()),
                 path: file.to_string_lossy().into_owned(),
                 beside: true,
             },
@@ -1318,29 +1318,29 @@ fn markdown_beside_terminal_scrolls_inside_its_border(cx: &mut TestAppContext) {
 /// A beside ask leaves the terminal shown and switching files keeps the draft.
 #[gpui::test]
 fn open_path_beside_keeps_the_terminal_and_the_draft(cx: &mut TestAppContext) {
-    let root = parvi_testkit::fresh_dir("files-beside");
+    let root = ahjo_testkit::fresh_dir("files-beside");
     std::fs::write(root.join("first.txt"), "first").unwrap();
     std::fs::write(root.join("second.txt"), "second").unwrap();
     let running = start(root.clone());
     cx.executor().allow_parking();
-    cx.update(parvi_app_shell::prepare);
+    cx.update(ahjo_app_shell::prepare);
     let url = running.url.clone();
     let (shell, cx) = cx.add_window_view(move |w, cx| {
-        parvi_app_shell::start(&[terminal, parvi_files_app::build], Some(url), None, w, cx)
+        ahjo_app_shell::start(&[terminal, ahjo_files_app::build], Some(url), None, w, cx)
     });
     until(cx, "terminal shown", |cx| {
         shell.read_with(cx, |s, _| s.shown_page()) == Some("sessions")
     });
     until(cx, "node linked", |cx| {
         shell.read_with(cx, |s, cx| {
-            s.hub().read(cx).fleet.here().state == parvi_app_kit::link::client::LinkState::Open
+            s.hub().read(cx).fleet.here().state == ahjo_app_kit::link::client::LinkState::Open
         })
     });
     let host = shell.read_with(cx, |s, _| {
-        parvi_app_kit::Host::new(s.hub()).for_page("sessions", &[])
+        ahjo_app_kit::Host::new(s.hub()).for_page("sessions", &[])
     });
-    let ask = |path: std::path::PathBuf| parvi_app_kit::Ask::OpenPath {
-        node: parvi_core::NodeId(running.node.clone()),
+    let ask = |path: std::path::PathBuf| ahjo_app_kit::Ask::OpenPath {
+        node: ahjo_core::NodeId(running.node.clone()),
         path: path.to_string_lossy().into_owned(),
         beside: true,
     };
@@ -1390,7 +1390,7 @@ fn open_path_beside_keeps_the_terminal_and_the_draft(cx: &mut TestAppContext) {
 /// dropped; a find in the text goes to its line; more than fit says so.
 #[gpui::test]
 fn find_updates_as_typed_shows_paths_lines_and_truncation(cx: &mut TestAppContext) {
-    let root = parvi_testkit::fresh_dir("files-find-live");
+    let root = ahjo_testkit::fresh_dir("files-find-live");
     std::fs::create_dir(root.join("sub")).unwrap();
     std::fs::write(root.join("sub/readme.md"), "read me").unwrap();
     std::fs::write(root.join("sub/realm.txt"), "other").unwrap();
@@ -1405,10 +1405,10 @@ fn find_updates_as_typed_shows_paths_lines_and_truncation(cx: &mut TestAppContex
     }
     let running = start(root.clone());
     cx.executor().allow_parking();
-    cx.update(parvi_app_shell::prepare);
+    cx.update(ahjo_app_shell::prepare);
     let url = running.url.clone();
     let (_, cx) = cx.add_window_view(move |w, cx| {
-        parvi_app_shell::start(&[observed_files], Some(url), None, w, cx)
+        ahjo_app_shell::start(&[observed_files], Some(url), None, w, cx)
     });
     tree(cx, "file-row-sub");
     let page = SEARCH_PAGE.with(|page| page.borrow().as_ref().unwrap().clone());
@@ -1429,8 +1429,8 @@ fn find_updates_as_typed_shows_paths_lines_and_truncation(cx: &mut TestAppContex
     page.update(cx, |p, cx| {
         p.find.as_mut().unwrap().answer(
             old_revision,
-            Ok(parvi_files_contract::Matches {
-                matches: vec![parvi_files_contract::Match {
+            Ok(ahjo_files_contract::Matches {
+                matches: vec![ahjo_files_contract::Match {
                     path: "/stale".into(),
                     name: "stale".into(),
                     line: None,
@@ -1481,15 +1481,15 @@ fn find_updates_as_typed_shows_paths_lines_and_truncation(cx: &mut TestAppContex
 
 #[gpui::test]
 fn find_shows_a_hit_in_the_tree_and_its_text(cx: &mut TestAppContext) {
-    let root = parvi_testkit::fresh_dir("files-find");
+    let root = ahjo_testkit::fresh_dir("files-find");
     std::fs::create_dir(root.join("nested")).unwrap();
     std::fs::write(root.join("nested/needle.txt"), "found").unwrap();
     let running = start(root.clone());
     cx.executor().allow_parking();
-    cx.update(parvi_app_shell::prepare);
+    cx.update(ahjo_app_shell::prepare);
     let url = running.url.clone();
     let (_, cx) = cx.add_window_view(move |w, cx| {
-        parvi_app_shell::start(&[parvi_files_app::build], Some(url), None, w, cx)
+        ahjo_app_shell::start(&[ahjo_files_app::build], Some(url), None, w, cx)
     });
     tree(cx, "file-row-nested");
     cx.simulate_keystrokes("/");
@@ -1532,14 +1532,14 @@ fn find_shows_a_hit_in_the_tree_and_its_text(cx: &mut TestAppContext) {
 /// A stale save keeps both the outside change and the operator's draft.
 #[gpui::test]
 fn conflicting_save_can_write_a_separate_copy(cx: &mut TestAppContext) {
-    let root = parvi_testkit::fresh_dir("files-conflict");
+    let root = ahjo_testkit::fresh_dir("files-conflict");
     std::fs::write(root.join("note.txt"), "before").unwrap();
     let running = start(root.clone());
     cx.executor().allow_parking();
-    cx.update(parvi_app_shell::prepare);
+    cx.update(ahjo_app_shell::prepare);
     let url = running.url.clone();
     let (_, cx) = cx.add_window_view(move |w, cx| {
-        parvi_app_shell::start(&[parvi_files_app::build], Some(url), None, w, cx)
+        ahjo_app_shell::start(&[ahjo_files_app::build], Some(url), None, w, cx)
     });
     tree(cx, "file-row-note.txt");
     click(cx, "file-row-note.txt");
@@ -1567,14 +1567,14 @@ fn conflicting_save_can_write_a_separate_copy(cx: &mut TestAppContext) {
 /// Unsaved edits in the main Files page hold the app window open.
 #[gpui::test]
 fn unsaved_file_holds_the_window_until_the_operator_decides(cx: &mut TestAppContext) {
-    let root = parvi_testkit::fresh_dir("files-close");
+    let root = ahjo_testkit::fresh_dir("files-close");
     std::fs::write(root.join("note.txt"), "before").unwrap();
     let running = start(root.clone());
     cx.executor().allow_parking();
-    cx.update(parvi_app_shell::prepare);
+    cx.update(ahjo_app_shell::prepare);
     let url = running.url.clone();
     let (_, cx) = cx.add_window_view(move |w, cx| {
-        parvi_app_shell::start(&[parvi_files_app::build], Some(url), None, w, cx)
+        ahjo_app_shell::start(&[ahjo_files_app::build], Some(url), None, w, cx)
     });
     tree(cx, "file-row-note.txt");
     click(cx, "file-row-note.txt");
@@ -1598,10 +1598,10 @@ fn unsaved_file_holds_the_window_until_the_operator_decides(cx: &mut TestAppCont
 #[cfg(unix)]
 #[gpui::test]
 fn read_markdown_json_text_binary_and_permission_error(cx: &mut TestAppContext) {
-    use parvi_files_app::open::Show;
+    use ahjo_files_app::open::Show;
     use std::os::unix::fs::PermissionsExt;
-    let root = parvi_testkit::fresh_dir("files-read-finish");
-    let downloads = parvi_testkit::fresh_dir("files-read-downloads");
+    let root = ahjo_testkit::fresh_dir("files-read-finish");
+    let downloads = ahjo_testkit::fresh_dir("files-read-downloads");
     std::fs::write(root.join("README.md"), "# Heading\nBody\n").unwrap();
     std::fs::write(root.join("data.json"), "{\"a\":1}").unwrap();
     std::fs::write(root.join("lines.txt"), "first\nsecond\n").unwrap();
@@ -1620,10 +1620,10 @@ fn read_markdown_json_text_binary_and_permission_error(cx: &mut TestAppContext) 
     .unwrap();
     let running = start(root.clone());
     cx.executor().allow_parking();
-    cx.update(parvi_app_shell::prepare);
+    cx.update(ahjo_app_shell::prepare);
     let url = running.url.clone();
     let (shell, cx) = cx.add_window_view(move |w, cx| {
-        parvi_app_shell::start(&[observed_files], Some(url), Some(settings), w, cx)
+        ahjo_app_shell::start(&[observed_files], Some(url), Some(settings), w, cx)
     });
     tree(cx, "file-row-README.md");
     let page = SEARCH_PAGE.with(|p| p.borrow().as_ref().unwrap().clone());
@@ -1696,7 +1696,7 @@ fn read_markdown_json_text_binary_and_permission_error(cx: &mut TestAppContext) 
 /// files, folders, a rename and a delete go through the menus.
 #[gpui::test]
 fn create_rename_delete_and_diff_in_the_files_page(cx: &mut TestAppContext) {
-    let root = parvi_testkit::fresh_dir("files-act-finish");
+    let root = ahjo_testkit::fresh_dir("files-act-finish");
     let git = |args: &[&str]| {
         let output = std::process::Command::new("git")
             .current_dir(&root)
@@ -1725,10 +1725,10 @@ fn create_rename_delete_and_diff_in_the_files_page(cx: &mut TestAppContext) {
     std::fs::write(root.join("tracked.txt"), "after\n").unwrap();
     let running = start(root.clone());
     cx.executor().allow_parking();
-    cx.update(parvi_app_shell::prepare);
+    cx.update(ahjo_app_shell::prepare);
     let url = running.url.clone();
     let (_, cx) = cx.add_window_view(move |w, cx| {
-        parvi_app_shell::start(&[observed_files], Some(url), None, w, cx)
+        ahjo_app_shell::start(&[observed_files], Some(url), None, w, cx)
     });
     tree(cx, "file-row-tracked.txt");
     let page = SEARCH_PAGE.with(|p| p.borrow().as_ref().unwrap().clone());
@@ -1818,14 +1818,14 @@ fn create_rename_delete_and_diff_in_the_files_page(cx: &mut TestAppContext) {
 
 #[gpui::test]
 fn picture_zoom_can_switch_between_fit_and_actual_size(cx: &mut TestAppContext) {
-    let root = parvi_testkit::fresh_dir("files-picture");
+    let root = ahjo_testkit::fresh_dir("files-picture");
     std::fs::write(root.join("pixel.png"), include_bytes!("pixel.png")).unwrap();
     let running = start(root.clone());
     cx.executor().allow_parking();
-    cx.update(parvi_app_shell::prepare);
+    cx.update(ahjo_app_shell::prepare);
     let url = running.url.clone();
     let (shell, cx) = cx.add_window_view(move |w, cx| {
-        parvi_app_shell::start(&[parvi_files_app::build], Some(url), None, w, cx)
+        ahjo_app_shell::start(&[ahjo_files_app::build], Some(url), None, w, cx)
     });
     tree(cx, "file-row-pixel.png");
     click(cx, "file-row-pixel.png");
@@ -1845,7 +1845,7 @@ fn picture_zoom_can_switch_between_fit_and_actual_size(cx: &mut TestAppContext) 
 /// opening over the files, and shows it again as it was.
 #[gpui::test]
 fn the_side_switches_views_and_hides(cx: &mut TestAppContext) {
-    let root = parvi_testkit::fresh_dir("files-side");
+    let root = ahjo_testkit::fresh_dir("files-side");
     std::fs::create_dir_all(root.join("proj/docs")).unwrap();
     for (name, text, ago) in [
         ("proj/README.md", "# Proj\n\nWhat it is.\n", 50),
@@ -1857,21 +1857,21 @@ fn the_side_switches_views_and_hides(cx: &mut TestAppContext) {
     }
     let running = start(root.clone());
     cx.executor().allow_parking();
-    cx.update(parvi_app_shell::prepare);
+    cx.update(ahjo_app_shell::prepare);
     let url = running.url.clone();
     let (shell, cx) = cx.add_window_view(move |w, cx| {
-        parvi_app_shell::start(&[parvi_files_app::build], Some(url), None, w, cx)
+        ahjo_app_shell::start(&[ahjo_files_app::build], Some(url), None, w, cx)
     });
     until(cx, "the newest file shown", |cx| {
         cx.debug_bounds("file-view-plan.md").is_some()
     });
-    assert_eq!(kept(&shell, cx).side, parvi_files_app::store::Side::Folders);
+    assert_eq!(kept(&shell, cx).side, ahjo_files_app::store::Side::Folders);
 
     click(cx, "files-side-changes");
     until(cx, "changes grouped by project", |cx| {
         cx.debug_bounds("group-proj").is_some()
     });
-    assert_eq!(kept(&shell, cx).side, parvi_files_app::store::Side::Changes);
+    assert_eq!(kept(&shell, cx).side, ahjo_files_app::store::Side::Changes);
     let group = cx.debug_bounds("group-proj").unwrap();
     let plan = cx.debug_bounds("recent-plan.md").unwrap();
     assert!(group.top() < plan.top(), "a group heads its files");
@@ -1890,7 +1890,7 @@ fn the_side_switches_views_and_hides(cx: &mut TestAppContext) {
     until(cx, "the files alone", |cx| {
         cx.debug_bounds("files-list").is_none() && cx.debug_bounds("files-side-show").is_some()
     });
-    assert_eq!(kept(&shell, cx).side, parvi_files_app::store::Side::Hidden);
+    assert_eq!(kept(&shell, cx).side, ahjo_files_app::store::Side::Hidden);
     cx.simulate_keystrokes("ctrl-p");
     until(cx, "the find over the file", |cx| {
         cx.debug_bounds("files-palette").is_some()
@@ -1930,7 +1930,7 @@ fn the_side_switches_views_and_hides(cx: &mut TestAppContext) {
 /// asks before it closes.
 #[gpui::test]
 fn moving_through_many_files_keeps_tabs_places_and_marks(cx: &mut TestAppContext) {
-    let root = parvi_testkit::fresh_dir("files-many");
+    let root = ahjo_testkit::fresh_dir("files-many");
     let git = |args: &[&str]| {
         let output = std::process::Command::new("git")
             .current_dir(&root)
@@ -1973,10 +1973,10 @@ fn moving_through_many_files_keeps_tabs_places_and_marks(cx: &mut TestAppContext
     std::fs::write(root.join("e.txt"), "new\n").unwrap();
     let running = start(root.clone());
     cx.executor().allow_parking();
-    cx.update(parvi_app_shell::prepare);
+    cx.update(ahjo_app_shell::prepare);
     let url = running.url.clone();
     let (_, cx) = cx.add_window_view(move |w, cx| {
-        parvi_app_shell::start(&[observed_files], Some(url), None, w, cx)
+        ahjo_app_shell::start(&[observed_files], Some(url), None, w, cx)
     });
     tree(cx, "file-row-a.rs");
     let page = SEARCH_PAGE.with(|p| p.borrow().as_ref().unwrap().clone());
@@ -1994,7 +1994,7 @@ fn moving_through_many_files_keeps_tabs_places_and_marks(cx: &mut TestAppContext
                 .iter()
                 .map(|t| {
                     (
-                        parvi_files_app::store::paths::base_name(&t.key.1).to_owned(),
+                        ahjo_files_app::store::paths::base_name(&t.key.1).to_owned(),
                         t.preview,
                     )
                 })
@@ -2170,7 +2170,7 @@ fn moving_through_many_files_keeps_tabs_places_and_marks(cx: &mut TestAppContext
 /// A repository of `files` (path, text) under a fresh folder, committed;
 /// then `changed` written over.
 fn repository(name: &str, files: &[(&str, &str)], changed: &[(&str, &str)]) -> std::path::PathBuf {
-    let root = parvi_testkit::fresh_dir(name);
+    let root = ahjo_testkit::fresh_dir(name);
     let git = |args: &[&str]| {
         let output = std::process::Command::new("git")
             .current_dir(&root)
@@ -2216,10 +2216,10 @@ fn the_side_panel_shows_the_pages_tree_on_the_other_pages(cx: &mut TestAppContex
     );
     let running = start(root.clone());
     cx.executor().allow_parking();
-    cx.update(parvi_app_shell::prepare);
+    cx.update(ahjo_app_shell::prepare);
     let url = running.url.clone();
     let (shell, cx) = cx.add_window_view(move |window, cx| {
-        parvi_app_shell::start(&[toy, parvi_files_app::build], Some(url), None, window, cx)
+        ahjo_app_shell::start(&[toy, ahjo_files_app::build], Some(url), None, window, cx)
     });
     assert_eq!(shell.read_with(cx, |s, _| s.shown_page()), Some("toy"));
     until(cx, "the tree beside the toy page, marked", |cx| {
@@ -2269,10 +2269,10 @@ fn a_find_inside_files_searches_the_open_files_repository(cx: &mut TestAppContex
     );
     let running = start(root.clone());
     cx.executor().allow_parking();
-    cx.update(parvi_app_shell::prepare);
+    cx.update(ahjo_app_shell::prepare);
     let url = running.url.clone();
     let (_, cx) = cx.add_window_view(move |w, cx| {
-        parvi_app_shell::start(&[observed_files], Some(url), None, w, cx)
+        ahjo_app_shell::start(&[observed_files], Some(url), None, w, cx)
     });
     let page = SEARCH_PAGE.with(|p| p.borrow().as_ref().unwrap().clone());
     tree(cx, "file-row-top.md");

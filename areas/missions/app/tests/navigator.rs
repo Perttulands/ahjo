@@ -1,7 +1,7 @@
 #![cfg(unix)]
+use ahjo_node_kit::{Built, Listing, Setup};
+use ahjo_testkit::{node::Node, sessions};
 use gpui::{Modifiers, TestAppContext, VisualTestContext};
-use parvi_node_kit::{Built, Listing, Setup};
-use parvi_testkit::{node::Node, sessions};
 use serde_json::json;
 use std::{
     sync::mpsc,
@@ -9,11 +9,11 @@ use std::{
 };
 
 fn lab(setup: &Setup) -> anyhow::Result<Built> {
-    parvi_missions::build_with_executor(setup, Some(Box::new(parvi_mission_engine::LabExecutor)))
+    ahjo_missions::build_with_executor(setup, Some(Box::new(ahjo_mission_engine::LabExecutor)))
 }
 const MISSIONS: Listing = Listing {
     build: lab,
-    ..parvi_missions::LISTING
+    ..ahjo_missions::LISTING
 };
 struct Running {
     url: String,
@@ -36,7 +36,7 @@ fn start() -> Running {
     let (stop, stopped) = mpsc::channel();
     let thread = std::thread::spawn(move || {
         tokio::runtime::Runtime::new().unwrap().block_on(async move {
-        let node = Node::start(&[sessions::LISTING, parvi_work::LISTING, MISSIONS], "").await.unwrap();
+        let node = Node::start(&[sessions::LISTING, ahjo_work::LISTING, MISSIONS], "").await.unwrap();
         let dir = node.dir().join("missions/missions");
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(dir.join("hello.mission.toml"), include_str!("fixtures/solo-lab.mission.toml")).unwrap();
@@ -101,15 +101,15 @@ fn click(cx: &mut VisualTestContext, selector: &str) {
 fn the_list_opens_the_latest_run_and_reaches_every_run_of_a_mission(cx: &mut TestAppContext) {
     let running = start();
     let settings = std::env::temp_dir()
-        .join(format!("parvi-nav-{}", std::process::id()))
+        .join(format!("ahjo-nav-{}", std::process::id()))
         .join("app.json");
     std::fs::create_dir_all(settings.parent().unwrap()).unwrap();
     cx.executor().allow_parking();
-    cx.update(parvi_app_shell::prepare);
+    cx.update(ahjo_app_shell::prepare);
     let url = running.url.clone();
     let (_, cx) = cx.add_window_view(move |window, cx| {
-        parvi_app_shell::start(
-            &[parvi_missions_app::build],
+        ahjo_app_shell::start(
+            &[ahjo_missions_app::build],
             Some(url),
             Some(settings),
             window,

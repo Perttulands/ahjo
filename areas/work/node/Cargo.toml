@@ -1,5 +1,5 @@
 [package]
-name = "parvi-work"
+name = "ahjo-work"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -9,10 +9,10 @@ publish = false
 workspace = true
 
 [dependencies]
-parvi-core = { path = "../../../kit/core" }
-parvi-node-kit = { path = "../../../kit/node-kit" }
-parvi-work-contract = { path = "../contract" }
-parvi-work-ref = { path = "../../../engine/work-ref" }
+ahjo-core = { path = "../../../kit/core" }
+ahjo-node-kit = { path = "../../../kit/node-kit" }
+ahjo-work-contract = { path = "../contract" }
+ahjo-work-ref = { path = "../../../engine/work-ref" }
 anyhow = "1"
 axum = { version = "0.8", default-features = false, features = ["http1", "json", "query", "tokio"] }
 futures-util = "0.3"
@@ -24,6 +24,6 @@ tokio = { version = "1", features = ["full", "test-util"] }
 libc = "0.2"
 
 [dev-dependencies]
-parvi-testkit = { path = "../../../kit/testkit" }
+ahjo-testkit = { path = "../../../kit/testkit" }
 tower = { version = "0.5", features = ["util"] }
 tokio-tungstenite = "0.30"

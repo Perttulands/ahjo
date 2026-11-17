@@ -1,12 +1,12 @@
-//! The terminals area as other areas reach it ([`parvi_term::Sessions`]).
+//! The terminals area as other areas reach it ([`ahjo_term::Sessions`]).
 
 use std::sync::Arc;
 
+use ahjo_term::backend::Reply;
+use ahjo_term::control::PaneId;
+use ahjo_term::engine::{Delivering, PaneStream, SessionInfo};
+use ahjo_term::{Renames, Screen, SessionRef, SessionSpec, Sessions, Start};
 use anyhow::Context;
-use parvi_term::backend::Reply;
-use parvi_term::control::PaneId;
-use parvi_term::engine::{Delivering, PaneStream, SessionInfo};
-use parvi_term::{Renames, Screen, SessionRef, SessionSpec, Sessions, Start};
 use tokio::sync::watch;
 
 use crate::hub::Hub;

@@ -3,12 +3,12 @@
 //! session, follows a rename, says why a session refused, and finds the
 //! sessions wherever they are listed.
 
-use parvi_node_kit::Listing;
-use parvi_testkit::node::Node;
-use parvi_testkit::sessions;
+use ahjo_node_kit::Listing;
+use ahjo_testkit::node::Node;
+use ahjo_testkit::sessions;
 use serde_json::json;
 
-const AREAS: &[Listing] = &[sessions::LISTING, parvi_scheduled::LISTING];
+const AREAS: &[Listing] = &[sessions::LISTING, ahjo_scheduled::LISTING];
 
 #[tokio::test(flavor = "multi_thread")]
 async fn a_run_is_delivered_to_the_session_a_task_names() {
@@ -92,7 +92,7 @@ async fn a_renamed_session_keeps_its_tasks_and_a_refusal_is_reported() {
 /// the sessions; with no area providing them it is refused, saying so.
 #[tokio::test(flavor = "multi_thread")]
 async fn scheduled_finds_the_sessions_wherever_they_are_listed_and_says_when_none_are() {
-    let first: &[Listing] = &[parvi_scheduled::LISTING, sessions::LISTING];
+    let first: &[Listing] = &[ahjo_scheduled::LISTING, sessions::LISTING];
     let node = Node::start(first, "").await.unwrap();
     node.fake_sessions().add("alpha");
     let made = node
@@ -109,7 +109,7 @@ async fn scheduled_finds_the_sessions_wherever_they_are_listed_and_says_when_non
     assert_eq!(node.fake_sessions().delivered().len(), 1);
     node.stop().await;
 
-    let alone: &[Listing] = &[parvi_scheduled::LISTING];
+    let alone: &[Listing] = &[ahjo_scheduled::LISTING];
     let error = match Node::start(alone, "").await {
         Ok(_) => panic!("scheduled started without sessions"),
         Err(error) => format!("{error:#}"),

@@ -10,7 +10,7 @@ use std::time::Duration;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::process::Command;
 
-use parvi_host_contract::{Component as State, LogLine};
+use ahjo_host_contract::{Component as State, LogLine};
 
 use super::catalog::Component;
 

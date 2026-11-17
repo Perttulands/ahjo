@@ -1,7 +1,7 @@
 //! Mission create and rename dialog, adapted from the original navigator.
 use super::*;
+use ahjo_app_kit::theme::Theme;
 use gpui::{FontWeight, MouseButton, SharedString};
-use parvi_app_kit::theme::Theme;
 
 #[derive(Clone)]
 enum Doing {
@@ -27,7 +27,7 @@ struct Form {
     doing: Doing,
     name: Entity<TextField>,
     /// The example a new mission starts as a copy of; none starts empty.
-    example: Option<&'static parvi_missions_contract::Example>,
+    example: Option<&'static ahjo_missions_contract::Example>,
     problem: Option<String>,
     busy: bool,
 }
@@ -138,7 +138,7 @@ impl MissionsPage {
         })
         .detach();
         if !matches!(doing, Doing::Archive { .. }) {
-            parvi_app_kit::widgets::field::focus(&name, window, cx);
+            ahjo_app_kit::widgets::field::focus(&name, window, cx);
         }
         self.manage.form = Some(Form {
             doing,
@@ -281,14 +281,14 @@ impl MissionsPage {
     fn example_choice(
         &self,
         t: &Theme,
-        chosen: Option<&'static parvi_missions_contract::Example>,
+        chosen: Option<&'static ahjo_missions_contract::Example>,
         cx: &mut Context<Self>,
     ) -> Div {
         let row = |id: String,
                    title: &'static str,
                    about: &'static str,
                    on: bool,
-                   pick: Option<&'static parvi_missions_contract::Example>| {
+                   pick: Option<&'static ahjo_missions_contract::Example>| {
             let selector = id.clone();
             div()
                 .id(SharedString::from(id))
@@ -321,7 +321,7 @@ impl MissionsPage {
             chosen.is_none(),
             None,
         ));
-        for e in parvi_missions_contract::EXAMPLES {
+        for e in ahjo_missions_contract::EXAMPLES {
             list = list.child(row(
                 format!("mission-example-{}", e.name),
                 e.title,
@@ -359,7 +359,7 @@ impl MissionsPage {
                 .absolute()
                 .inset_0()
                 .occlude()
-                .bg(parvi_app_kit::theme::alpha(t.bg, SCRIM))
+                .bg(ahjo_app_kit::theme::alpha(t.bg, SCRIM))
                 .flex()
                 .justify_center()
                 .items_start()

@@ -2,7 +2,7 @@
 //! the same folder, on the same node and Unix user, under the next free
 //! name in the source's family. Pure, so it is tested on its own.
 
-use parvi_terminals_contract::{Harness, Session};
+use ahjo_terminals_contract::{Harness, Session};
 
 /// The launcher harness that runs what the session runs, or why a copy is
 /// refused. A shell copies as the shell; an agent as the harness whose
@@ -11,7 +11,7 @@ pub fn harness<'a>(s: &Session, harnesses: &'a [Harness]) -> Result<&'a Harness,
     if s.cwd.as_deref().is_none_or(|c| c.trim().is_empty()) {
         return Err("Working directory unavailable");
     }
-    let index = parvi_terminals_contract::session_copy::harness_index(
+    let index = ahjo_terminals_contract::session_copy::harness_index(
         s.command.as_deref().unwrap_or(""),
         harnesses.iter().map(|h| h.command.as_str()),
     )
@@ -23,7 +23,7 @@ pub fn harness<'a>(s: &Session, harnesses: &'a [Harness]) -> Result<&'a Harness,
 /// `n` from 2. A copy of a copy stays in its family (`build-3` gives
 /// `build-4`), but only while the family's first is listed: `project-2026`
 /// alone is a name of its own, not a copy.
-pub use parvi_terminals_contract::session_copy::next_name;
+pub use ahjo_terminals_contract::session_copy::next_name;
 
 #[cfg(test)]
 mod tests {

@@ -4,28 +4,28 @@
 //! reference into that session through the Send ask and starts sessions
 //! through the Launch ask; other pages read the sessions the page publishes
 //! and open views beside it. Linux and macOS only;
-//! skips without tmux unless `PARVI_REQUIRE_TMUX=1`.
+//! skips without tmux unless `AHJO_REQUIRE_TMUX=1`.
 #![cfg(unix)]
 
 use std::cell::RefCell;
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
+use ahjo_app_kit::ask::SessionTarget;
+use ahjo_app_kit::link::client::LinkState;
+use ahjo_app_kit::{Answers, Ask, Host, Mounted, Page, mount};
+use ahjo_app_shell::Shell;
+use ahjo_core::NodeId;
+use ahjo_node_kit::Listing;
+use ahjo_terminals_app::Terminals;
+use ahjo_terminals_app::store::sessions::Key;
+use ahjo_terminals_contract::SessionList;
+use ahjo_testkit::node::Node;
+use ahjo_testkit::tmux::Server;
 use gpui::{Entity, Modifiers, TestAppContext, VisualTestContext, Window, div, prelude::*, px};
-use parvi_app_kit::ask::SessionTarget;
-use parvi_app_kit::link::client::LinkState;
-use parvi_app_kit::{Answers, Ask, Host, Mounted, Page, mount};
-use parvi_app_shell::Shell;
-use parvi_core::NodeId;
-use parvi_node_kit::Listing;
-use parvi_terminals_app::Terminals;
-use parvi_terminals_app::store::sessions::Key;
-use parvi_terminals_contract::SessionList;
-use parvi_testkit::node::Node;
-use parvi_testkit::tmux::Server;
 
-const AREAS: &[Listing] = &[parvi_terminals::LISTING];
-const AREAS_WITH_FILES: &[Listing] = &[parvi_terminals::LISTING, parvi_files::LISTING];
+const AREAS: &[Listing] = &[ahjo_terminals::LISTING];
+const AREAS_WITH_FILES: &[Listing] = &[ahjo_terminals::LISTING, ahjo_files::LISTING];
 
 thread_local! {
     static PAGE: RefCell<Option<Entity<Terminals>>> = const { RefCell::new(None) };
@@ -174,11 +174,11 @@ fn start_config(
                     tmux.run(&["respawn-pane", "-k", "-t", session, "env PS1='$ ' /bin/bash --noprofile --norc -i"]);
                 }
             }
-            let dir = parvi_testkit::fresh_dir("flags-ui");
+            let dir = ahjo_testkit::fresh_dir("flags-ui");
             let binary = dir.join("fake");
             let launch = dir.join("launch.conf");
             if harness {
-                parvi_testkit::tmux::write_script(
+                ahjo_testkit::tmux::write_script(
                     &binary,
                     format!("#!/bin/sh\nif [ \"$1\" = --help ]; then printf 'Options:\\n  -v, --verbose  Verbose output\\n'; exit; fi\nprintf '%s|%s\\n' \"$PWD\" \"$*\" >> '{}'\nwhile :; do sleep 1; done\n", dir.join("runs").display()),
                 );
@@ -221,8 +221,8 @@ fn start_config(
         None => {
             let _ = thread.join();
             assert!(
-                std::env::var_os("PARVI_REQUIRE_TMUX").is_none(),
-                "PARVI_REQUIRE_TMUX is set but tmux did not start"
+                std::env::var_os("AHJO_REQUIRE_TMUX").is_none(),
+                "AHJO_REQUIRE_TMUX is set but tmux did not start"
             );
             None
         }
@@ -272,19 +272,19 @@ fn open_with_alpha<'a>(
 fn open_pages_with_alpha<'a>(
     running: &Running,
     name: &str,
-    pages: &'static [parvi_app_kit::Build],
+    pages: &'static [ahjo_app_kit::Build],
     cx: &'a mut TestAppContext,
 ) -> (Entity<Shell>, &'a mut VisualTestContext, std::path::PathBuf) {
     let settings = std::env::temp_dir()
-        .join(format!("parvi-terminals-{name}-{}", std::process::id()))
+        .join(format!("ahjo-terminals-{name}-{}", std::process::id()))
         .join("app.json");
     std::fs::create_dir_all(settings.parent().expect("its folder")).expect("a folder");
     // The node and the link run on their own threads.
     cx.executor().allow_parking();
-    cx.update(parvi_app_shell::prepare);
+    cx.update(ahjo_app_shell::prepare);
     let (url, path) = (running.url.clone(), settings.clone());
     let (shell, cx) = cx.add_window_view(move |window, cx| {
-        parvi_app_shell::start(pages, Some(url), Some(path), window, cx)
+        ahjo_app_shell::start(pages, Some(url), Some(path), window, cx)
     });
     until(cx, "the link to open", |cx| {
         shell.read_with(cx, |s, cx| {
@@ -450,9 +450,9 @@ fn nothing_opened_on_the_page_resizes_a_session(cx: &mut TestAppContext) {
         "opened-size",
         &[
             terminals,
-            parvi_files_app::build,
-            parvi_work_app::build,
-            parvi_brain_app::build,
+            ahjo_files_app::build,
+            ahjo_work_app::build,
+            ahjo_brain_app::build,
         ],
         cx,
     );
@@ -682,7 +682,7 @@ fn nothing_opened_on_the_page_resizes_a_session(cx: &mut TestAppContext) {
     });
     unchanged(cx, "after the work item closed");
 
-    // An agent's `parvi view open` brings the page forward; the windows
+    // An agent's `ahjo view open` brings the page forward; the windows
     // are as they were when the terminals come back.
     let rt = tokio::runtime::Runtime::new().expect("a runtime");
     let path = picture.display().to_string();
@@ -699,14 +699,14 @@ fn nothing_opened_on_the_page_resizes_a_session(cx: &mut TestAppContext) {
             .collect();
         let opened = rt.spawn(async move {
             let mut out = Vec::new();
-            parvi_node_kit::cli::run("view", &args, &mut out)
+            ahjo_node_kit::cli::run("view", &args, &mut out)
                 .await
                 .expect("the command runs")
         });
-        until(cx, "parvi view open answered", |_| opened.is_finished());
+        until(cx, "ahjo view open answered", |_| opened.is_finished());
         assert_eq!(rt.block_on(opened).expect("its task"), 0, "{page_id}");
         assert_eq!(shell.read_with(cx, |s, _| s.shown_page()), Some(page_id));
-        unchanged(cx, &format!("with {page_id} shown by parvi view open"));
+        unchanged(cx, &format!("with {page_id} shown by ahjo view open"));
         let terminals = shell.read_with(cx, |s, _| Host::new(s.hub()).for_page("sessions", &[]));
         cx.update(|_, cx| terminals.show(cx));
         until(cx, "the terminals back", |cx| {
@@ -737,9 +737,9 @@ fn what_lies_over_the_windows_takes_every_click_inside_it(cx: &mut TestAppContex
         &[
             terminals,
             toy,
-            parvi_files_app::build,
-            parvi_work_app::build,
-            parvi_brain_app::build,
+            ahjo_files_app::build,
+            ahjo_work_app::build,
+            ahjo_brain_app::build,
         ],
         cx,
     );
@@ -1054,7 +1054,7 @@ fn a_page_starts_a_session_in_a_folder_through_launch(cx: &mut TestAppContext) {
 
 fn tmux(running: &Running, args: &[&str]) -> String {
     let out =
-        std::process::Command::new(std::env::var_os("PARVI_TMUX").unwrap_or_else(|| "tmux".into()))
+        std::process::Command::new(std::env::var_os("AHJO_TMUX").unwrap_or_else(|| "tmux".into()))
             .args(["-S", running.socket.to_str().unwrap()])
             .args(args)
             .output()
@@ -1085,13 +1085,13 @@ fn launches_use_each_tile_grid(cx: &mut TestAppContext) {
     let Some(running) = start("terminals-sized-launches") else {
         return;
     };
-    let settings = parvi_testkit::fresh_dir("sized-settings").join("app.json");
+    let settings = ahjo_testkit::fresh_dir("sized-settings").join("app.json");
     cx.executor().allow_parking();
-    cx.update(parvi_app_shell::prepare);
+    cx.update(ahjo_app_shell::prepare);
     let url = running.url.clone();
     let path = settings.clone();
     let (shell, cx) = cx.add_window_view(move |window, cx| {
-        parvi_app_shell::start(&[terminals, toy], Some(url), Some(path), window, cx)
+        ahjo_app_shell::start(&[terminals, toy], Some(url), Some(path), window, cx)
     });
     cx.simulate_resize(gpui::size(px(1440.), px(900.)));
     let page = PAGE.with(|p| p.borrow().clone()).unwrap();
@@ -1154,7 +1154,7 @@ fn launches_use_each_tile_grid(cx: &mut TestAppContext) {
         let font = cx.update(|window, cx| {
             let p = page.read(cx);
             let geo = p.geo.borrow()[i];
-            parvi_terminals_app::term::paint::fit(
+            ahjo_terminals_app::term::paint::fit(
                 window,
                 geo.body.unwrap().size,
                 grid.0 as usize,
@@ -1276,13 +1276,13 @@ fn launcher_browses_and_selects_node_flags(cx: &mut TestAppContext) {
     let Some(running) = start_with_harness("terminals-flags", true) else {
         return;
     };
-    let settings = parvi_testkit::fresh_dir("flags-ui-settings").join("app.json");
+    let settings = ahjo_testkit::fresh_dir("flags-ui-settings").join("app.json");
     cx.executor().allow_parking();
-    cx.update(parvi_app_shell::prepare);
+    cx.update(ahjo_app_shell::prepare);
     let url = running.url.clone();
     let path = settings.clone();
     let (_shell, cx) = cx.add_window_view(move |window, cx| {
-        parvi_app_shell::start(&[terminals], Some(url), Some(path), window, cx)
+        ahjo_app_shell::start(&[terminals], Some(url), Some(path), window, cx)
     });
     until(cx, "fake harness", |cx| {
         cx.debug_bounds("harness-0-fake").is_some()
@@ -1328,13 +1328,13 @@ fn restart_recovers_the_launched_harness_and_folder(cx: &mut TestAppContext) {
     let Some(running) = start_with_restart_harness("terminals-restart-harness", true, true) else {
         return;
     };
-    let settings = parvi_testkit::fresh_dir("restart-harness-settings").join("app.json");
+    let settings = ahjo_testkit::fresh_dir("restart-harness-settings").join("app.json");
     cx.executor().allow_parking();
-    cx.update(parvi_app_shell::prepare);
+    cx.update(ahjo_app_shell::prepare);
     let url = running.url.clone();
     let path = settings.clone();
     let (_shell, cx) = cx.add_window_view(move |window, cx| {
-        parvi_app_shell::start(&[terminals], Some(url), Some(path), window, cx)
+        ahjo_app_shell::start(&[terminals], Some(url), Some(path), window, cx)
     });
     until(cx, "fake harness", |cx| {
         cx.debug_bounds("harness-0-fake").is_some()
@@ -1642,7 +1642,7 @@ async fn cli_send_accepts_an_explicit_pane_id() {
     assert_eq!(panes, ["%0", "%1"]);
     let config = format!("[terminals]\nsocket = {:?}\n", server.socket_path());
     let node = Node::start(AREAS, &config).await.unwrap();
-    parvi_testkit::tmux::eventually("both panes listed", || {
+    ahjo_testkit::tmux::eventually("both panes listed", || {
         node.sessions()
             .list()
             .iter()
@@ -1663,12 +1663,12 @@ async fn cli_send_accepts_an_explicit_pane_id() {
     ]
     .map(str::to_owned);
     assert_eq!(
-        parvi_node_kit::cli::run("session", &args, &mut Vec::new())
+        ahjo_node_kit::cli::run("session", &args, &mut Vec::new())
             .await
             .unwrap(),
         0
     );
-    parvi_testkit::tmux::eventually("CLI text in pane 1", || {
+    ahjo_testkit::tmux::eventually("CLI text in pane 1", || {
         server
             .run(&["capture-pane", "-p", "-t", "%1"])
             .contains("cli-pane-42")
@@ -1973,8 +1973,8 @@ fn late_launch_success_does_not_replace_a_newer_failure(cx: &mut TestAppContext)
     };
     let (shell, cx, settings) = open_with_alpha(&running, "launch-status-order", cx);
     let gate_shell = running.fixture.join("gate-shell");
-    let tmux_program = std::env::var_os("PARVI_TMUX").unwrap_or_else(|| "tmux".into());
-    parvi_testkit::tmux::write_script(
+    let tmux_program = std::env::var_os("AHJO_TMUX").unwrap_or_else(|| "tmux".into());
+    ahjo_testkit::tmux::write_script(
         &gate_shell,
         format!(
             "#!/bin/sh\n'{}' -S '{}' wait-for launch-status-release\nexec /bin/bash --noprofile --norc -i\n",
@@ -2303,7 +2303,7 @@ fn pasted_attachment_reaches_the_node_and_session(cx: &mut TestAppContext) {
     cx.write_to_clipboard(gpui::ClipboardItem::new_image(&image));
     cx.update(|window, cx| {
         page.update(cx, |p, cx| {
-            parvi_app_kit::widgets::field::focus(&p.send_note, window, cx);
+            ahjo_app_kit::widgets::field::focus(&p.send_note, window, cx);
         })
     });
     cx.simulate_keystrokes("ctrl-v");
@@ -2341,7 +2341,7 @@ fn hook_reports_mark_session_and_tab_until_cli_seen(cx: &mut TestAppContext) {
             true
         }
         fn log(&self, record: &log::Record<'_>) {
-            if record.target() == "parvi_terminals_app::sound" {
+            if record.target() == "ahjo_terminals_app::sound" {
                 TONES.lock().unwrap().push(record.args().to_string());
             }
         }
@@ -2364,10 +2364,10 @@ fn hook_reports_mark_session_and_tab_until_cli_seen(cx: &mut TestAppContext) {
     // The terminal is not being looked at, so a report remains news.
     click(cx, "tab-toy".into());
     for (event, kind) in [
-        ("finished", parvi_terminals_contract::EventKind::Finished),
+        ("finished", ahjo_terminals_contract::EventKind::Finished),
         (
             "needs-input",
-            parvi_terminals_contract::EventKind::NeedsInput,
+            ahjo_terminals_contract::EventKind::NeedsInput,
         ),
     ] {
         let url = format!(
@@ -2375,7 +2375,7 @@ fn hook_reports_mark_session_and_tab_until_cli_seen(cx: &mut TestAppContext) {
             running.url,
             &id[1..]
         );
-        parvi_node_kit::hook::report(&[url, "{\"message\":\"ready\"}".into()]);
+        ahjo_node_kit::hook::report(&[url, "{\"message\":\"ready\"}".into()]);
         until(cx, "hook marks the row and tab", |cx| {
             page.read_with(cx, |p, _| {
                 p.fleet
@@ -2396,7 +2396,7 @@ fn hook_reports_mark_session_and_tab_until_cli_seen(cx: &mut TestAppContext) {
         let runtime = tokio::runtime::Runtime::new().unwrap();
         assert_eq!(
             runtime
-                .block_on(parvi_node_kit::cli::run("session", &args, &mut Vec::new()))
+                .block_on(ahjo_node_kit::cli::run("session", &args, &mut Vec::new()))
                 .unwrap(),
             0
         );
@@ -2429,7 +2429,7 @@ fn clicking_a_marked_session_clears_its_mark(cx: &mut TestAppContext) {
         running.url,
         &id[1..]
     );
-    parvi_node_kit::hook::report(&[url, "{\"message\":\"ready\"}".into()]);
+    ahjo_node_kit::hook::report(&[url, "{\"message\":\"ready\"}".into()]);
     until(cx, "the report marks the row", |cx| {
         page.read_with(cx, |p, _| {
             p.fleet.session(&key).is_some_and(|s| p.marked(s).is_some())
@@ -2780,7 +2780,7 @@ fn arrange_tabs_preset_drag_and_sizing_on_a_live_node(cx: &mut TestAppContext) {
                 .all
                 .iter()
                 .filter(|s| s.name == "alpha" || s.name == "beta")
-                .all(|s| s.seat == Some(parvi_terminals_contract::Seat::Mine))
+                .all(|s| s.seat == Some(ahjo_terminals_contract::Seat::Mine))
         })
     });
     let _ = std::fs::remove_dir_all(settings.parent().unwrap());
@@ -2792,12 +2792,12 @@ fn launcher_completes_recent_folder_before_starting_agent(cx: &mut TestAppContex
     let Some(running) = start_with_restart_harness("terminals-folder-journey", true, true) else {
         return;
     };
-    let settings = parvi_testkit::fresh_dir("folder-journey-settings").join("app.json");
+    let settings = ahjo_testkit::fresh_dir("folder-journey-settings").join("app.json");
     cx.executor().allow_parking();
-    cx.update(parvi_app_shell::prepare);
+    cx.update(ahjo_app_shell::prepare);
     let (url, path) = (running.url.clone(), settings.clone());
     let (_shell, cx) = cx.add_window_view(move |window, cx| {
-        parvi_app_shell::start(&[terminals], Some(url), Some(path), window, cx)
+        ahjo_app_shell::start(&[terminals], Some(url), Some(path), window, cx)
     });
     until(cx, "fake harness offered", |cx| {
         cx.debug_bounds("harness-0-fake").is_some()
@@ -3158,7 +3158,7 @@ fn opening_a_session_sizes_it_with_another_node_following(cx: &mut TestAppContex
         running.fixture.join("no-launch.conf")
     );
     let second = runtime.block_on(Node::start(AREAS, &config)).unwrap();
-    runtime.block_on(parvi_testkit::tmux::eventually(
+    runtime.block_on(ahjo_testkit::tmux::eventually(
         "second node follows alpha",
         || {
             second
@@ -3170,7 +3170,7 @@ fn opening_a_session_sizes_it_with_another_node_following(cx: &mut TestAppContex
         },
     ));
     let second_sessions = second.sessions();
-    runtime.block_on(parvi_testkit::tmux::eventually(
+    runtime.block_on(ahjo_testkit::tmux::eventually(
         "second node attaches only to alpha",
         || {
             let sessions = second_sessions.list();
@@ -3197,7 +3197,7 @@ fn opening_a_session_sizes_it_with_another_node_following(cx: &mut TestAppContex
                 return false;
             };
             session.foreign == Some(0)
-                && session.seat == Some(parvi_terminals_contract::Seat::Mine)
+                && session.seat == Some(ahjo_terminals_contract::Seat::Mine)
                 && tmux(
                     &running,
                     &[
@@ -3222,12 +3222,12 @@ fn launcher_completes_a_folder_outside_files_roots(cx: &mut TestAppContext) {
     };
     let chosen = running.fixture.join("subfolder");
     std::fs::create_dir(&chosen).unwrap();
-    let settings = parvi_testkit::fresh_dir("folder-outside-settings").join("app.json");
+    let settings = ahjo_testkit::fresh_dir("folder-outside-settings").join("app.json");
     cx.executor().allow_parking();
-    cx.update(parvi_app_shell::prepare);
+    cx.update(ahjo_app_shell::prepare);
     let (url, path) = (running.url.clone(), settings.clone());
     let (shell, cx) = cx.add_window_view(move |window, cx| {
-        parvi_app_shell::start(&[terminals], Some(url), Some(path), window, cx)
+        ahjo_app_shell::start(&[terminals], Some(url), Some(path), window, cx)
     });
     until(cx, "fake harness offered", |cx| {
         cx.debug_bounds("harness-0-fake").is_some()
@@ -3297,7 +3297,7 @@ fn connecting_the_app_preserves_idle_session_activity(cx: &mut TestAppContext) {
         let mut output = Vec::new();
         assert_eq!(
             runtime
-                .block_on(parvi_node_kit::cli::run("session", &args, &mut output))
+                .block_on(ahjo_node_kit::cli::run("session", &args, &mut output))
                 .unwrap(),
             0
         );
@@ -3350,7 +3350,7 @@ fn connecting_the_app_preserves_idle_session_activity(cx: &mut TestAppContext) {
     );
     let second = runtime.block_on(Node::start(AREAS, &config)).unwrap();
     // Nobody looks at the second node, so it lists when asked.
-    let second_lists = |what: &str, check: &dyn Fn(&[parvi_term::engine::SessionInfo]) -> bool| {
+    let second_lists = |what: &str, check: &dyn Fn(&[ahjo_term::engine::SessionInfo]) -> bool| {
         let deadline = Instant::now() + Duration::from_secs(10);
         loop {
             let sessions = runtime.block_on(second.sessions().listed()).unwrap();
@@ -3364,7 +3364,7 @@ fn connecting_the_app_preserves_idle_session_activity(cx: &mut TestAppContext) {
             std::thread::sleep(Duration::from_millis(50));
         }
     };
-    let seconds = |s: &parvi_term::engine::SessionInfo| {
+    let seconds = |s: &ahjo_term::engine::SessionInfo| {
         s.activity
             .last_output
             .and_then(|at| at.duration_since(std::time::UNIX_EPOCH).ok())
@@ -3387,7 +3387,7 @@ fn connecting_the_app_preserves_idle_session_activity(cx: &mut TestAppContext) {
             p.fleet
                 .all
                 .iter()
-                .any(|s| s.name == "alpha" && s.seat == Some(parvi_terminals_contract::Seat::Mine))
+                .any(|s| s.name == "alpha" && s.seat == Some(ahjo_terminals_contract::Seat::Mine))
         })
     });
     let after = read();

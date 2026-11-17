@@ -5,11 +5,11 @@
 //! to the page as an ask to reveal it.
 
 use crate::shell::Shell;
+use ahjo_app_kit::Ask;
+use ahjo_app_kit::link::client::LinkState;
+use ahjo_app_kit::link::socket::LinkId;
+use ahjo_core::NodeId;
 use gpui::{Context, Task, Window};
-use parvi_app_kit::Ask;
-use parvi_app_kit::link::client::LinkState;
-use parvi_app_kit::link::socket::LinkId;
-use parvi_core::NodeId;
 use serde::Serialize;
 use serde_json::{Map, Value};
 use std::time::{Duration, Instant};

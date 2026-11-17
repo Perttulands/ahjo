@@ -6,13 +6,13 @@ mod notify;
 mod routes;
 mod run_routes;
 
-use anyhow::{Context, Result};
-use axum::Router;
-use parvi_mission_engine::{
+use ahjo_mission_engine::{
     Coordinator, LocalSeats, RunSettings, SeatExecutor, Store, TranscriptRoots,
 };
-use parvi_node_kit::{Area, BoxFuture, Built, Channel, Client, Listing, Setup};
-use parvi_term::Sessions;
+use ahjo_node_kit::{Area, BoxFuture, Built, Channel, Client, Listing, Setup};
+use ahjo_term::Sessions;
+use anyhow::{Context, Result};
+use axum::Router;
 use serde::Deserialize;
 use std::{
     collections::BTreeMap,
@@ -24,7 +24,7 @@ use tokio::sync::broadcast;
 
 pub const LISTING: Listing = Listing {
     name: "missions",
-    kinds: parvi_missions_contract::KINDS,
+    kinds: ahjo_missions_contract::KINDS,
     commands: commands::NAMES,
     build,
 };
@@ -42,7 +42,7 @@ struct Missions {
     store: Store,
     coordinator: Coordinator,
     changes: broadcast::Sender<()>,
-    resolver: Arc<dyn parvi_work_contract::Resolver>,
+    resolver: Arc<dyn ahjo_work_contract::Resolver>,
     node: String,
     notify_task: Option<Arc<tokio::sync::Mutex<Option<tokio::task::JoinHandle<()>>>>>,
 }
@@ -59,7 +59,7 @@ pub fn build(setup: &Setup) -> Result<Built> {
 /// Inject an executor for isolated test nodes.
 pub fn build_with_executor(
     setup: &Setup,
-    override_executor: Option<Box<dyn parvi_mission_engine::Executor>>,
+    override_executor: Option<Box<dyn ahjo_mission_engine::Executor>>,
 ) -> Result<Built> {
     let section: Section = setup.config.section("missions")?;
     let repositories: BTreeMap<String, PathBuf> = section
@@ -83,7 +83,7 @@ pub fn build_with_executor(
             .get::<dyn Sessions>()
             .context("missions needs sessions")?;
         let resolver = provided
-            .get::<dyn parvi_work_contract::Resolver>()
+            .get::<dyn ahjo_work_contract::Resolver>()
             .context("missions needs Work reference resolution")?;
         let seats = LocalSeats::new(sessions, &root, node.clone(), TranscriptRoots::from_host())
             .with_repositories(repositories.clone());
@@ -94,7 +94,7 @@ pub fn build_with_executor(
             repositories,
             run_workspace_root,
             notify_command: notify_command.clone(),
-            on_block: Some(parvi_mission_engine::OnBlock(Arc::new(
+            on_block: Some(ahjo_mission_engine::OnBlock(Arc::new(
                 move |run, reason| {
                     blocked_events.record(
                         "mission",
@@ -130,7 +130,7 @@ impl Area for Missions {
     fn routes(&self) -> Router {
         routes::routes(self.clone()).merge(run_routes::routes(self.clone()))
     }
-    fn commands(&self) -> Vec<parvi_node_kit::Command> {
+    fn commands(&self) -> Vec<ahjo_node_kit::Command> {
         commands::commands(self)
     }
     fn channel(&self, _: Client) -> Option<Box<dyn Channel>> {

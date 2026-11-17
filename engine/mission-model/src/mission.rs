@@ -10,9 +10,9 @@
 use serde::{Deserialize, Serialize};
 
 use crate::nodes::{Connection, End, Formation, Gate, InputCard, Limit};
-use parvi_core::Error;
+use ahjo_core::Error;
 
-/// The only mission file schema Parvi reads.
+/// The only mission file schema Ahjo reads.
 pub const MISSION_SCHEMA: i64 = 1;
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq)]
@@ -56,7 +56,7 @@ impl Mission {
             return Err(Error::new(
                 "unsupported_schema",
                 format!(
-                    "mission schema {}; Parvi reads schema {MISSION_SCHEMA}",
+                    "mission schema {}; Ahjo reads schema {MISSION_SCHEMA}",
                     mission.schema
                 ),
             ));

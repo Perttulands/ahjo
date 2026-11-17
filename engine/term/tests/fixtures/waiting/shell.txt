@@ -1,5 +1,5 @@
-ls -la /srv/parvi-example; git -C /srv/parvi-example log --oneline -5
-worker@workstation:/srv/parvi-example$ ls -la /srv/parvi-example; git -C /srv/parvi-example log --oneline -5
+ls -la /srv/ahjo-example; git -C /srv/ahjo-example log --oneline -5
+worker@workstation:/srv/ahjo-example$ ls -la /srv/ahjo-example; git -C /srv/ahjo-example log --oneline -5
 total 52
 drwxrwxrwx 1 worker worker  4096 Oct 30 03:09 .
 drwxrwxrwx 1 worker worker  4096 Oct 30 02:42 ..
@@ -26,7 +26,7 @@ e4378b3 (HEAD -> m2/waiting, origin/main, origin/HEAD) Merge pull request #41 fr
 ff13f62 Search panel, and Peek at a line of history
 8a48837 Search every pane's scrollback, from the server
 3528f44 Merge pull request #40 from Perttulands/m2/launch
-worker@workstation:/srv/parvi-example$
+worker@workstation:/srv/ahjo-example$
 
 
 

@@ -1,9 +1,9 @@
 //! Work provides reference resolution to the node's other areas.
-use parvi_core::Error;
-use parvi_node_kit::{Built, Listing, Setup};
-use parvi_testkit::node::Node;
-use parvi_work::{Bd, Gh};
-use parvi_work_contract::Resolver;
+use ahjo_core::Error;
+use ahjo_node_kit::{Built, Listing, Setup};
+use ahjo_testkit::node::Node;
+use ahjo_work::{Bd, Gh};
+use ahjo_work_contract::Resolver;
 use std::path::PathBuf;
 use std::sync::OnceLock;
 
@@ -12,7 +12,7 @@ use std::sync::OnceLock;
 fn fixture() -> &'static (PathBuf, String) {
     static FIXTURE: OnceLock<(PathBuf, String)> = OnceLock::new();
     FIXTURE.get_or_init(|| {
-        let dir = parvi_testkit::fresh_dir("parvi-work-resolver");
+        let dir = ahjo_testkit::fresh_dir("ahjo-work-resolver");
         let store = dir.join("store");
         std::fs::create_dir_all(store.join(".beads")).unwrap();
         let bd = dir.join("bd");
@@ -29,12 +29,12 @@ fn fixture() -> &'static (PathBuf, String) {
 }
 
 fn build(setup: &Setup) -> anyhow::Result<Built> {
-    parvi_work::build_with(setup, Bd::new(fixture().1.clone()), Gh::default())
+    ahjo_work::build_with(setup, Bd::new(fixture().1.clone()), Gh::default())
 }
 
 const WORK: Listing = Listing {
     build,
-    ..parvi_work::LISTING
+    ..ahjo_work::LISTING
 };
 
 #[tokio::test(flavor = "multi_thread")]
@@ -49,7 +49,7 @@ async fn work_resolves_references_for_other_areas() {
         format!("bead:{}:{store}#tst-1", node.id())
     );
     let unknown: Error = resolver.resolve("zz-1").await.unwrap_err();
-    assert_eq!(unknown.code, parvi_work_contract::BAD_REQUEST);
+    assert_eq!(unknown.code, ahjo_work_contract::BAD_REQUEST);
     assert!(
         unknown.message.contains("no Beads store"),
         "{}",

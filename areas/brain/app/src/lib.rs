@@ -8,9 +8,9 @@ mod view;
 pub use page::BrainPage;
 
 pub fn build(
-    host: parvi_app_kit::Host,
+    host: ahjo_app_kit::Host,
     window: &mut gpui::Window,
     cx: &mut gpui::App,
-) -> parvi_app_kit::Mounted {
-    parvi_app_kit::mount(host, window, cx, BrainPage::new)
+) -> ahjo_app_kit::Mounted {
+    ahjo_app_kit::mount(host, window, cx, BrainPage::new)
 }

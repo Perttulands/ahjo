@@ -11,11 +11,11 @@ use crate::link::http;
 use crate::link::socket::Tap;
 use crate::menu::{Menu, MenuRow};
 use crate::settings::Place;
+use ahjo_core::frame::{Kinds, owns};
+use ahjo_core::{Error, NodeId};
 use gpui::{
     AnyView, App, Context, Entity, FocusHandle, Pixels, Point, SystemNotification, Task, WeakEntity,
 };
-use parvi_core::frame::{Kinds, owns};
-use parvi_core::{Error, NodeId};
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 use std::collections::BTreeMap;

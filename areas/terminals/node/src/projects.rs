@@ -167,7 +167,7 @@ mod tests {
 
     #[test]
     fn finds_projects_three_deep_and_skips_what_was_set_aside() {
-        let root = std::env::temp_dir().join(format!("parvi-projects-{}", std::process::id()));
+        let root = std::env::temp_dir().join(format!("ahjo-projects-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&root);
         for (dir, marker) in [
             ("games/korpi", ".git"),
@@ -206,7 +206,7 @@ mod tests {
         assert!(skipped("chrote-archive"));
         assert!(skipped("retired-2026-10-19"));
         assert!(skipped("AppData"));
-        assert!(skipped("parvi-worktrees"));
+        assert!(skipped("ahjo-worktrees"));
         assert!(!skipped("tmpl"));
         assert!(!skipped("korpi"));
     }

@@ -13,7 +13,7 @@ pub mod undo;
 pub mod validation;
 pub mod words;
 
-use parvi_missions_contract::{
+use ahjo_missions_contract::{
     Layout, Mission, MissionListing, MissionSnapshot, RUNS_SNAPSHOT, RunProjection, SNAPSHOT,
 };
 use std::collections::BTreeMap;

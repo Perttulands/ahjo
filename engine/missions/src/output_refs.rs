@@ -1,5 +1,5 @@
 //! Materialize text-port refs without blocking on a special file.
-use parvi_mission_model::Formation;
+use ahjo_mission_model::Formation;
 use serde_json::{Map, Value};
 use std::{
     fs::OpenOptions,
@@ -68,14 +68,14 @@ pub(crate) fn materialize(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use parvi_mission_model::Port;
+    use ahjo_mission_model::Port;
     use serde_json::json;
     #[test]
     fn text_refs_are_bounded_and_materialized_exactly() {
         let mut random = [0u8; 8];
         getrandom::fill(&mut random).unwrap();
         let root =
-            std::env::temp_dir().join(format!("parvi-102-ref-{:x}", u64::from_ne_bytes(random)));
+            std::env::temp_dir().join(format!("ahjo-102-ref-{:x}", u64::from_ne_bytes(random)));
         std::fs::create_dir(&root).unwrap();
         let path = root.join("output");
         std::fs::write(&path, "one\ntwo").unwrap();

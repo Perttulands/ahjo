@@ -2,22 +2,22 @@
 //! scheduled over a scratch tmux, started through the testkit) and lists a
 //! task made through the CLI, and offers the sessions the Sessions page
 //! publishes. Linux and macOS only; skips without tmux
-//! unless `PARVI_REQUIRE_TMUX=1`.
+//! unless `AHJO_REQUIRE_TMUX=1`.
 #![cfg(unix)]
 
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
+use ahjo_app_kit::Host;
+use ahjo_app_kit::link::client::LinkState;
+use ahjo_node_kit::{Listing, cli};
+use ahjo_terminals_contract::{Session, SessionList};
+use ahjo_testkit::node::Node;
+use ahjo_testkit::tmux::{Server, eventually, session_text};
 use gpui::{Modifiers, TestAppContext, VisualTestContext};
-use parvi_app_kit::Host;
-use parvi_app_kit::link::client::LinkState;
-use parvi_node_kit::{Listing, cli};
-use parvi_terminals_contract::{Session, SessionList};
-use parvi_testkit::node::Node;
-use parvi_testkit::tmux::{Server, eventually, session_text};
 use serde_json::json;
 
-const AREAS: &[Listing] = &[parvi_terminals::LISTING, parvi_scheduled::LISTING];
+const AREAS: &[Listing] = &[ahjo_terminals::LISTING, ahjo_scheduled::LISTING];
 
 /// A running node, on its own thread and runtime.
 struct Running {
@@ -139,24 +139,24 @@ fn cli_call(url: &str, args: &[&str]) -> serde_json::Value {
 fn the_page_lists_a_task_made_through_the_cli(cx: &mut TestAppContext) {
     let Some(running) = start() else {
         assert!(
-            std::env::var_os("PARVI_REQUIRE_TMUX").is_none(),
-            "PARVI_REQUIRE_TMUX is set but tmux did not start"
+            std::env::var_os("AHJO_REQUIRE_TMUX").is_none(),
+            "AHJO_REQUIRE_TMUX is set but tmux did not start"
         );
         return;
     };
     let (node, task) = running.node.split_once('\n').expect("node and task");
     let selector = format!("task-{node}-{task}");
     let settings = std::env::temp_dir()
-        .join(format!("parvi-scheduled-page-{}", std::process::id()))
+        .join(format!("ahjo-scheduled-page-{}", std::process::id()))
         .join("app.json");
     std::fs::create_dir_all(settings.parent().expect("its folder")).expect("a folder");
     // The node and the link run on their own threads.
     cx.executor().allow_parking();
-    cx.update(parvi_app_shell::prepare);
+    cx.update(ahjo_app_shell::prepare);
     let (url, path) = (running.url.clone(), settings.clone());
     let (shell, cx) = cx.add_window_view(move |window, cx| {
-        parvi_app_shell::start(
-            &[parvi_scheduled_app::build],
+        ahjo_app_shell::start(
+            &[ahjo_scheduled_app::build],
             Some(url),
             Some(path),
             window,

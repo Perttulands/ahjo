@@ -5,12 +5,12 @@ use crate::Work;
 use crate::store::work::Board;
 use crate::text::encode;
 use crate::view::Place;
+use ahjo_app_kit::host::Request;
+use ahjo_app_kit::theme::{FAMILY, theme};
+use ahjo_app_kit::widgets::pane;
+use ahjo_core::NodeId;
+use ahjo_work_contract::{Item, ProjectView, Snapshot, StoreView};
 use gpui::{AppContext, Context, Entity, IntoElement, Render, Window, div, prelude::*};
-use parvi_app_kit::host::Request;
-use parvi_app_kit::theme::{FAMILY, theme};
-use parvi_app_kit::widgets::pane;
-use parvi_core::NodeId;
-use parvi_work_contract::{Item, ProjectView, Snapshot, StoreView};
 use std::rc::Rc;
 use std::time::Duration;
 

@@ -5,7 +5,7 @@ use std::path::Path;
 use std::process::{Command, Stdio};
 
 use super::{error::FilesError, roots::Roots};
-pub use parvi_files_contract::{FileState, RepoStatus};
+pub use ahjo_files_contract::{FileState, RepoStatus};
 
 /// Files reported at most: a repository with more changed is shown in part.
 const MOST: usize = 5000;

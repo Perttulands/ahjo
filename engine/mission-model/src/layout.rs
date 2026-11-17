@@ -4,7 +4,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use parvi_core::Error;
+use ahjo_core::Error;
 
 pub const LAYOUT_SCHEMA: i64 = 1;
 

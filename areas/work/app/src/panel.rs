@@ -5,12 +5,12 @@ use crate::Work;
 use crate::store::work::outline::{self, Line};
 use crate::tokens::*;
 use crate::view::{Place, status_meta};
+use ahjo_app_kit::theme::{FAMILY, Theme, size, theme};
+use ahjo_app_kit::widgets::field::{self, FieldEvent};
+use ahjo_app_kit::widgets::{kit, pane};
 use gpui::{
     AnyElement, AppContext, Context, Div, Entity, KeyDownEvent, Render, Window, div, prelude::*, px,
 };
-use parvi_app_kit::theme::{FAMILY, Theme, size, theme};
-use parvi_app_kit::widgets::field::{self, FieldEvent};
-use parvi_app_kit::widgets::{kit, pane};
 
 /// The page the Work panel opens beside.
 pub(crate) const PANEL_BESIDE: &str = "sessions";

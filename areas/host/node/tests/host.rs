@@ -1,17 +1,17 @@
 //! Host commands, services routes and subscriptions through a testkit node.
 use std::time::Duration;
 
+use ahjo_host_contract::{self as contract, ReadingFrame, ServiceList, State};
+use ahjo_node_kit::{NodeClient, cli};
+use ahjo_testkit::node::Node;
 use axum::http::Method;
 use futures_util::{SinkExt, StreamExt};
-use parvi_host_contract::{self as contract, ReadingFrame, ServiceList, State};
-use parvi_node_kit::{NodeClient, cli};
-use parvi_testkit::node::Node;
 use serde_json::{Value, json};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio_tungstenite::tungstenite::Message;
 
 async fn start() -> Node {
-    Node::start(&[parvi_host::LISTING], "").await.unwrap()
+    Node::start(&[ahjo_host::LISTING], "").await.unwrap()
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -22,7 +22,7 @@ async fn services_and_commands_use_the_same_catalog_and_coded_errors() {
         .request(Method::GET, "/api/services", None, None)
         .await
         .unwrap_err();
-    let missing = missing.downcast_ref::<parvi_node_kit::NodeError>().unwrap();
+    let missing = missing.downcast_ref::<ahjo_node_kit::NodeError>().unwrap();
     assert_eq!(missing.code, contract::UNAVAILABLE);
     let missing = node.call("service_list", json!({})).await.unwrap_err();
     assert_eq!(missing.code, contract::UNAVAILABLE);
@@ -73,7 +73,7 @@ async fn services_and_commands_use_the_same_catalog_and_coded_errors() {
         .unwrap_err();
     assert_eq!(
         refused
-            .downcast_ref::<parvi_node_kit::NodeError>()
+            .downcast_ref::<ahjo_node_kit::NodeError>()
             .unwrap()
             .code,
         contract::BAD_REQUEST
@@ -84,7 +84,7 @@ async fn services_and_commands_use_the_same_catalog_and_coded_errors() {
         .unwrap_err();
     assert_eq!(
         failed
-            .downcast_ref::<parvi_node_kit::NodeError>()
+            .downcast_ref::<ahjo_node_kit::NodeError>()
             .unwrap()
             .code,
         contract::SERVICE_FAILED
@@ -95,7 +95,7 @@ async fn services_and_commands_use_the_same_catalog_and_coded_errors() {
         .unwrap_err();
     assert_eq!(
         not_found
-            .downcast_ref::<parvi_node_kit::NodeError>()
+            .downcast_ref::<ahjo_node_kit::NodeError>()
             .unwrap()
             .code,
         contract::NOT_FOUND
@@ -110,7 +110,7 @@ async fn services_and_commands_use_the_same_catalog_and_coded_errors() {
     let names: Vec<_> = tools
         .iter()
         .map(|t| t["name"].as_str().unwrap())
-        .filter(|name| !parvi_node_kit::own::COMMANDS.contains(name))
+        .filter(|name| !ahjo_node_kit::own::COMMANDS.contains(name))
         .collect();
     assert_eq!(
         names,
@@ -304,7 +304,7 @@ async fn socket_subscription_starts_with_state_streams_readings_and_stops() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn disabled_host_has_no_routes_or_tools() {
-    let node = Node::start(&[parvi_host::LISTING], "[host]\nenabled = false\n")
+    let node = Node::start(&[ahjo_host::LISTING], "[host]\nenabled = false\n")
         .await
         .unwrap();
     let client = NodeClient::new(Some(&node.url())).unwrap();
@@ -330,7 +330,7 @@ async fn disabled_host_has_no_routes_or_tools() {
         .iter()
         .map(|t| t["name"].as_str().unwrap())
         .collect();
-    assert_eq!(names, parvi_node_kit::own::COMMANDS, "only the node's own");
+    assert_eq!(names, ahjo_node_kit::own::COMMANDS, "only the node's own");
     node.stop().await;
 }
 
@@ -338,7 +338,7 @@ async fn disabled_host_has_no_routes_or_tools() {
 #[test]
 fn host_cli_json_reports_gpu_failure() {
     use std::os::unix::fs::PermissionsExt;
-    const CHILD: &str = "PARVI_GPU_REASON_CHILD";
+    const CHILD: &str = "AHJO_GPU_REASON_CHILD";
     if std::env::var_os(CHILD).is_some() {
         tokio::runtime::Runtime::new().unwrap().block_on(async {
             let node = start().await;
@@ -355,7 +355,7 @@ fn host_cli_json_reports_gpu_failure() {
         });
         return;
     }
-    let dir = parvi_testkit::fresh_dir("host-cli-gpu");
+    let dir = ahjo_testkit::fresh_dir("host-cli-gpu");
     let executable = dir.join("nvidia-smi");
     std::fs::write(
         &executable,

@@ -5,7 +5,7 @@
 //! goes breadth first along outputs, passes before fails, never enters a
 //! judge chain as a step, and numbers a node once, where it is first met.
 
-use parvi_missions_contract::{Connection, Mission};
+use ahjo_missions_contract::{Connection, Mission};
 use std::collections::{HashMap, VecDeque};
 
 #[derive(Clone, Debug, PartialEq)]
@@ -314,7 +314,7 @@ pub(crate) mod tests {
     /// Archon's delivery mission, as the node serves it.
     pub fn delivery() -> Mission {
         let json = include_str!("testdata/delivery.json");
-        serde_json::from_str::<parvi_missions_contract::MissionResponse>(json)
+        serde_json::from_str::<ahjo_missions_contract::MissionResponse>(json)
             .unwrap()
             .mission
             .mission

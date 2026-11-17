@@ -7,9 +7,9 @@ pub const SETTLE_MS: u64 = 200;
 /// From this many results the list says it is the best of more.
 pub const LIMIT: usize = 50;
 
-pub use parvi_brain_contract::{Commit, Found as Hit, Link, Listed, Page, PageRef};
+pub use ahjo_brain_contract::{Commit, Found as Hit, Link, Listed, Page, PageRef};
 
-use parvi_brain_contract::{Changes, Results};
+use ahjo_brain_contract::{Changes, Results};
 
 /// An edit in hand: the reader shows the editor instead of the page.
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -453,7 +453,7 @@ fn words(status: u16, body: &[u8]) -> String {
     if status == 0 {
         return String::from_utf8_lossy(body).into_owned();
     }
-    parvi_app_kit::link::http::error_text(status, body)
+    ahjo_app_kit::link::http::error_text(status, body)
 }
 
 #[cfg(test)]

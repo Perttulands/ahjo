@@ -2,7 +2,7 @@
 
 use std::collections::{HashSet, VecDeque};
 
-use parvi_mission_model::{
+use ahjo_mission_model::{
     Connection, END_IN, Formation, GATE_FAIL, GATE_IN, GATE_JUDGE, GATE_PASS, Gate, INPUT_CARD_OUT,
     Mission,
 };
@@ -188,7 +188,7 @@ pub fn selecting_gate<'a>(mission: &'a Mission, step: &str) -> Result<&'a Gate, 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use parvi_mission_model::Port;
+    use ahjo_mission_model::Port;
     use serde::Deserialize;
 
     #[derive(Deserialize)]

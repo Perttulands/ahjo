@@ -1,6 +1,6 @@
 //! Public, sanitized views of a validated run ledger.
 use crate::{RunEvent, validate_ledger};
-use parvi_mission_model::{PublicEvent, PublicInputRef, RunProjection, WaitingGate};
+use ahjo_mission_model::{PublicEvent, PublicInputRef, RunProjection, WaitingGate};
 use std::io;
 
 fn string(event: &RunEvent, name: &str) -> String {

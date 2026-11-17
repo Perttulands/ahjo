@@ -1,7 +1,7 @@
 //! Work page's visual measures, and the colours it gives meanings.
 
+use ahjo_app_kit::theme::{Theme, alpha};
 use gpui::Hsla;
-use parvi_app_kit::theme::{Theme, alpha};
 
 pub const SPACE_XS: f32 = 4.;
 pub const SPACE_XL: f32 = 12.;

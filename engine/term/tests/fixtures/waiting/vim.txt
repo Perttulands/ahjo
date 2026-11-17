@@ -1,10 +1,10 @@
 [package]
-name = "parvi"
+name = "ahjo"
 version = "0.0.1"
 edition = "2024"
 license = "MIT"
 description = "The server in your hands: a browser view over tmux and the host."
-repository = "https://github.com/Perttulands/parvi"
+repository = "https://github.com/Perttulands/ahjo"
 publish = false
 
 [dependencies]
@@ -37,4 +37,4 @@ panic = "abort"
 ~
 ~
 ~
-"/srv/parvi-example/Cargo.toml" 31 lines, 790 bytes
+"/srv/ahjo-example/Cargo.toml" 31 lines, 790 bytes

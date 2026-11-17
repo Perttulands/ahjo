@@ -269,14 +269,14 @@ struct Tally {
 mod tests {
     use super::*;
 
-    const PARVI: &str = include_str!("../../tests/fixtures/work/parvi.json");
+    const AHJO: &str = include_str!("../../tests/fixtures/work/ahjo.json");
     const CHECKS: &str = include_str!("../../tests/fixtures/work/checks.json");
     const MISSING: &str = include_str!("../../tests/fixtures/work/missing.json");
 
     #[test]
-    fn reads_parvis_issues_and_pull_requests() {
-        let work = parse(PARVI).unwrap();
-        assert_eq!(work.url, "https://github.com/example-owner/parvi");
+    fn reads_ahjos_issues_and_pull_requests() {
+        let work = parse(AHJO).unwrap();
+        assert_eq!(work.url, "https://github.com/example-owner/ahjo");
         assert_eq!(
             (work.open_issues, work.closed_issues, work.open_pulls),
             (15, 28, 0)
@@ -303,7 +303,7 @@ mod tests {
 
     #[test]
     fn links_issues_and_the_pull_requests_that_close_them() {
-        let work = parse(PARVI).unwrap();
+        let work = parse(AHJO).unwrap();
         let issue = work.issues.iter().find(|i| i.number == 51).unwrap();
         assert_eq!(issue.pulls, vec![58]);
         let pull = work.pulls.iter().find(|p| p.number == 58).unwrap();
@@ -315,7 +315,7 @@ mod tests {
 
     #[test]
     fn counts_a_commits_checks_and_leaves_them_out_when_there_are_none() {
-        let work = parse(PARVI).unwrap();
+        let work = parse(AHJO).unwrap();
         let checked = work.pulls.iter().find(|p| p.number == 45).unwrap();
         assert_eq!(
             checked.checks,

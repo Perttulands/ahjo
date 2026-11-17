@@ -1,5 +1,5 @@
 //! MCP: the areas' commands as tools for agents and AI apps. Every node
-//! serves them over streamable HTTP at `/mcp`, and `parvi mcp` offers the
+//! serves them over streamable HTTP at `/mcp`, and `ahjo mcp` offers the
 //! same over stdio by relaying to the node. Every call is logged. There are
 //! no permissions here: a caller reaches what the node's user does.
 
@@ -8,8 +8,8 @@ mod http;
 mod rpc;
 mod stdio;
 
+use ahjo_core::{Error, NodeId};
 use axum::Router;
-use parvi_core::{Error, NodeId};
 use serde_json::{Value, json};
 
 use crate::Command;

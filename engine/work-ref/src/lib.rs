@@ -223,7 +223,7 @@ mod tests {
             bead("n1", "C:\\work\\x", "a1-b2"),
             WorkRef::Issue {
                 owner: "Perttulands".into(),
-                repo: "parvi".into(),
+                repo: "ahjo".into(),
                 number: 179,
             },
         ] {
@@ -235,8 +235,8 @@ mod tests {
     fn reads_written_forms() {
         assert_eq!(parse("ctx-12"), Ok(Written::Bead("ctx-12".into())));
         assert_eq!(
-            parse("Perttulands/parvi#7").unwrap(),
-            parse("gh:Perttulands/parvi#7").unwrap()
+            parse("Perttulands/ahjo#7").unwrap(),
+            parse("gh:Perttulands/ahjo#7").unwrap()
         );
         let r = parse_resolved("gh:a/b#7").unwrap();
         assert_eq!((r.tracker(), r.short()), ("github", "a/b#7".into()));

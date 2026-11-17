@@ -1,7 +1,7 @@
 //! The Brain area through a real testkit node and a stand-in Citadel.
+use ahjo_node_kit::{NodeClient, NodeError};
+use ahjo_testkit::{fresh_dir, node::Node};
 use axum::{Json, http::Method, routing::post};
-use parvi_node_kit::{NodeClient, NodeError};
-use parvi_testkit::{fresh_dir, node::Node};
 use serde_json::{Value, json};
 use std::{path::PathBuf, process::Command};
 
@@ -59,7 +59,7 @@ async fn node_serves_brain_routes_commands_and_coded_errors() {
         format!("http://{address}"),
         "Test Author <author@example.org>"
     );
-    let node = Node::start(&[parvi_brain::LISTING], &config).await.unwrap();
+    let node = Node::start(&[ahjo_brain::LISTING], &config).await.unwrap();
     let client = NodeClient::new(Some(&format!("{}/", node.url()))).unwrap();
     async fn get(client: &NodeClient, path: &str) -> Value {
         client
@@ -131,7 +131,7 @@ async fn node_serves_brain_routes_commands_and_coded_errors() {
         .unwrap()
         .iter()
         .map(|tool| tool["name"].as_str().unwrap())
-        .filter(|name| !parvi_node_kit::own::COMMANDS.contains(name))
+        .filter(|name| !ahjo_node_kit::own::COMMANDS.contains(name))
         .collect();
     assert_eq!(
         names,
@@ -173,7 +173,7 @@ async fn node_serves_brain_routes_commands_and_coded_errors() {
 
 #[tokio::test]
 async fn disabled_brain_has_no_routes_or_tools() {
-    let node = Node::start(&[parvi_brain::LISTING], "[brain]\nenabled = false\n")
+    let node = Node::start(&[ahjo_brain::LISTING], "[brain]\nenabled = false\n")
         .await
         .unwrap();
     let client = NodeClient::new(Some(&format!("{}/", node.url()))).unwrap();
@@ -203,6 +203,6 @@ async fn disabled_brain_has_no_routes_or_tools() {
         .iter()
         .map(|tool| tool["name"].as_str().unwrap())
         .collect();
-    assert_eq!(names, parvi_node_kit::own::COMMANDS, "only the node's own");
+    assert_eq!(names, ahjo_node_kit::own::COMMANDS, "only the node's own");
     node.stop().await;
 }

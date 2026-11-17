@@ -1,5 +1,5 @@
 [package]
-name = "parvi-terminals-app"
+name = "ahjo-terminals-app"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -10,10 +10,10 @@ publish = false
 workspace = true
 
 [dependencies]
-parvi-app-kit = { path = "../../../kit/app-kit" }
-parvi-core = { path = "../../../kit/core" }
-parvi-terminals-contract = { path = "../contract" }
-parvi-work-contract = { path = "../../work/contract" }
+ahjo-app-kit = { path = "../../../kit/app-kit" }
+ahjo-core = { path = "../../../kit/core" }
+ahjo-terminals-contract = { path = "../contract" }
+ahjo-work-contract = { path = "../../work/contract" }
 gpui = { package = "gpui-pre", version = "=0.3.12" }
 alacritty_terminal = "0.26"
 async-channel = "2"
@@ -36,13 +36,13 @@ windows-sys = { version = "0.61", features = ["Win32_Media_Audio"] }
 
 [dev-dependencies]
 gpui = { package = "gpui-pre", version = "=0.3.12", features = ["test-support"] }
-parvi-app-shell = { path = "../../../kit/app-shell" }
-parvi-terminals = { path = "../node" }
-parvi-files = { path = "../../files/node" }
-parvi-files-app = { path = "../../files/app" }
-parvi-work-app = { path = "../../work/app" }
-parvi-brain-app = { path = "../../brain/app" }
-parvi-testkit = { path = "../../../kit/testkit" }
-parvi-node-kit = { path = "../../../kit/node-kit" }
-parvi-term = { path = "../../../engine/term" }
+ahjo-app-shell = { path = "../../../kit/app-shell" }
+ahjo-terminals = { path = "../node" }
+ahjo-files = { path = "../../files/node" }
+ahjo-files-app = { path = "../../files/app" }
+ahjo-work-app = { path = "../../work/app" }
+ahjo-brain-app = { path = "../../brain/app" }
+ahjo-testkit = { path = "../../../kit/testkit" }
+ahjo-node-kit = { path = "../../../kit/node-kit" }
+ahjo-term = { path = "../../../engine/term" }
 tokio = { version = "1", features = ["full"] }

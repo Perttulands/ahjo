@@ -84,7 +84,7 @@ async fn replies_a_client_does_not_read_are_bounded() {
         .open(holder.endpoint.path())
         .unwrap();
     let (mut read, mut write) = tokio::io::split(pipe);
-    let mut lines = parvi_holder::handshake::hello();
+    let mut lines = ahjo_holder::handshake::hello();
     for _ in 0..300 {
         lines.push_str("capture-pane -p -e -S - -t s\n");
     }

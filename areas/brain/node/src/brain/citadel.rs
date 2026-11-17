@@ -1,9 +1,9 @@
 //! Context Citadel's ranked search (`POST /v1/library/search`), which owns the
-//! index, the ranking and which collections a search covers. Parvi keeps no
+//! index, the ranking and which collections a search covers. Ahjo keeps no
 //! search of its own. Citadel trusts loopback callers that send no token, so
-//! Parvi talks to a Citadel on its own machine over plain HTTP.
+//! Ahjo talks to a Citadel on its own machine over plain HTTP.
 
-use parvi_brain_contract::Found;
+use ahjo_brain_contract::Found;
 use std::time::Duration;
 
 use anyhow::{Result, bail};

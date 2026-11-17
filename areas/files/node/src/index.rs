@@ -17,7 +17,7 @@
 //! thousands of files, and one thread took seconds over them.
 
 use super::roots::Roots;
-use parvi_files_contract::{Changed, Match, Matches};
+use ahjo_files_contract::{Changed, Match, Matches};
 use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};

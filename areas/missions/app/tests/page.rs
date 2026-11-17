@@ -1,16 +1,16 @@
 #![cfg(unix)]
+use ahjo_app_kit::link::client::LinkState;
+use ahjo_node_kit::{Listing, NodeClient};
+use ahjo_testkit::{node::Node, sessions};
 use gpui::{Modifiers, TestAppContext, VisualTestContext};
-use parvi_app_kit::link::client::LinkState;
-use parvi_node_kit::{Listing, NodeClient};
-use parvi_testkit::{node::Node, sessions};
 use serde_json::json;
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
 const AREAS: &[Listing] = &[
     sessions::LISTING,
-    parvi_work::LISTING,
-    parvi_missions::LISTING,
+    ahjo_work::LISTING,
+    ahjo_missions::LISTING,
 ];
 struct Running {
     url: String,
@@ -75,15 +75,15 @@ fn until(
 fn opens_a_fixture_mission_on_the_canvas(cx: &mut TestAppContext) {
     let running = start();
     let settings = std::env::temp_dir()
-        .join(format!("parvi-missions-page-{}", std::process::id()))
+        .join(format!("ahjo-missions-page-{}", std::process::id()))
         .join("app.json");
     std::fs::create_dir_all(settings.parent().unwrap()).unwrap();
     cx.executor().allow_parking();
-    cx.update(parvi_app_shell::prepare);
+    cx.update(ahjo_app_shell::prepare);
     let (url, path) = (running.url.clone(), settings.clone());
     let (shell, cx) = cx.add_window_view(move |window, cx| {
-        parvi_app_shell::start(
-            &[parvi_missions_app::build],
+        ahjo_app_shell::start(
+            &[ahjo_missions_app::build],
             Some(url),
             Some(path),
             window,
@@ -191,7 +191,7 @@ fn cli_authored_graph_and_layout_open_on_the_canvas(cx: &mut TestAppContext) {
         let mut argv: Vec<String> = args.iter().map(|s| (*s).to_owned()).collect();
         argv.extend(["--node".into(), format!("{url}/"), "--json".into()]);
         let mut output = Vec::new();
-        let exit = parvi_node_kit::cli::run(noun, &argv, &mut output)
+        let exit = ahjo_node_kit::cli::run(noun, &argv, &mut output)
             .await
             .unwrap();
         assert_eq!(
@@ -231,15 +231,15 @@ fn cli_authored_graph_and_layout_open_on_the_canvas(cx: &mut TestAppContext) {
         (input, steps, judge, human, end)
     });
     let settings = std::env::temp_dir()
-        .join(format!("parvi-cli-canvas-{}", std::process::id()))
+        .join(format!("ahjo-cli-canvas-{}", std::process::id()))
         .join("app.json");
     std::fs::create_dir_all(settings.parent().unwrap()).unwrap();
     cx.executor().allow_parking();
-    cx.update(parvi_app_shell::prepare);
+    cx.update(ahjo_app_shell::prepare);
     let url = running.url.clone();
     let (_, cx) = cx.add_window_view(move |window, cx| {
-        parvi_app_shell::start(
-            &[parvi_missions_app::build],
+        ahjo_app_shell::start(
+            &[ahjo_missions_app::build],
             Some(url),
             Some(settings),
             window,

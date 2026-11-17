@@ -10,17 +10,17 @@
 
 use crate::host_store::Hosts;
 use crate::services_store::{self, Change, Ended, Group, NO_ANSWER, Service, Services, Step};
-use gpui::{App, Context, Entity, FocusHandle, KeyDownEvent, ScrollHandle, Window};
-use parvi_app_kit::{
+use ahjo_app_kit::{
     Ask, Host, Page,
     ask::Answers,
     host::{Request, Status},
     hub::now_ms,
     link::client::LinkState,
 };
-use parvi_core::NodeId;
-use parvi_host_contract::{HOST, HOST_EVENT, HOST_STATE};
-use parvi_terminals_contract::SessionList;
+use ahjo_core::NodeId;
+use ahjo_host_contract::{HOST, HOST_EVENT, HOST_STATE};
+use ahjo_terminals_contract::SessionList;
+use gpui::{App, Context, Entity, FocusHandle, KeyDownEvent, ScrollHandle, Window};
 use std::collections::HashSet;
 use std::time::Duration;
 
@@ -233,7 +233,7 @@ impl HostPage {
                     Request::get(NodeId(node), path),
                     move |s, status, body, cx| {
                         let last = read + 1 == services_store::FOLLOW.len();
-                        let clock = parvi_app_kit::clock::hhmm(now_ms());
+                        let clock = ahjo_app_kit::clock::hhmm(now_ms());
                         if s.services
                             .nodes
                             .entry(at.clone())
@@ -323,7 +323,7 @@ impl Page for HostPage {
     const TITLE: &'static str = "Host";
     const KEY: Option<char> = Some('H');
     const AREA: Option<&'static str> = Some("host");
-    const KINDS: parvi_core::frame::Kinds = &[HOST_STATE..=HOST_EVENT];
+    const KINDS: ahjo_core::frame::Kinds = &[HOST_STATE..=HOST_EVENT];
     const CHANNELS: &'static [u8] = &[HOST];
     const ANSWERS: &'static [Answers] = &[Answers::Reveal("service")];
 

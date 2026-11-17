@@ -1,11 +1,11 @@
 //! A lab seat side makes real dispatch records and uses testkit's fake Sessions.
-use parvi_mission_engine::{
+use ahjo_mission_engine::{
     AgentSeat, Coordinator, Dispatch, DispatchResult, PublishedTurn, RunSettings, SeatEvent,
     SeatExecutor, SeatFuture, SeatId, SeatSide, TurnWorkspace,
 };
-use parvi_mission_model::RunStart;
-use parvi_term::{Sessions, Start};
-use parvi_testkit::{node::Node, sessions};
+use ahjo_mission_model::RunStart;
+use ahjo_term::{Sessions, Start};
+use ahjo_testkit::{node::Node, sessions};
 use serde_json::json;
 use std::{
     collections::{BTreeMap, HashMap},
@@ -43,19 +43,19 @@ impl SeatSide for LabSeats {
                     user: String::new(),
                 })
                 .await
-                .map_err(|e| parvi_mission_engine::Error::new("fake", e.to_string()))?;
+                .map_err(|e| ahjo_mission_engine::Error::new("fake", e.to_string()))?;
             let pane = self
                 .sessions
                 .active_pane(&id)
                 .await
-                .map_err(|e| parvi_mission_engine::Error::new("fake", e.to_string()))?;
+                .map_err(|e| ahjo_mission_engine::Error::new("fake", e.to_string()))?;
             let seat = SeatId {
                 node: "test-node".into(),
                 session_name: format!("seat-{}", request.slot_id),
-                session: parvi_term::SessionRef {
+                session: ahjo_term::SessionRef {
                     session_id: id,
                     pane_id: pane,
-                    generation: parvi_term::Generation {
+                    generation: ahjo_term::Generation {
                         pid: 1,
                         start_time: 1,
                     },
@@ -64,7 +64,7 @@ impl SeatSide for LabSeats {
             };
             let path = self.root.join(format!("{}.md", request.slot_id));
             std::fs::write(&path, &request.brief)
-                .map_err(|e| parvi_mission_engine::Error::new("fake", e.to_string()))?;
+                .map_err(|e| ahjo_mission_engine::Error::new("fake", e.to_string()))?;
             let created = json!({"dispatchId":request.id,"node":seat.node,"sessionName":seat.session_name,"sessionId":seat.session.session_id,"paneId":seat.session.pane_id,"generation":seat.session.generation});
             let prepared = json!({"seat":seat,"briefPath":path});
             let events = vec![
@@ -103,8 +103,8 @@ impl SeatSide for LabSeats {
         id: &str,
         since: u64,
     ) -> Result<
-        mpsc::Receiver<Result<SeatEvent, parvi_mission_engine::Error>>,
-        parvi_mission_engine::Error,
+        mpsc::Receiver<Result<SeatEvent, ahjo_mission_engine::Error>>,
+        ahjo_mission_engine::Error,
     > {
         let entries = self.entries.clone();
         let id = id.to_owned();
@@ -135,7 +135,7 @@ impl SeatSide for LabSeats {
             Ok(())
         })
     }
-    fn dispatch_info(&self, id: &str) -> Result<Dispatch, parvi_mission_engine::Error> {
+    fn dispatch_info(&self, id: &str) -> Result<Dispatch, ahjo_mission_engine::Error> {
         Ok(self
             .entries
             .lock()
@@ -145,7 +145,7 @@ impl SeatSide for LabSeats {
             .dispatch
             .clone())
     }
-    fn result(&self, id: &str) -> Result<Option<DispatchResult>, parvi_mission_engine::Error> {
+    fn result(&self, id: &str) -> Result<Option<DispatchResult>, ahjo_mission_engine::Error> {
         Ok(self.entries.lock().unwrap().get(id).unwrap().result.clone())
     }
     fn seat_alive(&self, seat: &SeatId) -> SeatFuture<'_, bool> {
@@ -189,7 +189,7 @@ impl SeatSide for LabSeats {
             Ok("ended".into())
         })
     }
-    fn seats(&self, _: &str) -> Result<Vec<AgentSeat>, parvi_mission_engine::Error> {
+    fn seats(&self, _: &str) -> Result<Vec<AgentSeat>, ahjo_mission_engine::Error> {
         Ok(vec![])
     }
     fn prepare_turn(&self, _: &str, _: &TurnWorkspace) -> SeatFuture<'_, PathBuf> {
@@ -203,7 +203,7 @@ impl SeatSide for LabSeats {
 #[tokio::test(flavor = "multi_thread")]
 async fn controller_output_reaches_gate_and_lost_workers_are_reported() {
     let node = Node::start(&[sessions::LISTING], "").await.unwrap();
-    let root = parvi_testkit::fresh_dir("orchestrated-seats");
+    let root = ahjo_testkit::fresh_dir("orchestrated-seats");
     std::fs::create_dir_all(root.join("missions")).unwrap();
     let mission = include_str!("parity/runs/missions/solo-lab.mission.toml")
         .replace("type = \"solo\"", "type = \"orchestrated\"")
@@ -289,7 +289,7 @@ async fn controller_output_reaches_gate_and_lost_workers_are_reported() {
             );
             assert!(brief.contains(&entry.seat.session_name));
             assert!(brief.contains(&format!(
-                "parvi session send {} --text",
+                "ahjo session send {} --text",
                 entry.seat.session_name
             )));
             assert!(brief.contains(entry.path.to_str().unwrap()));
@@ -302,7 +302,7 @@ async fn controller_output_reaches_gate_and_lost_workers_are_reported() {
         }
     }
     let ledger =
-        parvi_mission_engine::Ledger::new(root.join("runs").join(format!("{run}.ndjson")), &run)
+        ahjo_mission_engine::Ledger::new(root.join("runs").join(format!("{run}.ndjson")), &run)
             .read()
             .unwrap();
     let team = ledger
@@ -366,7 +366,7 @@ async fn controller_output_reaches_gate_and_lost_workers_are_reported() {
             .unwrap();
         lead.result = Some(DispatchResult {
             status: "ok".into(),
-            text: "```parvi-outputs\n{\"port_out\":{\"text\":\"controller-result\"}}\n```".into(),
+            text: "```ahjo-outputs\n{\"port_out\":{\"text\":\"controller-result\"}}\n```".into(),
         });
         let data = json!({"dispatchId":lead.dispatch.id,"sentinel":{"runId":run}});
         lead.events.push(SeatEvent {
@@ -399,7 +399,7 @@ async fn controller_output_reaches_gate_and_lost_workers_are_reported() {
         "worker-result"
     );
     let ledger =
-        parvi_mission_engine::Ledger::new(root.join("runs").join(format!("{run}.ndjson")), &run)
+        ahjo_mission_engine::Ledger::new(root.join("runs").join(format!("{run}.ndjson")), &run)
             .read()
             .unwrap();
     assert!(ledger.iter().any(|e| e.kind == "worker_observation"
@@ -425,35 +425,35 @@ async fn controller_output_reaches_gate_and_lost_workers_are_reported() {
 // The same real SeatExecutor is driven through the node's public CLI here.
 static CLI_SEATS: Mutex<Option<Arc<LabSeats>>> = Mutex::new(None);
 struct CliSeatExecutor(tokio::runtime::Handle);
-impl parvi_mission_engine::Executor for CliSeatExecutor {
+impl ahjo_mission_engine::Executor for CliSeatExecutor {
     fn execute_formation(
         &self,
-        execution: parvi_mission_engine::FormationExecution,
-        sink: parvi_mission_engine::ExecutionSink,
-    ) -> Result<parvi_mission_engine::FormationResult, parvi_mission_engine::Error> {
+        execution: ahjo_mission_engine::FormationExecution,
+        sink: ahjo_mission_engine::ExecutionSink,
+    ) -> Result<ahjo_mission_engine::FormationResult, ahjo_mission_engine::Error> {
         let seats = CLI_SEATS.lock().unwrap().as_ref().unwrap().clone();
-        parvi_mission_engine::Executor::execute_formation(
+        ahjo_mission_engine::Executor::execute_formation(
             &SeatExecutor::new(seats, self.0.clone()),
             execution,
             sink,
         )
     }
 }
-fn cli_build(setup: &parvi_node_kit::Setup) -> anyhow::Result<parvi_node_kit::Built> {
-    parvi_missions::build_with_executor(
+fn cli_build(setup: &ahjo_node_kit::Setup) -> anyhow::Result<ahjo_node_kit::Built> {
+    ahjo_missions::build_with_executor(
         setup,
         Some(Box::new(CliSeatExecutor(tokio::runtime::Handle::current()))),
     )
 }
-const CLI_MISSIONS: parvi_node_kit::Listing = parvi_node_kit::Listing {
+const CLI_MISSIONS: ahjo_node_kit::Listing = ahjo_node_kit::Listing {
     build: cli_build,
-    ..parvi_missions::LISTING
+    ..ahjo_missions::LISTING
 };
 async fn cli(node: &Node, noun: &str, args: &[&str]) -> serde_json::Value {
     let mut argv: Vec<String> = args.iter().map(|s| (*s).to_owned()).collect();
     argv.extend(["--node".into(), format!("{}/", node.url()), "--json".into()]);
     let mut output = Vec::new();
-    let exit = parvi_node_kit::cli::run(noun, &argv, &mut output)
+    let exit = ahjo_node_kit::cli::run(noun, &argv, &mut output)
         .await
         .unwrap();
     assert_eq!(
@@ -466,7 +466,7 @@ async fn cli(node: &Node, noun: &str, args: &[&str]) -> serde_json::Value {
 }
 #[tokio::test(flavor = "multi_thread")]
 async fn cli_runs_orchestration_to_end_with_controller_and_worker_seats() {
-    let node = Node::start(&[sessions::LISTING, parvi_work::LISTING, CLI_MISSIONS], "")
+    let node = Node::start(&[sessions::LISTING, ahjo_work::LISTING, CLI_MISSIONS], "")
         .await
         .unwrap();
     let root = node.dir().join("missions");
@@ -521,7 +521,7 @@ async fn cli_runs_orchestration_to_end_with_controller_and_worker_seats() {
         assert!(brief.contains("seat-slot_worker"));
         lead.result = Some(DispatchResult {
             status: "ok".into(),
-            text: "```parvi-outputs\n{\"port_out\":{\"text\":\"controller-result\"}}\n```".into(),
+            text: "```ahjo-outputs\n{\"port_out\":{\"text\":\"controller-result\"}}\n```".into(),
         });
         let data = json!({"dispatchId":lead.dispatch.id,"sentinel":{"runId":run}});
         lead.events.push(SeatEvent {
@@ -539,7 +539,7 @@ async fn cli_runs_orchestration_to_end_with_controller_and_worker_seats() {
     .await;
     assert_eq!(final_run["status"], "succeeded", "{final_run}");
     let ledger =
-        parvi_mission_engine::Ledger::new(root.join("runs").join(format!("{run}.ndjson")), run)
+        ahjo_mission_engine::Ledger::new(root.join("runs").join(format!("{run}.ndjson")), run)
             .read()
             .unwrap();
     assert!(

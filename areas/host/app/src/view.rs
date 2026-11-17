@@ -7,13 +7,13 @@ use crate::host_store::{self as store, Figure, percent};
 use crate::page::{Chosen, HostPage};
 use crate::services_store::{self as services, Group, NodeServices, Service};
 use crate::tokens;
-use gpui::{AnyElement, Context, Div, KeyDownEvent, SharedString, Window, div, prelude::*, px};
-use parvi_app_kit::{
+use ahjo_app_kit::{
     host::Node,
     hub::now_ms,
     theme::{self, Theme, size},
     widgets::{kit, pane},
 };
+use gpui::{AnyElement, Context, Div, KeyDownEvent, SharedString, Window, div, prelude::*, px};
 
 /// A running service started less than this long ago says so in the list.
 const LATELY: u64 = 3_600_000;

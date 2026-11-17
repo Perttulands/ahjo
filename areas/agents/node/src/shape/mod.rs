@@ -8,8 +8,8 @@ mod codex;
 pub mod edit;
 pub mod routes;
 
-use parvi_agents_contract::shape::{Instruction, Load, Origin, SeenSkill, Shape, Source};
-use parvi_core::Error;
+use ahjo_agents_contract::shape::{Instruction, Load, Origin, SeenSkill, Shape, Source};
+use ahjo_core::Error;
 use std::collections::BTreeMap;
 use std::path::{Component, Path, PathBuf};
 
@@ -56,7 +56,7 @@ pub fn read(roots: &Roots, dir: &str, harness: &str) -> Result<Shape, Error> {
         "codex" => codex::read(roots, &dir),
         other => {
             return Err(Error::new(
-                parvi_agents_contract::shape::INVALID,
+                ahjo_agents_contract::shape::INVALID,
                 format!("no harness {other:?}: claude or codex"),
             ));
         }
@@ -80,7 +80,7 @@ pub fn folder(home: &Home, dir: &str) -> Result<PathBuf, Error> {
     };
     if !path.is_absolute() {
         return Err(Error::new(
-            parvi_agents_contract::shape::INVALID,
+            ahjo_agents_contract::shape::INVALID,
             format!("{dir:?} is not a full path"),
         ));
     }
@@ -96,7 +96,7 @@ pub fn folder(home: &Home, dir: &str) -> Result<PathBuf, Error> {
     }
     if !clean.is_dir() {
         return Err(Error::new(
-            parvi_agents_contract::shape::NOT_FOUND,
+            ahjo_agents_contract::shape::NOT_FOUND,
             format!("{} is not a folder", clean.display()),
         ));
     }

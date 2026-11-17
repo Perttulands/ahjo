@@ -50,7 +50,7 @@ pub fn offset() -> UtcOffset {
 }
 
 pub fn modified(ms: u64) -> String {
-    modified_at(ms, parvi_app_kit::hub::now_ms(), offset())
+    modified_at(ms, ahjo_app_kit::hub::now_ms(), offset())
 }
 
 /// How long ago, in a few letters: `now`, `4m`, `3h`, `2d`, then the date.
@@ -66,7 +66,7 @@ pub fn ago_at(ms: u64, now: u64, offset: UtcOffset) -> String {
 }
 
 pub fn ago(ms: u64) -> String {
-    ago_at(ms, parvi_app_kit::hub::now_ms(), offset())
+    ago_at(ms, ahjo_app_kit::hub::now_ms(), offset())
 }
 
 /// `9 s left`, `4 min left`, `2 h left`.

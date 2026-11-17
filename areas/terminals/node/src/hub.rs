@@ -1,5 +1,5 @@
 //! Several tmux servers as one (issue #39): the service user's own, and one
-//! per Unix user the host gives Parvi access to. Each is followed by its own
+//! per Unix user the host gives Ahjo access to. Each is followed by its own
 //! [`Engine`]; the hub gives clients one list and one set of ids.
 //!
 //! The first server keeps tmux's ids, so a host with one server sees no
@@ -18,11 +18,9 @@ use tokio::task::JoinHandle;
 use crate::agent_events::hooks::Hooks;
 use crate::agent_events::{Event, Events, Kind};
 use crate::launch::{self, Config, Launch};
-use parvi_term::backend::Backend;
-use parvi_term::control::PaneId;
-use parvi_term::engine::{
-    Delivering, Engine, PaneStream, PaneUpdate, Sent, SessionInfo, Thumbnail,
-};
+use ahjo_term::backend::Backend;
+use ahjo_term::control::PaneId;
+use ahjo_term::engine::{Delivering, Engine, PaneStream, PaneUpdate, Sent, SessionInfo, Thumbnail};
 
 /// Bits of a pane id that are tmux's own; the rest say which server.
 const PANE_BITS: u32 = 24;
@@ -34,7 +32,7 @@ const LISTED_WITHIN: Duration = Duration::from_secs(5);
 /// The most servers one hub follows.
 pub const MAX_SERVERS: usize = 1 << (32 - PANE_BITS);
 
-pub use parvi_term::Renames;
+pub use ahjo_term::Renames;
 
 /// One tmux server and who owns it.
 pub struct Server {
@@ -407,7 +405,7 @@ impl Hub {
 
     /// Someone looks at every server's session list until these are
     /// dropped ([`Engine::look`]).
-    pub fn look(&self) -> Vec<parvi_term::engine::Looking> {
+    pub fn look(&self) -> Vec<ahjo_term::engine::Looking> {
         self.servers.iter().map(|s| s.engine.look()).collect()
     }
 
@@ -466,7 +464,7 @@ impl Hub {
         let (server, pane) = self.pane(pane).context("unknown pane")?;
         server
             .engine
-            .deliver_when_ready(pane, text, enter, parvi_term::engine::READY_WAIT)
+            .deliver_when_ready(pane, text, enter, ahjo_term::engine::READY_WAIT)
             .await
     }
 
@@ -555,12 +553,12 @@ mod tests {
         assert_eq!(active("%3 0 1\n%4 1 0\n"), None, "none clear: refused");
         assert_eq!(active(""), None);
     }
-    use parvi_term::backend::tmux::Socket;
+    use ahjo_term::backend::tmux::Socket;
 
     #[tokio::test]
     async fn the_first_server_keeps_tmux_ids_and_the_rest_carry_their_own() {
         // Sockets in a directory of its own, where no server runs.
-        let dir = std::env::temp_dir().join(format!("parvi-hub-test-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("ahjo-hub-test-{}", std::process::id()));
         std::fs::create_dir(&dir).unwrap();
         let server = |user: Option<&str>, name: &str| Server {
             user: user.map(str::to_owned),

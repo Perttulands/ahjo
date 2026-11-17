@@ -6,7 +6,7 @@ use std::collections::HashMap;
 
 use crate::graph;
 use crate::limits::duration_words;
-use parvi_mission_model::{Code, Finding, Limit, Mission};
+use ahjo_mission_model::{Code, Finding, Limit, Mission};
 
 const DEFAULT_TITLE: &str = "Limit";
 

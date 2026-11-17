@@ -1,18 +1,18 @@
 //! The Agents commands and channel on an isolated node and scratch home.
 use std::time::Duration;
 
+use ahjo_agents_contract::{FAILED, REPORT, SYNC, SYNCED, WATCH};
+use ahjo_core::Error;
+use ahjo_node_kit::{NodeClient, cli};
+use ahjo_testkit::{fresh_dir, node::Node, sessions};
 use axum::http::Method;
 use futures_util::{SinkExt, StreamExt};
-use parvi_agents_contract::{FAILED, REPORT, SYNC, SYNCED, WATCH};
-use parvi_core::Error;
-use parvi_node_kit::{NodeClient, cli};
-use parvi_testkit::{fresh_dir, node::Node, sessions};
 use serde_json::{Value, json};
 use tokio_tungstenite::tungstenite::Message;
 
 #[tokio::test(flavor = "multi_thread")]
 async fn commands_and_channel_work_over_the_node() {
-    let home = fresh_dir("parvi-agents-node-home");
+    let home = fresh_dir("ahjo-agents-node-home");
     let skill = home.join(".agents/skills/example/SKILL.md");
     std::fs::create_dir_all(skill.parent().unwrap()).unwrap();
     std::fs::write(
@@ -21,7 +21,7 @@ async fn commands_and_channel_work_over_the_node() {
     )
     .unwrap();
     let config = format!("[agents]\nhome = {:?}\npath = []\n", home);
-    let node = Node::start(&[sessions::LISTING, parvi_agents::LISTING], &config)
+    let node = Node::start(&[sessions::LISTING, ahjo_agents::LISTING], &config)
         .await
         .unwrap();
     let client = NodeClient::new(Some(&node.url())).unwrap();
@@ -48,7 +48,7 @@ async fn commands_and_channel_work_over_the_node() {
         .unwrap()
         .iter()
         .filter_map(|tool| tool["name"].as_str())
-        .filter(|name| !parvi_node_kit::own::COMMANDS.contains(name))
+        .filter(|name| !ahjo_node_kit::own::COMMANDS.contains(name))
         .collect();
     assert_eq!(
         names,
@@ -75,7 +75,7 @@ async fn commands_and_channel_work_over_the_node() {
             "role_characters"
         ]
     );
-    assert_eq!(parvi_agents::LISTING.commands, names);
+    assert_eq!(ahjo_agents::LISTING.commands, names);
 
     let args = vec!["--node".into(), node.url()];
     let mut output = Vec::new();
@@ -155,9 +155,9 @@ async fn next_kind(
 
 #[tokio::test(flavor = "multi_thread")]
 async fn role_routes_and_commands_keep_versions_and_usage() {
-    let root = fresh_dir("parvi-roles-node");
+    let root = fresh_dir("ahjo-roles-node");
     let config = format!("[agents]\nhome = {:?}\npath = []\n", root);
-    let node = Node::start(&[sessions::LISTING, parvi_agents::LISTING], &config)
+    let node = Node::start(&[sessions::LISTING, ahjo_agents::LISTING], &config)
         .await
         .unwrap();
     let client = NodeClient::new(Some(&node.url())).unwrap();
@@ -208,7 +208,7 @@ async fn role_routes_and_commands_keep_versions_and_usage() {
         .unwrap_err();
     assert_eq!(
         conflict
-            .downcast_ref::<parvi_node_kit::NodeError>()
+            .downcast_ref::<ahjo_node_kit::NodeError>()
             .unwrap()
             .code,
         "conflict"
@@ -265,7 +265,7 @@ async fn role_routes_and_commands_keep_versions_and_usage() {
         "role_delete",
         "role_characters",
     ];
-    assert!(parvi_agents::LISTING.commands.ends_with(&names));
+    assert!(ahjo_agents::LISTING.commands.ends_with(&names));
     let role = node
         .call("role_new", json!({"role":"editor","display_name":"Editor"}))
         .await
@@ -306,7 +306,7 @@ async fn watching_does_not_fetch_and_sync_failures_survive_refresh_and_other_wat
         symlink(&skill, links.join(name)).unwrap();
     }
     let config = format!("[agents]\nhome = {:?}\npath = [{:?}]\n", home, bin);
-    let node = Node::start(&[sessions::LISTING, parvi_agents::LISTING], &config)
+    let node = Node::start(&[sessions::LISTING, ahjo_agents::LISTING], &config)
         .await
         .unwrap();
     let (mut first, _) = tokio_tungstenite::connect_async(node.ws()).await.unwrap();

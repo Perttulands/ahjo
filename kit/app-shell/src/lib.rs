@@ -1,5 +1,5 @@
-//! Parvi's app shell: the window around the pages a binary lists. It knows
-//! the pages only through `parvi_app_kit::Page`, so an area's tests drive it
+//! Ahjo Swarm's app shell: the window around the pages a binary lists. It knows
+//! the pages only through `ahjo_app_kit::Page`, so an area's tests drive it
 //! with their own page without building any other area.
 
 mod chrome;
@@ -12,11 +12,11 @@ pub mod view_control;
 
 pub use shell::Shell;
 
+use ahjo_app_kit::link::socket::Net;
+use ahjo_app_kit::theme::Theme;
+use ahjo_app_kit::widgets::field;
+use ahjo_app_kit::{Build, Hub};
 use gpui::{App, AppContext, Context, Window};
-use parvi_app_kit::link::socket::Net;
-use parvi_app_kit::theme::Theme;
-use parvi_app_kit::widgets::field;
-use parvi_app_kit::{Build, Hub};
 use std::path::PathBuf;
 
 /// What every window of the app needs before it opens.
@@ -56,7 +56,7 @@ pub fn start(
             .unwrap_or(true)
     });
     let pages = shell::mount(builds, &hub, window, cx)
-        .unwrap_or_else(|e| panic!("Parvi refuses to start: {e}"));
+        .unwrap_or_else(|e| panic!("Ahjo Swarm refuses to start: {e}"));
     let shell = Shell::new(hub.clone(), pages, window, cx);
     hub.update(cx, |h, cx| {
         if let Some(n) = node {

@@ -2,7 +2,7 @@
 use crate::coordinator::Control;
 use crate::run_worker::{append_live, event};
 use crate::{Coordinator, RunEvent, Workspaces, Worktree};
-use parvi_mission_model::RunStart;
+use ahjo_mission_model::RunStart;
 use serde_json::json;
 use sha2::{Digest, Sha256};
 use std::{
@@ -88,7 +88,7 @@ pub(crate) fn prepare_placed_turn(
             json!({"base":base,"place":place}),
         ),
     )?;
-    let branch = format!("parvi/run-{id}");
+    let branch = format!("ahjo/run-{id}");
     let target = format!("HEAD:refs/heads/{branch}");
     git(
         workspace,
@@ -243,7 +243,7 @@ pub(crate) fn commit_turn(
     let tree = Worktree {
         path: path.clone(),
         checkout: PathBuf::from(field("checkout")),
-        branch: format!("parvi/run-{id}"),
+        branch: format!("ahjo/run-{id}"),
         base: field("base"),
     };
     let workspaces = Workspaces::new(

@@ -3,7 +3,7 @@ use crate::{
     Claude, Codex, Dispatch, HarnessAdapter, Pi, SeatId, SeatRecords, Shell, SlotBinding,
     TranscriptRoots,
 };
-use parvi_term::{SessionSpec, Sessions, waiting::harness::Harness};
+use ahjo_term::{SessionSpec, Sessions, waiting::harness::Harness};
 use serde_json::json;
 use sha2::{Digest, Sha256};
 use std::{collections::BTreeMap, path::PathBuf, sync::Arc};
@@ -119,7 +119,7 @@ impl LocalSeats {
             // crashed before binding.
             let name = if request.name.is_empty() {
                 format!(
-                    "parvi-{}-{}-{}",
+                    "ahjo-{}-{}-{}",
                     component(&request.run_id),
                     component(&request.slot_id),
                     &hash[..8]
@@ -185,7 +185,7 @@ impl LocalSeats {
         }
     }
     /// The folder a live session's harness runs in, as tmux last reported it.
-    async fn folder(&self, session: &parvi_term::SessionRef) -> Option<PathBuf> {
+    async fn folder(&self, session: &ahjo_term::SessionRef) -> Option<PathBuf> {
         let listed = self.engine.listed().await.ok()?;
         let info = listed.iter().find(|s| s.id == session.session_id)?;
         let path = &info.facts.as_ref()?.path;
@@ -195,7 +195,7 @@ impl LocalSeats {
         &self,
         id: &str,
         name: String,
-        session: parvi_term::SessionRef,
+        session: ahjo_term::SessionRef,
         cwd: Option<PathBuf>,
         started: bool,
     ) -> Result<String, String> {

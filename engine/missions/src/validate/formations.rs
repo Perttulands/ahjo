@@ -1,7 +1,7 @@
 //! Formation types, their slot shapes, and slot ids.
 
 use super::possessive;
-use parvi_mission_model::{Code, Finding, Formation, Mission, ORCHESTRATED, PEER, SOLO};
+use ahjo_mission_model::{Code, Finding, Formation, Mission, ORCHESTRATED, PEER, SOLO};
 
 /// What a slot id may be, for messages: its seat's session is named after
 /// it, and a relayed verdict names it.
@@ -160,7 +160,7 @@ pub fn slot_id_findings(mission: &Mission) -> Vec<Finding> {
                 Code::InvalidSlotId,
                 &formation.id,
                 format!(
-                    "{} slot id {slot:?} is not a slot id Parvi can use: {SLOT_ID_RULE}; rename it in the mission file",
+                    "{} slot id {slot:?} is not a slot id Ahjo can use: {SLOT_ID_RULE}; rename it in the mission file",
                     possessive(mission.node_name(&formation.id))
                 ),
             ));

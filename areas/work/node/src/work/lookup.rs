@@ -2,8 +2,8 @@
 //! item with its family, and naming an item to an agent. Each reads only
 //! when asked (`docs/work.md`, The seam).
 
+use ahjo_work_ref::{WorkRef, Written};
 use anyhow::{Context, Result, bail};
-use parvi_work_ref::{WorkRef, Written};
 use tokio::task::JoinSet;
 
 use super::config::Project;
@@ -15,7 +15,7 @@ impl Work {
     /// id resolves only when exactly one configured store has its prefix,
     /// and not while a store's prefix cannot be read.
     pub async fn resolve(&self, text: &str) -> Result<WorkRef> {
-        let id = match parvi_work_ref::parse(text)? {
+        let id = match ahjo_work_ref::parse(text)? {
             Written::Ref(r) => return Ok(r),
             Written::Bead(id) => id,
         };
@@ -73,7 +73,7 @@ impl Work {
     /// with its store's folder when another configured store shares the
     /// Bead's prefix.
     pub async fn reference_line(&self, item: &Item) -> String {
-        let Ok(WorkRef::Bead { folder, id, .. }) = parvi_work_ref::parse_resolved(&item.reference)
+        let Ok(WorkRef::Bead { folder, id, .. }) = ahjo_work_ref::parse_resolved(&item.reference)
         else {
             return item.reference_line(None);
         };
@@ -261,7 +261,7 @@ mod tests {
         let fake = Fake::new("item", &fixture("item.json"), &bd());
         let mut projects = stores(&fake, &["tst", "tst"]);
         projects.push(Project::GitHub(Repo {
-            name: "example-owner/parvi".into(),
+            name: "example-owner/ahjo".into(),
             checkout: None,
         }));
         let work = fake.work(projects.clone());
@@ -297,20 +297,20 @@ mod tests {
             )
         );
         let issue = work
-            .item(&work.resolve("example-owner/parvi#51").await.unwrap())
+            .item(&work.resolve("example-owner/ahjo#51").await.unwrap())
             .await
             .unwrap();
-        assert_eq!(fake.runs("gh"), vec!["owner=example-owner name=parvi"]);
+        assert_eq!(fake.runs("gh"), vec!["owner=example-owner name=ahjo"]);
         assert_eq!(
             work.reference_line(&issue).await,
-            "issue example-owner/parvi#51: Example work item"
+            "issue example-owner/ahjo#51: Example work item"
         );
         for missing in [
             format!("bead:n1:{}#tst-404", projects[0].name()),
             format!("bead:n2:{}#tst-1", projects[0].name()),
             "bead:n1:/elsewhere#tst-1".into(),
         ] {
-            let r = parvi_work_ref::parse_resolved(&missing).unwrap();
+            let r = ahjo_work_ref::parse_resolved(&missing).unwrap();
             assert!(work.item(&r).await.is_err(), "{missing}");
         }
     }

@@ -2,9 +2,9 @@
 //! lately, then the missions to set off.
 use super::*;
 use crate::store::{navigator as model, words};
+use ahjo_app_kit::theme::Theme;
+use ahjo_app_kit::widgets::pane;
 use gpui::SharedString;
-use parvi_app_kit::theme::Theme;
-use parvi_app_kit::widgets::pane;
 
 /// Finished runs the list keeps; older ones stay under their mission.
 const RECENT: usize = 8;

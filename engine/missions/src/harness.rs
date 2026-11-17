@@ -229,7 +229,7 @@ mod tests {
 
     #[test]
     fn a_known_codex_model_narrows_the_efforts() {
-        let home = std::env::temp_dir().join(format!("parvi-64-codex-{}", std::process::id()));
+        let home = std::env::temp_dir().join(format!("ahjo-64-codex-{}", std::process::id()));
         std::fs::create_dir_all(&home).unwrap();
         std::fs::write(
             home.join("models_cache.json"),

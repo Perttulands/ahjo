@@ -1,16 +1,16 @@
 #![cfg(unix)]
+use ahjo_app_kit::link::client::LinkState;
+use ahjo_node_kit::{Listing, NodeClient};
+use ahjo_testkit::{node::Node, sessions};
 use gpui::{Modifiers, TestAppContext, VisualTestContext};
-use parvi_app_kit::link::client::LinkState;
-use parvi_node_kit::{Listing, NodeClient};
-use parvi_testkit::{node::Node, sessions};
 use serde_json::json;
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
 const AREAS: &[Listing] = &[
     sessions::LISTING,
-    parvi_work::LISTING,
-    parvi_missions::LISTING,
+    ahjo_work::LISTING,
+    ahjo_missions::LISTING,
 ];
 struct Running {
     url: String,
@@ -75,15 +75,15 @@ fn until(
 fn run_is_only_emphasized_for_a_current_runnable_mission(cx: &mut TestAppContext) {
     let running = start();
     let settings = std::env::temp_dir()
-        .join(format!("parvi-missions-validation-{}", std::process::id()))
+        .join(format!("ahjo-missions-validation-{}", std::process::id()))
         .join("app.json");
     std::fs::create_dir_all(settings.parent().unwrap()).unwrap();
     cx.executor().allow_parking();
-    cx.update(parvi_app_shell::prepare);
+    cx.update(ahjo_app_shell::prepare);
     let (url, path) = (running.url.clone(), settings.clone());
     let (shell, cx) = cx.add_window_view(move |window, cx| {
-        parvi_app_shell::start(
-            &[parvi_missions_app::build],
+        ahjo_app_shell::start(
+            &[ahjo_missions_app::build],
             Some(url),
             Some(path),
             window,
@@ -127,7 +127,7 @@ fn run_is_only_emphasized_for_a_current_runnable_mission(cx: &mut TestAppContext
     assert!(cx.debug_bounds("mission-run-ready").is_none());
     assert!(cx.debug_bounds("prepare-run").is_none());
     let rail = cx.debug_bounds("missions-rail").unwrap();
-    assert_eq!(rail.size.width, gpui::px(parvi_app_kit::theme::size::LIST));
+    assert_eq!(rail.size.width, gpui::px(ahjo_app_kit::theme::size::LIST));
     let canvas = cx.debug_bounds("mission-mode-canvas").unwrap().center();
     cx.simulate_click(canvas, Modifiers::none());
     until(cx, "canvas mode", |cx| {

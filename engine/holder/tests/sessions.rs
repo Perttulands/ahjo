@@ -7,8 +7,8 @@ mod common;
 
 use std::time::{Duration, Instant};
 
+use ahjo_holder::{Attached, connect, connect_or_start};
 use common::{Scratch, new_session, run, type_line, wait_for};
-use parvi_holder::{Attached, connect, connect_or_start};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::windows::named_pipe::{ClientOptions, ServerOptions};
 
@@ -42,7 +42,7 @@ async fn send(attached: &mut Attached, line: &str) {
 #[tokio::test(flavor = "multi_thread")]
 async fn one_holder_per_pipe() {
     let holder = Scratch::start().await;
-    let exe = env!("CARGO_BIN_EXE_parvi-holder");
+    let exe = env!("CARGO_BIN_EXE_ahjo-holder");
     let second = std::process::Command::new(exe)
         .args(["--pipe", holder.endpoint.path()])
         .arg("--log")
@@ -55,12 +55,12 @@ async fn one_holder_per_pipe() {
     assert_eq!(holder.connect().await.greeting().pid, holder.pid);
 
     // Starters racing for one pipe all reach the same holder.
-    let race = parvi_holder::Endpoint::scratch(&format!("test-{}-race", std::process::id()));
+    let race = ahjo_holder::Endpoint::scratch(&format!("test-{}-race", std::process::id()));
     let log = holder.dir.join("race.log");
     let starts = (0..3).map(|_| {
         let (race, log) = (race.clone(), log.clone());
         tokio::spawn(async move {
-            let exe = std::path::Path::new(env!("CARGO_BIN_EXE_parvi-holder"));
+            let exe = std::path::Path::new(env!("CARGO_BIN_EXE_ahjo-holder"));
             let started = connect_or_start(&race, exe, Some(&log)).await;
             started.unwrap().greeting().pid
         })
@@ -78,7 +78,7 @@ async fn other_protocols_are_refused() {
     let holder = Scratch::start().await;
     let pipe = ClientOptions::new().open(holder.endpoint.path()).unwrap();
     let (read, mut write) = tokio::io::split(pipe);
-    write.write_all(b"parvi-holder 999\n").await.unwrap();
+    write.write_all(b"ahjo-holder 999\n").await.unwrap();
     let mut line = String::new();
     BufReader::new(read).read_line(&mut line).await.unwrap();
     assert!(line.starts_with("%exit protocol 999 wanted"), "{line:?}");
@@ -88,7 +88,7 @@ async fn other_protocols_are_refused() {
 #[tokio::test(flavor = "multi_thread")]
 async fn an_incompatible_running_holder_is_not_replaced() {
     let endpoint =
-        parvi_holder::Endpoint::scratch(&format!("test-{}-old-protocol", std::process::id()));
+        ahjo_holder::Endpoint::scratch(&format!("test-{}-old-protocol", std::process::id()));
     let server = ServerOptions::new()
         .first_pipe_instance(true)
         .create(endpoint.path())
@@ -231,8 +231,8 @@ async fn streams_capture_and_reports_command_errors() {
         "PS ",
     )
     .await;
-    type_line(&mut command, "stream", "echo parvi-stream-129").await;
-    wait_for(&mut command, "stream", "parvi-stream-129").await;
+    type_line(&mut command, "stream", "echo ahjo-stream-129").await;
+    wait_for(&mut command, "stream", "ahjo-stream-129").await;
 
     let mut connection = holder.connect().await;
     let (mut read, mut write) = tokio::io::duplex(64);
@@ -247,7 +247,7 @@ async fn streams_capture_and_reports_command_errors() {
     let mut text = String::new();
     read.read_to_string(&mut text).await.unwrap();
     task.await.unwrap().unwrap();
-    assert!(text.contains("parvi-stream-129"), "{text}");
+    assert!(text.contains("ahjo-stream-129"), "{text}");
 
     let mut connection = holder.connect().await;
     let mut sink = tokio::io::sink();
@@ -329,14 +329,14 @@ async fn owned_session_is_pinned_and_generation_guarded() {
         "-NoLogo",
         "-NoProfile",
         "-Command",
-        "Write-Output $env:PARVI_OWNED_TEST; Start-Sleep -Seconds 120",
+        "Write-Output $env:AHJO_OWNED_TEST; Start-Sleep -Seconds 120",
     ])
     .unwrap();
-    let env = serde_json::to_string(&[("PARVI_OWNED_TEST", "owned-env-ok")]).unwrap();
+    let env = serde_json::to_string(&[("AHJO_OWNED_TEST", "owned-env-ok")]).unwrap();
     let cwd = std::env::temp_dir().to_string_lossy().to_string();
     let identity = run(
         &mut c,
-        &["parvi-create", "owned", &cwd, "160", "48", &command, &env],
+        &["ahjo-create", "owned", &cwd, "160", "48", &command, &env],
     )
     .await;
     let fields: Vec<_> = identity.split_whitespace().collect();
@@ -383,11 +383,11 @@ async fn owned_session_is_pinned_and_generation_guarded() {
     );
     let bad_pid = (holder.pid + 1).to_string();
     assert!(
-        c.command(&["parvi-kill", fields[0], &bad_pid, fields[3]])
+        c.command(&["ahjo-kill", fields[0], &bad_pid, fields[3]])
             .await
             .unwrap()
             .is_err()
     );
     run(&mut c, &["has-session", "-t", fields[0]]).await;
-    run(&mut c, &["parvi-kill", fields[0], fields[2], fields[3]]).await;
+    run(&mut c, &["ahjo-kill", fields[0], fields[2], fields[3]]).await;
 }

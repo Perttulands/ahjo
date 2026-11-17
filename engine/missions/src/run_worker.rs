@@ -19,7 +19,7 @@ pub(crate) enum Outcome {
     Stopped,
 }
 use crate::{BindingsSnapshot, Coordinator, RunEvent, render_run_inputs, resolve_run_inputs};
-use parvi_mission_model::{Mission, RunStart};
+use ahjo_mission_model::{Mission, RunStart};
 use serde_json::json;
 use std::{
     io,
@@ -78,7 +78,7 @@ pub fn execute(
                 .as_deref()
                 .map(crate::run_open_dispatch::unresolved)
                 .unwrap_or_default();
-            if let Err(e) = c.append(&id, RunEvent { kind:"run_blocked".into(), timestamp:now(), data:json!({"code":"coordinator_shutdown","reason":"Parvi shut down while the run was going; resume to continue","resumeAllowed":true,"resumePolicy":"explicit","openDispatches":open.iter().map(|e| &e.data).collect::<Vec<_>>()}).as_object().unwrap().clone(), ..Default::default() }) { eprintln!("parvi: cannot record shutdown of run {id}: {e}"); }
+            if let Err(e) = c.append(&id, RunEvent { kind:"run_blocked".into(), timestamp:now(), data:json!({"code":"coordinator_shutdown","reason":"Ahjo shut down while the run was going; resume to continue","resumeAllowed":true,"resumePolicy":"explicit","openDispatches":open.iter().map(|e| &e.data).collect::<Vec<_>>()}).as_object().unwrap().clone(), ..Default::default() }) { eprintln!("ahjo: cannot record shutdown of run {id}: {e}"); }
         }
         *done = true;
         control.finished.notify_all();
@@ -104,7 +104,7 @@ pub fn execute(
             } else { Ok(crate::outputs::Resolved { outputs: Vec::new(), picks: Vec::new() }) } {
                 Ok(resolved) => success_event(end_ids, resolved),
                 Err(crate::outputs::MissingOutput::Missing(reason)) => RunEvent { kind: "run_failed".into(), actor: "archond".into(), timestamp: now(), data: json!({"final":true,"endIds":end_ids,"code":"missing_output","reason":reason}).as_object().unwrap().clone(), ..Default::default() },
-                Err(crate::outputs::MissingOutput::Ledger(error)) => { eprintln!("parvi: cannot resolve run {id} outputs: {error}"); RunEvent { kind:"run_blocked".into(), timestamp:now(), data:json!({"code":"executor_failed","reason":error.to_string(),"resumeAllowed":true}).as_object().unwrap().clone(), ..Default::default() } }
+                Err(crate::outputs::MissingOutput::Ledger(error)) => { eprintln!("ahjo: cannot resolve run {id} outputs: {error}"); RunEvent { kind:"run_blocked".into(), timestamp:now(), data:json!({"code":"executor_failed","reason":error.to_string(),"resumeAllowed":true}).as_object().unwrap().clone(), ..Default::default() } }
             },
             Ok(Outcome::Rejected { end_id, gate_id, reason, actor, end_ids }) => RunEvent {
                 kind: "run_failed".into(),
@@ -135,7 +135,7 @@ pub fn execute(
             },
             Ok(Outcome::Unfinished(nodes)) => {
                 let reason = "the run has unfinished work here; resume to continue it".to_owned();
-                if let Err(error) = c.append(&id, RunEvent { kind: "error".into(), node_id: nodes[0].clone(), timestamp: now(), data: json!({"code":"run_work_unfinished","message":reason,"reason":reason,"boundary":"engine","nodeId":nodes[0],"recoverable":true}).as_object().unwrap().clone(), ..Default::default() }) { eprintln!("parvi: cannot record run {id} unfinished work: {error}"); }
+                if let Err(error) = c.append(&id, RunEvent { kind: "error".into(), node_id: nodes[0].clone(), timestamp: now(), data: json!({"code":"run_work_unfinished","message":reason,"reason":reason,"boundary":"engine","nodeId":nodes[0],"recoverable":true}).as_object().unwrap().clone(), ..Default::default() }) { eprintln!("ahjo: cannot record run {id} unfinished work: {error}"); }
                 RunEvent { kind: "run_blocked".into(), node_id: nodes[0].clone(), timestamp: now(), data: json!({"code":"run_work_unfinished","reason":reason,"blockedNodeId":nodes[0],"resumeAllowed":true,"resumePolicy":"explicit"}).as_object().unwrap().clone(), ..Default::default() }
             },
             Ok(Outcome::Limit(stop)) => match crate::run_limit::final_event(&c, &id, &mission, &stop) {
@@ -161,7 +161,7 @@ pub fn execute(
                         ..Default::default()
                     },
                 ) {
-                    eprintln!("parvi: cannot record run {id} error: {error}");
+                    eprintln!("ahjo: cannot record run {id} error: {error}");
                 }
                 let pending = if ["output_not_kept", "invalid_output_ref", "unavailable_output_ref"].contains(&code) {
                     c.ledger(&id).and_then(|ledger| ledger.read().map_err(crate::error::to_io)).ok().and_then(|events| {
@@ -190,7 +190,7 @@ pub fn execute(
         }
     };
     if let Err(e) = c.append(&id, event) {
-        eprintln!("parvi: cannot record run {id} outcome: {e}");
+        eprintln!("ahjo: cannot record run {id} outcome: {e}");
     }
     *done = true;
     control.finished.notify_all();
@@ -246,7 +246,7 @@ pub(crate) fn error_code(detail: &str) -> &'static str {
 /// An agent that ended its turn with a done line other than ok: it said
 /// itself that the step is blocked, or failed.
 fn agent_status(detail: &str) -> Option<&'static str> {
-    let done = &detail[detail.find("<<<PARVI-DONE")?..];
+    let done = &detail[detail.find("<<<AHJO-DONE")?..];
     let line = done.lines().next().unwrap_or(done);
     Some(if line.contains("status=blocked") {
         "agent_blocked"

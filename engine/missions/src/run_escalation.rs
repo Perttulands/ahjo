@@ -1,6 +1,6 @@
 //! Escalation evidence projected separately from the sanitized run view.
 use crate::RunEvent;
-use parvi_mission_model::Escalation;
+use ahjo_mission_model::Escalation;
 pub fn project_escalations(events: &[RunEvent]) -> Vec<Escalation> {
     events
         .iter()
@@ -122,7 +122,7 @@ mod tests {
     use super::parse_escalation;
     #[test]
     fn finds_matching_run_and_quoted_reason() {
-        let captured = "<<<PARVI-ESCALATE run-id=other reason=ignored>>> <<<PARVI-ESCALATE run-id=run_1 severity=stop reason='needs å review' nodeId=step>>>";
+        let captured = "<<<AHJO-ESCALATE run-id=other reason=ignored>>> <<<AHJO-ESCALATE run-id=run_1 severity=stop reason='needs å review' nodeId=step>>>";
         let found = parse_escalation(captured, "run_1").unwrap();
         assert_eq!(found.reason, "needs å review");
         assert_eq!(found.node_id, "step");

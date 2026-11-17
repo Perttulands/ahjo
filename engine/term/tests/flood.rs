@@ -1,17 +1,17 @@
-//! Issue #24: a flood of output never stalls tmux or parvi, memory stays
+//! Issue #24: a flood of output never stalls tmux or ahjo, memory stays
 //! bounded, and the held screen matches tmux once the flood is over. A test
 //! binary of its own, so the memory reading is this test's alone.
 #![cfg(unix)]
 
 use std::time::{Duration, Instant};
 
-use parvi_term::engine::Engine;
-use parvi_testkit::tmux::*;
+use ahjo_term::engine::Engine;
+use ahjo_testkit::tmux::*;
 
 /// How much more memory the flood may cost us, at its peak.
 const MAX_GROWTH_KIB: u64 = 64 * 1024;
 
-/// How long tmux or parvi may take to answer during the flood.
+/// How long tmux or ahjo may take to answer during the flood.
 const MAX_STALL: Duration = Duration::from_secs(2);
 
 /// This process's resident memory, where /proc has it.
@@ -79,7 +79,7 @@ async fn a_flood_never_stalls_tmux_or_us() {
         let asked = Instant::now();
         let _ = engine.snapshot();
         let we_took = asked.elapsed();
-        assert!(we_took < MAX_STALL, "parvi took {we_took:?} to answer");
+        assert!(we_took < MAX_STALL, "ahjo took {we_took:?} to answer");
 
         // Typing into another session still gets through, and comes back.
         typed += 1;

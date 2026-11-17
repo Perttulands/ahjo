@@ -1,8 +1,8 @@
 //! The Agents page reads an isolated node and offers its tool details.
+use ahjo_app_kit::link::client::LinkState;
+use ahjo_app_kit::{Ask, Host};
+use ahjo_testkit::{fresh_dir, node::Node, sessions};
 use gpui::{Modifiers, TestAppContext, VisualTestContext};
-use parvi_app_kit::link::client::LinkState;
-use parvi_app_kit::{Ask, Host};
-use parvi_testkit::{fresh_dir, node::Node, sessions};
 use std::path::PathBuf;
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
@@ -28,14 +28,14 @@ fn start() -> Running {
     let thread = std::thread::spawn(move || {
         let rt = tokio::runtime::Runtime::new().unwrap();
         rt.block_on(async move {
-            let home = fresh_dir("parvi-agents-page-home");
+            let home = fresh_dir("ahjo-agents-page-home");
             std::fs::create_dir_all(home.join(".claude")).unwrap();
             std::fs::write(home.join(".claude/CLAUDE.md"), "# Mine\n\nBe brief.\n").unwrap();
             std::fs::create_dir_all(home.join("proj/.git")).unwrap();
             std::fs::write(home.join("proj/.git/HEAD"), "ref: refs/heads/main\n").unwrap();
             std::fs::write(home.join("proj/AGENTS.md"), "# Project\n").unwrap();
             let config = format!("[agents]\nhome = {:?}\npath = []\n", home);
-            let node = Node::start(&[sessions::LISTING, parvi_agents::LISTING], &config)
+            let node = Node::start(&[sessions::LISTING, ahjo_agents::LISTING], &config)
                 .await
                 .unwrap();
             let role_file = node.dir().join("missions/roles/fixture-writer.toml");
@@ -76,19 +76,13 @@ fn until(
 #[gpui::test]
 fn role_library_edits_and_saves_a_fixture_card(cx: &mut TestAppContext) {
     let running = start();
-    let settings = fresh_dir("parvi-agents-page-settings");
+    let settings = fresh_dir("ahjo-agents-page-settings");
     cx.executor().allow_parking();
-    cx.update(parvi_app_shell::prepare);
+    cx.update(ahjo_app_shell::prepare);
     let url = running.url.clone();
     let path = settings.join("app.json");
     let (shell, cx) = cx.add_window_view(move |window, cx| {
-        parvi_app_shell::start(
-            &[parvi_agents_app::build],
-            Some(url),
-            Some(path),
-            window,
-            cx,
-        )
+        ahjo_app_shell::start(&[ahjo_agents_app::build], Some(url), Some(path), window, cx)
     });
     until(cx, "the node connection", |cx| {
         shell.read_with(cx, |s, cx| {
@@ -149,19 +143,13 @@ fn click(cx: &mut VisualTestContext, selector: &'static str) {
 #[gpui::test]
 fn agent_view_reads_a_folder_and_saves_an_instruction_in_place(cx: &mut TestAppContext) {
     let running = start();
-    let settings = fresh_dir("parvi-agents-page-shape");
+    let settings = fresh_dir("ahjo-agents-page-shape");
     cx.executor().allow_parking();
-    cx.update(parvi_app_shell::prepare);
+    cx.update(ahjo_app_shell::prepare);
     let url = running.url.clone();
     let path = settings.join("app.json");
     let (shell, cx) = cx.add_window_view(move |window, cx| {
-        parvi_app_shell::start(
-            &[parvi_agents_app::build],
-            Some(url),
-            Some(path),
-            window,
-            cx,
-        )
+        ahjo_app_shell::start(&[ahjo_agents_app::build], Some(url), Some(path), window, cx)
     });
     until(cx, "the node connection", |cx| {
         shell.read_with(cx, |s, cx| {
@@ -205,19 +193,13 @@ fn agent_view_reads_a_folder_and_saves_an_instruction_in_place(cx: &mut TestAppC
 #[gpui::test]
 fn a_reveal_of_an_agent_opens_its_folder_by_its_harness(cx: &mut TestAppContext) {
     let running = start();
-    let settings = fresh_dir("parvi-agents-page-reveal");
+    let settings = fresh_dir("ahjo-agents-page-reveal");
     cx.executor().allow_parking();
-    cx.update(parvi_app_shell::prepare);
+    cx.update(ahjo_app_shell::prepare);
     let url = running.url.clone();
     let path = settings.join("app.json");
     let (shell, cx) = cx.add_window_view(move |window, cx| {
-        parvi_app_shell::start(
-            &[parvi_agents_app::build],
-            Some(url),
-            Some(path),
-            window,
-            cx,
-        )
+        ahjo_app_shell::start(&[ahjo_agents_app::build], Some(url), Some(path), window, cx)
     });
     until(cx, "the node connection", |cx| {
         shell.read_with(cx, |s, cx| {

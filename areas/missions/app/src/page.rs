@@ -10,11 +10,7 @@ mod run_view;
 mod staffing;
 mod validation;
 use crate::store::{Store, canvas as board, flow, undo};
-use gpui::{
-    AppContext, Context, Div, Entity, FocusHandle, FontWeight, IntoElement, KeyDownEvent,
-    MouseButton, Render, SystemNotification, Window, div, prelude::*, px,
-};
-use parvi_app_kit::{
+use ahjo_app_kit::{
     Host, Page,
     host::Request,
     theme::{size, theme},
@@ -24,9 +20,13 @@ use parvi_app_kit::{
         pane,
     },
 };
-use parvi_core::NodeId;
-use parvi_missions_contract::{
+use ahjo_core::NodeId;
+use ahjo_missions_contract::{
     EditResponse, ErrorResponse, LayoutResponse, MissionResponse, WATCH, WATCH_RUNS,
+};
+use gpui::{
+    AppContext, Context, Div, Entity, FocusHandle, FontWeight, IntoElement, KeyDownEvent,
+    MouseButton, Render, SystemNotification, Window, div, prelude::*, px,
 };
 use serde_json::json;
 
@@ -70,7 +70,7 @@ pub struct MissionsPage {
     check_value: Entity<TextField>,
     history: undo::History,
     writing: bool,
-    roles: Option<parvi_agents_contract::roles::Roles>,
+    roles: Option<ahjo_agents_contract::roles::Roles>,
     /// The repositories the node's config names, for a step's Repository.
     repositories: Option<Vec<String>>,
     role: Entity<TextField>,
@@ -79,7 +79,7 @@ pub struct MissionsPage {
     effort: Entity<TextField>,
     slot: Option<String>,
     note: Entity<TextField>,
-    notes: Option<parvi_missions_contract::document::NotesDocument>,
+    notes: Option<ahjo_missions_contract::document::NotesDocument>,
     port_label: Entity<TextField>,
     port_kind: Entity<TextField>,
     port: Option<String>,
@@ -265,7 +265,7 @@ impl MissionsPage {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let Ok(runs) = serde_json::from_slice::<Vec<parvi_missions_contract::RunProjection>>(body)
+        let Ok(runs) = serde_json::from_slice::<Vec<ahjo_missions_contract::RunProjection>>(body)
         else {
             return;
         };
@@ -319,7 +319,7 @@ impl MissionsPage {
                     );
                 }
             }
-            let blocked_seq = |run: &parvi_missions_contract::RunProjection| {
+            let blocked_seq = |run: &ahjo_missions_contract::RunProjection| {
                 run.events
                     .iter()
                     .rev()
@@ -798,7 +798,7 @@ impl MissionsPage {
             && let Some((node, _)) = self.state.selected.clone()
         {
             let asked = self.host.request(
-                Request::get(NodeId(node.clone()), parvi_agents_contract::roles::PATH),
+                Request::get(NodeId(node.clone()), ahjo_agents_contract::roles::PATH),
                 cx,
             );
             self.read_repositories(node, cx);
@@ -831,8 +831,8 @@ impl MissionsPage {
     /// for every attempt (a best-of-n step).
     fn session_choice(
         &self,
-        t: &parvi_app_kit::theme::Theme,
-        f: &parvi_missions_contract::Formation,
+        t: &ahjo_app_kit::theme::Theme,
+        f: &ahjo_missions_contract::Formation,
         cx: &mut Context<Self>,
     ) -> Div {
         let Some(m) = self.state.mission.as_ref() else {
@@ -915,17 +915,16 @@ impl MissionsPage {
         let Some(etag) = self.state.mission_etag.clone() else {
             return;
         };
-        let before =
-            match serde_json::to_value(parvi_missions_contract::document::MissionDocument {
-                mission: mission.clone(),
-                etag: None,
-            }) {
-                Ok(v) => v,
-                Err(e) => {
-                    self.state.error = Some(e.to_string());
-                    return;
-                }
-            };
+        let before = match serde_json::to_value(ahjo_missions_contract::document::MissionDocument {
+            mission: mission.clone(),
+            etag: None,
+        }) {
+            Ok(v) => v,
+            Err(e) => {
+                self.state.error = Some(e.to_string());
+                return;
+            }
+        };
         let layout = self
             .state
             .layout
@@ -971,7 +970,7 @@ impl MissionsPage {
         });
         let mut body = patch.clone();
         body["expectedRev"] = json!(mission.rev);
-        body["updatedBy"] = json!("user:parvi-app");
+        body["updatedBy"] = json!("user:ahjo-swarm");
         let request = Request::new("PATCH", NodeId(node), mission_path(&slug))
             .header("If-Match", etag)
             .json(&body);
@@ -1118,7 +1117,7 @@ impl MissionsPage {
                 page.note_saving = false;
                 match result {
                     Ok(a) if a.ok() => match serde_json::from_slice::<
-                        parvi_missions_contract::NotesResponse,
+                        ahjo_missions_contract::NotesResponse,
                     >(&a.body)
                     {
                         Ok(n) => {
@@ -1454,20 +1453,20 @@ impl Page for MissionsPage {
     const TITLE: &'static str = "Missions";
     const KEY: Option<char> = Some('M');
     const AREA: Option<&'static str> = Some("missions");
-    const KINDS: parvi_core::frame::Kinds = parvi_missions_contract::KINDS;
+    const KINDS: ahjo_core::frame::Kinds = ahjo_missions_contract::KINDS;
     const CHANNELS: &'static [u8] = &[WATCH];
-    const ANSWERS: &'static [parvi_app_kit::ask::Answers] = &[
-        parvi_app_kit::ask::Answers::Reveal("mission"),
-        parvi_app_kit::ask::Answers::Reveal("run"),
+    const ANSWERS: &'static [ahjo_app_kit::ask::Answers] = &[
+        ahjo_app_kit::ask::Answers::Reveal("mission"),
+        ahjo_app_kit::ask::Answers::Reveal("run"),
     ];
     fn answer(
         &mut self,
-        ask: parvi_app_kit::Ask,
+        ask: ahjo_app_kit::Ask,
         _: &'static str,
         _: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if let parvi_app_kit::Ask::Reveal {
+        if let ahjo_app_kit::Ask::Reveal {
             what,
             id,
             node,
@@ -1523,11 +1522,11 @@ impl Page for MissionsPage {
     fn link(
         &mut self,
         node: &NodeId,
-        state: Option<parvi_app_kit::link::client::LinkState>,
+        state: Option<ahjo_app_kit::link::client::LinkState>,
         _: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if state != Some(parvi_app_kit::link::client::LinkState::Open)
+        if state != Some(ahjo_app_kit::link::client::LinkState::Open)
             && self
                 .state
                 .selected
@@ -1551,15 +1550,15 @@ impl Page for MissionsPage {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if kind == parvi_missions_contract::RUNS_SNAPSHOT {
+        if kind == ahjo_missions_contract::RUNS_SNAPSHOT {
             self.report_new_asks(node, body, window, cx);
         }
         self.state.frame(node.as_str(), kind, body);
         self.resolve_wanted(cx);
-        if kind == parvi_missions_contract::RUNS_SNAPSHOT {
+        if kind == ahjo_missions_contract::RUNS_SNAPSHOT {
             self.sync_gate(cx);
         }
-        if kind == parvi_missions_contract::SNAPSHOT
+        if kind == ahjo_missions_contract::SNAPSHOT
             && self
                 .state
                 .selected

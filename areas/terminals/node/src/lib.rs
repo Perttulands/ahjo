@@ -1,6 +1,6 @@
 //! The terminals area: every session on the tmux servers the node follows
 //! (the service user's own and other Unix users'), on the socket, as
-//! commands and through [`parvi_term::Sessions`] for other areas.
+//! commands and through [`ahjo_term::Sessions`] for other areas.
 //!
 //! Its config section, `[terminals]`:
 //!
@@ -30,16 +30,16 @@ use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 
+use ahjo_core::Error;
+use ahjo_node_kit::{Area, BoxFuture, Built, Channel, Client, Command, Failure, Listing, Setup};
+use ahjo_term::backend::tmux::Socket;
+use ahjo_term::{Engine, Sessions};
 use anyhow::{Context, Result, bail};
 use axum::Router;
 use axum::extract::{Query, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use axum::routing::get;
-use parvi_core::Error;
-use parvi_node_kit::{Area, BoxFuture, Built, Channel, Client, Command, Failure, Listing, Setup};
-use parvi_term::backend::tmux::Socket;
-use parvi_term::{Engine, Sessions};
 use serde::Deserialize;
 
 use agent_events::hooks::{self, Hooks};
@@ -50,10 +50,10 @@ use launcher::Launcher;
 /// The area's name and config section.
 pub const NAME: &str = "terminals";
 
-/// How `bin/parvi` lists the area.
+/// How `bin/ahjo` lists the area.
 pub const LISTING: Listing = Listing {
     name: NAME,
-    kinds: parvi_terminals_contract::KINDS,
+    kinds: ahjo_terminals_contract::KINDS,
     commands: &[
         "session_list",
         "session_read",
@@ -92,7 +92,7 @@ struct Terminals {
 }
 
 /// Builds the area from `[terminals]`, and provides the node's
-/// [`parvi_term::Sessions`].
+/// [`ahjo_term::Sessions`].
 pub fn build(setup: &Setup) -> Result<Built> {
     let section: Section = setup.config.section(NAME)?;
     if section.socket.is_some() && section.socket_name.is_some() {
@@ -119,7 +119,7 @@ pub fn build(setup: &Setup) -> Result<Built> {
         })
         .map_err(|error| format!("{error:#}"));
     if let Err(error) = &hooks {
-        eprintln!("parvi: launches run without completion hooks: {error}");
+        eprintln!("ahjo: launches run without completion hooks: {error}");
     }
     let hub = Arc::new(hub.with_hooks(hooks));
     setup
@@ -171,7 +171,7 @@ fn servers(section: &Section, setup: &Setup) -> Result<Vec<Server>> {
 
 #[cfg(windows)]
 fn own_engine(holder: Option<&str>) -> Result<Engine> {
-    use parvi_term::backend::holder::Holder;
+    use ahjo_term::backend::holder::Holder;
     let holder = match holder {
         Some(name) => Holder::scratch(name)?,
         None => Holder::for_user()?,
@@ -221,7 +221,7 @@ async fn folders(Query(query): Query<FolderQuery>) -> Response {
         return Failure(
             StatusCode::BAD_REQUEST,
             Error::new(
-                parvi_terminals_contract::COMMAND_FAILED,
+                ahjo_terminals_contract::COMMAND_FAILED,
                 "An absolute folder is required",
             ),
         )
@@ -247,7 +247,7 @@ async fn folders(Query(query): Query<FolderQuery>) -> Response {
         Err(error) => Failure(
             StatusCode::BAD_REQUEST,
             Error::new(
-                parvi_terminals_contract::COMMAND_FAILED,
+                ahjo_terminals_contract::COMMAND_FAILED,
                 format!("Cannot list {}: {error}", path.display()),
             ),
         )
@@ -268,7 +268,7 @@ async fn windows(State(hub): State<Arc<Hub>>, Query(query): Query<WindowQuery>) 
         Err(error) => Failure(
             StatusCode::BAD_REQUEST,
             Error::new(
-                parvi_terminals_contract::COMMAND_FAILED,
+                ahjo_terminals_contract::COMMAND_FAILED,
                 format!("{error:#}"),
             ),
         )

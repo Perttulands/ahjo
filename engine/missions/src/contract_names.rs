@@ -1,8 +1,8 @@
 //! Names used in the seat's output contract.
-pub const VERDICT: &str = "parvi-verdict";
-pub const OUTPUTS: &str = "parvi-outputs";
-pub const PICK: &str = "parvi-pick";
-pub const DONE: &str = "<<<PARVI-DONE ";
+pub const VERDICT: &str = "ahjo-verdict";
+pub const OUTPUTS: &str = "ahjo-outputs";
+pub const PICK: &str = "ahjo-pick";
+pub const DONE: &str = "<<<AHJO-DONE ";
 
 /// The fields of a sentinel whose opening `DONE` has been cut off, and the
 /// text after it. A sentinel ends at `>>>`; one an agent left unclosed ends
@@ -14,4 +14,4 @@ pub fn sentinel_fields(tail: &str) -> (&str, &str) {
         None => (line, after_line),
     }
 }
-pub const ESCALATE: &str = "<<<PARVI-ESCALATE ";
+pub const ESCALATE: &str = "<<<AHJO-ESCALATE ";

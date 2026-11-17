@@ -1,5 +1,8 @@
 //! Help catalogue for configured harnesses.
 use crate::launcher::Launcher;
+use ahjo_core::Error;
+use ahjo_node_kit::Failure;
+use ahjo_terminals_contract::Flag;
 use axum::{
     Json, Router,
     extract::{Query, State},
@@ -7,9 +10,6 @@ use axum::{
     response::{IntoResponse, Response},
     routing::get,
 };
-use parvi_core::Error;
-use parvi_node_kit::Failure;
-use parvi_terminals_contract::Flag;
 use serde::Deserialize;
 use std::{
     collections::HashMap,
@@ -58,7 +58,7 @@ async fn get_flags(catalogue: &Catalogue, id: &str) -> Result<Vec<Flag>, FlagErr
         .ok_or_else(|| {
             (
                 StatusCode::NOT_FOUND,
-                parvi_terminals_contract::UNKNOWN_HARNESS,
+                ahjo_terminals_contract::UNKNOWN_HARNESS,
                 "Unknown harness".into(),
             )
         })?;
@@ -68,7 +68,7 @@ async fn get_flags(catalogue: &Catalogue, id: &str) -> Result<Vec<Flag>, FlagErr
     let path = resolve(&harness.command).ok_or_else(|| {
         (
             StatusCode::NOT_FOUND,
-            parvi_terminals_contract::HARNESS_NOT_FOUND,
+            ahjo_terminals_contract::HARNESS_NOT_FOUND,
             "Harness binary not found in the node PATH".into(),
         )
     })?;
@@ -103,7 +103,7 @@ async fn get_flags(catalogue: &Catalogue, id: &str) -> Result<Vec<Flag>, FlagErr
     .map_err(|_| {
         (
             StatusCode::GATEWAY_TIMEOUT,
-            parvi_terminals_contract::HARNESS_HELP_TIMEOUT,
+            ahjo_terminals_contract::HARNESS_HELP_TIMEOUT,
             "Harness help timed out".into(),
         )
     })?
@@ -111,7 +111,7 @@ async fn get_flags(catalogue: &Catalogue, id: &str) -> Result<Vec<Flag>, FlagErr
     if !status.success() {
         return Err((
             StatusCode::BAD_GATEWAY,
-            parvi_terminals_contract::HARNESS_HELP_FAILED,
+            ahjo_terminals_contract::HARNESS_HELP_FAILED,
             "Harness help failed".into(),
         ));
     }
@@ -126,7 +126,7 @@ async fn get_flags(catalogue: &Catalogue, id: &str) -> Result<Vec<Flag>, FlagErr
 fn internal(error: std::io::Error) -> FlagError {
     (
         StatusCode::INTERNAL_SERVER_ERROR,
-        parvi_terminals_contract::HARNESS_HELP_ERROR,
+        ahjo_terminals_contract::HARNESS_HELP_ERROR,
         error.to_string(),
     )
 }

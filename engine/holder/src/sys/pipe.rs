@@ -25,9 +25,9 @@ use super::{last_error, owned, wide};
 /// Owner and SYSTEM only, protected from inherited entries.
 const OWNER_ONLY: &str = "D:P(A;;GA;;;OW)(A;;GA;;;SY)";
 
-/// `\\.\pipe\parvi-holder-<suffix>`.
+/// `\\.\pipe\ahjo-holder-<suffix>`.
 pub fn path(suffix: &str) -> String {
-    format!(r"\\.\pipe\parvi-holder-{suffix}")
+    format!(r"\\.\pipe\ahjo-holder-{suffix}")
 }
 
 /// This user's SID as a string (`S-1-5-21-…`): unlike the user name, it

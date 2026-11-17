@@ -2,7 +2,7 @@
 //! lists, its panes' screens, and what was asked of it. Pane ids are only
 //! unique on one node, so everything here is addressed by (node, pane).
 //! The app's link decides which nodes there are; the page hears each one
-//! open, go and leave through [`Page::link`](parvi_app_kit::Page::link).
+//! open, go and leave through [`Page::link`](ahjo_app_kit::Page::link).
 //!
 //! Screens are fed on the network thread by the page's tap, so a busy pane
 //! never waits on the UI; the tap wakes the page once per paint.
@@ -10,9 +10,9 @@
 use crate::remote::{Match, Notice, Remote, Screens, SharedScreen, feed};
 use crate::store::sessions::{self, Key};
 use crate::store::workspace::{Binding, LinkState, TileState, tile_state};
+use ahjo_app_kit::link::socket::Tap;
+use ahjo_terminals_contract::{Launch, OUTPUT, SCREEN, Session, decode_down};
 use parking_lot::Mutex;
-use parvi_app_kit::link::socket::Tap;
-use parvi_terminals_contract::{Launch, OUTPUT, SCREEN, Session, decode_down};
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
@@ -117,7 +117,7 @@ impl Remotes {
     }
 
     /// A frame from `node`, already decoded.
-    pub fn frame(&mut self, node: &str, down: parvi_terminals_contract::Down) -> Vec<Notice> {
+    pub fn frame(&mut self, node: &str, down: ahjo_terminals_contract::Down) -> Vec<Notice> {
         let Some(c) = self.get_mut(node) else {
             return vec![];
         };

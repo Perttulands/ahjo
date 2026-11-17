@@ -14,10 +14,10 @@ use std::time::Duration;
 use anyhow::{Context, Result, bail};
 
 use crate::agent_events::hooks::{self, Hooks};
-use parvi_core::json::push_string as push_json_string;
-use parvi_term::backend::Backend;
-use parvi_term::engine::Engine;
-pub use parvi_terminals_contract::Launch;
+use ahjo_core::json::push_string as push_json_string;
+use ahjo_term::backend::Backend;
+use ahjo_term::engine::Engine;
+pub use ahjo_terminals_contract::Launch;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 static LAUNCH_SEQUENCE: AtomicU64 = AtomicU64::new(0);
@@ -336,7 +336,7 @@ pub async fn launch(
     let folder = folder.to_string_lossy();
     new.push(&folder);
     let channel = format!(
-        "parvi-launch-{}-{}",
+        "ahjo-launch-{}-{}",
         std::process::id(),
         LAUNCH_SEQUENCE.fetch_add(1, Ordering::Relaxed)
     );
@@ -437,7 +437,7 @@ pub async fn launch(
         if let Err(error) = typed.await {
             // The session is a working shell in the folder: it stays, as in
             // CHROTE, and the operator is told what did not start.
-            let reason = if error.is::<parvi_term::engine::NotReady>() {
+            let reason = if error.is::<ahjo_term::engine::NotReady>() {
                 format!(
                     "{error:#}; the shell may never have enabled bracketed paste (bash older than 5.1, enable-bracketed-paste off in .inputrc, sh/dash, or the launch gate's timeout command missing)"
                 )
@@ -566,7 +566,7 @@ mod tests {
     #[test]
     fn parses_harnesses_folders_and_size() {
         let config = Config::parse(
-            "# Parvi launcher\n\
+            "# Ahjo launcher\n\
              harness claude-code claude --permission-mode acceptEdits\n\
              harness codex codex\n\
              \n\
@@ -670,9 +670,9 @@ mod tests {
             PathBuf::from(r"C:\work\my checkout")
         );
         assert!(resolve_folder("relative", Some(&home), true).is_err());
-        assert!(resolve_folder("~/surely-not-here-parvi", Some(&home), true).is_err());
+        assert!(resolve_folder("~/surely-not-here-ahjo", Some(&home), true).is_err());
         // Another user's folder is left to their tmux server.
-        assert!(resolve_folder("~/surely-not-here-parvi", Some(&home), false).is_ok());
+        assert!(resolve_folder("~/surely-not-here-ahjo", Some(&home), false).is_ok());
         assert!(resolve_folder("~", None, false).is_err());
     }
 }

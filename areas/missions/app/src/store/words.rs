@@ -1,7 +1,7 @@
 //! The words Missions shows, as Archon's cockpit says them: run states,
 //! harness names, staffing sentences, times and spans.
 
-use parvi_missions_contract::{RunOutput, RunProjection as Run, Slot};
+use ahjo_missions_contract::{RunOutput, RunProjection as Run, Slot};
 use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
 
@@ -15,7 +15,7 @@ pub fn run_reference(run: &Run, device: &str) -> String {
 /// A gate reference includes the request sequence that makes the answer exact.
 pub fn gate_reference(
     run: &Run,
-    gate: &parvi_missions_contract::WaitingGate,
+    gate: &ahjo_missions_contract::WaitingGate,
     device: &str,
 ) -> String {
     let what = if gate.pick.is_some() { "pick" } else { "gate" };
@@ -97,11 +97,11 @@ pub fn role_name(agent: &str) -> String {
 /// The session a slot's agent works in, as the session list shows it: the
 /// agent's own, or for a step that starts fresh, one per attempt.
 pub fn session_of(
-    m: &parvi_missions_contract::Mission,
-    f: &parvi_missions_contract::Formation,
+    m: &ahjo_missions_contract::Mission,
+    f: &ahjo_missions_contract::Formation,
     slot: &Slot,
 ) -> String {
-    let session = parvi_missions_contract::agent_session(&m.session_prefix(), &f.agent_of(slot));
+    let session = ahjo_missions_contract::agent_session(&m.session_prefix(), &f.agent_of(slot));
     if f.fresh {
         format!("{session}-*")
     } else {
@@ -111,7 +111,7 @@ pub fn session_of(
 
 /// What a Limit card caps and what happens when it is spent:
 /// `3 rounds · then the best`.
-pub fn limit_line(l: &parvi_missions_contract::Limit) -> String {
+pub fn limit_line(l: &ahjo_missions_contract::Limit) -> String {
     let mut caps = vec![];
     if let Some(r) = l.rounds {
         caps.push(format!("{r} round{}", if r == 1 { "" } else { "s" }));
@@ -318,7 +318,7 @@ pub fn work_label(work: &str) -> String {
 pub fn actor_label(actor: &str) -> String {
     match actor {
         "human:operator" => "you".into(),
-        "parvi" | "archond" => "Parvi".into(),
+        "ahjo" | "archond" => "Ahjo".into(),
         other => other.trim_start_matches("agent:").to_string(),
     }
 }
@@ -349,7 +349,7 @@ pub fn output_excerpt(o: &RunOutput) -> String {
 
 /// The branch a repository run works on, kept until it is landed.
 pub fn run_branch(run: &Run) -> Option<String> {
-    (!run.repository.is_empty()).then(|| format!("parvi/run-{}", run.run_id))
+    (!run.repository.is_empty()).then(|| format!("ahjo/run-{}", run.run_id))
 }
 
 /// A file's size in a few characters: `512 B`, `2 KB`, `1.18 GB`.
@@ -390,7 +390,7 @@ mod tests {
     #[test]
     fn a_run_and_its_gate_are_handed_over_by_what_answers_them() {
         let run: Run = serde_json::from_value(serde_json::json!({"runId":"r-7","status":"waiting_human","final":false,"resumeAllowed":false,"epoch":1,"missionSlug":"daily","missionId":"m","missionRev":1,"inputCardId":"i","work":"","cwd":"","repository":"","base":"","contextPaths":[],"inputs":[],"outputs":[],"eventCount":1,"startedBy":"","startedAt":"","updatedAt":"","waitingGates":[],"events":[]})).unwrap();
-        let gate = parvi_missions_contract::WaitingGate {
+        let gate = ahjo_missions_contract::WaitingGate {
             gate_id: "gate_review".into(),
             requested_seq: 12,
             requested_at: String::new(),

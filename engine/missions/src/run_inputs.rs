@@ -1,6 +1,6 @@
 //! Admission and rendering of values supplied to a mission run.
 
-use parvi_mission_model::{Code, Finding, Mission, MissionInput, RunInput};
+use ahjo_mission_model::{Code, Finding, Mission, MissionInput, RunInput};
 use std::collections::{BTreeMap, HashSet};
 use std::path::Path;
 
@@ -153,13 +153,13 @@ pub fn render_run_inputs(mission: &Mission, inputs: &[RunInput]) -> String {
 }
 
 /// The placeholders that take the run's work item: Archon's `{bead}` and
-/// Parvi's `{issue}`, the same value under two names.
+/// Ahjo's `{issue}`, the same value under two names.
 pub const WORK_REFERENCES: [&str; 2] = ["bead", "issue"];
 
 /// What `{bead}` and `{issue}` take for a run's canonical work reference:
 /// the Bead id, as Archon gives it, or `owner/repo#N`; empty without one.
 pub fn work_placeholder(work: &str) -> String {
-    parvi_work_ref::parse_resolved(work)
+    ahjo_work_ref::parse_resolved(work)
         .map(|r| r.short())
         .unwrap_or_default()
 }

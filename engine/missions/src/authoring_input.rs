@@ -1,6 +1,6 @@
 //! Partial Input card edits and declaration normalization.
 use crate::Error;
-use parvi_mission_model::{InputCardUpdate, Mission};
+use ahjo_mission_model::{InputCardUpdate, Mission};
 use serde::Serialize;
 use std::collections::HashSet;
 use toml_edit::{DocumentMut, Item, value};

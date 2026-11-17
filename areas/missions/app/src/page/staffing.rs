@@ -1,8 +1,8 @@
 //! The selected slot's role, harness, model and effort pickers.
 use super::*;
 use crate::store::staffing::{self, Choice};
+use ahjo_app_kit::theme::Theme;
 use gpui::{SharedString, Stateful};
-use parvi_app_kit::theme::Theme;
 
 #[derive(Clone, Copy)]
 enum Part {

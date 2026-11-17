@@ -6,12 +6,12 @@ use crate::chords::Chord;
 use crate::declared::Setting;
 use crate::host::Host;
 use crate::link::client::LinkState;
+use ahjo_core::NodeId;
+use ahjo_core::frame::Kinds;
 use gpui::{
     AnyElement, App, AppContext, Context, Entity, EntityId, FocusHandle, IntoElement, Render,
     Subscription, Window,
 };
-use parvi_core::NodeId;
-use parvi_core::frame::Kinds;
 
 pub trait Page: Render + Sized + 'static {
     /// Names the page in view control, in settings and in its layers.
@@ -119,7 +119,7 @@ pub struct Meta {
 impl Meta {
     /// Whether frames of `kind` are this page's.
     pub fn takes(&self, kind: u8) -> bool {
-        parvi_core::frame::owns(self.kinds, kind)
+        ahjo_core::frame::owns(self.kinds, kind)
     }
 }
 

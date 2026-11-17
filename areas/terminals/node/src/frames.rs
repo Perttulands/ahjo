@@ -4,9 +4,9 @@
 
 use std::collections::HashMap;
 
-use parvi_core::json::push_string as push_json_string;
-use parvi_term::engine::SessionInfo;
-use parvi_terminals_contract::{LAUNCHER, MATCH, Outcome, SEARCHED, SESSIONS};
+use ahjo_core::json::push_string as push_json_string;
+use ahjo_term::engine::SessionInfo;
+use ahjo_terminals_contract::{LAUNCHER, MATCH, Outcome, SEARCHED, SESSIONS};
 
 use crate::agent_events::Event;
 use crate::launch::Config;
@@ -120,7 +120,7 @@ pub fn launcher(config: &Config, users: &[String], notify_off: Option<&str>) -> 
 
 /// `0x26`, search id u32, pane u32, line u32, then UTF-8 `before\nline\nafter`.
 /// `line` counts from the pane's oldest history line.
-pub fn found(id: u32, found: &parvi_term::search::Match) -> Vec<u8> {
+pub fn found(id: u32, found: &ahjo_term::search::Match) -> Vec<u8> {
     let text = found.context.join("\n");
     [
         &[MATCH][..],
@@ -134,7 +134,7 @@ pub fn found(id: u32, found: &parvi_term::search::Match) -> Vec<u8> {
 
 /// `0x27`, search id u32, matches u32, panes u32, truncated u8: the search
 /// has ended, having read this many panes.
-pub fn searched(id: u32, summary: &parvi_term::search::Summary) -> Vec<u8> {
+pub fn searched(id: u32, summary: &ahjo_term::search::Summary) -> Vec<u8> {
     [
         &[SEARCHED][..],
         &id.to_le_bytes(),
@@ -149,8 +149,8 @@ pub fn searched(id: u32, summary: &parvi_term::search::Summary) -> Vec<u8> {
 pub fn outcome(result: &anyhow::Result<()>) -> Outcome {
     match result {
         Ok(()) => Outcome::Delivered,
-        Err(e) if e.is::<parvi_term::engine::NotSubmitted>() => Outcome::Unknown,
-        Err(e) if e.is::<parvi_term::engine::NotReady>() => Outcome::Unknown,
+        Err(e) if e.is::<ahjo_term::engine::NotSubmitted>() => Outcome::Unknown,
+        Err(e) if e.is::<ahjo_term::engine::NotReady>() => Outcome::Unknown,
         Err(_) => Outcome::Failed,
     }
 }
@@ -161,7 +161,7 @@ mod tests {
 
     use super::*;
     use crate::agent_events::Kind;
-    use parvi_term::engine::{Activity, Facts};
+    use ahjo_term::engine::{Activity, Facts};
 
     #[test]
     fn the_launcher_names_other_users_only_if_there_are_any() {

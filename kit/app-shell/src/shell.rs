@@ -7,15 +7,15 @@ use crate::close::{self, CloseGuard};
 use crate::keys::KeysPanel;
 use crate::settings_page::SettingsPage;
 use crate::view_control::{self, ViewControl};
+use ahjo_app_kit::chords::{self, Chord, KeyLike, Keyboard, Run, Verdict};
+use ahjo_app_kit::host::{Cover, Layer};
+use ahjo_app_kit::hub::{HubEvent, Surface};
+use ahjo_app_kit::page::Meta;
+use ahjo_app_kit::{Build, Error, Host, Hub, Mounted, declared, mount as mount_page};
+use ahjo_core::frame::{overlap, reserved};
 use gpui::{
     App, AppContext, Context, Entity, FocusHandle, KeyDownEvent, Subscription, Task, Window,
 };
-use parvi_app_kit::chords::{self, Chord, KeyLike, Keyboard, Run, Verdict};
-use parvi_app_kit::host::{Cover, Layer};
-use parvi_app_kit::hub::{HubEvent, Surface};
-use parvi_app_kit::page::Meta;
-use parvi_app_kit::{Build, Error, Host, Hub, Mounted, declared, mount as mount_page};
-use parvi_core::frame::{overlap, reserved};
 use std::collections::{HashMap, HashSet};
 use std::time::{Duration, Instant};
 
@@ -53,7 +53,7 @@ pub struct Shell {
 
 /// Makes every page, then the Settings page listing what they declare,
 /// refusing two pages of one id or two that take the same frame kinds, any
-/// that takes a reserved kind (`parvi_core::frame::RESERVED`) or declares a
+/// that takes a reserved kind (`ahjo_core::frame::RESERVED`) or declares a
 /// setting twice, and two whose chords live everywhere share a key.
 pub fn mount(
     builds: &[Build],
@@ -476,7 +476,7 @@ impl Shell {
                 // The leader still answers with keys off, to say how to turn
                 // them back on, and nothing else.
                 self.host.report(
-                    parvi_app_kit::host::Status::new(crate::chrome::KEYS_OFF_HINT),
+                    ahjo_app_kit::host::Status::new(crate::chrome::KEYS_OFF_HINT),
                     cx,
                 );
             }
@@ -578,7 +578,7 @@ impl gpui::Focusable for Shell {
 mod tests {
     use super::*;
 
-    fn meta(id: &'static str, kinds: parvi_core::frame::Kinds) -> Meta {
+    fn meta(id: &'static str, kinds: ahjo_core::frame::Kinds) -> Meta {
         Meta {
             id,
             title: id,
@@ -608,7 +608,7 @@ mod tests {
         );
         let shell = check(&[meta("a", &[0xb3..=0xb3])]).unwrap_err();
         assert_eq!(shell.message, "a takes frame kinds of view control");
-        const LOUD: parvi_app_kit::Setting = parvi_app_kit::Setting::toggle("loud", "Loud", false);
+        const LOUD: ahjo_app_kit::Setting = ahjo_app_kit::Setting::toggle("loud", "Loud", false);
         let twice = Meta {
             settings: &[LOUD, LOUD],
             ..meta("a", &[])

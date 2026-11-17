@@ -2,7 +2,7 @@
 //! shapes an agent started there, and the one thing opened from it. Plain
 //! data and the readings the view draws; nothing here draws or sends.
 
-pub use parvi_agents_contract::shape::*;
+pub use ahjo_agents_contract::shape::*;
 use serde::{Deserialize, Serialize};
 
 /// The most folders the view remembers.

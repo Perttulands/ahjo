@@ -27,8 +27,8 @@ impl Evidence {
     pub fn written_outputs(
         &self,
         cwd: &str,
-        outputs: &[parvi_missions_contract::RunOutput],
-    ) -> Vec<parvi_missions_contract::RunOutput> {
+        outputs: &[ahjo_missions_contract::RunOutput],
+    ) -> Vec<ahjo_missions_contract::RunOutput> {
         let base = format!("{}/", cwd.trim_end_matches('/'));
         self.written
             .iter()
@@ -41,7 +41,7 @@ impl Evidence {
                             && file_name(&o.value) == file_name(&w.path))
                 })
             })
-            .map(|w| parvi_missions_contract::RunOutput {
+            .map(|w| ahjo_missions_contract::RunOutput {
                 name: w.path.strip_prefix(&base).unwrap_or(&w.path).to_owned(),
                 kind: "file".into(),
                 value: w.path.clone(),

@@ -103,7 +103,7 @@ fn grant(drop: &Path, user: &str) -> Result<()> {
 /// A sortable, unguessable folder name: the time, then 128 random bits.
 fn drop_id() -> String {
     let now = jiff::Timestamp::now().strftime("%Y%m%dT%H%M%SZ");
-    format!("{now}-{}", parvi_node_kit::identity::new_id())
+    format!("{now}-{}", ahjo_node_kit::identity::new_id())
 }
 
 /// The file's own name, kept to letters, digits, `.`, `_` and `-`, as CHROTE
@@ -141,7 +141,7 @@ mod tests {
 
     #[test]
     fn a_drop_is_private_and_a_stranger_is_refused() {
-        let dir = std::env::temp_dir().join(format!("parvi-drops-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("ahjo-drops-{}", std::process::id()));
         let drops = Drops::new(dir.clone(), vec![]);
         let path = drops.write("a b.txt", "", b"hello").unwrap();
         assert_eq!(path.file_name().unwrap(), "a-b.txt");

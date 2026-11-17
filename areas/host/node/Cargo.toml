@@ -1,5 +1,5 @@
 [package]
-name = "parvi-host"
+name = "ahjo-host"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -9,9 +9,9 @@ publish = false
 workspace = true
 
 [dependencies]
-parvi-core = { path = "../../../kit/core" }
-parvi-node-kit = { path = "../../../kit/node-kit" }
-parvi-host-contract = { path = "../contract" }
+ahjo-core = { path = "../../../kit/core" }
+ahjo-node-kit = { path = "../../../kit/node-kit" }
+ahjo-host-contract = { path = "../contract" }
 anyhow = "1"
 axum = { version = "0.8", default-features = false, features = ["http1", "json", "query", "tokio"] }
 futures-util = "0.3"
@@ -26,5 +26,5 @@ libc = "0.2"
 windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Security", "Win32_Storage_FileSystem", "Win32_System_Diagnostics_ToolHelp", "Win32_System_JobObjects", "Win32_System_Registry", "Win32_System_SystemInformation", "Win32_System_Threading"] }
 
 [dev-dependencies]
-parvi-testkit = { path = "../../../kit/testkit" }
+ahjo-testkit = { path = "../../../kit/testkit" }
 tokio-tungstenite = "0.30"

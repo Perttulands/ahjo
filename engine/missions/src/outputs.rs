@@ -1,7 +1,7 @@
 //! Resolve mission results by following accepted deliveries back from done Ends.
 use crate::graph::{endpoint_node, endpoint_port, outgoing, outgoing_from_port};
 use crate::{Ledger, RoutedInput, RunEvent};
-use parvi_mission_model::{Mission, PublicOrigin, RunOutput};
+use ahjo_mission_model::{Mission, PublicOrigin, RunOutput};
 use std::{
     collections::{HashMap, HashSet, VecDeque},
     io,
@@ -338,7 +338,7 @@ fn inherited_picks(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use parvi_mission_model::{Connection, End, Gate, InputCard, MissionOutput};
+    use ahjo_mission_model::{Connection, End, Gate, InputCard, MissionOutput};
     use serde_json::json;
 
     fn event(kind: &str, node: &str, attempt: i64, data: serde_json::Value) -> RunEvent {
@@ -415,7 +415,7 @@ mod tests {
     #[test]
     fn a_mission_without_declared_outputs_shows_what_reached_its_end() {
         let mission = Mission {
-            formations: vec![parvi_mission_model::Formation {
+            formations: vec![ahjo_mission_model::Formation {
                 id: "write".into(),
                 title: "Write the plan".into(),
                 ..Default::default()
@@ -584,7 +584,7 @@ mod tests {
         let mut random = [0u8; 8];
         getrandom::fill(&mut random).unwrap();
         let root = std::env::temp_dir().join(format!(
-            "parvi-102-output-parity-{:x}",
+            "ahjo-102-output-parity-{:x}",
             u64::from_ne_bytes(random)
         ));
         let work = root.join("fmn_work/1/outputs/port_work_out/site");

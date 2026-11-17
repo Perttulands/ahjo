@@ -3,13 +3,13 @@
 use serde::{Deserialize, Serialize};
 
 pub mod patch;
-pub use parvi_mission_model::*;
+pub use ahjo_mission_model::*;
 
 pub const WATCH: u8 = 0xa8;
 pub const WATCH_RUNS: u8 = 0xa9;
 pub const SNAPSHOT: u8 = 0xa0;
 pub const RUNS_SNAPSHOT: u8 = 0xa1;
-pub const KINDS: parvi_core::frame::Kinds = &[0xa0..=0xa1, 0xa8..=0xa9];
+pub const KINDS: ahjo_core::frame::Kinds = &[0xa0..=0xa1, 0xa8..=0xa9];
 
 pub mod error {
     pub const BAD_REQUEST: &str = "bad_request";
@@ -57,7 +57,7 @@ pub mod error {
 /// admission, includes every engine finding alongside it.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct AdmissionRejection {
-    pub error: parvi_core::Error,
+    pub error: ahjo_core::Error,
     pub findings: Vec<Finding>,
 }
 
@@ -224,7 +224,7 @@ pub struct AttemptsQuery {
 }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ErrorResponse {
-    pub error: parvi_core::Error,
+    pub error: ahjo_core::Error,
 }
 
 /// Describes the built-in, deterministic checks offered when authoring a gate.

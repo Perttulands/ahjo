@@ -3,7 +3,7 @@
 //! attempt the loop settled on, the one the window opens on, and which two
 //! stand side by side.
 
-use parvi_missions_contract::{AttemptVerdict, StepAttempt, StepAttempts};
+use ahjo_missions_contract::{AttemptVerdict, StepAttempt, StepAttempts};
 use std::collections::HashSet;
 use time::OffsetDateTime;
 
@@ -291,12 +291,12 @@ pub fn verdict_headline(v: &AttemptVerdict, waiting: &HashSet<String>) -> String
         .join(" · ")
 }
 
-/// Who picked: you, the only candidate (Parvi took it), or the judge by
+/// Who picked: you, the only candidate (Ahjo took it), or the judge by
 /// its step's title.
 pub fn picker_words(decided_by: &str, title_of: impl Fn(&str) -> String) -> String {
     match decided_by {
         "" => String::new(),
-        "parvi" => "the only candidate".into(),
+        "ahjo" => "the only candidate".into(),
         d if d.starts_with("human:") => "you".into(),
         d => match title_of(d) {
             t if t.is_empty() || t == d => "the judge".into(),
@@ -324,7 +324,7 @@ pub fn timing(a: &StepAttempt, now: OffsetDateTime) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use parvi_missions_contract::{AttemptOutput, AttemptPick};
+    use ahjo_missions_contract::{AttemptOutput, AttemptPick};
 
     fn output() -> AttemptOutput {
         serde_json::from_value(

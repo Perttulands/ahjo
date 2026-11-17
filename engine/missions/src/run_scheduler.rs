@@ -3,7 +3,7 @@ use crate::coordinator::Control;
 use crate::run_gate::{GateSettlement, settle_gate};
 use crate::run_worker::{Outcome, event};
 use crate::{Coordinator, render_run_inputs, resolve_run_inputs};
-use parvi_mission_model::{Mission, RunStart};
+use ahjo_mission_model::{Mission, RunStart};
 use serde_json::json;
 use std::{
     io,
@@ -14,7 +14,7 @@ use std::{
 pub(crate) enum Finished {
     Step(String, i64, io::Result<crate::FormationResult>),
     Judge(
-        Box<parvi_mission_model::Gate>,
+        Box<ahjo_mission_model::Gate>,
         i64,
         Box<crate::RoutedInput>,
         io::Result<crate::JudgeVerdict>,

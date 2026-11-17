@@ -2,8 +2,8 @@
 //! interval and cron, the editor Every, Daily, Weekly and Cron; and the plain
 //! words a task is described in.
 
+use ahjo_scheduled_contract::{Schedule, Target, Task};
 use jiff::Timestamp;
-use parvi_scheduled_contract::{Schedule, Target, Task};
 
 use crate::ACTOR;
 

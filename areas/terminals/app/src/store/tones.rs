@@ -4,7 +4,7 @@
 //! as a WAV the system plays (`crate::sound`), so a test reads exactly what
 //! would be heard.
 
-use parvi_terminals_contract::EventKind;
+use ahjo_terminals_contract::EventKind;
 
 pub const NOTE_SECONDS: f32 = 0.12;
 const LEVEL: f32 = 0.2;

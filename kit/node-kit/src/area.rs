@@ -1,13 +1,13 @@
 //! What a node area plugs into (ARCHITECTURE.md, Areas register themselves):
 //! its routes, the frames it owns on the socket, and its commands, each of
-//! which is both an MCP tool and a `parvi <noun> <verb>`.
+//! which is both an MCP tool and an `ahjo <noun> <verb>`.
 
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
 
+use ahjo_core::Error;
 use axum::Router;
-use parvi_core::Error;
 use serde_json::Value;
 
 use crate::{Provided, Setup};
@@ -90,7 +90,7 @@ pub trait Channel: Send {
 type Call = dyn Fn(Value) -> BoxFuture<'static, Result<Value, Error>> + Send + Sync;
 
 /// One definition behind an MCP tool `noun_verb` and the CLI's
-/// `parvi noun verb`.
+/// `ahjo noun verb`.
 #[derive(Clone)]
 pub struct Command {
     /// `noun_verb`: a noun, then a verb of one or more words, joined by

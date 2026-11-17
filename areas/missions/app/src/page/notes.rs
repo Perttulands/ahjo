@@ -1,12 +1,12 @@
 //! Canvas note pins and sticky threads, carried from the original Missions page.
 use super::canvas::View;
 use super::*;
-use gpui::{AnyElement, FontWeight, Hsla, MouseButton, SharedString};
-use parvi_app_kit::theme::{Theme, rgb};
-use parvi_missions_contract::{
+use ahjo_app_kit::theme::{Theme, rgb};
+use ahjo_missions_contract::{
     MISSION_THREAD, Mission,
     document::{Note, NotesDocument},
 };
+use gpui::{AnyElement, FontWeight, Hsla, MouseButton, SharedString};
 
 const STICKY_W: f32 = 240.;
 const OPEN_W: f32 = 320.;
@@ -104,7 +104,7 @@ impl MissionsPage {
                 page.note_paper.loading = false;
                 match result {
                     Ok(answer) if answer.ok() => match serde_json::from_slice::<
-                        parvi_missions_contract::NotesResponse,
+                        ahjo_missions_contract::NotesResponse,
                     >(&answer.body)
                     {
                         Ok(notes) => {
@@ -144,7 +144,7 @@ impl MissionsPage {
         self.note.update(cx, |field, cx| field.set("", false, cx));
         self.note_paper.open = Some(target);
         self.note_etag = self.notes.as_ref().map(|notes| notes.etag.clone());
-        parvi_app_kit::widgets::field::focus(&self.note, window, cx);
+        ahjo_app_kit::widgets::field::focus(&self.note, window, cx);
         self.state.error = None;
         cx.notify();
     }
@@ -434,7 +434,7 @@ impl MissionsPage {
                 let edit_selector = format!("canvas-note-edit-{}", note.id);
                 let delete_selector = format!("canvas-note-delete-{}", note.id);
                 entry = entry.child(div().flex()
-                    .child(kit::button(t, SharedString::from(edit_selector.clone()), "Edit", Kind::Quiet).text_color(t.bg).debug_selector(move || edit_selector.clone()).on_click(cx.listener(move |page, _, window, cx| { page.select_note(&edit_id, &edit_text, cx); if page.note_id.as_deref() == Some(edit_id.as_str()) { parvi_app_kit::widgets::field::focus(&page.note, window, cx); } })))
+                    .child(kit::button(t, SharedString::from(edit_selector.clone()), "Edit", Kind::Quiet).text_color(t.bg).debug_selector(move || edit_selector.clone()).on_click(cx.listener(move |page, _, window, cx| { page.select_note(&edit_id, &edit_text, cx); if page.note_id.as_deref() == Some(edit_id.as_str()) { ahjo_app_kit::widgets::field::focus(&page.note, window, cx); } })))
                     .child(kit::button(t, SharedString::from(delete_selector.clone()), "Delete", Kind::Quiet).text_color(t.bg).debug_selector(move || delete_selector.clone()).on_click(cx.listener(move |page, _, _, cx| {
                         if page.note_saving || page.note.read(cx).text != page.note_base { page.state.error = Some("Save or discard the current note draft before deleting an entry.".into()); cx.notify(); return; }
                         page.select_note(&delete_id, &delete_text, cx);

@@ -12,8 +12,7 @@ use crate::page::{Chosen, HostPage};
 use crate::services_store::Service;
 use crate::tokens;
 use crate::view::title;
-use gpui::{Context, Div, Hsla, SharedString, div, prelude::*, px, relative};
-use parvi_app_kit::{
+use ahjo_app_kit::{
     clock::hhmm,
     host::Node,
     hub::now_ms,
@@ -23,7 +22,8 @@ use parvi_app_kit::{
         pane::{self, Col},
     },
 };
-use parvi_host_contract::MINUTE;
+use ahjo_host_contract::MINUTE;
+use gpui::{Context, Div, Hsla, SharedString, div, prelude::*, px, relative};
 
 /// What is heavy: the program, where it runs, its CPU and memory.
 const HEAVY: [Col; 4] = [
@@ -215,7 +215,7 @@ impl HostPage {
             ticks: ticks.clone(),
             hover: self.hover,
             grid: t.divider,
-            hair: parvi_app_kit::theme::alpha(t.text2, tokens::LINE_ALPHA),
+            hair: ahjo_app_kit::theme::alpha(t.text2, tokens::LINE_ALPHA),
         };
         let width = end.saturating_sub(start).max(1) as f32;
         let place = |at: u64| relative(at.saturating_sub(start) as f32 / width);

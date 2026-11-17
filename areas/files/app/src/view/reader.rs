@@ -4,10 +4,10 @@
 //! what changed grouped by where (Review) and a folder shown as a place.
 use super::*;
 use crate::store::who;
+use ahjo_app_kit::theme::alpha;
+use ahjo_app_kit::widgets::markdown::{self, Block};
+use ahjo_app_kit::widgets::select;
 use gpui::{Bounds, Pixels, Point, point};
-use parvi_app_kit::theme::alpha;
-use parvi_app_kit::widgets::markdown::{self, Block};
-use parvi_app_kit::widgets::select;
 
 /// The find opened over the file: its width, and its top from the page's.
 const PALETTE_W: f32 = 640.;
@@ -201,7 +201,7 @@ impl FilesPage {
 
     /// A step's menu: the folder itself, then what is in it.
     fn crumb_menu(&mut self, folder: String, at: Point<Pixels>, cx: &mut Context<Self>) {
-        use parvi_app_kit::menu::MenuRow;
+        use ahjo_app_kit::menu::MenuRow;
         let me = self.me.clone();
         let here = folder.clone();
         let tree = self.side == Side::Folders;
@@ -481,7 +481,7 @@ impl FilesPage {
         &self,
         t: &Theme,
         headings: &[(usize, u8, String)],
-        marks: &[Option<parvi_app_kit::widgets::code::Mark>],
+        marks: &[Option<ahjo_app_kit::widgets::code::Mark>],
         blocks: usize,
         cx: &mut Context<Self>,
     ) -> gpui::Stateful<Div> {

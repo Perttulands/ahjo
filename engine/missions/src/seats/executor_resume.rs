@@ -4,7 +4,7 @@ use crate::{
     AgentSeat, Dispatch, DispatchResult, Executor, OpenDispatch, PublishedTurn, SeatEvent,
     SeatExecutor, SeatFuture, SeatId, SeatSide, TurnWorkspace,
 };
-use parvi_mission_model::{Formation, Slot};
+use ahjo_mission_model::{Formation, Slot};
 use std::{
     collections::{HashMap, VecDeque},
     path::PathBuf,
@@ -148,7 +148,7 @@ fn each_resume_asks_the_kept_seat_to_go_on_once() {
     let seats = Arc::new(Kept::default());
     seats.answers.lock().unwrap().extend([
         result("error", STOPPED),
-        result("ok", "<<<PARVI-DONE run-id=run_1 status=ok artifact=x>>>"),
+        result("ok", "<<<AHJO-DONE run-id=run_1 status=ok artifact=x>>>"),
     ]);
     // The first resume's turn stops short again: the step blocks again
     // rather than asking on and on.
@@ -156,7 +156,7 @@ fn each_resume_asks_the_kept_seat_to_go_on_once() {
     assert!(first.starts_with("seat_idle_without_sentinel"), "{first}");
     assert_eq!(seats.dispatched.lock().unwrap().len(), 1);
     // The next resume steps over that turn and asks once more.
-    assert!(resume(&seats).unwrap().contains("PARVI-DONE"));
+    assert!(resume(&seats).unwrap().contains("AHJO-DONE"));
     let dispatched = seats.dispatched.lock().unwrap();
     assert_eq!(dispatched.len(), 2);
     for turn in dispatched.iter() {

@@ -3,7 +3,7 @@
 //! session (`src/launch.rs`): the preview is a promise, but for the hooks
 //! Notify adds, which its own switch stands for.
 
-use parvi_terminals_contract::Session;
+use ahjo_terminals_contract::Session;
 
 /// What a launch types into the new session's shell. Empty for the shell.
 pub fn command_line(command: &str, flags: &str) -> String {
@@ -399,7 +399,7 @@ mod tests {
         assert_eq!(place(None, None, known), None);
     }
 
-    // CHROTE's FolderField tests, on the rules under the Parvi field.
+    // CHROTE's FolderField tests, on the rules under the Ahjo field.
 
     #[test]
     fn the_offered_folders_stand_until_something_is_typed() {
@@ -471,20 +471,20 @@ mod tests {
     #[test]
     fn a_fragment_finds_the_nodes_projects_after_the_offered_folders() {
         let offered = [
-            "/srv/parvi".to_string(),
+            "/srv/ahjo".to_string(),
             "~".to_string(),
             "/home/operator/wealth/".to_string(),
         ];
         let projects = [
             "/home/operator/wealth".to_string(),
             "/srv/games/korpi".to_string(),
-            "/srv/parvi".to_string(),
+            "/srv/ahjo".to_string(),
         ];
         let all = searched(&offered, &projects);
         assert_eq!(
             all,
             [
-                "/srv/parvi",
+                "/srv/ahjo",
                 "~",
                 "/home/operator/wealth/",
                 "/srv/games/korpi"

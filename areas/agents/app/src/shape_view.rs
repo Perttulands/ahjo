@@ -6,16 +6,16 @@
 
 use crate::shape_state::{self as sh, Load, Pick, Shape, Text};
 use crate::{AgentsPage, tokens};
+use ahjo_app_kit::host::Status;
+use ahjo_app_kit::theme::{Theme, size, theme};
+use ahjo_app_kit::widgets::code::{Code, CodeEvent};
+use ahjo_app_kit::widgets::field::{FieldEvent, TextField};
+use ahjo_app_kit::widgets::kit::{self, Kind};
+use ahjo_app_kit::widgets::{markdown, pane, syntax};
 use gpui::{
     AnyElement, AppContext, Context, Div, Entity, Hsla, SharedString, Stateful, Window, div,
     prelude::*, px, relative,
 };
-use parvi_app_kit::host::Status;
-use parvi_app_kit::theme::{Theme, size, theme};
-use parvi_app_kit::widgets::code::{Code, CodeEvent};
-use parvi_app_kit::widgets::field::{FieldEvent, TextField};
-use parvi_app_kit::widgets::kit::{self, Kind};
-use parvi_app_kit::widgets::{markdown, pane, syntax};
 use serde_json::{Value, json};
 
 /// The entities the Agent and Skills views type into, made once.
@@ -220,7 +220,7 @@ impl AgentsPage {
                 set(&self.inputs.event, first, cx);
                 let command = self.inputs.command.clone();
                 window.defer(cx, move |window, cx| {
-                    parvi_app_kit::widgets::field::focus(&command, window, cx)
+                    ahjo_app_kit::widgets::field::focus(&command, window, cx)
                 });
             }
             Pick::Setting(..) => {
@@ -235,7 +235,7 @@ impl AgentsPage {
                 set(&i.value, "", cx);
                 let key = self.inputs.key.clone();
                 window.defer(cx, move |window, cx| {
-                    parvi_app_kit::widgets::field::focus(&key, window, cx)
+                    ahjo_app_kit::widgets::field::focus(&key, window, cx)
                 });
             }
             Pick::None => {}
@@ -1250,7 +1250,7 @@ impl AgentsPage {
                 if shape.harness == "claude" {
                     body = body.child(kit::note(
                         t,
-                        "Claude Code has no switch of its own: a hook switched off is kept by Parvi and put back when switched on.",
+                        "Claude Code has no switch of its own: a hook switched off is kept by Ahjo and put back when switched on.",
                         Some(t.dim),
                     ));
                 } else {

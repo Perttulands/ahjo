@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, bail};
 
-use parvi_scheduled_contract::Task;
+use ahjo_scheduled_contract::Task;
 
 /// Task files that do not read, by id, each with why.
 pub type Unreadable = Vec<(String, anyhow::Error)>;

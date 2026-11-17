@@ -230,17 +230,15 @@ pub fn plain_reason(detail: &str) -> String {
 /// when `detail` is not such an answer. An agent that wrote nothing before
 /// its outputs is read by the first text it put out.
 fn agent_words(detail: &str) -> Option<String> {
-    let done = detail.find("<<<PARVI-DONE")?;
-    let fence = detail
-        .find("```parvi-outputs")
-        .filter(|&fence| fence < done);
+    let done = detail.find("<<<AHJO-DONE")?;
+    let fence = detail.find("```ahjo-outputs").filter(|&fence| fence < done);
     let words = detail[..fence.unwrap_or(done)].trim();
     let first = words.split("\n\n").next().unwrap_or(words).trim();
     if !first.is_empty() {
         return Some(first.to_owned());
     }
     let put_out = fence.and_then(|fence| {
-        let block = &detail[fence + "```parvi-outputs".len()..done];
+        let block = &detail[fence + "```ahjo-outputs".len()..done];
         let block = block.split("```").next().unwrap_or(block);
         let outputs: serde_json::Map<String, serde_json::Value> =
             serde_json::from_str(block.trim()).ok()?;
@@ -256,12 +254,12 @@ fn agent_words(detail: &str) -> Option<String> {
 mod tests {
     #[test]
     fn an_agents_answer_reads_as_its_first_words() {
-        let answer = "The input file is missing, so I did nothing.\n\n```parvi-outputs\n{\"p\":{\"text\":\"x\"}}\n```\n\n<<<PARVI-DONE run-id=r status=blocked artifact=none>>>";
+        let answer = "The input file is missing, so I did nothing.\n\n```ahjo-outputs\n{\"p\":{\"text\":\"x\"}}\n```\n\n<<<AHJO-DONE run-id=r status=blocked artifact=none>>>";
         assert_eq!(
             super::plain_reason(answer),
             "The input file is missing, so I did nothing."
         );
-        let silent = "```parvi-outputs\n{\"p\":{\"text\":\"blocked: the poem needs a reader.\"}}\n```\n\n<<<PARVI-DONE run-id=r status=blocked artifact=p>>>.";
+        let silent = "```ahjo-outputs\n{\"p\":{\"text\":\"blocked: the poem needs a reader.\"}}\n```\n\n<<<AHJO-DONE run-id=r status=blocked artifact=p>>>.";
         assert_eq!(
             super::plain_reason(silent),
             "Blocked: the poem needs a reader."

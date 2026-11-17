@@ -32,14 +32,14 @@ mod tokens {
     pub const MARK: f32 = 20.;
     pub const MARK_BIG: f32 = 28.;
 }
+use ahjo_app_kit::host::Status;
+use ahjo_app_kit::link::client::LinkState;
+use ahjo_app_kit::theme::Theme;
+use ahjo_app_kit::widgets::kit::{self, Kind};
+use ahjo_app_kit::{Host, Mounted, Page, mount};
+use ahjo_core::NodeId;
+use ahjo_terminals_contract::SessionList;
 use gpui::{App, Context, Entity, IntoElement, Render, SharedString, Window, div, prelude::*};
-use parvi_app_kit::host::Status;
-use parvi_app_kit::link::client::LinkState;
-use parvi_app_kit::theme::Theme;
-use parvi_app_kit::widgets::kit::{self, Kind};
-use parvi_app_kit::{Host, Mounted, Page, mount};
-use parvi_core::NodeId;
-use parvi_terminals_contract::SessionList;
 use state::{Agents, Synced, WATCH};
 use std::collections::BTreeMap;
 
@@ -186,20 +186,20 @@ impl Page for AgentsPage {
     const TITLE: &'static str = "Agents";
     const KEY: Option<char> = Some('A');
     const AREA: Option<&'static str> = Some("agents");
-    const KINDS: parvi_core::frame::Kinds = &[0x80..=0x8f];
+    const KINDS: ahjo_core::frame::Kinds = &[0x80..=0x8f];
     const CHANNELS: &'static [u8] = &[WATCH];
     /// "What this agent sees": a folder (`id`) on a node, by a harness
     /// (`part`, "claude" or "codex", else the one shown).
-    const ANSWERS: &'static [parvi_app_kit::ask::Answers] =
-        &[parvi_app_kit::ask::Answers::Reveal("agent")];
+    const ANSWERS: &'static [ahjo_app_kit::ask::Answers] =
+        &[ahjo_app_kit::ask::Answers::Reveal("agent")];
     fn answer(
         &mut self,
-        ask: parvi_app_kit::Ask,
+        ask: ahjo_app_kit::Ask,
         _: &'static str,
         _: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let parvi_app_kit::Ask::Reveal { id, node, part, .. } = ask else {
+        let ahjo_app_kit::Ask::Reveal { id, node, part, .. } = ask else {
             return;
         };
         self.started = true;
@@ -229,7 +229,7 @@ impl Page for AgentsPage {
                 cx,
             ),
             Some(Some(Synced::Refused { code, .. }))
-                if code == parvi_agents_contract::FETCH_FAILED => {}
+                if code == ahjo_agents_contract::FETCH_FAILED => {}
             Some(Some(Synced::Refused { checkout, why, .. })) => self
                 .host
                 .report(Status::failure(format!("{checkout}: {why}")), cx),

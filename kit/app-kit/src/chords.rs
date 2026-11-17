@@ -1,5 +1,5 @@
 //! The keyboard (CHROTE's keys/chords.ts and useAppChords.ts). A focused
-//! terminal gets every key, so Parvi takes one modifier: Alt. A registered
+//! terminal gets every key, so Ahjo takes one modifier: Alt. A registered
 //! Alt chord runs wherever focus is; every other Alt combination reaches
 //! the program, and so does AltGr (Ctrl+Alt on Windows), which a Finnish
 //! layout needs for `@`, `$`, `{` and `}`. The leader, Ctrl+Shift+Space,

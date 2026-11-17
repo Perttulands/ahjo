@@ -1,13 +1,13 @@
-use parvi_node_kit::{Built, Listing, Setup};
-use parvi_testkit::{node::Node, sessions};
+use ahjo_node_kit::{Built, Listing, Setup};
+use ahjo_testkit::{node::Node, sessions};
 use serde_json::json;
 
 fn lab(setup: &Setup) -> anyhow::Result<Built> {
-    parvi_missions::build_with_executor(setup, Some(Box::new(parvi_mission_engine::LabExecutor)))
+    ahjo_missions::build_with_executor(setup, Some(Box::new(ahjo_mission_engine::LabExecutor)))
 }
 const LAB: Listing = Listing {
     build: lab,
-    ..parvi_missions::LISTING
+    ..ahjo_missions::LISTING
 };
 const EXPECTED: &[&str] = &[
     "mission_list",
@@ -82,8 +82,8 @@ const EXPECTED: &[&str] = &[
 
 #[tokio::test(flavor = "multi_thread")]
 async fn command_list_and_coded_failures() {
-    assert_eq!(parvi_missions::LISTING.commands, EXPECTED);
-    let role_commands: Vec<_> = parvi_agents::LISTING
+    assert_eq!(ahjo_missions::LISTING.commands, EXPECTED);
+    let role_commands: Vec<_> = ahjo_agents::LISTING
         .commands
         .iter()
         .copied()
@@ -103,7 +103,7 @@ async fn command_list_and_coded_failures() {
             "role_characters"
         ]
     );
-    let node = Node::start(&[sessions::LISTING, parvi_work::LISTING, LAB], "")
+    let node = Node::start(&[sessions::LISTING, ahjo_work::LISTING, LAB], "")
         .await
         .unwrap();
     for &command in EXPECTED {
@@ -122,7 +122,7 @@ async fn command_list_and_coded_failures() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn author_and_run_with_tools() {
-    let node = Node::start(&[sessions::LISTING, parvi_work::LISTING, LAB], "")
+    let node = Node::start(&[sessions::LISTING, ahjo_work::LISTING, LAB], "")
         .await
         .unwrap();
     assert!(node.call("mission_list", json!({})).await.unwrap()["missions"].is_array());
@@ -238,7 +238,7 @@ async fn author_and_run_with_tools() {
     // A durable, resumable run: copy the engine's actual snapshots from the
     // completed run, then record a shutdown block for a fresh run id.
     let runs = node.dir().join("missions/runs");
-    let original = parvi_mission_engine::Ledger::new(runs.join(format!("{run}.ndjson")), run);
+    let original = ahjo_mission_engine::Ledger::new(runs.join(format!("{run}.ndjson")), run);
     let mut first = original.read().unwrap().remove(0);
     first.run_id.clear();
     let resumed = "run_resume_test";
@@ -249,9 +249,9 @@ async fn author_and_run_with_tools() {
         )
         .unwrap();
     }
-    let ledger = parvi_mission_engine::Ledger::new(runs.join(format!("{resumed}.ndjson")), resumed);
+    let ledger = ahjo_mission_engine::Ledger::new(runs.join(format!("{resumed}.ndjson")), resumed);
     ledger.create(first).unwrap();
-    let blocked = parvi_mission_engine::RunEvent {
+    let blocked = ahjo_mission_engine::RunEvent {
         kind: "run_blocked".into(),
         timestamp: "2026-01-01T00:00:00Z".into(),
         data: json!({"code":"coordinator_shutdown","resumeAllowed":true})
@@ -286,8 +286,8 @@ async fn author_and_run_with_tools() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn gate_and_abort_commands_act_on_pending_runs() {
-    use parvi_mission_engine::{Ledger, RunEvent};
-    let node = Node::start(&[sessions::LISTING, parvi_work::LISTING, LAB], "")
+    use ahjo_mission_engine::{Ledger, RunEvent};
+    let node = Node::start(&[sessions::LISTING, ahjo_work::LISTING, LAB], "")
         .await
         .unwrap();
     let event = |kind: &str| RunEvent {
@@ -312,15 +312,15 @@ async fn gate_and_abort_commands_act_on_pending_runs() {
             "agent:bob",
         ),
         ("run_pick", "pick", true, Some("agent:carol"), "agent:carol"),
-        ("run_approve_default", "approve", false, None, "agent:parvi"),
-        ("run_reject_default", "reject", false, None, "agent:parvi"),
-        ("run_pick_default", "pick", true, None, "agent:parvi"),
+        ("run_approve_default", "approve", false, None, "agent:ahjo"),
+        ("run_reject_default", "reject", false, None, "agent:ahjo"),
+        ("run_pick_default", "pick", true, None, "agent:ahjo"),
         (
             "run_approve_empty",
             "approve",
             false,
             Some(""),
-            "agent:parvi",
+            "agent:ahjo",
         ),
     ] {
         let ledger = Ledger::new(
@@ -355,7 +355,7 @@ async fn gate_and_abort_commands_act_on_pending_runs() {
         args.extend(["--node".into(), format!("{}/", node.url()), "--json".into()]);
         let mut output = Vec::new();
         assert_eq!(
-            parvi_node_kit::cli::run("gate", &args, &mut output)
+            ahjo_node_kit::cli::run("gate", &args, &mut output)
                 .await
                 .unwrap(),
             0,
@@ -395,7 +395,7 @@ async fn gate_and_abort_commands_act_on_pending_runs() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn a_repository_run_can_be_landed() {
-    let root = parvi_testkit::fresh_dir("mission-checkout");
+    let root = ahjo_testkit::fresh_dir("mission-checkout");
     let git = |args: &[&str]| {
         let output = std::process::Command::new("git")
             .arg("-C")
@@ -416,7 +416,7 @@ async fn a_repository_run_can_be_landed() {
     git(&["add", "readme"]);
     git(&["commit", "-m", "initial"]);
     let config = format!("[missions]\nrepositories = {{ \"example/project\" = {root:?} }}\n");
-    let node = Node::start(&[sessions::LISTING, parvi_work::LISTING, LAB], &config)
+    let node = Node::start(&[sessions::LISTING, ahjo_work::LISTING, LAB], &config)
         .await
         .unwrap();
     let folder = node.dir().join("missions/missions");
@@ -466,7 +466,7 @@ async fn a_repository_run_can_be_landed() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn a_mission_built_through_commands_stays_arranged() {
-    let node = Node::start(&[sessions::LISTING, parvi_work::LISTING, LAB], "")
+    let node = Node::start(&[sessions::LISTING, ahjo_work::LISTING, LAB], "")
         .await
         .unwrap();
     let call = |name: &'static str, args: serde_json::Value| {
@@ -546,7 +546,7 @@ async fn a_mission_built_through_commands_stays_arranged() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn cli_uses_the_same_mission_commands() {
-    let node = Node::start(&[sessions::LISTING, parvi_work::LISTING, LAB], "")
+    let node = Node::start(&[sessions::LISTING, ahjo_work::LISTING, LAB], "")
         .await
         .unwrap();
     let mut output = Vec::new();
@@ -558,7 +558,7 @@ async fn cli_uses_the_same_mission_commands() {
         "--json".to_string(),
     ];
     assert_eq!(
-        parvi_node_kit::cli::run("mission", &args, &mut output)
+        ahjo_node_kit::cli::run("mission", &args, &mut output)
             .await
             .unwrap(),
         0
@@ -570,7 +570,7 @@ async fn cli_uses_the_same_mission_commands() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn end_create_help_names_the_outcomes_and_default() {
-    let node = Node::start(&[sessions::LISTING, parvi_work::LISTING, LAB], "")
+    let node = Node::start(&[sessions::LISTING, ahjo_work::LISTING, LAB], "")
         .await
         .unwrap();
     let args = vec![
@@ -581,7 +581,7 @@ async fn end_create_help_names_the_outcomes_and_default() {
     ];
     let mut output = Vec::new();
     assert_eq!(
-        parvi_node_kit::cli::run("end", &args, &mut output)
+        ahjo_node_kit::cli::run("end", &args, &mut output)
             .await
             .unwrap(),
         0
@@ -598,7 +598,7 @@ async fn end_create_help_names_the_outcomes_and_default() {
 /// wrong name is answered with the names there are.
 #[tokio::test(flavor = "multi_thread")]
 async fn a_simple_mission_needs_no_seat_or_port_names() {
-    let node = Node::start(&[sessions::LISTING, parvi_work::LISTING, LAB], "")
+    let node = Node::start(&[sessions::LISTING, ahjo_work::LISTING, LAB], "")
         .await
         .unwrap();
     node.call("mission_new", json!({"slug":"plain"}))
@@ -659,7 +659,7 @@ async fn a_simple_mission_needs_no_seat_or_port_names() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn specialized_authoring_commands_build_and_edit_a_graph() {
-    let node = Node::start(&[sessions::LISTING, parvi_work::LISTING, LAB], "")
+    let node = Node::start(&[sessions::LISTING, ahjo_work::LISTING, LAB], "")
         .await
         .unwrap();
     node.call("mission_new", json!({"slug":"board"}))
@@ -737,7 +737,7 @@ async fn specialized_authoring_commands_build_and_edit_a_graph() {
         "--json".into(),
     ];
     assert_eq!(
-        parvi_node_kit::cli::run("formation", &cli_args, &mut cli_out)
+        ahjo_node_kit::cli::run("formation", &cli_args, &mut cli_out)
             .await
             .unwrap(),
         0
@@ -749,7 +749,7 @@ async fn specialized_authoring_commands_build_and_edit_a_graph() {
     .await
     .unwrap();
     node.call("formation_assign",json!({"mission":"board","formation":step_id,"slot":"seat","harness":"claude-code","effort":"medium"})).await.unwrap();
-    let client = parvi_node_kit::NodeClient::new(Some(&format!("{}/", node.url()))).unwrap();
+    let client = ahjo_node_kit::NodeClient::new(Some(&format!("{}/", node.url()))).unwrap();
     client
         .request(
             axum::http::Method::POST,
@@ -914,7 +914,7 @@ async fn specialized_authoring_commands_build_and_edit_a_graph() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn cli_lists_and_removes_deleted_mission_archives() {
-    let node = Node::start(&[sessions::LISTING, parvi_work::LISTING, LAB], "")
+    let node = Node::start(&[sessions::LISTING, ahjo_work::LISTING, LAB], "")
         .await
         .unwrap();
     node.call("mission_new", json!({"slug":"archived","title":"Archived"}))
@@ -937,7 +937,7 @@ async fn cli_lists_and_removes_deleted_mission_archives() {
         args.extend(["--node".into(), format!("{}/", node.url()), "--json".into()]);
         let mut output = Vec::new();
         assert_eq!(
-            parvi_node_kit::cli::run("mission", &args, &mut output)
+            ahjo_node_kit::cli::run("mission", &args, &mut output)
                 .await
                 .unwrap(),
             0,
@@ -953,7 +953,7 @@ async fn cli_lists_and_removes_deleted_mission_archives() {
         format!("{}/", node.url()),
     ];
     assert_eq!(
-        parvi_node_kit::cli::run("mission", &args, &mut help)
+        ahjo_node_kit::cli::run("mission", &args, &mut help)
             .await
             .unwrap(),
         0

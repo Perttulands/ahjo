@@ -64,7 +64,7 @@ impl Imsg {
         match (major, minor) {
             (Some(major), Some(minor)) if (major, minor) >= (3, 6) => Ok(Imsg::Mark),
             (Some(major), Some(minor)) if (major, minor) >= (3, 2) => Ok(Imsg::Flags),
-            _ => bail!("tmux {version:?}: Parvi needs tmux 3.2 or later"),
+            _ => bail!("tmux {version:?}: Ahjo needs tmux 3.2 or later"),
         }
     }
 }

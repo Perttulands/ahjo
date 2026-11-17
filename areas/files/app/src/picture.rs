@@ -5,9 +5,9 @@
 use crate::open::Show;
 use crate::page::FilesPage;
 use crate::store::zoom::{self, Px};
+use ahjo_app_kit::theme::{Theme, size};
+use ahjo_app_kit::widgets::kit::{self, Kind};
 use gpui::{AnyElement, App, Context, Div, RenderImage, Window, canvas, div, img, prelude::*, px};
-use parvi_app_kit::theme::{Theme, size};
-use parvi_app_kit::widgets::kit::{self, Kind};
 use std::cell::Cell;
 use std::rc::Rc;
 use std::sync::Arc;

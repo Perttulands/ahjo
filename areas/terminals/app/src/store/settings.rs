@@ -4,7 +4,7 @@
 
 use super::workspace::Workspace;
 use crate::theme::size;
-use parvi_app_kit::Setting;
+use ahjo_app_kit::Setting;
 use serde::{Deserialize, Deserializer, Serialize};
 use std::collections::BTreeMap;
 
@@ -230,6 +230,6 @@ mod tests {
         assert!(!odd.event_tone && odd.event_toast);
         // A settings file that is not an object does not read; the app's
         // settings, which hold this section, are where that is decided.
-        assert!(parvi_app_kit::settings::Settings::parse("[1]").is_none());
+        assert!(ahjo_app_kit::settings::Settings::parse("[1]").is_none());
     }
 }

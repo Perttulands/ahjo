@@ -1,9 +1,9 @@
 //! A disposable user unit exercised through the app and CLI on a testkit node.
 #![cfg(target_os = "linux")]
+use ahjo_app_kit::link::client::LinkState;
+use ahjo_node_kit::{NodeClient, cli};
+use ahjo_testkit::node::Node;
 use gpui::{Modifiers, TestAppContext, VisualTestContext};
-use parvi_app_kit::link::client::LinkState;
-use parvi_node_kit::{NodeClient, cli};
-use parvi_testkit::node::Node;
 use serde_json::{Value, json};
 use std::{
     path::PathBuf,
@@ -18,9 +18,9 @@ struct Unit {
 }
 impl Unit {
     fn new() -> Self {
-        let dir = parvi_testkit::fresh_dir("host-service-unit");
+        let dir = ahjo_testkit::fresh_dir("host-service-unit");
         let name = format!(
-            "parvi-test-{}.service",
+            "ahjo-test-{}.service",
             dir.file_name().unwrap().to_string_lossy()
         );
         let file = dir.join(&name);
@@ -76,7 +76,7 @@ fn start(unit: &Unit) -> Running {
     let thread =
         std::thread::spawn(move || {
             tokio::runtime::Runtime::new().unwrap().block_on(async move {
-        let node = Node::start(&[parvi_host::LISTING], "[host]\nenabled = true\n").await.unwrap();
+        let node = Node::start(&[ahjo_host::LISTING], "[host]\nenabled = true\n").await.unwrap();
         let user = std::env::var("USER").unwrap();
         let component = json!({"kind":"systemd-user", "user":user, "unit":name});
         let missing = json!({"kind":"systemd-user", "user":user, "unit":format!("missing-{name}")});
@@ -161,13 +161,13 @@ fn refused(url: &str, path: &str) -> String {
 fn disposable_systemd_service_and_host_health_journey(cx: &mut TestAppContext) {
     let unit = Unit::new();
     let node = start(&unit);
-    let temp = parvi_testkit::fresh_dir("host-service-app");
+    let temp = ahjo_testkit::fresh_dir("host-service-app");
     cx.executor().allow_parking();
-    cx.update(parvi_app_shell::prepare);
+    cx.update(ahjo_app_shell::prepare);
     let url = node.url.clone();
     let settings = temp.join("app.json");
     let (shell, cx) = cx.add_window_view(move |w, cx| {
-        parvi_app_shell::start(&[parvi_host_app::build], Some(url), Some(settings), w, cx)
+        ahjo_app_shell::start(&[ahjo_host_app::build], Some(url), Some(settings), w, cx)
     });
     until(cx, "node link", |cx| {
         shell.read_with(cx, |s, cx| {

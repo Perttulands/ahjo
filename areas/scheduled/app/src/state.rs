@@ -4,7 +4,7 @@
 
 use std::collections::BTreeMap;
 
-use parvi_scheduled_contract::{Envelope, RunEntry, SUCCESS, Task};
+use ahjo_scheduled_contract::{Envelope, RunEntry, SUCCESS, Task};
 use serde::Deserialize;
 
 use crate::form::TaskForm;

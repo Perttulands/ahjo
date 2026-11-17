@@ -8,14 +8,14 @@ use crate::open::Show;
 use crate::page::{FilesPage, Pick};
 use crate::store::Side;
 use crate::store::{format, paths, tree::Row};
+use ahjo_app_kit::theme::{Theme, size, theme};
+use ahjo_app_kit::widgets::kit::{self, Kind};
+use ahjo_app_kit::widgets::pane;
+use ahjo_files_contract::{Changed, Match};
 use gpui::{
     AnyElement, Context, Div, MouseButton, MouseMoveEvent, Render, ScrollDelta, SharedString,
     Window, div, img, prelude::*, px, uniform_list,
 };
-use parvi_app_kit::theme::{Theme, size, theme};
-use parvi_app_kit::widgets::kit::{self, Kind};
-use parvi_app_kit::widgets::pane;
-use parvi_files_contract::{Changed, Match};
 
 /// Under each of these widths a file's header leaves out one more of its
 /// least needed words. A view beside the terminals opens about 420 wide,
@@ -307,7 +307,7 @@ fn group_by_file(out: &mut Vec<Line>, first: usize) {
 /// One group of hits, numbered from `first`: still looking, why not, none,
 /// or the hits (with a word first when there were more). Answers how many.
 fn found_lines(
-    found: &Option<Result<parvi_files_contract::Matches, String>>,
+    found: &Option<Result<ahjo_files_contract::Matches, String>>,
     first: usize,
     none: String,
     out: &mut Vec<Line>,
@@ -976,7 +976,7 @@ impl FilesPage {
                     )
                     .debug_selector(|| "files-save".into())
                     .tooltip(kit::tip("Save (Ctrl+S)"))
-                    .when(!dirty, |b| b.opacity(parvi_app_kit::theme::fade::IDLE))
+                    .when(!dirty, |b| b.opacity(ahjo_app_kit::theme::fade::IDLE))
                     .on_click(cx.listener(|p, _, _, cx| p.save(cx))),
                 )
                 .child(
@@ -1175,7 +1175,7 @@ impl FilesPage {
                 .child(kit::note(t, why.clone(), Some(t.error)))
                 .into_any_element(),
             Show::Not(why) => {
-                let node = parvi_core::NodeId(o.node.clone());
+                let node = ahjo_core::NodeId(o.node.clone());
                 let path = o.path.clone();
                 pane::empty(
                     t,

@@ -5,7 +5,7 @@
 
 use super::frames::{self, Peer};
 use super::socket::{Event, Link, LinkId, Net, ws_url};
-use parvi_core::Hello;
+use ahjo_core::Hello;
 use std::collections::HashSet;
 use std::sync::atomic::{AtomicU32, Ordering};
 

@@ -5,9 +5,9 @@
 use super::page::Terminals;
 use super::surface::{self, Surface};
 use crate::store::sessions::{self, Key};
+use ahjo_app_kit::chords::Chord;
+use ahjo_app_kit::widgets::field;
 use gpui::{Context, WeakEntity, Window};
-use parvi_app_kit::chords::Chord;
-use parvi_app_kit::widgets::field;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Action {
@@ -57,7 +57,7 @@ fn chords(page: &WeakEntity<Terminals>, tabs: usize) -> Vec<Chord> {
         chord("n", "Launcher in the focused window", Action::Launcher).alt("n", Some(false)),
         chord("tab", "Sessions and files panel", Action::Sessions).alt("a", Some(false)),
         chord("s", "Send from the focused session", Action::Send).alt("s", Some(false)),
-        // Parvi's own, on letters CHROTE leaves free: V for view, H for
+        // Ahjo's own, on letters CHROTE leaves free: V for view, H for
         // history (Alt+F is the shell's forward-word).
         chord("v", "Overview of every session", Action::Overview).alt("v", Some(false)),
         chord("h", "Search every session's output", Action::Find).alt("h", Some(false)),
@@ -221,7 +221,7 @@ impl Terminals {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use parvi_app_kit::chords::{KeyLike, after_leader, direct, filter, rows};
+    use ahjo_app_kit::chords::{KeyLike, after_leader, direct, filter, rows};
 
     fn alt(key: &str, ch: &str, shift: bool) -> KeyLike {
         KeyLike {
@@ -242,7 +242,7 @@ mod tests {
     }
 
     /// Every terminal chord in CHROTE's useAppChords.ts, Alt form and
-    /// leader key, and what Parvi does with it. `None` is the app's or no
+    /// leader key, and what Ahjo does with it. `None` is the app's or no
     /// page's. Work owns leader B / Alt+B (column rather than a separate
     /// Beads tab), leader I / Alt+I (close its beside card), and leader R /
     /// Alt+R (report); Brain owns leader L / Alt+L. The shell owns leader ? / Alt+K and leader K.

@@ -6,7 +6,7 @@
 //! mission as it is later. Undoing an entry writes its steps and keeps
 //! their own reverses as the redo.
 
-use parvi_missions_contract::LayoutNode as Placed;
+use ahjo_missions_contract::LayoutNode as Placed;
 use serde_json::{Value, json};
 
 #[derive(Clone, Debug, PartialEq)]

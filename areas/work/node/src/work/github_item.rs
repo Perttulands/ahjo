@@ -1,7 +1,7 @@
 //! Reads GitHub's answer to `item.graphql` into an [`Item`] with its family.
 
+use ahjo_work_ref::WorkRef;
 use anyhow::{Context, Result, bail};
-use parvi_work_ref::WorkRef;
 use serde::Deserialize;
 
 use super::item::{Family, Item};
@@ -168,10 +168,10 @@ mod tests {
 
     #[test]
     fn reads_an_issue_with_the_pull_requests_that_close_it() {
-        let item = parse(FIXTURE, "example-owner", "parvi").unwrap();
-        assert_eq!(item.reference, "gh:example-owner/parvi#51");
+        let item = parse(FIXTURE, "example-owner", "ahjo").unwrap();
+        assert_eq!(item.reference, "gh:example-owner/ahjo#51");
         assert_eq!((item.id.as_str(), item.status.as_str()), ("51", "closed"));
-        assert_eq!(item.family.pulls, vec!["gh:example-owner/parvi#58"]);
+        assert_eq!(item.family.pulls, vec!["gh:example-owner/ahjo#58"]);
         assert!(item.family.parent.is_none() && item.family.children.is_empty());
     }
 
@@ -179,19 +179,20 @@ mod tests {
     fn names_family_in_other_repositories_by_their_own() {
         let mut answer: serde_json::Value = serde_json::from_str(FIXTURE).unwrap();
         let issue = &mut answer["data"]["repository"]["issue"];
-        issue["parent"] = serde_json::json!({"number": 1, "repository": {"nameWithOwner": "example-owner/parvi"}});
-        issue["subIssues"]["nodes"] = serde_json::json!([{"number": 2, "repository": {"nameWithOwner": "example-owner/parvi"}}]);
+        issue["parent"] =
+            serde_json::json!({"number": 1, "repository": {"nameWithOwner": "example-owner/ahjo"}});
+        issue["subIssues"]["nodes"] = serde_json::json!([{"number": 2, "repository": {"nameWithOwner": "example-owner/ahjo"}}]);
         issue["blockedBy"]["nodes"] =
             serde_json::json!([{"number": 3, "repository": {"nameWithOwner": "cli/cli"}}]);
         issue["blocking"]["nodes"] = serde_json::json!([{"number": 4, "repository": null}]);
-        let item = parse(&answer.to_string(), "example-owner", "parvi").unwrap();
+        let item = parse(&answer.to_string(), "example-owner", "ahjo").unwrap();
         assert_eq!(
             item.family.parent.as_deref(),
-            Some("gh:example-owner/parvi#1")
+            Some("gh:example-owner/ahjo#1")
         );
-        assert_eq!(item.family.children, vec!["gh:example-owner/parvi#2"]);
+        assert_eq!(item.family.children, vec!["gh:example-owner/ahjo#2"]);
         assert_eq!(item.family.blockers, vec!["gh:cli/cli#3"]);
-        assert_eq!(item.family.blocking, vec!["gh:example-owner/parvi#4"]);
+        assert_eq!(item.family.blocking, vec!["gh:example-owner/ahjo#4"]);
     }
 
     #[test]

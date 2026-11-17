@@ -1,15 +1,15 @@
 //! The Work page's list, card and handoff against a node with a fixture store.
 #![cfg(unix)]
 
+use ahjo_app_kit::ask::Ask;
+use ahjo_app_kit::link::client::LinkState;
+use ahjo_app_kit::{Host, Mounted, Page, mount};
+use ahjo_node_kit::{Built, Listing, Setup};
+use ahjo_terminals_app::Terminals;
+use ahjo_testkit::node::Node;
+use ahjo_testkit::tmux::Server;
 use gpui::{App, Context, IntoElement, Render, div, prelude::*};
 use gpui::{Entity, Modifiers, TestAppContext, VisualTestContext, Window};
-use parvi_app_kit::ask::Ask;
-use parvi_app_kit::link::client::LinkState;
-use parvi_app_kit::{Host, Mounted, Page, mount};
-use parvi_node_kit::{Built, Listing, Setup};
-use parvi_terminals_app::Terminals;
-use parvi_testkit::node::Node;
-use parvi_testkit::tmux::Server;
 use std::cell::RefCell;
 use std::sync::{OnceLock, mpsc};
 use std::time::{Duration, Instant};
@@ -17,17 +17,17 @@ use std::time::{Duration, Instant};
 static BD: OnceLock<String> = OnceLock::new();
 static GH: OnceLock<String> = OnceLock::new();
 fn build_work(setup: &Setup) -> anyhow::Result<Built> {
-    parvi_work::build_with(
+    ahjo_work::build_with(
         setup,
-        parvi_work::Bd::new(BD.get().unwrap()),
-        parvi_work::Gh::new(GH.get().unwrap()),
+        ahjo_work::Bd::new(BD.get().unwrap()),
+        ahjo_work::Gh::new(GH.get().unwrap()),
     )
 }
 const WORK: Listing = Listing {
     build: build_work,
-    ..parvi_work::LISTING
+    ..ahjo_work::LISTING
 };
-const AREAS: &[Listing] = &[parvi_terminals::LISTING, WORK];
+const AREAS: &[Listing] = &[ahjo_terminals::LISTING, WORK];
 thread_local! { static TERMINALS: RefCell<Option<Entity<Terminals>>> = const { RefCell::new(None) }; }
 fn terminals(host: Host, window: &mut Window, cx: &mut gpui::App) -> Mounted {
     mount(host, window, cx, |host, window, cx| {
@@ -80,7 +80,7 @@ fn start() -> Option<Running> {
         rt.block_on(async move {
             let Some(tmux) = Server::start_in("work-page-journey") else { ready.send(None).unwrap(); return; };
             tmux.new_session("alpha", 100, 30);
-            let dir = parvi_testkit::fresh_dir("work-page-store");
+            let dir = ahjo_testkit::fresh_dir("work-page-store");
             std::fs::create_dir_all(dir.join(".beads")).unwrap();
             let script = dir.join("fixture-bd");
             std::fs::write(&script, "#!/bin/sh\nif [ \"$2\" = config ]; then echo '{\"value\":\"fixture\"}'; exit 0; fi\nif [ -f slow ]; then sleep 6; fi\nif [ -f fail ]; then echo 'tracker unavailable' >&2; exit 1; fi\ncat fixture.json\n").unwrap();
@@ -95,12 +95,12 @@ fn start() -> Option<Running> {
             BD.set(script.to_string_lossy().into_owned()).unwrap();
             let gh = dir.join("fixture-gh");
             let base = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../node/tests/fixtures/work");
-            std::fs::write(&gh, format!("#!/bin/sh\ncase \"$*\" in *number=51*) cat '{}';; *) cat '{}';; esac\n", base.join("item.json").display(), base.join("parvi.json").display())).unwrap();
+            std::fs::write(&gh, format!("#!/bin/sh\ncase \"$*\" in *number=51*) cat '{}';; *) cat '{}';; esac\n", base.join("item.json").display(), base.join("ahjo.json").display())).unwrap();
             std::fs::set_permissions(&gh, std::fs::Permissions::from_mode(0o755)).unwrap();
             GH.set(gh.to_string_lossy().into_owned()).unwrap();
             let launch = dir.join("launch.conf");
             std::fs::write(&launch, format!("folder {}\n", dir.display())).unwrap();
-            let config = format!("[terminals]\nsocket = {:?}\nlaunch = {:?}\n[work]\nprojects = [{:?}, {:?}]\n", tmux.socket_path(), launch, format!("beads {}", dir.display()), "github example-owner/parvi");
+            let config = format!("[terminals]\nsocket = {:?}\nlaunch = {:?}\n[work]\nprojects = [{:?}, {:?}]\n", tmux.socket_path(), launch, format!("beads {}", dir.display()), "github example-owner/ahjo");
             let node = Node::start(AREAS, &config).await.unwrap();
             ready.send(Some((node.url(), node.id(), dir.display().to_string(), tmux.socket_path()))).unwrap();
             while stopped.try_recv().is_err() { tokio::time::sleep(Duration::from_millis(50)).await; }
@@ -120,7 +120,7 @@ fn start() -> Option<Running> {
         None => {
             thread.join().unwrap();
             assert!(
-                std::env::var_os("PARVI_REQUIRE_TMUX").is_none(),
+                std::env::var_os("AHJO_REQUIRE_TMUX").is_none(),
                 "tmux is required"
             );
             None
@@ -161,14 +161,14 @@ fn work_column_and_terminal_links_open_cards_and_hand_off(cx: &mut TestAppContex
     let Some(running) = start() else {
         return;
     };
-    let settings = parvi_testkit::fresh_dir("work-page-settings");
+    let settings = ahjo_testkit::fresh_dir("work-page-settings");
     cx.executor().allow_parking();
-    cx.update(parvi_app_shell::prepare);
+    cx.update(ahjo_app_shell::prepare);
     let url = running.url.clone();
     let path = settings.join("app.json");
     let (shell, cx) = cx.add_window_view(move |window, cx| {
-        parvi_app_shell::start(
-            &[toy, terminals, parvi_work_app::build],
+        ahjo_app_shell::start(
+            &[toy, terminals, ahjo_work_app::build],
             Some(url),
             Some(path),
             window,
@@ -184,7 +184,7 @@ fn work_column_and_terminal_links_open_cards_and_hand_off(cx: &mut TestAppContex
     let reveal = |id: &str, beside| Ask::Reveal {
         what: "item".into(),
         id: id.into(),
-        node: Some(parvi_core::NodeId(running.node.clone())),
+        node: Some(ahjo_core::NodeId(running.node.clone())),
         part: None,
         beside,
     };
@@ -308,11 +308,11 @@ fn work_column_and_terminal_links_open_cards_and_hand_off(cx: &mut TestAppContex
     // Both forms printed in the terminal resolve through the real Work page.
     for (written, title) in [
         ("fixture-1", "Read the fixture"),
-        ("example-owner/parvi#51", "Example work item"),
+        ("example-owner/ahjo#51", "Example work item"),
     ] {
         let command = format!("printf '\\033[2J\\033[H{written}\\n'");
         let output = std::process::Command::new(
-            std::env::var("PARVI_TMUX").unwrap_or_else(|_| "tmux".into()),
+            std::env::var("AHJO_TMUX").unwrap_or_else(|_| "tmux".into()),
         )
         .args(["-f", "/dev/null", "-S"])
         .arg(&running.socket)
@@ -388,7 +388,7 @@ fn work_column_and_terminal_links_open_cards_and_hand_off(cx: &mut TestAppContex
     until(cx, "item menu", |cx| cx.debug_bounds("work-more").is_some());
     let host = shell.read_with(cx, |shell, _| Host::new(shell.hub()));
     let sessions = cx
-        .update(|_, cx| host.model::<parvi_terminals_contract::SessionList>(cx))
+        .update(|_, cx| host.model::<ahjo_terminals_contract::SessionList>(cx))
         .unwrap();
     // "…" offers to start a session in the item's checkout, first.
     click(cx, "work-more");

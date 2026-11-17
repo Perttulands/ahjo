@@ -4,7 +4,7 @@
 //! the history costs the same after a minute and after a month.
 
 use super::Ring;
-use parvi_host_contract::{Minute, Point};
+use ahjo_host_contract::{Minute, Point};
 
 /// Minutes kept: a day.
 pub const MINUTES: usize = 24 * 60;
@@ -50,7 +50,7 @@ impl History {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use parvi_host_contract::MINUTE;
+    use ahjo_host_contract::MINUTE;
 
     fn at(at: u64, cpu: f32) -> Point {
         Point {

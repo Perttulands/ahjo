@@ -1,6 +1,6 @@
 //! Restore a deleted node, its wires and its canvas position in one edit.
 use crate::Error;
-use parvi_mission_model::{Connection, LayoutNode, Mission, Patch, RestoredNode};
+use ahjo_mission_model::{Connection, LayoutNode, Mission, Patch, RestoredNode};
 use serde::Serialize;
 use std::collections::HashSet;
 use toml_edit::{ArrayOfTables, DocumentMut, Item};
@@ -66,7 +66,7 @@ pub(crate) fn apply(
             crate::authoring_input::apply(
                 doc,
                 &current,
-                parvi_mission_model::InputCardUpdate {
+                ahjo_mission_model::InputCardUpdate {
                     id: n.id.clone(),
                     human_channel: Some(n.human_channel.clone()),
                     inputs: Some(n.inputs.clone()),

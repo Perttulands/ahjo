@@ -1,5 +1,5 @@
 [package]
-name = "parvi-host-contract"
+name = "ahjo-host-contract"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -9,7 +9,7 @@ publish = false
 workspace = true
 
 [dependencies]
-parvi-core = { path = "../../../kit/core" }
+ahjo-core = { path = "../../../kit/core" }
 serde = { version = "1", features = ["derive"] }
 
 [dev-dependencies]

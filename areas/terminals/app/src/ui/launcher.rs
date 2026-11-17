@@ -10,12 +10,12 @@ use crate::store::settings::launched_in;
 use crate::store::workspace::LinkState;
 use crate::store::{devices, launch, launch_flags, sessions};
 use crate::theme::{size, theme};
+use ahjo_app_kit::host::{Host, Request};
+use ahjo_app_kit::widgets::field::{FieldEvent, TextField};
+use ahjo_app_kit::widgets::kit::{self, Kind};
+use ahjo_core::NodeId;
+use ahjo_terminals_contract::Launch;
 use gpui::{Context, Entity, FocusHandle, ScrollHandle, WeakEntity, Window, div, prelude::*, px};
-use parvi_app_kit::host::{Host, Request};
-use parvi_app_kit::widgets::field::{FieldEvent, TextField};
-use parvi_app_kit::widgets::kit::{self, Kind};
-use parvi_core::NodeId;
-use parvi_terminals_contract::Launch;
 
 /// How many launched-in folders a node keeps.
 const LAUNCHED_KEPT: usize = 5;
@@ -129,7 +129,7 @@ impl Launcher {
     pub fn focus_first(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let field = self.folder.read(cx).field.clone();
         field.update(cx, |f, cx| f.set(&f.text.clone(), true, cx));
-        parvi_app_kit::widgets::field::focus(&field, window, cx);
+        ahjo_app_kit::widgets::field::focus(&field, window, cx);
         cx.notify();
     }
 
@@ -730,7 +730,7 @@ impl Render for Launcher {
                                 .on_click(cx.listener(move |l, _, window, cx| {
                                     l.pick_flag(chosen.clone(), cx);
                                     if l.editing.is_some() {
-                                        parvi_app_kit::widgets::field::focus(&l.draft, window, cx);
+                                        ahjo_app_kit::widgets::field::focus(&l.draft, window, cx);
                                     }
                                 })),
                         );
@@ -839,7 +839,7 @@ impl Render for Launcher {
                                                 l.catalogue_key = None;
                                             }
                                             l.fetch_flags(node.clone(), harness.clone(), cx);
-                                            parvi_app_kit::widgets::field::focus(
+                                            ahjo_app_kit::widgets::field::focus(
                                                 &l.search, window, cx,
                                             );
                                         }

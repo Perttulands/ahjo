@@ -69,11 +69,8 @@ mod tests {
     #[test]
     fn takes_only_one_byte_watch_frames() {
         let mut channel = Channel::new(Work::default());
-        assert!(parvi_core::frame::owns(parvi_work_contract::KINDS, WATCH));
-        assert!(!parvi_core::frame::owns(
-            parvi_work_contract::KINDS,
-            SNAPSHOT
-        ));
+        assert!(ahjo_core::frame::owns(ahjo_work_contract::KINDS, WATCH));
+        assert!(!ahjo_core::frame::owns(ahjo_work_contract::KINDS, SNAPSHOT));
         assert!(channel.receive(&[WATCH]).is_err());
         assert!(channel.receive(&[WATCH, 1, 0]).is_err());
     }
@@ -93,12 +90,12 @@ mod tests {
 
     #[test]
     fn spells_the_snapshot_as_the_browser_reads_it() {
-        let work = crate::work::parse::parse(include_str!("../../tests/fixtures/work/parvi.json"))
-            .unwrap();
+        let work =
+            crate::work::parse::parse(include_str!("../../tests/fixtures/work/ahjo.json")).unwrap();
         let frame = snapshot(&Snapshot {
             refreshed: 0,
             projects: vec![ProjectView::Github(RepoView {
-                name: "example-owner/parvi".into(),
+                name: "example-owner/ahjo".into(),
                 checkout: None,
                 synced: Some(1),
                 error: None,
@@ -107,7 +104,7 @@ mod tests {
         });
         let json = std::str::from_utf8(&frame[1..]).unwrap();
         for expected in [
-            r#"{"projects":[{"tracker":"github","name":"example-owner/parvi","synced":1,"url":"https://github.com/example-owner/parvi","openIssues":15,"closedIssues":28,"openPulls":0,"closedPulls":27,"issues":[{"number":70,"#,
+            r#"{"projects":[{"tracker":"github","name":"example-owner/ahjo","synced":1,"url":"https://github.com/example-owner/ahjo","openIssues":15,"closedIssues":28,"openPulls":0,"closedPulls":27,"issues":[{"number":70,"#,
             r#""state":"merged""#,
             r#""checks":{"passed":1,"failed":0,"pending":0}"#,
             r#""pulls":[58]"#,

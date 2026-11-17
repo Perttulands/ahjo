@@ -1,5 +1,5 @@
 use super::adapter::{Launch, Shell, SlotBinding, TranscriptRoots};
-use parvi_term::waiting::harness::Harness;
+use ahjo_term::waiting::harness::Harness;
 use std::{io, path::Path};
 fn quote(s: &str, shell: Shell) -> String {
     match shell {

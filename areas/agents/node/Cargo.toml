@@ -1,5 +1,5 @@
 [package]
-name = "parvi-agents"
+name = "ahjo-agents"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -10,12 +10,12 @@ workspace = true
 
 [dependencies]
 anyhow = "1"
-parvi-agents-contract = { path = "../contract" }
-parvi-core = { path = "../../../kit/core" }
-parvi-node-kit = { path = "../../../kit/node-kit" }
-parvi-mission-engine = { path = "../../../engine/missions" }
+ahjo-agents-contract = { path = "../contract" }
+ahjo-core = { path = "../../../kit/core" }
+ahjo-node-kit = { path = "../../../kit/node-kit" }
+ahjo-mission-engine = { path = "../../../engine/missions" }
 axum = { version = "0.8", default-features = false, features = ["json"] }
-parvi-term = { path = "../../../engine/term" }
+ahjo-term = { path = "../../../engine/term" }
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["preserve_order"] }
 sha2 = "0.11"
@@ -27,8 +27,8 @@ tokio = { version = "1", features = ["full"] }
 windows-sys = { version = "0.61", features = ["Win32_System_Threading"] }
 
 [dev-dependencies]
-parvi-testkit = { path = "../../../kit/testkit" }
-parvi-terminals = { path = "../../terminals/node" }
+ahjo-testkit = { path = "../../../kit/testkit" }
+ahjo-terminals = { path = "../../terminals/node" }
 
 futures-util = "0.3"
 tokio-tungstenite = "0.30"

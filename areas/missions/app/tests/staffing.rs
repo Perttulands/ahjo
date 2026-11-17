@@ -1,9 +1,9 @@
 #![cfg(unix)]
+use ahjo_app_kit::{Ask, Host};
+use ahjo_core::NodeId;
+use ahjo_node_kit::{Area, Built, Listing, NodeClient, Setup};
+use ahjo_testkit::{node::Node, sessions};
 use gpui::{Modifiers, TestAppContext, VisualTestContext, point, px};
-use parvi_app_kit::{Ask, Host};
-use parvi_core::NodeId;
-use parvi_node_kit::{Area, Built, Listing, NodeClient, Setup};
-use parvi_testkit::{node::Node, sessions};
 use serde_json::json;
 use std::{
     sync::{Arc, mpsc},
@@ -45,7 +45,7 @@ fn start() -> Running {
     // The node checks a chosen model against this host's Codex models; give
     // it the one the roles fake offers. Alone in its binary, so the
     // process-wide variable is safe to set.
-    let codex = std::env::temp_dir().join(format!("parvi-staffing-codex-{}", std::process::id()));
+    let codex = std::env::temp_dir().join(format!("ahjo-staffing-codex-{}", std::process::id()));
     std::fs::create_dir_all(&codex).unwrap();
     std::fs::write(
         codex.join("models_cache.json"),
@@ -62,8 +62,8 @@ fn start() -> Running {
                 let node = Node::start(
                     &[
                         sessions::LISTING,
-                        parvi_work::LISTING,
-                        parvi_missions::LISTING,
+                        ahjo_work::LISTING,
+                        ahjo_missions::LISTING,
                         ROLES,
                     ],
                     "",
@@ -137,15 +137,15 @@ fn catalog_pickers_offer_sorted_roles_and_model_efforts_and_save_the_choice(
 ) {
     let running = start();
     cx.executor().allow_parking();
-    cx.update(parvi_app_shell::prepare);
+    cx.update(ahjo_app_shell::prepare);
     let settings = std::env::temp_dir()
-        .join(format!("parvi-staffing-{}", std::process::id()))
+        .join(format!("ahjo-staffing-{}", std::process::id()))
         .join("app.json");
     std::fs::create_dir_all(settings.parent().unwrap()).unwrap();
     let url = running.url.clone();
     let (shell, cx) = cx.add_window_view(move |window, cx| {
-        parvi_app_shell::start(
-            &[parvi_missions_app::build],
+        ahjo_app_shell::start(
+            &[ahjo_missions_app::build],
             Some(url),
             Some(settings),
             window,

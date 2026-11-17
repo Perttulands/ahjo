@@ -1,10 +1,10 @@
 //! The hello this node sends first on every `/ws` connection
-//! ([`parvi_core::Hello`] reads it).
+//! ([`ahjo_core::Hello`] reads it).
 
 use crate::identity::Identity;
-use parvi_core::PROTOCOL;
-use parvi_core::frame::HELLO;
-use parvi_core::json::push_string as push_json_string;
+use ahjo_core::PROTOCOL;
+use ahjo_core::frame::HELLO;
+use ahjo_core::json::push_string as push_json_string;
 
 /// `0x00` and JSON: `{"node":…,"device":…,"environment":"wsl","version":"0.0.1","protocol":16}`.
 pub fn hello(node: &Identity, off: &[&str]) -> Vec<u8> {
@@ -31,7 +31,7 @@ pub fn hello(node: &Identity, off: &[&str]) -> Vec<u8> {
 mod tests {
     use super::*;
     use crate::identity::Environment;
-    use parvi_core::Hello;
+    use ahjo_core::Hello;
 
     #[test]
     fn reads_back_the_hello_it_sends() {

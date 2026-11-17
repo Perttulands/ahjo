@@ -47,7 +47,7 @@ impl Coordinator {
                         (
                             "pick",
                             format!(
-                                "parvi gate pick {id} {} --requested-seq {} --attempt {attempt}",
+                                "ahjo gate pick {id} {} --requested-seq {} --attempt {attempt}",
                                 gate.gate_id, gate.requested_seq
                             ),
                         )
@@ -55,12 +55,12 @@ impl Coordinator {
                         (
                             "verdict",
                             format!(
-                                "parvi gate approve {id} {} --requested-seq {}\nparvi gate reject {id} {} --requested-seq {}",
+                                "ahjo gate approve {id} {} --requested-seq {}\nahjo gate reject {id} {} --requested-seq {}",
                                 gate.gate_id, gate.requested_seq, gate.gate_id, gate.requested_seq
                             ),
                         )
                     };
-                    let subject = format!("Parvi needs your answer: {title} ({})", mission.title);
+                    let subject = format!("Ahjo needs your answer: {title} ({})", mission.title);
                     let body = format!(
                         "{} is waiting at {title}.\n\nCriterion: {criterion}\n\nInput:\n{input}\n\n{commands}\n\nRun: {id}\nMission: {}\n",
                         mission.title, run.mission_slug
@@ -90,11 +90,11 @@ impl Coordinator {
             for event in &escalations {
                 let reason = field(event, "reason");
                 let subject = format!(
-                    "Parvi needs you: {} escalated ({})",
+                    "Ahjo needs you: {} escalated ({})",
                     event.node_id, mission.title
                 );
                 let body = format!(
-                    "Run {id} needs you: {reason}\n\nparvi run resume {id} --reason 'how it was resolved'\n"
+                    "Run {id} needs you: {reason}\n\nahjo run resume {id} --reason 'how it was resolved'\n"
                 );
                 asks.push(message(
                     &run,
@@ -116,16 +116,16 @@ impl Coordinator {
                 && (field(event, "code") != "coordinator_shutdown" || run.waiting_gates.is_empty())
             {
                 let reason = field(event, "reason");
-                let subject = format!("Parvi run blocked: {}", mission.title);
+                let subject = format!("Ahjo run blocked: {}", mission.title);
                 let commands = if !run.resume_allowed {
                     "Inspect the run and start a new one.".to_owned()
                 } else {
                     match run.resume_policy.as_str() {
-                        "grant" => format!("parvi run resume {id} --grant"),
+                        "grant" => format!("ahjo run resume {id} --grant"),
                         "grant_or_pick" => format!(
-                            "parvi run resume {id} --grant\nparvi run resume {id} --pick-best"
+                            "ahjo run resume {id} --grant\nahjo run resume {id} --pick-best"
                         ),
-                        _ => format!("parvi run resume {id}"),
+                        _ => format!("ahjo run resume {id}"),
                     }
                 };
                 let body = format!("Run {id} is blocked: {reason}\n\n{commands}\n");
@@ -143,7 +143,7 @@ impl Coordinator {
                 ));
             }
         } else if settled && let Some(event) = events.last() {
-            let subject = format!("Parvi run {}: {}", run.status, mission.title);
+            let subject = format!("Ahjo run {}: {}", run.status, mission.title);
             let picked = if run.status == "picked" {
                 "Work continued through a pick of failed attempts.\n"
             } else {
@@ -175,7 +175,7 @@ impl Coordinator {
 
 #[allow(clippy::too_many_arguments)]
 fn message(
-    run: &parvi_mission_model::RunProjection,
+    run: &ahjo_mission_model::RunProjection,
     event: &RunEvent,
     mission: &str,
     kind: &str,

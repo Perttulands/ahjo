@@ -16,7 +16,7 @@ mod wiring;
 
 use crate::harness::Harnesses;
 use crate::roles::RoleStore;
-use parvi_mission_model::{Mission, Report};
+use ahjo_mission_model::{Mission, Report};
 
 /// Validates a whole mission. Role cards come from `roles`, and what each
 /// harness model accepts from `harnesses`.
@@ -58,10 +58,10 @@ fn possessive(name: &str) -> String {
 }
 
 /// Capabilities the runtime cannot execute, independent of incomplete drafts.
-pub(crate) fn unsupported(mission: &Mission) -> Vec<parvi_mission_model::Finding> {
+pub(crate) fn unsupported(mission: &Mission) -> Vec<ahjo_mission_model::Finding> {
     let mut findings: Vec<_> = formations::shape_findings(mission)
         .into_iter()
-        .filter(|finding| finding.code == parvi_mission_model::Code::UnsupportedFormation)
+        .filter(|finding| finding.code == ahjo_mission_model::Code::UnsupportedFormation)
         .collect();
     findings.extend(wiring::unsupported_human_channels(mission));
     findings

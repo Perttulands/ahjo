@@ -124,12 +124,12 @@ impl Bd {
 /// only after a write: the Dolt manifests of its databases, embedded
 /// (`.beads/embeddeddolt/<db>`) or kept by a local Dolt server
 /// (`.beads/dolt/<db>`). Any other layout, such as a store served from
-/// elsewhere, has no marker Parvi can read cheaply: the error says why, and
+/// elsewhere, has no marker Ahjo can read cheaply: the error says why, and
 /// the store is then read only when watching starts or on request.
 ///
 /// The marker is the manifests' bytes, about 150 each, not their file
 /// times: `bd list` rewrites a manifest with the same bytes on every read,
-/// so a time or inode would move with Parvi's own reads.
+/// so a time or inode would move with Ahjo's own reads.
 pub fn marker(folder: &str) -> Result<Vec<u8>, String> {
     let beads = Path::new(folder).join(".beads");
     let mut manifests = Vec::new();
@@ -146,7 +146,7 @@ pub fn marker(folder: &str) -> Result<Vec<u8>, String> {
     }
     if manifests.is_empty() {
         return Err(format!(
-            "no Dolt manifest under {}, so Parvi cannot see when it changes",
+            "no Dolt manifest under {}, so Ahjo cannot see when it changes",
             beads.display()
         ));
     }

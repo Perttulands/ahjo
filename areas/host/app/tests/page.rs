@@ -1,7 +1,7 @@
 //! Both host pages render data from a testkit node.
+use ahjo_app_kit::link::client::LinkState;
+use ahjo_testkit::node::Node;
 use gpui::{TestAppContext, VisualTestContext};
-use parvi_app_kit::link::client::LinkState;
-use parvi_testkit::node::Node;
 use std::{
     sync::mpsc,
     time::{Duration, Instant},
@@ -28,7 +28,7 @@ fn start() -> Running {
         tokio::runtime::Runtime::new()
             .unwrap()
             .block_on(async move {
-                let node = Node::start(&[parvi_host::LISTING], "").await.unwrap();
+                let node = Node::start(&[ahjo_host::LISTING], "").await.unwrap();
                 // A read-only fixture with an invalid user is never sent to a real manager.
                 std::fs::write(node.dir().join("services.json"), serde_json::json!({"services": [
                 {"id":"fixture", "name":"Fixture service", "readOnly":true,
@@ -67,13 +67,13 @@ fn until(
 #[gpui::test]
 fn readings_and_services_render_node_data(cx: &mut TestAppContext) {
     let running = start();
-    let dir = parvi_testkit::fresh_dir("parvi-host-page");
+    let dir = ahjo_testkit::fresh_dir("ahjo-host-page");
     cx.executor().allow_parking();
-    cx.update(parvi_app_shell::prepare);
+    cx.update(ahjo_app_shell::prepare);
     let (url, settings) = (running.url.clone(), dir.join("app.json"));
     let (shell, cx) = cx.add_window_view(move |window, cx| {
-        parvi_app_shell::start(
-            &[parvi_host_app::build],
+        ahjo_app_shell::start(
+            &[ahjo_host_app::build],
             Some(url),
             Some(settings),
             window,

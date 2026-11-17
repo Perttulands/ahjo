@@ -1,19 +1,19 @@
 #![cfg(unix)]
+use ahjo_app_kit::{Ask, Host, Mounted, Page, link::client::LinkState, mount};
+use ahjo_core::NodeId;
+use ahjo_mission_engine::{
+    ExecutionSink, Executor, FormationExecution, FormationResult, LabExecutor,
+};
+use ahjo_node_kit::{Built, Listing, NodeClient, Setup};
+use ahjo_term::Sessions;
+use ahjo_testkit::{
+    node::Node,
+    sessions::{self, FakeSessions},
+};
 use gpui::ParentElement;
 use gpui::{
     App, Context, IntoElement, Modifiers, SystemNotificationResponse, TestAppContext,
     VisualTestContext, Window, point, px,
-};
-use parvi_app_kit::{Ask, Host, Mounted, Page, link::client::LinkState, mount};
-use parvi_core::NodeId;
-use parvi_mission_engine::{
-    ExecutionSink, Executor, FormationExecution, FormationResult, LabExecutor,
-};
-use parvi_node_kit::{Built, Listing, NodeClient, Setup};
-use parvi_term::Sessions;
-use parvi_testkit::{
-    node::Node,
-    sessions::{self, FakeSessions},
 };
 use serde_json::json;
 use std::sync::{Arc, Mutex, mpsc};
@@ -21,18 +21,18 @@ use std::time::{Duration, Instant};
 
 static FAIL_GATE_READ: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 static WATCHES: Mutex<Vec<Vec<u8>>> = Mutex::new(Vec::new());
-struct ObservedArea(Arc<dyn parvi_node_kit::Area>);
-struct ObservedChannel(Box<dyn parvi_node_kit::Channel>);
-impl parvi_node_kit::Channel for ObservedChannel {
-    fn receive(&mut self, frame: Vec<u8>) -> parvi_node_kit::BoxFuture<'_, ()> {
+struct ObservedArea(Arc<dyn ahjo_node_kit::Area>);
+struct ObservedChannel(Box<dyn ahjo_node_kit::Channel>);
+impl ahjo_node_kit::Channel for ObservedChannel {
+    fn receive(&mut self, frame: Vec<u8>) -> ahjo_node_kit::BoxFuture<'_, ()> {
         WATCHES.lock().unwrap().push(frame.clone());
         self.0.receive(frame)
     }
-    fn next(&mut self) -> parvi_node_kit::BoxFuture<'_, Option<Vec<u8>>> {
+    fn next(&mut self) -> ahjo_node_kit::BoxFuture<'_, Option<Vec<u8>>> {
         self.0.next()
     }
 }
-impl parvi_node_kit::Area for ObservedArea {
+impl ahjo_node_kit::Area for ObservedArea {
     fn routes(&self) -> axum::Router {
         self.0.routes().layer(axum::middleware::from_fn(
             |request: axum::extract::Request, next: axum::middleware::Next| async move {
@@ -49,15 +49,15 @@ impl parvi_node_kit::Area for ObservedArea {
             },
         ))
     }
-    fn commands(&self) -> Vec<parvi_node_kit::Command> {
+    fn commands(&self) -> Vec<ahjo_node_kit::Command> {
         self.0.commands()
     }
-    fn channel(&self, client: parvi_node_kit::Client) -> Option<Box<dyn parvi_node_kit::Channel>> {
+    fn channel(&self, client: ahjo_node_kit::Client) -> Option<Box<dyn ahjo_node_kit::Channel>> {
         self.0
             .channel(client)
-            .map(|channel| Box::new(ObservedChannel(channel)) as Box<dyn parvi_node_kit::Channel>)
+            .map(|channel| Box::new(ObservedChannel(channel)) as Box<dyn ahjo_node_kit::Channel>)
     }
-    fn stop(&self) -> parvi_node_kit::BoxFuture<'_, ()> {
+    fn stop(&self) -> ahjo_node_kit::BoxFuture<'_, ()> {
         self.0.stop()
     }
 }
@@ -85,7 +85,7 @@ impl Executor for FakeSeatLab {
         &self,
         execution: FormationExecution,
         sink: ExecutionSink,
-    ) -> Result<FormationResult, parvi_core::Error> {
+    ) -> Result<FormationResult, ahjo_core::Error> {
         let sessions = FAKE.lock().unwrap().clone().expect("fake Sessions");
         let id = sessions.add(&format!("seat-{}", execution.formation.id));
         self.runtime
@@ -96,7 +96,7 @@ impl Executor for FakeSeatLab {
                     .await?;
                 Ok::<_, anyhow::Error>(())
             })
-            .map_err(|e| parvi_core::Error::new("test", e.to_string()))?;
+            .map_err(|e| ahjo_core::Error::new("test", e.to_string()))?;
         let receiver = RELEASE.lock().unwrap().take().expect("release receiver");
         receiver
             .recv_timeout(Duration::from_secs(20))
@@ -105,7 +105,7 @@ impl Executor for FakeSeatLab {
     }
 }
 fn build(setup: &Setup) -> anyhow::Result<Built> {
-    let built = parvi_missions::build_with_executor(
+    let built = ahjo_missions::build_with_executor(
         setup,
         Some(Box::new(FakeSeatLab {
             runtime: tokio::runtime::Handle::current(),
@@ -120,7 +120,7 @@ fn build(setup: &Setup) -> anyhow::Result<Built> {
 }
 const MISSIONS: Listing = Listing {
     build,
-    ..parvi_missions::LISTING
+    ..ahjo_missions::LISTING
 };
 struct Running {
     url: String,
@@ -143,7 +143,7 @@ fn start() -> Running {
         tokio::runtime::Runtime::new()
             .unwrap()
             .block_on(async move {
-                let node = Node::start(&[sessions::LISTING, parvi_work::LISTING, MISSIONS], "")
+                let node = Node::start(&[sessions::LISTING, ahjo_work::LISTING, MISSIONS], "")
                     .await
                     .unwrap();
                 *FAKE.lock().unwrap() = Some(node.fake_sessions());
@@ -209,18 +209,18 @@ fn starts_a_run_sees_active_step_answers_gate_and_shows_admission_findings(
     *RELEASE.lock().unwrap() = Some(receiver);
     let running = start();
     let settings = std::env::temp_dir()
-        .join(format!("parvi-missions-run-{}", std::process::id()))
+        .join(format!("ahjo-missions-run-{}", std::process::id()))
         .join("app.json");
     std::fs::create_dir_all(settings.parent().unwrap()).unwrap();
     cx.executor().allow_parking();
     cx.update(|cx| {
-        parvi_app_shell::prepare(cx);
-        cx.set_app_identity("io.parvi.test", "Parvi test");
+        ahjo_app_shell::prepare(cx);
+        cx.set_app_identity("io.ahjo.test", "Ahjo test");
     });
     let (url, path) = (running.url.clone(), settings.clone());
     let (shell, cx) = cx.add_window_view(move |window, cx| {
-        parvi_app_shell::start(
-            &[parvi_missions_app::build, other],
+        ahjo_app_shell::start(
+            &[ahjo_missions_app::build, other],
             Some(url),
             Some(path),
             window,
@@ -435,10 +435,10 @@ fn starts_a_run_sees_active_step_answers_gate_and_shows_admission_findings(
             let frames = WATCHES.lock().unwrap();
             frames
                 .iter()
-                .any(|frame| frame.as_slice() == [parvi_missions_contract::WATCH, 0])
+                .any(|frame| frame.as_slice() == [ahjo_missions_contract::WATCH, 0])
                 && frames
                     .iter()
-                    .any(|frame| frame.as_slice() == [parvi_missions_contract::WATCH_RUNS, 1])
+                    .any(|frame| frame.as_slice() == [ahjo_missions_contract::WATCH_RUNS, 1])
         },
     );
     assert!(
@@ -446,7 +446,7 @@ fn starts_a_run_sees_active_step_answers_gate_and_shows_admission_findings(
             .lock()
             .unwrap()
             .iter()
-            .any(|frame| frame.as_slice() == [parvi_missions_contract::WATCH_RUNS, 0])
+            .any(|frame| frame.as_slice() == [ahjo_missions_contract::WATCH_RUNS, 0])
     );
     cx.update(|window, _| window.activate_window());
     cx.run_until_parked();
@@ -657,7 +657,7 @@ fn starts_a_run_sees_active_step_answers_gate_and_shows_admission_findings(
         let error = client.request(http::Method::POST, "/api/runs", Some(json!({"mission":"admission-findings", "inputCardId":"inp", "expectedRev":mission["mission"]["rev"], "inputs":{"topic":"A topic"}})), Some(&etag)).await.unwrap_err();
         // Each finding reads as a sentence, named by its step's title.
         let title = |id: &str| mission["mission"]["formations"].as_array().unwrap().iter().find(|f| f["id"] == id).map_or(id.to_owned(), |f| f["title"].as_str().unwrap().to_owned());
-        error.downcast_ref::<parvi_node_kit::NodeError>().unwrap().findings.as_ref().unwrap().as_array().unwrap().iter().map(|f| match f["nodeId"].as_str().unwrap() { "" => f["message"].as_str().unwrap().to_owned(), id => format!("{}: {}", title(id), f["message"].as_str().unwrap()) }).collect::<Vec<_>>()
+        error.downcast_ref::<ahjo_node_kit::NodeError>().unwrap().findings.as_ref().unwrap().as_array().unwrap().iter().map(|f| match f["nodeId"].as_str().unwrap() { "" => f["message"].as_str().unwrap().to_owned(), id => format!("{}: {}", title(id), f["message"].as_str().unwrap()) }).collect::<Vec<_>>()
     });
     assert!(expected.len() > 1);
     click(cx, "run-start");

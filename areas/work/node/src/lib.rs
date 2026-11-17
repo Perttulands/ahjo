@@ -1,15 +1,15 @@
 //! Work's tracker readers, commands and watched snapshot channel, and
-//! reference resolution for other areas ([`parvi_work_contract::Resolver`]).
+//! reference resolution for other areas ([`ahjo_work_contract::Resolver`]).
 #[cfg(test)]
 mod test_support;
 mod work;
 
+use ahjo_core::{Error, NodeId};
+use ahjo_node_kit::args::{flag, object, text};
+use ahjo_node_kit::{Area, BoxFuture, Built, Channel, Client, Command, Listing, Setup};
+use ahjo_work_contract::{Resolver, Resolving};
 use anyhow::Result;
 use axum::Router;
-use parvi_core::{Error, NodeId};
-use parvi_node_kit::args::{flag, object, text};
-use parvi_node_kit::{Area, BoxFuture, Built, Channel, Client, Command, Listing, Setup};
-use parvi_work_contract::{Resolver, Resolving};
 use serde::Deserialize;
 use serde_json::json;
 use std::sync::Arc;
@@ -19,7 +19,7 @@ use work::{Config, Work};
 
 pub const LISTING: Listing = Listing {
     name: "work",
-    kinds: parvi_work_contract::KINDS,
+    kinds: ahjo_work_contract::KINDS,
     commands: &["work_list", "work_show", "work_create"],
     build,
 };
@@ -55,7 +55,7 @@ pub fn build_with(setup: &Setup, bd: Bd, gh: Gh) -> Result<Built> {
     })
 }
 
-/// Work as other areas reach it ([`parvi_work_contract::Resolver`]).
+/// Work as other areas reach it ([`ahjo_work_contract::Resolver`]).
 struct Provided(Work);
 
 impl Resolver for Provided {
@@ -64,7 +64,7 @@ impl Resolver for Provided {
             self.0
                 .resolve(written)
                 .await
-                .map_err(|error| Error::new(parvi_work_contract::BAD_REQUEST, format!("{error:#}")))
+                .map_err(|error| Error::new(ahjo_work_contract::BAD_REQUEST, format!("{error:#}")))
         })
     }
 }

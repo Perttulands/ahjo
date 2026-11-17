@@ -36,7 +36,7 @@ async fn text(State(work): State<Work>, Query(params): Query<HashMap<String, Str
         Err(error) => {
             return refuse(
                 StatusCode::BAD_REQUEST,
-                parvi_work_contract::BAD_REQUEST,
+                ahjo_work_contract::BAD_REQUEST,
                 error,
             );
         }
@@ -47,7 +47,7 @@ async fn text(State(work): State<Work>, Query(params): Query<HashMap<String, Str
             let (status, code) = if error.downcast_ref::<super::MissingItem>().is_some() {
                 (StatusCode::NOT_FOUND, "not_found")
             } else {
-                (StatusCode::BAD_GATEWAY, parvi_work_contract::TRACKER_ERROR)
+                (StatusCode::BAD_GATEWAY, ahjo_work_contract::TRACKER_ERROR)
             };
             refuse(status, code, error)
         }
@@ -61,7 +61,7 @@ async fn search(
     State(work): State<Work>,
     Query(params): Query<HashMap<String, String>>,
 ) -> Response {
-    let terms = parvi_work_contract::text::terms(params.get("q").map(String::as_str).unwrap_or(""));
+    let terms = ahjo_work_contract::text::terms(params.get("q").map(String::as_str).unwrap_or(""));
     let snapshot = work.last();
     match tokio::task::spawn_blocking(move || snapshot.matching(&terms)).await {
         Ok(references) => Json(json!({ "references": references })).into_response(),
@@ -84,7 +84,7 @@ async fn item(State(work): State<Work>, Query(params): Query<HashMap<String, Str
         Err(error) => {
             return refuse(
                 StatusCode::BAD_REQUEST,
-                parvi_work_contract::BAD_REQUEST,
+                ahjo_work_contract::BAD_REQUEST,
                 error,
             );
         }
@@ -99,7 +99,7 @@ async fn item(State(work): State<Work>, Query(params): Query<HashMap<String, Str
             let (status, code) = if error.downcast_ref::<super::MissingItem>().is_some() {
                 (StatusCode::NOT_FOUND, "not_found")
             } else {
-                (StatusCode::BAD_GATEWAY, parvi_work_contract::TRACKER_ERROR)
+                (StatusCode::BAD_GATEWAY, ahjo_work_contract::TRACKER_ERROR)
             };
             refuse(status, code, error)
         }
@@ -108,7 +108,7 @@ async fn item(State(work): State<Work>, Query(params): Query<HashMap<String, Str
 
 async fn create(
     State(work): State<Work>,
-    request: Result<Json<parvi_work_contract::Create>, axum::extract::rejection::JsonRejection>,
+    request: Result<Json<ahjo_work_contract::Create>, axum::extract::rejection::JsonRejection>,
 ) -> Response {
     let Json(request) = match request {
         Ok(request) => request,
@@ -135,7 +135,7 @@ async fn create(
 fn refuse(status: StatusCode, code: &str, error: anyhow::Error) -> Response {
     (
         status,
-        Json(json!({ "error": parvi_core::Error::new(code, format!("{error:#}")) })),
+        Json(json!({ "error": ahjo_core::Error::new(code, format!("{error:#}")) })),
     )
         .into_response()
 }

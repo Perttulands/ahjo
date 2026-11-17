@@ -3,7 +3,7 @@ use crate::Coordinator;
 use crate::coordinator::Control;
 use crate::run_job::execute_formation;
 use crate::run_worker::event;
-use parvi_mission_model::{Mission, RunStart};
+use ahjo_mission_model::{Mission, RunStart};
 use serde_json::json;
 use std::io;
 
@@ -15,8 +15,8 @@ pub(crate) fn run_judges(
     req: &RunStart,
     workspace: &std::path::Path,
     control: &Control,
-    inputs: &[parvi_mission_model::RunInput],
-    gate: &parvi_mission_model::Gate,
+    inputs: &[ahjo_mission_model::RunInput],
+    gate: &ahjo_mission_model::Gate,
     gate_attempt: i64,
     input: &crate::RoutedInput,
 ) -> io::Result<crate::JudgeVerdict> {

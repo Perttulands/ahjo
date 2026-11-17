@@ -6,7 +6,7 @@ use crate::{
     FormationExecution, PublishedTurn, SeatEvent, SeatExecutor, SeatFuture, SeatId, SeatSide,
     TurnWorkspace, executor::PendingEvent,
 };
-use parvi_mission_model::{Formation, Slot};
+use ahjo_mission_model::{Formation, Slot};
 use serde_json::json;
 use std::{
     path::PathBuf,
@@ -42,11 +42,11 @@ impl SeatSide for Away {
         let (sender, events) = stream::channel(4);
         let seat = SeatId {
             node: "n2".into(),
-            session_name: "parvi-run_1".into(),
-            session: parvi_term::SessionRef {
+            session_name: "ahjo-run_1".into(),
+            session: ahjo_term::SessionRef {
                 session_id: "$1".into(),
                 pane_id: 1,
-                generation: parvi_term::Generation {
+                generation: ahjo_term::Generation {
                     pid: 1,
                     start_time: 1,
                 },

@@ -1,6 +1,6 @@
 //! Frozen seat settings and complete role sources for a run.
 use crate::RoleStore;
-use parvi_mission_model::{Mission, Slot};
+use ahjo_mission_model::{Mission, Slot};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
@@ -111,7 +111,7 @@ impl BindingsSnapshot {
         &self,
         run_id: &str,
         mission: &Mission,
-        gate: &parvi_mission_model::Gate,
+        gate: &ahjo_mission_model::Gate,
     ) -> Result<&crate::CodeGateBinding, crate::Error> {
         (|| -> Result<&crate::CodeGateBinding, String> {
             if self.schema != 3

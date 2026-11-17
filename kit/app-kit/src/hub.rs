@@ -16,11 +16,11 @@ use crate::link::socket::{Event, Net};
 use crate::menu::Menu;
 use crate::settings::Settings;
 use crate::theme::{Direction, Theme, motion};
+use ahjo_core::{Error, NodeId};
 use gpui::{
     AnyEntity, AnyView, AnyWeakEntity, App, AppContext, Context, Entity, EventEmitter,
     SystemNotification, Task,
 };
-use parvi_core::{Error, NodeId};
 use std::any::{TypeId, type_name};
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::PathBuf;
@@ -308,7 +308,7 @@ impl Hub {
             Notice::Opened if Some(node.as_str()) != self.fleet.here_id() => {}
             Notice::Opened => {
                 if let Some(h) = self.fleet.here().hello.clone() {
-                    let to = format!("{} ({}), Parvi {}", h.device, h.environment, h.version);
+                    let to = format!("{} ({}), Ahjo {}", h.device, h.environment, h.version);
                     let text = match self.fleet.away() {
                         Some(_) => {
                             format!("Connected through {to} while {} is away", self.home_name())

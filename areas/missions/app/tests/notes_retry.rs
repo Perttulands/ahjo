@@ -1,7 +1,7 @@
 #![cfg(unix)]
+use ahjo_node_kit::Listing;
+use ahjo_testkit::{node::Node, sessions};
 use gpui::{Modifiers, TestAppContext, VisualTestContext};
-use parvi_node_kit::Listing;
-use parvi_testkit::{node::Node, sessions};
 use std::{
     path::PathBuf,
     sync::mpsc,
@@ -9,8 +9,8 @@ use std::{
 };
 const AREAS: &[Listing] = &[
     sessions::LISTING,
-    parvi_work::LISTING,
-    parvi_missions::LISTING,
+    ahjo_work::LISTING,
+    ahjo_missions::LISTING,
 ];
 struct Running {
     url: String,
@@ -90,15 +90,15 @@ fn click(cx: &mut VisualTestContext, id: &str) {
 fn failed_note_read_can_be_retried(cx: &mut TestAppContext) {
     let running = start();
     let settings = std::env::temp_dir()
-        .join(format!("parvi-note-retry-{}", std::process::id()))
+        .join(format!("ahjo-note-retry-{}", std::process::id()))
         .join("app.json");
     std::fs::create_dir_all(settings.parent().unwrap()).unwrap();
     cx.executor().allow_parking();
-    cx.update(parvi_app_shell::prepare);
+    cx.update(ahjo_app_shell::prepare);
     let url = running.url.clone();
     let (_, cx) = cx.add_window_view(move |window, cx| {
-        parvi_app_shell::start(
-            &[parvi_missions_app::build],
+        ahjo_app_shell::start(
+            &[ahjo_missions_app::build],
             Some(url),
             Some(settings),
             window,

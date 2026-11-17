@@ -2,7 +2,7 @@ use super::{
     adapter::{Pointer, TranscriptRoots},
     transcript::s,
 };
-use parvi_term::waiting::harness::Harness;
+use ahjo_term::waiting::harness::Harness;
 use std::{
     collections::BTreeSet,
     fs, io,
@@ -135,7 +135,7 @@ mod tests {
     use std::os::unix::fs::symlink;
     #[test]
     fn only_writable_user_threads_are_active() {
-        let base = std::env::temp_dir().join(format!("parvi-104-proc-{}", std::process::id()));
+        let base = std::env::temp_dir().join(format!("ahjo-104-proc-{}", std::process::id()));
         let root = base.join("sessions");
         let proc = base.join("proc");
         fs::create_dir_all(&root).unwrap();

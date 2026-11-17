@@ -4,7 +4,7 @@
 //! order until it is arranged.
 
 use super::flow::Flow;
-use parvi_missions_contract::{LayoutNode, Mission};
+use ahjo_missions_contract::{LayoutNode, Mission};
 use std::collections::HashMap;
 
 /// Archon's card sizes (formations-d7.css). A step card is its IN rows,
@@ -104,7 +104,7 @@ pub fn body_h(kind: &str, slots: usize) -> f32 {
 }
 
 /// The face and the board must agree on the head height so ports meet rows.
-pub fn step_head(f: &parvi_missions_contract::Formation, running: bool) -> f32 {
+pub fn step_head(f: &ahjo_missions_contract::Formation, running: bool) -> f32 {
     let has_brief = f.brief.as_ref().is_some_and(|b| !b.goal.trim().is_empty());
     (if has_brief {
         STEP_HEAD
@@ -113,7 +113,7 @@ pub fn step_head(f: &parvi_missions_contract::Formation, running: bool) -> f32 {
     }) + if running { RUN_CHIPS } else { 0. }
 }
 
-fn input_lines(c: &parvi_missions_contract::InputCard) -> f32 {
+fn input_lines(c: &ahjo_missions_contract::InputCard) -> f32 {
     // Inputs, and the human-gate channel.
     1. + f32::from(u8::from(!c.inputs.is_empty()))
 }
@@ -588,7 +588,7 @@ mod tests {
     fn empty_briefs_leave_no_band_and_outputs_follow_the_card() {
         let mut m = delivery();
         let id = m.formations[0].id.clone();
-        m.formations[0].brief = Some(parvi_missions_contract::Brief {
+        m.formations[0].brief = Some(ahjo_missions_contract::Brief {
             goal: "A brief".into(),
             ..Default::default()
         });

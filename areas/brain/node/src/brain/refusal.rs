@@ -1,10 +1,10 @@
 //! Why the Brain could not answer, as an HTTP status and a sentence.
 
-use axum::http::StatusCode;
-use axum::response::{IntoResponse, Response};
-use parvi_brain_contract::{
+use ahjo_brain_contract::{
     BAD_REQUEST, BRAIN_ERROR, CONFLICT, FORBIDDEN, NOT_FOUND, TOO_LARGE, UNAVAILABLE,
 };
+use axum::http::StatusCode;
+use axum::response::{IntoResponse, Response};
 
 #[derive(Debug, PartialEq)]
 pub struct Refusal {
@@ -24,7 +24,7 @@ impl Refusal {
 impl IntoResponse for Refusal {
     fn into_response(self) -> Response {
         let code = code(self.status);
-        parvi_node_kit::Failure(self.status, parvi_core::Error::new(code, self.message))
+        ahjo_node_kit::Failure(self.status, ahjo_core::Error::new(code, self.message))
             .into_response()
     }
 }

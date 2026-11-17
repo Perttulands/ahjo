@@ -7,7 +7,7 @@ use anyhow::{Context, Result};
 use super::checkout::SETUP;
 use super::report::checkout_paths;
 use super::{Home, run, skills};
-use parvi_term::{Sessions, Start};
+use ahjo_term::{Sessions, Start};
 
 /// Starts syncing the checkout the operator knows as `shown` (as the report
 /// shows its path), if it is one the skills come from. Returns the new
@@ -124,7 +124,7 @@ mod tests {
     fn sync_is_noninteractive_and_runs_setup_only_after_a_successful_fast_forward() {
         use std::os::unix::fs::PermissionsExt;
         use std::process::Command;
-        let dir = std::env::temp_dir().join(format!("parvi-sync-command-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("ahjo-sync-command-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let git = dir.join("git");
         let setup = dir.join("install.sh");

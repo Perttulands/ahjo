@@ -1,9 +1,9 @@
 #![cfg(unix)]
+use ahjo_app_kit::{Ask, Host};
+use ahjo_core::NodeId;
+use ahjo_node_kit::{Built, Listing, NodeClient, Setup};
+use ahjo_testkit::{node::Node, sessions};
 use gpui::{Modifiers, TestAppContext, VisualTestContext};
-use parvi_app_kit::{Ask, Host};
-use parvi_core::NodeId;
-use parvi_node_kit::{Built, Listing, NodeClient, Setup};
-use parvi_testkit::{node::Node, sessions};
 use serde_json::json;
 use std::{
     sync::mpsc,
@@ -11,11 +11,11 @@ use std::{
 };
 
 fn build(setup: &Setup) -> anyhow::Result<Built> {
-    parvi_missions::build_with_executor(setup, Some(Box::new(parvi_mission_engine::LabExecutor)))
+    ahjo_missions::build_with_executor(setup, Some(Box::new(ahjo_mission_engine::LabExecutor)))
 }
 const MISSIONS: Listing = Listing {
     build,
-    ..parvi_missions::LISTING
+    ..ahjo_missions::LISTING
 };
 struct Running {
     url: String,
@@ -38,7 +38,7 @@ fn start() -> Running {
         tokio::runtime::Runtime::new()
             .unwrap()
             .block_on(async move {
-                let node = Node::start(&[sessions::LISTING, parvi_work::LISTING, MISSIONS], "")
+                let node = Node::start(&[sessions::LISTING, ahjo_work::LISTING, MISSIONS], "")
                     .await
                     .unwrap();
                 let dir = node.dir().join("missions/missions");
@@ -110,15 +110,15 @@ fn comparing_and_picking_attempt_records_the_reason(cx: &mut TestAppContext) {
         id
     });
     cx.executor().allow_parking();
-    cx.update(parvi_app_shell::prepare);
+    cx.update(ahjo_app_shell::prepare);
     let settings = std::env::temp_dir()
-        .join(format!("parvi-attempt-pick-{}", std::process::id()))
+        .join(format!("ahjo-attempt-pick-{}", std::process::id()))
         .join("app.json");
     std::fs::create_dir_all(settings.parent().unwrap()).unwrap();
     let url = running.url.clone();
     let (shell, cx) = cx.add_window_view(move |window, cx| {
-        parvi_app_shell::start(
-            &[parvi_missions_app::build],
+        ahjo_app_shell::start(
+            &[ahjo_missions_app::build],
             Some(url),
             Some(settings),
             window,

@@ -321,7 +321,7 @@ impl Current {
     fn paste(&mut self, session: &str, out: &mut String, pending: &mut VecDeque<Pending>) {
         let text = std::mem::take(&mut self.text);
         let pane = self.pane;
-        let buffer = format!("parvi-send-{}", session.trim_start_matches('$'));
+        let buffer = format!("ahjo-send-{}", session.trim_start_matches('$'));
         let steps = [
             (pid_command(pane), Step::Pid),
             (
@@ -751,7 +751,7 @@ mod tests {
         assert!(deliveries.readying().unwrap().1 >= start + wait);
         deliveries.looked("$1", Readiness::Ready, later, &mut out, &mut pending);
         assert!(
-            out.contains("paste-buffer -p -d -b parvi-send-1 -t %4"),
+            out.contains("paste-buffer -p -d -b ahjo-send-1 -t %4"),
             "{out}"
         );
         assert!(deliveries.readying().is_none());

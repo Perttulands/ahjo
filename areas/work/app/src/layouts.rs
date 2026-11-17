@@ -11,9 +11,9 @@ use crate::store::work::timeline::{day_label, range_label};
 use crate::tokens::{self, *};
 use crate::view::on_days;
 use crate::{Moved, Work};
+use ahjo_app_kit::theme::{Theme, size};
+use ahjo_app_kit::widgets::{kit, pane};
 use gpui::{AnyElement, Context, Div, FontWeight, Hsla, SharedString, div, prelude::*, px};
-use parvi_app_kit::theme::{Theme, size};
-use parvi_app_kit::widgets::{kit, pane};
 
 impl Work {
     /// The strip over the facets, the list and the item.

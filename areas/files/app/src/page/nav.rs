@@ -5,7 +5,7 @@
 //! group of tabs beside the first.
 use super::*;
 use crate::store::{symbols, tabs::Key};
-use parvi_app_kit::widgets::code::Place;
+use ahjo_app_kit::widgets::code::Place;
 use std::ops::Range;
 use std::time::Instant;
 
@@ -538,7 +538,7 @@ impl FilesPage {
     /// Rows a page of the list holds.
     pub(crate) fn list_page(&self) -> usize {
         let h = f32::from(self.list_scroll.0.borrow().base_handle.bounds().size.height);
-        ((h / parvi_app_kit::theme::size::ROW).floor() as usize).max(2) - 1
+        ((h / ahjo_app_kit::theme::size::ROW).floor() as usize).max(2) - 1
     }
 
     pub(crate) fn typing_ahead(&self) -> bool {
@@ -799,7 +799,7 @@ impl FilesPage {
             replace: replace || was,
             ..Default::default()
         });
-        parvi_app_kit::widgets::field::focus(&self.infile_query, window, cx);
+        ahjo_app_kit::widgets::field::focus(&self.infile_query, window, cx);
         self.refind(true, cx);
         cx.notify();
     }
@@ -917,7 +917,7 @@ impl FilesPage {
                 let focus_back = self.infile_focused(window, cx);
                 self.edit(window, cx);
                 if focus_back {
-                    parvi_app_kit::widgets::field::focus(&self.infile_with, window, cx);
+                    ahjo_app_kit::widgets::field::focus(&self.infile_with, window, cx);
                 }
                 true
             }
@@ -946,7 +946,7 @@ impl FilesPage {
                 if p.tree.node != node || s != 200 {
                     return;
                 }
-                let Ok(status) = serde_json::from_slice::<parvi_files_contract::RepoStatus>(&b)
+                let Ok(status) = serde_json::from_slice::<ahjo_files_contract::RepoStatus>(&b)
                 else {
                     return;
                 };

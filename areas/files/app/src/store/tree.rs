@@ -4,7 +4,7 @@
 
 use super::listing;
 use super::paths;
-use parvi_files_contract::{Entry, Root};
+use ahjo_files_contract::{Entry, Root};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeSet, HashMap};
 

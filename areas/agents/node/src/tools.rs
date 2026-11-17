@@ -179,7 +179,7 @@ mod tests {
 
     #[test]
     fn gh_checks_token_presence_and_config_override_without_reading_files() {
-        let dir = std::env::temp_dir().join(format!("parvi-82-gh-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("ahjo-82-gh-{}", std::process::id()));
         let config = dir.join("custom");
         std::fs::create_dir_all(&config).unwrap();
         std::fs::write(config.join("hosts.yml"), "secret").unwrap();

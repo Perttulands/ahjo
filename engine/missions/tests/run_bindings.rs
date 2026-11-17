@@ -1,5 +1,5 @@
-use parvi_mission_engine::{BindingsSnapshot, RoleStore};
-use parvi_mission_model::{Formation, Mission, Slot};
+use ahjo_mission_engine::{BindingsSnapshot, RoleStore};
+use ahjo_mission_model::{Formation, Mission, Slot};
 #[test]
 fn frozen_bindings_reject_mutated_settings_and_roles() {
     let slot = Slot {
@@ -20,7 +20,7 @@ fn frozen_bindings_reject_mutated_settings_and_roles() {
         }],
         ..Default::default()
     };
-    let roles = RoleStore::new(std::env::temp_dir().join("parvi-99-no-such-roles"));
+    let roles = RoleStore::new(std::env::temp_dir().join("ahjo-99-no-such-roles"));
     let mut frozen = BindingsSnapshot::capture("run_a", &mission, "input", &roles).unwrap();
     assert!(
         frozen

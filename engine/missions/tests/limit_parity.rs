@@ -2,11 +2,11 @@
 //! `run_limit_fail_test.go` and `run_pick_test.go` (example/project#233).
 #[allow(dead_code)]
 mod run_support;
-use parvi_mission_engine::{
+use ahjo_mission_engine::{
     Coordinator, ExecutionEvent, ExecutionSink, Executor, FormationExecution, FormationResult,
     LabExecutor, OpenDispatch, RunSettings,
 };
-use parvi_mission_model::{HumanPick, HumanVerdict, ResumeRequest, RunProjection, RunStart};
+use ahjo_mission_model::{HumanPick, HumanVerdict, ResumeRequest, RunProjection, RunStart};
 use run_support::Scratch;
 use serde_json::{Value, json};
 use std::{
@@ -61,14 +61,14 @@ fn work_card(knobs: &str) -> String {
 
 fn verdict(verdict: &str, reason: &str) -> String {
     format!(
-        "```parvi-verdict\n{}\n```",
+        "```ahjo-verdict\n{}\n```",
         json!({"verdict":verdict,"reason":reason,"evidence":[]})
     )
 }
 
 fn pick_block(attempt: i64, reason: &str, evidence: &[&str]) -> String {
     format!(
-        "```parvi-pick\n{}\n```",
+        "```ahjo-pick\n{}\n```",
         json!({"attempt":attempt,"reason":reason,"evidence":evidence})
     )
 }
@@ -104,7 +104,7 @@ impl Executor for Scripted {
         &self,
         request: FormationExecution,
         events: ExecutionSink,
-    ) -> Result<FormationResult, parvi_mission_engine::Error> {
+    ) -> Result<FormationResult, ahjo_mission_engine::Error> {
         (|| -> Result<FormationResult, String> {
             let node = request.formation.id.clone();
             let attempt = request.attempt;
@@ -137,7 +137,7 @@ impl Executor for Scripted {
             }
             Ok(result)
         })()
-        .map_err(|message: String| parvi_mission_engine::Error::new("executor_error", message))
+        .map_err(|message: String| ahjo_mission_engine::Error::new("executor_error", message))
     }
 }
 impl Scripted {
@@ -236,7 +236,7 @@ impl Run {
         }
     }
     /// Resume once the worker that blocked the run has let go of it.
-    fn resume(&self, request: ResumeRequest) -> Result<RunProjection, parvi_mission_engine::Error> {
+    fn resume(&self, request: ResumeRequest) -> Result<RunProjection, ahjo_mission_engine::Error> {
         let deadline = Instant::now() + Duration::from_secs(10);
         loop {
             match self.c.resume(&self.id, request.clone()) {
@@ -279,7 +279,7 @@ fn resume_with(grant: bool, pick_best: bool) -> ResumeRequest {
     }
 }
 
-fn refused(result: Result<RunProjection, parvi_mission_engine::Error>, words: &str) {
+fn refused(result: Result<RunProjection, ahjo_mission_engine::Error>, words: &str) {
     match result {
         Err(e) if e.code == "invalid_input" && e.to_string().contains(words) => {}
         other => panic!("expected a refusal naming {words:?}, got {other:?}"),
@@ -372,7 +372,7 @@ fn a_grant_resumes_only_a_spent_limit() {
     responses
         .get_mut("fmn_j2")
         .unwrap()
-        .insert(1, "```parvi-verdict\n{invalid}\n```".into());
+        .insert(1, "```ahjo-verdict\n{invalid}\n```".into());
     let run = Run::start(
         &pick_mission("[\"formation\"]", "Draft.", &work_card("rounds = 3")),
         Scripted::new(responses),
@@ -465,7 +465,7 @@ fn a_fail_time_limit_warns_then_cuts_off_the_working_attempt() {
     let warnings = run.of_type("limit_warning");
     assert_eq!(warnings.len(), 1, "{}", run.ledger_text());
     assert_eq!(warnings[0]["slotId"], "slot_fmn_work");
-    assert!(warnings[0]["data"]["text"].as_str().unwrap().starts_with("Parvi: 1 s left of this step's working time (Limit card Cap). When it runs out the step stops and the run fails"));
+    assert!(warnings[0]["data"]["text"].as_str().unwrap().starts_with("Ahjo: 1 s left of this step's working time (Limit card Cap). When it runs out the step stops and the run fails"));
 }
 
 #[test]
@@ -805,7 +805,7 @@ fn the_only_judged_attempt_is_taken_without_a_picker() {
     );
     let verdict = &run.pick_verdicts()[0]["data"];
     assert_eq!(verdict["reason"], "the only attempt Review judged");
-    assert_eq!(verdict["pick"]["decidedBy"], "parvi");
+    assert_eq!(verdict["pick"]["decidedBy"], "ahjo");
 }
 
 #[test]
@@ -994,7 +994,7 @@ impl Executor for Lost {
         &self,
         request: FormationExecution,
         events: ExecutionSink,
-    ) -> Result<FormationResult, parvi_mission_engine::Error> {
+    ) -> Result<FormationResult, ahjo_mission_engine::Error> {
         (|| -> Result<FormationResult, String> {
             if request.formation.id != "fmn_work" || request.attempt != 1 {
                 return LabExecutor
@@ -1014,12 +1014,12 @@ impl Executor for Lost {
                 .map_err(|error| error.message)?;
             Err("the node went down".into())
         })()
-        .map_err(|message: String| parvi_mission_engine::Error::new("executor_error", message))
+        .map_err(|message: String| ahjo_mission_engine::Error::new("executor_error", message))
     }
     fn reattach(
         &self,
         dispatch: OpenDispatch,
-    ) -> Result<FormationResult, parvi_mission_engine::Error> {
+    ) -> Result<FormationResult, ahjo_mission_engine::Error> {
         (|| -> Result<FormationResult, String> {
             let began = Instant::now();
             if self.tokens > 0 {
@@ -1036,7 +1036,7 @@ impl Executor for Lost {
             *self.cut_after.lock().unwrap() = Some(began.elapsed());
             Err("stopped at the limit".into())
         })()
-        .map_err(|message: String| parvi_mission_engine::Error::new("executor_error", message))
+        .map_err(|message: String| ahjo_mission_engine::Error::new("executor_error", message))
     }
 }
 
@@ -1110,7 +1110,7 @@ fn a_seat_reattached_after_a_restart_is_cut_off_by_the_time_it_worked_before() {
     let p = run.settle();
     assert_eq!(p.status, "failed", "{}", run.ledger_text());
     let resumed = run.of_type("run_resumed").pop().unwrap();
-    assert_eq!(resumed["actor"], "parvi:restart");
+    assert_eq!(resumed["actor"], "ahjo:restart");
     let cut = lost
         .cut_after
         .lock()

@@ -1,6 +1,6 @@
 //! Paths and problems recorded by one run, without reading artifact contents.
 use crate::{Coordinator, RunEvent};
-use parvi_mission_model::EvidenceText;
+use ahjo_mission_model::EvidenceText;
 use serde_json::{Value, json};
 use std::{fs, io, path::Path};
 
@@ -249,7 +249,7 @@ mod tests {
 
     #[test]
     fn lists_files_written_since_the_start_and_leaves_hidden_ones_out() {
-        let dir = parvi_testkit::fresh_dir("written");
+        let dir = ahjo_testkit::fresh_dir("written");
         fs::create_dir_all(dir.join("notes")).unwrap();
         fs::create_dir_all(dir.join(".git")).unwrap();
         fs::write(dir.join("plan.txt"), "plan").unwrap();

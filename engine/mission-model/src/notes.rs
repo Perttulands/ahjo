@@ -7,7 +7,7 @@
 
 use serde::{Deserialize, Deserializer, Serialize};
 
-use parvi_core::Error;
+use ahjo_core::Error;
 
 pub const NOTES_SCHEMA: i64 = 2;
 /// The target of the mission's own thread.

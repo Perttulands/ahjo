@@ -1,5 +1,5 @@
 //! Owned terminal seats reconstructed from a run's public lifecycle events.
-use parvi_missions_contract::RunProjection;
+use ahjo_missions_contract::RunProjection;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Seat {

@@ -1,4 +1,4 @@
-use parvi_mission_engine::{Error, Harnesses, Ledger, parse_verdict};
+use ahjo_mission_engine::{Error, Harnesses, Ledger, parse_verdict};
 
 fn assert_error(error: Error, code: &str) {
     assert_eq!(error.code, code);
@@ -16,7 +16,7 @@ fn assert_error(error: Error, code: &str) {
 #[test]
 fn runtime_errors_use_the_shared_shape() {
     let missing = std::env::temp_dir()
-        .join(format!("parvi-error-test-{}", std::process::id()))
+        .join(format!("ahjo-error-test-{}", std::process::id()))
         .join("missing.ndjson");
     assert_error(
         Ledger::new(missing, "run_test").read().unwrap_err(),

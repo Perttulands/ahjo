@@ -1,5 +1,5 @@
 //! The catalogue edits the free-form flag line without losing quoted tokens.
-pub use parvi_terminals_contract::Flag;
+pub use ahjo_terminals_contract::Flag;
 
 fn tokens(line: &str) -> Vec<(String, String)> {
     let (mut raw, mut text) = (String::new(), String::new());

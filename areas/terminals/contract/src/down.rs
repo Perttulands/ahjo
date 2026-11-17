@@ -29,7 +29,7 @@ pub enum Seat {
 
 /// Every session the app follows, across nodes, as the Sessions page last
 /// heard them: the read model it publishes for other pages
-/// (`parvi_app_kit::Host::model`).
+/// (`ahjo_app_kit::Host::model`).
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct SessionList {
     pub sessions: Vec<Session>,

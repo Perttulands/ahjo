@@ -1,6 +1,6 @@
 //! Safe pointer delivery through the terminal engine's live screen.
 use crate::{HarnessAdapter, Submission, SubmissionAction};
-use parvi_term::{
+use ahjo_term::{
     Sessions,
     control::PaneId,
     waiting::harness::{self, Harness},

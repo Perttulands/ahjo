@@ -5,7 +5,7 @@
 //! both use these types, so a changed field fails the build on the other
 //! side.
 //!
-//! Errors are the one shape `parvi_core::Error` defines, with the codes
+//! Errors are the one shape `ahjo_core::Error` defines, with the codes
 //! below; over HTTP they come in CHROTE's envelope (see [`Envelope`]).
 
 use jiff::Timestamp;
@@ -15,7 +15,7 @@ use serde::{Deserialize, Serialize};
 pub const WATCH: u8 = 0xc8;
 /// The node's tasks changed; the page should read them again.
 pub const CHANGED: u8 = 0xc0;
-pub const KINDS: parvi_core::frame::Kinds = &[WATCH..=WATCH];
+pub const KINDS: ahjo_core::frame::Kinds = &[WATCH..=WATCH];
 
 /// The tasks' HTTP root: `GET` lists, `POST` creates; `/{id}` reads,
 /// patches and deletes; `POST /{id}/pause`, `/resume` and `/run-now` act.
@@ -49,7 +49,7 @@ pub struct Envelope {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub data: Option<serde_json::Value>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub error: Option<parvi_core::Error>,
+    pub error: Option<ahjo_core::Error>,
     pub timestamp: String,
 }
 

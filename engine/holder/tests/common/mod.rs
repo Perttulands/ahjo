@@ -6,7 +6,7 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::{Duration, Instant};
 
-use parvi_holder::{Connection, Endpoint, connect, connect_or_start};
+use ahjo_holder::{Connection, Endpoint, connect, connect_or_start};
 
 pub mod process;
 
@@ -27,10 +27,10 @@ impl Scratch {
             std::process::id(),
             NEXT.fetch_add(1, Ordering::Relaxed)
         );
-        let dir = std::env::temp_dir().join("parvi-holder-tests").join(&name);
+        let dir = std::env::temp_dir().join("ahjo-holder-tests").join(&name);
         std::fs::create_dir_all(&dir).unwrap();
         let endpoint = Endpoint::scratch(&name);
-        let exe = PathBuf::from(env!("CARGO_BIN_EXE_parvi-holder"));
+        let exe = PathBuf::from(env!("CARGO_BIN_EXE_ahjo-holder"));
         let connection = connect_or_start(&endpoint, &exe, Some(&dir.join("holder.log")))
             .await
             .expect("starting a scratch holder");

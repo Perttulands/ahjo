@@ -2,7 +2,7 @@
 //! asks, and the output of the step that feeds it, so the answer window can
 //! quote it. Never refs, paths, prompts or session identities.
 use crate::{Coordinator, RunEvent};
-use parvi_mission_model::{GateInput, GateRequest};
+use ahjo_mission_model::{GateInput, GateRequest};
 use serde_json::Value;
 use std::io;
 

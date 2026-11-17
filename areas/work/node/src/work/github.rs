@@ -1,5 +1,5 @@
 //! Reads one repository through `gh api graphql`. gh holds the token and
-//! Parvi never sees it (ARCHITECTURE.md: Work).
+//! Ahjo never sees it (ARCHITECTURE.md: Work).
 
 use std::time::Duration;
 
@@ -189,10 +189,10 @@ mod tests {
 
     #[tokio::test]
     async fn reads_all_connections_until_their_cursors_end() {
-        let dir = std::env::temp_dir().join(format!("parvi-67-pages-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("ahjo-67-pages-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let mut first: serde_json::Value =
-            serde_json::from_str(include_str!("../../tests/fixtures/work/parvi.json")).unwrap();
+            serde_json::from_str(include_str!("../../tests/fixtures/work/ahjo.json")).unwrap();
         let mut second = first.clone();
         for key in ["openIssues", "closedIssues", "openPulls", "closedPulls"] {
             first["data"]["repository"][key]["pageInfo"] =

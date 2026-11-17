@@ -2,9 +2,9 @@
 pub mod brain;
 mod commands;
 
+use ahjo_node_kit::{Area, Built, Command, Listing, Setup};
 use anyhow::Result;
 use axum::Router;
-use parvi_node_kit::{Area, Built, Command, Listing, Setup};
 use serde::Deserialize;
 use std::{path::PathBuf, sync::Arc};
 
@@ -40,14 +40,14 @@ pub fn build(setup: &Setup) -> Result<Built> {
         Ok(Arc::new(BrainArea {
             brain: Arc::new(brain),
             node,
-            sessions: provided.get::<dyn parvi_term::Sessions>().ok(),
+            sessions: provided.get::<dyn ahjo_term::Sessions>().ok(),
         }) as Arc<dyn Area>)
     })
 }
 struct BrainArea {
     brain: Arc<brain::Brain>,
     node: String,
-    sessions: Option<Arc<dyn parvi_term::Sessions>>,
+    sessions: Option<Arc<dyn ahjo_term::Sessions>>,
 }
 impl Area for BrainArea {
     fn routes(&self) -> Router {

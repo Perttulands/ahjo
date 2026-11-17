@@ -3,8 +3,8 @@
 //! its clients both use these, so a changed frame fails the build on the
 //! other side.
 
-use parvi_core::Error;
-use parvi_core::frame::Kinds;
+use ahjo_core::Error;
+use ahjo_core::frame::Kinds;
 
 mod down;
 pub mod session_copy;
@@ -515,10 +515,10 @@ mod tests {
             HISTORY,
             CLAIM_REFUSED,
         ] {
-            assert!(parvi_core::frame::owns(KINDS, kind), "{kind:#04x}");
+            assert!(ahjo_core::frame::owns(KINDS, kind), "{kind:#04x}");
         }
         for kind in [0x00, 0x04, 0x1b, 0x1c, 0x1d, 0x2a, 0x30] {
-            assert!(!parvi_core::frame::owns(KINDS, kind), "{kind:#04x}");
+            assert!(!ahjo_core::frame::owns(KINDS, kind), "{kind:#04x}");
         }
     }
 

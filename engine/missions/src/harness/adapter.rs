@@ -1,5 +1,5 @@
 use super::{conversation, launch, tokens, transcript};
-use parvi_term::{
+use ahjo_term::{
     Screen,
     waiting::harness::{self, Harness},
 };

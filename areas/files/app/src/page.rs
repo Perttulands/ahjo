@@ -4,12 +4,7 @@ use crate::{
     open::{self, Draft, Opened, Show},
     store::{self, Side, find::Find, paths, tree::Tree},
 };
-use gpui::{
-    App, AppContext, Context, Entity, FocusHandle, KeyDownEvent, UniformListScrollHandle,
-    WeakEntity, Window,
-};
-pub use nav::{InFile, Jump, Spot};
-use parvi_app_kit::{
+use ahjo_app_kit::{
     Answers, Ask, Host, Page,
     host::{Request, Status},
     link::client::LinkState,
@@ -20,8 +15,13 @@ use parvi_app_kit::{
         syntax,
     },
 };
-use parvi_core::NodeId;
-use parvi_files_contract::{Changed, Listing, Matches, NodeRoots};
+use ahjo_core::NodeId;
+use ahjo_files_contract::{Changed, Listing, Matches, NodeRoots};
+use gpui::{
+    App, AppContext, Context, Entity, FocusHandle, KeyDownEvent, UniformListScrollHandle,
+    WeakEntity, Window,
+};
+pub use nav::{InFile, Jump, Spot};
 use std::collections::{HashMap, VecDeque};
 use std::path::PathBuf;
 use std::time::Duration;
@@ -172,9 +172,9 @@ pub struct FilesPage {
     restored: bool,
     pub(crate) beside_from: &'static str,
     pub(crate) me: WeakEntity<FilesPage>,
-    pub(crate) sessions: Option<Entity<parvi_terminals_contract::SessionList>>,
+    pub(crate) sessions: Option<Entity<ahjo_terminals_contract::SessionList>>,
     /// The sessions as last told, for the views that group by them.
-    pub(crate) live: Vec<parvi_terminals_contract::Session>,
+    pub(crate) live: Vec<ahjo_terminals_contract::Session>,
     uploads: VecDeque<Upload>,
     uploading: bool,
     upload_conflict: Option<UploadConflict>,
@@ -201,7 +201,7 @@ pub struct FilesPage {
     pub closing: Option<store::tabs::Key>,
     close_after_save: Option<store::tabs::Key>,
     /// A place to go to once the file is read.
-    pending_place: Option<parvi_app_kit::widgets::code::Place>,
+    pending_place: Option<ahjo_app_kit::widgets::code::Place>,
     /// The open file's symbols.
     pub symbols: Vec<store::symbols::Symbol>,
     /// The find inside the open file, and its two fields.
@@ -214,7 +214,7 @@ pub struct FilesPage {
     typed_ahead: (String, Option<std::time::Instant>),
     /// What git says differs from HEAD: by repository, then by path, and
     /// the folders holding any of it.
-    repos: HashMap<String, Vec<parvi_files_contract::FileState>>,
+    repos: HashMap<String, Vec<ahjo_files_contract::FileState>>,
     no_repo: std::collections::HashSet<String>,
     status_asked: std::collections::HashSet<String>,
     pub states: HashMap<String, char>,
@@ -236,7 +236,7 @@ pub struct FilesPage {
     /// for the outline; its words, to be selected.
     pub md_scroll: gpui::ScrollHandle,
     pub md_blocks: std::rc::Rc<std::cell::RefCell<Vec<gpui::Bounds<gpui::Pixels>>>>,
-    pub md_select: std::rc::Rc<std::cell::RefCell<parvi_app_kit::widgets::select::Selectable>>,
+    pub md_select: std::rc::Rc<std::cell::RefCell<ahjo_app_kit::widgets::select::Selectable>>,
     /// A block to scroll to once laid out.
     pub md_go: std::rc::Rc<std::cell::Cell<Option<usize>>>,
     /// The viewer's body as last laid out: room for the outline or not.
@@ -244,7 +244,7 @@ pub struct FilesPage {
     /// Review: the file opened goes to its first change once read.
     jump_due: bool,
     /// The place's README, rendered, when it has one.
-    pub place_readme: Option<Vec<parvi_app_kit::widgets::markdown::Block>>,
+    pub place_readme: Option<Vec<ahjo_app_kit::widgets::markdown::Block>>,
 }
 
 fn enc(s: &str) -> String {
@@ -292,17 +292,17 @@ impl Page for FilesPage {
     const KEY: Option<char> = Some('F');
     const AREA: Option<&'static str> = Some("files");
     const ANSWERS: &'static [Answers] = &[Answers::OpenPath, Answers::Reveal("path")];
-    const SETTINGS: &'static [parvi_app_kit::Setting] =
+    const SETTINGS: &'static [ahjo_app_kit::Setting] =
         &[
-            parvi_app_kit::Setting::text("download_folder", "Download folder", "")
+            ahjo_app_kit::Setting::text("download_folder", "Download folder", "")
                 .note("Leave empty to use Downloads in your home folder."),
-            parvi_app_kit::Setting::text("side", "Side", "folders")
+            ahjo_app_kit::Setting::text("side", "Side", "folders")
                 .note("folders, changes or hidden: the folder tree beside the open files, what changed by session, or the open files alone."),
         ];
-    fn chords(&self, _: &App) -> Vec<parvi_app_kit::chords::Chord> {
+    fn chords(&self, _: &App) -> Vec<ahjo_app_kit::chords::Chord> {
         let me = self.me.clone();
         vec![
-            parvi_app_kit::chords::Chord::new("o", "Files panel", move |window, cx| {
+            ahjo_app_kit::chords::Chord::new("o", "Files panel", move |window, cx| {
                 let _ = me.update(cx, |page, cx| page.toggle_panel(window, cx));
             })
             .alt("o", Some(false))
@@ -416,7 +416,7 @@ impl Page for FilesPage {
 impl FilesPage {
     pub fn new(host: Host, window: &mut Window, cx: &mut Context<Self>) -> Self {
         let kept: store::Kept = host.setting(cx).unwrap_or_default();
-        let sessions = host.model::<parvi_terminals_contract::SessionList>(cx);
+        let sessions = host.model::<ahjo_terminals_contract::SessionList>(cx);
         if let Some(sessions) = &sessions {
             cx.observe(sessions, |p: &mut Self, list, cx| {
                 p.live = list.read(cx).sessions.clone();
@@ -454,7 +454,7 @@ impl FilesPage {
                 FieldEvent::Submit | FieldEvent::Down => page.infile_step(true, cx),
                 FieldEvent::Up => page.infile_step(false, cx),
                 FieldEvent::Tab if page.infile.as_ref().is_some_and(|f| f.replace) => {
-                    parvi_app_kit::widgets::field::focus(&page.infile_with, window, cx);
+                    ahjo_app_kit::widgets::field::focus(&page.infile_with, window, cx);
                 }
                 _ => {}
             },
@@ -662,7 +662,7 @@ impl FilesPage {
         if file {
             window.focus(&focus, cx);
         } else {
-            parvi_app_kit::widgets::field::focus(&query, window, cx);
+            ahjo_app_kit::widgets::field::focus(&query, window, cx);
         }
     }
 
@@ -709,12 +709,12 @@ impl FilesPage {
     }
     /// The folder the side panel's Files section starts at: the focused
     /// session's, while that session is on this tree's device.
-    pub(crate) fn side_root(&self, cx: &App) -> Option<parvi_files_contract::Root> {
+    pub(crate) fn side_root(&self, cx: &App) -> Option<ahjo_files_contract::Root> {
         if !self.lends_side {
             return None;
         }
         let (node, folder) = self.session_folder(cx)?;
-        (node == self.tree.node).then(|| parvi_files_contract::Root {
+        (node == self.tree.node).then(|| ahjo_files_contract::Root {
             name: paths::base_name(&folder).to_owned(),
             path: folder,
         })
@@ -878,7 +878,7 @@ impl FilesPage {
                 // the tree stays in view.
                 let first = p.recent.is_none();
                 p.recent = Some(if s == 200 {
-                    serde_json::from_slice::<parvi_files_contract::Recent>(&b)
+                    serde_json::from_slice::<ahjo_files_contract::Recent>(&b)
                         .map(|r| r.files)
                         .map_err(|e| e.to_string())
                 } else {
@@ -914,7 +914,7 @@ impl FilesPage {
                     return;
                 }
                 *found = Some(if s == 200 {
-                    serde_json::from_slice::<parvi_files_contract::Recent>(&b)
+                    serde_json::from_slice::<ahjo_files_contract::Recent>(&b)
                         .map(|r| r.files)
                         .map_err(|e| e.to_string())
                 } else {
@@ -963,7 +963,7 @@ impl FilesPage {
                     Ok(answer) if answer.status == 200 => page.show_folder(path, cx),
                     Ok(answer)
                         if code_of(&answer.body).as_deref()
-                            == Some(parvi_files_contract::NOT_FOLDER) =>
+                            == Some(ahjo_files_contract::NOT_FOLDER) =>
                     {
                         page.show_in_tree(&path, cx);
                         page.open(path, window, cx);
@@ -1048,7 +1048,7 @@ impl FilesPage {
                 } else if s == 0 || s == 421 || s == 502 || s == 503 {
                     p.tree.away = true;
                 } else {
-                    if code_of(&b).as_deref() == Some(parvi_files_contract::NOT_FOUND) {
+                    if code_of(&b).as_deref() == Some(ahjo_files_contract::NOT_FOUND) {
                         p.tree.open.remove(&path);
                         p.tree.listings.remove(&path);
                     }
@@ -1411,7 +1411,7 @@ impl FilesPage {
                     return;
                 }
                 if s != 200 {
-                    if code_of(&b).as_deref() == Some(parvi_files_contract::NOT_FILE) {
+                    if code_of(&b).as_deref() == Some(ahjo_files_contract::NOT_FILE) {
                         p.opened = None;
                         p.show_folder(path, cx);
                         return;
@@ -1563,7 +1563,7 @@ impl FilesPage {
                     return;
                 };
                 o.diff = (status == 200)
-                    .then(|| serde_json::from_slice::<parvi_files_contract::Diff>(&body).ok())
+                    .then(|| serde_json::from_slice::<ahjo_files_contract::Diff>(&body).ok())
                     .flatten()
                     .filter(|d| d.error.is_none() && !d.diff.trim().is_empty());
                 o.changes = o.diff.as_ref().map(|d| store::marks::of_diff(&d.diff));
@@ -1740,7 +1740,7 @@ impl FilesPage {
                     o.saved = sent.clone();
                     if matches!(o.show, Show::Text { markdown: Some(_) }) {
                         o.show = Show::Text {
-                            markdown: Some(parvi_app_kit::widgets::markdown::parse(&sent)),
+                            markdown: Some(ahjo_app_kit::widgets::markdown::parse(&sent)),
                         };
                     }
                     o.pretty = open::pretty(&o.name, &sent);
@@ -1821,7 +1821,7 @@ impl FilesPage {
             && key.key == "c"
             && let Some(text) = self.md_select.borrow().copied()
         {
-            parvi_app_kit::widgets::select::copy(text, cx);
+            ahjo_app_kit::widgets::select::copy(text, cx);
             cx.stop_propagation();
             return;
         }
@@ -1972,7 +1972,7 @@ impl FilesPage {
             field.set(&text, true, cx)
         });
         self.naming = Some(naming);
-        parvi_app_kit::widgets::field::focus(&self.name_field, window, cx);
+        ahjo_app_kit::widgets::field::focus(&self.name_field, window, cx);
         cx.notify();
     }
     pub fn start_rename(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -2120,7 +2120,7 @@ impl FilesPage {
         cx: &mut Context<Self>,
     ) {
         let node = self.node();
-        parvi_app_kit::widgets::path_picker::pick(
+        ahjo_app_kit::widgets::path_picker::pick(
             self.host.clone(),
             "Upload files",
             window,
@@ -2227,7 +2227,7 @@ impl FilesPage {
                     page.uploading = false;
                     page.next_upload(cx);
                 } else if status == 409
-                    && code_of(&body).as_deref() == Some(parvi_files_contract::ALREADY_EXISTS)
+                    && code_of(&body).as_deref() == Some(ahjo_files_contract::ALREADY_EXISTS)
                 {
                     if ordinal > 0 {
                         page.write_upload(upload, name, bytes, false, ordinal + 1, cx);
@@ -2463,7 +2463,7 @@ impl FilesPage {
                     p.fail(message(s, &b), cx)
                 } else {
                     let key = open::version(format!("{node}\n{path}").as_bytes());
-                    let dir = std::env::temp_dir().join("parvi-open").join(&key[..16]);
+                    let dir = std::env::temp_dir().join("ahjo-open").join(&key[..16]);
                     let dest = dir.join(&name);
                     match std::fs::create_dir_all(&dir).and_then(|()| std::fs::write(&dest, b)) {
                         Ok(()) => cx.open_with_system(&dest),
@@ -2708,7 +2708,7 @@ impl FilesPage {
         if self.side == Side::Hidden && !self.beside {
             self.palette = true;
         }
-        parvi_app_kit::widgets::field::focus(&self.query, window, cx);
+        ahjo_app_kit::widgets::field::focus(&self.query, window, cx);
         cx.notify();
     }
 
@@ -2735,18 +2735,18 @@ impl FilesPage {
     }
 
     /// The rendered Markdown's blocks with what changed in each.
-    pub fn block_marks(&self) -> Vec<Option<parvi_app_kit::widgets::code::Mark>> {
+    pub fn block_marks(&self) -> Vec<Option<ahjo_app_kit::widgets::code::Mark>> {
         let Some(o) = &self.opened else {
             return vec![];
         };
         let Some(changes) = &o.changes else {
             return vec![];
         };
-        let ranges: Vec<_> = parvi_app_kit::widgets::markdown::parse_lines(&o.saved)
+        let ranges: Vec<_> = ahjo_app_kit::widgets::markdown::parse_lines(&o.saved)
             .into_iter()
             .map(|(_, r)| r)
             .collect();
-        parvi_app_kit::widgets::markdown::block_marks(&ranges, &changes.marks)
+        ahjo_app_kit::widgets::markdown::block_marks(&ranges, &changes.marks)
     }
 
     /// Scrolls to the next change (or the one before): in the code, or to
@@ -2828,7 +2828,7 @@ impl FilesPage {
             move |p, s, b, cx| {
                 if s == 200 && p.place.as_deref() == Some(paths::parent(&readme).as_str()) {
                     let text = String::from_utf8_lossy(&b);
-                    p.place_readme = Some(parvi_app_kit::widgets::markdown::parse(&text));
+                    p.place_readme = Some(ahjo_app_kit::widgets::markdown::parse(&text));
                     cx.notify();
                 }
             },
@@ -2845,7 +2845,7 @@ impl FilesPage {
                     return;
                 }
                 p.place_recent = Some(if s == 200 {
-                    serde_json::from_slice::<parvi_files_contract::Recent>(&b)
+                    serde_json::from_slice::<ahjo_files_contract::Recent>(&b)
                         .map(|r| r.files)
                         .map_err(|e| e.to_string())
                 } else {
@@ -2859,12 +2859,12 @@ impl FilesPage {
     }
 
     /// The live sessions on this node working where `path` is.
-    pub fn sessions_at(&self, path: &str) -> Vec<&parvi_terminals_contract::Session> {
+    pub fn sessions_at(&self, path: &str) -> Vec<&ahjo_terminals_contract::Session> {
         store::who::working_at(&self.live, &self.tree.node, path)
     }
 
     /// Brings a session forward in the terminals.
-    pub fn reveal_session(&self, s: &parvi_terminals_contract::Session, cx: &mut Context<Self>) {
+    pub fn reveal_session(&self, s: &ahjo_terminals_contract::Session, cx: &mut Context<Self>) {
         let ask = Ask::Reveal {
             what: "session".into(),
             id: s.name.clone(),

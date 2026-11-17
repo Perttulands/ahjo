@@ -1,4 +1,4 @@
-pub use parvi_agents_contract::*;
+pub use ahjo_agents_contract::*;
 use std::collections::{BTreeMap, HashMap};
 
 /// Gold needs the operator, error is broken, plain is worth knowing.
@@ -488,7 +488,7 @@ impl Agents {
                         session: text,
                     }
                 } else {
-                    let error = serde_json::from_str::<parvi_core::Error>(&text).ok()?;
+                    let error = serde_json::from_str::<ahjo_core::Error>(&text).ok()?;
                     Synced::Refused {
                         checkout,
                         code: error.code,

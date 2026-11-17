@@ -1,4 +1,4 @@
-use parvi_missions_contract::*;
+use ahjo_missions_contract::*;
 use serde::{Serialize, de::DeserializeOwned};
 use serde_json::{Value, json};
 

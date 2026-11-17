@@ -2,11 +2,11 @@
 
 use std::path::{Path, PathBuf};
 
+use ahjo_files::{Files, MAX_BYTES};
 use axum::Router;
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use http_body_util::BodyExt;
-use parvi_files::{Files, MAX_BYTES};
 use tower::ServiceExt;
 
 const NODE: &str = "test-node";
@@ -16,7 +16,7 @@ struct Scratch(PathBuf);
 impl Scratch {
     fn new(name: &str) -> Scratch {
         let path =
-            std::env::temp_dir().join(format!("parvi-files-http-{}-{name}", std::process::id()));
+            std::env::temp_dir().join(format!("ahjo-files-http-{}-{name}", std::process::id()));
         let _ = std::fs::remove_dir_all(&path);
         std::fs::create_dir_all(&path).unwrap();
         Scratch(path.canonicalize().unwrap())
@@ -30,9 +30,9 @@ impl Drop for Scratch {
 }
 
 fn app(root: &Path) -> Router {
-    parvi_files::routes(
+    ahjo_files::routes(
         std::sync::Arc::new(Files::new(NODE.to_owned(), &[root.to_path_buf()], None).unwrap()),
-        std::sync::Arc::new(parvi_files::drops::Drops::new(root.join("drops"), vec![])),
+        std::sync::Arc::new(ahjo_files::drops::Drops::new(root.join("drops"), vec![])),
     )
 }
 
@@ -444,7 +444,7 @@ async fn status_names_every_file_that_differs_from_head_and_a_whole_diff_has_eve
     )
     .await;
     assert_eq!(status, StatusCode::OK);
-    let result: parvi_files_contract::RepoStatus = serde_json::from_slice(&body).unwrap();
+    let result: ahjo_files_contract::RepoStatus = serde_json::from_slice(&body).unwrap();
     assert_eq!(result.repository, repo.to_str().unwrap());
     let mut states: Vec<_> = result
         .files
@@ -481,6 +481,6 @@ async fn status_names_every_file_that_differs_from_head_and_a_whole_diff_has_eve
     let plain = scratch.0.join("plain");
     std::fs::create_dir(&plain).unwrap();
     let (_, body, _) = call(&app, "GET", &at("status", &plain), Body::empty()).await;
-    let none: parvi_files_contract::RepoStatus = serde_json::from_slice(&body).unwrap();
+    let none: ahjo_files_contract::RepoStatus = serde_json::from_slice(&body).unwrap();
     assert_eq!(none, Default::default());
 }

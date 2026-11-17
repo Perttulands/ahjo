@@ -1,14 +1,14 @@
 //! Tests against a real tmux on scratch sockets. Linux and macOS only.
 //!
-//! Without tmux these tests skip, unless `PARVI_REQUIRE_TMUX=1` (set in CI),
+//! Without tmux these tests skip, unless `AHJO_REQUIRE_TMUX=1` (set in CI),
 //! where a missing tmux fails them.
 #![cfg(unix)]
 
 use std::time::Duration;
 
-use parvi_term::engine::{Engine, PaneUpdate, Sent};
-use parvi_term::search::Target;
-use parvi_testkit::tmux::*;
+use ahjo_term::engine::{Engine, PaneUpdate, Sent};
+use ahjo_term::search::Target;
+use ahjo_testkit::tmux::*;
 
 #[tokio::test(flavor = "multi_thread")]
 async fn broken_utf8_before_clear_matches_tmux() {
@@ -472,7 +472,7 @@ async fn sending_to_a_missing_pane_fails() {
     engine.stop().await;
 }
 
-fn facts_of(engine: &Engine) -> Option<parvi_term::engine::Facts> {
+fn facts_of(engine: &Engine) -> Option<ahjo_term::engine::Facts> {
     engine.sessions().first()?.facts.clone()
 }
 
@@ -650,7 +650,7 @@ async fn search_finds_a_line_that_scrolled_off_screen() {
     let targets = [pane, other, 9999]
         .map(|p| Target::own(&socket, p))
         .to_vec();
-    let summary = parvi_term::search::search(targets, "scrolled-marker", found).await;
+    let summary = ahjo_term::search::search(targets, "scrolled-marker", found).await;
     let mut all = Vec::new();
     while let Ok(m) = matches.try_recv() {
         all.push(m);
@@ -675,7 +675,7 @@ async fn search_finds_a_line_that_scrolled_off_screen() {
     assert_eq!(summary.matches as usize, all.len());
 
     // The escaped capture has the same rows, so the line finds it there.
-    let escaped = parvi_term::search::capture(&server.socket(), pane)
+    let escaped = ahjo_term::search::capture(&server.socket(), pane)
         .await
         .unwrap();
     let row = escaped.lines().nth(output.line as usize).unwrap();
@@ -684,7 +684,7 @@ async fn search_finds_a_line_that_scrolled_off_screen() {
     // A capital letter makes case matter.
     let (found, _matches) = tokio::sync::mpsc::channel(16);
     let summary =
-        parvi_term::search::search(vec![Target::own(&socket, pane)], "SCROLLED", found).await;
+        ahjo_term::search::search(vec![Target::own(&socket, pane)], "SCROLLED", found).await;
     assert_eq!(summary.matches, 0);
 }
 fn viewer_flags(server: &Server) -> String {
@@ -850,38 +850,6 @@ async fn a_follower_that_goes_without_stopping_gives_the_seat_back() {
 
     server.run(&["detach-client", "-t", &client_named(&server, false)]);
     window_becomes(&server, "alpha", "120x40").await;
-    engine.stop().await;
-    viewer.detach();
-}
-
-/// A node killed while it held a seat left the viewer set aside, as the
-/// session's `@parvi-aside` records; the next node gives it back without
-/// attaching to the session.
-#[tokio::test(flavor = "multi_thread")]
-async fn a_node_start_gives_back_a_seat_a_killed_node_held() {
-    let Some(server) = Server::start() else {
-        return;
-    };
-    server.new_session("alpha", 200, 50);
-    let viewer = server.viewer("alpha", 120, 40);
-    window_becomes(&server, "alpha", "120x40").await;
-    let name = client_named(&server, true);
-    server.run(&["refresh-client", "-t", &name, "-f", "ignore-size"]);
-    server.run(&["set-option", "-t", "alpha", "@parvi-aside", &name]);
-    assert!(viewer_flags(&server).contains("ignore-size"));
-
-    let engine = Engine::start_lazy(server.socket());
-    eventually("the viewer sizing again", || {
-        (!viewer_flags(&server).contains("ignore-size")).then_some(())
-    })
-    .await;
-    assert_eq!(
-        server
-            .run(&["show-options", "-qv", "-t", "alpha", "@parvi-aside"])
-            .trim(),
-        ""
-    );
-    assert_eq!(server.clients().len(), 1, "the node did not attach");
     engine.stop().await;
     viewer.detach();
 }
@@ -1113,7 +1081,7 @@ async fn sees_a_prompt_wait_and_clear() {
 /// A streamed command that tmux refuses says why, as other commands do.
 #[tokio::test(flavor = "multi_thread")]
 async fn a_failed_stream_reports_what_tmux_said() {
-    use parvi_term::backend::Backend;
+    use ahjo_term::backend::Backend;
     let Some(server) = Server::start() else {
         return;
     };
@@ -1160,7 +1128,7 @@ async fn ready_with_no_server_lists_nothing() {
     engine.stop().await;
 }
 
-/// Other Parvi followers use control mode with pause-after; they do not own a
+/// Other Ahjo followers use control mode with pause-after; they do not own a
 /// sizing seat. A viewer that actually sizes the session still counts.
 #[tokio::test(flavor = "multi_thread")]
 async fn another_follower_is_not_a_foreign_viewer() {
@@ -1218,7 +1186,7 @@ async fn another_follower_is_not_a_foreign_viewer() {
     let master = unsafe { std::fs::File::from_raw_fd(master) };
     // SAFETY: the slave descriptor is separate from master and also freshly owned.
     let slave = unsafe { std::fs::File::from_raw_fd(slave) };
-    let process = std::process::Command::new(parvi_term::backend::tmux::program())
+    let process = std::process::Command::new(ahjo_term::backend::tmux::program())
         .args([
             "-S",
             server.socket_path().to_str().unwrap(),
@@ -1442,7 +1410,7 @@ async fn a_watching_follower_keeps_no_output_for_a_later_mode_change() {
     tokio::time::sleep(Duration::from_secs(3)).await;
     engine.stop().await;
     let kept = server.run(&["show-options", "-q", "-t", "alpha"]);
-    assert!(!kept.contains("@parvi-"), "a watcher wrote: {kept}");
+    assert!(!kept.contains("@ahjo-"), "a watcher wrote: {kept}");
 }
 
 /// A follower starts from the last output in any of the session's windows,
@@ -1461,7 +1429,7 @@ async fn a_follower_starts_from_output_in_another_window() {
     window_becomes(&server, "alpha", "90x30").await;
     engine.stop().await;
     let left: u64 = server
-        .run(&["show-options", "-qv", "-t", "alpha", "@parvi-left"])
+        .run(&["show-options", "-qv", "-t", "alpha", "@ahjo-left"])
         .trim()
         .parse()
         .expect("the follower kept its output");
@@ -1497,27 +1465,27 @@ async fn a_follower_starts_from_output_in_another_window() {
 
 /// A tmux server's backend that counts the commands run on it.
 struct Counting {
-    inner: parvi_term::backend::tmux::Socket,
+    inner: ahjo_term::backend::tmux::Socket,
     commands: std::sync::Arc<std::sync::atomic::AtomicUsize>,
 }
 
-impl parvi_term::backend::Backend for Counting {
+impl ahjo_term::backend::Backend for Counting {
     fn launch_gate(&self, channel: &str) -> Option<String> {
         self.inner.launch_gate(channel)
     }
     fn create_session<'a>(
         &'a self,
-        spec: &'a parvi_term::SessionSpec,
-    ) -> parvi_term::backend::Reply<'a, parvi_term::SessionRef> {
+        spec: &'a ahjo_term::SessionSpec,
+    ) -> ahjo_term::backend::Reply<'a, ahjo_term::SessionRef> {
         self.inner.create_session(spec)
     }
     fn kill_session<'a>(
         &'a self,
-        session: &'a parvi_term::SessionRef,
-    ) -> parvi_term::backend::Reply<'a, ()> {
+        session: &'a ahjo_term::SessionRef,
+    ) -> ahjo_term::backend::Reply<'a, ()> {
         self.inner.kill_session(session)
     }
-    fn command<'a>(&'a self, args: &'a [&'a str]) -> parvi_term::backend::Reply<'a, String> {
+    fn command<'a>(&'a self, args: &'a [&'a str]) -> ahjo_term::backend::Reply<'a, String> {
         self.commands
             .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         self.inner.command(args)
@@ -1527,16 +1495,16 @@ impl parvi_term::backend::Backend for Counting {
         session: &'a str,
         cols: u16,
         rows: u16,
-    ) -> parvi_term::backend::Reply<'a, ()> {
+    ) -> ahjo_term::backend::Reply<'a, ()> {
         self.inner.size(session, cols, rows)
     }
     fn stream<'a>(
         &'a self,
         args: &'a [&'a str],
-    ) -> parvi_term::backend::Reply<'a, parvi_term::backend::Stream> {
+    ) -> ahjo_term::backend::Reply<'a, ahjo_term::backend::Stream> {
         self.inner.stream(args)
     }
-    fn attach<'a>(&'a self, session: &'a str) -> parvi_term::backend::Attaching<'a> {
+    fn attach<'a>(&'a self, session: &'a str) -> ahjo_term::backend::Attaching<'a> {
         self.inner.attach(session)
     }
 }

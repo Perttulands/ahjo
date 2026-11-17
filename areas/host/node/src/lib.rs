@@ -1,14 +1,14 @@
 //! Host readings and service management.
 mod commands;
 pub mod host;
-use parvi_node_kit::{Area, BoxFuture, Built, Channel, Client, Command, Listing, Setup};
+use ahjo_node_kit::{Area, BoxFuture, Built, Channel, Client, Command, Listing, Setup};
 use serde::Deserialize;
 use std::{path::PathBuf, sync::Arc};
 use tokio::{sync::mpsc, task::JoinHandle};
 
 pub const LISTING: Listing = Listing {
     name: "host",
-    kinds: &[parvi_host_contract::HOST..=parvi_host_contract::HOST_EVENT],
+    kinds: &[ahjo_host_contract::HOST..=ahjo_host_contract::HOST_EVENT],
     commands: &[
         "host_show",
         "service_list",
@@ -29,7 +29,7 @@ struct HostArea {
     host: Arc<host::Host>,
     services: Arc<host::services::Services>,
     node: String,
-    events: Arc<parvi_node_kit::events::Log>,
+    events: Arc<ahjo_node_kit::events::Log>,
 }
 pub fn build(setup: &Setup) -> anyhow::Result<Built> {
     let section: Section = setup.config.section("host")?;

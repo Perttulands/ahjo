@@ -2,6 +2,14 @@
 //! reads and edits.
 
 use super::{Roots, edit};
+use ahjo_agents_contract::FAILED;
+use ahjo_agents_contract::shape::{
+    FILE, HOOK, HookAt, HookChange, HookEdit, HookSpec, INVALID, NOT_FOUND, PATH, SETTING, STALE,
+    SettingEdit, Write,
+};
+use ahjo_core::Error;
+use ahjo_node_kit::Command;
+use ahjo_node_kit::args::object;
 use axum::{
     Json, Router,
     extract::{Query, State},
@@ -9,14 +17,6 @@ use axum::{
     response::{IntoResponse, Response},
     routing::{get, post},
 };
-use parvi_agents_contract::FAILED;
-use parvi_agents_contract::shape::{
-    FILE, HOOK, HookAt, HookChange, HookEdit, HookSpec, INVALID, NOT_FOUND, PATH, SETTING, STALE,
-    SettingEdit, Write,
-};
-use parvi_core::Error;
-use parvi_node_kit::Command;
-use parvi_node_kit::args::object;
 use serde_json::{Value, json};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -130,7 +130,7 @@ fn written(v: &Value) -> Value {
 
 pub fn commands(roots: Option<Arc<Roots>>, node: String) -> Vec<Command> {
     let place = json!({"harness":{"type":"string","description":"claude or codex"},"file":{"type":"string","description":"the settings or hooks file, as agents shape lists it"}});
-    let where_ = json!({"event":{"type":"string"},"group":{"type":"integer"},"index":{"type":"integer"},"parked":{"type":"boolean","description":"a hook Parvi switched off"},"was":{"type":"string","description":"what the hook runs now, as agents shape shows it"}});
+    let where_ = json!({"event":{"type":"string"},"group":{"type":"integer"},"index":{"type":"integer"},"parked":{"type":"boolean","description":"a hook Ahjo switched off"},"was":{"type":"string","description":"what the hook runs now, as agents shape shows it"}});
     let merge = |a: &Value, b: Value| {
         let mut m = a.as_object().cloned().unwrap_or_default();
         m.extend(b.as_object().cloned().unwrap_or_default());

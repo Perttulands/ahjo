@@ -1,14 +1,14 @@
 //! A quick report over whichever page the operator is using.
 use crate::{Work, tokens::*};
+use ahjo_app_kit::Host;
+use ahjo_app_kit::ask::Ask;
+use ahjo_app_kit::host::{Layer, Request, Status};
+use ahjo_app_kit::theme::{FAMILY, theme};
+use ahjo_app_kit::widgets::field::{FieldEvent, TextField};
+use ahjo_app_kit::widgets::kit::{self, Kind};
+use ahjo_core::NodeId;
+use ahjo_work_contract::{ProjectView, Snapshot};
 use gpui::{AppContext, Context, Entity, Focusable, Render, Window, div, prelude::*, px};
-use parvi_app_kit::Host;
-use parvi_app_kit::ask::Ask;
-use parvi_app_kit::host::{Layer, Request, Status};
-use parvi_app_kit::theme::{FAMILY, theme};
-use parvi_app_kit::widgets::field::{FieldEvent, TextField};
-use parvi_app_kit::widgets::kit::{self, Kind};
-use parvi_core::NodeId;
-use parvi_work_contract::{ProjectView, Snapshot};
 use serde_json::{Value, json};
 
 const LAYER: &str = "report";
@@ -22,7 +22,7 @@ struct Project {
 pub(crate) struct Report {
     host: Host,
     field: Entity<TextField>,
-    sessions: Option<Entity<parvi_terminals_contract::SessionList>>,
+    sessions: Option<Entity<ahjo_terminals_contract::SessionList>>,
     projects: Vec<Project>,
     selected: Option<Project>,
     preferred: Option<Project>,
@@ -45,7 +45,7 @@ impl Report {
             },
         )
         .detach();
-        let sessions = host.model::<parvi_terminals_contract::SessionList>(cx);
+        let sessions = host.model::<ahjo_terminals_contract::SessionList>(cx);
         Self {
             host,
             field,
@@ -66,7 +66,7 @@ impl Report {
             .as_ref()
             .and_then(|s| s.read(cx).focused.as_ref())
             .map(|s| format!("Context: {}", s.name))
-            .unwrap_or_else(|| "Context: Parvi".into());
+            .unwrap_or_else(|| "Context: Ahjo".into());
         self.error = None;
         self.projects.clear();
         let remembered: Value = self.host.setting(cx).unwrap_or(Value::Null);

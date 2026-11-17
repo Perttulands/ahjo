@@ -2,7 +2,7 @@
 //! the hidden (dot) ones after the rest, in natural order (`file2` before
 //! `file10`).
 
-use parvi_files_contract::Entry;
+use ahjo_files_contract::Entry;
 use std::cmp::Ordering;
 
 /// Compares names as people count: digit runs by value, the rest without case.
@@ -36,7 +36,7 @@ pub fn natural(a: &str, b: &str) -> Ordering {
 
 /// A copy's staging folder (docs/files.md, Bridge): the node keeps it
 /// beside the copy, but it is the node's bookkeeping, not the operator's.
-pub const STAGING: &str = ".parvi-transfer-";
+pub const STAGING: &str = ".ahjo-transfer-";
 
 /// The entries a folder shows, in order.
 pub fn shown(entries: &[Entry]) -> Vec<&Entry> {
@@ -83,7 +83,7 @@ mod tests {
             e("c", true),
             e(".cache", true),
             e(".bashrc", false),
-            e(".parvi-transfer-0123456789abcdef0123456789abcdef", true),
+            e(".ahjo-transfer-0123456789abcdef0123456789abcdef", true),
         ];
         let names: Vec<&str> = shown(&list).iter().map(|e| e.name.as_str()).collect();
         assert_eq!(names, ["c", "z", ".cache", "b9.txt", "b10.txt", ".bashrc"]);

@@ -14,11 +14,11 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 
-use parvi_node_kit::{BoxFuture, Channel, Client};
-use parvi_term::control::PaneId;
-use parvi_term::engine::PaneUpdate;
-use parvi_term::search::Target;
-use parvi_terminals_contract::{self as contract, Up};
+use ahjo_node_kit::{BoxFuture, Channel, Client};
+use ahjo_term::control::PaneId;
+use ahjo_term::engine::PaneUpdate;
+use ahjo_term::search::Target;
+use ahjo_terminals_contract::{self as contract, Up};
 use tokio::sync::{broadcast, mpsc, watch};
 use tokio::task::JoinHandle;
 
@@ -49,7 +49,7 @@ pub(crate) struct Terminal {
     overview: Option<JoinHandle<()>>,
     searching: Option<JoinHandle<()>>,
     /// The client looks at the session list while it is connected.
-    _looking: Vec<parvi_term::engine::Looking>,
+    _looking: Vec<ahjo_term::engine::Looking>,
 }
 
 impl Terminal {
@@ -101,7 +101,7 @@ impl Terminal {
             }
             Up::Input(pane, data) => {
                 if let Err(error) = hub.send_input(pane, data).await {
-                    eprintln!("parvi: input to %{pane}: {error:#}");
+                    eprintln!("ahjo: input to %{pane}: {error:#}");
                 }
             }
             Up::Claim(pane, cols, rows) => {
@@ -112,7 +112,7 @@ impl Terminal {
             }
             Up::Release(pane) => {
                 if let Err(error) = hub.release(pane, me).await {
-                    eprintln!("parvi: release for %{pane}: {error:#}");
+                    eprintln!("ahjo: release for %{pane}: {error:#}");
                 }
             }
             Up::Send {
@@ -136,7 +136,7 @@ impl Terminal {
                         Err(error) => Err(error),
                     };
                     if let Err(error) = &delivered {
-                        eprintln!("parvi: send to %{pane}: {error:#}");
+                        eprintln!("ahjo: send to %{pane}: {error:#}");
                     }
                     let outcome = frames::outcome(&delivered);
                     let _ = outbox.send(contract::delivered(pane, id, outcome)).await;
@@ -156,11 +156,11 @@ impl Terminal {
                     let frame = match hub.launch(&launcher, &launch).await {
                         Ok((session, None)) => contract::done(id, true, &session),
                         Ok((session, Some(warning))) => {
-                            eprintln!("parvi: launching {}: {warning}", launch.name);
+                            eprintln!("ahjo: launching {}: {warning}", launch.name);
                             contract::done(id, true, &format!("{session}\0{warning}"))
                         }
                         Err(error) => {
-                            eprintln!("parvi: launching {}: {error:#}", launch.name);
+                            eprintln!("ahjo: launching {}: {error:#}", launch.name);
                             contract::done(id, false, &format!("{error:#}"))
                         }
                     };
@@ -212,9 +212,9 @@ impl Terminal {
                 let (hub, outbox) = (hub.clone(), outbox.clone());
                 tokio::spawn(async move {
                     let capture = match hub.pane(pane) {
-                        Some((server, own)) => parvi_term::search::capture(server.backend(), own)
-                            .await
-                            .ok(),
+                        Some((server, own)) => {
+                            ahjo_term::search::capture(server.backend(), own).await.ok()
+                        }
                         None => None,
                     };
                     let frame = contract::history(id, pane, capture.as_deref());
@@ -231,7 +231,7 @@ impl Channel for Terminal {
         Box::pin(async move {
             match contract::decode_up(&frame) {
                 Ok(up) => self.handle(up).await,
-                Err(error) => eprintln!("parvi: bad frame: {error}"),
+                Err(error) => eprintln!("ahjo: bad frame: {error}"),
             }
         })
     }
@@ -298,7 +298,7 @@ async fn search(hub: Arc<Hub>, id: u32, query: String, outbox: mpsc::Sender<Vec<
             }
         }
     };
-    let (summary, ()) = tokio::join!(parvi_term::search::search(panes, &query, found), forward);
+    let (summary, ()) = tokio::join!(ahjo_term::search::search(panes, &query, found), forward);
     let _ = outbox.send(frames::searched(id, &summary)).await;
 }
 

@@ -4,7 +4,7 @@ use crate::run_replay::Replay;
 use crate::run_scheduler::Finished;
 use crate::run_worker::event;
 use crate::{Coordinator, RunEvent};
-use parvi_mission_model::{Mission, RunInput, RunStart};
+use ahjo_mission_model::{Mission, RunInput, RunStart};
 use serde_json::json;
 use std::io;
 use std::{
@@ -290,7 +290,7 @@ pub(crate) fn advance(
 }
 
 pub(crate) struct GateSettlement<'a> {
-    pub gate: &'a parvi_mission_model::Gate,
+    pub gate: &'a ahjo_mission_model::Gate,
     pub attempt: i64,
     pub input: &'a crate::RoutedInput,
     pub result: &'a crate::JudgeVerdict,

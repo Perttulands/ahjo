@@ -1,35 +1,35 @@
 //! The area exposes the old Work commands and only pushes while watched.
+use ahjo_node_kit::{Built, Listing, Setup};
+use ahjo_testkit::node::Node;
 use futures_util::{SinkExt, StreamExt};
-use parvi_node_kit::{Built, Listing, Setup};
-use parvi_testkit::node::Node;
 use serde_json::json;
 use std::sync::OnceLock;
 use std::time::Duration;
 static BD: OnceLock<String> = OnceLock::new();
 fn build_work(setup: &Setup) -> anyhow::Result<Built> {
-    parvi_work::build_with(
+    ahjo_work::build_with(
         setup,
-        parvi_work::Bd::new(BD.get().unwrap()),
-        parvi_work::Gh::default(),
+        ahjo_work::Bd::new(BD.get().unwrap()),
+        ahjo_work::Gh::default(),
     )
 }
 const WORK: Listing = Listing {
     build: build_work,
-    ..parvi_work::LISTING
+    ..ahjo_work::LISTING
 };
 use tokio_tungstenite::tungstenite::Message;
 
 #[test]
 fn commands_match_the_old_cli_and_mcp_tools() {
     assert_eq!(
-        parvi_work::LISTING.commands,
+        ahjo_work::LISTING.commands,
         &["work_list", "work_show", "work_create"]
     );
 }
 
 #[tokio::test(flavor = "multi_thread")]
 async fn work_is_pushed_only_while_watched() {
-    let node = Node::start(&[parvi_work::LISTING], "").await.unwrap();
+    let node = Node::start(&[ahjo_work::LISTING], "").await.unwrap();
     let answer = node.call("work_list", json!({})).await.unwrap();
     assert_eq!(answer["projects"], json!([]));
     assert!(node.call("work_show", json!({"ref":"bad"})).await.is_err());
@@ -65,7 +65,7 @@ async fn work_is_pushed_only_while_watched() {
 #[cfg(unix)]
 #[tokio::test(flavor = "multi_thread")]
 async fn cli_lists_shows_and_creates_a_work_item() {
-    let dir = parvi_testkit::fresh_dir("parvi-work-create");
+    let dir = ahjo_testkit::fresh_dir("ahjo-work-create");
     std::fs::create_dir(dir.join(".beads")).unwrap();
     std::fs::write(dir.join(".beads/prefix"), "pwc").unwrap();
     let program = dir.join("fake-bd");
@@ -90,7 +90,7 @@ async fn cli_lists_shows_and_creates_a_work_item() {
     .map(str::to_owned)
     .collect();
     assert_eq!(
-        parvi_node_kit::cli::run("work", &missing, &mut Vec::new())
+        ahjo_node_kit::cli::run("work", &missing, &mut Vec::new())
             .await
             .unwrap(),
         1
@@ -105,7 +105,7 @@ async fn cli_lists_shows_and_creates_a_work_item() {
         .code,
         "unknown_project"
     );
-    let client = parvi_node_kit::NodeClient::new(Some(&node.url())).unwrap();
+    let client = ahjo_node_kit::NodeClient::new(Some(&node.url())).unwrap();
     let (created, _) = client.request(axum::http::Method::POST, "/api/work/items", Some(json!({"project": dir.display().to_string(), "title":"Via HTTP", "description":"Body", "type":"feature"})), None).await.unwrap();
     let http_id = created["reference"]
         .as_str()
@@ -139,7 +139,7 @@ async fn cli_lists_shows_and_creates_a_work_item() {
     ];
     let mut out = Vec::new();
     assert_eq!(
-        parvi_node_kit::cli::run("work", &args, &mut out)
+        ahjo_node_kit::cli::run("work", &args, &mut out)
             .await
             .unwrap(),
         0
@@ -157,7 +157,7 @@ async fn cli_lists_shows_and_creates_a_work_item() {
     let list = vec!["list".into(), "--node".into(), node.url()];
     let mut out = Vec::new();
     assert_eq!(
-        parvi_node_kit::cli::run("work", &list, &mut out)
+        ahjo_node_kit::cli::run("work", &list, &mut out)
             .await
             .unwrap(),
         0
@@ -172,7 +172,7 @@ async fn cli_lists_shows_and_creates_a_work_item() {
     ];
     let mut out = Vec::new();
     assert_eq!(
-        parvi_node_kit::cli::run("work", &show, &mut out)
+        ahjo_node_kit::cli::run("work", &show, &mut out)
             .await
             .unwrap(),
         0

@@ -9,9 +9,9 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+use ahjo_core::frame::{self, Kinds};
 use axum::extract::ws::{Message, WebSocket};
 use futures_util::future::{self, Either};
-use parvi_core::frame::{self, Kinds};
 
 use super::{Shared, hello};
 use crate::{BoxFuture, Channel, Client};
@@ -114,7 +114,7 @@ pub(super) async fn connection(mut socket: WebSocket, shared: Arc<Shared>) {
                     .find(|(kinds, _)| frame::owns(kinds, kind))
                 {
                     Some((_, channel)) => channel.receive(frame).await,
-                    None => eprintln!("parvi: no area takes frame kind {kind:#04x}"),
+                    None => eprintln!("ahjo: no area takes frame kind {kind:#04x}"),
                 }
             }
         }

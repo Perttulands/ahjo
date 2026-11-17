@@ -1,7 +1,7 @@
 //! The first exchange on every connection.
 //!
-//! The client opens with `parvi-holder <protocol>`. The holder answers
-//! `parvi-holder <protocol> <version> <pid>` when it speaks that protocol, and
+//! The client opens with `ahjo-holder <protocol>`. The holder answers
+//! `ahjo-holder <protocol> <version> <pid>` when it speaks that protocol, and
 //! otherwise `%exit protocol <theirs> wanted, holder speaks <ours>` before
 //! closing. After the greeting the connection is a tmux control-mode client.
 //!
@@ -13,7 +13,7 @@ use anyhow::{Result, bail};
 /// The wire format this build speaks.
 pub const PROTOCOL: u32 = 2;
 
-const WORD: &str = "parvi-holder";
+const WORD: &str = "ahjo-holder";
 
 /// What a running holder said about itself.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -34,7 +34,7 @@ pub fn answer(line: &str, pid: u32) -> Result<String, String> {
     let theirs = line
         .strip_prefix(WORD)
         .and_then(|rest| rest.trim().parse::<u32>().ok())
-        .ok_or_else(|| format!("%exit not a parvi-holder client: {line:?}\n"))?;
+        .ok_or_else(|| format!("%exit not an ahjo-holder client: {line:?}\n"))?;
     if theirs != PROTOCOL {
         return Err(format!(
             "%exit protocol {theirs} wanted, holder speaks {PROTOCOL}\n"
@@ -52,7 +52,7 @@ pub fn greeting(line: &str) -> Result<Greeting> {
     }
     let mut words = line.split(' ');
     if words.next() != Some(WORD) {
-        bail!("not a parvi holder: {line:?}");
+        bail!("not an ahjo holder: {line:?}");
     }
     let parsed = (|| {
         Some(Greeting {
@@ -86,7 +86,7 @@ mod tests {
 
     #[test]
     fn other_protocols_are_refused_with_both_numbers() {
-        let refusal = answer("parvi-holder 999", 1).unwrap_err();
+        let refusal = answer("ahjo-holder 999", 1).unwrap_err();
         assert_eq!(
             refusal,
             format!("%exit protocol 999 wanted, holder speaks {PROTOCOL}\n")
@@ -98,7 +98,7 @@ mod tests {
 
     #[test]
     fn a_newer_holder_is_named() {
-        let error = greeting("parvi-holder 3 0.1.0 7").unwrap_err().to_string();
+        let error = greeting("ahjo-holder 3 0.1.0 7").unwrap_err().to_string();
         assert!(error.contains("protocol 3"), "{error}");
     }
 }

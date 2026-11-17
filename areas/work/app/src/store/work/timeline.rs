@@ -274,7 +274,7 @@ pub fn range_label(range: Range) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use parvi_work_contract::{Item, ProjectView, Snapshot, StoreView};
+    use ahjo_work_contract::{Item, ProjectView, Snapshot, StoreView};
 
     /// 2026-11-10 in days since the epoch.
     const TODAY: Day = 20_402;

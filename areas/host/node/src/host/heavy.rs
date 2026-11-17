@@ -6,7 +6,7 @@
 use std::collections::HashMap;
 use std::time::Instant;
 
-pub use parvi_host_contract::Heavy;
+pub use ahjo_host_contract::Heavy;
 
 /// One process as read.
 #[derive(Clone, Debug, PartialEq)]
@@ -91,7 +91,7 @@ impl Before {
         let groups: Vec<Heavy> = groups
             .into_values()
             .map(|mut g| {
-                g.cpu = g.cpu.map(parvi_host_contract::tenth);
+                g.cpu = g.cpu.map(ahjo_host_contract::tenth);
                 g
             })
             .collect();

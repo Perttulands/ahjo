@@ -61,7 +61,7 @@ pub struct StoreView {
     /// changes or watching starts anew.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
-    /// Present when Parvi cannot see this store change, saying why: its
+    /// Present when Ahjo cannot see this store change, saying why: its
     /// Beads are then as read when watching began.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub unwatched: Option<String>,

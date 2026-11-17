@@ -59,7 +59,7 @@ mod tests {
 
     #[test]
     fn links_the_missing_skills_of_one_checkout_and_nothing_else() {
-        let dir = std::env::temp_dir().join(format!("parvi-link-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("ahjo-link-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         let kit = dir.join("kit");
         let other = dir.join("other");

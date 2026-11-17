@@ -4,7 +4,7 @@
 use super::*;
 use crate::open::Sides;
 use crate::store::diff::Kind as RowKind;
-use parvi_app_kit::theme::{FAMILY, alpha};
+use ahjo_app_kit::theme::{FAMILY, alpha};
 use std::rc::Rc;
 
 /// Under this width the two sides do not both fit: inline.

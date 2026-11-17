@@ -1,5 +1,5 @@
 [package]
-name = "parvi-terminals"
+name = "ahjo-terminals"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -9,10 +9,10 @@ publish = false
 workspace = true
 
 [dependencies]
-parvi-core = { path = "../../../kit/core" }
-parvi-node-kit = { path = "../../../kit/node-kit" }
-parvi-term = { path = "../../../engine/term" }
-parvi-terminals-contract = { path = "../contract" }
+ahjo-core = { path = "../../../kit/core" }
+ahjo-node-kit = { path = "../../../kit/node-kit" }
+ahjo-term = { path = "../../../engine/term" }
+ahjo-terminals-contract = { path = "../contract" }
 anyhow = "1"
 axum = { version = "0.8", default-features = false, features = ["http1", "json", "query", "tokio"] }
 serde = { version = "1", features = ["derive"] }
@@ -22,7 +22,7 @@ toml = { version = "1", default-features = false, features = ["parse", "serde", 
 
 [dev-dependencies]
 libc = "0.2"
-parvi-testkit = { path = "../../../kit/testkit" }
+ahjo-testkit = { path = "../../../kit/testkit" }
 vt100 = "0.16.2"
 futures-util = { version = "0.3", default-features = false, features = ["sink"] }
 tokio-tungstenite = "0.30"

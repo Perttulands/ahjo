@@ -1,15 +1,15 @@
 [package]
-name = "parvi-mission-engine"
+name = "ahjo-mission-engine"
 version = "0.0.1"
 edition = "2024"
 license = "MIT"
-description = "Parvi's mission engine: its store, its validation and its runs."
-repository = "https://github.com/Perttulands/parvi"
+description = "Ahjo's mission engine: its store, its validation and its runs."
+repository = "https://github.com/Perttulands/ahjo"
 publish = false
 
 [dependencies]
-parvi-mission-model = { path = "../mission-model" }
-parvi-core = { path = "../../kit/core" }
+ahjo-mission-model = { path = "../mission-model" }
+ahjo-core = { path = "../../kit/core" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 toml = { version = "1", default-features = false, features = ["parse", "serde", "std"] }
@@ -19,8 +19,8 @@ hex = "0.4"
 getrandom = "0.4"
 libc = "0.2"
 time = { version = "0.3", features = ["formatting", "parsing"] }
-parvi-term = { path = "../term" }
-parvi-work-ref = { path = "../work-ref" }
+ahjo-term = { path = "../term" }
+ahjo-work-ref = { path = "../work-ref" }
 tokio = { version = "1", features = ["sync", "time", "macros", "rt"] }
 
 [target.'cfg(windows)'.dependencies]
@@ -32,8 +32,8 @@ workspace = true
 [dev-dependencies]
 anyhow = "1"
 tokio = { version = "1", features = ["full"] }
-parvi-missions = { path = "../../areas/missions/node" }
-parvi-terminals = { path = "../../areas/terminals/node" }
-parvi-work = { path = "../../areas/work/node" }
-parvi-node-kit = { path = "../../kit/node-kit" }
-parvi-testkit = { path = "../../kit/testkit" }
+ahjo-missions = { path = "../../areas/missions/node" }
+ahjo-terminals = { path = "../../areas/terminals/node" }
+ahjo-work = { path = "../../areas/work/node" }
+ahjo-node-kit = { path = "../../kit/node-kit" }
+ahjo-testkit = { path = "../../kit/testkit" }

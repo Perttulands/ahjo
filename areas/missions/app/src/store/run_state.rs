@@ -2,7 +2,7 @@
 //! places it is now (Archon's `formationsRunState.ts`, ported as it is), and
 //! the run bar's words for them.
 
-use parvi_missions_contract::{PublicEvent as RunEvent, RunProjection as Run};
+use ahjo_missions_contract::{PublicEvent as RunEvent, RunProjection as Run};
 use std::collections::{HashMap, HashSet};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -355,7 +355,7 @@ pub fn points(run: &Run) -> Vec<Point> {
                     if b.detail.is_empty() {
                         b.code.replace('_', " ")
                     } else {
-                        parvi_missions_contract::plain_reason(&b.detail)
+                        ahjo_missions_contract::plain_reason(&b.detail)
                     }
                 })
                 .unwrap_or_else(|| run.block_code.replace('_', " "));
@@ -521,13 +521,13 @@ mod tests {
 
     #[test]
     fn a_resumed_block_no_longer_asks_for_a_resume() {
-        let reason = "Parvi shut down while the run was going; resume to continue";
+        let reason = "Ahjo shut down while the run was going; resume to continue";
         let blocked = vec![ev(1, "run_started", ""), ev(4, "run_blocked", "")];
         assert_eq!(problem_now(&blocked, 4, reason), reason);
         let resumed = [blocked, vec![ev(5, "run_resumed", "")]].concat();
         assert_eq!(
             problem_now(&resumed, 4, reason),
-            "Parvi shut down while the run was going; resumed"
+            "Ahjo shut down while the run was going; resumed"
         );
     }
 

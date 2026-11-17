@@ -1,12 +1,12 @@
-use parvi_mission_engine::Store;
-use parvi_mission_model::{Patch, Precondition};
+use ahjo_mission_engine::Store;
+use ahjo_mission_model::{Patch, Precondition};
 use std::sync::atomic::{AtomicU64, Ordering};
 static NEXT: AtomicU64 = AtomicU64::new(0);
 struct Scratch(std::path::PathBuf);
 impl Scratch {
     fn new() -> Self {
         let path = std::env::temp_dir().join(format!(
-            "parvi-97-mission-{}-{}",
+            "ahjo-97-mission-{}-{}",
             std::process::id(),
             NEXT.fetch_add(1, Ordering::Relaxed)
         ));
@@ -19,7 +19,7 @@ impl Drop for Scratch {
         std::fs::remove_dir_all(&self.0).unwrap();
     }
 }
-fn pre(edit: &parvi_mission_model::Edit) -> Precondition {
+fn pre(edit: &ahjo_mission_model::Edit) -> Precondition {
     Precondition {
         rev: edit.mission.rev,
         etag: edit.etag.clone(),
@@ -76,7 +76,7 @@ fn input_and_formation_titles_and_hint_can_be_set_and_cleared() {
             .patch(
                 "updates",
                 pre(&edit),
-                Patch::UpdateInputCard(parvi_mission_model::InputCardUpdate {
+                Patch::UpdateInputCard(ahjo_mission_model::InputCardUpdate {
                     id: input.clone(),
                     title: Some(title.into()),
                     goal: Some(goal.into()),
@@ -115,7 +115,7 @@ fn input_and_formation_titles_and_hint_can_be_set_and_cleared() {
         .patch(
             "updates",
             pre(&edit),
-            Patch::UpdateInputCard(parvi_mission_model::InputCardUpdate {
+            Patch::UpdateInputCard(ahjo_mission_model::InputCardUpdate {
                 id: input,
                 input_hint: Some("".into()),
                 ..Default::default()
@@ -161,7 +161,7 @@ fn gate_rejects_bad_kinds_and_checks_without_mutation() {
     let before = std::fs::read(&path).unwrap();
     for (update, code) in [
         (
-            parvi_mission_model::GateUpdate {
+            ahjo_mission_model::GateUpdate {
                 id: id.clone(),
                 kinds: Some(vec![]),
                 ..Default::default()
@@ -169,7 +169,7 @@ fn gate_rejects_bad_kinds_and_checks_without_mutation() {
             "invalid_gate_kind",
         ),
         (
-            parvi_mission_model::GateUpdate {
+            ahjo_mission_model::GateUpdate {
                 id: id.clone(),
                 kinds: Some(vec!["human".into(), "robot".into()]),
                 ..Default::default()
@@ -177,7 +177,7 @@ fn gate_rejects_bad_kinds_and_checks_without_mutation() {
             "invalid_gate_kind",
         ),
         (
-            parvi_mission_model::GateUpdate {
+            ahjo_mission_model::GateUpdate {
                 id: id.clone(),
                 kinds: Some(vec!["human".into()]),
                 check: Some("output_contains".into()),
@@ -186,7 +186,7 @@ fn gate_rejects_bad_kinds_and_checks_without_mutation() {
             "invalid_code_gate_profile",
         ),
         (
-            parvi_mission_model::GateUpdate {
+            ahjo_mission_model::GateUpdate {
                 id: id.clone(),
                 check_version: Some("999".into()),
                 ..Default::default()
@@ -194,7 +194,7 @@ fn gate_rejects_bad_kinds_and_checks_without_mutation() {
             "invalid_code_gate_profile",
         ),
         (
-            parvi_mission_model::GateUpdate {
+            ahjo_mission_model::GateUpdate {
                 id: "missing".into(),
                 title: Some("x".into()),
                 ..Default::default()
@@ -216,7 +216,7 @@ fn gate_rejects_bad_kinds_and_checks_without_mutation() {
         .patch(
             "gate",
             pre(&edit),
-            Patch::UpdateGate(parvi_mission_model::GateUpdate {
+            Patch::UpdateGate(ahjo_mission_model::GateUpdate {
                 id,
                 title: Some("".into()),
                 criterion: Some("".into()),
@@ -385,7 +385,7 @@ fn repeated_node_type_port_and_judge_edits_keep_bytes_and_check_etags() {
     let input = edit.mission.input_cards[0].id.clone();
     let gate = edit.mission.gates[0].id.clone();
     let changes = vec![
-        Patch::UpdateInputCard(parvi_mission_model::InputCardUpdate {
+        Patch::UpdateInputCard(ahjo_mission_model::InputCardUpdate {
             id: input,
             title: Some("Framed".into()),
             goal: Some("New goal".into()),
@@ -438,7 +438,7 @@ fn repeated_node_type_port_and_judge_edits_keep_bytes_and_check_etags() {
     }
 }
 
-// Port of TestS3FormationBriefRejectsUnsafeNonEmptyBeadID. Parvi's `work`
+// Port of TestS3FormationBriefRejectsUnsafeNonEmptyBeadID. Ahjo's `work`
 // takes any written work reference (docs/missions.md).
 #[test]
 fn brief_rejects_unsafe_work_references_without_writing() {
@@ -476,7 +476,7 @@ fn brief_rejects_unsafe_work_references_without_writing() {
                 pre(&edit),
                 Patch::SetBrief {
                     formation_id: id.clone(),
-                    brief: parvi_mission_model::Brief {
+                    brief: ahjo_mission_model::Brief {
                         goal: "Ship".into(),
                         work: work.into(),
                         ..Default::default()
@@ -494,7 +494,7 @@ fn brief_rejects_unsafe_work_references_without_writing() {
             pre(&edit),
             Patch::SetBrief {
                 formation_id: id,
-                brief: parvi_mission_model::Brief {
+                brief: ahjo_mission_model::Brief {
                     goal: "Ship".into(),
                     repository: String::new(),
                     work: "srv-abc.2".into(),
@@ -517,7 +517,7 @@ fn brief_rejects_unsafe_work_references_without_writing() {
                 pre(&latest),
                 Patch::SetBrief {
                     formation_id: latest.mission.formations[0].id.clone(),
-                    brief: parvi_mission_model::Brief {
+                    brief: ahjo_mission_model::Brief {
                         goal: "Ship".into(),
                         work: work.into(),
                         ..Default::default()

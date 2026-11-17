@@ -99,7 +99,7 @@ impl Launcher {
             Err(error) => {
                 let error = format!("{error:#}");
                 eprintln!(
-                    "parvi: {}: {error}; the launcher stays as it was",
+                    "ahjo: {}: {error}; the launcher stays as it was",
                     path.display()
                 );
                 state.error = Some(error);
@@ -116,8 +116,7 @@ mod tests {
     const SRV: &str = if cfg!(windows) { r"C:\srv" } else { "/srv" };
 
     fn scratch(name: &str) -> PathBuf {
-        let dir =
-            std::env::temp_dir().join(format!("parvi-launcher-{name}-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("ahjo-launcher-{name}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         dir

@@ -1,7 +1,7 @@
 //! Finding a file: by words in its path under every root as you type, or
 //! by the text inside the files under one folder when asked.
 
-use parvi_files_contract::Matches;
+use ahjo_files_contract::Matches;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Find {
@@ -85,7 +85,7 @@ impl Find {
     }
 
     /// Every hit as the list numbers them: names, then lines inside files.
-    pub fn matches(&self) -> Vec<parvi_files_contract::Match> {
+    pub fn matches(&self) -> Vec<ahjo_files_contract::Match> {
         let of = |f: &Option<Result<Matches, String>>| match f {
             Some(Ok(m)) => m.matches.clone(),
             _ => vec![],
@@ -146,7 +146,7 @@ mod tests {
         Matches {
             matches: paths
                 .iter()
-                .map(|p| parvi_files_contract::Match {
+                .map(|p| ahjo_files_contract::Match {
                     path: p.to_string(),
                     name: p.rsplit('/').next().unwrap().to_string(),
                     line: None,

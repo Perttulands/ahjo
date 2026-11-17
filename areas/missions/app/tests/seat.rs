@@ -1,17 +1,17 @@
 #![cfg(unix)]
+use ahjo_app_kit::{Ask, Host, Mounted, Page, ask::Answers, mount};
+use ahjo_core::NodeId;
+use ahjo_mission_engine::{
+    ExecutionEvent, ExecutionSink, Executor, FormationExecution, FormationResult, LabExecutor,
+};
+use ahjo_node_kit::{Built, Listing, Setup};
+use ahjo_testkit::{
+    node::Node,
+    sessions::{self, FakeSessions},
+};
 use gpui::{
     App, Context, IntoElement, Modifiers, ParentElement, TestAppContext, VisualTestContext, Window,
     div,
-};
-use parvi_app_kit::{Ask, Host, Mounted, Page, ask::Answers, mount};
-use parvi_core::NodeId;
-use parvi_mission_engine::{
-    ExecutionEvent, ExecutionSink, Executor, FormationExecution, FormationResult, LabExecutor,
-};
-use parvi_node_kit::{Built, Listing, Setup};
-use parvi_testkit::{
-    node::Node,
-    sessions::{self, FakeSessions},
 };
 use serde_json::json;
 use std::{
@@ -46,7 +46,7 @@ impl Executor for SeatLab {
         &self,
         request: FormationExecution,
         sink: ExecutionSink,
-    ) -> Result<FormationResult, parvi_core::Error> {
+    ) -> Result<FormationResult, ahjo_core::Error> {
         let sessions = SESSIONS.lock().unwrap().clone().unwrap();
         let name = format!("seat-{}", request.formation.id);
         let session = sessions.add(&name);
@@ -64,7 +64,7 @@ impl Executor for SeatLab {
         let receiver = RELEASE.lock().unwrap().take().unwrap();
         receiver
             .recv_timeout(Duration::from_secs(120))
-            .map_err(|e| parvi_core::Error::new("test", e.to_string()))?;
+            .map_err(|e| ahjo_core::Error::new("test", e.to_string()))?;
         let result = LabExecutor.execute_formation(request, sink.clone())?;
         sink.emit(ExecutionEvent {
             kind: "seat_cleanup".into(),
@@ -78,11 +78,11 @@ impl Executor for SeatLab {
     }
 }
 fn build(setup: &Setup) -> anyhow::Result<Built> {
-    parvi_missions::build_with_executor(setup, Some(Box::new(SeatLab)))
+    ahjo_missions::build_with_executor(setup, Some(Box::new(SeatLab)))
 }
 const MISSIONS: Listing = Listing {
     build,
-    ..parvi_missions::LISTING
+    ..ahjo_missions::LISTING
 };
 struct Running {
     url: String,
@@ -112,7 +112,7 @@ fn start() -> Running {
     *RELEASE.lock().unwrap() = Some(receiver);
     let thread = std::thread::spawn(move || {
         tokio::runtime::Runtime::new().unwrap().block_on(async move {
-        let node = Node::start(&[sessions::LISTING, parvi_work::LISTING, MISSIONS], "").await.unwrap();
+        let node = Node::start(&[sessions::LISTING, ahjo_work::LISTING, MISSIONS], "").await.unwrap();
         *SESSIONS.lock().unwrap() = Some(node.fake_sessions());
         *NODE.lock().unwrap() = node.id();
         let dir = node.dir().join("missions/missions");
@@ -174,17 +174,17 @@ fn step_and_run_bar_open_the_owned_session_and_disable_ended_seats(cx: &mut Test
     let mut running = start();
     cx.executor().allow_parking();
     cx.update(|cx| {
-        parvi_app_shell::prepare(cx);
-        cx.set_app_identity("io.parvi.seat-test", "Parvi seat test");
+        ahjo_app_shell::prepare(cx);
+        cx.set_app_identity("io.ahjo.seat-test", "Ahjo seat test");
     });
     let settings = std::env::temp_dir()
-        .join(format!("parvi-seat-{}", std::process::id()))
+        .join(format!("ahjo-seat-{}", std::process::id()))
         .join("app.json");
     std::fs::create_dir_all(settings.parent().unwrap()).unwrap();
     let url = running.url.clone();
     let (shell, cx) = cx.add_window_view(move |window, cx| {
-        parvi_app_shell::start(
-            &[parvi_missions_app::build, terminal],
+        ahjo_app_shell::start(
+            &[ahjo_missions_app::build, terminal],
             Some(url),
             Some(settings),
             window,

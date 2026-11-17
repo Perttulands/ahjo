@@ -3,9 +3,9 @@ mod codex;
 mod pi;
 
 use super::adapter::{Pointer, TranscriptRoots, Turn, TurnState};
+use ahjo_term::waiting::harness::Harness;
 use claude::read_claude;
 use codex::read_codex;
-use parvi_term::waiting::harness::Harness;
 use pi::read_pi;
 use serde_json::Value;
 use std::{
@@ -247,9 +247,9 @@ pub(super) fn find(
 mod tests {
     use super::*;
     #[test]
-    fn completion_requires_a_parvi_marker_for_the_run() {
+    fn completion_requires_a_ahjo_marker_for_the_run() {
         assert!(matches_sentinel(
-            "<<<PARVI-DONE run-id=run_1 status=ok>>>",
+            "<<<AHJO-DONE run-id=run_1 status=ok>>>",
             "run_1"
         ));
         assert!(!matches_sentinel(
@@ -261,7 +261,7 @@ mod tests {
     #[test]
     fn partial_utf8_record_is_left_for_the_next_read() {
         let path =
-            std::env::temp_dir().join(format!("parvi-104-partial-{}.jsonl", std::process::id()));
+            std::env::temp_dir().join(format!("ahjo-104-partial-{}.jsonl", std::process::id()));
         fs::write(&path, b"{\"type\":\"first\"}\n{\"text\":\"\xf0\x9f").unwrap();
         let rows = records(&path).unwrap();
         assert_eq!(rows.len(), 1);

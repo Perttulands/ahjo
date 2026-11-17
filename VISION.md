@@ -1,12 +1,14 @@
-# Parvi
+# Ahjo Swarm
 
-> Parvi makes tmux sessions great.
+> Ahjo Swarm makes tmux sessions great.
 
-*Parvi* is Finnish for a flock: many machines moving as one.
+Ahjo is a family of three apps on one app kit: Swarm, Brain and Desk. This is
+Swarm's vision. Ahjo Swarm was called Parvi, Finnish for a swarm: many machines
+moving as one.
 
 ## What it is
 
-Parvi makes tmux sessions great: launch an agent in the right place in seconds,
+Swarm makes tmux sessions great: launch an agent in the right place in seconds,
 see what all of them are doing, see what shapes them, see what work is open,
 and chain them into missions.
 
@@ -18,22 +20,22 @@ other. Each tab has one purpose and is designed to serve it as far as it can
 ## You and your agent, side by side
 
 A great app for the person and a great CLI for their agent, over the same
-things. You work in the app. An agent on the same machine works through `parvi`
+things. You work in the app. An agent on the same machine works through `ahjo`
 and can do what you can.
 
 - **Every capability has a command.** A purely visual gesture needs none.
-- **The agent composes; Parvi stays simple.** Parvi offers commands and clear
+- **The agent composes; Swarm stays simple.** Swarm offers commands and clear
   configuration, not setup journeys or policy engines.
 - **One configuration.** Every setting lives in one place an agent can edit, and
   also appears in Settings.
-- **No permissions inside Parvi.** An agent has the access it already has on the
+- **No permissions inside Swarm.** An agent has the access it already has on the
   machine.
 - **Easy to change.** Each area is self-contained and plugs in at one place. A
   new idea becomes a request to an agent.
 
 ## What "finished" means
 
-The operator works in Parvi alone and the two tools it replaces, CHROTE and
+The operator works in Swarm alone and the two tools it replaces, CHROTE and
 Archon, are switched off. The bar is capability and journey: the operator can do
 what they did before, with the best experience and the simplest solution we can
 build. Nothing stays compatible with the old tools.
@@ -57,13 +59,13 @@ agent arranging the operator's view, ChatGPT through MCP, and the phone. The dat
 from the start (every resource is a node and a local id) so these add on
 without rework.
 
-## Not Parvi
+## Not Swarm
 
 Resident agents and compute admission (`heavy` and `gpu-lock` own it).
 
-The brain and the decision desk are their own apps, each with one purpose:
-exploring what we know, and the shared surface where an agent publishes
-something (a picture, a video, a rendered page, a question) and the operator
-responds freely, in prose and by marking what he sees. They share Parvi's
-look and are not opened from it. Parvi's Brain tab goes when the brain app
+The brain and the decision desk are their own apps, Ahjo Brain and Ahjo Desk,
+each with one purpose: exploring what we know, and the shared surface where an
+agent publishes something (a picture, a video, a rendered page, a question) and
+the operator responds freely, in prose and by marking what he sees. They share
+Swarm's look and are not opened from it. Swarm's Brain tab goes when Ahjo Brain
 replaces it.

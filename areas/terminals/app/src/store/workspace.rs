@@ -12,7 +12,7 @@
 
 use super::presets::Preset;
 use super::sessions::{Key, find};
-use parvi_terminals_contract::Session;
+use ahjo_terminals_contract::Session;
 use serde::{Deserialize, Serialize};
 
 pub const MAX_TABS: usize = 6;
@@ -160,7 +160,7 @@ pub enum TileState<'a> {
     Ended(&'a str),
 }
 
-pub use parvi_app_kit::link::client::LinkState;
+pub use ahjo_app_kit::link::client::LinkState;
 
 impl Workspace {
     /// The tabs on the bar.
@@ -505,7 +505,7 @@ pub fn tile_state<'a>(binding: Option<&'a Binding>, node: Option<Reach<'a>>) -> 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use parvi_terminals_contract::Pane;
+    use ahjo_terminals_contract::Pane;
 
     fn key(name: &str) -> Key {
         Key {

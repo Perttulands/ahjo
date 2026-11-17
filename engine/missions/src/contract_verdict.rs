@@ -97,7 +97,7 @@ mod tests {
     use super::parse_verdict;
     #[test]
     fn validates_the_whole_contract() {
-        let wrap = |body: &str| format!("```parvi-verdict\n{body}\n```");
+        let wrap = |body: &str| format!("```ahjo-verdict\n{body}\n```");
         assert_eq!(
             parse_verdict(&wrap(r#"{"verdict":"pass","reason":"ok","evidence":[]}"#))
                 .unwrap()

@@ -1,5 +1,5 @@
 //! Translate one HTTP mission mutation into the engine's authoring operation.
-use parvi_mission_model::{
+use ahjo_mission_model::{
     Brief, EndUpdate, GateUpdate, InputCardUpdate, Limit, LimitUpdate, Patch, RestoredNode,
 };
 use serde::de::DeserializeOwned;

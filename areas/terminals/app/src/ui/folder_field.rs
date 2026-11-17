@@ -11,12 +11,12 @@ use crate::http;
 use crate::store::launch::{self, FolderList, Suggestion};
 use crate::store::sessions;
 use crate::theme::theme;
+use ahjo_app_kit::Host;
+use ahjo_app_kit::host::Request;
+use ahjo_app_kit::widgets::field::{FieldEvent, TextField};
+use ahjo_app_kit::widgets::kit;
+use ahjo_core::NodeId;
 use gpui::{Context, Entity, EventEmitter, Window, div, prelude::*, px};
-use parvi_app_kit::Host;
-use parvi_app_kit::host::Request;
-use parvi_app_kit::widgets::field::{FieldEvent, TextField};
-use parvi_app_kit::widgets::kit;
-use parvi_core::NodeId;
 
 /// Rows the list shows at once; it is this tall whatever it holds.
 const ROWS: usize = 6;

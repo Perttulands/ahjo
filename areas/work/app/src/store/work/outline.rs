@@ -150,7 +150,7 @@ pub fn search(
     query: &str,
     texts: &HashSet<String>,
 ) -> Found {
-    let terms = parvi_work_contract::text::terms(query);
+    let terms = ahjo_work_contract::text::terms(query);
     let mut found = Found::default();
     if terms.is_empty() {
         return found;

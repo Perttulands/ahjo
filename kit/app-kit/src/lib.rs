@@ -1,4 +1,4 @@
-//! What every Parvi page is made of: the theme and widgets, the link to
+//! What every Ahjo page is made of: the theme and widgets, the link to
 //! the nodes, and the [`Host`] and [`Page`] that join a page to the app.
 
 pub mod ask;
@@ -16,9 +16,9 @@ pub mod text;
 pub mod theme;
 pub mod widgets;
 
+pub use ahjo_core::Error;
 pub use ask::{Answers, Ask};
 pub use declared::{Control, Setting};
 pub use host::Host;
 pub use hub::Hub;
 pub use page::{Build, Mounted, Page, mount};
-pub use parvi_core::Error;

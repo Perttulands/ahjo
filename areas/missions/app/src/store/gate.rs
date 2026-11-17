@@ -62,7 +62,7 @@ pub fn route(targets: &[Target], answer: &str, alone: bool) -> (String, String) 
 }
 
 /// Names the card whose output the gate is considering.
-pub fn source(mission: &parvi_missions_contract::Mission, id: &str) -> String {
+pub fn source(mission: &ahjo_missions_contract::Mission, id: &str) -> String {
     let title = mission.node_title(id).trim();
     if title.is_empty() {
         "upstream step".into()
@@ -107,14 +107,14 @@ mod tests {
     use super::*;
     #[test]
     fn a_gate_quote_names_the_feeding_card_or_a_plain_fallback() {
-        let mission = parvi_missions_contract::Mission {
+        let mission = ahjo_missions_contract::Mission {
             formations: vec![
-                parvi_missions_contract::Formation {
+                ahjo_missions_contract::Formation {
                     id: "named".into(),
                     title: "Plan".into(),
                     ..Default::default()
                 },
-                parvi_missions_contract::Formation {
+                ahjo_missions_contract::Formation {
                     id: "untitled".into(),
                     ..Default::default()
                 },

@@ -1,15 +1,15 @@
 //! The terminals area on the socket against a real tmux: a headless client
 //! connects to a node holding only terminals, watches a pane and types into
-//! it. Linux and macOS only; skips without tmux unless `PARVI_REQUIRE_TMUX=1`.
+//! it. Linux and macOS only; skips without tmux unless `AHJO_REQUIRE_TMUX=1`.
 #![cfg(unix)]
 
 use std::time::{Duration, Instant};
 
+use ahjo_core::Hello;
+use ahjo_terminals_contract::{self as protocol, Up};
+use ahjo_testkit::node::Node;
+use ahjo_testkit::tmux::Server as Tmux;
 use futures_util::{SinkExt, StreamExt};
-use parvi_core::Hello;
-use parvi_terminals_contract::{self as protocol, Up};
-use parvi_testkit::node::Node;
-use parvi_testkit::tmux::Server as Tmux;
 use serde_json::{Value, json};
 use tokio_tungstenite::tungstenite::Message;
 
@@ -23,7 +23,7 @@ async fn node(tmux: &Tmux, launch: &str) -> Node {
         tmux.socket_path(),
         file
     );
-    Node::start(&[parvi_terminals::LISTING], &config)
+    Node::start(&[ahjo_terminals::LISTING], &config)
         .await
         .unwrap()
 }
@@ -32,7 +32,7 @@ async fn node(tmux: &Tmux, launch: &str) -> Node {
 /// including one with another node and an ordinary attached terminal.
 #[tokio::test(flavor = "multi_thread")]
 async fn listing_does_not_touch_sessions_with_other_clients() {
-    use parvi_testkit::tmux::{capture, eventually};
+    use ahjo_testkit::tmux::{capture, eventually};
     use std::os::fd::FromRawFd;
 
     struct Viewer {
@@ -262,23 +262,23 @@ fn pane_of(frame: &[u8]) -> u32 {
 /// server: a node with no sessions still says hello.
 #[tokio::test(flavor = "multi_thread")]
 async fn every_connection_starts_with_the_hello() {
-    let dir = parvi_testkit::fresh_dir("parvi-hello");
+    let dir = ahjo_testkit::fresh_dir("ahjo-hello");
     let config = format!(
         "[node]\ndevice = \"test-rig\"\n[terminals]\nsocket = {:?}\n",
         dir.join("tmux")
     );
-    let node = Node::start(&[parvi_terminals::LISTING], &config)
+    let node = Node::start(&[ahjo_terminals::LISTING], &config)
         .await
         .unwrap();
     for _ in 0..2 {
         let (mut ws, _) = tokio_tungstenite::connect_async(node.ws()).await.unwrap();
         let hello = next_frame(&mut ws).await;
-        assert_eq!(hello[0], parvi_core::frame::HELLO, "the hello comes first");
+        assert_eq!(hello[0], ahjo_core::frame::HELLO, "the hello comes first");
         let hello = Hello::decode(&hello).unwrap();
         assert_eq!(hello.node, node.id());
         assert_eq!(hello.device, "test-rig");
-        assert_eq!(hello.version, parvi_node_kit::VERSION);
-        assert_eq!(hello.protocol, parvi_core::PROTOCOL);
+        assert_eq!(hello.version, ahjo_node_kit::VERSION);
+        assert_eq!(hello.protocol, ahjo_core::PROTOCOL);
         assert_eq!(next_frame(&mut ws).await[0], protocol::SESSIONS);
     }
     node.stop().await;
@@ -741,7 +741,7 @@ async fn a_client_sees_and_uses_another_users_server() {
     };
     own.run(&["new-session", "-d", "-s", "mine", "env PS1='$ ' sh"]);
     other.run(&["new-session", "-d", "-s", "theirs", "env PS1='$ ' sh"]);
-    let user = parvi_testkit::tmux::whoami();
+    let user = ahjo_testkit::tmux::whoami();
     let launch = own.dir().join("launch.conf");
     std::fs::write(&launch, "folder /tmp").unwrap();
     let config = format!(
@@ -750,7 +750,7 @@ async fn a_client_sees_and_uses_another_users_server() {
         launch,
         other.socket_path()
     );
-    let node = Node::start(&[parvi_terminals::LISTING], &config)
+    let node = Node::start(&[ahjo_terminals::LISTING], &config)
         .await
         .unwrap();
     let addr = node.address();

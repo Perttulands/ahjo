@@ -1,7 +1,7 @@
 //! Paths as a node writes them: `/` on Linux and WSL, `\` on Windows. Every
 //! helper takes the separator from the path it is given.
 
-use parvi_files_contract::Root;
+use ahjo_files_contract::Root;
 
 pub fn separator(path: &str) -> char {
     if path.contains('\\') && !path.contains('/') {

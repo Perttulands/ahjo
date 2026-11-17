@@ -9,7 +9,7 @@ use super::disk::Mount;
 use super::heavy::Before;
 use super::{disk, gpu, os};
 
-pub use parvi_host_contract::{Disk, Gpu, Reading, Usage};
+pub use ahjo_host_contract::{Disk, Gpu, Reading, Usage};
 
 /// Takes readings, remembering what the next is measured against: CPU
 /// time, swap pages and each process's CPU time.

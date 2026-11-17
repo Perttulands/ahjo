@@ -5,7 +5,7 @@ use crate::{
     FormationExecution, FormationResult, JudgeCorrection, LeftSeat, OpenDispatch, SeatEvent,
     SeatFuture, SeatId, SeatSide, parse_outputs, parse_verdict,
 };
-use parvi_mission_model::Slot;
+use ahjo_mission_model::Slot;
 use serde_json::{Map, Value, json};
 use sha2::{Digest, Sha256};
 use std::{
@@ -112,7 +112,7 @@ impl SeatExecutor {
                         if self.seats.away(&request.formation.device).is_some() { break; }
                         if matches!(tokio::time::timeout(Duration::from_millis(250), self.seats.seat_alive(worker_seat)).await, Ok(Ok(false))) {
                             let text = format!("Worker {} (session {}) is gone. Continue without that worker.", worker.id, worker_seat.session_name);
-                            let data = json!({"mode":"agentic-leader","observer":"parvi-seat","phase":"work","outcome":"gone","anomaly":true,"slotId":worker.id,"controllerSlot":slot.id,"sessionRef":format!("terminal:{}", worker_seat.session_name)});
+                            let data = json!({"mode":"agentic-leader","observer":"ahjo-seat","phase":"work","outcome":"gone","anomaly":true,"slotId":worker.id,"controllerSlot":slot.id,"sessionRef":format!("terminal:{}", worker_seat.session_name)});
                             sink.emit(ExecutionEvent { kind: "worker_observation".into(), slot_id: worker.id.clone(), data: data.as_object().unwrap().clone() }).map_err(|e| format!("seat_ledger_unavailable: {e}"))?;
                             self.seats.notify(&id, &text).await.map_err(|e| e.message)?;
                             lost.insert(worker.id.clone());
@@ -293,7 +293,7 @@ impl SeatExecutor {
             if claimed.is_ok()
                 && let Err(error) = self.seats.notify(id, &warning.text).await
             {
-                eprintln!("parvi: cannot paste a limit warning into dispatch {id}: {error}");
+                eprintln!("ahjo: cannot paste a limit warning into dispatch {id}: {error}");
             }
         }
     }
@@ -611,7 +611,7 @@ impl SeatExecutor {
                 use std::fmt::Write;
                 let _ = writeln!(
                     prompt,
-                    "- {} (slot {}): parvi session send {} --text {}",
+                    "- {} (slot {}): ahjo session send {} --text {}",
                     seat.session_name,
                     slot.id,
                     shell_word(&seat.session_name),
@@ -648,7 +648,7 @@ impl SeatExecutor {
             return Err(format!("seat_ledger_unavailable: {error}"));
         }
         for (slot, _, seat, _) in &workers {
-            let data = json!({"mode":"agentic-leader","observer":"parvi-seat","phase":"bind","outcome":"bound","anomaly":false,"slotId":slot.id,"controllerSlot":controller.id,"sessionRef":format!("terminal:{}", seat.session_name)});
+            let data = json!({"mode":"agentic-leader","observer":"ahjo-seat","phase":"bind","outcome":"bound","anomaly":false,"slotId":slot.id,"controllerSlot":controller.id,"sessionRef":format!("terminal:{}", seat.session_name)});
             if let Err(error) = sink.emit(ExecutionEvent {
                 kind: "worker_observation".into(),
                 slot_id: slot.id.clone(),
@@ -890,7 +890,7 @@ impl Executor for SeatExecutor {
                 node: serde_json::from_value(get("node")?).map_err(|e| e.to_string())?,
                 session_name: serde_json::from_value(get("sessionName")?)
                     .map_err(|e| e.to_string())?,
-                session: parvi_term::SessionRef {
+                session: ahjo_term::SessionRef {
                     session_id: serde_json::from_value(get("sessionId")?)
                         .map_err(|e| e.to_string())?,
                     pane_id: serde_json::from_value(get("paneId")?).map_err(|e| e.to_string())?,
@@ -1099,7 +1099,7 @@ fn recovered_result(
     })
 }
 fn formation_outputs(
-    formation: &parvi_mission_model::Formation,
+    formation: &ahjo_mission_model::Formation,
     text: &str,
 ) -> Result<Map<String, Value>, String> {
     let (_, payloads) =
@@ -1224,7 +1224,7 @@ fn seat_session(request: &FormationExecution, slot: &Slot) -> (String, bool) {
     }
     let agent = request.formation.agent_of(slot);
     if request.formation.fresh {
-        let name = parvi_mission_model::fresh_session(
+        let name = ahjo_mission_model::fresh_session(
             &request.prefix,
             &agent,
             request.run_number,
@@ -1233,7 +1233,7 @@ fn seat_session(request: &FormationExecution, slot: &Slot) -> (String, bool) {
         (name, false)
     } else {
         (
-            parvi_mission_model::agent_session(&request.prefix, &agent),
+            ahjo_mission_model::agent_session(&request.prefix, &agent),
             true,
         )
     }

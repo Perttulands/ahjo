@@ -619,7 +619,7 @@ impl Engine {
     }
 
     /// Each session rename on the server, as (old name, new name), whether
-    /// Parvi, CHROTE or tmux itself made it.
+    /// Ahjo, CHROTE or tmux itself made it.
     pub fn renames(&self) -> broadcast::Receiver<(String, String)> {
         self.shared.renamed.subscribe()
     }
@@ -894,9 +894,6 @@ impl Shared {
 async fn supervise(shared: Arc<Shared>, mut stopped: oneshot::Receiver<()>) {
     let (tx, mut rx) = mpsc::unbounded_channel();
     let mut tasks: HashMap<String, JoinHandle<()>> = HashMap::new();
-    // An earlier node killed while it held a seat left the operator's
-    // clients set aside; they size their windows again from now.
-    restore_set_aside(shared.backend.as_ref()).await;
     loop {
         match list_sessions(shared.backend.as_ref()).await {
             Ok(found) => {
@@ -958,7 +955,7 @@ async fn supervise(shared: Arc<Shared>, mut stopped: oneshot::Receiver<()>) {
                     tasks.insert(id, task);
                 }
             }
-            Err(error) => eprintln!("parvi: listing sessions: {error:#}"),
+            Err(error) => eprintln!("ahjo: listing sessions: {error:#}"),
         }
         let first = !std::mem::replace(&mut shared.state.lock().unwrap().listed, true);
         if first {
@@ -1244,7 +1241,7 @@ enum Pending {
 /// What a follower reads when it starts: tmux's last activity in the
 /// window, then the last output and the time a follower kept them when it
 /// left (`leave_output`).
-const ACTIVITY_FORMAT: &str = "#{window_activity} #{@parvi-output} #{@parvi-left}";
+const ACTIVITY_FORMAT: &str = "#{window_activity} #{@ahjo-output} #{@ahjo-left}";
 
 /// How long after a follower left its own going still counts as its doing:
 /// letting go of the window resizes it, and the programs redraw.
@@ -1287,9 +1284,9 @@ fn leave_output(session: &str, wrote: SystemTime) -> Option<[String; 2]> {
             .map(|d| d.as_secs())
     };
     Some([
-        format!("set-option -t '{session}' @parvi-output {}", secs(wrote)?),
+        format!("set-option -t '{session}' @ahjo-output {}", secs(wrote)?),
         format!(
-            "set-option -t '{session}' @parvi-left {}",
+            "set-option -t '{session}' @ahjo-left {}",
             secs(SystemTime::now())?
         ),
     ])
@@ -1409,7 +1406,7 @@ async fn follow(
     supervisor: mpsc::UnboundedSender<SupervisorMsg>,
 ) {
     if let Err(error) = follow_inner(&shared, &session, &mut requests, &supervisor).await {
-        eprintln!("parvi: following {session}: {error:#}");
+        eprintln!("ahjo: following {session}: {error:#}");
     }
     let _ = supervisor.send(SupervisorMsg::Ended(session));
 }
@@ -1531,7 +1528,7 @@ async fn follow_inner(
                     Event::Reply { from_us: true, ok, lines } => {
                         let what = pending.pop_front().context("reply to nothing")?;
                         if !ok {
-                            eprintln!("parvi: {session}: tmux error: {}", lines.join(" "));
+                            eprintln!("ahjo: {session}: tmux error: {}", lines.join(" "));
                         }
                         match what {
                             Pending::Version => {
@@ -1745,66 +1742,6 @@ async fn follow_inner(
     client.close().await
 }
 
-/// Gives back the sizing of the clients an earlier Parvi node set aside to
-/// hold a seat and never released, as each session's `@parvi-aside` names
-/// them: those still set to `ignore-size`, unless a follower holds that
-/// session's seat now.
-async fn restore_set_aside(backend: &dyn Backend) {
-    let format = "#{session_id}\t#{@parvi-aside}";
-    let listed = backend.command(&["list-sessions", "-F", format]).await;
-    let Ok(listed) = listed else { return };
-    let aside: Vec<(&str, &str)> = listed
-        .lines()
-        .filter_map(|line| line.split_once('\t'))
-        .filter(|(_, names)| !names.is_empty())
-        .collect();
-    if aside.is_empty() {
-        return;
-    }
-    let Ok(clients) = backend
-        .command(&[
-            "list-clients",
-            "-F",
-            "#{session_id}\t#{client_name}\t#{client_flags}",
-        ])
-        .await
-    else {
-        return;
-    };
-    let clients: Vec<[&str; 3]> = clients
-        .lines()
-        .filter_map(|line| {
-            let mut fields = line.splitn(3, '\t');
-            Some([fields.next()?, fields.next()?, fields.next()?])
-        })
-        .collect();
-    let has = |flags: &str, flag: &str| flags.split(',').any(|f| f == flag);
-    for (session, names) in aside {
-        let held = clients.iter().any(|[on, _, flags]| {
-            *on == session
-                && has(flags, "control-mode")
-                && flags.split(',').any(|f| f.starts_with("pause-after"))
-                && !has(flags, "ignore-size")
-        });
-        if held {
-            continue;
-        }
-        for name in names.split(' ') {
-            if clients
-                .iter()
-                .any(|[_, client, flags]| *client == name && has(flags, "ignore-size"))
-            {
-                let _ = backend
-                    .command(&["refresh-client", "-t", name, "-f", "!ignore-size"])
-                    .await;
-            }
-        }
-        let _ = backend
-            .command(&["set-option", "-u", "-t", session, "@parvi-aside"])
-            .await;
-    }
-}
-
 /// One session's sizing seat, as our client sees it.
 ///
 /// The window follows tmux's `window-size latest`: whichever client was
@@ -1907,7 +1844,7 @@ impl Seat {
 
 /// Of the clients listed as `activity name flags`, the sizing one used most
 /// recently, when there are several: with one, tmux needs no help.
-/// Followers (control clients with `pause-after`, as Parvi nodes attach)
+/// Followers (control clients with `pause-after`, as Ahjo nodes attach)
 /// are not where a person types.
 fn used_last(lines: &[String]) -> Option<&str> {
     let sizing: Vec<(u64, &str)> = lines
@@ -1961,7 +1898,7 @@ fn facts_command() -> String {
     format!("display-message -p '{FACTS_FORMAT}'")
 }
 
-/// A second Parvi node follows in control mode without owning the sizing
+/// A second Ahjo node follows in control mode without owning the sizing
 /// seat. Count actual attached viewers separately from those followers.
 fn request_facts(session: &str, out: &mut String, pending: &mut VecDeque<Pending>) {
     send(out, pending, facts_command(), Pending::Facts);

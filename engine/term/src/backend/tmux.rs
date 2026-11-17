@@ -29,11 +29,11 @@ pub enum Socket {
     Path(PathBuf),
 }
 
-/// The tmux program: `PARVI_TMUX` when set, else `tmux` on `PATH`. Tests on a
+/// The tmux program: `AHJO_TMUX` when set, else `tmux` on `PATH`. Tests on a
 /// host whose `tmux` is a guarding wrapper (CHROTE's refuses `kill-server`)
 /// set it to the real binary.
 pub fn program() -> OsString {
-    std::env::var_os("PARVI_TMUX")
+    std::env::var_os("AHJO_TMUX")
         .filter(|program| !program.is_empty())
         .unwrap_or_else(|| "tmux".into())
 }

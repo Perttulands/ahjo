@@ -7,7 +7,7 @@ use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use parvi_core::{Error, NodeId};
+use ahjo_core::{Error, NodeId};
 use serde_json::{Map, Value, json};
 use tokio::sync::mpsc;
 
@@ -92,7 +92,7 @@ impl Views {
         if sent == 0 {
             return Err(Error::new(
                 "no_app",
-                "No Parvi app is connected to this node.",
+                "No Ahjo Swarm app is connected to this node.",
             ));
         }
         let got = tokio::time::timeout(WAIT, answered.recv()).await;
@@ -135,7 +135,7 @@ impl Channel for Link {
                     });
                     app.shown = shown;
                 }
-                Err(e) => eprintln!("parvi: an app's view is not JSON: {e}"),
+                Err(e) => eprintln!("ahjo: an app's view is not JSON: {e}"),
             },
             Some((&VIEW_DONE, body)) if body.len() >= 4 => {
                 let id = u32::from_le_bytes(body[..4].try_into().expect("four bytes"));
@@ -147,7 +147,7 @@ impl Channel for Link {
                     let _ = waiting.send(answer);
                 }
             }
-            _ => eprintln!("parvi: a view-control frame the node does not take"),
+            _ => eprintln!("ahjo: a view-control frame the node does not take"),
         }
         Box::pin(async {})
     }
@@ -188,7 +188,7 @@ pub(crate) fn commands(views: &Arc<Views>, node: NodeId) -> Vec<Command> {
     vec![
         Command::new(
             "view_show",
-            "What each Parvi app connected to this node shows: its page.",
+            "What each Ahjo Swarm app connected to this node shows: its page.",
             || json!({ "type": "object", "properties": {} }),
             move |_| {
                 let shown = shown.show();
@@ -197,7 +197,7 @@ pub(crate) fn commands(views: &Arc<Views>, node: NodeId) -> Vec<Command> {
         ),
         Command::new(
             "view_open",
-            "Open a page in the operator's Parvi app, and one thing on it: a path, item, run, \
+            "Open a page in the operator's Ahjo Swarm app, and one thing on it: a path, item, run, \
              mission, document or session. Answers with what the app shows now.",
             move || schema.clone(),
             move |args: Value| {

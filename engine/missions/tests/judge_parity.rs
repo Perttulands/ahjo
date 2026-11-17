@@ -1,7 +1,7 @@
 #[allow(dead_code)]
 mod run_support;
-use parvi_mission_engine::{Coordinator, LabExecutor, RunSettings};
-use parvi_mission_model::RunStart;
+use ahjo_mission_engine::{Coordinator, LabExecutor, RunSettings};
+use ahjo_mission_model::RunStart;
 use run_support::{Scratch, gated_mission, normalized_ledger};
 use serde_json::Value;
 use std::{
@@ -35,7 +35,7 @@ fn lab_judge_routes_a_synthetic_verdict() {
             expected_rev: 1,
             inputs: BTreeMap::from([(
                 "brief".into(),
-                "\n```parvi-verdict\n{\"verdict\":\"pass\",\"reason\":\"ok\",\"evidence\":[]}\n```"
+                "\n```ahjo-verdict\n{\"verdict\":\"pass\",\"reason\":\"ok\",\"evidence\":[]}\n```"
                     .into(),
             )]),
             ..Default::default()
@@ -66,8 +66,8 @@ fn lab_judge_routes_a_synthetic_verdict() {
         &id,
         include_str!("parity/runs/archon-ledgers/judge-pass.payload.ndjson"),
     );
-    // A start that names no actor is Parvi's own (#174).
-    assert_eq!(c.run(&id).unwrap().started_by, "agent:parvi");
+    // A start that names no actor is Ahjo's own (#174).
+    assert_eq!(c.run(&id).unwrap().started_by, "agent:ahjo");
     let id = c
         .start_mission(RunStart {
             mission: "hello".into(),
@@ -90,7 +90,7 @@ fn lab_judge_routes_a_synthetic_verdict() {
     loop {
         match c.resume(
             &id,
-            parvi_mission_model::ResumeRequest {
+            ahjo_mission_model::ResumeRequest {
                 take_fail: true,
                 actor: "human:operator".into(),
                 ..Default::default()
@@ -128,13 +128,13 @@ fn lab_judge_routes_a_synthetic_verdict() {
 }
 
 struct ScriptedLab(std::sync::Arc<std::sync::Mutex<Vec<(String, i64, String)>>>);
-impl parvi_mission_engine::Executor for ScriptedLab {
+impl ahjo_mission_engine::Executor for ScriptedLab {
     fn execute_formation(
         &self,
-        request: parvi_mission_engine::FormationExecution,
-        events: parvi_mission_engine::ExecutionSink,
-    ) -> Result<parvi_mission_engine::FormationResult, parvi_mission_engine::Error> {
-        (|| -> Result<parvi_mission_engine::FormationResult, String> {
+        request: ahjo_mission_engine::FormationExecution,
+        events: ahjo_mission_engine::ExecutionSink,
+    ) -> Result<ahjo_mission_engine::FormationResult, ahjo_mission_engine::Error> {
+        (|| -> Result<ahjo_mission_engine::FormationResult, String> {
         let node = request.formation.id.clone();
         let attempt = request.attempt;
         self.0
@@ -142,20 +142,20 @@ impl parvi_mission_engine::Executor for ScriptedLab {
             .unwrap()
             .push((node.clone(), attempt, request.input_text.clone()));
         let mut result =
-            parvi_mission_engine::Executor::execute_formation(&LabExecutor, request, events).map_err(|error| error.message)?;
+            ahjo_mission_engine::Executor::execute_formation(&LabExecutor, request, events).map_err(|error| error.message)?;
         let text = if node == "fmn_judge2" {
             if attempt == 1 {
-                "```parvi-verdict\n{invalid}\n```"
+                "```ahjo-verdict\n{invalid}\n```"
             } else {
-                "```parvi-verdict\n{\"verdict\":\"pass\",\"reason\":\"fixed\",\"evidence\":[]}\n```"
+                "```ahjo-verdict\n{\"verdict\":\"pass\",\"reason\":\"fixed\",\"evidence\":[]}\n```"
             }
         } else if node == "fmn_judge1" {
             "earlier review"
         } else if node == "fmn_judge" {
             if attempt == 1 {
-                "```parvi-verdict\n{\"verdict\":\"fail\",\"reason\":\"add coverage\",\"evidence\":[\"missing test\"]}\n```"
+                "```ahjo-verdict\n{\"verdict\":\"fail\",\"reason\":\"add coverage\",\"evidence\":[\"missing test\"]}\n```"
             } else {
-                "```parvi-verdict\n{\"verdict\":\"pass\",\"reason\":\"covered\",\"evidence\":[]}\n```"
+                "```ahjo-verdict\n{\"verdict\":\"pass\",\"reason\":\"covered\",\"evidence\":[]}\n```"
             }
         } else if attempt == 1 {
             "draft one"
@@ -167,34 +167,34 @@ impl parvi_mission_engine::Executor for ScriptedLab {
             output["text"] = text.into();
         }
         Ok(result)
-     })().map_err(|message: String| parvi_mission_engine::Error::new("executor_error", message))
+     })().map_err(|message: String| ahjo_mission_engine::Error::new("executor_error", message))
     }
 }
 
 struct CorrectingLab(std::sync::Arc<std::sync::Mutex<Vec<(String, i64)>>>);
-impl parvi_mission_engine::Executor for CorrectingLab {
+impl ahjo_mission_engine::Executor for CorrectingLab {
     fn execute_formation(
         &self,
-        request: parvi_mission_engine::FormationExecution,
-        events: parvi_mission_engine::ExecutionSink,
-    ) -> Result<parvi_mission_engine::FormationResult, parvi_mission_engine::Error> {
-        parvi_mission_engine::Executor::execute_formation(&LabExecutor, request, events)
+        request: ahjo_mission_engine::FormationExecution,
+        events: ahjo_mission_engine::ExecutionSink,
+    ) -> Result<ahjo_mission_engine::FormationResult, ahjo_mission_engine::Error> {
+        ahjo_mission_engine::Executor::execute_formation(&LabExecutor, request, events)
             .map_err(|error| error.message)
-            .map_err(|message: String| parvi_mission_engine::Error::new("executor_error", message))
+            .map_err(|message: String| ahjo_mission_engine::Error::new("executor_error", message))
     }
     fn correct_judge(
         &self,
-        request: parvi_mission_engine::JudgeCorrection,
-        _: parvi_mission_engine::ExecutionSink,
-    ) -> Result<Option<String>, parvi_mission_engine::Error> {
+        request: ahjo_mission_engine::JudgeCorrection,
+        _: ahjo_mission_engine::ExecutionSink,
+    ) -> Result<Option<String>, ahjo_mission_engine::Error> {
         {
         self.0
             .lock()
             .unwrap()
             .push((request.node_id, request.attempt));
         assert!(request.error.contains("missing"));
-        Ok(Some("```parvi-verdict\n{\"verdict\":\"pass\",\"reason\":\"corrected\",\"evidence\":[]}\n```\n```parvi-outputs\n{\"port_out\":{\"text\":\"corrected\"}}\n```".into()))
-     }.map_err(|message: String| parvi_mission_engine::Error::new("executor_error", message))
+        Ok(Some("```ahjo-verdict\n{\"verdict\":\"pass\",\"reason\":\"corrected\",\"evidence\":[]}\n```\n```ahjo-outputs\n{\"port_out\":{\"text\":\"corrected\"}}\n```".into()))
+     }.map_err(|message: String| ahjo_mission_engine::Error::new("executor_error", message))
     }
 }
 
@@ -421,7 +421,7 @@ fn delivery_example_reaches_its_end_with_a_simulated_judge() {
     )
     .unwrap();
     let c = Coordinator::open(&root.0, RunSettings::default(), Box::new(LabExecutor)).unwrap();
-    let id = c.start_mission(RunStart { mission: "delivery".into(), input_card_id: "mis_delivery".into(), expected_rev: 1, inputs: BTreeMap::from([("change".into(), "simulated\n```parvi-verdict\n{\"verdict\":\"pass\",\"reason\":\"simulated review\",\"evidence\":[]}\n```".into())]), ..Default::default() }).unwrap();
+    let id = c.start_mission(RunStart { mission: "delivery".into(), input_card_id: "mis_delivery".into(), expected_rev: 1, inputs: BTreeMap::from([("change".into(), "simulated\n```ahjo-verdict\n{\"verdict\":\"pass\",\"reason\":\"simulated review\",\"evidence\":[]}\n```".into())]), ..Default::default() }).unwrap();
     let deadline = Instant::now() + Duration::from_secs(10);
     loop {
         let p = c.run(&id).unwrap();
@@ -448,7 +448,7 @@ fn delivery_example_reaches_its_end_with_a_simulated_judge() {
 
 #[test]
 fn concurrent_judge_and_step_publish_only_their_own_files() {
-    use parvi_mission_engine::{ExecutionSink, Executor, FormationExecution, FormationResult};
+    use ahjo_mission_engine::{ExecutionSink, Executor, FormationExecution, FormationResult};
     use std::sync::{
         Arc,
         atomic::{AtomicUsize, Ordering},
@@ -459,7 +459,7 @@ fn concurrent_judge_and_step_publish_only_their_own_files() {
             &self,
             req: FormationExecution,
             sink: ExecutionSink,
-        ) -> Result<FormationResult, parvi_mission_engine::Error> {
+        ) -> Result<FormationResult, ahjo_mission_engine::Error> {
             (|| -> Result<FormationResult, String> {
                 let node = req.formation.id.clone();
                 if node == "fmn_other" || node == "fmn_judge" {
@@ -483,7 +483,7 @@ fn concurrent_judge_and_step_publish_only_their_own_files() {
                     .execute_formation(req, sink)
                     .map_err(|error| error.message)
             })()
-            .map_err(|message: String| parvi_mission_engine::Error::new("executor_error", message))
+            .map_err(|message: String| ahjo_mission_engine::Error::new("executor_error", message))
         }
     }
     fn git(dir: &std::path::Path, args: &[&str]) -> String {
@@ -545,7 +545,7 @@ fn concurrent_judge_and_step_publish_only_their_own_files() {
             repository: "owner/repo".into(),
             inputs: BTreeMap::from([(
                 "brief".into(),
-                "```parvi-verdict\n{\"verdict\":\"pass\",\"reason\":\"ok\",\"evidence\":[]}\n```"
+                "```ahjo-verdict\n{\"verdict\":\"pass\",\"reason\":\"ok\",\"evidence\":[]}\n```"
                     .into(),
             )]),
             ..Default::default()
@@ -563,7 +563,7 @@ fn concurrent_judge_and_step_publish_only_their_own_files() {
     assert_eq!(p.status, "succeeded", "{:?}", p.events.last());
     let workspace = root.0.join("worktrees").join(&id);
     let events =
-        parvi_mission_engine::Ledger::new(root.0.join("runs").join(format!("{id}.ndjson")), &id)
+        ahjo_mission_engine::Ledger::new(root.0.join("runs").join(format!("{id}.ndjson")), &id)
             .read()
             .unwrap();
     for node in ["fmn_judge", "fmn_other"] {

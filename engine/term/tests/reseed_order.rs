@@ -8,11 +8,11 @@ use std::sync::{
 };
 use std::time::Duration;
 
+use ahjo_term::backend::{Attaching, Backend, ControlClient, Reply, Stream, tmux::Socket};
+use ahjo_term::control::{Event, Notification, Parser};
+use ahjo_term::engine::{Engine, PaneUpdate};
+use ahjo_testkit::tmux::{Server, capture, normalise, write_script};
 use anyhow::Result;
-use parvi_term::backend::{Attaching, Backend, ControlClient, Reply, Stream, tmux::Socket};
-use parvi_term::control::{Event, Notification, Parser};
-use parvi_term::engine::{Engine, PaneUpdate};
-use parvi_testkit::tmux::{Server, capture, normalise, write_script};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::sync::{Notify, mpsc};
 
@@ -34,11 +34,11 @@ struct Gated {
 impl Backend for Gated {
     fn create_session<'a>(
         &'a self,
-        spec: &'a parvi_term::SessionSpec,
-    ) -> Reply<'a, parvi_term::SessionRef> {
+        spec: &'a ahjo_term::SessionSpec,
+    ) -> Reply<'a, ahjo_term::SessionRef> {
         self.socket.create_session(spec)
     }
-    fn kill_session<'a>(&'a self, session: &'a parvi_term::SessionRef) -> Reply<'a, ()> {
+    fn kill_session<'a>(&'a self, session: &'a ahjo_term::SessionRef) -> Reply<'a, ()> {
         self.socket.kill_session(session)
     }
     fn command<'a>(&'a self, args: &'a [&'a str]) -> Reply<'a, String> {
@@ -158,7 +158,7 @@ async fn next(steps: &mut mpsc::UnboundedReceiver<Step>) -> Step {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn late_output_after_pause_capture_is_not_lost() -> Result<()> {
-    let Some(server) = Server::start_in("parvi-reseed-order") else {
+    let Some(server) = Server::start_in("ahjo-reseed-order") else {
         return Ok(());
     };
     let script = server.dir().join("producer");

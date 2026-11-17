@@ -7,7 +7,7 @@ use super::{error::FilesError, roots::Roots};
 
 const LIMIT: u64 = 1 << 20;
 
-pub use parvi_files_contract::Diff;
+pub use ahjo_files_contract::Diff;
 
 /// Lines around each change when the whole file is asked for: more than
 /// any file the limit lets through has.

@@ -7,7 +7,7 @@
 //! backlinks come from one walk of the corpus on each read: nothing is
 //! indexed or cached, so the reader always sees the checkout as it is.
 
-use parvi_brain_contract::{Collection, Link, Page, PageRef};
+use ahjo_brain_contract::{Collection, Link, Page, PageRef};
 use std::fs;
 use std::io::Read;
 use std::path::{Component, Path, PathBuf};

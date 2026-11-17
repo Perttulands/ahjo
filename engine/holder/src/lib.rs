@@ -1,9 +1,9 @@
-//! Parvi's Windows session holder.
+//! Ahjo's Windows session holder.
 //!
 //! A detached per-user process that owns ConPTY sessions and plays tmux's
 //! part on Windows: a node attaches to it over a named pipe, and sessions
 //! survive the node's restarts, upgrades and crashes. It speaks the subset of
-//! tmux control mode that Parvi's engine uses, after a versioned greeting
+//! tmux control mode that Ahjo's engine uses, after a versioned greeting
 //! ([`handshake`]).
 //!
 //! The holder runs on Windows; the wire format and the parts of it that are

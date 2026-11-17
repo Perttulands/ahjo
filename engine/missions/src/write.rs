@@ -60,8 +60,7 @@ fn get<T: Default>(registry: &Registry<T>, key: PathBuf) -> Arc<T> {
 mod reference_lock_tests {
     #[test]
     fn role_deletion_and_mission_writes_share_the_reference_lock() {
-        let root =
-            std::env::temp_dir().join(format!("parvi-reference-lock-{}", std::process::id()));
+        let root = std::env::temp_dir().join(format!("ahjo-reference-lock-{}", std::process::id()));
         let mission = super::locks(&root, "mission:example");
         let role = super::locks(&root, "role:writer");
         let guard = mission.references.read().unwrap();
@@ -220,7 +219,7 @@ fn prepare(path: &Path, bytes: &[u8]) -> io::Result<Staged> {
 fn create_temp(dir: &Path) -> io::Result<(PathBuf, std::fs::File)> {
     loop {
         let path = dir.join(format!(
-            ".parvi-{}-{}.tmp",
+            ".ahjo-{}-{}.tmp",
             std::process::id(),
             NEXT_TEMP.fetch_add(1, Ordering::Relaxed)
         ));
@@ -243,7 +242,7 @@ mod tests {
     #[test]
     fn failed_second_publish_restores_first_file_and_keeps_second() {
         let dir = std::env::temp_dir().join(format!(
-            "parvi-97-pair-{}-{}",
+            "ahjo-97-pair-{}-{}",
             std::process::id(),
             NEXT_TEMP.fetch_add(1, Ordering::Relaxed)
         ));
@@ -269,7 +268,7 @@ mod tests {
     #[test]
     fn rollback_failure_keeps_original_in_the_reported_backup() {
         let dir = std::env::temp_dir().join(format!(
-            "parvi-97-pair-{}-{}",
+            "ahjo-97-pair-{}-{}",
             std::process::id(),
             NEXT_TEMP.fetch_add(1, Ordering::Relaxed)
         ));
@@ -294,7 +293,7 @@ mod tests {
                 path.file_name()
                     .unwrap()
                     .to_string_lossy()
-                    .starts_with(".parvi-")
+                    .starts_with(".ahjo-")
             })
             .unwrap();
         assert!(

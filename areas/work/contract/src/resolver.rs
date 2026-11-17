@@ -5,8 +5,8 @@
 use std::future::Future;
 use std::pin::Pin;
 
-use parvi_core::Error;
-use parvi_work_ref::WorkRef;
+use ahjo_core::Error;
+use ahjo_work_ref::WorkRef;
 
 pub type Resolving<'a> = Pin<Box<dyn Future<Output = Result<WorkRef, Error>> + Send + 'a>>;
 

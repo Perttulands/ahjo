@@ -3,9 +3,9 @@
 //! closes when none holds any, and otherwise only once the operator chooses
 //! to leave it. Two toy pages and a toy draft view, made here.
 
+use ahjo_app_kit::{Build, Host, Mounted, Page, mount};
+use ahjo_app_shell::Shell;
 use gpui::{Entity, Modifiers, TestAppContext, VisualTestContext, Window, div, prelude::*};
-use parvi_app_kit::{Build, Host, Mounted, Page, mount};
-use parvi_app_shell::Shell;
 use std::cell::RefCell;
 
 /// A page holding at most one unsaved thing, named.
@@ -111,9 +111,9 @@ fn unsaved_work_holds_the_window_until_the_operator_leaves_it(cx: &mut TestAppCo
         format!("http://{}", l.local_addr().expect("its address"))
     };
     cx.executor().allow_parking();
-    cx.update(parvi_app_shell::prepare);
+    cx.update(ahjo_app_shell::prepare);
     let (shell, cx) = cx.add_window_view(move |window, cx| {
-        parvi_app_shell::start(PAGES, Some(node), None, window, cx)
+        ahjo_app_shell::start(PAGES, Some(node), None, window, cx)
     });
     cx.run_until_parked();
     let pen = PEN.with(|p| p.borrow().clone()).expect("Pen was made");

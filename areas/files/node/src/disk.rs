@@ -11,9 +11,9 @@ use super::roots::Roots;
 
 /// One thing in a folder. A link shows as what it points to; a link out of
 /// the roots, or to nothing, is left out.
-pub use parvi_files_contract::Entry;
+pub use ahjo_files_contract::Entry;
 
-pub use parvi_files_contract::Listing;
+pub use ahjo_files_contract::Listing;
 
 /// A folder's entries, by name. Names that are not UTF-8 are left out: the
 /// browser could not name them back.
@@ -161,7 +161,7 @@ fn temporary(file: &Path) -> std::io::Result<(std::path::PathBuf, fs::File)> {
         .ok_or_else(|| std::io::Error::other("file has no parent"))?;
     loop {
         let temp = parent.join(format!(
-            ".parvi-save-{}-{}",
+            ".ahjo-save-{}-{}",
             std::process::id(),
             NEXT.fetch_add(1, Ordering::Relaxed)
         ));

@@ -1,6 +1,6 @@
 //! The same arrangement goldens Archon's Go store and dashboard use.
-use parvi_mission_engine::arrange;
-use parvi_mission_model::{Layout, LayoutNode, Mission};
+use ahjo_mission_engine::arrange;
+use ahjo_mission_model::{Layout, LayoutNode, Mission};
 
 #[test]
 fn arrangements_match_archons_goldens() {

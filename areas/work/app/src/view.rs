@@ -8,16 +8,16 @@ use crate::store::work::{Row, Status, Tracker, prose, when};
 use crate::text::Text;
 use crate::tokens::*;
 use crate::{Entry, Layout, Moved, Work};
+use ahjo_app_kit::hub::now_ms;
+use ahjo_app_kit::theme::{FAMILY, Theme, size, theme};
+use ahjo_app_kit::widgets::kit;
+use ahjo_app_kit::widgets::markdown;
+use ahjo_app_kit::widgets::pane;
+use ahjo_app_kit::widgets::select;
 use gpui::{
     AnyElement, ClickEvent, Context, Div, FontWeight, Hsla, MouseButton, MouseDownEvent,
     SharedString, Stateful, Window, div, prelude::*, px, uniform_list,
 };
-use parvi_app_kit::hub::now_ms;
-use parvi_app_kit::theme::{FAMILY, Theme, size, theme};
-use parvi_app_kit::widgets::kit;
-use parvi_app_kit::widgets::markdown;
-use parvi_app_kit::widgets::pane;
-use parvi_app_kit::widgets::select;
 use std::rc::Rc;
 
 /// Where an item view stands: on the page, beside the page that named it,

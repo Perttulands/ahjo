@@ -1,5 +1,5 @@
 //! Decisions while submitting one pasted brief pointer.
-use parvi_term::{
+use ahjo_term::{
     Screen,
     waiting::harness::{self, Harness},
 };
@@ -54,7 +54,7 @@ impl Submission {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use parvi_term::{Cell, Color, Cursor};
+    use ahjo_term::{Cell, Color, Cursor};
     fn screen(text: &str) -> Screen {
         let cells = format!("› {text}")
             .chars()

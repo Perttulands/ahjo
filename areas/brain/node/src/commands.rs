@@ -1,7 +1,7 @@
 use crate::brain::Brain;
-use parvi_brain_contract::{BAD_REQUEST, BRAIN_ERROR, NOT_FOUND, UNAVAILABLE};
-use parvi_core::Error;
-use parvi_node_kit::{
+use ahjo_brain_contract::{BAD_REQUEST, BRAIN_ERROR, NOT_FOUND, UNAVAILABLE};
+use ahjo_core::Error;
+use ahjo_node_kit::{
     Command,
     args::{maybe_text, object, text},
 };
@@ -11,7 +11,7 @@ use std::sync::Arc;
 pub fn commands(
     brain: Arc<Brain>,
     node: String,
-    sessions: Option<Arc<dyn parvi_term::Sessions>>,
+    sessions: Option<Arc<dyn ahjo_term::Sessions>>,
 ) -> Vec<Command> {
     let search = brain.clone();
     let search_node = node.clone();

@@ -9,6 +9,13 @@ use std::{
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
+use ahjo_app_kit::link::client::LinkState;
+use ahjo_host_contract::{
+    self as wire, Component, Facts, Gpu, Heavy, LogLine, Point, Reading, ReadingFrame, Service,
+    ServiceList, ServiceLog, State, Usage,
+};
+use ahjo_node_kit::{Area, BoxFuture, Built, Channel, Client, Listing, Setup};
+use ahjo_testkit::node::Node;
 use axum::{
     Json, Router,
     extract::Path,
@@ -16,13 +23,6 @@ use axum::{
     routing::{get, post},
 };
 use gpui::{Modifiers, TestAppContext, VisualTestContext};
-use parvi_app_kit::link::client::LinkState;
-use parvi_host_contract::{
-    self as wire, Component, Facts, Gpu, Heavy, LogLine, Point, Reading, ReadingFrame, Service,
-    ServiceList, ServiceLog, State, Usage,
-};
-use parvi_node_kit::{Area, BoxFuture, Built, Channel, Client, Listing, Setup};
-use parvi_testkit::node::Node;
 use serde_json::json;
 use tokio::sync::mpsc::{self as tokio_mpsc, UnboundedReceiver, UnboundedSender};
 
@@ -276,7 +276,7 @@ fn click(cx: &mut VisualTestContext, selector: &'static str) {
         .center();
     cx.simulate_click(position, Modifiers::none());
 }
-fn status(shell: &gpui::Entity<parvi_app_shell::Shell>, cx: &mut VisualTestContext) -> String {
+fn status(shell: &gpui::Entity<ahjo_app_shell::Shell>, cx: &mut VisualTestContext) -> String {
     shell.read_with(cx, |s, cx| {
         s.hub()
             .read(cx)
@@ -289,13 +289,13 @@ fn status(shell: &gpui::Entity<parvi_app_shell::Shell>, cx: &mut VisualTestConte
 #[gpui::test]
 fn host_journeys(cx: &mut TestAppContext) {
     let running = start();
-    let dir = parvi_testkit::fresh_dir("parvi-host-journey");
+    let dir = ahjo_testkit::fresh_dir("ahjo-host-journey");
     cx.executor().allow_parking();
-    cx.update(parvi_app_shell::prepare);
+    cx.update(ahjo_app_shell::prepare);
     let (url, settings) = (running.url.clone(), dir.join("app.json"));
     let (shell, cx) = cx.add_window_view(move |window, cx| {
-        parvi_app_shell::start(
-            &[parvi_host_app::build],
+        ahjo_app_shell::start(
+            &[ahjo_host_app::build],
             Some(url),
             Some(settings),
             window,

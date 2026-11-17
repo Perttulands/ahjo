@@ -19,11 +19,11 @@
 //! switches one off and holds the hash it was trusted at.
 
 use super::{Roots, ancestors, edit, instruction, shown, source};
-use parvi_agents_contract::shape::{
+use ahjo_agents_contract::shape::{
     Hook, HookChange, HookEdit, INVALID, Instruction, Load, Origin, STALE, SeenSkill, Server,
     Setting, Shape, Source,
 };
-use parvi_core::Error;
+use ahjo_core::Error;
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 use std::path::{Path, PathBuf};
@@ -688,7 +688,7 @@ pub fn hook_edit(roots: &Roots, e: &HookEdit) -> Result<Value, Error> {
                 let key = state_key(&key_file, event, g, i);
                 let item = take_state(&mut doc, &key);
                 let mut tagged = h.clone();
-                tagged["__parvi"] = json!(states.len());
+                tagged["__ahjo"] = json!(states.len());
                 states.push((event.clone(), h.clone(), item));
                 v["hooks"][event][g]["hooks"][i] = tagged;
             }
@@ -745,7 +745,7 @@ pub fn hook_edit(roots: &Roots, e: &HookEdit) -> Result<Value, Error> {
                     "the hook changed since it was read; read it again",
                 ));
             }
-            switch = h["__parvi"].as_u64().map(|n| (n as usize, *on));
+            switch = h["__ahjo"].as_u64().map(|n| (n as usize, *on));
         }
     }
     // Put the states back at each handler's new place.
@@ -754,7 +754,7 @@ pub fn hook_edit(roots: &Roots, e: &HookEdit) -> Result<Value, Error> {
         for (g, group) in groups.iter().enumerate() {
             for (i, h) in group["hooks"].as_array().into_iter().flatten().enumerate() {
                 let key = state_key(&key_file, event, g, i);
-                if let Some(n) = h["__parvi"].as_u64().map(|n| n as usize) {
+                if let Some(n) = h["__ahjo"].as_u64().map(|n| n as usize) {
                     let mut item = states[n].2.clone();
                     if let Some((m, on)) = switch
                         && m == n
@@ -777,7 +777,7 @@ pub fn hook_edit(roots: &Roots, e: &HookEdit) -> Result<Value, Error> {
                     }
                 }
                 if let Some(o) = v["hooks"][event][g]["hooks"][i].as_object_mut() {
-                    o.remove("__parvi");
+                    o.remove("__ahjo");
                 }
             }
         }

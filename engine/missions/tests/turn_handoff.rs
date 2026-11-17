@@ -2,7 +2,7 @@
 //! placed turn is published once however often it is asked for, a publish
 //! that stopped before removing its worktree removes it when asked again, and
 //! landing the run deletes what it pushed to the remote, unless it moved since.
-use parvi_mission_engine::{TurnWorkspace, TurnWorktrees, Workspaces};
+use ahjo_mission_engine::{TurnWorkspace, TurnWorktrees, Workspaces};
 use std::{
     collections::BTreeMap,
     path::{Path, PathBuf},
@@ -15,7 +15,7 @@ impl Scratch {
         let mut bytes = [0; 8];
         getrandom::fill(&mut bytes).unwrap();
         let root =
-            std::env::temp_dir().join(format!("parvi-121-handoff-{}", u64::from_ne_bytes(bytes)));
+            std::env::temp_dir().join(format!("ahjo-121-handoff-{}", u64::from_ne_bytes(bytes)));
         std::fs::create_dir_all(&root).unwrap();
         git(
             &root,
@@ -116,7 +116,7 @@ fn a_placed_turn_is_published_once_and_landing_deletes_its_remote_refs() {
 }
 
 #[test]
-fn landing_leaves_shared_refs_that_moved_since_parvi_pushed_them() {
+fn landing_leaves_shared_refs_that_moved_since_ahjo_pushed_them() {
     let scratch = Scratch::new();
     let checkout = scratch.side("coordinator");
     let workspaces = Workspaces::new(
@@ -131,8 +131,8 @@ fn landing_leaves_shared_refs_that_moved_since_parvi_pushed_them() {
     );
     let pushed = git(&tree.path, &["rev-parse", "HEAD"]);
     let remote = scratch.0.join("remote.git");
-    // Someone else moves the run branch and a turn ref after Parvi pushed
-    // them, and pushes a turn ref Parvi has no record of.
+    // Someone else moves the run branch and a turn ref after Ahjo pushed
+    // them, and pushes a turn ref Ahjo has no record of.
     let theirs = git(
         &remote,
         &[
@@ -148,8 +148,8 @@ fn landing_leaves_shared_refs_that_moved_since_parvi_pushed_them() {
             &format!("{pushed}^{{tree}}"),
         ],
     );
-    let turn = "refs/parvi/turns/run_moved/aaaaaaaaaaaa-1";
-    let stray = "refs/parvi/turns/run_moved/bbbbbbbbbbbb-1";
+    let turn = "refs/ahjo/turns/run_moved/aaaaaaaaaaaa-1";
+    let stray = "refs/ahjo/turns/run_moved/bbbbbbbbbbbb-1";
     for reference in [branch.as_str(), turn, stray] {
         git(&remote, &["update-ref", reference, &theirs]);
     }
@@ -172,9 +172,7 @@ fn landing_leaves_shared_refs_that_moved_since_parvi_pushed_them() {
         .map(str::to_owned)
         .collect();
     left.sort();
-    assert_eq!(
-        left,
-        ["refs/heads/main", &branch, turn, stray],
-        "nothing moved is deleted"
-    );
+    let mut kept = ["refs/heads/main", &branch, turn, stray];
+    kept.sort();
+    assert_eq!(left, kept, "nothing moved is deleted");
 }

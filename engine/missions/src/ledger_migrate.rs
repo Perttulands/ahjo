@@ -38,7 +38,7 @@ pub(crate) fn migrate(runs: &Path) -> io::Result<BTreeMap<String, String>> {
                  so it was left as it was: {error}",
                 path.display()
             );
-            eprintln!("parvi: {reason}");
+            eprintln!("ahjo: {reason}");
             refused.insert(id.to_owned(), reason);
         }
     }
@@ -100,11 +100,11 @@ fn rename(object: &mut Map<String, Value>) -> io::Result<bool> {
         .as_str()
         .ok_or_else(|| invalid("issue is not a string"))?;
     if !issue.is_empty() {
-        let work = parvi_work_ref::parse(issue)
+        let work = ahjo_work_ref::parse(issue)
             .ok()
             .and_then(|written| match written {
-                parvi_work_ref::Written::Ref(reference) => Some(reference.to_string()),
-                parvi_work_ref::Written::Bead(_) => None,
+                ahjo_work_ref::Written::Ref(reference) => Some(reference.to_string()),
+                ahjo_work_ref::Written::Bead(_) => None,
             })
             .ok_or_else(|| {
                 invalid(&format!(
@@ -130,7 +130,7 @@ mod tests {
     /// by others and a crash left a readable temporary behind.
     #[test]
     fn a_migrated_ledger_is_private() {
-        let dir = std::env::temp_dir().join(format!("parvi-180-mode-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("ahjo-180-mode-{}", std::process::id()));
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(&dir).unwrap();
         let ledger = dir.join("run_a.ndjson");

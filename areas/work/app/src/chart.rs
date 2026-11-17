@@ -12,13 +12,13 @@
 use crate::Work;
 use crate::store::work::timeline::{Day, Range, Timeline, day_label};
 use crate::tokens::{self, *};
+use ahjo_app_kit::theme::{FAMILY, Theme, alpha, size as kit};
+use ahjo_app_kit::widgets::boundary;
 use gpui::{
     App, Bounds, DispatchPhase, Hsla, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent,
     PathBuilder, Pixels, Point, TextAlign, WeakEntity, Window, canvas, fill, point, prelude::*, px,
     size,
 };
-use parvi_app_kit::theme::{FAMILY, Theme, alpha, size as kit};
-use parvi_app_kit::widgets::boundary;
 use std::rc::Rc;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]

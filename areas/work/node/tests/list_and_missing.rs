@@ -1,8 +1,8 @@
 //! Work commands filter their own response without changing the page's board.
 #![cfg(unix)]
+use ahjo_node_kit::{Built, Listing, Setup};
+use ahjo_testkit::node::Node;
 use futures_util::{SinkExt, StreamExt};
-use parvi_node_kit::{Built, Listing, Setup};
-use parvi_testkit::node::Node;
 use serde_json::{Value, json};
 use std::os::unix::fs::PermissionsExt;
 use std::sync::OnceLock;
@@ -10,20 +10,20 @@ use tokio_tungstenite::tungstenite::Message;
 
 static BD: OnceLock<String> = OnceLock::new();
 fn build(setup: &Setup) -> anyhow::Result<Built> {
-    parvi_work::build_with(
+    ahjo_work::build_with(
         setup,
-        parvi_work::Bd::new(BD.get().unwrap()),
-        parvi_work::Gh::default(),
+        ahjo_work::Bd::new(BD.get().unwrap()),
+        ahjo_work::Gh::default(),
     )
 }
 const WORK: Listing = Listing {
     build,
-    ..parvi_work::LISTING
+    ..ahjo_work::LISTING
 };
 
 #[tokio::test(flavor = "multi_thread")]
 async fn list_filters_closed_without_changing_the_page_and_missing_is_not_found() {
-    let dir = parvi_testkit::fresh_dir("parvi-work-filter");
+    let dir = ahjo_testkit::fresh_dir("ahjo-work-filter");
     std::fs::create_dir(dir.join(".beads")).unwrap();
     std::fs::write(
         dir.join(".beads/list.json"),
@@ -62,7 +62,7 @@ async fn list_filters_closed_without_changing_the_page_and_missing_is_not_found(
     let mut out = Vec::new();
     let args = ["list", "--all", "--json", "--node", &node.url()].map(str::to_owned);
     assert_eq!(
-        parvi_node_kit::cli::run("work", &args, &mut out)
+        ahjo_node_kit::cli::run("work", &args, &mut out)
             .await
             .unwrap(),
         0
@@ -96,7 +96,7 @@ async fn list_filters_closed_without_changing_the_page_and_missing_is_not_found(
         .unwrap_err();
     assert_eq!(error.code, "not_found");
     assert!(error.message.contains("tst-missing"));
-    let client = parvi_node_kit::NodeClient::new(Some(&node.url())).unwrap();
+    let client = ahjo_node_kit::NodeClient::new(Some(&node.url())).unwrap();
     let error = client
         .request(
             axum::http::Method::GET,
@@ -106,7 +106,7 @@ async fn list_filters_closed_without_changing_the_page_and_missing_is_not_found(
         )
         .await
         .unwrap_err();
-    let error = error.downcast_ref::<parvi_node_kit::NodeError>().unwrap();
+    let error = error.downcast_ref::<ahjo_node_kit::NodeError>().unwrap();
     assert_eq!(error.status, axum::http::StatusCode::NOT_FOUND);
     assert_eq!(error.code, "not_found");
     drop(ws);

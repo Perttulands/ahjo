@@ -1,7 +1,7 @@
 //! Mission definition, layout and note archives. Removing an archived
 //! symlink unlinks it and never removes its target.
 use crate::{Error, Store};
-use parvi_mission_model::{Mission, Notes};
+use ahjo_mission_model::{Mission, Notes};
 use serde::Serialize;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -240,7 +240,7 @@ mod tests {
     #[test]
     fn a_failed_later_archive_move_restores_the_earlier_notes() {
         let dir =
-            std::env::temp_dir().join(format!("parvi-archive-rollback-{}", std::process::id()));
+            std::env::temp_dir().join(format!("ahjo-archive-rollback-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let notes = dir.join("live.notes.toml");
         let archived = dir.join("notes.deleted");

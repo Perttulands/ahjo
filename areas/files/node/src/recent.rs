@@ -4,7 +4,7 @@
 //! together (a checkout, a batch of renders) stand as one folder line, and
 //! so do more than a few changes in one folder.
 
-use parvi_files_contract::Changed;
+use ahjo_files_contract::Changed;
 use std::collections::HashMap;
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};

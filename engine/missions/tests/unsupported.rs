@@ -1,5 +1,5 @@
-use parvi_mission_engine::{Harnesses, Store, run_admission, validate};
-use parvi_mission_model::{Code, Mission};
+use ahjo_mission_engine::{Harnesses, Store, run_admission, validate};
+use ahjo_mission_model::{Code, Mission};
 use std::collections::BTreeMap;
 
 fn gated() -> Mission {
@@ -10,7 +10,7 @@ fn gated() -> Mission {
 }
 #[test]
 fn reports_unsupported_capabilities_on_the_nodes_and_refuses_admission() {
-    let root = parvi_testkit::fresh_dir("unsupported-validation");
+    let root = ahjo_testkit::fresh_dir("unsupported-validation");
     let store = Store::new(&root);
     let mut mission = gated();
     let solo = validate(&mission, &store.roles(), &Harnesses::default());
@@ -84,8 +84,8 @@ fn reports_unsupported_capabilities_on_the_nodes_and_refuses_admission() {
 
 #[test]
 fn legacy_missions_can_be_repaired_without_allowing_unrelated_saves() {
-    use parvi_mission_model::{InputCardUpdate, Patch, Precondition};
-    let root = parvi_testkit::fresh_dir("unsupported-repair");
+    use ahjo_mission_model::{InputCardUpdate, Patch, Precondition};
+    let root = ahjo_testkit::fresh_dir("unsupported-repair");
     let folder = root.join("missions");
     std::fs::create_dir_all(&folder).unwrap();
     let source = include_str!("../../../areas/missions/app/tests/fixtures/gated.mission.toml")
@@ -110,7 +110,7 @@ fn legacy_missions_can_be_repaired_without_allowing_unrelated_saves() {
             .iter()
             .any(|f| f.code == Code::UnsupportedHumanChannel)
     );
-    let pre = |edit: &parvi_mission_model::Edit| Precondition {
+    let pre = |edit: &ahjo_mission_model::Edit| Precondition {
         rev: edit.mission.rev,
         etag: edit.etag.clone(),
     };
@@ -153,18 +153,18 @@ fn legacy_missions_can_be_repaired_without_allowing_unrelated_saves() {
     std::fs::remove_dir_all(root).unwrap();
 }
 
-fn lab(setup: &parvi_node_kit::Setup) -> anyhow::Result<parvi_node_kit::Built> {
-    parvi_missions::build_with_executor(setup, Some(Box::new(parvi_mission_engine::LabExecutor)))
+fn lab(setup: &ahjo_node_kit::Setup) -> anyhow::Result<ahjo_node_kit::Built> {
+    ahjo_missions::build_with_executor(setup, Some(Box::new(ahjo_mission_engine::LabExecutor)))
 }
-const LAB: parvi_node_kit::Listing = parvi_node_kit::Listing {
+const LAB: ahjo_node_kit::Listing = ahjo_node_kit::Listing {
     build: lab,
-    ..parvi_missions::LISTING
+    ..ahjo_missions::LISTING
 };
 #[tokio::test(flavor = "multi_thread")]
 async fn cli_refuses_to_save_unsupported_formation_and_channel() {
-    use parvi_testkit::{node::Node, sessions};
+    use ahjo_testkit::{node::Node, sessions};
     use serde_json::json;
-    let node = Node::start(&[sessions::LISTING, parvi_work::LISTING, LAB], "")
+    let node = Node::start(&[sessions::LISTING, ahjo_work::LISTING, LAB], "")
         .await
         .unwrap();
     let folder = node.dir().join("missions/missions");
@@ -185,7 +185,7 @@ async fn cli_refuses_to_save_unsupported_formation_and_channel() {
         format!("{}/", node.url()),
     ];
     assert_eq!(
-        parvi_node_kit::cli::run("formation", &args, &mut output)
+        ahjo_node_kit::cli::run("formation", &args, &mut output)
             .await
             .unwrap(),
         1
@@ -205,7 +205,7 @@ async fn cli_refuses_to_save_unsupported_formation_and_channel() {
         format!("{}/", node.url()),
     ];
     assert_eq!(
-        parvi_node_kit::cli::run("mission", &args, &mut output)
+        ahjo_node_kit::cli::run("mission", &args, &mut output)
             .await
             .unwrap(),
         1

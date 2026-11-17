@@ -104,7 +104,7 @@ fn stage(roots: &Roots, target: &Target) -> Result<(PathBuf, PathBuf), FilesErro
     if !folder.is_dir() {
         return Err(FilesError::NotFolder);
     }
-    let stage = folder.join(format!(".parvi-transfer-{}", target.id));
+    let stage = folder.join(format!(".ahjo-transfer-{}", target.id));
     match fs::create_dir(&stage) {
         Ok(()) => {}
         Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {}
@@ -385,7 +385,7 @@ mod tests {
         assert!(matches!(prepare(&roots, &target), Err(FilesError::Exists)));
         assert_eq!(fs::read(dir.join("copy.txt")).unwrap(), b"original");
         assert!(
-            !dir.join(format!(".parvi-transfer-{}/data", target.id))
+            !dir.join(format!(".ahjo-transfer-{}/data", target.id))
                 .exists()
         );
         fs::remove_file(dir.join("copy.txt")).unwrap();

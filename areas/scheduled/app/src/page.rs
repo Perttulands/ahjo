@@ -3,15 +3,15 @@
 
 use std::time::Duration;
 
+use ahjo_app_kit::host::Request;
+use ahjo_app_kit::hub::now_ms;
+use ahjo_app_kit::link::client::LinkState;
+use ahjo_app_kit::widgets::field::{FieldEvent, TextField};
+use ahjo_app_kit::{Host, Page};
+use ahjo_core::NodeId;
+use ahjo_scheduled_contract::{CHANGED, INTENT, INTENT_VALUE, PATH, Target, Task, WATCH};
+use ahjo_terminals_contract::SessionList;
 use gpui::{App, AppContext, Context, Entity, Window};
-use parvi_app_kit::host::Request;
-use parvi_app_kit::hub::now_ms;
-use parvi_app_kit::link::client::LinkState;
-use parvi_app_kit::widgets::field::{FieldEvent, TextField};
-use parvi_app_kit::{Host, Page};
-use parvi_core::NodeId;
-use parvi_scheduled_contract::{CHANGED, INTENT, INTENT_VALUE, PATH, Target, Task, WATCH};
-use parvi_terminals_contract::SessionList;
 use serde_json::{Value, json};
 
 use crate::ACTOR;
@@ -72,7 +72,7 @@ impl Page for ScheduledPage {
     const TITLE: &'static str = "Scheduled";
     const KEY: Option<char> = Some('S');
     const AREA: Option<&'static str> = Some(crate::NAME);
-    const KINDS: parvi_core::frame::Kinds = &[CHANGED..=CHANGED];
+    const KINDS: ahjo_core::frame::Kinds = &[CHANGED..=CHANGED];
     const CHANNELS: &'static [u8] = &[WATCH];
 
     fn frame(&mut self, node: &NodeId, _: u8, _: &[u8], _: &mut Window, cx: &mut Context<Self>) {

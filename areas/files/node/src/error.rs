@@ -60,20 +60,20 @@ impl fmt::Display for FilesError {
     }
 }
 
-impl From<FilesError> for parvi_core::Error {
+impl From<FilesError> for ahjo_core::Error {
     fn from(error: FilesError) -> Self {
         let code = match &error {
-            FilesError::Outside => parvi_files_contract::OUTSIDE_ROOTS,
-            FilesError::Root => parvi_files_contract::ROOT_IMMUTABLE,
-            FilesError::NotFound => parvi_files_contract::NOT_FOUND,
-            FilesError::Exists => parvi_files_contract::ALREADY_EXISTS,
-            FilesError::Changed => parvi_files_contract::FILE_CHANGED,
-            FilesError::Permission => parvi_files_contract::PERMISSION_DENIED,
-            FilesError::NotFolder => parvi_files_contract::NOT_FOLDER,
-            FilesError::NotFile => parvi_files_contract::NOT_FILE,
-            FilesError::TooLarge => parvi_files_contract::TOO_LARGE,
-            FilesError::OtherNode(_) => parvi_files_contract::UNKNOWN_NODE,
-            FilesError::Io(_) => parvi_files_contract::IO_ERROR,
+            FilesError::Outside => ahjo_files_contract::OUTSIDE_ROOTS,
+            FilesError::Root => ahjo_files_contract::ROOT_IMMUTABLE,
+            FilesError::NotFound => ahjo_files_contract::NOT_FOUND,
+            FilesError::Exists => ahjo_files_contract::ALREADY_EXISTS,
+            FilesError::Changed => ahjo_files_contract::FILE_CHANGED,
+            FilesError::Permission => ahjo_files_contract::PERMISSION_DENIED,
+            FilesError::NotFolder => ahjo_files_contract::NOT_FOLDER,
+            FilesError::NotFile => ahjo_files_contract::NOT_FILE,
+            FilesError::TooLarge => ahjo_files_contract::TOO_LARGE,
+            FilesError::OtherNode(_) => ahjo_files_contract::UNKNOWN_NODE,
+            FilesError::Io(_) => ahjo_files_contract::IO_ERROR,
         };
         Self::new(code, error.to_string())
     }

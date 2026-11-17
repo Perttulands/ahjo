@@ -1,5 +1,5 @@
 use crate::{Coordinator, Error};
-use parvi_mission_model::RunProjection;
+use ahjo_mission_model::RunProjection;
 use std::time::Duration;
 
 /// The condition a driver is waiting for.

@@ -9,7 +9,7 @@
 //! on the `run_resumed` that gives it, adds one more allowance: a round, or
 //! the card's time or tokens again.
 use crate::RunEvent;
-use parvi_mission_model::{Limit, Mission};
+use ahjo_mission_model::{Limit, Mission};
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::time::{Duration, SystemTime};
@@ -372,7 +372,7 @@ fn warning_text(mission: &Mission, limit: &Limit, left: i64) -> String {
         _ => "waits for the operator",
     };
     format!(
-        "Parvi: {} left of {whose} working time (Limit card {}). When it runs out the step stops and the run {ending}. Finish your output now.",
+        "Ahjo: {} left of {whose} working time (Limit card {}). When it runs out the step stops and the run {ending}. Finish your output now.",
         duration_words(left),
         mission.node_name(&limit.id)
     )

@@ -1,11 +1,11 @@
 //! A mission as defined, read top to bottom, and the head it wears while
 //! its steps are changed on the canvas.
 use super::*;
+use ahjo_app_kit::menu::MenuRow;
+use ahjo_app_kit::theme::Theme;
+use ahjo_app_kit::widgets::pane::{self, Col};
+use ahjo_missions_contract::{MISSION_THREAD, Mission};
 use gpui::SharedString;
-use parvi_app_kit::menu::MenuRow;
-use parvi_app_kit::theme::Theme;
-use parvi_app_kit::widgets::pane::{self, Col};
-use parvi_missions_contract::{MISSION_THREAD, Mission};
 
 /// Runs listed under a mission; the rest are in the list's filter.
 const RUNS_SHOWN: usize = 20;

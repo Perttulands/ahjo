@@ -4,7 +4,7 @@ use crate::run_worker::event;
 use crate::{
     BindingsSnapshot, Coordinator, FormationExecution, mission_run_inputs, substitute_run_inputs,
 };
-use parvi_mission_model::{Mission, RunStart};
+use ahjo_mission_model::{Mission, RunStart};
 use serde_json::json;
 use std::{
     io,
@@ -24,7 +24,7 @@ pub(crate) fn execute_formation(
     attempt: i64,
     refs: Vec<serde_json::Value>,
     text: String,
-    inputs: &[parvi_mission_model::RunInput],
+    inputs: &[ahjo_mission_model::RunInput],
     reason: &str,
     final_judge: bool,
     started: Option<mpsc::SyncSender<()>>,
@@ -405,7 +405,7 @@ pub(crate) struct JobContext<'a> {
     pub mission: &'a Mission,
     pub req: &'a RunStart,
     pub workspace: &'a std::path::Path,
-    pub inputs: &'a [parvi_mission_model::RunInput],
+    pub inputs: &'a [ahjo_mission_model::RunInput],
     pub events: &'a [crate::RunEvent],
     pub replay: &'a crate::run_replay::Replay,
     pub done: &'a mpsc::Sender<crate::run_scheduler::Finished>,

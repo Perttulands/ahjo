@@ -29,7 +29,7 @@ use std::sync::Arc;
 use anyhow::Result;
 use axum::http::StatusCode;
 
-pub use parvi_brain_contract::{Change, Collection, Commit, Found, Listed, Page, PageRef};
+pub use ahjo_brain_contract::{Change, Collection, Commit, Found, Listed, Page, PageRef};
 
 pub use refusal::{Refusal, code as refusal_code};
 pub use routes::routes;
@@ -58,7 +58,7 @@ pub struct Read<T> {
 impl Brain {
     /// The Brain over the corpus checkout at `corpus`, searched through the
     /// Citadel at `citadel` (`http://host:port`). A root that is not a
-    /// directory or a URL Parvi cannot reach is an error now rather than at
+    /// directory or a URL Ahjo cannot reach is an error now rather than at
     /// the first search.
     pub fn new(corpus: Option<&Path>, citadel: Option<&str>) -> Result<Brain> {
         Ok(Brain {

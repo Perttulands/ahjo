@@ -332,7 +332,7 @@ mod tests {
     use super::*;
     #[test]
     fn card_edit_and_note_commit_together_and_reject_stale_etag() {
-        let dir = std::env::temp_dir().join(format!("parvi-98-role-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("ahjo-98-role-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         let store = RoleStore::new(&dir);
         let original = store

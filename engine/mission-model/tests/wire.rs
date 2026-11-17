@@ -2,7 +2,7 @@
 //! share one declaration. Responses omit empty fields when written; requests
 //! are written whole.
 
-use parvi_mission_model::{
+use ahjo_mission_model::{
     Code, Escalation, GateRequest, HumanPick, HumanVerdict, MissionListing, Report, ResumeMode,
     ResumeRequest, RunAttempts, RunProjection, RunStart, RunSummary,
 };
@@ -45,7 +45,7 @@ fn responses_read_back_with_their_empty_fields_left_out() {
         "blockCode": "limit_spent", "startedBy": "human:operator",
         "startedAt": "2026-11-11T00:00:00Z", "updatedAt": "2026-11-11T00:00:01Z",
         "inputExcerpt": "hi", "outputs": [],
-        "sessions": [{"sessionName": "parvi-a", "nodeId": "fmn_a", "slotId": "w1"}]
+        "sessions": [{"sessionName": "ahjo-a", "nodeId": "fmn_a", "slotId": "w1"}]
     }]));
     reads_back::<RunAttempts>(json!({"runId": "run_a", "steps": [{
         "nodeId": "fmn_a", "title": "Plan",

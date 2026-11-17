@@ -6,12 +6,12 @@
 //! was read, so nothing changed meanwhile is overwritten.
 
 use super::{Roots, claude, codex, shown};
-use parvi_agents_contract::shape::Hook;
-use parvi_agents_contract::shape::{
+use ahjo_agents_contract::shape::Hook;
+use ahjo_agents_contract::shape::{
     HookAt, HookChange, HookEdit, HookSpec, INVALID, NOT_FOUND, Origin, STALE, SettingEdit, Text,
     Write,
 };
-use parvi_core::Error;
+use ahjo_core::Error;
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 use std::path::{Path, PathBuf};
@@ -97,7 +97,7 @@ fn replace(p: &Path, bytes: &[u8]) -> Result<(), Error> {
         .ok_or_else(|| invalid("no folder to write in"))?;
     std::fs::create_dir_all(dir).map_err(failed)?;
     let name = to.file_name().unwrap_or_default().to_string_lossy();
-    let temp = dir.join(format!(".{name}.parvi-{}", std::process::id()));
+    let temp = dir.join(format!(".{name}.ahjo-{}", std::process::id()));
     std::fs::write(&temp, bytes).map_err(failed)?;
     if let Ok(meta) = std::fs::metadata(&to) {
         let _ = std::fs::set_permissions(&temp, meta.permissions());
@@ -372,7 +372,7 @@ fn claude_hook(roots: &Roots, edit: &HookEdit) -> Result<Value, Error> {
 }
 
 pub fn known_event(harness: &str, event: &str) -> Result<(), Error> {
-    if parvi_agents_contract::shape::events(harness).contains(&event) {
+    if ahjo_agents_contract::shape::events(harness).contains(&event) {
         Ok(())
     } else {
         Err(invalid(format!("{harness} has no hook event {event:?}")))

@@ -304,7 +304,7 @@ mod tests {
     }
     #[test]
     fn tab_completes_files_and_directories() {
-        let dir = std::env::temp_dir().join(format!("parvi-path-picker-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("ahjo-path-picker-{}", std::process::id()));
         std::fs::create_dir_all(dir.join("folder")).unwrap();
         std::fs::write(dir.join("file one"), b"").unwrap();
         let prefix = format!("{}/fi", dir.display());
@@ -326,7 +326,7 @@ mod tests {
 
     #[gpui::test]
     fn path_field_completes_and_submits_a_file(cx: &mut gpui::TestAppContext) {
-        let dir = std::env::temp_dir().join(format!("parvi-path-field-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("ahjo-path-field-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("picked.txt");
         std::fs::write(&path, b"picked").unwrap();

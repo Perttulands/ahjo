@@ -18,6 +18,7 @@ use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::sync::Arc;
 
+use ahjo_core::{Error, PROTOCOL};
 use anyhow::{Context, Result};
 use axum::Router;
 use axum::extract::State;
@@ -26,7 +27,6 @@ use axum::http::StatusCode;
 use axum::middleware;
 use axum::response::{IntoResponse, Response};
 use axum::routing::get;
-use parvi_core::{Error, PROTOCOL};
 use tokio::net::TcpListener;
 use tokio::sync::oneshot;
 use tokio::task::JoinHandle;
@@ -147,7 +147,7 @@ pub async fn start(options: Options, areas: &[Listing]) -> Result<Running> {
     events.record(
         events::NODE,
         false,
-        format!("Parvi {} started on {here}", crate::VERSION),
+        format!("Ahjo {} started on {here}", crate::VERSION),
     );
     let shared = Arc::new(Shared {
         node: node.clone(),
@@ -174,7 +174,7 @@ pub async fn start(options: Options, areas: &[Listing]) -> Result<Running> {
         .layer(middleware::from_fn_with_state(trust, trust::guard));
     let recorded = address::record(&dir, address)?;
     eprintln!(
-        "parvi: node {} ({}, {}) serving http://{address}",
+        "ahjo: node {} ({}, {}) serving http://{address}",
         node.id,
         node.device,
         node.environment.name(),
@@ -208,7 +208,7 @@ impl Running {
     pub async fn stop(self) -> Result<()> {
         let here = format!("{} · {}", self.node.device, self.node.environment.name());
         self.events
-            .record(events::NODE, false, format!("Parvi stopping on {here}"));
+            .record(events::NODE, false, format!("Ahjo stopping on {here}"));
         let _ = self.stop.send(());
         // Open sockets keep a graceful shutdown waiting; they are dropped
         // with the task.

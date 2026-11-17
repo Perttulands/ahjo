@@ -23,7 +23,7 @@ use super::{
     Roots, ancestors, below, git_root, glob, instruction, json_file, main_root, shadow, shown,
     skills_in, source, with_imports,
 };
-use parvi_agents_contract::shape::{
+use ahjo_agents_contract::shape::{
     Hook, HookAt, Instruction, Load, Origin, SeenSkill, Server, Setting, Shape, Source,
 };
 use serde_json::Value;

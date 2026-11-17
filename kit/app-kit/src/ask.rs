@@ -2,7 +2,7 @@
 //! another: a page asks through its Host, and the page that answers that
 //! ask gets it. A page declares what it answers in [`crate::Page::ANSWERS`].
 
-use parvi_core::NodeId;
+use ahjo_core::NodeId;
 
 /// Something a page wants done where another page does it.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -129,7 +129,7 @@ mod tests {
     fn a_reveal_marked_beside_is_answered_beside_the_asker() {
         let reveal = |beside| Ask::Reveal {
             what: "item".into(),
-            id: "parvi-1".into(),
+            id: "ahjo-1".into(),
             node: None,
             part: None,
             beside,

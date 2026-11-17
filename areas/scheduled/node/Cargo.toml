@@ -1,5 +1,5 @@
 [package]
-name = "parvi-scheduled"
+name = "ahjo-scheduled"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -9,10 +9,10 @@ publish = false
 workspace = true
 
 [dependencies]
-parvi-core = { path = "../../../kit/core" }
-parvi-node-kit = { path = "../../../kit/node-kit" }
-parvi-term = { path = "../../../engine/term" }
-parvi-scheduled-contract = { path = "../contract" }
+ahjo-core = { path = "../../../kit/core" }
+ahjo-node-kit = { path = "../../../kit/node-kit" }
+ahjo-term = { path = "../../../engine/term" }
+ahjo-scheduled-contract = { path = "../contract" }
 anyhow = "1"
 axum = { version = "0.8", default-features = false, features = ["http1", "json", "tokio"] }
 futures-util = { version = "0.3", default-features = false, features = ["alloc"] }
@@ -25,6 +25,6 @@ tokio = { version = "1", features = ["full"] }
 libc = "0.2"
 
 [dev-dependencies]
-parvi-testkit = { path = "../../../kit/testkit" }
+ahjo-testkit = { path = "../../../kit/testkit" }
 tower = { version = "0.5", features = ["util"] }
-parvi-terminals = { path = "../../terminals/node" }
+ahjo-terminals = { path = "../../terminals/node" }

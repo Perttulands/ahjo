@@ -1,6 +1,6 @@
 //! Atomic decisions on pending human gate requests.
 use crate::{Coordinator, RunEvent, run_storage::now};
-use parvi_mission_model::{HumanVerdict, RunProjection};
+use ahjo_mission_model::{HumanVerdict, RunProjection};
 use serde_json::json;
 use std::io;
 

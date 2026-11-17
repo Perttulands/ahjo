@@ -11,12 +11,12 @@ mod skills;
 mod sync;
 mod tools;
 
+use ahjo_agents_contract::{FAILED, FETCH_FAILED, LINK, LINKED, REPORT, SYNC, SYNCED, WATCH};
+use ahjo_core::Error;
+use ahjo_node_kit::args::{object, text};
+use ahjo_node_kit::{Area, BoxFuture, Built, Channel, Client, Command, Listing, Setup};
+use ahjo_term::Sessions;
 use anyhow::{Context, Result};
-use parvi_agents_contract::{FAILED, FETCH_FAILED, LINK, LINKED, REPORT, SYNC, SYNCED, WATCH};
-use parvi_core::Error;
-use parvi_node_kit::args::{object, text};
-use parvi_node_kit::{Area, BoxFuture, Built, Channel, Client, Command, Listing, Setup};
-use parvi_term::Sessions;
 use serde::Deserialize;
 use serde_json::{Value, json};
 use std::collections::HashMap;
@@ -159,7 +159,7 @@ pub fn build(setup: &Setup) -> Result<Built> {
     if let (Some(home), Some(path)) = (&mut home, section.path) {
         home.path = path.iter().map(|p| setup.config.path(p)).collect();
     }
-    let root = parvi_mission_engine::Store::root_in(&setup.dir);
+    let root = ahjo_mission_engine::Store::root_in(&setup.dir);
     let roles = Arc::new(roles::Service::new(root, fixture_codex));
     let node = setup.node.id.to_string();
     let sync_state = Arc::new(SyncState::default());

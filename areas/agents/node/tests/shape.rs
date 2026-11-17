@@ -1,6 +1,6 @@
 //! What shapes an agent, read from a scratch home and project the way each
 //! harness reads them, and changed through the node's commands.
-use parvi_testkit::{fresh_dir, node::Node, sessions};
+use ahjo_testkit::{fresh_dir, node::Node, sessions};
 use serde_json::{Value, json};
 use std::path::{Path, PathBuf};
 
@@ -19,8 +19,8 @@ struct World {
 /// A home and a tree: `<srv>/AGENTS.md` above a repository `<srv>/proj`
 /// with its own files, and a folder `src` inside it.
 fn world() -> World {
-    let home = fresh_dir("parvi-agents-shape-home");
-    let srv = fresh_dir("parvi-agents-shape-srv");
+    let home = fresh_dir("ahjo-agents-shape-home");
+    let srv = fresh_dir("ahjo-agents-shape-srv");
     let project = srv.join("proj");
     let dir = project.join("src");
     std::fs::create_dir_all(project.join(".git")).unwrap();
@@ -139,7 +139,7 @@ fn paths(v: &Value, list: &str) -> Vec<(String, String, String)> {
 async fn each_harness_reads_its_own_files_in_its_own_order() {
     let w = world();
     let config = format!("[agents]\nhome = {:?}\npath = []\n", w.home);
-    let node = Node::start(&[sessions::LISTING, parvi_agents::LISTING], &config)
+    let node = Node::start(&[sessions::LISTING, ahjo_agents::LISTING], &config)
         .await
         .unwrap();
     let p = |path: &Path| path.to_string_lossy().into_owned();
@@ -317,7 +317,7 @@ async fn each_harness_reads_its_own_files_in_its_own_order() {
 async fn edits_land_in_the_file_they_came_from() {
     let w = world();
     let config = format!("[agents]\nhome = {:?}\npath = []\n", w.home);
-    let node = Node::start(&[sessions::LISTING, parvi_agents::LISTING], &config)
+    let node = Node::start(&[sessions::LISTING, ahjo_agents::LISTING], &config)
         .await
         .unwrap();
     let p = |path: &Path| path.to_string_lossy().into_owned();
@@ -364,7 +364,7 @@ async fn edits_land_in_the_file_they_came_from() {
         assert_eq!(std::fs::read_to_string(&target).unwrap(), "Changed.\n");
     }
 
-    // Claude Code hooks: add, switch off and on (Parvi keeps it meanwhile),
+    // Claude Code hooks: add, switch off and on (Ahjo keeps it meanwhile),
     // change and remove.
     let shape = || async {
         node.call(

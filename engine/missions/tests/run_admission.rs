@@ -1,5 +1,5 @@
-use parvi_mission_engine::{Harnesses, RoleStore, run_admission};
-use parvi_mission_model::{Formation, Mission, Slot};
+use ahjo_mission_engine::{Harnesses, RoleStore, run_admission};
+use ahjo_mission_model::{Formation, Mission, Slot};
 use std::collections::BTreeMap;
 
 #[test]
@@ -26,7 +26,7 @@ fn admission_checks_inputs_and_frozen_staffing_across_the_mission() {
         }],
         ..Default::default()
     });
-    let roles = RoleStore::new(std::env::temp_dir().join("parvi-99-no-such-roles"));
+    let roles = RoleStore::new(std::env::temp_dir().join("ahjo-99-no-such-roles"));
     let report = run_admission(
         &mission,
         &roles,

@@ -2,9 +2,9 @@
 //! `api/scheduled_test.go`), in Rust, against a fake runner.
 
 use super::*;
+use ahjo_scheduled_contract::{ERROR, PARTIAL, SUBMIT_KEY_DISPATCHED, SUCCESS};
 use axum::body::Body;
 use axum::http::Request;
-use parvi_scheduled_contract::{ERROR, PARTIAL, SUBMIT_KEY_DISPATCHED, SUCCESS};
 use tower::ServiceExt;
 
 const T0: &str = "2026-06-27T14:00:00Z";
@@ -107,7 +107,7 @@ fn service(dir: &std::path::Path, fake: Arc<Fake>, now: Arc<Mutex<Timestamp>>) -
 }
 
 fn scratch(name: &str) -> PathBuf {
-    let dir = std::env::temp_dir().join(format!("parvi-scheduled-{name}-{}", std::process::id()));
+    let dir = std::env::temp_dir().join(format!("ahjo-scheduled-{name}-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     dir
 }

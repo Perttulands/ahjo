@@ -17,5 +17,5 @@
 {"type":"event_msg","payload":{"type":"task_started","turn_id":"fixture-turn-9"}}
 {"type":"turn_context","payload":{"turn_id":"fixture-turn-9","cwd":"/work","model":"gpt-6-astra","effort":"low"}}
 {"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"Continue the brief now: reply with the exact completion line, without running the command."}],"internal_chat_message_metadata_passthrough":{"content_item_kinds":["user.text"]}}}
-{"type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"<<<PARVI-DONE run-id=run_fixture status=ok artifact=none>>>"}],"phase":"final_answer","internal_chat_message_metadata_passthrough":{"content_item_kinds":["unknown"]}}}
+{"type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"<<<AHJO-DONE run-id=run_fixture status=ok artifact=none>>>"}],"phase":"final_answer","internal_chat_message_metadata_passthrough":{"content_item_kinds":["unknown"]}}}
 {"type":"event_msg","payload":{"type":"task_complete","turn_id":"fixture-turn-9"}}

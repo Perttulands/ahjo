@@ -1,7 +1,7 @@
 //! The Brain reads, edits and saves a page from a testkit node.
+use ahjo_app_kit::link::client::LinkState;
+use ahjo_testkit::{fresh_dir, node::Node};
 use gpui::{Modifiers, TestAppContext, VisualTestContext};
-use parvi_app_kit::link::client::LinkState;
-use parvi_testkit::{fresh_dir, node::Node};
 use std::{
     sync::mpsc,
     time::{Duration, Instant},
@@ -56,7 +56,7 @@ fn reads_edits_and_saves_a_page_from_a_node(cx: &mut TestAppContext) {
                 "[brain]\ncorpus = {:?}\nauthor = \"perttu <author@example.org>\"\n",
                 corpus.to_str().unwrap()
             );
-            let node = Node::start(&[parvi_brain::LISTING], &config).await.unwrap();
+            let node = Node::start(&[ahjo_brain::LISTING], &config).await.unwrap();
             ready.send(node.url()).unwrap();
             while stopped.try_recv().is_err() {
                 tokio::time::sleep(Duration::from_millis(20)).await;
@@ -79,10 +79,10 @@ fn reads_edits_and_saves_a_page_from_a_node(cx: &mut TestAppContext) {
     let url = wait.recv().unwrap();
     let settings = fresh_dir("brain-page-settings");
     cx.executor().allow_parking();
-    cx.update(parvi_app_shell::prepare);
+    cx.update(ahjo_app_shell::prepare);
     let (shell, cx) = cx.add_window_view(|window, cx| {
-        parvi_app_shell::start(
-            &[parvi_brain_app::build],
+        ahjo_app_shell::start(
+            &[ahjo_brain_app::build],
             Some(url),
             Some(settings.join("app.json")),
             window,
@@ -105,7 +105,7 @@ fn reads_edits_and_saves_a_page_from_a_node(cx: &mut TestAppContext) {
     until(cx, "page reader", |cx| {
         cx.debug_bounds("brain-reading-notes/page.md").is_some()
     });
-    let when = parvi_brain_app::state::when("2020-02-03T04:05:06Z", jiff::Timestamp::now());
+    let when = ahjo_brain_app::state::when("2020-02-03T04:05:06Z", jiff::Timestamp::now());
     let meta =
         Box::leak(format!("brain-meta-notes · changed {when} by Corpus Owner").into_boxed_str());
     assert!(

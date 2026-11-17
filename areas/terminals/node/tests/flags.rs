@@ -1,7 +1,7 @@
 #![cfg(unix)]
+use ahjo_node_kit::{NodeClient, NodeError};
+use ahjo_testkit::{fresh_dir, node::Node, tmux::write_script};
 use axum::http::Method;
-use parvi_node_kit::{NodeClient, NodeError};
-use parvi_testkit::{fresh_dir, node::Node, tmux::write_script};
 use std::time::{Duration, Instant};
 
 #[tokio::test]
@@ -29,7 +29,7 @@ async fn configured_help_and_timeout() {
     )
     .unwrap();
     let node = Node::start(
-        &[parvi_terminals::LISTING],
+        &[ahjo_terminals::LISTING],
         &format!("[terminals]\nlaunch = {:?}\n", launch),
     )
     .await

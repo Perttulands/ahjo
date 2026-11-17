@@ -2,8 +2,8 @@
 //! of it: the figures each row reads, what is wrong now, and the words a
 //! reading is written and handed over in. Plain data; the page draws it.
 
-pub use parvi_host_contract::{Disk, Event, Heavy, Point, Reading, State, Usage};
-use parvi_host_contract::{
+pub use ahjo_host_contract::{Disk, Event, Heavy, Point, Reading, State, Usage};
+use ahjo_host_contract::{
     EventFrame, HOST_EVENT as EVENT, HOST_READING as READING, HOST_STATE as STATE, MINUTE, Minute,
     ReadingFrame,
 };
@@ -317,7 +317,7 @@ pub fn troubles(s: &State, now: u64) -> Vec<Trouble> {
         if e.kind == "host" && e.failure && e.at + DAY > now {
             out.push(Trouble {
                 figure: Some(Figure::Memory),
-                text: format!("{} at {}", e.text, parvi_app_kit::clock::hhmm(e.at)),
+                text: format!("{} at {}", e.text, ahjo_app_kit::clock::hhmm(e.at)),
             });
             break;
         }
@@ -593,7 +593,7 @@ pub fn ticks(start: u64, end: u64, offset: i64) -> Vec<u64> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use parvi_host_contract::Gpu;
+    use ahjo_host_contract::Gpu;
 
     fn p(at: u64, cpu: f32) -> Point {
         Point {
@@ -653,7 +653,7 @@ mod tests {
     fn events_come_with_the_state_and_one_by_one_and_stay_bounded() {
         let mut h = Hosts::default();
         let state = br#"{"facts":{},"minutes":[],"latest":null,
-            "events":[{"at":1,"kind":"node","failure":false,"text":"Parvi 0.0.1 started"}]}"#;
+            "events":[{"at":1,"kind":"node","failure":false,"text":"Ahjo 0.0.1 started"}]}"#;
         assert_eq!(h.take("n", STATE, state), Some(None));
         for i in 0..EVENTS_KEPT {
             let e = format!(
@@ -871,13 +871,13 @@ mod tests {
         let sessions = [
             ("shell", "/home/me"),
             ("root", "/"),
-            ("parvi", "/srv/parvi"),
-            ("ui", "/srv/parvi/ui"),
+            ("ahjo", "/srv/ahjo"),
+            ("ui", "/srv/ahjo/ui"),
         ];
         let at = |cwd| place(Some(cwd), &sessions, home);
-        assert_eq!(at("/srv/parvi/ui/src"), "ui · /srv/parvi/ui/src");
-        assert_eq!(at("/srv/parvi"), "parvi · /srv/parvi");
-        assert_eq!(at("/srv/parvi-next"), "/srv/parvi-next", "not a prefix");
+        assert_eq!(at("/srv/ahjo/ui/src"), "ui · /srv/ahjo/ui/src");
+        assert_eq!(at("/srv/ahjo"), "ahjo · /srv/ahjo");
+        assert_eq!(at("/srv/ahjo-next"), "/srv/ahjo-next", "not a prefix");
         assert_eq!(at("/home/me/x"), "~/x", "home claims nothing");
         assert_eq!(place(None, &sessions, home), "");
     }

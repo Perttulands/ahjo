@@ -1,4 +1,4 @@
-//! What every Parvi crate shares, with no I/O: the one error shape, the ids
+//! What every Ahjo crate shares, with no I/O: the one error shape, the ids
 //! every resource carries, and the frame envelope and hello of the node's
 //! socket.
 

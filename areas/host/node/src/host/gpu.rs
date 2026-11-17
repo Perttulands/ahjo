@@ -110,7 +110,7 @@ mod tests {
     #[tokio::test]
     async fn missing_and_failed_commands_explain_why() {
         use std::os::unix::fs::PermissionsExt;
-        let dir = parvi_testkit::fresh_dir("gpu-failure");
+        let dir = ahjo_testkit::fresh_dir("gpu-failure");
         let missing = locate_in(Some(dir.clone().into_os_string()), &[]);
         assert_eq!(
             read(missing.as_deref()).await.unwrap_err(),

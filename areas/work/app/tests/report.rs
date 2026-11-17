@@ -1,24 +1,24 @@
 //! Reporting from another page against an isolated Beads store.
 #![cfg(unix)]
+use ahjo_app_kit::{Host, Mounted, Page, mount};
+use ahjo_node_kit::{Built, Listing, Setup};
+use ahjo_testkit::node::Node;
 use gpui::{
     App, Context, IntoElement, Render, TestAppContext, VisualTestContext, Window, div, prelude::*,
 };
-use parvi_app_kit::{Host, Mounted, Page, mount};
-use parvi_node_kit::{Built, Listing, Setup};
-use parvi_testkit::node::Node;
 use std::sync::{OnceLock, mpsc};
 static GH: OnceLock<String> = OnceLock::new();
 static BD: OnceLock<String> = OnceLock::new();
 fn build_work(setup: &Setup) -> anyhow::Result<Built> {
-    parvi_work::build_with(
+    ahjo_work::build_with(
         setup,
-        parvi_work::Bd::new(BD.get().unwrap()),
-        parvi_work::Gh::new(GH.get().unwrap()),
+        ahjo_work::Bd::new(BD.get().unwrap()),
+        ahjo_work::Gh::new(GH.get().unwrap()),
     )
 }
 const WORK: Listing = Listing {
     build: build_work,
-    ..parvi_work::LISTING
+    ..ahjo_work::LISTING
 };
 use std::time::{Duration, Instant};
 
@@ -54,7 +54,7 @@ fn until(
 
 #[gpui::test]
 fn reports_file_to_beads_and_github_with_context_and_escape_discards(cx: &mut TestAppContext) {
-    let dir = parvi_testkit::fresh_dir("parvi-report-store");
+    let dir = ahjo_testkit::fresh_dir("ahjo-report-store");
     std::fs::create_dir(dir.join(".beads")).unwrap();
     std::fs::write(dir.join(".beads/prefix"), "reporttest").unwrap();
     let bd = dir.join("fake-bd");
@@ -69,7 +69,7 @@ fn reports_file_to_beads_and_github_with_context_and_escape_discards(cx: &mut Te
     let gh = dir.join("fake-gh");
     let args = dir.join("gh-args");
     let fixture = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../node/tests/fixtures/work/parvi.json");
+        .join("../node/tests/fixtures/work/ahjo.json");
     let item = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../node/tests/fixtures/work/item.json");
     std::fs::write(&gh, format!("#!/bin/sh\nif [ \"$1\" = issue ]; then printf '%s\\n' \"$@\" > '{}'; echo https://github.com/o/r/issues/51; else case \"$*\" in *number=51*) cat '{}';; *) cat '{}';; esac; fi\n", args.display(), item.display(), fixture.display())).unwrap();
@@ -90,7 +90,7 @@ fn reports_file_to_beads_and_github_with_context_and_escape_discards(cx: &mut Te
             let list = vec!["list".to_owned(), "--node".into(), node.url()];
             let mut output = Vec::new();
             assert_eq!(
-                parvi_node_kit::cli::run("work", &list, &mut output)
+                ahjo_node_kit::cli::run("work", &list, &mut output)
                     .await
                     .unwrap(),
                 0
@@ -105,7 +105,7 @@ fn reports_file_to_beads_and_github_with_context_and_escape_discards(cx: &mut Te
             ];
             let mut output = Vec::new();
             assert_eq!(
-                parvi_node_kit::cli::run("work", &show, &mut output)
+                ahjo_node_kit::cli::run("work", &show, &mut output)
                     .await
                     .unwrap(),
                 0
@@ -120,12 +120,12 @@ fn reports_file_to_beads_and_github_with_context_and_escape_discards(cx: &mut Te
         });
     });
     let url = wait.recv().unwrap();
-    let settings = parvi_testkit::fresh_dir("parvi-report-settings");
+    let settings = ahjo_testkit::fresh_dir("ahjo-report-settings");
     cx.executor().allow_parking();
-    cx.update(parvi_app_shell::prepare);
+    cx.update(ahjo_app_shell::prepare);
     let (shell, cx) = cx.add_window_view(move |window, cx| {
-        parvi_app_shell::start(
-            &[toy, parvi_work_app::build],
+        ahjo_app_shell::start(
+            &[toy, ahjo_work_app::build],
             Some(url),
             Some(settings.join("app.json")),
             window,
@@ -134,15 +134,15 @@ fn reports_file_to_beads_and_github_with_context_and_escape_discards(cx: &mut Te
     });
     until(cx, "link", |cx| {
         shell.read_with(cx, |s, cx| {
-            s.hub().read(cx).fleet.here().state == parvi_app_kit::link::client::LinkState::Open
+            s.hub().read(cx).fleet.here().state == ahjo_app_kit::link::client::LinkState::Open
         })
     });
     let host = shell.read_with(cx, |s, _| Host::new(s.hub()));
     let sessions = cx
-        .update(|_, cx| host.model::<parvi_terminals_contract::SessionList>(cx))
+        .update(|_, cx| host.model::<ahjo_terminals_contract::SessionList>(cx))
         .unwrap();
     sessions.update(cx, |s, cx| {
-        s.focused = Some(parvi_terminals_contract::FocusedSession {
+        s.focused = Some(ahjo_terminals_contract::FocusedSession {
             node: "node".into(),
             user: "user".into(),
             name: "alpha".into(),

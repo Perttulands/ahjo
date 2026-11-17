@@ -1,6 +1,6 @@
 //! Where this machine's node listens, for its own command line. A node
-//! records the address it bound in the config dir; `parvi <noun> <verb>` and
-//! `parvi mcp` read it, so a node on another loopback port than its
+//! records the address it bound in the config dir; `ahjo <noun> <verb>` and
+//! `ahjo mcp` read it, so a node on another loopback port than its
 //! environment's needs no flag on every command. WSL with mirrored networking
 //! needs that: Windows Tailscale holding a tailnet port also holds that port
 //! for Linux, so `tailscale serve --tcp=7300` must forward to another one.
@@ -63,7 +63,7 @@ mod tests {
 
     #[test]
     fn a_recorded_address_lasts_while_its_node_runs_and_not_over_a_later_one() {
-        let dir = std::env::temp_dir().join(format!("parvi-address-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("ahjo-address-{}", std::process::id()));
         let first: SocketAddr = "127.0.0.1:7310".parse().unwrap();
         let second: SocketAddr = "127.0.0.1:7311".parse().unwrap();
 

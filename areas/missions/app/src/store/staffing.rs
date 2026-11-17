@@ -1,5 +1,5 @@
 //! Clamp slot choices to the catalog published by the node's role library.
-use parvi_agents_contract::roles::Roles;
+use ahjo_agents_contract::roles::Roles;
 
 const EFFORTS: [&str; 6] = ["low", "medium", "high", "xhigh", "max", "ultra"];
 fn rank(e: &str) -> usize {

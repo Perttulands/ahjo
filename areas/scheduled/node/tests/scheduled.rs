@@ -1,15 +1,15 @@
 //! The scheduled area on a node with terminals over a real tmux on a
 //! scratch socket: its commands over MCP and the CLI, and its HTTP route.
-//! Linux and macOS only; skips without tmux unless `PARVI_REQUIRE_TMUX=1`.
+//! Linux and macOS only; skips without tmux unless `AHJO_REQUIRE_TMUX=1`.
 #![cfg(unix)]
 
+use ahjo_node_kit::{Listing, NodeClient, cli};
+use ahjo_testkit::node::Node;
+use ahjo_testkit::tmux::{Server, capture, eventually, session_text};
 use axum::http::Method;
-use parvi_node_kit::{Listing, NodeClient, cli};
-use parvi_testkit::node::Node;
-use parvi_testkit::tmux::{Server, capture, eventually, session_text};
 use serde_json::{Value, json};
 
-const AREAS: &[Listing] = &[parvi_terminals::LISTING, parvi_scheduled::LISTING];
+const AREAS: &[Listing] = &[ahjo_terminals::LISTING, ahjo_scheduled::LISTING];
 
 /// A node with terminals and scheduled over a scratch tmux holding `alpha`.
 async fn start(name: &str, extra: &str) -> Option<(Node, Server)> {
@@ -113,7 +113,7 @@ async fn the_cli_and_the_http_route_see_the_same_tasks() {
         "list", "show", "create", "edit", "copy", "pause", "resume", "run", "delete",
     ] {
         assert!(
-            verbs.contains(&format!("parvi scheduled {verb}")),
+            verbs.contains(&format!("ahjo scheduled {verb}")),
             "{verb}: {verbs}"
         );
     }

@@ -1,6 +1,6 @@
 //! Owns the mission state directory and its concurrent runs.
 use crate::{BindingsSnapshot, Executor, Harnesses, Ledger, RunEvent, Store, run_admission};
-use parvi_mission_model::{Finding, RunProjection, RunSessionSummary, RunStart, RunSummary};
+use ahjo_mission_model::{Finding, RunProjection, RunSessionSummary, RunStart, RunSummary};
 use std::{
     collections::BTreeMap,
     fs::{File, OpenOptions},
@@ -220,7 +220,7 @@ impl Coordinator {
         if self.ledger(id).is_ok_and(|ledger| !ledger.path().exists()) {
             return Err(crate::Error::new(
                 "not_found",
-                format!("there is no run {id:?} on this node; parvi run list shows its runs"),
+                format!("there is no run {id:?} on this node; ahjo run list shows its runs"),
             ));
         }
         (|| -> io::Result<RunProjection> {
@@ -231,8 +231,8 @@ impl Coordinator {
     }
     /// The mission as the run froze it when it started: what the run
     /// executes, whatever the editable mission has become since.
-    pub fn frozen_mission(&self, id: &str) -> Result<parvi_mission_model::Mission, crate::Error> {
-        (|| -> io::Result<parvi_mission_model::Mission> {
+    pub fn frozen_mission(&self, id: &str) -> Result<ahjo_mission_model::Mission, crate::Error> {
+        (|| -> io::Result<ahjo_mission_model::Mission> {
             let ledger = self.ledger(id)?;
             if !ledger.path().exists() {
                 return Err(io::Error::new(io::ErrorKind::NotFound, "run not found"));
@@ -242,7 +242,7 @@ impl Coordinator {
                 .root
                 .join("runs")
                 .join(format!("{id}.snapshot.toml"));
-            parvi_mission_model::Mission::parse(&std::fs::read_to_string(path)?)
+            ahjo_mission_model::Mission::parse(&std::fs::read_to_string(path)?)
                 .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e.to_string()))
         })()
         .map_err(crate::error::io)
@@ -261,8 +261,8 @@ impl Coordinator {
         }
         Ok(None)
     }
-    pub fn events(&self, id: &str) -> Result<Vec<parvi_mission_model::PublicEvent>, crate::Error> {
-        (|| -> io::Result<Vec<parvi_mission_model::PublicEvent>> {
+    pub fn events(&self, id: &str) -> Result<Vec<ahjo_mission_model::PublicEvent>, crate::Error> {
+        (|| -> io::Result<Vec<ahjo_mission_model::PublicEvent>> {
             Ok(self.run(id).map_err(crate::error::to_io)?.events)
         })()
         .map_err(crate::error::io)
@@ -270,8 +270,8 @@ impl Coordinator {
     pub fn escalations(
         &self,
         id: &str,
-    ) -> Result<Vec<parvi_mission_model::Escalation>, crate::Error> {
-        (|| -> io::Result<Vec<parvi_mission_model::Escalation>> {
+    ) -> Result<Vec<ahjo_mission_model::Escalation>, crate::Error> {
+        (|| -> io::Result<Vec<ahjo_mission_model::Escalation>> {
             Ok(crate::project_escalations(
                 &self.ledger(id)?.read().map_err(crate::error::to_io)?,
             ))
@@ -480,7 +480,7 @@ impl Coordinator {
             })
             .map(|repo| {
                 Finding::new(
-                    parvi_mission_model::Code::NoCheckout,
+                    ahjo_mission_model::Code::NoCheckout,
                     "",
                     format!(
                         "No repository named \"{repo}\" is set up on this node. \
@@ -514,7 +514,7 @@ impl Coordinator {
             })
             .map(|f| {
                 Finding::new(
-                    parvi_mission_model::Code::UnknownDevice,
+                    ahjo_mission_model::Code::UnknownDevice,
                     &f.id,
                     format!(
                         "formation {:?} runs on {}, a device this node does not know; name one of the fleet's devices or clear it",
@@ -536,7 +536,7 @@ impl Coordinator {
             .filter(|_| request.repository.is_empty())
             .map(|f| {
                 Finding::new(
-                    parvi_mission_model::Code::PlacementWithoutRepository,
+                    ahjo_mission_model::Code::PlacementWithoutRepository,
                     &f.id,
                     format!(
                         "formation {:?} runs on {}, which reaches the run's work only through a repository; give the run a repository or clear the device",
@@ -612,7 +612,7 @@ impl Coordinator {
             let tree = crate::Worktree {
                 path: PathBuf::from(get("cwd")),
                 checkout: PathBuf::from(checkout),
-                branch: format!("parvi/run-{id}"),
+                branch: format!("ahjo/run-{id}"),
                 base: get("base"),
             };
             // What each placed turn's node pushed, so only that is deleted.

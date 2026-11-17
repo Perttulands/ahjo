@@ -1,4 +1,4 @@
-bin/parvi/Cargo.toml merge=union
-bin/parvi/src/lib.rs merge=union
-bin/parvi-app/Cargo.toml merge=union
-bin/parvi-app/src/lib.rs merge=union
+bin/ahjo/Cargo.toml merge=union
+bin/ahjo/src/lib.rs merge=union
+bin/ahjo-swarm/Cargo.toml merge=union
+bin/ahjo-swarm/src/lib.rs merge=union

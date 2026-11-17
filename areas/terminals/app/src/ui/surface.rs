@@ -4,11 +4,11 @@
 
 use super::page::Terminals;
 use crate::store::sessions::Key;
+use ahjo_app_kit::host::Cover;
 use gpui::{
     AnyElement, App, AppContext, Context, Entity, IntoElement, Pixels, Point, Render, Subscription,
     WeakEntity, Window, div,
 };
-use parvi_app_kit::host::Cover;
 
 /// Where everything that opens over the windows lies: Send, the output
 /// search and a view beside them. The one rule: at the right edge of the

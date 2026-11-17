@@ -6,16 +6,16 @@ use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::time::{Duration, Instant};
 
-use parvi_term::backend::tmux::{Socket, program};
+use ahjo_term::backend::tmux::{Socket, program};
 
 use crate::fresh_dir;
-use parvi_term::engine::{Engine, Snapshot};
+use ahjo_term::engine::{Engine, Snapshot};
 
 /// The start of the name of every private directory `Server::start` makes.
-pub const SERVER_DIR: &str = "parvi-tmux";
+pub const SERVER_DIR: &str = "ahjo-tmux";
 
 /// A tmux server on a socket in a private directory this test created, so
-/// the test can only ever reach its own server. Runs `PARVI_TMUX` (default
+/// the test can only ever reach its own server. Runs `AHJO_TMUX` (default
 /// `tmux`). When the test ends its server is stopped by its process id and,
 /// once that process has exited, the directory is removed. A server that
 /// cannot be confirmed stopped fails the test and keeps its directory.
@@ -37,7 +37,7 @@ impl Server {
     pub fn start_in(label: &str) -> Option<Server> {
         if Command::new(program()).arg("-V").output().is_err() {
             assert!(
-                std::env::var_os("PARVI_REQUIRE_TMUX").is_none(),
+                std::env::var_os("AHJO_REQUIRE_TMUX").is_none(),
                 "tmux is required but not installed"
             );
             eprintln!("skipping: tmux is not installed");
@@ -52,7 +52,7 @@ impl Server {
         for harness in HARNESSES {
             write_script(
                 &stubs.join(harness),
-                "#!/bin/sh\necho \"parvi test: $0 is a stub; run a fake harness by its path\" >&2\nexit 97\n",
+                "#!/bin/sh\necho \"ahjo test: $0 is a stub; run a fake harness by its path\" >&2\nexit 97\n",
             );
         }
         let name = dir.file_name().unwrap().to_string_lossy().into_owned();
@@ -370,7 +370,7 @@ pub fn pane_text(engine: &Engine, session: &str) -> Option<String> {
 
 /// The first pane of the session named `session` as the node's sessions
 /// read it, one line per row, once its screen is read.
-pub fn session_text(sessions: &dyn parvi_term::Sessions, session: &str) -> Option<String> {
+pub fn session_text(sessions: &dyn ahjo_term::Sessions, session: &str) -> Option<String> {
     let listed = sessions.list();
     let (pane, _, _) = *listed.iter().find(|s| s.name == session)?.panes.first()?;
     let screen = sessions.screen(pane)?;

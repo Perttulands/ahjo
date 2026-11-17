@@ -8,7 +8,7 @@ rev = 1
 [[inputCard]]
 id = "inp_one"
 title = "One"
-files = ["/", "notes.md", "/nonexistent/parvi-64/rubric.md"]
+files = ["/", "notes.md", "/nonexistent/ahjo-64/rubric.md"]
 humanChannel = "pager"
 
 [[inputCard]]
@@ -22,7 +22,7 @@ type = "solo"
 title = "Analysis"
 [formation.brief]
 goal = "Read the files."
-files = ["relative/brief.md", "/nonexistent/parvi-64/brief.md"]
+files = ["relative/brief.md", "/nonexistent/ahjo-64/brief.md"]
 [[formation.input]]
 id = "in"
 [[formation.output]]
@@ -36,7 +36,7 @@ effort = "low"
 id = "gate_h"
 title = "Sign-off"
 kinds = ["human"]
-files = ["/nonexistent/parvi-64/criteria.md"]
+files = ["/nonexistent/ahjo-64/criteria.md"]
 
 [[end]]
 id = "end_done"

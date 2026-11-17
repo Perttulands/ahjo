@@ -1,7 +1,7 @@
 //! Keep Run's emphasis tied to a current node-side validation result.
 use super::*;
 use crate::store::validation::Key;
-use parvi_missions_contract::{Mission, ValidationResponse};
+use ahjo_missions_contract::{Mission, ValidationResponse};
 
 impl MissionsPage {
     fn validation_key(&self) -> Option<Key> {
@@ -16,7 +16,7 @@ impl MissionsPage {
     }
     /// Errors and warnings for the saved, current mission. Never paint an old
     /// report on a changed definition or on a run's frozen canvas.
-    pub(super) fn canvas_findings(&self) -> Vec<(parvi_missions_contract::Finding, bool)> {
+    pub(super) fn canvas_findings(&self) -> Vec<(ahjo_missions_contract::Finding, bool)> {
         if self.writing || self.is_showing_run() {
             return Vec::new();
         }
@@ -56,13 +56,13 @@ impl MissionsPage {
     pub(super) fn todo(
         &self,
         mission: &Mission,
-    ) -> Vec<(String, Vec<parvi_missions_contract::Finding>)> {
+    ) -> Vec<(String, Vec<ahjo_missions_contract::Finding>)> {
         crate::store::validation::todo_lines(
             mission,
             self.canvas_findings()
                 .into_iter()
                 .filter(|(finding, error)| {
-                    *error || finding.code == parvi_missions_contract::Code::MissionNotRunnable
+                    *error || finding.code == ahjo_missions_contract::Code::MissionNotRunnable
                 })
                 .map(|(finding, _)| finding),
         )
@@ -72,7 +72,7 @@ impl MissionsPage {
     /// once a run was asked for and could not start.
     pub(super) fn todo_band(
         &self,
-        t: &parvi_app_kit::theme::Theme,
+        t: &ahjo_app_kit::theme::Theme,
         mission: &Mission,
     ) -> Option<Div> {
         let lines = self.todo(mission);

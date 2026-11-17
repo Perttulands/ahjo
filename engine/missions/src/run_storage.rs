@@ -1,6 +1,6 @@
 //! Admission-time snapshots and private workspaces.
 use crate::{AdmissionFailure, BindingsSnapshot, Coordinator, RunEvent, resolve_run_inputs};
-use parvi_mission_model::{Mission, RunStart};
+use ahjo_mission_model::{Mission, RunStart};
 const RUN_RECORD_MAX_BYTES: usize = 1 << 20;
 use serde_json::json;
 use std::{
@@ -38,7 +38,7 @@ pub fn validate_request(r: &RunStart) -> Result<(), AdmissionFailure> {
         ));
     }
     if !r.work.is_empty()
-        && let Err(invalid) = parvi_work_ref::parse_resolved(&r.work)
+        && let Err(invalid) = ahjo_work_ref::parse_resolved(&r.work)
     {
         return Err(AdmissionFailure::Invalid(format!("work: {invalid}")));
     }

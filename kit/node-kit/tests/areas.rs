@@ -6,17 +6,17 @@
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU32, Ordering};
 
+use ahjo_core::Error;
+use ahjo_core::Hello;
+use ahjo_core::frame::Kinds;
+use ahjo_node_kit::{
+    Area, BoxFuture, Build, Built, Channel, Client, Command, Config, Listing, NodeClient,
+    NodeError, Options, Running, Setup,
+};
 use axum::Router;
 use axum::http::Method;
 use axum::routing::get;
 use futures_util::{SinkExt, StreamExt};
-use parvi_core::Error;
-use parvi_core::Hello;
-use parvi_core::frame::Kinds;
-use parvi_node_kit::{
-    Area, BoxFuture, Build, Built, Channel, Client, Command, Config, Listing, NodeClient,
-    NodeError, Options, Running, Setup,
-};
 use serde_json::{Value, json};
 use tokio::sync::mpsc;
 use tokio_tungstenite::tungstenite::Message;
@@ -101,13 +101,13 @@ fn lights(_: &Setup) -> anyhow::Result<Built> {
 async fn start(areas: &[Listing], config: &str) -> anyhow::Result<Running> {
     static NEXT: AtomicU32 = AtomicU32::new(0);
     let dir = std::env::temp_dir().join(format!(
-        "parvi-areas-{}-{}",
+        "ahjo-areas-{}-{}",
         std::process::id(),
         NEXT.fetch_add(1, Ordering::Relaxed)
     ));
     std::fs::create_dir_all(&dir)?;
     let config = Config::parse(config, dir.clone())?;
-    parvi_node_kit::start(
+    ahjo_node_kit::start(
         Options {
             dir,
             config,
@@ -196,7 +196,7 @@ async fn an_area_defined_in_a_test_answers_every_way() {
     let args: Vec<String> = ["switch", "--level", "5", "--json", "--node", &url]
         .map(String::from)
         .to_vec();
-    let code = parvi_node_kit::cli::run("lights", &args, &mut out)
+    let code = ahjo_node_kit::cli::run("lights", &args, &mut out)
         .await
         .unwrap();
     assert_eq!(code, 0);
@@ -221,7 +221,7 @@ async fn an_area_its_section_turns_off_is_not_built_and_says_so() {
         .unwrap();
     assert_eq!(health["off"], json!(["lights"]));
     let args: Vec<String> = ["switch", "--node", &url].map(String::from).to_vec();
-    let refused = parvi_node_kit::cli::run("lights", &args, &mut Vec::new())
+    let refused = ahjo_node_kit::cli::run("lights", &args, &mut Vec::new())
         .await
         .unwrap_err();
     assert!(
@@ -532,13 +532,13 @@ fn files(_: &Setup) -> anyhow::Result<Built> {
     Built::now(Files)
 }
 
-/// `parvi <noun> <args>` against the node at `url`: its exit code and what
+/// `ahjo <noun> <args>` against the node at `url`: its exit code and what
 /// it printed.
-async fn parvi(noun: &str, args: &[&str], url: &str) -> (i32, Value) {
+async fn ahjo(noun: &str, args: &[&str], url: &str) -> (i32, Value) {
     let mut args: Vec<String> = args.iter().map(|a| a.to_string()).collect();
     args.extend(["--json".into(), "--node".into(), url.into()]);
     let mut out = Vec::new();
-    let code = parvi_node_kit::cli::run(noun, &args, &mut out)
+    let code = ahjo_node_kit::cli::run(noun, &args, &mut out)
         .await
         .unwrap();
     (code, serde_json::from_slice(&out).unwrap_or(Value::Null))
@@ -554,20 +554,20 @@ async fn config_show_answers_the_file_and_each_section() {
     .await
     .unwrap();
     let url = format!("http://{}/", node.address);
-    let (code, all) = parvi("config", &["show"], &url).await;
+    let (code, all) = ahjo("config", &["show"], &url).await;
     assert_eq!(code, 0);
     let path = all["path"].as_str().unwrap();
     assert!(path.ends_with("config.toml"), "{path}");
     assert_eq!(all["sections"]["files"]["roots"], json!(["/srv/notes"]));
     assert_eq!(all["sections"]["lights"]["enabled"], json!(true));
 
-    let (code, files) = parvi("config", &["show", "--section", "files"], &url).await;
+    let (code, files) = ahjo("config", &["show", "--section", "files"], &url).await;
     assert_eq!(code, 0);
     assert_eq!(
         files["sections"],
         json!({"files": {"roots": ["/srv/notes"]}})
     );
-    let (code, _) = parvi("config", &["show", "--section", "nope"], &url).await;
+    let (code, _) = ahjo("config", &["show", "--section", "nope"], &url).await;
     assert_eq!(code, 1);
 
     let client = NodeClient::new(Some(&url)).unwrap();
@@ -627,9 +627,9 @@ async fn view_open_reaches_the_app_and_answers_its_answer() {
     let node = start(&[], "").await.unwrap();
     let url = format!("http://{}/", node.address);
     let client = NodeClient::new(Some(&url)).unwrap();
-    assert_eq!(parvi("view", &["show"], &url).await, (0, json!([])));
+    assert_eq!(ahjo("view", &["show"], &url).await, (0, json!([])));
     assert_eq!(
-        parvi("view", &["open", "--page", "files"], &url).await.0,
+        ahjo("view", &["open", "--page", "files"], &url).await.0,
         1,
         "no app"
     );

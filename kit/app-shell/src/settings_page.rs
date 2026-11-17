@@ -8,21 +8,21 @@
 //! shows, and shown as named settings; it changes by editing its file.
 //! Typing in the search shows every setting that matches, from every group.
 
+use ahjo_app_kit::ask::Ask;
+use ahjo_app_kit::host::{Request, Status};
+use ahjo_app_kit::link::client::LinkState;
+use ahjo_app_kit::page::Meta;
+use ahjo_app_kit::settings::DEFAULT_NODE;
+use ahjo_app_kit::theme::{Direction, Theme, size, theme};
+use ahjo_app_kit::widgets::field::{FieldEvent, TextField};
+use ahjo_app_kit::widgets::kit::{self, Kind};
+use ahjo_app_kit::widgets::pane;
+use ahjo_app_kit::{Control, Host, Hub, Page, Setting};
+use ahjo_core::NodeId;
 use gpui::{
     AnyElement, App, AppContext, Context, Div, Entity, SharedString, Subscription, Window, div,
     prelude::*, px,
 };
-use parvi_app_kit::ask::Ask;
-use parvi_app_kit::host::{Request, Status};
-use parvi_app_kit::link::client::LinkState;
-use parvi_app_kit::page::Meta;
-use parvi_app_kit::settings::DEFAULT_NODE;
-use parvi_app_kit::theme::{Direction, Theme, size, theme};
-use parvi_app_kit::widgets::field::{FieldEvent, TextField};
-use parvi_app_kit::widgets::kit::{self, Kind};
-use parvi_app_kit::widgets::pane;
-use parvi_app_kit::{Control, Host, Hub, Page, Setting};
-use parvi_core::NodeId;
 use serde_json::Value;
 use std::collections::HashMap;
 
@@ -36,7 +36,7 @@ const APP: &[Setting] = &[
     Setting::text("node", "Node", DEFAULT_NODE)
         .note("The node this app talks to, as http://host:port. Enter connects."),
     Setting::toggle("keys", "Shortcuts", true)
-        .note("Parvi's shortcuts take their keys before the terminal does."),
+        .note("Ahjo Swarm's shortcuts take their keys before the terminal does."),
     Setting::toggle("show_keys", "Show shortcut keys", false)
         .note("Each shortcut's keys show at the foot of the window for a moment."),
 ];
@@ -526,7 +526,7 @@ impl SettingsPage {
                 if let Some(h) = &hub.fleet.here().hello
                     && matches("version")
                 {
-                    let words = format!("Parvi {} on {} · {}", h.version, h.device, h.environment);
+                    let words = format!("Ahjo {} on {} · {}", h.version, h.device, h.environment);
                     lines.push(pane::line(t, "Version", words).into_any_element());
                 }
                 lines

@@ -9,8 +9,8 @@ const RESULTS: usize = 50;
 const FILE_LIMIT: u64 = 1024 * 1024;
 const VISIT_LIMIT: usize = 100_000;
 
-pub use parvi_files_contract::Match;
-pub use parvi_files_contract::Matches;
+pub use ahjo_files_contract::Match;
+pub use ahjo_files_contract::Matches;
 
 pub fn search(
     roots: &Roots,

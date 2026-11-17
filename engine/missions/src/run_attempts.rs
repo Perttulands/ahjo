@@ -8,7 +8,7 @@
 //! attempt's artifact directory listing; a file output carries its path,
 //! read through Files.
 use crate::RunEvent;
-use parvi_mission_model::{
+use ahjo_mission_model::{
     AttemptOutput, AttemptPick, AttemptVerdict, EvidenceItem, EvidenceText, Mission, RunAttempts,
     StepAttempt, StepAttempts, StepPort,
 };
@@ -454,8 +454,8 @@ impl crate::Coordinator {
         &self,
         id: &str,
         only: Option<&str>,
-    ) -> Result<parvi_mission_model::RunAttempts, crate::Error> {
-        (|| -> std::io::Result<parvi_mission_model::RunAttempts> {
+    ) -> Result<ahjo_mission_model::RunAttempts, crate::Error> {
+        (|| -> std::io::Result<ahjo_mission_model::RunAttempts> {
             let events = self.ledger(id)?.read().map_err(crate::error::to_io)?;
             let mission = self.frozen_mission(id).map_err(crate::error::to_io)?;
             if let Some(step) = only

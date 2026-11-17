@@ -1,7 +1,7 @@
 //! Restart interrupted runs from their durable snapshots.
 use crate::coordinator::Control;
 use crate::{BindingsSnapshot, Coordinator};
-use parvi_mission_model::RunStart;
+use ahjo_mission_model::RunStart;
 use std::{io, path::PathBuf, sync::Arc};
 
 impl Coordinator {
@@ -38,9 +38,9 @@ impl Coordinator {
                                     && refs[0].get("dispatchId") == dispatch.data.get("dispatchId")
                             })
                     {
-                        let mission = parvi_mission_model::Mission::parse(
-                            &std::fs::read_to_string(runs.join(format!("{id}.snapshot.toml")))?,
-                        )
+                        let mission = ahjo_mission_model::Mission::parse(&std::fs::read_to_string(
+                            runs.join(format!("{id}.snapshot.toml")),
+                        )?)
                         .map_err(|e| io::Error::other(e.to_string()))?;
                         crate::run_reattach::stage_completed(self, id, &mission, dispatch);
                     }
@@ -59,13 +59,13 @@ impl Coordinator {
             }) {
                 self.append(id, crate::RunEvent {
                     kind: "run_blocked".into(), node_id: pending.node_id.clone(), actor: "archond".into(), timestamp: crate::run_storage::now(),
-                    data: serde_json::json!({"code":"coordinator_shutdown","reason":"Parvi stopped while keeping the step's outputs; resume to keep them","blockedNodeId":pending.node_id,"resumeAllowed":true,"resumePolicy":"explicit","pendingOutput":{"nodeId":pending.node_id,"attempt":pending.attempt,"output":pending.data}}).as_object().unwrap().clone(),
+                    data: serde_json::json!({"code":"coordinator_shutdown","reason":"Ahjo stopped while keeping the step's outputs; resume to keep them","blockedNodeId":pending.node_id,"resumeAllowed":true,"resumePolicy":"explicit","pendingOutput":{"nodeId":pending.node_id,"attempt":pending.attempt,"output":pending.data}}).as_object().unwrap().clone(),
                     ..Default::default()
                 })?;
                 interrupted.push(id.to_owned());
                 continue;
             }
-            let mission = parvi_mission_model::Mission::parse(&std::fs::read_to_string(
+            let mission = ahjo_mission_model::Mission::parse(&std::fs::read_to_string(
                 runs.join(format!("{id}.snapshot.toml")),
             )?)
             .map_err(|e| io::Error::other(e.to_string()))?;
@@ -147,7 +147,7 @@ impl Coordinator {
                 self.append(id, crate::RunEvent {
                     kind: "run_blocked".into(),
                     timestamp: crate::run_storage::now(),
-                    data: serde_json::json!({"code":code,"reason":recovery_error.unwrap_or_else(|| if open.is_empty() {"Parvi restarted between steps; resume to continue".into()} else {"Parvi restarted while a step was working; resume to pick it up".into()}),"resumeAllowed":true,"resumePolicy":"explicit","openDispatches":open.iter().map(|e| &e.data).collect::<Vec<_>>(),"pendingOutput":pending}).as_object().unwrap().clone(),
+                    data: serde_json::json!({"code":code,"reason":recovery_error.unwrap_or_else(|| if open.is_empty() {"Ahjo restarted between steps; resume to continue".into()} else {"Ahjo restarted while a step was working; resume to pick it up".into()}),"resumeAllowed":true,"resumePolicy":"explicit","openDispatches":open.iter().map(|e| &e.data).collect::<Vec<_>>(),"pendingOutput":pending}).as_object().unwrap().clone(),
                     ..Default::default()
                 })?;
                 if restarted {
@@ -178,8 +178,8 @@ impl Coordinator {
     /// `run resume` would. When the evidence is missing, the resume blocks the
     /// run again and choices that discard work stay the operator's.
     fn resume_after_restart(&self, id: &str) {
-        let request = parvi_mission_model::ResumeRequest {
-            actor: "parvi:restart".into(),
+        let request = ahjo_mission_model::ResumeRequest {
+            actor: "ahjo:restart".into(),
             ..Default::default()
         };
         if let Err(error) = self.resume(id, request) {
@@ -204,9 +204,9 @@ pub(crate) fn pending_capture(events: &[crate::RunEvent]) -> Option<serde_json::
 }
 
 pub(crate) fn only_waiting(
-    mission: &parvi_mission_model::Mission,
+    mission: &ahjo_mission_model::Mission,
     events: &[crate::RunEvent],
-    projection: &parvi_mission_model::RunProjection,
+    projection: &ahjo_mission_model::RunProjection,
 ) -> bool {
     let replay = crate::run_replay::Replay::read(mission, events);
     let unrouted_verdict = events.iter().any(|decision| {

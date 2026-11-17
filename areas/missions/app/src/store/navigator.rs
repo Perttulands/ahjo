@@ -1,6 +1,6 @@
 //! Mission navigator rows: groups, stable run numbering and attention order.
 use super::{Store, words};
-use parvi_missions_contract::RunProjection;
+use ahjo_missions_contract::RunProjection;
 
 #[derive(Clone)]
 pub struct Row {

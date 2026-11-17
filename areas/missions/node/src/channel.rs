@@ -1,14 +1,14 @@
 //! Subscription to node-local mission changes; no timer is needed.
 use super::Missions;
-use parvi_missions_contract::{RUNS_SNAPSHOT, SNAPSHOT, WATCH, WATCH_RUNS};
-use parvi_node_kit::{BoxFuture, Channel};
+use ahjo_missions_contract::{RUNS_SNAPSHOT, SNAPSHOT, WATCH, WATCH_RUNS};
+use ahjo_node_kit::{BoxFuture, Channel};
 use std::collections::HashMap;
 use tokio::sync::broadcast;
 pub struct Connection {
     missions: Missions,
     watching: Option<broadcast::Receiver<()>>,
     initial: bool,
-    runs: Option<broadcast::Receiver<parvi_missions_contract::RunProjection>>,
+    runs: Option<broadcast::Receiver<ahjo_missions_contract::RunProjection>>,
     runs_initial: bool,
     run_versions: HashMap<String, usize>,
 }
@@ -134,16 +134,16 @@ impl Channel for Connection {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use parvi_mission_engine::{Coordinator, LabExecutor, RunSettings, Store};
+    use ahjo_mission_engine::{Coordinator, LabExecutor, RunSettings, Store};
     struct NoResolver;
-    impl parvi_work_contract::Resolver for NoResolver {
-        fn resolve<'a>(&'a self, _: &'a str) -> parvi_work_contract::Resolving<'a> {
-            Box::pin(async { Err(parvi_core::Error::new("bad_request", "unused")) })
+    impl ahjo_work_contract::Resolver for NoResolver {
+        fn resolve<'a>(&'a self, _: &'a str) -> ahjo_work_contract::Resolving<'a> {
+            Box::pin(async { Err(ahjo_core::Error::new("bad_request", "unused")) })
         }
     }
     #[tokio::test]
     async fn watches_missions_and_unsubscribes() {
-        let root = parvi_testkit::fresh_dir("missions-channel");
+        let root = ahjo_testkit::fresh_dir("missions-channel");
         let coordinator =
             Coordinator::open(&root, RunSettings::default(), Box::new(LabExecutor)).unwrap();
         let missions = Missions {
@@ -158,7 +158,7 @@ mod tests {
         socket.receive(&[WATCH, 1]).unwrap();
         let first = socket.next().await;
         assert_eq!(first[0], SNAPSHOT);
-        let value: parvi_missions_contract::MissionSnapshot =
+        let value: ahjo_missions_contract::MissionSnapshot =
             serde_json::from_slice(&first[1..]).unwrap();
         assert!(value.missions.is_empty());
         missions
@@ -167,7 +167,7 @@ mod tests {
             .unwrap();
         missions.changed();
         let next = socket.next().await;
-        let value: parvi_missions_contract::MissionSnapshot =
+        let value: ahjo_missions_contract::MissionSnapshot =
             serde_json::from_slice(&next[1..]).unwrap();
         assert_eq!(value.missions[0].slug, "example");
         socket.receive(&[WATCH, 0]).unwrap();
@@ -177,8 +177,8 @@ mod tests {
         std::fs::remove_dir_all(root).unwrap();
     }
     async fn snapshot_discards_older_updates(lagged: bool) {
-        use parvi_mission_engine::{Ledger, RunEvent, project_run};
-        let root = parvi_testkit::fresh_dir("missions-channel-order");
+        use ahjo_mission_engine::{Ledger, RunEvent, project_run};
+        let root = ahjo_testkit::fresh_dir("missions-channel-order");
         let coordinator =
             Coordinator::open(&root, RunSettings::default(), Box::new(LabExecutor)).unwrap();
         let missions = Missions {

@@ -6,10 +6,10 @@ use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
+use ahjo_brain::brain::{self, Brain};
 use axum::Json;
 use axum::extract::State;
 use axum::routing::post;
-use parvi_brain::brain::{self, Brain};
 use serde_json::{Value, json};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
@@ -18,7 +18,7 @@ struct Corpus(PathBuf);
 
 impl Corpus {
     fn new(name: &str) -> Corpus {
-        let root = std::env::temp_dir().join(format!("parvi-80-{name}-{}", std::process::id()));
+        let root = std::env::temp_dir().join(format!("ahjo-80-{name}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&root);
         std::fs::create_dir_all(&root).unwrap();
         Corpus(root)
@@ -258,7 +258,7 @@ type Asked = Arc<Mutex<Vec<Value>>>;
 async fn citadel(asked: Asked) -> SocketAddr {
     async fn search(State(asked): State<Asked>, Json(body): Json<Value>) -> Json<Value> {
         asked.lock().unwrap().push(body);
-        // Citadel's order is its ranking; it carries more fields than Parvi reads.
+        // Citadel's order is its ranking; it carries more fields than Ahjo reads.
         Json(json!({ "results": [
             { "id": "upscaling", "slug": "upscaling", "path": "knowledge/upscaling/upscaling.md",
               "title": "Tiled upscaling", "kind": "topic", "collection": "knowledge",
@@ -333,7 +333,7 @@ async fn says_what_is_missing() {
             .contains("Citadel")
     );
 
-    assert!(Brain::new(Some(Path::new("/nonexistent/parvi-80")), None).is_err());
+    assert!(Brain::new(Some(Path::new("/nonexistent/ahjo-80")), None).is_err());
 }
 
 /// Runs git in `dir` as the Librarian, who writes the corpus between edits.

@@ -12,21 +12,21 @@ use crate::store::settings::{Kept, Settings};
 use crate::store::workspace::{LinkState, TileState};
 use crate::term::screen::Screen;
 use crate::theme::size;
+use ahjo_app_kit::Host;
+use ahjo_app_kit::chords::Chord;
+use ahjo_app_kit::host::Status;
+use ahjo_app_kit::menu::MenuRow;
+use ahjo_app_kit::settings::Place;
+use ahjo_app_kit::widgets::field::{self, FieldEvent, TextField};
+use ahjo_app_kit::{Answers, Ask, Page, Setting};
+use ahjo_core::NodeId;
+use ahjo_core::frame::Kinds;
+use ahjo_terminals_contract::{Launch, SessionList, decode_down};
 use gpui::{
     AnyElement, App, AppContext, Bounds, Context, Entity, FocusHandle, Focusable, IntoElement,
     Pixels, Point, Render, ScrollHandle, Task, WeakEntity, Window, px,
 };
 use parking_lot::Mutex;
-use parvi_app_kit::Host;
-use parvi_app_kit::chords::Chord;
-use parvi_app_kit::host::Status;
-use parvi_app_kit::menu::MenuRow;
-use parvi_app_kit::settings::Place;
-use parvi_app_kit::widgets::field::{self, FieldEvent, TextField};
-use parvi_app_kit::{Answers, Ask, Page, Setting};
-use parvi_core::NodeId;
-use parvi_core::frame::Kinds;
-use parvi_terminals_contract::{Launch, SessionList, decode_down};
 use std::cell::{Cell, RefCell};
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::rc::Rc;
@@ -478,7 +478,7 @@ impl Terminals {
         let page = cx.entity();
         let rail = cx.new(|cx| super::rail::Rail::new(&page, cx));
         s.host
-            .lend_side(rail.into(), parvi_app_kit::hub::SideOn::EveryPage, cx);
+            .lend_side(rail.into(), ahjo_app_kit::hub::SideOn::EveryPage, cx);
         s
     }
 
@@ -677,7 +677,7 @@ impl Terminals {
             sessions: self.fleet.all.clone(),
             focused: self
                 .focused_key()
-                .map(|k| parvi_terminals_contract::FocusedSession {
+                .map(|k| ahjo_terminals_contract::FocusedSession {
                     node: k.node,
                     user: k.user,
                     name: k.name,
@@ -703,7 +703,7 @@ impl Terminals {
         {
             return None;
         }
-        self.places.get(node)?.seen.map(parvi_app_kit::clock::hhmm)
+        self.places.get(node)?.seen.map(ahjo_app_kit::clock::hhmm)
     }
 
     /// Keeps each node's session names, so an away device keeps its rows
@@ -1012,7 +1012,7 @@ impl Terminals {
             }
             Surface::Overview => {
                 self.host
-                    .channel(parvi_terminals_contract::OVERVIEW, true, cx);
+                    .channel(ahjo_terminals_contract::OVERVIEW, true, cx);
                 self.overview_cursor = 0;
                 self.overview_scroll.scroll_to_item(1);
                 self.focus.clone()
@@ -1031,7 +1031,7 @@ impl Terminals {
         };
         let view = surface::view(self.me.clone(), name, cx);
         let page = self.me.clone();
-        let layer = parvi_app_kit::host::Layer::new(name, view)
+        let layer = ahjo_app_kit::host::Layer::new(name, view)
             .cover(s.cover())
             .focus(focus.clone())
             .on_dismiss(move |window, cx| {
@@ -1056,7 +1056,7 @@ impl Terminals {
         match s {
             Surface::Overview => {
                 self.host
-                    .channel(parvi_terminals_contract::OVERVIEW, false, cx);
+                    .channel(ahjo_terminals_contract::OVERVIEW, false, cx);
                 self.fleet.overview_off();
             }
             Surface::Peek => {
@@ -1163,10 +1163,10 @@ impl Terminals {
                     crate::store::sessions::Running::Harness("codex") => Some("codex"),
                     _ => None,
                 };
-                let ask = parvi_app_kit::Ask::Reveal {
+                let ask = ahjo_app_kit::Ask::Reveal {
                     what: "agent".into(),
                     id: folder,
-                    node: Some(parvi_core::NodeId(k.node.clone())),
+                    node: Some(ahjo_core::NodeId(k.node.clone())),
                     part: harness.map(str::to_string),
                     beside: false,
                 };
@@ -1671,7 +1671,7 @@ impl Page for Terminals {
     const TITLE: &'static str = "Sessions";
     const KEY: Option<char> = Some('T');
     const AREA: Option<&'static str> = Some(crate::AREA);
-    const KINDS: Kinds = parvi_terminals_contract::KINDS;
+    const KINDS: Kinds = ahjo_terminals_contract::KINDS;
     const ANSWERS: &'static [Answers] =
         &[Answers::Send, Answers::Launch, Answers::Reveal("session")];
     const SETTINGS: &'static [Setting] = crate::store::settings::DECLARED;
