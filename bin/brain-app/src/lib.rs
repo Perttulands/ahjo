@@ -20,7 +20,7 @@ use gpui::App;
 use parvi_app_kit::theme::{FAMILY_FILES, Theme};
 use std::borrow::Cow;
 
-const USAGE: &str = "brain-app [--brain <folder>] [--citadel <url>] [--take sky|gather|orbit] [--search <words>] [--open <page>] [--bench <seconds>]";
+const USAGE: &str = "brain-app [--brain <folder>] [--citadel <url>] [--take sky|gather|orbit] [--search <words>] [--open <page>] [--bench <seconds>] [--where]";
 
 fn value(args: &[String], name: &str) -> Option<String> {
     args.iter()
@@ -33,6 +33,9 @@ pub fn run() {
     if args.iter().any(|a| a == "--help" || a == "-h") {
         println!("{USAGE}");
         return;
+    }
+    if args.iter().any(|a| a == "--where") {
+        std::process::exit(tell_where(&source::find(&args)));
     }
     let take = match value(&args, "--take") {
         Some(name) => match Take::parse(&name) {
@@ -68,4 +71,40 @@ pub fn run() {
         app::open_window(start, cx);
         cx.on_window_closed(|cx, _| cx.quit()).detach();
     });
+}
+
+/// `--where`: where this launch finds the brain, its search and its cache,
+/// and how long reading the brain takes from here, without a window.
+fn tell_where(place: &source::Where) -> i32 {
+    println!("search: {}", place.citadel);
+    match &place.cache {
+        Some(c) => println!("cache:  {}", c.display()),
+        None => println!("cache:  none"),
+    }
+    let Some(root) = &place.brain else {
+        println!("brain:  not found; give --brain <folder> or BRAIN_ROOT");
+        return 1;
+    };
+    println!("brain:  {}", root.display());
+    let kept = place
+        .cache
+        .as_ref()
+        .map(|c| source::load(c, root))
+        .unwrap_or_default();
+    let started = std::time::Instant::now();
+    match corpus::scan(root, &kept.entries) {
+        Ok(entries) => {
+            println!(
+                "read:   {} pages in {:.1} s ({} cached before)",
+                entries.len(),
+                started.elapsed().as_secs_f32(),
+                kept.entries.len()
+            );
+            0
+        }
+        Err(e) => {
+            println!("read:   failed: {e}");
+            1
+        }
+    }
 }

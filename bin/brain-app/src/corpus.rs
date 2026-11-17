@@ -327,6 +327,12 @@ fn is_meta(path: &str) -> bool {
 /// changed. Reads run on several threads, which is what makes a first scan
 /// across a network share bearable.
 pub fn scan(root: &Path, known: &[Entry]) -> std::io::Result<Vec<Entry>> {
+    if !root.is_dir() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::NotFound,
+            format!("{} is not a folder", root.display()),
+        ));
+    }
     let found = walk(root)?;
     let known: HashMap<&str, &Entry> = known.iter().map(|e| (e.path.as_str(), e)).collect();
     let mut entries: Vec<Option<Entry>> = found
@@ -748,5 +754,7 @@ mod tests {
         let second = scan(&root, &known).unwrap();
         assert!(second.iter().all(|e| e.title.starts_with("cached ")));
         std::fs::remove_dir_all(&root).unwrap();
+        // A brain that is not there is an error, not an empty sky.
+        assert!(scan(&root, &[]).is_err());
     }
 }
