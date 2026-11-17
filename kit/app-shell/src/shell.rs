@@ -46,6 +46,8 @@ pub struct Shell {
     page_keys: Vec<(usize, &'static str, &'static str, bool)>,
     /// The status line's next redraw, when its words go stale.
     pub(crate) status_expiry: Option<(std::time::SystemTime, Task<()>)>,
+    /// The fades after a page or a theme is chosen.
+    pub(crate) veils: crate::veil::Veils,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -198,6 +200,7 @@ impl Shell {
             leaving: false,
             page_keys,
             status_expiry: None,
+            veils: Default::default(),
             _subscriptions: subscriptions,
         }
     }

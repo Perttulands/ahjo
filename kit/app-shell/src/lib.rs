@@ -7,6 +7,7 @@ mod close;
 mod keys;
 mod settings_page;
 pub mod shell;
+mod veil;
 pub mod view_control;
 
 pub use shell::Shell;

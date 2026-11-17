@@ -33,6 +33,8 @@ pub mod size {
     /// The bar under the shown tab, and its inset from the tab's sides.
     pub const TAB_MARK: f32 = 2.;
     pub const TAB_MARK_INSET: f32 = 8.;
+    /// How far in from its ends the tab mark starts as it draws out.
+    pub const TAB_MARK_DRAW: f32 = 14.;
     /// A state's dot.
     pub const DOT: f32 = 7.;
     /// The plate a group's count stands on.
@@ -92,6 +94,17 @@ pub mod motion {
     pub const TOAST_IN: u64 = 120;
     pub const TOAST_SHOWN: u64 = 1800;
     pub const TOAST_OUT: u64 = 200;
+    /// A page coming up as its tab is chosen, and how much of the
+    /// background veils it at first.
+    pub const PAGE_IN: u64 = 180;
+    pub const PAGE_VEIL: f32 = 0.6;
+    /// The whole window coming up in a theme chosen.
+    pub const THEME_IN: u64 = 360;
+    /// A menu or a layer opening, and how far a menu drops into place.
+    pub const PANEL_IN: u64 = 140;
+    pub const PANEL_DROP: f32 = 6.;
+    /// The active tab's mark drawing out from its middle.
+    pub const TAB_IN: u64 = 220;
 }
 
 /// The type scale: what is read first is largest. Body text is
@@ -101,15 +114,10 @@ pub mod ty {
     pub const PAGE: f32 = 22.;
     /// The name of the thing a detail shows, in its head.
     pub const TITLE: f32 = 15.;
-    /// A group's or a section's label: the display face, small, in the
-    /// theme's case and tracking.
-    pub const GROUP: f32 = 11.;
     /// A number worth reading at a glance (a reading, a count).
     pub const GLANCE: f32 = 30.;
     /// What an empty place says, under its art.
     pub const EMPTY: f32 = 16.;
-    /// Prose: a document, a work item's description, a brain page.
-    pub const READ: f32 = 15.;
     /// The line height of prose, as a share of its size.
     pub const READ_LEADING: f32 = 1.55;
 }
@@ -136,17 +144,21 @@ pub const FAMILY_FILES: [&[u8]; 2] = [
 
 /// Every face the app registers: the family, and each direction's display
 /// and reading faces (all under the SIL Open Font License, beside them).
-pub const FONT_FILES: [&[u8]; 12] = [
+pub const FONT_FILES: [&[u8]; 16] = [
     FAMILY_FILES[0],
     FAMILY_FILES[1],
+    include_bytes!("../assets/fonts/JetBrainsMono-Italic.ttf"),
+    include_bytes!("../assets/fonts/JetBrainsMono-BoldItalic.ttf"),
     include_bytes!("../assets/fonts/SpaceGrotesk-Medium.ttf"),
     include_bytes!("../assets/fonts/SpaceGrotesk-Bold.ttf"),
     include_bytes!("../assets/fonts/Inter-Regular.ttf"),
     include_bytes!("../assets/fonts/Inter-Bold.ttf"),
+    include_bytes!("../assets/fonts/Inter-Italic.ttf"),
     include_bytes!("../assets/fonts/Cinzel-SemiBold.ttf"),
     include_bytes!("../assets/fonts/Cinzel-Bold.ttf"),
     include_bytes!("../assets/fonts/EBGaramond-Regular.ttf"),
     include_bytes!("../assets/fonts/EBGaramond-Bold.ttf"),
+    include_bytes!("../assets/fonts/EBGaramond-Italic.ttf"),
     include_bytes!("../assets/fonts/Archivo-Regular.ttf"),
     include_bytes!("../assets/fonts/Archivo-ExtraBold.ttf"),
 ];
@@ -207,7 +219,13 @@ pub struct Type {
     pub display: &'static str,
     pub display_weight: FontWeight,
     pub reading: &'static str,
-    /// Group labels in capitals, and the room between their letters.
+    /// A group's or a section's label: its size, whether in capitals
+    /// (Cinzel's own lower case is small capitals, which read better
+    /// small), and the room between its letters.
+    pub group: f32,
+    /// Prose (a document, a work item's description, a brain page) at the
+    /// size its face reads at: a book face wants more than a grotesk.
+    pub read: f32,
     pub labels_upper: bool,
     pub tracking: f32,
 }
@@ -402,6 +420,30 @@ fn picture(format: ImageFormat, bytes: &[u8]) -> Arc<Image> {
     Arc::new(Image::from_bytes(format, bytes.to_vec()))
 }
 
+/// The theme chosen in Parvi's settings, for an app of the kit that runs
+/// on its own (Brain, Desk) and draws as the operator chose. No settings,
+/// or settings that do not read, give the default; so does a theme no
+/// direction is called, with a notice that says so. The file is only read.
+pub fn chosen() -> (Theme, Option<String>) {
+    let settings = crate::settings::path()
+        .and_then(|p| std::fs::read_to_string(p).ok())
+        .and_then(|text| crate::settings::Settings::parse(&text));
+    let Some(settings) = settings else {
+        return (Theme::default(), None);
+    };
+    match Direction::from_key(&settings.theme) {
+        Some(d) => (Theme::new(d), None),
+        None => (
+            Theme::default(),
+            Some(format!(
+                "No theme is called {:?}; drawn in {}",
+                settings.theme,
+                Direction::default().label()
+            )),
+        ),
+    }
+}
+
 impl Default for Theme {
     fn default() -> Self {
         Self::new(Direction::default())
@@ -417,6 +459,8 @@ impl Theme {
                     display: "Space Grotesk",
                     display_weight: FontWeight::BOLD,
                     reading: "Inter",
+                    group: 11.,
+                    read: 15.,
                     labels_upper: true,
                     tracking: 1.5,
                 },
@@ -431,8 +475,10 @@ impl Theme {
                     display: "Cinzel",
                     display_weight: FontWeight::BOLD,
                     reading: "EB Garamond",
-                    labels_upper: true,
-                    tracking: 1.,
+                    group: 14.,
+                    read: 17.,
+                    labels_upper: false,
+                    tracking: 0.6,
                 },
                 Art {
                     window_show: 0.85,
@@ -446,13 +492,12 @@ impl Theme {
                     display: "Archivo",
                     display_weight: FontWeight::EXTRA_BOLD,
                     reading: FAMILY,
+                    group: 11.,
+                    read: 14.,
                     labels_upper: true,
                     tracking: 2.,
                 },
-                Art {
-                    window_show: 0.7,
-                    ..art!("signal")
-                },
+                art!("signal"),
             ),
         };
         Self {

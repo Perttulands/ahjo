@@ -313,7 +313,7 @@ impl Reader {
             Block::Quote(q) => div()
                 .pl(px(r::INDENT - r::QUOTE_BAR))
                 .border_l(px(r::QUOTE_BAR))
-                .border_color(alpha(t.accent, 0.35))
+                .border_color(alpha(t.text2, 0.35))
                 .text_color(t.text2)
                 .child(self.styled(id(0), q, plain, t))
                 .into_any_element(),

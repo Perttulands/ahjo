@@ -9,7 +9,6 @@
 use parvi_app_kit::theme::size;
 
 pub use parvi_app_kit::theme::size::{PAD, RADIUS, SMALL, TEXT};
-pub use parvi_app_kit::theme::ty::{READ, READ_LEADING};
 
 /// Type: the ask's title, the words under it.
 pub const TITLE: f32 = 18.;

@@ -20,7 +20,7 @@ pub mod video;
 pub mod views;
 
 use gpui::{App, AppContext, Bounds, WindowBounds, WindowOptions, point, px, size};
-use parvi_app_kit::theme::Theme;
+
 use parvi_app_kit::widgets::field;
 use std::borrow::Cow;
 
@@ -48,7 +48,9 @@ pub fn run() {
         if let Err(e) = cx.text_system().add_fonts(fonts) {
             panic!("the bundled fonts did not load: {e}");
         }
-        cx.set_global(Theme::default());
+        let (theme, unknown) = parvi_app_kit::theme::chosen();
+        let notice = notice.or(unknown);
+        cx.set_global(theme);
         field::bind_keys(cx);
         cx.set_app_identity("io.parvi.desk", "Desk");
         let opened = cx.open_window(

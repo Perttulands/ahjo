@@ -4,8 +4,8 @@
 
 use crate::shell::Shell;
 use gpui::{
-    AnyElement, Context, MouseButton, MouseDownEvent, Window, anchored, deferred, div, point,
-    prelude::*, px,
+    Animation, AnimationExt, AnyElement, Context, ElementId, MouseButton, MouseDownEvent, Window,
+    anchored, deferred, div, ease_out_quint, point, prelude::*, px,
 };
 use parvi_app_kit::host::{Cover, Status};
 use parvi_app_kit::hub::{Surface, Toast};
@@ -401,11 +401,21 @@ impl Shell {
         let mut out = vec![];
         for (depth, s) in stack.into_iter().enumerate() {
             match s {
-                Surface::Layer(l) if l.cover == cover => out.push(
-                    deferred(div().absolute().inset_0().child(l.view))
+                Surface::Layer(l) if l.cover == cover => {
+                    let id = l.view.entity_id().as_u64() as usize;
+                    out.push(
+                        deferred(
+                            div().absolute().inset_0().child(l.view).with_animation(
+                                ("layer-in", id),
+                                Animation::new(Duration::from_millis(motion::PANEL_IN))
+                                    .with_easing(ease_out_quint()),
+                                |d, x| d.opacity(x),
+                            ),
+                        )
                         .with_priority(5 + depth)
                         .into_any_element(),
-                ),
+                    )
+                }
                 Surface::Menu(m) if cover == Cover::Window => {
                     out.push(self.render_menu(depth, &m, cx))
                 }
@@ -501,7 +511,13 @@ impl Shell {
                         .child(
                             div()
                                 .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
-                                .child(list),
+                                .child(list)
+                                .with_animation(
+                                    ("menu-in", depth),
+                                    Animation::new(Duration::from_millis(motion::PANEL_IN))
+                                        .with_easing(ease_out_quint()),
+                                    |d, x| d.opacity(x).mt(px(-motion::PANEL_DROP * (1. - x))),
+                                ),
                         ),
                 ),
         )
@@ -556,25 +572,40 @@ impl Shell {
 /// A toast: a word that something happened, fading on its own.
 fn render_toast(t: &Theme, toast: &Toast) -> AnyElement {
     let fade_at = Duration::from_millis(motion::TOAST_IN + motion::TOAST_SHOWN);
-    let opacity = if toast.at.elapsed() >= fade_at {
-        0.0
-    } else {
-        1.0
-    };
-    kit::panel(t)
+    let leaving = toast.at.elapsed() >= fade_at;
+    let panel = kit::panel(t)
         .id("toast")
         .debug_selector(|| "toast".into())
-        .opacity(opacity)
         .px(px(size::HEAD_PAD))
         .py(px(size::HEAD_GAP))
-        .child(toast.text.clone())
-        .into_any_element()
+        .child(toast.text.clone());
+    // Each toast rises in, and fades as it goes.
+    let id = ElementId::Name(format!("toast-{:?}-{leaving}", toast.at).into());
+    if leaving {
+        panel
+            .with_animation(
+                id,
+                Animation::new(Duration::from_millis(motion::TOAST_OUT)),
+                |d, x| d.opacity(1. - x),
+            )
+            .into_any_element()
+    } else {
+        panel
+            .with_animation(
+                id,
+                Animation::new(Duration::from_millis(motion::TOAST_IN))
+                    .with_easing(ease_out_quint()),
+                |d, x| d.opacity(x).mt(px(motion::PANEL_DROP * (1. - x))),
+            )
+            .into_any_element()
+    }
 }
 
 impl Render for Shell {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let t = theme(cx).clone();
         self.view_changed(cx);
+        self.veils.note(self.shown, &t);
         let page = self.render_page(window, cx);
         div()
             .id("shell")
@@ -599,12 +630,14 @@ impl Render for Shell {
                         .h_full()
                         .relative()
                         .child(page)
+                        .children(self.veils.page())
                         .children(self.render_layers(Cover::Page, cx)),
                 ),
             )
             .children(self.render_notices(cx))
             .children(self.render_layers(Cover::Window, cx))
             .children(self.render_echo(cx))
+            .children(self.veils.theme())
     }
 }
 

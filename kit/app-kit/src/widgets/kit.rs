@@ -3,7 +3,8 @@
 
 use crate::theme::{Theme, art, size, ty};
 use gpui::{
-    App, Div, ElementId, FontWeight, Hsla, SharedString, Stateful, div, img, prelude::*, px,
+    AnimationExt, App, Div, ElementId, FontWeight, Hsla, SharedString, Stateful, div, img,
+    prelude::*, px,
 };
 
 /// A field's or a section's label: the theme's group label, quieter.
@@ -25,7 +26,7 @@ pub fn group_label(t: &Theme, text: impl Into<SharedString>) -> Div {
         .whitespace_nowrap()
         .font_family(t.ty.display)
         .font_weight(t.ty.display_weight)
-        .text_size(px(ty::GROUP))
+        .text_size(px(t.ty.group))
         .text_color(t.text2);
     if t.ty.tracking <= 0. {
         return d.child(words);
@@ -33,7 +34,7 @@ pub fn group_label(t: &Theme, text: impl Into<SharedString>) -> Div {
     // Text has no letter spacing of its own: each letter stands apart.
     d.gap(px(t.ty.tracking)).children(words.chars().map(|c| {
         if c == ' ' {
-            div().w(px(ty::GROUP * 0.3))
+            div().flex_none().w(px(t.ty.group * 0.3))
         } else {
             div().flex_none().child(c.to_string())
         }
@@ -209,14 +210,24 @@ pub fn tab(t: &Theme, id: impl Into<ElementId>, active: bool, cx: &App) -> State
         .text_color(if active { t.text } else { t.text2 })
         .hover(move |d| d.text_color(text))
         .when(active, |d| {
+            // The mark draws out from the middle as the tab is chosen.
             d.child(
                 div()
                     .absolute()
-                    .left(px(size::TAB_MARK_INSET))
-                    .right(px(size::TAB_MARK_INSET))
                     .bottom_0()
                     .h(px(size::TAB_MARK))
-                    .bg(t.accent),
+                    .bg(t.accent)
+                    .with_animation(
+                        "tab-mark",
+                        gpui::Animation::new(std::time::Duration::from_millis(
+                            crate::theme::motion::TAB_IN,
+                        ))
+                        .with_easing(gpui::ease_out_quint()),
+                        |d, x| {
+                            let inset = size::TAB_MARK_INSET + size::TAB_MARK_DRAW * (1. - x);
+                            d.left(px(inset)).right(px(inset)).opacity(x)
+                        },
+                    ),
             )
         })
 }

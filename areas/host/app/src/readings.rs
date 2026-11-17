@@ -345,7 +345,7 @@ impl ReadingsPage {
                 div()
                     .id(SharedString::from(selector.clone()))
                     .debug_selector(move || selector)
-                    .w(px(tokens::GLANCE_W))
+                    .min_w(px(tokens::GLANCE_W))
                     .p(px(size::HEAD_PAD))
                     .flex()
                     .flex_col()

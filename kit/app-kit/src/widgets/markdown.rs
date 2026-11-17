@@ -538,7 +538,7 @@ pub fn render_marked(
         .flex_col()
         .gap(px(10.))
         .font_family(t.ty.reading)
-        .text_size(px(ty::READ))
+        .text_size(px(t.ty.read))
         .text_color(t.text);
     if let Some(s) = &look.select {
         s.borrow_mut().begin();
@@ -553,8 +553,8 @@ pub fn render_marked(
                 let sz = match level {
                     1 => ty::PAGE,
                     2 => ty::PAGE - 4.,
-                    3 => ty::READ + 1.,
-                    _ => ty::READ,
+                    3 => t.ty.read + 1.,
+                    _ => t.ty.read,
                 };
                 div()
                     .pt(px(if *level <= 2 { 8. } else { 4. }))
@@ -569,7 +569,7 @@ pub fn render_marked(
                     .child(styled(look, eid, h, HighlightStyle::default(), BLOCK))
             }
             Block::Paragraph(p) => div()
-                .line_height(px(ty::READ * ty::READ_LEADING))
+                .line_height(px(t.ty.read * ty::READ_LEADING))
                 .child(styled(look, eid, p, HighlightStyle::default(), BLOCK)),
             Block::Quote(q) => div()
                 .pl(px(12.))

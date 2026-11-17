@@ -17,7 +17,7 @@ mod tokens;
 
 use app::{Bench, Start, Take};
 use gpui::App;
-use parvi_app_kit::theme::{FONT_FILES, Theme};
+use parvi_app_kit::theme::FONT_FILES;
 use std::borrow::Cow;
 
 const USAGE: &str = "brain-app [--brain <folder>] [--citadel <url>] [--take sky|gather|orbit] [--search <words>] [--open <page>] [--bench <seconds>] [--where]";
@@ -66,7 +66,11 @@ pub fn run() {
         if let Err(e) = cx.text_system().add_fonts(fonts) {
             panic!("the bundled fonts did not load: {e}");
         }
-        cx.set_global(Theme::default());
+        let (theme, notice) = parvi_app_kit::theme::chosen();
+        if let Some(notice) = notice {
+            eprintln!("brain-app: {notice}");
+        }
+        cx.set_global(theme);
         parvi_app_kit::widgets::field::bind_keys(cx);
         app::open_window(start, cx);
         cx.on_window_closed(|cx, _| cx.quit()).detach();

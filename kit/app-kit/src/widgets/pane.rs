@@ -227,9 +227,12 @@ pub fn send(t: &Theme, id: impl Into<ElementId>, host: &Host, reference: String)
 /// A group's label in a list, or a section's over part of a detail: the
 /// theme's group label ([`crate::widgets::kit::group_label`]).
 pub fn label(t: &Theme, text: impl Into<SharedString>) -> Div {
+    // Standing on its foot, the label keeps its own height where a list
+    // gives its row a fixed one.
     div()
         .flex_none()
         .flex()
+        .items_end()
         .px(px(size::ROW_PAD))
         .pt(px(size::LABEL_TOP))
         .pb(px(size::LABEL_BOTTOM))
@@ -399,7 +402,7 @@ pub fn empty(t: &Theme, words: impl Into<SharedString>, action: Option<AnyElemen
         .child(
             div()
                 .font_family(t.ty.reading)
-                .text_size(px(ty::READ))
+                .text_size(px(t.ty.read))
                 .text_color(t.text2)
                 .child(words),
         )
