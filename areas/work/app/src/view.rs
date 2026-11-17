@@ -5,6 +5,7 @@
 
 use crate::store::work::timeline::{Range, range_label};
 use crate::store::work::{Row, Status, Tracker, prose, when};
+use crate::text::Text;
 use crate::tokens::*;
 use crate::{Entry, Layout, Moved, Work};
 use gpui::{
@@ -45,7 +46,10 @@ impl Render for Work {
         let t = theme(cx).clone();
         let list = self.list_column(&t, cx);
         let detail = match self.shown_row() {
-            Some(row) => self.detail(&t, row, Place::Page, cx),
+            Some(row) => {
+                self.want_text(row, cx);
+                self.detail(&t, row, Place::Page, cx)
+            }
             // The list says why it holds nothing; the detail stays clear.
             None => pane::detail(&t, "work-detail", pane::head(&t), div()),
         };
@@ -554,7 +558,12 @@ impl Work {
         }
         let fam = &r.family;
         body = body.children(self.relations(t, row, place, cx));
-        let text = prose::link_ids(r.body.trim(), &|id| {
+        let (words, missing) = match self.text_of(row) {
+            Text::Read(text) | Text::Reading(Some(text)) => (text, "No description.".to_string()),
+            Text::Reading(None) => (String::new(), "Reading the text…".to_string()),
+            Text::Failed(error) => (String::new(), format!("Could not read the text: {error}")),
+        };
+        let text = prose::link_ids(words.trim(), &|id| {
             self.board.find_from(id, r.project).is_some()
         });
         if !text.is_empty() {
@@ -583,7 +592,11 @@ impl Work {
                         }
                     }),
                 )
-                .child(markdown::render(&look, "work-body", &blocks));
+                .child(
+                    div()
+                        .debug_selector(|| "work-text".into())
+                        .child(markdown::render(&look, "work-body", &blocks)),
+                );
             body = body.child(select::track(
                 prose_area,
                 &self.prose,
@@ -596,7 +609,7 @@ impl Work {
                     .id("work-card")
                     .debug_selector(|| "work-card".into())
                     .text_color(t.dim)
-                    .child("No description."),
+                    .child(missing),
             );
         }
         let pulls_label = if r.pull.is_some() {

@@ -3,6 +3,7 @@
 pub mod item;
 pub mod model;
 mod resolver;
+pub mod text;
 pub use item::{Family, Item};
 pub use model::*;
 /// The syntax of a work item's reference, for pages that recognise one in text.

@@ -200,6 +200,11 @@ impl Work {
         self.0.snapshot.borrow().clone()
     }
 
+    /// The snapshot as last read, which is what watchers were last sent.
+    pub fn last(&self) -> Arc<Snapshot> {
+        self.0.snapshot.borrow().clone()
+    }
+
     /// Starts watching: the snapshot now, and again each time it changes.
     /// The poller runs while any subscription lives.
     pub fn subscribe(&self) -> Subscription {

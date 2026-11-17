@@ -85,7 +85,7 @@ fn start() -> Option<Running> {
             let script = dir.join("fixture-bd");
             std::fs::write(&script, "#!/bin/sh\nif [ \"$2\" = config ]; then echo '{\"value\":\"fixture\"}'; exit 0; fi\nif [ -f slow ]; then sleep 6; fi\nif [ -f fail ]; then echo 'tracker unavailable' >&2; exit 1; fi\ncat fixture.json\n").unwrap();
             std::fs::write(dir.join("fixture.json"), r#"[
-              {"id":"fixture-1","title":"Read the fixture","status":"open","created_at":"2026-11-01T00:00:00Z","updated_at":"2026-11-01T00:00:00Z","parent":"fixture-0","dependencies":[{"type":"blocks","depends_on_id":"fixture-3"}]},
+              {"id":"fixture-1","title":"Read the fixture","description":"Its words travel apart from the snapshot.","status":"open","created_at":"2026-11-01T00:00:00Z","updated_at":"2026-11-01T00:00:00Z","parent":"fixture-0","dependencies":[{"type":"blocks","depends_on_id":"fixture-3"}]},
               {"id":"fixture-0","title":"Parent title","status":"open","created_at":"2026-11-01T00:00:00Z","updated_at":"2026-11-01T00:00:00Z"},
               {"id":"fixture-2","title":"Child title","status":"open","created_at":"2026-11-01T00:00:00Z","updated_at":"2026-11-01T00:00:00Z","parent":"fixture-1"},
               {"id":"fixture-3","title":"Blocker title","status":"closed","created_at":"2026-11-01T00:00:00Z","updated_at":"2026-11-01T00:00:00Z"}
@@ -283,6 +283,18 @@ fn work_column_and_terminal_links_open_cards_and_hand_off(cx: &mut TestAppContex
             .is_some()
     });
     assert_eq!(shell.read_with(cx, |s, _| s.shown_page()), Some("work"));
+    // The snapshot leaves the text out: the card reads it from the node,
+    // and a search finds the item by words only its text holds.
+    until(cx, "the item's text", |cx| {
+        cx.debug_bounds("work-text").is_some()
+    });
+    cx.simulate_keystrokes("/");
+    cx.simulate_input("travel apart");
+    until(cx, "found by its text", |cx| {
+        cx.debug_bounds("work-row-fixture-1").is_some()
+            && cx.debug_bounds("work-row-fixture-2").is_none()
+    });
+    cx.simulate_keystrokes("escape");
     cx.update(|window, cx| shell.update(cx, |shell, cx| shell.show_id("terminals", window, cx)));
     let row = format!("row-{}::alpha", running.node);
     until(cx, "session", |cx| {

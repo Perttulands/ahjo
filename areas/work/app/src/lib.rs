@@ -11,6 +11,7 @@ mod report;
 pub mod store;
 #[cfg(test)]
 mod tests;
+mod text;
 pub(crate) mod tokens;
 mod view;
 
@@ -23,7 +24,7 @@ use parvi_core::NodeId;
 use parvi_terminals_contract::SessionList;
 use parvi_work_contract::{SNAPSHOT, Snapshot, WATCH};
 use std::cell::RefCell;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::rc::Rc;
 use std::sync::Arc;
 use store::work::outline::{self, Found, Line};
@@ -160,6 +161,11 @@ pub struct Work {
     /// what holds the keyboard in the panel once the find is left.
     panel_search: Entity<TextField>,
     panel_focus: FocusHandle,
+    /// Items' text, which the snapshot leaves out, as read from their
+    /// node: by reference, with the update it was read for.
+    texts: HashMap<String, (Option<u64>, text::Text)>,
+    /// The words last searched, and the items the nodes say hold them.
+    text_hits: (String, HashSet<String>),
     /// The take on the page in use; kept.
     layout: Layout,
     /// The days chosen on the chart, and the day a drag started from
@@ -350,6 +356,8 @@ impl Work {
             show_finished: false,
             list_scroll: gpui::ScrollHandle::new(),
             reveal: false,
+            texts: HashMap::new(),
+            text_hits: Default::default(),
             layout,
             range: opening_range(layout, today),
             anchor: None,
@@ -434,6 +442,9 @@ impl Work {
         self.dated = Rc::new(timeline::dated(&board, &self.clock));
         self.board = Rc::new(board);
         self.today = self.clock.day(parvi_app_kit::hub::now_ms());
+        if !self.text_hits.0.is_empty() {
+            self.search_text(&self.text_hits.0.clone(), cx);
+        }
         self.settle();
         self.relist(cx);
         self.open_wanted(cx);
@@ -493,6 +504,9 @@ impl Work {
         }
     }
     fn refresh(&mut self, cx: &mut Context<Self>) {
+        // A text that could not be read is tried again.
+        self.texts
+            .retain(|_, (_, text)| !matches!(text, text::Text::Failed(_)));
         for node in self.host.nodes(cx) {
             let done = self
                 .snapshots
@@ -677,7 +691,12 @@ impl Work {
             here,
             elsewhere,
             more,
-        } = outline::search(&self.board, project, &self.query);
+        } = outline::search(
+            &self.board,
+            project,
+            &self.query,
+            self.hits_for(&self.query),
+        );
         let mut entries: Vec<Entry> = here
             .into_iter()
             .map(|row| Entry::Item {
@@ -1049,6 +1068,7 @@ impl Work {
             FieldEvent::Changed => {
                 let held = self.shown_row();
                 self.query = self.search.read(cx).text.clone();
+                self.search_text(&self.query.clone(), cx);
                 self.relist(cx);
                 if let Some(row) = held.filter(|_| self.selected_row().is_none()) {
                     self.select(row, cx);
@@ -1068,6 +1088,7 @@ impl Work {
 
     fn clear_search(&mut self, cx: &mut Context<Self>) {
         self.query.clear();
+        self.search_text("", cx);
         self.search.update(cx, |f, cx| f.set("", false, cx));
         self.relist(cx);
     }

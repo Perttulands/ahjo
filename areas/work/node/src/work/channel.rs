@@ -1,5 +1,6 @@
 //! The Work channel of the browser protocol (`docs/protocol.md`, Work): a
-//! browser watches the snapshot while its Work tab is open.
+//! browser watches the snapshot while its Work tab is open. Items come
+//! without their text, which [`super::routes`] serves one item at a time.
 
 use anyhow::{Result, bail};
 
@@ -53,10 +54,10 @@ impl Channel {
     }
 }
 
-/// `0x90` and the snapshot as JSON.
+/// `0x90` and the snapshot as JSON, without the items' text.
 pub fn snapshot(snapshot: &Snapshot) -> Vec<u8> {
     let mut frame = vec![SNAPSHOT];
-    serde_json::to_writer(&mut frame, snapshot).expect("a snapshot always serialises");
+    serde_json::to_writer(&mut frame, &snapshot.lean()).expect("a snapshot always serialises");
     frame
 }
 
@@ -113,5 +114,7 @@ mod tests {
         ] {
             assert!(json.contains(expected), "{expected} in {}", &json[..300]);
         }
+        assert!(!json.contains("## Goal"), "the text is left out");
+        assert!(json.contains(r#""body":"""#), "and its field kept");
     }
 }

@@ -3,6 +3,7 @@
 //! its node with its family's titles.
 use crate::Work;
 use crate::store::work::Board;
+use crate::text::encode;
 use crate::view::Place;
 use gpui::{AppContext, Context, Entity, IntoElement, Render, Window, div, prelude::*};
 use parvi_app_kit::host::Request;
@@ -23,8 +24,10 @@ impl Render for Card {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let t = theme(cx).clone();
         let detail = self.work.update(cx, |work, cx| {
-            work.shown_row()
-                .map(|row| work.detail(&t, row, Place::Beside, cx))
+            work.shown_row().map(|row| {
+                work.want_text(row, cx);
+                work.detail(&t, row, Place::Beside, cx)
+            })
         });
         let words = match &self.error {
             Some((_, true)) => Some(("work-beside-not-found", "Item not found")),
@@ -64,18 +67,6 @@ impl Render for Card {
             )
             .children(detail)
     }
-}
-
-fn encode(s: &str) -> String {
-    s.bytes()
-        .map(|b| {
-            if b.is_ascii_alphanumeric() || b"-._~".contains(&b) {
-                (b as char).to_string()
-            } else {
-                format!("%{b:02X}")
-            }
-        })
-        .collect()
 }
 
 impl Work {

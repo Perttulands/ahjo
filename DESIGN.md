@@ -35,7 +35,13 @@ A page is judged by three questions, in this order:
   that", settings and tools. Skills has its own page for managing them and
   for what is out of sync; Roles has another.
 - **Work.** See the open work across projects and how it moves over time.
-  Being settled from a prototype against the present tree.
+  The strip comes first: a chart of what opened and finished each day over
+  the open line, facets for state and project, and the rows with type,
+  state, priority and age. Time gives the chart the page and says what
+  opened, finished or sat idle in the days dragged across it. Tree keeps
+  one project's work as parents and children. Every chart reads out the
+  day under the mouse, and the item beside the list shows its relations
+  as cards.
 - **Missions.** Chain sessions into repeatable runs of several agents. The
   graph is a diagram: typed cards, coloured ports, visible loops and gates.
   A step uses a named agent's live session or starts one; a mission's

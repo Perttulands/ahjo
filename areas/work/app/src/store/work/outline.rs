@@ -142,20 +142,21 @@ pub const SHOWN: usize = 100;
 
 /// The rows holding every word of `query` in their id, title, text or
 /// labels: `project`'s first, open work before finished, each the latest
-/// update first.
-pub fn search(board: &Board, project: Option<usize>, query: &str) -> Found {
-    let terms: Vec<String> = query
-        .to_lowercase()
-        .split_whitespace()
-        .map(|t| t.trim_start_matches('#').to_string())
-        .filter(|t| !t.is_empty())
-        .collect();
+/// update first. A row whose text the board leaves out matches when its
+/// reference is in `texts`, the node's answer for the words.
+pub fn search(
+    board: &Board,
+    project: Option<usize>,
+    query: &str,
+    texts: &HashSet<String>,
+) -> Found {
+    let terms = parvi_work_contract::text::terms(query);
     let mut found = Found::default();
     if terms.is_empty() {
         return found;
     }
     for (i, r) in board.rows.iter().enumerate() {
-        if terms.iter().all(|t| r.haystack.contains(t.as_str())) {
+        if terms.iter().all(|t| r.haystack.contains(t.as_str())) || texts.contains(&r.reference) {
             if Some(r.project) == project {
                 found.here.push(i);
             } else {

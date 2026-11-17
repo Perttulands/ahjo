@@ -70,6 +70,10 @@ impl Work {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if ev == FieldEvent::Changed {
+            let query = self.panel_search.read(cx).text.clone();
+            self.search_text(&query, cx);
+        }
         if ev == FieldEvent::Submit
             && let Some(&row) = self.panel_rows(cx).first()
         {
@@ -86,6 +90,7 @@ impl Work {
             &self.board,
             self.panel_project(cx),
             &self.panel_search.read(cx).text,
+            self.hits_for(&self.panel_search.read(cx).text),
         );
         found.here.into_iter().chain(found.elsewhere).collect()
     }
@@ -118,7 +123,10 @@ impl Work {
             .as_ref()
             .and_then(|key| self.board.position(key));
         let inner = match item {
-            Some(row) => self.detail(&t, row, Place::Panel, cx),
+            Some(row) => {
+                self.want_text(row, cx);
+                self.detail(&t, row, Place::Panel, cx)
+            }
             None if self.panel_picking => self.panel_projects(&t, cx),
             None => {
                 let project = self.panel_project(cx);

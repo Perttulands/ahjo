@@ -424,20 +424,25 @@ fn a_search_finds_this_projects_matches_first_open_before_finished() {
         ),
         store("/srv/q", vec![b("q-1").body("Which stores to read")]),
     ]);
-    let found = outline::search(&b, Some(0), "STORES");
+    let found = outline::search(&b, Some(0), "STORES", &Default::default());
     let ids =
         |rows: &[usize]| -> Vec<&str> { rows.iter().map(|&i| b.rows[i].id.as_str()).collect() };
     assert_eq!(ids(&found.here), ["p-2", "p-1"]);
     assert_eq!(ids(&found.elsewhere), ["q-1"]);
     assert_eq!(found.more, 0);
     assert_eq!(
-        outline::search(&b, Some(0), "  "),
+        outline::search(&b, Some(0), "  ", &Default::default()),
         outline::Found::default()
     );
     assert_eq!(
-        ids(&outline::search(&b, None, "read stores").elsewhere),
+        ids(&outline::search(&b, None, "read stores", &Default::default()).elsewhere),
         ["q-1", "p-1"]
     );
+    // A row without its text matches when the node says its text does.
+    let lean = board_of(vec![store("/srv/q", vec![self::b("q-1"), self::b("q-2")])]);
+    let texts = [lean.rows[1].reference.clone()].into_iter().collect();
+    let found = outline::search(&lean, Some(0), "which stores", &texts);
+    assert_eq!(found.here, [1]);
 }
 
 #[test]

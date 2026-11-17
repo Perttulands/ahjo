@@ -16,8 +16,61 @@ use super::poller::Work;
 pub fn routes<S: Clone + Send + Sync + 'static>(work: Work) -> Router<S> {
     Router::new()
         .route("/api/work/item", get(item))
+        .route("/api/work/text", get(text))
+        .route("/api/work/search", get(search))
         .route("/api/work/items", post(create))
         .with_state(work)
+}
+
+/// `GET /api/work/text?ref=<reference>`: `{"text": …}`, the item's text
+/// that the channel's snapshot leaves out. From the snapshot as last read,
+/// so it matches the rest of the item the page shows; an item the snapshot
+/// does not hold is read as `/api/work/item` reads it.
+async fn text(State(work): State<Work>, Query(params): Query<HashMap<String, String>>) -> Response {
+    let written = params.get("ref").map(String::as_str).unwrap_or("");
+    if let Some(text) = work.last().text(written) {
+        return Json(json!({ "text": text })).into_response();
+    }
+    let reference = match work.resolve(written).await {
+        Ok(reference) => reference,
+        Err(error) => {
+            return refuse(
+                StatusCode::BAD_REQUEST,
+                parvi_work_contract::BAD_REQUEST,
+                error,
+            );
+        }
+    };
+    match work.item(&reference).await {
+        Ok(item) => Json(json!({ "text": item.body })).into_response(),
+        Err(error) => {
+            let (status, code) = if error.downcast_ref::<super::MissingItem>().is_some() {
+                (StatusCode::NOT_FOUND, "not_found")
+            } else {
+                (StatusCode::BAD_GATEWAY, parvi_work_contract::TRACKER_ERROR)
+            };
+            refuse(status, code, error)
+        }
+    }
+}
+
+/// `GET /api/work/search?q=<words>`: `{"references": […]}`, the items in
+/// the snapshot as last read holding every word in their id, title,
+/// labels or text, as the page's own search counts them.
+async fn search(
+    State(work): State<Work>,
+    Query(params): Query<HashMap<String, String>>,
+) -> Response {
+    let terms = parvi_work_contract::text::terms(params.get("q").map(String::as_str).unwrap_or(""));
+    let snapshot = work.last();
+    match tokio::task::spawn_blocking(move || snapshot.matching(&terms)).await {
+        Ok(references) => Json(json!({ "references": references })).into_response(),
+        Err(error) => refuse(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "search_failed",
+            error.into(),
+        ),
+    }
 }
 
 /// `GET /api/work/item?ref=<reference>`: `{"item": …, "line": …,
@@ -93,6 +146,27 @@ mod tests {
     use axum::body::{Body, to_bytes};
     use axum::http::Request;
     use tower::ServiceExt;
+
+    async fn get_json(path: &str) -> (StatusCode, serde_json::Value) {
+        let app: Router = routes(Work::default());
+        let response = app
+            .oneshot(Request::get(path).body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+        let status = response.status();
+        let body = to_bytes(response.into_body(), 8192).await.unwrap();
+        (status, serde_json::from_slice(&body).unwrap())
+    }
+
+    #[tokio::test]
+    async fn text_and_search_answer_from_the_snapshot() {
+        let (status, value) = get_json("/api/work/search?q=anything").await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(value, json!({"references": []}));
+        let (status, value) = get_json("/api/work/text?ref=nowhere-1").await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        assert_eq!(value["error"]["code"], "bad_request");
+    }
 
     #[tokio::test]
     async fn create_route_returns_the_work_error_shape() {

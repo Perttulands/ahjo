@@ -14,6 +14,7 @@ pub mod tests;
 
 pub use links::Links;
 
+use parvi_work_contract::text::haystack;
 use parvi_work_contract::{Family, ProjectView as Project, Snapshot};
 use std::collections::HashMap;
 
@@ -189,10 +190,6 @@ fn common_prefix(items: &[parvi_work_contract::Item]) -> Option<String> {
         .map(|(p, _)| p.to_string())
 }
 
-fn haystack(parts: &[&str]) -> String {
-    parts.join("\n").to_lowercase()
-}
-
 impl Board {
     /// The board of a snapshot.
     pub fn from_snapshot(s: &Snapshot) -> Board {
@@ -218,7 +215,7 @@ impl Board {
                     for i in items {
                         b.rows.push(Row {
                             project: pi,
-                            haystack: haystack(&[&i.id, &i.title, &i.body, &i.labels.join(" ")]),
+                            haystack: haystack(&i.id, &i.title, &i.body, &i.labels),
                             reference: i.reference,
                             id: i.id,
                             number: None,
@@ -260,17 +257,13 @@ impl Board {
                         read: r.work.is_some(),
                         total: issues.len() + pulls.len(),
                     });
-                    let reference = |n: u32| format!("gh:{}#{n}", r.name);
+                    let reference =
+                        |n: u32| parvi_work_contract::text::github_reference(&r.name, n);
                     for i in issues {
                         let n = i.number;
                         b.rows.push(Row {
                             project: pi,
-                            haystack: haystack(&[
-                                &format!("#{n}"),
-                                &i.title,
-                                &i.body,
-                                &i.labels.join(" "),
-                            ]),
+                            haystack: haystack(&format!("#{n}"), &i.title, &i.body, &i.labels),
                             reference: reference(n),
                             id: format!("#{n}"),
                             number: Some(n),
@@ -306,12 +299,7 @@ impl Board {
                         let n = p.number;
                         b.rows.push(Row {
                             project: pi,
-                            haystack: haystack(&[
-                                &format!("#{n}"),
-                                &p.title,
-                                &p.body,
-                                &p.labels.join(" "),
-                            ]),
+                            haystack: haystack(&format!("#{n}"), &p.title, &p.body, &p.labels),
                             reference: reference(n),
                             id: format!("#{n}"),
                             number: Some(n),
