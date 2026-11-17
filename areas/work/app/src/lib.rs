@@ -3,13 +3,15 @@
 //! session in one action; the same item beside a terminal that named it,
 //! and the project's tree in a panel over the terminals.
 mod beside;
+mod chart;
+mod layouts;
 mod natural;
 mod panel;
 mod report;
 pub mod store;
 #[cfg(test)]
 mod tests;
-mod tokens;
+pub(crate) mod tokens;
 mod view;
 
 use gpui::{App, AppContext, Context, Entity, FocusHandle, KeyDownEvent, WeakEntity, Window};
@@ -25,7 +27,8 @@ use std::collections::BTreeMap;
 use std::rc::Rc;
 use std::sync::Arc;
 use store::work::outline::{self, Found, Line};
-use store::work::{Board, RowKey, prose};
+use store::work::timeline::{self, Clock, Day, Movement, Range, Timeline};
+use store::work::{Board, RowKey, Status, prose};
 
 pub const NAME: &str = "work";
 pub fn build(host: Host, window: &mut Window, cx: &mut App) -> Mounted {
@@ -43,9 +46,62 @@ pub enum Entry {
         depth: usize,
         away: bool,
     },
-    Label(&'static str),
+    Label(String),
     /// Matches left out of a long search.
     More(usize),
+}
+
+/// How the page lays out the work: three takes on one purpose, to be
+/// settled by using them (DESIGN.md, Work).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Layout {
+    /// One project's open work as a tree, the item beside it.
+    Tree,
+    /// The tree under a strip of the last weeks, the projects and states
+    /// counted beside it; a range on the strip lists what moved in it.
+    Strip,
+    /// The chart is the page: a range says what opened, closed and stayed
+    /// stuck, across every project or one.
+    Time,
+}
+
+impl Layout {
+    pub const ALL: [Layout; 3] = [Layout::Tree, Layout::Strip, Layout::Time];
+    pub fn key(self) -> &'static str {
+        match self {
+            Layout::Tree => "tree",
+            Layout::Strip => "strip",
+            Layout::Time => "time",
+        }
+    }
+    pub fn name(self) -> &'static str {
+        match self {
+            Layout::Tree => "Tree",
+            Layout::Strip => "Strip",
+            Layout::Time => "Time",
+        }
+    }
+    fn of(key: &str) -> Layout {
+        Layout::ALL
+            .into_iter()
+            .find(|l| l.key() == key)
+            .unwrap_or(Layout::Tree)
+    }
+    fn next(self) -> Layout {
+        match self {
+            Layout::Tree => Layout::Strip,
+            Layout::Strip => Layout::Time,
+            Layout::Time => Layout::Tree,
+        }
+    }
+}
+
+/// Which of a range's movements the time page lists.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Moved {
+    Opened,
+    Closed,
+    Stuck,
 }
 
 pub struct Work {
@@ -104,6 +160,36 @@ pub struct Work {
     /// what holds the keyboard in the panel once the find is left.
     panel_search: Entity<TextField>,
     panel_focus: FocusHandle,
+    /// The take on the page in use; kept.
+    layout: Layout,
+    /// The days chosen on the chart, and the day a drag started from
+    /// while the mouse is held.
+    range: Option<Range>,
+    anchor: Option<Day>,
+    /// The day under the mouse on the chart.
+    hover: Option<Day>,
+    clock: Clock,
+    today: Day,
+    /// The strip and the time page show every project, not the chosen one.
+    every: bool,
+    /// The strip's state facet: only work in this state.
+    state: Option<Status>,
+    /// What the time page lists of the range.
+    moved: Moved,
+    /// The chosen work over time, and what moved in the range.
+    timeline: Rc<Timeline>,
+    movement: Movement,
+    /// Per project, and per state, how much of the work in view counts:
+    /// open work, or with a range the work that moved in it.
+    project_counts: Vec<usize>,
+    state_counts: [usize; 5],
+    /// The list's scroll for the strip and time pages.
+    rows_scroll: gpui::UniformListScrollHandle,
+    /// What the timeline was counted for: the project, every project, and
+    /// the board.
+    counted: (Option<usize>, bool, *const Board),
+    /// The timeline and range the time page last chose its list for.
+    moved_for: (*const Timeline, Option<Range>),
 }
 
 impl Page for Work {
@@ -114,6 +200,21 @@ impl Page for Work {
     const KINDS: parvi_core::frame::Kinds = &[SNAPSHOT..=SNAPSHOT];
     const CHANNELS: &'static [u8] = &[WATCH];
     const ANSWERS: &'static [Answers] = &[Answers::Reveal("item")];
+    const SETTINGS: &'static [parvi_app_kit::declared::Setting] = &[
+        parvi_app_kit::declared::Setting {
+            key: "layout",
+            label: "Layout",
+            note: "tree, strip or time: the project's tree, the tree under a time strip, or the chart as the page (V on the page)",
+            control: parvi_app_kit::declared::Control::Text { default: "tree" },
+        },
+    ];
+    fn settings_changed(&mut self, _: &mut Window, cx: &mut Context<Self>) {
+        let settings: serde_json::Value = self.host.setting(cx).unwrap_or_default();
+        let layout = Layout::of(settings["layout"].as_str().unwrap_or(""));
+        if layout != self.layout {
+            self.set_layout(layout, false, cx);
+        }
+    }
     fn frame(&mut self, node: &NodeId, _: u8, body: &[u8], _: &mut Window, cx: &mut Context<Self>) {
         self.gone.remove(node.as_str());
         self.pending.insert(node.as_str().into(), body.to_vec());
@@ -202,6 +303,9 @@ impl Work {
             cx.observe(s, |_, _, cx| cx.notify()).detach();
         }
         let settings: serde_json::Value = host.setting(cx).unwrap_or_default();
+        let now = parvi_app_kit::hub::now_ms();
+        let clock = Clock::local(now);
+        let layout = Layout::of(settings["layout"].as_str().unwrap_or(""));
         Self {
             host,
             me: cx.weak_entity(),
@@ -237,6 +341,22 @@ impl Work {
             show_finished: false,
             list_scroll: gpui::ScrollHandle::new(),
             reveal: false,
+            layout,
+            range: opening_range(layout, clock.day(now)),
+            anchor: None,
+            hover: None,
+            clock,
+            today: clock.day(now),
+            every: layout == Layout::Time,
+            state: None,
+            moved: Moved::Opened,
+            timeline: Rc::default(),
+            movement: Movement::default(),
+            project_counts: Vec::new(),
+            state_counts: [0; 5],
+            rows_scroll: gpui::UniformListScrollHandle::new(),
+            counted: (None, false, std::ptr::null()),
+            moved_for: (std::ptr::null(), None),
         }
     }
 
@@ -294,6 +414,7 @@ impl Work {
 
     fn set_board(&mut self, board: Board, cx: &mut Context<Self>) {
         self.board = Rc::new(board);
+        self.today = self.clock.day(parvi_app_kit::hub::now_ms());
         self.settle();
         self.relist(cx);
         self.open_wanted(cx);
@@ -496,47 +617,285 @@ impl Work {
         order
     }
 
-    /// What the list holds now: the project's tree, or a search's matches.
+    /// What the list holds now: a search's matches, else what the layout
+    /// lists; and, for the strip and the time page, the chart and the
+    /// counts beside it.
     fn relist(&mut self, cx: &App) {
         let project = self.project(cx);
-        self.entries = if self.query.trim().is_empty() {
-            project.map_or_else(Vec::new, |p| {
-                outline::tree(&self.board, p)
-                    .into_iter()
-                    .map(|Line { row, depth }| Entry::Item {
-                        row,
-                        depth,
-                        away: self.board.rows[row].project != p,
-                    })
-                    .collect()
-            })
+        if self.layout != Layout::Tree {
+            self.recount(project);
+        }
+        self.entries = if !self.query.trim().is_empty() {
+            self.found(project)
         } else {
-            let Found {
-                here,
-                elsewhere,
-                more,
-            } = outline::search(&self.board, project, &self.query);
-            let mut entries: Vec<Entry> = here
-                .into_iter()
-                .map(|row| Entry::Item {
-                    row,
-                    depth: 0,
-                    away: false,
-                })
-                .collect();
-            if !elsewhere.is_empty() {
-                entries.push(Entry::Label("Other projects"));
-                entries.extend(elsewhere.into_iter().map(|row| Entry::Item {
-                    row,
-                    depth: 0,
-                    away: true,
-                }));
+            match self.layout {
+                Layout::Tree => project.map_or_else(Vec::new, |p| self.tree_of(p)),
+                Layout::Strip => self.strip_entries(project),
+                Layout::Time => {
+                    let rows = match self.moved {
+                        Moved::Opened => &self.movement.opened,
+                        Moved::Closed => &self.movement.closed,
+                        Moved::Stuck => &self.movement.stuck,
+                    };
+                    rows.iter()
+                        .map(|&row| Entry::Item {
+                            row,
+                            depth: 0,
+                            away: self.every || Some(self.board.rows[row].project) != project,
+                        })
+                        .collect()
+                }
             }
-            if more > 0 {
-                entries.push(Entry::More(more));
-            }
-            entries
         };
+    }
+
+    fn tree_of(&self, p: usize) -> Vec<Entry> {
+        outline::tree(&self.board, p)
+            .into_iter()
+            .map(|Line { row, depth }| Entry::Item {
+                row,
+                depth,
+                away: self.board.rows[row].project != p,
+            })
+            .collect()
+    }
+
+    fn found(&self, project: Option<usize>) -> Vec<Entry> {
+        let Found {
+            here,
+            elsewhere,
+            more,
+        } = outline::search(&self.board, project, &self.query);
+        let mut entries: Vec<Entry> = here
+            .into_iter()
+            .map(|row| Entry::Item {
+                row,
+                depth: 0,
+                away: false,
+            })
+            .collect();
+        if !elsewhere.is_empty() {
+            entries.push(Entry::Label("Other projects".into()));
+            entries.extend(elsewhere.into_iter().map(|row| Entry::Item {
+                row,
+                depth: 0,
+                away: true,
+            }));
+        }
+        if more > 0 {
+            entries.push(Entry::More(more));
+        }
+        entries
+    }
+
+    /// The rows in view on the strip and the time page: the chosen
+    /// project's, or every project's.
+    fn scoped(&self, project: Option<usize>) -> Vec<usize> {
+        (0..self.board.rows.len())
+            .filter(|&i| self.every || Some(self.board.rows[i].project) == project)
+            .collect()
+    }
+
+    /// The chart, the range's movement and the facets' counts, again.
+    fn recount(&mut self, project: Option<usize>) {
+        let rows = self.scoped(project);
+        let days = match self.layout {
+            Layout::Time => tokens::CHART_DAYS,
+            _ => tokens::STRIP_DAYS,
+        };
+        if self.timeline.first + self.timeline.opened.len() as i64 - 1 != self.today
+            || self.timeline.opened.len() != days
+            || self.counted != (project, self.every, Rc::as_ptr(&self.board))
+        {
+            self.timeline = Rc::new(Timeline::of(
+                &self.board,
+                &rows,
+                self.clock,
+                self.today,
+                days,
+            ));
+            self.counted = (project, self.every, Rc::as_ptr(&self.board));
+        }
+        self.movement = match self.range {
+            Some(range) => timeline::movement(&self.board, &rows, self.clock, range),
+            None => Movement::default(),
+        };
+        // New days or another scope: the time page lists the first of the
+        // range's movements that holds anything, rather than an empty one.
+        let moved = (Rc::as_ptr(&self.timeline), self.range);
+        if self.layout == Layout::Time && moved != self.moved_for {
+            self.moved_for = moved;
+            let m = &self.movement;
+            let held = |which: Moved| match which {
+                Moved::Opened => !m.opened.is_empty(),
+                Moved::Closed => !m.closed.is_empty(),
+                Moved::Stuck => !m.stuck.is_empty(),
+            };
+            if !held(self.moved)
+                && let Some(first) = [Moved::Opened, Moved::Closed, Moved::Stuck]
+                    .into_iter()
+                    .find(|&w| held(w))
+            {
+                self.moved = first;
+            }
+        }
+        // What counts: work moved in the range, else open work.
+        let counts = |i: usize| match self.range {
+            Some(range) => timeline::touched(&self.board.rows[i], self.clock, range),
+            None => outline::open(&self.board, i),
+        };
+        self.project_counts = vec![0; self.board.projects.len()];
+        for i in 0..self.board.rows.len() {
+            if counts(i) {
+                self.project_counts[self.board.rows[i].project] += 1;
+            }
+        }
+        self.state_counts = [0; 5];
+        for &i in &rows {
+            let r = &self.board.rows[i];
+            if self
+                .range
+                .is_none_or(|range| timeline::touched(r, self.clock, range))
+            {
+                self.state_counts[r.status as usize] += 1;
+            }
+        }
+    }
+
+    /// The strip's list: with a range or a state chosen, the work in view
+    /// that matches, latest move first; else the open work as trees, the
+    /// chosen project's or every project's under its name.
+    fn strip_entries(&self, project: Option<usize>) -> Vec<Entry> {
+        if self.range.is_none() && self.state.is_none() {
+            if !self.every {
+                return project.map_or_else(Vec::new, |p| self.tree_of(p));
+            }
+            let mut out = Vec::new();
+            for p in self.projects_named("") {
+                if self.project_counts.get(p).copied().unwrap_or(0) == 0 {
+                    continue;
+                }
+                out.push(Entry::Label(self.board.projects[p].label.clone()));
+                out.extend(self.tree_of(p));
+            }
+            return out;
+        }
+        let mut rows: Vec<usize> = self
+            .scoped(project)
+            .into_iter()
+            .filter(|&i| {
+                let r = &self.board.rows[i];
+                self.state.is_none_or(|s| r.status == s)
+                    && self
+                        .range
+                        .is_none_or(|range| timeline::touched(r, self.clock, range))
+            })
+            .collect();
+        let last = |i: usize| {
+            let r = &self.board.rows[i];
+            r.closed.max(r.updated).max(r.created)
+        };
+        rows.sort_by_key(|&i| std::cmp::Reverse(last(i)));
+        rows.into_iter()
+            .map(|row| Entry::Item {
+                row,
+                depth: 0,
+                away: self.every,
+            })
+            .collect()
+    }
+
+    /// Uses another layout, kept when `keep`.
+    pub fn set_layout(&mut self, layout: Layout, keep: bool, cx: &mut Context<Self>) {
+        self.layout = layout;
+        if layout == Layout::Time && self.range.is_none() {
+            self.range = opening_range(layout, self.today);
+        }
+        if keep {
+            let mut settings: serde_json::Value = self.host.setting(cx).unwrap_or_default();
+            if !settings.is_object() {
+                settings = serde_json::json!({});
+            }
+            settings["layout"] = serde_json::json!(layout.key());
+            if let Err(e) = self.host.set_setting(&settings, cx) {
+                self.host.toast(&e.message, cx);
+            }
+        }
+        self.relist(cx);
+        cx.notify();
+    }
+
+    /// A press on the chart: the range starts at that day. A press on the
+    /// one day already chosen lets the range go.
+    pub fn range_press(&mut self, day: Day, cx: &mut Context<Self>) {
+        if self.range == Some(Range::between(day, day)) {
+            self.range = None;
+            self.anchor = None;
+        } else {
+            self.anchor = Some(day);
+            self.range = Some(Range::between(day, day));
+        }
+        self.range_changed(cx);
+    }
+
+    /// The mouse moved: over the chart at `over`, or dragging at `held`.
+    pub fn range_move(&mut self, over: Option<Day>, held: Option<Day>, cx: &mut Context<Self>) {
+        let mut changed = false;
+        if let (Some(anchor), Some(day)) = (self.anchor, held) {
+            let range = Some(Range::between(anchor, day));
+            if range != self.range {
+                self.range = range;
+                self.range_changed(cx);
+                changed = true;
+            }
+        }
+        if over != self.hover {
+            self.hover = over;
+            if !changed {
+                cx.notify();
+            }
+        }
+    }
+
+    pub fn range_release(&mut self, cx: &mut Context<Self>) {
+        if self.anchor.take().is_some() {
+            cx.notify();
+        }
+    }
+
+    pub fn clear_range(&mut self, cx: &mut Context<Self>) {
+        if self.range.take().is_some() {
+            self.range_changed(cx);
+        }
+    }
+
+    fn range_changed(&mut self, cx: &mut Context<Self>) {
+        self.relist(cx);
+        self.rows_scroll
+            .scroll_to_item(0, gpui::ScrollStrategy::Top);
+        cx.notify();
+    }
+
+    /// The strip's and time page's scope: every project, or the one chosen.
+    pub fn show_every(&mut self, every: bool, cx: &mut Context<Self>) {
+        self.every = every;
+        self.relist(cx);
+        cx.notify();
+    }
+
+    pub fn show_state(&mut self, state: Option<Status>, cx: &mut Context<Self>) {
+        self.state = state;
+        self.relist(cx);
+        cx.notify();
+    }
+
+    pub fn show_moved(&mut self, moved: Moved, cx: &mut Context<Self>) {
+        self.moved = moved;
+        self.selected = None;
+        self.relist(cx);
+        self.rows_scroll
+            .scroll_to_item(0, gpui::ScrollStrategy::Top);
+        cx.notify();
     }
 
     /// The rows the list shows, in order.
@@ -719,6 +1078,14 @@ impl Work {
             }
             "escape" if !self.query.is_empty() => {
                 self.clear_search(cx);
+                true
+            }
+            "escape" if self.range.is_some() && self.layout != Layout::Tree => {
+                self.clear_range(cx);
+                true
+            }
+            "v" => {
+                self.set_layout(self.layout.next(), true, cx);
                 true
             }
             "/" => {
@@ -909,6 +1276,12 @@ impl Work {
             self.follow_row(row, cx);
         }
     }
+}
+
+/// The range a layout opens on: the time page the last week, the others
+/// none.
+fn opening_range(layout: Layout, today: Day) -> Option<Range> {
+    (layout == Layout::Time).then(|| Range::between(today - tokens::OPENING_RANGE + 1, today))
 }
 
 const SEARCH: &str = "Search…";

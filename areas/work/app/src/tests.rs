@@ -464,3 +464,116 @@ fn session_names() {
         "r-1-3"
     );
 }
+
+/// The page on `layout`, its clock at UTC and today 2026-10-21, so the
+/// fixture's days fall where the test says.
+fn on(layout: crate::Layout, cx: &mut TestAppContext) -> (Entity<Work>, &mut VisualTestContext) {
+    let (work, cx) = page(cx);
+    cx.update(|_, cx| {
+        work.update(cx, |w, cx| {
+            w.clock = crate::Clock { offset_ms: 0 };
+            w.today = day("2026-10-21");
+            w.set_layout(layout, false, cx);
+        })
+    });
+    cx.run_until_parked();
+    (work, cx)
+}
+
+fn day(date: &str) -> crate::Day {
+    let ms = crate::store::work::when::parse(&format!("{date}T12:00:00Z")).unwrap();
+    crate::Clock { offset_ms: 0 }.day(ms)
+}
+
+fn ids(work: &Entity<Work>, cx: &mut VisualTestContext) -> Vec<String> {
+    listed(work, cx).into_iter().map(|(id, _)| id).collect()
+}
+
+#[gpui::test]
+fn the_time_page_draws_before_any_work_is_read(cx: &mut TestAppContext) {
+    cx.update(parvi_app_shell::prepare);
+    let (work, cx) = cx.add_window_view(|window, cx| {
+        let (tx, _) = async_channel::unbounded();
+        let hub = cx
+            .new(|_| parvi_app_kit::Hub::new(parvi_app_kit::link::socket::Net::start(), tx, None));
+        let mut w = Work::new(parvi_app_kit::Host::new(&hub), window, cx);
+        w.set_layout(crate::Layout::Time, false, cx);
+        w
+    });
+    cx.run_until_parked();
+    // It opens on the last week, and draws with nothing read.
+    let range = work.read_with(cx, |w, _| w.range).unwrap();
+    assert_eq!(range.days(), crate::tokens::OPENING_RANGE);
+    assert!(cx.debug_bounds("work-chart").is_some());
+    cx.update(|_, cx| {
+        work.update(cx, |w, cx| {
+            w.snapshots.insert("node".into(), Arc::new(snapshot()));
+            w.rebuild(cx);
+        })
+    });
+    cx.run_until_parked();
+    assert!(cx.debug_bounds("work-moved-opened").is_some());
+}
+
+#[gpui::test]
+fn a_drag_on_the_strip_lists_what_moved_and_a_click_on_the_day_lets_it_go(cx: &mut TestAppContext) {
+    let (work, cx) = on(crate::Layout::Strip, cx);
+    // No range: the chosen project's tree.
+    assert_eq!(listed(&work, cx), tree());
+    cx.update(|_, cx| work.update(cx, |w, cx| w.show_every(true, cx)));
+    // Pressed on Oct 19 and dragged to Oct 20: only what moved then, from
+    // every project; the facets count it.
+    cx.update(|_, cx| {
+        work.update(cx, |w, cx| {
+            w.range_press(day("2026-10-19"), cx);
+            w.range_move(None, Some(day("2026-10-20")), cx);
+            w.range_release(cx);
+        })
+    });
+    let mut moved = ids(&work, cx);
+    moved.sort();
+    // The issue was touched and its pull request opened in those days too.
+    assert_eq!(moved, ["#10", "#11", "ctx-xvl"]);
+    let counted: usize = work.read_with(cx, |w, _| w.project_counts.iter().sum());
+    assert_eq!(counted, 3);
+    assert!(cx.debug_bounds("work-range").is_some());
+    // A press on one day takes it; a press on it again lets it go, and the
+    // trees of every project come back under their names.
+    cx.update(|_, cx| work.update(cx, |w, cx| w.range_press(day("2026-10-20"), cx)));
+    let mut moved = ids(&work, cx);
+    moved.sort();
+    assert_eq!(moved, ["#10", "ctx-xvl"]);
+    cx.update(|_, cx| work.update(cx, |w, cx| w.range_press(day("2026-10-20"), cx)));
+    let listed = ids(&work, cx);
+    assert!(listed.contains(&"library-zvi.1".to_string()), "{listed:?}");
+    assert!(listed.contains(&"ctx-old".to_string()), "{listed:?}");
+}
+
+#[gpui::test]
+fn the_time_page_says_what_a_range_opened_finished_and_left_untouched(cx: &mut TestAppContext) {
+    // It opens on the last week. In the chosen project nothing was opened or
+    // finished then, so it lists what stayed untouched instead of nothing.
+    let (work, cx) = on(crate::Layout::Time, cx);
+    let range = work.read_with(cx, |w, _| w.range).unwrap();
+    assert_eq!(
+        range,
+        crate::Range::between(day("2026-10-15"), day("2026-10-21"))
+    );
+    let mut stuck = ids(&work, cx);
+    stuck.sort();
+    assert_eq!(stuck, ["library-zvi", "library-zvi.1", "library-zvi.2"]);
+    // Every project: the pull request opened in those days.
+    cx.update(|_, cx| {
+        work.update(cx, |w, cx| {
+            w.show_every(true, cx);
+            w.show_moved(crate::Moved::Opened, cx);
+        })
+    });
+    assert_eq!(ids(&work, cx), ["#11"]);
+    cx.update(|_, cx| work.update(cx, |w, cx| w.show_moved(crate::Moved::Closed, cx)));
+    assert_eq!(ids(&work, cx), ["ctx-xvl"]);
+    cx.update(|_, cx| work.update(cx, |w, cx| w.show_moved(crate::Moved::Stuck, cx)));
+    let stuck = ids(&work, cx);
+    assert!(stuck.contains(&"ctx-old".to_string()), "{stuck:?}");
+    assert!(!stuck.contains(&"ctx-xvl".to_string()), "{stuck:?}");
+}

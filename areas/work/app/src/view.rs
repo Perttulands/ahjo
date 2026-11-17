@@ -3,12 +3,13 @@
 //! projects to choose from; the item beside it, read as a page reads. The
 //! same item view stands beside a terminal and in the panel.
 
+use crate::store::work::timeline::{Range, range_label};
 use crate::store::work::{Row, Status, Tracker, prose, when};
-use crate::tokens::*;
-use crate::{Entry, Work};
+use crate::tokens::{self, *};
+use crate::{Entry, Layout, Moved, Work};
 use gpui::{
     AnyElement, ClickEvent, Context, Div, FontWeight, Hsla, MouseButton, MouseDownEvent,
-    SharedString, Window, div, prelude::*, px,
+    SharedString, Stateful, Window, div, prelude::*, px, uniform_list,
 };
 use parvi_app_kit::hub::now_ms;
 use parvi_app_kit::theme::{FAMILY, Theme, size, theme};
@@ -31,8 +32,8 @@ pub(crate) enum Place {
 /// said, ready is not.
 pub(crate) fn status_meta(t: &Theme, r: &Row) -> Option<(String, Hsla)> {
     match r.status {
-        Status::InProgress => Some(("in progress".into(), t.accent)),
-        Status::Blocked => Some(("blocked".into(), t.error)),
+        Status::InProgress => Some(("in progress".into(), tokens::running(t))),
+        Status::Blocked => Some(("blocked".into(), t.text2)),
         Status::Deferred => Some(("deferred".into(), t.dim)),
         Status::Closed => Some((raw_label(r), t.dim)),
         Status::Open => None,
@@ -42,30 +43,18 @@ pub(crate) fn status_meta(t: &Theme, r: &Row) -> Option<(String, Hsla)> {
 impl Render for Work {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let t = theme(cx).clone();
-        let (rows, chosen) = self.list_rows(&t, cx);
-        // The row the keys reached stays in view.
-        if std::mem::take(&mut self.reveal)
-            && let Some(at) = chosen
-        {
-            self.list_scroll.scroll_to_item(at);
-        }
-        let body = div()
-            .id("work-list")
-            .flex_1()
-            .min_h_0()
-            .overflow_y_scroll()
-            .track_scroll(&self.list_scroll)
-            .flex()
-            .flex_col()
-            .children(rows);
-        let list = pane::list_wide_frame(&t, self.list_head(&t, cx), body);
+        let list = self.list_column(&t, cx);
         let detail = match self.shown_row() {
             Some(row) => self.detail(&t, row, Place::Page, cx),
             // The list says why it holds nothing; the detail stays clear.
             None => pane::detail(&t, "work-detail", pane::head(&t), div()),
         };
-        pane::page(&t, list, detail)
-            .id("work")
+        let page = match self.layout {
+            Layout::Tree => pane::page(&t, list, detail),
+            Layout::Strip => self.strip_page(&t, list, detail, cx),
+            Layout::Time => self.time_page(&t, list, detail, cx),
+        };
+        page.id("work")
             .key_context("Work")
             .track_focus(&self.focus)
             .font_family(FAMILY)
@@ -92,19 +81,129 @@ impl Work {
         if self.board.projects.is_empty() {
             return "No projects are configured on this node: add a `beads` or `github` line to its work settings.".into();
         }
+        if !self.query.trim().is_empty() {
+            return format!("Nothing matches “{}”.", self.query.trim());
+        }
+        if self.layout != Layout::Tree && (self.range.is_some() || self.state.is_some()) {
+            let what = match (self.layout, self.moved) {
+                (Layout::Time, Moved::Opened) => "Nothing was opened",
+                (Layout::Time, Moved::Closed) => "Nothing was finished",
+                (Layout::Time, Moved::Stuck) => "Nothing sat untouched",
+                _ => "Nothing moved",
+            };
+            return match self.range {
+                Some(r) => format!("{what} {}.", on_days(r)),
+                None => "Nothing here is in that state.".into(),
+            };
+        }
+        if self.every && self.layout != Layout::Tree {
+            return "Nothing is open.".into();
+        }
         let Some(p) = self.project(cx) else {
             return "Reading work…".into();
         };
         let info = &self.board.projects[p];
-        if !self.query.trim().is_empty() {
-            format!("Nothing matches “{}”.", self.query.trim())
-        } else if let Some(e) = &info.error {
+        if let Some(e) = &info.error {
             format!("{} could not be read: {}", info.label, e.trim())
         } else if !info.read {
             format!("Reading {}…", info.label)
         } else {
             format!("Nothing open in {}.", info.label)
         }
+    }
+
+    /// The list column: its head, a line saying the project could not be
+    /// read when so, and the rows.
+    fn list_column(&mut self, t: &Theme, cx: &mut Context<Self>) -> Div {
+        let head = self.list_head(t, cx);
+        let mut body = div().flex_1().min_h_0().flex().flex_col();
+        if !self.picking
+            && let Some(p) = self
+                .project(cx)
+                .filter(|_| !self.every || self.layout == Layout::Tree)
+        {
+            let info = &self.board.projects[p];
+            let trouble = info
+                .error
+                .as_ref()
+                .map(|e| format!("Not read: {}", e.trim()))
+                .or_else(|| {
+                    info.unwatched
+                        .as_ref()
+                        .map(|w| format!("Not watched: {}", w.trim()))
+                });
+            if let Some(trouble) = trouble.filter(|_| info.read) {
+                body = body.child(pane::label(t, trouble).text_color(t.error));
+            }
+        }
+        if self.picking {
+            let (rows, chosen) = self.project_rows(t, cx);
+            if std::mem::take(&mut self.reveal)
+                && let Some(at) = chosen
+            {
+                self.list_scroll.scroll_to_item(at);
+            }
+            body = body.child(
+                div()
+                    .id("work-list")
+                    .flex_1()
+                    .min_h_0()
+                    .overflow_y_scroll()
+                    .track_scroll(&self.list_scroll)
+                    .flex()
+                    .flex_col()
+                    .children(rows),
+            );
+        } else if self.entries.is_empty() {
+            body = body.child(pane::empty(t, self.why_empty(cx), None));
+        } else {
+            let shown = self.shown_row();
+            if std::mem::take(&mut self.reveal)
+                && let Some(at) = self
+                    .entries
+                    .iter()
+                    .position(|e| matches!(e, Entry::Item { row, .. } if Some(*row) == shown))
+            {
+                self.rows_scroll
+                    .scroll_to_item(at, gpui::ScrollStrategy::Nearest);
+            }
+            let n = self.entries.len();
+            body = body.child(
+                uniform_list(
+                    "work-list",
+                    n,
+                    cx.processor(move |w, range: std::ops::Range<usize>, _, cx| {
+                        let t = theme(cx).clone();
+                        let shown = w.shown_row();
+                        range
+                            .filter_map(|at| Some((at, w.entries.get(at)?.clone())))
+                            .map(|(at, entry)| match entry {
+                                Entry::Item { row, .. } => {
+                                    w.item_row(&t, at, &entry, shown == Some(row), cx)
+                                }
+                                Entry::Label(text) => list_label(&t, text).into_any_element(),
+                                Entry::More(n) => {
+                                    list_label(&t, format!("{n} more: add a word to narrow it"))
+                                        .into_any_element()
+                                }
+                            })
+                            // Each row takes the list's whole width.
+                            .map(|row| {
+                                div()
+                                    .w_full()
+                                    .flex()
+                                    .flex_col()
+                                    .child(row)
+                                    .into_any_element()
+                            })
+                            .collect::<Vec<_>>()
+                    }),
+                )
+                .track_scroll(&self.rows_scroll)
+                .flex_1(),
+            );
+        }
+        pane::list_wide_frame(t, head, body)
     }
 
     fn list_head(&self, t: &Theme, cx: &mut Context<Self>) -> Div {
@@ -122,69 +221,38 @@ impl Work {
             };
             return pane::head(t).child(field).child(act);
         }
-        let label = self
-            .project(cx)
-            .map(|p| self.board.projects[p].label.clone())
-            .unwrap_or_else(|| "Project".into());
-        pane::head(t).child(field).child(
-            pane::act(t, "work-project", label)
-                .debug_selector(|| "work-project".into())
-                .max_w(px(PROJECT_ACT_W))
-                .overflow_hidden()
-                .whitespace_nowrap()
-                .text_ellipsis()
-                .tooltip(kit::tip("Choose the project (P)"))
-                .on_click(cx.listener(|w, _, window, cx| w.start_picking(window, cx))),
-        )
+        let mut head = pane::head(t).child(field);
+        if self.layout == Layout::Tree {
+            let label = self
+                .project(cx)
+                .map(|p| self.board.projects[p].label.clone())
+                .unwrap_or_else(|| "Project".into());
+            head = head.child(
+                pane::act(t, "work-project", label)
+                    .debug_selector(|| "work-project".into())
+                    .max_w(px(PROJECT_ACT_W))
+                    .overflow_hidden()
+                    .whitespace_nowrap()
+                    .text_ellipsis()
+                    .tooltip(kit::tip("Choose the project (P)"))
+                    .on_click(cx.listener(|w, _, window, cx| w.start_picking(window, cx))),
+            );
+        }
+        head.child(self.layout_act(t, cx))
     }
 
-    /// The list's rows, and which of them is the one chosen.
-    fn list_rows(&self, t: &Theme, cx: &mut Context<Self>) -> (Vec<AnyElement>, Option<usize>) {
-        if self.picking {
-            return self.project_rows(t, cx);
-        }
-        let mut out: Vec<AnyElement> = Vec::new();
-        if let Some(p) = self.project(cx) {
-            let info = &self.board.projects[p];
-            let trouble = info
-                .error
-                .as_ref()
-                .map(|e| format!("Not read: {}", e.trim()))
-                .or_else(|| {
-                    info.unwatched
-                        .as_ref()
-                        .map(|w| format!("Not watched: {}", w.trim()))
-                });
-            if let Some(trouble) = trouble.filter(|_| info.read) {
-                out.push(
-                    pane::label(t, trouble)
-                        .text_color(t.error)
-                        .into_any_element(),
-                );
-            }
-        }
-        if self.entries.is_empty() {
-            out.push(pane::empty(t, self.why_empty(cx), None).into_any_element());
-            return (out, None);
-        }
-        let shown = self.shown_row();
-        let mut chosen = None;
-        for (at, entry) in self.entries.iter().enumerate() {
-            if matches!(entry, Entry::Item { row, .. } if Some(*row) == shown) {
-                chosen = Some(out.len());
-            }
-            out.push(match *entry {
-                Entry::Item { row, .. } => self.item_row(t, at, entry, shown == Some(row), cx),
-                Entry::Label(text) => pane::label(t, text).into_any_element(),
-                Entry::More(n) => {
-                    pane::label(t, format!("{n} more: add a word to narrow it")).into_any_element()
-                }
-            });
-        }
-        (out, chosen)
+    /// The layout in use, by name; a press moves to the next.
+    fn layout_act(&self, t: &Theme, cx: &mut Context<Self>) -> Stateful<Div> {
+        pane::act(t, "work-layout", self.layout.name())
+            .debug_selector(|| "work-layout".into())
+            .tooltip(kit::tip("Layout: tree, strip or time (V)"))
+            .on_click(cx.listener(|w, _, _, cx| w.set_layout(w.layout.next(), true, cx)))
     }
 
-    fn item_row(
+    /// A row of the list: its state, its title, what kind of work it is
+    /// when not a plain task, a high priority, its project when another's,
+    /// and how long since it last moved.
+    pub(crate) fn item_row(
         &self,
         t: &Theme,
         at: usize,
@@ -197,19 +265,49 @@ impl Work {
         };
         let r = &self.board.rows[row];
         let selector = format!("work-row-{}", r.id);
-        let status = status_meta(t, r);
         let project = away.then(|| self.board.projects[r.project].label.clone());
+        let quiet = matches!(
+            r.status,
+            Status::Closed | Status::Deferred | Status::Blocked
+        );
+        // Only what changes what the operator does next earns a word: a
+        // bug, and work marked most urgent.
+        let kind = (r.kind == "bug").then(|| r.kind.clone());
+        let priority = r.priority.filter(|p| *p == 0);
+        let age = r
+            .closed
+            .filter(|_| r.status == Status::Closed)
+            .or(r.updated)
+            .map(|u| when::short_age(u, now_ms()));
         pane::row(t, ("work-row", at), chosen)
             .debug_selector(move || selector)
+            .h(px(size::ROW))
             .pl(px(
                 size::ROW_PAD - size::ROW_INSET + depth.min(MAX_DEPTH) as f32 * INDENT
             ))
+            .child(glyph(t, r))
             .child(
                 pane::cell(r.title.clone())
-                    .when(r.status == Status::Closed, |d| d.text_color(t.dim)),
+                    .when(quiet && !chosen, |d| d.text_color(t.dim))
+                    .when(!quiet && !chosen, |d| d.text_color(t.text)),
             )
-            .children(status.map(|(s, c)| pane::meta(t, s, Some(c))))
-            .children(project.map(|p| pane::meta(t, p, None)))
+            .children(kind.map(|k| pane::meta(t, k, None)))
+            .children(priority.map(|p| {
+                pane::meta(t, format!("P{p}"), Some(t.text)).font_weight(FontWeight::SEMIBOLD)
+            }))
+            .children(project.map(|p| {
+                pane::meta(t, p, None)
+                    .max_w(px(AWAY_W))
+                    .overflow_hidden()
+                    .whitespace_nowrap()
+                    .text_ellipsis()
+            }))
+            .child(
+                pane::meta(t, age.unwrap_or_default(), None)
+                    .w(px(AGE_W))
+                    .flex()
+                    .justify_end(),
+            )
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(move |w, _, window, cx| {
@@ -392,10 +490,7 @@ impl Work {
             body = body.child(pane::section(t, "Branch").child(line));
         }
         let fam = &r.family;
-        let parent: Vec<String> = fam.parent.iter().cloned().collect();
-        body = body
-            .children(self.family(t, PART_OF, &parent, place, cx))
-            .children(self.family(t, "Blocked by", &fam.blockers, place, cx));
+        body = body.children(self.relations(t, row, place, cx));
         let text = prose::link_ids(r.body.trim(), &|id| {
             self.board.find_from(id, r.project).is_some()
         });
@@ -451,14 +546,7 @@ impl Work {
         } else {
             &fam.pulls
         };
-        let none = Vec::new();
-        let blocking = if r.pull.is_some() {
-            &none
-        } else {
-            &fam.blocking
-        };
         body.children(self.family(t, "Children", &fam.children, place, cx))
-            .children(self.family(t, "Blocking", blocking, place, cx))
             .children(self.family(t, pulls_label, pulls, place, cx))
     }
 
@@ -501,6 +589,7 @@ impl Work {
                     let selector = format!("work-family-{label}-{}", r.id);
                     let status = status_meta(t, r);
                     row.debug_selector(move || selector)
+                        .child(glyph(t, r))
                         .child(
                             pane::cell(r.title.clone())
                                 .when(r.status == Status::Closed, |d| d.text_color(t.dim)),
@@ -565,10 +654,201 @@ impl Work {
 
 const PART_OF: &str = "Part of";
 
+impl Work {
+    /// What the item stands in: what it is part of, what it waits on and
+    /// what waits on it, each a card that shows it. Finished blockers fold
+    /// into one card until asked for; a reference no store read stays as
+    /// written.
+    fn relations(
+        &self,
+        t: &Theme,
+        row: usize,
+        place: Place,
+        cx: &mut Context<Self>,
+    ) -> Option<Div> {
+        let r = &self.board.rows[row];
+        let fam = &r.family;
+        let blocking: &[String] = if r.pull.is_some() { &[] } else { &fam.blocking };
+        let groups: [(&'static str, &[String]); 3] = [
+            (PART_OF, fam.parent.as_slice()),
+            ("Blocked by", &fam.blockers),
+            ("Blocking", blocking),
+        ];
+        let closed =
+            |i: Option<usize>| i.is_some_and(|i| self.board.rows[i].status == Status::Closed);
+        let mut cards: Vec<AnyElement> = Vec::new();
+        for (label, refs) in groups {
+            let mut found: Vec<(usize, &String, Option<usize>)> = refs
+                .iter()
+                .enumerate()
+                .map(|(k, reference)| (k, reference, self.board.find(reference)))
+                .collect();
+            found.sort_by_key(|(k, _, f)| (closed(*f), *k));
+            let finished = found.iter().filter(|(_, _, f)| closed(*f)).count();
+            let fold = finished > 0 && label != PART_OF && !self.show_finished;
+            for (k, reference, f) in found {
+                if fold && closed(f) {
+                    continue;
+                }
+                cards.push(self.card(t, label, k, reference, f, place, cx));
+            }
+            if fold {
+                let selector = format!("work-family-{label}-finished");
+                cards.push(
+                    card_frame(t, SharedString::from(format!("card-{label}-finished")))
+                        .debug_selector(move || selector)
+                        .justify_center()
+                        .child(card_label(t, label))
+                        .child(
+                            div()
+                                .text_color(t.dim)
+                                .child(format!("{finished} finished")),
+                        )
+                        .on_click(cx.listener(|w, _, _, cx| {
+                            w.show_finished = true;
+                            cx.notify();
+                        }))
+                        .into_any_element(),
+                );
+            }
+        }
+        if cards.is_empty() {
+            return None;
+        }
+        Some(
+            div()
+                .flex()
+                .flex_wrap()
+                .gap(px(size::HEAD_GAP))
+                .children(cards),
+        )
+    }
+
+    /// One related item as a card: how it relates, its state, its title
+    /// over two lines at most, its id and how long since it moved.
+    #[allow(clippy::too_many_arguments)]
+    fn card(
+        &self,
+        t: &Theme,
+        label: &'static str,
+        k: usize,
+        reference: &str,
+        found: Option<usize>,
+        place: Place,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let frame = card_frame(t, SharedString::from(format!("card-{label}-{k}")));
+        let Some(i) = found else {
+            let selector = format!("work-family-{label}-{reference}");
+            return frame
+                .debug_selector(move || selector)
+                .cursor_default()
+                .child(card_label(t, label))
+                .child(div().text_color(t.dim).child(reference.to_string()))
+                .into_any_element();
+        };
+        let r = &self.board.rows[i];
+        let selector = format!("work-family-{label}-{}", r.id);
+        let done = r.status == Status::Closed;
+        let state = status_meta(t, r).map(|(s, c)| div().text_color(c).child(s));
+        let age = r.updated.map(|u| when::short_age(u, now_ms()));
+        frame
+            .debug_selector(move || selector)
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .gap(px(SPACE_XS))
+                    .child(card_label(t, label))
+                    .child(div().flex_1())
+                    .child(glyph(t, r).w_auto()),
+            )
+            .child(
+                div()
+                    .line_clamp(2)
+                    .text_color(if done { t.dim } else { t.text })
+                    .child(r.title.clone()),
+            )
+            .child(
+                div()
+                    .flex()
+                    .gap(px(size::HEAD_GAP))
+                    .text_size(px(size::SMALL))
+                    .text_color(t.dim)
+                    .child(r.written_id(&self.board))
+                    .children(state)
+                    .child(div().flex_1())
+                    .children(age),
+            )
+            .on_click(cx.listener(move |w, _, _, cx| w.go(i, place, cx)))
+            .into_any_element()
+    }
+}
+
+/// A card's frame: a raised tile, as wide as the room allows within its
+/// bounds.
+fn card_frame(t: &Theme, id: SharedString) -> Stateful<Div> {
+    div()
+        .id(id)
+        .flex_1()
+        .min_w(px(CARD_MIN))
+        .max_w(px(CARD_MAX))
+        .p(px(CARD_PAD))
+        .rounded(px(size::RADIUS))
+        .bg(t.surface)
+        .border_1()
+        .border_color(t.divider)
+        .cursor_pointer()
+        .hover(|d| d.bg(t.raised))
+        .flex()
+        .flex_col()
+        .gap(px(SPACE_XS))
+}
+
+fn card_label(t: &Theme, label: &'static str) -> Div {
+    div()
+        .text_size(px(size::SMALL))
+        .text_color(t.dim)
+        .child(label)
+}
+
 /// The tracker's own status word, as the operator knows it.
 pub(crate) fn raw_label(r: &Row) -> String {
     match (r.status, r.raw_status.as_str()) {
         (Status::Blocked, "open") => "blocked".into(),
         (_, raw) => raw.replace('_', " "),
+    }
+}
+
+/// A row's state as a mark: open a ring, under way half full in the
+/// running colour, blocked full, deferred a dash, finished a tick in the
+/// done colour.
+pub(crate) fn glyph(t: &Theme, r: &Row) -> Div {
+    let (mark, ink) = match r.status {
+        Status::Open => ("○", t.dim),
+        Status::InProgress => ("◐", tokens::running(t)),
+        Status::Blocked => ("●", t.text2),
+        Status::Deferred => ("–", t.dim),
+        Status::Closed => ("✓", tokens::done(t)),
+    };
+    div().flex_none().w(px(GLYPH_W)).text_color(ink).child(mark)
+}
+
+/// A label between a list's rows, as high as a row so the list scrolls
+/// evenly.
+fn list_label(t: &Theme, text: impl Into<SharedString>) -> Div {
+    div()
+        .h(px(size::ROW))
+        .flex()
+        .items_end()
+        .child(pane::label(t, text).pt_0())
+}
+
+/// `on Nov 3`, or `from Nov 3 to Nov 9`.
+pub(crate) fn on_days(r: Range) -> String {
+    if r.from == r.to {
+        format!("on {}", range_label(r))
+    } else {
+        format!("from {}", range_label(r).replace(" – ", " to "))
     }
 }

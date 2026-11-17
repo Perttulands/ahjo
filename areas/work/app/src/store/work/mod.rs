@@ -6,6 +6,7 @@
 pub mod links;
 pub mod outline;
 pub mod prose;
+pub mod timeline;
 pub mod when;
 
 #[cfg(test)]

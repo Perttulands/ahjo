@@ -69,6 +69,20 @@ pub fn age(ms: u64, now: u64) -> String {
     }
 }
 
+/// How long ago, as a row says it in four characters at most: `now`,
+/// `40m`, `3h`, `12d`, `5mo`.
+pub fn short_age(ms: u64, now: u64) -> String {
+    let minutes = now.saturating_sub(ms) / 60_000;
+    let days = minutes / 1440;
+    match minutes {
+        0 => "now".into(),
+        1..60 => format!("{minutes}m"),
+        _ if minutes < 1440 => format!("{}h", minutes / 60),
+        _ if days < 100 => format!("{days}d"),
+        _ => format!("{}mo", days / 30),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -92,5 +106,10 @@ mod tests {
         assert_eq!(age(now - 40 * 60_000, now), "40 min");
         assert_eq!(age(now - 3 * 3_600_000, now), "3 h");
         assert_eq!(age(now - 3 * 86_400_000, now), "3 days");
+        assert_eq!(short_age(now - 20_000, now), "now");
+        assert_eq!(short_age(now - 40 * 60_000, now), "40m");
+        assert_eq!(short_age(now - 23 * 3_600_000, now), "23h");
+        assert_eq!(short_age(now - 99 * 86_400_000, now), "99d");
+        assert_eq!(short_age(now - 150 * 86_400_000, now), "5mo");
     }
 }
