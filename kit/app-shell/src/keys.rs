@@ -188,7 +188,18 @@ impl Render for KeysPanel {
                     .child(div().p(px(size::HEAD_PAD)).child(self.search.clone()))
                     .child(kit::rule(&t))
                     .child(head)
-                    .child(list),
+                    .child(list)
+                    // Zoom is no chord but the same everywhere it applies.
+                    .child(kit::rule(&t))
+                    .child(
+                        div()
+                            .debug_selector(|| "keys-zoom".into())
+                            .px(px(size::ROW_PAD))
+                            .py(px(size::HEAD_GAP))
+                            .text_size(px(size::SMALL))
+                            .text_color(t.dim)
+                            .child(ahjo_app_kit::zoom::HINT),
+                    ),
             )
     }
 }

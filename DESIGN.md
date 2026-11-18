@@ -26,7 +26,10 @@ A page is judged by three questions, in this order:
   name and remembers how the operator launches. Sessions are shared with
   other places. A session fits the window it is shown in; nothing opened over
   it resizes or disturbs it, and nothing over it lets a click or a key
-  through to it.
+  through to it. Peek is a full terminal on a session without a window:
+  typed into, scrolled and selected as in a window, at the session's own
+  size; Esc goes to the session, Shift+Esc or a click outside closes it,
+  and Attach gives it a window sized to it.
 - **Files.** Read and change what agents wrote, beside the session that wrote
   it. At least as good as VS Code at finding, reading and editing a file.
   Being redesigned from a prototype.
@@ -76,6 +79,10 @@ adds its own panel of missions and runs.
 - **Type has a hierarchy.** Headers, group labels, numbers worth reading at a
   glance and comfortable body text are different sizes and weights, all from
   tokens.
+- **One zoom.** What the operator reads or works in (a terminal, code and
+  its changes, a picture, a page read) zooms the same way: Ctrl+wheel over
+  it, Ctrl+= and Ctrl+-, Ctrl+0 back. Each keeps its own size across runs
+  and says it when it changes.
 - **Words only when they change what you do.** Keys live in tooltips and the
   Keys overlay.
 - **Send is the same everywhere.** Anything you can look at can be sent to a

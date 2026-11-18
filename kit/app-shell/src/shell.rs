@@ -461,7 +461,7 @@ impl Shell {
         let keyboard = Keyboard {
             on: hub.settings.keys,
             leader: self.leader,
-            surfaces: !hub.stack.is_empty(),
+            surfaces: hub.stack.top().is_some_and(|s| s.escape_closes()),
         };
         match chords::route(&k, &keyboard, &all, Instant::now()) {
             Verdict::Pass => {}

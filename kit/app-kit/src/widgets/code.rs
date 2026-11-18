@@ -128,6 +128,8 @@ pub struct Code {
     found: Vec<Range<usize>>,
     /// The line at the top and the caret's line as last told (`Moved`).
     told: (usize, usize),
+    /// The text's size in pixels: `size::TEXT` unless the view zooms it.
+    text_px: f32,
 }
 
 impl EventEmitter<CodeEvent> for Code {}
@@ -138,8 +140,8 @@ impl Focusable for Code {
     }
 }
 
-fn line_height() -> Pixels {
-    px((size::TEXT * 1.55).round())
+fn line_height(text_px: f32) -> Pixels {
+    px((text_px * 1.55).round())
 }
 
 /// Letters a wrapped line's later rows stand in by, under its own indent
@@ -260,6 +262,7 @@ impl Code {
             cols: 0,
             row_starts: vec![0, 1],
             found: vec![],
+            text_px: size::TEXT,
             told: (0, 0),
             ruler: None,
         }
@@ -479,6 +482,19 @@ impl Code {
 
     pub fn wraps(&self) -> bool {
         self.wrap
+    }
+
+    /// Draws the text at `text_px` pixels (a zoom), keeping the line at the
+    /// top in view.
+    pub fn set_text_size(&mut self, text_px: f32, cx: &mut Context<Self>) {
+        if self.text_px != text_px {
+            self.text_px = text_px;
+            cx.notify();
+        }
+    }
+
+    pub fn text_size(&self) -> f32 {
+        self.text_px
     }
 
     /// Letters line `n` shows, tabs as spaces.
@@ -733,7 +749,7 @@ impl Code {
 
     fn rows_in_view(&self) -> usize {
         self.area
-            .map(|b| (b.size.height / line_height()).floor() as usize)
+            .map(|b| (b.size.height / line_height(self.text_px)).floor() as usize)
             .unwrap_or(20)
             .max(1)
     }
@@ -1109,13 +1125,13 @@ impl Code {
     }
 
     fn wheel(&mut self, e: &ScrollEvent, _: &mut Window, cx: &mut Context<Self>) {
-        let d = e.delta.pixel_delta(line_height());
+        let d = e.delta.pixel_delta(line_height(self.text_px));
         let (dx, dy) = if e.modifiers.shift && d.x == px(0.) {
             (d.y, px(0.))
         } else {
             (d.x, d.y)
         };
-        self.scroll_lines(-(dy / line_height()), cx);
+        self.scroll_lines(-(dy / line_height(self.text_px)), cx);
         if !self.wrap {
             self.left = (self.left - dx).max(px(0.));
         }
@@ -1125,14 +1141,14 @@ impl Code {
 
     fn index_at(&self, p: Point<Pixels>, window: &mut Window) -> usize {
         let Some(b) = self.area else { return 0 };
-        let row = ((p.y - b.origin.y) / line_height() + self.top).floor();
+        let row = ((p.y - b.origin.y) / line_height(self.text_px) + self.top).floor();
         let (n, k) = self.line_at_row(row);
         let r = self.line_range(n);
         let line = &self.text[r.clone()];
         let shown = expand(line);
         let segs = self.segments(&shown);
         let seg = segs[k.min(segs.len() - 1)].clone();
-        let shaped = shape(window, &shown[seg.clone()], MEASURE, &[]);
+        let shaped = shape(window, self.text_px, &shown[seg.clone()], MEASURE, &[]);
         let lead = self.row_x(&shown, k.min(segs.len() - 1), self.char_w);
         let x = (p.x - b.origin.x + self.left - lead).max(px(0.));
         r.start + from_shown(line, seg.start + shaped.closest_index_for_x(x))
@@ -1200,6 +1216,7 @@ const MEASURE: gpui::Hsla = gpui::Hsla {
 /// theirs.
 fn shape(
     window: &mut Window,
+    text_px: f32,
     text: &str,
     color: Hsla,
     coloured: &[(Range<usize>, Hsla)],
@@ -1234,7 +1251,7 @@ fn shape(
     }
     window
         .text_system()
-        .shape_line(text, px(size::TEXT), &runs, None)
+        .shape_line(text, px(text_px), &runs, None)
 }
 
 impl EntityInputHandler for Code {
@@ -1327,12 +1344,12 @@ impl EntityInputHandler for Code {
             .iter()
             .position(|s| at_shown < s.end)
             .unwrap_or(segs.len() - 1);
-        let shaped = shape(window, &shown[segs[k].clone()], MEASURE, &[]);
+        let shaped = shape(window, self.text_px, &shown[segs[k].clone()], MEASURE, &[]);
         let x = shaped.x_for_index(at_shown - segs[k].start) + self.row_x(&shown, k, self.char_w);
-        let y = ((self.row_starts[n] + k) as f32 - self.top) * line_height();
+        let y = ((self.row_starts[n] + k) as f32 - self.top) * line_height(self.text_px);
         Some(Bounds::new(
             point(b.origin.x + x - self.left, b.origin.y + y),
-            sz(px(2.), line_height()),
+            sz(px(2.), line_height(self.text_px)),
         ))
     }
     fn character_index_for_point(
@@ -1402,9 +1419,10 @@ impl Element for CodeElement {
     ) -> Painted {
         let t = theme(cx).clone();
         let c = self.code.read(cx);
-        let lh = line_height();
+        let tp = c.text_px;
+        let lh = line_height(tp);
         let digits = c.starts.len().to_string().len().max(3);
-        let char_w = shape(window, "0", t.text, &[]).width;
+        let char_w = shape(window, tp, "0", t.text, &[]).width;
         let gutter_w = char_w * digits as f32 + px(24.);
         let all = c.rows_total().max(1) as f32;
         let ruled = !c.marks.is_empty() || !c.found.is_empty() || all * lh > bounds.size.height;
@@ -1511,7 +1529,7 @@ impl Element for CodeElement {
                         )
                     })
                     .collect();
-                let shaped = shape(window, &shown[seg.clone()], t.text, &part);
+                let shaped = shape(window, tp, &shown[seg.clone()], t.text, &part);
                 let mark = c
                     .marks
                     .binary_search_by_key(&n, |m| m.0)
@@ -1543,6 +1561,7 @@ impl Element for CodeElement {
                 if k == 0 {
                     let num = shape(
                         window,
+                        tp,
                         &format!("{:>digits$}", n + 1),
                         if n == caret_line && c.editable {
                             t.text2
@@ -1630,13 +1649,16 @@ impl Element for CodeElement {
         cx: &mut App,
     ) {
         let t = theme(cx).clone();
-        let focus = self.code.read(cx).focus.clone();
+        let (focus, tp) = {
+            let c = self.code.read(cx);
+            (c.focus.clone(), c.text_px)
+        };
         window.handle_input(
             &focus,
             ElementInputHandler::new(bounds, self.code.clone()),
             cx,
         );
-        let lh = line_height();
+        let lh = line_height(tp);
         window.with_content_mask(Some(gpui::ContentMask { bounds }), |window| {
             window.paint_quad(fill(
                 Bounds::new(

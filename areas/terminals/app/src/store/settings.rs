@@ -5,6 +5,7 @@
 use super::workspace::Workspace;
 use crate::theme::size;
 use ahjo_app_kit::Setting;
+use ahjo_app_kit::zoom::{self, Zoom};
 use serde::{Deserialize, Deserializer, Serialize};
 use std::collections::BTreeMap;
 
@@ -12,6 +13,9 @@ use std::collections::BTreeMap;
 #[serde(default)]
 pub struct Settings {
     pub font_size: f32,
+    /// Peek's own text size, zoomed with Ctrl+wheel; none is `font_size`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub peek_font: Option<u8>,
     /// Copy a selection to the clipboard as the mouse is released.
     pub copy_on_select: bool,
     pub collapsed_groups: Vec<String>,
@@ -90,6 +94,7 @@ impl Default for Settings {
     fn default() -> Self {
         Self {
             font_size: size::TERM_DEFAULT,
+            peek_font: None,
             copy_on_select: true,
             collapsed_groups: vec![],
             recent_targets: vec![],
@@ -129,18 +134,24 @@ impl Settings {
         self.event_desktop = fresh.event_desktop;
     }
 
-    /// The font size Ctrl and `key` set, as browsers and terminals do:
-    /// `=` (or `+`) a point larger, `-` a point smaller, `0` the default.
-    /// `None` for another key, or at the end of the range.
-    pub fn font_for_key(&self, key: &str) -> Option<f32> {
-        let to = match key {
-            "=" | "+" => self.font_size + 1.,
-            "-" => self.font_size - 1.,
-            "0" => size::TERM_DEFAULT,
-            _ => return None,
-        }
-        .clamp(size::TERM_MIN, size::TERM_MAX);
-        (to != self.font_size).then_some(to)
+    /// A terminal's text size: its own, else the Settings size.
+    pub fn font(&self, own: Option<u8>) -> f32 {
+        own.map_or(self.font_size, f32::from)
+            .clamp(size::TERM_MIN, size::TERM_MAX)
+    }
+
+    /// A terminal's own text size after `n` steps of a zoom, as browsers
+    /// and terminals step it: a pixel each, within the range. A reset, or
+    /// a zoom that lands on the Settings size, leaves it none, so it
+    /// follows Settings again. `None` when nothing changes.
+    pub fn zoom_font(&self, own: Option<u8>, z: Zoom, n: i32) -> Option<Option<u8>> {
+        let to = match z {
+            Zoom::Reset => return own.is_some().then_some(None),
+            Zoom::In => zoom::step(self.font(own), n, 1., size::TERM_MIN, size::TERM_MAX)?,
+            Zoom::Out => zoom::step(self.font(own), -n, 1., size::TERM_MIN, size::TERM_MAX)?,
+        };
+        let own_now = (to != self.font_size).then_some(to.round() as u8);
+        (own_now != own).then_some(own_now)
     }
 
     /// Brings what was read within bounds.
@@ -165,18 +176,24 @@ mod tests {
     use super::*;
 
     #[test]
-    fn ctrl_keys_step_the_font_within_its_range() {
-        let at = |font_size| Settings {
-            font_size,
+    fn a_zoom_steps_a_terminals_own_size_within_its_range() {
+        let s = Settings {
+            font_size: 14.,
             ..Settings::default()
         };
-        assert_eq!(at(14.).font_for_key("="), Some(15.));
-        assert_eq!(at(14.).font_for_key("+"), Some(15.));
-        assert_eq!(at(14.).font_for_key("-"), Some(13.));
-        assert_eq!(at(18.).font_for_key("0"), Some(size::TERM_DEFAULT));
-        assert_eq!(at(size::TERM_MAX).font_for_key("="), None);
-        assert_eq!(at(size::TERM_MIN).font_for_key("-"), None);
-        assert_eq!(at(14.).font_for_key("x"), None);
+        assert_eq!(s.zoom_font(None, Zoom::In, 1), Some(Some(15)));
+        assert_eq!(s.zoom_font(None, Zoom::Out, 2), Some(Some(12)));
+        assert_eq!(s.zoom_font(Some(18), Zoom::In, 3), Some(Some(21)));
+        // Back on the Settings size it follows Settings again.
+        assert_eq!(s.zoom_font(Some(15), Zoom::Out, 1), Some(None));
+        assert_eq!(s.zoom_font(Some(18), Zoom::Reset, 1), Some(None));
+        assert_eq!(s.zoom_font(None, Zoom::Reset, 1), None);
+        let top = size::TERM_MAX as u8;
+        assert_eq!(s.zoom_font(Some(top), Zoom::In, 1), None);
+        let bottom = size::TERM_MIN as u8;
+        assert_eq!(s.zoom_font(Some(bottom), Zoom::Out, 1), None);
+        assert_eq!(s.font(Some(18)), 18.);
+        assert_eq!(s.font(None), 14.);
     }
 
     fn parse(text: &str) -> Option<Settings> {
@@ -224,7 +241,7 @@ mod tests {
         let back = parse(&serde_json::to_string(&s).unwrap()).unwrap();
         assert_eq!(back, s);
         let odd = parse(r#"{"font_size":40,"workspace":{"tabs":[]}}"#).unwrap();
-        assert_eq!(odd.font_size, 20.);
+        assert_eq!(odd.font_size, size::TERM_MAX);
         assert_eq!(odd.workspace, Workspace::default());
         // A device plays tones only once asked to, as CHROTE's.
         assert!(!odd.event_tone && odd.event_toast);

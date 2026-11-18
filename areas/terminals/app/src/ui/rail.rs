@@ -3,24 +3,23 @@
 //! this page's section of the side panel, so it shows on every page. On
 //! this page a click peeks, Ctrl+ and Shift+click pick rows to kill
 //! together, a drag puts the session in a window, the menu does the rest;
-//! on another page a click goes to the session here. Peek shows a session
-//! without sizing it.
+//! on another page a click goes to the session here. Peek is the session's
+//! terminal over the page, used as in a window, without sizing it.
 
-use super::page::{Act, MenuItem, Terminals};
+use super::page::{Act, MenuItem, PEEK_SLOT, Terminals};
 use super::place;
 use super::session_acts::Gesture;
 use super::tiles::{DragPreview, Dragged};
 use crate::store::devices;
 use crate::store::sessions::{self, Key};
 use crate::store::workspace::LinkState;
-use crate::term::paint::{self, Look};
 use crate::theme::{Theme, size, theme};
 use ahjo_app_kit::widgets::kit::{self, Kind};
 use ahjo_app_kit::widgets::pane;
 use ahjo_terminals_contract::{AgentEvent, EventKind, Session};
 use gpui::{
-    AnyElement, ContentMask, Context, Entity, FontWeight, MouseButton, MouseDownEvent,
-    Subscription, WeakEntity, Window, canvas, div, prelude::*, px,
+    AnyElement, Context, Entity, FontWeight, MouseButton, MouseDownEvent, Subscription, WeakEntity,
+    Window, div, prelude::*, px,
 };
 
 /// The rail as the side panel holds it: the page draws it, and it draws
@@ -503,6 +502,10 @@ impl Terminals {
         items
     }
 
+    /// Peek: the session in a terminal over the page, used as in a window
+    /// (typed into, pasted, scrolled back, selected, clicked) without
+    /// sizing it. Escape is its program's; Shift+Escape, Close or a click
+    /// outside closes it.
     pub fn render_peek(
         &mut self,
         _window: &mut Window,
@@ -511,24 +514,21 @@ impl Terminals {
         let t = theme(cx).clone();
         let p = self.peek.as_ref()?;
         let key = p.key.clone();
+        let pane = p.pane;
         let session = self.fleet.session(&key).cloned();
-        let font = self.settings.font_size;
-        let (screen, from_history) = match (&p.history, p.pane) {
-            (Some(h), _) => (Some(h.clone()), true),
-            (None, Some(pane)) => (self.fleet.screen(&key.node, pane), false),
-            _ => (None, false),
-        };
         // A device that went keeps its last screen here, saying since when.
         let away = (!self
             .fleet
             .get(&key.node)
             .is_some_and(|c| c.state == LinkState::Open))
         .then(|| self.away_since(&key.node));
-        let word = match (&away, from_history) {
-            (_, true) => format!("history, line {}", p.line.unwrap_or(0) + 1),
-            (Some(Some(at)), false) => format!("offline since {at}, last screen"),
-            (Some(None), false) => "offline, last screen".to_string(),
-            (None, false) => "peek".to_string(),
+        let word = match &away {
+            Some(Some(at)) => Some(format!("offline since {at}, last screen")),
+            Some(None) => Some("offline, last screen".to_string()),
+            None => self
+                .histories
+                .contains_key(&PEEK_SLOT)
+                .then(|| "reading back".to_string()),
         };
         let device = self
             .where_is(&key.node)
@@ -556,16 +556,17 @@ impl Terminals {
                     .whitespace_nowrap()
                     .child(key.name.clone()),
             )
-            .child(
+            .children(word.map(|w| {
                 div()
                     .flex_none()
                     .text_size(px(12.))
                     .text_color(t.dim)
-                    .child(word),
-            )
+                    .child(w)
+            }))
             .child(
                 kit::button(&t, "peek-attach", "Attach", Kind::Plain)
                     .debug_selector(|| "peek-attach".into())
+                    .tooltip(kit::tip("Put it in a window, sized to it"))
                     .on_click(cx.listener(move |s, _, window, cx| {
                         s.close(super::surface::PEEK, cx);
                         s.place(k1.clone(), window, cx);
@@ -579,56 +580,51 @@ impl Terminals {
                     },
                 )),
             )
+            // Escape is the program's here, unlike every other layer, so
+            // the way out says its key where it is seen.
             .child(
-                kit::button(&t, "peek-close", "Close", Kind::Quiet)
-                    .tooltip(kit::tip("Esc"))
-                    .on_click(cx.listener(|s, _, _, cx| s.close(super::surface::PEEK, cx))),
+                div()
+                    .flex()
+                    .items_center()
+                    .gap(px(6.))
+                    .child(
+                        kit::button(&t, "peek-close", "Close", Kind::Quiet)
+                            .debug_selector(|| "peek-close".into())
+                            .tooltip(kit::tip(
+                                "Shift+Esc, or a click outside. Esc goes to the session.",
+                            ))
+                            .on_click(cx.listener(|s, _, _, cx| s.close(super::surface::PEEK, cx))),
+                    )
+                    .child(
+                        div()
+                            .flex_none()
+                            .text_size(px(11.))
+                            .text_color(t.dim)
+                            .child("Shift+Esc"),
+                    ),
             );
-        let body: AnyElement = match (screen, session.is_some(), p.loading) {
-            (_, false, _) => kit::note(&t, format!("{} is not running.", key.name), None)
+        let live = match (&session, pane) {
+            (Some(s), Some(pane)) if away.is_none() => self.source(PEEK_SLOT, pane, s),
+            _ => None,
+        };
+        let body: AnyElement = match (live, &session) {
+            (Some(src), _) => self.term_body(PEEK_SLOT, src, true, &t, cx),
+            (None, None) => kit::note(&t, format!("{} is not running.", key.name), None)
                 .p(px(16.))
                 .into_any_element(),
-            (_, true, true) => kit::note(&t, "Reading the history…", None)
-                .p(px(16.))
-                .into_any_element(),
-            (Some(screen), true, false) => {
-                let tt = t.clone();
-                canvas(
-                    |_, _, _| (),
-                    move |b, _, window, cx| {
-                        let s = screen.lock();
-                        let m = paint::fit(window, b.size, s.cols, s.rows, font);
-                        let o = paint::origin(b, m, s.rows_to_show());
-                        window.with_content_mask(Some(ContentMask { bounds: b }), |window| {
-                            paint::paint(
-                                &s,
-                                m,
-                                o,
-                                Look {
-                                    theme: &tt,
-                                    cursor: !from_history,
-                                    focused: false,
-                                    link: &[],
-                                },
-                                window,
-                                cx,
-                            );
-                        });
+            (None, Some(_)) => {
+                let last = pane.and_then(|pane| self.fleet.screen(&key.node, pane));
+                let note = kit::note(
+                    &t,
+                    match away {
+                        Some(_) => format!("Waiting for {device}; it comes back by itself."),
+                        None => "Connecting…".to_string(),
                     },
+                    None,
                 )
-                .size_full()
-                .into_any_element()
+                .into_any_element();
+                self.detached_body(last, note, &t)
             }
-            (None, true, false) => kit::note(
-                &t,
-                match away {
-                    Some(_) => format!("Waiting for {device}; it comes back by itself."),
-                    None => "Connecting…".to_string(),
-                },
-                None,
-            )
-            .p(px(16.))
-            .into_any_element(),
         };
         Some(
             div()
@@ -636,6 +632,7 @@ impl Terminals {
                 .inset_0()
                 .occlude()
                 .track_focus(&self.peek_focus)
+                .on_key_down(cx.listener(Self::term_key))
                 .flex()
                 .items_center()
                 .justify_center()
@@ -654,24 +651,46 @@ impl Terminals {
                         .flex_col()
                         .bg(t.surface)
                         .border_1()
-                        .border_color(t.divider)
+                        .border_color(t.accent)
                         .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
-                        .on_scroll(cx.listener(|s, e: &gpui::ScrollEvent, _, cx| {
-                            if let Some(h) = s.peek.as_ref().and_then(|p| p.history.clone()) {
-                                let n = match e.delta {
-                                    gpui::ScrollDelta::Lines(l) => (l.y * 3.).round() as i32,
-                                    gpui::ScrollDelta::Pixels(p) => {
-                                        (f32::from(p.y) / 16.).round() as i32
-                                    }
-                                };
-                                h.lock()
-                                    .term
-                                    .scroll_display(alacritty_terminal::grid::Scroll::Delta(n));
-                                cx.notify();
-                            }
-                        }))
+                        .on_mouse_move(cx.listener(Self::term_mouse_move))
+                        .on_mouse_up(MouseButton::Left, cx.listener(Self::term_mouse_up))
+                        .on_mouse_up_out(MouseButton::Left, cx.listener(Self::term_mouse_up))
+                        .on_mouse_up(MouseButton::Middle, cx.listener(Self::term_mouse_up))
+                        .on_mouse_up(MouseButton::Right, cx.listener(Self::term_mouse_up))
+                        .on_scroll(cx.listener(Self::term_scroll))
                         .child(header)
-                        .child(div().flex_1().min_h_0().p(px(6.)).bg(t.term_bg).child(body)),
+                        .child(
+                            div()
+                                .id("peek-body")
+                                .debug_selector(|| "peek-body".into())
+                                .flex_1()
+                                .min_h_0()
+                                .flex()
+                                .flex_col()
+                                .on_mouse_down(
+                                    MouseButton::Left,
+                                    cx.listener(|s, e: &MouseDownEvent, window, cx| {
+                                        cx.stop_propagation();
+                                        s.tile_mouse_down(PEEK_SLOT, e, window, cx);
+                                    }),
+                                )
+                                .on_mouse_down(
+                                    MouseButton::Middle,
+                                    cx.listener(|s, e: &MouseDownEvent, window, cx| {
+                                        cx.stop_propagation();
+                                        s.tile_mouse_down(PEEK_SLOT, e, window, cx);
+                                    }),
+                                )
+                                .on_mouse_down(
+                                    MouseButton::Right,
+                                    cx.listener(|s, e: &MouseDownEvent, window, cx| {
+                                        cx.stop_propagation();
+                                        s.tile_mouse_down(PEEK_SLOT, e, window, cx);
+                                    }),
+                                )
+                                .child(body),
+                        ),
                 )
                 .into_any_element(),
         )

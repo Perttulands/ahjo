@@ -34,6 +34,10 @@ pub struct Window {
     pub sessions: Vec<Binding>,
     /// The tag on screen.
     pub active: usize,
+    /// Its own text size in pixels, zoomed with Ctrl+wheel; none is the
+    /// Settings size.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub font: Option<u8>,
 }
 
 /// A window as stored: today's, or one binding or none, as an app before
@@ -47,19 +51,29 @@ enum StoredWindow {
         sessions: Vec<Binding>,
         #[serde(default)]
         active: usize,
+        #[serde(default)]
+        font: Option<u8>,
     },
     Empty(()),
 }
 
 impl From<StoredWindow> for Window {
     fn from(s: StoredWindow) -> Self {
-        let (sessions, active) = match s {
-            StoredWindow::One(b) => (vec![b], 0),
-            StoredWindow::Tags { sessions, active } => (sessions, active),
-            StoredWindow::Empty(()) => (vec![], 0),
+        let (sessions, active, font) = match s {
+            StoredWindow::One(b) => (vec![b], 0, None),
+            StoredWindow::Tags {
+                sessions,
+                active,
+                font,
+            } => (sessions, active, font),
+            StoredWindow::Empty(()) => (vec![], 0, None),
         };
         let active = active.min(sessions.len().saturating_sub(1));
-        Self { sessions, active }
+        Self {
+            sessions,
+            active,
+            font,
+        }
     }
 }
 
@@ -184,6 +198,14 @@ impl Workspace {
     /// The binding window `i` of the active tab shows.
     pub fn shown(&self, i: usize) -> Option<&Binding> {
         self.windows().get(i)?.shown()
+    }
+
+    /// Gives window `i` of the active tab its own text size, or the
+    /// Settings size again (`None`).
+    pub fn set_font(&mut self, i: usize, font: Option<u8>) {
+        if let Some(w) = self.tab_mut().windows.get_mut(i) {
+            w.font = font;
+        }
     }
 
     /// Shows one more tab: the next hidden one, with what it held.

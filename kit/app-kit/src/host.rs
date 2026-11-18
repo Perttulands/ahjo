@@ -159,6 +159,9 @@ pub struct Layer {
     pub cover: Cover,
     pub focus: Option<FocusHandle>,
     pub dismiss: Option<Run>,
+    /// Escape is its content's (a terminal's program), so it does not
+    /// close it; it says on screen how it closes.
+    pub keeps_escape: bool,
 }
 
 impl Layer {
@@ -169,7 +172,13 @@ impl Layer {
             cover: Cover::Page,
             focus: None,
             dismiss: None,
+            keeps_escape: false,
         }
+    }
+
+    pub fn keeps_escape(mut self) -> Self {
+        self.keeps_escape = true;
+        self
     }
 
     pub fn cover(mut self, cover: Cover) -> Self {

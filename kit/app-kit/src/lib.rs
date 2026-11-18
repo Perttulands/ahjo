@@ -15,6 +15,7 @@ pub mod settings;
 pub mod text;
 pub mod theme;
 pub mod widgets;
+pub mod zoom;
 
 pub use ahjo_core::Error;
 pub use ask::{Answers, Ask};

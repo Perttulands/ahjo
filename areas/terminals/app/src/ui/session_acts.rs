@@ -259,7 +259,7 @@ impl Terminals {
         match gesture {
             Gesture::Plain => {
                 self.pick.plain(&key);
-                self.open_peek(k.clone(), None, window, cx);
+                self.open_peek(k.clone(), window, cx);
             }
             Gesture::Toggle => self.pick.toggle(&key),
             Gesture::Range => {

@@ -11,7 +11,6 @@ use crate::store::sessions::{self, Key};
 use crate::store::settings::{Kept, Settings, launched_in};
 use crate::store::workspace::{LinkState, TileState};
 use crate::term::screen::Screen;
-use crate::theme::size;
 use ahjo_app_kit::Host;
 use ahjo_app_kit::chords::Chord;
 use ahjo_app_kit::host::Status;
@@ -24,7 +23,7 @@ use ahjo_core::frame::Kinds;
 use ahjo_terminals_contract::{Launch, SessionList, decode_down};
 use gpui::{
     AnyElement, App, AppContext, Bounds, Context, Entity, FocusHandle, Focusable, IntoElement,
-    Pixels, Point, Render, ScrollHandle, Task, WeakEntity, Window, px,
+    Pixels, Point, Render, ScrollHandle, Task, WeakEntity, Window,
 };
 use parking_lot::Mutex;
 use std::cell::{Cell, RefCell};
@@ -46,6 +45,8 @@ pub enum Act {
     RestorePreset(usize),
     DeletePreset(usize),
     Peek(Key),
+    /// A terminal's own text size goes: a window's, or Peek's.
+    ResetZoom(usize),
     Send(Key),
     Attach(Key, usize),
     Unassign(Key),
@@ -185,19 +186,23 @@ pub struct History {
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum HistoryTarget {
+    /// A window, or Peek at [`PEEK_SLOT`].
     Window { index: usize, line: Option<usize> },
-    Peek,
 }
 
-/// Peek: one session, observed, never sized.
+/// Peek: one session over the page, used as in a window (typed into,
+/// pasted, scrolled back, selected, clicked), and never sized: it shows the
+/// grid the session has, at its own text size.
 pub struct Peek {
     pub key: Key,
     pub pane: Option<u32>,
-    /// Opened at a search result: the history at that line.
-    pub history: Option<Arc<Mutex<Screen>>>,
-    pub line: Option<u32>,
-    pub loading: bool,
 }
+
+/// Peek's place among the windows' slots (their geometry, history, links):
+/// it is a terminal as they are, after the last of them.
+pub const PEEK_SLOT: usize = crate::store::workspace::MAX_WINDOWS;
+/// The windows' slots and Peek's.
+pub const SLOTS: usize = PEEK_SLOT + 1;
 
 /// A terminal grid: columns, rows.
 pub type Grid = (u16, u16);
@@ -210,6 +215,9 @@ pub struct Geo {
     pub cell: Option<gpui::Size<Pixels>>,
     pub rows: usize,
     pub cols: usize,
+    /// The text size it was drawn at: below its own when its grid, set
+    /// elsewhere, only fits smaller.
+    pub font: Option<f32>,
     pub display_offset: usize,
     /// Below a history: where the live input is docked.
     pub dock: Option<Bounds<Pixels>>,
@@ -257,9 +265,9 @@ pub struct Terminals {
     pub surfaces: Vec<Surface>,
     /// Status lines said since the page last handed them to the app.
     said: Vec<Status>,
-    pub geo: Rc<RefCell<[Geo; 4]>>,
+    pub geo: Rc<RefCell<[Geo; SLOTS]>>,
     /// The small pictures each window last drew, for the pointer.
-    pub chips: Rc<RefCell<[Vec<super::tiles::pictures::Chip>; 4]>>,
+    pub chips: Rc<RefCell<[Vec<super::tiles::pictures::Chip>; SLOTS]>>,
     /// Pictures the sessions named, read from their devices.
     pub pictures: crate::store::pictures::Pictures<std::sync::Arc<gpui::RenderImage>>,
     /// The grid each window's body would hold at the terminal font,
@@ -340,8 +348,8 @@ pub struct Terminals {
     pub menu_at: Point<Pixels>,
     /// Ended sessions being made again, until their node answers.
     pub restarting: HashSet<Key>,
-    /// How many rows Peek shows at the font size, measured as the window draws.
-    pub peek_rows: usize,
+    /// The wheel with Ctrl held, between its steps.
+    pub zoom_wheel: ahjo_app_kit::zoom::Wheel,
     /// The agent event each session was last told seen for, by key text.
     pub seen_sent: HashMap<String, u64>,
     /// The session whose report the status line says, and when it said it.
@@ -423,7 +431,7 @@ impl Terminals {
             beside_resizing: false,
             surfaces: vec![],
             said,
-            geo: Rc::new(RefCell::new([Geo::default(); 4])),
+            geo: Rc::new(RefCell::new([Geo::default(); SLOTS])),
             chips: Rc::default(),
             pictures: Default::default(),
             launch_grids: Rc::default(),
@@ -470,7 +478,7 @@ impl Terminals {
             seam_over: None,
             menu_at: Point::default(),
             restarting: HashSet::new(),
-            peek_rows: 0,
+            zoom_wheel: Default::default(),
             seen_sent: HashMap::new(),
             told: None,
             acted: false,
@@ -504,7 +512,7 @@ impl Terminals {
                         .first()
                         .map(|x| Key::of(x))
                     {
-                        s.open_peek(k, None, window, cx);
+                        s.open_peek(k, window, cx);
                     }
                 }
                 _ => {}
@@ -1058,12 +1066,16 @@ impl Terminals {
         };
         let view = surface::view(self.me.clone(), name, cx);
         let page = self.me.clone();
-        let layer = ahjo_app_kit::host::Layer::new(name, view)
+        let mut layer = ahjo_app_kit::host::Layer::new(name, view)
             .cover(s.cover())
             .focus(focus.clone())
             .on_dismiss(move |window, cx| {
                 let _ = page.update(cx, |p, cx| p.closed(name, window, cx));
             });
+        // Peek is a terminal: Escape is its program's.
+        if matches!(s, Surface::Peek) {
+            layer = layer.keeps_escape();
+        }
         self.host.layer(layer, cx);
         window.focus(&focus, cx);
         cx.notify();
@@ -1088,6 +1100,12 @@ impl Terminals {
             }
             Surface::Peek => {
                 self.peek = None;
+                self.leave_history(PEEK_SLOT, cx);
+                if self.mouse_down_in.is_some_and(|(i, _)| i == PEEK_SLOT) {
+                    self.mouse_down_in = None;
+                }
+                self.geo.borrow_mut()[PEEK_SLOT] = Geo::default();
+                self.chips.borrow_mut()[PEEK_SLOT].clear();
                 self.sync(cx);
             }
             Surface::Send if self.shown => {
@@ -1169,7 +1187,7 @@ impl Terminals {
                 }
             }
             Act::Peek(k) => {
-                self.open_peek(k, None, window, cx);
+                self.open_peek(k, window, cx);
                 return;
             }
             Act::Send(k) => {
@@ -1263,6 +1281,10 @@ impl Terminals {
                 }
             }
             Act::History(w) => self.open_history(w, cx),
+            Act::ResetZoom(w) => {
+                self.zoom_slot(w, ahjo_app_kit::zoom::Zoom::Reset, 1, cx);
+                return;
+            }
             Act::Restart(k) => self.restart(k),
         }
         self.sync(cx);
@@ -1275,6 +1297,42 @@ impl Terminals {
     pub fn focused_key(&self) -> Option<Key> {
         let ws = &self.settings.workspace;
         ws.shown(ws.focus).map(|b| b.key.clone())
+    }
+
+    /// Peek is open and on top: it has the keyboard.
+    pub fn peek_on_top(&self) -> bool {
+        matches!(self.surfaces.last(), Some(Surface::Peek)) && self.peek.is_some()
+    }
+
+    /// The terminal that takes what is typed: Peek while it is on top,
+    /// else the focused window.
+    pub fn active_slot(&self) -> usize {
+        if self.peek_on_top() {
+            PEEK_SLOT
+        } else {
+            self.settings.workspace.focus
+        }
+    }
+
+    /// The live pane a slot shows: a window's, or Peek's.
+    pub fn slot_pane(&self, i: usize) -> Option<PaneAt> {
+        if i == PEEK_SLOT {
+            let p = self.peek.as_ref()?;
+            self.fleet.session(&p.key)?;
+            return Some(PaneAt {
+                node: p.key.node.clone(),
+                pane: p.pane?,
+            });
+        }
+        self.window_panes().get(i).cloned().flatten()
+    }
+
+    /// The session a slot shows.
+    pub fn slot_key(&self, i: usize) -> Option<Key> {
+        if i == PEEK_SLOT {
+            return self.peek.as_ref().map(|p| p.key.clone());
+        }
+        self.settings.workspace.shown(i).map(|b| b.key.clone())
     }
 
     /// The pane each window of the active tab shows, if live.
@@ -1500,27 +1558,10 @@ impl Terminals {
         cx.notify();
     }
 
-    pub fn open_peek(
-        &mut self,
-        k: Key,
-        line: Option<(u32, u32)>,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        let pane = line.map(|(p, _)| p);
-        let node = k.node.clone();
-        self.peek = Some(Peek {
-            key: k,
-            pane,
-            history: None,
-            line: line.map(|(_, l)| l),
-            loading: line.is_some(),
-        });
-        if let Some((p, _)) = line
-            && let Some(id) = self.fleet.history(&node, p)
-        {
-            self.history_wanted.insert(id, HistoryTarget::Peek);
-        }
+    pub fn open_peek(&mut self, k: Key, window: &mut Window, cx: &mut Context<Self>) {
+        // Another session's history does not carry over.
+        self.leave_history(PEEK_SLOT, cx);
+        self.peek = Some(Peek { key: k, pane: None });
         self.open(Surface::Peek, window, cx);
         self.sync(cx);
     }
@@ -1588,7 +1629,7 @@ impl Terminals {
     // ---- history ----
 
     pub fn open_history(&mut self, w: usize, cx: &mut Context<Self>) {
-        let Some(Some(pane)) = self.window_panes().get(w).cloned() else {
+        let Some(pane) = self.slot_pane(w) else {
             return;
         };
         if self.histories.get(&w).is_some_and(|h| h.pane == pane)
@@ -1642,7 +1683,7 @@ impl Terminals {
         let query = self.find_query.read(cx).text.clone();
         match target {
             HistoryTarget::Window { index: w, line } => {
-                if self.window_panes().get(w).and_then(Option::as_ref) != Some(&pane) {
+                if self.slot_pane(w).as_ref() != Some(&pane) {
                     return;
                 }
                 // On the live screen, so output goes on arriving below;
@@ -1675,18 +1716,6 @@ impl Terminals {
                     top
                 };
                 self.histories.insert(w, History { pane, screen, top });
-            }
-            HistoryTarget::Peek => {
-                if let Some(p) = &mut self.peek {
-                    let line = p.line.map(|l| l as usize);
-                    let rows = rows.max(self.peek_rows);
-                    let mut screen = Screen::history(&text, cols, rows, line);
-                    if let Some(l) = line {
-                        select_line(&mut screen, l, &query);
-                    }
-                    p.history = Some(Arc::new(Mutex::new(screen)));
-                    p.loading = false;
-                }
             }
         }
         cx.notify();
@@ -1821,11 +1850,6 @@ impl Page for Terminals {
 
 impl Render for Terminals {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let page = window.viewport_size().height - px(size::TAB_BAR);
-        let cell = crate::term::paint::metrics(window, self.settings.font_size)
-            .cell
-            .height;
-        self.peek_rows = ((page * size::PEEK_SHARE - px(size::PEEK_HEAD)) / cell).max(1.) as usize;
         self.see_focused(window);
         // What had the keyboard went away (a view beside closed): it comes
         // back to the terminal that looks focused. A closed view can keep

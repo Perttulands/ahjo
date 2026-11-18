@@ -42,6 +42,17 @@ pub enum Surface {
 /// The stack's name for the one open menu.
 const MENU: &str = "menu";
 
+impl Surface {
+    /// Escape closes it when it is on top; a layer that keeps Escape for
+    /// its content does not close on it.
+    pub fn escape_closes(&self) -> bool {
+        match self {
+            Surface::Menu(_) => true,
+            Surface::Layer(l) => !l.keeps_escape,
+        }
+    }
+}
+
 impl layers::Layer for Surface {
     fn kind(&self) -> &str {
         match self {

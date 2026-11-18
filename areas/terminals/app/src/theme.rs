@@ -62,7 +62,8 @@ pub mod size {
     pub const LAUNCHER: f32 = 420.;
     /// The share of an empty window above its launcher.
     pub const LAUNCHER_TOP: f32 = 0.12;
-    /// Peek covers this share of the page; its header is this tall.
+    /// Peek, a terminal on a session without a window, covers this share
+    /// of the page; its header is this tall.
     pub const PEEK_SHARE: f32 = 0.9;
     pub const PEEK_HEAD: f32 = 30.;
     /// An Overview card and the screen text inside it.
@@ -103,11 +104,11 @@ pub mod size {
     pub const DIAGRAM_START: f32 = 2.;
     /// Send's target list shows at most this many whole rows, then scrolls.
     pub const SEND_TARGET_ROWS: f32 = 9.;
-    /// Terminal font: Settings may pick 12..=20; the fit never goes below
-    /// the floor, and clips instead.
+    /// Terminal font: Settings and a zoom pick within 10..=32; the fit
+    /// never goes below the floor, and clips instead.
     pub const TERM_DEFAULT: f32 = 14.;
-    pub const TERM_MIN: f32 = 12.;
-    pub const TERM_MAX: f32 = 20.;
+    pub const TERM_MIN: f32 = 10.;
+    pub const TERM_MAX: f32 = 32.;
     pub const TERM_FLOOR: f32 = 11.;
 }
 

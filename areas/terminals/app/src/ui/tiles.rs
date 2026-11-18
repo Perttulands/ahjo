@@ -2,7 +2,7 @@
 //! the windows themselves, each a session's terminal, a state, or the
 //! launcher. The terminal takes every key and the mouse.
 
-use super::page::{Act, Geo, MenuItem, Terminals};
+use super::page::{Act, Geo, MenuItem, PEEK_SLOT, Terminals};
 use super::place;
 use crate::remote::SharedScreen;
 use crate::remotes::PaneAt;
@@ -16,6 +16,7 @@ use crate::theme::{Theme, alpha, size, theme};
 use ahjo_app_kit::Ask;
 use ahjo_app_kit::host::Request;
 use ahjo_app_kit::widgets::kit::{self, Kind};
+use ahjo_app_kit::zoom::{self, Zoom};
 use ahjo_core::NodeId;
 use alacritty_terminal::index::{Column, Line, Point as GridPoint, Side};
 use alacritty_terminal::selection::{Selection, SelectionType};
@@ -103,7 +104,7 @@ impl Render for DragPreview {
 }
 
 /// What a window's terminal draws from.
-struct Source {
+pub(super) struct Source {
     screen: SharedScreen,
     /// This window sets the pane's grid.
     sizing: Option<PaneAt>,
@@ -291,7 +292,7 @@ impl Terminals {
             self.attach(key, w, window, cx);
         }
     }
-    fn source(
+    pub(super) fn source(
         &self,
         i: usize,
         pane: u32,
@@ -531,7 +532,7 @@ impl Terminals {
             }
         };
         let grids = self.launch_grids.clone();
-        let font = self.settings.font_size;
+        let font = self.font_of(i);
         // An empty window has no head yet; the session launched in it will.
         let tagged = !self.settings.workspace.windows()[i].sessions.is_empty();
         let head_to_come = if tagged { 0. } else { size::TILE_HEAD };
@@ -952,6 +953,7 @@ impl Terminals {
                 );
             }
         }
+        items.extend(self.zoom_row(i));
         items.push(MenuItem::rule());
         items.push(MenuItem::new("Rename session…", Act::Rename(key.clone())));
         items.push(self.copy_row(key));
@@ -960,6 +962,33 @@ impl Terminals {
             Act::Remove(i, key.clone()),
         ));
         items.push(MenuItem::new("Kill session", Act::Kill(key.clone())).danger());
+        items
+    }
+
+    /// Where a terminal's menu says its text size: a zoomed one offers
+    /// the reset, at the size it is.
+    pub(super) fn zoom_row(&self, i: usize) -> Option<MenuItem> {
+        self.own_font(i)?;
+        let size = self.font_of(i);
+        Some(
+            MenuItem::new(format!("Reset text size ({size} px)"), Act::ResetZoom(i))
+                .chord("Ctrl+0"),
+        )
+    }
+
+    /// Peek's menu: what the rail's row offers, without Peek itself, and
+    /// reading back.
+    pub(super) fn peek_menu(&self) -> Vec<MenuItem> {
+        let Some(key) = self.peek.as_ref().map(|p| p.key.clone()) else {
+            return vec![];
+        };
+        let mut items = vec![MenuItem::new("Scroll back", Act::History(PEEK_SLOT))];
+        items.extend(self.zoom_row(PEEK_SLOT));
+        items.extend(
+            self.row_menu(&key)
+                .into_iter()
+                .filter(|m| m.act != Some(Act::Peek(key.clone()))),
+        );
         items
     }
     /// The session's tmux windows, as a menu where the last one stood,
@@ -1041,7 +1070,12 @@ impl Terminals {
 
     /// A window without a live terminal: the last frame dimmed behind, and
     /// what to know over it.
-    fn detached_body(&self, last: Option<SharedScreen>, over: AnyElement, t: &Theme) -> AnyElement {
+    pub(super) fn detached_body(
+        &self,
+        last: Option<SharedScreen>,
+        over: AnyElement,
+        t: &Theme,
+    ) -> AnyElement {
         let theme_t = t.clone();
         let behind = last.map(|screen| {
             let font = self.settings.font_size;
@@ -1097,7 +1131,7 @@ impl Terminals {
             .into_any_element()
     }
 
-    fn term_body(
+    pub(super) fn term_body(
         &mut self,
         i: usize,
         src: Source,
@@ -1107,10 +1141,15 @@ impl Terminals {
     ) -> AnyElement {
         let entity = cx.entity();
         let geo = self.geo.clone();
-        let focus = self.term_focus.clone();
-        let font = self.settings.font_size;
+        // Peek takes what is typed while it is on top; a window while
+        // nothing is open over the page.
+        let (focus, take_input) = if i == PEEK_SLOT {
+            (self.peek_focus.clone(), self.peek_on_top())
+        } else {
+            (self.term_focus.clone(), focused && self.surfaces.is_empty())
+        };
+        let font = self.font_of(i);
         let theme_t = t.clone();
-        let take_input = focused && self.surfaces.is_empty();
         let composing = self.composing.clone().filter(|_| take_input);
         let hover = self
             .link_hover
@@ -1123,15 +1162,10 @@ impl Terminals {
             top,
         } = src;
         let history = live.is_some() || self.histories.contains_key(&i);
-        let place = self
-            .window_panes()
-            .get(i)
-            .cloned()
-            .flatten()
-            .map(|at| pictures::Place {
-                node: at.node,
-                cwd: self.cwd_of(i),
-            });
+        let place = self.slot_pane(i).map(|at| pictures::Place {
+            node: at.node,
+            cwd: self.cwd_of(i),
+        });
         let chips = self.chips.clone();
         // A window between grids draws at the terminal font, clipped or
         // with room to spare, until tmux has the new grid; one sized by
@@ -1238,6 +1272,7 @@ impl Terminals {
                     cell: Some(m.cell),
                     rows: s.rows,
                     cols: s.cols,
+                    font: Some(f32::from(m.font_size)),
                     display_offset: s.term.grid().display_offset(),
                     dock: dock.map(|d| d.0),
                     dock_origin: dock.filter(|_| same).map(|d| d.1),
@@ -1424,19 +1459,17 @@ impl Terminals {
         if let Some(h) = self.histories.get(&i) {
             return Some((h.screen.clone(), None));
         }
-        let at = self.window_panes().get(i).cloned().flatten()?;
+        let at = self.slot_pane(i)?;
         Some((self.fleet.screen(&at.node, at.pane)?, Some(at)))
     }
 
     fn focused_pane(&self) -> Option<PaneAt> {
-        self.window_panes()
-            .get(self.settings.workspace.focus)
-            .cloned()
-            .flatten()
+        self.slot_pane(self.active_slot())
     }
 
-    /// Bytes for the focused window's program. A history being read stays
-    /// open: the program's input is docked below it.
+    /// Bytes for the program of the terminal that has the keyboard (Peek,
+    /// or the focused window). A history being read stays open: the
+    /// program's input is docked below it.
     pub fn send_input(&mut self, bytes: &[u8], cx: &mut Context<Self>) {
         let Some(pane) = self.focused_pane() else {
             return;
@@ -1446,9 +1479,66 @@ impl Terminals {
         }
         self.fleet.input(&pane.node, pane.pane, bytes);
         self.flush(cx);
-        if let Some(k) = self.focused_key() {
+        if let Some(k) = self.slot_key(self.active_slot()) {
             self.answered(&k, cx);
         }
+    }
+
+    /// Terminal `i`'s text size: Peek's or the window's own, else the
+    /// Settings size.
+    pub(super) fn font_of(&self, i: usize) -> f32 {
+        self.settings.font(self.own_font(i))
+    }
+
+    fn own_font(&self, i: usize) -> Option<u8> {
+        if i == PEEK_SLOT {
+            self.settings.peek_font
+        } else {
+            self.settings
+                .workspace
+                .windows()
+                .get(i)
+                .and_then(|w| w.font)
+        }
+    }
+
+    /// Zooms terminal `i` by `n` steps, or resets it, and says the size it
+    /// is at now. A window sized by this app asks its session for the grid
+    /// the new size holds, as a window resized does; Peek never does.
+    pub(super) fn zoom_slot(&mut self, i: usize, z: Zoom, n: i32, cx: &mut Context<Self>) {
+        let before = self.font_of(i);
+        let Some(own) = self.settings.zoom_font(self.own_font(i), z, n) else {
+            return;
+        };
+        // A grid set elsewhere (Peek's, a window another client sizes)
+        // already drawn smaller than asked grows no further.
+        let drawn = self.geo.borrow()[i].font;
+        let capped = z == Zoom::In && drawn.is_some_and(|d| d < before - 0.25);
+        if i == PEEK_SLOT {
+            self.settings.peek_font = own;
+        } else {
+            self.settings.workspace.set_font(i, own);
+        }
+        self.save(cx);
+        let size = self.settings.font(own);
+        let reset = if own.is_some() {
+            " · Ctrl+0 resets"
+        } else {
+            ""
+        };
+        let text = match drawn.filter(|_| capped) {
+            Some(d) => format!(
+                "Text {size} px; the session's whole grid fits at {d} px here{}",
+                if i == PEEK_SLOT {
+                    ". Attach sizes it to a window"
+                } else {
+                    ""
+                }
+            ),
+            None => format!("Text {size} px{reset}"),
+        };
+        self.toast(&text, cx);
+        cx.notify();
     }
 
     fn paste_clipboard(&mut self, cx: &mut Context<Self>) {
@@ -1501,7 +1591,13 @@ impl Terminals {
     pub fn term_key(&mut self, e: &KeyDownEvent, _: &mut Window, cx: &mut Context<Self>) {
         let k = &e.keystroke;
         let m = &k.modifiers;
-        let w = self.settings.workspace.focus;
+        let w = self.active_slot();
+        // Escape is the program's in Peek; Shift+Escape closes it.
+        if w == PEEK_SLOT && m.shift && !m.control && !m.alt && k.key == "escape" {
+            self.close(super::surface::PEEK, cx);
+            cx.stop_propagation();
+            return;
+        }
         if m.control && m.shift && k.key == "c" {
             self.copy_selection(w, cx);
             cx.stop_propagation();
@@ -1512,14 +1608,10 @@ impl Terminals {
             cx.stop_propagation();
             return;
         }
-        // Ctrl+=, Ctrl+- and Ctrl+0 size the font, as browsers do.
-        // At the end of the range the key is still the font's.
-        if m.control && !m.alt && !m.platform && matches!(k.key.as_str(), "=" | "+" | "-" | "0") {
-            if let Some(font) = self.settings.font_for_key(&k.key) {
-                self.settings.font_size = font;
-                self.save(cx);
-                cx.notify();
-            }
+        // Ctrl+=, Ctrl+- and Ctrl+0 zoom this terminal, as browsers do.
+        // At the end of the range the key is still the zoom's.
+        if let Some(z) = zoom::from_key(k) {
+            self.zoom_slot(w, z, 1, cx);
             cx.stop_propagation();
             return;
         }
@@ -1546,10 +1638,17 @@ impl Terminals {
         }
     }
 
+    /// The terminal under the pointer: Peek's while it is open over the
+    /// windows, else a window's.
     fn window_at(&self, p: gpui::Point<Pixels>) -> Option<usize> {
-        self.geo
-            .borrow()
-            .iter()
+        let geo = self.geo.borrow();
+        if self.peek.is_some() {
+            return geo[PEEK_SLOT]
+                .body
+                .is_some_and(|b| b.contains(&p))
+                .then_some(PEEK_SLOT);
+        }
+        geo.iter()
             .position(|g| g.body.is_some_and(|b| b.contains(&p)))
             .filter(|i| *i < self.settings.workspace.windows().len())
     }
@@ -1589,14 +1688,15 @@ impl Terminals {
             .then_some((mode, pane?))
     }
 
-    fn tile_mouse_down(
+    pub(super) fn tile_mouse_down(
         &mut self,
         i: usize,
         e: &MouseDownEvent,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if self.settings.workspace.focus != i {
+        let peek = i == PEEK_SLOT;
+        if !peek && self.settings.workspace.focus != i {
             self.settings.workspace.focus = i;
             self.publish_sessions(cx);
             self.save(cx);
@@ -1605,20 +1705,18 @@ impl Terminals {
         let in_body = self.geo.borrow()[i]
             .body
             .is_some_and(|b| b.contains(&e.position));
-        let Some(at) = self
-            .window_panes()
-            .get(i)
-            .cloned()
-            .flatten()
-            .filter(|_| in_body)
-        else {
+        let Some(at) = self.slot_pane(i).filter(|_| in_body) else {
             return;
         };
-        // A click is using the session here: it takes the window back from
-        // another client that sized it since.
-        self.fleet.retake(&at.node, at.pane);
-        self.flush(cx);
-        window.focus(&self.term_focus, cx);
+        if peek {
+            window.focus(&self.peek_focus, cx);
+        } else {
+            // A click is using the session here: it takes the window back
+            // from another client that sized it since. Peek sizes nothing.
+            self.fleet.retake(&at.node, at.pane);
+            self.flush(cx);
+            window.focus(&self.term_focus, cx);
+        }
         let button = match e.button {
             MouseButton::Left => mouse::Button::Left,
             MouseButton::Middle => mouse::Button::Middle,
@@ -1664,15 +1762,20 @@ impl Terminals {
                 cx.notify();
             }
             MouseButton::Middle => self.paste_clipboard(cx),
-            MouseButton::Right => {
-                // A right click copies a selection, else offers the menu.
-                if !self.copy_selection(i, cx)
-                    && let (Some(b), Some(at)) = (
+            // A right click copies a selection, else offers the menu.
+            MouseButton::Right if !self.copy_selection(i, cx) => {
+                let items = if peek {
+                    self.peek_menu()
+                } else {
+                    match (
                         self.settings.workspace.shown(i).cloned(),
                         self.window_panes()[i].clone(),
-                    )
-                {
-                    let items = self.tile_menu(i, &b.key, at.pane);
+                    ) {
+                        (Some(b), Some(at)) => self.tile_menu(i, &b.key, at.pane),
+                        _ => vec![],
+                    }
+                };
+                if !items.is_empty() {
                     self.menu(items, e.position, window, cx);
                 }
             }
@@ -1680,7 +1783,12 @@ impl Terminals {
         }
     }
 
-    fn term_mouse_move(&mut self, e: &MouseMoveEvent, _: &mut Window, cx: &mut Context<Self>) {
+    pub(super) fn term_mouse_move(
+        &mut self,
+        e: &MouseMoveEvent,
+        _: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         // A press from a window is followed everywhere (`term_drag`).
         if self.selecting.is_some() || self.mouse_down_in.is_some() {
             return;
@@ -1774,12 +1882,7 @@ impl Terminals {
         }
         let node = match self.histories.get(&i) {
             Some(h) => Some(h.pane.node.clone()),
-            None => self
-                .window_panes()
-                .get(i)
-                .cloned()
-                .flatten()
-                .map(|a| a.node),
+            None => self.slot_pane(i).map(|a| a.node),
         };
         let Some(node) = node else { return };
         let ask = match target {
@@ -1807,12 +1910,17 @@ impl Terminals {
     fn cwd_of(&self, i: usize) -> Option<String> {
         let session = match self.histories.get(&i) {
             Some(h) => self.fleet.session_of_pane(&h.pane.node, h.pane.pane),
-            None => self.fleet.session(&self.settings.workspace.shown(i)?.key),
+            None => self.fleet.session(&self.slot_key(i)?),
         };
         session?.cwd.clone()
     }
 
-    fn term_mouse_up(&mut self, e: &MouseUpEvent, _window: &mut Window, cx: &mut Context<Self>) {
+    pub(super) fn term_mouse_up(
+        &mut self,
+        e: &MouseUpEvent,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         if let Some((i, b)) = self.mouse_down_in.take() {
             if let Some((mode, pane)) = self.mouse_mode(i, false)
                 && let Some((col, row, _)) = self.cell_at(i, e.position)
@@ -1858,10 +1966,20 @@ impl Terminals {
         cx.notify();
     }
 
-    fn term_scroll(&mut self, e: &ScrollEvent, _: &mut Window, cx: &mut Context<Self>) {
+    pub(super) fn term_scroll(&mut self, e: &ScrollEvent, _: &mut Window, cx: &mut Context<Self>) {
         let Some(i) = self.window_at(e.position) else {
             return;
         };
+        // Ctrl+wheel zooms the terminal under the pointer, never reaching
+        // its program.
+        if let Some(n) = self.zoom_wheel.steps(e) {
+            let z = if n > 0 { Zoom::In } else { Zoom::Out };
+            if n != 0 {
+                self.zoom_slot(i, z, n.abs(), cx);
+            }
+            cx.stop_propagation();
+            return;
+        }
         let cell_h = self.geo.borrow()[i]
             .cell
             .map(|c| c.height)
@@ -2038,7 +2156,7 @@ impl EntityInputHandler for Terminals {
         _: &mut Context<Self>,
     ) -> Option<Bounds<Pixels>> {
         // The candidate window opens at the focused terminal's cursor.
-        let w = self.settings.workspace.focus;
+        let w = self.active_slot();
         let g = self.geo.borrow()[w];
         let (o, cell) = (g.origin?, g.cell?);
         let (screen, _) = self.shown_screen(w)?;

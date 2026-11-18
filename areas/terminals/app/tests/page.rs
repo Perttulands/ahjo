@@ -931,14 +931,40 @@ fn what_lies_over_the_windows_takes_every_click_inside_it(cx: &mut TestAppContex
         });
     }
 
+    // Peek is a terminal: what is done in it reaches the session it shows
+    // (beta) and no window under it, and Escape is its program's.
     click(cx, format!("row-{}::beta", running.node));
     until(cx, "the peek", |cx| cx.debug_bounds("peek").is_some());
-    let over = cx.debug_bounds("peek").expect("peek");
+    let over = cx.debug_bounds("peek-body").expect("Peek's terminal");
     poke(cx, inside(over), "window-1");
-    untouched(cx, "Peek", 0);
+    until(cx, "beta to take what was typed in Peek", |_| {
+        tmux(&running, &["capture-pane", "-p", "-t", "beta"]).contains(MARK)
+    });
+    let alpha = tmux(&running, &["capture-pane", "-p", "-t", "alpha"]);
+    assert!(!alpha.contains(MARK), "alpha took input through Peek");
+    page.read_with(cx, |p, _| {
+        assert_eq!(p.settings.workspace.focus, 0, "focused window after Peek");
+        let windows = p.settings.workspace.windows().len();
+        assert!(
+            p.histories.keys().all(|w| *w >= windows),
+            "no window reads back after Peek"
+        );
+    });
+    assert!(
+        !term_focused(cx),
+        "the windows took the keyboard through Peek"
+    );
     cx.simulate_keystrokes("escape");
     cx.run_until_parked();
-    assert!(cx.debug_bounds("peek").is_none(), "Esc closed Peek");
+    assert!(
+        cx.debug_bounds("peek").is_some(),
+        "Esc is beta's, Peek stays"
+    );
+    cx.simulate_keystrokes("shift-escape");
+    cx.run_until_parked();
+    assert!(cx.debug_bounds("peek").is_none(), "Shift+Esc closed Peek");
+    // Beta's prompt is clean again for what follows.
+    tmux(&running, &["send-keys", "-t", "beta", "C-u"]);
 
     // A launcher too big for its window stays in it: its fields scroll
     // under its button, and beta's window beside it stays whole.
@@ -2145,7 +2171,13 @@ fn peek_keyboard_dismisses_and_restores_focus_after_a_leader_action(cx: &mut Tes
         cx.debug_bounds("peek-attach").is_some()
     });
     cx.simulate_keystrokes("escape");
-    until(cx, "Escape closes Peek", |cx| {
+    cx.run_until_parked();
+    assert!(
+        cx.debug_bounds("peek-attach").is_some(),
+        "Escape is the session's in Peek"
+    );
+    cx.simulate_keystrokes("shift-escape");
+    until(cx, "Shift+Escape closes Peek", |cx| {
         cx.debug_bounds("peek-attach").is_none()
     });
     cx.simulate_input("echo peek-escape-restored");
@@ -2177,8 +2209,8 @@ fn peek_keyboard_dismisses_and_restores_focus_after_a_leader_action(cx: &mut Tes
     until(cx, "Overview returns focus to Peek", |cx| {
         cx.debug_bounds("overview-grid").is_none() && cx.debug_bounds("peek-attach").is_some()
     });
-    cx.simulate_keystrokes("escape");
-    until(cx, "second Escape closes Peek", |cx| {
+    cx.simulate_keystrokes("shift-escape");
+    until(cx, "Shift+Escape then closes Peek", |cx| {
         cx.debug_bounds("peek-attach").is_none()
     });
     cx.simulate_input("echo peek-leader-restored");
@@ -3509,5 +3541,72 @@ fn connecting_the_app_preserves_idle_session_activity(cx: &mut TestAppContext) {
         of("alpha") > baseline["alpha"].as_u64() && of("beta") == baseline["beta"].as_u64()
     });
     runtime.block_on(second.stop());
+    let _ = std::fs::remove_dir_all(settings.parent().unwrap());
+}
+
+/// Ctrl+wheel and Ctrl+= over a terminal zoom that one terminal; Ctrl+0
+/// puts it back on the Settings size. Peek zooms its own text, takes what
+/// is typed, and never sizes the session it shows.
+#[gpui::test]
+fn ctrl_wheel_zooms_the_terminal_under_it_and_peek_is_typed_into(cx: &mut TestAppContext) {
+    let Some(running) = start("zoom-and-peek") else {
+        return;
+    };
+    let (_shell, cx, settings) = open_with_alpha(&running, "zoom-and-peek", cx);
+    let page = PAGE.with(|p| p.borrow().clone()).unwrap();
+    // A notch of the wheel, as the platforms report it: three lines.
+    let ctrl_wheel = |cx: &mut VisualTestContext, at: gpui::Point<gpui::Pixels>, notches: f32| {
+        cx.simulate_event(gpui::ScrollEvent {
+            position: at,
+            delta: gpui::ScrollDelta::Lines(gpui::point(0., 3. * notches)),
+            modifiers: Modifiers::control(),
+            touch_phase: gpui::TouchPhase::Moved,
+            source: gpui::ScrollSource::Pointer,
+        });
+        cx.run_until_parked();
+    };
+    let window_font = |cx: &mut VisualTestContext| {
+        page.read_with(cx, |p, _| p.settings.workspace.windows()[0].font)
+    };
+    let at = cx.debug_bounds("window-0").expect("window 0").center();
+    ctrl_wheel(cx, at, 2.);
+    assert_eq!(window_font(cx), Some(16), "two notches in");
+    page.read_with(cx, |p, _| {
+        assert!(p.histories.is_empty(), "a zoom does not read back");
+        assert_eq!(p.settings.font_size, 14., "Settings keeps its size");
+    });
+    cx.simulate_keystrokes("ctrl--");
+    assert_eq!(window_font(cx), Some(15));
+    cx.simulate_keystrokes("ctrl-0");
+    assert_eq!(window_font(cx), None, "Ctrl+0 back on the Settings size");
+
+    until(cx, "beta listed", |cx| {
+        page.read_with(cx, |p, _| p.fleet.all.iter().any(|s| s.name == "beta"))
+    });
+    click(cx, format!("row-{}::beta", running.node));
+    until(cx, "Peek's terminal", |cx| {
+        cx.debug_bounds("peek-body").is_some()
+    });
+    cx.simulate_input("echo peek-$((6*7))");
+    cx.simulate_keystrokes("enter");
+    until(cx, "beta to run what was typed in Peek", |_| {
+        tmux(&running, &["capture-pane", "-p", "-t", "beta"]).contains("peek-42")
+    });
+    let over = cx.debug_bounds("peek-body").expect("Peek").center();
+    ctrl_wheel(cx, over, 1.);
+    page.read_with(cx, |p, _| {
+        assert_eq!(p.settings.peek_font, Some(15), "Peek zooms its own text");
+        assert_eq!(p.settings.workspace.windows()[0].font, None);
+        let beta = p.fleet.all.iter().find(|s| s.name == "beta").unwrap();
+        let pane = beta.panes[0].id;
+        assert!(
+            p.fleet.claimed(&beta.node, pane).is_none(),
+            "Peek asked tmux for no size"
+        );
+    });
+    cx.simulate_keystrokes("shift-escape");
+    until(cx, "Shift+Escape closes Peek", |cx| {
+        cx.debug_bounds("peek").is_none()
+    });
     let _ = std::fs::remove_dir_all(settings.parent().unwrap());
 }
