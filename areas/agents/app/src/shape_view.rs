@@ -43,7 +43,13 @@ impl Inputs {
             }
         })
         .detach();
-        let reader = cx.new(Code::new);
+        // Instructions are prose with long lines: the editor wraps them, as
+        // the Files editor does by default.
+        let reader = cx.new(|cx| {
+            let mut c = Code::new(cx);
+            c.set_wrap(true, cx);
+            c
+        });
         cx.subscribe_in(&reader, window, |page, _, event, window, cx| match event {
             CodeEvent::Save => page.file_save(cx),
             CodeEvent::Escape => page.file_discard(window, cx),
@@ -1021,14 +1027,20 @@ impl AgentsPage {
                         .text_ellipsis()
                         .child(s.name.clone()),
                 )
+                // The whole description, wrapped: it is how the agent
+                // decides to use the skill.
                 .child(
-                    pane::cell(s.why.clone().unwrap_or_else(|| s.description.clone())).text_color(
-                        if s.load == Load::Off {
+                    div()
+                        .flex_1()
+                        .min_w_0()
+                        .py(px(size::LABEL_BOTTOM))
+                        .whitespace_normal()
+                        .text_color(if s.load == Load::Off {
                             t.needs
                         } else {
                             t.text2
-                        },
-                    ),
+                        })
+                        .child(s.why.clone().unwrap_or_else(|| s.description.clone())),
                 )
                 .child(pane::meta(t, s.origin.word(), None));
             section = section.child(row);

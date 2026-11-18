@@ -539,18 +539,19 @@ impl AgentsPage {
                         "Edit role"
                     },
                 ))
-                .child(pane::act(&t, "role-cancel", "Cancel").on_click(cx.listener(
-                    |s, _, _, cx| {
-                        s.library.form = None;
-                        cx.notify();
-                    },
-                )))
+                // The primary action first, as in every detail's head.
                 .child(
                     kit::button(&t, "role-save", "Save", Kind::Primary)
                         .debug_selector(|| "role-save".into())
                         .when(l.busy, |b| b.opacity(tokens::DIMMED))
                         .on_click(cx.listener(|s, _, _, cx| s.save_role(cx))),
-                );
+                )
+                .child(pane::act(&t, "role-cancel", "Cancel").on_click(cx.listener(
+                    |s, _, _, cx| {
+                        s.library.form = None;
+                        cx.notify();
+                    },
+                )));
             let mut body = div()
                 .flex()
                 .flex_col()
