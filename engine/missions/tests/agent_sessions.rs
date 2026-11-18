@@ -10,6 +10,10 @@ use ahjo_testkit::{
 };
 
 fn dispatch(id: &str, name: &str, keep: bool) -> Dispatch {
+    dispatch_in(id, name, keep, "/")
+}
+
+fn dispatch_in(id: &str, name: &str, keep: bool, cwd: impl Into<std::path::PathBuf>) -> Dispatch {
     Dispatch {
         id: id.into(),
         run_id: "run_1".into(),
@@ -19,7 +23,7 @@ fn dispatch(id: &str, name: &str, keep: bool) -> Dispatch {
         harness: "pi".into(),
         model: String::new(),
         effort: String::new(),
-        cwd: "/".into(),
+        cwd: cwd.into(),
         brief: "Write.".into(),
         reuse_dispatch: None,
         keep,
@@ -145,6 +149,28 @@ async fn an_agents_session_is_used_again_and_a_namesake_is_left_alone() {
     assert_eq!(again.session, started.session);
     assert_eq!(again.cwd.as_deref(), Some(std::path::Path::new("/")));
     assert_eq!(seats.end_seat("dsp_4", "run_final").await.unwrap(), "kept");
+
+    // An agent started in a checkout that is then removed, as a repository
+    // run's attempt is, still stands under that folder's own name, which is
+    // where its harness keeps the record of its turns.
+    let checkout = server.dir().join("turn-1");
+    std::fs::create_dir(&checkout).unwrap();
+    seats
+        .dispatch(dispatch_in("dsp_6", "demo-builder", true, &checkout))
+        .await
+        .unwrap();
+    eventually("the fake harness running in demo-builder", || {
+        (server.display("demo-builder", "#{pane_current_command}") == "sleep").then_some(())
+    })
+    .await;
+    assert_eq!(seats.end_seat("dsp_6", "run_final").await.unwrap(), "kept");
+    std::fs::remove_dir(&checkout).unwrap();
+    seats
+        .dispatch(dispatch("dsp_7", "demo-builder", true))
+        .await
+        .unwrap();
+    assert_eq!(seat("dsp_7").cwd.as_deref(), Some(checkout.as_path()));
+    assert_eq!(seats.end_seat("dsp_7", "run_final").await.unwrap(), "kept");
 
     // Renamed by a person, it is no longer the reviewer's: a session that
     // took the name since is not either.

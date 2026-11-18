@@ -55,6 +55,7 @@ impl TurnWatch<'_> {
         let mut transcript_stamp: Option<(u64, Option<SystemTime>)> = None;
         let mut nudges = super::state::Reminders::new(*reminded);
         let mut waits = super::state::WaitTracker::new(Instant::now());
+        let mut unseen = super::state::Unseen::default();
         loop {
             if canceled.load(Ordering::Acquire) {
                 return Err("canceled".into());
@@ -123,6 +124,16 @@ impl TurnWatch<'_> {
                     .any(|session| session.panes.iter().any(|p| p.0 == pane))
             {
                 return Err("the agent's session ended before it finished".into());
+            }
+            // The brief was sent, the agent sits at an empty prompt, and its
+            // harness's record shows no such turn: nothing read there will
+            // ever end this wait.
+            let lost = !turn.consumed
+                && screen.as_ref().is_some_and(|screen| {
+                    harness::input_clear(kind, screen) && !adapter.working(screen)
+                });
+            if unseen.observe(lost, Instant::now()) {
+                return Err("seat_stuck: the agent was sent its brief, but its harness kept no record of the turn where Ahjo reads it, so Ahjo cannot tell when it is done. Open its terminal to see what it did, then run the step again.".into());
             }
             let idle = turn.consumed
                 && !matches!(turn.state, TurnState::BackgroundWork)

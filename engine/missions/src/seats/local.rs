@@ -209,7 +209,7 @@ impl LocalSeats {
         let listed = self.engine.listed().await.ok()?;
         let info = listed.iter().find(|s| s.id == session.session_id)?;
         let path = &info.facts.as_ref()?.path;
-        (!path.is_empty()).then(|| PathBuf::from(path))
+        (!path.is_empty()).then(|| standing(path))
     }
     async fn bind(
         &self,
@@ -351,6 +351,16 @@ impl LocalSeats {
             .map_err(|error| error.to_string())
     }
 }
+/// The folder a process stands in, from what the system says of it. Linux
+/// names a removed one with ` (deleted)` after it, as an agent's is once
+/// the checkout its first attempt worked in is gone; its harness still
+/// keeps its record under the folder's own name.
+fn standing(path: &str) -> PathBuf {
+    match path.strip_suffix(" (deleted)") {
+        Some(gone) if !std::path::Path::new(path).exists() => PathBuf::from(gone),
+        _ => PathBuf::from(path),
+    }
+}
 /// What the seat's session runs. On Windows the harness runs in PowerShell,
 /// which finds npm's `.cmd` and `.ps1` shims as a person's prompt would;
 /// the command is passed encoded, so no quoting layer can split it.
@@ -452,6 +462,17 @@ mod tests {
         assert_eq!(super::base64(b"Ma"), "TWE=");
         assert_eq!(super::base64(b"M"), "TQ==");
         assert_eq!(super::base64(b""), "");
+    }
+    #[test]
+    fn a_removed_folder_keeps_its_own_name() {
+        let dir = ahjo_testkit::fresh_dir("standing");
+        let named = dir.join("odd (deleted)");
+        std::fs::create_dir_all(&named).unwrap();
+        // A folder that is really called that stays as it is.
+        assert_eq!(super::standing(named.to_str().unwrap()), named);
+        let gone = format!("{} (deleted)", dir.join("turn-1").display());
+        assert_eq!(super::standing(&gone), dir.join("turn-1"));
+        assert_eq!(super::standing("/w"), std::path::PathBuf::from("/w"));
     }
     #[cfg(unix)]
     #[test]

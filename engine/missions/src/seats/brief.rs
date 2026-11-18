@@ -40,6 +40,20 @@ fn render_for(request: &FormationExecution, slot: &Slot, final_output: bool) -> 
         brief,
         "Work in the working directory and write what you make there, unless the goal names another place. The attempt directory is Ahjo's record of this attempt, not where results go.\n"
     );
+    // A repository run's attempt works in a checkout of its own, here
+    // ([`crate::run_workspace::turn_path`]) or on the environment it is
+    // placed on.
+    let own_checkout = request.turn.is_some()
+        || request
+            .cwd
+            .file_name()
+            .is_some_and(|name| name.to_string_lossy().starts_with(".turn-"));
+    if own_checkout {
+        let _ = writeln!(
+            brief,
+            "The working directory is a checkout made for this attempt: go there first, wherever your session started. What you leave in it is committed to the run's branch and the checkout is then removed, so name a file by its path inside it, not by an absolute path.\n"
+        );
+    }
     if let Some(turn) = &request.turn {
         let _ = writeln!(brief, "Starting commit: {}", turn.commit);
     }

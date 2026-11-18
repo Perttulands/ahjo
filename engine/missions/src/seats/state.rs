@@ -165,6 +165,26 @@ impl Reminders {
     }
 }
 
+/// How long a seat may sit idle at its prompt, its brief sent, while its
+/// harness's own record shows no such turn.
+pub(super) const UNSEEN_GRACE: Duration = Duration::from_secs(180);
+
+/// Watches for a turn Ahjo will never see end: the brief was sent and the
+/// agent sits idle, but nothing in the harness's record says it took it, so
+/// neither its done line nor its silence can be read there.
+#[derive(Default)]
+pub(super) struct Unseen(Option<Instant>);
+impl Unseen {
+    /// Whether the seat has now been `unseen` past the grace.
+    pub fn observe(&mut self, unseen: bool, now: Instant) -> bool {
+        if !unseen {
+            self.0 = None;
+            return false;
+        }
+        now.saturating_duration_since(*self.0.get_or_insert(now)) >= UNSEEN_GRACE
+    }
+}
+
 fn detail(state: &str) -> &'static str {
     match state {
         "seat_not_ready" => {
@@ -188,6 +208,19 @@ fn detail(state: &str) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn an_idle_seat_with_no_record_of_its_turn_stops_the_step() {
+        let start = Instant::now();
+        let at = |s: u64| start + Duration::from_secs(s);
+        let mut unseen = Unseen::default();
+        assert!(!unseen.observe(true, at(0)));
+        assert!(!unseen.observe(true, at(179)));
+        // Working, or its turn found, starts the wait again.
+        assert!(!unseen.observe(false, at(180)));
+        assert!(!unseen.observe(true, at(181)));
+        assert!(!unseen.observe(true, at(360)));
+        assert!(unseen.observe(true, at(361)));
+    }
     #[test]
     fn a_seat_that_stops_without_its_done_line_is_reminded_twice_then_given_up() {
         let start = Instant::now();

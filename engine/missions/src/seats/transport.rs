@@ -172,7 +172,18 @@ pub(super) async fn stage_guarded(
         tokio::select! {
             received = updates.recv() => match received {
                 Ok(_) | Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => (),
-                Err(tokio::sync::broadcast::error::RecvError::Closed) => return Err("seat stream closed".into()),
+                // The stream closes with the session, and with the node.
+                Err(tokio::sync::broadcast::error::RecvError::Closed) => {
+                    let listed = engine
+                        .listed()
+                        .await
+                        .is_ok_and(|all| all.iter().any(|s| s.panes.iter().any(|p| p.0 == pane)));
+                    return Err(if listed {
+                        "seat stream closed".into()
+                    } else {
+                        "the agent's session ended before it took its brief".into()
+                    });
+                }
             },
             _ = tokio::time::sleep(Duration::from_millis(250)) => (),
         }
