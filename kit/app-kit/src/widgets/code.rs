@@ -320,8 +320,11 @@ impl Code {
         let n = self.line_of(self.selected.start);
         let row = self.row_starts[n] as f32;
         let rows = self.rows_in_view() as f32;
-        if row < self.top || row >= self.top + rows - 1. {
-            self.top = (row - GO_TO_CONTEXT as f32).max(0.);
+        // Out of view, or on the top row with nothing seen above it: shown
+        // with whole lines before it (counted in lines, so wrapping keeps
+        // them).
+        if (row <= self.top && n > 0) || row >= self.top + rows - 1. {
+            self.top = self.row_starts[n.saturating_sub(GO_TO_CONTEXT)] as f32;
         }
         self.reveal();
         self.tell_moved(cx);
@@ -1833,6 +1836,24 @@ mod tests {
             assert_eq!(c.top_line(), 9 - GO_TO_CONTEXT);
             c.go_to_line(1, cx);
             assert_eq!((c.selected_lines(), c.top_line()), (Some((2, 2)), 0));
+        });
+    }
+
+    #[gpui::test]
+    fn a_found_word_shows_with_lines_above_it(cx: &mut gpui::TestAppContext) {
+        let code = cx.new(Code::new);
+        code.update(cx, |c, cx| {
+            let text: String = (0..60).map(|n| format!("line {n:02}\n")).collect();
+            c.set(&text, cx);
+            let at = |n: usize| n * 8..n * 8 + 7;
+            c.select(at(40), cx);
+            assert_eq!(c.top_line(), 40 - GO_TO_CONTEXT, "out of view: lines above");
+            // Found on the top row: not left under whatever is above the
+            // view, but shown with lines above it too.
+            c.select(at(37), cx);
+            assert_eq!(c.top_line(), 37 - GO_TO_CONTEXT);
+            c.select(at(38), cx);
+            assert_eq!(c.top_line(), 37 - GO_TO_CONTEXT, "in view: stays");
         });
     }
 
