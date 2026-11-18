@@ -349,7 +349,7 @@ pub fn output_excerpt(o: &RunOutput) -> String {
 
 /// The branch a repository run works on, kept until it is landed.
 pub fn run_branch(run: &Run) -> Option<String> {
-    (!run.repository.is_empty()).then(|| format!("ahjo/run-{}", run.run_id))
+    (!run.repository.is_empty()).then(|| ahjo_missions_contract::run_branch(&run.run_id))
 }
 
 /// A file's size in a few characters: `512 B`, `2 KB`, `1.18 GB`.

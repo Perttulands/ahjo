@@ -1645,13 +1645,23 @@ fn repository_runs_isolate_commit_and_land() {
     assert!(!checkout.join("fmn_work").exists());
     git(
         &checkout,
-        &["merge", "--no-ff", "-m", "land", &format!("ahjo/run-{a}")],
+        &[
+            "merge",
+            "--no-ff",
+            "-m",
+            "land",
+            &format!("ahjo/run-{}", &a[4..12]),
+        ],
     );
     c.land(&a, false).unwrap();
     c.land(&b, true).unwrap();
     for id in [&a, &b] {
         assert!(!dir.0.join("worktrees").join(id).exists());
-        let branches = git(&checkout, &["branch", "--list", &format!("ahjo/run-{id}")]);
+        // A run's branch is named by its id's first eight characters.
+        let branches = git(
+            &checkout,
+            &["branch", "--list", &format!("ahjo/run-{}", &id[4..12])],
+        );
         assert!(branches.is_empty());
     }
 }

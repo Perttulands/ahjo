@@ -532,7 +532,7 @@ mod tests {
 
     #[test]
     fn a_stopped_runs_reason_leaves_its_kept_branch_to_a_line_of_its_own() {
-        let kept = "What Build wrote in attempt 1 is kept on branch ahjo/run-r1-kept/fmn_b-1 of demo/site.";
+        let kept = "What Build wrote in attempt 1 is kept on branch ahjo/run-r1-kept/build-1 of demo/site.";
         let events = vec![RunEvent {
             detail: kept.into(),
             ..ev(4, "workspace_kept", "fmn_b")
@@ -542,7 +542,7 @@ mod tests {
             ahjo_missions_contract::plain_reason(&without_kept(&events, &reason)),
             "The agent's session ended"
         );
-        assert_eq!(kept_branches(&events), ["ahjo/run-r1-kept/fmn_b-1"]);
+        assert_eq!(kept_branches(&events), ["ahjo/run-r1-kept/build-1"]);
         assert_eq!(
             problem_now(&events, 5, &reason),
             "fmn_b: the agent's session ended (executor_error)."

@@ -6,6 +6,7 @@
 //! and runs it.
 
 mod authoring;
+mod branches;
 mod examples;
 mod finding;
 pub mod flow;
@@ -22,6 +23,7 @@ pub use authoring::{
     Edit, EndUpdate, GateUpdate, InputCardUpdate, LayoutEdit, LayoutPatch, LimitUpdate,
     MissionDeletion, NotePatch, NotesEdit, Patch, Precondition, RestoredNode,
 };
+pub use branches::{kept_branch, run_branch, run_tag};
 pub use examples::{EXAMPLES, Example, example};
 pub use finding::{Code, Finding, Report};
 pub use layout::{LAYOUT_SCHEMA, Layout, LayoutEdge, LayoutNode};

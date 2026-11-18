@@ -48,7 +48,7 @@ impl Workspaces {
                 .checkout(repository)
                 .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "no checkout"))?
                 .to_path_buf();
-            let branch = format!("ahjo/run-{run}");
+            let branch = ahjo_mission_model::run_branch(run);
             let base = if base.is_empty() {
                 git(&checkout, ["symbolic-ref", "--quiet", "--short", "HEAD"])?
             } else {

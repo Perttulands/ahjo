@@ -617,7 +617,7 @@ impl Coordinator {
             let tree = crate::Worktree {
                 path: PathBuf::from(get("cwd")),
                 checkout: PathBuf::from(checkout),
-                branch: format!("ahjo/run-{id}"),
+                branch: ahjo_mission_model::run_branch(id),
                 base: get("base"),
             };
             // What each placed turn's node pushed, so only that is deleted.

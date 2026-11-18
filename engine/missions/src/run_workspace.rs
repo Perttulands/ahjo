@@ -88,7 +88,7 @@ pub(crate) fn prepare_placed_turn(
             json!({"base":base,"place":place}),
         ),
     )?;
-    let branch = format!("ahjo/run-{id}");
+    let branch = ahjo_mission_model::run_branch(id);
     let target = format!("HEAD:refs/heads/{branch}");
     git(
         workspace,
@@ -243,7 +243,7 @@ pub(crate) fn commit_turn(
     let tree = Worktree {
         path: path.clone(),
         checkout: PathBuf::from(field("checkout")),
-        branch: format!("ahjo/run-{id}"),
+        branch: ahjo_mission_model::run_branch(id),
         base: field("base"),
     };
     let workspaces = Workspaces::new(

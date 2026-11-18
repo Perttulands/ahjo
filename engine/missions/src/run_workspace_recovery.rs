@@ -3,7 +3,7 @@ use crate::coordinator::Control;
 use crate::run_worker::{append_live, event};
 use crate::run_workspace::{commit_turn, remove, turn_path};
 use crate::{Coordinator, RunEvent, Workspaces, Worktree};
-use ahjo_mission_model::{Mission, RunStart};
+use ahjo_mission_model::{Mission, RunStart, kept_branch};
 use serde_json::json;
 use std::{
     io,
@@ -53,25 +53,8 @@ pub(crate) fn cleanup(
     Ok(kept)
 }
 
-/// The branch an attempt's unpublished work is kept on. It stands beside
-/// the run's own `ahjo/run-<id>`, which as a branch cannot also be a folder
-/// of them.
-pub(crate) fn kept_branch(id: &str, node: &str, attempt: i64) -> String {
-    let node: String = node
-        .chars()
-        .map(|c| {
-            if c.is_ascii_alphanumeric() || c == '_' || c == '-' {
-                c
-            } else {
-                '-'
-            }
-        })
-        .collect();
-    format!("ahjo/run-{id}-kept/{node}-{attempt}")
-}
-
 /// Commit what the attempt left in its checkout, files it never committed
-/// included, and keep it on [`kept_branch`], so removing the checkout loses
+/// included, and keep it on a [`kept_branch`], so removing the checkout loses
 /// nothing an agent wrote. The branch goes when the run is deleted.
 fn keep(
     c: &Coordinator,
@@ -111,17 +94,17 @@ fn keep(
     if head == base {
         return Ok(None);
     }
-    let branch = kept_branch(id, node, attempt);
+    let step = (mission.formation(node).map(|f| f.title.as_str()))
+        .or_else(|| mission.gate(node).map(|g| g.title.as_str()))
+        .filter(|title| !title.is_empty())
+        .unwrap_or(node);
+    let branch = kept_branch(id, step, attempt);
     git(path, &["branch", "--force", &branch, &head])?;
     let repository = events[0]
         .data
         .get("repository")
         .and_then(|v| v.as_str())
         .unwrap_or("");
-    let step = (mission.formation(node).map(|f| f.title.as_str()))
-        .or_else(|| mission.gate(node).map(|g| g.title.as_str()))
-        .filter(|title| !title.is_empty())
-        .unwrap_or(node);
     let detail = format!(
         "What {step} wrote in attempt {attempt} is kept on branch {branch}{}.",
         if repository.is_empty() {

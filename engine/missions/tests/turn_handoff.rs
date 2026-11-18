@@ -148,8 +148,8 @@ fn landing_leaves_shared_refs_that_moved_since_ahjo_pushed_them() {
             &format!("{pushed}^{{tree}}"),
         ],
     );
-    let turn = "refs/ahjo/turns/run_moved/aaaaaaaaaaaa-1";
-    let stray = "refs/ahjo/turns/run_moved/bbbbbbbbbbbb-1";
+    let turn = "refs/ahjo/turns/moved/aaaaaaaaaaaa-1";
+    let stray = "refs/ahjo/turns/moved/bbbbbbbbbbbb-1";
     for reference in [branch.as_str(), turn, stray] {
         git(&remote, &["update-ref", reference, &theirs]);
     }

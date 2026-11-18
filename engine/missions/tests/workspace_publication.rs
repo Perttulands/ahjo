@@ -206,7 +206,7 @@ fn error_cancel_and_escalation_keep_their_work_and_remove_their_turn_worktrees()
             turns(&root, &id)
         );
         let checkout = root.0.join("checkout");
-        let prefix = format!("refs/heads/ahjo/run-{id}-kept/");
+        let prefix = format!("refs/heads/ahjo/run-{}-kept/", &id[4..12]);
         let branches = git(
             &checkout,
             &["for-each-ref", "--format=%(refname:short)", &prefix],
