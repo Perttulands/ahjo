@@ -1096,13 +1096,7 @@ impl MissionsPage {
                 self.flow_scroll.set_offset(gpui::point(offset.x, px(-y)));
             }
         } else if let Some(m) = self.state.mission.as_ref() {
-            let layout = self
-                .state
-                .layout
-                .as_ref()
-                .map(|l| l.nodes.clone())
-                .unwrap_or_default();
-            let board = board::board(m, &flow::build(m), &layout, false);
+            let board = self.shown_board(m, false);
             if let Some(card) = board.cards.iter().find(|c| c.id == id) {
                 self.canvas.show((card.x, card.y, card.w, card.h));
             }

@@ -81,9 +81,14 @@ pub struct Wire {
     pub route: String,
     pub from_node: String,
     pub to_node: String,
-    /// A wire back to an earlier card runs above the board at this height
-    /// instead of curving behind the cards between (Archon's loop).
+    /// A wire that cannot curve straight into its target runs along this
+    /// height instead of behind the cards between: above the board for a
+    /// loop back, through the gap between rows for a forward wire whose
+    /// target stands on a row below (a wrapped chain).
     pub lane: Option<f32>,
+    /// It returns to a step the run met already (Flow's loop), whichever
+    /// way the cards stand: drawn dashed, labelled with where it returns.
+    pub back: bool,
 }
 
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -148,29 +153,10 @@ fn size(m: &Mission, id: &str, running: bool) -> Option<(Kind, f32, f32)> {
 /// Run order, left to right: Input cards first, each numbered step in its
 /// column (siblings stacked), a gate's judges under it, Ends last.
 pub fn arranged(m: &Mission, flow: &Flow) -> Vec<LayoutNode> {
-    let mut columns: Vec<Vec<String>> = vec![m.input_cards.iter().map(|c| c.id.clone()).collect()];
-    let mut by_number: Vec<(usize, String)> = flow
-        .numbers
-        .iter()
-        .map(|(id, n)| (*n, id.clone()))
-        .collect();
-    by_number.sort();
-    for (n, id) in by_number {
-        while columns.len() <= n {
-            columns.push(vec![]);
-        }
-        columns[n].push(id.clone());
-        // A gate's judges sit under it.
-        for (judge, gate) in &flow.judge_of {
-            if *gate == id {
-                columns[n].push(judge.clone());
-            }
-        }
-    }
-    columns.push(m.ends.iter().map(|e| e.id.clone()).collect());
+    let columns = columns(m, flow);
     let mut out = vec![];
     let mut x = MARGIN;
-    for col in columns.iter().filter(|c| !c.is_empty()) {
+    for col in &columns {
         let mut y = MARGIN;
         let mut w: f32 = 0.;
         for id in col {
@@ -186,6 +172,127 @@ pub fn arranged(m: &Mission, flow: &Flow) -> Vec<LayoutNode> {
             w = w.max(cw);
         }
         x += w + GAP_X;
+    }
+    out
+}
+
+/// The run-order columns, each top to bottom: Input cards, each numbered
+/// step (siblings stacked, a gate's judges under it), Ends.
+fn columns(m: &Mission, flow: &Flow) -> Vec<Vec<String>> {
+    let mut columns: Vec<Vec<String>> = vec![m.input_cards.iter().map(|c| c.id.clone()).collect()];
+    let mut by_number: Vec<(usize, String)> = flow
+        .numbers
+        .iter()
+        .map(|(id, n)| (*n, id.clone()))
+        .collect();
+    by_number.sort();
+    for (n, id) in by_number {
+        while columns.len() <= n {
+            columns.push(vec![]);
+        }
+        columns[n].push(id.clone());
+        // A gate's judges sit under it, in a stable order.
+        let mut judges: Vec<&String> = flow
+            .judge_of
+            .iter()
+            .filter(|(_, gate)| **gate == id)
+            .map(|(judge, _)| judge)
+            .collect();
+        judges.sort();
+        columns[n].extend(judges.into_iter().cloned());
+    }
+    columns.push(m.ends.iter().map(|e| e.id.clone()).collect());
+    columns.retain(|c| !c.is_empty());
+    columns
+}
+
+/// The room between two rows of a wrapped board, for the wires that run
+/// from the end of one row to the start of the next.
+const ROW_GAP: f32 = 2. * GAP_Y;
+
+/// A column's cards with where each sits in it, then its width and height.
+type Column = (Vec<(String, f32)>, f32, f32);
+
+/// The mission laid out for a pane of `room` (width, height, in pixels)
+/// that only shows it: the run-order columns wrapped into the rows that
+/// draw its cards largest there, so a tall pane gets a column of rows and
+/// a wide one a single row. When even the best wrap draws them smaller
+/// than `floor`, the rows are as wide as still fit across at `floor`, and
+/// the board runs down past the pane. For display only: never saved.
+pub fn shaped(m: &Mission, flow: &Flow, room: (f32, f32), floor: f32) -> Vec<LayoutNode> {
+    let room = (room.0.max(1.), room.1.max(1.));
+    // Each column's cards, where each sits in it, its width and height;
+    // a Limit card keeps its room under the card it caps.
+    let columns: Vec<Column> = columns(m, flow)
+        .into_iter()
+        .map(|ids| {
+            let (mut y, mut w) = (0f32, 0f32);
+            let mut placed = vec![];
+            for id in ids {
+                let Some((_, cw, ch)) = size(m, &id, false) else {
+                    continue;
+                };
+                let capped = m.limits.iter().filter(|l| l.target == id).count() as f32;
+                placed.push((id, y));
+                y += ch + GAP_Y;
+                if capped > 0. {
+                    y += LIMIT_GAP + capped * LIMIT_H + (capped - 1.) * GAP_Y / 2.;
+                }
+                w = w.max(cw);
+            }
+            (placed, w, (y - GAP_Y).max(0.))
+        })
+        .filter(|(placed, ..)| !placed.is_empty())
+        .collect();
+    if columns.is_empty() {
+        return vec![];
+    }
+    let extent = |n: usize| {
+        let rows: Vec<_> = columns.chunks(n).collect();
+        let w = rows
+            .iter()
+            .map(|r| r.iter().map(|c| c.1).sum::<f32>() + GAP_X * (r.len() - 1) as f32)
+            .fold(0., f32::max);
+        let h = rows
+            .iter()
+            .map(|r| r.iter().map(|c| c.2).fold(0., f32::max))
+            .sum::<f32>()
+            + ROW_GAP * (rows.len() - 1) as f32;
+        (w, h)
+    };
+    let zoom = |n: usize| {
+        let (w, h) = extent(n);
+        (room.0 / w).min(room.1 / h).min(1.)
+    };
+    let all = columns.len();
+    // The fewest rows among those that draw it largest (the last of
+    // equals wins).
+    let best = (1..=all)
+        .max_by(|a, b| zoom(*a).total_cmp(&zoom(*b)))
+        .unwrap_or(all);
+    let per_row = if zoom(best) >= floor {
+        best
+    } else {
+        (1..=all)
+            .rev()
+            .find(|n| room.0 / extent(*n).0 >= floor)
+            .unwrap_or(1)
+    };
+    let mut out = vec![];
+    let mut y = MARGIN;
+    for row in columns.chunks(per_row) {
+        let mut x = MARGIN;
+        for (placed, w, _) in row {
+            for (id, dy) in placed {
+                out.push(LayoutNode {
+                    id: id.clone(),
+                    x: x as i64,
+                    y: (y + dy) as i64,
+                });
+            }
+            x += w + GAP_X;
+        }
+        y += row.iter().map(|c| c.2).fold(0., f32::max) + ROW_GAP;
     }
     out
 }
@@ -351,6 +458,7 @@ pub fn board(m: &Mission, flow: &Flow, layout: &[LayoutNode], running: bool) -> 
     }
     let card = |id: &str| cards.iter().find(|c| c.id == id);
     let top = cards.iter().map(|c| c.y).fold(f32::MAX, f32::min);
+    let number = |id: &str| flow.numbers.get(id).copied();
     let mut loops = 0.;
     let mut wires: Vec<Wire> = m
         .connections
@@ -372,17 +480,29 @@ pub fn board(m: &Mission, flow: &Flow, layout: &[LayoutNode], running: bool) -> 
             } else {
                 port_at(m, b, to_port, false)
             };
-            let back = route != "judge" && to.0 < from.0;
-            // Each loop back has a lane of its own, the later ones higher.
-            let lane = back.then(|| {
+            // Back is told by the run's order, not by where the cards
+            // stand: a chain wrapped onto a second row still reads forward.
+            let back = route != "judge"
+                && matches!((number(from_node), number(to_node)), (Some(a), Some(b)) if b <= a);
+            // A loop back to a row above runs through the gap over its own
+            // row; one within a row has a lane of its own above the board,
+            // the later ones higher.
+            let lane = if back && b.y + b.h <= a.y {
+                Some(gap_above(&cards, a, b))
+            } else if back {
                 loops += 1.;
-                top - LOOP * loops
-            });
+                Some(top - LOOP * loops)
+            } else if route != "judge" && to.0 < from.0 + 2. * LOOP_OUT {
+                Some(gutter(&cards, a, b))
+            } else {
+                None
+            };
             Some(Wire {
                 id: c.id.clone(),
                 from,
                 to,
                 lane,
+                back,
                 route,
                 from_node: from_node.to_string(),
                 to_node: to_node.to_string(),
@@ -407,9 +527,39 @@ pub fn board(m: &Mission, flow: &Flow, layout: &[LayoutNode], running: bool) -> 
             from_node: l.id.clone(),
             to_node: l.target.clone(),
             lane: None,
+            back: false,
         });
     }
     Board { cards, wires }
+}
+
+/// The height a forward wire runs along to reach a card it cannot curve
+/// into: the middle of the gap above the target when the target stands on
+/// a row below, else just under both cards.
+fn gutter(cards: &[Card], a: &Card, b: &Card) -> f32 {
+    if b.y >= a.y + a.h {
+        let (x0, x1) = (b.x.min(a.x), (a.x + a.w).max(b.x + b.w));
+        let above = cards
+            .iter()
+            .filter(|c| c.y + c.h <= b.y && c.x < x1 && c.x + c.w > x0)
+            .map(|c| c.y + c.h)
+            .fold(a.y + a.h, f32::max);
+        (above + b.y) / 2.
+    } else {
+        (a.y + a.h).max(b.y + b.h) + LOOP
+    }
+}
+
+/// A third down the gap over `a`'s row, for a wire back from `a` to `b`
+/// on a row above: clear of a forward wire, which crosses at its middle.
+fn gap_above(cards: &[Card], a: &Card, b: &Card) -> f32 {
+    let (x0, x1) = (b.x.min(a.x), (a.x + a.w).max(b.x + b.w));
+    let above = cards
+        .iter()
+        .filter(|c| c.y + c.h <= a.y && c.x < x1 && c.x + c.w > x0)
+        .map(|c| c.y + c.h)
+        .fold(b.y + b.h, f32::max);
+    above + (a.y - above) / 3.
 }
 
 /// How big a card of this kind is when it is new: one port each way, one
@@ -516,6 +666,70 @@ mod tests {
         assert!(fail.lane.is_some_and(|y| y < top));
         let pass = b.wires.iter().find(|w| w.route == "pass").unwrap();
         assert_eq!(pass.lane, None);
+    }
+
+    #[test]
+    fn a_board_shown_in_a_pane_is_laid_out_to_the_panes_shape() {
+        let m = delivery();
+        let flow = build(&m);
+        let rows = |room: (f32, f32), floor: f32| {
+            let layout = shaped(&m, &flow, room, floor);
+            // A row starts where a column's first card stands.
+            let mut tops: Vec<i64> = layout
+                .iter()
+                .filter(|p| !layout.iter().any(|o| o.x == p.x && o.y < p.y))
+                .map(|p| p.y)
+                .collect();
+            tops.sort();
+            tops.dedup();
+            (tops.len(), board(&m, &flow, &layout, false))
+        };
+        // A wide pane shows the mission as one row; a tall one wraps it,
+        // so its cards are drawn larger than one long row would allow.
+        let (wide, _) = rows((4000., 900.), 0.);
+        assert_eq!(wide, 1);
+        let (tall, b) = rows((700., 1400.), 0.);
+        assert!(tall > 1, "a tall pane wraps the chain");
+        let (_, _, w, h) = extent(&b);
+        let (_, _, w1, h1) = extent(&board(&m, &flow, &arranged(&m, &flow), false));
+        assert!((700. / w).min(1400. / h) > (700. / w1).min(1400. / h1));
+        // Too small for the floor: the rows still fit across at the floor
+        // and the board runs down instead.
+        let (_, b) = rows((500., 300.), 0.6);
+        assert!(extent(&b).2 * 0.6 <= 500.);
+    }
+
+    #[test]
+    fn a_wire_wrapped_onto_the_next_row_reads_forward() {
+        let m = delivery();
+        let flow = build(&m);
+        let b = board(&m, &flow, &shaped(&m, &flow, (700., 1400.), 0.), false);
+        let card = |id: &str| b.cards.iter().find(|c| c.id == id).unwrap();
+        let wrapped: Vec<&Wire> = b
+            .wires
+            .iter()
+            .filter(|w| w.route != "judge" && w.route != "limit" && w.to.0 < w.from.0)
+            .filter(|w| !matches!((flow.numbers.get(&w.from_node), flow.numbers.get(&w.to_node)), (Some(a), Some(b)) if b <= a))
+            .collect();
+        assert!(!wrapped.is_empty(), "the pane wraps a forward wire");
+        for w in wrapped {
+            assert!(!w.back, "{} reads forward", w.id);
+            // It runs through the gap above its target, not over the board.
+            let (a, t) = (card(&w.from_node), card(&w.to_node));
+            let lane = w.lane.unwrap();
+            assert!(
+                lane > a.y + a.h && lane < t.y,
+                "{} runs between the rows",
+                w.id
+            );
+        }
+        // A gate sending work back still loops back, wherever it stands,
+        // over the gate's row and clear of the card it returns to.
+        let fail = b.wires.iter().find(|w| w.route == "fail").unwrap();
+        assert!(fail.back);
+        let (gate, to) = (card(&fail.from_node), card(&fail.to_node));
+        let lane = fail.lane.unwrap();
+        assert!(lane < gate.y && (lane < to.y || lane > to.y + to.h));
     }
 
     #[test]

@@ -16,6 +16,10 @@ const FIT_MARGIN: f32 = 80.;
 /// The least zoom a card's words read at. A board that fits whole only
 /// smaller opens at this zoom on its start; Fit still shows it whole.
 const READABLE: f32 = 0.85;
+/// The least zoom the board beside Flow is drawn at: its titles still
+/// read, its small words only just. A mission it cannot show whole at this
+/// size runs down past the pane and scrolls; Fit still shows it whole.
+pub(super) const BESIDE_FLOOR: f32 = 0.6;
 /// The strip on the right the zoom controls stand in; new cards keep out.
 const DRAG_SLOP: f32 = 3.;
 const CURVE_REACH: f32 = 40.;
@@ -204,34 +208,50 @@ impl View {
         self.fitted = !board.cards.is_empty();
     }
     /// The view a board opens at: whole when its words read at that size,
-    /// otherwise at [`READABLE`] on its start, where the Input is, so a
-    /// long mission or a narrow window opens readable rather than tiny.
-    fn open(&mut self, board: &board::Board) {
+    /// otherwise at `floor` on its start, where the Input is, so a long
+    /// mission or a narrow window opens readable rather than tiny. With
+    /// `across`, a board too long to show whole is drawn as large as its
+    /// width allows, at `floor` or more, and runs down past the view.
+    fn open(&mut self, board: &board::Board, floor: f32, across: bool) {
         self.fit(board);
-        if self.zoom >= READABLE || board.cards.is_empty() {
+        if self.zoom >= floor || board.cards.is_empty() {
             return;
         }
-        let (_, _, _, h) = self.bounds.get();
-        let (x, y, _, bh) = board::extent(board);
-        self.zoom = READABLE;
-        // Centred top to bottom when it fits that way.
-        let top = if bh * READABLE <= h {
-            (h - bh * READABLE) / 2. - y * READABLE
+        let (_, _, w, h) = self.bounds.get();
+        let (x, y, bw, bh) = board::extent(board);
+        let floor = if across {
+            ((w - FIT_MARGIN) / bw).clamp(floor, 1.)
         } else {
-            FIT_MARGIN / 2. - y * READABLE
+            floor
         };
-        self.pan = (FIT_MARGIN / 2. - x * READABLE, top);
+        self.zoom = floor;
+        // Centred each way it fits.
+        let place = |room: f32, size: f32, at: f32| {
+            if size * floor <= room - FIT_MARGIN {
+                (room - size * floor) / 2. - at * floor
+            } else {
+                FIT_MARGIN / 2. - at * floor
+            }
+        };
+        self.pan = (place(w, bw, x), place(h, bh, y));
+    }
+    /// The room the board has in view, less the margin a fit keeps.
+    pub(super) fn room(&self) -> (f32, f32) {
+        let (_, _, w, h) = self.bounds.get();
+        (w - FIT_MARGIN, h - FIT_MARGIN)
     }
 }
 
 impl MissionsPage {
-    pub(super) fn render_canvas(
-        &mut self,
-        t: &ahjo_app_kit::theme::Theme,
-        mission: &Mission,
-        running: bool,
-        cx: &mut Context<Self>,
-    ) -> Div {
+    /// The board as drawn. Beside Flow it is read only and shows no run (no
+    /// run chips, no room for them), and is laid out for the pane it has
+    /// rather than at its saved places, which are for the whole window.
+    pub(super) fn shown_board(&self, mission: &Mission, running: bool) -> board::Board {
+        let flow = flow::build(mission);
+        if self.beside {
+            let layout = board::shaped(mission, &flow, self.canvas.room(), BESIDE_FLOOR);
+            return board::board(mission, &flow, &layout, false);
+        }
         let mut layout = self
             .state
             .layout
@@ -246,10 +266,16 @@ impl MissionsPage {
                 y: now.1.round() as i64,
             });
         }
-        // Beside Flow the board is read only, as a run's is, but shows no
-        // run: no run chips, no room for them.
-        let run_marks = running && !self.beside;
-        let board = board::board(mission, &flow::build(mission), &layout, run_marks);
+        board::board(mission, &flow, &layout, running)
+    }
+    pub(super) fn render_canvas(
+        &mut self,
+        t: &ahjo_app_kit::theme::Theme,
+        mission: &Mission,
+        running: bool,
+        cx: &mut Context<Self>,
+    ) -> Div {
+        let board = self.shown_board(mission, running);
         if let Some(id) = self.canvas.follow.clone() {
             match board.cards.iter().find(|c| c.id == id) {
                 Some(c) if self.editor.as_ref().is_some_and(|e| e.id == id) => {
@@ -386,7 +412,7 @@ impl MissionsPage {
             running || self.state.layout.is_some(),
         ));
         // A loop back says where it returns to, on its lane.
-        for w in board.wires.iter().filter(|w| w.lane.is_some()) {
+        for w in board.wires.iter().filter(|w| w.back) {
             let lane = w.lane.unwrap_or_default();
             let (x, y) = view.position((w.from.0 + w.to.0) / 2., lane);
             let colour = if w.route == "fail" { t.fail } else { t.wire };
@@ -1084,14 +1110,14 @@ fn wires(
             // itself stays where it is, so nothing moves under the pointer
             // when the panel closes.
             let resized = (before.2, before.3) != (bounds.get().2, bounds.get().3);
-            // Beside Flow, a board nobody moved is framed again when the
-            // window's size changes it. On its own it stays put.
-            if resized && before.2 > 0. && !view.touched && view.fitted {
+            // Beside Flow the board is laid out for its pane, so a new
+            // size lays it out and frames it again. On its own it stays put.
+            if resized && before.2 > 0. {
                 let entity = entity.clone();
                 cx.defer(move |cx| {
                     let _ = entity.update(cx, |page, cx| {
                         if page.beside {
-                            page.canvas.fitted = false;
+                            page.canvas.reopen();
                             cx.notify();
                         }
                     });
@@ -1109,12 +1135,15 @@ fn wires(
                 cx.defer(move |cx| {
                     let _ = entity.update(cx, |page, cx| {
                         if page.generation == generation && !page.canvas.fitted {
-                            // Beside Flow the board is the mission's shape,
-                            // whole; on its own it opens readable.
-                            if page.beside {
-                                page.canvas.fit(&fit_board);
-                            } else {
-                                page.canvas.open(&fit_board);
+                            // Beside Flow the board is laid out for the pane
+                            // as it now is, and opens as large as fits it.
+                            let mission = page.state.mission.clone();
+                            match mission {
+                                Some(m) if page.beside => {
+                                    let board = page.shown_board(&m, false);
+                                    page.canvas.open(&board, BESIDE_FLOOR, true);
+                                }
+                                _ => page.canvas.open(&fit_board, READABLE, false),
                             }
                             if page.canvas.fitted {
                                 cx.notify();
@@ -1147,7 +1176,7 @@ fn wires(
                 // are dotted; a loop back is dashed.
                 if matches!(w.route.as_str(), "judge" | "limit") {
                     path = path.dash_array(&[px(DASH_SHORT), px(DASH_LONG)]);
-                } else if w.lane.is_some() {
+                } else if w.back {
                     path = path.dash_array(&[px(DASH_LONG * 2.), px(DASH_LONG)]);
                 }
                 path.move_to(a);

@@ -462,6 +462,10 @@ impl MissionsPage {
                         pane::cell(format!("{}  {}", step.number, mission.node_name(&step.id)))
                             .font_weight(FontWeight::SEMIBOLD)
                             .id(SharedString::from(format!("flow-title-{title_id}")))
+                            .debug_selector({
+                                let selector = format!("flow-title-{title_id}");
+                                move || selector
+                            })
                             .when(self.beside, |d| {
                                 d.cursor_pointer()
                                     .on_click(cx.listener(move |page, _, _, cx| {
@@ -628,12 +632,13 @@ impl MissionsPage {
                         .flex()
                         .items_center()
                         .gap(px(size::HEAD_GAP))
-                        .child(div().text_color(t.text2).child(
+                        .child(div().flex_1().min_w_0().text_color(t.text2).child(
                             "Write what you are making, as roughly as you like: an agent \
                              reads it with ahjo mission inspect and builds from it.",
                         ))
                         .child(
                             kit::button(t, button, "Write it", Kind::Primary)
+                                .flex_none()
                                 .debug_selector(move || button.into())
                                 .on_click(cx.listener(|page, _, window, cx| {
                                     page.open_canvas_note(MISSION_THREAD.into(), window, cx)
