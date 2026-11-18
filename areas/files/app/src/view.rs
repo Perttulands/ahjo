@@ -181,7 +181,7 @@ pub fn lines(p: &FilesPage) -> Vec<Line> {
     if let Some(Ok(recent)) = &p.recent
         && !recent.is_empty()
     {
-        out.push(Line::Label("Recent".into()));
+        out.push(Line::Label("Changed lately".into()));
         let shown = if p.recent_more || !tree {
             recent.len()
         } else {
