@@ -55,6 +55,14 @@ impl Server {
                 "#!/bin/sh\necho \"ahjo test: $0 is a stub; run a fake harness by its path\" >&2\nexit 97\n",
             );
         }
+        // The server's default shell, which a launched session starts: a
+        // plain one with a fixed prompt, so no test reads the profile or
+        // the prompt of whoever runs it (ahjo-m97). tmux also runs a
+        // session's command through it, with `-c`.
+        write_script(
+            &dir.join(SHELL),
+            "#!/bin/sh\nPS1='$ '\nexport PS1\nif [ -x /bin/bash ]; then\n  case \"$1\" in -c) exec /bin/bash --noprofile --norc \"$@\" ;; esac\n  exec /bin/bash --noprofile --norc -i\nfi\ncase \"$1\" in -c) exec /bin/sh \"$@\" ;; esac\nexec /bin/sh -i\n",
+        );
         let name = dir.file_name().unwrap().to_string_lossy().into_owned();
         Some(Server { name, dir })
     }
@@ -82,6 +90,7 @@ impl Server {
             .arg("-S")
             .arg(self.socket_path())
             .env_remove("TMUX")
+            .env("SHELL", self.dir.join(SHELL))
             .env("PATH", stubbed_path(&self.dir.join("no-harness")));
         command
     }
@@ -278,6 +287,9 @@ fn exiting(error: &str) -> bool {
 }
 
 /// The harnesses a test must never start for real.
+/// The file name of the plain shell a test server starts sessions with.
+const SHELL: &str = "shell";
+
 pub const HARNESSES: [&str; 2] = ["claude", "codex"];
 
 /// `PATH` with `stubs` first.
