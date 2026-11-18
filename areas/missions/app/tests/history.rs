@@ -183,16 +183,30 @@ fn undo_and_redo_replay_both_wires_of_a_removed_shared_input(cx: &mut TestAppCon
     until(cx, "redo removes both wires", |_| targets(&read()) == 0);
 
     // The page shortcuts operate on the same compound history as the buttons.
+    // Each waits, as a click does, until the page has taken the last answer:
+    // the node can have the wires back before the page has its redo.
+    until(cx, "undo ready again", |cx| {
+        cx.debug_bounds("undo").is_some()
+    });
     cx.simulate_keystrokes("ctrl-z");
     until(cx, "keyboard undo restores both wires", |_| {
         targets(&read()) == 2
+    });
+    until(cx, "redo ready again", |cx| {
+        cx.debug_bounds("redo").is_some()
     });
     cx.simulate_keystrokes("ctrl-shift-z");
     until(cx, "keyboard redo removes both wires", |_| {
         targets(&read()) == 0
     });
+    until(cx, "undo ready a third time", |cx| {
+        cx.debug_bounds("undo").is_some()
+    });
     cx.simulate_keystrokes("ctrl-z");
     until(cx, "second keyboard undo", |_| targets(&read()) == 2);
+    until(cx, "redo ready a third time", |cx| {
+        cx.debug_bounds("redo").is_some()
+    });
     cx.simulate_keystrokes("ctrl-y");
     until(cx, "ctrl-y redo", |_| targets(&read()) == 0);
 
