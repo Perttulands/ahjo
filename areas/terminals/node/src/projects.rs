@@ -118,14 +118,13 @@ pub fn routes(launcher: Arc<Launcher>) -> Router {
         }))
 }
 
-fn home() -> Option<PathBuf> {
-    std::env::var_os(if cfg!(windows) { "USERPROFILE" } else { "HOME" }).map(PathBuf::from)
-}
-
 /// `GET /api/terminal/projects`: every project under the search roots.
 async fn projects(State(search): State<Arc<Search>>) -> Response {
     search.launcher.look();
-    let roots = search.launcher.get().search_roots(home().as_deref());
+    let roots = search
+        .launcher
+        .get()
+        .search_roots(crate::launch::own_home().as_deref());
     let (known, stale) = {
         let last = search.last.lock().unwrap();
         match last.as_ref().filter(|w| w.roots == roots) {

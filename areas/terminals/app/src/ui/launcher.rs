@@ -164,6 +164,12 @@ impl Launcher {
             .map_or(&[], Vec::as_slice)
     }
 
+    /// The home folder `~` names for the chosen user, when the node said:
+    /// its own user's only, since another user's home is theirs.
+    fn home<'a>(&self, conf: &'a ahjo_terminals_contract::Launcher) -> Option<&'a str> {
+        conf.home.as_deref().filter(|_| self.user.is_empty())
+    }
+
     fn client<'a>(&self, shell: &'a Terminals) -> Option<&'a Remote> {
         shell.fleet.get(&self.node(shell)?)
     }
@@ -272,6 +278,7 @@ impl Launcher {
                 &l.folders,
                 &node.sessions,
                 &self.user,
+                self.home(l),
             )
             .into_iter()
             .next()
@@ -491,7 +498,7 @@ impl Render for Launcher {
             .as_ref()
             .map(|c| {
                 let launched = client.map_or(&[][..], |n| self.launched(shell, &n.node));
-                launch::folders(launched, &c.folders, sessions, &self.user)
+                launch::folders(launched, &c.folders, sessions, &self.user, self.home(c))
             })
             .unwrap_or_default();
         let notify_on = shell.settings.notify;
@@ -525,10 +532,11 @@ impl Render for Launcher {
             self.named = false;
         }
         let at = target.clone().unwrap_or_default();
+        let home = self.home(&conf).map(str::to_string);
         let field_empty = self.folder.read(cx).text(cx).is_empty();
         let field_focused = self.folder.read(cx).field.read(cx).is_focused(window);
         self.folder.update(cx, |f, cx| {
-            f.serve(&at, &self.user, offered, cx);
+            f.serve(&at, &self.user, offered, home, cx);
             if field_empty {
                 f.field
                     .update(cx, |field, _| field.set_placeholder(&folder));

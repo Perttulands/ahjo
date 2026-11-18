@@ -95,9 +95,31 @@ pub fn sessions(sessions: &[SessionInfo], events: &HashMap<String, Event>, me: u
 /// `0x02` and the launcher's configuration as JSON, see [`Config::json`],
 /// with `"users"`: the other Unix users a session can start for, if any, and
 /// `"notifyOff"`: why a launch asked to notify gets no completion hooks
-/// here, if it doesn't.
+/// here, if it doesn't; and `"home"`: the folder `~` names for the node's
+/// own user, so a launcher can tell `~/work` and its full path are one
+/// folder.
 pub fn launcher(config: &Config, users: &[String], notify_off: Option<&str>) -> Vec<u8> {
+    launcher_at(
+        config,
+        users,
+        notify_off,
+        crate::launch::own_home().as_deref(),
+    )
+}
+
+fn launcher_at(
+    config: &Config,
+    users: &[String],
+    notify_off: Option<&str>,
+    home: Option<&std::path::Path>,
+) -> Vec<u8> {
     let mut json = config.json();
+    if let Some(home) = home {
+        json.pop();
+        json.push_str(",\"home\":");
+        push_json_string(&mut json, &home.to_string_lossy());
+        json.push('}');
+    }
     if !users.is_empty() {
         json.pop();
         json.push_str(",\"users\":[");
@@ -166,12 +188,25 @@ mod tests {
     #[test]
     fn the_launcher_names_other_users_only_if_there_are_any() {
         let config = Config::default();
-        assert_eq!(launcher(&config, &[], None)[1..], *config.json().as_bytes());
+        assert_eq!(
+            launcher_at(&config, &[], None, None)[1..],
+            *config.json().as_bytes()
+        );
         let users = ["alice".into(), "bob".into()];
-        let json = String::from_utf8(launcher(&config, &users, Some("no \"hooks\""))[1..].to_vec())
-            .unwrap();
+        let json = String::from_utf8(
+            launcher_at(
+                &config,
+                &users,
+                Some("no \"hooks\""),
+                Some(std::path::Path::new("/home/me")),
+            )[1..]
+                .to_vec(),
+        )
+        .unwrap();
         assert!(
-            json.ends_with(r#""rows":50,"users":["alice","bob"],"notifyOff":"no \"hooks\""}"#),
+            json.ends_with(
+                r#""rows":50,"home":"/home/me","users":["alice","bob"],"notifyOff":"no \"hooks\""}"#
+            ),
             "{json}"
         );
         serde_json::from_str::<serde_json::Value>(&json).unwrap();

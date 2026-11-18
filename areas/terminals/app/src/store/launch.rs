@@ -261,16 +261,32 @@ pub fn matching(fragment: &str, offered: &[String]) -> Vec<Suggestion> {
         .collect()
 }
 
+/// A folder as the launcher writes it: under `home`, the node's own home
+/// folder, it starts with `~`, so `/home/me/work` and `~/work` are one
+/// folder and read as the shorter. Other folders stay as they are.
+pub fn tilde(folder: &str, home: Option<&str>) -> String {
+    let home = home.map(|h| h.trim_end_matches(['/', '\\']));
+    match home.filter(|h| !h.is_empty()) {
+        Some(home) if folder == home => "~".into(),
+        Some(home) => match folder.strip_prefix(home) {
+            Some(rest) if rest.starts_with(['/', '\\']) => format!("~{rest}"),
+            _ => folder.to_string(),
+        },
+        None => folder.to_string(),
+    }
+}
+
 /// What a fragment searches: the offered folders first, so they win ties,
-/// then the node's projects not already among them.
-/// A folder written with a closing separator, as Tab completes it, is the
-/// same folder.
-pub fn searched(offered: &[String], projects: &[String]) -> Vec<String> {
+/// then the node's projects not already among them, each written as
+/// [`tilde`] writes it. A folder written with a closing separator, as Tab
+/// completes it, is the same folder.
+pub fn searched(offered: &[String], projects: &[String], home: Option<&str>) -> Vec<String> {
     let same = |f: &str| f.trim_end_matches(['/', '\\']).to_string();
     let mut all: Vec<String> = Vec::new();
     for folder in offered.iter().chain(projects) {
-        if !all.iter().any(|a| same(a) == same(folder)) {
-            all.push(folder.clone());
+        let folder = tilde(folder, home);
+        if !all.iter().any(|a| same(a) == same(&folder)) {
+            all.push(folder);
         }
     }
     all
@@ -303,12 +319,14 @@ const RECENT: usize = 5;
 /// The folders the launcher offers: those launched in on this device, the
 /// latest first, so the first is where the next launch goes; then the
 /// node's own; then the folders `user`'s live sessions sit in, the newest
-/// first, at most five of them.
+/// first, at most five of them. Each is written as [`tilde`] writes it
+/// under `home`, so one folder is offered once however it was named.
 pub fn folders(
     launched: &[String],
     pinned: &[String],
     sessions: &[Session],
     user: &str,
+    home: Option<&str>,
 ) -> Vec<String> {
     let mut mine: Vec<&Session> = sessions
         .iter()
@@ -317,8 +335,9 @@ pub fn folders(
     mine.sort_by_key(|s| std::cmp::Reverse(s.last.unwrap_or(0)));
     let mut out: Vec<String> = Vec::new();
     for folder in launched.iter().chain(pinned) {
-        if !out.contains(folder) {
-            out.push(folder.clone());
+        let folder = tilde(folder, home);
+        if !out.contains(&folder) {
+            out.push(folder);
         }
     }
     let mut recent = 0;
@@ -326,8 +345,9 @@ pub fn folders(
         if recent == RECENT {
             break;
         }
-        if !cwd.is_empty() && !out.iter().any(|f| f == cwd) {
-            out.push(cwd.to_string());
+        let cwd = tilde(cwd, home);
+        if !cwd.is_empty() && !out.contains(&cwd) {
+            out.push(cwd);
             recent += 1;
         }
     }
@@ -480,7 +500,7 @@ mod tests {
             "/srv/games/korpi".to_string(),
             "/srv/ahjo".to_string(),
         ];
-        let all = searched(&offered, &projects);
+        let all = searched(&offered, &projects, None);
         assert_eq!(
             all,
             [
@@ -495,6 +515,39 @@ mod tests {
         assert_eq!(first("wealth").as_deref(), Some("/home/operator/wealth/"));
         assert_eq!(first("kor").as_deref(), Some("/srv/games/korpi"));
         assert_eq!(first("KOR").as_deref(), Some("/srv/games/korpi"));
+    }
+
+    /// A project under the home folder is found once, however the launcher
+    /// and the node's walk each wrote it.
+    #[test]
+    fn a_folder_under_home_is_one_folder_written_with_a_tilde() {
+        let home = Some("/home/operator");
+        assert_eq!(tilde("/home/operator", home), "~");
+        assert_eq!(tilde("/home/operator/", Some("/home/operator/")), "~/");
+        assert_eq!(tilde("/home/operator/wealth", home), "~/wealth");
+        assert_eq!(tilde("/home/operators/x", home), "/home/operators/x");
+        assert_eq!(tilde(r"C:\Users\me\src", Some(r"C:\Users\me")), r"~\src");
+        assert_eq!(tilde("/srv/ahjo", None), "/srv/ahjo");
+        let offered = ["~/wealth".to_string()];
+        let projects = [
+            "/home/operator/wealth".to_string(),
+            "/home/operator/korpi".to_string(),
+        ];
+        assert_eq!(searched(&offered, &projects, home), ["~/wealth", "~/korpi"]);
+        let at = |cwd: &str| Session {
+            cwd: Some(cwd.into()),
+            ..Default::default()
+        };
+        assert_eq!(
+            folders(
+                &["/home/operator/wealth".into()],
+                &["~".into(), "~/wealth".into()],
+                &[at("/home/operator"), at("/home/operator/korpi")],
+                "",
+                home
+            ),
+            ["~/wealth", "~", "~/korpi"]
+        );
     }
 
     #[test]
@@ -566,15 +619,15 @@ mod tests {
             at("/home/alice", Some("alice"), 9),
         ];
         assert_eq!(
-            folders(&[], &["~".into()], &live, ""),
+            folders(&[], &["~".into()], &live, "", None),
             ["~", "/srv/b", "/srv/a"]
         );
-        assert_eq!(folders(&[], &[], &live, "alice"), ["/home/alice"]);
+        assert_eq!(folders(&[], &[], &live, "alice", None), ["/home/alice"]);
         // Where this device launched last comes first, so it is where the
         // next launch goes, then the rest in the order they were used.
         let launched = ["/srv/a".to_string(), "/tmp/proj".to_string()];
         assert_eq!(
-            folders(&launched, &["~".into()], &live, ""),
+            folders(&launched, &["~".into()], &live, "", None),
             ["/srv/a", "/tmp/proj", "~", "/srv/b"]
         );
     }

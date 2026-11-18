@@ -47,6 +47,8 @@ pub struct FolderField {
     /// What the list offers before anything is typed.
     offered: Vec<String>,
     offered_user: String,
+    /// The node's home folder for that user, when the node said.
+    home: Option<String>,
     /// Typing turns the list into suggestions; a folder picked, launched
     /// or left alone is not being typed.
     editing: bool,
@@ -88,6 +90,7 @@ impl FolderField {
             host,
             offered: vec![],
             offered_user: String::new(),
+            home: None,
             editing: false,
             lit: None,
             listing: None,
@@ -109,7 +112,14 @@ impl FolderField {
     }
 
     /// Where paths are listed and what is offered: the launcher's node now.
-    pub fn serve(&mut self, node: &str, user: &str, offered: Vec<String>, cx: &mut Context<Self>) {
+    pub fn serve(
+        &mut self,
+        node: &str,
+        user: &str,
+        offered: Vec<String>,
+        home: Option<String>,
+        cx: &mut Context<Self>,
+    ) {
         if self.node != node || self.offered_user != user {
             self.listing = None;
             self.offered.clear();
@@ -121,6 +131,7 @@ impl FolderField {
         }
         self.node = node.to_string();
         self.offered_user = user.to_string();
+        self.home = home;
         keep_recent_order(&mut self.offered, offered);
     }
 
@@ -152,7 +163,10 @@ impl FolderField {
                     Some((node, projects)) if *node == self.node => &projects[..],
                     _ => &[],
                 };
-                launch::matching(&self.value(cx), &launch::searched(&self.offered, projects))
+                launch::matching(
+                    &self.value(cx),
+                    &launch::searched(&self.offered, projects, self.home.as_deref()),
+                )
             }
             FolderList::Inside { dir, segment } => match &self.listing {
                 Some(l) if l.node == self.node && l.dir == *dir => {
@@ -170,9 +184,10 @@ impl FolderField {
         }
     }
 
-    /// The folder a launch takes now, exactly as the field shows it.
+    /// The folder a launch takes now: what Enter would take, so the lit
+    /// match of a fragment rather than the fragment.
     pub fn chosen(&self, cx: &gpui::App) -> String {
-        self.value(cx).trim().to_string()
+        self.chosen_for_enter(cx)
     }
 
     fn on_field(&mut self, ev: &FieldEvent, _window: &mut Window, cx: &mut Context<Self>) {
@@ -184,6 +199,11 @@ impl FolderField {
             }
             // Folders and projects made since the last look show on the next.
             FieldEvent::Focused => {
+                // The folder standing there was not typed: the first key
+                // replaces it, as in an address bar.
+                if !self.editing {
+                    self.field.update(cx, |f, cx| f.select_everything(cx));
+                }
                 self.listing = None;
                 let node = self.node.clone();
                 self.ask_projects(&node, cx);
@@ -212,7 +232,7 @@ impl FolderField {
                 cx.emit(FolderEvent::Changed);
             }
             FieldEvent::Submit => {
-                let chosen = self.chosen_for_enter(cx);
+                let chosen = self.chosen(cx);
                 if chosen.is_empty() {
                     return;
                 }

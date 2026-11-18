@@ -244,6 +244,11 @@ fn check_flags(flags: &str) -> Result<()> {
     Ok(())
 }
 
+/// The folder `~` names for the node's own user.
+pub fn own_home() -> Option<PathBuf> {
+    std::env::var_os(if cfg!(windows) { "USERPROFILE" } else { "HOME" }).map(PathBuf::from)
+}
+
 /// `~` and `~/…` under `home`; absolute paths as they are. Checked to be a
 /// folder only if `check`: another user's folders may be closed to us.
 fn resolve_folder(folder: &str, home: Option<&Path>, check: bool) -> Result<PathBuf> {
@@ -307,7 +312,7 @@ pub async fn launch(
     check_flags(&launch.flags)?;
     let own = launch.user.is_empty();
     let home = if own {
-        std::env::var_os(if cfg!(windows) { "USERPROFILE" } else { "HOME" }).map(PathBuf::from)
+        own_home()
     } else {
         check_owner(backend, &launch.user).await?;
         server_home(backend).await

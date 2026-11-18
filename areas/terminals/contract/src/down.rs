@@ -122,6 +122,9 @@ pub struct Launcher {
     /// Why a launch asked to notify gets no completion hooks on this node.
     #[serde(default, rename = "notifyOff")]
     pub notify_off: Option<String>,
+    /// The folder `~` names for the node's own user, when the node says.
+    #[serde(default)]
+    pub home: Option<String>,
 }
 
 /// A frame from the node.

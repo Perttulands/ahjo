@@ -205,6 +205,15 @@ impl TextField {
         cx.notify();
     }
 
+    /// Selects all of the text, ending any selection the mouse is making,
+    /// so the next key typed replaces it.
+    pub fn select_everything(&mut self, cx: &mut Context<Self>) {
+        self.selected = 0..self.text.len();
+        self.reversed = false;
+        self.selecting = false;
+        cx.notify();
+    }
+
     fn changed(&mut self, cx: &mut Context<Self>) {
         cx.emit(FieldEvent::Changed);
         cx.notify();
