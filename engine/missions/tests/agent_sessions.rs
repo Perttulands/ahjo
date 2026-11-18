@@ -3,6 +3,8 @@
 //! a dispatch that wants it while another holds it gets a session of its
 //! own, ended with it.
 use ahjo_mission_engine::{Dispatch, LocalSeats, TranscriptRoots};
+use std::path::Path;
+
 use ahjo_testkit::{
     node::Node,
     tmux::{Server, eventually, stubbed_path, write_script},
@@ -59,6 +61,13 @@ async fn an_agents_live_session_is_used_and_outlives_the_run() {
         "-c",
         &home.to_string_lossy(),
     ]);
+    // tmux answers before the pane's child has moved into its folder; until
+    // then the pane reports the folder the server was started in.
+    eventually("demo-writer standing in its folder", || {
+        (Path::new(server.display("demo-writer", "#{pane_current_path}").trim()) == home)
+            .then_some(())
+    })
+    .await;
     let live_id = server
         .display("demo-writer", "#{session_id}")
         .trim()
