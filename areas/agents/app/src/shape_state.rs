@@ -125,7 +125,7 @@ pub fn short(path: &str, root: Option<&str>, home: &str) -> String {
         && let Some((_, rest)) = after.split_once('/')
     {
         let shown = short(before, root, home);
-        return format!("{shown}/.claude/projects/…/{rest}");
+        return format!("{shown}/.claude/…/{rest}");
     }
     if let Some(r) = root
         && let Some(rest) = path.strip_prefix(r)
@@ -220,6 +220,21 @@ pub fn without_front_matter(text: &str) -> &str {
     }
 }
 
+/// The file the reader opens on when nothing is picked: the instruction
+/// file closest to the folder that the harness reads at the start (the
+/// project's own, not one it imports), else the first one read.
+pub fn opening(shape: &Shape) -> Option<String> {
+    let within = shape.root.as_deref().unwrap_or(&shape.dir);
+    shape
+        .instructions
+        .iter()
+        .rfind(|i| {
+            i.load == Load::Start && i.from.is_none() && i.path.starts_with(&format!("{within}/"))
+        })
+        .or_else(|| shape.instructions.iter().find(|i| i.load == Load::Start))
+        .map(|i| i.path.clone())
+}
+
 /// The folders the list offers: running agents' first, then recent ones,
 /// each once.
 pub fn offered(running: &[(String, String)], recent: &[String]) -> Vec<String> {
@@ -276,7 +291,7 @@ mod tests {
                 Some("/srv/p"),
                 "/home/u"
             ),
-            "~/.claude/projects/…/memory/MEMORY.md"
+            "~/.claude/…/memory/MEMORY.md"
         );
     }
 
@@ -285,6 +300,39 @@ mod tests {
         assert_eq!(tokens_words(tokens(3000)), "750");
         assert_eq!(tokens_words(9800), "9.8k");
         assert_eq!(tokens_words(31_400), "31k");
+    }
+
+    #[test]
+    fn the_reader_opens_on_the_folders_own_instructions() {
+        let file = |path: &str, load, from: Option<&str>| Instruction {
+            path: path.into(),
+            load,
+            from: from.map(str::to_owned),
+            ..Instruction::default()
+        };
+        let mut shape = Shape {
+            dir: "/w/garden/beds".into(),
+            root: Some("/w/garden".into()),
+            instructions: vec![
+                file("/home/u/.claude/CLAUDE.md", Load::Start, None),
+                file("/w/garden/CLAUDE.md", Load::Start, None),
+                file(
+                    "/w/garden/AGENTS.md",
+                    Load::Start,
+                    Some("/w/garden/CLAUDE.md"),
+                ),
+                file("/w/garden/beds/deep/CLAUDE.md", Load::Later, None),
+            ],
+            ..Shape::default()
+        };
+        assert_eq!(opening(&shape).as_deref(), Some("/w/garden/CLAUDE.md"));
+        shape.instructions.truncate(1);
+        assert_eq!(
+            opening(&shape).as_deref(),
+            Some("/home/u/.claude/CLAUDE.md")
+        );
+        shape.instructions.clear();
+        assert_eq!(opening(&shape), None);
     }
 
     #[test]

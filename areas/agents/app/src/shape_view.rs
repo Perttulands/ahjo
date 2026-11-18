@@ -142,7 +142,6 @@ impl AgentsPage {
         if v.harness.is_empty() {
             v.harness = "claude".into();
         }
-        sh::remember(&mut self.kept.recent, &dir);
         self.kept.harness = self.shape.harness.clone();
         let _ = self.host.set_setting(&self.kept, cx);
         self.shape_load(cx);
@@ -171,8 +170,21 @@ impl AgentsPage {
             match crate::library::response::<Shape>(answer) {
                 Ok(shape) => {
                     v.dir = shape.dir.clone();
+                    // Only a folder that could be read is offered again.
+                    sh::remember(&mut page.kept.recent, &shape.dir);
+                    let _ = page.host.set_setting(&page.kept, cx);
+                    let v = &mut page.shape;
+                    // The reader opens on what the folder itself tells its
+                    // agent, rather than on an empty half.
+                    let first = (v.pick == Pick::None && !v.editing)
+                        .then(|| sh::opening(&shape))
+                        .flatten();
                     v.shape = Some(shape);
                     v.error = None;
+                    if let Some(path) = first {
+                        page.shape.pick = Pick::File(path.clone());
+                        page.file_read(path, cx);
+                    }
                 }
                 Err(e) => {
                     v.shape = None;
@@ -315,7 +327,11 @@ impl AgentsPage {
                 page.shape.saving = false;
                 match crate::library::response::<Text>(answer) {
                     Ok(text) => {
-                        page.host.toast(&format!("Saved {}", text.path), cx);
+                        let shown = match &page.shape.shape {
+                            Some(sp) => sh::short(&text.path, sp.root.as_deref(), &sp.home),
+                            None => text.path.clone(),
+                        };
+                        page.host.toast(&format!("Saved {shown}"), cx);
                         page.shape.file = Some(text);
                         page.shape.editing = false;
                         page.shape.close_editor = true;
@@ -436,7 +452,7 @@ impl AgentsPage {
     }
 
     /// The folders the list offers: running sessions' first, then recent.
-    fn running(&self, cx: &Context<Self>) -> Vec<(String, String, String)> {
+    pub(crate) fn running(&self, cx: &Context<Self>) -> Vec<(String, String, String)> {
         let Some(list) = &self.sessions else {
             return vec![];
         };
@@ -606,7 +622,7 @@ impl AgentsPage {
             .child(
                 div()
                     .flex_1()
-                    .min_w_0()
+                    .min_w(px(tokens::READER_MIN))
                     .h_full()
                     .border_l_1()
                     .border_color(t.divider)

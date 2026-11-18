@@ -81,7 +81,7 @@ pub fn folder(home: &Home, dir: &str) -> Result<PathBuf, Error> {
     if !path.is_absolute() {
         return Err(Error::new(
             ahjo_agents_contract::shape::INVALID,
-            format!("{dir:?} is not a full path"),
+            format!("{dir:?} is not a full path; type one such as ~/project"),
         ));
     }
     let mut clean = PathBuf::new();
