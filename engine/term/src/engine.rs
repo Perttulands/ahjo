@@ -1807,7 +1807,7 @@ async fn follow_inner(
                 Some(Request::Input(pane, data)) => {
                     // What answers typing is news, however soon it comes.
                     layout_changed = None;
-                    send(&mut out, &mut pending, control::send_keys_hex(pane, &data), Pending::Input);
+                    deliveries.input(pane, data, &mut out, &mut pending);
                 }
                 Some(Request::Claim { cols, rows }) => {
                     seat.claim(session, cols, rows, &mut out, &mut pending);

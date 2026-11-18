@@ -9,7 +9,9 @@
 //! and tmux never reuses a pane id within one server.
 //!
 //! A session delivers one text at a time, in the order asked, so a second
-//! paste never lands between the first and its Enter. Typing is not held up.
+//! paste never lands between the first and its Enter. Typing keeps its place
+//! in that order: keys typed while a delivery is in flight or waiting go to
+//! the pane after it, so they never become part of the submitted text.
 //! A delivery whose waiter has gone before its turn is dropped unsent, so
 //! one given up on (a deadline passed) never pastes late; one that has
 //! started finishes, and its waiter can tell which it was ([`Delivering`]).
@@ -342,10 +344,17 @@ impl Current {
     }
 }
 
-/// A session's deliveries: the one in flight and those waiting their turn.
+/// What waits its turn behind the delivery in flight.
+enum Queued {
+    Delivery(Delivery),
+    /// Keys typed into a pane, held so they keep their place.
+    Input(PaneId, Vec<u8>),
+}
+
+/// A session's deliveries: the one in flight and what waits its turn.
 #[derive(Default)]
 pub(super) struct Deliveries {
-    queue: VecDeque<Delivery>,
+    queue: VecDeque<Queued>,
     current: Option<Current>,
 }
 
@@ -358,9 +367,30 @@ impl Deliveries {
         out: &mut String,
         pending: &mut VecDeque<Pending>,
     ) {
-        self.queue.push_back(delivery);
+        self.queue.push_back(Queued::Delivery(delivery));
         if self.current.is_none() {
             self.start_next(session, out, pending);
+        }
+    }
+
+    /// Keys typed into `pane`: sent now when no delivery is in flight or
+    /// waiting, else after them, in the order they came.
+    pub fn input(
+        &mut self,
+        pane: PaneId,
+        data: Vec<u8>,
+        out: &mut String,
+        pending: &mut VecDeque<Pending>,
+    ) {
+        if self.current.is_none() && self.queue.is_empty() {
+            send(
+                out,
+                pending,
+                control::send_keys_hex(pane, &data),
+                Pending::Input,
+            );
+        } else {
+            self.queue.push_back(Queued::Input(pane, data));
         }
     }
 
@@ -529,16 +559,27 @@ impl Deliveries {
     }
 
     fn start_next(&mut self, session: &str, out: &mut String, pending: &mut VecDeque<Pending>) {
-        while let Some(Delivery {
-            pane,
-            text,
-            enter,
-            ready,
-            pace,
-            done,
-            turn,
-        }) = self.queue.pop_front()
-        {
+        while let Some(next) = self.queue.pop_front() {
+            let Delivery {
+                pane,
+                text,
+                enter,
+                ready,
+                pace,
+                done,
+                turn,
+            } = match next {
+                Queued::Delivery(d) => d,
+                Queued::Input(pane, data) => {
+                    send(
+                        out,
+                        pending,
+                        control::send_keys_hex(pane, &data),
+                        Pending::Input,
+                    );
+                    continue;
+                }
+            };
             if turn
                 .compare_exchange(WAITING, STARTED, Ordering::AcqRel, Ordering::Acquire)
                 .is_err()
@@ -717,6 +758,44 @@ mod tests {
         assert!(!out.contains("second"), "withdrawn, never pasted: {out}");
         assert!(out.contains("third"), "the next one in line goes: {out}");
         assert!(third_heard.started());
+    }
+
+    /// Review: keys typed while a paste settled reached the pane before its
+    /// Enter and were submitted with the text. They wait their turn now,
+    /// and keys typed before the next delivery go before it.
+    #[test]
+    fn typing_during_a_delivery_goes_after_its_enter() {
+        let mut deliveries = Deliveries::default();
+        let mut out = String::new();
+        let mut pending = VecDeque::new();
+        deliveries.input(4, b"a".to_vec(), &mut out, &mut pending);
+        assert!(out.contains("send-keys -t %4 -H 61"), "at once: {out}");
+        let (first, first_heard) = Delivery::new(4, "first".into(), true, None);
+        let (second, _second_heard) = Delivery::new(4, "second".into(), false, None);
+        deliveries.push("$1", first, &mut out, &mut pending);
+        let lines = ["7".to_string()];
+        for step in [Step::Pid, Step::Paste, Step::Paste] {
+            deliveries.replied("$1", step, true, &lines, &mut out, &mut pending);
+        }
+        assert!(deliveries.due().is_some(), "settling");
+        out.clear();
+        deliveries.input(4, b"x".to_vec(), &mut out, &mut pending);
+        deliveries.push("$1", second, &mut out, &mut pending);
+        deliveries.input(4, b"y".to_vec(), &mut out, &mut pending);
+        assert!(out.is_empty(), "held while the paste settles: {out}");
+        deliveries.settled(&mut out, &mut pending);
+        deliveries.replied("$1", Step::Guard, true, &[], &mut out, &mut pending);
+        deliveries.replied("$1", Step::GuardResult, true, &[], &mut out, &mut pending);
+        assert!(futures_block(first_heard).is_ok());
+        let enter = out.find("send-keys -t %4 Enter").expect("Enter");
+        let x = out.find("-H 78").expect("x sent");
+        let second = out.find("second").expect("second pasted");
+        assert!(enter < x && x < second, "in order: {out}");
+        assert!(!out.contains("-H 79"), "y waits for the second: {out}");
+        for step in [Step::Pid, Step::Paste, Step::Paste] {
+            deliveries.replied("$1", step, true, &lines, &mut out, &mut pending);
+        }
+        assert!(out.contains("-H 79"), "then y: {out}");
     }
 
     /// #242: a delivery that waits pastes nothing until its pane is ready
