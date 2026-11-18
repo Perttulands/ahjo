@@ -472,7 +472,8 @@ impl FilesPage {
             })
             .collect();
         let room = self.body_room.get().unwrap_or(0.);
-        let outline = headings.len() >= OUTLINE_MIN && room >= TEXT_MIN + OUTLINE_W + size::PAD;
+        let outline =
+            headings.len() >= OUTLINE_MIN && room >= TEXT_MIN * scale + OUTLINE_W + size::PAD;
         let selection = self.md_select.clone();
         let laid = self.md_blocks.clone();
         let go = self.md_go.clone();
@@ -557,8 +558,11 @@ impl FilesPage {
             .child(measure(self.body_room.clone()))
             .child(scrolled)
             .when(outline, |d| {
-                // What the text and the outline leave, either side of them.
-                let side = ((room - size::READING - OUTLINE_W) / 2.).max(0.);
+                // What the text and the outline leave, either side of them;
+                // zoomed, the text's measure is wider and the outline
+                // stands further out.
+                let text = (size::READING * scale).min(room - OUTLINE_W);
+                let side = ((room - text - OUTLINE_W) / 2.).max(0.);
                 d.child(
                     self.outline(t, &headings, &marks, blocks.len(), cx)
                         .right(px(side)),
