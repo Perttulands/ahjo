@@ -288,10 +288,13 @@ fn message(status: u16, body: &[u8]) -> String {
         .ok()
         .and_then(|v| v["error"]["message"].as_str().map(str::to_owned))
         .unwrap_or_else(|| {
-            format!(
-                "Request failed ({status}): {}",
-                String::from_utf8_lossy(body)
-            )
+            let said = String::from_utf8_lossy(body);
+            match (said.trim(), status) {
+                // No route at all: the node runs without its files area.
+                ("", 404) => "This node does not serve files.".to_string(),
+                ("", _) => format!("The node answered {status} and gave no reason."),
+                (said, _) => format!("Request failed ({status}): {said}"),
+            }
         })
 }
 fn code_of(body: &[u8]) -> Option<String> {
@@ -306,13 +309,21 @@ impl Page for FilesPage {
     const KEY: Option<char> = Some('F');
     const AREA: Option<&'static str> = Some("files");
     const ANSWERS: &'static [Answers] = &[Answers::OpenPath, Answers::Reveal("path")];
-    const SETTINGS: &'static [ahjo_app_kit::Setting] =
-        &[
-            ahjo_app_kit::Setting::text("download_folder", "Download folder", "")
-                .note("Leave empty to use Downloads in your home folder."),
-            ahjo_app_kit::Setting::text("side", "Side", "folders")
-                .note("folders, changes or hidden: the folder tree beside the open files, what changed by session, or the open files alone."),
-        ];
+    const SETTINGS: &'static [ahjo_app_kit::Setting] = &[
+        ahjo_app_kit::Setting::text("download_folder", "Download folder", "")
+            .note("Leave empty to use Downloads in your home folder."),
+        ahjo_app_kit::Setting::choice(
+            "side",
+            "Side",
+            "folders",
+            &[
+                ("folders", "Folders"),
+                ("changes", "Changes"),
+                ("hidden", "Hidden"),
+            ],
+        )
+        .note("Beside the open files: the folder tree, what changed by session, or nothing."),
+    ];
     fn chords(&self, _: &App) -> Vec<ahjo_app_kit::chords::Chord> {
         let me = self.me.clone();
         vec![
