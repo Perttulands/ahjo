@@ -159,6 +159,25 @@ impl Opened {
         (self.node.clone(), self.path.clone())
     }
 
+    /// After `sent` was written to `target` (this file, or a copy beside
+    /// it): the file as the device now has it.
+    pub fn wrote(&mut self, target: &str, sent: &str) {
+        self.saving = false;
+        self.changed_on_disk = false;
+        if target != self.path {
+            self.path = target.to_owned();
+            self.name = super::store::paths::base_name(target).to_owned();
+        }
+        self.saved = sent.to_owned();
+        if matches!(self.show, Show::Text { markdown: Some(_) }) {
+            self.show = Show::Text {
+                markdown: Some(markdown::parse(sent)),
+            };
+        }
+        self.pretty = pretty(&self.name, sent);
+        self.base = version(sent.as_bytes());
+    }
+
     /// Text small enough to edit here.
     pub fn editable(&self) -> bool {
         matches!(self.show, Show::Text { .. }) && self.saved.len() <= MAX_EDIT

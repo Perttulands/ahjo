@@ -1745,78 +1745,108 @@ impl FilesPage {
         self.request(
             request,
             move |p, status, body, cx| {
-                if !p
-                    .opened
-                    .as_ref()
-                    .is_some_and(|o| o.node == node && o.path == path)
-                {
+                let key = (node.clone(), path.clone());
+                // The answer belongs to the file it was sent for, shown or not.
+                let here = p.opened.as_ref().is_some_and(|o| o.key() == key);
+                if status != success {
+                    if !here {
+                        p.not_saved_away(&key, status, &body, cx);
+                    } else {
+                        p.leave_after_save = false;
+                        p.opened.as_mut().unwrap().saving = false;
+                        if status == 412 {
+                            p.conflict = true;
+                            p.copy_ordinal = 1;
+                        } else if status == 409 && mode == open::Write::Copy {
+                            p.copy_ordinal = ordinal + 1;
+                            p.write(mode, cx);
+                        } else {
+                            p.fail(message(status, &body), cx)
+                        }
+                    }
+                    cx.notify();
                     return;
                 }
-                if status != success {
-                    p.leave_after_save = false;
-                    p.opened.as_mut().unwrap().saving = false;
-                    if status == 412 {
-                        p.conflict = true;
-                        p.copy_ordinal = 1;
-                    } else if status == 409 && mode == open::Write::Copy {
-                        p.copy_ordinal = ordinal + 1;
-                        p.write(mode, cx);
-                    } else {
-                        p.fail(message(status, &body), cx)
-                    }
-                } else {
+                p.host
+                    .toast(&format!("Saved {}", paths::base_name(&target)), cx);
+                let new_key = (node.clone(), target.clone());
+                if here {
                     p.conflict = false;
-                    p.host
-                        .toast(&format!("Saved {}", paths::base_name(&target)), cx);
                     let now = p.code.read(cx).text().to_owned();
                     let o = p.opened.as_mut().unwrap();
-                    let old_key = o.key();
-                    o.saving = false;
-                    o.changed_on_disk = false;
-                    if mode == open::Write::Copy {
-                        o.path = target.clone();
-                        o.name = paths::base_name(&target).to_owned();
-                    }
-                    o.saved = sent.clone();
-                    if matches!(o.show, Show::Text { markdown: Some(_) }) {
-                        o.show = Show::Text {
-                            markdown: Some(ahjo_app_kit::widgets::markdown::parse(&sent)),
-                        };
-                    }
-                    o.pretty = open::pretty(&o.name, &sent);
-                    o.base = open::version(sent.as_bytes());
-                    let new_key = o.key();
+                    o.wrote(&target, &sent);
                     let pretty = o.pretty.clone();
-                    // Our own write is not a change to show.
-                    let opened_path = o.path.clone();
-                    p.seen.remove(&opened_path);
-                    p.seen.remove(&folder);
                     p.pretty_code.update(cx, |code, cx| {
                         code.reload(pretty.as_deref().unwrap_or(&sent), cx)
                     });
-                    p.drafts.remove(&old_key);
-                    p.tabs.moved(&old_key, new_key.clone());
+                    p.drafts.remove(&key);
                     if let Some(d) = open::acknowledged(&now, &sent) {
                         p.drafts.insert(new_key.clone(), d);
                         p.leave_after_save = false;
                     }
-                    p.refresh_status(cx);
-                    if p.close_after_save.take() == Some(new_key.clone())
-                        && !p.drafts.contains_key(&new_key)
+                } else {
+                    // Saved while another file is shown: its tab and its
+                    // edit learn the new version, so it is neither unsaved
+                    // nor in conflict with this write when it comes back.
+                    if let Some(mut kept) = p.tab_kept.remove(&key) {
+                        kept.opened_mut().wrote(&target, &sent);
+                        p.tab_kept.insert(new_key.clone(), kept);
+                    }
+                    if let Some(d) = p.drafts.remove(&key)
+                        && let Some(d) = open::acknowledged(&d.text, &sent)
                     {
-                        p.close_now(new_key, cx);
-                        cx.notify();
-                        return;
+                        p.drafts.insert(new_key.clone(), d);
                     }
-                    if p.tree.listings.contains_key(&folder) {
-                        p.list(folder.clone(), cx);
-                    }
-                    p.read_changes(cx);
                 }
+                p.tabs.moved(&key, new_key.clone());
+                // Our own write is not a change to show.
+                p.seen.remove(&target);
+                p.seen.remove(&folder);
+                p.refresh_status(cx);
+                if p.close_after_save.take() == Some(new_key.clone())
+                    && !p.drafts.contains_key(&new_key)
+                {
+                    p.close_now(new_key, cx);
+                    cx.notify();
+                    return;
+                }
+                if p.tree.listings.contains_key(&folder) {
+                    p.list(folder.clone(), cx);
+                }
+                p.read_changes(cx);
                 cx.notify();
             },
             cx,
         )
+    }
+    /// A save that failed after another file was shown: said with the
+    /// file's name, its edit kept, and its tab knowing it is not saving.
+    fn not_saved_away(
+        &mut self,
+        key: &store::tabs::Key,
+        status: u16,
+        body: &[u8],
+        cx: &mut Context<Self>,
+    ) {
+        if let Some(kept) = self.tab_kept.get_mut(key) {
+            let o = kept.opened_mut();
+            o.saving = false;
+            o.changed_on_disk |= status == 412;
+        }
+        if self.close_after_save.as_ref() == Some(key) {
+            self.close_after_save = None;
+        }
+        let name = paths::base_name(&key.1);
+        self.fail(
+            if status == 412 {
+                format!(
+                    "{name} was not saved: it changed on disk since it was opened. Open it to keep yours or theirs."
+                )
+            } else {
+                format!("{name} was not saved: {}", message(status, body))
+            },
+            cx,
+        );
     }
     pub fn search_key(&mut self, e: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
         // Beside another page, Esc in an empty find takes the view away.

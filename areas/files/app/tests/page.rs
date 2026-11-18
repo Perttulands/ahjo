@@ -1575,6 +1575,100 @@ fn conflicting_save_can_write_a_separate_copy(cx: &mut TestAppContext) {
     std::fs::remove_dir_all(root).unwrap();
 }
 
+/// A save answered after another file was opened still lands on its own
+/// tab: coming back finds it saved, and the next save is not a conflict
+/// with the app's own write.
+#[gpui::test]
+fn a_save_answered_after_switching_files_lands_on_its_tab(cx: &mut TestAppContext) {
+    let root = ahjo_testkit::fresh_dir("files-save-away");
+    std::fs::write(root.join("note.txt"), "before").unwrap();
+    std::fs::write(root.join("other.txt"), "other").unwrap();
+    let running = start(root.clone());
+    cx.executor().allow_parking();
+    cx.update(ahjo_app_shell::prepare);
+    let url = running.url.clone();
+    let (_, cx) = cx.add_window_view(move |w, cx| {
+        ahjo_app_shell::start(&[observed_files], Some(url), None, w, cx)
+    });
+    let page = SEARCH_PAGE.with(|p| p.borrow().as_ref().unwrap().clone());
+    tree(cx, "file-row-note.txt");
+    click(cx, "file-row-note.txt");
+    until(cx, "viewer", |cx| cx.debug_bounds("files-edit").is_some());
+    click(cx, "files-edit");
+    cx.simulate_keystrokes("ctrl-a");
+    cx.simulate_input("first");
+    let other = root.join("other.txt").to_string_lossy().into_owned();
+    // Saved and left in one step, so the answer can only come after.
+    page.update_in(cx, |p, w, cx| {
+        p.save(cx);
+        p.open(other, w, cx);
+    });
+    until(cx, "first saved", |_| {
+        std::fs::read(root.join("note.txt")).ok().as_deref() == Some(b"first")
+    });
+    let note = (
+        running.node.clone(),
+        root.join("note.txt").to_string_lossy().into_owned(),
+    );
+    until(cx, "the draft acknowledged", |cx| {
+        page.read_with(cx, |p, _| !p.drafts.contains_key(&note))
+    });
+    click(cx, "file-row-note.txt");
+    until(cx, "note shown again", |cx| {
+        cx.debug_bounds("file-view-note.txt").is_some()
+    });
+    assert!(cx.debug_bounds("files-unsaved").is_none());
+    if cx.debug_bounds("files-save").is_none() {
+        click(cx, "files-edit");
+    }
+    cx.simulate_keystrokes("ctrl-a");
+    cx.simulate_input("second");
+    cx.simulate_keystrokes("ctrl-s");
+    until(cx, "second saved", |_| {
+        std::fs::read(root.join("note.txt")).ok().as_deref() == Some(b"second")
+    });
+    assert!(cx.debug_bounds("conflict-copy").is_none());
+    drop(running);
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+/// A file opened from a find is the folders' row when the find ends, not
+/// the row the find began on.
+#[gpui::test]
+fn the_folders_come_back_on_the_file_a_find_opened(cx: &mut TestAppContext) {
+    let root = ahjo_testkit::fresh_dir("files-find-row");
+    std::fs::write(root.join("first.txt"), "first").unwrap();
+    std::fs::write(root.join("second.txt"), "second").unwrap();
+    let running = start(root.clone());
+    cx.executor().allow_parking();
+    cx.update(ahjo_app_shell::prepare);
+    let url = running.url.clone();
+    let (_, cx) = cx.add_window_view(move |w, cx| {
+        ahjo_app_shell::start(&[observed_files], Some(url), None, w, cx)
+    });
+    tree(cx, "file-row-first.txt");
+    click(cx, "file-row-first.txt");
+    until(cx, "first open", |cx| {
+        cx.debug_bounds("file-view-first.txt").is_some()
+    });
+    click(cx, "files-search");
+    cx.simulate_input("second");
+    cx.executor().advance_clock(Duration::from_millis(300));
+    until(cx, "a name found", |cx| {
+        cx.debug_bounds("hit-second.txt").is_some()
+    });
+    cx.simulate_keystrokes("enter");
+    until(cx, "second open", |cx| {
+        cx.debug_bounds("file-view-second.txt").is_some()
+    });
+    cx.simulate_keystrokes("escape");
+    until(cx, "the row of the file open", |cx| {
+        cx.debug_bounds("picked-second.txt").is_some()
+    });
+    drop(running);
+    std::fs::remove_dir_all(root).unwrap();
+}
+
 /// Unsaved edits in the main Files page hold the app window open.
 #[gpui::test]
 fn unsaved_file_holds_the_window_until_the_operator_decides(cx: &mut TestAppContext) {

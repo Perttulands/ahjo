@@ -33,6 +33,14 @@ pub(crate) struct TabKept {
     md: gpui::Point<gpui::Pixels>,
 }
 
+impl TabKept {
+    /// The file as kept: a save that answers while it is not shown
+    /// updates it here.
+    pub(crate) fn opened_mut(&mut self) -> &mut Opened {
+        &mut self.opened
+    }
+}
+
 /// The find inside the open file: what it found, the one gone to, and
 /// whether it replaces too.
 #[derive(Clone, Debug, Default)]
@@ -195,7 +203,8 @@ impl FilesPage {
         let Some(o) = self.opened.as_ref() else {
             return;
         };
-        if !matches!(o.show, Show::Text { .. }) || o.saving || self.tabs.at(&o.key()).is_none() {
+        // A save on its way is kept too: its answer finds the tab here.
+        if !matches!(o.show, Show::Text { .. }) || self.tabs.at(&o.key()).is_none() {
             return;
         }
         let kept = TabKept {
