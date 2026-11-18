@@ -304,3 +304,41 @@ fn a_note_on_a_wire_shows_under_its_step_and_on_the_board(cx: &mut TestAppContex
         has(cx, "canvas-wire-note-edge_done")
     });
 }
+
+#[gpui::test]
+fn a_wide_window_shows_flow_beside_the_board(cx: &mut TestAppContext) {
+    let running = start();
+    let settings = std::env::temp_dir()
+        .join(format!("ahjo-beside-{}", std::process::id()))
+        .join("app.json");
+    std::fs::create_dir_all(settings.parent().unwrap()).unwrap();
+    cx.executor().allow_parking();
+    cx.update(ahjo_app_shell::prepare);
+    let url = running.url.clone();
+    let (_, cx) = cx.add_window_view(move |window, cx| {
+        ahjo_app_shell::start(
+            &[ahjo_missions_app::build],
+            Some(url),
+            Some(settings),
+            window,
+            cx,
+        )
+    });
+    cx.simulate_resize(gpui::size(gpui::px(1920.), gpui::px(1080.)));
+    let mission = format!("mission-{}-hello", running.node);
+    until(cx, "mission", |cx| has(cx, &mission));
+    click(cx, &mission);
+    until(cx, "Flow beside the board", |cx| {
+        has(cx, "missions-board-beside") && has(cx, "mission-card-fmn_work")
+    });
+    // A card chosen on the board is marked in Flow.
+    click(cx, "mission-card-fmn_work");
+    until(cx, "the step marked in Flow", |cx| {
+        has(cx, "flow-chosen-fmn_work")
+    });
+    // Narrower, one view again, with Edit to switch.
+    cx.simulate_resize(gpui::size(gpui::px(1280.), gpui::px(900.)));
+    until(cx, "Flow alone", |cx| {
+        !has(cx, "missions-board-beside") && has(cx, "flow-step-fmn_work")
+    });
+}

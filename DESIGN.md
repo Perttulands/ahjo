@@ -54,8 +54,12 @@ A page is judged by three questions, in this order:
   resolving the ones it took up. The page exists so a person understands a
   complex flow: in what order the steps run, who does each, and where the
   gates and limits are and what each checks or caps, readable without
-  opening a card. The graph is a diagram: typed cards, coloured ports,
-  visible loops and gates. A step uses a named agent's live session or
+  opening a card. Where the window is wide, the words and the picture
+  stand together: Flow, the steps in order, beside the whole board, and a
+  step chosen in one is marked and brought into view in the other. Notes
+  read as annotations, quiet beside the flow, not banners over it. The
+  graph is a diagram: typed cards, coloured ports, visible loops and
+  gates. A step uses a named agent's live session or
   starts one; a mission's sessions are ordinary sessions under the
   mission's prefix.
 - **Scheduled.** What will run when, and how the last run went.

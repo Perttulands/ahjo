@@ -246,7 +246,10 @@ impl MissionsPage {
                 y: now.1.round() as i64,
             });
         }
-        let board = board::board(mission, &flow::build(mission), &layout, running);
+        // Beside Flow the board is read only, as a run's is, but shows no
+        // run: no run chips, no room for them.
+        let run_marks = running && !self.beside;
+        let board = board::board(mission, &flow::build(mission), &layout, run_marks);
         if let Some(id) = self.canvas.follow.clone() {
             match board.cards.iter().find(|c| c.id == id) {
                 Some(c) if self.editor.as_ref().is_some_and(|e| e.id == id) => {
@@ -443,8 +446,11 @@ impl MissionsPage {
                     .child(self.empty_mission(t, "canvas-empty", cx)),
             );
         }
-        for note in self.canvas_notes(t, mission, &board, &view, cx) {
-            layer = layer.child(note);
+        // Beside Flow the notes are read in Flow; the board shows the shape.
+        if !self.beside {
+            for note in self.canvas_notes(t, mission, &board, &view, cx) {
+                layer = layer.child(note);
+            }
         }
         if !running {
             for port in &ports {
@@ -673,7 +679,7 @@ impl MissionsPage {
         let id = card.id.clone();
         let from = (card.x, card.y);
         let selector = format!("mission-card-{id}");
-        let face = card_face(t, mission, card, z, running, state);
+        let face = card_face(t, mission, card, z, running && !self.beside, state);
         let issues: Vec<_> = findings
             .iter()
             .filter(|(finding, _)| finding.node_id == id)
@@ -709,9 +715,17 @@ impl MissionsPage {
             .h(px(card.h * z))
             .overflow_hidden()
             .border_1()
+            // The step chosen in Flow beside the board stands out on it.
+            .when(
+                self.beside && self.flow_focus.as_deref() == Some(&id),
+                |d| d.border_2(),
+            )
             .border_color(if !issues.is_empty() && self.run_tried {
                 issue_color
-            } else if self.reveal_card.as_deref() == Some(&id) || card.kind == board::Kind::Input {
+            } else if self.reveal_card.as_deref() == Some(&id)
+                || card.kind == board::Kind::Input
+                || (self.beside && self.flow_focus.as_deref() == Some(&id))
+            {
                 t.accent
             } else {
                 color
@@ -802,6 +816,13 @@ impl MissionsPage {
         } else {
             rendered
         };
+        if running && self.beside {
+            // Beside Flow, a card is where to read about it.
+            let step = card.id.clone();
+            return rendered.on_click(cx.listener(move |page, _, _, cx| {
+                page.choose_in_flow(&step, true, cx);
+            }));
+        }
         if running {
             return rendered.cursor_default();
         }
@@ -1063,6 +1084,19 @@ fn wires(
             // itself stays where it is, so nothing moves under the pointer
             // when the panel closes.
             let resized = (before.2, before.3) != (bounds.get().2, bounds.get().3);
+            // Beside Flow, a board nobody moved is framed again when the
+            // window's size changes it. On its own it stays put.
+            if resized && before.2 > 0. && !view.touched && view.fitted {
+                let entity = entity.clone();
+                cx.defer(move |cx| {
+                    let _ = entity.update(cx, |page, cx| {
+                        if page.beside {
+                            page.canvas.fitted = false;
+                            cx.notify();
+                        }
+                    });
+                });
+            }
             if resized && view.follow.is_some() {
                 let entity = entity.clone();
                 cx.defer(move |cx| {
@@ -1075,7 +1109,13 @@ fn wires(
                 cx.defer(move |cx| {
                     let _ = entity.update(cx, |page, cx| {
                         if page.generation == generation && !page.canvas.fitted {
-                            page.canvas.open(&fit_board);
+                            // Beside Flow the board is the mission's shape,
+                            // whole; on its own it opens readable.
+                            if page.beside {
+                                page.canvas.fit(&fit_board);
+                            } else {
+                                page.canvas.open(&fit_board);
+                            }
                             if page.canvas.fitted {
                                 cx.notify();
                             }

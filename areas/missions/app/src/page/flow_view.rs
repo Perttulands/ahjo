@@ -411,15 +411,43 @@ impl MissionsPage {
         let edit_selector = format!("flow-edit-{id}");
         // A step asked for by name stands out, marked as on the canvas.
         let revealed = self.reveal_card.as_deref() == Some(step.id.as_str());
+        // Chosen here or on the board beside: marked on both.
+        let chosen = self.beside && self.flow_focus.as_deref() == Some(step.id.as_str());
         let marker = format!("mission-reveal-{id}");
+        let chosen_marker = format!("flow-chosen-{id}");
+        let places = self.flow_places.clone();
+        let place = step.id.clone();
+        let title_id = step.id.clone();
         let mut block = div()
             .id(SharedString::from(selector.clone()))
             .debug_selector(move || selector.clone())
+            .relative()
             .flex()
             .flex_col()
             .pb(px(size::PAD))
+            // Where the step stands, for the board beside to scroll to it.
+            .child(
+                gpui::canvas(
+                    move |bounds, _, _| {
+                        places
+                            .borrow_mut()
+                            .insert(place.clone(), f32::from(bounds.origin.y));
+                    },
+                    |_, _, _, _| {},
+                )
+                .absolute()
+                .top_0()
+                .left_0()
+                .size_full(),
+            )
             .when(revealed, |d| {
                 d.child(div().debug_selector(move || marker.clone()))
+                    .border_l_2()
+                    .border_color(t.accent)
+                    .pl(px(size::ROW_PAD))
+            })
+            .when(chosen && !revealed, |d| {
+                d.child(div().debug_selector(move || chosen_marker.clone()))
                     .border_l_2()
                     .border_color(t.accent)
                     .pl(px(size::ROW_PAD))
@@ -432,7 +460,14 @@ impl MissionsPage {
                     .min_h(px(size::ROW))
                     .child(
                         pane::cell(format!("{}  {}", step.number, mission.node_name(&step.id)))
-                            .font_weight(FontWeight::SEMIBOLD),
+                            .font_weight(FontWeight::SEMIBOLD)
+                            .id(SharedString::from(format!("flow-title-{title_id}")))
+                            .when(self.beside, |d| {
+                                d.cursor_pointer()
+                                    .on_click(cx.listener(move |page, _, _, cx| {
+                                        page.choose_in_flow(&title_id, false, cx)
+                                    }))
+                            }),
                     )
                     .child(
                         pane::act(t, SharedString::from(edit_selector.clone()), "Edit")

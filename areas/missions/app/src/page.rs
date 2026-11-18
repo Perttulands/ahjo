@@ -45,6 +45,14 @@ const SCRIM: f32 = 0.7;
 /// The least a page shows the list beside the board in: under it the
 /// board's cards would be drawn too small to read.
 const NARROW: f32 = size::LIST + 460.;
+/// The least a detail shows Flow and the board side by side in: Flow at
+/// its measure and a board wide enough to see the mission's shape. Below
+/// it the detail shows one of them, with Edit to switch.
+const SPLIT_AT: f32 = size::MEASURE + BOARD_MIN;
+const BOARD_MIN: f32 = 560.;
+/// Flow's share of a split detail, kept between the measure and the
+/// reading width; the board takes the rest.
+const FLOW_SHARE: f32 = 0.45;
 pub struct MissionsPage {
     host: Host,
     focus: FocusHandle,
@@ -54,6 +62,13 @@ pub struct MissionsPage {
     manage: manage::Manage,
     canvas: canvas::View,
     mission_canvas_mode: bool,
+    /// The board stands beside Flow, read only, the whole mission fitted.
+    beside: bool,
+    /// The step chosen in Flow or on the board beside it, marked on both.
+    flow_focus: Option<String>,
+    flow_scroll: gpui::ScrollHandle,
+    /// Where each step stood in Flow at the last draw, to scroll to it.
+    flow_places: std::rc::Rc<std::cell::RefCell<std::collections::HashMap<String, f32>>>,
     /// The step editor shows what few steps need.
     editor_more: bool,
     note_paper: notes::NotesUi,
@@ -217,6 +232,10 @@ impl MissionsPage {
             wanted: None,
             carry: None,
             reveal_card: None,
+            beside: false,
+            flow_focus: None,
+            flow_scroll: Default::default(),
+            flow_places: Default::default(),
             new_step: None,
             run_tried: false,
             staff_pending: false,
@@ -1061,6 +1080,35 @@ impl MissionsPage {
         .detach();
         cx.notify();
     }
+    /// Choose a step where Flow and the board stand side by side: marked
+    /// on both, and brought into view on the other one: chosen on the
+    /// board, Flow scrolls to it; chosen in Flow, the board shows it.
+    fn choose_in_flow(&mut self, id: &str, from_board: bool, cx: &mut Context<Self>) {
+        self.flow_focus = Some(id.to_owned());
+        if from_board {
+            let top = self.flow_places.borrow().get(id).copied();
+            if let Some(top) = top {
+                let view = self.flow_scroll.bounds();
+                let offset = self.flow_scroll.offset();
+                let content = top - f32::from(view.origin.y) - f32::from(offset.y);
+                let most = f32::from(self.flow_scroll.max_offset().y);
+                let y = (content - size::PAD).clamp(0., most.max(0.));
+                self.flow_scroll.set_offset(gpui::point(offset.x, px(-y)));
+            }
+        } else if let Some(m) = self.state.mission.as_ref() {
+            let layout = self
+                .state
+                .layout
+                .as_ref()
+                .map(|l| l.nodes.clone())
+                .unwrap_or_default();
+            let board = board::board(m, &flow::build(m), &layout, false);
+            if let Some(card) = board.cards.iter().find(|c| c.id == id) {
+                self.canvas.show((card.x, card.y, card.w, card.h));
+            }
+        }
+        cx.notify();
+    }
     fn undo(&mut self, redo: bool, cx: &mut Context<Self>) {
         self.step_history(redo, cx);
     }
@@ -1599,6 +1647,20 @@ impl Render for MissionsPage {
         // In a narrow page the board takes the whole page, so its cards are
         // drawn large enough to read; the list comes back with Done.
         let narrow = f32::from(window.viewport_size().width) - side < NARROW;
+        let room = f32::from(window.viewport_size().width) - side - size::LIST;
+        let beside = room >= SPLIT_AT
+            && !self.mission_canvas_mode
+            && self.run.selected.is_none()
+            && self
+                .state
+                .mission
+                .as_ref()
+                .is_some_and(|m| !m.input_cards.is_empty() || !m.formations.is_empty());
+        if beside != self.beside {
+            // The one board is framed again for where it now stands.
+            self.beside = beside;
+            self.canvas.reopen();
+        }
         let mut board = false;
         let list = self.render_navigator(&t, cx);
         let error = self.state.error.clone().map(|e| {
@@ -1666,6 +1728,47 @@ impl Render for MissionsPage {
                             error.map(|e| div().flex_none().px(px(PAD)).py(px(TAB_GAP)).child(e)),
                         )
                         .children(todo),
+                )
+            } else if beside {
+                let (head, body) = self.mission_detail(&t, &m, cx);
+                let flow_w = (room * FLOW_SHARE).clamp(size::MEASURE, size::READING);
+                pane::detail_frame(
+                    head,
+                    div()
+                        .size_full()
+                        .flex()
+                        .child(
+                            div()
+                                .id(gpui::SharedString::from(format!(
+                                    "missions-detail-{}",
+                                    m.slug
+                                )))
+                                .debug_selector(|| "missions-flow-beside".into())
+                                .track_scroll(&self.flow_scroll)
+                                .flex_none()
+                                .w(px(flow_w))
+                                .h_full()
+                                .overflow_y_scroll()
+                                .child(
+                                    div()
+                                        .p(px(size::PAD))
+                                        .flex()
+                                        .flex_col()
+                                        .gap(px(size::SECTION_GAP))
+                                        .children(error)
+                                        .child(body),
+                                ),
+                        )
+                        .child(
+                            div()
+                                .debug_selector(|| "missions-board-beside".into())
+                                .flex_1()
+                                .min_w_0()
+                                .h_full()
+                                .border_l_1()
+                                .border_color(t.divider)
+                                .child(self.render_canvas(&t, &m, true, cx)),
+                        ),
                 )
             } else {
                 let (head, body) = self.mission_detail(&t, &m, cx);
