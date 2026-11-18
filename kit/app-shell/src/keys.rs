@@ -16,7 +16,7 @@ use gpui::{
 pub const LAYER: &str = "keys";
 /// The panel, and its key columns: the Alt chord, then the key after the
 /// leader.
-const PANEL_W: f32 = 560.;
+const PANEL_W: f32 = 680.;
 const ALT_W: f32 = 120.;
 const LEADER_W: f32 = 150.;
 
@@ -129,13 +129,18 @@ impl KeysPanel {
 }
 
 impl Render for KeysPanel {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let t = theme(cx).clone();
+        let top = px(size::TAB_BAR * 2.);
+        let tallest = window.viewport_size().height - top - px(size::TAB_BAR);
         let rows = self.rows(cx);
         let cursor = self.cursor.min(rows.len().saturating_sub(1));
         let mut list = div()
             .id("keys-list")
-            .max_h(px(640.))
+            // The rows take what the window leaves; they scroll only when
+            // they do not fit.
+            .flex_1()
+            .min_h_0()
             .overflow_y_scroll()
             .py(px(size::ROW_INSET))
             .flex()
@@ -175,13 +180,14 @@ impl Render for KeysPanel {
             .flex()
             .justify_center()
             .items_start()
-            .pt(px(size::TAB_BAR * 2.))
+            .pt(top)
             .on_mouse_down(MouseButton::Left, move |_, _, cx| {
                 host.close_layer(LAYER, cx)
             })
             .child(
                 kit::panel(&t)
                     .w(px(PANEL_W))
+                    .max_h(tallest)
                     .flex()
                     .flex_col()
                     .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
