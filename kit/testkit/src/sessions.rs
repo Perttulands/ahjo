@@ -13,7 +13,7 @@ use ahjo_node_kit::{Area, BoxFuture, Built, Listing, Setup};
 use ahjo_term::backend::Reply;
 use ahjo_term::control::PaneId;
 use ahjo_term::engine::{Activity, Delivering, PaneStream, SessionInfo};
-use ahjo_term::{Renames, Screen, SessionRef, SessionSpec, Sessions, Start};
+use ahjo_term::{Generation, Renames, Screen, SessionRef, SessionSpec, Sessions, Start};
 use anyhow::bail;
 use tokio::sync::{broadcast, watch};
 
@@ -40,6 +40,8 @@ struct State {
     refusing: Vec<String>,
     delivered: Vec<Delivered>,
     next: u32,
+    /// How often the servers restarted: their identity.
+    restarts: u64,
 }
 
 /// The sessions a test says the node has, and what was delivered to them.
@@ -110,6 +112,17 @@ impl FakeSessions {
             .unwrap()
             .sessions
             .retain(|s| s.name != name);
+        self.changed.send_modify(|n| *n += 1);
+    }
+
+    /// Restarts the servers, as a reboot does: every session ends, and
+    /// those added after have ids from the start again.
+    pub fn restart(&self) {
+        let mut state = self.state.lock().unwrap();
+        state.sessions.clear();
+        state.next = 0;
+        state.restarts += 1;
+        drop(state);
         self.changed.send_modify(|n| *n += 1);
     }
 
@@ -226,6 +239,19 @@ impl Sessions for FakeSessions {
 
     fn pid(&self, pane: PaneId) -> Reply<'_, u32> {
         Box::pin(async move { bail!("the fake sessions run no programs (pane {pane})") })
+    }
+
+    fn server<'a>(&'a self, session: &'a str) -> Reply<'a, Generation> {
+        Box::pin(async move {
+            let state = self.state.lock().unwrap();
+            match state.sessions.iter().any(|s| s.id == session) {
+                true => Ok(Generation {
+                    pid: 1,
+                    start_time: state.restarts,
+                }),
+                false => bail!("no session {session}"),
+            }
+        })
     }
 }
 

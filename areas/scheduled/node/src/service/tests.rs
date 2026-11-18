@@ -962,3 +962,16 @@ async fn a_renamed_session_keeps_its_tasks() {
     );
     let _ = std::fs::remove_dir_all(dir);
 }
+
+/// A session is the one a target was tied to while its server is the same
+/// one; a restarted server gives ids from the start again, so there the
+/// name decides. A tie kept before servers were kept compares by id.
+#[test]
+fn a_tie_follows_the_name_only_onto_a_restarted_server() {
+    assert_eq!(tie("$3 41:100", "$3 41:100"), Tie::Same);
+    assert_eq!(tie("$3 41:100", "$5 41:100"), Tie::Other);
+    assert_eq!(tie("$3 41:100", "$0 77:200"), Tie::Moved);
+    assert_eq!(tie("$3 41:100", "$3 77:200"), Tie::Moved);
+    assert_eq!(tie("$3", "$3 41:100"), Tie::Moved);
+    assert_eq!(tie("$3", "$0 41:100"), Tie::Other);
+}

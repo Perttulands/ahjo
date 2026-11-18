@@ -196,11 +196,14 @@ pub struct Task {
     pub name: String,
     pub prompt: String,
     pub targets: Vec<Target>,
-    /// Which session each target meant, by its label: the server's own id
-    /// for it (tmux's `$3`), learned when the target was chosen. A session
-    /// that has the name but not the id is another one, and the task is
-    /// held rather than typed into it. Not CHROTE's; a target without one
-    /// learns it at its next run.
+    /// Which session each target meant, by its label, learned when the
+    /// target was chosen: its id and the server it was on,
+    /// `<session id> <server pid>:<server start>` (see [`tied_session`]).
+    /// On the same server a session that has the name but not the id is
+    /// another one, and the task is held rather than typed into it. On
+    /// another server (tmux restarted, as at a reboot, and ids began
+    /// again) the session that has the name is the one meant. Not
+    /// CHROTE's; a target without one learns it at its next run.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub session_ids: BTreeMap<String, String>,
     pub schedule: Schedule,
@@ -325,6 +328,11 @@ impl From<TaskDoc> for Task {
             attempt: d.attempt,
         }
     }
+}
+
+/// The session id of a [`Task::session_ids`] entry, without its server.
+pub fn tied_session(tie: &str) -> &str {
+    tie.split_once(' ').map_or(tie, |(session, _)| session)
 }
 
 /// Trimmed, without empties or repeats, in the caller's order.

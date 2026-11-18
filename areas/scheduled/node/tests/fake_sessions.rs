@@ -134,6 +134,52 @@ async fn a_task_never_types_into_another_session_that_took_its_name() {
     node.stop().await;
 }
 
+/// After the tmux server restarts (a reboot) every session is new and ids
+/// begin again: a task follows its sessions' names onto the new server
+/// without being held, and is tied to the new session there.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_task_follows_its_session_onto_a_restarted_server() {
+    let node = Node::start(AREAS, "").await.unwrap();
+    let fake = node.fake_sessions();
+    fake.add("alpha");
+    let before = fake.add("ops");
+    let made = node
+        .call(
+            "scheduled_create",
+            json!({ "name": "nudge", "prompt": "morning", "sessions": ["ops"], "every": 60 }),
+        )
+        .await
+        .unwrap();
+    let id = made["task"]["id"].as_str().unwrap().to_owned();
+
+    fake.restart();
+    let after = fake.add("ops");
+    assert_ne!(before, after, "the new server gave ops another id");
+    node.call("scheduled_run", json!({ "id": id }))
+        .await
+        .unwrap();
+    assert_eq!(fake.delivered().len(), 1, "sent to ops on the new server");
+    let shown = node
+        .call("scheduled_show", json!({ "id": id }))
+        .await
+        .unwrap();
+    assert!(shown["task"].get("held").is_none(), "{shown}");
+
+    // Tied to the new ops now: another session taking its name on this
+    // same server is still not typed into.
+    fake.close("ops");
+    fake.add("ops");
+    let refused = node.call("scheduled_run", json!({ "id": id })).await;
+    assert!(
+        refused
+            .unwrap_err()
+            .message
+            .contains("ops is another session")
+    );
+    assert_eq!(fake.delivered().len(), 1);
+    node.stop().await;
+}
+
 /// The list's order does not matter: scheduled listed first still reaches
 /// the sessions; with no area providing them it is refused, saying so.
 #[tokio::test(flavor = "multi_thread")]

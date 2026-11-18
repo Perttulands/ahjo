@@ -5,8 +5,8 @@ use std::sync::Arc;
 use ahjo_term::backend::Reply;
 use ahjo_term::control::PaneId;
 use ahjo_term::engine::{Delivering, PaneStream, SessionInfo};
-use ahjo_term::{Renames, Screen, SessionRef, SessionSpec, Sessions, Start};
-use anyhow::Context;
+use ahjo_term::{Generation, Renames, Screen, SessionRef, SessionSpec, Sessions, Start};
+use anyhow::{Context, bail};
 use tokio::sync::watch;
 
 use crate::hub::Hub;
@@ -127,6 +127,26 @@ impl Sessions for Provided {
             pid.trim()
                 .parse()
                 .with_context(|| format!("pane {pane} has no process id: {pid:?}"))
+        })
+    }
+
+    fn server<'a>(&'a self, session: &'a str) -> Reply<'a, Generation> {
+        Box::pin(async move {
+            let (server, local) = self.hub.session(session)?;
+            let said = server
+                .backend()
+                .command(&["display-message", "-p", "-t", local, "#{pid} #{start_time}"])
+                .await?;
+            let mut words = said.split_whitespace().map(str::parse::<u64>);
+            match (words.next(), words.next(), words.next()) {
+                (Some(Ok(pid)), Some(Ok(start_time)), None) => Ok(Generation {
+                    pid: u32::try_from(pid)?,
+                    start_time,
+                }),
+                _ => {
+                    bail!("the server of session {session} did not say its pid and start: {said:?}")
+                }
+            }
         })
     }
 }

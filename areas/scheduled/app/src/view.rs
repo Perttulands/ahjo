@@ -9,7 +9,7 @@ use ahjo_app_kit::theme::{Theme, size, theme};
 use ahjo_app_kit::widgets::kit::{self, Kind};
 use ahjo_app_kit::widgets::pane::{self, Col};
 use ahjo_core::NodeId;
-use ahjo_scheduled_contract::{SUCCESS, Target, Task};
+use ahjo_scheduled_contract::{SUCCESS, Target, Task, tied_session};
 use gpui::{
     AnyElement, App, ClickEvent, Context, Div, FontWeight, KeyDownEvent, SharedString, Window, div,
     prelude::*, px,
@@ -558,7 +558,7 @@ impl ScheduledPage {
             let trouble = match (now, task.session_ids.get(&target.label())) {
                 _ if running.is_empty() => None,
                 (None, _) => Some(("not running", "No session of this name is running")),
-                (Some(s), Some(id)) if !s.id.is_empty() && s.id != *id => Some((
+                (Some(s), Some(tie)) if !s.id.is_empty() && s.id != tied_session(tie) => Some((
                     "another session",
                     "The session this task was made for was closed or renamed, and another \
                      has its name now. Edit and save the task to send to it.",

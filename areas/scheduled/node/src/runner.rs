@@ -18,7 +18,7 @@ use ahjo_scheduled_contract::Target;
 use ahjo_term::Sessions;
 use ahjo_term::engine::{Delivering, SessionInfo};
 
-use crate::service::Runner;
+use crate::service::{Runner, Tie, tie};
 
 /// How long a send that has started is waited for past its deadline: its
 /// paste settles for 1.2 s before Enter.
@@ -62,9 +62,20 @@ impl SessionsRunner {
     }
 }
 
+impl SessionsRunner {
+    /// The session tied to its server, as [`ahjo_scheduled_contract::Task::session_ids`] keeps it.
+    async fn tie(&self, session: &SessionInfo) -> Result<String, String> {
+        let server = (self.sessions.server(&session.id).await).map_err(|e| format!("{e:#}"))?;
+        Ok(format!(
+            "{} {}:{}",
+            session.id, server.pid, server.start_time
+        ))
+    }
+}
+
 impl Runner for SessionsRunner {
     fn validate<'a>(&'a self, target: &'a Target) -> BoxFuture<'a, Result<String, String>> {
-        Box::pin(async move { self.find(target).await.map(|s| s.id) })
+        Box::pin(async move { self.tie(&self.find(target).await?).await })
     }
 
     fn send<'a>(
@@ -79,7 +90,9 @@ impl Runner for SessionsRunner {
             let queued = async {
                 let session = self.find(target).await?;
                 // Its name alone does not make a session the task's.
-                if id.is_some_and(|id| id != session.id) {
+                if let Some(kept) = id
+                    && tie(kept, &self.tie(&session).await?) == Tie::Other
+                {
                     return Err(crate::service::replaced(target));
                 }
                 let pane = self

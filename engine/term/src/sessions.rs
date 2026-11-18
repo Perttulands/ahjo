@@ -13,7 +13,7 @@ use tokio::sync::{broadcast, watch};
 use crate::backend::Reply;
 use crate::control::PaneId;
 use crate::engine::{Delivering, PaneStream, SessionInfo};
-use crate::{Screen, SessionRef, SessionSpec};
+use crate::{Generation, Screen, SessionRef, SessionSpec};
 
 /// One server's session renames, as (old name, new name).
 pub type Renames = broadcast::Receiver<(String, String)>;
@@ -83,6 +83,11 @@ pub trait Sessions: Send + Sync {
 
     /// The process id of the program in a pane.
     fn pid(&self, pane: PaneId) -> Reply<'_, u32>;
+
+    /// Which tmux server holds a session now, by its node-wide id: the
+    /// server's pid and start time, which a restarted server does not
+    /// repeat although it gives its sessions ids from `$0` again.
+    fn server<'a>(&'a self, session: &'a str) -> Reply<'a, Generation>;
 }
 
 /// A session to start: a shell in `folder`, with `command` typed into it.

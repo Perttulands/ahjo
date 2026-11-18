@@ -28,7 +28,7 @@ use ahjo_node_kit::events::Log;
 use ahjo_scheduled_contract::{
     Attempt, AuditEntry, BAD_REQUEST, CONFLICT, ERROR, INTERNAL, NOT_FOUND, PARTIAL, RunEntry,
     SUBMIT_KEY_DISPATCHED, SUCCESS, Schedule, TARGET_NOT_FOUND, Target, TargetRun, Task,
-    normalize_targets,
+    normalize_targets, tied_session,
 };
 use ahjo_term::Sessions;
 use anyhow::Context;
@@ -123,11 +123,12 @@ pub type Result<T, E = Error> = std::result::Result<T, E>;
 
 /// Checks targets and pastes prompts into them.
 pub trait Runner: Send + Sync {
-    /// The id of the session the target names now (tmux's `$3`).
+    /// The session the target names now, tied to its server
+    /// ([`Task::session_ids`]): `$3 4242:1731920000`.
     fn validate<'a>(&'a self, target: &'a Target) -> BoxFuture<'a, Result<String, String>>;
     /// Pastes the prompt and presses Enter; the pane it went to. Only into
-    /// the session of id `session` where one is given: a session that has
-    /// the target's name and another id is refused. A send whose turn does
+    /// the session tied as `session` where one is given: one that is
+    /// [`Tie::Other`] is refused. A send whose turn does
     /// not come within `deadline` is withdrawn unsent; one under way is not
     /// given up as failed while it may still paste.
     fn send<'a>(
@@ -147,6 +148,27 @@ pub(crate) fn replaced(target: &Target) -> String {
          renamed. Edit the task and save it to send to the session of that name now",
         target.label()
     )
+}
+
+/// How the session a target names now stands to the one it was tied to.
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) enum Tie {
+    Same,
+    /// The session meant, on a server that restarted since (ids begin
+    /// again there), or tied before servers were kept: tie it again.
+    Moved,
+    /// On the same server, another session that took the name.
+    Other,
+}
+
+pub(crate) fn tie(kept: &str, now: &str) -> Tie {
+    let server = |tie: &str| tie.split_once(' ').map(|(_, server)| server.to_owned());
+    match (server(kept), server(now)) {
+        (Some(was), Some(is)) if was != is => Tie::Moved,
+        _ if tied_session(kept) != tied_session(now) => Tie::Other,
+        _ if kept != now => Tie::Moved,
+        _ => Tie::Same,
+    }
 }
 
 #[derive(Default)]
@@ -267,8 +289,15 @@ impl Scheduled {
     /// operator is told.
     fn hold(&self, id: &str, why: String) {
         self.due.lock().unwrap().remove(id);
-        self.events
-            .record(EVENT, true, format!("Scheduled task {id} held back: {why}"));
+        let name = match self.store.get(id) {
+            Ok(Some(task)) => format!("{:?}", task.name),
+            _ => id.to_owned(),
+        };
+        self.events.record(
+            EVENT,
+            true,
+            format!("Scheduled task {name} held back: {why}"),
+        );
         eprintln!("ahjo: scheduled task {id} held back: {why}");
         self.held.lock().unwrap().insert(id.to_string(), why);
         self.announce();
@@ -761,9 +790,11 @@ impl Scheduled {
     }
 
     /// Refused, naming them, where a session that has a target's name is
-    /// not the one the task was made for. A target without its session's
-    /// id (made before ids were kept) learns it here; one whose session is
-    /// gone is left for its delivery to say so.
+    /// not the one the task was made for ([`Tie::Other`]). A target
+    /// without its session's tie (made before ties were kept) learns it
+    /// here, and one whose server restarted is tied again to the session
+    /// that has its name there; one whose session is gone is left for its
+    /// delivery to say so.
     async fn same_sessions(&self, task: &mut Task) -> Result<(), String> {
         if !self.validate_targets {
             return Ok(());
@@ -773,12 +804,16 @@ impl Scheduled {
             let Ok(now) = self.validate(target).await else {
                 continue;
             };
-            match task.session_ids.get(&target.label()) {
-                None => {
+            match task
+                .session_ids
+                .get(&target.label())
+                .map(|kept| tie(kept, &now))
+            {
+                Some(Tie::Same) => {}
+                Some(Tie::Other) => others.push(replaced(target)),
+                None | Some(Tie::Moved) => {
                     task.session_ids.insert(target.label(), now);
                 }
-                Some(id) if *id != now => others.push(replaced(target)),
-                Some(_) => {}
             }
         }
         match others.is_empty() {
@@ -880,7 +915,7 @@ impl Scheduled {
                 match tokio::time::timeout(self.run_timeout, self.validate(target)).await {
                     Err(_) => return Err(exceeded()),
                     Ok(Err(e)) => return Err(e.to_string()),
-                    Ok(Ok(id)) if session.is_some_and(|s| s != id) => {
+                    Ok(Ok(now)) if session.is_some_and(|kept| tie(kept, &now) == Tie::Other) => {
                         return Err(replaced(target));
                     }
                     Ok(Ok(_)) => {}

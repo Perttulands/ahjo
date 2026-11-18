@@ -209,6 +209,75 @@ async fn the_cli_and_the_http_route_see_the_same_tasks() {
     node.stop().await;
 }
 
+/// The id the node lists for the session named `name`, once it lists one
+/// other than `not`. Listed afresh each time, as a command lists them:
+/// with nobody looking, the node does not watch a new server.
+async fn listed_id(node: &Node, name: &str, not: &str) -> String {
+    let sessions = node.sessions();
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    loop {
+        let listed = sessions.listed().await.unwrap_or_default();
+        if let Some(session) = listed.into_iter().find(|s| s.name == name && s.id != not) {
+            return session.id;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "{name} never listed but as {not:?}"
+        );
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    }
+}
+
+/// A task is tied to a session on one tmux server. When the server
+/// restarts, as at a reboot, and the session is made again under its name,
+/// the task follows the name and sends; on that same server, a session
+/// that merely took the name later is not typed into.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_task_follows_its_session_across_a_tmux_restart_but_not_to_a_newcomer() {
+    let Some((node, tmux)) = start("sched-restart", "").await else {
+        return;
+    };
+    tmux.new_session("ops", 100, 30);
+    let first = listed_id(&node, "ops", "").await;
+    let made = node
+        .call(
+            "scheduled_create",
+            json!({ "name": "nudge", "prompt": "echo nudged-$((6*7))",
+                    "sessions": ["ops"], "every": 60 }),
+        )
+        .await
+        .unwrap();
+    let id = made["task"]["id"].as_str().unwrap().to_owned();
+
+    tmux.kill();
+    for name in ["spare", "alpha", "ops"] {
+        tmux.new_session(name, 100, 30);
+    }
+    let second = listed_id(&node, "ops", &first).await;
+    node.call("scheduled_run", json!({ "id": id }))
+        .await
+        .unwrap();
+    eventually("the prompt ran in the new ops", || {
+        capture(&tmux, "ops")
+            .lines()
+            .any(|line| line.trim() == "nudged-42")
+            .then_some(())
+    })
+    .await;
+
+    tmux.run(&["kill-session", "-t", "=ops"]);
+    tmux.new_session("ops", 100, 30);
+    listed_id(&node, "ops", &second).await;
+    let refused = node.call("scheduled_run", json!({ "id": id })).await;
+    let why = refused.unwrap_err().message;
+    assert!(why.contains("ops is another session"), "{why}");
+    assert!(
+        !capture(&tmux, "ops").contains("nudged-42"),
+        "typed into the newcomer"
+    );
+    node.stop().await;
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn a_node_with_scheduled_turned_off_has_no_commands_or_route() {
     let Some((node, _tmux)) = start("scheduled-off", "[scheduled]\nenabled = false\n").await else {
