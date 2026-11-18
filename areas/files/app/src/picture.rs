@@ -19,7 +19,108 @@ const ZOOM_GAP: f32 = 2.;
 const ZOOM_PAD: f32 = 6.;
 const ZOOM_LABEL_WIDTH: f32 = 44.;
 
+/// A picture a Markdown file shows in its text: on its way, read, or not
+/// to be had (then its words stay a link to it).
+#[derive(Clone)]
+pub enum Inline {
+    Reading,
+    Ready(Arc<RenderImage>),
+    Failed,
+}
+
+/// The widest an inline picture is drawn, as a share of its natural size
+/// in device pixels: none larger than it is.
+const INLINE_MOST: f32 = 1.;
+
 impl FilesPage {
+    /// The picture `src` of the Markdown open from `folder`, drawn at its
+    /// size or the column's width; asked for the first time it is seen.
+    pub fn inline_picture(
+        &self,
+        node: &str,
+        markdown: &str,
+        src: &str,
+        cx: &mut Context<Self>,
+    ) -> Option<Inline> {
+        let folder = crate::store::paths::parent(markdown);
+        if src.contains("://") || src.starts_with("data:") || src.starts_with('#') {
+            return None;
+        }
+        let path = crate::page::resolve(&folder, src.split('#').next().unwrap_or(src));
+        if crate::open::picture_format(&path).is_none()
+            || !self.tree.roots.is_empty()
+                && crate::store::paths::root_of(&self.tree.roots, &path).is_none()
+        {
+            return None;
+        }
+        let key = [node.to_string(), markdown.to_string(), path.clone()];
+        if let Some(p) = self.md_pictures.borrow().get(&key) {
+            return Some(p.clone());
+        }
+        self.md_pictures
+            .borrow_mut()
+            .insert(key.clone(), Inline::Reading);
+        let format = crate::open::picture_format(&path)?;
+        let task = self.host.request(
+            ahjo_app_kit::host::Request::get(
+                ahjo_core::NodeId(node.to_string()),
+                crate::page::route("file", &path),
+            ),
+            cx,
+        );
+        let svg = cx.svg_renderer();
+        cx.spawn(async move |this, cx| {
+            let got = match task.await {
+                Ok(a) if a.status == 200 => Some(a.body),
+                _ => None,
+            };
+            let decoded = match got {
+                Some(bytes) => {
+                    cx.background_executor()
+                        .spawn(async move {
+                            gpui::Image::from_bytes(format, bytes)
+                                .to_image_data(svg)
+                                .ok()
+                        })
+                        .await
+                }
+                None => None,
+            };
+            let _ = this.update(cx, |p, cx| {
+                let now = decoded.map_or(Inline::Failed, Inline::Ready);
+                if let Some(slot) = p.md_pictures.borrow_mut().get_mut(&key) {
+                    *slot = now;
+                }
+                cx.notify();
+            });
+        })
+        .detach();
+        Some(Inline::Reading)
+    }
+
+    /// An inline picture drawn: whole, no wider than the column, its
+    /// words under it.
+    pub fn inline_drawn(image: Arc<RenderImage>, most: f32, alt: &str, t: &Theme) -> AnyElement {
+        let natural = image.size(0);
+        let (w, h) = (natural.width.0 as f32, natural.height.0 as f32);
+        let w_at = (w * INLINE_MOST).min(most).max(1.);
+        let h_at = h * w_at / w.max(1.);
+        div()
+            .flex()
+            .flex_col()
+            .gap(px(ZOOM_GAP))
+            .child(img(image).w(px(w_at)).h(px(h_at)))
+            .when(!alt.is_empty(), |d| {
+                d.child(
+                    div()
+                        .text_size(px(size::SMALL))
+                        .text_color(t.dim)
+                        .child(alt.to_string()),
+                )
+            })
+            .into_any_element()
+    }
+
     /// How big pictures are drawn, kept in the settings file.
     pub fn zoom(&self, cx: &App) -> zoom::Level {
         self.host
@@ -50,7 +151,7 @@ impl FilesPage {
     /// Frees the pictures the page no longer shows; the window keeps a
     /// decoded picture until told.
     pub fn release_pictures(&mut self, window: &mut Window) {
-        let shown: Vec<Arc<RenderImage>> = self
+        let mut shown: Vec<Arc<RenderImage>> = self
             .opened
             .iter()
             .filter_map(|o| match &o.show {
@@ -59,6 +160,15 @@ impl FilesPage {
                 _ => None,
             })
             .collect();
+        // The open Markdown's pictures stay; another file's go.
+        let open = self.opened.as_ref().map(|o| o.key());
+        let mut inline = self.md_pictures.borrow_mut();
+        inline.retain(|[node, md, _], _| open.as_ref().is_some_and(|(n, p)| n == node && p == md));
+        shown.extend(inline.values().filter_map(|p| match p {
+            Inline::Ready(image) => Some(image.clone()),
+            _ => None,
+        }));
+        drop(inline);
         for gone in self.drawn.drain(..) {
             if !shown.iter().any(|s| Arc::ptr_eq(s, &gone)) {
                 let _ = window.drop_image(gone);

@@ -130,6 +130,9 @@ pub struct FilesPage {
     copy_ordinal: usize,
     pub confirm_close_beside: bool,
     pub drawn: Vec<std::sync::Arc<gpui::RenderImage>>,
+    /// The pictures the open Markdown shows, by node, the Markdown's path
+    /// and the picture's, read once while it is open.
+    pub md_pictures: std::cell::RefCell<HashMap<[String; 3], crate::picture::Inline>>,
     /// The opened file's header and the room its name has there, and the
     /// list's width, as last laid out: names shorten in the middle to fit.
     pub(crate) head_room: crate::view::Width,
@@ -274,7 +277,7 @@ fn enc(s: &str) -> String {
         })
         .collect()
 }
-fn route(kind: &str, path: &str) -> String {
+pub(crate) fn route(kind: &str, path: &str) -> String {
     format!("/api/files/{kind}?path={}", enc(path))
 }
 fn upload_copy_name(name: &str, ordinal: usize) -> String {
@@ -298,6 +301,18 @@ fn message(status: u16, body: &[u8]) -> String {
                 (said, _) => format!("Request failed ({status}): {said}"),
             }
         })
+}
+/// Where a relative link from a file in `folder` leads.
+pub(crate) fn resolve(folder: &str, link: &str) -> String {
+    let mut at = folder.to_owned();
+    for part in link.split(['/', '\\']) {
+        match part {
+            "" | "." => {}
+            ".." => at = paths::parent(&at),
+            p => at = paths::join(&at, p),
+        }
+    }
+    at
 }
 fn code_of(body: &[u8]) -> Option<String> {
     serde_json::from_slice::<serde_json::Value>(body)
@@ -579,6 +594,7 @@ impl FilesPage {
             copy_ordinal: 1,
             confirm_close_beside: false,
             drawn: Vec::new(),
+            md_pictures: Default::default(),
             head_room: Default::default(),
             name_room: Default::default(),
             list_room: Default::default(),
@@ -2604,14 +2620,7 @@ impl FilesPage {
         if link.is_empty() || self.tree.node != node {
             return;
         }
-        let mut at = folder.to_owned();
-        for part in link.split(['/', '\\']) {
-            match part {
-                "" | "." => {}
-                ".." => at = paths::parent(&at),
-                p => at = paths::join(&at, p),
-            }
-        }
+        let at = resolve(folder, link);
         if !self.tree.roots.is_empty() && paths::root_of(&self.tree.roots, &at).is_none() {
             self.fail("That link is outside the roots.".into(), cx);
             return;

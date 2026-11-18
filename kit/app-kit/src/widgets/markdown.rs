@@ -325,6 +325,15 @@ pub fn inline(src: &str, refs: bool) -> Runs {
             i += end + 2;
             continue;
         }
+        // A picture inside text reads as a link to it, by its words.
+        if rest.starts_with("![")
+            && rest[1..]
+                .find("](")
+                .is_some_and(|c| rest[1 + c..].contains(')'))
+        {
+            i += 1;
+            continue;
+        }
         if rest.starts_with('[')
             && let Some(close) = rest.find("](")
             && let Some(end) = rest[close..].find(')')
@@ -524,6 +533,19 @@ pub fn block_marks(
         .collect()
 }
 
+/// A paragraph that is one picture, `![words](where)`: its words and
+/// where it is.
+pub fn lone_picture(p: &str) -> Option<(String, String)> {
+    let inner = p.trim().strip_prefix("![")?.strip_suffix(')')?;
+    let (alt, src) = inner.split_once("](")?;
+    let src = src.split_whitespace().next().unwrap_or("");
+    (!src.is_empty() && !alt.contains(']')).then(|| (alt.to_string(), src.to_string()))
+}
+
+/// What draws a paragraph that is one picture, given its words and where
+/// it is; `None` leaves it a link to the picture.
+pub type Picture<'a> = &'a dyn Fn(&str, &str) -> Option<AnyElement>;
+
 /// [`render`], each block with a bar in the margin to its left in the
 /// colour of its mark, when it has one.
 pub fn render_marked(
@@ -531,6 +553,17 @@ pub fn render_marked(
     id: &str,
     blocks: &[Block],
     marks: &[Option<super::code::Mark>],
+) -> Div {
+    render_pictured(look, id, blocks, marks, None)
+}
+
+/// [`render_marked`], a paragraph that is one picture drawn by `picture`.
+pub fn render_pictured(
+    look: &Look,
+    id: &str,
+    blocks: &[Block],
+    marks: &[Option<super::code::Mark>],
+    picture: Option<Picture>,
 ) -> Div {
     let t = look.t;
     let mut col = div()
@@ -568,9 +601,15 @@ pub fn render_marked(
                     })
                     .child(styled(look, eid, h, HighlightStyle::default(), BLOCK))
             }
-            Block::Paragraph(p) => div()
-                .line_height(px(t.ty.read * ty::READ_LEADING))
-                .child(styled(look, eid, p, HighlightStyle::default(), BLOCK)),
+            Block::Paragraph(p) => match picture
+                .zip(lone_picture(p))
+                .and_then(|(draw, (alt, src))| draw(&alt, &src))
+            {
+                Some(drawn) => div().child(drawn),
+                None => div()
+                    .line_height(px(t.ty.read * ty::READ_LEADING))
+                    .child(styled(look, eid, p, HighlightStyle::default(), BLOCK)),
+            },
             Block::Quote(q) => div()
                 .pl(px(12.))
                 .border_l_2()
@@ -847,6 +886,23 @@ mod tests {
         assert_eq!(b[0], Block::Heading(1, "Plan".into()));
         assert_eq!(b[1], Block::Heading(2, "Steps".into()));
         assert!(matches!(b[2], Block::List(_)));
+    }
+
+    #[test]
+    fn a_picture_is_its_words_linked_or_drawn_alone() {
+        let r = inline("See ![the map](a/map.png) here", false);
+        assert_eq!(r.text, "See the map here", "no stray !");
+        assert_eq!(r.links, ["a/map.png"]);
+        assert_eq!(
+            lone_picture(" ![map](assets/map.png) "),
+            Some(("map".into(), "assets/map.png".into()))
+        );
+        assert_eq!(
+            lone_picture("![map](map.png \"Title\")"),
+            Some(("map".into(), "map.png".into()))
+        );
+        assert_eq!(lone_picture("Text ![map](map.png)"), None);
+        assert_eq!(inline("Wow!", false).text, "Wow!");
     }
 
     #[test]

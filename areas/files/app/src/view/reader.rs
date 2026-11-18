@@ -477,21 +477,50 @@ impl FilesPage {
         let laid = self.md_blocks.clone();
         let go = self.md_go.clone();
         let scroll = self.md_scroll.clone();
-        let content = markdown::render_marked(&look, "file-markdown", blocks, &marks)
-            .on_children_prepainted(move |bounds: Vec<Bounds<Pixels>>, window, cx| {
-                selection.borrow_mut().laid_out();
-                *laid.borrow_mut() = bounds.clone();
-                let Some(i) = go.take() else {
-                    return;
-                };
-                let Some(block) = bounds.get(i) else {
-                    return;
-                };
-                let offset = scroll.offset();
-                let y = offset.y + scroll.bounds().top() - block.top() + px(GO_ROOM);
-                scroll.set_offset(point(offset.x, y.min(px(0.))));
-                window.defer(cx, |window, _| window.refresh());
-            });
+        // Its pictures, each read the first time it is drawn; one still on
+        // its way holds its place with its words.
+        let md_path = o.path.clone();
+        let md_node = o.node.clone();
+        let mut pictures = std::collections::HashMap::new();
+        for b in blocks {
+            if let Block::Paragraph(p) = b
+                && let Some((_, src)) = markdown::lone_picture(p)
+                && let Some(state) = self.inline_picture(&md_node, &md_path, &src, cx)
+            {
+                pictures.insert(src, state);
+            }
+        }
+        let most = size::READING * scale - 2. * size::PAD - size::HEAD_GAP;
+        let draw = |alt: &str, src: &str| -> Option<AnyElement> {
+            match pictures.get(src)? {
+                crate::picture::Inline::Ready(image) => {
+                    Some(FilesPage::inline_drawn(image.clone(), most, alt, t))
+                }
+                crate::picture::Inline::Reading => Some(
+                    div()
+                        .text_color(t.dim)
+                        .child(format!("{alt} \u{2026}"))
+                        .into_any_element(),
+                ),
+                crate::picture::Inline::Failed => None,
+            }
+        };
+        let content =
+            markdown::render_pictured(&look, "file-markdown", blocks, &marks, Some(&draw))
+                .on_children_prepainted(move |bounds: Vec<Bounds<Pixels>>, window, cx| {
+                    selection.borrow_mut().laid_out();
+                    *laid.borrow_mut() = bounds.clone();
+                    let Some(i) = go.take() else {
+                        return;
+                    };
+                    let Some(block) = bounds.get(i) else {
+                        return;
+                    };
+                    let offset = scroll.offset();
+                    let y = offset.y + scroll.bounds().top() - block.top() + px(GO_ROOM);
+                    scroll.set_offset(point(offset.x, y.min(px(0.))));
+                    window.defer(cx, |window, _| window.refresh());
+                });
         let column = div()
             .flex_1()
             .min_w_0()
