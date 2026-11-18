@@ -1,6 +1,5 @@
 //! Windows: the exe carries an icon and file properties as a resource (gpui
-//! loads icon 1 for the window and taskbar). The Desk wears Ahjo's icon
-//! until it has its own.
+//! loads icon 1 for the window and taskbar).
 //!
 //! Linux: the X11 platform links `xcb`, `xkbcommon` and `xkbcommon-x11` by
 //! their unversioned names, which only the `-dev` packages install; hosts
@@ -18,7 +17,7 @@ fn main() {
 
 fn embed_windows_resource() {
     let manifest_dir = std::env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR");
-    let icon = std::path::Path::new(&manifest_dir).join("../ahjo-swarm/assets/icon/ahjo.ico");
+    let icon = std::path::Path::new(&manifest_dir).join("assets/icon/ahjo-desk.ico");
     println!("cargo:rerun-if-changed={}", icon.display());
     let version = |part: &str| std::env::var(format!("CARGO_PKG_VERSION_{part}")).expect(part);
     let (major, minor, patch) = (version("MAJOR"), version("MINOR"), version("PATCH"));

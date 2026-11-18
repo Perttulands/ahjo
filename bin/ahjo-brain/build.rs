@@ -1,3 +1,5 @@
+//! Windows: gpui loads the executable's icon 1 for the window and taskbar.
+//!
 //! Linux: the X11 platform links `xcb`, `xkbcommon` and `xkbcommon-x11` by
 //! their unversioned names, which only the `-dev` packages install. Hosts that
 //! have the runtime libraries alone (WSL with WSLg) get links to the versioned
@@ -6,9 +8,28 @@
 
 fn main() {
     println!("cargo:rerun-if-changed=build.rs");
-    if std::env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("linux") {
-        link_x11_libraries();
+    match std::env::var("CARGO_CFG_TARGET_OS").as_deref() {
+        Ok("windows") => embed_windows_icon(),
+        Ok("linux") => link_x11_libraries(),
+        _ => {}
     }
+}
+
+fn embed_windows_icon() {
+    let manifest_dir = std::env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR");
+    let icon = std::path::Path::new(&manifest_dir).join("assets/icon/ahjo-brain.ico");
+    println!("cargo:rerun-if-changed={}", icon.display());
+    let path = icon.display().to_string().replace('\\', "\\\\");
+    let out = std::path::PathBuf::from(std::env::var("OUT_DIR").expect("OUT_DIR"));
+    let script = out.join("ahjo-brain.rc");
+    std::fs::write(
+        &script,
+        format!("#pragma code_page(65001)\n1 ICON \"{path}\"\n"),
+    )
+    .expect("write ahjo-brain.rc");
+    embed_resource::compile(&script, embed_resource::NONE)
+        .manifest_required()
+        .unwrap_or_else(|error| panic!("embedding the Ahjo Brain icon failed: {error}"));
 }
 
 fn link_x11_libraries() {

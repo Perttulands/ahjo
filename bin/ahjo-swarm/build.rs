@@ -1,11 +1,7 @@
 //! Windows: the exe carries Ahjo Swarm's icon and file properties as a resource.
 //! gpui loads icon 1 for the window and taskbar, and Explorer shows it too.
-//! The icon is drawn in `assets/icon/ahjo.svg` (40 px and up) and by hand on
-//! the pixel grid in `ahjo-16.svg`, `ahjo-20.svg`, `ahjo-24.svg` and
-//! `ahjo-32.svg`. Each renders at 4096 px before the box filter, which keeps
-//! the hand-drawn pixels within a few levels of their colours. After changing them, in
-//! that directory (ImageMagick and Pillow):
-//! `for s in 16 20 24 32 40 48 64 128 256; do src=ahjo.svg; d=1536; [ -f ahjo-$s.svg ] && src=ahjo-$s.svg && d=$((393216 / s)); magick -background none -density $d $src -filter box -resize ${s}x${s} -depth 8 -strip PNG32:ahjo-$s.png; done; python3 -c 'from PIL import Image; s=[256,128,64,48,40,32,24,20,16]; i=[Image.open(f"ahjo-{n}.png") for n in s]; i[0].save("ahjo.ico", append_images=i[1:], sizes=[(n,n) for n in s])'`
+//! Each Ahjo app keeps its 256 px source PNG next to the Windows ICO.
+//! Export with Pillow's ICO writer at 16, 20, 24, 32, 40, 48, 64, 128 and 256 px.
 //!
 //! Linux: the X11 platform links `xcb`, `xkbcommon` and `xkbcommon-x11` by
 //! their unversioned names, which only the `-dev` packages install. Hosts that

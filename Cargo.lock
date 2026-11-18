@@ -201,6 +201,7 @@ name = "ahjo-app-brain"
 version = "0.0.1"
 dependencies = [
  "ahjo-app-kit",
+ "embed-resource",
  "gpui-pre",
  "gpui-pre-platform",
  "serde",

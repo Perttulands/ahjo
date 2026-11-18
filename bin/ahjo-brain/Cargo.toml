@@ -28,5 +28,8 @@ time = { version = "0.3", features = ["local-offset"] }
 [target.'cfg(target_os = "linux")'.dependencies]
 gpui_platform = { package = "gpui-pre-platform", version = "=0.3.12", features = ["x11"] }
 
+[build-dependencies]
+embed-resource = "3"
+
 [dev-dependencies]
 gpui = { package = "gpui-pre", version = "=0.3.12", features = ["test-support"] }
