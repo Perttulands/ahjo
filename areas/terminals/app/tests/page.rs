@@ -132,10 +132,19 @@ impl Drop for Running {
     fn drop(&mut self) {
         let _ = self.stop.send(());
         if let Some(thread) = self.thread.take() {
+            let _waiting = waiting("the node and its tmux to stop");
             let _ = thread.join();
         }
+        SERVERS
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .retain(|s| *s != self.socket);
     }
 }
+
+/// The sockets of the tmux servers the running tests started, which the
+/// watchdog stops before it ends a stuck run: nothing would stop them then.
+static SERVERS: std::sync::Mutex<Vec<std::path::PathBuf>> = std::sync::Mutex::new(Vec::new());
 
 /// A node following a scratch tmux server with one session, `alpha`.
 fn start(label: &str) -> Option<Running> {
@@ -209,11 +218,21 @@ fn start_config(
             let _ = std::fs::remove_dir_all(dir);
         });
     });
-    match wait.recv().expect("the node thread") {
+    let started = {
+        let _waiting = waiting("the node to start");
+        wait.recv().expect("the node thread")
+    };
+    match started {
         Some((url, node, socket, fixture)) => Some(Running {
+            socket: {
+                SERVERS
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .push(socket.clone());
+                socket
+            },
             url,
             node,
-            socket,
             fixture,
             stop,
             thread: Some(thread),
@@ -229,11 +248,79 @@ fn start_config(
     }
 }
 
+/// A test still in one wait this long is stuck where its own deadline cannot
+/// fire: in a call that blocks, a scheduler that never parks, a node that
+/// never stops.
+const STUCK: Duration = Duration::from_secs(60);
+
+/// What each test is waiting for, and since when, by test name.
+static WAITS: std::sync::Mutex<std::collections::BTreeMap<String, (String, Instant)>> =
+    std::sync::Mutex::new(std::collections::BTreeMap::new());
+
+/// The calling test waits for `what` until this is dropped. A watchdog ends
+/// the whole run, naming the test and the wait, once any wait is [`STUCK`]:
+/// a hang becomes a failure that says where it was.
+struct Waiting(String);
+
+fn waiting(what: &str) -> Waiting {
+    static WATCHDOG: std::sync::Once = std::sync::Once::new();
+    WATCHDOG.call_once(|| {
+        std::thread::spawn(|| {
+            loop {
+                std::thread::sleep(Duration::from_secs(1));
+                let waits = WAITS.lock().unwrap_or_else(|e| e.into_inner());
+                if let Some((test, (what, since))) =
+                    waits.iter().find(|(_, (_, since))| since.elapsed() > STUCK)
+                {
+                    // Past the test harness's capture, which shows output
+                    // only once a test ends.
+                    use std::io::Write;
+                    let _ = writeln!(
+                        std::io::stderr(),
+                        "{test} is stuck: waiting for {what} for {:?}; ending the run",
+                        since.elapsed()
+                    );
+                    let servers = SERVERS.lock().unwrap_or_else(|e| e.into_inner());
+                    for socket in servers.iter() {
+                        let _ = std::process::Command::new(
+                            std::env::var_os("AHJO_TMUX").unwrap_or_else(|| "tmux".into()),
+                        )
+                        .arg("-S")
+                        .arg(socket)
+                        .arg("kill-server")
+                        .output();
+                    }
+                    std::process::abort();
+                }
+            }
+        });
+    });
+    let test = std::thread::current()
+        .name()
+        .unwrap_or("a test")
+        .to_string();
+    WAITS
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .insert(test.clone(), (what.to_string(), Instant::now()));
+    Waiting(test)
+}
+
+impl Drop for Waiting {
+    fn drop(&mut self) {
+        WAITS
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .remove(&self.0);
+    }
+}
+
 fn until(
     cx: &mut VisualTestContext,
     what: &str,
     mut ok: impl FnMut(&mut VisualTestContext) -> bool,
 ) {
+    let _waiting = waiting(what);
     let deadline = Instant::now() + Duration::from_secs(15);
     loop {
         cx.run_until_parked();
@@ -307,6 +394,25 @@ fn open_pages_with_alpha<'a>(
     click(cx, "peek-attach".into());
     until(cx, "alpha's screen in the window", |cx| {
         !shown(cx).trim().is_empty()
+    });
+    // The window then sizes alpha to its grid, and the screen tmux sends
+    // for the new size starts the window's terminal over: a selection made
+    // before it arrives is gone, and rows can move.
+    let page = PAGE.with(|p| p.borrow().clone()).expect("the page");
+    until(cx, "alpha's screen at the grid its window claimed", |cx| {
+        page.read_with(cx, |p, _| {
+            let Some(at) = p.slot_pane(0) else {
+                return false;
+            };
+            let (Some(claimed), Some(screen)) = (
+                p.fleet.claimed(&at.node, at.pane),
+                p.fleet.screen(&at.node, at.pane),
+            ) else {
+                return false;
+            };
+            let s = screen.lock();
+            (s.cols, s.rows) == (claimed.cols as usize, claimed.rows as usize)
+        })
     });
     (shell, cx, settings)
 }
