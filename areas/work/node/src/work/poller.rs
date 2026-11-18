@@ -151,9 +151,17 @@ impl Work {
             .iter()
             .find(|p| p.name() == request.project)
             .ok_or_else(|| {
+                let names: Vec<_> = self.0.config.projects.iter().map(Project::name).collect();
+                let known = match names.as_slice() {
+                    [] => format!("this node has no projects; {}", super::config::ADDING),
+                    names => format!(
+                        "a project is named as ahjo work list shows it: {}",
+                        names.join(", ")
+                    ),
+                };
                 Error::new(
                     "unknown_project",
-                    format!("unknown project: {}", request.project),
+                    format!("unknown project: {}; {known}", request.project),
                 )
             })?;
         let reference = match project {

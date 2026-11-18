@@ -33,7 +33,8 @@ impl Work {
                 id,
             }),
             [] => bail!(
-                "no Beads store in this node's [work] projects has the prefix of {id}; add a beads project"
+                "no Beads store in this node's [work] projects has the prefix of {id}; to read its project, {}",
+                super::config::ADDING
             ),
             many => bail!(
                 "{id} could be in {}; name its store as bead:{}:<folder>#{id}",

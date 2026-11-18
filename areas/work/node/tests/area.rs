@@ -32,6 +32,13 @@ async fn work_is_pushed_only_while_watched() {
     let node = Node::start(&[ahjo_work::LISTING], "").await.unwrap();
     let answer = node.call("work_list", json!({})).await.unwrap();
     assert_eq!(answer["projects"], json!([]));
+    // An empty node says how a project is added.
+    let none = answer["none"].as_str().unwrap();
+    assert!(
+        none.contains(r#"[work] projects = ["beads /abs/folder"]"#),
+        "{none}"
+    );
+    assert!(none.contains("ahjo config show"), "{none}");
     assert!(node.call("work_show", json!({"ref":"bad"})).await.is_err());
     let (mut ws, _) = tokio_tungstenite::connect_async(node.ws()).await.unwrap();
     ws.next().await.unwrap().unwrap(); // hello
@@ -95,15 +102,19 @@ async fn cli_lists_shows_and_creates_a_work_item() {
             .unwrap(),
         1
     );
-    assert_eq!(
-        node.call(
+    let unknown = node
+        .call(
             "work_create",
-            json!({"project":"missing", "title":"T", "description":"D"})
+            json!({"project":"missing", "title":"T", "description":"D"}),
         )
         .await
-        .unwrap_err()
-        .code,
-        "unknown_project"
+        .unwrap_err();
+    assert_eq!(unknown.code, "unknown_project");
+    // It names the projects there are, as work list shows them.
+    assert!(
+        unknown.message.contains(&dir.display().to_string()),
+        "{}",
+        unknown.message
     );
     let client = ahjo_node_kit::NodeClient::new(Some(&node.url())).unwrap();
     let (created, _) = client.request(axum::http::Method::POST, "/api/work/items", Some(json!({"project": dir.display().to_string(), "title":"Via HTTP", "description":"Body", "type":"feature"})), None).await.unwrap();

@@ -39,10 +39,26 @@ impl Own {
 
 pub(crate) fn commands(own: &Arc<Own>) -> Vec<Command> {
     let shown = own.clone();
+    // Built once when the node starts, so naming its sections costs one
+    // short string for the node's life.
+    let described: &'static str = Box::leak(
+        format!(
+            "The node's config file and each section's keys and values as the node loaded them. \
+             An agent edits the file; restarting the node applies it, and sessions survive. \
+             Its sections are [node] and one per area: {}. A section is TOML, for example \
+             [work] projects = [\"beads /abs/folder\"]; a key the area does not know is refused \
+             when the node starts, with the reason.",
+            own.areas
+                .iter()
+                .map(|a| format!("[{a}]"))
+                .collect::<Vec<_>>()
+                .join(", ")
+        )
+        .into_boxed_str(),
+    );
     let mut commands = vec![Command::new(
         "config_show",
-        "The node's config file and each section's keys and values as the node loaded them. \
-         An agent edits the file; restarting the node applies it, and sessions survive.",
+        described,
         || {
             json!({
                 "type": "object",

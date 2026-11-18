@@ -25,7 +25,7 @@ mod tree;
 
 pub use beads::Bd;
 pub use channel::Channel;
-pub use config::Config;
+pub use config::{ADDING, Config};
 pub use github::Gh;
 pub use poller::Work;
 pub use routes::routes;

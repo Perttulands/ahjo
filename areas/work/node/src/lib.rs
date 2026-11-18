@@ -97,6 +97,12 @@ impl Area for WorkArea {
                             omit_closed(&mut snapshot);
                         }
                         snapshot["items"] = json!(listed_items(&snapshot));
+                        if snapshot["projects"].as_array().is_some_and(Vec::is_empty) {
+                            snapshot["none"] = json!(format!(
+                                "this node reads no projects; to read one, {}",
+                                work::ADDING
+                            ));
+                        }
                         snapshot["node"] = json!(node);
                         Ok(snapshot)
                     };
@@ -165,10 +171,11 @@ impl Area for WorkArea {
         let work = self.work.clone();
         let create = Command::new(
             "work_create",
-            "File an item in a configured project.",
+            "File an item in a configured project, for example: \
+             ahjo work create /srv/app 'Login fails' 'What fails, and how to see it'.",
             || {
                 object(
-                    json!({"project":{"type":"string"}, "title":{"type":"string"}, "description":{"type":"string"}, "type":{"type":"string", "enum":["bug", "task", "feature"]}}),
+                    json!({"project":{"type":"string", "description":"The project as ahjo work list shows it: a Beads store's absolute folder, or owner/name on GitHub."}, "title":{"type":"string"}, "description":{"type":"string"}, "type":{"type":"string", "enum":["bug", "task", "feature"]}}),
                     &["project", "title", "description"],
                 )
             },

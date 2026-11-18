@@ -4,6 +4,11 @@
 
 use anyhow::{Context, Result, bail};
 
+/// How a project is added, for answers that find none.
+pub const ADDING: &str = "add it to the node's config file, which ahjo config show names, \
+    as [work] projects = [\"beads /abs/folder\"] (a folder holding .beads) \
+    or [\"github owner/name\"], then restart the node";
+
 /// The projects to read, in the order the tab offers them.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Config {
