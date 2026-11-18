@@ -41,6 +41,9 @@ const APPLY_AFTER: std::time::Duration = std::time::Duration::from_millis(600);
 const BESIDE_W: f32 = 560.;
 /// How much a dialog's backdrop dims the page behind it.
 const SCRIM: f32 = 0.7;
+/// The least a page shows the list beside the board in: under it the
+/// board's cards would be drawn too small to read.
+const NARROW: f32 = size::LIST + 460.;
 pub struct MissionsPage {
     host: Host,
     focus: FocusHandle,
@@ -1576,6 +1579,15 @@ impl Render for MissionsPage {
         self.sync_validation(cx);
         let t = theme(cx).clone();
         self.choose_first(cx);
+        let side = if self.host.side_open(cx) {
+            size::SIDE
+        } else {
+            size::SIDE_SHUT
+        };
+        // In a narrow page the board takes the whole page, so its cards are
+        // drawn large enough to read; the list comes back with Done.
+        let narrow = f32::from(window.viewport_size().width) - side < NARROW;
+        let mut board = false;
         let list = self.render_navigator(&t, cx);
         let error = self.state.error.clone().map(|e| {
             div()
@@ -1619,6 +1631,7 @@ impl Render for MissionsPage {
             }
         } else if let Some(m) = self.state.mission.clone() {
             if self.mission_canvas_mode {
+                board = true;
                 let head = self.edit_head(&t, &m, cx);
                 let todo = self.todo_band(&t, &m);
                 pane::detail_frame(
@@ -1718,7 +1731,12 @@ impl Render for MissionsPage {
         let start_form = self.run_start_form(&t, window, cx);
         let attempts_form = self.attempts_form(&t, cx);
         let stop_form = self.stop_form(&t, cx);
-        pane::page(&t, list, detail)
+        let frame = if board && narrow {
+            div().size_full().flex().bg(t.bg).child(detail)
+        } else {
+            pane::page(&t, list, detail)
+        };
+        frame
             .id("missions-root")
             .track_focus(&self.focus)
             .relative()
