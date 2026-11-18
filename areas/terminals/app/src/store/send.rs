@@ -7,6 +7,7 @@
 //! paths follow the note.
 
 use crate::store::sessions::Key;
+use crate::store::sessions::Running;
 use crate::theme::size;
 use ahjo_terminals_contract::{Outcome, Session};
 
@@ -26,6 +27,19 @@ pub fn message(reference: Option<&str>, note: &str, files: &[String]) -> String 
         parts.push(format!("Files:\n{}", list.join("\n")));
     }
     parts.join("\n\n")
+}
+
+/// The reference as `target` receives it. A session handed over is named
+/// by a line (`session_reference`) for the agent that reads it; a shell
+/// would run that line as a command, so a shell gets the note alone. Any
+/// other reference is the thing sent, and goes as it is.
+pub fn reference_for<'a>(
+    reference: Option<&'a str>,
+    names_a_session: bool,
+    target: Option<&Session>,
+) -> Option<&'a str> {
+    let shell = target.is_some_and(|s| crate::store::sessions::running(s) == Running::Nothing);
+    reference.filter(|_| !(names_a_session && shell))
 }
 
 /// The line naming a session handed over, in words the receiving agent can
@@ -217,6 +231,32 @@ mod tests {
             ),
             "see\n\nFiles:\n- /d/1/a.png\n- /d/2/b.txt"
         );
+    }
+
+    /// A shell ran `session shell-one on landmass/wsl` as a command: the
+    /// line naming a session goes to what reads it, never to a shell.
+    #[test]
+    fn a_shell_gets_the_note_without_the_line_naming_a_session() {
+        let with = |command: &str| Session {
+            command: Some(command.into()),
+            ..Default::default()
+        };
+        let line = Some("session shell-one on landmass/wsl");
+        assert_eq!(reference_for(line, true, Some(&with("claude"))), line);
+        assert_eq!(reference_for(line, true, Some(&with("aider"))), line);
+        assert_eq!(reference_for(line, true, Some(&with("bash"))), None);
+        assert_eq!(reference_for(line, true, Some(&with("pwsh.exe"))), None);
+        assert_eq!(
+            message(
+                reference_for(line, true, Some(&with("bash"))),
+                "echo hi",
+                &[]
+            ),
+            "echo hi"
+        );
+        // A file or an item handed over is what is sent, to a shell too.
+        let path = Some("path /srv/x.rs");
+        assert_eq!(reference_for(path, false, Some(&with("bash"))), path);
     }
 
     #[test]

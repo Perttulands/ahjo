@@ -175,6 +175,12 @@ pub fn running(s: &Session) -> Running<'_> {
     }
 }
 
+/// An agent runs in it: a known harness, or one that reports through its
+/// hooks. A shell or another program is not one.
+pub fn is_agent(s: &Session) -> bool {
+    matches!(running(s), Running::Harness(_)) || s.event.is_some()
+}
+
 /// A shell, the resting state: a Unix shell, or a Windows node's.
 pub fn is_shell(program: &str) -> bool {
     SHELLS.contains(&program) || ["pwsh", "powershell", "cmd"].contains(&program)

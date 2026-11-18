@@ -45,6 +45,25 @@ pub fn name_problem(name: &str) -> Option<&'static str> {
     None
 }
 
+/// What is wrong with a folder typed for a launch, said where it is typed
+/// instead of as a failed launch: the node starts a session only in a path
+/// from the root (`/`, `C:\`, `\\server`) or from home (`~`).
+pub fn folder_problem(folder: &str) -> Option<&'static str> {
+    let f = folder.trim();
+    let windows_root = {
+        let b = f.as_bytes();
+        b.len() >= 3 && b[0].is_ascii_alphabetic() && b[1] == b':' && matches!(b[2], b'/' | b'\\')
+    };
+    let fine = f.is_empty()
+        || f == "~"
+        || f.starts_with("~/")
+        || f.starts_with("~\\")
+        || f.starts_with('/')
+        || f.starts_with("\\\\")
+        || windows_root;
+    (!fine).then_some("A folder starts with / or ~.")
+}
+
 /// The folder's last part; Windows paths (`~\work`, `C:\src`) split at
 /// either slash, and a drive root is its letter.
 fn folder_part(folder: &str) -> &str {
@@ -413,6 +432,27 @@ mod tests {
             Some("At most 50 characters.")
         );
         assert_eq!(name_problem("claude-srv_2"), None);
+    }
+
+    /// A folder the node would refuse is said under Folder, not as a
+    /// failed launch's red line that stays.
+    #[test]
+    fn a_folder_starts_at_the_root_or_at_home() {
+        for fine in [
+            "",
+            "~",
+            "~/src",
+            "~\\work",
+            "/srv",
+            "C:\\src",
+            "c:/x",
+            "\\\\host\\share",
+        ] {
+            assert_eq!(folder_problem(fine), None, "{fine}");
+        }
+        for wrong in ["harbour", "src/x", "~x", "C:"] {
+            assert!(folder_problem(wrong).is_some(), "{wrong}");
+        }
     }
 
     #[test]

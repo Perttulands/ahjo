@@ -140,8 +140,10 @@ impl Terminals {
             });
         if ws.shown_tabs().len() < crate::store::workspace::MAX_TABS {
             bar = bar.child(
+                // Its id follows the count: the tab it adds lands where the
+                // tooltip was, which goes with the element it belonged to.
                 div()
-                    .id("tab-add")
+                    .id(("tab-add", ws.shown_tabs().len()))
                     .flex_none()
                     .debug_selector(|| "tab-add".into())
                     .px(px(12.))
@@ -510,6 +512,12 @@ impl Terminals {
             Some((i, matches.len(), name, m.line, m.context[1].clone()))
         });
         let query = self.find_query.read(cx).text.clone();
+        let inset = self.beside_inset(window, cx);
+        let width = crate::store::send::width(
+            Some(size::FIND_DRAWER),
+            window.viewport_size().width / px(1.) - inset,
+        );
+        let lead = hit_lead(width, &query);
         if let Some((matches, _)) = &found {
             let cursor = self.find_cursor.min(matches.len().saturating_sub(1));
             for (i, m) in matches.iter().enumerate().take(500) {
@@ -554,7 +562,7 @@ impl Terminals {
                                 .overflow_hidden()
                                 .child(m.context[0].clone()),
                         )
-                        .child(hit_line(&t, &m.context[1], &query))
+                        .child(hit_line(&t, &m.context[1], &query, lead))
                         .child(
                             div()
                                 .text_size(px(11.))
@@ -570,78 +578,83 @@ impl Terminals {
                 );
             }
         }
-        let inset = self.beside_inset(window, cx);
-        let drawer = surface::at_edge(
-            div().id("find").debug_selector(|| "find-drawer".into()),
-            inset,
-        )
-        .when(!compact, |d| d.bottom_0())
-        // Shift+Enter steps back; the field would take it as Enter.
-        .capture_action(cx.listener(
-            |s, _: &ahjo_app_kit::widgets::field::ShiftEnter, window, cx| {
-                s.step_match(false, window, cx);
-                cx.stop_propagation();
-            },
-        ))
-        .w(px(crate::store::send::width(
-            Some(size::FIND_DRAWER),
-            window.viewport_size().width / px(1.) - inset,
-        )))
-        .flex()
-        .flex_col()
-        .bg(t.surface)
-        .border_l_1()
-        .border_color(t.divider)
-        .shadow_lg()
-        .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
-        .child(
-            div()
-                .h(px(size::STRIP))
-                .px(px(12.))
-                .flex()
-                .items_center()
-                .border_b_1()
-                .border_color(t.divider)
-                .child(
-                    div()
-                        .flex_1()
-                        .font_weight(FontWeight::SEMIBOLD)
-                        .child("Search output"),
-                )
-                .child(
-                    kit::button(&t, "find-close", "Close", Kind::Quiet)
-                        .tooltip(kit::tip("Esc"))
-                        .on_click(cx.listener(|s, _, _, cx| s.close(surface::FIND, cx))),
-                ),
-        )
-        .child(
-            div()
-                .p(px(12.))
-                .flex()
-                .flex_col()
-                .gap(px(6.))
-                .child(self.find_query.clone())
-                .children(summary.map(|s| kit::note(&t, s, Some(t.dim)))),
-        )
-        .child(kit::rule(&t))
-        .map(|d| match (compact, shown_hit) {
-            (true, Some((i, n, name, line, text))) => d.child(
+        // Open, it stands the height of the page at the right; once a hit
+        // is shown it shrinks to its query and that hit at the bottom right,
+        // so the hit's window keeps its tab and head in view, and the hit,
+        // which lands in the middle of the view, stays clear.
+        let drawer = div()
+            .id("find")
+            .debug_selector(|| "find-drawer".into())
+            .absolute()
+            .right(px(inset))
+            .occlude()
+            .map(|d| match compact {
+                true => d.bottom(px(size::TILE_GAP)),
+                false => d.top_0().bottom_0(),
+            })
+            // Shift+Enter steps back; the field would take it as Enter.
+            .capture_action(cx.listener(
+                |s, _: &ahjo_app_kit::widgets::field::ShiftEnter, window, cx| {
+                    s.step_match(false, window, cx);
+                    cx.stop_propagation();
+                },
+            ))
+            .w(px(width))
+            .flex()
+            .flex_col()
+            .bg(t.surface)
+            .border_l_1()
+            .border_color(t.divider)
+            .shadow_lg()
+            .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+            .child(
                 div()
-                    .debug_selector(|| "find-shown".into())
+                    .h(px(size::STRIP))
                     .px(px(12.))
-                    .py(px(8.))
+                    .flex()
+                    .items_center()
+                    .border_b_1()
+                    .border_color(t.divider)
+                    .child(
+                        div()
+                            .flex_1()
+                            .font_weight(FontWeight::SEMIBOLD)
+                            .child("Search output"),
+                    )
+                    .child(
+                        kit::button(&t, "find-close", "Close", Kind::Quiet)
+                            .tooltip(kit::tip("Esc"))
+                            .on_click(cx.listener(|s, _, _, cx| s.close(surface::FIND, cx))),
+                    ),
+            )
+            .child(
+                div()
+                    .p(px(12.))
                     .flex()
                     .flex_col()
-                    .gap(px(2.))
-                    .child(div().text_size(px(11.)).text_color(t.dim).child(format!(
-                        "{} of {n} · {name}, line {}",
-                        i + 1,
-                        line + 1
-                    )))
-                    .child(hit_line(&t, &text, &query)),
-            ),
-            _ => d.child(results),
-        });
+                    .gap(px(6.))
+                    .child(self.find_query.clone())
+                    .children(summary.map(|s| kit::note(&t, s, Some(t.dim)))),
+            )
+            .child(kit::rule(&t))
+            .map(|d| match (compact, shown_hit) {
+                (true, Some((i, n, name, line, text))) => d.child(
+                    div()
+                        .debug_selector(|| "find-shown".into())
+                        .px(px(12.))
+                        .py(px(8.))
+                        .flex()
+                        .flex_col()
+                        .gap(px(2.))
+                        .child(div().text_size(px(11.)).text_color(t.dim).child(format!(
+                            "{} of {n} · {name}, line {}",
+                            i + 1,
+                            line + 1
+                        )))
+                        .child(hit_line(&t, &text, &query, lead)),
+                ),
+                _ => d.child(results),
+            });
         div()
             .absolute()
             .inset_0()
@@ -654,13 +667,13 @@ impl Terminals {
 
 /// A hit's line with the match in view and marked: the line from a little
 /// before the match, which a long line would otherwise cut off.
-fn hit_line(t: &Theme, line: &str, query: &str) -> gpui::Div {
+fn hit_line(t: &Theme, line: &str, query: &str, lead: usize) -> gpui::Div {
     let row = div()
         .text_size(px(12.))
         .text_color(t.text)
         .whitespace_nowrap()
         .overflow_hidden();
-    let Some((before, hit, after)) = crate::store::find::hit_parts(line, query, FIND_LEAD) else {
+    let Some((before, hit, after)) = crate::store::find::hit_parts(line, query, lead) else {
         return row.child(line.to_string());
     };
     row.flex()
@@ -677,8 +690,18 @@ fn hit_line(t: &Theme, line: &str, query: &str) -> gpui::Div {
         .child(div().min_w_0().overflow_hidden().child(after))
 }
 
-/// Characters of a hit's line shown before the match.
-const FIND_LEAD: usize = 24;
+/// Characters of a hit's line shown before the match in a drawer `width`
+/// wide: as many as leave the match and a little after it in view, so a
+/// line that fits is shown whole, as its context lines are.
+fn hit_lead(width: f32, query: &str) -> usize {
+    // A hit's line is mono at 12 px: a cell is about 0.6 of that wide.
+    let room = ((width - 24.) / (12. * 0.6)).max(0.) as usize;
+    room.saturating_sub(query.chars().count() + 8)
+        .max(FIND_LEAD_LEAST)
+}
+
+/// Characters before the match that a narrow drawer still shows.
+const FIND_LEAD_LEAST: usize = 24;
 
 #[cfg(test)]
 mod tests {

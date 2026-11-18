@@ -39,6 +39,8 @@ pub struct Draft {
     pub reference: Option<String>,
     /// The originating session, excluded from this handoff's targets.
     pub source: Option<Key>,
+    /// The reference is the line naming a session (`send::session_reference`).
+    pub names_a_session: bool,
     /// Files from this computer, written on the target's node on send.
     pub files: Vec<Attachment>,
     /// Why the last send did not simply arrive, shown above the actions.
@@ -75,13 +77,13 @@ impl Terminals {
     /// Opens Send with the focused terminal as the source, aimed at `target`.
     pub fn open_send(&mut self, target: Option<Key>, window: &mut Window, cx: &mut Context<Self>) {
         let reference = self.focused_key().map(|key| self.session_reference(&key));
-        self.handoff(reference, target, window, cx);
+        self.handoff_from(reference, target, None, true, window, cx);
     }
 
     /// Sends the named window's session as the source to a different target.
     pub fn send_from(&mut self, source: Key, window: &mut Window, cx: &mut Context<Self>) {
         let reference = Some(self.session_reference(&source));
-        self.handoff_from(reference, None, Some(source), window, cx);
+        self.handoff_from(reference, None, Some(source), true, window, cx);
     }
 
     /// The line naming session `key` in a message: its name and where it
@@ -119,7 +121,7 @@ impl Terminals {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.handoff_from(reference, target, None, window, cx);
+        self.handoff_from(reference, target, None, false, window, cx);
     }
 
     fn handoff_from(
@@ -127,6 +129,7 @@ impl Terminals {
         reference: Option<String>,
         target: Option<Key>,
         source: Option<Key>,
+        names_a_session: bool,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
@@ -139,6 +142,7 @@ impl Terminals {
         self.send = Draft {
             reference,
             source,
+            names_a_session,
             launch_grid,
             ..Default::default()
         };
@@ -202,7 +206,18 @@ impl Terminals {
 
     fn draft_text(&self, cx: &Context<Self>) -> String {
         let note = self.send_note.read(cx).text.clone();
-        send::message(self.send.reference.as_deref(), &note, &[])
+        send::message(self.sent_reference(), &note, &[])
+    }
+
+    /// The reference as the chosen target gets it (`send::reference_for`);
+    /// a new agent reads it.
+    fn sent_reference(&self) -> Option<&str> {
+        let reference = self.send.reference.as_deref();
+        if self.send.new_agent {
+            return reference;
+        }
+        let target = (self.send_target.as_ref()).and_then(|k| self.fleet.session(k));
+        send::reference_for(reference, self.send.names_a_session, target)
     }
 
     /// Writes the attachments on `k`'s node, then pastes the message.
@@ -246,11 +261,20 @@ impl Terminals {
         cx: &mut Context<Self>,
     ) {
         let note = self.send_note.read(cx).text.clone();
-        let text = send::message(self.send.reference.as_deref(), &note, &files);
         let Some(s) = self.fleet.session(&k) else {
             self.send.said = Some(format!("{} is not running.", k.name));
             return;
         };
+        // A launched agent may not report its program yet; it is an agent.
+        let reference = match launched {
+            true => self.send.reference.as_deref(),
+            false => send::reference_for(
+                self.send.reference.as_deref(),
+                self.send.names_a_session,
+                Some(s),
+            ),
+        };
+        let text = send::message(reference, &note, &files);
         if !s.panes.iter().any(|p| p.id == pane) {
             self.send.said = Some(format!(
                 "The selected pane of {} is gone; choose another.",
@@ -473,10 +497,14 @@ impl Terminals {
                 .child(self.launchers[SEND].clone());
         }
         body = body.child(div().mt(px(8.)).child(kit::label(&t, "Message")));
+        // A shell or a program gets the note alone: the line is shown struck
+        // through, saying why, so what arrives is what was seen.
+        let dropped = self.send.reference.is_some() && self.sent_reference().is_none();
         if let Some(r) = &self.send.reference {
             body = body.child(
                 div()
                     .id("send-reference")
+                    .when(dropped, |d| d.line_through().opacity(0.6))
                     .flex_none()
                     .px(px(8.))
                     .py(px(4.))
@@ -491,6 +519,16 @@ impl Terminals {
                     .text_ellipsis()
                     .child(r.clone()),
             );
+            if dropped && let Some(k) = self.send_target.as_ref() {
+                body = body.child(kit::note(
+                    &t,
+                    format!(
+                        "Not sent: {} is not an agent, so it gets your message alone.",
+                        k.name
+                    ),
+                    Some(t.dim),
+                ));
+            }
         }
         body = body
             .child(self.send_note.clone())

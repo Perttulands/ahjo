@@ -116,6 +116,67 @@ pub struct Tab {
     pub windows: Vec<Window>,
     #[serde(default)]
     pub count: usize,
+    /// Where its dividers were dragged to, for the layout they were dragged
+    /// in; none, or another layout, is even.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sizes: Option<Sizes>,
+}
+
+/// How the windows of a layout share it, in thousandths: a weight per
+/// column (the two rows of four windows share their columns) and the top
+/// row's share of the height.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Sizes {
+    /// The window count these sizes were dragged in.
+    pub count: usize,
+    pub columns: Vec<u16>,
+    #[serde(default = "half")]
+    pub top: u16,
+}
+
+fn half() -> u16 {
+    500
+}
+
+/// The smallest share, in thousandths, a divider leaves a window of the
+/// room it splits.
+pub const LEAST_SHARE: f32 = 120.;
+
+/// The columns a layout of `n` windows has: one row of up to three, or
+/// two rows of two.
+pub fn columns(n: usize) -> usize {
+    if n == 4 { 2 } else { n.max(1) }
+}
+
+impl Sizes {
+    pub fn even(count: usize) -> Self {
+        Self {
+            count,
+            columns: vec![1000; columns(count)],
+            top: 500,
+        }
+    }
+
+    /// Moves the divider after column `k` by `by`, a fraction of the room
+    /// the two columns either side of it have together.
+    pub fn drag_column(&mut self, k: usize, by: f32) {
+        let Some(pair) = self.columns.get(k..k + 2) else {
+            return;
+        };
+        let both = f32::from(pair[0]) + f32::from(pair[1]);
+        let left = (f32::from(pair[0]) + by * both).clamp(
+            both * LEAST_SHARE / 1000.,
+            both * (1. - LEAST_SHARE / 1000.),
+        );
+        self.columns[k] = left.round() as u16;
+        self.columns[k + 1] = (both - left).round() as u16;
+    }
+
+    /// Moves the divider between the rows by `by`, a fraction of the height.
+    pub fn drag_rows(&mut self, by: f32) {
+        let top = (f32::from(self.top) + by * 1000.).clamp(LEAST_SHARE, 1000. - LEAST_SHARE);
+        self.top = top.round() as u16;
+    }
 }
 
 impl Tab {
@@ -124,11 +185,22 @@ impl Tab {
             name: None,
             windows: windows(),
             count: 1,
+            sizes: None,
         }
     }
 
     pub fn shown(&self) -> &[Window] {
         &self.windows[..self.count]
+    }
+
+    /// How its shown windows share the layout: as dragged for this layout,
+    /// else even.
+    pub fn sizes(&self) -> Sizes {
+        self.sizes
+            .clone()
+            .filter(|s| s.count == self.count && s.columns.len() == columns(self.count))
+            .filter(|s| s.columns.iter().all(|w| *w > 0) && (1..1000).contains(&s.top))
+            .unwrap_or_else(|| Sizes::even(self.count))
     }
 }
 
@@ -188,6 +260,13 @@ impl Workspace {
 
     fn tab_mut(&mut self) -> &mut Tab {
         &mut self.tabs[self.active]
+    }
+
+    /// Sets how the active tab's windows share it; even sizes forget the
+    /// drag.
+    pub fn set_sizes(&mut self, sizes: Sizes) {
+        let even = Sizes::even(sizes.count);
+        self.tab_mut().sizes = (sizes != even).then_some(sizes);
     }
 
     /// The windows of the active tab on screen.
@@ -535,6 +614,36 @@ mod tests {
             user: String::new(),
             name: name.into(),
         }
+    }
+
+    /// A dragged divider is kept with the layout it was dragged in, stays
+    /// within reach of both windows, survives a save, and another window
+    /// count lays out evenly again.
+    #[test]
+    fn dividers_are_kept_with_their_layout() {
+        let mut ws = Workspace::default();
+        ws.add_window();
+        assert_eq!(ws.tab().sizes().columns, [1000, 1000]);
+        let mut s = ws.tab().sizes();
+        s.drag_column(0, 0.25);
+        assert_eq!(s.columns, [1500, 500]);
+        s.drag_column(0, 0.9);
+        assert_eq!(s.columns, [1760, 240], "never under the least share");
+        ws.set_sizes(s.clone());
+        let back = Workspace::parse(serde_json::to_value(&ws).unwrap()).unwrap();
+        assert_eq!(back.tab().sizes(), s);
+        ws.add_window();
+        assert_eq!(ws.tab().sizes().columns, [1000, 1000, 1000]);
+        ws.remove_window();
+        assert_eq!(ws.tab().sizes(), s, "back to two, the drag is back");
+        // Four windows: two columns and the rows' split.
+        ws.set_windows(0, 4);
+        let mut four = ws.tab().sizes();
+        four.drag_rows(-0.2);
+        assert_eq!((four.columns.len(), four.top), (2, 300));
+        // Even is no drag at all: a double-click forgets it.
+        ws.set_sizes(Sizes::even(4));
+        assert_eq!(ws.tab().sizes, None);
     }
 
     fn tags(w: &Window) -> Vec<&str> {

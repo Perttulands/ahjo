@@ -205,6 +205,9 @@ pub struct Keyboard {
     pub leader: Option<Instant>,
     /// A layer is open, so Escape is its.
     pub surfaces: bool,
+    /// The top layer keeps Escape for its content (a terminal's program),
+    /// so Shift+Escape closes it, wherever focus is.
+    pub kept: bool,
 }
 
 /// What becomes of a key.
@@ -242,6 +245,10 @@ pub fn route(k: &KeyLike, s: &Keyboard, chords: &[Chord], now: Instant) -> Verdi
     let waiting = s.on && leader_waiting(s.leader, now);
     let plain = !k.alt && !k.ctrl && !k.shift && !k.platform;
     if plain && k.key == "escape" && (waiting || s.surfaces) {
+        return Verdict::Dismiss;
+    }
+    let only_shift = k.shift && !k.alt && !k.ctrl && !k.platform;
+    if only_shift && k.key == "escape" && s.kept {
         return Verdict::Dismiss;
     }
     if is_leader(k) {
@@ -395,6 +402,7 @@ mod tests {
         on: true,
         leader: None,
         surfaces: false,
+        kept: false,
     };
 
     #[test]
@@ -513,6 +521,26 @@ mod tests {
             ..bare("escape", "")
         };
         assert_eq!(route(&shifted, &open, &t, now), Verdict::Pass);
+    }
+
+    #[test]
+    fn shift_escape_closes_a_layer_that_keeps_escape_wherever_focus_is() {
+        let t = table();
+        let now = Instant::now();
+        // Peek on top: plain Escape is its program's, Shift+Escape closes it.
+        let peek = Keyboard {
+            kept: true,
+            ..KEYBOARD
+        };
+        let shifted = KeyLike {
+            shift: true,
+            ..bare("escape", "")
+        };
+        assert_eq!(route(&bare("escape", ""), &peek, &t, now), Verdict::Pass);
+        assert_eq!(route(&shifted, &peek, &t, now), Verdict::Dismiss);
+        // Keys off do not stop the way out.
+        let off = Keyboard { on: false, ..peek };
+        assert_eq!(route(&shifted, &off, &t, now), Verdict::Dismiss);
     }
 
     #[test]

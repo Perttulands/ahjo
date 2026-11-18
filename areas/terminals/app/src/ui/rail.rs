@@ -15,7 +15,7 @@ use crate::store::sessions::{self, Key};
 use crate::store::workspace::LinkState;
 use crate::theme::{Theme, size, theme};
 use ahjo_app_kit::widgets::kit::{self, Kind};
-use ahjo_app_kit::widgets::pane;
+use ahjo_app_kit::widgets::{field, pane};
 use ahjo_terminals_contract::{AgentEvent, EventKind, Session};
 use gpui::{
     AnyElement, Context, Entity, FontWeight, MouseButton, MouseDownEvent, Subscription, WeakEntity,
@@ -60,7 +60,33 @@ impl Terminals {
         // The list's head as every page has it: the filter, then the acts.
         // Searching what sessions printed starts from the same words, as
         // the list's first row, so the head holds one search.
-        let header = pane::list_head(&t, Some(self.rail_search.clone().into_any_element()))
+        let query = self.rail_search.read(cx).text.clone();
+        // A filter that holds words shows how to empty it (Escape does too).
+        let filter =
+            div()
+                .relative()
+                .child(self.rail_search.clone())
+                .when(!query.is_empty(), |d| {
+                    d.child(
+                        div()
+                            .absolute()
+                            .top_0()
+                            .bottom_0()
+                            .right(px(2.))
+                            .flex()
+                            .items_center()
+                            .child(
+                                kit::button(&t, "rail-search-clear", "×", Kind::Quiet)
+                                    .debug_selector(|| "rail-search-clear".into())
+                                    .tooltip(kit::tip("Clear  Esc"))
+                                    .on_click(cx.listener(|s, _, window, cx| {
+                                        s.clear_rail_search(cx);
+                                        field::focus(&s.rail_search, window, cx);
+                                    })),
+                            ),
+                    )
+                });
+        let header = pane::list_head(&t, Some(filter.into_any_element()))
             .child(
                 kit::button(&t, "rail-new", "New", Kind::Quiet)
                     .tooltip(kit::tip("Start a session"))
@@ -76,15 +102,15 @@ impl Terminals {
                         s.run(super::chords::Action::Sessions, window, cx);
                     })),
             );
-        let query = self.rail_search.read(cx).text.clone();
         // The filter matches names; the same words search what every
         // session printed, one click away.
         let search = (!query.trim().is_empty()).then(|| {
             let words = query.clone();
             pane::row(&t, "rail-search-inside", false)
                 .debug_selector(|| "rail-search-inside".into())
-                .tooltip(kit::tip("Alt+H"))
                 .child(pane::cell(format!("Search output for “{}”", query.trim())))
+                // The key on the row itself: a tooltip lay over the words.
+                .child(pane::meta(&t, "Alt+H", None))
                 .on_click(cx.listener(move |s, _, window, cx| s.search_inside(&words, window, cx)))
         });
         let fleet = &self.fleet;
@@ -480,9 +506,16 @@ impl Terminals {
     }
 
     pub fn row_menu(&self, key: &Key) -> Vec<MenuItem> {
+        // What shapes an agent in its folder: this one's, or, for a shell
+        // or a program, one started there.
+        let sees = if self.fleet.session(key).is_some_and(sessions::is_agent) {
+            "What this agent sees"
+        } else {
+            "What an agent here sees"
+        };
         let mut items = vec![
             MenuItem::new("Peek", Act::Peek(key.clone())),
-            MenuItem::new("What this agent sees", Act::Sees(key.clone())),
+            MenuItem::new(sees, Act::Sees(key.clone())),
             MenuItem::new("Send…", Act::Send(key.clone())).chord("Alt+S"),
             MenuItem::new("Rename…", Act::Rename(key.clone())),
             self.copy_row(key),

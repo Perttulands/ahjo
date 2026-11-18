@@ -280,8 +280,14 @@ impl Terminals {
         if e.keystroke.modifiers.modified() {
             return;
         }
+        let searching = !self.rail_search.read(cx).text.is_empty();
         match e.keystroke.key.as_str() {
             "escape" if !self.pick.keys.is_empty() => self.pick.clear(),
+            // Escape empties the filter, then leaves it for the terminal.
+            "escape" if searching => self.clear_rail_search(cx),
+            "escape" if self.rail_search.read(cx).is_focused(window) => {
+                window.focus(&self.term_focus, cx);
+            }
             "delete" if !self.pick_targets().is_empty() => {
                 // Where the pointer last was: by the rows just clicked.
                 let at = window.mouse_position();

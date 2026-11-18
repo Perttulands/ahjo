@@ -246,11 +246,12 @@ impl FolderField {
                 cx.emit(FolderEvent::Changed);
             }
             FieldEvent::Submit => {
+                // An empty field launches where its placeholder and the
+                // launch button say, as the button does.
                 let chosen = self.chosen(cx);
-                if chosen.is_empty() {
-                    return;
+                if !chosen.is_empty() {
+                    self.set(&chosen, cx);
                 }
-                self.set(&chosen, cx);
                 cx.emit(FolderEvent::Submit);
             }
             _ => {}

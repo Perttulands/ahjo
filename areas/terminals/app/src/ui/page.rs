@@ -224,6 +224,13 @@ pub struct Geo {
     /// Reading back on the live screen: where its row 0 would lie, so a
     /// selection reaches the docked rows.
     pub dock_origin: Option<Point<Pixels>>,
+    /// Peek zoomed past its room: the columns its view is moved right by,
+    /// and the most it can be.
+    pub pan: usize,
+    pub pan_room: usize,
+    /// Where the cursor was when the view last followed it: a pan by the
+    /// wheel holds until the cursor moves.
+    pub followed: Option<(usize, i32)>,
 }
 
 /// A launch awaiting its node's answer, including the status it started with.
@@ -344,6 +351,11 @@ pub struct Terminals {
     pub dragging_over: Option<usize>,
     /// The seam a drag is over: after which window of the shown tab.
     pub seam_over: Option<usize>,
+    /// A divider between windows being dragged.
+    pub divider: Option<super::tiles::DividerDrag>,
+    /// The windows' grid as last laid out, which a divider's drag is a
+    /// share of.
+    pub grid_bounds: std::rc::Rc<std::cell::Cell<Bounds<Pixels>>>,
     /// Where the last menu a row was picked from stood.
     pub menu_at: Point<Pixels>,
     /// Ended sessions being made again, until their node answers.
@@ -476,6 +488,8 @@ impl Terminals {
             renames: HashMap::new(),
             dragging_over: None,
             seam_over: None,
+            divider: None,
+            grid_bounds: Default::default(),
             menu_at: Point::default(),
             restarting: HashSet::new(),
             zoom_wheel: Default::default(),
@@ -512,6 +526,9 @@ impl Terminals {
                         .first()
                         .map(|x| Key::of(x))
                     {
+                        // The words found the session; the list comes back
+                        // whole for the next look.
+                        s.clear_rail_search(cx);
                         s.open_peek(k, window, cx);
                     }
                 }
@@ -1602,9 +1619,16 @@ impl Terminals {
         cx.notify();
     }
 
+    /// Empties the rail's filter, so the whole list shows again.
+    pub fn clear_rail_search(&mut self, cx: &mut Context<Self>) {
+        self.rail_search.update(cx, |f, cx| f.set("", false, cx));
+    }
+
     /// Opens the scrollback search for `words`, from the session search.
+    /// The words move there: the rail's filter empties.
     pub fn search_inside(&mut self, words: &str, window: &mut Window, cx: &mut Context<Self>) {
         let words = words.trim().to_string();
+        self.clear_rail_search(cx);
         self.find_query.update(cx, |f, cx| f.set(&words, false, cx));
         if self.is_open(surface::FIND) {
             self.find_cursor = 0;
@@ -1777,7 +1801,8 @@ impl Page for Terminals {
     }
 
     /// The search and Send drawers belong to this page: they go while
-    /// another page shows, and come back with it.
+    /// another page shows, and come back with it. Peek and Overview are a
+    /// glance at this page's sessions, so leaving the page closes them.
     fn shown(&mut self, shown: bool, window: &mut Window, cx: &mut Context<Self>) {
         self.shown = shown;
         if shown {
@@ -1789,7 +1814,11 @@ impl Page for Terminals {
                 .filter(|s| matches!(s, Surface::Find | Surface::Send))
                 .cloned()
                 .collect();
-            for s in &away {
+            let glances: Vec<Surface> = (self.surfaces.iter())
+                .filter(|s| matches!(s, Surface::Peek | Surface::Overview))
+                .cloned()
+                .collect();
+            for s in away.iter().chain(&glances) {
                 self.close(s.name(), cx);
             }
             self.put_away = away;

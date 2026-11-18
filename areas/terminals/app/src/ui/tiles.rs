@@ -103,6 +103,20 @@ impl Render for DragPreview {
     }
 }
 
+/// A divider between windows: after a column, or between the two rows.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Divide {
+    Column(usize),
+    Rows,
+}
+
+/// A divider being dragged: which, where the press was and the shares then.
+pub struct DividerDrag {
+    pub at: Divide,
+    pub from: gpui::Point<Pixels>,
+    pub sizes: crate::store::workspace::Sizes,
+}
+
 /// What a window's terminal draws from.
 pub(super) struct Source {
     screen: SharedScreen,
@@ -210,31 +224,57 @@ impl Terminals {
             .absolute()
             .size_0(),
         );
+        let laid = self.grid_bounds.clone();
+        grid = grid.child(
+            canvas(|_, _, _| (), move |bounds, _, _, _| laid.set(bounds))
+                .absolute()
+                .inset_0(),
+        );
         let mut tiles = tiles.into_iter();
         // One row of up to three, or two rows of two (`columns`). Every layout that can still grow is one row, so a seam is always
         // between two windows side by side.
         let rows: Vec<usize> = if n == 4 { vec![2, 2] } else { vec![n] };
-        for count in rows {
+        let sizes = self.settings.workspace.tab().sizes();
+        let row_count = rows.len();
+        for (row, count) in rows.into_iter().enumerate() {
+            let share = match (row_count, row) {
+                (1, _) => 1.,
+                (_, 0) => f32::from(sizes.top),
+                _ => 1000. - f32::from(sizes.top),
+            };
             let mut r = div()
-                .flex_1()
+                .flex_grow(share)
+                .flex_shrink(1.)
+                .flex_basis(px(0.))
                 .min_h_0()
                 .flex()
                 .flex_row()
-                .gap(px(size::TILE_GAP));
+                .gap(px(size::TILE_GAP))
+                .relative();
             for k in 0..count {
                 if let Some(tile) = tiles.next() {
                     let seam = (seams && k + 1 < count).then(|| self.seam(k, &t, cx));
+                    // Without a drop in the air, the gap is a divider.
+                    let divider =
+                        (!seams && k + 1 < count).then(|| self.divider(Divide::Column(k), &t, cx));
+                    let weight = sizes.columns.get(k).copied().unwrap_or(1000);
                     r = r.child(
                         div()
-                            .flex_1()
+                            .flex_grow(f32::from(weight))
+                            .flex_shrink(1.)
+                            .flex_basis(px(0.))
                             .min_w_0()
                             .h_full()
                             .flex()
                             .relative()
                             .child(tile)
-                            .children(seam),
+                            .children(seam)
+                            .children(divider),
                     );
                 }
+            }
+            if row == 0 && row_count == 2 {
+                r = r.child(self.divider(Divide::Rows, &t, cx));
             }
             grid = grid.child(r);
         }
@@ -284,6 +324,106 @@ impl Terminals {
         )
         .with_priority(1)
         .into_any_element()
+    }
+
+    /// The divider after column `k`, or between the rows: the gap and a pad
+    /// either side, over both windows. Dragged, it moves the windows' shares
+    /// (the sessions resize once it rests); a double-click evens them.
+    fn divider(&self, at: Divide, t: &Theme, cx: &mut Context<Self>) -> AnyElement {
+        let reach = size::TILE_GAP + 2. * size::SEAM_PAD;
+        let out = px(-(size::TILE_GAP + size::SEAM_PAD));
+        let held = self.divider.as_ref().is_some_and(|d| d.at == at);
+        let id = match at {
+            Divide::Column(k) => ("divider", k),
+            Divide::Rows => ("divider", MAX_WINDOWS),
+        };
+        let line = div().when(held, |d| d.bg(t.accent));
+        let (e, line) = match at {
+            Divide::Column(_) => (
+                div()
+                    .top_0()
+                    .bottom_0()
+                    .right(out)
+                    .w(px(reach))
+                    .flex()
+                    .justify_center()
+                    .cursor(gpui::CursorStyle::ResizeLeftRight),
+                line.w(px(size::TILE_GAP)).h_full(),
+            ),
+            Divide::Rows => (
+                div()
+                    .left_0()
+                    .right_0()
+                    .bottom(out)
+                    .h(px(reach))
+                    .flex()
+                    .flex_col()
+                    .justify_center()
+                    .cursor(gpui::CursorStyle::ResizeUpDown),
+                line.h(px(size::TILE_GAP)).w_full(),
+            ),
+        };
+        deferred(
+            e.id(id)
+                .debug_selector(move || format!("divider-{}", id.1))
+                .absolute()
+                .group("divider")
+                .child(line.group_hover("divider", |d| d.bg(t.accent_soft())))
+                .on_mouse_down(
+                    MouseButton::Left,
+                    cx.listener(move |s, e: &MouseDownEvent, _, cx| {
+                        cx.stop_propagation();
+                        let sizes = s.settings.workspace.tab().sizes();
+                        if e.click_count >= 2 {
+                            s.divider = None;
+                            s.settings
+                                .workspace
+                                .set_sizes(crate::store::workspace::Sizes::even(sizes.count));
+                            s.save(cx);
+                        } else {
+                            s.divider = Some(DividerDrag {
+                                at,
+                                from: e.position,
+                                sizes,
+                            });
+                        }
+                        cx.notify();
+                    }),
+                ),
+        )
+        .with_priority(1)
+        .into_any_element()
+    }
+
+    /// A divider's drag moved to `p`: the windows either side share their
+    /// room as it says.
+    pub(super) fn drag_divider(&mut self, p: gpui::Point<Pixels>, cx: &mut Context<Self>) {
+        let Some(d) = &self.divider else {
+            return;
+        };
+        let grid = self.grid_bounds.get();
+        let mut sizes = d.sizes.clone();
+        let edge = 2. * size::TILE_GAP;
+        match d.at {
+            Divide::Column(k) => {
+                let n = sizes.columns.len() as f32;
+                let all: f32 = sizes.columns.iter().map(|w| f32::from(*w)).sum();
+                let room = f32::from(grid.size.width) - edge - (n - 1.) * size::TILE_GAP;
+                let pair = f32::from(sizes.columns[k]) + f32::from(sizes.columns[k + 1]);
+                let pair_px = room * pair / all;
+                if pair_px > 0. {
+                    sizes.drag_column(k, f32::from(p.x - d.from.x) / pair_px);
+                }
+            }
+            Divide::Rows => {
+                let room = f32::from(grid.size.height) - edge - size::TILE_GAP;
+                if room > 0. {
+                    sizes.drag_rows(f32::from(p.y - d.from.y) / room);
+                }
+            }
+        }
+        self.settings.workspace.set_sizes(sizes);
+        cx.notify();
     }
 
     /// Shows the next window and binds `key` in it (a drop on a seam).
@@ -1150,6 +1290,10 @@ impl Terminals {
             (self.term_focus.clone(), focused && self.surfaces.is_empty())
         };
         let font = self.font_of(i);
+        // Peek zoomed draws at its own size, never resizing the session:
+        // a grid larger than its room is moved under it, following the
+        // cursor (`peek_view`).
+        let zoomed = i == PEEK_SLOT && self.settings.peek_font.is_some();
         let theme_t = t.clone();
         let composing = self.composing.clone().filter(|_| take_input);
         let hover = self
@@ -1195,7 +1339,7 @@ impl Terminals {
                 }
                 // Reading back on the live screen, the dock is its own rows.
                 let same = live.as_ref().is_some_and(|l| Arc::ptr_eq(l, &screen));
-                let m = if settling {
+                let m = if settling || zoomed {
                     paint::metrics(window, font)
                 } else {
                     paint::fit(window, bounds.size, s.cols, s.rows, font)
@@ -1234,7 +1378,19 @@ impl Terminals {
                     None => bounds,
                 };
                 let o = paint::origin(view, m, s.rows_to_show());
-                let o = point(o.x, o.y + m.cell.height * stale as f32);
+                let before = geo.borrow()[i];
+                let cursor = s.term.grid().cursor.point;
+                let (pan, pan_room, followed) = peek_view(
+                    zoomed,
+                    view.size.width / m.cell.width,
+                    s.cols,
+                    (cursor.column.0, cursor.line.0),
+                    (before.pan, before.followed),
+                );
+                let o = point(
+                    o.x - m.cell.width * pan as f32,
+                    o.y + m.cell.height * stale as f32,
+                );
                 // Found again at each paint, so output that moves the text
                 // under a resting pointer moves the underline with it.
                 let link = hover
@@ -1277,6 +1433,9 @@ impl Terminals {
                     display_offset: s.term.grid().display_offset(),
                     dock: dock.map(|d| d.0),
                     dock_origin: dock.filter(|_| same).map(|d| d.1),
+                    pan,
+                    pan_room,
+                    followed,
                 };
                 let drawn = place.as_ref().map(|place| {
                     window.with_content_mask(Some(ContentMask { bounds }), |window| {
@@ -1536,21 +1695,22 @@ impl Terminals {
         } else {
             ""
         };
-        let text = match drawn.filter(|_| capped) {
-            Some(d) => format!("Text {size} px; the session's whole grid fits at {d} px here"),
-            None => format!("Text {size} px{reset}"),
-        };
+        // Drawn smaller than asked (its grid is set elsewhere): the size
+        // it is drawn at, which is what the operator sees.
+        let shown = drawn.filter(|_| capped).unwrap_or(size);
+        let text = format!("Text {shown} px{reset}");
         self.toast(&text, cx);
         cx.notify();
     }
 
     /// Peek's zoom: from the size it is drawn at, which unzoomed fills its
-    /// room; no larger than the session's grid fits, since Peek never
-    /// resizes the session. Ctrl+0 fills the room again.
+    /// room with the session's whole grid. Larger than that, the session
+    /// keeps its size (Peek never resizes it) and the view follows its
+    /// cursor, the wheel with Shift moving it sideways. Ctrl+0 fits the
+    /// whole grid again.
     fn zoom_peek(&mut self, z: Zoom, n: i32, cx: &mut Context<Self>) {
         let own = self.settings.peek_font;
         let drawn = self.geo.borrow()[PEEK_SLOT].font;
-        let fill = if own.is_none() { drawn } else { None };
         let at = own
             .map(f32::from)
             .or(drawn)
@@ -1558,23 +1718,25 @@ impl Terminals {
         let to = match z {
             Zoom::Reset if own.is_none() => return,
             Zoom::Reset => None,
-            Zoom::In => zoom::step(at, n, 1., size::TERM_MIN, size::TERM_MAX),
-            Zoom::Out => zoom::step(at, -n, 1., size::TERM_MIN, size::TERM_MAX),
+            Zoom::In => match zoom::step(at.round(), n, 1., size::TERM_MIN, size::TERM_MAX) {
+                Some(v) => Some(v),
+                None => return,
+            },
+            Zoom::Out => match zoom::step(at.round(), -n, 1., size::TERM_MIN, size::TERM_MAX) {
+                Some(v) => Some(v),
+                None => return,
+            },
         };
-        let grows = matches!(z, Zoom::In) && (own.is_none() || to.is_none());
-        if grows {
-            let most = fill.or(drawn).unwrap_or(at);
-            self.toast(
-                &format!("Peek shows the whole session at {most} px; Attach gives it a window sized to it"),
-                cx,
-            );
-            return;
-        }
         self.settings.peek_font = to.map(|v| v.round() as u8);
+        {
+            let mut geo = self.geo.borrow_mut();
+            geo[PEEK_SLOT].pan = 0;
+            geo[PEEK_SLOT].followed = None;
+        }
         self.save(cx);
         let text = match to {
-            Some(v) => format!("Text {v} px · Ctrl+0 fills Peek"),
-            None => "Text fills Peek".to_string(),
+            Some(v) => format!("Text {v} px · Ctrl+0 fits the whole session"),
+            None => "Text fits the whole session".to_string(),
         };
         self.toast(&text, cx);
         cx.notify();
@@ -1631,12 +1793,8 @@ impl Terminals {
         let k = &e.keystroke;
         let m = &k.modifiers;
         let w = self.active_slot();
-        // Escape is the program's in Peek; Shift+Escape closes it.
-        if w == PEEK_SLOT && m.shift && !m.control && !m.alt && k.key == "escape" {
-            self.close(super::surface::PEEK, cx);
-            cx.stop_propagation();
-            return;
-        }
+        // Escape is the program's in Peek; Shift+Escape, which closes it,
+        // is the app's (`chords::route`) wherever focus is.
         if m.control && m.shift && k.key == "c" {
             self.copy_selection(w, cx);
             cx.stop_propagation();
@@ -1973,6 +2131,11 @@ impl Terminals {
         _window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if self.divider.take().is_some() {
+            self.save(cx);
+            cx.notify();
+            return;
+        }
         if let Some((i, b)) = self.mouse_down_in.take() {
             if let Some((mode, pane)) = self.mouse_mode(i, false)
                 && let Some((col, row, _)) = self.cell_at(i, e.position)
@@ -2032,10 +2195,37 @@ impl Terminals {
             cx.stop_propagation();
             return;
         }
-        let cell_h = self.geo.borrow()[i]
-            .cell
-            .map(|c| c.height)
-            .unwrap_or(px(16.));
+        // Peek zoomed past its room: Shift+wheel, or a sideways wheel,
+        // moves the view along the row.
+        let g = self.geo.borrow()[i];
+        if g.pan_room > 0 {
+            let cell_w = g.cell.map(|c| c.width).unwrap_or(px(8.));
+            let (dx, dy) = match e.delta {
+                ScrollDelta::Lines(l) => (l.x * 3., l.y * 3.),
+                ScrollDelta::Pixels(p) => (
+                    f32::from(p.x) / f32::from(cell_w),
+                    f32::from(p.y) / f32::from(cell_w),
+                ),
+            };
+            // Linux turns Shift+wheel into a sideways wheel itself.
+            let along = if dx != 0. && dx.abs() >= dy.abs() {
+                dx
+            } else if e.modifiers.shift {
+                dy
+            } else {
+                0.
+            };
+            if along != 0. {
+                let to = (g.pan as f32 - along * 2.)
+                    .round()
+                    .clamp(0., g.pan_room as f32);
+                self.geo.borrow_mut()[i].pan = to as usize;
+                cx.stop_propagation();
+                cx.notify();
+                return;
+            }
+        }
+        let cell_h = g.cell.map(|c| c.height).unwrap_or(px(16.));
         let lines = match e.delta {
             ScrollDelta::Lines(l) => l.y * 3.,
             ScrollDelta::Pixels(p) => f32::from(p.y) / f32::from(cell_h),
@@ -2231,6 +2421,37 @@ impl EntityInputHandler for Terminals {
     }
 }
 
+/// Peek's view along a row: the columns it is moved by, the most it can be
+/// moved, and the cursor it followed. Unzoomed, or with the grid in its
+/// room, it stays put. Zoomed past its room it holds where the wheel left
+/// it until the cursor moves, then brings the cursor into view with a few
+/// columns to spare.
+fn peek_view(
+    zoomed: bool,
+    room: f32,
+    cols: usize,
+    cursor: (usize, i32),
+    (pan, followed): (usize, Option<(usize, i32)>),
+) -> (usize, usize, Option<(usize, i32)>) {
+    let shown = room.floor().max(1.) as usize;
+    let most = cols.saturating_sub(shown);
+    if !zoomed || most == 0 {
+        return (0, 0, None);
+    }
+    const SPARE: usize = 4;
+    let mut pan = pan.min(most);
+    if followed != Some(cursor) {
+        let c = cursor.0;
+        if c < pan + SPARE.min(shown / 2) {
+            pan = c.saturating_sub(SPARE);
+        } else if c + SPARE >= pan + shown {
+            pan = (c + SPARE + 1).saturating_sub(shown);
+        }
+        pan = pan.min(most);
+    }
+    (pan, most, Some(cursor))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2250,6 +2471,29 @@ mod tests {
         assert!(tag.lands_on(0));
         let row = Dragged { key, from: None };
         assert!((0..MAX_WINDOWS).all(|i| row.lands_on(i)));
+    }
+
+    /// Peek zoomed past its room follows the cursor along the row, and a
+    /// pan by the wheel holds until the cursor moves.
+    #[test]
+    fn peek_zoomed_follows_the_cursor_and_keeps_a_pan_while_it_rests() {
+        // Unzoomed, or the whole row in its room: no pan.
+        assert_eq!(
+            peek_view(false, 50., 200, (150, 3), (0, None)),
+            (0, 0, None)
+        );
+        assert_eq!(peek_view(true, 120., 100, (90, 3), (0, None)).0, 0);
+        // The cursor past the right edge is brought into view with spare.
+        let (pan, most, followed) = peek_view(true, 50., 200, (120, 3), (0, None));
+        assert_eq!(most, 150);
+        assert!(pan <= 120 && 120 + 4 < pan + 50, "{pan}");
+        // Panned away by the wheel while the cursor rests: it holds.
+        assert_eq!(peek_view(true, 50., 200, (120, 3), (10, followed)).0, 10);
+        // The cursor moves: the view follows it again.
+        let (pan, ..) = peek_view(true, 50., 200, (121, 3), (10, followed));
+        assert!(pan <= 121 && 121 + 4 < pan + 50, "{pan}");
+        // Back at the start of the line, the view goes back to the start.
+        assert_eq!(peek_view(true, 50., 200, (0, 4), (pan, followed)).0, 0);
     }
 }
 

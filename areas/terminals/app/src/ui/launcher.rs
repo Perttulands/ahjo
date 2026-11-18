@@ -337,7 +337,7 @@ impl Launcher {
         let Some((harness, folder, flags, name, command)) = self.values(shell.read(cx), cx) else {
             return;
         };
-        if let Some(p) = launch::name_problem(&name) {
+        if let Some(p) = launch::name_problem(&name).or_else(|| launch::folder_problem(&folder)) {
             self.problem = Some(p.into());
             cx.notify();
             return;

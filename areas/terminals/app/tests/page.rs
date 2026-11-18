@@ -1008,7 +1008,8 @@ fn a_page_starts_a_session_in_a_folder_through_launch(cx: &mut TestAppContext) {
             })
         })
     });
-    // Its row's menu asks what shapes an agent in its folder.
+    // Its row's menu asks what shapes an agent in its folder; alpha-2 is a
+    // shell, so the row says an agent started there.
     let page = PAGE.with(|p| p.borrow().clone()).unwrap();
     let key = Key {
         node: running.node.clone(),
@@ -1025,7 +1026,7 @@ fn a_page_starts_a_session_in_a_folder_through_launch(cx: &mut TestAppContext) {
     let sees = page.read_with(cx, |p, _| {
         p.row_menu(&key)
             .into_iter()
-            .find(|r| r.label == "What this agent sees")
+            .find(|r| r.label == "What an agent here sees")
             .expect("the row menu offers it")
             .act
             .unwrap()
@@ -3586,14 +3587,21 @@ fn ctrl_wheel_zooms_the_terminal_under_it_and_peek_is_typed_into(cx: &mut TestAp
         filled > 14,
         "unzoomed, Peek fills its room past the Settings size"
     );
+    // Peek zooms past the fitted size like every other view: its text
+    // grows and the view follows the cursor, the session keeps its size.
     ctrl_wheel(cx, over, 1.);
     page.read_with(cx, |p, _| {
         assert_eq!(
-            p.settings.peek_font, None,
-            "Peek grows no larger than the grid fits"
+            p.settings.peek_font,
+            Some(filled + 1),
+            "Peek grows past the fit"
+        );
+        assert_eq!(
+            p.geo.borrow().last().unwrap().font,
+            Some(f32::from(filled + 1))
         );
     });
-    ctrl_wheel(cx, over, -1.);
+    ctrl_wheel(cx, over, -2.);
     page.read_with(cx, |p, _| {
         assert_eq!(
             p.settings.peek_font,

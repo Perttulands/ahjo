@@ -49,6 +49,7 @@ impl Workspace {
         for (tab, kept) in self.tabs.iter_mut().zip(p.tabs) {
             tab.windows = kept.windows;
             tab.count = kept.count;
+            tab.sizes = kept.sizes;
         }
         self.dedupe();
         self.focus = self.focus.min(self.windows().len() - 1);
@@ -69,6 +70,7 @@ pub(super) fn mend(presets: &mut Vec<Preset>) {
             name: None,
             windows: vec![],
             count: 1,
+            sizes: None,
         });
         for t in &mut p.tabs {
             t.name = None;

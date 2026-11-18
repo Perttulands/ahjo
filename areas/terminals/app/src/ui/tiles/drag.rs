@@ -13,6 +13,16 @@ impl Terminals {
     /// The pointer moved anywhere in the app while a press from a window is
     /// in flight. Moves with no press are the grid's own (links, motion).
     pub fn term_drag(&mut self, e: &MouseMoveEvent, _: &mut Window, cx: &mut Context<Self>) {
+        if self.divider.is_some() {
+            if e.pressed_button == Some(MouseButton::Left) {
+                self.drag_divider(e.position, cx);
+            } else {
+                // The button came up where no window heard it.
+                self.divider = None;
+                self.save(cx);
+            }
+            return;
+        }
         if let Some((i, b)) = self.mouse_down_in {
             self.drag_report(i, b, e, cx);
             return;
