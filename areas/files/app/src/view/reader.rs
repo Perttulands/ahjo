@@ -230,11 +230,18 @@ impl FilesPage {
         while kept.len() > 2 && len(&kept) > room / 2 {
             kept.remove(1);
         }
-        let mut row = div().flex_none().flex().items_center().min_w_0();
+        // The folders give way before the name: they clip, it stays.
+        let mut row = div().flex().items_center().min_w_0().overflow_hidden();
         let mut last = 0;
         for (n, &i) in kept.iter().enumerate() {
             if i > last + 1 || (n > 0 && i != last + 1) {
-                row = row.child(div().px(px(2.)).text_color(t.dim).child("\u{2026}/"));
+                row = row.child(
+                    div()
+                        .flex_none()
+                        .px(px(2.))
+                        .text_color(t.dim)
+                        .child("\u{2026}/"),
+                );
             }
             last = i;
             let crumb = &trail[i];
@@ -247,6 +254,9 @@ impl FilesPage {
                         move || id.clone()
                     })
                     .px(px(2.))
+                    .min_w_0()
+                    .overflow_hidden()
+                    .text_ellipsis()
                     .rounded(px(size::RADIUS))
                     .text_color(t.dim)
                     .cursor_pointer()
@@ -258,7 +268,7 @@ impl FilesPage {
                         cx.stop_propagation();
                     })),
             );
-            row = row.child(div().text_color(t.dim).child("/"));
+            row = row.child(div().flex_none().text_color(t.dim).child("/"));
         }
         row
     }

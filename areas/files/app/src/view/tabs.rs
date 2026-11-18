@@ -378,7 +378,8 @@ impl FilesPage {
         let s = self.symbol_here(cx)?;
         Some(
             div()
-                .flex_none()
+                .min_w_0()
+                .overflow_hidden()
                 .flex()
                 .items_center()
                 .text_color(t.text2)
