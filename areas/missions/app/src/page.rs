@@ -1760,6 +1760,16 @@ impl Render for MissionsPage {
                 if (key.modifiers.control || key.modifiers.platform) && (key.key == "z" || key.key == "y") && window.focused(cx).is_some_and(|focus| focus == page.focus) {
                     page.step_history(key.key == "y" || key.modifiers.shift, cx);
                     cx.stop_propagation();
+                } else if let Some(zoom) = ahjo_app_kit::zoom::from_key(key).filter(|_| page.mission_canvas_mode && window.focused(cx).is_some_and(|focus| focus == page.focus)) {
+                    // The canvas zooms as every surface does; Ctrl+0 goes
+                    // back to the view it opened at.
+                    match zoom {
+                        ahjo_app_kit::zoom::Zoom::In => page.canvas.step(true),
+                        ahjo_app_kit::zoom::Zoom::Out => page.canvas.step(false),
+                        ahjo_app_kit::zoom::Zoom::Reset => page.canvas.reopen(),
+                    }
+                    cx.stop_propagation();
+                    cx.notify();
                 } else if key.key == "escape" {
                     if page.canvas.close_menu() { cx.notify(); }
                     else if page.manage_is_open() { page.close_manage(cx); }

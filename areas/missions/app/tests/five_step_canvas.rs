@@ -193,3 +193,67 @@ fn five_step_canvas_can_pan_zoom_and_connect_visible_ports(cx: &mut TestAppConte
             .any(|c| c["from"] == "fmn_4:port_out" && c["to"] == "fmn_5:port_in")
     });
 }
+
+/// A board too long to read whole opens readable on its start rather than
+/// fitted tiny; Fit shows it whole, and Ctrl+0 goes back to how it opened.
+#[gpui::test]
+fn a_long_board_opens_readable_at_its_start(cx: &mut TestAppContext) {
+    let running = start();
+    let settings = std::env::temp_dir()
+        .join(format!("ahjo-open-canvas-{}", std::process::id()))
+        .join("app.json");
+    std::fs::create_dir_all(settings.parent().unwrap()).unwrap();
+    cx.executor().allow_parking();
+    cx.update(ahjo_app_shell::prepare);
+    let url = running.url.clone();
+    let (shell, cx) = cx.add_window_view(move |window, cx| {
+        ahjo_app_shell::start(
+            &[ahjo_missions_app::build],
+            Some(url),
+            Some(settings),
+            window,
+            cx,
+        )
+    });
+    cx.simulate_resize(gpui::size(px(1280.), px(900.)));
+    until(cx, "link", |cx| {
+        shell.read_with(cx, |s, cx| {
+            s.hub().read(cx).fleet.here().state == LinkState::Open
+        })
+    });
+    let bounds = |cx: &mut VisualTestContext, id: &str| {
+        cx.debug_bounds(Box::leak(id.to_string().into_boxed_str()))
+    };
+    let click = |cx: &mut VisualTestContext, id: &str| {
+        let at = bounds(cx, id).expect(id).center();
+        cx.simulate_click(at, Modifiers::none());
+    };
+    let mission = format!("mission-{}-hello", running.id);
+    until(cx, "mission", |cx| bounds(cx, &mission).is_some());
+    click(cx, &mission);
+    until(cx, "mode", |cx| bounds(cx, "mission-mode-canvas").is_some());
+    click(cx, "mission-mode-canvas");
+    until(cx, "board", |cx| bounds(cx, "mission-card-fmn_1").is_some());
+    let canvas = bounds(cx, "mission-canvas").unwrap();
+    let right = canvas.origin.x + canvas.size.width;
+    let shown = |cx: &mut VisualTestContext, id: &str| {
+        bounds(cx, id).is_some_and(|card| card.origin.x + card.size.width <= right)
+    };
+    let opened = bounds(cx, "mission-card-fmn_1").unwrap().size.width;
+    assert!(shown(cx, "mission-card-fmn_1"), "the start is in view");
+    assert!(!shown(cx, "mission-card-fmn_5"), "the end is further on");
+    click(cx, "canvas-fit");
+    cx.run_until_parked();
+    assert!(shown(cx, "mission-card-fmn_5"), "Fit shows it whole");
+    assert!(bounds(cx, "mission-card-fmn_1").unwrap().size.width < opened);
+    click(cx, "mission-card-fmn_1");
+    cx.simulate_keystrokes("escape");
+    cx.simulate_keystrokes("ctrl-0");
+    cx.run_until_parked();
+    assert_eq!(
+        bounds(cx, "mission-card-fmn_1").unwrap().size.width,
+        opened,
+        "Ctrl+0 opens it as it opened"
+    );
+    assert!(!shown(cx, "mission-card-fmn_5"));
+}

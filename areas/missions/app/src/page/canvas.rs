@@ -13,6 +13,9 @@ const ZOOM_MIN: f32 = 0.15;
 const ZOOM_MAX: f32 = 1.6;
 const ZOOM_STEP: f32 = 1.2;
 const FIT_MARGIN: f32 = 80.;
+/// The least zoom a card's words read at. A board that fits whole only
+/// smaller opens at this zoom on its start; Fit still shows it whole.
+const READABLE: f32 = 0.85;
 /// The strip on the right the zoom controls stand in; new cards keep out.
 const DRAG_SLOP: f32 = 3.;
 const CURVE_REACH: f32 = 40.;
@@ -59,6 +62,8 @@ pub(super) struct View {
     touched: bool,
     /// The card being edited, kept in view until the view is moved by hand.
     follow: Option<String>,
+    /// Ctrl+wheel as zoom steps, a touchpad's pixels adding up to one.
+    wheel: ahjo_app_kit::zoom::Wheel,
 }
 impl Default for View {
     fn default() -> Self {
@@ -71,6 +76,7 @@ impl Default for View {
             fitted: false,
             touched: false,
             follow: None,
+            wheel: Default::default(),
         }
     }
 }
@@ -86,6 +92,19 @@ impl View {
     }
     pub(super) fn invalidate_fit(&mut self) {
         self.fitted = false;
+    }
+    /// Back to the view the board opened at (Ctrl+0): framed again on the
+    /// next draw, as a board just opened is.
+    pub(super) fn reopen(&mut self) {
+        self.follow = None;
+        self.touched = false;
+        self.fitted = false;
+    }
+    /// Zoom a step in or out about the middle of the view (Ctrl+= and
+    /// Ctrl+-, and the + and − buttons).
+    pub(super) fn step(&mut self, inward: bool) {
+        let center = self.center();
+        self.zoom_at(if inward { ZOOM_STEP } else { 1. / ZOOM_STEP }, center);
     }
     pub(super) fn close_menu(&mut self) -> bool {
         self.menu.take().is_some()
@@ -178,6 +197,25 @@ impl View {
         self.pan = (place(w, bw, x), place(h, bh, y));
         // An empty board fits again once its first card lands.
         self.fitted = !board.cards.is_empty();
+    }
+    /// The view a board opens at: whole when its words read at that size,
+    /// otherwise at [`READABLE`] on its start, where the Input is, so a
+    /// long mission or a narrow window opens readable rather than tiny.
+    fn open(&mut self, board: &board::Board) {
+        self.fit(board);
+        if self.zoom >= READABLE || board.cards.is_empty() {
+            return;
+        }
+        let (_, _, _, h) = self.bounds.get();
+        let (x, y, _, bh) = board::extent(board);
+        self.zoom = READABLE;
+        // Centred top to bottom when it fits that way.
+        let top = if bh * READABLE <= h {
+            (h - bh * READABLE) / 2. - y * READABLE
+        } else {
+            FIT_MARGIN / 2. - y * READABLE
+        };
+        self.pan = (FIT_MARGIN / 2. - x * READABLE, top);
     }
 }
 
@@ -310,16 +348,14 @@ impl MissionsPage {
             )
             .on_scroll(cx.listener(|p, e: &ScrollEvent, _, cx| {
                 let delta = e.delta.pixel_delta(px(size::ROW));
-                if e.modifiers.control || e.modifiers.platform {
-                    let factor = if f32::from(delta.y) > 0. {
-                        ZOOM_STEP
-                    } else {
-                        1. / ZOOM_STEP
-                    };
-                    // The point under the pointer stays under it.
-                    let (x, y, _, _) = p.canvas.bounds.get();
-                    let at = (f32::from(e.position.x) - x, f32::from(e.position.y) - y);
-                    p.canvas.zoom_at(factor, at);
+                // Ctrl+wheel zooms, as on every surface (app-kit's zoom).
+                if let Some(steps) = p.canvas.wheel.steps(e) {
+                    if steps != 0 {
+                        // The point under the pointer stays under it.
+                        let (x, y, _, _) = p.canvas.bounds.get();
+                        let at = (f32::from(e.position.x) - x, f32::from(e.position.y) - y);
+                        p.canvas.zoom_at(ZOOM_STEP.powi(steps), at);
+                    }
                 } else {
                     p.canvas.follow = None;
                     p.canvas.pan.0 += f32::from(delta.x);
@@ -491,8 +527,7 @@ impl MissionsPage {
                 kit::button(t, "canvas-in", "+", Kind::Plain)
                     .debug_selector(|| "canvas-in".into())
                     .on_click(cx.listener(|p, _, _, cx| {
-                        let center = p.canvas.center();
-                        p.canvas.zoom_at(ZOOM_STEP, center);
+                        p.canvas.step(true);
                         cx.notify();
                     })),
             )
@@ -500,14 +535,16 @@ impl MissionsPage {
                 kit::button(t, "canvas-out", "−", Kind::Plain)
                     .debug_selector(|| "canvas-out".into())
                     .on_click(cx.listener(|p, _, _, cx| {
-                        let center = p.canvas.center();
-                        p.canvas.zoom_at(1. / ZOOM_STEP, center);
+                        p.canvas.step(false);
                         cx.notify();
                     })),
             )
             .child(
                 kit::button(t, "canvas-fit", "Fit", Kind::Plain)
                     .debug_selector(|| "canvas-fit".into())
+                    .tooltip(kit::tip(
+                        "Show the whole mission (Ctrl+0: back to how it opened)",
+                    ))
                     .on_click(cx.listener(move |p, _, _, cx| {
                         // The view is the operator's again: it stops
                         // following an edited card and frames each change.
@@ -1025,7 +1062,7 @@ fn wires(
                 cx.defer(move |cx| {
                     let _ = entity.update(cx, |page, cx| {
                         if page.generation == generation && !page.canvas.fitted {
-                            page.canvas.fit(&fit_board);
+                            page.canvas.open(&fit_board);
                             if page.canvas.fitted {
                                 cx.notify();
                             }
