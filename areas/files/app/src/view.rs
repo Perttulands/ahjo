@@ -376,7 +376,7 @@ fn lead_to_found<'a>(text: &'a str, query: &str) -> std::borrow::Cow<'a, str> {
 pub fn state_colour(t: &Theme, state: char) -> gpui::Hsla {
     match state {
         '?' | 'A' => t.done,
-        'D' => t.error,
+        'D' | 'C' => t.error,
         _ => t.needs,
     }
 }
@@ -388,7 +388,20 @@ pub fn state_word(state: char) -> &'static str {
         'A' => "A",
         'D' => "D",
         'R' => "R",
+        'C' => "!",
         _ => "M",
+    }
+}
+
+/// A state, said whole.
+pub fn state_tip(state: char) -> &'static str {
+    match state {
+        '?' => "New, not yet known to git",
+        'A' => "New, not committed",
+        'D' => "Deleted, not committed",
+        'R' => "Renamed, not committed",
+        'C' => "Merge conflict: both sides changed it",
+        _ => "Changed, not committed",
     }
 }
 
@@ -444,7 +457,26 @@ impl FilesPage {
                     folder = format!("{n} files, in {folder}");
                 }
                 let indent = if inside { INDENT + DISCLOSURE } else { 0. };
-                let room = self.row_letters(indent).saturating_sub(AGE + 1);
+                // An uncommitted file says how it stands, and where in its
+                // repository it is.
+                let state = self.states.get(&c.path).copied();
+                if c.modified == 0
+                    && let Some(repo) = self.repository_of(&c.path)
+                {
+                    folder = paths::parent(&c.path)
+                        .get(repo.len() + 1..)
+                        .unwrap_or_default()
+                        .to_owned();
+                }
+                let taken = if c.modified == 0 { 0 } else { AGE + 1 } + state.map_or(0, |_| 2);
+                let room = self.row_letters(indent).saturating_sub(taken);
+                // A folder line that cannot say where it is says how many.
+                if let Some(n) = c.files {
+                    let left = room.saturating_sub(name.chars().count() + 1);
+                    if folder.chars().count() > (left as f32 * size::TEXT / size::SMALL) as usize {
+                        folder = format!("{n} files");
+                    }
+                }
                 let path = c.path.clone();
                 let selector = format!("recent-{name}");
                 self.file_row(
@@ -452,14 +484,21 @@ impl FilesPage {
                     SharedString::from(format!("recent-{}", c.path)),
                     picked,
                     &name,
-                    Some(folder),
+                    Some(folder).filter(|f| !f.is_empty()),
                     room,
-                    Some(format::ago(c.modified)),
+                    (c.modified != 0).then(|| format::ago(c.modified)),
                     cx,
                 )
+                .when_some(state.filter(|_| !picked), |row, s| {
+                    row.text_color(state_colour(t, s))
+                })
+                .children(state.map(|s| pane::meta(t, state_word(s), Some(state_colour(t, s)))))
                 .pl(px(size::ROW_PAD - size::ROW_INSET + indent))
                 .debug_selector(move || selector.clone())
-                .tooltip(kit::tip(c.path.clone()))
+                .tooltip(kit::tip(match state {
+                    Some(s) => format!("{}\n{}", c.path, state_tip(s)),
+                    None => c.path.clone(),
+                }))
                 .on_mouse_down(
                     MouseButton::Right,
                     self.menu_at(c.path.clone(), c.files.is_some(), cx),
@@ -493,7 +532,13 @@ impl FilesPage {
                     // and the line, what was found in it marked.
                     Some(text) => {
                         let query = self.find.as_ref().map_or("", |f| f.query.trim());
-                        let text = &*lead_to_found(text, query);
+                        // A line that fits is shown whole.
+                        let fits = text.chars().count() + 6 <= room;
+                        let text = &*if fits {
+                            text.into()
+                        } else {
+                            lead_to_found(text, query)
+                        };
                         let marked: Vec<_> = crate::store::find::in_text(text, query)
                             .into_iter()
                             .map(|r| {
@@ -878,7 +923,7 @@ impl FilesPage {
             .flex_col()
             .children(side)
             .child(body);
-        let frame = if !self.beside && self.side == Side::Changes {
+        let frame = if !self.beside && (self.side == Side::Changes || self.finding.get()) {
             pane::list_wide_frame(t, head, body)
         } else {
             pane::list_frame(t, head, body)
@@ -1007,7 +1052,7 @@ impl FilesPage {
         if let Some(zoom) = self.zoom_bar(t, narrow, cx) {
             head = head.child(zoom);
         }
-        if o.diff.is_some() {
+        if o.diff.is_some() && !matches!(o.show, Show::Gone) {
             head = head.child(
                 pane::act(
                     t,
@@ -1108,17 +1153,20 @@ impl FilesPage {
         }
         if self.confirm_discard {
             return Some(
-                line("Your changes will be lost.".into())
-                    .child(
-                        kit::button(t, "files-confirm-discard", "Discard", Kind::Primary)
-                            .debug_selector(|| "files-confirm-discard".into())
-                            .on_click(cx.listener(|p, _, w, cx| p.discard(w, cx))),
-                    )
-                    .child(
-                        pane::act(t, "files-keep-editing", "Keep editing")
-                            .debug_selector(|| "files-keep-editing".into())
-                            .on_click(cx.listener(|p, _, w, cx| p.keep_editing(w, cx))),
-                    ),
+                line(match &self.opened {
+                    Some(o) => format!("Discard your changes to {}?", o.name),
+                    None => "Discard your changes?".into(),
+                })
+                .child(
+                    kit::button(t, "files-confirm-discard", "Discard", Kind::Primary)
+                        .debug_selector(|| "files-confirm-discard".into())
+                        .on_click(cx.listener(|p, _, w, cx| p.discard(w, cx))),
+                )
+                .child(
+                    pane::act(t, "files-keep-editing", "Keep editing")
+                        .debug_selector(|| "files-keep-editing".into())
+                        .on_click(cx.listener(|p, _, w, cx| p.keep_editing(w, cx))),
+                ),
             );
         }
         if self.confirm_close_beside {
@@ -1174,6 +1222,7 @@ impl FilesPage {
                 .debug_selector(|| "files-failed".into())
                 .child(kit::note(t, why.clone(), Some(t.error)))
                 .into_any_element(),
+            Show::Gone => pane::empty(t, "Deleted since the last commit", None).into_any_element(),
             Show::Not(why) => {
                 let node = ahjo_core::NodeId(o.node.clone());
                 let path = o.path.clone();
@@ -1420,6 +1469,16 @@ impl Render for FilesPage {
         if self.find.as_ref().is_some_and(|f| f.open_first) {
             cx.defer_in(window, |page, window, cx| page.open_first_found(window, cx));
         }
+        if self.leave_after_save && !self.opened.as_ref().is_some_and(|o| o.saving) {
+            self.leave_after_save = false;
+            cx.defer_in(window, |page, window, cx| page.finish_edit(window, cx));
+        }
+        self.finding.set(
+            !self.beside
+                && (self.find.is_some()
+                    || self.jump.is_some()
+                    || self.query.read(cx).is_focused(window)),
+        );
         let t = theme(cx).clone();
         let root = div()
             .debug_selector(|| "files-page".into())

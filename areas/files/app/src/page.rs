@@ -195,11 +195,21 @@ pub struct FilesPage {
     pub tabs: store::tabs::Tabs,
     tab_kept: HashMap<store::tabs::Key, nav::TabKept>,
     pub tabs_scroll: gpui::ScrollHandle,
+    /// The find box has the keyboard or shows what it found: the list
+    /// takes the room its lines need. Set as the page is drawn.
+    pub(crate) finding: std::cell::Cell<bool>,
+    /// The code outline's scroll, and the symbol it last followed the
+    /// reader to: it moves only when the reader comes to another symbol.
+    pub(crate) outline_scroll: gpui::ScrollHandle,
+    pub(crate) outline_here: std::cell::Cell<Option<usize>>,
     /// Ctrl+Tab held: the tab it is on among those shown last.
     pub switching: Option<usize>,
     /// A tab with unsaved changes asked to close: what to do with them.
     pub closing: Option<store::tabs::Key>,
     close_after_save: Option<store::tabs::Key>,
+    /// Esc pressed while a save was on its way: editing ends when the save
+    /// is answered, unless it failed or more was typed.
+    pub(crate) leave_after_save: bool,
     /// A place to go to once the file is read.
     pending_place: Option<ahjo_app_kit::widgets::code::Place>,
     /// The open file's symbols.
@@ -214,7 +224,7 @@ pub struct FilesPage {
     typed_ahead: (String, Option<std::time::Instant>),
     /// What git says differs from HEAD: by repository, then by path, and
     /// the folders holding any of it.
-    repos: HashMap<String, Vec<ahjo_files_contract::FileState>>,
+    pub(crate) repos: HashMap<String, Vec<ahjo_files_contract::FileState>>,
     no_repo: std::collections::HashSet<String>,
     status_asked: std::collections::HashSet<String>,
     pub states: HashMap<String, char>,
@@ -325,6 +335,7 @@ impl Page for FilesPage {
             self.start(cx);
             self.refresh_recent(cx);
             self.watch(window, cx);
+            self.tab_into_view_soon(window, cx);
         }
     }
     fn link(
@@ -371,6 +382,7 @@ impl Page for FilesPage {
             if let Some(file) = kept.file.clone() {
                 self.show_in_tree(&file, cx);
                 self.open(file, window, cx);
+                self.tab_into_view_soon(window, cx);
             }
             if kept.beside_open {
                 let view = self.panel(window, cx);
@@ -420,6 +432,9 @@ impl FilesPage {
         if let Some(sessions) = &sessions {
             cx.observe(sessions, |p: &mut Self, list, cx| {
                 p.live = list.read(cx).sessions.clone();
+                if p.shown && p.side == Side::Changes {
+                    p.ask_session_status(cx);
+                }
                 // The side panel's tree follows the focused session, and
                 // shows the pick in each new folder.
                 let at = p.side_root(cx).map(|r| r.path);
@@ -591,9 +606,13 @@ impl FilesPage {
             tabs: Default::default(),
             tab_kept: HashMap::new(),
             tabs_scroll: gpui::ScrollHandle::new(),
+            finding: std::cell::Cell::new(false),
+            outline_scroll: gpui::ScrollHandle::new(),
+            outline_here: std::cell::Cell::new(None),
             switching: None,
             closing: None,
             close_after_save: None,
+            leave_after_save: false,
             pending_place: None,
             symbols: vec![],
             infile: None,
@@ -863,6 +882,9 @@ impl FilesPage {
     pub fn refresh_recent(&mut self, cx: &mut Context<Self>) {
         if self.recent_asked || self.tree.node.is_empty() {
             return;
+        }
+        if self.side == Side::Changes && !self.beside {
+            self.ask_session_status(cx);
         }
         self.recent_asked = true;
         self.recent_at = Some(std::time::Instant::now());
@@ -1370,6 +1392,7 @@ impl FilesPage {
         self.md_select.borrow_mut().selection.clear();
         self.pending_line = None;
         self.confirm_discard = false;
+        self.leave_after_save = false;
         self.conflict = false;
         self.shown_newest = false;
         self.code
@@ -1418,6 +1441,11 @@ impl FilesPage {
                     }
                     if let Some(o) = p.opened.as_mut() {
                         o.show = Show::Failed(message(s, &b));
+                    }
+                    // A file deleted since the last commit still has what
+                    // went to show.
+                    if code_of(&b).as_deref() == Some(ahjo_files_contract::NOT_FOUND) {
+                        p.read_changes(cx);
                     }
                     cx.notify();
                     return;
@@ -1570,9 +1598,12 @@ impl FilesPage {
                 o.sides = o
                     .diff
                     .as_ref()
-                    .map(|d| std::rc::Rc::new(open::Sides::of(&d.diff)));
+                    .map(|d| std::rc::Rc::new(open::Sides::of(&o.name, &d.diff)));
                 if o.diff.is_none() {
                     o.diff_open = false;
+                } else if matches!(o.show, Show::Failed(_) | Show::Gone) {
+                    o.show = Show::Gone;
+                    o.diff_open = true;
                 }
                 page.apply_marks(cx);
                 if std::mem::take(&mut page.jump_due) {
@@ -1625,7 +1656,7 @@ impl FilesPage {
         self.apply_marks(cx);
         cx.notify()
     }
-    fn finish_edit(&mut self, w: &mut Window, cx: &mut Context<Self>) {
+    pub(crate) fn finish_edit(&mut self, w: &mut Window, cx: &mut Context<Self>) {
         if self.opened.as_ref().is_some_and(|o| !o.editing) {
             if self.beside {
                 self.close_beside(cx);
@@ -1639,7 +1670,15 @@ impl FilesPage {
             .opened
             .as_ref()
             .is_some_and(|o| self.drafts.contains_key(&o.key()));
-        if dirty {
+        if self.confirm_discard {
+            // Esc on the question is its safe answer.
+            self.keep_editing(w, cx);
+        } else if self.conflict {
+            self.cancel_conflict(w, cx);
+        } else if dirty && self.opened.as_ref().is_some_and(|o| o.saving) {
+            // The edit is on its way to disk: nothing to ask about yet.
+            self.leave_after_save = true;
+        } else if dirty {
             self.confirm_discard = true;
         } else if let Some(o) = self.opened.as_mut() {
             o.editing = false;
@@ -1714,6 +1753,7 @@ impl FilesPage {
                     return;
                 }
                 if status != success {
+                    p.leave_after_save = false;
                     p.opened.as_mut().unwrap().saving = false;
                     if status == 412 {
                         p.conflict = true;
@@ -1758,6 +1798,7 @@ impl FilesPage {
                     p.tabs.moved(&old_key, new_key.clone());
                     if let Some(d) = open::acknowledged(&now, &sent) {
                         p.drafts.insert(new_key.clone(), d);
+                        p.leave_after_save = false;
                     }
                     p.refresh_status(cx);
                     if p.close_after_save.take() == Some(new_key.clone())
@@ -1888,7 +1929,10 @@ impl FilesPage {
                 self.refresh_recent(cx);
                 self.refresh_status(cx);
             }
-            "/" => self.find_anywhere(window, cx),
+            "/" => {
+                self.reselect_query(cx);
+                self.find_anywhere(window, cx)
+            }
             "f2" => self.start_rename(window, cx),
             // Beside another page, Esc takes the view away (its drafts are
             // asked about first), with a find under the file shown too.
@@ -2694,6 +2738,9 @@ impl FilesPage {
 
     pub fn set_side(&mut self, layout: Side, window: &mut Window, cx: &mut Context<Self>) {
         self.side = layout;
+        if layout == Side::Changes {
+            self.ask_session_status(cx);
+        }
         let mut kept: store::Kept = self.host.setting(cx).unwrap_or_default();
         if kept.side != layout {
             kept.side = layout;

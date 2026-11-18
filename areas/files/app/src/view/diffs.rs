@@ -5,6 +5,7 @@ use super::*;
 use crate::open::Sides;
 use crate::store::diff::Kind as RowKind;
 use ahjo_app_kit::theme::{FAMILY, alpha};
+use ahjo_app_kit::widgets::syntax;
 use std::rc::Rc;
 
 /// Under this width the two sides do not both fit: inline.
@@ -51,9 +52,9 @@ impl FilesPage {
                 range
                     .map(|i| {
                         if wide {
-                            pair_row(&t, &sides.pairs[i], digits)
+                            pair_row(&t, &sides, &sides.pairs[i], digits)
                         } else {
-                            inline_row(&t, &sides.rows[i], digits)
+                            inline_row(&t, &sides, &sides.rows[i], digits)
                         }
                     })
                     .collect()
@@ -126,20 +127,38 @@ fn number(t: &Theme, n: Option<usize>, digits: usize) -> Div {
         .child(n.map(|n| n.to_string()).unwrap_or_default())
 }
 
-fn text_cell(text: &str) -> Div {
-    div()
+/// What colours a line as code: its language and what it starts inside.
+type Paint = Option<(&'static syntax::Lang, syntax::Carry)>;
+
+fn text_cell(t: &Theme, text: &str, paint: Paint) -> Div {
+    let text = text.replace('\t', "    ");
+    let cell = div()
         .flex_1()
         .min_w_0()
         .overflow_hidden()
-        .whitespace_nowrap()
-        .child(text.replace('\t', "    "))
+        .whitespace_nowrap();
+    let Some((lang, carry)) = paint else {
+        return cell.child(text);
+    };
+    let colours: Vec<_> = syntax::spans(lang, &text, carry)
+        .0
+        .into_iter()
+        .map(|(range, token)| {
+            let style = gpui::HighlightStyle {
+                color: Some(syntax::colour(t, token)),
+                ..Default::default()
+            };
+            (range, style)
+        })
+        .collect();
+    cell.child(gpui::StyledText::new(SharedString::from(text)).with_highlights(colours))
 }
 
 fn line_box() -> Div {
     div().h(px(LINE)).w_full().flex().items_center()
 }
 
-fn inline_row(t: &Theme, r: &crate::store::diff::Row, digits: usize) -> AnyElement {
+fn inline_row(t: &Theme, sides: &Sides, r: &crate::store::diff::Row, digits: usize) -> AnyElement {
     let (sign, wash, colour) = match r.kind {
         RowKind::Add => ("+", Some(t.done), t.text),
         RowKind::Delete => ("-", Some(t.error), t.text),
@@ -151,7 +170,7 @@ fn inline_row(t: &Theme, r: &crate::store::diff::Row, digits: usize) -> AnyEleme
             .bg(t.surface)
             .text_color(t.dim)
             .pl(px(size::HEAD_PAD))
-            .child(text_cell(&r.text))
+            .child(text_cell(t, &r.text, None))
             .into_any_element();
     }
     line_box()
@@ -166,20 +185,28 @@ fn inline_row(t: &Theme, r: &crate::store::diff::Row, digits: usize) -> AnyEleme
                 .text_color(wash.unwrap_or(t.dim))
                 .child(sign),
         )
-        .child(text_cell(&r.text))
+        .child(text_cell(
+            t,
+            &r.text,
+            match (r.new, r.old) {
+                (Some(n), _) => sides.paint(n, true),
+                (None, Some(n)) => sides.paint(n, false),
+                (None, None) => None,
+            },
+        ))
         .into_any_element()
 }
 
-fn pair_row(t: &Theme, p: &crate::store::diff::Pair, digits: usize) -> AnyElement {
+fn pair_row(t: &Theme, sides: &Sides, p: &crate::store::diff::Pair, digits: usize) -> AnyElement {
     if let Some(h) = &p.hunk {
         return line_box()
             .bg(t.surface)
             .text_color(t.dim)
             .pl(px(size::HEAD_PAD))
-            .child(text_cell(h))
+            .child(text_cell(t, h, None))
             .into_any_element();
     }
-    let side = |line: &Option<(usize, String)>, colour: gpui::Hsla| {
+    let side = |line: &Option<(usize, String)>, colour: gpui::Hsla, new: bool| {
         let present = line.is_some();
         div()
             .flex_1()
@@ -193,11 +220,15 @@ fn pair_row(t: &Theme, p: &crate::store::diff::Pair, digits: usize) -> AnyElemen
             .when(!present, |d| d.bg(alpha(t.text, ABSENT)))
             .text_color(if p.changed { t.text } else { t.text2 })
             .child(number(t, line.as_ref().map(|l| l.0), digits))
-            .child(text_cell(line.as_ref().map_or("", |l| l.1.as_str())))
+            .child(text_cell(
+                t,
+                line.as_ref().map_or("", |l| l.1.as_str()),
+                line.as_ref().and_then(|l| sides.paint(l.0, new)),
+            ))
     };
     line_box()
-        .child(side(&p.old, t.error))
+        .child(side(&p.old, t.error, false))
         .child(div().flex_none().w(px(1.)).h_full().bg(t.divider))
-        .child(side(&p.new, t.done))
+        .child(side(&p.new, t.done, true))
         .into_any_element()
 }

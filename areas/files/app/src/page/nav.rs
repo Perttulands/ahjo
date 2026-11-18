@@ -269,6 +269,17 @@ impl FilesPage {
         }
     }
 
+    /// The same once the strip has been drawn: tabs just put there have
+    /// no place to scroll to before that.
+    pub(crate) fn tab_into_view_soon(&self, window: &mut Window, cx: &mut Context<Self>) {
+        cx.on_next_frame(window, |page, _, cx| {
+            if let Some(key) = page.opened.as_ref().map(|o| o.key()) {
+                page.tab_into_view(&key);
+                cx.notify();
+            }
+        });
+    }
+
     /// Shows a tab's file, keeping the tab as it is (kept or a preview).
     pub fn show_tab(&mut self, key: Key, window: &mut Window, cx: &mut Context<Self>) {
         self.on_node(&key.0, cx);
@@ -624,6 +635,7 @@ impl FilesPage {
             }
             "p" | "e" if ctrl && !alt && !shift => {
                 self.search_inside = false;
+                self.reselect_query(cx);
                 self.find_anywhere(window, cx)
             }
             "g" if ctrl && !alt && !shift => self.find_with(":", window, cx),
@@ -663,6 +675,15 @@ impl FilesPage {
         }
     }
 
+    /// What the find box still holds is selected, so typing starts a new
+    /// find and Enter repeats the last.
+    pub(crate) fn reselect_query(&mut self, cx: &mut Context<Self>) {
+        self.query.update(cx, |f, cx| {
+            let text = f.text.clone();
+            f.set(&text, true, cx)
+        });
+    }
+
     /// The find box opened with `start` in it: `:` for a line, `@` for a
     /// symbol.
     pub fn find_with(&mut self, start: &str, window: &mut Window, cx: &mut Context<Self>) {
@@ -678,6 +699,8 @@ impl FilesPage {
         if !selected.is_empty() && !selected.contains('\n') {
             self.query.update(cx, |f, cx| f.set(&selected, true, cx));
             self.typed(selected, cx);
+        } else {
+            self.reselect_query(cx);
         }
         self.find_anywhere(window, cx);
         if self.find.is_some() {
@@ -943,6 +966,11 @@ impl FilesPage {
             Request::get(NodeId(node.clone()), route("status", &folder)),
             move |p, s, b, cx| {
                 p.status_asked.remove(&folder);
+                if p.tree.node == node && matches!(s, 403 | 404) {
+                    // Gone, or outside what the node shows: no repository
+                    // to ask about again.
+                    p.no_repo.insert(folder.clone());
+                }
                 if p.tree.node != node || s != 200 {
                     return;
                 }
@@ -960,6 +988,30 @@ impl FilesPage {
             },
             cx,
         );
+    }
+
+    /// Asks about the repository of every folder a session works in:
+    /// Changes lists what is not committed there.
+    pub(crate) fn ask_session_status(&mut self, cx: &mut Context<Self>) {
+        let folders: Vec<String> = self
+            .live
+            .iter()
+            .filter(|s| s.node == self.tree.node)
+            .filter_map(|s| s.cwd.clone())
+            .collect();
+        for folder in folders {
+            self.ask_status(&folder, cx);
+        }
+    }
+
+    /// Whether a live session works in `repo` or under it.
+    pub(crate) fn worked_in(&self, repo: &str) -> bool {
+        self.live.iter().any(|s| {
+            s.node == self.tree.node
+                && s.cwd
+                    .as_deref()
+                    .is_some_and(|cwd| cwd == repo || paths::inside(repo, cwd))
+        })
     }
 
     /// Asks every repository known again: something changed.

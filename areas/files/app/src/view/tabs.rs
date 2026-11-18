@@ -412,6 +412,12 @@ impl FilesPage {
             return body.into_any_element();
         }
         let here = self.symbol_here(cx).map(|s| s.line);
+        // The outline follows the reader through a long file.
+        if self.outline_here.replace(here) != here
+            && let Some(n) = self.symbols.iter().position(|s| Some(s.line) == here)
+        {
+            self.outline_scroll.scroll_to_item(n);
+        }
         let least = self.symbols.iter().map(|s| s.depth).min().unwrap_or(0);
         let marks = self.code.read(cx).marks().to_vec();
         let mut list = div()
@@ -425,6 +431,7 @@ impl FilesPage {
             .border_l_1()
             .border_color(t.divider)
             .overflow_y_scroll()
+            .track_scroll(&self.outline_scroll)
             .flex()
             .flex_col()
             .text_size(px(size::SMALL));

@@ -469,19 +469,15 @@ fn browse_find_edit_save_and_send_to_a_session(cx: &mut TestAppContext) {
     until(cx, "editor", |cx| cx.debug_bounds("files-save").is_some());
     cx.simulate_keystrokes("ctrl-a");
     cx.simulate_input("after");
+    // Esc while the save is on its way does not ask about the edit: it is
+    // being saved, and editing ends when the node has answered.
     cx.simulate_keystrokes("ctrl-s");
-    until(cx, "saved file", |_| {
-        std::fs::read(&file).ok().as_deref() == Some(b"after")
-    });
-    // The file is on disk before the node's answer reaches the page; until
-    // then the edit is still unsaved there, and Esc asks to discard it.
-    until(cx, "the save answered", |cx| {
-        cx.debug_bounds("files-unsaved").is_none()
-    });
     cx.simulate_keystrokes("escape");
     until(cx, "reading again", |cx| {
         cx.debug_bounds("files-send").is_some()
     });
+    assert_eq!(std::fs::read(&file).unwrap(), b"after");
+    assert!(cx.debug_bounds("files-unsaved").is_none());
     click(cx, "files-send");
     until(cx, "send drawer", |cx| cx.debug_bounds("send-go").is_some());
     assert_eq!(shell.read_with(cx, |s, _| s.shown_page()), Some("sessions"));
@@ -1018,6 +1014,16 @@ fn editing_by_keyboard_keeps_the_work_and_discard_restores_it(cx: &mut TestAppCo
     cx.simulate_input("unsaved");
     until(cx, "says it is unsaved", |cx| {
         cx.debug_bounds("files-unsaved").is_some()
+    });
+    cx.simulate_keystrokes("escape");
+    until(cx, "discard question", |cx| {
+        cx.debug_bounds("files-keep-editing").is_some()
+    });
+    // Esc on the question keeps editing, as its button does.
+    cx.simulate_keystrokes("escape");
+    until(cx, "the question put away, the edit kept", |cx| {
+        cx.debug_bounds("files-keep-editing").is_none()
+            && cx.debug_bounds("files-unsaved").is_some()
     });
     cx.simulate_keystrokes("escape");
     until(cx, "discard question", |cx| {
@@ -2256,6 +2262,52 @@ fn the_side_panel_shows_the_pages_tree_on_the_other_pages(cx: &mut TestAppContex
     until(cx, "and on the page", |cx| {
         cx.debug_bounds("file-row-b.txt").is_some()
     });
+    drop(running);
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+/// Changes lists what git says is not committed in a repository, a file
+/// deleted there too; opening that one shows what went.
+#[gpui::test]
+fn changes_list_the_uncommitted_files_and_a_deleted_one_shows_what_went(cx: &mut TestAppContext) {
+    let root = repository(
+        "files-uncommitted",
+        &[
+            ("kept.rs", "fn a() {}\n"),
+            ("old/gone.rs", "// gone\nfn b() {}\n"),
+        ],
+        &[("kept.rs", "fn a() { 1 }\n"), ("new.rs", "fn n() {}\n")],
+    );
+    std::fs::remove_dir_all(root.join("old")).unwrap();
+    let running = start(root.clone());
+    cx.executor().allow_parking();
+    cx.update(ahjo_app_shell::prepare);
+    let url = running.url.clone();
+    let (_, cx) = cx.add_window_view(move |w, cx| {
+        ahjo_app_shell::start(&[observed_files], Some(url), None, w, cx)
+    });
+    let page = SEARCH_PAGE.with(|p| p.borrow().as_ref().unwrap().clone());
+    tree(cx, "file-row-kept.rs");
+    click(cx, "files-side-changes");
+    until(cx, "every uncommitted file, the deleted one too", |cx| {
+        ["recent-kept.rs", "recent-new.rs", "recent-gone.rs"]
+            .iter()
+            .all(|row| cx.debug_bounds(row).is_some())
+    });
+    click(cx, "recent-gone.rs");
+    until(cx, "what went, as a diff", |cx| {
+        cx.debug_bounds("files-gone-file").is_some()
+            && (cx.debug_bounds("files-diff-inline").is_some()
+                || cx.debug_bounds("files-diff-sides").is_some())
+    });
+    page.read_with(cx, |p, _| {
+        let diff = &p.opened.as_ref().unwrap().diff.as_ref().unwrap().diff;
+        assert!(diff.contains("-// gone\n-fn b() {}"), "{diff}");
+    });
+    assert!(
+        cx.debug_bounds("files-edit").is_none(),
+        "nothing there to edit"
+    );
     drop(running);
     std::fs::remove_dir_all(root).unwrap();
 }

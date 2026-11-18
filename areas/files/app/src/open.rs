@@ -1,6 +1,7 @@
 //! File viewer state and decoding rules.
 use crate::store::{format, kinds, zoom};
 use ahjo_app_kit::widgets::markdown::{self, Block};
+use ahjo_app_kit::widgets::syntax;
 use gpui::{ImageFormat, RenderImage};
 use sha2::{Digest, Sha256};
 use std::sync::Arc;
@@ -32,6 +33,8 @@ pub enum Show {
     Media(kinds::Kind),
     /// Why it is not shown inline, in a sentence.
     Not(String),
+    /// Deleted since the last commit: only its diff is left to show.
+    Gone,
     Failed(String),
 }
 
@@ -66,18 +69,67 @@ pub struct Opened {
     pub changed_on_disk: bool,
 }
 
-/// A diff's lines, and the same paired side by side.
-#[derive(Debug)]
+/// A diff's lines, and the same paired side by side; and for colouring
+/// them as code, the file's language and what each line of the old file
+/// and of the new starts inside (by line number, from 1).
 pub struct Sides {
     pub rows: Vec<crate::store::diff::Row>,
     pub pairs: Vec<crate::store::diff::Pair>,
+    pub lang: Option<&'static syntax::Lang>,
+    old_carry: Vec<syntax::Carry>,
+    new_carry: Vec<syntax::Carry>,
 }
 
 impl Sides {
-    pub fn of(diff: &str) -> Self {
+    /// The diff of the file called `name`.
+    pub fn of(name: &str, diff: &str) -> Self {
+        use crate::store::diff::Kind;
         let rows = crate::store::diff::rows(diff);
         let pairs = crate::store::diff::pairs(&rows);
-        Sides { rows, pairs }
+        let lang = syntax::lang(name).filter(|_| diff.len() <= syntax::MAX_BYTES);
+        let (mut old_carry, mut new_carry) = (vec![], vec![]);
+        if let Some(lang) = lang {
+            let (mut old, mut new) = (syntax::Carry::default(), syntax::Carry::default());
+            let keep =
+                |carries: &mut Vec<syntax::Carry>, n: usize, at: &mut syntax::Carry, text: &str| {
+                    if carries.len() <= n {
+                        carries.resize(n + 1, syntax::Carry::default());
+                    }
+                    carries[n] = *at;
+                    *at = syntax::spans(lang, text, *at).1;
+                };
+            for row in &rows {
+                if row.kind == Kind::Hunk {
+                    // Lines are missing before a hunk: start afresh.
+                    (old, new) = Default::default();
+                    continue;
+                }
+                if let Some(n) = row.old {
+                    keep(&mut old_carry, n, &mut old, &row.text);
+                }
+                if let Some(n) = row.new {
+                    keep(&mut new_carry, n, &mut new, &row.text);
+                }
+            }
+        }
+        Sides {
+            rows,
+            pairs,
+            lang,
+            old_carry,
+            new_carry,
+        }
+    }
+
+    /// The language, and what line `n` of the old file (or the new) starts
+    /// inside: what colours it.
+    pub fn paint(&self, n: usize, new: bool) -> Option<(&'static syntax::Lang, syntax::Carry)> {
+        let carries = if new {
+            &self.new_carry
+        } else {
+            &self.old_carry
+        };
+        Some((self.lang?, carries.get(n).copied().unwrap_or_default()))
     }
 }
 

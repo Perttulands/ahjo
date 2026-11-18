@@ -24,6 +24,8 @@ const OUTLINE_DEPTH: u8 = 3;
 const OUTLINE_MIN: usize = 3;
 /// Files shown under a group in Review before the rest are counted.
 const PER_GROUP: usize = 5;
+/// A repository's uncommitted files listed at most.
+const UNCOMMITTED: usize = 500;
 /// Changed files a place shows.
 const PLACE_RECENT: usize = 12;
 /// The documents a place shows first when it has them.
@@ -46,14 +48,46 @@ pub(super) fn review_lines(p: &FilesPage) -> Vec<Line> {
         depth: 0,
         error,
     };
-    let recent = match &p.recent {
-        None => return vec![note("Reading\u{2026}", false)],
-        Some(Err(why)) => return vec![note(why, true)],
-        Some(Ok(r)) if r.is_empty() => return vec![note("Nothing changed lately", false)],
+    let recent: &[Changed] = match &p.recent {
         Some(Ok(r)) => r,
+        _ => &[],
     };
+    let mut out = vec![];
+    // What git says is not committed, a repository at a time: those a
+    // session works in first.
+    let mut repos: Vec<_> = p.repos.iter().filter(|(_, f)| !f.is_empty()).collect();
+    repos.sort_by_key(|(repo, _)| (!p.worked_in(repo), repo.to_string()));
+    for (repo, files) in &repos {
+        out.push(Line::Group((*repo).clone(), 0));
+        let mut files: Vec<_> = files.iter().collect();
+        files.sort_by_key(|f| (f.state != 'C', &f.path));
+        for f in files.iter().take(UNCOMMITTED) {
+            out.push(Line::Recent(
+                Changed {
+                    path: f.path.clone(),
+                    modified: 0,
+                    files: None,
+                },
+                true,
+            ));
+        }
+        if files.len() > UNCOMMITTED {
+            out.push(Line::Note {
+                text: format!("{} more not shown", files.len() - UNCOMMITTED),
+                depth: 1,
+                error: false,
+            });
+        }
+    }
+    // Then what changed lately anywhere git does not already account for.
     let mut groups: Vec<(String, u64, Vec<&Changed>)> = vec![];
     for c in recent {
+        // Also a folder line that stands for files of a repository listed.
+        if repos.iter().any(|(repo, _)| {
+            paths::inside(repo, &c.path) || (c.files.is_some() && paths::inside(&c.path, repo))
+        }) {
+            continue;
+        }
         let root = paths::root_of(&p.tree.roots, &c.path).map(|r| r.path.as_str());
         let folder = who::group_of(&p.live, &p.tree.node, root, &c.path);
         match groups.iter_mut().find(|g| g.0 == folder) {
@@ -61,7 +95,6 @@ pub(super) fn review_lines(p: &FilesPage) -> Vec<Line> {
             None => groups.push((folder, c.modified, vec![c])),
         }
     }
-    let mut out = vec![];
     for (folder, newest, files) in groups {
         let open = p.place.as_deref() == Some(folder.as_str()) || p.recent_more;
         out.push(Line::Group(folder, newest));
@@ -76,6 +109,13 @@ pub(super) fn review_lines(p: &FilesPage) -> Vec<Line> {
                 error: false,
             });
         }
+    }
+    if out.is_empty() {
+        return match &p.recent {
+            None => vec![note("Reading\u{2026}", false)],
+            Some(Err(why)) => vec![note(why, true)],
+            Some(Ok(_)) => vec![note("Nothing changed lately", false)],
+        };
     }
     out
 }
@@ -136,7 +176,15 @@ impl FilesPage {
                             .child(div().overflow_hidden().text_ellipsis().child(w))
                     })),
             )
-            .child(pane::meta(t, format::ago(newest), None))
+            .child(pane::meta(
+                t,
+                match self.repos.get(&path) {
+                    // A repository's line counts what is not committed.
+                    Some(files) if newest == 0 => format!("{} uncommitted", files.len()),
+                    _ => format::ago(newest),
+                },
+                None,
+            ))
             .on_mouse_down(MouseButton::Right, self.menu_at(path.clone(), true, cx))
             .on_click(cx.listener(move |p, _, w, cx| {
                 p.set_pick(Pick::Group(path.clone()), cx);
@@ -267,6 +315,17 @@ impl FilesPage {
         let c = o.changes.as_ref()?;
         if o.editing {
             return None;
+        }
+        let said = |words: &'static str, selector: &'static str| {
+            pane::meta(t, words, Some(t.error))
+                .debug_selector(move || selector.into())
+                .into_any_element()
+        };
+        if matches!(o.show, Show::Gone) {
+            return Some(said("Deleted, not committed", "files-gone-file"));
+        }
+        if self.states.get(&o.path) == Some(&'C') {
+            return Some(said("Merge conflict", "files-conflict-file"));
         }
         if c.new_file {
             return Some(
