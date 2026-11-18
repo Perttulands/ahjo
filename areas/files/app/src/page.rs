@@ -698,7 +698,10 @@ impl FilesPage {
             view.update(cx, |p, cx| p.close_beside(cx));
             return;
         }
-        let folder = self.session_folder(cx);
+        // A session outside the roots leaves the panel where it was.
+        let folder = self.session_folder(cx).filter(|(_, f)| {
+            self.tree.roots.is_empty() || paths::root_of(&self.tree.roots, f).is_some()
+        });
         let view = self.panel(window, cx);
         view.update(cx, |p, cx| {
             p.beside_from = PANEL_BESIDE;
@@ -768,13 +771,17 @@ impl FilesPage {
             .and_then(|s| Some((s.node.clone(), s.cwd.clone()?)))
     }
     /// The folder the side panel's Files section starts at: the focused
-    /// session's, while that session is on this tree's device.
+    /// session's, while that session is on this tree's device and works
+    /// inside its roots. A session elsewhere (a shell in a home folder the
+    /// roots leave out) leaves the roots shown: that is not a failure.
     pub(crate) fn side_root(&self, cx: &App) -> Option<ahjo_files_contract::Root> {
         if !self.lends_side {
             return None;
         }
         let (node, folder) = self.session_folder(cx)?;
-        (node == self.tree.node).then(|| ahjo_files_contract::Root {
+        let inside =
+            self.tree.roots.is_empty() || paths::root_of(&self.tree.roots, &folder).is_some();
+        (node == self.tree.node && inside).then(|| ahjo_files_contract::Root {
             name: paths::base_name(&folder).to_owned(),
             path: folder,
         })
