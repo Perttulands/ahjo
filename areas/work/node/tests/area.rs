@@ -23,7 +23,7 @@ use tokio_tungstenite::tungstenite::Message;
 fn commands_match_the_old_cli_and_mcp_tools() {
     assert_eq!(
         ahjo_work::LISTING.commands,
-        &["work_list", "work_show", "work_create"]
+        &["work_list", "work_search", "work_show", "work_create"]
     );
 }
 

@@ -71,6 +71,23 @@ async fn list_filters_closed_without_changing_the_page_and_missing_is_not_found(
     assert!(ids(&all["items"]).contains(&"tst-1mt".to_owned()));
     assert!(ids(&all["projects"][0]["items"]).contains(&"tst-1mt".to_owned()));
 
+    // A search reads every word, in titles and text, closed items too.
+    let found = |query: &'static str| {
+        let node = &node;
+        async move {
+            let found = node
+                .call("work_search", json!({"query": query}))
+                .await
+                .unwrap();
+            let mut found = ids(&found["items"]);
+            found.sort();
+            found
+        }
+    };
+    assert_eq!(found("store folder").await, ["tst-qq9", "tst-qq9.1"]);
+    assert_eq!(found("old idea").await, ["tst-1mt"]);
+    assert!(found("no such words").await.is_empty());
+
     let (mut ws, _) = tokio_tungstenite::connect_async(node.ws()).await.unwrap();
     ws.next().await.unwrap().unwrap();
     ws.send(Message::Binary(vec![0x98, 1].into()))

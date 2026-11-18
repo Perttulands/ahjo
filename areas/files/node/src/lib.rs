@@ -122,8 +122,13 @@ impl Files {
     pub fn stat(&self, paths: &[String]) -> Vec<Option<u64>> {
         disk::stat(&self.roots, paths)
     }
-    pub fn diff(&self, path: &str) -> Result<ahjo_files_contract::Diff, FilesError> {
-        diff::read(&self.roots, path, false)
+    /// The file's diff against HEAD; `whole` gives every line of the file,
+    /// not only the changed parts.
+    pub fn diff(&self, path: &str, whole: bool) -> Result<ahjo_files_contract::Diff, FilesError> {
+        diff::read(&self.roots, path, whole)
+    }
+    pub fn status(&self, folder: &str) -> Result<ahjo_files_contract::RepoStatus, FilesError> {
+        status::read(&self.roots, folder)
     }
     pub fn copy(
         self: &Arc<Self>,
@@ -167,6 +172,7 @@ pub const LISTING: AreaListing = AreaListing {
         "file_list",
         "file_read",
         "file_diff",
+        "file_status",
         "file_recent",
         "file_download",
         "file_upload",

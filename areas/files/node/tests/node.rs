@@ -231,6 +231,7 @@ async fn exact_commands_are_exposed_to_mcp_and_cli_and_operate_on_files() {
         "file_list",
         "file_read",
         "file_diff",
+        "file_status",
         "file_recent",
         "file_download",
         "file_upload",
@@ -351,6 +352,25 @@ async fn file_diff_command_matches_the_route_and_prints_unified_lines() {
         node.call("file_diff", json!({"path": file})).await.unwrap(),
         route
     );
+    // --whole and the tree's marks answer as their routes do.
+    for (command, args, route) in [
+        (
+            "file_diff",
+            json!({"path": file, "whole": true}),
+            format!("{}&whole=true", at("diff", &file)),
+        ),
+        ("file_status", json!({"path": repo}), at("status", &repo)),
+    ] {
+        let (status, body) = request(&node, "GET", &route, Body::empty(), false).await;
+        assert_eq!(status, StatusCode::OK, "{route}");
+        let routed: Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(node.call(command, args).await.unwrap(), routed, "{command}");
+    }
+    let marks = node
+        .call("file_status", json!({"path": repo}))
+        .await
+        .unwrap();
+    assert!(marks.to_string().contains("note.txt"), "{marks}");
 
     let (status, body) = request(&node, "GET", &at("diff", &plain), Body::empty(), false).await;
     assert_eq!(status, StatusCode::OK);

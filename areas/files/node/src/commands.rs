@@ -40,7 +40,13 @@ pub fn commands(files: Arc<Files>, home: Option<PathBuf>) -> Vec<Command> {
         ),
         (
             "file_diff",
-            "Show a file's diff against HEAD.",
+            "Show a file's diff against HEAD: its changed parts, or with --whole the whole file with the changes in it.",
+            &["path", "whole"],
+            &["path"],
+        ),
+        (
+            "file_status",
+            "List the files that differ from HEAD in the repository a folder is in, each with how: what the Files tree marks.",
             &["path"],
             &["path"],
         ),
@@ -132,7 +138,7 @@ pub fn commands(files: Arc<Files>, home: Option<PathBuf>) -> Vec<Command> {
                     for key in &props {
                         fields.insert(
                             (*key).into(),
-                            if matches!(*key, "new" | "replace" | "beside") {
+                            if matches!(*key, "new" | "replace" | "beside" | "whole") {
                                 json!({"type":"boolean", "default":false})
                             } else {
                                 json!({"type":"string"})
@@ -248,7 +254,11 @@ fn work(name: &str, files: &Files, home: Option<&Path>, args: &Value) -> Result<
                 json!({"node":node,"path":at,"size":bytes.len(),"version":version,"truncated":shown.len()<bytes.len(),"text":content}),
             )
         }
-        "file_diff" => serde_json::to_value(files.diff(&at)?).map_err(bad),
+        "file_diff" => {
+            let whole = flag(args, "whole", false).map_err(bad)?;
+            serde_json::to_value(files.diff(&at, whole)?).map_err(bad)
+        }
+        "file_status" => serde_json::to_value(files.status(&at)?).map_err(bad),
         "file_download" => {
             let (bytes, version) = files.read(&at, crate::routes::MAX_BYTES)?;
             Ok(

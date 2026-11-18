@@ -14,8 +14,8 @@ Add `--json` whenever you read the answer: stdout is then the answer as JSON, an
 | Noun | Purpose and verbs |
 |---|---|
 | `session` | Sessions: `list`, `read`, `history`, `search`, `send`, `keys`, `launch`, `copy`, `rename`, `kill`, `mouse`, `seen`. |
-| `file` | Browse and change files: `list`, `read`, `diff`, `recent`, `download`, `upload`, `write`, `mkdir`, `move`, `delete`, `find`, `locate`, `search`, `copy`, `resume`, `transfer`. Use the base version on writes to detect stale edits. |
-| `work` | Read the configured work board and item family, or file an item: `list`, `show`, `create`. |
+| `file` | Browse and change files: `list`, `read`, `diff` (`--whole` for the whole file), `status` (what differs from HEAD under a folder), `recent`, `download`, `upload`, `write`, `mkdir`, `move`, `delete`, `find`, `locate`, `search`, `copy`, `resume`, `transfer`. Use the base version on writes to detect stale edits. |
+| `work` | Read the configured work board and item family, or file an item: `list`, `search` (words in id, title, labels or text), `show`, `create`. |
 | `brain` | Find, read and save knowledge: `search`, `read`, `save`, `collections`, `changes`, `send`. |
 | `host` | Read host information: `show`. |
 | `service` | Inspect and control services: `list`, `show`, `log`, `start`, `stop`, `restart`. |

@@ -20,7 +20,7 @@ use work::{Config, Work};
 pub const LISTING: Listing = Listing {
     name: "work",
     kinds: ahjo_work_contract::KINDS,
-    commands: &["work_list", "work_show", "work_create"],
+    commands: &["work_list", "work_search", "work_show", "work_create"],
     build,
 };
 
@@ -107,6 +107,39 @@ impl Area for WorkArea {
             },
         );
         let (work, node) = (self.work.clone(), self.node.clone());
+        let search = Command::new(
+            "work_search",
+            "Find the items, closed ones too, holding every word of the query in their id, title, labels or text, as the Work page's search does.",
+            || object(json!({"query": {"type":"string"}}), &["query"]),
+            move |args| {
+                let (work, node) = (work.clone(), node.clone());
+                async move {
+                    let query = text(&args, "query")
+                        .map_err(|e| Error::new("bad_request", e.to_string()))?;
+                    let terms = ahjo_work_contract::text::terms(query);
+                    let _watching = work.subscribe();
+                    let requested = work.refresh();
+                    let read = async {
+                        let snapshot = work.refreshed(requested).await;
+                        let found = snapshot.matching(&terms);
+                        let board = serde_json::to_value(&*snapshot).map_err(failed)?;
+                        let items: Vec<_> = listed_items(&board)
+                            .into_iter()
+                            .filter(|item| {
+                                item["reference"]
+                                    .as_str()
+                                    .is_some_and(|r| found.iter().any(|f| f == r))
+                            })
+                            .collect();
+                        Ok(json!({"node": node, "items": items}))
+                    };
+                    tokio::time::timeout(Duration::from_secs(30), read)
+                        .await
+                        .map_err(|_| Error::new("tracker_error", "work read timed out"))?
+                }
+            },
+        );
+        let (work, node) = (self.work.clone(), self.node.clone());
         let show = Command::new(
             "work_show",
             "One work item and its family.",
@@ -149,7 +182,7 @@ impl Area for WorkArea {
                 }
             },
         );
-        vec![list, show, create]
+        vec![list, search, show, create]
     }
     fn channel(&self, _: Client) -> Option<Box<dyn Channel>> {
         Some(Box::new(Socket(work::Channel::new(self.work.clone()))))

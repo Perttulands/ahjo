@@ -20,7 +20,7 @@ These are the commands advertised by the enabled areas. Run `ahjo <noun> <verb> 
 
 ## file
 
-`ahjo file copy`, `ahjo file delete`, `ahjo file diff`, `ahjo file download`, `ahjo file find`, `ahjo file list`, `ahjo file locate`, `ahjo file mkdir`, `ahjo file move`, `ahjo file read`, `ahjo file recent`, `ahjo file resume`, `ahjo file search`, `ahjo file transfer`, `ahjo file upload`, `ahjo file write`.
+`ahjo file copy`, `ahjo file delete`, `ahjo file diff`, `ahjo file download`, `ahjo file find`, `ahjo file list`, `ahjo file locate`, `ahjo file mkdir`, `ahjo file move`, `ahjo file read`, `ahjo file recent`, `ahjo file resume`, `ahjo file search`, `ahjo file status`, `ahjo file transfer`, `ahjo file upload`, `ahjo file write`.
 
 ## formation
 
@@ -72,4 +72,4 @@ These are the commands advertised by the enabled areas. Run `ahjo <noun> <verb> 
 
 ## work
 
-`ahjo work create`, `ahjo work list`, `ahjo work show`.
+`ahjo work create`, `ahjo work list`, `ahjo work search`, `ahjo work show`.
