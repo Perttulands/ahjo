@@ -82,6 +82,14 @@ impl Layout {
             Layout::Time => "Time",
         }
     }
+    /// What it shows, for its button's tooltip.
+    pub fn what(self) -> &'static str {
+        match self {
+            Layout::Strip => "The list under a time strip (V for the next)",
+            Layout::Time => "The chart as the page (V for the next)",
+            Layout::Tree => "One project's tree (V for the next)",
+        }
+    }
     fn of(key: &str) -> Layout {
         Layout::ALL
             .into_iter()
@@ -218,14 +226,16 @@ impl Page for Work {
     const KINDS: ahjo_core::frame::Kinds = &[SNAPSHOT..=SNAPSHOT];
     const CHANNELS: &'static [u8] = &[WATCH];
     const ANSWERS: &'static [Answers] = &[Answers::Reveal("item")];
-    const SETTINGS: &'static [ahjo_app_kit::declared::Setting] = &[
-        ahjo_app_kit::declared::Setting {
-            key: "layout",
-            label: "Layout",
-            note: "strip, time or tree: the tree under a time strip, the chart as the page, or the tree alone (V on the page)",
-            control: ahjo_app_kit::declared::Control::Text { default: "strip" },
-        },
-    ];
+    const SETTINGS: &'static [ahjo_app_kit::declared::Setting] =
+        &[ahjo_app_kit::declared::Setting::choice(
+            "layout",
+            "Layout",
+            "strip",
+            &[("strip", "Strip"), ("time", "Time"), ("tree", "Tree")],
+        )
+        .note(
+            "The list under a time strip, the chart as the page, or the tree alone (V on the page)",
+        )];
     fn settings_changed(&mut self, _: &mut Window, cx: &mut Context<Self>) {
         let settings: serde_json::Value = self.host.setting(cx).unwrap_or_default();
         let layout = Layout::of(settings["layout"].as_str().unwrap_or(""));
@@ -277,6 +287,7 @@ impl Page for Work {
         let me = self.me.clone();
         let close = self.me.clone();
         let report = self.me.clone();
+        let (layout, search, pick) = (self.me.clone(), self.me.clone(), self.me.clone());
         vec![
             ahjo_app_kit::chords::Chord::new("r", "Report", move |window, cx| {
                 let _ = report.update(cx, |work, cx| work.open_report(window, cx));
@@ -297,6 +308,21 @@ impl Page for Work {
             })
             .alt("b", Some(false))
             .everywhere(),
+            // The keys the page takes itself, so the keys panel lists them.
+            ahjo_app_kit::chords::Chord::on_page(
+                "V",
+                "Layout: strip, time or tree",
+                move |_, cx| {
+                    let _ =
+                        layout.update(cx, |work, cx| work.set_layout(work.layout.next(), true, cx));
+                },
+            ),
+            ahjo_app_kit::chords::Chord::on_page("/", "Search the work", move |window, cx| {
+                let _ = search.update(cx, |work, cx| field::focus(&work.search, window, cx));
+            }),
+            ahjo_app_kit::chords::Chord::on_page("P", "Pick a project", move |window, cx| {
+                let _ = pick.update(cx, |work, cx| work.start_picking(window, cx));
+            }),
         ]
     }
     fn focus(&self, _: &App) -> Option<FocusHandle> {

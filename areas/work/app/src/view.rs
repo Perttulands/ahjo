@@ -383,12 +383,31 @@ impl Work {
         head.child(self.layout_act(t, cx))
     }
 
-    /// The layout in use, by name; a press moves to the next.
-    fn layout_act(&self, t: &Theme, cx: &mut Context<Self>) -> Stateful<Div> {
-        pane::act(t, "work-layout", self.layout.name())
+    /// The three layouts as a choice, the one in use filled; V moves to
+    /// the next.
+    fn layout_act(&self, t: &Theme, cx: &mut Context<Self>) -> Div {
+        let mut row = div()
             .debug_selector(|| "work-layout".into())
-            .tooltip(kit::tip("Layout: strip, time or tree (V)"))
-            .on_click(cx.listener(|w, _, _, cx| w.set_layout(w.layout.next(), true, cx)))
+            .flex_none()
+            .flex()
+            .items_center()
+            .gap(px(size::LABEL_BOTTOM));
+        for layout in Layout::ALL {
+            let selector = format!("work-layout-{}", layout.key());
+            let chosen = layout == self.layout;
+            row = row.child(
+                kit::option(
+                    t,
+                    SharedString::from(selector.clone()),
+                    layout.name(),
+                    chosen,
+                )
+                .debug_selector(move || selector)
+                .tooltip(kit::tip(layout.what()))
+                .on_click(cx.listener(move |w, _, _, cx| w.set_layout(layout, true, cx))),
+            );
+        }
+        row
     }
 
     /// A row of the list: its state, its title, what kind of work it is
