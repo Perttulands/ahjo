@@ -284,7 +284,7 @@ pub fn description(name: &str) -> &'static str {
         "formation_set_brief" => "Write the step's brief.",
         "formation_add_input" => "Add an input port.",
         "formation_add_output" => {
-            "Add an output port. A file or folder port's ref is an absolute path; Archon snapshots it into the attempt directory when the output is accepted."
+            "Add an output port. A file or folder port's ref is an absolute path; Ahjo snapshots it into the attempt directory when the output is accepted."
         }
         "formation_set_port" => {
             "Relabel a port, or set what an output port carries. <port> is the port's ID or label."
