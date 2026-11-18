@@ -1096,6 +1096,9 @@ impl Terminals {
         }
         items.extend(self.zoom_row(i));
         items.push(MenuItem::rule());
+        if self.settings.workspace.windows().len() < MAX_WINDOWS {
+            items.push(MenuItem::new("Split right", Act::SplitRight(i)));
+        }
         items.push(MenuItem::new("Rename session…", Act::Rename(key.clone())));
         items.push(self.copy_row(key));
         items.push(MenuItem::new(

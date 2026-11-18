@@ -129,9 +129,9 @@ impl Terminals {
             );
         let mut list = div()
             .id("rail-list")
-            .flex_1()
-            .min_h_0()
+            .size_full()
             .overflow_y_scroll()
+            .track_scroll(&self.rail_scroll)
             .py(px(8.))
             .flex()
             .flex_col();
@@ -208,7 +208,14 @@ impl Terminals {
             .flex_col()
             .child(header)
             .children(search)
-            .child(list)
+            .child(
+                div()
+                    .relative()
+                    .flex_1()
+                    .min_h_0()
+                    .child(list)
+                    .child(pane::scrollbar(&t, &self.rail_scroll)),
+            )
             .into_any_element()
     }
 

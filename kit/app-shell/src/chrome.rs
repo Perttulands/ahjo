@@ -660,11 +660,14 @@ impl Shell {
             );
         }
         let mut column = column.w(px(size::SIDE));
+        // Each section starts from what it holds: room left over is shared,
+        // and when both overflow the longer keeps the larger share, never
+        // less than a few rows.
         for (n, view) in sections.into_iter().enumerate() {
             column = column.child(
                 div()
-                    .flex_1()
-                    .min_h_0()
+                    .flex_auto()
+                    .min_h(px(size::ROW * 4.))
                     .flex()
                     .flex_col()
                     .when(n > 0, |d| d.border_t_1().border_color(t.divider))

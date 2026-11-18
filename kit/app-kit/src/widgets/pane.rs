@@ -21,9 +21,49 @@ use crate::ask::Ask;
 use crate::host::{Host, Status};
 use crate::theme::{Theme, art, size, ty};
 use gpui::{
-    AnyElement, Div, ElementId, FontWeight, Hsla, ScrollHandle, SharedString, Stateful, div, img,
-    prelude::*, px, relative,
+    AnyElement, Bounds, Div, ElementId, FontWeight, Hsla, Pixels, ScrollHandle, SharedString,
+    Stateful, canvas, div, fill, img, point, prelude::*, px, relative,
 };
+
+/// Where a list scrolled by `handle` is and that it scrolls: a thin thumb
+/// at its right edge, drawn over it, sized to the share of the list shown.
+/// Nothing shows while the list fits. Put it after the list in a parent
+/// laid out `relative()`; it reads the handle as it paints, so it follows
+/// a scroll without the view drawing again.
+pub fn scrollbar(t: &Theme, handle: &ScrollHandle) -> impl IntoElement {
+    let handle = handle.clone();
+    let colour = crate::theme::alpha(t.dim, 0.55);
+    canvas(
+        |_, _, _| (),
+        move |_, _, window, _| {
+            if let Some(thumb) = thumb(handle.bounds(), handle.max_offset().y, handle.offset().y) {
+                window.paint_quad(fill(thumb, colour).corner_radii(px(SCROLLBAR_W / 2.)));
+            }
+        },
+    )
+    .absolute()
+    .inset_0()
+}
+
+const SCROLLBAR_W: f32 = 4.;
+const SCROLLBAR_LEAST: f32 = 24.;
+
+/// The thumb of a list shown in `view` that scrolls `most` further, now
+/// scrolled by `offset` (negative going down).
+fn thumb(view: Bounds<Pixels>, most: Pixels, offset: Pixels) -> Option<Bounds<Pixels>> {
+    if most <= px(0.5) || view.size.height <= px(0.) {
+        return None;
+    }
+    let h = view.size.height;
+    let len = (h * (h / (h + most))).max(px(SCROLLBAR_LEAST)).min(h);
+    let at = (-offset).clamp(px(0.), most) / most;
+    let top = view.top() + (h - len) * at;
+    let left = view.right() - px(SCROLLBAR_W + 2.);
+    Some(Bounds::new(
+        point(left, top),
+        gpui::size(px(SCROLLBAR_W), len),
+    ))
+}
 
 /// The page: the list beside the detail, filling the page's area.
 pub fn page(t: &Theme, list: impl IntoElement, detail: impl IntoElement) -> Div {
@@ -538,6 +578,28 @@ pub fn middle(text: &str, chars: usize) -> String {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+
+    #[test]
+    fn the_thumb_shows_the_share_shown_and_where() {
+        let view = Bounds::new(point(px(0.), px(100.)), gpui::size(px(200.), px(400.)));
+        assert_eq!(
+            thumb(view, px(0.), px(0.)),
+            None,
+            "a list that fits has none"
+        );
+        let top = thumb(view, px(400.), px(0.)).unwrap();
+        assert_eq!((top.top(), top.size.height), (px(100.), px(200.)));
+        let end = thumb(view, px(400.), px(-400.)).unwrap();
+        assert_eq!(end.bottom(), px(500.));
+        let long = thumb(view, px(40_000.), px(-20_000.)).unwrap();
+        assert_eq!(
+            long.size.height,
+            px(SCROLLBAR_LEAST),
+            "a long list's thumb stays findable"
+        );
+    }
+
     use super::middle;
 
     #[test]

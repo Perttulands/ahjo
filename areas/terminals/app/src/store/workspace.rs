@@ -334,6 +334,21 @@ impl Workspace {
         true
     }
 
+    /// Opens an empty window right after window `at`, the windows after it
+    /// moving along; false when the tab holds all it can.
+    pub fn split_after(&mut self, at: usize) -> bool {
+        let n = self.windows().len();
+        if n >= MAX_WINDOWS || at >= n {
+            return false;
+        }
+        let t = self.tab_mut();
+        t.windows[n] = Window::default();
+        t.windows[at + 1..=n].rotate_right(1);
+        t.count += 1;
+        self.focus = at + 1;
+        true
+    }
+
     /// Hides the last window if it is empty: the layout does not shrink
     /// over somebody's live terminal (Alt+Minus).
     pub fn remove_window(&mut self) -> bool {
@@ -619,6 +634,29 @@ mod tests {
     /// A dragged divider is kept with the layout it was dragged in, stays
     /// within reach of both windows, survives a save, and another window
     /// count lays out evenly again.
+    #[test]
+    fn split_right_opens_an_empty_window_beside_the_one_split() {
+        let key = |name: &str| Key {
+            node: "n".into(),
+            user: String::new(),
+            name: name.into(),
+        };
+        let mut ws = Workspace::default();
+        ws.bind_in(0, 0, key("a"), None);
+        assert!(ws.add_window());
+        ws.bind_in(0, 1, key("b"), None);
+        assert!(ws.split_after(0));
+        let names: Vec<_> = ws
+            .windows()
+            .iter()
+            .map(|w| w.sessions.first().map(|b| b.key.name.clone()))
+            .collect();
+        assert_eq!(names, [Some("a".into()), None, Some("b".into())]);
+        assert_eq!(ws.focus, 1);
+        assert!(ws.split_after(2));
+        assert!(!ws.split_after(0), "four is the most");
+    }
+
     #[test]
     fn dividers_are_kept_with_their_layout() {
         let mut ws = Workspace::default();

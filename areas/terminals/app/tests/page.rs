@@ -906,7 +906,17 @@ fn what_lies_over_the_windows_takes_every_click_inside_it(cx: &mut TestAppContex
         cx.simulate_keystrokes(keys);
         cx.run_until_parked();
         let over = cx.debug_bounds(drawn).expect(drawn);
-        poke(cx, inside(over), "window-1");
+        // Overview's cards fill it and a click on one opens it: poke its
+        // margin, which is the layer's own.
+        let at = if drawn == "overview-grid" {
+            let under = cx.debug_bounds("window-1").expect("window 1");
+            let at = gpui::point(under.right() - px(2.), under.center().y);
+            assert!(over.contains(&at), "{at:?} lies in Overview {over:?}");
+            at
+        } else {
+            inside(over)
+        };
+        poke(cx, at, "window-1");
         untouched(cx, drawn, 0);
         cx.simulate_keystrokes("escape");
         cx.run_until_parked();

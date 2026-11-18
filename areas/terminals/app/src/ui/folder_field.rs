@@ -199,7 +199,10 @@ impl FolderField {
         match ev {
             FieldEvent::Changed => {
                 self.editing = true;
-                self.grown = true;
+                // The list keeps its height while you type, so rows do not
+                // jump under the pointer; emptied, it is Recent again and
+                // only as tall as what it holds.
+                self.grown = !self.field.read(cx).text.is_empty();
                 self.read(cx);
                 cx.emit(FolderEvent::Changed);
             }

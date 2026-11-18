@@ -53,7 +53,11 @@ fn chords(page: &WeakEntity<Terminals>, tabs: usize) -> Vec<Chord> {
             .alt("+", None)
             .or_layout(&["="]),
         chord("-", "Remove the last empty window", Action::RemoveWindow).alt("-", None),
-        chord("/", "Session search", Action::SearchSessions),
+        chord(
+            "/",
+            "Session search; Enter peeks the match",
+            Action::SearchSessions,
+        ),
         chord("n", "Launcher in the focused window", Action::Launcher).alt("n", Some(false)),
         chord("tab", "Sessions and files panel", Action::Sessions).alt("a", Some(false)),
         chord("s", "Send from the focused session", Action::Send).alt("s", Some(false)),
@@ -69,6 +73,15 @@ fn chords(page: &WeakEntity<Terminals>, tabs: usize) -> Vec<Chord> {
         )
         .alt("j", Some(false)),
     ]);
+    // Peek keeps Escape for the program in it; Shift+Esc closes it from
+    // anywhere on the page (the kit's dismissal).
+    let peek = page.clone();
+    all.push(
+        Chord::on_page("Shift+Esc", "Close Peek", move |_, cx| {
+            let _ = peek.update(cx, |p, cx| p.close(surface::PEEK, cx));
+        })
+        .everywhere(),
+    );
     all
 }
 
@@ -287,7 +300,7 @@ mod tests {
             ("W", Some("Previous window")),
             ("=", Some("Add a window")),
             ("-", Some("Remove the last empty window")),
-            ("/", Some("Session search")),
+            ("/", Some("Session search; Enter peeks the match")),
             ("n", Some("Launcher in the focused window")),
             ("s", Some("Send from the focused session")),
             ("3", Some("Sessions tab 3")),
@@ -309,6 +322,15 @@ mod tests {
             after_leader(&bare("enter", "\r"), &all).is_none(),
             "no resident yet"
         );
+        // Peek's close key is listed to find and pick, and runs from no
+        // leader key.
+        let rows = ahjo_app_kit::chords::rows(&all);
+        let close = rows
+            .iter()
+            .find(|r| r.label == "Close Peek")
+            .expect("listed");
+        assert_eq!(close.caps, ["Shift+Esc"]);
+        assert_eq!(close.leader, "");
     }
 
     #[test]

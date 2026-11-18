@@ -27,6 +27,7 @@ pub struct KeysPanel {
     cursor: usize,
     /// The leader waits for its key.
     leader: bool,
+    scroll: gpui::ScrollHandle,
     _search: Subscription,
 }
 
@@ -40,8 +41,14 @@ impl KeysPanel {
                 let n = k.rows(cx).len();
                 match ev {
                     FieldEvent::Changed => k.cursor = 0,
-                    FieldEvent::Down => k.cursor = (k.cursor + 1).min(n.saturating_sub(1)),
-                    FieldEvent::Up => k.cursor = k.cursor.saturating_sub(1),
+                    FieldEvent::Down => {
+                        k.cursor = (k.cursor + 1).min(n.saturating_sub(1));
+                        k.scroll.scroll_to_item(k.cursor);
+                    }
+                    FieldEvent::Up => {
+                        k.cursor = k.cursor.saturating_sub(1);
+                        k.scroll.scroll_to_item(k.cursor);
+                    }
                     FieldEvent::Submit => {
                         if let Some(row) = k.rows(cx).get(k.cursor).cloned() {
                             k.pick(&row, window, cx);
@@ -58,6 +65,7 @@ impl KeysPanel {
             chords: vec![],
             cursor: 0,
             leader: false,
+            scroll: Default::default(),
             _search: sub,
         }
     }
@@ -142,6 +150,7 @@ impl Render for KeysPanel {
             .flex_1()
             .min_h_0()
             .overflow_y_scroll()
+            .track_scroll(&self.scroll)
             .py(px(size::ROW_INSET))
             .flex()
             .flex_col();
@@ -194,7 +203,16 @@ impl Render for KeysPanel {
                     .child(div().p(px(size::HEAD_PAD)).child(self.search.clone()))
                     .child(kit::rule(&t))
                     .child(head)
-                    .child(list)
+                    .child(
+                        div()
+                            .relative()
+                            .flex_1()
+                            .min_h_0()
+                            .flex()
+                            .flex_col()
+                            .child(list)
+                            .child(pane::scrollbar(&t, &self.scroll)),
+                    )
                     // Zoom is no chord but the same everywhere it applies.
                     .child(kit::rule(&t))
                     .child(

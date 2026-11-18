@@ -523,7 +523,7 @@ impl Terminals {
                 body = body.child(kit::note(
                     &t,
                     format!(
-                        "Not sent: {} is not an agent, so it gets your message alone.",
+                        "Not sent: {} is at a shell prompt, which would run it as a command.",
                         k.name
                     ),
                     Some(t.dim),

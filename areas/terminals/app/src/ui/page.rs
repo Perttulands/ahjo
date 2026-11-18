@@ -47,6 +47,8 @@ pub enum Act {
     Peek(Key),
     /// A terminal's own text size goes: a window's, or Peek's.
     ResetZoom(usize),
+    /// A new empty window beside window `n`, right of it in the row.
+    SplitRight(usize),
     Send(Key),
     Attach(Key, usize),
     Unassign(Key),
@@ -321,6 +323,11 @@ pub struct Terminals {
     pub overview_cursor: usize,
     /// Number of overview cards fitting in the last painted row.
     pub overview_columns: Rc<Cell<usize>>,
+    /// The room Overview's cards were last laid out in, which sizes them.
+    pub overview_room: Rc<Cell<gpui::Size<Pixels>>>,
+    /// Overview's sessions in the rail's order, as last drawn: what the
+    /// arrow keys and Enter count in.
+    pub overview_order: Vec<Key>,
     pub overview_scroll: ScrollHandle,
     pub find_scroll: ScrollHandle,
     /// The Sessions tabs' strip, and the active tab, tab count and window
@@ -356,6 +363,8 @@ pub struct Terminals {
     /// The windows' grid as last laid out, which a divider's drag is a
     /// share of.
     pub grid_bounds: std::rc::Rc<std::cell::Cell<Bounds<Pixels>>>,
+    /// The rail's list, whose scrollbar shows where it is.
+    pub rail_scroll: gpui::ScrollHandle,
     /// Where the last menu a row was picked from stood.
     pub menu_at: Point<Pixels>,
     /// Ended sessions being made again, until their node answers.
@@ -473,6 +482,8 @@ impl Terminals {
             rename_field,
             overview_cursor: 0,
             overview_columns: Rc::new(Cell::new(1)),
+            overview_room: Default::default(),
+            overview_order: Vec::new(),
             overview_scroll: ScrollHandle::new(),
             find_scroll: ScrollHandle::new(),
             tab_scroll: ScrollHandle::new(),
@@ -490,6 +501,7 @@ impl Terminals {
             seam_over: None,
             divider: None,
             grid_bounds: Default::default(),
+            rail_scroll: Default::default(),
             menu_at: Point::default(),
             restarting: HashSet::new(),
             zoom_wheel: Default::default(),
@@ -963,6 +975,15 @@ impl Terminals {
                 panes.entry(p.key.node.clone()).or_default().insert(id);
             }
         }
+        // Overview draws every session as it is, colours and all: their
+        // screens stream while it is open, sizing nothing, as Peek's does.
+        if self.surfaces.iter().any(|s| matches!(s, Surface::Overview)) {
+            for s in &self.fleet.all {
+                if let Some(p) = s.panes.first() {
+                    panes.entry(s.node.clone()).or_default().insert(p.id);
+                }
+            }
+        }
         // A window whose session went stops sizing it.
         self.fleet.watch(&panes);
         self.publish_sessions(cx);
@@ -1067,6 +1088,7 @@ impl Terminals {
                     .channel(ahjo_terminals_contract::OVERVIEW, true, cx);
                 self.overview_cursor = 0;
                 self.overview_scroll.scroll_to_item(1);
+                self.sync(cx);
                 self.focus.clone()
             }
             Surface::Find => {
@@ -1114,6 +1136,7 @@ impl Terminals {
                 self.host
                     .channel(ahjo_terminals_contract::OVERVIEW, false, cx);
                 self.fleet.overview_off();
+                self.sync(cx);
             }
             Surface::Peek => {
                 self.peek = None;
@@ -1303,6 +1326,12 @@ impl Terminals {
                 return;
             }
             Act::Restart(k) => self.restart(k),
+            Act::SplitRight(w) => {
+                if !self.settings.workspace.split_after(w) {
+                    self.report("Four windows is the most a tab holds.", false, None);
+                }
+                self.histories.clear();
+            }
         }
         self.sync(cx);
         self.save(cx);

@@ -420,6 +420,19 @@ impl Shell {
                 });
             }),
         ];
+        // Zoom is no chord but the same keys everywhere; picked here it
+        // acts where the keyboard was.
+        for (keys, label, stroke) in [
+            ("Ctrl+Plus", "Zoom in", "ctrl-="),
+            ("Ctrl+Minus", "Zoom out", "ctrl--"),
+            ("Ctrl+0", "Reset zoom", "ctrl-0"),
+        ] {
+            all.push(Chord::on_page(keys, label, move |window, cx| {
+                if let Ok(k) = gpui::Keystroke::parse(stroke) {
+                    window.dispatch_keystroke(k, cx);
+                }
+            }));
+        }
         for &(i, leader, alt, shift) in &self.page_keys {
             let shell = cx.entity().downgrade();
             all.push(

@@ -7,12 +7,15 @@ use super::page::{Act, MenuItem, Terminals};
 use super::surface::{self, Surface};
 use crate::store::sessions::{self, Key};
 use crate::store::workspace::{MAX_WINDOWS, Workspace, tab_label};
+use crate::term::paint::{self, Look};
 use crate::theme::{Theme, size, theme};
 use ahjo_app_kit::widgets::kit::{self, Kind};
+use ahjo_app_kit::widgets::pane;
 use gpui::{
-    AnyElement, Context, FontWeight, KeyDownEvent, MouseButton, MouseDownEvent, Window, anchored,
-    canvas, deferred, div, point, prelude::*, px,
+    AnyElement, ContentMask, Context, FontWeight, KeyDownEvent, MouseButton, MouseDownEvent,
+    Window, anchored, canvas, deferred, div, point, prelude::*, px,
 };
+use std::collections::HashMap;
 
 impl Terminals {
     /// The Sessions tabs, in the page's place on the tab bar: a click shows
@@ -298,16 +301,46 @@ impl Terminals {
 
     pub(super) fn render_overview(
         &mut self,
-        _window: &mut Window,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let t = theme(cx).clone();
-        let columns = self.overview_columns.clone();
+        // The cards fill the room they are given: as many columns as make
+        // them largest at a terminal's shape, scrolling only when even the
+        // smallest card would be too short to read.
+        let room = self.overview_room.get();
+        let room = if room.width > px(0.) {
+            room
+        } else {
+            window.viewport_size()
+        };
+        // In the rail's order, which is the order the rest of the page uses.
+        let mut list = self.fleet.all.clone();
+        let rank: HashMap<Key, usize> = (self.rail_shown.iter().cloned())
+            .enumerate()
+            .map(|(i, k)| (k, i))
+            .collect();
+        list.sort_by_key(|s| rank.get(&Key::of(s)).copied().unwrap_or(usize::MAX));
+        self.overview_order = list.iter().map(Key::of).collect();
+        let grid_of = overview_grid(
+            list.len(),
+            f32::from(room.width) - 2. * OVERVIEW_PAD,
+            f32::from(room.height) - 2. * OVERVIEW_PAD,
+        );
+        self.overview_columns.set(grid_of.columns);
+        let measured = self.overview_room.clone();
+        let entity = cx.entity().downgrade();
         let measure = canvas(
             |_, _, _| (),
-            move |bounds, _, _, _| {
-                let width = f32::from(bounds.size.width);
-                columns.set((((width - 24. + 10.) / (size::THUMB_W + 10.)) as usize).max(1));
+            move |bounds, _, window, _| {
+                if measured.get() != bounds.size {
+                    measured.set(bounds.size);
+                    // The first frame was laid out from the window's size.
+                    let entity = entity.clone();
+                    window.on_next_frame(move |_, cx| {
+                        let _ = entity.update(cx, |_, cx| cx.notify());
+                    });
+                }
             },
         )
         .absolute()
@@ -315,36 +348,82 @@ impl Terminals {
         let mut grid = div()
             .id("overview-grid")
             .debug_selector(|| "overview-grid".into())
-            .relative()
-            .flex_1()
-            .min_h_0()
+            .size_full()
             .overflow_y_scroll()
             .track_scroll(&self.overview_scroll)
-            .p(px(12.))
+            .p(px(OVERVIEW_PAD))
             .flex()
             .flex_wrap()
-            .gap(px(10.))
-            .child(measure);
-        let list = self.fleet.all.clone();
+            .content_start()
+            .gap(px(OVERVIEW_GAP))
+            .child(div().absolute().w_0().h_0());
         self.overview_cursor = self.overview_cursor.min(list.len().saturating_sub(1));
         if list.is_empty() {
             grid = grid.child(kit::note(&t, "No sessions.", None));
         }
+        let font = (self.settings.font_size - 1.).clamp(size::TERM_MIN.max(11.), 14.);
         for (i, s) in list.iter().enumerate() {
             let key = Key::of(s);
-            let thumb = s
-                .panes
-                .first()
-                .and_then(|p| self.fleet.thumb(&s.node, p.id));
-            let text = thumb
-                .map(|th| sessions::screen_tail(th, size::THUMB_LINES))
-                .unwrap_or_default();
+            let pane = s.panes.first().map(|p| p.id);
+            let screen = pane.and_then(|p| self.fleet.screen(&s.node, p));
+            // Until its screen streams in, the card shows the node's text.
+            let body = match screen {
+                Some(screen) => {
+                    let look = t.clone();
+                    canvas(
+                        |_, _, _| (),
+                        move |bounds, _, window, cx| {
+                            let s = screen.lock();
+                            let m = paint::metrics(window, font);
+                            let o = paint::origin(bounds, m, s.rows_to_show());
+                            window.with_content_mask(Some(ContentMask { bounds }), |window| {
+                                paint::paint(
+                                    &s,
+                                    m,
+                                    o,
+                                    Look {
+                                        theme: &look,
+                                        cursor: false,
+                                        focused: true,
+                                        link: &[],
+                                    },
+                                    window,
+                                    cx,
+                                );
+                            });
+                        },
+                    )
+                    .size_full()
+                    .into_any_element()
+                }
+                None => {
+                    let text = pane
+                        .and_then(|p| self.fleet.thumb(&s.node, p))
+                        .map(|th| sessions::screen_tail(th, size::THUMB_LINES * 3))
+                        .unwrap_or_default();
+                    div()
+                        .size_full()
+                        .flex()
+                        .flex_col()
+                        .justify_end()
+                        .overflow_hidden()
+                        .text_size(px(font))
+                        .text_color(t.term_fg)
+                        .children(
+                            text.lines()
+                                .map(|l| div().whitespace_nowrap().child(l.to_string()))
+                                .collect::<Vec<_>>(),
+                        )
+                        .into_any_element()
+                }
+            };
             let waiting = sessions::waiting(s);
             grid = grid.child(
                 div()
                     .id(("ov", i))
-                    .w(px(size::THUMB_W))
-                    .h(px(size::THUMB_H))
+                    .debug_selector(move || format!("overview-card-{i}"))
+                    .w(px(grid_of.card.0))
+                    .h(px(grid_of.card.1))
                     .flex()
                     .flex_col()
                     .bg(t.surface)
@@ -359,6 +438,7 @@ impl Terminals {
                     .child(
                         div()
                             .h(px(26.))
+                            .flex_none()
                             .px(px(8.))
                             .flex()
                             .items_center()
@@ -394,17 +474,7 @@ impl Terminals {
                             .overflow_hidden()
                             .p(px(6.))
                             .bg(t.term_bg)
-                            .text_size(px(size::THUMB_TEXT))
-                            .line_height(px(size::THUMB_LINE))
-                            .text_color(t.term_fg)
-                            .flex()
-                            .flex_col()
-                            .justify_end()
-                            .children(
-                                text.lines()
-                                    .map(|l| div().whitespace_nowrap().child(l.to_string()))
-                                    .collect::<Vec<_>>(),
-                            ),
+                            .child(body),
                     )
                     .on_click(cx.listener(move |sh, _, window, cx| {
                         sh.close(surface::OVERVIEW, cx);
@@ -441,7 +511,15 @@ impl Terminals {
                             .on_click(cx.listener(|s, _, _, cx| s.close(surface::OVERVIEW, cx))),
                     ),
             )
-            .child(grid)
+            .child(
+                div()
+                    .relative()
+                    .flex_1()
+                    .min_h_0()
+                    .child(measure)
+                    .child(grid)
+                    .child(pane::scrollbar(&t, &self.overview_scroll)),
+            )
             .into_any_element()
     }
 
@@ -450,7 +528,7 @@ impl Terminals {
         if event.keystroke.modifiers.modified() {
             return;
         }
-        let len = self.fleet.all.len();
+        let len = self.overview_order.len();
         if len == 0 {
             return;
         }
@@ -462,7 +540,7 @@ impl Terminals {
             "up" => cursor.saturating_sub(columns),
             "down" => cursor.saturating_add(columns).min(len - 1),
             "enter" => {
-                let key = Key::of(&self.fleet.all[cursor]);
+                let key = self.overview_order[cursor].clone();
                 self.close(surface::OVERVIEW, cx);
                 self.place(key, window, cx);
                 cx.stop_propagation();
@@ -470,7 +548,7 @@ impl Terminals {
             }
             _ => return,
         };
-        // The first grid child is its measurement canvas.
+        // The first grid child is a marker that takes no room.
         self.overview_scroll
             .scroll_to_item(self.overview_cursor + 1);
         cx.stop_propagation();
@@ -703,9 +781,77 @@ fn hit_lead(width: f32, query: &str) -> usize {
 /// Characters before the match that a narrow drawer still shows.
 const FIND_LEAD_LEAST: usize = 24;
 
+/// Overview's padding round its cards and the gap between them.
+const OVERVIEW_PAD: f32 = 12.;
+const OVERVIEW_GAP: f32 = 10.;
+/// The shortest card that still shows a terminal's last lines.
+const OVERVIEW_LEAST_H: f32 = 180.;
+/// A card's best shape, width over height, near a terminal's.
+const OVERVIEW_SHAPE: f32 = 1.6;
+
+/// How Overview lays out `n` cards in `w` by `h`.
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct OverviewGrid {
+    columns: usize,
+    /// Each card's width and height.
+    card: (f32, f32),
+}
+
+/// The columns that make `n` cards largest at a terminal's shape in `w`
+/// by `h`; cards no shorter than [`OVERVIEW_LEAST_H`], the grid scrolling
+/// past that.
+fn overview_grid(n: usize, w: f32, h: f32) -> OverviewGrid {
+    let w = w.max(OVERVIEW_LEAST_H);
+    let h = h.max(OVERVIEW_LEAST_H);
+    let mut best = OverviewGrid {
+        columns: 1,
+        card: (w, h),
+    };
+    let mut score = f32::MIN;
+    for columns in 1..=n.max(1) {
+        let rows = n.max(1).div_ceil(columns);
+        let cw = (w - OVERVIEW_GAP * (columns - 1) as f32) / columns as f32;
+        let ch = ((h - OVERVIEW_GAP * (rows - 1) as f32) / rows as f32).max(OVERVIEW_LEAST_H);
+        // As large as the shape allows, either way it is short of, and
+        // less for each card that has to be scrolled to.
+        let tall = rows as f32 * ch + OVERVIEW_GAP * (rows - 1) as f32;
+        let shown = cw.min(ch * OVERVIEW_SHAPE) * (h / tall).min(1.);
+        if shown > score + 0.5 {
+            score = shown;
+            let ch = ch.min((cw / OVERVIEW_SHAPE * 1.25).max(OVERVIEW_LEAST_H));
+            best = OverviewGrid {
+                columns,
+                card: (cw.floor(), ch.floor()),
+            };
+        }
+    }
+    best
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn overview_fills_the_window_and_scrolls_only_past_readable() {
+        // Fourteen sessions at 1920x1080 less the chrome: every card shows,
+        // in a grid that uses the width and the height.
+        let g = overview_grid(14, 1880., 990.);
+        let rows = 14usize.div_ceil(g.columns);
+        assert!(g.columns >= 4 && g.columns <= 5, "{g:?}");
+        assert!(g.card.0 > 340., "{g:?}");
+        assert!(
+            rows as f32 * (g.card.1 + OVERVIEW_GAP) <= 990. + OVERVIEW_GAP,
+            "{g:?}"
+        );
+        // One session takes the room, at a terminal's shape.
+        let one = overview_grid(1, 1880., 990.);
+        assert_eq!(one.columns, 1);
+        assert!(one.card.1 >= 900., "{one:?}");
+        // Sixty do not shrink past reading: the grid scrolls.
+        let many = overview_grid(60, 1880., 990.);
+        assert_eq!(many.card.1, OVERVIEW_LEAST_H.floor());
+    }
 
     fn key(name: &str) -> Key {
         Key {
