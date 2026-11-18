@@ -146,6 +146,7 @@ impl MissionsPage {
                 "As rough as you like: what it makes, for whom, what good looks like",
             )
             .prose()
+            .min_lines(4)
         });
         let steps = cx.new(|cx| {
             TextField::new(
@@ -153,6 +154,7 @@ impl MissionsPage {
                 "One per line, such as\nGather merged PRs\nDraft\nReview",
             )
             .prose()
+            .min_lines(8)
         });
         cx.observe(&name, |_, _, cx| cx.notify()).detach();
         for field in [&name, &intent, &steps] {
@@ -429,7 +431,13 @@ impl MissionsPage {
                     kit::panel(t)
                         .id("mission-form")
                         .debug_selector(|| "mission-form".into())
-                        .w(px(size::NOTICE))
+                        // Room to draft a mission in; a rename or a delete
+                        // needs only a line.
+                        .w(px(if matches!(form.doing, Doing::Create { .. }) {
+                            size::MEASURE
+                        } else {
+                            size::NOTICE
+                        }))
                         .p(px(PAD))
                         .flex()
                         .flex_col()
@@ -447,6 +455,9 @@ impl MissionsPage {
                                         "“{title}” is deleted for good, with its layout and notes. Its runs stay."
                                     )),
                             )
+                        })
+                        .when(matches!(form.doing, Doing::Create { .. }), |d| {
+                            d.child(pane::meta(t, "Ctrl+Enter creates it from any field.", Some(t.text2)))
                         })
                         .when(!matches!(form.doing, Doing::Archive { .. }), |d| {
                             d.child(kit::label(t, "Name")).child(

@@ -111,6 +111,8 @@ pub struct TextField {
     reading: bool,
     /// A mono, smaller field for paths and flags looks like the rest.
     text_size: f32,
+    /// A text area at least this many lines high, empty or not.
+    min_lines: usize,
     lines: Vec<(usize, WrappedLine)>,
     bounds: Option<Bounds<Pixels>>,
     /// How far a single line is scrolled left so the caret stays in view.
@@ -142,6 +144,7 @@ impl TextField {
             prose: false,
             reading: false,
             text_size: size::TEXT,
+            min_lines: 1,
             lines: vec![],
             bounds: None,
             scroll: px(0.),
@@ -164,6 +167,13 @@ impl TextField {
     pub fn prose(mut self) -> Self {
         self.multiline = true;
         self.prose = true;
+        self
+    }
+
+    /// A text area that stands at least `lines` lines high, so there is
+    /// room to draft in before anything is written.
+    pub fn min_lines(mut self, lines: usize) -> Self {
+        self.min_lines = lines.max(1);
         self
     }
 
@@ -994,6 +1004,9 @@ impl Render for TextField {
             .w_full()
             .px(px(8.))
             .py(px(if self.multiline { 6. } else { 3. }))
+            .when(self.min_lines > 1, |d| {
+                d.min_h(line_height(self.text_size) * self.min_lines as f32 + px(14.))
+            })
             .bg(t.bg)
             .border_1()
             .border_color(if focused { t.accent } else { t.divider })

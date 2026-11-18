@@ -294,7 +294,9 @@ pub fn description(name: &str) -> &'static str {
         }
         "formation_unwire" => "Remove a connection.",
         "formation_delete" => "Remove a step, its connections and its Limit cards.",
-        "gate_create" => "Add a gate. It is human unless --kinds says otherwise.",
+        "gate_create" => {
+            "Add a gate. It is human unless --kinds names others: human, formation (a judge, see gate judge) or code."
+        }
         "gate_update" => {
             "Change a gate. Only the fields given change, and an empty value clears one."
         }
