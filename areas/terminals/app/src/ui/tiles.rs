@@ -1111,6 +1111,7 @@ impl Terminals {
         let font = self.settings.font_size;
         let theme_t = t.clone();
         let take_input = focused && self.surfaces.is_empty();
+        let composing = self.composing.clone().filter(|_| take_input);
         let hover = self
             .link_hover
             .filter(|h| h.0 == i)
@@ -1222,6 +1223,9 @@ impl Terminals {
                         window,
                         cx,
                     );
+                    if let Some(text) = composing.as_deref().filter(|_| !history) {
+                        paint::composition(&s, m, o, text, &theme_t, window, cx);
+                    }
                 });
                 s.dirty = false;
                 // The way back to live sits above the dock, laid out from
@@ -1287,6 +1291,9 @@ impl Terminals {
                             window,
                             cx,
                         );
+                        if let Some(text) = composing.as_deref() {
+                            paint::composition(l, m, at, text, &theme_t, window, cx);
+                        }
                     });
                     l.dirty = false;
                 }
@@ -1985,9 +1992,17 @@ impl EntityInputHandler for Terminals {
         })
     }
     fn marked_text_range(&self, _: &mut Window, _: &mut Context<Self>) -> Option<Range<usize>> {
-        None
+        let n = self.composing.as_ref()?.encode_utf16().count();
+        Some(0..n)
     }
-    fn unmark_text(&mut self, _: &mut Window, _: &mut Context<Self>) {}
+    /// The composition ends unsent: only committed text reaches the pane.
+    fn unmark_text(&mut self, _: &mut Window, cx: &mut Context<Self>) {
+        if self.composing.take().is_some() {
+            cx.notify();
+        }
+    }
+    /// Committed text replaces what was composed. An empty commit is a
+    /// composition given up, and sends nothing.
     fn replace_text_in_range(
         &mut self,
         _: Option<Range<usize>>,
@@ -1995,16 +2010,25 @@ impl EntityInputHandler for Terminals {
         _: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.send_input(text.as_bytes(), cx);
+        if self.composing.take().is_some() {
+            cx.notify();
+        }
+        if !text.is_empty() {
+            self.send_input(text.as_bytes(), cx);
+        }
     }
+    /// A dead key's accent or a word being composed shows at the cursor
+    /// until it is committed.
     fn replace_and_mark_text_in_range(
         &mut self,
         _: Option<Range<usize>>,
-        _: &str,
+        text: &str,
         _: Option<Range<usize>>,
         _: &mut Window,
-        _: &mut Context<Self>,
+        cx: &mut Context<Self>,
     ) {
+        self.composing = (!text.is_empty()).then(|| text.to_string());
+        cx.notify();
     }
     fn bounds_for_range(
         &mut self,

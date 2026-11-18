@@ -352,6 +352,54 @@ pub fn paint(
     }
 }
 
+/// What an input method is composing (a dead key's accent, a word being
+/// written), drawn at the cursor of the live screen and underlined, as
+/// terminals show it: it reaches the program only once it is committed.
+pub fn composition(
+    s: &Screen,
+    m: Metrics,
+    origin: Point<Pixels>,
+    text: &str,
+    t: &Theme,
+    window: &mut Window,
+    cx: &mut App,
+) {
+    let content = s.term.renderable_content();
+    if text.is_empty() || content.display_offset != 0 {
+        return;
+    }
+    let c = content.cursor.point;
+    let p = point(
+        origin.x + m.cell.width * c.column.0 as f32,
+        origin.y + m.cell.height * c.line.0 as f32,
+    );
+    let fg = rgb(t.term_fg_rgb);
+    let run = TextRun {
+        len: text.len(),
+        font: font(false, false, false),
+        color: fg,
+        background_color: None,
+        underline: Some(UnderlineStyle {
+            thickness: px(1.),
+            color: Some(fg),
+            wavy: false,
+        }),
+        strikethrough: None,
+    };
+    let line = window.text_system().clone().shape_line(
+        SharedString::from(text.to_string()),
+        m.font_size,
+        &[run],
+        None,
+    );
+    let w = line.width.max(m.cell.width);
+    window.paint_quad(fill(
+        Bounds::new(p, size(w, m.cell.height)),
+        rgb(t.term_bg_rgb),
+    ));
+    let _ = line.paint(p, m.cell.height, gpui::TextAlign::Left, None, window, cx);
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

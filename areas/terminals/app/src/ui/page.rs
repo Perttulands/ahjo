@@ -272,6 +272,8 @@ pub struct Terminals {
     /// The cell (window, column, row on screen) the pointer rests on, when
     /// a link is drawn there.
     pub link_hover: Option<(usize, usize, usize)>,
+    /// What the input method composes for the focused pane, not yet sent.
+    pub composing: Option<String>,
     pub histories: HashMap<usize, History>,
     /// Live screens with lines grown above them, dropped when no window
     /// reads them back any more (`tidy_histories`).
@@ -425,6 +427,7 @@ impl Terminals {
             drag_scroll_task: None,
             mouse_down_in: None,
             link_hover: None,
+            composing: None,
             histories: HashMap::new(),
             grown: Vec::new(),
             resizing: HashMap::new(),
