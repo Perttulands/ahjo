@@ -396,21 +396,36 @@ impl Engine {
         Ok(())
     }
 
-    /// The session named exactly `name` on this server, if any; no server
-    /// running means none, but a server it cannot reach is an error. A crashed owner finds the session it created
-    /// before it could record its identity.
+    /// The session named exactly `name` on this server, if any, whoever
+    /// started it; no server running means none, but a server it cannot
+    /// reach is an error.
     pub async fn find_session(&self, name: &str) -> Result<Option<crate::SessionRef>> {
+        Ok(self.named(name).await?.map(|(session, _)| session))
+    }
+
+    /// The seat named exactly `name`: a session [`Engine::create_session`]
+    /// started under that name, which a crashed owner finds again before it
+    /// could record its identity. A session that only has the name, as one
+    /// a person started, is not a seat.
+    pub async fn find_seat(&self, name: &str) -> Result<Option<crate::SessionRef>> {
+        Ok(self
+            .named(name)
+            .await?
+            .and_then(|(session, seat)| seat.then_some(session)))
+    }
+
+    /// The session named exactly `name`, and whether it is a seat created
+    /// under that name.
+    async fn named(&self, name: &str) -> Result<Option<(crate::SessionRef, bool)>> {
         let target = format!("{name}:");
+        let format = format!(
+            "#{{session_name}} #{{session_id}} #{{pane_id}} #{{pid}} #{{start_time}} seat=#{{{}}}",
+            crate::owned::SEAT_MARK
+        );
         let reply = match self
             .shared
             .backend
-            .command(&[
-                "display-message",
-                "-p",
-                "-t",
-                &target,
-                "#{session_name} #{session_id} #{pane_id} #{pid} #{start_time}",
-            ])
+            .command(&["display-message", "-p", "-t", &target, &format])
             .await
         {
             Ok(reply) => reply,
@@ -419,10 +434,19 @@ impl Engine {
             }
             Err(error) => return Err(error),
         };
-        match reply.trim().split_once(' ') {
+        // A session without the mark leaves nothing after `seat=`.
+        let reply = reply.trim_end_matches(['\r', '\n']);
+        let Some((identity, mark)) = reply.rsplit_once(" seat=") else {
+            bail!("invalid session identity from backend");
+        };
+        Self::identity(name, identity, mark == name)
+    }
+
+    fn identity(name: &str, reply: &str, seat: bool) -> Result<Option<(crate::SessionRef, bool)>> {
+        match reply.split_once(' ') {
             // tmux falls back to a prefix match when no name is exact.
             Some((found, _)) if found != name => Ok(None),
-            Some((_, identity)) => crate::owned::parse_ref(identity).map(Some),
+            Some((_, identity)) => Ok(Some((crate::owned::parse_ref(identity)?, seat))),
             None => bail!("invalid session identity from backend"),
         }
     }

@@ -91,6 +91,10 @@ impl Sessions for Provided {
         Box::pin(async move { self.hub.own_engine().find_session(name).await })
     }
 
+    fn seat<'a>(&'a self, name: &'a str) -> Reply<'a, Option<SessionRef>> {
+        Box::pin(async move { self.hub.own_engine().find_seat(name).await })
+    }
+
     fn verify<'a>(&'a self, seat: &'a SessionRef) -> Reply<'a, ()> {
         Box::pin(async move { self.hub.own_engine().verify_session(seat).await })
     }

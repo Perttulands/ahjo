@@ -189,6 +189,10 @@ impl Sessions for FakeSessions {
         Box::pin(async { Ok(None) })
     }
 
+    fn seat<'a>(&'a self, _name: &'a str) -> Reply<'a, Option<SessionRef>> {
+        Box::pin(async { Ok(None) })
+    }
+
     fn verify<'a>(&'a self, _seat: &'a SessionRef) -> Reply<'a, ()> {
         Box::pin(async { bail!("the fake sessions run no seats") })
     }

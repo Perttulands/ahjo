@@ -54,9 +54,15 @@ pub trait Sessions: Send + Sync {
     /// caller owns, known by an identity that outlives a node restart.
     fn create(&self, spec: SessionSpec) -> Reply<'_, SessionRef>;
 
-    /// The seat named exactly `name` on the node's own server, if any: a
-    /// caller that crashed before recording what it created finds it here.
+    /// The session named exactly `name` on the node's own server, if any,
+    /// whoever started it.
     fn find<'a>(&'a self, name: &'a str) -> Reply<'a, Option<SessionRef>>;
+
+    /// The seat named exactly `name` on the node's own server, if any: a
+    /// session [`Sessions::create`] started under that name. A caller that
+    /// crashed before recording what it created finds it here; a session
+    /// that only shares the name, as one a person started, is never one.
+    fn seat<'a>(&'a self, name: &'a str) -> Reply<'a, Option<SessionRef>>;
 
     /// Refused unless the seat is still the session that was created, on
     /// the same server.

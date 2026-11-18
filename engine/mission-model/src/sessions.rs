@@ -2,8 +2,10 @@
 //! sessions named under the mission's prefix, `<prefix>-<agent>`, so the
 //! session list groups them by that prefix.
 //!
-//! A step names its agent; a run uses that agent's session when it is live
-//! and starts it when it is not, and the session stays for the next run. A
+//! A step names its agent; a run starts that agent's session when it is
+//! not live, and the session stays for the next run to use. Only a session
+//! a run started is the agent's: one that merely has its name is left
+//! alone, and the step works in a session of its own beside it. A
 //! step that always starts fresh gets a session of its own for each
 //! attempt, `<prefix>-<agent>-<run>-<attempt>`, which ends with the attempt.
 

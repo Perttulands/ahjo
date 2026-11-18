@@ -198,6 +198,10 @@ impl Session {
             "session_activity" | "window_activity" => state.activity.to_string(),
             "window_id" => format!("@{}", self.id),
             "window_index" | "pane_index" => "0".into(),
+            // Only a session created for a caller is pinned, and a
+            // holder's session keeps the name it was created under.
+            "@ahjo-seat" if self.pinned => self.name.clone(),
+            "@ahjo-seat" => String::new(),
             "window-size" => if self.pinned { "manual" } else { "latest" }.into(),
             "mouse" => "0".into(),
             "pane_id" => format!("%{}", self.pane),

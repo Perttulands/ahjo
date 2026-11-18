@@ -30,6 +30,21 @@ async fn owned_screen_pin_and_generation() {
         Some(owned.clone())
     );
     assert_eq!(engine.find_session("own").await.unwrap(), None);
+    // What it created is a seat; a session that only has a name is not,
+    // nor one renamed to a seat's name.
+    assert_eq!(
+        engine.find_seat("owned").await.unwrap(),
+        Some(owned.clone())
+    );
+    server.new_session("theirs", 80, 24);
+    assert!(engine.find_session("theirs").await.unwrap().is_some());
+    assert_eq!(engine.find_seat("theirs").await.unwrap(), None);
+    server.run(&["rename-session", "-t", "owned", "moved"]);
+    assert_eq!(engine.find_seat("moved").await.unwrap(), None);
+    server.run(&["rename-session", "-t", "theirs", "owned"]);
+    assert_eq!(engine.find_seat("owned").await.unwrap(), None);
+    server.run(&["rename-session", "-t", "owned", "theirs"]);
+    server.run(&["rename-session", "-t", "moved", "owned"]);
     let screen = eventually("styled screen", || {
         let screen = engine.read_screen(owned.pane_id)?;
         (screen.rows[0][0].text == "g"

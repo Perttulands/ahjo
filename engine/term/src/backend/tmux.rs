@@ -145,6 +145,12 @@ impl Backend for Socket {
                 &spec.name,
                 "window-size",
                 "manual",
+                ";",
+                "set-option",
+                "-t",
+                &spec.name,
+                crate::owned::SEAT_MARK,
+                &spec.name,
             ]);
             crate::owned::parse_ref(&self.run(&args).await?)
         })

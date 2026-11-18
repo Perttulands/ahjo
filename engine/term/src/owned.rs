@@ -7,6 +7,11 @@ use serde::{Deserialize, Serialize};
 
 use crate::control::PaneId;
 
+/// The session option a created session carries, holding the name it was
+/// created under: what tells a seat from a session that merely shares its
+/// name.
+pub(crate) const SEAT_MARK: &str = "@ahjo-seat";
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SessionSpec {
     pub name: String,

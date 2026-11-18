@@ -58,8 +58,9 @@ impl LocalSeats {
         &self.roots
     }
     /// Create once, or verify the identity of the existing owned seat. A
-    /// kept seat is the agent's own session: a live one is used as it is,
-    /// unless another dispatch holds it, when this one gets its own.
+    /// kept seat is the agent's own session, one a run started: a live one
+    /// is used as it is, unless another dispatch holds it, when this one
+    /// gets its own.
     pub async fn dispatch(&self, request: Dispatch) -> Result<String, crate::Error> {
         let id = request.id.clone();
         let answer = self.dispatch_held(request).await;
@@ -75,8 +76,10 @@ impl LocalSeats {
             let request = match self.records.dispatch(&request.id) {
                 // A retry is the dispatch as first recorded.
                 Ok(recorded) => recorded,
-                Err(_) if request.keep => self.hold(request, &hash[..4]),
-                Err(_) => request,
+                Err(_) => match self.own_name(request, &hash[..4]).await? {
+                    request if request.keep => self.hold(request, &hash[..4]),
+                    request => request,
+                },
             };
             self.records.create(&request).map_err(|e| e.to_string())?;
             let _guard = self.creation_guard(&request.id).await?;
@@ -114,9 +117,9 @@ impl LocalSeats {
             let launch = adapter
                 .launch(&binding, &request.cwd, shell, &self.roots)
                 .map_err(|e| e.to_string())?;
-            // The name is derived from the dispatch, so a session found under
-            // it is the agent's own, or one an earlier attempt created and
-            // crashed before binding.
+            // Only a seat is used: a session a run created under this name,
+            // the agent's own or one an earlier attempt created and crashed
+            // before binding. A session that merely has the name is not.
             let name = if request.name.is_empty() {
                 format!(
                     "ahjo-{}-{}-{}",
@@ -127,7 +130,7 @@ impl LocalSeats {
             } else {
                 request.name.clone()
             };
-            if let Some(session) = self.engine.find(&name).await.map_err(|e| e.to_string())? {
+            if let Some(session) = self.engine.seat(&name).await.map_err(|e| e.to_string())? {
                 let cwd = if request.keep {
                     self.folder(&session).await
                 } else {
@@ -160,6 +163,23 @@ impl LocalSeats {
         })
         .await
         .map_err(|message: String| crate::Error::new("seat_error", message))
+    }
+    /// A session a run did not create is never a step's to take over, even
+    /// under the agent's name: the dispatch then works in a session of its
+    /// own beside it, ended with it.
+    async fn own_name(&self, mut request: Dispatch, tag: &str) -> Result<Dispatch, String> {
+        if request.name.is_empty() {
+            return Ok(request);
+        }
+        let seat = self.engine.seat(&request.name).await;
+        if seat.map_err(|e| e.to_string())?.is_none() {
+            let other = self.engine.find(&request.name).await;
+            if other.map_err(|e| e.to_string())?.is_some() {
+                request.name = format!("{}-{tag}", request.name);
+                request.keep = false;
+            }
+        }
+        Ok(request)
     }
     /// Claims a kept seat's session for this dispatch; one another open
     /// dispatch holds leaves this one a session of its own, ended with it.
