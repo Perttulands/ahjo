@@ -133,6 +133,10 @@ fn run_is_only_emphasized_for_a_current_runnable_mission(cx: &mut TestAppContext
     until(cx, "canvas mode", |cx| {
         cx.debug_bounds("mission-canvas").is_some()
     });
+    // The board says what stands between the mission and a run.
+    until(cx, "the unwired Input listed as to do", |cx| {
+        cx.debug_bounds("canvas-findings").is_some()
+    });
     rt.block_on(async {
         let (doc, etag) = client.request(http::Method::GET, "/api/missions/hello", None, None).await.unwrap();
         client.request(http::Method::PATCH, "/api/missions/hello", Some(json!({"expectedRev":doc["mission"]["rev"], "wireConnection":{"from":"inp_hello:out","to":"fmn_work:port_in"}})), Some(&etag)).await.unwrap();
@@ -140,8 +144,12 @@ fn run_is_only_emphasized_for_a_current_runnable_mission(cx: &mut TestAppContext
         assert_eq!(valid["errors"].as_array().unwrap().len(), 0, "{valid}");
         assert!(!valid["warnings"].as_array().unwrap().iter().any(|w| w["code"] == "mission_not_runnable"));
     });
+    // The page re-reads the changed mission and validates it again; until
+    // then Done is not on screen to be clicked. The old report still says
+    // complete, so wait for the new one: complete with nothing left to do.
     until(cx, "validation refreshed while editing", |cx| {
         cx.debug_bounds("mission-validation-complete").is_some()
+            && cx.debug_bounds("canvas-findings").is_none()
     });
     let done = cx.debug_bounds("mission-mode-flow").unwrap().center();
     cx.simulate_click(done, Modifiers::none());
