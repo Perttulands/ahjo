@@ -144,16 +144,18 @@ impl Work {
             let trouble = info
                 .error
                 .as_ref()
-                .map(|e| (format!("Not read: {}", first_line(e)), e.trim()))
+                .map(|e| (format!("Not read: {}", first_line(e)), e.trim(), t.error))
+                // Not watched is a warning: what is shown was read.
                 .or_else(|| {
                     info.unwatched.as_ref().map(|w| {
                         (
                             "Not watched for changes: click to read again".into(),
                             w.trim(),
+                            t.needs,
                         )
                     })
                 });
-            if let Some((short, full)) = trouble.filter(|_| info.read) {
+            if let Some((short, full, colour)) = trouble.filter(|_| info.read) {
                 body = body.child(
                     div()
                         .id("work-trouble")
@@ -162,7 +164,7 @@ impl Work {
                         .px(px(size::ROW_PAD))
                         .py(px(SPACE_XS))
                         .text_size(px(size::SMALL))
-                        .text_color(t.error)
+                        .text_color(colour)
                         .overflow_hidden()
                         .whitespace_nowrap()
                         .text_ellipsis()
