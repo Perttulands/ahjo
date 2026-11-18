@@ -11,6 +11,7 @@ pub mod layers;
 pub mod link;
 pub mod menu;
 pub mod page;
+pub mod pointer;
 pub mod settings;
 pub mod text;
 pub mod theme;

@@ -27,6 +27,10 @@ pub struct Chord {
     pub run: Run,
     /// Live while any page shows, not only its own.
     pub everywhere: bool,
+    /// A key the page takes itself while it has the keyboard, as written
+    /// ("V", "N"): listed in the keys panel with the page's chords, and run
+    /// from there by a click. It has no leader key.
+    pub on_page: Option<&'static str>,
 }
 
 impl Chord {
@@ -41,7 +45,21 @@ impl Chord {
             label: label.into(),
             run: Rc::new(run),
             everywhere: false,
+            on_page: None,
         }
+    }
+
+    /// A key the page takes itself while it has the keyboard (`keys` as
+    /// the panel shows it, "V"): no leader key, no Alt key; the panel
+    /// lists it so every key of the page is found in one place.
+    pub fn on_page(
+        keys: &'static str,
+        label: impl Into<String>,
+        run: impl Fn(&mut Window, &mut App) + 'static,
+    ) -> Self {
+        let mut c = Self::new("", label, run);
+        c.on_page = Some(keys);
+        c
     }
 
     /// Live while any page shows: it brings its own page forward itself.
@@ -80,7 +98,9 @@ impl Chord {
             }
             _ => false,
         };
-        self.leader == other.leader || direct
+        (!self.leader.is_empty() && self.leader == other.leader)
+            || direct
+            || (self.on_page.is_some() && self.on_page == other.on_page)
     }
 }
 
@@ -145,7 +165,11 @@ pub fn rows(chords: &[Chord]) -> Vec<Row> {
         .enumerate()
         .map(|(i, c)| Row {
             chord: i,
-            caps: c.direct.as_ref().map(direct_caps).unwrap_or_default(),
+            caps: match (&c.direct, c.on_page) {
+                (Some(d), _) => direct_caps(d),
+                (None, Some(keys)) => vec![keys.to_string()],
+                (None, None) => vec![],
+            },
             leader: c.leader.into(),
             label: c.label.clone(),
         })
@@ -348,6 +372,23 @@ mod tests {
             direct(&alt("k", "k", false), &t).unwrap().caps,
             ["Alt", "K"]
         );
+    }
+
+    #[test]
+    fn a_page_key_is_listed_and_left_to_the_page() {
+        let mut t = table();
+        t.push(Chord::on_page("V", "Layout", |_, _| {}));
+        t.push(Chord::on_page("N", "New task", |_, _| {}));
+        let rows = rows(&t);
+        let v = rows.iter().find(|r| r.label == "Layout").unwrap();
+        assert_eq!(v.caps, ["V"], "listed with the key the page takes");
+        assert_eq!(v.leader, "");
+        assert!(direct(&alt("v", "v", false), &t).is_none());
+        assert!(label(after_leader(&bare("v", "v"), &t)).as_deref() != Some("Layout"));
+        let (layout, new) = (&t[t.len() - 2], &t[t.len() - 1]);
+        assert!(!layout.clashes(new), "two page keys share no leader");
+        assert!(layout.clashes(&Chord::on_page("V", "Other", |_, _| {})));
+        assert!(!t[0].clashes(layout));
     }
 
     #[test]

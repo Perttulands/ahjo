@@ -355,7 +355,13 @@ impl Host {
     }
 
     fn open_menu(&self, rows: Vec<MenuRow>, at: Point<Pixels>, armed: Option<usize>, cx: &mut App) {
-        let menu = Menu { rows, at, armed };
+        let under = crate::pointer::pressed_at(at, cx);
+        let menu = Menu {
+            rows,
+            at,
+            armed,
+            under,
+        };
         self.update(cx, |h, cx| h.open(Surface::Menu(menu), cx));
     }
 

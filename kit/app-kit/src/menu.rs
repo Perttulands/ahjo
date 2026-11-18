@@ -92,6 +92,9 @@ pub struct Menu {
     pub rows: Vec<MenuRow>,
     pub at: gpui::Point<gpui::Pixels>,
     pub armed: Option<usize>,
+    /// The button it opened from, when a press on one opened it: the menu
+    /// stands under it, clear of the buttons beside it.
+    pub under: Option<crate::pointer::Pressed>,
 }
 
 /// What a click on row `index` of a menu comes to.
@@ -147,6 +150,7 @@ mod tests {
             ],
             at: Default::default(),
             armed: None,
+            under: None,
         };
         assert!(matches!(m.pick(0), Pick::Nothing));
         assert!(matches!(m.pick(3), Pick::Nothing), "refused");

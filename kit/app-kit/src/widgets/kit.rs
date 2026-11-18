@@ -270,7 +270,10 @@ pub fn button(
         .rounded(px(size::RADIUS))
         .text_size(px(size::TEXT))
         .cursor_pointer()
-        .child(text.into());
+        .relative()
+        .child(text.into())
+        // A press here quiets its tooltip and places the menu it opens.
+        .child(crate::pointer::watch());
     let accent = t.accent;
     let text = t.text;
     // A hairline every kind has, so focus (Tab) can colour it without a jump.
@@ -295,6 +298,23 @@ pub fn button(
             .hover(move |s| s.text_color(text))
             .focus(move |s| s.border_color(accent)),
     }
+}
+
+/// One option of a choice (Settings' choices, Work's layouts, a form's
+/// sessions and schedule): the chosen one filled as the primary button
+/// is, the others outlined, so what is chosen reads at a glance.
+pub fn option(
+    t: &Theme,
+    id: impl Into<ElementId>,
+    text: impl Into<SharedString>,
+    chosen: bool,
+) -> Stateful<Div> {
+    button(
+        t,
+        id,
+        text,
+        if chosen { Kind::Primary } else { Kind::Plain },
+    )
 }
 
 /// A key cap: filled for the modifier, outlined for the key.
@@ -451,7 +471,14 @@ pub fn tip(
     why: impl Into<SharedString>,
 ) -> impl Fn(&mut gpui::Window, &mut App) -> gpui::AnyView + 'static {
     let why: SharedString = why.into();
-    move |_, cx| cx.new(|_| Tip(why.clone())).into()
+    move |window, cx| {
+        // Not over what its button just opened: a menu, a form, a title.
+        let words = match crate::pointer::quiet(window, cx) {
+            true => SharedString::default(),
+            false => why.clone(),
+        };
+        cx.new(|_| Tip(words)).into()
+    }
 }
 
 pub struct Tip(pub SharedString);
@@ -463,6 +490,9 @@ impl Render for Tip {
         cx: &mut gpui::Context<Self>,
     ) -> impl IntoElement {
         let t = crate::theme::theme(cx);
+        if self.0.is_empty() {
+            return div().into_any_element();
+        }
         // A tooltip is drawn outside the page's tree, so it names the
         // app's face itself.
         panel(t)
@@ -473,6 +503,7 @@ impl Render for Tip {
             .text_size(px(12.))
             .text_color(t.text)
             .child(self.0.clone())
+            .into_any_element()
     }
 }
 

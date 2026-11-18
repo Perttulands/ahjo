@@ -85,13 +85,18 @@ fn frame(t: &Theme, width: f32, head: Div, body: impl IntoElement) -> Div {
         )
 }
 
-/// The detail column: its head on top, its body under it scrolling. Head
-/// and body share one column, [`size::READING`] at most and starting at
-/// the detail's left, so the head's actions stand at the right edge of
-/// what they act on however wide the window; the rule under the head
-/// still spans the detail. `id` names its scroll.
+/// The detail column: its head on top, its body under it scrolling. The
+/// body is [`size::READING`] at most, starting at the detail's left; the
+/// head spans the detail, so a detail's actions stand at its right edge on
+/// every page, however wide the body. `id` names its scroll.
 pub fn detail(t: &Theme, id: impl Into<ElementId>, head: Div, body: impl IntoElement) -> Div {
     reading(t, head, div().id(id), body)
+}
+
+/// [`detail`] whose body uses the detail's whole width: for what is
+/// read as lines that are long by nature (paths, addresses), not prose.
+pub fn detail_wide(t: &Theme, id: impl Into<ElementId>, head: Div, body: impl IntoElement) -> Div {
+    framed(t, head, div().id(id), body, None)
 }
 
 /// [`detail`] whose scroll the page holds, to go back to the top or to a
@@ -157,7 +162,7 @@ pub fn detail_beside(
         head,
         div().id(id),
         pair,
-        size::MEASURE + size::ASIDE_GAP + size::ASIDE_MAX,
+        Some(size::MEASURE + size::ASIDE_GAP + size::ASIDE_MAX),
     )
 }
 
@@ -172,17 +177,17 @@ pub enum Narrow {
 }
 
 fn reading(t: &Theme, head: Div, scroller: Stateful<Div>, body: impl IntoElement) -> Div {
-    framed(t, head, scroller, body, size::READING)
+    framed(t, head, scroller, body, Some(size::READING))
 }
 
-/// The detail's head over its scrolling body, both `widest` at most and
-/// starting at the detail's left.
+/// The detail's head across the detail, over its scrolling body, `widest`
+/// at most and starting at the detail's left.
 fn framed(
     t: &Theme,
     head: Div,
     scroller: Stateful<Div>,
     body: impl IntoElement,
-    widest: f32,
+    widest: Option<f32>,
 ) -> Div {
     div()
         .flex_1()
@@ -197,19 +202,13 @@ fn framed(
                 .h(px(size::TAB_BAR))
                 .border_b_1()
                 .border_color(t.divider)
-                .child(
-                    head.border_0()
-                        .h_full()
-                        .w_full()
-                        .max_w(px(widest))
-                        .px(px(size::PAD)),
-                ),
+                .child(head.border_0().h_full().w_full().px(px(size::PAD))),
         )
         .child(
             scroller.flex_1().min_h_0().overflow_y_scroll().child(
                 div()
                     .w_full()
-                    .max_w(px(widest))
+                    .when_some(widest, |d, w| d.max_w(px(w)))
                     .p(px(size::PAD))
                     .flex()
                     .flex_col()

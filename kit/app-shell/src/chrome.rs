@@ -11,8 +11,8 @@ use ahjo_app_kit::theme::{self, Theme, alpha, motion, size, theme};
 use ahjo_app_kit::widgets::{boundary, kit};
 use ahjo_app_kit::zoom::Zoom;
 use gpui::{
-    Animation, AnimationExt, AnyElement, Context, ElementId, MouseButton, MouseDownEvent, Window,
-    anchored, deferred, div, ease_out_quint, point, prelude::*, px,
+    Anchor, Animation, AnimationExt, AnyElement, Context, ElementId, MouseButton, MouseDownEvent,
+    Window, anchored, deferred, div, ease_out_quint, point, prelude::*, px,
 };
 use std::time::Duration;
 
@@ -506,20 +506,27 @@ impl Shell {
                 .on_mouse_down(MouseButton::Left, close)
                 .on_mouse_down(MouseButton::Right, close_right)
                 .child(
-                    anchored()
-                        .position(point(menu.at.x, menu.at.y))
-                        .snap_to_window_with_margin(px(8.))
-                        .child(
-                            div()
-                                .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
-                                .child(list)
-                                .with_animation(
-                                    ("menu-in", depth),
-                                    Animation::new(Duration::from_millis(motion::PANEL_IN))
-                                        .with_easing(ease_out_quint()),
-                                    |d, x| d.opacity(x).mt(px(-motion::PANEL_DROP * (1. - x))),
-                                ),
-                        ),
+                    // Under the button it opened from, aligned to its
+                    // nearer edge; else where it was asked for.
+                    match menu.under.and_then(|p| Some((p.bounds?, p.right))) {
+                        Some((b, true)) => anchored()
+                            .position(b.bottom_right())
+                            .anchor(Anchor::TopRight),
+                        Some((b, false)) => anchored().position(b.bottom_left()),
+                        None => anchored().position(point(menu.at.x, menu.at.y)),
+                    }
+                    .snap_to_window_with_margin(px(8.))
+                    .child(
+                        div()
+                            .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                            .child(list)
+                            .with_animation(
+                                ("menu-in", depth),
+                                Animation::new(Duration::from_millis(motion::PANEL_IN))
+                                    .with_easing(ease_out_quint()),
+                                |d, x| d.opacity(x).mt(px(-motion::PANEL_DROP * (1. - x))),
+                            ),
+                    ),
                 ),
         )
         .with_priority(20)
