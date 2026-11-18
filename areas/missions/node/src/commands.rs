@@ -112,7 +112,7 @@ fn description(name: &str) -> &'static str {
             "Say whether a mission can run, with its errors and warnings and the next command."
         }
         "mission_new" => {
-            "Create a mission: empty, or with --example a copy of a staffed, wired example to start from (mission examples lists them)."
+            "Create a mission: empty, or with --example a copy of a staffed, wired example to start from (mission examples lists them). Answers with what was made and its steps; mission inspect reads the whole graph."
         }
         "mission_examples" => "List the example missions a new mission can start from.",
         "mission_edit" => "Apply one mission authoring operation.",
@@ -327,7 +327,24 @@ async fn call(m: Missions, name: &str, a: Value) -> Result<Value, Error> {
                     .create_mission(slug, optional(&a, "title", slug)?, "agent:ahjo")?,
             };
             m.changed();
-            Ok(json!({"node":node,"mission":document(edit.mission,edit.etag)?}))
+            // A receipt, not the graph: mission inspect reads that.
+            let mission = &edit.mission;
+            let steps: Vec<_> = (mission.formations.iter())
+                .map(|step| json!({"id": step.id, "title": step.title}))
+                .collect();
+            let slug = shell_word(&mission.slug);
+            Ok(json!({
+                "node": node,
+                "created": mission.slug,
+                "id": mission.id,
+                "title": mission.title,
+                "rev": mission.rev,
+                "steps": steps,
+                "next": [
+                    format!("ahjo mission inspect {slug}"),
+                    format!("ahjo mission validate {slug}"),
+                ],
+            }))
         }
         "mission_examples" => {
             if a.as_object().is_some_and(|v| !v.is_empty()) {

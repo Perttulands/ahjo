@@ -129,6 +129,17 @@ async fn author_and_run_with_tools() {
     node.call("mission_new", json!({"slug":"demo","title":"Demo"}))
         .await
         .unwrap();
+    let copied = node
+        .call(
+            "mission_new",
+            json!({"slug":"pair","example":"write-and-review"}),
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        copied["steps"],
+        json!([{"id":"fmn_write","title":"Write"},{"id":"fmn_review","title":"Review"}])
+    );
     assert_eq!(
         node.call("mission_inspect", json!({"mission":"demo"}))
             .await
@@ -564,7 +575,14 @@ async fn cli_uses_the_same_mission_commands() {
         0
     );
     let result: serde_json::Value = serde_json::from_slice(&output).unwrap();
-    assert_eq!(result["mission"]["slug"], "demo");
+    // A receipt, not the graph, with the commands that read the rest,
+    // aimed at the node named.
+    assert_eq!(result["created"], "demo");
+    assert!(result.get("mission").is_none());
+    assert_eq!(
+        result["next"][0],
+        format!("ahjo mission inspect --node {}/ demo", node.url())
+    );
     node.stop().await;
 }
 
