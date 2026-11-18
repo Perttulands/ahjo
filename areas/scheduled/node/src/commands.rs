@@ -8,7 +8,7 @@ use std::sync::Arc;
 use ahjo_core::{Error, NodeId};
 use ahjo_node_kit::Command;
 use ahjo_node_kit::args::{flag, maybe_text, object, text};
-use ahjo_scheduled_contract::{BAD_REQUEST, Schedule, Target};
+use ahjo_scheduled_contract::{BAD_REQUEST, NOT_FOUND, Schedule, Target};
 use anyhow::{Context, Result, bail};
 use serde_json::{Value, json};
 
@@ -23,8 +23,15 @@ pub(crate) struct Ctx {
     pub scheduled: Arc<Scheduled>,
 }
 
+fn id_property() -> Value {
+    json!({
+        "type": "string",
+        "description": "The task's id, or its name where no other task has it.",
+    })
+}
+
 fn id_schema() -> Value {
-    object(json!({ "id": { "type": "string" } }), &["id"])
+    object(json!({ "id": id_property() }), &["id"])
 }
 
 fn task_properties() -> Value {
@@ -34,7 +41,9 @@ fn task_properties() -> Value {
         "sessions": {
             "type": "array",
             "items": { "type": "string" },
-            "description": "Session names; user/name for another user's session.",
+            "description": "Session names, user/name for another Unix user's. On the command \
+                line each is a word of its own: after the prompt for create, as one \
+                --sessions each for edit.",
         },
         "every": { "type": "integer", "minimum": 1, "description": "Fire every this many minutes." },
         "cron": { "type": "string", "description": "Five cron fields, instead of every." },
@@ -82,7 +91,8 @@ pub(crate) fn commands(ctx: &Arc<Ctx>) -> Vec<Command> {
         command(
             ctx,
             "scheduled_create",
-            "Schedule a prompt into sessions, every N minutes or on a cron.",
+            "Schedule a prompt into sessions, every N minutes or on a cron. Example: \
+             ahjo scheduled create nudge 'Check the build' ops build --every 60",
             || {
                 let mut properties = task_properties();
                 properties["paused"] = json!({ "type": "boolean", "default": false });
@@ -96,7 +106,7 @@ pub(crate) fn commands(ctx: &Arc<Ctx>) -> Vec<Command> {
             "Change a scheduled prompt; what is not given stays.",
             || {
                 let mut properties = task_properties();
-                properties["id"] = json!({ "type": "string" });
+                properties["id"] = id_property();
                 object(properties, &["id"])
             },
             |ctx, args| async move { edit(&ctx, &args).await },
@@ -107,7 +117,7 @@ pub(crate) fn commands(ctx: &Arc<Ctx>) -> Vec<Command> {
             "Duplicate a scheduled prompt, paused, as the view's Duplicate does.",
             || {
                 object(
-                    json!({ "id": { "type": "string" }, "name": { "type": "string" } }),
+                    json!({ "id": id_property(), "name": { "type": "string" } }),
                     &["id"],
                 )
             },
@@ -170,8 +180,40 @@ fn list(ctx: &Ctx) -> Result<Value, Error> {
     Ok(json!({ "node": ctx.node, "tasks": tasks }))
 }
 
+/// The id of the task an argument names: its id, or the name only one
+/// task has.
+fn task_id(ctx: &Ctx, args: &Value) -> Result<String, Error> {
+    let given = text(args, "id").map_err(bad)?;
+    let tasks = ctx.scheduled.list()?;
+    if tasks.iter().any(|t| t.id == given) {
+        return Ok(given.to_owned());
+    }
+    let named: Vec<_> = tasks.iter().filter(|t| t.name == given).collect();
+    match named[..] {
+        [one] => Ok(one.id.clone()),
+        [] => Err(Error::new(
+            NOT_FOUND,
+            format!(
+                "scheduled task not found: none has the id or name {given:?}; `ahjo scheduled list` shows them"
+            ),
+        )),
+        _ => Err(Error::new(
+            BAD_REQUEST,
+            format!(
+                "{} tasks are named {given:?}: give one's id ({})",
+                named.len(),
+                named
+                    .iter()
+                    .map(|t| t.id.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ),
+        )),
+    }
+}
+
 fn show(ctx: &Ctx, args: &Value) -> Result<Value, Error> {
-    let task = ctx.scheduled.get(text(args, "id").map_err(bad)?)?;
+    let task = ctx.scheduled.get(&task_id(ctx, args)?)?;
     Ok(json!({ "node": ctx.node, "task": task }))
 }
 
@@ -194,26 +236,24 @@ async fn create(ctx: &Ctx, args: &Value) -> Result<Value, Error> {
 }
 
 async fn edit(ctx: &Ctx, args: &Value) -> Result<Value, Error> {
-    let (id, patch) = (|| {
-        Ok::<_, anyhow::Error>((
-            text(args, "id")?,
-            Patch {
-                name: maybe_text(args, "name")?.map(str::to_owned),
-                prompt: maybe_text(args, "prompt")?.map(str::to_owned),
-                targets: targets(args)?,
-                schedule: schedule(args)?,
-                updated_by: ACTOR.into(),
-                ..Default::default()
-            },
-        ))
+    let id = task_id(ctx, args)?;
+    let patch = (|| {
+        Ok::<_, anyhow::Error>(Patch {
+            name: maybe_text(args, "name")?.map(str::to_owned),
+            prompt: maybe_text(args, "prompt")?.map(str::to_owned),
+            targets: targets(args)?,
+            schedule: schedule(args)?,
+            updated_by: ACTOR.into(),
+            ..Default::default()
+        })
     })()
     .map_err(bad)?;
-    let task = ctx.scheduled.patch(id, patch).await?;
+    let task = ctx.scheduled.patch(&id, patch).await?;
     Ok(json!({ "node": ctx.node, "task": task }))
 }
 
 async fn copy(ctx: &Ctx, args: &Value) -> Result<Value, Error> {
-    let from = ctx.scheduled.get(text(args, "id").map_err(bad)?)?;
+    let from = ctx.scheduled.get(&task_id(ctx, args)?)?;
     let create = Create {
         name: match maybe_text(args, "name").map_err(bad)? {
             Some(name) => name.to_owned(),
@@ -233,7 +273,7 @@ async fn copy(ctx: &Ctx, args: &Value) -> Result<Value, Error> {
 
 async fn act(ctx: &Ctx, args: &Value, action: &str) -> Result<Value, Error> {
     let scheduled = &ctx.scheduled;
-    let id = text(args, "id").map_err(bad)?;
+    let id = &task_id(ctx, args)?;
     let mut answer = match action {
         "pause" => json!({ "task": scheduled.pause(id, ACTOR)? }),
         "resume" => json!({ "task": scheduled.resume(id, ACTOR).await? }),

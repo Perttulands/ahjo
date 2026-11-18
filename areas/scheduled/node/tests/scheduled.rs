@@ -74,6 +74,12 @@ async fn schedules_a_prompt_runs_it_now_and_manages_it() {
         .unwrap();
     assert_eq!(copy["task"]["name"], "nudge (copy)");
     assert_eq!(copy["task"]["paused"], true);
+    // A task is found by a name no other task has, as list shows it.
+    let by_name = node
+        .call("scheduled_show", json!({ "id": "nudge (copy)" }))
+        .await
+        .unwrap();
+    assert_eq!(by_name["task"]["id"], copy["task"]["id"]);
     node.call("scheduled_delete", json!({ "id": id }))
         .await
         .unwrap();
