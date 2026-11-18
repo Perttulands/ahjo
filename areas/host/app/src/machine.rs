@@ -44,11 +44,12 @@ fn local_offset() -> i64 {
 }
 
 impl HostPage {
-    /// A node's services that need the operator.
+    /// A node's services that need the operator: those the list shows
+    /// under Failed.
     pub(crate) fn failed(&self, node: &str) -> Vec<&Service> {
         self.sorted(node)
             .into_iter()
-            .filter(|s| matches!(s.state.as_str(), "failed" | "partial"))
+            .filter(|s| services::needs_you(s))
             .collect()
     }
 
@@ -128,10 +129,22 @@ impl HostPage {
             let running = listed.iter().filter(|s| s.state == "running").count();
             facts.push(format!("{running} of {} services running", listed.len()));
         }
+        // The headline names what to look at; the lines under it say why.
+        let mut names: Vec<String> = troubles
+            .iter()
+            .map(|x| match x.figure {
+                Some(f) => f.name(Some(r)),
+                None => x.text.clone(),
+            })
+            .collect();
+        if unread.is_some() {
+            names.push("the services".into());
+        }
+        names.extend(failed.iter().map(|s| s.name.clone()));
+        names.dedup();
         let (words, colour) = match n {
             0 => ("All right".to_string(), t.text),
-            1 => ("One thing to look at".to_string(), t.error),
-            n => (format!("{n} things to look at"), t.error),
+            _ => (format!("Look at {}", store::listed(&names, 3)), t.error),
         };
         let mut out = div().flex().flex_col().gap(px(size::LABEL_BOTTOM)).child(
             div()
@@ -169,7 +182,10 @@ impl HostPage {
             );
         }
         for service in failed {
-            let text = format!("Service {} {}", service.name, services::state_word(service));
+            let text = match services::unknown_why(service) {
+                Some(why) => format!("{}: {}", service.name, lower_first(&why)),
+                None => format!("Service {} {}", service.name, services::state_word(service)),
+            };
             let selector = format!("host-trouble-{text}");
             let chosen = Chosen::Service(id.to_owned(), service.id.clone());
             out = out.child(
@@ -180,7 +196,7 @@ impl HostPage {
                     .gap(px(size::HEAD_GAP))
                     .text_color(t.error)
                     .child(div().flex_none().child(text))
-                    .child(pane::meta(t, "Show its log", Some(t.text2)))
+                    .child(pane::meta(t, "Show it", Some(t.text2)))
                     .on_click(cx.listener(move |page, _, _, cx| {
                         page.reveal = true;
                         page.choose(chosen.clone(), cx)
@@ -215,8 +231,10 @@ impl HostPage {
                 .gap_x(px(size::SECTION_GAP))
                 .gap_y(px(tokens::BAND_GAP))
         } else {
+            // As wide as its longest line (a card's whole name), so
+            // nothing is cut beside a chart that has the room.
             div()
-                .w(px(tokens::LEGEND_W))
+                .min_w(px(tokens::LEGEND_W))
                 .flex_none()
                 .flex()
                 .flex_col()
@@ -459,6 +477,15 @@ impl HostPage {
             })
             .collect();
         pane::section(t, "Heavy now").child(pane::table(t, &HEAVY, rows))
+    }
+}
+
+/// A sentence as a clause: "No unit" reads "no unit" after a colon.
+fn lower_first(s: &str) -> String {
+    let mut chars = s.chars();
+    match chars.next() {
+        Some(c) => c.to_lowercase().chain(chars).collect(),
+        None => String::new(),
     }
 }
 

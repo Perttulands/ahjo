@@ -457,6 +457,22 @@ pub fn program(h: &Heavy) -> String {
 }
 
 /// What one figure reads now, in words: `2.9 GiB of 31 GiB (9.4%)`.
+/// Names in a sentence, at most `most` of them: "A", "A and B",
+/// "A, B and C", "A, B and 2 more".
+pub fn listed(names: &[String], most: usize) -> String {
+    let shown = names.len().min(most.max(1));
+    let rest = names.len() - shown;
+    let mut parts: Vec<String> = names[..shown].to_vec();
+    if rest > 0 {
+        parts.push(format!("{rest} more"));
+    }
+    match parts.split_last() {
+        Some((last, [])) => last.clone(),
+        Some((last, first)) => format!("{} and {last}", first.join(", ")),
+        None => String::new(),
+    }
+}
+
 pub fn reading_words(figure: Figure, r: &Reading) -> String {
     let p = percent(figure.now(r));
     match figure.whole(r) {
@@ -605,6 +621,18 @@ pub fn labelled(ticks: &[u64], start: u64, end: u64, width: f32, label: f32) -> 
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn names_read_as_a_sentence() {
+        let n = |v: &[&str]| v.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        assert_eq!(listed(&n(&["Ledger"]), 3), "Ledger");
+        assert_eq!(listed(&n(&["Ledger", "Memory"]), 3), "Ledger and Memory");
+        assert_eq!(listed(&n(&["A", "B", "C"]), 3), "A, B and C");
+        assert_eq!(
+            listed(&n(&["A", "B", "C", "D", "E"]), 3),
+            "A, B, C and 2 more"
+        );
+    }
+
     use super::*;
     use ahjo_host_contract::Gpu;
 

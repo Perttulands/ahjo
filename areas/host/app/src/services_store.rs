@@ -222,14 +222,49 @@ pub fn looping(s: &Service) -> bool {
     s.components.iter().any(|c| c.sub == "auto-restart")
 }
 
+/// Whether a service needs the operator: what the list puts under
+/// Failed. The verdict and the machine's row count the same.
+pub fn needs_you(s: &Service) -> bool {
+    Group::of(&s.state) == Group::Failed
+}
+
 /// A service's state in the list's few words: a failed one that systemd
-/// keeps restarting says so.
+/// keeps restarting says so, and one whose unit this machine does not
+/// have says that.
 pub fn state_word(s: &Service) -> &str {
     if s.state == "failed" && looping(s) {
         "keeps restarting"
+    } else if missing(s).is_some() {
+        "no such unit"
     } else {
         word(&s.state)
     }
+}
+
+/// The unit of a service that this machine does not have, if any.
+pub fn missing(s: &Service) -> Option<&str> {
+    (s.state == "unknown")
+        .then(|| s.components.iter().find(|c| c.sub == "not-found"))
+        .flatten()
+        .map(|c| c.unit.as_str())
+}
+
+/// Why a service's state is not known, in a sentence: a unit this machine
+/// does not have, one systemd will not load, or one it did not answer
+/// about. None for a known state.
+pub fn unknown_why(s: &Service) -> Option<String> {
+    if s.state != "unknown" {
+        return None;
+    }
+    if let Some(unit) = missing(s) {
+        return Some(format!("No unit named {unit} on this machine"));
+    }
+    let c = s.components.iter().find(|c| c.state == "unknown")?;
+    Some(match c.sub.as_str() {
+        "" => format!("systemd did not say how {} is", c.unit),
+        "masked" => format!("{} is masked: systemd will not start it", c.unit),
+        why => format!("systemd cannot load {}: {why}", c.unit),
+    })
 }
 
 /// The lines of a log from before the service's current run, when it
@@ -670,6 +705,29 @@ mod tests {
         assert_eq!(Group::of("failed"), Group::Failed);
         assert_eq!(Group::of("partial"), Group::Failed);
         assert_eq!(Group::of("unknown"), Group::Failed);
+        let mut s = Service {
+            state: "unknown".into(),
+            components: vec![ahjo_host_contract::Component {
+                unit: "ledger.service".into(),
+                state: "unknown".into(),
+                sub: "not-found".into(),
+                ..Default::default()
+            }],
+            ..Service::default()
+        };
+        assert!(needs_you(&s), "what the list puts under Failed needs you");
+        assert_eq!(state_word(&s), "no such unit");
+        assert_eq!(
+            unknown_why(&s).as_deref(),
+            Some("No unit named ledger.service on this machine")
+        );
+        s.components[0].sub.clear();
+        assert_eq!(
+            unknown_why(&s).as_deref(),
+            Some("systemd did not say how ledger.service is")
+        );
+        s.state = "stopped".into();
+        assert!(!needs_you(&s) && unknown_why(&s).is_none());
         assert_eq!(Group::of("stopping"), Group::Running);
     }
 

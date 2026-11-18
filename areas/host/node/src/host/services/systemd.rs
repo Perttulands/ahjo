@@ -111,9 +111,13 @@ pub fn shown(show: &str, now: u64, clock: u64) -> State {
             .find_map(|l| l.strip_prefix(name)?.strip_prefix('='))
             .unwrap_or("")
     };
-    if field("LoadState") != "loaded" {
+    // Not loaded: systemd's word for why (`not-found`, `masked`) is the
+    // finer word, so the app can say there is no such unit.
+    let load = field("LoadState");
+    if load != "loaded" {
         return State {
             state: "unknown".into(),
+            sub: load.to_owned(),
             ..State::default()
         };
     }
@@ -354,6 +358,11 @@ mod tests {
             state("LoadState=not-found\nActiveState=inactive"),
             "unknown",
             "a unit systemd does not know is unknown, not stopped"
+        );
+        assert_eq!(
+            shown("LoadState=not-found\nActiveState=inactive", 0, 0).sub,
+            "not-found",
+            "and says why"
         );
         assert_eq!(
             state("LoadState=loaded\nActiveState=maintenance"),

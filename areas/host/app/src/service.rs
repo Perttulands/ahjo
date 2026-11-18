@@ -80,7 +80,8 @@ impl HostPage {
         }
 
         let group = Group::of(&s.state);
-        let mut state = n.shown(s).to_string();
+        let why = services::unknown_why(s).filter(|_| !n.changing.contains_key(&s.id));
+        let mut state = why.clone().unwrap_or_else(|| n.shown(s).to_string());
         if let Some(since) = s.since() {
             state.push_str(&format!(" for {}", services::ago(since, now)));
         }
@@ -170,7 +171,9 @@ impl HostPage {
         if !s.components.is_empty() {
             let mut units = div().flex().flex_col();
             for c in &s.components {
-                let state = if c.sub.is_empty() || c.sub == c.state {
+                let state = if c.sub == "not-found" {
+                    "not on this machine".to_string()
+                } else if c.sub.is_empty() || c.sub == c.state {
                     c.state.clone()
                 } else {
                     format!("{} ({})", c.state, c.sub)
@@ -220,14 +223,17 @@ impl HostPage {
             .flex_col()
             .gap(px(size::SECTION_GAP))
             .child(lines)
-            .child(self.log(
-                t,
-                n.logs.get(&s.id),
-                s.since().filter(|_| s.state == "running"),
-                unfolded,
-                key,
-                cx,
-            ));
+            // A unit this machine does not have logs nothing to read.
+            .when(services::missing(s).is_none(), |d| {
+                d.child(self.log(
+                    t,
+                    n.logs.get(&s.id),
+                    s.since().filter(|_| s.state == "running"),
+                    unfolded,
+                    key,
+                    cx,
+                ))
+            });
         pane::detail(t, "services-detail", head, body)
     }
 

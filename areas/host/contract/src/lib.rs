@@ -269,7 +269,8 @@ pub struct Component {
     /// `active`, `inactive`, `failed`, `activating`, `deactivating`,
     /// `reloading` or `unknown`.
     pub state: String,
-    /// systemd's finer word (`running`, `dead`, `auto-restart`), if any.
+    /// systemd's finer word (`running`, `dead`, `auto-restart`), if any;
+    /// for a unit it has not loaded, why (`not-found`, `masked`).
     #[serde(default)]
     pub sub: String,
     /// When it entered its state, Unix ms.

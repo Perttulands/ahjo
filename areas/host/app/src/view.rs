@@ -86,6 +86,13 @@ impl Render for HostPage {
     }
 }
 
+/// A catalog of one service, as the empty list shows it: enough of the
+/// format to start from.
+const CATALOG_EXAMPLE: &str = "{\"services\": [{\"id\": \"web\", \"name\": \"Web\",
+  \"link\": \"http://127.0.0.1:8080\",
+  \"components\": [{\"kind\": \"http\",
+    \"url\": \"http://127.0.0.1:8080/\"}]}]}";
+
 impl HostPage {
     /// One node's rows join `out`, each a child of the list so the keys
     /// can scroll to it; `chosen_at` is where the chosen row stands.
@@ -119,17 +126,50 @@ impl HostPage {
         out.push(self.machine_row(t, node, chosen == Some(&machine), cx));
         let n = self.services.nodes.get(id);
         if let Some(how) = n.and_then(|n| n.no_catalog()) {
-            let words = format!("No services are listed on this node. To show them, {how}.");
+            let words =
+                format!("No services are listed on this node. To show them, {how}, like this:");
             out.push(
                 div()
                     .debug_selector(|| "host-no-catalog".into())
                     .flex_none()
                     .px(px(size::ROW_PAD))
                     .py(px(size::LABEL_BOTTOM))
+                    .flex()
+                    .flex_col()
+                    .gap(px(size::LABEL_BOTTOM))
                     .text_size(px(size::SMALL))
                     .text_color(t.dim)
                     .whitespace_normal()
                     .child(words)
+                    .child(
+                        div()
+                            .debug_selector(|| "host-catalog-example".into())
+                            .p(px(size::LABEL_BOTTOM))
+                            .rounded(px(size::RADIUS))
+                            .bg(t.raised)
+                            .text_color(t.text2)
+                            .child(CATALOG_EXAMPLE),
+                    )
+                    .child(
+                        div()
+                            .flex()
+                            .items_baseline()
+                            .gap(px(size::HEAD_GAP))
+                            .child(div().flex_1().min_w_0().child(
+                                "A component is an \"http\" probe, a \"systemd-user\" unit (with \"user\") or a \"systemd-system\" unit.",
+                            ))
+                            .child(
+                                pane::act(t, "host-catalog-copy", "Copy")
+                                    .debug_selector(|| "host-catalog-copy".into())
+                                    .tooltip(kit::tip("Copy the example"))
+                                    .on_click(cx.listener(|page, _, _, cx| {
+                                        cx.write_to_clipboard(gpui::ClipboardItem::new_string(
+                                            CATALOG_EXAMPLE.to_string(),
+                                        ));
+                                        page.host.toast("Example copied", cx);
+                                    })),
+                            ),
+                    )
                     .into_any_element(),
             );
         }
