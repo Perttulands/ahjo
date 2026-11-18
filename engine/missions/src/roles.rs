@@ -154,7 +154,7 @@ impl RoleStore {
         check_role_id(id)?;
         let text = match links::read_definition(&self.dir.join(format!("{id}.toml"))) {
             Err(error) if error.code == "not_found" => {
-                return builtin(id).ok_or_else(|| Error::new("not_found", format!("role {id:?}")));
+                return builtin(id).ok_or_else(|| missing_role(id));
             }
             other => other?,
         };
@@ -255,6 +255,14 @@ pub(crate) fn check_role_id(id: &str) -> Result<(), Error> {
             format!("role {id:?} must be lowercase letters, digits and dashes"),
         ))
     }
+}
+
+/// No role has this id: said with where the roles are listed.
+pub(crate) fn missing_role(id: &str) -> Error {
+    Error::new(
+        "not_found",
+        format!("no role {id:?}; ahjo role list shows them"),
+    )
 }
 
 #[cfg(test)]

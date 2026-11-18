@@ -317,6 +317,38 @@ async fn delete(
     reply(s.delete(&id, tag(&headers)))
 }
 
+/// A role as `role list` gives it unless asked for every field: what tells
+/// one from another, and its status only when it is not active.
+fn summary(role: &Value) -> Value {
+    let mut short = serde_json::Map::new();
+    for key in ["id", "displayName", "summary"] {
+        if let Some(value) = role.get(key) {
+            short.insert(key.into(), value.clone());
+        }
+    }
+    if let Some(status) = role.get("status").filter(|s| *s != "active") {
+        short.insert("status".into(), status.clone());
+    }
+    Value::Object(short)
+}
+
+/// `role list` unless asked for every field: each role in short, and the
+/// role files that do not read, if any; not the harnesses and efforts a
+/// role can be staffed with.
+fn summary_list(listed: &Value) -> Value {
+    let roles: Vec<Value> = (listed["roles"].as_array().into_iter().flatten())
+        .map(summary)
+        .collect();
+    let mut short = json!({ "roles": roles });
+    if listed["unreadable"]
+        .as_array()
+        .is_some_and(|u| !u.is_empty())
+    {
+        short["unreadable"] = listed["unreadable"].clone();
+    }
+    short
+}
+
 pub fn commands(s: Arc<Service>, node: String) -> Vec<Command> {
     const NAMES: &[&str] = &[
         "role_list",
@@ -332,8 +364,8 @@ pub fn commands(s: Arc<Service>, node: String) -> Vec<Command> {
     NAMES.iter().map(|&name| {
         let (s, node) = (s.clone(), node.clone());
         let description = match name {
-            "role_list" => "List the roles a seat can take; --capable filters by capability.",
-            "role_inspect" => "Print one role.",
+            "role_list" => "List the roles a seat can take, each its id, name and summary; --capable filters by capability, --full adds every field and the harnesses and efforts to staff them with.",
+            "role_inspect" => "Print one role, every field.",
             "role_usage" => "Show where a role is used.",
             "role_new" => "Add a role to the library.",
             "role_edit" => "Change a role with a JSON change object.",
@@ -344,7 +376,7 @@ pub fn commands(s: Arc<Service>, node: String) -> Vec<Command> {
         };
         Command::new(name, description, move || {
             let (props, required) = match name {
-                "role_list" => (json!({"capable":{"type":"string"},"assignable":{"type":"boolean"}}), vec![]),
+                "role_list" => (json!({"capable":{"type":"string"},"assignable":{"type":"boolean"},"full":{"type":"boolean"}}), vec![]),
                 "role_characters" => (json!({}), vec![]),
                 "role_new" => (json!({"role":{"type":"string"},"display_name":{"type":"string"},"kind":{"type":"string"},"summary":{"type":"string"},"capabilities":{"type":"array","items":{"type":"string"}},"personality":{"type":"string"}}), vec!["role"]),
                 "role_edit" => (json!({"role":{"type":"string"},"change":{"type":"object"},"etag":{"type":"string"}}), vec!["role", "change"]),
@@ -356,7 +388,13 @@ pub fn commands(s: Arc<Service>, node: String) -> Vec<Command> {
                 let id = text(&args, "role");
                 let version = || -> Result<String, Error> { match args["etag"].as_str() { Some(tag) => Ok(tag.into()), None => Ok(s.read(id)?.etag) } };
                 let mut result = match name {
-                    "role_list" => serde_json::to_value(s.list(&Filter { capable: args["capable"].as_str().map(str::to_owned), assignable: args["assignable"].as_bool().unwrap_or(false) })?).map_err(bad)?,
+                    "role_list" => {
+                        let mut listed = serde_json::to_value(s.list(&Filter { capable: args["capable"].as_str().map(str::to_owned), assignable: args["assignable"].as_bool().unwrap_or(false) })?).map_err(bad)?;
+                        if !args["full"].as_bool().unwrap_or(false) {
+                            listed = summary_list(&listed);
+                        }
+                        listed
+                    }
                     "role_inspect" => json!(s.read(id)?),
                     "role_usage" => json!(s.usage(id)?),
                     "role_new" => json!(s.create(&json!({"id":id,"displayName":text(&args,"display_name"),"kind":text(&args,"kind"),"summary":text(&args,"summary"),"capabilities":args.get("capabilities").cloned().unwrap_or(json!([])),"personality":text(&args,"personality")}))?),

@@ -15,7 +15,7 @@ const USAGE: &str = "ahjo: the node of Ahjo Swarm, and the command line over its
 usage:
   ahjo <noun> <verb> [args] [--json] [--node id|url]   a command of the node, e.g. ahjo session list
   ahjo <noun> [--node id|url]                          a noun's verbs and their arguments
-  ahjo help [noun] [--node id|url]                     the node's commands
+  ahjo help [noun|--all] [--node id|url]               the nouns; a noun's verbs; every command
   ahjo version [--json] [--node addr:port]             this build, and the node that answers
   ahjo serve [--config file] [--listen addr:port]      run the node here, in the foreground
   ahjo install [--app file] [--root dir] ...           this build as a systemd user unit
@@ -33,7 +33,7 @@ Exit codes: 0 done, 1 the command failed, 2 the command line was wrong, 3 no nod
 const SERVE_USAGE: &str = "usage: ahjo serve [--config file] [--listen addr:port]";
 const MCP_USAGE: &str = "usage: ahjo mcp [--node addr:port]";
 const VERSION_USAGE: &str = "usage: ahjo version [--json] [--node addr:port]";
-const HELP_USAGE: &str = "usage: ahjo help [noun] [--node id|url]";
+const HELP_USAGE: &str = "usage: ahjo help [noun|--all] [--node id|url]";
 
 /// What `ahjo <command> --help` says for the binary's own commands.
 fn own_help(command: &str) -> Option<String> {
@@ -69,7 +69,10 @@ when no node answers. ahjo --version prints only this build's.
         ),
         "help" => format!(
             "{HELP_USAGE}
-List the node's commands, or with a noun its verbs and their arguments.
+List the node's nouns, each with its verbs; with a noun, its verbs and their
+arguments; with --all, every command with what it does.
+
+  --all   every command, one line each
 
   --node  id|url: the node whose commands to list (default: this machine's)"
         ),
@@ -182,7 +185,7 @@ async fn run(command: &str, args: &[String]) -> Result<i32> {
 
 /// `ahjo help`: the usage and the node's commands, or one noun's verbs.
 async fn help(args: &[String]) -> Result<i32> {
-    let (noun, node) = help_arguments(args)?;
+    let (noun, all, node) = help_arguments(args)?;
     if let Some(noun) = noun {
         if let Some(own) = own_help(noun) {
             println!("{own}");
@@ -194,10 +197,19 @@ async fn help(args: &[String]) -> Result<i32> {
         return cli::run(noun, &node, &mut std::io::stdout()).await;
     }
     println!("{USAGE}");
-    match cli::overview(node).await {
-        Ok(commands) => {
-            println!("\nCommands from the running node (ahjo <noun> <verb> --help):\n{commands}")
-        }
+    let commands = match all {
+        true => cli::overview(node).await.map(|commands| {
+            format!("\nEvery command of the running node (ahjo <noun> <verb> --help):\n{commands}")
+        }),
+        false => cli::index(node).await.map(|nouns| {
+            format!(
+                "\nThe running node's nouns and their verbs. ahjo <noun> says what each verb \
+                 does;\nahjo help --all lists every command.\n{nouns}"
+            )
+        }),
+    };
+    match commands {
+        Ok(commands) => println!("{commands}"),
         // Help is still help with no node of one's own running.
         Err(error) if node.is_none() && error.is::<Unreachable>() => println!(
             "\nThe node's commands are listed here while it runs: {error:#}.\n\
@@ -208,12 +220,14 @@ async fn help(args: &[String]) -> Result<i32> {
     Ok(0)
 }
 
-/// The optional noun and node of `ahjo help`.
-fn help_arguments(args: &[String]) -> Result<(Option<&str>, Option<&str>)> {
-    let (mut noun, mut node) = (None, None);
+/// The optional noun, `--all` and node of `ahjo help`.
+fn help_arguments(args: &[String]) -> Result<(Option<&str>, bool, Option<&str>)> {
+    let (mut noun, mut all, mut node) = (None, false, None);
     let mut args = args.iter();
     while let Some(arg) = args.next() {
-        if arg == "--node" {
+        if arg == "--all" && noun.is_none() {
+            all = true;
+        } else if arg == "--node" {
             node = Some(
                 args.next()
                     .filter(|node| !node.is_empty())
@@ -222,13 +236,13 @@ fn help_arguments(args: &[String]) -> Result<(Option<&str>, Option<&str>)> {
             );
         } else if let Some(given) = arg.strip_prefix("--node=").filter(|v| !v.is_empty()) {
             node = Some(given);
-        } else if arg.starts_with('-') || noun.is_some() {
+        } else if arg.starts_with('-') || noun.is_some() || all {
             return Err(usage(format!("unexpected {arg}"), HELP_USAGE));
         } else {
             noun = Some(arg.as_str());
         }
     }
-    Ok((noun, node))
+    Ok((noun, all, node))
 }
 
 /// This build's version, and the version of the node that answers.

@@ -15,7 +15,9 @@ fn answer(name: &str) -> Value {
         "scheduled_list" => {
             json!({"tasks": [{"id": "task-1", "next_run": "2026-11-12T12:00:00Z", "targets": [{"sessionName": "worker"}], "schedule": {"kind": "interval", "everyMinutes": 15}, "paused": false}]})
         }
-        "session_launch" => json!({"session": "worker", "warning": null}),
+        "session_launch" => {
+            json!({"node": "n1", "session": "worker", "warning": null, "pane": 3})
+        }
         _ => unreachable!(),
     }
 }
@@ -77,6 +79,10 @@ async fn plain_cli_formats_nested_responses_and_json_stays_the_same() {
             let expected = format!("{}{}", local.datetime(), local.offset());
             assert!(plain.contains(&format!("at: {expected}")), "{plain}");
             assert!(plain.contains(&format!("at={expected}")), "{plain}");
+        }
+        // The node answering is the one asked: said only in JSON.
+        if name == "session_launch" {
+            assert_eq!(plain, "session: worker\npane: 3\n", "in the node's order");
         }
         if name == "scheduled_list" {
             assert!(plain.contains("next_run=2026-11-12T12:00:00Z"), "{plain}");

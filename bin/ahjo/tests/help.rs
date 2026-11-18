@@ -61,8 +61,8 @@ async fn help_selects_the_requested_node_instead_of_the_local_node() {
                 String::from_utf8_lossy(&out.stderr)
             );
             let stdout = String::from_utf8(out.stdout).unwrap();
-            assert!(stdout.contains("ahjo beta show"), "{stdout}");
-            assert!(!stdout.contains("ahjo alpha show"), "{stdout}");
+            assert!(lists(&stdout, "beta"), "{stdout}");
+            assert!(!lists(&stdout, "alpha"), "{stdout}");
         }
     }
     let out = tokio::process::Command::new(env!("CARGO_BIN_EXE_ahjo"))
@@ -72,8 +72,21 @@ async fn help_selects_the_requested_node_instead_of_the_local_node() {
         .await
         .unwrap();
     let stdout = String::from_utf8(out.stdout).unwrap();
-    assert!(stdout.contains("ahjo alpha show"), "{stdout}");
-    assert!(!stdout.contains("ahjo beta show"), "{stdout}");
+    assert!(lists(&stdout, "alpha"), "{stdout}");
+    assert!(!lists(&stdout, "beta"), "{stdout}");
+    // Every command, with what it does, only when asked for all.
+    assert!(!stdout.contains("A test command"), "{stdout}");
+    let out = tokio::process::Command::new(env!("CARGO_BIN_EXE_ahjo"))
+        .args(["help", "--all"])
+        .env("XDG_CONFIG_HOME", &xdg)
+        .output()
+        .await
+        .unwrap();
+    let stdout = String::from_utf8(out.stdout).unwrap();
+    assert!(
+        stdout.contains("ahjo alpha show  A test command"),
+        "{stdout}"
+    );
     for args in [
         vec!["help", "--node"],
         vec!["--help", "--node="],
@@ -90,6 +103,12 @@ async fn help_selects_the_requested_node_instead_of_the_local_node() {
     local.stop().await;
     other.stop().await;
     std::fs::remove_dir_all(xdg).unwrap();
+}
+
+/// Whether help names `noun` on a line of its own with its verb.
+fn lists(help: &str, noun: &str) -> bool {
+    help.lines()
+        .any(|line| line.split_whitespace().eq([noun, "show"]))
 }
 
 fn ahjo(args: &[&str]) -> std::process::Output {

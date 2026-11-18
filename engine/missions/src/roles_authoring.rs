@@ -33,7 +33,7 @@ impl RoleStore {
             Ok(raw) => Ok(raw),
             Err(error) if error.code == "not_found" => crate::roles::builtin(id)
                 .map(|c| new_document(&c).to_string())
-                .ok_or_else(|| Error::new("not_found", format!("role {id:?}"))),
+                .ok_or_else(|| crate::roles::missing_role(id)),
             Err(e) => Err(e),
         }
     }

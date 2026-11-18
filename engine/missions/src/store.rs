@@ -94,7 +94,10 @@ impl Store {
             .collect();
         match matches.as_slice() {
             [listing] => Ok(listing.slug.clone()),
-            [] => Err(Error::new("not_found", format!("mission {selector:?}"))),
+            [] => Err(Error::new(
+                "not_found",
+                format!("no mission {selector:?}; ahjo mission list shows them"),
+            )),
             many => Err(Error::new(
                 "ambiguous_selector",
                 format!("mission {selector:?} matched {} missions", many.len()),

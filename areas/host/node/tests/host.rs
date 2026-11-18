@@ -185,10 +185,15 @@ async fn services_and_commands_use_the_same_catalog_and_coded_errors() {
     let host = node.call("host_show", json!({})).await.unwrap();
     assert_eq!(host["node"], node.id());
     assert!(host["facts"]["threads"].as_u64().is_some_and(|n| n > 0));
+    // Processes and events only when asked for in full.
+    assert!(host.get("events").is_none(), "{host}");
+    assert!(host["latest"].get("heavy").is_none(), "{host}");
+    let full = node.call("host_show", json!({"full": true})).await.unwrap();
+    assert!(full["events"].is_array(), "{full}");
     #[cfg(target_os = "linux")]
     {
         assert!(host["latest"]["memory"].is_object());
-        assert!(!host["latest"]["heavy"].as_array().unwrap().is_empty());
+        assert!(!full["latest"]["heavy"].as_array().unwrap().is_empty());
         assert!(!host["latest"]["disks"].as_array().unwrap().is_empty());
     }
 

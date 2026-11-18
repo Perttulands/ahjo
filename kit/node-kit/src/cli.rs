@@ -68,9 +68,14 @@ pub async fn run(noun: &str, args: &[String], out: &mut impl Write) -> Result<i3
             "" => String::new(),
             off => format!("; turned off on this node: {off}"),
         };
+        let known = nouns(&tools);
+        let nearest = match nearest(noun, known.iter().map(String::as_str)) {
+            Some(near) => format!(" (did you mean {near}?)"),
+            None => String::new(),
+        };
         return Err(usage_error(format!(
-            "no command {noun}; this node's commands are {}{off}",
-            nouns(&tools).join(", ")
+            "no command {noun}{nearest}; this node's commands are {}{off}",
+            known.join(", ")
         )));
     }
     let Some(verb) = args.first().filter(|v| !v.starts_with('-')) else {
@@ -79,9 +84,13 @@ pub async fn run(noun: &str, args: &[String], out: &mut impl Write) -> Result<i3
     };
     let tool_name = format!("{noun}_{}", verb.replace('-', "_"));
     let Some(tool) = ours.iter().find(|t| name(t) == tool_name) else {
+        let names: Vec<String> = ours.iter().map(|t| verb_of(noun, t)).collect();
+        let nearest = match nearest(verb, names.iter().map(String::as_str)) {
+            Some(near) => format!(" (did you mean ahjo {noun} {near}?)"),
+            None => String::new(),
+        };
         return Err(usage_error(format!(
-            "no command {noun} {verb}; {noun} has\n{}",
-            verbs(noun, &ours)
+            "no command {noun} {verb}{nearest}; ahjo {noun} lists its verbs"
         )));
     };
     let rest = &args[1..];
@@ -97,8 +106,8 @@ pub async fn run(noun: &str, args: &[String], out: &mut impl Write) -> Result<i3
         .collect();
     let mut arguments = parse(&tool["inputSchema"], &rest)
         .map_err(|error| usage_error(format!("{error:#}\nusage: {}", usage(noun, verb, tool))))?;
-    if let Some(on) = on {
-        arguments["node"] = Value::String(on);
+    if let Some(on) = &on {
+        arguments["node"] = Value::String(on.clone());
     }
     let answer = call(&client, &tool_name, arguments).await?;
     let failed = answer["isError"].as_bool().unwrap_or(false);
@@ -111,18 +120,54 @@ pub async fn run(noun: &str, args: &[String], out: &mut impl Write) -> Result<i3
         }
         return Ok(1);
     }
-    let value: Value = serde_json::from_str(text).unwrap_or_else(|_| Value::String(text.into()));
+    let mut value: Value =
+        serde_json::from_str(text).unwrap_or_else(|_| Value::String(text.into()));
     if json_out {
         writeln!(out, "{}", serde_json::to_string_pretty(&value)?)?;
     } else {
+        // Which node answered is the one asked, named or this machine's:
+        // said only where it is another than the one named.
+        if let Some(fields) = value.as_object_mut()
+            && fields
+                .get("node")
+                .and_then(Value::as_str)
+                .is_some_and(|node| on.as_deref().is_none_or(|on| on == node))
+        {
+            fields.shift_remove("node");
+        }
         write!(out, "{}", render(&value))?;
     }
     Ok(0)
 }
 
-/// The commands, one line each, for `ahjo help`.
+/// The commands, one line each, for `ahjo help --all`.
 pub async fn overview(node: Option<&str>) -> Result<String> {
     Ok(listing(&list(&NodeClient::new(node)?).await?))
+}
+
+/// The nouns, each on one line with its verbs, for `ahjo help`.
+pub async fn index(node: Option<&str>) -> Result<String> {
+    Ok(noun_index(&list(&NodeClient::new(node)?).await?))
+}
+
+/// One line per noun: the noun, then its verbs, nouns in the order the
+/// node first names them.
+fn noun_index(tools: &[Value]) -> String {
+    let mut nouns: Vec<(&str, Vec<String>)> = Vec::new();
+    for t in tools {
+        let (noun, verb) = name(t).split_once('_').unwrap_or((name(t), ""));
+        let verb = verb.replace('_', "-");
+        match nouns.iter_mut().find(|(n, _)| *n == noun) {
+            Some((_, verbs)) => verbs.push(verb),
+            None => nouns.push((noun, vec![verb])),
+        }
+    }
+    let width = nouns.iter().map(|(n, _)| n.len()).max().unwrap_or(0);
+    nouns
+        .iter()
+        .map(|(noun, verbs)| format!("  {noun:width$}  {}", verbs.join(" ")))
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 /// One line per command, each noun's commands together, nouns in the order
@@ -221,15 +266,76 @@ fn nouns(tools: &[Value]) -> Vec<String> {
     nouns
 }
 
+fn verb_of(noun: &str, tool: &Value) -> String {
+    name(tool)[noun.len() + 1..].replace('_', "-")
+}
+
 fn verbs(noun: &str, tools: &[&Value]) -> String {
     tools
         .iter()
         .map(|t| {
-            let verb = name(t)[noun.len() + 1..].replace('_', "-");
+            let verb = verb_of(noun, t);
             format!("  {}\n      {}", usage(noun, &verb, t), first_line(t))
         })
         .collect::<Vec<_>>()
         .join("\n")
+}
+
+/// Words that ask for the same thing, as a caller from another tool might
+/// say it: the first of a group the noun has answers for any of them.
+const ALIKE: &[&[&str]] = &[
+    &[
+        "show", "inspect", "status", "read", "get", "view", "info", "cat",
+    ],
+    &["list", "ls", "all"],
+    &["delete", "remove", "rm", "kill", "retire"],
+    &["create", "new", "add", "make"],
+    &["edit", "update", "set", "change"],
+    &["run", "start", "launch"],
+    &["search", "find", "grep", "query", "locate"],
+];
+
+/// The known word `typed` most likely meant: one asking for the same
+/// thing, one it begins or that begins it, or one a slip or two away.
+fn nearest<'a>(typed: &str, known: impl Iterator<Item = &'a str> + Clone) -> Option<&'a str> {
+    let typed = typed.to_lowercase();
+    let alike = ALIKE
+        .iter()
+        .filter(|group| group.contains(&typed.as_str()))
+        .flat_map(|group| group.iter())
+        .find_map(|word| known.clone().find(|k| k == word));
+    if alike.is_some() {
+        return alike;
+    }
+    let mut prefixed = known
+        .clone()
+        .filter(|k| typed.len() >= 2 && (k.starts_with(&typed) || typed.starts_with(*k)));
+    if let (Some(only), None) = (prefixed.next(), prefixed.next()) {
+        return Some(only);
+    }
+    known
+        .map(|k| (distance(&typed, k), k))
+        .filter(|(d, k)| *d <= 2 && *d < k.len().max(typed.len()) / 2 + 1)
+        .min_by_key(|(d, _)| *d)
+        .map(|(_, k)| k)
+}
+
+/// Edits (insert, delete, replace) that turn `a` into `b`.
+fn distance(a: &str, b: &str) -> usize {
+    let b: Vec<char> = b.chars().collect();
+    let mut row: Vec<usize> = (0..=b.len()).collect();
+    for (i, ca) in a.chars().enumerate() {
+        let mut diagonal = row[0];
+        row[0] = i + 1;
+        for (j, cb) in b.iter().enumerate() {
+            let above = row[j + 1];
+            row[j + 1] = (above + 1)
+                .min(row[j] + 1)
+                .min(diagonal + usize::from(ca != *cb));
+            diagonal = above;
+        }
+    }
+    row[b.len()]
 }
 
 /// `ahjo noun verb <required>... [--optional value]...`
@@ -239,8 +345,12 @@ fn usage(noun: &str, verb: &str, tool: &Value) -> String {
     for r in required(schema) {
         line.push_str(&format!(" <{r}>"));
     }
+    let lone = lone(schema);
+    if let Some(lone) = &lone {
+        line.push_str(&format!(" [<{lone}>]"));
+    }
     for (key, spec) in properties(schema) {
-        if required(schema).contains(&key.as_str()) {
+        if required(schema).contains(&key.as_str()) || lone.as_ref() == Some(&key) {
             continue;
         }
         let flag = key.replace('_', "-");
@@ -264,7 +374,8 @@ fn help(noun: &str, verb: &str, tool: &Value) -> String {
     let needed = required(schema);
     let mut all = properties(schema);
     all.sort_by_key(|(key, _)| needed.iter().position(|r| r == key).unwrap_or(needed.len()));
-    let label = |key: &str| match needed.contains(&key) {
+    let lone = lone(schema);
+    let label = |key: &str| match needed.contains(&key) || lone.as_deref() == Some(key) {
         true => format!("<{key}>"),
         false => format!("--{}", key.replace('_', "-")),
     };
@@ -301,6 +412,17 @@ fn properties(schema: &Value) -> Vec<(String, Value)> {
                 .collect()
         })
         .unwrap_or_default()
+}
+
+/// A command's one argument, when it is optional text: given without its
+/// flag too, as `ahjo file list <path>`, since nothing else could be meant.
+fn lone(schema: &Value) -> Option<String> {
+    match properties(schema).as_slice() {
+        [(key, spec)] if required(schema).is_empty() && spec["type"] == "string" => {
+            Some(key.clone())
+        }
+        _ => None,
+    }
 }
 
 fn required(schema: &Value) -> Vec<&str> {
@@ -353,10 +475,12 @@ fn parse(schema: &Value, args: &[String]) -> Result<Value> {
             }
         }
     }
+    let needed = required(schema).len();
     let mut waiting = required(schema)
         .into_iter()
-        .filter(|r| !out.contains_key(*r))
         .map(str::to_owned)
+        .chain(lone(schema))
+        .filter(|r| !out.contains_key(r))
         .collect::<Vec<_>>()
         .into_iter()
         .peekable();
@@ -378,7 +502,7 @@ fn parse(schema: &Value, args: &[String]) -> Result<Value> {
         }
         out.insert(key.clone(), typed(&key, &s, &p)?);
     }
-    if let Some(missing) = waiting.next() {
+    if let Some(missing) = waiting.next().filter(|_| needed > 0) {
         bail!("missing <{missing}>");
     }
     Ok(Value::Object(out))
@@ -589,6 +713,56 @@ mod tests {
                 "ahjo run wait"
             ]
         );
+    }
+
+    #[test]
+    fn help_names_each_noun_once_with_its_verbs() {
+        let tools: Vec<Value> = [
+            "session_list",
+            "agents_hook_add",
+            "session_read",
+            "agents_show",
+        ]
+        .iter()
+        .map(|n| json!({"name": n, "description": "Does it."}))
+        .collect();
+        assert_eq!(
+            noun_index(&tools),
+            "  session  list read\n  agents   hook-add show"
+        );
+    }
+
+    #[test]
+    fn a_mistyped_word_finds_the_one_meant_or_none() {
+        let verbs = ["list", "inspect", "status", "history", "hook-add"];
+        let near = |typed| nearest(typed, verbs.iter().copied());
+        assert_eq!(near("show"), Some("inspect"), "asks for the same");
+        assert_eq!(near("lst"), Some("list"), "a slip");
+        assert_eq!(near("hist"), Some("history"), "the start of it");
+        assert_eq!(near("hook_add"), Some("hook-add"));
+        assert_eq!(near("nonsense"), None);
+        assert_eq!(near("x"), None);
+        let nouns = ["session", "file", "scheduled"];
+        assert_eq!(nearest("sessions", nouns.iter().copied()), Some("session"));
+    }
+
+    #[test]
+    fn a_lone_optional_argument_may_go_without_its_flag() {
+        let one = json!({"type": "object", "properties": {"path": {"type": "string"}}});
+        assert_eq!(
+            parse(&one, &args(&["/srv"])).unwrap(),
+            json!({"path": "/srv"})
+        );
+        assert_eq!(parse(&one, &args(&[])).unwrap(), json!({}));
+        assert!(parse(&one, &args(&["/srv", "/tmp"])).is_err());
+        let tool = json!({"name": "file_list", "inputSchema": one});
+        assert_eq!(
+            usage("file", "list", &tool),
+            "ahjo file list [<path>] [--json] [--node id|url]"
+        );
+        let two = json!({"type": "object", "properties": {
+            "path": {"type": "string"}, "all": {"type": "boolean"}}});
+        assert!(parse(&two, &args(&["/srv"])).is_err(), "two could be meant");
     }
 
     fn schema() -> Value {

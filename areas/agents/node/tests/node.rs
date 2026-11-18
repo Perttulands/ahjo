@@ -277,6 +277,17 @@ async fn role_routes_and_commands_keep_versions_and_usage() {
             .unwrap()["id"],
         "editor"
     );
+    // A list gives what tells roles apart; every field when asked.
+    let listed = node.call("role_list", json!({})).await.unwrap();
+    let editor = (listed["roles"].as_array().unwrap().iter())
+        .find(|r| r["id"] == "editor")
+        .unwrap();
+    assert_eq!(editor["displayName"], "Editor", "{listed}");
+    assert!(editor.get("schema").is_none(), "{listed}");
+    assert!(listed.get("harnesses").is_none(), "{listed}");
+    let full = node.call("role_list", json!({"full": true})).await.unwrap();
+    assert!(full["roles"][0].get("schema").is_some(), "{full}");
+    assert!(full["harnesses"].is_array(), "{full}");
     node.stop().await;
     std::fs::remove_dir_all(root).unwrap();
 }

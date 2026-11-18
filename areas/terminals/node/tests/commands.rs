@@ -238,7 +238,10 @@ async fn lists_sessions_and_reads_a_screen() {
     let missing = node
         .call("session_read", json!({ "session": "nobody" }))
         .await;
-    assert_eq!(missing.unwrap_err(), "no session nobody");
+    assert_eq!(
+        missing.unwrap_err(),
+        "no session named nobody; ahjo session list shows them"
+    );
     let wrong_pane = node
         .call("session_read", json!({ "session": "alpha", "pane": 99999 }))
         .await;
@@ -361,6 +364,44 @@ async fn presses_keys_reads_history_searches_and_kills() {
         .await
         .unwrap();
     assert_eq!(last["text"].as_str().unwrap().lines().count(), 1, "{last}");
+    assert!(last["cut"].as_str().unwrap().contains("--all"), "{last}");
+
+    // Unasked, a long scrollback is cut to its newest 200 lines, saying so.
+    node.call(
+        "session_keys",
+        json!({ "session": "alpha", "keys": ["seq 1000 1300", "Enter"] }),
+    )
+    .await
+    .unwrap();
+    eventually("the long output ran", || {
+        (capture(&node.tmux, "alpha").lines())
+            .any(|line| line.trim() == "1300")
+            .then_some(())
+    })
+    .await;
+    let cut = node
+        .call("session_history", json!({ "session": "alpha" }))
+        .await
+        .unwrap();
+    let text = cut["text"].as_str().unwrap();
+    assert_eq!(text.lines().count(), 200, "{cut}");
+    assert!(text.contains("1300") && !text.contains("1000"), "{text}");
+    assert!(
+        cut["cut"]
+            .as_str()
+            .unwrap()
+            .starts_with("the newest 200 of "),
+        "{cut}"
+    );
+    let all = node
+        .call(
+            "session_history",
+            json!({ "session": "alpha", "all": true }),
+        )
+        .await
+        .unwrap();
+    assert!(all["text"].as_str().unwrap().contains("\n1000\n"), "{all}");
+    assert!(all["cut"].is_null(), "{all}");
 
     let found = node
         .call("session_search", json!({ "query": "keyed-42" }))
@@ -474,7 +515,7 @@ async fn renames_a_session_unless_the_name_is_taken() {
         )
         .await
         .unwrap_err();
-    assert!(unknown.contains("no session nobody"), "{unknown}");
+    assert!(unknown.contains("no session named nobody"), "{unknown}");
     let bad = node
         .call(
             "session_rename",

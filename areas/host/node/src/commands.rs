@@ -16,7 +16,8 @@ pub(crate) fn commands(services: Arc<Services>, events: Arc<Log>, node: String) 
     [
         (
             "host_show",
-            "This node's host facts, current reading, and recent events.",
+            "This node's host facts and current reading (CPU, memory, swap, disks, GPUs). \
+             --full adds the heaviest processes and recent events.",
         ),
         ("service_list", "List this node's services and their state."),
         (
@@ -38,7 +39,12 @@ pub(crate) fn commands(services: Arc<Services>, events: Arc<Log>, node: String) 
     .map(|(name, description)| {
         let (services, events, node) = (services.clone(), events.clone(), node.clone());
         let schema = move || {
-            if matches!(name, "host_show" | "service_list") {
+            if name == "host_show" {
+                object(
+                    json!({"full": {"type": "boolean", "description": "Add the heaviest processes and recent events."}}),
+                    &[],
+                )
+            } else if name == "service_list" {
                 object(json!({}), &[])
             } else if name == "service_log" {
                 object(
@@ -60,6 +66,14 @@ pub(crate) fn commands(services: Arc<Services>, events: Arc<Log>, node: String) 
             async move {
                 if name == "host_show" {
                     let mut state = host::now(Duration::from_millis(500), &events).await;
+                    if !args["full"].as_bool().unwrap_or(false)
+                        && let Some(fields) = state.as_object_mut()
+                    {
+                        fields.remove("events");
+                        if let Some(latest) = fields.get_mut("latest").and_then(Value::as_object_mut) {
+                            latest.remove("heavy");
+                        }
+                    }
                     state["node"] = json!(node);
                     return Ok(state);
                 }

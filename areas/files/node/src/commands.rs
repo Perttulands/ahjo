@@ -235,6 +235,32 @@ fn work(name: &str, files: &Files, home: Option<&Path>, args: &Value) -> Result<
         return serde_json::to_value(files.locate(query, near.as_deref(), beside)).map_err(bad);
     }
     let at = path(args, "path", home)?;
+    on_path(name, files, home, args, &at).map_err(|error| {
+        let at = Path::new(&at);
+        match error.code.as_str() {
+            ahjo_files_contract::NOT_FOUND if !at.exists() => Error::new(
+                error.code,
+                format!(
+                    "nothing at {}; ahjo file list {} lists what is there",
+                    at.display(),
+                    at.parent().unwrap_or(at).display()
+                ),
+            ),
+            _ => error,
+        }
+    })
+}
+
+/// A command on the file or folder at `at`.
+fn on_path(
+    name: &str,
+    files: &Files,
+    home: Option<&Path>,
+    args: &Value,
+    at: &str,
+) -> Result<Value, Error> {
+    let node = &files.node;
+    let at = at.to_owned();
     match name {
         "file_list" => {
             let l = files.list(&at)?;

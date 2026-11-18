@@ -217,7 +217,12 @@ impl Coordinator {
         ))
     }
     pub fn run(&self, id: &str) -> Result<RunProjection, crate::Error> {
-        if self.ledger(id).is_ok_and(|ledger| !ledger.path().exists()) {
+        // An id no run could have is no run either.
+        if self
+            .ledger(id)
+            .is_err_and(|e| e.kind() == io::ErrorKind::InvalidInput)
+            || self.ledger(id).is_ok_and(|ledger| !ledger.path().exists())
+        {
             return Err(crate::Error::new(
                 "not_found",
                 format!("there is no run {id:?} on this node; ahjo run list shows its runs"),

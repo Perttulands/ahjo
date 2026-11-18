@@ -147,12 +147,14 @@ pub(crate) fn commands(ctx: &Arc<Ctx>) -> Vec<Command> {
         command!(
             ctx,
             "session_history",
-            "Read a pane's whole scrollback and screen as plain text, oldest \
-        line first. Give last to keep only the newest lines.",
+            "Read a pane's scrollback and screen as plain text, oldest line \
+        first: the newest 200 lines, or the newest last lines, or with all every \
+        line. A cut answer says how many lines it left out.",
             |_ctx| {
                 object(
                     target_properties(json!({
-                        "last": { "type": "integer", "description": "Keep only this many lines." },
+                        "last": { "type": "integer", "description": "Keep only this many of the newest lines (200 if not said)." },
+                        "all": { "type": "boolean", "description": "Every line, however many." },
                     })),
                     &["session"],
                 )
@@ -418,18 +420,32 @@ async fn launch_agent(ctx: &Ctx, args: &Value) -> Result<Value> {
     Ok(json!({ "node": ctx.node, "session": session, "warning": warning }))
 }
 
+/// How many of a pane's newest lines `session history` answers with when
+/// not told: a screenful or several, never a whole scrollback unasked.
+const HISTORY_LINES: usize = 200;
+
 async fn history(ctx: &Ctx, args: &Value) -> Result<Value> {
     let (session, pane) = target(ctx, args).await?;
     let (server, own) = ctx.hub.pane(pane).context("the pane went")?;
     let capture = search::capture(server.backend(), own).await?;
     let plain = strip_escapes(&capture);
     let lines: Vec<&str> = plain.trim_end().lines().collect();
-    let keep = match args.get("last") {
-        None | Some(Value::Null) => lines.len(),
-        Some(last) => last.as_u64().context("last is a count of lines")? as usize,
+    let keep = match (args.get("last"), flag(args, "all", false)?) {
+        (None | Some(Value::Null), true) => lines.len(),
+        (None | Some(Value::Null), false) => HISTORY_LINES,
+        (Some(_), true) => bail!("give last or all, not both"),
+        (Some(last), false) => last.as_u64().context("last is a count of lines")? as usize,
     };
-    let text = lines[lines.len().saturating_sub(keep)..].join("\n");
-    Ok(json!({ "node": ctx.node, "session": session.id, "pane": pane, "text": text }))
+    let left_out = lines.len().saturating_sub(keep);
+    let text = lines[left_out..].join("\n");
+    // Said before the text, so a reader cut short by it still sees it.
+    let cut = (left_out > 0).then(|| {
+        format!(
+            "the newest {keep} of {} lines; --last <n> or --all for more",
+            lines.len()
+        )
+    });
+    Ok(json!({ "node": ctx.node, "session": session.id, "pane": pane, "cut": cut, "text": text }))
 }
 
 async fn search(ctx: &Ctx, args: &Value) -> Result<Value> {
@@ -629,8 +645,10 @@ fn find(ctx: &Ctx, wanted: &str) -> Result<SessionInfo> {
     let mut named = sessions.iter().filter(|s| s.name == wanted);
     match (named.next(), named.next()) {
         (Some(session), None) => Ok(session.clone()),
-        (Some(_), Some(_)) => bail!("several sessions are named {wanted}; give its id"),
-        (None, _) => bail!("no session {wanted}"),
+        (Some(_), Some(_)) => {
+            bail!("several sessions are named {wanted}; give its id, as ahjo session list shows it")
+        }
+        (None, _) => bail!("no session named {wanted}; ahjo session list shows them"),
     }
 }
 
