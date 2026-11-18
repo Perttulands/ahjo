@@ -6,16 +6,18 @@ use std::time::Duration;
 use ahjo_app_kit::host::Request;
 use ahjo_app_kit::hub::now_ms;
 use ahjo_app_kit::link::client::LinkState;
-use ahjo_app_kit::widgets::field::{FieldEvent, TextField};
+use ahjo_app_kit::widgets::field::{self, FieldEvent, TextField};
 use ahjo_app_kit::{Host, Page};
 use ahjo_core::NodeId;
 use ahjo_scheduled_contract::{CHANGED, INTENT, INTENT_VALUE, PATH, Target, Task, WATCH};
 use ahjo_terminals_contract::SessionList;
-use gpui::{App, AppContext, Context, Entity, Window};
+use gpui::{
+    App, AppContext, Context, Entity, FocusHandle, Focusable, KeyDownEvent, ScrollHandle, Window,
+};
 use serde_json::{Value, json};
 
 use crate::ACTOR;
-use crate::form::TaskForm;
+use crate::form::{Mode, TaskForm};
 use crate::state::{Saved, Scheduled, data};
 
 /// How often the countdowns move: CHROTE's.
@@ -42,6 +44,9 @@ enum Field {
 /// A session a task may send to, as a node's terminals list it.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct Session {
+    /// The server's id for it (tmux's `$3`): what a task's target was
+    /// chosen as.
+    pub id: String,
     pub name: String,
     pub user: Option<String>,
 }
@@ -65,6 +70,12 @@ pub struct ScheduledPage {
     shown: bool,
     /// The countdown clock runs (only while the page is shown).
     ticking: bool,
+    /// The keyboard's place while no form is open: the list's keys.
+    pub(crate) focus: FocusHandle,
+    /// The list's scroll, so the keys keep the chosen task in view.
+    pub(crate) scroll: ScrollHandle,
+    /// The chosen task moved by a key: the next draw scrolls to it.
+    pub(crate) reveal: bool,
 }
 
 impl Page for ScheduledPage {
@@ -74,6 +85,14 @@ impl Page for ScheduledPage {
     const AREA: Option<&'static str> = Some(crate::NAME);
     const KINDS: ahjo_core::frame::Kinds = &[CHANGED..=CHANGED];
     const CHANNELS: &'static [u8] = &[WATCH];
+
+    /// The prompt while a task is written, else the list.
+    fn focus(&self, cx: &App) -> Option<FocusHandle> {
+        Some(match self.state.form {
+            Some(_) => self.fields.prompt.focus_handle(cx),
+            None => self.focus.clone(),
+        })
+    }
 
     fn frame(&mut self, node: &NodeId, _: u8, _: &[u8], _: &mut Window, cx: &mut Context<Self>) {
         if self.shown {
@@ -110,8 +129,8 @@ impl ScheduledPage {
                 let f = TextField::new(cx, placeholder);
                 if prose { f.prose() } else { f }
             });
-            cx.subscribe_in(&f, window, move |page, f, ev, _, cx| {
-                if let FieldEvent::Changed = ev {
+            cx.subscribe_in(&f, window, move |page, f, ev, window, cx| match ev {
+                FieldEvent::Changed => {
                     let text = f.read(cx).text.clone();
                     page.state.change(|form| match which {
                         Field::Prompt => form.prompt = text,
@@ -122,6 +141,15 @@ impl ScheduledPage {
                     });
                     cx.notify();
                 }
+                // Ctrl+Enter saves from any field; Enter does from the
+                // one-line ones.
+                FieldEvent::SubmitAlt | FieldEvent::Submit => {
+                    if !page.state.busy {
+                        page.save(cx)
+                    }
+                }
+                FieldEvent::Tab => page.next_field(which, window, cx),
+                _ => {}
             })
             .detach();
             f
@@ -148,6 +176,9 @@ impl ScheduledPage {
             sessions,
             shown: false,
             ticking: false,
+            focus: cx.focus_handle(),
+            scroll: ScrollHandle::new(),
+            reveal: false,
         }
     }
 
@@ -209,6 +240,7 @@ impl ScheduledPage {
             .iter()
             .filter(|s| s.node == node)
             .map(|s| Session {
+                id: s.id.clone(),
                 name: s.name.clone(),
                 user: s.user.clone(),
             })
@@ -301,16 +333,111 @@ impl ScheduledPage {
         }
     }
 
-    pub(crate) fn open(&mut self, form: TaskForm, cx: &mut Context<Self>) {
+    /// Opens the form with the keyboard in its prompt.
+    pub(crate) fn open(&mut self, form: TaskForm, window: &mut Window, cx: &mut Context<Self>) {
         if self.state.open(form, now_ms()) {
             self.fill(cx);
+            field::focus(&self.fields.prompt, window, cx);
         }
+        cx.notify();
+    }
+
+    /// Tab goes on to the form's next field: the prompt, the schedule's
+    /// one field, the name, and round again.
+    fn next_field(&mut self, from: Field, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(form) = &self.state.form else {
+            return;
+        };
+        let fields = &self.fields;
+        let measure = match form.schedule.mode {
+            Mode::Every => &fields.every,
+            Mode::Daily | Mode::Weekly => &fields.time,
+            Mode::Cron => &fields.cron,
+        };
+        let to = match from {
+            Field::Prompt => measure,
+            Field::Every | Field::Time | Field::Cron => &fields.name,
+            Field::Name => &fields.prompt,
+        };
+        field::focus(to, window, cx);
+        // What is there is selected, so typing replaces it.
+        to.update(cx, |f, cx| {
+            let text = f.text.clone();
+            f.set(&text, true, cx);
+        });
+    }
+
+    /// The form's fields are gone from the page but one still holds the
+    /// keyboard (the form was saved or left): the list takes it back.
+    pub(crate) fn keys_to_list(&self, window: &mut Window, cx: &mut Context<Self>) {
+        let f = &self.fields;
+        let held = [&f.prompt, &f.name, &f.every, &f.time, &f.cron]
+            .iter()
+            .any(|field| field.read(cx).is_focused(window));
+        if self.state.form.is_none() && held {
+            window.focus(&self.focus, cx);
+        }
+    }
+
+    /// The list's keys: the arrows, Home and End choose a task, Enter
+    /// edits it, N starts a new one; Esc leaves the form.
+    pub(crate) fn key(
+        &mut self,
+        event: &KeyDownEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if event.keystroke.modifiers.modified() {
+            return;
+        }
+        let key = event.keystroke.key.as_str();
+        if self.state.form.is_some() {
+            if key != "escape" {
+                return;
+            }
+            self.state.close(now_ms());
+        } else {
+            let order = self.order(cx);
+            let at = self
+                .shown_task()
+                .and_then(|(n, t)| order.iter().position(|(on, id)| on == n && *id == t.id));
+            let to = match key {
+                "down" => at.map_or(0, |i| i + 1),
+                "up" => at.map_or(0, |i| i.saturating_sub(1)),
+                "home" => 0,
+                "end" => order.len().saturating_sub(1),
+                "enter" => {
+                    if let Some((node, task)) = self.shown_task() {
+                        let form = TaskForm::edit(node, task);
+                        self.open(form, window, cx);
+                        cx.stop_propagation();
+                    }
+                    return;
+                }
+                "n" => {
+                    self.new_task(window, cx);
+                    cx.stop_propagation();
+                    return;
+                }
+                _ => return,
+            };
+            let Some(to) = order.get(to.min(order.len().saturating_sub(1))) else {
+                return;
+            };
+            if self.state.selected.as_ref() != Some(to) {
+                self.state.notice = None;
+                self.state.error = None;
+            }
+            self.state.selected = Some(to.clone());
+            self.reveal = true;
+        }
+        cx.stop_propagation();
         cx.notify();
     }
 
     /// New task: on the node of the selected task, or the first live node
     /// (the serving node's).
-    pub(crate) fn new_task(&mut self, cx: &mut Context<Self>) {
+    pub(crate) fn new_task(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let node = self
             .state
             .selected
@@ -323,7 +450,7 @@ impl ScheduledPage {
                     .map(|n| n.id.as_str().to_string())
             })
             .unwrap_or_default();
-        self.open(TaskForm::new(&node, vec![]), cx);
+        self.open(TaskForm::new(&node, vec![]), window, cx);
     }
 
     /// Adds or removes a session as a target. A session of another node
@@ -435,6 +562,11 @@ impl ScheduledPage {
                         });
                         sc.nodes.entry(at.clone()).or_default().put(saved.task);
                         page.read(&at, cx);
+                    }
+                    // Why it is held is said beside the task (the hold is
+                    // announced, so it reads again): not twice.
+                    Err(e) if e.starts_with(ahjo_scheduled_contract::HELD) => {
+                        sc.error = Some("Nothing was sent: the task is held.".into());
                     }
                     Err(e) => sc.error = Some(e),
                 }

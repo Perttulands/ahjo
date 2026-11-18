@@ -118,9 +118,8 @@ impl Scheduled {
             return true;
         }
         self.discard_armed = Some(now);
-        self.notice = Some(
-            "Unsaved scheduled task changes. Repeat within three seconds to discard them.".into(),
-        );
+        self.notice =
+            Some("This task has unsaved changes. Do the same once more to discard them.".into());
         false
     }
 
@@ -185,7 +184,7 @@ mod tests {
         assert!(s.open(TaskForm::new("n", vec![]), 0));
         s.change(|f| f.prompt = "x".into());
         assert!(!s.open(TaskForm::new("n", vec![]), 1_000));
-        assert!(s.notice.as_deref().unwrap().contains("Repeat"));
+        assert!(s.notice.as_deref().unwrap().contains("once more"));
         assert!(s.open(TaskForm::new("n", vec![]), 2_000), "asked twice");
         s.change(|f| f.prompt = "y".into());
         assert!(!s.open(TaskForm::new("n", vec![]), 10_000));

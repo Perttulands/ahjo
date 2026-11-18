@@ -76,6 +76,8 @@ pub enum Error {
     Invalid(Invalid),
     TargetNotFound(String),
     Conflict(String),
+    /// The task is held and nothing was sent: why, in full.
+    Held(String),
     Internal(anyhow::Error),
 }
 
@@ -86,6 +88,7 @@ impl std::fmt::Display for Error {
             Error::Invalid(i) => i.fmt(f),
             Error::TargetNotFound(m) => write!(f, "scheduled task target not found: {m}"),
             Error::Conflict(id) => write!(f, "scheduled task is already being modified: {id}"),
+            Error::Held(why) => write!(f, "{}: {why}", ahjo_scheduled_contract::HELD),
             Error::Internal(e) => write!(f, "{e:#}"),
         }
     }
@@ -109,7 +112,7 @@ impl From<Error> for ahjo_core::Error {
             Error::NotFound => NOT_FOUND,
             Error::Invalid(_) => BAD_REQUEST,
             Error::TargetNotFound(_) => TARGET_NOT_FOUND,
-            Error::Conflict(_) => CONFLICT,
+            Error::Conflict(_) | Error::Held(_) => CONFLICT,
             Error::Internal(_) => INTERNAL,
         };
         ahjo_core::Error::new(code, e.to_string())
@@ -120,16 +123,30 @@ pub type Result<T, E = Error> = std::result::Result<T, E>;
 
 /// Checks targets and pastes prompts into them.
 pub trait Runner: Send + Sync {
-    fn validate<'a>(&'a self, target: &'a Target) -> BoxFuture<'a, Result<(), String>>;
-    /// Pastes the prompt and presses Enter; the pane it went to. A send
-    /// whose turn does not come within `deadline` is withdrawn unsent; one
-    /// under way is not given up as failed while it may still paste.
+    /// The id of the session the target names now (tmux's `$3`).
+    fn validate<'a>(&'a self, target: &'a Target) -> BoxFuture<'a, Result<String, String>>;
+    /// Pastes the prompt and presses Enter; the pane it went to. Only into
+    /// the session of id `session` where one is given: a session that has
+    /// the target's name and another id is refused. A send whose turn does
+    /// not come within `deadline` is withdrawn unsent; one under way is not
+    /// given up as failed while it may still paste.
     fn send<'a>(
         &'a self,
         target: &'a Target,
+        session: Option<&'a str>,
         prompt: &'a str,
         deadline: Duration,
     ) -> BoxFuture<'a, Result<String, String>>;
+}
+
+/// Why a target is not sent to: a session has its name, but not the id of
+/// the one the task was made for.
+pub(crate) fn replaced(target: &Target) -> String {
+    format!(
+        "session {} is another session now: the one this task was made for was closed or \
+         renamed. Edit the task and save it to send to the session of that name now",
+        target.label()
+    )
 }
 
 #[derive(Default)]
@@ -315,7 +332,11 @@ impl Scheduled {
             };
             let mut task = self.get_task(&listed.id)?;
             for target in task.targets.iter_mut().filter(|t| names(t)) {
+                let id = task.session_ids.remove(&target.label());
                 target.session_name = to.to_string();
+                if let Some(id) = id {
+                    task.session_ids.insert(target.label(), id);
+                }
             }
             let now = self.now();
             task.updated_at = now;
@@ -382,6 +403,7 @@ impl Scheduled {
             name: r.name.trim().to_string(),
             prompt: r.prompt,
             targets: normalize_targets(r.targets),
+            session_ids: Default::default(),
             schedule: r.schedule,
             enabled: r.enabled.unwrap_or(true),
             paused: r.paused,
@@ -491,6 +513,10 @@ impl Scheduled {
     pub async fn run_now(&self, id: &str, actor: &str) -> Result<(Task, RunEntry)> {
         let _claim = self.claim(id)?;
         let mut task = self.get_task(id)?;
+        if let Err(why) = self.same_sessions(&mut task).await {
+            self.hold(id, why.clone());
+            return Err(Error::Held(why));
+        }
         let run = match self.fire(&mut task, "manual").await {
             Ok(run) => run,
             Err(e) => {
@@ -619,6 +645,10 @@ impl Scheduled {
                 audit(&mut task, now, "", "scheduler-error", &e.to_string());
             }
             Ok(()) => {
+                if let Err(why) = self.same_sessions(&mut task).await {
+                    self.hold(id, why);
+                    return Ok(None);
+                }
                 let fired = match self.fire(&mut task, "scheduled").await {
                     Ok(fired) => fired,
                     Err(e) => {
@@ -712,22 +742,54 @@ impl Scheduled {
         }
         task.schedule = schedule::normalize(task.schedule.clone())?;
         recompute(task, now)?;
+        let labels: HashSet<String> = task.targets.iter().map(Target::label).collect();
+        task.session_ids.retain(|label, _| labels.contains(label));
         if check_targets && self.validate_targets {
             let gate = Semaphore::new(CONCURRENT_DELIVERIES);
             let checks = task.targets.iter().map(|t| async {
                 let _turn = gate.acquire().await;
                 self.validate(t).await
             });
-            for result in futures_util::future::join_all(checks).await {
-                result?;
+            let found = futures_util::future::join_all(checks).await;
+            // Chosen now: each target is the session that has its name now.
+            task.session_ids.clear();
+            for (target, id) in task.targets.iter().zip(found) {
+                task.session_ids.insert(target.label(), id?);
             }
         }
         Ok(())
     }
 
-    async fn validate(&self, target: &Target) -> Result<()> {
+    /// Refused, naming them, where a session that has a target's name is
+    /// not the one the task was made for. A target without its session's
+    /// id (made before ids were kept) learns it here; one whose session is
+    /// gone is left for its delivery to say so.
+    async fn same_sessions(&self, task: &mut Task) -> Result<(), String> {
+        if !self.validate_targets {
+            return Ok(());
+        }
+        let mut others = vec![];
+        for target in &task.targets {
+            let Ok(now) = self.validate(target).await else {
+                continue;
+            };
+            match task.session_ids.get(&target.label()) {
+                None => {
+                    task.session_ids.insert(target.label(), now);
+                }
+                Some(id) if *id != now => others.push(replaced(target)),
+                Some(_) => {}
+            }
+        }
+        match others.is_empty() {
+            true => Ok(()),
+            false => Err(others.join("; ")),
+        }
+    }
+
+    async fn validate(&self, target: &Target) -> Result<String> {
         match tokio::time::timeout(VALIDATE_TIMEOUT, self.runner.validate(target)).await {
-            Ok(Ok(())) => Ok(()),
+            Ok(Ok(id)) => Ok(id),
             Ok(Err(e)) => Err(Error::TargetNotFound(e)),
             Err(_) => Err(Error::TargetNotFound("validation took too long".into())),
         }
@@ -766,7 +828,8 @@ impl Scheduled {
             let gate = Semaphore::new(CONCURRENT_DELIVERIES);
             let deliveries = targets.iter().map(|t| async {
                 let _turn = gate.acquire().await;
-                self.deliver(t, &task.prompt).await
+                let session = task.session_ids.get(&t.label()).map(String::as_str);
+                self.deliver(t, session, &task.prompt).await
             });
             run.targets = futures_util::future::join_all(deliveries).await;
             let failures: Vec<String> = run
@@ -798,7 +861,7 @@ impl Scheduled {
     /// One target, validation and paste within one deadline. The runner
     /// owns the deadline once the paste is queued, so a send given up on is
     /// withdrawn, never left to paste after a failure was recorded.
-    async fn deliver(&self, target: &Target, prompt: &str) -> TargetRun {
+    async fn deliver(&self, target: &Target, session: Option<&str>, prompt: &str) -> TargetRun {
         let mut result = TargetRun {
             session_name: target.session_name.clone(),
             unix_user: target.unix_user.clone(),
@@ -817,14 +880,17 @@ impl Scheduled {
                 match tokio::time::timeout(self.run_timeout, self.validate(target)).await {
                     Err(_) => return Err(exceeded()),
                     Ok(Err(e)) => return Err(e.to_string()),
-                    Ok(Ok(())) => {}
+                    Ok(Ok(id)) if session.is_some_and(|s| s != id) => {
+                        return Err(replaced(target));
+                    }
+                    Ok(Ok(_)) => {}
                 }
             }
             let left = self.run_timeout.saturating_sub(start.elapsed());
             if left.is_zero() {
                 return Err(exceeded());
             }
-            self.runner.send(target, prompt, left).await
+            self.runner.send(target, session, prompt, left).await
         };
         match attempt.await {
             Ok(pane) => {
@@ -899,6 +965,7 @@ fn unreadable(id: String, e: &anyhow::Error) -> Task {
         id,
         prompt: String::new(),
         targets: vec![],
+        session_ids: Default::default(),
         schedule: Schedule::default(),
         enabled: false,
         paused: true,

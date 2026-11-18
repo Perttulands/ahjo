@@ -408,14 +408,45 @@ pub fn ago(at: Timestamp, now: Timestamp) -> String {
     }
 }
 
-/// `Nov 9, 09:00` in this computer's zone.
+/// `09:00` today, `Nov 9, 09:00` any other day, in this computer's zone.
 pub fn when(at: Option<Timestamp>) -> String {
-    match at {
-        Some(at) => at
-            .to_zoned(jiff::tz::TimeZone::system())
-            .strftime("%b %-d, %H:%M")
-            .to_string(),
-        None => "—".into(),
+    let zone = jiff::tz::TimeZone::system();
+    when_on(at, Timestamp::now().to_zoned(zone.clone()).date(), zone)
+}
+
+/// [`when`] with today and the zone given.
+pub fn when_on(
+    at: Option<Timestamp>,
+    today: jiff::civil::Date,
+    zone: jiff::tz::TimeZone,
+) -> String {
+    let Some(at) = at else {
+        return "—".into();
+    };
+    let at = at.to_zoned(zone);
+    let format = if at.date() == today {
+        "%H:%M"
+    } else {
+        "%b %-d, %H:%M"
+    };
+    at.strftime(format).to_string()
+}
+
+/// How a run went, in words: `ok`, or `failed` and why. The node's reason
+/// leads with what kind of failure it was, which the page has just said.
+pub fn result(status: &str, message: &str) -> String {
+    if status == ahjo_scheduled_contract::SUCCESS {
+        return "ok".into();
+    }
+    if status.is_empty() {
+        return "unknown".into();
+    }
+    let why = message.replace("scheduled task target not found: ", "");
+    let said = if status == "error" { "failed" } else { status };
+    if why.is_empty() {
+        said.to_string()
+    } else {
+        format!("{said}: {why}")
     }
 }
 
@@ -535,6 +566,30 @@ impl TaskForm {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_time_today_goes_without_its_date() {
+        let utc = jiff::tz::TimeZone::UTC;
+        let at: Timestamp = "2026-11-18T07:27:00Z".parse().unwrap();
+        let day = |d| jiff::civil::date(2026, 11, d);
+        assert_eq!(when_on(Some(at), day(18), utc.clone()), "07:27");
+        assert_eq!(when_on(Some(at), day(19), utc.clone()), "Nov 18, 07:27");
+        assert_eq!(when_on(None, day(18), utc), "—");
+    }
+
+    #[test]
+    fn a_failed_run_says_why_once() {
+        assert_eq!(result("success", ""), "ok");
+        assert_eq!(
+            result(
+                "error",
+                "ops: scheduled task target not found: no session ops on this node"
+            ),
+            "failed: ops: no session ops on this node"
+        );
+        assert_eq!(result("partial", ""), "partial");
+        assert_eq!(result("", ""), "unknown");
+    }
 
     /// The zone read from Windows' ICU is one jiff knows and keeps this
     /// machine's clock; on a Finnish home region it reads Helsinki (#222).

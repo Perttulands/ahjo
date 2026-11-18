@@ -27,6 +27,8 @@ struct Fake {
     sent: Mutex<Vec<(Target, String)>>,
     /// Sessions that refuse the paste.
     dead: HashSet<String>,
+    /// Sessions closed and started again under the same name: a new id.
+    reopened: Mutex<HashSet<String>>,
     /// Holds a send until released, and says it has begun.
     gate: Option<(tokio::sync::mpsc::UnboundedSender<()>, Arc<Notify>)>,
     validate_delay: Duration,
@@ -64,7 +66,7 @@ impl Fake {
 }
 
 impl Runner for Fake {
-    fn validate<'a>(&'a self, t: &'a Target) -> BoxFuture<'a, Result<(), String>> {
+    fn validate<'a>(&'a self, t: &'a Target) -> BoxFuture<'a, Result<String, String>> {
         Box::pin(async move {
             self.overlap().await;
             tokio::time::sleep(self.validate_delay).await;
@@ -72,7 +74,12 @@ impl Runner for Fake {
                 return Err(format!("unix user {:?} is not allowed", t.unix_user));
             }
             if self.allowed.lock().unwrap().contains(t) {
-                Ok(())
+                let again = self.reopened.lock().unwrap().contains(&t.session_name);
+                Ok(format!(
+                    "${}{}",
+                    t.session_name,
+                    if again { "-2" } else { "" }
+                ))
             } else {
                 Err(format!("no session {}", t.label()))
             }
@@ -82,6 +89,7 @@ impl Runner for Fake {
     fn send<'a>(
         &'a self,
         t: &'a Target,
+        _session: Option<&'a str>,
         prompt: &'a str,
         _deadline: Duration,
     ) -> BoxFuture<'a, Result<String, String>> {
@@ -118,6 +126,7 @@ fn persisted(id: &str, every: i64, next: Option<&str>) -> Task {
         name: "persisted".into(),
         prompt: "hello from scheduler".into(),
         targets: vec![target("ops")],
+        session_ids: Default::default(),
         schedule: Schedule {
             kind: "interval".into(),
             every_minutes: every,
@@ -174,6 +183,29 @@ async fn the_timer_computes_next_runs_and_fires_due_tasks_once() {
 }
 
 /// TestSchedulerDoesNotResurrectTaskDeletedDuringFire.
+/// A task made before sessions were known by id learns its session's id at
+/// its first run; when another session later has that name, the timer
+/// sends nothing and holds the task, saying why.
+#[tokio::test]
+async fn the_timer_holds_a_task_whose_session_was_replaced() {
+    let dir = scratch("replaced");
+    let now = Arc::new(Mutex::new(at(T0)));
+    let fake = Arc::new(Fake::default().allow(&["ops"]));
+    let s = service(&dir, fake.clone(), now.clone());
+    s.store.save(&persisted("tsk_aimed", 10, None)).unwrap();
+    s.prime().unwrap();
+    *now.lock().unwrap() = at("2026-06-27T14:10:00Z");
+    assert_eq!(s.run_due().await.unwrap().len(), 1);
+    assert_eq!(s.get("tsk_aimed").unwrap().session_ids["alice/ops"], "$ops");
+
+    fake.reopened.lock().unwrap().insert("ops".into());
+    *now.lock().unwrap() = at("2026-06-27T14:20:00Z");
+    assert!(s.run_due().await.unwrap().is_empty());
+    assert_eq!(fake.sends(), 1, "nothing typed into the newcomer");
+    let held = s.get("tsk_aimed").unwrap().held;
+    assert!(held.contains("alice/ops is another session"), "{held}");
+}
+
 #[tokio::test]
 async fn a_task_deleted_while_it_fires_stays_deleted() {
     let dir = scratch("resurrect");

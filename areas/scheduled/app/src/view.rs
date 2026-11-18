@@ -11,7 +11,8 @@ use ahjo_app_kit::widgets::pane::{self, Col};
 use ahjo_core::NodeId;
 use ahjo_scheduled_contract::{SUCCESS, Target, Task};
 use gpui::{
-    AnyElement, ClickEvent, Context, Div, FontWeight, SharedString, Window, div, prelude::*, px,
+    AnyElement, App, ClickEvent, Context, Div, FontWeight, KeyDownEvent, SharedString, Window, div,
+    prelude::*, px,
 };
 use jiff::Timestamp;
 
@@ -27,8 +28,9 @@ const RUNS: [Col; 3] = [
 ];
 
 impl Render for ScheduledPage {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let t = theme(cx).clone();
+        self.keys_to_list(window, cx);
         let shown = self
             .shown_task()
             .map(|(n, task)| (n.to_string(), task.clone()));
@@ -36,33 +38,45 @@ impl Render for ScheduledPage {
         let list_head = pane::list_head(&t, None).children(shown.is_some().then(|| {
             pane::act(&t, "scheduled-new", "New")
                 .debug_selector(|| "scheduled-new".into())
-                .on_click(cx.listener(|page, _, _, cx| page.new_task(cx)))
+                .tooltip(kit::tip("New task (N)"))
+                .on_click(cx.listener(|page, _, window, cx| page.new_task(window, cx)))
         }));
         let chosen = shown
             .as_ref()
             .map(|(n, task)| (n.as_str(), task.id.as_str()));
         // Each row says when, how often and how the last run went: the
         // wide list, so the names have room.
-        let rows = div()
+        let (rows, chosen_at) = self.list(&t, chosen, cx);
+        if std::mem::take(&mut self.reveal)
+            && let Some(at) = chosen_at
+        {
+            self.scroll.scroll_to_item(at);
+        }
+        let rows = rows
             .id("scheduled-list")
             .flex_1()
             .min_h_0()
             .overflow_y_scroll()
-            .child(self.list(&t, chosen, cx));
+            .track_scroll(&self.scroll);
         let list = pane::list_wide_frame(&t, list_head, rows);
         let detail = if self.state.form.is_some() {
             self.form(&t, cx)
         } else if let Some((node, task)) = &shown {
             self.detail(&t, node, task, cx)
         } else {
+            // Nothing can be scheduled where no node answers: no form
+            // that could not be saved is offered.
+            let apart = self.host.nodes(cx).is_empty();
             let words = if self.reading() {
                 "Reading scheduled tasks…"
+            } else if apart {
+                "Not connected to the node."
             } else {
-                "Nothing scheduled."
+                "Nothing scheduled. A task sends a prompt to your sessions on a timetable."
             };
-            let action = (!self.reading()).then(|| {
+            let action = (!self.reading() && !apart).then(|| {
                 kit::button(&t, "scheduled-empty-new", "New task", Kind::Primary)
-                    .on_click(cx.listener(|page, _, _, cx| page.new_task(cx)))
+                    .on_click(cx.listener(|page, _, window, cx| page.new_task(window, cx)))
                     .into_any_element()
             });
             pane::detail(
@@ -76,7 +90,12 @@ impl Render for ScheduledPage {
                 }),
             )
         };
-        pane::page(&t, list, detail).text_color(t.text)
+        div()
+            .id("scheduled")
+            .size_full()
+            .track_focus(&self.focus)
+            .on_key_down(cx.listener(|page, e: &KeyDownEvent, window, cx| page.key(e, window, cx)))
+            .child(pane::page(&t, list, detail).text_color(t.text))
     }
 }
 
@@ -115,15 +134,44 @@ impl ScheduledPage {
             .or_else(|| self.ordered().into_iter().next())
     }
 
-    fn list(&self, t: &Theme, chosen: Option<(&str, &str)>, cx: &mut Context<Self>) -> Div {
-        let now = Timestamp::now();
+    /// The tasks as the list shows them, top to bottom: grouped by device
+    /// where more than one has tasks (and then whether they are), else in
+    /// the one order.
+    fn listed(&self, cx: &App) -> (Vec<(&str, &Task)>, bool) {
         let ordered = self.ordered();
-        let nodes = self.host.nodes(cx);
-        // A device's label only where there are tasks on more than one.
         let several = ordered
             .iter()
             .any(|(n, _)| Some(*n) != ordered.first().map(|f| f.0));
+        if !several {
+            return (ordered, false);
+        }
+        let mut out = vec![];
+        for node in self.host.nodes(cx) {
+            out.extend(ordered.iter().filter(|(n, _)| *n == node.id.as_str()));
+        }
+        (out, true)
+    }
+
+    /// The listed tasks by (node, id), for the keys.
+    pub(crate) fn order(&self, cx: &App) -> Vec<(String, String)> {
+        let (rows, _) = self.listed(cx);
+        rows.into_iter()
+            .map(|(n, t)| (n.to_string(), t.id.clone()))
+            .collect()
+    }
+
+    /// The list, each row its child so the keys can scroll to one, and
+    /// where the chosen row stands among them.
+    fn list(
+        &self,
+        t: &Theme,
+        chosen: Option<(&str, &str)>,
+        cx: &mut Context<Self>,
+    ) -> (Div, Option<usize>) {
+        let now = Timestamp::now();
+        let nodes = self.host.nodes(cx);
         let mut out = div().flex().flex_col();
+        let (mut count, mut chosen_at) = (0, None);
         for node in &nodes {
             let id = node.id.as_str();
             let Some(state) = self.state.nodes.get(id) else {
@@ -139,32 +187,33 @@ impl ScheduledPage {
                         .child(kit::device_label(t, &node.device, &node.environment))
                         .child(pane::meta(t, format!("Not read: {e}"), Some(t.error))),
                 );
+                count += 1;
             }
         }
-        if several {
-            for node in &nodes {
-                let id = node.id.as_str();
-                let rows: Vec<_> = ordered.iter().filter(|(n, _)| *n == id).collect();
-                if rows.is_empty() {
-                    continue;
-                }
-                out = out.child(
-                    div()
-                        .px(px(size::ROW_PAD))
-                        .pt(px(size::LABEL_TOP))
-                        .pb(px(size::LABEL_BOTTOM))
-                        .child(kit::device_label(t, &node.device, &node.environment)),
-                );
-                for (n, task) in rows {
-                    out = out.child(self.row(t, n, task, chosen, now, cx));
+        // A device's label only where there are tasks on more than one.
+        let (rows, several) = self.listed(cx);
+        let mut under: Option<&str> = None;
+        for (n, task) in rows {
+            if several && under != Some(n) {
+                under = Some(n);
+                if let Some(node) = nodes.iter().find(|x| x.id.as_str() == n) {
+                    out = out.child(
+                        div()
+                            .px(px(size::ROW_PAD))
+                            .pt(px(size::LABEL_TOP))
+                            .pb(px(size::LABEL_BOTTOM))
+                            .child(kit::device_label(t, &node.device, &node.environment)),
+                    );
+                    count += 1;
                 }
             }
-        } else {
-            for (n, task) in &ordered {
-                out = out.child(self.row(t, n, task, chosen, now, cx));
+            if chosen == Some((n, task.id.as_str())) {
+                chosen_at = Some(count);
             }
+            out = out.child(self.row(t, n, task, chosen, now, cx));
+            count += 1;
         }
-        out
+        (out, chosen_at)
     }
 
     fn row(
@@ -176,7 +225,11 @@ impl ScheduledPage {
         now: Timestamp,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let on = self.state.form.is_none() && chosen == Some((node, task.id.as_str()));
+        // The row of the task being edited stays marked; a new task has none.
+        let on = match &self.state.form {
+            None => chosen == Some((node, task.id.as_str())),
+            Some(f) => f.node == node && f.id.as_deref() == Some(task.id.as_str()),
+        };
         // When it runs next, or why it will not.
         let (next, next_colour) = if !task.held.is_empty() {
             ("held".to_string(), Some(t.error))
@@ -209,6 +262,7 @@ impl ScheduledPage {
         let selector = format!("task-{node}-{}", task.id);
         let name = task.name.clone();
         let result_selector = format!("task-last-{node}-{}-{last}", task.id);
+        let chosen_selector = format!("scheduled-chosen-{}", task.id);
         pane::row(t, SharedString::from(selector.clone()), on)
             .debug_selector(move || selector)
             .h(px(TASK_ROW))
@@ -223,6 +277,7 @@ impl ScheduledPage {
                             .flex()
                             .items_center()
                             .gap(px(size::HEAD_GAP))
+                            .when(on, |d| d.debug_selector(move || chosen_selector))
                             .child(mark)
                             .child(
                                 pane::cell(task.name.clone())
@@ -258,7 +313,7 @@ impl ScheduledPage {
                             ),
                     ),
             )
-            .on_click(cx.listener(move |page, e: &ClickEvent, _, cx| {
+            .on_click(cx.listener(move |page, e: &ClickEvent, window, cx| {
                 let key = (pick_node.clone(), pick_id.clone());
                 if page.state.form.is_some() {
                     if !page.state.may_leave(now_ms()) {
@@ -276,7 +331,9 @@ impl ScheduledPage {
                 if e.click_count() >= 2
                     && let Some(task) = page.state.task(&pick_node, &pick_id).cloned()
                 {
-                    page.open(TaskForm::edit(&pick_node, &task), cx);
+                    page.open(TaskForm::edit(&pick_node, &task), window, cx);
+                } else {
+                    window.focus(&page.focus, cx);
                 }
                 cx.notify();
             }))
@@ -316,8 +373,9 @@ impl ScheduledPage {
             .child(
                 pane::act(t, "task-edit", "Edit")
                     .debug_selector(|| "task-edit".into())
-                    .on_click(cx.listener(move |page, _, _, cx| {
-                        page.open(TaskForm::edit(&edit_node, &edit), cx)
+                    .tooltip(kit::tip("Edit (Enter)"))
+                    .on_click(cx.listener(move |page, _, window, cx| {
+                        page.open(TaskForm::edit(&edit_node, &edit), window, cx)
                     })),
             )
             .child(
@@ -380,16 +438,13 @@ impl ScheduledPage {
                     .recent_runs
                     .first()
                     .filter(|r| r.status != SUCCESS && !r.message.is_empty())
-                    .map(|r| format!(": {}", r.message))
+                    .map(|r| r.message.as_str())
                     .unwrap_or_default();
-                let status = if task.last_status.is_empty() {
-                    "unknown".to_string()
-                } else {
-                    task.last_status.clone()
-                };
-                div()
-                    .when(failed, |d| d.text_color(t.error))
-                    .child(format!("{} · {status}{why}", form::when(task.last_run)))
+                div().when(failed, |d| d.text_color(t.error)).child(format!(
+                    "{} · {}",
+                    form::when(task.last_run),
+                    form::result(&task.last_status, why)
+                ))
             }
         };
 
@@ -408,11 +463,7 @@ impl ScheduledPage {
         }
         lines = lines
             .child(pane::line(t, "When", div().child(when)))
-            .child(pane::line(
-                t,
-                "Sends to",
-                self.sends_to(t, node, &task.targets),
-            ))
+            .child(pane::line(t, "Sends to", self.sends_to(t, node, task, cx)))
             .child(pane::line(t, "Last run", last));
         body = body.child(lines).child(
             pane::section(t, "Prompt").child(
@@ -428,18 +479,17 @@ impl ScheduledPage {
                 .iter()
                 .map(|r| {
                     let ok = r.status == SUCCESS;
-                    let mut result = r.status.clone();
-                    if !r.message.is_empty() {
-                        result = format!("{result}: {}", r.message);
-                    }
-                    let missed: Vec<String> = r
+                    let mut result = form::result(&r.status, &r.message);
+                    // Which sessions it missed, where some got it: where
+                    // none did, the reason has said so.
+                    let missed: Vec<&str> = r
                         .targets
                         .iter()
                         .filter(|x| x.status != SUCCESS)
-                        .map(|x| format!("{}: {}", x.session_name, x.status))
+                        .map(|x| x.session_name.as_str())
                         .collect();
-                    if !missed.is_empty() {
-                        result = format!("{result} ({})", missed.join(", "));
+                    if !missed.is_empty() && missed.len() < r.targets.len() {
+                        result = format!("{result} (missed {})", missed.join(", "));
                     }
                     let by = if r.trigger == "manual" {
                         "Run now"
@@ -481,8 +531,10 @@ impl ScheduledPage {
         let (dup_node, dup) = (node.to_string(), task.clone());
         let duplicate = MenuRow::new("Duplicate", {
             let page = page.clone();
-            move |_, cx| {
-                let _ = page.update(cx, |p, cx| p.open(TaskForm::duplicate(&dup_node, &dup), cx));
+            move |window, cx| {
+                let _ = page.update(cx, |p, cx| {
+                    p.open(TaskForm::duplicate(&dup_node, &dup), window, cx)
+                });
             }
         });
         let (del_node, del) = (node.to_string(), task.id.clone());
@@ -493,10 +545,26 @@ impl ScheduledPage {
         vec![duplicate, delete]
     }
 
-    /// The task's sessions, each a link that shows it in Terminal.
-    fn sends_to(&self, t: &Theme, node: &str, targets: &[Target]) -> Div {
+    /// The task's sessions, each a link that shows it in Terminal; one
+    /// not running, or running as another session than the task was made
+    /// for, is said so.
+    fn sends_to(&self, t: &Theme, node: &str, task: &Task, cx: &App) -> Div {
         let mut out = div().flex().flex_wrap().gap(px(size::HEAD_GAP));
-        for target in targets {
+        // A node that lists no session at all may only not have been heard
+        // yet: then nothing is said of any.
+        let running = self.sessions_on(node, cx);
+        for target in &task.targets {
+            let now = running.iter().find(|s| s.target() == *target);
+            let trouble = match (now, task.session_ids.get(&target.label())) {
+                _ if running.is_empty() => None,
+                (None, _) => Some(("not running", "No session of this name is running")),
+                (Some(s), Some(id)) if !s.id.is_empty() && s.id != *id => Some((
+                    "another session",
+                    "The session this task was made for was closed or renamed, and another \
+                     has its name now. Edit and save the task to send to it.",
+                )),
+                _ => None,
+            };
             let ask = Ask::Reveal {
                 what: "session".into(),
                 id: target.session_name.clone(),
@@ -514,8 +582,14 @@ impl ScheduledPage {
                     .cursor_pointer()
                     .text_color(t.text)
                     .hover(|d| d.underline())
-                    .tooltip(kit::tip("Show it in Terminal"))
-                    .child(target_name(target))
+                    .child(match trouble {
+                        Some((said, _)) => format!("{} ({said})", target_name(target)),
+                        None => target_name(target),
+                    })
+                    .map(|d| match trouble {
+                        Some((_, tip)) => d.text_color(t.error).tooltip(kit::tip(tip)),
+                        None => d.tooltip(kit::tip("Show it in Terminal")),
+                    })
                     .on_click(move |_, _, cx| {
                         let _ = host.ask(ask.clone(), cx);
                     }),
@@ -531,17 +605,23 @@ impl ScheduledPage {
         let head = pane::head(t)
             .child(pane::title(
                 t,
-                if form.id.is_some() {
-                    "Edit task"
-                } else {
-                    "New task"
+                match form
+                    .id
+                    .as_deref()
+                    .and_then(|id| self.state.task(&form.node, id))
+                {
+                    Some(task) => format!("Edit {}", task.name),
+                    None if form.id.is_some() => "Edit task".to_string(),
+                    None => "New task".to_string(),
                 },
             ))
             .child(
-                pane::act(t, "form-cancel", "Cancel").on_click(cx.listener(|page, _, _, cx| {
-                    page.state.close(now_ms());
-                    cx.notify();
-                })),
+                pane::act(t, "form-cancel", "Cancel")
+                    .tooltip(kit::tip("Esc"))
+                    .on_click(cx.listener(|page, _, _, cx| {
+                        page.state.close(now_ms());
+                        cx.notify();
+                    })),
             )
             .child(
                 kit::button(
@@ -551,6 +631,7 @@ impl ScheduledPage {
                     Kind::Primary,
                 )
                 .debug_selector(|| "form-save".into())
+                .tooltip(kit::tip("Ctrl+Enter"))
                 .when(busy, |b| b.opacity(BUSY))
                 .on_click(cx.listener(|page, _, _, cx| {
                     if !page.state.busy {
@@ -700,6 +781,13 @@ impl ScheduledPage {
                 );
             }
             out = out.child(days);
+        }
+        // "Every" counts minutes, which no zone changes.
+        if s.mode == Mode::Every {
+            return match s.error() {
+                Some(why) => out.child(div().text_color(t.error).child(why)),
+                None => out.child(div().text_color(t.dim).child(form::describe(&s.schedule()))),
+            };
         }
         // The zone is said only to be changed: this computer's, the task's,
         // or UTC.

@@ -62,7 +62,7 @@ pub(crate) fn failed(e: Error) -> Response {
     let status = match &e {
         Error::NotFound => StatusCode::NOT_FOUND,
         Error::Invalid(_) | Error::TargetNotFound(_) => StatusCode::BAD_REQUEST,
-        Error::Conflict(_) => StatusCode::CONFLICT,
+        Error::Conflict(_) | Error::Held(_) => StatusCode::CONFLICT,
         Error::Internal(_) => StatusCode::INTERNAL_SERVER_ERROR,
     };
     let Coded { code, message } = e.into();

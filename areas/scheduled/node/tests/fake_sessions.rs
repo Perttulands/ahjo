@@ -88,6 +88,52 @@ async fn a_renamed_session_keeps_its_tasks_and_a_refusal_is_reported() {
     node.stop().await;
 }
 
+/// A task is aimed at a session, not at its name: when that session is
+/// closed and another takes its name, nothing is typed into the newcomer.
+/// The task is held, says why, and is aimed again by saving it.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_task_never_types_into_another_session_that_took_its_name() {
+    let node = Node::start(AREAS, "").await.unwrap();
+    let fake = node.fake_sessions();
+    fake.add("ops");
+    let made = node
+        .call(
+            "scheduled_create",
+            json!({ "name": "nudge", "prompt": "deploy now", "sessions": ["ops"], "every": 60 }),
+        )
+        .await
+        .unwrap();
+    let id = made["task"]["id"].as_str().unwrap().to_owned();
+
+    fake.close("ops");
+    fake.add("ops");
+    let refused = node.call("scheduled_run", json!({ "id": id })).await;
+    assert!(fake.delivered().is_empty(), "typed into another session");
+    let why = refused.unwrap_err().message;
+    assert!(why.contains("ops is another session"), "{why}");
+    let listed = node.call("scheduled_list", json!({})).await.unwrap();
+    let held = listed["tasks"][0]["held"].as_str().unwrap();
+    assert!(held.contains("Edit the task"), "{listed}");
+
+    node.call("scheduled_edit", json!({ "id": id, "sessions": ["ops"] }))
+        .await
+        .unwrap();
+    let shown = node
+        .call("scheduled_show", json!({ "id": id }))
+        .await
+        .unwrap();
+    assert!(shown["task"].get("held").is_none(), "{shown}");
+    node.call("scheduled_run", json!({ "id": id }))
+        .await
+        .unwrap();
+    assert_eq!(
+        fake.delivered().len(),
+        1,
+        "saved again, it is the new ops's"
+    );
+    node.stop().await;
+}
+
 /// The list's order does not matter: scheduled listed first still reaches
 /// the sessions; with no area providing them it is refused, saying so.
 #[tokio::test(flavor = "multi_thread")]

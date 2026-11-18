@@ -380,5 +380,46 @@ fn the_page_lists_a_task_made_through_the_cli(cx: &mut TestAppContext) {
     until(cx, "task deleted", |cx| {
         cx.debug_bounds("scheduled-banner-Task deleted.").is_some()
     });
+
+    // The keyboard alone. N opens a new task with the caret already in
+    // its prompt: what is typed lands there, so leaving asks first.
+    cx.simulate_keystrokes("n");
+    until(cx, "the new task's form", |cx| {
+        cx.debug_bounds("scheduled-prompt").is_some()
+    });
+    cx.simulate_input("typed without a click");
+    cx.simulate_keystrokes("escape");
+    until(cx, "Esc asks before discarding what was typed", |cx| {
+        cx.debug_bounds(
+            "scheduled-banner-This task has unsaved changes. Do the same once more to discard them.",
+        )
+        .is_some()
+    });
+    cx.simulate_keystrokes("escape");
+    until(cx, "Esc again leaves the form", |cx| {
+        cx.debug_bounds("scheduled-prompt").is_none()
+    });
+    // The arrows walk the list: both tasks known here get their turn.
+    let copied_id = copied["task"]["id"].as_str().unwrap();
+    let first: &'static str = Box::leak(format!("scheduled-chosen-{task}").into_boxed_str());
+    let second: &'static str = Box::leak(format!("scheduled-chosen-{copied_id}").into_boxed_str());
+    cx.simulate_keystrokes("home");
+    let mut turns = vec![];
+    for _ in 0..3 {
+        cx.run_until_parked();
+        turns.push((
+            cx.debug_bounds(first).is_some(),
+            cx.debug_bounds(second).is_some(),
+        ));
+        cx.simulate_keystrokes("down");
+    }
+    assert_eq!(turns.iter().filter(|t| t.0).count(), 1, "{turns:?}");
+    assert_eq!(turns.iter().filter(|t| t.1).count(), 1, "{turns:?}");
+    assert!(!turns.contains(&(true, true)), "one task at a time");
+    // Enter edits the chosen task.
+    cx.simulate_keystrokes("enter");
+    until(cx, "Enter opens the chosen task's form", |cx| {
+        cx.debug_bounds("scheduled-prompt").is_some()
+    });
     let _ = std::fs::remove_dir_all(settings.parent().expect("its folder"));
 }

@@ -1,4 +1,5 @@
-//! Delivery to this node's sessions through Send's guarded path: the text
+//! Delivery to this node's sessions through Send's guarded path, only into
+//! the session a target was chosen as (its id, not only its name): the text
 //! is pasted as one paste, Enter waits for it to settle, and Enter is
 //! pressed only if the pane still runs the process the text went to
 //! (`ahjo_term::engine::delivery`). The prompt never reaches a shell or an
@@ -62,13 +63,14 @@ impl SessionsRunner {
 }
 
 impl Runner for SessionsRunner {
-    fn validate<'a>(&'a self, target: &'a Target) -> BoxFuture<'a, Result<(), String>> {
-        Box::pin(async move { self.find(target).await.map(|_| ()) })
+    fn validate<'a>(&'a self, target: &'a Target) -> BoxFuture<'a, Result<String, String>> {
+        Box::pin(async move { self.find(target).await.map(|s| s.id) })
     }
 
     fn send<'a>(
         &'a self,
         target: &'a Target,
+        id: Option<&'a str>,
         prompt: &'a str,
         deadline: Duration,
     ) -> BoxFuture<'a, Result<String, String>> {
@@ -76,6 +78,10 @@ impl Runner for SessionsRunner {
             let start = tokio::time::Instant::now();
             let queued = async {
                 let session = self.find(target).await?;
+                // Its name alone does not make a session the task's.
+                if id.is_some_and(|id| id != session.id) {
+                    return Err(crate::service::replaced(target));
+                }
                 let pane = self
                     .sessions
                     .active_pane(&session.id)

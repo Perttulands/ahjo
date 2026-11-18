@@ -8,6 +8,8 @@
 //! Errors are the one shape `ahjo_core::Error` defines, with the codes
 //! below; over HTTP they come in CHROTE's envelope (see [`Envelope`]).
 
+use std::collections::BTreeMap;
+
 use jiff::Timestamp;
 use serde::{Deserialize, Serialize};
 
@@ -54,6 +56,9 @@ pub struct Envelope {
 }
 
 pub const SUCCESS: &str = "success";
+/// How a run refused because its task is held begins; why follows the
+/// colon, as the task's `held` says it.
+pub const HELD: &str = "nothing was sent and the task is held";
 pub const ERROR: &str = "error";
 /// Some targets took the prompt and others did not.
 pub const PARTIAL: &str = "partial";
@@ -191,6 +196,13 @@ pub struct Task {
     pub name: String,
     pub prompt: String,
     pub targets: Vec<Target>,
+    /// Which session each target meant, by its label: the server's own id
+    /// for it (tmux's `$3`), learned when the target was chosen. A session
+    /// that has the name but not the id is another one, and the task is
+    /// held rather than typed into it. Not CHROTE's; a target without one
+    /// learns it at its next run.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub session_ids: BTreeMap<String, String>,
     pub schedule: Schedule,
     pub enabled: bool,
     pub paused: bool,
@@ -255,6 +267,8 @@ struct TaskDoc {
     #[serde(default)]
     target: Option<Target>,
     #[serde(default)]
+    session_ids: BTreeMap<String, String>,
+    #[serde(default)]
     schedule: Schedule,
     #[serde(default)]
     enabled: bool,
@@ -278,6 +292,9 @@ struct TaskDoc {
     audit: Vec<AuditEntry>,
     #[serde(default)]
     attempt: Option<Attempt>,
+    /// As the API says it, for the app; never in a file.
+    #[serde(default)]
+    held: String,
 }
 
 fn epoch() -> Timestamp {
@@ -291,6 +308,7 @@ impl From<TaskDoc> for Task {
             name: d.name,
             prompt: d.prompt,
             targets: normalize_targets(d.targets.into_iter().chain(d.target)),
+            session_ids: d.session_ids,
             schedule: d.schedule,
             enabled: d.enabled,
             paused: d.paused,
@@ -303,7 +321,7 @@ impl From<TaskDoc> for Task {
             updated_at: d.updated_at,
             recent_runs: d.recent_runs,
             audit: d.audit,
-            held: String::new(),
+            held: d.held,
             attempt: d.attempt,
         }
     }
@@ -401,6 +419,19 @@ mod tests {
         let back = serde_json::to_string(&run).unwrap();
         assert!(!back.contains("\"submitted\""), "{back}");
         assert!(back.contains("\"submitKeyDispatched\":true"));
+    }
+
+    /// What the API says of a task reaches the app: why it is held, and
+    /// which session each target was chosen as.
+    #[test]
+    fn a_held_task_reads_back_as_held_with_its_sessions() {
+        let said = r#"{"id":"tsk_1","name":"n","prompt":"p","targets":[{"sessionName":"ops"}],
+            "sessionIds":{"ops":"$3"},"schedule":{"type":"interval","everyMinutes":5},
+            "enabled":true,"paused":false,"createdAt":"2026-06-27T14:00:00Z",
+            "updatedAt":"2026-06-27T14:00:00Z","held":"session ops is another session now"}"#;
+        let task: Task = serde_json::from_str(said).unwrap();
+        assert_eq!(task.held, "session ops is another session now");
+        assert_eq!(task.session_ids["ops"], "$3");
     }
 
     /// CHROTE's TestStoreReadsLegacySingleTargetDocument and

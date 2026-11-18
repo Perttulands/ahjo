@@ -102,6 +102,17 @@ impl FakeSessions {
         self.changed.send_modify(|n| *n += 1);
     }
 
+    /// Ends the session named `name`, as closing it does: no rename is
+    /// told.
+    pub fn close(&self, name: &str) {
+        self.state
+            .lock()
+            .unwrap()
+            .sessions
+            .retain(|s| s.name != name);
+        self.changed.send_modify(|n| *n += 1);
+    }
+
     /// Makes deliveries to the session named `name` fail.
     pub fn refuse(&self, name: &str) {
         self.state.lock().unwrap().refusing.push(name.to_owned());
