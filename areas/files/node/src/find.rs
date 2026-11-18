@@ -6,6 +6,9 @@ use std::path::{Path, PathBuf};
 
 const CANDIDATES: usize = 500;
 const RESULTS: usize = 50;
+/// Lines found inside files answered at most: a search across a
+/// repository is read through, not picked from.
+const LINES: usize = 200;
 const FILE_LIMIT: u64 = 1024 * 1024;
 const VISIT_LIMIT: usize = 100_000;
 
@@ -38,8 +41,15 @@ pub fn search(
                 .then(a.path.cmp(&b.path))
         });
     }
-    if found.len() > RESULTS {
-        found.truncate(RESULTS);
+    let most = if content {
+        // The walk goes last folder first: a reader wants them in order.
+        found.sort_by(|a, b| a.path.cmp(&b.path).then(a.line.cmp(&b.line)));
+        LINES
+    } else {
+        RESULTS
+    };
+    if found.len() > most {
+        found.truncate(most);
         truncated = true;
     }
     Ok(Matches {

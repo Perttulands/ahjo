@@ -1,4 +1,5 @@
-//! A file's bounded unified diff against its repository's committed HEAD.
+//! A file's bounded unified diff against its repository's committed HEAD;
+//! a file deleted since then has one too.
 use std::io::Read;
 use std::path::Path;
 use std::process::{Command, Stdio};
@@ -16,7 +17,12 @@ const WHOLE: &str = "--unified=1000000";
 /// The diff of `requested`; `whole` gives every line of the file around
 /// its changes, not three.
 pub fn read(roots: &Roots, requested: &str, whole: bool) -> Result<Diff, FilesError> {
-    let path = roots.existing(requested)?;
+    // A file taken out since the commit still has a diff: all of it, gone.
+    let (path, gone) = match roots.existing(requested) {
+        Ok(path) => (path, false),
+        Err(FilesError::NotFound) => (roots.gone(requested)?, true),
+        Err(e) => return Err(e),
+    };
     if roots
         .list()
         .iter()
@@ -24,7 +30,7 @@ pub fn read(roots: &Roots, requested: &str, whole: bool) -> Result<Diff, FilesEr
     {
         return Err(FilesError::Root);
     }
-    if !path.is_file() {
+    if !gone && !path.is_file() {
         return Err(FilesError::NotFile);
     }
     let mut result = Diff {
@@ -38,7 +44,11 @@ pub fn read(roots: &Roots, requested: &str, whole: bool) -> Result<Diff, FilesEr
         .parent()
         .and_then(|parent| parent.ancestors().find(|p| p.join(".git").exists()))
     else {
-        return Ok(result);
+        return if gone {
+            Err(FilesError::NotFound)
+        } else {
+            Ok(result)
+        };
     };
     result.repository = repository.to_string_lossy().into_owned();
     let relative = path

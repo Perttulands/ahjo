@@ -95,6 +95,8 @@ fn entries(out: &str) -> impl Iterator<Item = (char, &str)> {
         let (x, y) = (c.next()?, c.next()?);
         let state = match (x, y) {
             ('?', '?') => '?',
+            // Unmerged: both sides changed it, and it waits to be settled.
+            ('U', _) | (_, 'U') | ('A', 'A') | ('D', 'D') => 'C',
             (_, 'D') | ('D', _) => 'D',
             ('A', _) => 'A',
             ('R', _) => 'R',
@@ -108,7 +110,8 @@ fn entries(out: &str) -> impl Iterator<Item = (char, &str)> {
 mod tests {
     #[test]
     fn porcelain_entries_read_as_what_a_reader_sees() {
-        let out = " M a.rs\0?? new/b.md\0A  c.txt\0 D gone.rs\0MM both.rs\0";
+        let out =
+            " M a.rs\0?? new/b.md\0A  c.txt\0 D gone.rs\0MM both.rs\0UU fight.rs\0DU theirs.rs\0";
         let got: Vec<_> = super::entries(out).collect();
         assert_eq!(
             got,
@@ -117,7 +120,9 @@ mod tests {
                 ('?', "new/b.md"),
                 ('A', "c.txt"),
                 ('D', "gone.rs"),
-                ('M', "both.rs")
+                ('M', "both.rs"),
+                ('C', "fight.rs"),
+                ('C', "theirs.rs")
             ]
         );
     }

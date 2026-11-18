@@ -90,6 +90,30 @@ impl Roots {
         }
     }
 
+    /// A path that is no longer there, as it would resolve: its nearest
+    /// folder still standing with every link resolved, the rest as given.
+    /// What a deleted file's repository is asked about.
+    pub fn gone(&self, path: &str) -> Result<PathBuf, FilesError> {
+        let path = absolute(path)?;
+        if path
+            .components()
+            .any(|c| matches!(c, Component::CurDir | Component::ParentDir))
+        {
+            return Err(FilesError::Outside);
+        }
+        let standing = path
+            .ancestors()
+            .find(|a| a.exists())
+            .ok_or(FilesError::NotFound)?;
+        let rest = path.strip_prefix(standing).expect("an ancestor");
+        let resolved = standing.canonicalize()?.join(rest);
+        if self.contains(&resolved) {
+            Ok(resolved)
+        } else {
+            Err(FilesError::Outside)
+        }
+    }
+
     pub fn contains(&self, canonical: &Path) -> bool {
         self.roots
             .iter()

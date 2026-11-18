@@ -60,8 +60,8 @@ pub struct DiffAt {
 }
 
 /// How a file stands against its repository's HEAD: changed (`M`), new to
-/// it (`A`, or `?` when not even staged), taken out (`D`) or renamed in
-/// (`R`).
+/// it (`A`, or `?` when not even staged), taken out (`D`), renamed in
+/// (`R`) or in a merge conflict (`C`).
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
 pub struct FileState {
     pub path: String,

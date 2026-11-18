@@ -478,8 +478,28 @@ async fn status_names_every_file_that_differs_from_head_and_a_whole_diff_has_eve
     let diff = all["diff"].as_str().unwrap();
     assert!(diff.contains(" line 1\n") && diff.contains(" line 20\n"));
     assert!(diff.contains("-line 10\n+line ten\n"));
+    // A file deleted since the commit still shows what went, also when its
+    // folder went with it; a path that never was is not found, and one
+    // that climbs out of the roots is refused.
+    let gone = at("diff", &repo.join("docs/gone.md"));
+    let (status, body, _) = call(&app, "GET", &gone, Body::empty()).await;
+    assert_eq!(status, StatusCode::OK);
+    let deleted: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert!(deleted["diff"].as_str().unwrap().contains("\n-gone\n"));
+    std::fs::remove_file(repo.join("docs/new.md")).unwrap();
+    std::fs::remove_dir(repo.join("docs")).unwrap();
+    let (status, body, _) = call(&app, "GET", &gone, Body::empty()).await;
+    assert_eq!(status, StatusCode::OK);
+    let deleted: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert!(deleted["diff"].as_str().unwrap().contains("\n-gone\n"));
     let plain = scratch.0.join("plain");
     std::fs::create_dir(&plain).unwrap();
+    let never = at("diff", &plain.join("never/was.txt"));
+    let (status, _, _) = call(&app, "GET", &never, Body::empty()).await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    let climbing = at("diff", &scratch.0.join("gone/../../../etc/passwd"));
+    let (status, _, _) = call(&app, "GET", &climbing, Body::empty()).await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
     let (_, body, _) = call(&app, "GET", &at("status", &plain), Body::empty()).await;
     let none: ahjo_files_contract::RepoStatus = serde_json::from_slice(&body).unwrap();
     assert_eq!(none, Default::default());
