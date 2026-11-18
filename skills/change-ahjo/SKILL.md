@@ -69,9 +69,14 @@ a scratch folder `$S`:
 3. `Xvfb :<n> -screen 0 1600x1000x24 -nolisten tcp &`, then
    `env -u WAYLAND_DISPLAY DISPLAY=:<n> VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/lvp_icd.json XDG_CONFIG_HOME=$S/xdg AHJO_SWARM_CONFIG=$S/app.json AHJO_SWARM_BOUNDS=0,0,1600,1000 target/release/ahjo-swarm --node http://127.0.0.1:<port> &`.
 4. Open the page with `target/release/ahjo view open <page> --node http://127.0.0.1:<port>`
-   (this host has no XTEST, so no synthetic clicks; every `ahjo` call names
-   your node with `--node`, or it reaches the operator's) and take
-   `ffmpeg -f x11grab -i :<n> -frames:v 1 $S/shot.png`.
+   (every `ahjo` call names your node with `--node`, or it reaches the
+   operator's) and take `ffmpeg -f x11grab -i :<n> -frames:v 1 $S/shot.png`.
+   Use it as a person does with `xdotool` on your display: `DISPLAY=:<n>
+   xdotool mousemove <x> <y> click 1`, `xdotool key Down Return Escape
+   ctrl+p`, `xdotool type --delay 20 'text'`. Coordinates are the
+   screenshot's pixels; give the app a moment after each action before the
+   next screenshot. Walk a journey this way, not by opening pages alone:
+   clicks, keys and typing are what show focus, order and dead ends.
 5. Stop what you started: the app, Xvfb, the node, and your tmux session.
 
 ## Upgrade the operator's node
