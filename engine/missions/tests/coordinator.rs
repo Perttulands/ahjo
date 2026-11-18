@@ -1842,15 +1842,14 @@ async fn wait_reports_a_human_gate_once_and_wakes_concurrent_drivers() {
         }));
     }
     tokio::task::yield_now().await;
-    let started = tokio::time::Instant::now();
     *held.0.lock().unwrap() = true;
     held.1.notify_all();
     let mut cursor = 0;
     for waiter in waiters {
-        let answer = tokio::time::timeout_at(started + Duration::from_secs(1), waiter)
-            .await
-            .unwrap()
-            .unwrap();
+        // A driver the gate did not wake answers "timeout" when its own
+        // ten seconds are up, so no clock is held against the step here:
+        // how long the step takes to reach the gate is the machine's.
+        let answer = waiter.await.unwrap();
         assert_eq!(answer.outcome, "needs-you");
         assert_eq!(answer.run.waiting_gates[0].gate_id, "gate_review");
         cursor = answer.cursor;
