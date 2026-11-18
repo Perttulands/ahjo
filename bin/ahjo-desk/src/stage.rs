@@ -11,7 +11,8 @@
 use crate::app::{DeskApp, Drawing, Item, Pic, fit_scale};
 use crate::marks::{self, Tool};
 use crate::model::{Ask, Mark, MediaKind};
-use crate::tokens::{self, GAP, GAP_SMALL, SMALL, TEXT};
+use crate::tokens::{self, CAP_TEXT, GAP, GAP_SMALL, META};
+use crate::views::button;
 use ahjo_app_kit::theme::{FAMILY, Theme, alpha, rgb, theme};
 use ahjo_app_kit::widgets::kit::{self, Kind};
 use ahjo_app_kit::widgets::{markdown, select};
@@ -137,7 +138,7 @@ impl DeskApp {
             .bg(t.surface)
             .border_b_1()
             .border_color(t.divider)
-            .text_size(px(SMALL))
+            .text_size(px(META))
             .text_color(t.text2);
         if item.doc {
             return bar
@@ -166,12 +167,22 @@ impl DeskApp {
                 })
                 .child(div().flex_1())
                 .child(
-                    kit::button(t, "open-page", "Open in browser", Kind::Quiet)
+                    button(t, "open-page", "Open in browser", Kind::Quiet)
                         .on_click(cx.listener(|app, _: &ClickEvent, _, cx| app.open_media(cx))),
                 )
                 .into_any_element();
         }
         let markable = matches!(item.kind(), Some(MediaKind::Image | MediaKind::Video));
+        if self.read_only() {
+            let n = self.marks().len();
+            return bar
+                .child(match n {
+                    0 => "Answered · sent without marks".to_string(),
+                    1 => "Answered · your mark as you sent it".to_string(),
+                    n => format!("Answered · your {n} marks as you sent them"),
+                })
+                .into_any_element();
+        }
         if !markable {
             return bar
                 .child(item.media.file_name().to_string())
@@ -211,6 +222,24 @@ impl DeskApp {
             .into_any_element()
     }
 
+    /// The room the pictures had last frame (all their panels together),
+    /// or, before any, the window's middle.
+    fn stage_room(&self, window: &Window) -> (f32, f32) {
+        let rooms = self.rooms.borrow();
+        match rooms.iter().copied().reduce(|a, b| a.union(&b)) {
+            Some(b) if b.size.width > px(0.) => (f32::from(b.size.width), f32::from(b.size.height)),
+            _ => {
+                let v = window.viewport_size();
+                let (w, h) = (f32::from(v.width), f32::from(v.height));
+                let (rail, column) = tokens::columns(w);
+                (
+                    w - rail - column,
+                    h - tokens::BAR - tokens::TOOLS - tokens::STRIP_H,
+                )
+            }
+        }
+    }
+
     #[allow(clippy::too_many_arguments)]
     fn pictures_surface(
         &mut self,
@@ -224,12 +253,27 @@ impl DeskApp {
         cx: &mut Context<Self>,
     ) -> (AnyElement, Option<String>, Vec<usize>) {
         let mut slots = vec![at];
-        if self.view.side
-            && let Some(p) = self.partner(items)
-            && !items[p].doc
-            && items[p].kind() != Some(MediaKind::Page)
-        {
-            slots.push(p);
+        let mut cols = 1;
+        if self.view.side {
+            // Every picture of the ask at once, in the rows and columns
+            // that draw them largest, while each still reads; past that,
+            // the one in front and its partner, the strip for the rest.
+            let pictures: Vec<usize> = (0..items.len())
+                .filter(|&j| j != at && !items[j].doc && items[j].kind() != Some(MediaKind::Page))
+                .collect();
+            let room = self.stage_room(window);
+            let shape = self.last_shape.get();
+            let (c, least) = tokens::grid(pictures.len() + 1, room, shape, 2.);
+            if pictures.len() > 1 && least >= tokens::SIDE_LEAST {
+                slots.extend(pictures);
+                cols = c;
+            } else if let Some(p) = self.partner(items)
+                && !items[p].doc
+                && items[p].kind() != Some(MediaKind::Page)
+            {
+                slots.push(p);
+                cols = tokens::grid(2, room, shape, 2.).0;
+            }
         }
         self.rooms
             .borrow_mut()
@@ -248,6 +292,7 @@ impl DeskApp {
                 && let Shown::Picture(_, n) = &shown
             {
                 natural = Some(*n);
+                self.last_shape.set(n.0 / n.1.max(1.));
             }
             let video = item.kind() == Some(MediaKind::Video);
             let ink = Ink {
@@ -263,7 +308,29 @@ impl DeskApp {
                     .clone()
                     .filter(|d| slot == 0 && d.media == item.media.id),
             };
-            panels.push(self.panel(t, slot, item, shown, rec, slots.len() > 1, ink));
+            panels.push((
+                i,
+                self.panel(t, slot, item, shown, rec, slots.len() > 1, ink),
+            ));
+        }
+        // Laid out in the ask's order, so a picture keeps its place as the
+        // one in front changes.
+        panels.sort_by_key(|(i, _)| *i);
+        let mut rows = Vec::new();
+        let mut panels = panels.into_iter().map(|(_, p)| p).peekable();
+        while panels.peek().is_some() {
+            let row: Vec<AnyElement> = panels.by_ref().take(cols).collect();
+            // A short last row keeps its cells the others' size.
+            let empty = cols - row.len();
+            rows.push(
+                div()
+                    .flex()
+                    .flex_1()
+                    .min_h_0()
+                    .gap(px(2.))
+                    .children(row)
+                    .children((0..empty).map(|_| div().flex_1().min_w_0())),
+            );
         }
         let shown_natural = natural;
         let natural = natural.unwrap_or((1., 1.));
@@ -280,6 +347,7 @@ impl DeskApp {
             .id("stage")
             .size_full()
             .flex()
+            .flex_col()
             .gap(px(2.))
             .bg(t.term_bg)
             .map(|d| {
@@ -291,7 +359,7 @@ impl DeskApp {
                     d.cursor_grab()
                 }
             })
-            .children(panels)
+            .children(rows)
             .on_scroll(cx.listener(move |app, e: &ScrollEvent, window, cx| {
                 // A wheel's notch is one step however many lines it says;
                 // a touchpad's pixels zoom smoothly.
@@ -467,7 +535,7 @@ impl DeskApp {
                         .py(px(4.))
                         .rounded(px(tokens::RADIUS))
                         .bg(alpha(t.bg, 0.78))
-                        .text_size(px(TEXT))
+                        .text_size(px(META))
                         .text_color(t.text)
                         .when(is_rec, |d| {
                             d.child(
@@ -581,12 +649,12 @@ impl DeskApp {
             .child(
                 div()
                     .max_w(px(tokens::READING / 1.6))
-                    .text_size(px(TEXT))
+                    .text_size(px(META))
                     .text_color(t.text2)
                     .child(why),
             )
             .child(
-                kit::button(t, "open-page-big", "Open the page", Kind::Primary)
+                button(t, "open-page-big", "Open the page", Kind::Primary)
                     .on_click(cx.listener(|app, _: &ClickEvent, _, cx| app.open_media(cx))),
             )
             .into_any_element()
@@ -649,7 +717,7 @@ impl DeskApp {
             .border_t_1()
             .border_color(t.divider)
             .child(
-                kit::button(
+                button(
                     t,
                     "play",
                     if playing { "Pause" } else { "Play" },
@@ -659,12 +727,12 @@ impl DeskApp {
                 .on_click(cx.listener(|app, _: &ClickEvent, _, cx| app.toggle_play(cx))),
             )
             .child(
-                kit::button(t, "back", "‹", Kind::Quiet)
+                button(t, "back", "‹", Kind::Quiet)
                     .tooltip(kit::tip("A frame back (←)"))
                     .on_click(cx.listener(|app, _: &ClickEvent, _, cx| app.step_frames(-1, cx))),
             )
             .child(
-                kit::button(t, "on", "›", Kind::Quiet)
+                button(t, "on", "›", Kind::Quiet)
                     .tooltip(kit::tip("A frame on (→)"))
                     .on_click(cx.listener(|app, _: &ClickEvent, _, cx| app.step_frames(1, cx))),
             )
@@ -730,7 +798,7 @@ impl DeskApp {
             .child(
                 div()
                     .flex_none()
-                    .text_size(px(SMALL))
+                    .text_size(px(META))
                     .text_color(t.text2)
                     .child(words),
             )
@@ -814,7 +882,7 @@ impl DeskApp {
                                 .rounded(px(2.))
                                 .bg(if is_rec { t.accent } else { alpha(t.bg, 0.8) })
                                 .text_color(if is_rec { t.on_accent() } else { t.text })
-                                .text_size(px(SMALL))
+                                .text_size(px(CAP_TEXT))
                                 .font_weight(FontWeight::BOLD)
                                 .child(label),
                         )
@@ -868,7 +936,7 @@ impl DeskApp {
                     .children(zoom.map(|z| {
                         div()
                             .id("zoom")
-                            .text_size(px(SMALL))
+                            .text_size(px(META))
                             .text_color(t.text2)
                             .tooltip(kit::tip(
                                 "Wheel zooms at the pointer · drag moves · Z fits · 0 is 1:1 · double click goes between",
@@ -877,13 +945,15 @@ impl DeskApp {
                     }))
                     .when(comparable, |d| {
                         d.child(
-                            kit::button(
+                            button(
                                 t,
                                 "compare",
-                                if side { "One" } else { "Side by side" },
+                                if side { "One" } else { "Compare" },
                                 Kind::Quiet,
                             )
-                            .tooltip(kit::tip("C · F swaps the two in place"))
+                            .tooltip(kit::tip(
+                                "C · every picture at once while each still reads · F steps the one in front",
+                            ))
                             .on_click(cx.listener(|app, _: &ClickEvent, _, cx| {
                                 app.view.side = !app.view.side;
                                 cx.notify();
@@ -903,7 +973,7 @@ fn segment(
     key: &str,
     on: bool,
 ) -> gpui::Stateful<gpui::Div> {
-    kit::button(
+    button(
         t,
         id,
         name.to_string(),
@@ -912,7 +982,7 @@ fn segment(
     .gap(px(GAP_SMALL))
     .child(
         div()
-            .text_size(px(SMALL))
+            .text_size(px(CAP_TEXT))
             .text_color(if on { alpha(t.on_accent(), 0.7) } else { t.dim })
             .child(key.to_string()),
     )
@@ -1101,7 +1171,7 @@ fn quiet(words: String, colour: Hsla) -> AnyElement {
         .items_center()
         .justify_center()
         .p(px(tokens::PAD))
-        .text_size(px(TEXT))
+        .text_size(px(META))
         .text_color(colour)
         .child(words)
         .into_any_element()

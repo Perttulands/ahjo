@@ -19,7 +19,7 @@ use gpui::{
     App, AppContext, AsyncApp, Bounds, Context, Entity, FocusHandle, Focusable, ImageFormat,
     KeyDownEvent, Pixels, Point, RenderImage, WeakEntity, Window,
 };
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::collections::{HashMap, VecDeque};
 use std::rc::Rc;
 use std::sync::Arc;
@@ -82,6 +82,15 @@ impl DeskState {
 
 /// An ask: its desk and its number.
 pub type Key = (usize, String);
+
+/// Which asks the list on the left shows: those waiting on him, or those
+/// he answered, to look at again.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum List {
+    #[default]
+    Waiting,
+    Answered,
+}
 
 /// One thing the surface can show: a picture, clip or page and what it
 /// belongs to, or the ask's document.
@@ -192,11 +201,16 @@ pub struct DeskApp {
     /// in it, and the clip's track.
     pub rooms: Rc<RefCell<Vec<Bounds<Pixels>>>>,
     pub drawn_at: Rc<RefCell<Vec<Option<Bounds<Pixels>>>>>,
+    /// The shape (width over height) of the picture in front, as last
+    /// shown: how the pictures compared at once are laid out.
+    pub last_shape: Rc<Cell<f32>>,
     pub track: Rc<RefCell<Option<Bounds<Pixels>>>>,
     pub held: Option<(Point<Pixels>, (f32, f32))>,
     play_gen: u64,
     /// He has chosen an ask; until then the queue's first is in front.
     chosen: bool,
+    /// The list on the left.
+    pub list: List,
     /// The document's text as selectable blocks, kept per ask and round.
     pub doc_select: Rc<RefCell<Selectable>>,
     pub doc_blocks: Option<(String, Rc<Vec<Block>>)>,
@@ -305,10 +319,12 @@ impl DeskApp {
             live: Arc::new(AtomicU64::new(0)),
             rooms: Rc::new(RefCell::new(vec![])),
             drawn_at: Rc::new(RefCell::new(vec![])),
+            last_shape: Rc::new(Cell::new(16. / 9.)),
             track: Rc::new(RefCell::new(None)),
             held: None,
             play_gen: 0,
             chosen: false,
+            list: List::Waiting,
             doc_select: Rc::default(),
             doc_blocks: None,
             #[cfg(windows)]
@@ -347,6 +363,50 @@ impl DeskApp {
         open.into_iter().map(|(a, d)| (d, a.id.clone())).collect()
     }
 
+    /// Every answered ask, the last answered first: what he said stays
+    /// where he can find it again.
+    pub fn answered(&self) -> Vec<Key> {
+        let mut done: Vec<(&Ask, usize)> = self
+            .desks
+            .iter()
+            .enumerate()
+            .flat_map(|(d, s)| {
+                s.asks
+                    .iter()
+                    .filter(|a| a.status == "answered" && a.answer.is_some())
+                    .map(move |a| (a, d))
+            })
+            .collect();
+        done.sort_by(|(a, _), (b, _)| answered_at(b).cmp(answered_at(a)));
+        done.into_iter().map(|(a, d)| (d, a.id.clone())).collect()
+    }
+
+    /// The asks the list on the left shows now.
+    pub fn listed(&self) -> Vec<Key> {
+        match self.list {
+            List::Waiting => self.queue(),
+            List::Answered => self.answered(),
+        }
+    }
+
+    /// Shows the asks waiting, or those answered, with the first in front.
+    pub fn set_list(&mut self, list: List, cx: &mut Context<Self>) {
+        if self.list == list {
+            return;
+        }
+        self.list = list;
+        self.chosen = false;
+        let first = self.listed().first().cloned();
+        self.show(first, cx);
+        self.aim(Aim::Words, cx);
+    }
+
+    /// The ask in front was answered: it is shown as it was sent, and
+    /// nothing on it changes.
+    pub fn read_only(&self) -> bool {
+        self.current_ask().is_some_and(|a| !a.is_open())
+    }
+
     pub fn ask(&self, key: &Key) -> Option<&Ask> {
         self.desks.get(key.0)?.asks.iter().find(|a| a.id == key.1)
     }
@@ -368,6 +428,9 @@ impl DeskApp {
     }
 
     pub fn draft_mut(&mut self) -> Option<&mut Draft> {
+        if self.read_only() {
+            return None;
+        }
         let k = self.draft_key()?;
         self.drafts_changed = true;
         Some(self.drafts.entry(k).or_default())
@@ -467,7 +530,7 @@ impl DeskApp {
         self.selected = None;
         self.page_comment = false;
         self.point_words(cx);
-        let queue = self.queue();
+        let queue = self.listed();
         let next = self
             .current
             .as_ref()
@@ -488,7 +551,7 @@ impl DeskApp {
     }
 
     pub fn step_ask(&mut self, by: i64, cx: &mut Context<Self>) {
-        let queue = self.queue();
+        let queue = self.listed();
         if queue.is_empty() {
             return;
         }
@@ -684,7 +747,7 @@ impl DeskApp {
 
     /// Starts a mark at `n` (0 to 1 across the shown media).
     pub fn draw_start(&mut self, n: [f64; 2], cx: &mut Context<Self>) {
-        let Some(item) = self.shown_item() else {
+        let Some(item) = self.shown_item().filter(|_| !self.read_only()) else {
             return;
         };
         if let Some((_, p)) = self.player.as_mut()
@@ -1313,7 +1376,7 @@ impl DeskApp {
     /// Sends his answer (his marks first when he changed them), and opens
     /// the next ask while the desk keeps it.
     pub fn send(&mut self, verdict: Verdict, window: &mut Window, cx: &mut Context<Self>) {
-        if self.sending {
+        if self.sending || self.read_only() {
             return;
         }
         let Some(key) = self.current.clone() else {
@@ -1434,11 +1497,9 @@ impl DeskApp {
                 }
                 // The first answerable ask opens by itself; an ask answered
                 // elsewhere (the phone) lets the next one in.
-                let gone = app
-                    .current
-                    .as_ref()
-                    .is_some_and(|k| !app.ask(k).is_some_and(|a| a.is_open()));
-                let first = app.queue().first().cloned();
+                let listed = app.listed();
+                let gone = app.current.as_ref().is_some_and(|k| !listed.contains(k));
+                let first = listed.first().cloned();
                 if (app.current.is_none() || gone || (!app.chosen && app.current != first))
                     && !app.sending
                 {
@@ -1559,6 +1620,17 @@ impl DeskApp {
             return;
         }
         let video = self.player.is_some();
+        // An answered ask is looked at, not answered again: its keys move
+        // and look, nothing marks or writes.
+        if self.read_only()
+            && matches!(
+                key,
+                "p" | "b" | "a" | "d" | "delete" | "backspace" | "enter" | "tab"
+            )
+        {
+            return;
+        }
+        let writes = self.read_only() && e.keystroke.key_char.is_some();
         match key {
             "j" | "pagedown" => self.step_ask(1, cx),
             "k" | "pageup" => self.step_ask(-1, cx),
@@ -1630,6 +1702,7 @@ impl DeskApp {
             }
             // Anything else is him starting to write.
             "enter" | "tab" => self.aim(Aim::Words, cx),
+            _ if writes => {}
             _ => {
                 if let Some(ch) = e.keystroke.key_char.clone() {
                     self.words.update(cx, |f, cx| {
@@ -1671,6 +1744,12 @@ pub fn fit_scale(room: Bounds<Pixels>, natural: (f32, f32), sf: f32) -> f32 {
     (w / natural.0.max(1.))
         .min(h / natural.1.max(1.))
         .min(tokens::FIT_MAX)
+}
+
+/// When an ask was answered, as the desk dates it (RFC 3339, which sorts
+/// as text).
+fn answered_at(a: &Ask) -> &str {
+    a.answer.as_ref().map_or("", |x| x.at.as_str())
 }
 
 fn image_format(path: &str) -> ImageFormat {

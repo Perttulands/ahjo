@@ -6,9 +6,18 @@
 //! Sizes the kit has are used from it; those only this app needs are named
 //! here, once.
 
-use ahjo_app_kit::theme::size;
+use ahjo_app_kit::theme::{size, ty};
 
-pub use ahjo_app_kit::theme::size::{PAD, RADIUS, SMALL, TEXT};
+pub use ahjo_app_kit::theme::size::{DOT, PAD, RADIUS, TEXT};
+
+/// The words around the ask (meta lines, the tools, hints, chips and
+/// buttons). The Desk is used full screen from a sitting distance, so they
+/// stand a step above the chrome's [`TEXT`], which is for a dense workspace:
+/// at the theme's title size.
+pub const META: f32 = ty::TITLE;
+/// The least the Desk writes: a key on its cap, a mark's number, an
+/// item's letter. The chrome's text size, never under it.
+pub const CAP_TEXT: f32 = size::TEXT;
 
 /// Type: the ask's title, and the Desk's own name in its bar. Words to
 /// read are the theme's reading size (`Theme::ty.read`).
@@ -24,7 +33,7 @@ pub const GAP: f32 = 12.;
 pub const GAP_SMALL: f32 = 6.;
 /// The conversation beside the surface, and the queue rail.
 pub const COLUMN: f32 = 460.;
-pub const RAIL: f32 = 300.;
+pub const RAIL: f32 = 360.;
 /// In a narrow window both give way so the surface keeps the most room:
 /// never narrower than these, and the window never narrower than
 /// [`WINDOW_MIN`].
@@ -55,8 +64,11 @@ pub const STRIP_THUMB_W: f32 = 96.;
 pub const TRANSPORT: f32 = 40.;
 pub const TRACK_H: f32 = 6.;
 pub const TICK_W: f32 = 3.;
-/// A key cap's height.
-pub const CAP: f32 = 20.;
+/// A key cap's height; a chip stands a little taller, so a pointer finds it.
+pub const CAP: f32 = 22.;
+/// The most of an option's name a "Lean to" chip shows: the chips wrap,
+/// so a name reads whole unless it is a sentence.
+pub const LEAN_WORDS: usize = 40;
 /// The accent rule beside a recommendation.
 pub const RULE_W: f32 = 3.;
 /// How far a picture fits up: never past twice its size, so a small one
@@ -82,8 +94,8 @@ pub const MARK_LINE_ON: f32 = 4.;
 pub const MARK_EDGE: f32 = 2.;
 /// A pin's radius, and a mark's number badge.
 pub const PIN: f32 = 7.;
-pub const BADGE: f32 = 18.;
-pub const BADGE_TEXT: f32 = 11.;
+pub const BADGE: f32 = 22.;
+pub const BADGE_TEXT: f32 = CAP_TEXT;
 
 /// Decoded video frames kept for stepping back and scrubbing, in bytes.
 pub const VIDEO_CACHE: usize = 640 << 20;
@@ -111,17 +123,84 @@ pub fn ink(color: Option<&str>) -> u32 {
         .unwrap_or(MARK_INK)
 }
 
+/// A picture `w` by `h` drawn whole in a queue row's thumbnail box.
+pub fn thumb_fit(w: f32, h: f32) -> (f32, f32) {
+    let k = (ROW_THUMB_W / w.max(1.)).min(ROW_THUMB_H / h.max(1.));
+    (w * k, h * k)
+}
+
+/// Pictures compared at once read while the shorter side of each, as
+/// drawn, is at least this.
+pub const SIDE_LEAST: f32 = 240.;
+
+/// The share of its size a layout gives up for each cell it leaves empty:
+/// a full grid reads as one comparison, a hole in it draws the eye.
+pub const GRID_EMPTY: f32 = 0.1;
+
+/// The columns that draw `n` pictures of `shape` (width over height)
+/// largest in `room` with `gap` between, every cell the same size, and the
+/// shorter side each is then drawn at.
+pub fn grid(n: usize, room: (f32, f32), shape: f32, gap: f32) -> (usize, f32) {
+    let n = n.max(1);
+    let mut best = (1, f32::MIN, f32::MIN);
+    for cols in 1..=n {
+        let rows = n.div_ceil(cols);
+        let w = (room.0 - gap * (cols - 1) as f32) / cols as f32;
+        let h = (room.1 - gap * (rows - 1) as f32) / rows as f32;
+        // Drawn whole in its cell: as high as the cell, or as wide.
+        let (dw, dh) = if w / h > shape {
+            (h * shape, h)
+        } else {
+            (w, w / shape)
+        };
+        let side = dw.min(dh);
+        let score = side * (1. - GRID_EMPTY * (rows * cols - n) as f32);
+        if score > best.2 {
+            best = (cols, side, score);
+        }
+    }
+    (best.0, best.1)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
     fn the_surface_keeps_room_in_a_narrow_window() {
-        // Wide: both stand at their full measure.
-        assert_eq!(columns(1600.), (RAIL, COLUMN));
+        // Full screen: both stand at their full measure.
+        assert_eq!(columns(1920.), (RAIL, COLUMN));
         // At the narrowest window the surface still has a third of it.
         let (rail, column) = columns(WINDOW_MIN.0);
         assert!(rail >= RAIL_MIN && column >= COLUMN_MIN);
         assert!(WINDOW_MIN.0 - rail - column >= WINDOW_MIN.0 / 3.);
+    }
+
+    #[test]
+    fn a_thumbnail_shows_the_whole_picture() {
+        // A portrait stands whole in the box, its height the box's.
+        let (w, h) = thumb_fit(1080., 1920.);
+        assert_eq!(h, ROW_THUMB_H);
+        assert!(w < ROW_THUMB_W);
+        // A wide one spans the box.
+        let (w, h) = thumb_fit(3840., 2160.);
+        assert_eq!(w, ROW_THUMB_W);
+        assert!(h <= ROW_THUMB_H);
+    }
+
+    #[test]
+    fn compared_pictures_use_the_height() {
+        // Full screen, the stage between the list and the conversation.
+        let (rail, column) = columns(1920.);
+        let room = (1920. - rail - column, 1080. - BAR - TOOLS - STRIP_H);
+        // Three wide pictures stack, each still readable, rather than leave
+        // a hole in a square.
+        let (cols, least) = grid(3, room, 16. / 9., 2.);
+        assert_eq!(cols, 1);
+        assert!(least >= SIDE_LEAST, "{least}");
+        // Three tall ones stand in a row.
+        assert_eq!(grid(3, room, 9. / 16., 2.).0, 3);
+        // Twelve no longer read: the strip takes them.
+        assert!(grid(12, room, 16. / 9., 2.).1 < SIDE_LEAST);
     }
 }
