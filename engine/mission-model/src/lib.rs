@@ -8,6 +8,7 @@
 mod authoring;
 mod examples;
 mod finding;
+pub mod flow;
 mod layout;
 mod mission;
 mod nodes;

@@ -267,6 +267,14 @@ pub enum NotePatch {
         author: String,
         text: String,
     },
+    /// Add to the thread the entry `to` is in; `resolves` says this answers
+    /// it for good.
+    Reply {
+        to: String,
+        author: String,
+        text: String,
+        resolves: bool,
+    },
     Edit {
         target: String,
         author: String,

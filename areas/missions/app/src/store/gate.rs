@@ -1,5 +1,5 @@
 //! Words for the routes a human gate may take.
-use super::flow::Target;
+use ahjo_missions_contract::flow::Target;
 
 /// What an answer does, in the operator's words: the line under the
 /// answer and the button. `alone` says nothing else in the run is open, so

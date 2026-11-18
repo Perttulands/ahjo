@@ -21,6 +21,8 @@ pub const NAMES: &[&str] = &[
     "mission_edit",
     "mission_notes",
     "mission_note",
+    "mission_reply",
+    "mission_resolve",
     "layout_show",
     "layout_edit",
     "mission_run",
@@ -107,7 +109,9 @@ fn description(name: &str) -> &'static str {
         "mission_purge_archive" => {
             "Permanently remove a listed mission archive's definition, layout and associated notes; unrelated notes and run history remain."
         }
-        "mission_inspect" => "Read a mission and its graph.",
+        "mission_inspect" => {
+            "Read a mission as an agent picks it up: the operator's notes beside the step, gate, limit or wire each is on, the steps in the order a run meets them with who does each and where they lead, and what still stops it running. --full gives the whole definition with every port."
+        }
         "mission_validate" => {
             "Say whether a mission can run, with its errors and warnings and the next command."
         }
@@ -116,8 +120,14 @@ fn description(name: &str) -> &'static str {
         }
         "mission_examples" => "List the example missions a new mission can start from.",
         "mission_edit" => "Apply one mission authoring operation.",
-        "mission_notes" => "Read mission note threads.",
-        "mission_note" => "Append, edit or delete a mission note.",
+        "mission_notes" => "Read every note thread as it is stored, by what it is on.",
+        "mission_note" => {
+            "Write a note on the mission, or with --target on a step, gate, limit, end, the Input card or a wire (id, title, or From->To). --edit <note-id> changes your own note and --delete <note-id> removes it. --author names you, e.g. --author claude-7."
+        }
+        "mission_reply" => "Answer a note or ask about it, in its thread.",
+        "mission_resolve" => {
+            "Close a note's thread with what you did about it, so the operator sees it taken up; a later note opens it again."
+        }
         "layout_show" => "Read a mission's canvas layout.",
         "layout_edit" => "Change or arrange a mission's canvas layout.",
         "mission_run" => "Start a mission at its Input card.",
@@ -161,8 +171,18 @@ fn schema(name: &str) -> Value {
             &["mission", "change"],
         ),
         "mission_note" => object(
-            json!({"mission":s,"target":s,"action":s,"entry":s,"text":s,"author":s,"etag":s}),
+            json!({"mission":s,
+                "text":{"type":"string","description":"What the note says; several lines are fine."},
+                "target":{"type":"string","description":"What the note is on: an id or title, or a wire as From->To. The mission itself when left out."},
+                "edit":{"type":"string","description":"Change this note of yours to --text."},
+                "delete":{"type":"string","description":"Remove this note of yours."},
+                "author":{"type":"string","description":"Your name, e.g. claude-7 (agent:claude-7)."}}),
             &["mission"],
+        ),
+        "mission_reply" | "mission_resolve" => object(
+            json!({"mission":s,"note":s,"text":s,
+                "author":{"type":"string","description":"Your name, e.g. claude-7 (agent:claude-7)."}}),
+            &["mission", "note", "text"],
         ),
         "mission_run" | "formation_run" => {
             let properties = json!({"mission":s,"formation":s,
@@ -183,7 +203,11 @@ fn schema(name: &str) -> Value {
             json!({"mission":s,"change":obj,"etag":s}),
             &["mission", "change"],
         ),
-        "mission_inspect" | "mission_validate" | "mission_notes" | "layout_show" => {
+        "mission_inspect" => object(
+            json!({"mission":s,"full":{"type":"boolean","description":"The whole definition, with every port and slot id."}}),
+            &["mission"],
+        ),
+        "mission_validate" | "mission_notes" | "layout_show" => {
             object(json!({"mission":s}), &["mission"])
         }
         "run_list" => object(json!({"mission":s}), &[]),
@@ -228,6 +252,99 @@ fn required<'a>(a: &'a Value, key: &str) -> Result<&'a str, Error> {
 }
 fn optional<'a>(a: &'a Value, key: &str, default: &'a str) -> Result<&'a str, Error> {
     Ok(maybe_text(a, key).map_err(bad)?.unwrap_or(default))
+}
+/// `--author claude-7` is the agent claude-7; `human:` and `agent:` names
+/// are kept as given.
+fn note_author(a: &Value) -> Result<String, Error> {
+    let author = optional(a, "author", "agent:ahjo")?.trim();
+    Ok(match author {
+        "" => "agent:ahjo".into(),
+        _ if author.starts_with("agent:") || author.starts_with("human:") => author.into(),
+        name => format!("agent:{name}"),
+    })
+}
+/// What a note is on: the mission, a card by id or unique title, or a wire
+/// by id or as `From->To`.
+fn note_target(mission: &wire::Mission, target: &str) -> Result<String, Error> {
+    let target = target.trim();
+    if target.is_empty() || target == wire::MISSION_THREAD {
+        return Ok(wire::MISSION_THREAD.into());
+    }
+    let cards = (mission.input_cards.iter().map(|n| (&n.id, &n.title)))
+        .chain(mission.formations.iter().map(|n| (&n.id, &n.title)))
+        .chain(mission.gates.iter().map(|n| (&n.id, &n.title)))
+        .chain(mission.ends.iter().map(|n| (&n.id, &n.title)))
+        .chain(mission.limits.iter().map(|n| (&n.id, &n.title)))
+        .collect::<Vec<_>>();
+    let card = |name: &str| -> Result<String, Error> {
+        let name = name.trim();
+        if let Some((id, _)) = cards.iter().find(|(id, _)| id.as_str() == name) {
+            return Ok((*id).clone());
+        }
+        match cards
+            .iter()
+            .filter(|(_, title)| title.as_str() == name)
+            .collect::<Vec<_>>()
+            .as_slice()
+        {
+            [(id, _)] => Ok((*id).clone()),
+            [] => Err(Error::new(
+                "not_found",
+                format!(
+                    "nothing called {name:?} in this mission; mission inspect names everything"
+                ),
+            )),
+            _ => Err(bad(format!("{name:?} names several; use the id"))),
+        }
+    };
+    if mission.connections.iter().any(|c| c.id == target) {
+        return Ok(target.into());
+    }
+    if let Some((from, to)) = target.split_once("->") {
+        let (from, from_port) = from.trim().split_once(':').unwrap_or((from, ""));
+        let (from, to) = (card(from)?, card(to)?);
+        let wires = (mission.connections.iter())
+            .filter(|c| {
+                let (a, port) = c.from.split_once(':').unwrap_or((&c.from, ""));
+                a == from
+                    && c.to.split(':').next() == Some(to.as_str())
+                    && (from_port.is_empty() || port == from_port.trim())
+            })
+            .collect::<Vec<_>>();
+        return match wires.as_slice() {
+            [one] => Ok(one.id.clone()),
+            [] => Err(Error::new("not_found", format!("no wire {target}"))),
+            _ => Err(bad(format!(
+                "several wires {target}; name the gate's verdict, as Gate:pass->Step"
+            ))),
+        };
+    }
+    card(target)
+}
+/// What a note command changed: the note written, and the thread it is in.
+fn note_receipt(node: &str, edited: wire::NotesEdit, before: &wire::Notes) -> Value {
+    let written = (edited.notes.entries.iter()).find(|e| {
+        !before.entries.iter().any(|b| b.id == e.id)
+            || before
+                .entries
+                .iter()
+                .any(|b| b.id == e.id && b.text != e.text)
+    });
+    match written {
+        Some(entry) => {
+            let thread = (edited.notes.thread(&entry.target))
+                .map(|e| {
+                    let mut row = json!({"id":e.id,"by":e.author,"text":e.text});
+                    if e.resolves {
+                        row["resolves"] = json!(true);
+                    }
+                    row
+                })
+                .collect::<Vec<_>>();
+            json!({"node":node,"note":entry.id,"on":entry.target,"resolved":edited.notes.resolved(&entry.target),"thread":thread})
+        }
+        None => json!({"node":node,"notes":"changed","rev":edited.notes.rev}),
+    }
 }
 fn command_actor(a: &Value) -> Result<String, Error> {
     let actor = optional(a, "actor", "agent:ahjo")?.trim();
@@ -357,8 +474,17 @@ async fn call(m: Missions, name: &str, a: Value) -> Result<Value, Error> {
             Ok(json!({"node":node,"examples":examples}))
         }
         "mission_inspect" => {
-            let edit = m.store.mission_edit(required(&a, "mission")?)?;
-            Ok(json!({"node":node,"mission":document(edit.mission,edit.etag)?}))
+            let selector = required(&a, "mission")?;
+            let edit = m.store.mission_edit(selector)?;
+            if boolean(&a, "full")? {
+                return Ok(json!({"node":node,"mission":document(edit.mission,edit.etag)?}));
+            }
+            let notes = m.store.notes_edit(selector)?.notes;
+            let report = validate(&edit.mission, &m.store.roles(), &Harnesses::from_host());
+            let mut answer =
+                crate::handover::handover(&edit.mission, &notes, &report.errors, &report.warnings);
+            answer["node"] = json!(node);
+            Ok(answer)
         }
         "mission_validate" => {
             let edit = m.store.mission_edit(required(&a, "mission")?)?;
@@ -455,31 +581,59 @@ async fn call(m: Missions, name: &str, a: Value) -> Result<Value, Error> {
         "mission_note" => {
             let id = required(&a, "mission")?;
             let current = m.store.notes_edit(id)?;
-            let etag = optional(&a, "etag", &current.etag)?;
-            let target = optional(&a, "target", "mission")?.into();
-            let author = optional(&a, "author", "agent:ahjo")?.into();
-            let patch = match optional(&a, "action", "append")? {
-                "append" => NotePatch::Append {
-                    target,
-                    author,
-                    text: optional(&a, "text", "")?.into(),
-                },
-                "edit" => NotePatch::Edit {
-                    target,
-                    author,
-                    id: required(&a, "entry")?.into(),
-                    text: optional(&a, "text", "")?.into(),
-                },
-                "delete" => NotePatch::Delete {
-                    target,
-                    author,
-                    id: required(&a, "entry")?.into(),
-                },
-                _ => return Err(bad("unknown note action")),
+            let author = note_author(&a)?;
+            let text = optional(&a, "text", "")?.to_owned();
+            let edit = maybe_text(&a, "edit").map_err(bad)?;
+            let delete = maybe_text(&a, "delete").map_err(bad)?;
+            let entry = |entry: &str| {
+                (current.notes.entries.iter())
+                    .find(|e| e.id == entry)
+                    .map(|e| e.target.clone())
+                    .ok_or_else(|| {
+                        Error::new(
+                            "not_found",
+                            format!("no note {entry:?}; mission inspect lists them"),
+                        )
+                    })
             };
-            let edited = m.store.patch_notes(id, etag, patch)?;
+            let patch = match (edit, delete) {
+                (Some(_), Some(_)) => return Err(bad("--edit or --delete, not both")),
+                (Some(entry_id), None) => NotePatch::Edit {
+                    target: entry(entry_id)?,
+                    author,
+                    id: entry_id.into(),
+                    text,
+                },
+                (None, Some(entry_id)) => NotePatch::Delete {
+                    target: entry(entry_id)?,
+                    author,
+                    id: entry_id.into(),
+                },
+                (None, None) => {
+                    let mission = m.store.read_mission(id)?;
+                    NotePatch::Append {
+                        target: note_target(&mission, optional(&a, "target", "")?)?,
+                        author,
+                        text,
+                    }
+                }
+            };
+            let edited = m.store.patch_notes(id, &current.etag, patch)?;
             m.changed();
-            Ok(json!({"node":node,"notes":notes(edited)?}))
+            Ok(note_receipt(node, edited, &current.notes))
+        }
+        "mission_reply" | "mission_resolve" => {
+            let id = required(&a, "mission")?;
+            let current = m.store.notes_edit(id)?;
+            let patch = NotePatch::Reply {
+                to: required(&a, "note")?.into(),
+                author: note_author(&a)?,
+                text: required(&a, "text")?.into(),
+                resolves: name == "mission_resolve",
+            };
+            let edited = m.store.patch_notes(id, &current.etag, patch)?;
+            m.changed();
+            Ok(note_receipt(node, edited, &current.notes))
         }
         "layout_show" => {
             let edit = m.store.layout_edit(required(&a, "mission")?)?;
@@ -742,7 +896,7 @@ async fn start(m: Missions, name: &str, a: &Value) -> Result<Value, Error> {
     .await?;
     Ok(json!({"node":m.node,"runId":id}))
 }
-fn shell_word(value: &str) -> String {
+pub(crate) fn shell_word(value: &str) -> String {
     if value
         .bytes()
         .all(|b| b.is_ascii_alphanumeric() || b"_-./".contains(&b))

@@ -9,7 +9,7 @@ mod run;
 mod run_view;
 mod staffing;
 mod validation;
-use crate::store::{Store, canvas as board, flow, undo};
+use crate::store::{Store, canvas as board, undo};
 use ahjo_app_kit::{
     Host, Page,
     host::Request,
@@ -21,6 +21,7 @@ use ahjo_app_kit::{
     },
 };
 use ahjo_core::NodeId;
+use ahjo_missions_contract::flow;
 use ahjo_missions_contract::{
     EditResponse, ErrorResponse, LayoutResponse, MissionResponse, WATCH, WATCH_RUNS,
 };

@@ -55,6 +55,7 @@ impl Store {
             return Err(Error::new("conflict", "mission selector changed"));
         }
         let mission = self.read_mission(&slug)?;
+        let current = self.notes_edit_locked(&slug)?;
         let (target, author, text) = match &patch {
             NotePatch::Append {
                 target,
@@ -66,14 +67,18 @@ impl Store {
                 author,
                 text,
                 ..
-            } => (target.as_str(), author.as_str(), Some(text.as_str())),
-            NotePatch::Delete { target, author, .. } => (target.as_str(), author.as_str(), None),
+            } => (target.trim(), author.as_str(), Some(text.as_str())),
+            NotePatch::Reply {
+                to, author, text, ..
+            } => {
+                let entry = (current.notes.entries.iter())
+                    .find(|entry| entry.id == *to)
+                    .ok_or_else(|| Error::new("not_found", format!("note entry {to:?}")))?;
+                (entry.target.as_str(), author.as_str(), Some(text.as_str()))
+            }
+            NotePatch::Delete { target, author, .. } => (target.trim(), author.as_str(), None),
         };
-        let target = if target.trim().is_empty() {
-            "mission"
-        } else {
-            target.trim()
-        };
+        let target = if target.is_empty() { "mission" } else { target };
         let author = author.trim();
         if !ahjo_mission_model::valid_author(author) || text.is_some_and(|s| s.trim().is_empty()) {
             return Err(Error::new(
@@ -84,16 +89,17 @@ impl Store {
         if text.is_some_and(|s| s.len() > 64 * 1024) {
             return Err(Error::new("note_too_large", "entry exceeds 64 KiB"));
         }
+        // A note goes on the mission, a card, or a wire.
         if target != "mission"
             && !mission.input_cards.iter().any(|n| n.id == target)
             && mission.formation(target).is_none()
             && mission.gate(target).is_none()
             && mission.end(target).is_none()
             && !mission.limits.iter().any(|n| n.id == target)
+            && !mission.connections.iter().any(|n| n.id == target)
         {
             return Err(Error::new("not_found", "note target"));
         }
-        let current = self.notes_edit_locked(&slug)?;
         if expected_etag.is_empty() {
             return Err(Error::new(
                 "precondition_required",
@@ -122,7 +128,7 @@ impl Store {
         crate::write::table_arrays(&mut doc, &["entry"]);
         let now = crate::authoring::now()?;
         match &patch {
-            NotePatch::Append { text, .. } => {
+            NotePatch::Append { text, .. } | NotePatch::Reply { text, .. } => {
                 let entry = NoteEntry {
                     id: crate::authoring::id("nte")?,
                     target: target.into(),
@@ -130,6 +136,7 @@ impl Store {
                     created_at: now.clone(),
                     edited_at: None,
                     text: text.clone(),
+                    resolves: matches!(patch, NotePatch::Reply { resolves: true, .. }),
                 };
                 crate::authoring_create::append(&mut doc, "entry", &entry)?;
             }

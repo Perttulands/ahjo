@@ -133,6 +133,8 @@ pub struct Note {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub edited_at: Option<String>,
     pub text: String,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub resolves: bool,
 }
 impl From<NoteEntry> for Note {
     fn from(n: NoteEntry) -> Self {
@@ -142,6 +144,7 @@ impl From<NoteEntry> for Note {
             created_at: n.created_at,
             edited_at: n.edited_at,
             text: n.text,
+            resolves: n.resolves,
         }
     }
 }

@@ -350,6 +350,12 @@ async fn edit_notes(
             author,
             text,
         },
+        "reply" | "resolve" => NotePatch::Reply {
+            resolves: s(&v, "action") == "resolve",
+            to: id_entry,
+            author,
+            text,
+        },
         "edit" => NotePatch::Edit {
             target,
             author,

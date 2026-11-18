@@ -2,8 +2,11 @@
 //! read and translated into briefs, staffing and wires; they never run.
 //!
 //! `<slug>.notes.toml` is schema 2: `missionId`, `rev`, and one `[[entry]]`
-//! per entry with its `target`, `mission` for the mission's own thread or a
-//! node id.
+//! per entry with its `target`: `mission` for the mission's own thread, a
+//! node id, or a connection id for a note on a wire. An entry that
+//! `resolves` its thread says what was done about it; the thread is
+//! resolved while that entry is its latest, and a later entry opens it
+//! again.
 
 use serde::{Deserialize, Deserializer, Serialize};
 
@@ -45,6 +48,9 @@ pub struct NoteEntry {
     )]
     pub edited_at: Option<String>,
     pub text: String,
+    /// This entry answers its thread for good: what was done about it.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub resolves: bool,
 }
 
 impl Notes {
@@ -105,6 +111,14 @@ impl Notes {
             return Err(invalid("the notes are larger than 512 KiB".to_owned()));
         }
         Ok(notes)
+    }
+
+    /// Whether a thread has been answered for good: its latest entry
+    /// resolves it.
+    pub fn resolved(&self, target: &str) -> bool {
+        self.thread(target)
+            .last()
+            .is_some_and(|entry| entry.resolves)
     }
 
     /// One thread, oldest entry first.

@@ -3,7 +3,7 @@
 //! before zoom. A mission with no saved layout reads left to right in run
 //! order until it is arranged.
 
-use super::flow::Flow;
+use ahjo_missions_contract::flow::Flow;
 use ahjo_missions_contract::{LayoutNode, Mission};
 use std::collections::HashMap;
 
@@ -483,7 +483,8 @@ pub fn extent(b: &Board) -> (f32, f32, f32, f32) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::store::flow::{build, tests::delivery};
+    use crate::store::flow_tests::delivery;
+    use ahjo_missions_contract::flow::build;
 
     #[test]
     fn an_unarranged_mission_reads_left_to_right_in_run_order() {

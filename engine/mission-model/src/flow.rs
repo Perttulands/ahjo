@@ -5,7 +5,7 @@
 //! goes breadth first along outputs, passes before fails, never enters a
 //! judge chain as a step, and numbers a node once, where it is first met.
 
-use ahjo_missions_contract::{Connection, Mission};
+use crate::{Connection, Mission};
 use std::collections::{HashMap, VecDeque};
 
 #[derive(Clone, Debug, PartialEq)]
@@ -304,63 +304,5 @@ pub fn build(m: &Mission) -> Flow {
         sections,
         numbers,
         judge_of,
-    }
-}
-
-#[cfg(test)]
-pub(crate) mod tests {
-    use super::*;
-
-    /// Archon's delivery mission, as the node serves it.
-    pub fn delivery() -> Mission {
-        let json = include_str!("testdata/delivery.json");
-        serde_json::from_str::<ahjo_missions_contract::MissionResponse>(json)
-            .unwrap()
-            .mission
-            .mission
-    }
-
-    #[test]
-    fn delivery_reads_in_run_order_with_its_judge_nested() {
-        let flow = build(&delivery());
-        let ids: Vec<(&str, usize)> = flow.sections[0]
-            .steps
-            .iter()
-            .map(|s| (s.id.as_str(), s.number))
-            .collect();
-        assert_eq!(
-            ids,
-            [
-                ("fmn_plan", 1),
-                ("fmn_beads", 2),
-                ("gate_beads_review", 3),
-                ("fmn_execution", 4),
-                ("fmn_final_review", 5)
-            ]
-        );
-        assert_eq!(flow.judge_of["fmn_beads_reviewer"], "gate_beads_review");
-        let StepKind::Gate {
-            deciders,
-            judges,
-            fail,
-            ..
-        } = &flow.sections[0].steps[2].kind
-        else {
-            panic!("a gate")
-        };
-        assert_eq!(deciders, &[Decider::Judge]);
-        assert_eq!(judges, &["fmn_beads_reviewer"]);
-        assert!(matches!(
-            &fail[0],
-            Target::Step {
-                back: true,
-                number: Some(2),
-                ..
-            }
-        ));
-        let StepKind::Formation { next } = &flow.sections[0].steps[4].kind else {
-            panic!("a formation")
-        };
-        assert!(matches!(&next[0], Target::End { outcome, .. } if outcome == "done"));
     }
 }

@@ -20,6 +20,8 @@ const EXPECTED: &[&str] = &[
     "mission_edit",
     "mission_notes",
     "mission_note",
+    "mission_reply",
+    "mission_resolve",
     "layout_show",
     "layout_edit",
     "mission_run",
@@ -143,7 +145,7 @@ async fn author_and_run_with_tools() {
     assert_eq!(
         node.call("mission_inspect", json!({"mission":"demo"}))
             .await
-            .unwrap()["mission"]["title"],
+            .unwrap()["title"],
         "Demo"
     );
     assert!(
@@ -165,7 +167,10 @@ async fn author_and_run_with_tools() {
         .call("mission_note", json!({"mission":"demo","text":"intent"}))
         .await
         .unwrap();
-    assert_eq!(note["notes"]["mission"][0]["text"], "intent");
+    assert_eq!(
+        (&note["on"], &note["thread"][0]["text"]),
+        (&json!("mission"), &json!("intent"))
+    );
     assert_eq!(
         node.call("mission_notes", json!({"mission":"demo"}))
             .await
@@ -687,7 +692,7 @@ async fn a_simple_mission_needs_no_seat_or_port_names() {
         "{valid}"
     );
     let edges = node
-        .call("mission_inspect", json!({"mission":"plain"}))
+        .call("mission_inspect", json!({"mission":"plain","full":true}))
         .await
         .unwrap()["mission"]["connections"]
         .to_string();
@@ -1063,7 +1068,7 @@ async fn cli_lists_and_removes_deleted_mission_archives() {
     assert_eq!(
         node.call("mission_inspect", json!({"mission":"archived"}))
             .await
-            .unwrap()["mission"]["title"],
+            .unwrap()["title"],
         "Replacement"
     );
     assert!(
@@ -1075,5 +1080,112 @@ async fn cli_lists_and_removes_deleted_mission_archives() {
         std::fs::read_to_string(run_dir.join("keep-history")).unwrap(),
         "unrelated run"
     );
+    node.stop().await;
+}
+
+/// An agent told to finish a mission reads it in one answer, with every
+/// note beside what it is on, then answers and closes the notes it took up.
+#[tokio::test(flavor = "multi_thread")]
+async fn an_agent_picks_up_a_mission_from_its_notes() {
+    let node = Node::start(&[sessions::LISTING, ahjo_work::LISTING, LAB], "")
+        .await
+        .unwrap();
+    node.call(
+        "mission_new",
+        json!({"slug":"ship","example":"plan-build-check"}),
+    )
+    .await
+    .unwrap();
+    let note = |target: &str, text: &str| json!({"mission":"ship","target":target,"text":text,"author":"human:ui"});
+    let intent = node
+        .call("mission_note", note("", "Ship it\nby Friday"))
+        .await
+        .unwrap();
+    for (target, text) in [
+        ("Build", "Small commits"),
+        ("lim_hour", "An hour is plenty"),
+        ("Plan->Build", "The plan, as a file"),
+    ] {
+        node.call("mission_note", note(target, text)).await.unwrap();
+    }
+    let read = node
+        .call("mission_inspect", json!({"mission":"ship"}))
+        .await
+        .unwrap();
+    assert_eq!(read["notes"], "4 threads, 4 open", "{read}");
+    assert_eq!(read["about"][0]["text"], "Ship it\nby Friday");
+    let steps: Vec<_> = read["steps"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|s| (s["n"].clone(), s["id"].as_str().unwrap()))
+        .collect();
+    assert_eq!(
+        steps,
+        [
+            (json!(1), "fmn_plan"),
+            (json!(2), "fmn_build"),
+            (json!(3), "gate_checks")
+        ]
+    );
+    assert_eq!(read["steps"][1]["notes"][0]["text"], "Small commits");
+    assert_eq!(read["steps"][2]["fail"], "back to 2 Build");
+    assert_eq!(read["limits"][0]["notes"][0]["text"], "An hour is plenty");
+    assert_eq!(read["wires"][0]["wire"], "Plan -> Build");
+    assert_eq!(read["wires"][0]["notes"][0]["by"], "human:ui");
+
+    let build_note = read["steps"][1]["notes"][0]["id"].as_str().unwrap();
+    let asked = node
+        .call(
+            "mission_reply",
+            json!({"mission":"ship","note":build_note,"text":"One per step?","author":"claude-7"}),
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        (&asked["on"], &asked["resolved"], &asked["thread"][1]["by"]),
+        (&json!("fmn_build"), &json!(false), &json!("agent:claude-7"))
+    );
+    let intent_id = intent["note"].as_str().unwrap();
+    node.call(
+        "mission_resolve",
+        json!({"mission":"ship","note":intent_id,"text":"Staffed and briefed every step","author":"claude-7"}),
+    )
+    .await
+    .unwrap();
+    let read = node
+        .call("mission_inspect", json!({"mission":"ship"}))
+        .await
+        .unwrap();
+    assert_eq!(read["notes"], "4 threads, 3 open");
+    assert_eq!(read["about"][1]["resolves"], true);
+
+    // Only the author changes a note; anyone may answer it.
+    let mine = asked["note"].as_str().unwrap();
+    node.call(
+        "mission_note",
+        json!({"mission":"ship","edit":mine,"text":"One commit per step?","author":"claude-7"}),
+    )
+    .await
+    .unwrap();
+    let theirs = node
+        .call(
+            "mission_note",
+            json!({"mission":"ship","edit":build_note,"text":"Mine now","author":"claude-7"}),
+        )
+        .await
+        .unwrap_err();
+    assert_eq!(theirs.code, "note_author_mismatch");
+    node.call(
+        "mission_note",
+        json!({"mission":"ship","delete":mine,"author":"claude-7"}),
+    )
+    .await
+    .unwrap();
+    let missing = node
+        .call("mission_note", note("Nowhere", "lost"))
+        .await
+        .unwrap_err();
+    assert_eq!(missing.code, "not_found");
     node.stop().await;
 }

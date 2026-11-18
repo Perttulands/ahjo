@@ -2,6 +2,7 @@
 mod authoring;
 mod channel;
 mod commands;
+mod handover;
 mod notify;
 mod routes;
 mod run_routes;
