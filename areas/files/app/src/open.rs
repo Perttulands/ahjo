@@ -65,6 +65,11 @@ pub struct Opened {
     /// The diff read into lines and paired side by side, for its view.
     pub sides: Option<std::rc::Rc<Sides>>,
     pub diff_open: bool,
+    /// The folds of unchanged lines opened in the changes view, by the
+    /// first line each hides.
+    pub diff_folds: std::collections::HashSet<usize>,
+    /// The change the changes view was last taken to, from 0.
+    pub diff_at: usize,
     /// The file changed on disk under an unsaved edit.
     pub changed_on_disk: bool,
 }
@@ -151,6 +156,8 @@ impl Opened {
             changes: None,
             sides: None,
             diff_open: false,
+            diff_folds: Default::default(),
+            diff_at: 0,
             changed_on_disk: false,
         }
     }

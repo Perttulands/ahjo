@@ -152,9 +152,115 @@ pub fn change_starts(changed: impl Iterator<Item = bool>) -> Vec<usize> {
     out
 }
 
+/// Unchanged lines kept in view either side of a change.
+pub const CONTEXT: usize = 3;
+/// A run of unchanged lines folds only when it hides more than this: a
+/// fold of one or two lines takes the room the lines would.
+const FOLD_LEAST: usize = 3;
+
+/// A row of the changes view: one line of the diff (an index among its
+/// lines), or unchanged lines folded away, `from..to` among them.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Shown {
+    Line(usize),
+    Fold { from: usize, to: usize },
+}
+
+impl Shown {
+    pub fn changed(&self, changed: &[bool]) -> bool {
+        match self {
+            Shown::Line(i) => changed.get(*i).copied().unwrap_or(false),
+            Shown::Fold { .. } => false,
+        }
+    }
+}
+
+/// The diff's lines as the view shows them: each change with `CONTEXT`
+/// unchanged lines either side, and every longer unchanged run folded,
+/// unless its fold (named by its first line) was opened. `hidden` lines
+/// (a whole file's one hunk head, which says nothing) never show.
+pub fn fold(
+    changed: &[bool],
+    hidden: &[bool],
+    open: &std::collections::HashSet<usize>,
+) -> Vec<Shown> {
+    let lines: Vec<usize> = (0..changed.len())
+        .filter(|&i| !hidden.get(i).copied().unwrap_or(false))
+        .collect();
+    let mut out = vec![];
+    let mut k = 0;
+    while k < lines.len() {
+        if changed[lines[k]] {
+            out.push(Shown::Line(lines[k]));
+            k += 1;
+            continue;
+        }
+        let start = k;
+        while k < lines.len() && !changed[lines[k]] {
+            k += 1;
+        }
+        // Context after the change before the run, and before the next.
+        let keep_head = if start > 0 { CONTEXT } else { 0 };
+        let keep_tail = if k < lines.len() { CONTEXT } else { 0 };
+        let run = k - start;
+        let hide = run.saturating_sub(keep_head + keep_tail);
+        let from = lines[start + keep_head.min(run)];
+        if hide <= FOLD_LEAST || open.contains(&from) {
+            out.extend(lines[start..k].iter().map(|&i| Shown::Line(i)));
+            continue;
+        }
+        let fold_at = start + keep_head;
+        let fold_end = fold_at + hide;
+        out.extend(lines[start..fold_at].iter().map(|&i| Shown::Line(i)));
+        out.push(Shown::Fold {
+            from: lines[fold_at],
+            to: lines[fold_end - 1] + 1,
+        });
+        out.extend(lines[fold_end..k].iter().map(|&i| Shown::Line(i)));
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn unchanged_runs_fold_to_their_context_and_open_on_asking() {
+        // 20 lines, a change at 10 and one at the last line.
+        let mut changed = vec![false; 20];
+        changed[10] = true;
+        changed[19] = true;
+        let none = std::collections::HashSet::new();
+        let shown = fold(&changed, &[], &none);
+        assert_eq!(shown[0], Shown::Fold { from: 0, to: 7 }, "the start folds");
+        assert_eq!(
+            &shown[1..5],
+            [7, 8, 9, 10].map(Shown::Line),
+            "three lines before the change"
+        );
+        // 11..19 is eight unchanged lines: three after, a fold of two
+        // would hide too little, so all of them show.
+        assert_eq!(shown.len(), 1 + 4 + 8 + 1);
+        let starts = change_starts(shown.iter().map(|s| s.changed(&changed)));
+        assert_eq!(starts, [4, 13], "the view opens near the first change");
+        let open: std::collections::HashSet<usize> = [0].into();
+        assert_eq!(
+            fold(&changed, &[], &open).len(),
+            20,
+            "an opened fold shows all"
+        );
+        // A long run between changes keeps context either side.
+        let mut far = vec![false; 40];
+        far[0] = true;
+        far[39] = true;
+        let shown = fold(&far, &[], &none);
+        assert_eq!(shown[4], Shown::Fold { from: 4, to: 36 });
+        // The hidden hunk head never shows.
+        let mut hidden = vec![false; 40];
+        hidden[0] = true;
+        assert!(!fold(&far, &hidden, &none).contains(&Shown::Line(0)));
+    }
 
     const DIFF: &str = "diff --git a/x b/x\n--- a/x\n+++ b/x\n@@ -3,4 +3,4 @@ fn x\n kept\n-old one\n-old two\n+new one\n same\n\\ No newline at end of file\n+added\n";
 

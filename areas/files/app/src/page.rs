@@ -243,6 +243,8 @@ pub struct FilesPage {
     /// The diff's list, and whether it is shown inline when there is room
     /// for both sides.
     pub diff_scroll: UniformListScrollHandle,
+    /// How far the changes view's lines are scrolled sideways, in pixels.
+    pub diff_left: std::cell::Cell<f32>,
     pub diff_inline: bool,
     /// Review and Reader: a folder shown as a place (its sessions, what
     /// changed in it, its documents) instead of a file.
@@ -665,6 +667,7 @@ impl FilesPage {
             split: None,
             split_of: None,
             diff_scroll: UniformListScrollHandle::new(),
+            diff_left: Default::default(),
             diff_inline: false,
             place: None,
             place_recent: None,
@@ -1663,6 +1666,9 @@ impl FilesPage {
         if let Some(o) = self.opened.as_mut() {
             o.diff_open = !o.diff_open && o.diff.is_some();
         }
+        if self.opened.as_ref().is_some_and(|o| o.diff_open) {
+            self.diff_opened(cx);
+        }
         cx.notify();
     }
     fn changed(&mut self, cx: &mut Context<Self>) {
@@ -1950,7 +1956,8 @@ impl FilesPage {
         }
         let plain = !m.alt && !m.control && !m.platform;
         // Reading: the next change in the file, or the one before.
-        if (reading || self.opened.is_some() && self.focus.is_focused(window) && self.reading())
+        let in_diff = self.opened.as_ref().is_some_and(|o| o.diff_open);
+        if (reading || self.focus.is_focused(window) && (self.reading() || in_diff))
             && plain
             && key.key.eq_ignore_ascii_case("n")
         {

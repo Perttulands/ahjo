@@ -2406,6 +2406,60 @@ fn changes_list_the_uncommitted_files_and_a_deleted_one_shows_what_went(cx: &mut
     std::fs::remove_dir_all(root).unwrap();
 }
 
+/// The changes view opens on the first change with the unchanged lines
+/// around it folded, says which change of how many is in view, and N goes
+/// on to the next; a fold opens on a click.
+#[gpui::test]
+fn the_changes_view_opens_on_the_first_change_and_steps_through_them(cx: &mut TestAppContext) {
+    let before: String = (0..200).map(|i| format!("line {i}\n")).collect();
+    let after = before
+        .replace("line 50\n", "line fifty\n")
+        .replace("line 150\n", "line one-fifty\n");
+    let root = repository(
+        "files-diff-steps",
+        &[("long.txt", before.as_str())],
+        &[("long.txt", after.as_str())],
+    );
+    let running = start(root.clone());
+    cx.executor().allow_parking();
+    cx.update(ahjo_app_shell::prepare);
+    let url = running.url.clone();
+    let (_, cx) = cx.add_window_view(move |w, cx| {
+        ahjo_app_shell::start(&[observed_files], Some(url), None, w, cx)
+    });
+    let page = SEARCH_PAGE.with(|p| p.borrow().as_ref().unwrap().clone());
+    tree(cx, "file-row-long.txt");
+    click(cx, "file-row-long.txt");
+    until(cx, "Changes offered", |cx| {
+        cx.debug_bounds("files-changes").is_some()
+    });
+    click(cx, "files-changes");
+    until(cx, "the changes, folded, on the first", |cx| {
+        cx.debug_bounds("files-diff-count").is_some()
+            && cx.debug_bounds("files-diff-fold").is_some()
+    });
+    let laid = |cx: &mut gpui::VisualTestContext| {
+        page.read_with(cx, |p, _| {
+            let laid = p.diff_laid().unwrap();
+            (
+                laid.shown.len(),
+                laid.starts(),
+                p.opened.as_ref().unwrap().diff_at,
+            )
+        })
+    };
+    let (rows, starts, at) = laid(cx);
+    assert_eq!(starts.len(), 2, "two changes");
+    assert_eq!(at, 0, "on the first");
+    assert!(rows < 40, "the unchanged lines are folded: {rows} rows");
+    cx.simulate_keystrokes("n");
+    until(cx, "N to the second", |cx| laid(cx).2 == 1);
+    click(cx, "files-diff-fold");
+    until(cx, "a fold opened shows its lines", |cx| laid(cx).0 > rows);
+    drop(running);
+    std::fs::remove_dir_all(root).unwrap();
+}
+
 /// A find inside files searches the repository of the file open, not only
 /// its folder, and says so; a folder picked narrows it to that folder.
 #[gpui::test]
