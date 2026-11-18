@@ -7,8 +7,25 @@ use crate::theme::place::{self, Texture};
 use crate::theme::{Theme, alpha, rgb};
 use gpui::{Bounds, Div, FontWeight, Hsla, PathBuilder, canvas, div, point, prelude::*, px};
 
+/// The plate's fill and the ink on it. The device's colour is a deep one:
+/// on a light ground it stands as it is under white; on a dark ground it
+/// would sink into it, so there the plate is the same hue made bright and
+/// the ink is the ground, as on the primary button.
+fn plate_colours(t: &Theme, device: &str) -> (Hsla, Hsla) {
+    let deep = rgb(place::device_colour(device));
+    if t.light {
+        return (deep, rgb(0xffffff));
+    }
+    let bright = Hsla {
+        l: place::PLATE_BRIGHT,
+        ..deep
+    };
+    (bright, t.bg)
+}
+
 /// The device plate: its name in capitals on its colour.
-pub fn plate(device: &str) -> Div {
+pub fn plate(t: &Theme, device: &str) -> Div {
+    let (fill, ink) = plate_colours(t, device);
     div()
         .flex_none()
         .h(px(place::PLATE_H))
@@ -16,8 +33,8 @@ pub fn plate(device: &str) -> Div {
         .flex()
         .items_center()
         .rounded(px(2.))
-        .bg(rgb(place::device_colour(device)))
-        .text_color(rgb(0xffffff))
+        .bg(fill)
+        .text_color(ink)
         .text_size(px(11.))
         .font_weight(FontWeight::BOLD)
         .child(device.to_uppercase())
@@ -26,7 +43,7 @@ pub fn plate(device: &str) -> Div {
 /// The environment strip: its word, then its texture.
 pub fn strip(t: &Theme, environment: &str, width: f32) -> Div {
     let (word, texture) = place::environment(environment);
-    let ink = alpha(t.text2, 0.55);
+    let ink = alpha(t.text2, place::TEXTURE_INK);
     div()
         .flex_none()
         .h(px(place::STRIP_H))
@@ -36,7 +53,7 @@ pub fn strip(t: &Theme, environment: &str, width: f32) -> Div {
         .items_center()
         .gap(px(6.))
         .border_1()
-        .border_color(alpha(t.text2, 0.35))
+        .border_color(alpha(t.text2, place::STRIP_EDGE))
         .rounded(px(2.))
         .text_size(px(10.))
         .text_color(t.text2)
@@ -56,7 +73,7 @@ pub fn passport(t: &Theme, device: &str, environment: &str) -> Div {
         .flex_none()
         .items_center()
         .gap(px(4.))
-        .child(plate(device))
+        .child(plate(t, device))
         .child(strip(t, environment, 28.))
 }
 

@@ -195,7 +195,7 @@ impl Terminals {
             .flex()
             .items_center()
             .gap(px(8.))
-            .child(place::plate(device))
+            .child(place::plate(t, device))
             .child(div().flex_1())
             .child(waiting_word(t, !live))
             .into_any_element()

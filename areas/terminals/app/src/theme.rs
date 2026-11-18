@@ -124,6 +124,12 @@ pub mod fade {
 pub mod place {
     /// Plate colours, picked per device name.
     pub const DEVICES: [u32; 6] = [0x3d5a80, 0x7a4f2e, 0x3f6b4a, 0x6a4a7d, 0x7d4a55, 0x2f6b6b];
+    /// How light a plate is on a dark ground, where its ink is the ground.
+    pub const PLATE_BRIGHT: f32 = 0.74;
+    /// How much of the secondary text colour the strip's edge and its
+    /// texture take.
+    pub const STRIP_EDGE: f32 = 0.6;
+    pub const TEXTURE_INK: f32 = 0.8;
     pub const PLATE_H: f32 = 18.;
     pub const STRIP_H: f32 = 18.;
 
