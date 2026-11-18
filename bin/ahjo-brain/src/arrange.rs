@@ -34,6 +34,19 @@ pub struct Orbit {
     pub arcs: Vec<Arc>,
 }
 
+/// An orbit's pages in the order they stand round the ring, clockwise
+/// from the top: the order the arrow keys walk them.
+pub fn clockwise(o: &Orbit) -> Vec<usize> {
+    let top = -std::f32::consts::FRAC_PI_2;
+    let mut ring: Vec<(f32, usize)> = o
+        .planets
+        .iter()
+        .map(|p| ((p.angle - top).rem_euclid(std::f32::consts::TAU), p.page))
+        .collect();
+    ring.sort_by(|a, b| a.0.total_cmp(&b.0).then(a.1.cmp(&b.1)));
+    ring.into_iter().map(|p| p.1).collect()
+}
+
 /// The page `sun` at the centre of `view`, the pages it links and that link
 /// to it around it, gathered into one arc per subject; its evidence too
 /// unless `evidence` is folded away.
@@ -178,6 +191,14 @@ mod tests {
         assert_eq!(open.planets.len(), 3);
         let folded = orbit(&corpus, &sky, hub, view, false);
         assert_eq!(folded.planets.len(), 1);
+        // The arrow keys walk every planet once, from the top round.
+        let ring = clockwise(&open);
+        assert_eq!(ring.len(), 3);
+        let angle = |page: usize| {
+            let p = open.planets.iter().find(|p| p.page == page).unwrap();
+            (p.angle + std::f32::consts::FRAC_PI_2).rem_euclid(std::f32::consts::TAU)
+        };
+        assert!(ring.windows(2).all(|w| angle(w[0]) <= angle(w[1])));
     }
 
     #[test]

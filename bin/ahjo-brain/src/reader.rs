@@ -51,7 +51,7 @@ impl Reader {
         let asked = self.asked;
         let file = data.root.join(&data.corpus.pages[page].path);
         let title = data.corpus.pages[page].title.clone();
-        self.data = Some(data);
+        self.data = Some(data.clone());
         self.page = Some(page);
         self.body = None;
         self.scroll.set_offset(gpui::point(px(0.), px(0.)));
@@ -60,13 +60,24 @@ impl Reader {
             std::fs::read(&file)
                 .map(|bytes| {
                     let text = String::from_utf8_lossy(&bytes);
-                    let body = without_title(corpus::body(&text), &title);
-                    parse(&wiki_links(&body))
+                    without_title(corpus::body(&text), &title)
                 })
                 .map_err(|e| format!("{}: {e}", file.display()))
         });
         cx.spawn(async move |me, cx| {
-            let body = read.await;
+            // The links take their pages' titles here, where the brain is;
+            // the reading and the parsing are off the UI thread.
+            let body = match read.await {
+                Ok(body) => {
+                    let linked = wiki_links_named(&body, |target| {
+                        data.corpus
+                            .resolve(target)
+                            .map(|p| data.corpus.pages[p].title.clone())
+                    });
+                    Ok(cx.background_spawn(async move { parse(&linked) }).await)
+                }
+                Err(e) => Err(e),
+            };
             let _ = me.update(cx, |me, cx| {
                 if me.asked == asked {
                     me.body = Some(body);
@@ -125,7 +136,9 @@ enum Target {
 }
 
 /// Turns `[[target#heading|label]]` into a Markdown link, outside code.
-pub fn wiki_links(source: &str) -> String {
+/// A link written without a label reads as what `name` calls
+/// its target (the page's title), not as the slug it was written with.
+pub fn wiki_links_named(source: &str, name: impl Fn(&str) -> Option<String>) -> String {
     let mut out = String::with_capacity(source.len());
     let mut fence: Option<&str> = None;
     for line in source.split_inclusive('\n') {
@@ -159,8 +172,15 @@ pub fn wiki_links(source: &str) -> String {
                 if !target.trim().is_empty() && !inner.contains(['[', ']']) {
                     let label = label.trim();
                     let label = label.split('#').next().unwrap_or(label);
+                    let named = (!inner.contains('|'))
+                        .then(|| name(target.trim()))
+                        .flatten()
+                        .filter(|n| !n.contains(['[', ']']));
                     out.push('[');
-                    out.push_str(label.rsplit('/').next().unwrap_or(label));
+                    match &named {
+                        Some(n) => out.push_str(n),
+                        None => out.push_str(label.rsplit('/').next().unwrap_or(label)),
+                    }
                     out.push_str("](");
                     out.push_str(&target.trim().replace(' ', "%20"));
                     out.push(')');
@@ -221,7 +241,7 @@ pub fn age(updated: i32, today: i32) -> String {
 impl Reader {
     fn hue_of(&self, page: usize, t: &Theme) -> Hsla {
         match &self.data {
-            Some(d) => d.hues[d.corpus.pages[page].subject],
+            Some(d) => crate::tokens::words(t, d.hues[d.corpus.pages[page].subject]),
             None => t.text2,
         }
     }
@@ -479,7 +499,7 @@ impl Reader {
                         div()
                             .flex_none()
                             .text_size(px(r::META))
-                            .text_color(alpha(hue, 0.8))
+                            .text_color(alpha(crate::tokens::words(t, hue), 0.8))
                             .child(data.corpus.subjects[page.subject].name.clone()),
                     ),
             );
@@ -558,7 +578,11 @@ impl Render for Reader {
                     .text_size(px(r::META))
                     .text_color(t.dim)
                     .child(div().size(px(r::DOT)).rounded(px(r::DOT)).bg(hue))
-                    .child(div().text_color(hue).child(meta[0].clone()))
+                    .child(
+                        div()
+                            .text_color(crate::tokens::words(&t, hue))
+                            .child(meta[0].clone()),
+                    )
                     .children(meta[1..].iter().map(|m| div().child(format!("· {m}")))),
             )
             .child(
@@ -584,6 +608,10 @@ impl Render for Reader {
             Some(Err(e)) => div()
                 .text_color(t.error)
                 .child(format!("This page did not read: {e}"))
+                .into_any_element(),
+            Some(Ok(blocks)) if blocks.is_empty() => div()
+                .text_color(t.dim)
+                .child("This page has no words yet.")
                 .into_any_element(),
             Some(Ok(blocks)) => div()
                 .flex()
@@ -643,8 +671,17 @@ mod tests {
     #[test]
     fn wiki_links_become_links_with_their_labels_outside_code() {
         assert_eq!(
-            wiki_links("[[first#part|read]] [[folder/b]] `[[literal]]`\n```\n[[code]]\n```\n"),
+            wiki_links_named(
+                "[[first#part|read]] [[folder/b]] `[[literal]]`\n```\n[[code]]\n```\n",
+                |_| None
+            ),
             "[read](first#part) [b](folder/b) `[[literal]]`\n```\n[[code]]\n```\n"
+        );
+        // Written bare, a link reads as its page's title; a label stays.
+        let title = |t: &str| (t == "the-nectar-gap").then(|| "The nectar gap".to_string());
+        assert_eq!(
+            wiki_links_named("[[the-nectar-gap]] [[the-nectar-gap|here]] [[gone]]", title),
+            "[The nectar gap](the-nectar-gap) [here](the-nectar-gap) [gone](gone)"
         );
     }
 

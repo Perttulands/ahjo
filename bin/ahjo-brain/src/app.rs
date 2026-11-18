@@ -177,6 +177,13 @@ pub struct Bench {
     /// When the process started, and how long until the sky first lit.
     launched: Instant,
     lit: Option<f32>,
+    /// The second part types a search, a letter at a time: the words, how
+    /// many are in, how long each key took to answer from the titles, and
+    /// the frames' work while it ran.
+    words: Vec<char>,
+    typed: usize,
+    keys: Vec<f32>,
+    work_typing: Vec<f32>,
 }
 
 impl Bench {
@@ -191,7 +198,22 @@ impl Bench {
             began: None,
             launched,
             lit: None,
+            words: vec![],
+            typed: 0,
+            keys: vec![],
+            work_typing: vec![],
         }
+    }
+
+    /// The flight takes this share of the run; the typing the rest.
+    const FLIGHT: f32 = 0.6;
+    /// A key every so many seconds, as a person types.
+    const KEY_EVERY: f32 = 0.18;
+
+    /// How many letters should be in by now, once the typing has begun.
+    fn due(&self, now: Instant) -> Option<usize> {
+        let s = now.duration_since(self.start?).as_secs_f32() - self.seconds * Self::FLIGHT;
+        (s >= 0.).then(|| ((s / Self::KEY_EVERY) as usize + 1).min(self.words.len()))
     }
 }
 
@@ -397,6 +419,14 @@ impl BrainApp {
                     return;
                 }
             };
+            if entries.is_empty() && kept.entries.is_empty() {
+                // Read, and nothing in it: say so instead of reading on.
+                let _ = me.update(cx, |me, cx| {
+                    me.status = Some(no_pages(&root));
+                    cx.notify();
+                });
+                return;
+            }
             if same(&entries, &kept.entries) {
                 return;
             }
@@ -701,6 +731,22 @@ impl BrainApp {
 
     // ---- Search.
 
+    /// The bench's second part: the next letter of its search, when due.
+    fn bench_types(&mut self, cx: &mut Context<Self>) {
+        let Some(b) = &self.bench else { return };
+        let Some(due) = b.due(Instant::now()).filter(|&d| d > b.typed) else {
+            return;
+        };
+        let text: String = b.words[..due].iter().collect();
+        self.field.update(cx, |f, cx| f.set(&text, false, cx));
+        let began = Instant::now();
+        self.typed(cx);
+        if let Some(b) = &mut self.bench {
+            b.typed = due;
+            b.keys.push(began.elapsed().as_secs_f32() * 1000.);
+        }
+    }
+
     fn typed(&mut self, cx: &mut Context<Self>) {
         let q = self.field.read(cx).text.trim().to_string();
         if q == self.query {
@@ -717,6 +763,14 @@ impl BrainApp {
             self.replanned = true;
             cx.notify();
             return;
+        }
+        // The titles and aliases answer at once, on every key; Citadel's
+        // ranking and its passages take their place when they come.
+        if let Some(data) = self.data.clone() {
+            self.results = self.local(&data);
+            self.pick = (!self.results.is_empty()).then_some(0);
+            self.replanned = true;
+            cx.notify();
         }
         let url = self.place.citadel.clone();
         cx.spawn(async move |me, cx| {
@@ -740,10 +794,28 @@ impl BrainApp {
         .detach();
     }
 
+    /// What the titles and aliases answer to the words asked.
+    fn local(&self, data: &Data) -> Vec<Found> {
+        data.corpus
+            .local_search(&self.query, search::LOCAL_MOST)
+            .into_iter()
+            .map(|page| Found {
+                page,
+                snippet: String::new(),
+            })
+            .collect()
+    }
+
     fn found(&mut self, hits: Result<Vec<Hit>, String>, cx: &mut Context<Self>) {
         let Some(data) = self.data.clone() else {
             return;
         };
+        // The row he stands on stays his when the ranking arrives.
+        let stood = self
+            .pick
+            .filter(|&i| i > 0)
+            .and_then(|i| self.results.get(i))
+            .map(|f| f.page);
         match hits {
             Ok(hits) => {
                 let mut seen = HashSet::new();
@@ -761,19 +833,14 @@ impl BrainApp {
             }
             Err(e) => {
                 // Citadel away: the titles and aliases still answer.
-                self.results = data
-                    .corpus
-                    .local_search(&self.query, search::LOCAL_MOST)
-                    .into_iter()
-                    .map(|page| Found {
-                        page,
-                        snippet: String::new(),
-                    })
-                    .collect();
+                self.results = self.local(&data);
                 self.away = Some(e);
             }
         }
-        self.pick = (!self.results.is_empty()).then_some(0);
+        let shown = search::ROWS.min(self.results.len());
+        self.pick = stood
+            .and_then(|p| self.results[..shown].iter().position(|f| f.page == p))
+            .or((!self.results.is_empty()).then_some(0));
         self.replanned = true;
         if !self.orbiting() {
             let stars = self
@@ -849,6 +916,34 @@ impl BrainApp {
         cx.notify();
     }
 
+    /// The next neighbour round the ring of the page read (clockwise for
+    /// `by` above zero), lit as if pointed at.
+    fn round_the_ring(&mut self, by: isize, cx: &mut Context<Self>) {
+        let (Some(data), Some(sun)) = (self.data.clone(), self.reading) else {
+            return;
+        };
+        let o = arrange::orbit(
+            &data.corpus,
+            &data.sky,
+            sun,
+            self.free(),
+            !self.fold_evidence,
+        );
+        let ring: Vec<usize> = arrange::clockwise(&o);
+        if ring.is_empty() {
+            return;
+        }
+        let n = ring.len() as isize;
+        let at = match self.hover.and_then(|h| ring.iter().position(|&p| p == h)) {
+            Some(i) => (i as isize + by).rem_euclid(n),
+            None if by > 0 => 0,
+            None => n - 1,
+        };
+        self.hover = Some(ring[at as usize]);
+        self.link = None;
+        cx.notify();
+    }
+
     /// A link in the reader pointed at, or let go.
     pub fn point_at_link(&mut self, page: Option<usize>, cx: &mut Context<Self>) {
         if self.link != page {
@@ -883,6 +978,8 @@ impl BrainApp {
                     Ok(h) => Replaying::Ready(Replay::new(h, &data.corpus)),
                     Err(e) => Replaying::Failed(e),
                 });
+                // The whole sky again, above the bar now there.
+                me.frame_everything();
                 cx.notify();
             });
         })
@@ -955,12 +1052,17 @@ impl BrainApp {
             self.search_width() + chrome::INSET * 2.
         };
         let top = search::FIELD_HEIGHT + chrome::INSET * 2.;
+        // The replay's bar lies over the sky's foot.
+        let foot = match &self.replay {
+            Some(Replaying::Ready(_)) => tokens::replay::ROOM,
+            _ => 0.,
+        };
         Rect {
             x: left,
             y: top,
             w: (right - left).max(80.),
             // Above the counts along the bottom.
-            h: (h - top - chrome::INSET - chrome::FOOT).max(80.),
+            h: (h - top - chrome::INSET - chrome::FOOT - foot).max(80.),
         }
     }
 
@@ -1136,7 +1238,9 @@ impl BrainApp {
                 if self.replay.is_some() {
                     self.replay = None;
                 } else if self.reading.is_some() {
+                    // Back where he came from: the search, its keys his.
                     self.close(cx);
+                    field::focus(&self.field, window, cx);
                 } else if !self.field.read(cx).text.is_empty() {
                     self.field.update(cx, |f, cx| f.set("", false, cx));
                     self.typed(cx);
@@ -1165,6 +1269,23 @@ impl BrainApp {
                 let to = self.camera.zoom_about(cx_, cy_, factor);
                 self.fly(to);
                 cx.notify();
+            }
+            // Round the ring of the page read, one neighbour at a time;
+            // Enter reads the one stood on.
+            "left" | "right" | "up" | "down" if !typing && self.orbiting() => {
+                let by = if matches!(ks.key.as_str(), "right" | "down") {
+                    1
+                } else {
+                    -1
+                };
+                self.round_the_ring(by, cx);
+                cx.stop_propagation();
+            }
+            "enter" if !typing && self.orbiting() => {
+                if let Some(p) = self.hover.filter(|&p| Some(p) != self.reading) {
+                    self.open(p, cx);
+                    cx.stop_propagation();
+                }
             }
             "left" | "right" | "up" | "down" if !typing && !self.orbiting() => {
                 let p = motion::KEY_PAN;
@@ -1209,6 +1330,15 @@ fn same(a: &[Entry], b: &[Entry]) -> bool {
     let index: HashMap<&str, &Entry> = b.iter().map(|e| (e.path.as_str(), e)).collect();
     a.iter()
         .all(|e| index.get(e.path.as_str()).is_some_and(|o| *o == e))
+}
+
+/// What an empty brain says: where it looked and where pages go.
+fn no_pages(root: &std::path::Path) -> String {
+    format!(
+        "No pages in {} yet. A page is a Markdown file under knowledge/, evidence/, \
+         projects/ or self/; the sky lights as soon as one is there.",
+        root.display()
+    )
 }
 
 /// A Julian day as a person writes it: `21 October 2026`.
@@ -1282,11 +1412,23 @@ impl BrainApp {
         let mut busy = false;
         let (w, h) = self.size;
 
+        let mut touring = false;
         if let Some(bench) = &mut self.bench {
             let start = *bench.start.get_or_insert(now);
-            let s = now.duration_since(start).as_secs_f32();
-            self.camera = bench_camera(&data.sky, self.free(), s);
+            if bench.words.is_empty() {
+                // The words of a title from the middle of the brain.
+                let title = &data.corpus.pages[data.corpus.pages.len() / 2].title;
+                bench.words = title.to_lowercase().chars().take(18).collect();
+            }
             busy = true;
+            if bench.due(now).is_none() {
+                let s = now.duration_since(start).as_secs_f32();
+                self.camera = bench_camera(&data.sky, self.free(), s);
+                touring = true;
+            }
+        }
+        if touring {
+            // The bench holds the camera.
         } else if let Some((flight, start, ms)) = self.flight {
             let k = now.duration_since(start).as_secs_f32() * 1000. / ms;
             self.camera = flight.at(ease_in_out(k));
@@ -1757,6 +1899,11 @@ impl BrainApp {
         taken
             .0
             .push((0., 0., w, search::FIELD_HEIGHT + chrome::INSET * 2.));
+        // And the results down the left, which a name would show through.
+        let beside = self.free().x;
+        if beside > 0. {
+            taken.0.push((0., 0., beside, h));
+        }
         if let Some(o) = &orbit {
             self.orbit_names(&data, o, hot, &mut pic, &mut taken, window, t);
         } else {
@@ -1865,13 +2012,22 @@ impl BrainApp {
             let small = k::PAGE_NAME - 1.;
             let cy2 = y + size * 0.7 + small * 0.85;
             let cw = paint::measure(&count, small, &Face::mono(false), window);
-            if taken.take(x - cw / 2., cy2 - small * 0.6, cw, small * 1.2, 2.) {
+            if taken.take(
+                x - cw / 2.,
+                cy2 - small * 0.6,
+                cw,
+                small * 1.2,
+                k::COUNT_PAD,
+            ) {
                 pic.labels.push(Label {
                     text: count.into(),
                     x,
                     y: cy2,
                     size: small,
-                    color: alpha(hue, if lit { 0.75 } else { 0.5 } * a),
+                    color: {
+                        let c = tokens::quiet(t, hue, lit);
+                        alpha(c, c.a * a)
+                    },
                     face: Face::mono(false),
                     align: Align::Centre,
                 });
@@ -2028,7 +2184,12 @@ impl BrainApp {
         // it; the subjects are named in a key in the corner, most first.
         for arc in &o.arcs {
             let hue = data.hues[data.sky.systems[arc.system].subject];
-            let pad = 0.03_f32.min((arc.to - arc.from) / 4.);
+            // One subject all the way round closes its ring.
+            let pad = if o.arcs.len() == 1 {
+                0.
+            } else {
+                0.03_f32.min((arc.to - arc.from) / 4.)
+            };
             pic.bows.push(paint::Bow {
                 x: o.centre.0,
                 y: o.centre.1,
@@ -2096,10 +2257,19 @@ impl BrainApp {
                 continue;
             }
             let lit = Some(p.page) == hot;
-            let text = shorten(&data.corpus.pages[p.page].title, tokens::orbit::NAME_MAX);
             let right = p.angle.cos() >= 0.;
+            // A name runs as far as the sky beside its planet allows.
+            let off = tokens::orbit::NAME_OFF;
+            let room = if right {
+                free.x + free.w - x - off
+            } else {
+                x - off - free.x
+            } - chrome::INSET / 2.;
+            let most = ((room / (k::PAGE_NAME * tokens::orbit::NAME_CHAR)) as usize)
+                .clamp(tokens::orbit::NAME_MAX, tokens::orbit::NAME_MOST);
+            let text = shorten(&data.corpus.pages[p.page].title, most);
             let tw = paint::measure(&text, k::PAGE_NAME, &Face::mono(lit), window);
-            let lx = if right { x + 10. } else { x - 10. - tw };
+            let lx = if right { x + off } else { x - off - tw };
             if !lit && !taken.take(lx, y - 9., tw, 18., 2.) {
                 continue;
             }
@@ -2176,6 +2346,7 @@ impl Render for BrainApp {
             window.focus(&self.focus, cx);
         }
         let typing = self.field.read(cx).is_focused(window);
+        self.bench_types(cx);
         let (picture, busy) = self.scene(window, &t);
         if busy {
             window.request_animation_frame();
@@ -2187,7 +2358,12 @@ impl Render for BrainApp {
                     .push(began.duration_since(last).as_secs_f32() * 1000.);
             }
             if let (Some(prev), Some(done)) = (b.began, b.painted.get()) {
-                b.work.push(done.duration_since(prev).as_secs_f32() * 1000.);
+                let ms = done.duration_since(prev).as_secs_f32() * 1000.;
+                if b.typed > 0 {
+                    b.work_typing.push(ms);
+                } else {
+                    b.work.push(ms);
+                }
             }
             b.last = Some(began);
             b.began = Some(began);
@@ -2324,11 +2500,14 @@ fn report(b: &Bench, pages: usize) {
         1000. * b.frames.len() as f32 / b.frames.iter().sum::<f32>()
     };
     eprintln!(
-        "bench: {pages} pages, sky lit {:.0} ms after launch, {} frames, {fps:.1} fps\n  frame interval: {}\n  build+paint on the UI thread: {}",
+        "bench: {pages} pages, sky lit {:.0} ms after launch, {} frames, {fps:.1} fps\n  frame interval: {}\n  build+paint on the UI thread, flying: {}\n  build+paint on the UI thread, typing a search: {}\n  a key answered from the titles ({} keys): {}",
         b.lit.unwrap_or(f32::NAN),
         b.frames.len(),
         stats(&b.frames),
-        stats(&b.work)
+        stats(&b.work),
+        stats(&b.work_typing),
+        b.keys.len(),
+        stats(&b.keys)
     );
 }
 
@@ -2735,7 +2914,11 @@ impl BrainApp {
         }));
         let mut note = format!("{} worked on", self::pages(pages.len()));
         if r.reshuffles > 0 {
-            note.push_str(&format!(" · {} reorganisations left out", r.reshuffles));
+            note.push_str(&format!(
+                " · {} reorganisation{} left out",
+                r.reshuffles,
+                if r.reshuffles == 1 { "" } else { "s" }
+            ));
         }
         bar.child(
             div()

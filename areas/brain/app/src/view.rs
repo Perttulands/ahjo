@@ -537,7 +537,14 @@ impl BrainPage {
         };
         self.select.borrow_mut().begin();
         let without_title = crate::prose::without_title(&page.body, &page.title);
-        let text = crate::prose::wiki_links(&without_title);
+        let text = crate::prose::wiki_links_named(&without_title, |target| {
+            page.links
+                .iter()
+                .find(|link| link.target == target)
+                .and_then(|link| link.page.as_ref())
+                .map(|linked| linked.title.clone())
+                .filter(|title| !title.is_empty())
+        });
         let selection = self.select.clone();
         let blocks = markdown::parse(&text);
         let mut slugs = crate::prose::Slugger::default();

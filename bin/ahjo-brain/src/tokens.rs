@@ -160,9 +160,30 @@ pub fn subject_hue(t: &Theme, id: &str) -> Hsla {
 pub fn lift(t: &Theme, c: Hsla, share: f32) -> Hsla {
     let to = if t.light { 0. } else { 1. };
     Hsla {
-        l: c.l + (to - c.l) * share * if t.light { 0.6 } else { 1. },
+        // On paper a name has to be ink: yellows and greens at the stars'
+        // own lightness do not read there.
+        l: c.l + (to - c.l) * share * if t.light { LIFT_ON_LIGHT } else { 1. },
         s: c.s * (1. - share * 0.5),
         ..c
+    }
+}
+
+/// A subject's hue as words to read (a link, a subject's name): as it is on
+/// a dark ground; on paper taken towards the ink until it reads.
+pub fn words(t: &Theme, hue: Hsla) -> Hsla {
+    if t.light { lift(t, hue, 0.3) } else { hue }
+}
+
+/// How much further a lifted colour goes towards the ink on a light ground.
+pub const LIFT_ON_LIGHT: f32 = 1.6;
+
+/// A quiet line in a subject's hue (a system's count): fainter on a dark
+/// sky than on paper, where a faint hue is lost.
+pub fn quiet(t: &Theme, hue: Hsla, lit: bool) -> Hsla {
+    match (t.light, lit) {
+        (true, _) => lift(t, hue, 0.25),
+        (false, true) => Hsla { a: 0.75, ..hue },
+        (false, false) => Hsla { a: 0.5, ..hue },
     }
 }
 
@@ -179,6 +200,8 @@ pub mod sky {
     pub const HIT: f32 = 12.;
     /// The most page names drawn at once.
     pub const NAMES: usize = 70;
+    /// The room a system's count keeps clear of every other name.
+    pub const COUNT_PAD: f32 = 10.;
     /// A bridge shows from afar once this many links run along it.
     pub const STRONG: u32 = 4;
     /// How much a lit search dims everything it did not find.
@@ -319,7 +342,13 @@ pub mod orbit {
     pub const SUN: f32 = 9.;
     pub const PLANET_MIN: f32 = 2.6;
     pub const PLANET_MAX: f32 = 6.;
+    /// A planet's name: its least and most letters (as many between as
+    /// the sky beside it holds, a letter being this share of its size
+    /// wide), and how far it stands off its planet.
     pub const NAME_MAX: usize = 24;
+    pub const NAME_MOST: usize = 44;
+    pub const NAME_CHAR: f32 = 0.62;
+    pub const NAME_OFF: f32 = 14.;
     /// The gap between two subjects' arcs, in radians.
     pub const ARC_GAP: f32 = 0.16;
 }
@@ -328,6 +357,8 @@ pub mod orbit {
 pub mod replay {
     pub const STRIP: f32 = 34.;
     pub const GAP: f32 = 2.;
+    /// The room its bar takes from the sky's foot.
+    pub const ROOM: f32 = 150.;
 }
 
 /// The reader.

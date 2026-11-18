@@ -1,7 +1,9 @@
 //! Adapt wiki links to the shared Markdown renderer, keeping code literal.
 
-/// Turns `[[target#heading|label]]` into a Markdown link, outside code.
-pub fn wiki_links(source: &str) -> String {
+/// Turns `[[target#heading|label]]` into a Markdown link, outside code; a
+/// link written without a label reads as what `name` calls its target (the
+/// page's title), not as the slug it was written with.
+pub fn wiki_links_named(source: &str, name: impl Fn(&str) -> Option<String>) -> String {
     let mut out = String::with_capacity(source.len());
     let mut fence: Option<&str> = None;
     for line in source.split_inclusive('\n') {
@@ -37,8 +39,12 @@ pub fn wiki_links(source: &str) -> String {
                 let inner = &rest[2..end];
                 let (target, label) = inner.split_once('|').unwrap_or((inner, inner));
                 if !target.trim().is_empty() && !inner.contains(['[', ']']) {
+                    let named = (!inner.contains('|'))
+                        .then(|| name(target.split('#').next().unwrap_or(target).trim()))
+                        .flatten()
+                        .filter(|n| !n.contains(['[', ']']));
                     out.push('[');
-                    out.push_str(label.trim());
+                    out.push_str(named.as_deref().unwrap_or(label.trim()));
                     out.push_str("](");
                     out.push_str(target.trim());
                     out.push(')');
@@ -135,7 +141,10 @@ mod tests {
     }
     #[test]
     fn reads_wiki_links_with_anchor_and_label() {
-        let source = wiki_links("See [[self/pace#Notes|the pace]] and [[decision-models]].");
+        let source = wiki_links_named(
+            "See [[self/pace#Notes|the pace]] and [[decision-models]].",
+            |_| None,
+        );
         let runs = ahjo_app_kit::widgets::markdown::inline(&source, false);
         assert_eq!(runs.text, "See the pace and decision-models.");
         assert_eq!(runs.links, ["self/pace#Notes", "decision-models"]);
@@ -147,9 +156,21 @@ mod tests {
         assert_eq!(runs.links[0].split('#').next(), Some("self/pace.md"));
     }
     #[test]
+    fn a_bare_wiki_link_reads_as_its_pages_title() {
+        let title = |t: &str| (t == "pace").then(|| "Pace of work".to_string());
+        assert_eq!(
+            wiki_links_named("[[pace]] [[pace#Notes]] [[pace|here]] [[gone]]", title),
+            "[Pace of work](pace) [Pace of work](pace#Notes) [here](pace) [gone](gone)"
+        );
+    }
+
+    #[test]
     fn wiki_links_are_rendered_without_touching_code() {
         assert_eq!(
-            wiki_links("[[first#part|read]] `[[literal]]`\n```\n[[code]]\n```\n"),
+            wiki_links_named(
+                "[[first#part|read]] `[[literal]]`\n```\n[[code]]\n```\n",
+                |_| None
+            ),
             "[read](first#part) `[[literal]]`\n```\n[[code]]\n```\n"
         );
     }
