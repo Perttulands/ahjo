@@ -38,13 +38,17 @@ pub fn execute(
 ) {
     let result = execute_inner(&c, &id, &mission, &req, workspace.clone(), &control);
     let cleanup = if control.stopping.load(Ordering::Acquire) {
-        Ok(())
+        Ok(Vec::new())
     } else {
         crate::run_workspace_recovery::cleanup(&c, &id, &req, &workspace, &control)
     };
+    let kept = cleanup
+        .as_ref()
+        .map(|kept| kept.join(" "))
+        .unwrap_or_default();
     let mut result = match (result, cleanup) {
-        (Ok(outcome), Ok(())) => Ok(outcome),
-        (Err(error), Ok(())) | (Ok(_), Err(error)) => Err(error),
+        (Ok(outcome), Ok(_)) => Ok(outcome),
+        (Err(error), Ok(_)) | (Ok(_), Err(error)) => Err(error),
         (Err(error), Err(cleanup)) => Err(io::Error::other(format!(
             "{error}; workspace cleanup failed: {cleanup}"
         ))),
@@ -189,6 +193,19 @@ pub fn execute(
             }
         }
     };
+    let mut event = event;
+    // A run that stopped on a step says where that step's work was kept.
+    if !kept.is_empty() && matches!(event.kind.as_str(), "run_blocked" | "run_failed") {
+        for field in ["reason", "detail"] {
+            if let Some(serde_json::Value::String(said)) = event.data.get_mut(field) {
+                if !said.ends_with(['.', '!', '?']) {
+                    said.push('.');
+                }
+                said.push(' ');
+                said.push_str(&kept);
+            }
+        }
+    }
     if let Err(e) = c.append(&id, event) {
         eprintln!("ahjo: cannot record run {id} outcome: {e}");
     }

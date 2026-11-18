@@ -133,7 +133,7 @@ fn description(name: &str) -> &'static str {
         "run_resume" => "Resume a blocked run.",
         "run_land" => "Land a finished repository run.",
         "run_delete" => {
-            "Delete a finished run, its kept outputs and the folder Ahjo made for it; land a repository run first."
+            "Delete a finished run, its kept outputs, the branches a failed step's work was kept on and the folder Ahjo made for it; land a repository run first."
         }
         "gate_approve" => "Approve a pending human gate.",
         "gate_reject" => "Reject a pending human gate.",

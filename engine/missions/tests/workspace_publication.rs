@@ -164,8 +164,11 @@ impl Executor for Failure {
         .map_err(|message: String| ahjo_mission_engine::Error::new("executor_error", message))
     }
 }
+/// A step that fails, is stopped or asks for help leaves no checkout behind,
+/// but what it wrote is kept on a branch of its own, said where the run
+/// stopped, until the run is deleted.
 #[test]
-fn error_cancel_and_escalation_remove_their_turn_worktrees() {
+fn error_cancel_and_escalation_keep_their_work_and_remove_their_turn_worktrees() {
     for mode in ["error", "cancel", "escalate"] {
         let root = Scratch::new();
         let settings = setup(&root);
@@ -201,6 +204,50 @@ fn error_cancel_and_escalation_remove_their_turn_worktrees() {
             turns(&root, &id).is_empty(),
             "{mode}: {:?}",
             turns(&root, &id)
+        );
+        let checkout = root.0.join("checkout");
+        let prefix = format!("refs/heads/ahjo/run-{id}-kept/");
+        let branches = git(
+            &checkout,
+            &["for-each-ref", "--format=%(refname:short)", &prefix],
+        );
+        let branch = branches.lines().collect::<Vec<_>>();
+        assert_eq!(branch.len(), 1, "{mode}: {branches:?}");
+        let branch = branch[0];
+        assert_eq!(
+            git(&checkout, &["show", &format!("{branch}:unfinished")]),
+            "partial",
+            "{mode}"
+        );
+        let kept = p
+            .events
+            .iter()
+            .find(|e| e.kind == "workspace_kept")
+            .unwrap_or_else(|| panic!("{mode}: no workspace_kept event"));
+        assert!(kept.detail.contains(branch), "{mode}: {}", kept.detail);
+        if mode != "cancel" {
+            let blocked = p
+                .events
+                .iter()
+                .rev()
+                .find(|e| e.kind == "run_blocked")
+                .unwrap();
+            assert!(
+                blocked.detail.contains(branch),
+                "{mode}: {}",
+                blocked.detail
+            );
+            continue;
+        }
+        c.land(&id, true).unwrap();
+        c.delete_run(&id).unwrap();
+        assert_eq!(
+            git(
+                &checkout,
+                &["for-each-ref", "--format=%(refname:short)", &prefix]
+            ),
+            "",
+            "the kept branch goes with the run"
         );
     }
 }

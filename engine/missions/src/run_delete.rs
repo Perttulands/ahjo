@@ -5,7 +5,8 @@ use std::path::PathBuf;
 
 impl Coordinator {
     /// Delete a finished run: its event record, frozen mission, bindings,
-    /// kept outputs and the folder Ahjo made for it. A folder the operator
+    /// kept outputs, the branches its failed attempts' work was kept on and
+    /// the folder Ahjo made for it. A folder the operator
     /// gave stays, and a repository run is landed first so its branch is
     /// not lost.
     pub fn delete_run(&self, id: &str) -> Result<(), crate::Error> {
@@ -22,6 +23,23 @@ impl Coordinator {
                     io::ErrorKind::InvalidInput,
                     "the run still has its branch and worktree; land it first",
                 ));
+            }
+            // The branches a failed or stopped attempt's work was kept on
+            // go with the run, each only while it is where Ahjo left it.
+            let events = self.ledger(id)?.read().map_err(crate::error::to_io)?;
+            let checkout = events[0].data.get("checkout").and_then(|v| v.as_str());
+            if let Some(checkout) = checkout.filter(|c| std::path::Path::new(c).exists()) {
+                for kept in events.iter().filter(|e| e.kind == "workspace_kept") {
+                    let field = |name: &str| kept.data.get(name).and_then(|v| v.as_str());
+                    if let (Some(branch), Some(commit)) = (field("branch"), field("commit")) {
+                        let reference = format!("refs/heads/{branch}");
+                        // A branch already gone, or moved by someone, stays as it is.
+                        let _ = std::process::Command::new("git")
+                            .current_dir(checkout)
+                            .args(["update-ref", "-d", &reference, commit])
+                            .output()?;
+                    }
+                }
             }
             let root = &self.inner.root;
             let made = self
