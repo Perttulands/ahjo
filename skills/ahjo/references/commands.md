@@ -4,7 +4,7 @@ These are the commands advertised by the enabled areas. Run `ahjo <noun> <verb> 
 
 ## agents
 
-`ahjo agents show`, `ahjo agents sync`.
+`ahjo agents hook-add`, `ahjo agents hook-remove`, `ahjo agents hook-set`, `ahjo agents hook-switch`, `ahjo agents link`, `ahjo agents read`, `ahjo agents setting-set`, `ahjo agents shape`, `ahjo agents show`, `ahjo agents sync`, `ahjo agents write`.
 
 ## brain
 
@@ -24,7 +24,7 @@ These are the commands advertised by the enabled areas. Run `ahjo <noun> <verb> 
 
 ## formation
 
-`ahjo formation add-input`, `ahjo formation add-output`, `ahjo formation assign`, `ahjo formation create`, `ahjo formation delete`, `ahjo formation inspect`, `ahjo formation list`, `ahjo formation place`, `ahjo formation rename`, `ahjo formation run`, `ahjo formation set-brief`, `ahjo formation set-port`, `ahjo formation set-slots`, `ahjo formation set-type`, `ahjo formation unassign`, `ahjo formation unwire`, `ahjo formation wire`.
+`ahjo formation add-input`, `ahjo formation add-output`, `ahjo formation agent`, `ahjo formation assign`, `ahjo formation create`, `ahjo formation delete`, `ahjo formation fresh`, `ahjo formation inspect`, `ahjo formation list`, `ahjo formation place`, `ahjo formation rename`, `ahjo formation run`, `ahjo formation set-brief`, `ahjo formation set-port`, `ahjo formation set-slots`, `ahjo formation set-type`, `ahjo formation unassign`, `ahjo formation unwire`, `ahjo formation wire`.
 
 ## gate
 
@@ -44,7 +44,7 @@ These are the commands advertised by the enabled areas. Run `ahjo <noun> <verb> 
 
 ## mission
 
-`ahjo mission archives`, `ahjo mission arrange`, `ahjo mission create`, `ahjo mission delete`, `ahjo mission edit`, `ahjo mission input`, `ahjo mission inspect`, `ahjo mission list`, `ahjo mission move`, `ahjo mission new`, `ahjo mission note`, `ahjo mission notes`, `ahjo mission output`, `ahjo mission purge-archive`, `ahjo mission rename`, `ahjo mission run`, `ahjo mission update`, `ahjo mission validate`, `ahjo mission wire`.
+`ahjo mission archives`, `ahjo mission arrange`, `ahjo mission create`, `ahjo mission delete`, `ahjo mission edit`, `ahjo mission examples`, `ahjo mission input`, `ahjo mission inspect`, `ahjo mission list`, `ahjo mission move`, `ahjo mission new`, `ahjo mission note`, `ahjo mission notes`, `ahjo mission output`, `ahjo mission prefix`, `ahjo mission purge-archive`, `ahjo mission rename`, `ahjo mission run`, `ahjo mission update`, `ahjo mission validate`, `ahjo mission wire`.
 
 ## role
 

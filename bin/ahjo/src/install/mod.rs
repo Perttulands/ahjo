@@ -1,5 +1,5 @@
-//! `ahjo install` and `ahjo upgrade`: this machine's node as a systemd
-//! user unit (Linux and WSL).
+//! `ahjo install`, `ahjo upgrade` and `ahjo uninstall`: this machine's node
+//! as a systemd user unit (Linux and WSL).
 //!
 //! They live in the binary, not in an area: they put the binary itself in
 //! place and run it, before any node exists or while the node they replace
@@ -29,6 +29,51 @@ pub const INSTALL_USAGE: &str = "usage: ahjo install [--from file] [--app file] 
 pub const UPGRADE_USAGE: &str = "usage: ahjo upgrade [--from file] [--app file] [--unit name] \
 [--unit-dir dir] [--timeout seconds] [--json]";
 
+pub const UNINSTALL_USAGE: &str = "usage: ahjo uninstall [--unit name] [--unit-dir dir] [--json]";
+
+pub const INSTALL_HELP: &str = "usage: ahjo install [--from file] [--app file] [--root dir] \
+[--unit name] [--unit-dir dir] [--listen addr:port] [--config file] [--timeout seconds] [--json]
+Put this build in place as a systemd user unit, enable it and start it, then
+wait until the node answers as this build. Linux and WSL. Run again it changes
+only what differs. A unit already running another build is refused: ahjo
+upgrade replaces a running node. The unit starts with this command's PATH
+(and AHJO_TMUX), which is where the node finds tmux and the agent programs.
+
+  --from      file: the ahjo to install (default: the one running this)
+  --app       file: an ahjo-swarm to put beside it
+  --root      dir: binaries go in <root>/bin (default ~/.local)
+  --unit      name: the unit is <name>.service (default ahjo)
+  --unit-dir  dir: where units live (default ~/.config/systemd/user)
+  --listen    addr:port: where the node listens (default [node] listen in
+              the config, or else this environment's port on 127.0.0.1)
+  --config    file: a config other than ~/.config/ahjo/config.toml
+  --timeout   seconds to wait for the node to answer (default 30)
+  --json      the answer as JSON";
+
+pub const UPGRADE_HELP: &str = "usage: ahjo upgrade [--from file] [--app file] [--unit name] \
+[--unit-dir dir] [--timeout seconds] [--json]
+Replace the installed build with this one and restart the node; run it from
+the new build. Terminal sessions live on. A new build that does not answer in
+time is taken out again and the previous one started, and the upgrade fails
+with upgrade_failed. Where the node listens and what it reads stay as the
+unit says: ahjo install changes those.
+
+  --from      file: the ahjo to put in (default: the one running this)
+  --app       file: an ahjo-swarm to put beside it
+  --unit      name: the unit is <name>.service (default ahjo)
+  --unit-dir  dir: where units live (default ~/.config/systemd/user)
+  --timeout   seconds to wait for the node to answer (default 30)
+  --json      the answer as JSON";
+
+pub const UNINSTALL_HELP: &str = "usage: ahjo uninstall [--unit name] [--unit-dir dir] [--json]
+Stop and disable the unit, and remove it and the binaries ahjo install put
+in place. Terminal sessions live on in tmux, and the node's config and state
+(~/.config/ahjo) stay: remove that folder yourself for a clean slate.
+
+  --unit      name: the unit is <name>.service (default ahjo)
+  --unit-dir  dir: where units live (default ~/.config/systemd/user)
+  --json      the answer as JSON";
+
 /// Where an install lives and how it is reached.
 struct Flags {
     from: Option<PathBuf>,
@@ -42,12 +87,13 @@ struct Flags {
     json: bool,
 }
 
-/// Runs `ahjo install` or `ahjo upgrade` (`verb`) with `args`, printing
+/// Runs `ahjo install`, `upgrade` or `uninstall` (`verb`) with `args`, printing
 /// what it did, or its error as `{code, message}`. Answers the exit code.
 pub async fn run(verb: &str, args: &[String]) -> i32 {
     let json = args.iter().any(|a| a == "--json");
     let done = match parse(verb, args) {
         Ok(flags) if verb == "install" => install(&flags).await,
+        Ok(flags) if verb == "uninstall" => uninstall(&flags),
         Ok(flags) => upgrade(&flags).await,
         Err(error) => Err(error),
     };
@@ -60,22 +106,22 @@ pub async fn run(verb: &str, args: &[String]) -> i32 {
             println!("{}", report["summary"].as_str().unwrap_or_default());
             0
         }
-        Err(error) if json => {
-            eprintln!("{}", json!({ "error": error }));
-            1
-        }
         Err(error) => {
-            eprintln!("ahjo {verb}: {error}");
-            1
+            match json {
+                true => eprintln!("{}", json!({ "error": error })),
+                false => eprintln!("ahjo {verb}: {error}"),
+            }
+            // As every ahjo command: 2 when the command line was wrong.
+            if error.code == "bad_arguments" { 2 } else { 1 }
         }
     }
 }
 
 fn parse(verb: &str, args: &[String]) -> Result<Flags, Error> {
-    let usage = if verb == "install" {
-        INSTALL_USAGE
-    } else {
-        UPGRADE_USAGE
+    let usage = match verb {
+        "install" => INSTALL_USAGE,
+        "uninstall" => UNINSTALL_USAGE,
+        _ => UPGRADE_USAGE,
     };
     let bad = |why: String| Error::new("bad_arguments", format!("{why}\n{usage}"));
     let mut flags = Flags {
@@ -100,6 +146,12 @@ fn parse(verb: &str, args: &[String]) -> Result<Flags, Error> {
             return Err(bad(format!(
                 "{flag}: ahjo upgrade keeps what the unit says; ahjo install changes it"
             )));
+        }
+        if verb == "uninstall" && !matches!(flag.as_str(), "--unit" | "--unit-dir") {
+            return Err(bad(format!("unknown flag {flag}")));
+        }
+        if !flag.starts_with("--") {
+            return Err(bad(format!("unexpected {flag}")));
         }
         let value = args
             .next()
@@ -554,4 +606,74 @@ async fn upgrade(flags: &Flags) -> Result<Value, Error> {
             ),
         ),
     })
+}
+
+/// Takes the unit and what `ahjo install` put in place away. Sessions are
+/// tmux's and the config and state are the operator's: both stay.
+fn uninstall(flags: &Flags) -> Result<Value, Error> {
+    linux_only()?;
+    let unit_file = unit_file(flags)?;
+    let service = format!("{}.service", flags.unit);
+    let text = std::fs::read_to_string(&unit_file).map_err(|e| {
+        Error::new(
+            "not_installed",
+            format!("reading {}: {e}; nothing to uninstall", unit_file.display()),
+        )
+    })?;
+    // Only a unit that runs `ahjo serve` is ours to take away.
+    let unit = Unit::parse(&text, &unit_file);
+    if let Err(error) = &unit
+        && error.code != "unit_kills_sessions"
+    {
+        return Err(Error::new(
+            "unit_unreadable",
+            format!("{}; remove it by hand if it is yours", error.message),
+        ));
+    }
+    let mut did = Vec::new();
+    if state(&service) == "active" {
+        systemctl(&["stop", &service])?;
+        did.push(format!("stopped {service}"));
+    }
+    systemctl(&["disable", "--quiet", &service])?;
+    std::fs::remove_file(&unit_file).map_err(|e| io("removing", &unit_file, e))?;
+    systemctl(&["daemon-reload"])?;
+    did.push(format!("removed {}", unit_file.display()));
+    let mut removed = Vec::new();
+    if let Ok(unit) = &unit {
+        let app = app_path(&unit.binary);
+        for path in [
+            unit.binary.clone(),
+            previous(&unit.binary),
+            app.clone(),
+            previous(&app),
+        ] {
+            match std::fs::remove_file(&path) {
+                Ok(()) => removed.push(path),
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+                Err(e) => return Err(io("removing", &path, e)),
+            }
+        }
+        // The folder too, when the install was all it held.
+        if let Some(dir) = unit.binary.parent() {
+            let _ = std::fs::remove_dir(dir);
+        }
+    }
+    for path in &removed {
+        did.push(format!("removed {}", path.display()));
+    }
+    let kept = Identity::config_dir()
+        .map(|dir| dir.display().to_string())
+        .unwrap_or_else(|_| "~/.config/ahjo".into());
+    let summary = format!(
+        "{}\nKept: every tmux session, and the node's config and state in {kept}.",
+        did.join("\n")
+    );
+    Ok(json!({
+        "summary": summary,
+        "unit": service,
+        "unit_file": unit_file,
+        "removed": removed,
+        "kept": kept,
+    }))
 }

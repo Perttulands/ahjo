@@ -91,3 +91,88 @@ async fn help_selects_the_requested_node_instead_of_the_local_node() {
     other.stop().await;
     std::fs::remove_dir_all(xdg).unwrap();
 }
+
+fn ahjo(args: &[&str]) -> std::process::Output {
+    std::process::Command::new(env!("CARGO_BIN_EXE_ahjo"))
+        .args(args)
+        .output()
+        .unwrap()
+}
+
+/// The binary's own commands answer `--help` without doing anything, and a
+/// wrong command line is one usage line and exit 2, not the whole usage.
+#[test]
+fn own_commands_have_help_and_a_wrong_command_line_exits_2() {
+    for command in [
+        "serve",
+        "install",
+        "upgrade",
+        "uninstall",
+        "version",
+        "mcp",
+        "kinds",
+        "hook",
+        "help",
+    ] {
+        let out = ahjo(&[command, "--help"]);
+        let text = String::from_utf8_lossy(&out.stdout);
+        assert_eq!(out.status.code(), Some(0), "{command}: {out:?}");
+        assert!(
+            text.starts_with(&format!("usage: ahjo {command}")),
+            "{command}: {text}"
+        );
+        assert!(text.lines().count() > 1, "{command} says only its usage");
+        let asked = ahjo(&["help", command]);
+        assert_eq!(asked.stdout, out.stdout, "ahjo help {command}");
+    }
+    for (args, says) in [
+        (&["serve", "--bogus"][..], "usage: ahjo serve"),
+        (&["version", "extra"], "usage: ahjo version"),
+        (&["mcp", "--bogus"], "usage: ahjo mcp"),
+        (&["install", "--bogus", "x"], "usage: ahjo install"),
+        (&["upgrade", "--root", "x"], "usage: ahjo upgrade"),
+        (&["--bogus"], "ahjo --help"),
+    ] {
+        let out = ahjo(args);
+        let error = String::from_utf8_lossy(&out.stderr);
+        assert_eq!(out.status.code(), Some(2), "{args:?}: {error}");
+        assert!(error.contains(says), "{args:?}: {error}");
+        assert!(error.lines().count() <= 3, "{args:?}: {error}");
+        assert!(out.stdout.is_empty(), "{args:?}");
+    }
+}
+
+/// With no node there, a command says so in one line and exits 3 soon, in
+/// plain words or as the one JSON error shape.
+#[test]
+fn a_node_that_is_not_running_is_said_in_one_line_and_exits_3() {
+    // Bound and dropped: a port nothing listens on.
+    let port = std::net::TcpListener::bind("127.0.0.1:0")
+        .unwrap()
+        .local_addr()
+        .unwrap()
+        .port();
+    let node = format!("127.0.0.1:{port}");
+    let started = std::time::Instant::now();
+    let out = ahjo(&["session", "list", "--node", &node]);
+    assert!(started.elapsed() < std::time::Duration::from_secs(30));
+    let error = String::from_utf8_lossy(&out.stderr);
+    assert_eq!(out.status.code(), Some(3), "{error}");
+    assert_eq!(error.lines().count(), 1, "{error}");
+    assert!(
+        error.starts_with(&format!("ahjo: no node answers on {node} (")),
+        "{error}"
+    );
+    assert!(error.contains("ahjo serve"), "{error}");
+
+    let out = ahjo(&["session", "list", "--json", "--node", &node]);
+    assert_eq!(out.status.code(), Some(3));
+    let error: serde_json::Value = serde_json::from_slice(&out.stderr).unwrap();
+    assert_eq!(error["error"]["code"], "no_node", "{error}");
+
+    let out = ahjo(&["version", "--json", "--node", &node]);
+    assert_eq!(out.status.code(), Some(3));
+    let version: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(version["version"], ahjo_node_kit::VERSION);
+    assert!(version["node"].is_null(), "{version}");
+}

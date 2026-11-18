@@ -21,7 +21,7 @@ mod setup;
 mod view;
 
 pub use area::{Area, BoxFuture, Build, Built, Channel, Client, Command, Finish};
-pub use client::{NodeClient, NodeError};
+pub use client::{NodeClient, NodeError, Unreachable};
 pub use config::Config;
 pub use listing::Listing;
 pub use serve::{Failure, Options, Running, set_liveness, start};

@@ -1,4 +1,4 @@
-//! `ahjo install` and `ahjo upgrade`, the whole binary, against a stand-in
+//! `ahjo install`, `ahjo upgrade` and `ahjo uninstall`, the whole binary, against a stand-in
 //! for `systemctl --user` on PATH: it runs a unit's ExecStart as a process of
 //! its own and, as `KillMode=process` does, stops only that process. The
 //! node serves a tmux server of the test's own. Nothing here reaches the real
@@ -12,7 +12,7 @@ use std::process::{Command, Output};
 
 use ahjo::install::Unit;
 use ahjo_testkit::fresh_dir;
-use ahjo_testkit::tmux::{Server, eventually};
+use ahjo_testkit::tmux::{Server, eventually, write_script};
 use serde_json::Value;
 
 const AHJO: &str = env!("CARGO_BIN_EXE_ahjo");
@@ -53,6 +53,7 @@ stop() {
 case $command in
   daemon-reload) ;;
   enable) touch "$FAKE_SYSTEMD/$service.enabled" ;;
+  disable) rm -f "$FAKE_SYSTEMD/$service.enabled" ;;
   start) running || start ;;
   restart) stop; start ;;
   stop) stop ;;
@@ -74,7 +75,7 @@ impl Machine {
         for sub in ["fakebin", "systemd", "units", "home", "xdg", "builds"] {
             std::fs::create_dir(dir.join(sub)).unwrap();
         }
-        write_executable(&dir.join("fakebin/systemctl"), FAKE_SYSTEMCTL);
+        write_script(&dir.join("fakebin/systemctl"), FAKE_SYSTEMCTL);
         std::fs::write(
             dir.join("config.toml"),
             format!(
@@ -118,7 +119,9 @@ impl Machine {
         command.arg(verb).arg("--json");
         command.args(["--unit", UNIT, "--unit-dir"]);
         command.arg(self.dir.join("units"));
-        command.args(["--timeout", "10"]);
+        if verb != "uninstall" {
+            command.args(["--timeout", "10"]);
+        }
         command.args(extra);
         let path = format!(
             "{}:{}",
@@ -189,12 +192,6 @@ impl Drop for Machine {
         }
         let _ = std::fs::remove_dir_all(&self.dir);
     }
-}
-
-fn write_executable(path: &Path, text: &str) {
-    use std::os::unix::fs::PermissionsExt;
-    std::fs::write(path, text).unwrap();
-    std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o755)).unwrap();
 }
 
 fn succeeded(out: &Output) -> Value {
@@ -293,9 +290,9 @@ async fn a_build_that_fails_its_health_check_is_rolled_back() {
     let broken = machine.dir.join("builds/broken");
     std::fs::create_dir(&broken).unwrap();
     let broken = broken.join("ahjo");
-    write_executable(
+    write_script(
         &broken,
-        &format!(
+        format!(
             "#!/bin/sh\ncase \"$1\" in serve) echo 'broken build' >&2; exit 3 ;; esac\nexec {AHJO} \"$@\"\n"
         ),
     );
@@ -397,4 +394,50 @@ async fn install_is_idempotent_and_writes_the_expected_unit() {
     let error: Value = serde_json::from_slice(&refused.stderr).unwrap();
     assert_eq!(error["error"]["code"], "install_running", "{error}");
     assert_eq!(machine.node_pid(), Some(pid));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn uninstall_takes_the_unit_and_the_build_away_and_keeps_sessions_and_config() {
+    let _alone = ONE_AT_A_TIME.lock().await;
+    let Some(tmux) = Server::start_in("ahjo-uninstall") else {
+        return;
+    };
+    tmux.new_session("alpha", 100, 30);
+    let machine = Machine::new(&tmux);
+    let first = machine.build("first");
+    succeeded(&machine.install(&first));
+    let node = machine.node_pid().unwrap();
+    let pane = tmux.display("alpha", "#{pane_pid}");
+    let service = format!("{UNIT}.service");
+    let enabled = machine.dir.join(format!("systemd/{service}.enabled"));
+    assert!(enabled.exists());
+
+    let gone = succeeded(&machine.ahjo(&first, "uninstall", &[]));
+    assert_eq!(gone["unit"], service.as_str());
+    assert_eq!(
+        gone["removed"],
+        serde_json::json!([machine.installed()]),
+        "{gone}"
+    );
+    assert!(!machine.unit_file().exists());
+    assert!(!machine.installed().exists());
+    assert!(!enabled.exists(), "the unit is still enabled");
+    assert_eq!(machine.node_pid(), None, "the node still runs");
+    assert!(
+        !Path::new(&format!("/proc/{node}")).exists(),
+        "the node process outlived its unit"
+    );
+    // What is not the install's stays: the session, and the config.
+    assert_eq!(tmux.display("alpha", "#{pane_pid}"), pane);
+    assert!(machine.dir.join("config.toml").exists());
+
+    // Nothing is left to take away, and a wrong flag is a wrong command line.
+    let again = machine.ahjo(&first, "uninstall", &[]);
+    assert_eq!(again.status.code(), Some(1));
+    let error: Value = serde_json::from_slice(&again.stderr).unwrap();
+    assert_eq!(error["error"]["code"], "not_installed", "{error}");
+    let wrong = machine.ahjo(&first, "uninstall", &["--root", "/nowhere"]);
+    assert_eq!(wrong.status.code(), Some(2));
+    let error: Value = serde_json::from_slice(&wrong.stderr).unwrap();
+    assert_eq!(error["error"]["code"], "bad_arguments", "{error}");
 }

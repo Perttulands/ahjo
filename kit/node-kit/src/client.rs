@@ -18,9 +18,54 @@ pub struct NodeError {
     pub findings: Option<Value>,
 }
 
+/// How long a connection may take. A closed port refuses at once on most
+/// hosts, but WSL with mirrored networking lets the attempt hang for
+/// minutes, so a node that is not running must be given up on here.
+const CONNECT: std::time::Duration = std::time::Duration::from_secs(5);
+/// On this machine itself a listener answers at once.
+const CONNECT_LOCAL: std::time::Duration = std::time::Duration::from_secs(2);
+
+/// Nothing accepted the connection: no node runs there, or it cannot be
+/// reached.
+#[derive(Debug)]
+pub struct Unreachable {
+    /// `host:port` as it was asked.
+    pub authority: String,
+    pub why: String,
+}
+
+impl std::fmt::Display for Unreachable {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "no node answers on {} ({})", self.authority, self.why)
+    }
+}
+impl std::error::Error for Unreachable {}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn a_port_nobody_listens_on_is_unreachable_and_says_where() {
+        // Bound and dropped, so the port is known and nothing listens.
+        let address = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .unwrap()
+            .local_addr()
+            .unwrap();
+        let error = NodeClient::new(Some(&address.to_string()))
+            .unwrap()
+            .request(Method::GET, "/api/health", None, None)
+            .await
+            .unwrap_err();
+        let unreachable = error.downcast_ref::<Unreachable>().unwrap();
+        assert_eq!(unreachable.authority, address.to_string());
+        assert!(
+            error
+                .to_string()
+                .starts_with("no node answers on 127.0.0.1:")
+        );
+    }
 
     #[test]
     fn a_node_is_a_url_an_address_or_an_id() {
@@ -195,9 +240,25 @@ impl NodeClient {
             None => Vec::new(),
         };
         let request = builder.body(Body::from(bytes))?;
-        let stream = TcpStream::connect(&self.authority)
-            .await
-            .context("connecting to node")?;
+        let unreachable = |why: String| Unreachable {
+            authority: self.authority.clone(),
+            why,
+        };
+        let local = ["127.", "localhost:", "[::1]:"]
+            .iter()
+            .any(|own| self.authority.starts_with(own));
+        let within = if local { CONNECT_LOCAL } else { CONNECT };
+        let stream = match tokio::time::timeout(within, TcpStream::connect(&self.authority)).await {
+            Ok(Ok(stream)) => stream,
+            Ok(Err(error)) => return Err(unreachable(error.to_string()).into()),
+            Err(_) => {
+                return Err(unreachable(format!(
+                    "no answer to a connection within {} s",
+                    within.as_secs()
+                ))
+                .into());
+            }
+        };
         let (mut sender, connection) =
             hyper::client::conn::http1::handshake(TokioIo::new(stream)).await?;
         tokio::spawn(async move {

@@ -231,6 +231,11 @@ One shape everywhere: a stable `code` and a human `message`, defined in `core`.
 Each area owns its codes in its `contract`. Routes, commands and the app all
 carry that shape; nothing returns a bare string.
 
+The command line says how a command ended in its exit code: 0 done, 1 it ran
+and failed, 2 the command line was wrong (`bad_arguments`), 3 no node answers
+(`no_node`). With `--json` the answer is JSON on stdout and a failure the
+error shape on stderr, as `{"error": {code, message}}`.
+
 ## Sessions survive
 
 Terminal sessions belong to the holder process, not to the node. Installing,
@@ -239,7 +244,7 @@ tmux records a session as active when a node attaches a control client; Ahjo pre
 
 ## Install and upgrade
 
-`ahjo install` and `ahjo upgrade` are the binary's own verbs, not an area's
+`ahjo install`, `ahjo upgrade` and `ahjo uninstall` are the binary's own verbs, not an area's
 commands: they put the binary itself in place and restart the node, so no
 node can own them. They have no MCP tool, because a node upgrading itself
 would be stopped by its own restart before it could answer. On Linux and WSL
@@ -258,6 +263,9 @@ restart signals only the node and a tmux server it started lives on.
   build it set aside back, restarts it and fails with `upgrade_failed`;
   once the new node is healthy the old build is deleted.
   A unit without `KillMode=process` is refused before anything changes.
+- **Uninstall** stops and disables the unit and removes it and the
+  binaries its `ExecStart` names. Sessions, and the node's config and
+  state, stay.
 - **Version.** A build's version is the package version and its commit
   (`0.0.1+8cdb58b`), in `ahjo --version`, `ahjo version` and the health.
 - **The address.** A node records the address it bound in its config folder
@@ -270,7 +278,7 @@ restart signals only the node and a tmux server it started lives on.
 into `~/.config/systemd/user`, and the ChatGPT tunnel's unit and profile,
 which reach the node's `/mcp`. The `change-ahjo` skill has the steps.
 
-`bin/ahjo/tests/install.rs` runs both against a stand-in `systemctl` on
+`bin/ahjo/tests/install.rs` runs all three against a stand-in `systemctl` on
 `PATH`, with a node, a tmux server and a session of the test's own.
 
 ## Tests

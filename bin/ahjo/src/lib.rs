@@ -20,5 +20,13 @@ pub const AREAS: &[Listing] = &[
 
 /// The binary's own first words, which no area's command noun may take.
 pub const VERBS: &[&str] = &[
-    "serve", "mcp", "hook", "kinds", "help", "install", "upgrade", "version",
+    "serve",
+    "mcp",
+    "hook",
+    "kinds",
+    "help",
+    "install",
+    "upgrade",
+    "uninstall",
+    "version",
 ];

@@ -12,6 +12,23 @@ use std::io::Write;
 
 use crate::client::NodeClient;
 
+/// The command line itself was wrong: no such command, an unknown flag, a
+/// missing argument. Nothing was asked of the node's tool. `ahjo` exits 2
+/// on it, and 1 when a command ran and failed.
+#[derive(Debug)]
+pub struct Usage(pub String);
+
+impl std::fmt::Display for Usage {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+impl std::error::Error for Usage {}
+
+fn usage_error(message: String) -> anyhow::Error {
+    Usage(message).into()
+}
+
 /// Runs one command, writing its answer to `out`. The exit code is 1 when
 /// the tool failed. `node`, when given, is the node to talk to; else the
 /// one this machine runs, or `--node` among `args`.
@@ -51,10 +68,10 @@ pub async fn run(noun: &str, args: &[String], out: &mut impl Write) -> Result<i3
             "" => String::new(),
             off => format!("; turned off on this node: {off}"),
         };
-        bail!(
-            "no command {noun}; commands: {}{off}",
+        return Err(usage_error(format!(
+            "no command {noun}; this node's commands are {}{off}",
             nouns(&tools).join(", ")
-        );
+        )));
     }
     let Some(verb) = args.first().filter(|v| !v.starts_with('-')) else {
         writeln!(out, "{}", verbs(noun, &ours))?;
@@ -62,7 +79,10 @@ pub async fn run(noun: &str, args: &[String], out: &mut impl Write) -> Result<i3
     };
     let tool_name = format!("{noun}_{}", verb.replace('-', "_"));
     let Some(tool) = ours.iter().find(|t| name(t) == tool_name) else {
-        bail!("no command {noun} {verb}\n{}", verbs(noun, &ours));
+        return Err(usage_error(format!(
+            "no command {noun} {verb}; {noun} has\n{}",
+            verbs(noun, &ours)
+        )));
     };
     let rest = &args[1..];
     if rest.iter().any(|a| a == "--help" || a == "-h") {
@@ -76,7 +96,7 @@ pub async fn run(noun: &str, args: &[String], out: &mut impl Write) -> Result<i3
         .cloned()
         .collect();
     let mut arguments = parse(&tool["inputSchema"], &rest)
-        .with_context(|| format!("usage: {}", usage(noun, verb, tool)))?;
+        .map_err(|error| usage_error(format!("{error:#}\nusage: {}", usage(noun, verb, tool))))?;
     if let Some(on) = on {
         arguments["node"] = Value::String(on);
     }
@@ -108,24 +128,29 @@ pub async fn overview(node: Option<&str>) -> Result<String> {
 /// One line per command, each noun's commands together, nouns in the order
 /// the node first names them.
 fn listing(tools: &[Value]) -> String {
-    let mut nouns: Vec<(&str, Vec<String>)> = Vec::new();
+    let mut nouns: Vec<(&str, Vec<(String, &str)>)> = Vec::new();
     for t in tools {
         let (noun, verb) = name(t).split_once('_').unwrap_or((name(t), ""));
-        let line = format!(
-            "  ahjo {noun} {}  {}",
-            verb.replace('_', "-"),
-            first_line(t)
-        );
+        let command = format!("ahjo {noun} {}", verb.replace('_', "-"));
         match nouns.iter_mut().find(|(n, _)| *n == noun) {
-            Some((_, lines)) => lines.push(line),
-            None => nouns.push((noun, vec![line])),
+            Some((_, lines)) => lines.push((command, first_line(t))),
+            None => nouns.push((noun, vec![(command, first_line(t))])),
         }
     }
+    // What each command does starts in one column within its noun, and a
+    // blank line parts the nouns.
     nouns
         .into_iter()
-        .flat_map(|(_, lines)| lines)
+        .map(|(_, lines)| {
+            let width = lines.iter().map(|(c, _)| c.len()).max().unwrap_or(0);
+            lines
+                .iter()
+                .map(|(command, does)| format!("  {command:width$}  {does}"))
+                .collect::<Vec<_>>()
+                .join("\n")
+        })
         .collect::<Vec<_>>()
-        .join("\n")
+        .join("\n\n")
 }
 
 fn take_node(args: &[String]) -> Result<(Option<String>, Vec<String>)> {
@@ -148,8 +173,7 @@ async fn rpc(client: &NodeClient, method: &str, params: Value) -> Result<Value> 
     let body = json!({"jsonrpc": "2.0", "id": 1, "method": method, "params": params});
     let (answer, _) = client
         .request(Method::POST, "/mcp", Some(body), None)
-        .await
-        .context("is the Ahjo node running? (ahjo serve)")?;
+        .await?;
     if let Some(error) = answer.get("error") {
         bail!(
             "{}",
@@ -184,6 +208,7 @@ fn first_line(tool: &Value) -> &str {
         .split(". ")
         .next()
         .unwrap_or("")
+        .trim_end_matches('.')
 }
 
 fn nouns(tools: &[Value]) -> Vec<String> {
@@ -191,7 +216,8 @@ fn nouns(tools: &[Value]) -> Vec<String> {
         .iter()
         .filter_map(|t| name(t).split_once('_').map(|(n, _)| n.to_owned()))
         .collect();
-    nouns.dedup();
+    let mut seen = std::collections::HashSet::new();
+    nouns.retain(|noun| seen.insert(noun.clone()));
     nouns
 }
 
@@ -232,9 +258,23 @@ fn help(noun: &str, verb: &str, tool: &Value) -> String {
         usage(noun, verb, tool),
         tool["description"].as_str().unwrap_or("")
     );
-    for (key, spec) in properties(&tool["inputSchema"]) {
-        let flag = key.replace('_', "-");
-        let mut line = format!("\n  --{flag}  {}", spec["type"].as_str().unwrap_or("value"));
+    // The required arguments first, in the order they are given without
+    // their flags, then the rest.
+    let schema = &tool["inputSchema"];
+    let needed = required(schema);
+    let mut all = properties(schema);
+    all.sort_by_key(|(key, _)| needed.iter().position(|r| r == key).unwrap_or(needed.len()));
+    let label = |key: &str| match needed.contains(&key) {
+        true => format!("<{key}>"),
+        false => format!("--{}", key.replace('_', "-")),
+    };
+    let width = all.iter().map(|(k, _)| label(k).len()).max().unwrap_or(0);
+    for (key, spec) in all {
+        let mut line = format!(
+            "\n  {:width$}  {}",
+            label(&key),
+            spec["type"].as_str().unwrap_or("value")
+        );
         if let Some(d) = spec["description"].as_str() {
             line.push_str(&format!(": {d}"));
         }
@@ -370,10 +410,15 @@ fn typed(key: &str, spec: &Value, raw: &str) -> Result<Value> {
 /// fields as tab-separated `key=value`, and whatever an item nests indented
 /// under its row. Text of several lines follows its key as it is. Nulls and
 /// empty values are left out. Epoch milliseconds in timestamp fields are
-/// rendered in local time. `--json` prints the value itself instead.
+/// rendered in local time. A list the answer is about (a top-level one) that
+/// is empty reads `key: none`, so an answer with nothing in it still says
+/// what there is none of. `--json` prints the value itself instead.
 fn render(value: &Value) -> String {
     let mut text = String::new();
     render_value(value, 0, &mut text);
+    if value.as_array().is_some_and(Vec::is_empty) {
+        text.push_str("none\n");
+    }
     text
 }
 
@@ -406,9 +451,19 @@ fn scalar(value: &Value) -> String {
 
 /// Render timestamp fields without changing the value sent to JSON clients.
 fn field_scalar(key: &str, value: &Value) -> String {
-    if (matches!(key, "at" | "started" | "updated" | "modified" | "synced") || key.ends_with("_at"))
-        && let Some(ms) = value.as_i64()
-        && let Ok(at) = jiff::Timestamp::from_millisecond(ms)
+    let timed = matches!(
+        key,
+        "at" | "started" | "updated" | "modified" | "synced" | "last_output"
+    ) || key.ends_with("_at");
+    // Below this a count of milliseconds would be a day in 1973: the field
+    // counts seconds.
+    const SECONDS_BELOW: i64 = 100_000_000_000;
+    if timed
+        && let Some(count) = value.as_i64()
+        && let Ok(at) = match count.abs() < SECONDS_BELOW {
+            true => jiff::Timestamp::from_second(count),
+            false => jiff::Timestamp::from_millisecond(count),
+        }
     {
         let local = at.to_zoned(jiff::tz::TimeZone::system());
         return format!("{}{}", local.datetime(), local.offset());
@@ -423,8 +478,12 @@ fn pad(indent: usize, out: &mut String) {
 fn render_value(value: &Value, indent: usize, out: &mut String) {
     match value {
         Value::Object(fields) => {
-            for (key, value) in fields.iter().filter(|(_, v)| has_content(v)) {
-                render_field(key, value, indent, out);
+            for (key, value) in fields {
+                if has_content(value) {
+                    render_field(key, value, indent, out);
+                } else if indent == 0 && value.as_array().is_some_and(Vec::is_empty) {
+                    out.push_str(&format!("{key}: none\n"));
+                }
             }
         }
         Value::Array(items) => {
@@ -514,9 +573,12 @@ mod tests {
             .iter()
             .map(|n| json!({"name": n, "description": "Does it."}))
             .collect();
-        let verbs: Vec<String> = listing(&tools)
+        let listed = listing(&tools);
+        assert_eq!(listed.matches("\n\n").count(), 1, "{listed}");
+        let verbs: Vec<String> = listed
             .lines()
-            .map(|l| l.split("  ").nth(1).unwrap_or("").to_owned())
+            .filter(|l| !l.is_empty())
+            .map(|l| l.split("  ").nth(1).unwrap_or("").trim().to_owned())
             .collect();
         assert_eq!(
             verbs,
@@ -559,6 +621,43 @@ mod tests {
         );
         let v = parse(&schema(), &args(&["--text=hi", "main", "--enter"])).unwrap();
         assert_eq!(v, json!({"session": "main", "text": "hi", "enter": true}));
+    }
+
+    #[test]
+    fn help_names_required_arguments_first_in_the_order_they_are_given() {
+        let tool = json!({"name": "session_send", "description": "Type text.", "inputSchema": {
+            "type": "object",
+            "properties": {
+                "text": {"type": "string"},
+                "enter": {"type": "boolean", "default": true},
+                "session": {"type": "string", "description": "A session id or name."},
+            },
+            "required": ["session", "text"],
+        }});
+        assert_eq!(
+            help("session", "send", &tool),
+            concat!(
+                "usage: ahjo session send <session> <text> [--enter|--no-enter] [--json] [--node id|url]\n",
+                "Type text.\n\n",
+                "  <session>  string: A session id or name.\n",
+                "  <text>     string\n",
+                "  --enter    boolean (default true)",
+            )
+        );
+    }
+
+    #[test]
+    fn an_empty_list_says_none_and_a_count_of_seconds_is_a_time_too() {
+        assert_eq!(
+            render(&json!({"node": "n", "missions": [], "inner": {"runs": []}})),
+            "node: n\nmissions: none\n"
+        );
+        assert_eq!(render(&json!([])), "none\n");
+        let seconds = 1_700_000_000_i64;
+        assert_eq!(
+            render(&json!({"last_output": seconds})),
+            render(&json!({"last_output": seconds * 1000}))
+        );
     }
 
     #[test]
@@ -623,6 +722,7 @@ mod tests {
             render(&answer),
             concat!(
                 "node: local\n",
+                "none: none\n",
                 "host:\n  cpu:\n    percent: 0\n  gpu:\n    reason: unavailable\n",
                 "tasks:\n  name=check\n    targets:\n      name=agent\tpaused=false\n",
                 "  name=review\n    schedule:\n      every: 15\n",

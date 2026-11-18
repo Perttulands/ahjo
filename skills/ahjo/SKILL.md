@@ -5,21 +5,23 @@ description: Drive Ahjo Swarm, the operator's agent workspace, from the command 
 
 # Ahjo Swarm
 
-Ahjo Swarm runs a node in each machine environment. Use `ahjo help` for the running local node's commands, `ahjo <noun>` for its verbs and `ahjo <noun> <verb> --help` for arguments. Commands depend on the areas enabled on that node. `ahjo version` says whether the local node answers; where `ahjo install` put it in place it runs as the systemd user unit `ahjo`. `ahjo mcp` exposes the same tools over stdio.
+Ahjo Swarm runs a node in each machine environment. Use `ahjo help` for the running local node's commands, `ahjo <noun>` for its verbs and `ahjo <noun> <verb> --help` for arguments. Commands depend on the areas enabled on that node. `ahjo version` says whether the local node answers (exit 3 when none does); where `ahjo install` put it in place it runs as the systemd user unit `ahjo`. `ahjo mcp` exposes the same tools over stdio.
 
-Commands use `ahjo <noun> <verb>`. Required arguments can be positional or named flags; object arguments are JSON. Add `--json` for structured output. Add `--node <id>` to act on a node through the local node, or `--node <url>` to contact a node directly. Without it, commands address the local node. Use the command's help for current arguments and defaults.
+Commands use `ahjo <noun> <verb>`. Required arguments can be positional or named flags; object arguments are JSON. Add `--node <id>` to act on a node through the local node, or `--node <url>` to contact a node directly. Without it, commands address the local node. Use the command's help for current arguments and defaults.
+
+Add `--json` whenever you read the answer: stdout is then the answer as JSON, and a failure is `{"error":{"code","message"}}` on stderr. Plain output is for a person and leaves out empty fields. The exit code is 0 when the command was done, 1 when it ran and failed (match on the error's `code`), 2 when the command line was wrong (the usage follows), and 3 when no node answers.
 
 | Noun | Purpose and verbs |
 |---|---|
 | `session` | Sessions: `list`, `read`, `history`, `search`, `send`, `keys`, `launch`, `copy`, `rename`, `kill`, `mouse`, `seen`. |
-| `file` | Browse and change files: `list`, `read`, `diff`, `projects`, `download`, `upload`, `write`, `mkdir`, `move`, `delete`, `find`, `search`, `copy`, `resume`, `transfer`. Use the base version on writes to detect stale edits. |
+| `file` | Browse and change files: `list`, `read`, `diff`, `recent`, `download`, `upload`, `write`, `mkdir`, `move`, `delete`, `find`, `locate`, `search`, `copy`, `resume`, `transfer`. Use the base version on writes to detect stale edits. |
 | `work` | Read the configured work board and item family, or file an item: `list`, `show`, `create`. |
 | `brain` | Find, read and save knowledge: `search`, `read`, `save`, `collections`, `changes`, `send`. |
 | `host` | Read host information: `show`. |
-| `service` | Inspect and control services: `list`, `show`, `start`, `stop`, `restart`. |
+| `service` | Inspect and control services: `list`, `show`, `log`, `start`, `stop`, `restart`. |
 | `scheduled` | Manage prompts sent into sessions: `list`, `show`, `create`, `edit`, `copy`, `pause`, `resume`, `run`, `delete`. |
 | `role` | Manage the role library: `list`, `inspect`, `usage`, `new`, `edit`, `retire`, `restore`, `delete`, `characters`. |
-| `agents` | Inspect agent tools, skills and checkouts with `show`; `sync` a skills checkout. `shape --dir D [--harness claude\|codex]` shows what an agent started in D gets (instructions in load order, skills, hooks, settings, servers, each with its file); `read`/`write` an instruction or skill file (write names the etag read); `hook-add`, `hook-set`, `hook-remove`, `hook-switch` and `setting-set` change the file `shape` lists. |
+| `agents` | Inspect agent tools, skills and checkouts with `show`; `sync` a skills checkout and `link` its skills into the skills folders missing them. `shape --dir D [--harness claude\|codex]` shows what an agent started in D gets (instructions in load order, skills, hooks, settings, servers, each with its file); `read`/`write` an instruction or skill file (write names the etag read); `hook-add`, `hook-set`, `hook-remove`, `hook-switch` and `setting-set` change the file `shape` lists. |
 | `mission`, `formation`, `layout`, `gate`, `end`, `limit`, `run` | Author mission graphs and drive runs; read [missions](references/missions.md). |
 | `view` | Inspect connected apps with `show` and open a page or item with `open`. |
 | `config` | Read the node configuration with `show`. |

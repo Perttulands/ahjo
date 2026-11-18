@@ -19,22 +19,39 @@ all three before you change anything.
 | What every area plugs into | `kit/`; tell the other owners when you change its interface or a `contract` they use |
 | Terminal engine, session holder, mission model and engine | `engine/` |
 | A new area | its directory, plus one line in `bin/ahjo`'s `AREAS`, one in `bin/ahjo-swarm`'s `PAGES` and a dependency line in each `Cargo.toml` |
-| `ahjo install` and `ahjo upgrade` | `bin/ahjo/src/install` |
+| `ahjo install`, `ahjo upgrade` and `ahjo uninstall` | `bin/ahjo/src/install` |
+| The binary's own words (`serve`, `help`, `version`), their help and the exit codes | `bin/ahjo/src/main.rs` |
+| How every `ahjo <noun> <verb>` reads its arguments and prints its answer | `kit/node-kit/src/cli.rs` |
+| What an agent is taught: every command is named in `skills/ahjo` (a test in `bin/ahjo` holds this) | `skills/ahjo` |
 
 An area that needs another goes through that area's `contract` or an interface
 it provides. When a change cannot stay inside these lines, stop and say so.
 
 ## Build and check
 
-Run the `AGENTS.md` checks from `/srv/ahjo`, one build at a time, through
-`heavy`. `tmux` on `PATH` here is a wrapper that refuses `kill-server`, so give
-the tests the real one:
+Work in a worktree of your own, not in `/srv/ahjo`, which other agents share:
 
 ```sh
+git -C /srv/ahjo fetch origin
+git -C /srv/ahjo worktree add /srv/ahjo-worktrees/<name> -b <name> origin/main
+```
+
+Run the `AGENTS.md` checks there, one build at a time, through `heavy`. `tmux`
+on `PATH` here is a wrapper that refuses `kill-server`, so give the tests the
+real one, and the app crates the system `pkg-config`:
+
+```sh
+export AHJO_REQUIRE_TMUX=1 AHJO_TMUX=/home/linuxbrew/.linuxbrew/bin/tmux PKG_CONFIG=/usr/bin/pkg-config
 cargo fmt --check
 heavy run --memory 8 -- cargo clippy -p <crate> --all-targets -- -D warnings
-heavy run --memory 8 -- env AHJO_REQUIRE_TMUX=1 AHJO_TMUX=/home/linuxbrew/.linuxbrew/bin/tmux cargo test -p <crate>
+heavy run --memory 8 -- cargo test -p <crate>
 ```
+
+When they pass, `git fetch origin && git rebase origin/main`, then
+`git push origin HEAD:main`, and look at the CI run for your commit
+(`gh run list -R Perttulands/ahjo`). Afterwards remove what you made:
+`git -C /srv/ahjo worktree remove /srv/ahjo-worktrees/<name>` and
+`git -C /srv/ahjo branch -D <name>`.
 
 ## See it on screen
 
@@ -42,14 +59,18 @@ Run the app against a node of your own on a private display, then look at the
 screenshot. Pick a display number and port nobody uses, and keep every file in
 a scratch folder `$S`:
 
-1. A tmux server of your own: `tmux -S $S/tmux.sock new-session -d -s <name>`.
-2. `$S/xdg/ahjo/config.toml` with `[node] listen = "127.0.0.1:<port>"` and
-   `[terminals] socket = "$S/tmux.sock"`, then
-   `XDG_CONFIG_HOME=$S/xdg target/release/ahjo serve &`.
+1. A tmux server of your own:
+   `$AHJO_TMUX -S $S/tmux.sock new-session -d -s <name> -c $S`.
+2. `$S/xdg/ahjo/config.toml` with `[node] listen = "127.0.0.1:<port>"`,
+   `[terminals] socket = "$S/tmux.sock"` and `[files] roots = ["$S"]`, then
+   `HOME=$S XDG_CONFIG_HOME=$S/xdg target/release/ahjo serve &`. With `HOME`
+   and the roots in your scratch folder, nothing of the operator's shows in a
+   screenshot. `ahjo version --node 127.0.0.1:<port>` answers when it is up.
 3. `Xvfb :<n> -screen 0 1600x1000x24 -nolisten tcp &`, then
    `env -u WAYLAND_DISPLAY DISPLAY=:<n> VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/lvp_icd.json XDG_CONFIG_HOME=$S/xdg AHJO_SWARM_CONFIG=$S/app.json AHJO_SWARM_BOUNDS=0,0,1600,1000 target/release/ahjo-swarm --node http://127.0.0.1:<port> &`.
-4. Open the page with `ahjo view open <page> --node http://127.0.0.1:<port>`
-   (this host has no XTEST, so no synthetic clicks) and take
+4. Open the page with `target/release/ahjo view open <page> --node http://127.0.0.1:<port>`
+   (this host has no XTEST, so no synthetic clicks; every `ahjo` call names
+   your node with `--node`, or it reaches the operator's) and take
    `ffmpeg -f x11grab -i :<n> -frames:v 1 $S/shot.png`.
 5. Stop what you started: the app, Xvfb, the node, and your tmux session.
 
@@ -57,11 +78,13 @@ a scratch folder `$S`:
 
 The node is the systemd user unit `ahjo`, listening on `127.0.0.1:7310`
 (Windows Tailscale serves tailnet port 7300 to it, and the ChatGPT tunnel
-`ahjo-tunnel` reaches its `/mcp` there). Upgrade only to what is on main:
+`ahjo-tunnel` reaches its `/mcp` there). Upgrade only to what is on main,
+built in the deploy worktree, which holds nothing but main:
 
 ```sh
-cd /srv/ahjo && git pull --rebase
-heavy run --memory 8 -- cargo build --release -p ahjo -p ahjo-app-swarm
+cd /home/perttu/.cache/ahjo-dev/deploy
+git fetch origin && git checkout --detach origin/main
+heavy run --memory 8 -- env PKG_CONFIG=/usr/bin/pkg-config cargo build --release -p ahjo -p ahjo-app-swarm
 target/release/ahjo upgrade --app target/release/ahjo-swarm
 ahjo version
 ```
@@ -73,8 +96,8 @@ the build both the CLI and the node run.
 
 Where the install lives:
 
-- Unit `~/.config/systemd/user/ahjo.service`, a link to `deploy/ahjo.service`,
-  which is what `ahjo install` wrote; `/srv/landmass-host/boot.toml` records
+- Unit `~/.config/systemd/user/ahjo.service`, a link to
+  `/srv/ahjo/deploy/ahjo.service`, which is what `ahjo install` wrote; `/srv/landmass-host/boot.toml` records
   it with `deploy/ahjo-tunnel.service` and `deploy/ahjo-tunnel.yaml`.
 - Binaries in `~/.local/share/ahjo/bin`; `~/.local/bin/ahjo` links there.
 - State in `~/.config/ahjo`: `config.toml`, `launch.conf`, the node id in
@@ -94,6 +117,12 @@ env -u XDG_CONFIG_HOME PATH="$(sed -n 's/^Environment=PATH=//p' deploy/ahjo.serv
 
 A changed unit is written over the link: copy it to `deploy/ahjo.service`,
 link it back, run `systemctl --user daemon-reload` and commit the file.
+
+`ahjo uninstall` stops the unit and removes it and the installed binaries;
+sessions, `~/.config/ahjo` and the tunnel stay. Never run it, `install` or
+`upgrade` to try a change: the install tests (`bin/ahjo/tests/install.rs`) do
+that against a stand-in `systemctl` with a unit, root and config of their own,
+and are where a change to them is tried.
 
 ## Build and install the Windows app
 
