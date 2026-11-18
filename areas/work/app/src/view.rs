@@ -108,7 +108,18 @@ impl Work {
         };
         let info = &self.board.projects[p];
         if let Some(e) = &info.error {
-            format!("{} could not be read: {}", info.label, e.trim())
+            // Why, in the tracker's first line, and what to do.
+            let why = first_line(e);
+            match info.tracker {
+                Tracker::Beads => format!(
+                    "{} could not be read: {why}. Run `bd list` in {} to see what Beads says, or take the line out of the node's work settings.",
+                    info.label, info.path
+                ),
+                Tracker::Github => format!(
+                    "{} could not be read: {why}. Check `gh auth status` where the node runs.",
+                    info.label
+                ),
+            }
         } else if !info.read {
             format!("Reading {}…", info.label)
         } else {
@@ -127,17 +138,39 @@ impl Work {
                 .filter(|_| !self.every || self.layout == Layout::Tree)
         {
             let info = &self.board.projects[p];
+            // One line in the column's own width that reads the store
+            // again when clicked; the full cause, which names a whole
+            // path, is in its tooltip.
             let trouble = info
                 .error
                 .as_ref()
-                .map(|e| format!("Not read: {}", e.trim()))
+                .map(|e| (format!("Not read: {}", first_line(e)), e.trim()))
                 .or_else(|| {
-                    info.unwatched
-                        .as_ref()
-                        .map(|w| format!("Not watched: {}", w.trim()))
+                    info.unwatched.as_ref().map(|w| {
+                        (
+                            "Not watched for changes: click to read again".into(),
+                            w.trim(),
+                        )
+                    })
                 });
-            if let Some(trouble) = trouble.filter(|_| info.read) {
-                body = body.child(pane::label(t, trouble).text_color(t.error));
+            if let Some((short, full)) = trouble.filter(|_| info.read) {
+                body = body.child(
+                    div()
+                        .id("work-trouble")
+                        .debug_selector(|| "work-trouble".into())
+                        .flex_none()
+                        .px(px(size::ROW_PAD))
+                        .py(px(SPACE_XS))
+                        .text_size(px(size::SMALL))
+                        .text_color(t.error)
+                        .overflow_hidden()
+                        .whitespace_nowrap()
+                        .text_ellipsis()
+                        .cursor_pointer()
+                        .child(short)
+                        .tooltip(kit::tip(full.to_owned()))
+                        .on_click(cx.listener(|w, _, _, cx| w.refresh(cx))),
+                );
             }
         }
         if self.picking {
@@ -508,11 +541,18 @@ impl Work {
     fn item_body(&self, t: &Theme, row: usize, place: Place, cx: &mut Context<Self>) -> Div {
         let r = &self.board.rows[row];
         let p = &self.board.projects[r.project];
-        let mut facts = vec![r.written_id(&self.board), r.kind.clone()];
+        let id = r.written_id(&self.board);
+        let names_project = id
+            .strip_prefix(p.label.as_str())
+            .is_some_and(|rest| rest.starts_with(['-', '#']));
+        let mut facts = vec![id, r.kind.clone()];
         if let Some(pr) = r.priority {
             facts.push(format!("P{pr}"));
         }
-        facts.push(p.label.clone());
+        // An id that starts with the project's name already names it.
+        if !names_project {
+            facts.push(p.label.clone());
+        }
         if let Some(u) = r.updated {
             facts.push(format!("updated {} ago", when::age(u, now_ms())));
         }
@@ -531,7 +571,15 @@ impl Work {
                 .text_size(px(size::SMALL))
                 .text_color(t.dim)
                 .children(status.map(|(s, c)| div().text_color(c).child(s)))
-                .child(facts.join(" · ")),
+                // Each its own piece, so a narrow detail wraps the line
+                // between facts instead of cutting the last one off.
+                .children(
+                    facts.into_iter().enumerate().map(
+                        |(i, f)| {
+                            if i == 0 { f } else { format!("· {f}") }
+                        },
+                    ),
+                ),
         );
         if let Some(pf) = &r.pull {
             let mut line = div()
@@ -551,7 +599,13 @@ impl Work {
                 line = line.child(
                     div()
                         .text_color(if c.failed > 0 { t.error } else { t.text2 })
-                        .child(format!("checks {}/{all}", c.passed)),
+                        .child(if c.failed > 0 {
+                            format!("{} of {all} checks failed", c.failed)
+                        } else if c.pending > 0 {
+                            format!("{} of {all} checks still run", c.pending)
+                        } else {
+                            format!("all {all} checks passed")
+                        }),
                 );
             }
             body = body.child(pane::section(t, "Branch").child(line));
@@ -912,6 +966,15 @@ pub(crate) fn glyph(t: &Theme, r: &Row) -> Div {
         Status::Closed => ("✓", t.done),
     };
     div().flex_none().w(px(GLYPH_W)).text_color(ink).child(mark)
+}
+
+/// An error's first line with words in it: a tool's hints and blank
+/// lines stay out of a one-line label.
+pub(crate) fn first_line(e: &str) -> &str {
+    e.lines()
+        .map(str::trim)
+        .find(|l| !l.is_empty())
+        .unwrap_or("")
 }
 
 /// A label between a list's rows, as high as a row so the list scrolls

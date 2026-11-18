@@ -387,20 +387,25 @@ impl Work {
             let n = count(p);
             let chosen = !self.every && Some(p) == project;
             let why = info.error.clone();
+            let selector = format!("work-facet-{}", info.label);
+            // A project that could not be read says so where its count
+            // would be: none open and not read are not the same thing.
+            let row = if why.is_some() {
+                let s = selector.clone();
+                pane::row(t, SharedString::from(selector), chosen)
+                    .debug_selector(move || s)
+                    .child(pane::cell(info.label.clone()))
+                    .child(pane::meta(t, "not read", Some(t.error)))
+            } else {
+                facet(t, selector, info.label.clone(), n, chosen)
+            };
             rows.push(
-                facet(
-                    t,
-                    format!("work-facet-{}", info.label),
-                    info.label.clone(),
-                    n,
-                    chosen,
-                )
-                .when_some(why, |d, why| d.tooltip(kit::tip(why)))
-                .on_click(cx.listener(move |w, _, window, cx| {
-                    w.every = false;
-                    w.choose_project(p, window, cx);
-                }))
-                .into_any_element(),
+                row.when_some(why, |d, why| d.tooltip(kit::tip(why)))
+                    .on_click(cx.listener(move |w, _, window, cx| {
+                        w.every = false;
+                        w.choose_project(p, window, cx);
+                    }))
+                    .into_any_element(),
             );
         }
         div()
