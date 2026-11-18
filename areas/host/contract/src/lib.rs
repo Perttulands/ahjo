@@ -9,6 +9,10 @@ pub const BAD_REQUEST: &str = "bad_request";
 pub const NOT_FOUND: &str = "not_found";
 pub const UNAVAILABLE: &str = "unavailable";
 pub const SERVICE_FAILED: &str = "service_failed";
+/// How a node with no service catalog begins its refusal: where to write
+/// one follows the colon. A node set up without one is not a failure, so
+/// the app tells this refusal from the others by these words.
+pub const NO_CATALOG: &str = "No service catalog on this node: ";
 
 pub fn encode_on(on: bool) -> Vec<u8> {
     vec![HOST, u8::from(on)]

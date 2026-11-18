@@ -271,7 +271,10 @@ impl HostPage {
                 .map(|l| ahjo_app_kit::clock::stamp(l.at, now))
                 .collect()
         };
-        let time_col = match stamps(&log.lines).iter().any(|s| s.len() > 5) {
+        // As wide as the stamps on show need: folded lines of another day
+        // do not push this run's lines aside.
+        let shown = if unfolded { &log.lines[..] } else { run };
+        let time_col = match stamps(shown).iter().any(|s| s.len() > 5) {
             true => tokens::DAY_TIME_COL,
             false => tokens::TIME_COL,
         };

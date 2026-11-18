@@ -69,11 +69,12 @@ impl Render for HostPage {
                     None => self.machine(&t, node, cx),
                 }
             }
+            // No node answers, in the words the other pages use.
             _ => pane::detail(
                 &t,
                 "host-detail",
                 pane::head(&t),
-                pane::empty(&t, "Waiting for a node…", None).p_0(),
+                pane::vacant(&t, "Not connected to the node.", None),
             ),
         };
         div()
@@ -117,7 +118,22 @@ impl HostPage {
         }
         out.push(self.machine_row(t, node, chosen == Some(&machine), cx));
         let n = self.services.nodes.get(id);
-        if let Some(e) = n.and_then(|n| n.error.as_ref()) {
+        if let Some(how) = n.and_then(|n| n.no_catalog()) {
+            let words = format!("No services are listed on this node. To show them, {how}.");
+            out.push(
+                div()
+                    .debug_selector(|| "host-no-catalog".into())
+                    .flex_none()
+                    .px(px(size::ROW_PAD))
+                    .py(px(size::LABEL_BOTTOM))
+                    .text_size(px(size::SMALL))
+                    .text_color(t.dim)
+                    .whitespace_normal()
+                    .child(words)
+                    .into_any_element(),
+            );
+        }
+        if let Some(e) = n.and_then(|n| n.unread()) {
             out.push(
                 div()
                     .flex_none()
@@ -125,7 +141,7 @@ impl HostPage {
                     .py(px(size::LABEL_BOTTOM))
                     .child(pane::meta(
                         t,
-                        format!("Services not read: {e}"),
+                        format!("Services could not be read: {e}"),
                         Some(t.error),
                     ))
                     .into_any_element(),

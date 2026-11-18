@@ -9,7 +9,7 @@ use crate::host_store::{
     self as store, DAY, Figure, HOUR, State, Trouble, average, bands, peak, percent,
 };
 use crate::page::{Chosen, HostPage};
-use crate::services_store::Service;
+use crate::services_store::{self as services, Service};
 use crate::tokens;
 use crate::view::title;
 use ahjo_app_kit::{
@@ -54,7 +54,14 @@ impl HostPage {
 
     /// How many things on a node need looking at.
     pub(crate) fn trouble_count(&self, node: &str, s: &State) -> usize {
-        store::troubles(s, now_ms()).len() + self.failed(node).len()
+        store::troubles(s, now_ms()).len()
+            + self.failed(node).len()
+            + usize::from(self.unread(node).is_some())
+    }
+
+    /// Why a node's services could not be read, when that is a failure.
+    fn unread(&self, node: &str) -> Option<&str> {
+        self.services.nodes.get(node)?.unread()
     }
 
     pub(crate) fn machine(&self, t: &Theme, node: &Node, cx: &mut Context<Self>) -> Div {
@@ -108,7 +115,10 @@ impl HostPage {
     ) -> Div {
         let r = s.latest.as_ref().expect("a reading");
         let failed = self.failed(id);
-        let n = troubles.len() + failed.len();
+        let unread = self
+            .unread(id)
+            .map(|e| format!("Services could not be read: {e}"));
+        let n = troubles.len() + failed.len() + usize::from(unread.is_some());
         let mut facts = vec![];
         if let Some(up) = r.uptime {
             facts.push(format!("Up {}", store::uptime(up)));
@@ -145,8 +155,21 @@ impl HostPage {
                     .child(trouble.text.clone()),
             );
         }
+        if let Some(text) = unread {
+            let selector = format!("host-trouble-{text}");
+            out = out.child(
+                // The reason names a path and a parse error: it wraps.
+                div()
+                    .debug_selector(move || selector)
+                    .min_h(px(size::ROW))
+                    .min_w_0()
+                    .whitespace_normal()
+                    .text_color(t.error)
+                    .child(text),
+            );
+        }
         for service in failed {
-            let text = format!("Service {} {}", service.name, service.state);
+            let text = format!("Service {} {}", service.name, services::state_word(service));
             let selector = format!("host-trouble-{text}");
             let chosen = Chosen::Service(id.to_owned(), service.id.clone());
             out = out.child(

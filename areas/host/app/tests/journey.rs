@@ -29,6 +29,8 @@ use tokio::sync::mpsc::{self as tokio_mpsc, UnboundedReceiver, UnboundedSender};
 #[derive(Default)]
 struct Control {
     on: AtomicBool,
+    /// The catalog stops reading.
+    unread: AtomicBool,
     forwards: AtomicUsize,
     restarts: AtomicUsize,
     // One app socket: the test owns the sender and its channel takes the receiver.
@@ -49,16 +51,23 @@ struct FakeArea(Arc<Control>);
 impl Area for FakeArea {
     fn routes(&self) -> Router {
         let control = self.0.clone();
+        let reading = self.0.clone();
         Router::new()
             .route(
                 "/api/services",
-                get(|| async {
+                get(move || async move {
+                    if reading.unread.load(Ordering::SeqCst) {
+                        return Err((
+                            StatusCode::SERVICE_UNAVAILABLE,
+                            Json(json!({"error":{"code":"unavailable","message":"The catalog is not JSON"}})),
+                        ));
+                    }
                     let unit = |unit: &str, state: &str| Component {
                         unit: unit.into(),
                         state: state.into(),
                         ..Component::default()
                     };
-                    Json(ServiceList {
+                    Ok(Json(ServiceList {
                         services: vec![
                             Service {
                                 id: "fixture".into(),
@@ -85,7 +94,7 @@ impl Area for FakeArea {
                                 ..Service::default()
                             },
                         ],
-                    })
+                    }))
                 }),
             )
             .route(
@@ -409,5 +418,17 @@ fn host_journeys(cx: &mut TestAppContext) {
     until(cx, "restart refusal displayed", |cx| shows(cx, failure));
     assert_eq!(running.control.restarts.load(Ordering::SeqCst), 1);
     assert_eq!(status(&shell, cx), "Restart refused by fake manager");
+
+    // Services that could not be read are not all right: the machine says
+    // so, as one more thing to look at.
+    running.control.unread.store(true, Ordering::SeqCst);
+    click(cx, at(format!("host-row-{node}-machine")));
+    click(cx, "services-refresh");
+    until(cx, "the unread services in the verdict", |cx| {
+        shows(
+            cx,
+            "host-trouble-Services could not be read: The catalog is not JSON",
+        )
+    });
     let _ = std::fs::remove_dir_all(dir);
 }

@@ -309,8 +309,32 @@ impl NodeServices {
                 self.error = None;
                 self.read_at = Some(now);
             }
-            _ => self.error = Some(words(status, body)),
+            _ => {
+                let error = words(status, body);
+                // A node with no catalog has no services: none of those
+                // read before stays listed.
+                if error.starts_with(ahjo_host_contract::NO_CATALOG) {
+                    self.list = None;
+                    self.unsettled.clear();
+                }
+                self.error = Some(error);
+            }
         }
+    }
+
+    /// Why the services could not be read. A node with no catalog was
+    /// only never told which services to show: that is not a failure.
+    pub fn unread(&self) -> Option<&str> {
+        self.error
+            .as_deref()
+            .filter(|e| !e.starts_with(ahjo_host_contract::NO_CATALOG))
+    }
+
+    /// Where a node without a catalog says to write one.
+    pub fn no_catalog(&self) -> Option<&str> {
+        self.error
+            .as_deref()?
+            .strip_prefix(ahjo_host_contract::NO_CATALOG)
     }
 
     /// The state shown for a row: the change asked for while it runs.
@@ -599,6 +623,18 @@ mod tests {
             1,
         );
         assert_eq!(n.error.as_deref(), Some("No service catalog"));
+        assert_eq!(n.unread(), Some("No service catalog"), "a failure");
+        // A node that was never given a catalog has not failed, and has
+        // no services, whatever was listed before.
+        n.list = Some(vec![Service::default()]);
+        n.listed(
+            503,
+            br#"{"error":{"code":"unavailable","message":"No service catalog on this node: write one at /x/services.json"}}"#,
+            3,
+        );
+        assert_eq!(n.unread(), None);
+        assert_eq!(n.no_catalog(), Some("write one at /x/services.json"));
+        assert!(n.list.is_none(), "nothing stays listed from before");
     }
 
     #[test]

@@ -104,7 +104,8 @@ impl Services {
             return Err(Refused(
                 StatusCode::SERVICE_UNAVAILABLE,
                 format!(
-                    "No service catalog on this node: write one at {}",
+                    "{}write one at {}",
+                    ahjo_host_contract::NO_CATALOG,
                     self.catalog.display()
                 ),
             ));
@@ -213,7 +214,14 @@ impl Services {
         }
         let name = &entry.name;
         let (failure, text) = match outcome {
-            Outcome::Done => (false, format!("{name}: {action} done")),
+            Outcome::Done => {
+                let done = match action {
+                    "stop" => "stopped",
+                    "start" => "started",
+                    _ => "restarted",
+                };
+                (false, format!("{name} {done}"))
+            }
             Outcome::Failed => (
                 true,
                 format!("{name}: {action} failed: {}", errors.join("; ")),

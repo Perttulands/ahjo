@@ -102,7 +102,7 @@ real list, and `ahjo kinds` prints who owns which kinds.
 - **View control.** The node keeps the view-control kinds itself: a client
   that reports the page it shows (0xb0) is an app until it goes. `ahjo view
   show` lists what each app shows; `ahjo view open --page <id> [--path|item|
-  run|mission|document|session <id>] [--step]` sends the apps a view command
+  run|mission|document|session|setting|service <id>] [--step]` sends the apps a view command
   (0xb8) and answers the first answer (0xb1): `no_app` with none connected,
   `timeout` after 5 s. The app shows the page and hands it the thing as an
   `Ask::Reveal`, on this node.

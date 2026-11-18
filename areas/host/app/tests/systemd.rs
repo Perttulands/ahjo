@@ -211,7 +211,7 @@ fn disposable_systemd_service_and_host_health_journey(cx: &mut TestAppContext) {
                 .read(cx)
                 .status
                 .as_ref()
-                .is_some_and(|v| v.text.contains("restart done"))
+                .is_some_and(|v| v.text.contains("restarted"))
         })
     });
     // A running unit keeps Stop under More.
@@ -282,8 +282,7 @@ fn disposable_systemd_service_and_host_health_journey(cx: &mut TestAppContext) {
     .unwrap();
     click(cx, selector(format!("host-row-{}-machine", node.id)));
     until(cx, "service action in Host events", |cx| {
-        cx.debug_bounds("host-event-Disposable: stop done")
-            .is_some()
+        cx.debug_bounds("host-event-Disposable stopped").is_some()
     });
     let config = command(&node.url, "config", &["show"]);
     assert_eq!(config["sections"]["host"]["enabled"], true);
