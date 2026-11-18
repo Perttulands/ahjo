@@ -449,8 +449,12 @@ impl FilesPage {
                     page.follow_link(&node, &folder, link, window, cx)
                 });
             });
+        // Zoomed, the reading text and its measure grow together.
+        let scale = self.code_text(cx) / size::TEXT;
+        let mut zoomed = t.clone();
+        zoomed.ty.read = (t.ty.read * scale).round();
         let look = markdown::Look {
-            t,
+            t: &zoomed,
             refs: false,
             on_link: Some(on_link),
             select: Some(self.md_select.clone()),
@@ -491,7 +495,7 @@ impl FilesPage {
         let column = div()
             .flex_1()
             .min_w_0()
-            .max_w(px(size::READING))
+            .max_w(px(size::READING * scale))
             .p(px(size::PAD))
             // Room for the change bars left of the blocks.
             .pl(px(size::PAD + size::HEAD_GAP))

@@ -9,6 +9,7 @@ use ahjo_app_kit::widgets::{
     kit::{self, Kind},
     markdown, pane, select,
 };
+use ahjo_app_kit::zoom::Zoom;
 use gpui::{
     AnyElement, ClickEvent, Context, Div, FontWeight, HighlightStyle, KeyDownEvent, MouseButton,
     SharedString, StyledText, Window, div, prelude::*, px,
@@ -71,6 +72,14 @@ impl Render for BrainPage {
                     } else {
                         window.focus(&page.reader_focus, cx);
                     }
+                    cx.stop_propagation();
+                    return;
+                }
+                if page.state.edit.is_none()
+                    && !page.field.read(cx).is_focused(window)
+                    && let Some(z) = ahjo_app_kit::zoom::from_key(&event.keystroke)
+                {
+                    page.zoom_read(z, 1, cx);
                     cx.stop_propagation();
                     return;
                 }
@@ -345,7 +354,14 @@ impl BrainPage {
             }
         }
         let body = self.page_body(t, &page, window, cx);
+        let me = cx.weak_entity();
+        let catch = ahjo_app_kit::zoom::catch(self.zoom_wheel.clone(), move |n, _, cx| {
+            let z = if n > 0 { Zoom::In } else { Zoom::Out };
+            let _ = me.update(cx, |page, cx| page.zoom_read(z, n.abs(), cx));
+        });
         pane::detail_scrolled(t, "brain-reader", &self.scroll, head, body)
+            .relative()
+            .child(catch)
             .track_focus(&self.reader_focus)
             .on_mouse_down(MouseButton::Left, {
                 let focus = self.reader_focus.clone();
@@ -529,8 +545,13 @@ impl BrainPage {
                 let _ = weak.update(cx, |page, cx| page.brain_follow(&path, anchor, cx));
             }
         });
+        // Zoomed, the text and its measure grow together.
+        let read = self.read_size(cx);
+        let scale = read / t.ty.read;
+        let mut zoomed = t.clone();
+        zoomed.ty.read = read;
         let look = markdown::Look {
-            t,
+            t: &zoomed,
             refs: false,
             on_link: Some(on_link),
             select: Some(self.select.clone()),
@@ -564,7 +585,7 @@ impl BrainPage {
         let anchor = self.anchor.clone();
         let scroll = self.scroll.clone();
         let body = markdown::render(&look, "brain-body", &blocks)
-            .max_w(px(MEASURE))
+            .max_w(px(MEASURE * scale))
             .debug_selector(|| "brain-prose".into())
             .on_children_prepainted(move |bounds, window, cx| {
                 selection.borrow_mut().laid_out();

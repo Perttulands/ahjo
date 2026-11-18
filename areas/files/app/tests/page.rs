@@ -2471,3 +2471,54 @@ fn a_find_inside_files_searches_the_open_files_repository(cx: &mut TestAppContex
     drop(running);
     std::fs::remove_dir_all(root).unwrap();
 }
+
+#[gpui::test]
+fn ctrl_wheel_and_ctrl_keys_zoom_the_code_and_keep_it(cx: &mut TestAppContext) {
+    let root = ahjo_testkit::fresh_dir("files-zoom");
+    let text: String = (1..=200)
+        .map(|n| format!("let line_{n} = {n};\n"))
+        .collect();
+    std::fs::write(root.join("main.rs"), &text).unwrap();
+    let running = start(root.clone());
+    cx.executor().allow_parking();
+    cx.update(ahjo_app_shell::prepare);
+    let url = running.url.clone();
+    let (shell, cx) = cx.add_window_view(move |w, cx| {
+        ahjo_app_shell::start(&[observed_files], Some(url), None, w, cx)
+    });
+    tree(cx, "file-row-main.rs");
+    let page = SEARCH_PAGE.with(|p| p.borrow().as_ref().unwrap().clone());
+    click(cx, "file-row-main.rs");
+    until(cx, "the file read", |cx| {
+        page.read_with(cx, |p, cx| p.code.read(cx).text().len() == text.len())
+    });
+    let size = |cx: &mut VisualTestContext| page.read_with(cx, |p, cx| p.code.read(cx).text_size());
+    let usual = size(cx);
+    let over = cx.debug_bounds("files-viewer").unwrap().center();
+    // Two notches of the wheel with Ctrl, as the platforms report them.
+    let wheel = |cx: &mut VisualTestContext, lines: f32, modifiers: Modifiers| {
+        cx.simulate_event(gpui::ScrollEvent {
+            position: over,
+            delta: gpui::ScrollDelta::Lines(gpui::point(0., lines)),
+            modifiers,
+            ..Default::default()
+        });
+        cx.run_until_parked();
+    };
+    wheel(cx, -6., Modifiers::control());
+    assert_eq!(size(cx), usual - 2., "two notches down are two steps out");
+    let top = page.read_with(cx, |p, cx| p.code.read(cx).top_line());
+    assert_eq!(top, 0, "the zoom did not scroll the code");
+    wheel(cx, 12., Modifiers::control());
+    assert_eq!(size(cx), usual + 2.);
+    assert_eq!(kept(&shell, cx).text, Some((usual + 2.) as u8));
+    wheel(cx, -3., Modifiers::none());
+    assert_eq!(size(cx), usual + 2., "without Ctrl the wheel only scrolls");
+    cx.simulate_keystrokes("ctrl--");
+    assert_eq!(size(cx), usual + 1.);
+    cx.simulate_keystrokes("ctrl-0");
+    assert_eq!(size(cx), usual);
+    assert_eq!(kept(&shell, cx).text, None, "the usual size is not kept");
+    drop(running);
+    std::fs::remove_dir_all(root).unwrap();
+}

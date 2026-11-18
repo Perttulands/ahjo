@@ -14,8 +14,10 @@ const SIDE_BY_SIDE: f32 = 960.;
 const WASH: f32 = 0.12;
 /// The side a line is missing from: a faint fill where it would be.
 const ABSENT: f32 = 0.03;
-/// A line's height: the code's.
-const LINE: f32 = size::ROW - size::HEAD_GAP;
+/// A line's height at text `text` pixels: the code's.
+fn line(text: f32) -> f32 {
+    (text * 1.55).round()
+}
 
 impl FilesPage {
     pub(super) fn diff_view(
@@ -26,6 +28,7 @@ impl FilesPage {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let room = self.body_room.get().unwrap_or(0.);
+        let text = self.code_text(cx);
         let wide = room >= SIDE_BY_SIDE && !self.diff_inline;
         let n = if wide {
             sides.pairs.len()
@@ -52,9 +55,9 @@ impl FilesPage {
                 range
                     .map(|i| {
                         if wide {
-                            pair_row(&t, &sides, &sides.pairs[i], digits)
+                            pair_row(&t, &sides, &sides.pairs[i], digits, text)
                         } else {
-                            inline_row(&t, &sides, &sides.rows[i], digits)
+                            inline_row(&t, &sides, &sides.rows[i], digits, text)
                         }
                     })
                     .collect()
@@ -75,7 +78,7 @@ impl FilesPage {
                 }
             })
             .font_family(FAMILY)
-            .text_size(px(size::TEXT))
+            .text_size(px(text))
             .child(measure(self.body_room.clone()))
             .child(div().flex_1().min_h_0().child(list))
             .when(truncated, |d| {
@@ -101,7 +104,7 @@ impl FilesPage {
             )
         };
         let offset = self.diff_scroll.0.borrow().base_handle.offset();
-        let here = (f32::from(-offset.y) / LINE).round() as usize + GO_LINES;
+        let here = (f32::from(-offset.y) / line(self.code_text(cx))).round() as usize + GO_LINES;
         let next = if forward {
             starts.into_iter().find(|&s| s > here)
         } else {
@@ -115,14 +118,15 @@ impl FilesPage {
     }
 }
 
-fn number(t: &Theme, n: Option<usize>, digits: usize) -> Div {
+fn number(t: &Theme, n: Option<usize>, digits: usize, text: f32) -> Div {
+    let small = size::SMALL * text / size::TEXT;
     div()
         .flex_none()
-        .w(px(size::SMALL * ADVANCE * (digits + 2) as f32))
+        .w(px(small * ADVANCE * (digits + 2) as f32))
         .pr(px(size::HEAD_GAP))
         .flex()
         .justify_end()
-        .text_size(px(size::SMALL))
+        .text_size(px(small))
         .text_color(t.dim)
         .child(n.map(|n| n.to_string()).unwrap_or_default())
 }
@@ -154,11 +158,17 @@ fn text_cell(t: &Theme, text: &str, paint: Paint) -> Div {
     cell.child(gpui::StyledText::new(SharedString::from(text)).with_highlights(colours))
 }
 
-fn line_box() -> Div {
-    div().h(px(LINE)).w_full().flex().items_center()
+fn line_box(text: f32) -> Div {
+    div().h(px(line(text))).w_full().flex().items_center()
 }
 
-fn inline_row(t: &Theme, sides: &Sides, r: &crate::store::diff::Row, digits: usize) -> AnyElement {
+fn inline_row(
+    t: &Theme,
+    sides: &Sides,
+    r: &crate::store::diff::Row,
+    digits: usize,
+    text: f32,
+) -> AnyElement {
     let (sign, wash, colour) = match r.kind {
         RowKind::Add => ("+", Some(t.done), t.text),
         RowKind::Delete => ("-", Some(t.error), t.text),
@@ -166,18 +176,18 @@ fn inline_row(t: &Theme, sides: &Sides, r: &crate::store::diff::Row, digits: usi
         RowKind::Hunk => ("", None, t.dim),
     };
     if r.kind == RowKind::Hunk {
-        return line_box()
+        return line_box(text)
             .bg(t.surface)
             .text_color(t.dim)
             .pl(px(size::HEAD_PAD))
             .child(text_cell(t, &r.text, None))
             .into_any_element();
     }
-    line_box()
+    line_box(text)
         .when_some(wash, |d, c| d.bg(alpha(c, WASH)))
         .text_color(colour)
-        .child(number(t, r.old, digits))
-        .child(number(t, r.new, digits))
+        .child(number(t, r.old, digits, text))
+        .child(number(t, r.new, digits, text))
         .child(
             div()
                 .flex_none()
@@ -197,9 +207,15 @@ fn inline_row(t: &Theme, sides: &Sides, r: &crate::store::diff::Row, digits: usi
         .into_any_element()
 }
 
-fn pair_row(t: &Theme, sides: &Sides, p: &crate::store::diff::Pair, digits: usize) -> AnyElement {
+fn pair_row(
+    t: &Theme,
+    sides: &Sides,
+    p: &crate::store::diff::Pair,
+    digits: usize,
+    text: f32,
+) -> AnyElement {
     if let Some(h) = &p.hunk {
-        return line_box()
+        return line_box(text)
             .bg(t.surface)
             .text_color(t.dim)
             .pl(px(size::HEAD_PAD))
@@ -219,14 +235,14 @@ fn pair_row(t: &Theme, sides: &Sides, p: &crate::store::diff::Pair, digits: usiz
             // went out.
             .when(!present, |d| d.bg(alpha(t.text, ABSENT)))
             .text_color(if p.changed { t.text } else { t.text2 })
-            .child(number(t, line.as_ref().map(|l| l.0), digits))
+            .child(number(t, line.as_ref().map(|l| l.0), digits, text))
             .child(text_cell(
                 t,
                 line.as_ref().map_or("", |l| l.1.as_str()),
                 line.as_ref().and_then(|l| sides.paint(l.0, new)),
             ))
     };
-    line_box()
+    line_box(text)
         .child(side(&p.old, t.error, false))
         .child(div().flex_none().w(px(1.)).h_full().bg(t.divider))
         .child(side(&p.new, t.done, true))

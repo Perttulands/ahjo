@@ -3,6 +3,7 @@
 mod diffs;
 mod reader;
 mod tabs;
+mod zoomed;
 
 use crate::open::Show;
 use crate::page::{FilesPage, Pick};
@@ -1371,7 +1372,14 @@ impl FilesPage {
             .children(self.closing_line(t, cx))
             .children(self.decision(t, cx))
             .children(self.infile_bar(t, cx))
-            .child(div().flex_1().min_h_0().child(self.viewer_body(t, cx)));
+            .child(
+                div()
+                    .flex_1()
+                    .min_h_0()
+                    .relative()
+                    .child(self.viewer_body(t, cx))
+                    .child(self.zoom_catch(cx)),
+            );
         let tabs = (!self.beside).then(|| {
             div()
                 .flex_none()

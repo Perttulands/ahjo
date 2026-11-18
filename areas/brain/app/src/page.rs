@@ -39,6 +39,8 @@ pub struct BrainPage {
     pub(crate) list_scroll: ScrollHandle,
     pub(crate) reveal: bool,
     pub(crate) reader_focus: FocusHandle,
+    /// Ctrl+wheel over the page read, a step not yet taken.
+    pub(crate) zoom_wheel: Rc<std::cell::Cell<ahjo_app_kit::zoom::Wheel>>,
     node: NodeId,
     shown: bool,
 }
@@ -149,6 +151,7 @@ impl BrainPage {
             list_scroll: ScrollHandle::new(),
             reveal: false,
             reader_focus: cx.focus_handle(),
+            zoom_wheel: Default::default(),
             node: NodeId(String::new()),
             shown: false,
         }
@@ -428,6 +431,46 @@ impl BrainPage {
             });
         })
         .detach();
+        cx.notify();
+    }
+}
+
+/// The smallest and largest text a page is read at.
+const READ_MIN: f32 = 11.;
+const READ_MAX: f32 = 32.;
+
+impl BrainPage {
+    /// The size a page is read at: the theme's unless zoomed.
+    pub(crate) fn read_size(&self, cx: &App) -> f32 {
+        let kept: state::Kept = self.host.setting(cx).unwrap_or_default();
+        kept.read
+            .map_or(ahjo_app_kit::theme::theme(cx).ty.read, f32::from)
+    }
+
+    /// The one zoom rule (`ahjo_app_kit::zoom`) on the page read.
+    pub(crate) fn zoom_read(
+        &mut self,
+        z: ahjo_app_kit::zoom::Zoom,
+        n: i32,
+        cx: &mut Context<Self>,
+    ) {
+        use ahjo_app_kit::zoom::{Zoom, step};
+        let usual = ahjo_app_kit::theme::theme(cx).ty.read;
+        let at = self.read_size(cx);
+        let to = match z {
+            Zoom::Reset => (at != usual).then_some(usual),
+            Zoom::In => step(at, n, 1., READ_MIN, READ_MAX),
+            Zoom::Out => step(at, -n, 1., READ_MIN, READ_MAX),
+        };
+        let Some(to) = to else {
+            return;
+        };
+        let kept = state::Kept {
+            read: (to != usual).then_some(to as u8),
+        };
+        let _ = self.host.set_setting(&kept, cx);
+        let reset = if to == usual { "" } else { " · Ctrl+0 resets" };
+        self.host.toast(&format!("Text {to} px{reset}"), cx);
         cx.notify();
     }
 }

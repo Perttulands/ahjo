@@ -259,6 +259,8 @@ pub struct FilesPage {
     jump_due: bool,
     /// The place's README, rendered, when it has one.
     pub place_readme: Option<Vec<ahjo_app_kit::widgets::markdown::Block>>,
+    /// Ctrl+wheel over the open file, a step not yet taken.
+    pub(crate) zoom_wheel: std::rc::Rc<std::cell::Cell<ahjo_app_kit::zoom::Wheel>>,
 }
 
 fn enc(s: &str) -> String {
@@ -463,14 +465,17 @@ impl FilesPage {
             .detach();
         }
         let wrap = !kept.unwrapped;
+        let text = kept.text.map_or(ahjo_app_kit::theme::size::TEXT, f32::from);
         let code = cx.new(|cx| {
             let mut c = Code::new(cx);
             c.set_wrap(wrap, cx);
+            c.set_text_size(text, cx);
             c
         });
         let pretty_code = cx.new(|cx| {
             let mut c = Code::new(cx);
             c.set_wrap(wrap, cx);
+            c.set_text_size(text, cx);
             c
         });
         let query = cx.new(|cx| TextField::new(cx, "Find a file  (: a line, @ a symbol)"));
@@ -652,6 +657,7 @@ impl FilesPage {
             md_select: Default::default(),
             md_go: Default::default(),
             body_room: Default::default(),
+            zoom_wheel: Default::default(),
             jump_due: false,
             place_readme: None,
         }
@@ -1900,6 +1906,13 @@ impl FilesPage {
         if self.files_key(e, window, cx) {
             cx.stop_propagation();
             cx.notify();
+            return;
+        }
+        if self.opened.is_some()
+            && let Some(z) = ahjo_app_kit::zoom::from_key(&e.keystroke)
+        {
+            self.zoom_file(z, 1, cx);
+            cx.stop_propagation();
             return;
         }
         let reading = !self.opened.as_ref().is_some_and(|o| o.editing)

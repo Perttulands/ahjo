@@ -11,6 +11,15 @@ pub use ahjo_brain_contract::{Commit, Found as Hit, Link, Listed, Page, PageRef}
 
 use ahjo_brain_contract::{Changes, Results};
 
+/// What the Brain page keeps between app runs.
+#[derive(Clone, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(default)]
+pub struct Kept {
+    /// The size a page is read at, when zoomed from the theme's.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub read: Option<u8>,
+}
+
 /// An edit in hand: the reader shows the editor instead of the page.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Edit {

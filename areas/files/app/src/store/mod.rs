@@ -32,6 +32,10 @@ pub struct Kept {
     pub unwrapped: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub zoom: zoom::Level,
+    /// The size code, changes and rendered text are read at, when zoomed
+    /// from the usual (Ctrl+wheel, Ctrl+= and Ctrl+-).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub text: Option<u8>,
     /// What the side of the page shows, or that it is hidden.
     pub side: Side,
     /// The files open in tabs, in their order, to open again.
