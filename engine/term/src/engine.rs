@@ -81,8 +81,8 @@ const QUIET_READ: Duration = Duration::from_secs(1);
 const BUSY_READ: Duration = Duration::from_secs(5);
 
 /// A session's badge facts, read when its windows or clients change, when
-/// it goes quiet after output (a program started or ended), and when a
-/// browser connects. Not a tmux subscription: those cost tmux a format
+/// it goes quiet after output (a program started or ended), after text that
+/// came as the window resized, and when a browser connects. Not a tmux subscription: those cost tmux a format
 /// evaluation per session every second, idle or not. An option set by hand
 /// (`mouse`, `window-size`) shows at the next of those. The folder is last:
 /// it may hold spaces.
@@ -1571,6 +1571,8 @@ async fn follow_inner(
     // program sets as we attach. tmux counted it, so the next follower
     // needs told (`leave_output`).
     let mut skipped_redraw = false;
+    // Text taken for a redraw arrived: read the facts at the next look.
+    let mut facts_after_look = false;
     let quiet = tokio::time::sleep(ACTIVE_FOR);
     tokio::pin!(quiet);
     // A look at our panes' screens for a waiting prompt is due.
@@ -1698,6 +1700,11 @@ async fn follow_inner(
                             // Modes set later are the program's own doing,
                             // which tmux counts whether we follow or not.
                             skipped_redraw |= redraw || attached.elapsed() < REDRAW_FOR;
+                            // Not news, so no quiet comes to read the facts
+                            // after it; but something typed in another
+                            // client (a `cd`) may have changed them as the
+                            // window resized. The look after it reads them.
+                            facts_after_look |= redraw && shows;
                             continue;
                         }
                         last_output = tokio::time::Instant::now();
@@ -1782,6 +1789,9 @@ async fn follow_inner(
             }
             () = &mut look, if looking => {
                 looking = false;
+                if std::mem::take(&mut facts_after_look) {
+                    request_facts(session, &mut out, &mut pending);
+                }
                 let mut state = shared.state.lock().unwrap();
                 let mut changed = false;
                 for pane in state.panes.values_mut().filter(|pane| pane.owner == session) {

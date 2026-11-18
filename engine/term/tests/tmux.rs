@@ -1460,6 +1460,56 @@ async fn a_repaint_for_a_new_size_is_not_activity() {
     engine.stop().await;
 }
 
+/// What changes as a window resizes still shows: a program that changes
+/// folder in its redraw (or a `cd` typed in another client just then) is
+/// read as a redraw, not news, yet the session's folder follows it. The
+/// facts read for the layout change come before the program moves.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_folder_changed_during_a_redraw_shows() {
+    let Some(server) = Server::start_in("terminal-redraw-folder") else {
+        return;
+    };
+    server.new_session("alpha", 100, 30);
+    let moved = server.dir().join("moved");
+    std::fs::create_dir(&moved).unwrap();
+    let script = server.dir().join("move.sh");
+    write_script(
+        &script,
+        format!(
+            "#!/bin/sh\ncd '{}'\ntrap 'sleep 0.2; cd {}; printf \"\\033[H\\033[2Kmoved\\n\"' WINCH\nprintf here\nwhile :; do sleep 0.1; done\n",
+            server.dir().display(),
+            moved.display()
+        ),
+    );
+    server.run(&[
+        "respawn-pane",
+        "-k",
+        "-t",
+        "alpha",
+        script.to_str().unwrap(),
+    ]);
+    let engine = Engine::start(server.socket());
+    let pane = seeded_pane(&engine).await;
+    let here = server.dir().display().to_string();
+    eventually("the first folder", || {
+        (facts_of(&engine)?.path == here).then_some(())
+    })
+    .await;
+    // Going quiet after news reads the facts too; none is due now.
+    eventually("idle", || {
+        (!engine.sessions()[0].activity.active).then_some(())
+    })
+    .await;
+
+    engine.claim(pane, 1, 100, 50).await.unwrap();
+    let want = moved.display().to_string();
+    eventually("the folder the redraw moved to", || {
+        (facts_of(&engine)?.path == want).then_some(())
+    })
+    .await;
+    engine.stop().await;
+}
+
 fn now_secs() -> u64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
