@@ -641,13 +641,8 @@ impl SettingsPage {
                 for &(option, words) in options {
                     let name = format!("{id}-{option}");
                     let selector = name.clone();
-                    let kind = if option == now {
-                        Kind::Primary
-                    } else {
-                        Kind::Plain
-                    };
                     row = row.child(
-                        kit::button(t, SharedString::from(name), words, kind)
+                        kit::option(t, SharedString::from(name), words, option == now)
                             .debug_selector(move || selector)
                             .on_click(cx.listener(move |p, _, _, cx| {
                                 p.write(owner, key, Value::from(option), cx)
@@ -1008,10 +1003,16 @@ impl Render for SettingsPage {
             }
             (format!("Settings matching “{query}”"), all)
         };
+        // The node's own configuration is paths: they use the width.
+        let detail = if query.is_empty() && self.chosen == Group::Node {
+            pane::detail_wide
+        } else {
+            pane::detail
+        };
         pane::page(
             &t,
             list,
-            pane::detail(
+            detail(
                 &t,
                 "settings-page",
                 pane::head(&t).child(pane::title(&t, title)),
