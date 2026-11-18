@@ -31,6 +31,8 @@ const MOST: usize = 2_000_000;
 const MOST_NEAR: usize = 100_000;
 /// The most threads one walk reads folders on.
 const WALKERS: usize = 8;
+/// How many of a path's last parts a word spelled loosely runs through.
+const LOOSE_DEPTH: usize = 3;
 /// Results a name find answers.
 const RESULTS: usize = 50;
 /// What changed answers this many lines at most.
@@ -384,9 +386,19 @@ fn find_in<'a>(
     let mut hits = Vec::new();
     for item in items {
         let path = item.path.to_lowercase();
-        if !words.iter().all(|w| path.contains(w.as_str())) {
+        // A word not in the path may still be its letters in order through
+        // the file's last folders ("cartmod" for cart/model.rs); those
+        // files come after every file that holds the words as written.
+        let loose = if words.iter().all(|w| path.contains(w.as_str())) {
+            false
+        } else if words
+            .iter()
+            .all(|w| path.contains(w.as_str()) || spelled_in(&path, w))
+        {
+            true
+        } else {
             continue;
-        }
+        };
         let name = &path[item.name..];
         let rank = if name.starts_with(words[0].as_str()) {
             0
@@ -399,6 +411,7 @@ fn find_in<'a>(
         };
         let away = !near.is_some_and(|folder| under(&item.path, folder));
         let key = (
+            loose,
             away,
             rank,
             item.path.len(),
@@ -425,6 +438,36 @@ fn find_in<'a>(
             .collect(),
         truncated,
     }
+}
+
+/// Whether `word`, letters and digits only, appears in order through the
+/// last [`LOOSE_DEPTH`] parts of `path`, its first letter at the start of
+/// a part or of a word in one, so it runs through a folder and a name
+/// rather than across the roots.
+fn spelled_in(path: &str, word: &str) -> bool {
+    let start = path
+        .rmatch_indices('/')
+        .nth(LOOSE_DEPTH - 1)
+        .map_or(0, |(i, _)| i + 1);
+    let tail = &path[start..];
+    // A word with a dot or a dash in it is a name as written.
+    if !word.chars().all(char::is_alphanumeric) {
+        return false;
+    }
+    let mut letters = word.chars();
+    let Some(first) = letters.next() else {
+        return false;
+    };
+    let mut prev = '/';
+    let Some(at) = tail.char_indices().find_map(|(i, c)| {
+        let found = c == first && !prev.is_alphanumeric();
+        prev = c;
+        found.then(|| i + c.len_utf8())
+    }) else {
+        return false;
+    };
+    let mut rest = tail[at..].chars();
+    letters.all(|l| rest.any(|c| c == l))
 }
 
 #[cfg(test)]
@@ -466,6 +509,33 @@ mod tests {
         );
         assert_eq!(found("Gen world"), ["/r/src/world/terrain_generator.rs"]);
         assert!(found("nothing").is_empty());
+    }
+
+    #[test]
+    fn letters_in_order_through_a_folder_and_a_name_find_a_file_after_whole_words() {
+        let items = [
+            item("/r/src/cart/model.rs", 1),
+            item("/r/src/checkout/model.rs", 1),
+            item("/r/src/cartmodel_notes.md", 1),
+            item("/r/docs/cart.md", 1),
+            item("/root/deep/a/b/c/model.rs", 1),
+        ];
+        let found = |q: &str| -> Vec<String> {
+            let words: Vec<String> = q.split_whitespace().map(str::to_lowercase).collect();
+            find_in(items.iter(), &words, None)
+                .matches
+                .into_iter()
+                .map(|m| m.path)
+                .collect()
+        };
+        assert_eq!(
+            found("cartmod"),
+            ["/r/src/cartmodel_notes.md", "/r/src/cart/model.rs"]
+        );
+        assert_eq!(found("chkmodel"), ["/r/src/checkout/model.rs"]);
+        // Letters must begin a part, and stay within the last few.
+        assert!(found("artmod").iter().all(|p| p.contains("cartmodel")));
+        assert!(found("rootmodel").is_empty());
     }
 
     #[test]

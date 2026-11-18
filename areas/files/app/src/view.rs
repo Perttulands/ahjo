@@ -1207,7 +1207,12 @@ impl FilesPage {
 
     fn viewer_body(&self, t: &Theme, cx: &mut Context<Self>) -> AnyElement {
         let Some(o) = &self.opened else {
-            return pane::vacant(t, "No file open", None).into_any_element();
+            return pane::vacant(
+                t,
+                "Choose a file to read it, or find one by name with Ctrl+P.",
+                None,
+            )
+            .into_any_element();
         };
         if o.diff_open
             && let Some(sides) = o.sides.clone()

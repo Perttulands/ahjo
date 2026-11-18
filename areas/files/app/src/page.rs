@@ -160,8 +160,9 @@ pub struct FilesPage {
     /// The open file is the newest, shown unasked: not kept as the file
     /// to come back to.
     shown_newest: bool,
-    /// The pick and the list's place when a find began, to go back to.
-    before_find: Option<(Option<Pick>, gpui::Point<gpui::Pixels>)>,
+    /// The pick, the list's place and the file open when a find began, to
+    /// go back to.
+    before_find: Option<(Option<Pick>, gpui::Point<gpui::Pixels>, Option<String>)>,
     /// A path to open the tree down to once the roots are known.
     reveal_pending: Option<String>,
     /// Folders asked for and not answered yet.
@@ -1095,7 +1096,8 @@ impl FilesPage {
         }
         if self.find.is_none() && self.jump.is_none() {
             let place = self.list_scroll.0.borrow().base_handle.offset();
-            self.before_find = Some((self.pick.take(), place));
+            let open = self.opened.as_ref().map(|o| o.path.clone());
+            self.before_find = Some((self.pick.take(), place, open));
         }
         if let Some(jump) = jump {
             self.find = None;
@@ -1207,14 +1209,20 @@ impl FilesPage {
             self.back_from_find();
         }
     }
-    /// The find is over: the list is where it was when the find began.
+    /// The find is over: the list is where it was when the find began, or
+    /// on the file the find opened.
     fn back_from_find(&mut self) {
-        let Some((pick, place)) = self.before_find.take() else {
+        let Some((pick, place, open)) = self.before_find.take() else {
             self.pick = None;
             return;
         };
         self.pick = pick;
         self.list_scroll.0.borrow().base_handle.set_offset(place);
+        if let Some(path) = self.opened.as_ref().map(|o| o.path.clone())
+            && open.as_ref() != Some(&path)
+        {
+            self.follow_open(&path);
+        }
     }
 
     /// The rows the keyboard steps through, as the list shows them.
