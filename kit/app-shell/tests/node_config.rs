@@ -76,9 +76,20 @@ fn the_settings_page_shows_the_nodes_config_file(cx: &mut TestAppContext) {
         field_bounds.size.width >= gpui::px(300.),
         "node URL has room"
     );
+    // The node's configuration is paths: it uses the detail's width, in
+    // the same value column as the app's settings, and stays inside it.
+    let viewport = cx.update(|window, _| window.viewport_size());
     assert!(
-        roots_bounds.size.width <= field_bounds.size.width + gpui::px(1.),
-        "config stays in the value column"
+        (roots_bounds.origin.x - field_bounds.origin.x).abs() <= gpui::px(1.),
+        "config stands in the value column"
+    );
+    assert!(
+        roots_bounds.size.width > field_bounds.size.width,
+        "config uses the width the app's settings leave"
+    );
+    assert!(
+        roots_bounds.right() <= viewport.width,
+        "config stays inside the detail"
     );
     assert!(
         roots_bounds.size.height > gpui::px(30.),
