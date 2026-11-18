@@ -28,6 +28,8 @@ pub struct Stack {
     /// The time axis's ticks, Unix ms.
     pub ticks: Vec<u64>,
     pub hover: Option<u64>,
+    /// The width the page last knew the stack at.
+    pub known_w: Option<f32>,
     pub grid: Hsla,
     /// The crosshair's colour.
     pub hair: Hsla,
@@ -49,6 +51,17 @@ pub fn stack(s: Stack, page: WeakEntity<HostPage>) -> impl IntoElement {
                 draw(&s, band, area, window);
             }
             follow_mouse(s.start, s.end, b, page.clone(), window);
+            // A new width reaches the page for the next frame's labels.
+            let w = f32::from(b.size.width);
+            if s.known_w != Some(w) {
+                let page = page.clone();
+                window.on_next_frame(move |_, cx| {
+                    let _ = page.update(cx, |p, cx| {
+                        p.chart_w = Some(w);
+                        cx.notify();
+                    });
+                });
+            }
         }),
     )
     .size_full()

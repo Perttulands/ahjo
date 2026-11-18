@@ -48,6 +48,9 @@ pub struct HostPage {
     chosen: Option<Chosen>,
     /// The moment under the mouse on the machine's figures.
     pub(crate) hover: Option<u64>,
+    /// The machine's chart's width as last drawn, which says how many of
+    /// its time labels fit.
+    pub(crate) chart_w: Option<f32>,
     pub(crate) shown: bool,
     pub(crate) sessions: Option<Entity<SessionList>>,
     pub(crate) focus: FocusHandle,
@@ -76,6 +79,7 @@ impl HostPage {
             services: Services::default(),
             chosen: None,
             hover: None,
+            chart_w: None,
             shown: false,
             sessions,
             focus: cx.focus_handle(),

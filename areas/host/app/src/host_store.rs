@@ -590,6 +590,19 @@ pub fn ticks(start: u64, end: u64, offset: i64) -> Vec<u64> {
         .collect()
 }
 
+/// The ticks whose labels stand apart on an axis `width` pixels wide:
+/// every one when they fit, else every second, third and on, each label
+/// wanting `label` pixels.
+pub fn labelled(ticks: &[u64], start: u64, end: u64, width: f32, label: f32) -> Vec<u64> {
+    let span = end.saturating_sub(start).max(1) as f32;
+    let apart = match ticks {
+        [a, b, ..] => width * (b - a) as f32 / span,
+        _ => return ticks.to_vec(),
+    };
+    let every = (label / apart.max(1.)).ceil().max(1.) as usize;
+    ticks.iter().copied().step_by(every).collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -825,6 +838,17 @@ mod tests {
         );
         let helsinki = ticks(at(20, 0), at(32, 0), 7200);
         assert_eq!(helsinki[0], at(22, 0));
+    }
+
+    #[test]
+    fn a_narrow_axis_labels_only_the_ticks_that_stand_apart() {
+        let at = |h: u64| h * HOUR;
+        let all: Vec<u64> = (1..=6).map(at).collect();
+        // Seven hours over 700 px: a tick each 100 px, every label fits.
+        assert_eq!(labelled(&all, 0, at(7), 700., 55.), all);
+        // Over 140 px a tick each 20 px: every third label.
+        assert_eq!(labelled(&all, 0, at(7), 140., 55.), vec![at(1), at(4)]);
+        assert_eq!(labelled(&[at(1)], 0, at(7), 10., 55.), vec![at(1)]);
     }
 
     #[test]

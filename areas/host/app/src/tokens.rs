@@ -23,6 +23,8 @@ pub const GLYPH: f32 = 8.;
 /// A service row's two lines, and where the second starts: under the
 /// name, past the state mark.
 pub const SERVICE_ROW: f32 = 44.;
+/// The machine row's line of figures, one line high.
+pub const FIGURES_H: f32 = 16.;
 pub const SECOND_LINE_INDENT: f32 = GLYPH + 8.;
 /// The most of an address a service row shows before it shortens it.
 pub const ADDRESS_CHARS: usize = 30;

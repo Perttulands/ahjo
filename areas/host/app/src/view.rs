@@ -133,17 +133,14 @@ impl HostPage {
                     .into_any_element(),
             );
         }
-        if let Some(e) = n.and_then(|n| n.unread()) {
+        // The cause in full is the machine's headline; here a few words.
+        if n.and_then(|n| n.unread()).is_some() {
             out.push(
                 div()
                     .flex_none()
                     .px(px(size::ROW_PAD))
                     .py(px(size::LABEL_BOTTOM))
-                    .child(pane::meta(
-                        t,
-                        format!("Services could not be read: {e}"),
-                        Some(t.error),
-                    ))
+                    .child(pane::meta(t, "Services could not be read", Some(t.error)))
                     .into_any_element(),
             );
         }
@@ -201,9 +198,11 @@ impl HostPage {
                     .filter(|f| *f != Figure::Swap)
                     .map(|f| format!("{} {}", short(f), percent(f.now(r))))
                     .collect::<Vec<_>>()
-                    .join("  ")
             })
             .unwrap_or_default();
+        // Each figure whole or not at all: one that does not fit wraps onto
+        // a line the row does not show.
+        let figures = figures.into_iter().map(|f| div().flex_none().child(f));
         let selector = format!("host-row-{id}-machine");
         let verdict_selector = format!("host-verdict-{id}-{verdict}");
         let at = id.to_owned();
@@ -227,7 +226,14 @@ impl HostPage {
                                     .debug_selector(move || verdict_selector),
                             ),
                     )
-                    .child(second_line(t).text_color(t.dim).child(figures)),
+                    .child(
+                        second_line(t)
+                            .h(px(tokens::FIGURES_H))
+                            .flex_wrap()
+                            .gap_x(px(size::HEAD_GAP))
+                            .text_color(t.dim)
+                            .children(figures),
+                    ),
             )
             .on_click(cx.listener(move |page, _, window, cx| {
                 window.focus(&page.focus, cx);

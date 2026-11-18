@@ -237,6 +237,7 @@ impl HostPage {
             end,
             ticks: ticks.clone(),
             hover: self.hover,
+            known_w: self.chart_w,
             grid: t.divider,
             hair: ahjo_app_kit::theme::alpha(t.text2, tokens::LINE_ALPHA),
         };
@@ -246,7 +247,12 @@ impl HostPage {
         // The moment under the mouse takes the place of the ticks near it.
         let room = (end - start) / (ticks.len() as u64 + 1) / 2;
         let hovered = self.hover.filter(|at| *at >= start);
-        for at in ticks {
+        // Only as many labels as stand apart at the chart's width.
+        let labelled = match self.chart_w {
+            Some(w) => store::labelled(&ticks, start, end, w, tokens::TICK_W * 1.25),
+            None => ticks,
+        };
+        for at in labelled {
             if hovered.is_some_and(|h| h.abs_diff(at) < room) {
                 continue;
             }
