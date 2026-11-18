@@ -90,12 +90,23 @@ impl Render for ScheduledPage {
                 }),
             )
         };
+        // With nothing scheduled anywhere, an empty list beside the
+        // invitation says nothing: the invitation takes the page.
+        let nothing = shown.is_none()
+            && self.state.form.is_none()
+            && self.ordered().is_empty()
+            && self.state.nodes.values().all(|n| n.error.is_none());
+        let page = if nothing {
+            div().size_full().flex().bg(t.bg).child(detail)
+        } else {
+            pane::page(&t, list, detail)
+        };
         div()
             .id("scheduled")
             .size_full()
             .track_focus(&self.focus)
             .on_key_down(cx.listener(|page, e: &KeyDownEvent, window, cx| page.key(e, window, cx)))
-            .child(pane::page(&t, list, detail).text_color(t.text))
+            .child(page.text_color(t.text))
     }
 }
 
@@ -473,7 +484,8 @@ impl ScheduledPage {
                     .child(task.prompt.clone()),
             ),
         );
-        if !task.recent_runs.is_empty() {
+        // The runs stand beside the task where the window has the room.
+        let runs = (!task.recent_runs.is_empty()).then(|| {
             let rows = task
                 .recent_runs
                 .iter()
@@ -519,10 +531,11 @@ impl ScheduledPage {
                     .into_any_element()
                 })
                 .collect();
-            body = body
-                .child(pane::section(t, "Runs, newest first").child(pane::table(t, &RUNS, rows)));
-        }
-        pane::detail(t, "scheduled-detail", head, body)
+            pane::section(t, "Runs, newest first")
+                .child(pane::table(t, &RUNS, rows))
+                .into_any_element()
+        });
+        pane::detail_beside(t, "scheduled-detail", head, body, runs, pane::Narrow::Below)
     }
 
     /// What the head's "…" offers: the actions a task needs now and then.

@@ -593,3 +593,39 @@ fn the_time_page_says_what_a_range_opened_finished_and_left_idle(cx: &mut TestAp
     assert!(idle.contains(&"ctx-old".to_string()), "{idle:?}");
     assert!(!idle.contains(&"ctx-xvl".to_string()), "{idle:?}");
 }
+
+#[gpui::test]
+fn a_full_screen_window_gives_the_list_more_room_and_the_item_a_second_column(
+    cx: &mut TestAppContext,
+) {
+    let (work, cx) = page(cx);
+    select(&work, cx, "library-zvi.1");
+    let bounds = |cx: &mut VisualTestContext, name: &'static str| {
+        cx.run_until_parked();
+        cx.debug_bounds(name)
+            .unwrap_or_else(|| panic!("{name} is drawn"))
+    };
+    // Full screen at 1920 by 1080: the list is wider than its usual width,
+    // and what the item stands among is a column beside its text.
+    cx.simulate_resize(gpui::size(gpui::px(1920.), gpui::px(1080.)));
+    cx.run_until_parked();
+    let list = bounds(cx, "work-grip");
+    assert!(
+        f32::from(list.origin.x) > crate::tokens::LIST_W + crate::tokens::FACETS_W,
+        "the list grew: its edge at {:?}",
+        list.origin.x
+    );
+    let (aside, text) = (bounds(cx, "work-aside"), bounds(cx, "work-text"));
+    assert!(
+        aside.left() >= text.right(),
+        "beside: {aside:?} after {text:?}"
+    );
+    assert!(aside.top() <= text.top(), "level with the text");
+    // At 900 wide the same item stacks: its relations above its text.
+    cx.simulate_resize(gpui::size(gpui::px(900.), gpui::px(800.)));
+    let (aside, text) = (bounds(cx, "work-aside"), bounds(cx, "work-text"));
+    assert!(
+        aside.bottom() <= text.top(),
+        "above: {aside:?} over {text:?}"
+    );
+}

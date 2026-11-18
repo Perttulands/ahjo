@@ -33,6 +33,10 @@ pub const GRIP: f32 = 6.;
 /// The most of its row the list takes, and the grip's ink when the mouse
 /// is on it.
 pub const LIST_SHARE: f32 = 0.6;
+/// The list's share of the room beside the facets until its edge is
+/// dragged, at least [`LIST_W`] and at most this.
+pub const LIST_SHARE_OPEN: f32 = 0.4;
+pub const LIST_OPEN_MAX: f32 = 760.;
 pub const GRIP_INK: f32 = 0.5;
 
 /// The time strip over the list: its height, and the room its axis

@@ -200,12 +200,28 @@ impl HostPage {
             .min(end.saturating_sub(HOUR));
         let figures = bands(Some(r));
         let ticks = store::ticks(start, end, local_offset());
-        let mut legends = div()
-            .w(px(tokens::LEGEND_W))
-            .flex_none()
-            .flex()
-            .flex_col()
-            .gap(px(tokens::BAND_GAP));
+        // Where the room is too small for the legends and a chart worth
+        // reading side by side, the legends stand above the chart, side by
+        // side, and the chart takes the whole width, each band named.
+        let above = self
+            .figures_w
+            .get()
+            .is_some_and(|w| w < tokens::LEGEND_W + size::SECTION_GAP + tokens::CHART_MIN);
+        let mut legends = if above {
+            div()
+                .w_full()
+                .flex()
+                .flex_wrap()
+                .gap_x(px(size::SECTION_GAP))
+                .gap_y(px(tokens::BAND_GAP))
+        } else {
+            div()
+                .w(px(tokens::LEGEND_W))
+                .flex_none()
+                .flex()
+                .flex_col()
+                .gap(px(tokens::BAND_GAP))
+        };
         let mut scales = div().absolute().inset_0();
         let mut drawn = vec![];
         for (i, figure) in figures.iter().copied().enumerate() {
@@ -213,7 +229,12 @@ impl HostPage {
             let top = store::ceiling(figure, &points);
             let warn = store::warns(troubles, figure);
             let ink = if warn { t.error } else { t.chart };
-            legends = legends.child(self.legend(t, s, figure, &points, warn));
+            let legend = self.legend(t, s, figure, &points, warn);
+            legends = legends.child(if above {
+                legend.h_auto().flex_1().min_w(px(tokens::LEGEND_MIN))
+            } else {
+                legend
+            });
             scales = scales.child(
                 div()
                     .absolute()
@@ -223,7 +244,11 @@ impl HostPage {
                     .left(px(size::LABEL_BOTTOM))
                     .text_size(px(size::SMALL))
                     .text_color(t.dim)
-                    .child(format!("{top:.0}%")),
+                    .child(if above {
+                        format!("{} · {top:.0}%", figure.name(Some(r)))
+                    } else {
+                        format!("{top:.0}%")
+                    }),
             );
             drawn.push(Band {
                 runs: store::runs(&points),
@@ -281,10 +306,30 @@ impl HostPage {
                     .child(scales),
             )
             .child(axis);
+        // Its width as drawn decides the next frame's arrangement; a new
+        // one draws again at once.
+        let known = self.figures_w.clone();
+        let page = cx.entity().downgrade();
+        let measure = gpui::canvas(
+            move |b, _, cx| {
+                let w = Some(f32::from(b.size.width));
+                if known.replace(w) != w {
+                    cx.defer(move |cx| {
+                        let _ = page.update(cx, |_, cx| cx.notify());
+                    });
+                }
+            },
+            |_, _, _, _| {},
+        )
+        .absolute()
+        .size_full();
         pane::section(t, format!("Last {hours} h")).child(
             div()
+                .relative()
                 .flex()
+                .when(above, |d| d.flex_col())
                 .gap(px(size::SECTION_GAP))
+                .child(measure)
                 .child(legends)
                 .child(chart),
         )

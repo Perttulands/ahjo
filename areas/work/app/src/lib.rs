@@ -180,9 +180,13 @@ pub struct Work {
     dated: Rc<Vec<Dated>>,
     /// How many days untouched makes open work idle on the time page; kept.
     idle_days: i64,
-    /// The list's width, dragged at its edge; kept. While the edge is
-    /// held: where the press was, and the width then.
-    list_w: f32,
+    /// The list's width once dragged at its edge, kept; until then a
+    /// share of the room ([`tokens::LIST_SHARE_OPEN`]), so a wide window
+    /// widens it. Where it starts and its width as last drawn: the room
+    /// is measured from there, and a drag starts from that width. While
+    /// the edge is held: where the press was, and the width then.
+    list_w: Option<f32>,
+    list_drawn: Rc<std::cell::Cell<(f32, f32)>>,
     grip: Option<(f32, f32)>,
     /// The strip and the time page show every project, not the chosen one.
     every: bool,
@@ -369,9 +373,8 @@ impl Work {
                 .as_i64()
                 .filter(|d| tokens::IDLE_DAYS.contains(d))
                 .unwrap_or(tokens::IDLE_DEFAULT),
-            list_w: settings["list_width"]
-                .as_f64()
-                .map_or(tokens::LIST_W, |w| w as f32),
+            list_w: settings["list_width"].as_f64().map(|w| w as f32),
+            list_drawn: Rc::new(std::cell::Cell::new((0., tokens::LIST_W))),
             grip: None,
             every: layout == Layout::Time,
             state: None,
@@ -924,14 +927,16 @@ impl Work {
     /// most it may take; kept when the drag ends.
     pub fn drag_list(&mut self, width: f32, cx: &mut Context<Self>) {
         let width = width.clamp(tokens::LIST_MIN, tokens::LIST_MAX);
-        if width != self.list_w {
-            self.list_w = width;
+        if Some(width) != self.list_w {
+            self.list_w = Some(width);
             cx.notify();
         }
     }
 
     pub fn keep_list(&mut self, cx: &mut Context<Self>) {
-        self.keep("list_width", serde_json::json!(self.list_w.round()), cx);
+        if let Some(w) = self.list_w {
+            self.keep("list_width", serde_json::json!(w.round()), cx);
+        }
     }
 
     /// One of the page's settings, kept for the next run.

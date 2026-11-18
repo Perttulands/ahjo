@@ -368,6 +368,30 @@ fn host_journeys(cx: &mut TestAppContext) {
     until(cx, "the GPU reading", |cx| shows(cx, "host-legend-gpu-35%"));
     assert_eq!(running.control.forwards.load(Ordering::SeqCst), 1);
 
+    // Wide, each figure stands beside the chart; in a narrow window the
+    // figures stand above it and the chart takes the whole width.
+    let beside = |cx: &mut VisualTestContext| {
+        let legend = cx.debug_bounds("host-legend-cpu-31%");
+        let chart = cx.debug_bounds("host-chart");
+        legend.zip(chart).map(|(l, c)| l.right() <= c.left())
+    };
+    cx.simulate_resize(gpui::size(gpui::px(1600.), gpui::px(1000.)));
+    until(cx, "the figures beside the chart", |cx| {
+        beside(cx) == Some(true)
+    });
+    cx.simulate_resize(gpui::size(gpui::px(640.), gpui::px(900.)));
+    until(cx, "the figures above the chart", |cx| {
+        let legend = cx.debug_bounds("host-legend-cpu-31%");
+        let chart = cx.debug_bounds("host-chart");
+        legend
+            .zip(chart)
+            .is_some_and(|(l, c)| l.bottom() <= c.top() && l.left() <= c.left())
+    });
+    cx.simulate_resize(gpui::size(gpui::px(1600.), gpui::px(1000.)));
+    until(cx, "the figures beside the chart again", |cx| {
+        beside(cx) == Some(true)
+    });
+
     // The mouse over the figures reads one moment in all of them.
     let chart = cx.debug_bounds("host-chart").expect("the figures").center();
     cx.simulate_mouse_move(chart, None, Modifiers::none());

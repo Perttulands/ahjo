@@ -64,6 +64,15 @@ pub mod size {
     pub const LIST_WIDE: f32 = 420.;
     pub const PAD: f32 = 24.;
     pub const READING: f32 = 960.;
+    /// A detail in two columns (`widgets::pane::detail_beside`): the body
+    /// at a reading measure, wider than its least before the aside is put
+    /// above it, never wider than its most; the aside's least and most,
+    /// and the gap between them.
+    pub const MEASURE_MIN: f32 = 400.;
+    pub const MEASURE: f32 = 720.;
+    pub const ASIDE: f32 = 360.;
+    pub const ASIDE_MAX: f32 = 520.;
+    pub const ASIDE_GAP: f32 = 32.;
     pub const SECTION_GAP: f32 = 24.;
     /// A head's padding at its ends and the gap between its parts.
     pub const HEAD_PAD: f32 = 12.;

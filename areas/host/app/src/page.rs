@@ -51,6 +51,9 @@ pub struct HostPage {
     /// The machine's chart's width as last drawn, which says how many of
     /// its time labels fit.
     pub(crate) chart_w: Option<f32>,
+    /// The width the figures and their chart share, as last drawn, which
+    /// says whether the figures stand beside the chart or above it.
+    pub(crate) figures_w: std::rc::Rc<std::cell::Cell<Option<f32>>>,
     pub(crate) shown: bool,
     pub(crate) sessions: Option<Entity<SessionList>>,
     pub(crate) focus: FocusHandle,
@@ -80,6 +83,7 @@ impl HostPage {
             chosen: None,
             hover: None,
             chart_w: None,
+            figures_w: Default::default(),
             shown: false,
             sessions,
             focus: cx.focus_handle(),

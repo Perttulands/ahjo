@@ -42,9 +42,10 @@ pub(crate) fn status_meta(t: &Theme, r: &Row) -> Option<(String, Hsla)> {
 }
 
 impl Render for Work {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let t = theme(cx).clone();
-        let list = self.list_column(&t, cx);
+        let viewport = f32::from(window.viewport_size().width);
+        let list = self.list_column(&t, viewport, cx);
         let detail = match self.shown_row() {
             Some(row) => {
                 self.want_text(row, cx);
@@ -53,7 +54,16 @@ impl Render for Work {
             // The list says why it holds nothing; the detail stays clear.
             None => pane::detail(&t, "work-detail", pane::head(&t), div()),
         };
+        // A node with no projects has nothing to chart, facet or list:
+        // the page says how one is added, across its whole width.
+        let unconfigured = !self.snapshots.is_empty() && self.board.projects.is_empty();
         let page = match self.layout {
+            _ if unconfigured => {
+                div()
+                    .size_full()
+                    .bg(t.bg)
+                    .child(pane::vacant(&t, self.why_empty(cx), None))
+            }
             Layout::Tree => pane::page(&t, list, detail),
             Layout::Strip => self.strip_page(&t, list, detail, cx),
             Layout::Time => self.time_page(&t, list, detail, cx),
@@ -129,7 +139,7 @@ impl Work {
 
     /// The list column: its head, a line saying the project could not be
     /// read when so, and the rows.
-    fn list_column(&mut self, t: &Theme, cx: &mut Context<Self>) -> Div {
+    fn list_column(&mut self, t: &Theme, viewport: f32, cx: &mut Context<Self>) -> Div {
         let head = self.list_head(t, cx);
         let mut body = div().flex_1().min_h_0().flex().flex_col();
         if !self.picking
@@ -243,11 +253,36 @@ impl Work {
             );
         }
         // As wide as the operator dragged it, never more than most of
-        // the room beside the facets.
+        // the room beside the facets; until dragged, a share of that room
+        // (measured where the list starts, as last drawn), so a
+        // full-screen window shows whole titles and leaves the item room
+        // for two columns.
+        let drawn = self.list_drawn.clone();
+        let me = cx.entity().downgrade();
+        let width = self
+            .list_w
+            .unwrap_or_else(|| open_width(viewport - drawn.get().0));
         pane::list_wide_frame(t, head, body)
-            .w(px(self.list_w))
+            .w(px(width))
             .max_w(gpui::relative(LIST_SHARE))
             .relative()
+            .child(
+                gpui::canvas(
+                    move |b, _, cx| {
+                        let was = drawn.replace((f32::from(b.origin.x), f32::from(b.size.width)));
+                        // A new start arranges the next frame: drawn now,
+                        // since a refresh asked while drawing is not one.
+                        if (was.0 - f32::from(b.origin.x)).abs() > 0.5 {
+                            cx.defer(move |cx| {
+                                let _ = me.update(cx, |_, cx| cx.notify());
+                            });
+                        }
+                    },
+                    |_, _, _, _| {},
+                )
+                .absolute()
+                .size_full(),
+            )
             .child(self.grip(t, cx))
     }
 
@@ -281,7 +316,8 @@ impl Work {
                                 && b.contains(&e.position)
                             {
                                 let x = f32::from(e.position.x);
-                                let _ = down.update(cx, |w, _| w.grip = Some((x, w.list_w)));
+                                let _ = down
+                                    .update(cx, |w, _| w.grip = Some((x, w.list_drawn.get().1)));
                             }
                         });
                         window.on_mouse_event(move |e: &gpui::MouseMoveEvent, phase, _, cx| {
@@ -531,16 +567,35 @@ impl Work {
                     })),
             );
         }
-        let body = self.item_body(t, row, place, cx);
-        let id = match place {
-            Place::Page => "work-detail",
-            Place::Beside => "work-beside-detail",
-            Place::Panel => "work-panel-detail",
-        };
-        pane::detail(t, id, head, body)
+        let (body, aside) = self.item_body(t, row, place, cx);
+        match place {
+            // On the page the item's relations and children stand in a
+            // column of their own beside its text, where the window has
+            // the room.
+            Place::Page => pane::detail_beside(
+                t,
+                "work-detail",
+                head,
+                body,
+                aside.map(|a| a.into_any_element()),
+                pane::Narrow::Above,
+            ),
+            Place::Beside => pane::detail(t, "work-beside-detail", head, body),
+            Place::Panel => pane::detail(t, "work-panel-detail", head, body),
+        }
     }
 
-    fn item_body(&self, t: &Theme, row: usize, place: Place, cx: &mut Context<Self>) -> Div {
+    /// The item's facts and text, and what it stands among (what it is
+    /// part of, waits on and holds). On the page the second is a column
+    /// of its own; beside the terminals, one column, relations before the
+    /// text and children after it.
+    fn item_body(
+        &self,
+        t: &Theme,
+        row: usize,
+        place: Place,
+        cx: &mut Context<Self>,
+    ) -> (Div, Option<Div>) {
         let r = &self.board.rows[row];
         let p = &self.board.projects[r.project];
         let id = r.written_id(&self.board);
@@ -613,7 +668,11 @@ impl Work {
             body = body.child(pane::section(t, "Branch").child(line));
         }
         let fam = &r.family;
-        body = body.children(self.relations(t, row, place, cx));
+        let mut relations = self.relations(t, row, place, cx);
+        let on_page = place == Place::Page;
+        if !on_page {
+            body = body.children(relations.take());
+        }
         let (words, missing) = match self.text_of(row) {
             Text::Read(text) | Text::Reading(Some(text)) => (text, "No description.".to_string()),
             Text::Reading(None) => (String::new(), "Reading the text…".to_string()),
@@ -678,8 +737,21 @@ impl Work {
         } else {
             &fam.pulls
         };
-        body.children(self.family(t, "Children", &fam.children, place, cx))
-            .children(self.family(t, pulls_label, pulls, place, cx))
+        let children = self.family(t, "Children", &fam.children, place, cx);
+        let pulls = self.family(t, pulls_label, pulls, place, cx);
+        if !on_page {
+            return (body.children(children).children(pulls), None);
+        }
+        let aside: Vec<Div> = relations.into_iter().chain(children).chain(pulls).collect();
+        let aside = (!aside.is_empty()).then(|| {
+            div()
+                .debug_selector(|| "work-aside".into())
+                .flex()
+                .flex_col()
+                .gap(px(size::SECTION_GAP))
+                .children(aside)
+        });
+        (body, aside)
     }
 
     /// A section of the item's family: each a row with its title and its
@@ -720,12 +792,22 @@ impl Work {
                     let r = &self.board.rows[i];
                     let selector = format!("work-family-{label}-{}", r.id);
                     let status = status_meta(t, r);
+                    // In the page's narrower second column a title takes
+                    // a second line rather than losing its end.
+                    let title = if place == Place::Page {
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .py(px(SPACE_XS))
+                            .line_clamp(2)
+                            .text_ellipsis()
+                            .child(r.title.clone())
+                    } else {
+                        pane::cell(r.title.clone())
+                    };
                     row.debug_selector(move || selector)
                         .child(glyph(t, r))
-                        .child(
-                            pane::cell(r.title.clone())
-                                .when(r.status == Status::Closed, |d| d.text_color(t.dim)),
-                        )
+                        .child(title.when(r.status == Status::Closed, |d| d.text_color(t.dim)))
                         .children(status.map(|(s, c)| pane::meta(t, s, Some(c))))
                         .child(pane::meta(t, r.written_id(&self.board), None))
                         .on_click(cx.listener(move |w, _, _, cx| w.go(i, place, cx)))
@@ -919,6 +1001,13 @@ impl Work {
             .on_click(cx.listener(move |w, _, _, cx| w.go(i, place, cx)))
             .into_any_element()
     }
+}
+
+/// The list's width until its edge is dragged, in `room` (from where it
+/// starts to the window's right): a share of it, never under its usual
+/// width unless the room is too small for that, never over its most.
+pub(crate) fn open_width(room: f32) -> f32 {
+    (room * LIST_SHARE_OPEN).clamp((room * LIST_SHARE).min(LIST_W), LIST_OPEN_MAX)
 }
 
 /// A card's frame: a raised tile, as wide as the room allows within its

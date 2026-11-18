@@ -7,6 +7,10 @@ pub const BAND_GAP: f32 = 12.;
 /// peak and average.
 pub const LEGEND_W: f32 = 210.;
 pub const LEGEND_GAP: f32 = 2.;
+/// The least the chart takes beside the legends: in less room the legends
+/// stand above it, side by side, each at least this wide.
+pub const CHART_MIN: f32 = 440.;
+pub const LEGEND_MIN: f32 = 150.;
 /// The time axis under the bands and a tick's label.
 pub const AXIS_H: f32 = 18.;
 pub const TICK_W: f32 = 44.;

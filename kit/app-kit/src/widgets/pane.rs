@@ -106,7 +106,84 @@ pub fn detail_scrolled(
     reading(t, head, div().id(id).track_scroll(scroll), body)
 }
 
+/// [`detail`] with a second column: `body` is what the thing says, kept to
+/// a reading measure ([`size::MEASURE`]); `aside` is what it stands among
+/// (its relations, its runs, its history). Where the detail has room for
+/// both, the aside stands beside the body; where it has not, above or
+/// below it as `narrow` says. Wrapping does it, so the layout needs no
+/// measure of its own and holds at every width.
+pub fn detail_beside(
+    t: &Theme,
+    id: impl Into<ElementId>,
+    head: Div,
+    body: impl IntoElement,
+    aside: Option<AnyElement>,
+    narrow: Narrow,
+) -> Div {
+    let main = div()
+        .flex_grow(1.)
+        .flex_shrink(1.)
+        .flex_basis(px(size::MEASURE_MIN))
+        .min_w_0()
+        .max_w(px(size::MEASURE))
+        .flex()
+        .flex_col()
+        .gap(px(size::SECTION_GAP))
+        .child(body);
+    let pair = div().w_full().flex();
+    let pair = match narrow {
+        // Reversed, the aside's line stands above the body's when the two
+        // do not fit side by side.
+        Narrow::Above => pair.flex_wrap_reverse(),
+        Narrow::Below => pair.flex_wrap(),
+    }
+    .gap(px(size::ASIDE_GAP))
+    .child(main)
+    .children(aside.map(|aside| {
+        div()
+            .debug_selector(|| "pane-aside".into())
+            .flex_grow(1.)
+            .flex_shrink(1.)
+            .flex_basis(px(size::ASIDE))
+            .min_w_0()
+            .max_w(px(size::ASIDE_MAX))
+            .flex()
+            .flex_col()
+            .gap(px(size::SECTION_GAP))
+            .child(aside)
+    }));
+    framed(
+        t,
+        head,
+        div().id(id),
+        pair,
+        size::MEASURE + size::ASIDE_GAP + size::ASIDE_MAX,
+    )
+}
+
+/// Where a [`detail_beside`]'s aside goes when the detail is too narrow
+/// for it to stand beside the body: above, when it says what to read the
+/// body by (what an item is part of and waits on); below, when it is
+/// history.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Narrow {
+    Above,
+    Below,
+}
+
 fn reading(t: &Theme, head: Div, scroller: Stateful<Div>, body: impl IntoElement) -> Div {
+    framed(t, head, scroller, body, size::READING)
+}
+
+/// The detail's head over its scrolling body, both `widest` at most and
+/// starting at the detail's left.
+fn framed(
+    t: &Theme,
+    head: Div,
+    scroller: Stateful<Div>,
+    body: impl IntoElement,
+    widest: f32,
+) -> Div {
     div()
         .flex_1()
         .min_w_0()
@@ -124,7 +201,7 @@ fn reading(t: &Theme, head: Div, scroller: Stateful<Div>, body: impl IntoElement
                     head.border_0()
                         .h_full()
                         .w_full()
-                        .max_w(px(size::READING))
+                        .max_w(px(widest))
                         .px(px(size::PAD)),
                 ),
         )
@@ -132,7 +209,7 @@ fn reading(t: &Theme, head: Div, scroller: Stateful<Div>, body: impl IntoElement
             scroller.flex_1().min_h_0().overflow_y_scroll().child(
                 div()
                     .w_full()
-                    .max_w(px(size::READING))
+                    .max_w(px(widest))
                     .p(px(size::PAD))
                     .flex()
                     .flex_col()
