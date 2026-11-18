@@ -38,14 +38,18 @@ pub(super) mod pictures;
 /// not at every frame.
 const RESIZE_SETTLE: std::time::Duration = std::time::Duration::from_millis(120);
 
-/// The theme's ravens behind an empty window, covering it from its middle.
-fn window_art(t: &Theme) -> gpui::Img {
-    gpui::img(t.art.window.clone())
-        .absolute()
-        .inset_0()
-        .size_full()
-        .object_fit(gpui::ObjectFit::Cover)
-        .opacity(t.art.window_show)
+/// A painted theme's ravens behind an empty window, covering it from its
+/// middle. A drawn theme has none: two flat shapes stretched over a window
+/// of any shape showed as scraps at its edge, and the launcher is enough.
+fn window_art(t: &Theme) -> Option<gpui::Img> {
+    t.direction.own().then(|| {
+        gpui::img(t.art.window.clone())
+            .absolute()
+            .inset_0()
+            .size_full()
+            .object_fit(gpui::ObjectFit::Cover)
+            .opacity(t.art.window_show)
+    })
 }
 
 /// What a window says while a drop on it would land there.
@@ -385,7 +389,7 @@ impl Terminals {
                 .bg(t.term_bg)
                 .text_color(t.text2)
                 .debug_selector(move || format!("empty-window-{i}"))
-                .child(window_art(&t))
+                .children(window_art(&t))
                 .child(
                     kit::panel(&t)
                         .px(px(14.))
@@ -410,7 +414,7 @@ impl Terminals {
                     .min_h_0()
                     .relative()
                     .bg(t.term_bg)
-                    .child(window_art(&t))
+                    .children(window_art(&t))
                     .child(
                         div()
                             .id(("launcher-scroll", i))
