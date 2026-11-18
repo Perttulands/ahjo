@@ -209,11 +209,13 @@ pub fn plain_reason(detail: &str) -> String {
         {
             text = rest.trim_start();
         }
-        if let Some(open) = text.rfind(" (")
-            && text.ends_with(')')
-            && code(&text[open + 2..text.len() - 1])
+        // A code at the end, before a closing full stop or none.
+        let closed = text.strip_suffix('.').unwrap_or(text);
+        if let Some(open) = closed.rfind(" (")
+            && closed.ends_with(')')
+            && code(&closed[open + 2..closed.len() - 1])
         {
-            text = text[..open].trim_end();
+            text = closed[..open].trim_end();
         }
         if text == before {
             break;
@@ -297,5 +299,9 @@ mod tests {
             "Missing verdict block"
         );
         assert_eq!(super::plain_reason("escalation"), "Escalation");
+        assert_eq!(
+            super::plain_reason("fmn_work: the session ended (executor_error)."),
+            "The session ended"
+        );
     }
 }

@@ -363,6 +363,10 @@ impl MissionsPage {
         if let Some(branch) = words::run_branch(run) {
             out = out.child(pane::line(t, "Branch", branch));
         }
+        // Where a stopped step's work was kept, whole on a line of its own.
+        for branch in run_state::kept_branches(&run.events) {
+            out = out.child(pane::line(t, "Kept work", branch));
+        }
         if !run.work.is_empty() {
             out = out.child(pane::line(t, "Work", words::work_label(&run.work)));
         }

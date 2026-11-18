@@ -61,10 +61,45 @@ pub fn problem_now(events: &[RunEvent], seq: u64, reason: &str) -> String {
     let resumed = events
         .iter()
         .any(|e| e.kind == "run_resumed" && e.seq > seq);
+    let reason = without_kept(events, reason);
     match reason.split_once("; resume") {
         Some((what, _)) if resumed => format!("{what}; resumed"),
-        _ => reason.to_owned(),
+        _ => reason,
     }
+}
+
+/// The sentences saying where a stopped step's work was kept.
+fn kept(events: &[RunEvent]) -> impl Iterator<Item = &RunEvent> {
+    events
+        .iter()
+        .filter(|e| e.kind == "workspace_kept" && !e.detail.is_empty())
+}
+
+/// `text` without the sentences saying where work was kept, which the
+/// engine adds to a stopped run's reason: the run shows each kept branch
+/// on a line of its own.
+pub fn without_kept(events: &[RunEvent], text: &str) -> String {
+    let mut out = text.to_owned();
+    for e in kept(events) {
+        out = out.replace(e.detail.as_str(), "");
+    }
+    out.trim_end().to_owned()
+}
+
+/// The branches stopped steps' work was kept on, in the order kept.
+pub fn kept_branches(events: &[RunEvent]) -> Vec<String> {
+    let mut out: Vec<String> = vec![];
+    for e in kept(events) {
+        let branch = e
+            .detail
+            .split_once(" on branch ")
+            .and_then(|(_, rest)| rest.split_whitespace().next())
+            .map(|b| b.trim_end_matches('.').to_owned());
+        if let Some(b) = branch.filter(|b| !b.is_empty() && !out.contains(b)) {
+            out.push(b);
+        }
+    }
+    out
 }
 
 /// Honest per-node state from the ledger, in the engine's vocabulary.
@@ -355,7 +390,7 @@ pub fn points(run: &Run) -> Vec<Point> {
                     if b.detail.is_empty() {
                         b.code.replace('_', " ")
                     } else {
-                        ahjo_missions_contract::plain_reason(&b.detail)
+                        ahjo_missions_contract::plain_reason(&without_kept(&run.events, &b.detail))
                     }
                 })
                 .unwrap_or_else(|| run.block_code.replace('_', " "));
@@ -493,6 +528,25 @@ mod tests {
             gate_id: g.into(),
             ..ev(seq, kind, g)
         }
+    }
+
+    #[test]
+    fn a_stopped_runs_reason_leaves_its_kept_branch_to_a_line_of_its_own() {
+        let kept = "What Build wrote in attempt 1 is kept on branch ahjo/run-r1-kept/fmn_b-1 of demo/site.";
+        let events = vec![RunEvent {
+            detail: kept.into(),
+            ..ev(4, "workspace_kept", "fmn_b")
+        }];
+        let reason = format!("fmn_b: the agent's session ended (executor_error). {kept}");
+        assert_eq!(
+            ahjo_missions_contract::plain_reason(&without_kept(&events, &reason)),
+            "The agent's session ended"
+        );
+        assert_eq!(kept_branches(&events), ["ahjo/run-r1-kept/fmn_b-1"]);
+        assert_eq!(
+            problem_now(&events, 5, &reason),
+            "fmn_b: the agent's session ended (executor_error)."
+        );
     }
 
     #[test]
