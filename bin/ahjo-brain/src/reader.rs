@@ -15,9 +15,10 @@ use ahjo_app_kit::widgets::kit;
 use ahjo_app_kit::widgets::markdown::{Block, Span, inline, parse};
 use gpui::{
     AnyElement, Context, Div, ElementId, FontStyle, FontWeight, HighlightStyle, Hsla,
-    InteractiveText, IntoElement, ParentElement, Render, ScrollHandle, SharedString, StyledText,
-    WeakEntity, Window, div, prelude::*, px,
+    InteractiveText, IntoElement, MouseButton, ParentElement, Render, ScrollHandle, SharedString,
+    StyledText, WeakEntity, Window, div, prelude::*, px,
 };
+use std::cell::RefCell;
 use std::ops::Range;
 use std::rc::Rc;
 
@@ -28,6 +29,14 @@ pub struct Reader {
     body: Option<Result<Vec<Block>, String>>,
     scroll: ScrollHandle,
     asked: u64,
+    /// The body's size as zoomed (`ahjo_app_kit::zoom`); the rest of the
+    /// page and its measure follow it.
+    text: f32,
+    /// The link under the pointer (its text's id and its number there),
+    /// and the one a press went down on. A link is followed when the press
+    /// comes up on the link it went down on.
+    link_over: Rc<RefCell<Option<(ElementId, usize)>>>,
+    link_down: Rc<RefCell<Option<(ElementId, usize)>>>,
 }
 
 impl Reader {
@@ -39,7 +48,55 @@ impl Reader {
             body: None,
             scroll: ScrollHandle::new(),
             asked: 0,
+            text: r::BODY,
+            link_over: Rc::default(),
+            link_down: Rc::default(),
         }
+    }
+
+    /// Reads the page at `text` pixels for the body.
+    pub fn set_text(&mut self, text: f32, cx: &mut Context<Self>) {
+        if self.text != text {
+            self.text = text;
+            cx.notify();
+        }
+    }
+
+    /// How much the page is zoomed from its own sizes.
+    fn k(&self) -> f32 {
+        self.text / r::BODY
+    }
+
+    /// Moves the page by `by` pixels (down above zero), as far as it goes.
+    pub fn scroll_by(&mut self, by: f32, cx: &mut Context<Self>) {
+        let most = f32::from(self.scroll.max_offset().y);
+        let at = f32::from(self.scroll.offset().y);
+        let to = (at - by).clamp(-most, 0.);
+        if to != at {
+            self.scroll.set_offset(gpui::point(px(0.), px(to)));
+            cx.notify();
+        }
+    }
+
+    /// Moves the page by `pages` of what the sheet shows, keeping a line
+    /// of the last in view.
+    pub fn scroll_pages(&mut self, pages: f32, cx: &mut Context<Self>) {
+        let seen = f32::from(self.scroll.bounds().size.height);
+        let step = (seen - r::BODY_LINE * self.k() * 2.).max(r::BODY_LINE);
+        self.scroll_by(step * pages, cx);
+    }
+
+    /// What an arrow key moves the page: two lines of the body.
+    pub fn arrow_step(&self) -> f32 {
+        r::BODY_LINE * self.k() * 2.
+    }
+
+    /// To the page's top, or its end.
+    pub fn scroll_end(&mut self, end: bool, cx: &mut Context<Self>) {
+        let most = f32::from(self.scroll.max_offset().y);
+        self.scroll
+            .set_offset(gpui::point(px(0.), px(if end { -most } else { 0. })));
+        cx.notify();
     }
 
     /// Shows `page`, reading its file off the UI thread.
@@ -295,45 +352,76 @@ impl Reader {
         if ranges.is_empty() {
             return text.into_any_element();
         }
+        // A link opens on its own press and release, not through
+        // `InteractiveText::on_click`: that one listens for the release
+        // only from the frame after the press, so a quick click whose
+        // release came before the next frame was lost; with a page's links
+        // lighting the sky as the pointer reaches them, that was most
+        // clicks on a link's first line.
         let targets = Rc::new(targets);
-        let (on_click, on_hover) = (targets.clone(), targets);
-        let (app_click, app_hover) = (self.app.clone(), self.app.clone());
-        let hover_ranges = ranges.clone();
-        InteractiveText::new(id, text)
-            .on_click(ranges, move |i, _, cx| match &on_click[i] {
-                Target::Page(p) => {
-                    let p = *p;
-                    let _ = app_click.update(cx, |app, cx| app.open(p, cx));
+        let (over, down) = (self.link_over.clone(), self.link_down.clone());
+        let app = self.app.clone();
+        let hover_id = id.clone();
+        let on_hover = targets.clone();
+        let text = InteractiveText::new(id.clone(), text).on_hover(move |index, _, _, cx| {
+            let link = index.and_then(|ix| ranges.iter().position(|r| r.contains(&ix)));
+            {
+                let mut over = over.borrow_mut();
+                match link {
+                    Some(i) => *over = Some((hover_id.clone(), i)),
+                    None if over.as_ref().is_some_and(|(at, _)| *at == hover_id) => *over = None,
+                    None => {}
                 }
-                Target::Web(url) => cx.open_url(url),
-                Target::Nowhere => {}
+            }
+            let page = link.and_then(|i| match on_hover[i] {
+                Target::Page(p) => Some(p),
+                _ => None,
+            });
+            let _ = app.update(cx, |app, cx| app.point_at_link(page, cx));
+        });
+        let (over_down, down_set) = (self.link_over.clone(), down.clone());
+        let over_up = self.link_over.clone();
+        let app = self.app.clone();
+        div()
+            .on_mouse_down(MouseButton::Left, move |_, _, _| {
+                *down_set.borrow_mut() = over_down.borrow().clone();
             })
-            .on_hover(move |index, _, _, cx| {
-                let page = index
-                    .and_then(|ix| hover_ranges.iter().position(|r| r.contains(&ix)))
-                    .and_then(|i| match on_hover[i] {
-                        Target::Page(p) => Some(p),
-                        _ => None,
-                    });
-                let _ = app_hover.update(cx, |app, cx| app.point_at_link(page, cx));
+            .on_mouse_up(MouseButton::Left, move |_, _, cx| {
+                let pressed = down.borrow_mut().take();
+                let Some((at, i)) = over_up.borrow().clone() else {
+                    return;
+                };
+                if at != id || pressed != Some((at, i)) {
+                    return;
+                }
+                match &targets[i] {
+                    Target::Page(p) => {
+                        let p = *p;
+                        let _ = app.update(cx, |app, cx| app.open(p, cx));
+                    }
+                    Target::Web(url) => cx.open_url(url),
+                    Target::Nowhere => {}
+                }
             })
+            .child(text)
             .into_any_element()
     }
 
     fn block(&self, n: usize, b: &Block, t: &Theme) -> AnyElement {
         let id = |k: usize| ElementId::Name(format!("b{n}-{k}").into());
         let plain = HighlightStyle::default();
+        let k = self.k();
         match b {
             // The page's own front matter is cut before parsing and shown as
             // the line over its title; a block of it later is not prose.
             Block::FrontMatter(_) => div().into_any_element(),
             Block::Heading(level, h) => {
                 let (size, color) = match level {
-                    1 | 2 => (r::H2, t.text),
-                    _ => (r::H3, t.text),
+                    1 | 2 => (r::H2 * k, t.text),
+                    _ => (r::H3 * k, t.text),
                 };
                 div()
-                    .pt(px(r::HEAD_GAP - r::PARA_GAP))
+                    .pt(px((r::HEAD_GAP - r::PARA_GAP) * k))
                     .text_size(px(size))
                     .line_height(px(size * 1.4))
                     .font_family(t.ty.display)
@@ -346,7 +434,7 @@ impl Reader {
                 .child(self.styled(id(0), p, plain, t))
                 .into_any_element(),
             Block::Quote(q) => div()
-                .pl(px(r::INDENT - r::QUOTE_BAR))
+                .pl(px(r::INDENT * k - r::QUOTE_BAR))
                 .border_l(px(r::QUOTE_BAR))
                 .border_color(alpha(t.text2, 0.35))
                 .text_color(t.text2)
@@ -357,20 +445,20 @@ impl Reader {
                 .bg(alpha(t.bg, 0.6))
                 .rounded(px(r::RADIUS))
                 .font_family(FAMILY)
-                .text_size(px(r::CODE))
-                .line_height(px(r::CODE * 1.55))
+                .text_size(px(r::CODE * k))
+                .line_height(px(r::CODE * k * 1.55))
                 .text_color(t.text2)
                 .overflow_x_hidden()
                 .child(c.replace('\t', "    "))
                 .into_any_element(),
             Block::Rule => div()
-                .my(px(r::PARA_GAP))
+                .my(px(r::PARA_GAP * k))
                 .h(px(r::RULE))
                 .bg(t.divider)
                 .into_any_element(),
             Block::List(items) => {
-                let mut list = div().flex().flex_col().gap(px(r::LIST_GAP));
-                for (k, it) in items.iter().enumerate() {
+                let mut list = div().flex().flex_col().gap(px(r::LIST_GAP * k));
+                for (j, it) in items.iter().enumerate() {
                     let marker = match (it.checked, it.number) {
                         (Some(true), _) => "☑".to_string(),
                         (Some(false), _) => "☐".to_string(),
@@ -388,16 +476,16 @@ impl Reader {
                     list = list.child(
                         div()
                             .flex()
-                            .pl(px(it.depth as f32 * r::INDENT))
+                            .pl(px(it.depth as f32 * r::INDENT * k))
                             .child(
                                 div()
                                     .flex_none()
-                                    .w(px(r::INDENT + 4.))
+                                    .w(px((r::INDENT + 4.) * k))
                                     .text_color(t.dim)
                                     .child(marker),
                             )
                             .child(div().flex_1().min_w_0().child(self.styled(
-                                id(k + 1),
+                                id(j + 1),
                                 &it.text,
                                 base,
                                 t,
@@ -411,8 +499,8 @@ impl Reader {
                 let mut table = div()
                     .flex()
                     .flex_col()
-                    .text_size(px(r::CODE))
-                    .line_height(px(r::CODE * 1.5))
+                    .text_size(px(r::CODE * k))
+                    .line_height(px(r::CODE * k * 1.5))
                     .border_1()
                     .border_color(t.divider)
                     .rounded(px(r::RADIUS));
@@ -449,12 +537,13 @@ impl Reader {
         let Some(data) = &self.data else {
             return div();
         };
+        let k = self.k();
         let mut col = div()
             .flex()
             .flex_col()
             .gap(px(2.))
             .font_family(FAMILY)
-            .text_size(px(r::LIST))
+            .text_size(px(r::LIST * k))
             .child(kit::label(t, format!("{label} · {}", list.len())).pb(px(6.)));
         for &p in list.iter().take(r::NEIGHBOURS) {
             let page = &data.corpus.pages[p];
@@ -498,7 +587,7 @@ impl Reader {
                     .child(
                         div()
                             .flex_none()
-                            .text_size(px(r::META))
+                            .text_size(px(r::META * k))
                             .text_color(alpha(crate::tokens::words(t, hue), 0.8))
                             .child(data.corpus.subjects[page.subject].name.clone()),
                     ),
@@ -508,7 +597,7 @@ impl Reader {
             col = col.child(
                 div()
                     .pt(px(4.))
-                    .text_size(px(r::META))
+                    .text_size(px(r::META * k))
                     .text_color(t.dim)
                     .child(format!(
                         "and {} more in the sky",
@@ -558,6 +647,7 @@ impl Render for Reader {
         };
         let page = &data.corpus.pages[p];
         let hue = data.hues[page.subject];
+        let k = self.k();
         let mut meta = vec![data.corpus.subjects[page.subject].name.clone()];
         meta.push(page.kind.clone());
         if let Some(u) = page.updated {
@@ -575,7 +665,7 @@ impl Render for Reader {
                     .items_center()
                     .gap(px(8.))
                     .font_family(FAMILY)
-                    .text_size(px(r::META))
+                    .text_size(px(r::META * k))
                     .text_color(t.dim)
                     .child(div().size(px(r::DOT)).rounded(px(r::DOT)).bg(hue))
                     .child(
@@ -587,8 +677,8 @@ impl Render for Reader {
             )
             .child(
                 div()
-                    .text_size(px(r::TITLE))
-                    .line_height(px(r::TITLE_LINE))
+                    .text_size(px(r::TITLE * k))
+                    .line_height(px(r::TITLE_LINE * k))
                     .font_family(t.ty.display)
                     .font_weight(t.ty.display_weight)
                     .text_color(t.text)
@@ -597,8 +687,8 @@ impl Render for Reader {
             .when(!page.summary.is_empty(), |d| {
                 d.child(
                     div()
-                        .text_size(px(r::LEDE))
-                        .line_height(px(r::LEDE_LINE))
+                        .text_size(px(r::LEDE * k))
+                        .line_height(px(r::LEDE_LINE * k))
                         .text_color(t.text2)
                         .child(page.summary.clone()),
                 )
@@ -616,9 +706,9 @@ impl Render for Reader {
             Some(Ok(blocks)) => div()
                 .flex()
                 .flex_col()
-                .gap(px(r::PARA_GAP))
-                .text_size(px(r::BODY))
-                .line_height(px(r::BODY_LINE))
+                .gap(px(r::PARA_GAP * k))
+                .text_size(px(r::BODY * k))
+                .line_height(px(r::BODY_LINE * k))
                 .text_color(alpha(t.text, 0.92))
                 .children(blocks.iter().enumerate().map(|(n, b)| self.block(n, b, &t)))
                 .into_any_element(),
@@ -631,7 +721,7 @@ impl Render for Reader {
             .collect();
         let column = div()
             .w_full()
-            .max_w(px(r::MEASURE))
+            .max_w(px(r::MEASURE * k))
             .flex()
             .flex_col()
             .gap(px(28.))
@@ -653,9 +743,12 @@ impl Render for Reader {
     }
 }
 
-/// How wide the reader's sheet is in a window this wide.
-pub fn sheet_width(window_width: f32) -> f32 {
-    let sheet = (window_width * r::SHARE).clamp(r::MIN, r::MAX);
+/// How wide the reader's sheet is in a window this wide, its text zoomed
+/// `k` times: a page read bigger takes more of the window, so its measure
+/// stays.
+pub fn sheet_width(window_width: f32, k: f32) -> f32 {
+    let most = (r::MAX * k).max(r::MIN);
+    let sheet = (window_width * r::SHARE * k).clamp(r::MIN, most);
     // A sliver of sky beside it is no use: then the sheet is the window.
     if window_width - sheet < r::SKY_LEAST {
         window_width
@@ -704,13 +797,17 @@ mod tests {
     #[test]
     fn the_sheet_fits_any_window() {
         for w in [0., 300., 600., 1456., 4000.] {
-            let s = sheet_width(w);
-            assert!(s <= w, "{w} gives {s}");
-            assert!(s == w || w - s >= r::SKY_LEAST, "{w} leaves a sliver");
+            for k in [0.6, 1., 2.] {
+                let s = sheet_width(w, k);
+                assert!(s <= w, "{w} gives {s}");
+                assert!(s == w || w - s >= r::SKY_LEAST, "{w} leaves a sliver");
+            }
         }
-        assert_eq!(sheet_width(640.), 640.);
-        assert_eq!(sheet_width(1000.), r::MIN);
-        assert_eq!(sheet_width(4000.), r::MAX);
+        assert_eq!(sheet_width(640., 1.), 640.);
+        assert_eq!(sheet_width(1000., 1.), r::MIN);
+        assert_eq!(sheet_width(4000., 1.), r::MAX);
+        // Read bigger, the sheet widens with its measure.
+        assert!(sheet_width(1920., 1.3) > sheet_width(1920., 1.));
     }
 
     #[test]

@@ -2,7 +2,7 @@
 //! already name. Colours come from the theme (`ahjo_app_kit::theme`) and
 //! are only mixed here, so a new theme reaches the sky and the reader.
 
-use ahjo_app_kit::theme::{Direction, Theme, alpha};
+use ahjo_app_kit::theme::{Direction, Theme, alpha, size, ty};
 use gpui::Hsla;
 
 /// The sky's character in each of the theme's directions.
@@ -244,15 +244,19 @@ pub mod sky {
     pub const LINKS_FULL: f32 = 10.;
     /// A link leaving the view draws at this share.
     pub const LINK_AWAY: f32 = 0.4;
-    /// Names.
-    pub const SYSTEM_NAME: f32 = 14.;
+    /// Names. The Brain is read full screen from a sitting distance: no
+    /// name in the sky is smaller than the chrome's text, a page's name
+    /// stands at the theme's title size.
+    pub const SYSTEM_NAME: f32 = super::ty::TITLE;
     /// Far out, a system's name grows with how much it holds.
-    pub const SYSTEM_NAME_MIN: f32 = 11.;
+    pub const SYSTEM_NAME_MIN: f32 = super::size::TEXT;
     pub const SYSTEM_NAME_MAX: f32 = 17.;
     /// What counts as moved lately, in days.
     pub const MOVED_DAYS: i32 = 7;
-    pub const PAGE_NAME: f32 = 12.;
+    pub const PAGE_NAME: f32 = super::ty::TITLE;
     pub const PAGE_NAME_MAX: usize = 42;
+    /// The least clear sky between two names, so each reads as its own.
+    pub const NAME_GAP: f32 = 8.;
     /// A system's name sits this share of its radius below its centre when
     /// the sky is far.
     pub const NAME_BELOW: f32 = 0.8;
@@ -261,7 +265,9 @@ pub mod sky {
     pub const HALO_BLUR: f32 = 7.;
     /// The scale a flight to one page lands at, and the closest a fit goes.
     pub const PAGE_SCALE: f32 = 1.6;
-    pub const FIT_MOST: f32 = 1.5;
+    /// A small sky is spread to the window's room rather than kept small
+    /// in its middle, up to this.
+    pub const FIT_MOST: f32 = 3.;
     pub const FIT_PAD: f32 = 48.;
     /// In the replay, a page not touched lately keeps this much of its light,
     /// and the most pages it names on a day.
@@ -300,6 +306,8 @@ pub mod motion {
     pub const WHEEL_ZOOM: f32 = 1.12;
     /// Pixels a key press pans.
     pub const KEY_PAN: f32 = 80.;
+    /// How long a word the app says (a zoom) stays.
+    pub const SAID: u64 = 1800;
 }
 
 /// The search over the sky.
@@ -307,28 +315,42 @@ pub mod search {
     pub const WIDTH: f32 = 460.;
     pub const FIELD_HEIGHT: f32 = 40.;
     pub const FIELD_TEXT: f32 = 15.;
-    pub const ROWS: usize = 8;
+    /// The gap between the field and the list under it; the room the
+    /// notice that Citadel is away takes over the list.
+    pub const LIST_GAP: f32 = 6.;
+    pub const AWAY: f32 = 52.;
+    /// What changed lately, before anything is asked.
+    pub const RECENT: usize = 8;
     pub const ROW_PAD_X: f32 = 14.;
     pub const ROW_PAD_Y: f32 = 8.;
-    pub const TITLE: f32 = 14.;
-    pub const SNIPPET: f32 = 12.;
+    /// A result's title and the words under it: the snippet at the
+    /// theme's title size, the title a step over it.
+    pub const TITLE: f32 = super::ty::EMPTY;
+    pub const SNIPPET: f32 = super::ty::TITLE;
     /// The most a search matched here, without Citadel, shows.
     pub const LOCAL_MOST: usize = 50;
     /// The best results a search flies the camera to.
     pub const FLY_TO: usize = 8;
     /// While a page is read, the ranked results stay beside its orbit:
-    /// this wide, titles only, as many as fit up to the most, and only if
-    /// the orbit keeps at least this much room.
+    /// at least this wide (wider as the orbit leaves room, up to the
+    /// search's width), titles only, and only if the orbit keeps at least
+    /// this much room.
     pub const ASIDE: f32 = 270.;
-    pub const ASIDE_ROW: f32 = 30.;
-    pub const ASIDE_MOST: usize = 16;
+    pub const ASIDE_ROW: f32 = 32.;
+    pub const ASIDE_ROW_PAD: f32 = 4.;
     pub const ORBIT_LEAST: f32 = 680.;
+    /// The room the orbit is left before the results beside it widen.
+    pub const ORBIT_WANTS: f32 = 760.;
 }
 
 /// The orbit a page read stands at the centre of.
 pub mod orbit {
-    /// Room left beside and above the outermost ring, for names.
+    /// Room left beside and above the outermost ring, for names: beside
+    /// it at least this, more as the longest name needs (and the pad past
+    /// its end), while the ring keeps its least radius.
     pub const ROOM_X: f32 = 196.;
+    pub const NAME_PAD: f32 = 16.;
+    pub const RING_LEAST: f32 = 170.;
     pub const ROOM_Y: f32 = 56.;
     /// Inside the ring, each subject's bow, as a share of its radius.
     pub const BOW: f32 = 0.9;
@@ -342,11 +364,17 @@ pub mod orbit {
     pub const SUN: f32 = 9.;
     pub const PLANET_MIN: f32 = 2.6;
     pub const PLANET_MAX: f32 = 6.;
-    /// A planet's name: its least and most letters (as many between as
-    /// the sky beside it holds, a letter being this share of its size
-    /// wide), and how far it stands off its planet.
-    pub const NAME_MAX: usize = 24;
+    /// A planet's name: the most letters it shows and the least it is
+    /// cut to (it wraps onto a second line before it is cut), a letter
+    /// being about this share of its size wide, and how far it stands off
+    /// its planet.
     pub const NAME_MOST: usize = 44;
+    pub const NAME_LEAST: usize = 8;
+    /// The ring leaves room for a name of this many letters on one line;
+    /// a longer one is reckoned as two lines, the wider a few letters over
+    /// half.
+    pub const NAME_LINE: usize = 20;
+    pub const NAME_LINE_SLACK: usize = 4;
     pub const NAME_CHAR: f32 = 0.62;
     pub const NAME_OFF: f32 = 14.;
     /// The gap between two subjects' arcs, in radians.
@@ -380,11 +408,15 @@ pub mod reader {
     pub const LEDE_LINE: f32 = 26.;
     pub const BODY: f32 = 15.5;
     pub const BODY_LINE: f32 = 27.;
+    /// The body's least and most as zoomed; the rest of the page follows.
+    pub const TEXT_LEAST: f32 = 10.5;
+    pub const TEXT_MOST: f32 = 32.5;
     pub const H2: f32 = 19.;
     pub const H3: f32 = 16.5;
-    pub const META: f32 = 12.;
-    /// The pages listed under the prose.
-    pub const LIST: f32 = 13.5;
+    /// The line over the title, and the pages listed under the prose, at
+    /// the theme's title size before the reader is zoomed.
+    pub const META: f32 = super::ty::TITLE;
+    pub const LIST: f32 = super::ty::TITLE;
     pub const CODE: f32 = 13.;
     pub const PARA_GAP: f32 = 14.;
     pub const HEAD_GAP: f32 = 26.;
@@ -402,10 +434,16 @@ pub mod reader {
 
 /// Chrome over the sky: the counts, the theme button.
 pub mod chrome {
+    /// The back arrow and the close cross, drawn: their side and stroke.
+    pub const GLYPH: f32 = 12.;
+    pub const GLYPH_LINE: f32 = 1.6;
+
     pub const INSET: f32 = 16.;
     /// The line of counts along the bottom.
-    pub const FOOT: f32 = 20.;
-    pub const TEXT: f32 = 12.;
+    pub const FOOT: f32 = 22.;
+    /// The chrome's words (counts, the theme, the replay, notices): at
+    /// the theme's title size, as the reader is read from a distance.
+    pub const TEXT: f32 = super::ty::TITLE;
     pub const SWITCH_PAD_X: f32 = 12.;
     pub const SWITCH_HEIGHT: f32 = 30.;
     /// Room kept for the theme button beside the search in a narrow window.
@@ -418,6 +456,8 @@ pub mod chrome {
     pub const MARK: f32 = 18.;
     pub const PANEL_ALPHA: f32 = 0.88;
     pub const RADIUS: f32 = 8.;
+    /// The reader's back and close stand in from its corner by this.
+    pub const SHEET_BAR: f32 = 10.;
 }
 
 /// The panel colour over the sky, letting a little of it through.

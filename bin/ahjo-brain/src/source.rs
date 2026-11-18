@@ -182,6 +182,9 @@ pub struct Settings {
     /// The theme's direction, by its key: `night`, `saga` or `signal`.
     #[serde(skip_serializing_if = "String::is_empty")]
     pub theme: String,
+    /// The reader's body size as zoomed; none is its own size.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reader_text: Option<f32>,
     #[serde(flatten)]
     pub rest: serde_json::Map<String, serde_json::Value>,
 }
@@ -269,10 +272,13 @@ mod tests {
         std::fs::write(&path, r#"{"theme":"saga","later":1}"#).unwrap();
         let mut s = read_settings(&path).unwrap();
         assert_eq!(s.theme, "saga");
+        assert_eq!(s.reader_text, None);
         s.theme = "signal".into();
+        s.reader_text = Some(18.5);
         write_settings(&path, &s).unwrap();
         let back = read_settings(&path).unwrap();
         assert_eq!(back.theme, "signal");
+        assert_eq!(back.reader_text, Some(18.5));
         assert_eq!(back.rest["later"], 1);
         std::fs::write(&path, "{not json").unwrap();
         assert!(read_settings(&path).is_err());

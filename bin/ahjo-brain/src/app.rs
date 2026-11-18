@@ -21,13 +21,15 @@ use crate::reader::{self, Reader};
 use crate::sky::{self, Rect, Role, Sky};
 use crate::source::{self, Where};
 use crate::tokens::{self, chrome, lift, motion, search, sky as k, veil};
-use ahjo_app_kit::theme::{Direction, FAMILY, Theme, alpha, art, theme, ty};
+use ahjo_app_kit::theme::{Direction, FAMILY, Theme, alpha, art, size, theme, ty};
 use ahjo_app_kit::widgets::field::{self, FieldEvent, TextField};
 use ahjo_app_kit::widgets::{kit, pane};
+use ahjo_app_kit::zoom::{self, Zoom};
 use gpui::{
-    AnyElement, AnyView, App, AppContext, Context, Entity, FocusHandle, Focusable, FontWeight,
-    Hsla, KeyDownEvent, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, ScrollDelta,
-    ScrollEvent, SharedString, StyleRefinement, Window, canvas, div, img, prelude::*, px,
+    AnyElement, AnyView, App, AppContext, Bounds, Context, Entity, FocusHandle, Focusable,
+    FontWeight, Hsla, KeyDownEvent, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent,
+    PathBuilder, Pixels, ScrollDelta, ScrollEvent, ScrollHandle, SharedString, StyleRefinement,
+    Window, canvas, div, img, point, prelude::*, px,
 };
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
@@ -270,6 +272,9 @@ pub struct BrainApp {
     bench: Option<Bench>,
     /// A page opened: the keyboard leaves the search for the page.
     leave_field: bool,
+    /// The search field has the keys, as of the last frame: what changed
+    /// lately then shows under it.
+    typing: bool,
     /// Evidence left out of a page's orbit, counted at its edge.
     fold_evidence: bool,
     replay: Option<Replaying>,
@@ -279,6 +284,14 @@ pub struct BrainApp {
     /// Why the settings file did not read; while it does not, it is not
     /// written over.
     settings_broken: Option<String>,
+    /// The reader's body size, zoomed by the one zoom rule.
+    reader_text: f32,
+    reader_wheel: Rc<std::cell::Cell<zoom::Wheel>>,
+    /// The results' list, scrolled to the row stood on.
+    results_scroll: ScrollHandle,
+    /// A word the app says for a moment (the zoom), and which saying it is.
+    said: Option<String>,
+    said_gen: u64,
 }
 
 impl Focusable for BrainApp {
@@ -316,7 +329,14 @@ impl BrainApp {
             field.update(cx, |f, cx| f.set(q, false, cx));
         }
         let (settings_path, settings, settings_broken) = start.settings;
+        let reader_text = reader_size(&settings);
+        reader.update(cx, |r, cx| r.set_text(reader_text, cx));
         let mut app = BrainApp {
+            reader_text,
+            reader_wheel: Rc::default(),
+            results_scroll: ScrollHandle::new(),
+            said: None,
+            said_gen: 0,
             settings_seen: settings_path.as_deref().and_then(source::changed),
             fold_evidence: true,
             replay: None,
@@ -365,6 +385,8 @@ impl BrainApp {
             size: (1440., 900.),
             bench: start.bench,
             leave_field: false,
+            // The field takes the keys from the start (above).
+            typing: true,
         };
         app.load(cx);
         app
@@ -544,7 +566,7 @@ impl BrainApp {
                     .filter(|&p| !corpus.pages[p].is_evidence())
                     .collect();
                 r.sort_by_key(|&p| std::cmp::Reverse(corpus.pages[p].modified));
-                r.truncate(search::ROWS);
+                r.truncate(search::RECENT);
                 r
             },
             moved: sky
@@ -680,6 +702,9 @@ impl BrainApp {
             Ok(s) => {
                 self.settings_broken = None;
                 let want = Direction::from_key(&s.theme);
+                self.reader_text = reader_size(&s);
+                let text = self.reader_text;
+                self.reader.update(cx, |r, cx| r.set_text(text, cx));
                 self.settings = s;
                 if let Some(d) = want {
                     self.restyle(d, cx);
@@ -707,6 +732,65 @@ impl BrainApp {
                 self.settings_broken = Some(format!("{} was not written: {e}", path.display()))
             }
         }
+    }
+
+    /// How much the reader is zoomed from its own size.
+    fn reader_k(&self) -> f32 {
+        self.reader_text / tokens::reader::BODY
+    }
+
+    /// The one zoom rule on the page read: its text `n` steps bigger or
+    /// smaller, or back; kept, and said.
+    fn zoom_reader(&mut self, z: Zoom, n: i32, cx: &mut Context<Self>) {
+        let at = self.reader_text;
+        let (least, most) = (tokens::reader::TEXT_LEAST, tokens::reader::TEXT_MOST);
+        let to = match z {
+            Zoom::Reset => (at != tokens::reader::BODY).then_some(tokens::reader::BODY),
+            Zoom::In => zoom::step(at, n, 1., least, most),
+            Zoom::Out => zoom::step(at, -n, 1., least, most),
+        };
+        let Some(to) = to else { return };
+        self.reader_text = to;
+        self.reader.update(cx, |r, cx| r.set_text(to, cx));
+        let reset = if to == tokens::reader::BODY {
+            ""
+        } else {
+            " · Ctrl+0 resets"
+        };
+        self.say(format!("Text {to} px{reset}"), cx);
+        // The orbit gives the wider sheet its room.
+        self.replanned = true;
+        if self.settings_broken.is_none()
+            && let Some(path) = self.settings_path.clone()
+        {
+            self.settings.reader_text = (to != tokens::reader::BODY).then_some(to);
+            match source::write_settings(&path, &self.settings) {
+                Ok(()) => self.settings_seen = source::changed(&path),
+                Err(e) => {
+                    self.settings_broken = Some(format!("{} was not written: {e}", path.display()))
+                }
+            }
+        }
+        cx.notify();
+    }
+
+    /// Says `words` for a moment.
+    fn say(&mut self, words: String, cx: &mut Context<Self>) {
+        self.said = Some(words);
+        self.said_gen += 1;
+        let said = self.said_gen;
+        cx.spawn(async move |me, cx| {
+            cx.background_executor()
+                .timer(std::time::Duration::from_millis(motion::SAID))
+                .await;
+            let _ = me.update(cx, |me, cx| {
+                if me.said_gen == said {
+                    me.said = None;
+                    cx.notify();
+                }
+            });
+        })
+        .detach();
     }
 
     /// The app in another of the theme's directions: its colours, its
@@ -754,6 +838,7 @@ impl BrainApp {
         }
         self.query = q.clone();
         self.asked += 1;
+        self.results_scroll.set_offset(gpui::point(px(0.), px(0.)));
         let asked = self.asked;
         if q.is_empty() {
             self.answered = asked;
@@ -837,9 +922,8 @@ impl BrainApp {
                 self.away = Some(e);
             }
         }
-        let shown = search::ROWS.min(self.results.len());
         self.pick = stood
-            .and_then(|p| self.results[..shown].iter().position(|f| f.page == p))
+            .and_then(|p| self.results.iter().position(|f| f.page == p))
             .or((!self.results.is_empty()).then_some(0));
         self.replanned = true;
         if !self.orbiting() {
@@ -861,9 +945,10 @@ impl BrainApp {
         if self.results.is_empty() {
             return;
         }
-        let shown = search::ROWS.min(self.results.len());
         let at = self.pick.unwrap_or(0) as isize + by;
-        self.pick = Some(at.rem_euclid(shown.max(1) as isize) as usize);
+        let pick = at.rem_euclid(self.results.len() as isize) as usize;
+        self.pick = Some(pick);
+        self.results_scroll.scroll_to_item(pick);
         if !self.orbiting() {
             let page = self.results[self.pick.unwrap_or(0)].page;
             self.fly_to_page(page);
@@ -1006,10 +1091,26 @@ impl BrainApp {
     /// and narrow beside an orbit.
     fn search_width(&self) -> f32 {
         if self.aside() {
-            return search::ASIDE;
+            // Beside an orbit, as wide as the orbit's room leaves.
+            let w = self.size.0;
+            return (w
+                - reader::sheet_width(w, self.reader_k())
+                - chrome::INSET * 2.
+                - search::ORBIT_WANTS)
+                .clamp(search::ASIDE, search::WIDTH);
         }
         (self.size.0 - chrome::INSET * 3. - chrome::SWITCH_ROOM)
             .clamp(chrome::SEARCH_LEAST, search::WIDTH)
+    }
+
+    /// Whether what changed lately shows under the search: before anything
+    /// is asked, with the field taking the keys over the sky.
+    fn recent_shown(&self) -> bool {
+        self.typing
+            && self.query.is_empty()
+            && self.reading.is_none()
+            && self.replay.is_none()
+            && self.data.as_ref().is_some_and(|d| !d.recent.is_empty())
     }
 
     /// Whether the ranked results stay beside the orbit of the page read:
@@ -1018,16 +1119,8 @@ impl BrainApp {
         let w = self.size.0;
         self.reading.is_some()
             && !self.results.is_empty()
-            && w - reader::sheet_width(w) - search::ASIDE - chrome::INSET * 2.
+            && w - reader::sheet_width(w, self.reader_k()) - search::ASIDE - chrome::INSET * 2.
                 >= search::ORBIT_LEAST
-    }
-
-    /// How many results stand beside the orbit.
-    fn aside_rows(&self) -> usize {
-        let room = self.size.1 - search::FIELD_HEIGHT - chrome::INSET * 4. - chrome::FOOT;
-        ((room / search::ASIDE_ROW).floor().max(0.) as usize)
-            .min(search::ASIDE_MOST)
-            .min(self.results.len())
     }
 
     /// A page open is the sky turned into its orbit.
@@ -1040,13 +1133,14 @@ impl BrainApp {
     fn free(&self) -> Rect {
         let (w, h) = self.size;
         let right = if self.reading.is_some() {
-            w - reader::sheet_width(w)
+            w - reader::sheet_width(w, self.reader_k())
         } else {
             w
         };
         // The list under the search covers the sky's left; beside an
-        // orbit only when it stays there.
-        let left = if self.results.is_empty() || (self.reading.is_some() && !self.aside()) {
+        // orbit only when it stays there. So does what changed lately.
+        let listed = !self.results.is_empty() && (self.reading.is_none() || self.aside());
+        let left = if !listed && !self.recent_shown() {
             0.
         } else {
             self.search_width() + chrome::INSET * 2.
@@ -1209,6 +1303,41 @@ impl BrainApp {
         let ks = &e.keystroke;
         let m = &ks.modifiers;
         let typing = self.field.read(cx).is_focused(window);
+        // The page read zooms by the one rule, wherever the keyboard is.
+        if self.reading.is_some()
+            && let Some(z) = zoom::from_key(ks)
+        {
+            self.zoom_reader(z, 1, cx);
+            cx.stop_propagation();
+            return;
+        }
+        // The page read scrolls from the keyboard as any page does; Left
+        // and Right go round its ring.
+        if self.reading.is_some() && !typing && !m.control && !m.alt && !m.platform {
+            let reader = self.reader.clone();
+            let step = reader.read(cx).arrow_step();
+            let moved = match ks.key.as_str() {
+                "pagedown" => Some(Scroll::Pages(1.)),
+                "pageup" => Some(Scroll::Pages(-1.)),
+                "space" if self.replay.is_some() => None,
+                "space" if m.shift => Some(Scroll::Pages(-1.)),
+                "space" => Some(Scroll::Pages(1.)),
+                "down" => Some(Scroll::By(step)),
+                "up" => Some(Scroll::By(-step)),
+                "home" => Some(Scroll::End(false)),
+                "end" => Some(Scroll::End(true)),
+                _ => None,
+            };
+            if let Some(how) = moved {
+                reader.update(cx, |r, cx| match how {
+                    Scroll::Pages(n) => r.scroll_pages(n, cx),
+                    Scroll::By(by) => r.scroll_by(by, cx),
+                    Scroll::End(end) => r.scroll_end(end, cx),
+                });
+                cx.stop_propagation();
+                return;
+            }
+        }
         if m.control || m.platform {
             if ks.key == "t" {
                 self.next_theme(cx);
@@ -1272,12 +1401,8 @@ impl BrainApp {
             }
             // Round the ring of the page read, one neighbour at a time;
             // Enter reads the one stood on.
-            "left" | "right" | "up" | "down" if !typing && self.orbiting() => {
-                let by = if matches!(ks.key.as_str(), "right" | "down") {
-                    1
-                } else {
-                    -1
-                };
+            "left" | "right" if !typing && self.orbiting() => {
+                let by = if ks.key == "right" { 1 } else { -1 };
                 self.round_the_ring(by, cx);
                 cx.stop_propagation();
             }
@@ -1314,6 +1439,23 @@ impl BrainApp {
             _ => {}
         }
     }
+}
+
+/// How a key moves the page read.
+#[derive(Clone, Copy)]
+enum Scroll {
+    Pages(f32),
+    By(f32),
+    End(bool),
+}
+
+/// The reader's body size the settings keep, held in range.
+fn reader_size(s: &source::Settings) -> f32 {
+    s.reader_text
+        .filter(|v| v.is_finite())
+        .map_or(tokens::reader::BODY, |v| {
+            v.clamp(tokens::reader::TEXT_LEAST, tokens::reader::TEXT_MOST)
+        })
 }
 
 /// A corpus and its sky, off the UI thread.
@@ -1982,7 +2124,7 @@ impl BrainApp {
             {
                 continue;
             }
-            if !taken.take(bx, by, tw, size * 1.4, 6.) {
+            if !taken.take(bx, by, tw, size * 1.4, k::NAME_GAP * 1.5) {
                 continue;
             }
             let hue = data.hues[sys.subject];
@@ -2128,7 +2270,7 @@ impl BrainApp {
                 x + 9.
             };
             let size = k::PAGE_NAME;
-            if !taken.take(lx, y - size * 0.75, tw, size * 1.5, 3.) {
+            if !taken.take(lx, y - size * 0.75, tw, size * 1.5, k::NAME_GAP) {
                 continue;
             }
             count += 1;
@@ -2258,32 +2400,73 @@ impl BrainApp {
             }
             let lit = Some(p.page) == hot;
             let right = p.angle.cos() >= 0.;
-            // A name runs as far as the sky beside its planet allows.
+            // A name runs as far as the sky beside its planet allows, on a
+            // second line before it is cut; never past that room.
             let off = tokens::orbit::NAME_OFF;
             let room = if right {
                 free.x + free.w - x - off
             } else {
                 x - off - free.x
             } - chrome::INSET / 2.;
-            let most = ((room / (k::PAGE_NAME * tokens::orbit::NAME_CHAR)) as usize)
-                .clamp(tokens::orbit::NAME_MAX, tokens::orbit::NAME_MOST);
-            let text = shorten(&data.corpus.pages[p.page].title, most);
-            let tw = paint::measure(&text, k::PAGE_NAME, &Face::mono(lit), window);
+            let face = Face::mono(lit);
+            let size = k::PAGE_NAME;
+            let title = &data.corpus.pages[p.page].title;
+            let lines = name_lines(title, room, |s| paint::measure(s, size, &face, window));
+            let widths: Vec<f32> = lines
+                .iter()
+                .map(|l| paint::measure(l, size, &face, window))
+                .collect();
+            let tw = widths.iter().copied().fold(0., f32::max);
+            let line = size * 1.25;
+            let high = line * lines.len() as f32;
+            let top = y - high / 2.;
             let lx = if right { x + off } else { x - off - tw };
-            if !lit && !taken.take(lx, y - 9., tw, 18., 2.) {
+            if !lit && !taken.take(lx, top, tw, high, 2.) {
                 continue;
             }
-            pic.labels.push(Label {
-                text: text.into(),
-                x: lx,
-                y,
-                size: k::PAGE_NAME,
-                color: if lit { t.text } else { alpha(t.text2, 0.9 * a) },
-                face: Face::mono(lit),
-                align: Align::Left,
-            });
+            for (n, (text, w)) in lines.into_iter().zip(widths).enumerate() {
+                pic.labels.push(Label {
+                    text: text.into(),
+                    x: if right { x + off } else { x - off - w },
+                    y: top + line * (n as f32 + 0.5),
+                    size,
+                    color: if lit { t.text } else { alpha(t.text2, 0.9 * a) },
+                    face: face.clone(),
+                    align: Align::Left,
+                });
+            }
         }
     }
+}
+
+/// A name in `room` pixels, as `measure` sizes text: whole on one line if
+/// it fits, else split between its words onto two, else cut to the room.
+fn name_lines(name: &str, room: f32, measure: impl Fn(&str) -> f32) -> Vec<String> {
+    if measure(name) <= room {
+        return vec![name.to_string()];
+    }
+    // The split that leaves the longer line shortest.
+    let best = name
+        .match_indices(' ')
+        .map(|(i, _)| (name[..i].trim_end(), name[i..].trim_start()))
+        .map(|(a, b)| (a, b, measure(a).max(measure(b))))
+        .min_by(|x, y| x.2.total_cmp(&y.2));
+    if let Some((a, b, widest)) = best
+        && widest <= room
+    {
+        return vec![a.to_string(), b.to_string()];
+    }
+    // Cut where it still fits, letter by letter from the whole.
+    let chars: Vec<char> = name.chars().collect();
+    let mut n = chars.len().min(tokens::orbit::NAME_MOST);
+    while n > tokens::orbit::NAME_LEAST {
+        let cut = shorten(name, n);
+        if measure(&cut) <= room {
+            return vec![cut];
+        }
+        n -= 1;
+    }
+    vec![shorten(name, tokens::orbit::NAME_LEAST)]
 }
 
 /// The bench's camera: a fixed tour over the whole sky, then close in on
@@ -2346,6 +2529,7 @@ impl Render for BrainApp {
             window.focus(&self.focus, cx);
         }
         let typing = self.field.read(cx).is_focused(window);
+        self.typing = typing;
         self.bench_types(cx);
         let (picture, busy) = self.scene(window, &t);
         if busy {
@@ -2524,7 +2708,7 @@ impl BrainApp {
             .w(px(self.search_width()))
             .flex()
             .flex_col()
-            .gap(px(6.))
+            .gap(px(search::LIST_GAP))
             .occlude()
             .child(
                 div()
@@ -2538,8 +2722,7 @@ impl BrainApp {
             );
         let Some(data) = &self.data else { return panel };
         if self.query.is_empty() {
-            if typing && self.reading.is_none() && self.replay.is_none() && !data.recent.is_empty()
-            {
+            if typing && self.recent_shown() {
                 panel = panel.child(self.recent(data, t, cx));
             }
             return panel;
@@ -2584,35 +2767,34 @@ impl BrainApp {
         if self.results.is_empty() || (self.reading.is_some() && !typing && !aside) {
             return panel;
         }
-        let mut list = div()
+        // Every result is reachable: the list scrolls in the room down to
+        // the counts, and the wheel over it is its own, not the sky's.
+        let mut room = self.size.1
+            - search::FIELD_HEIGHT
+            - chrome::INSET * 3.
+            - chrome::FOOT
+            - search::LIST_GAP;
+        if self.away.is_some() {
+            room -= search::AWAY;
+        }
+        let rows = self
+            .results
+            .iter()
+            .enumerate()
+            .map(|(i, f)| self.result_row(i, f, data, t, aside, cx).into_any_element())
+            .collect::<Vec<_>>();
+        let list = div()
+            .id("results")
             .flex()
             .flex_col()
             .py(px(4.))
+            .max_h(px(room.max(search::ASIDE_ROW * 3.)))
+            .overflow_y_scroll()
+            .track_scroll(&self.results_scroll)
+            .on_scroll(|_, _, cx| cx.stop_propagation())
             .rounded(px(chrome::RADIUS))
-            .bg(veil(t, chrome::PANEL_ALPHA));
-        let rows = if aside {
-            self.aside_rows()
-        } else {
-            search::ROWS
-        };
-        for (i, f) in self.results.iter().take(rows).enumerate() {
-            list = list.child(self.result_row(i, f, data, t, aside, cx));
-        }
-        if self.results.len() > rows {
-            let more = self.results.len() - rows;
-            list = list.child(
-                div()
-                    .px(px(search::ROW_PAD_X))
-                    .py(px(4.))
-                    .text_size(px(search::SNIPPET))
-                    .text_color(t.dim)
-                    .child(if aside {
-                        format!("{more} more found")
-                    } else {
-                        format!("{more} more lit in the sky")
-                    }),
-            );
-        }
+            .bg(veil(t, chrome::PANEL_ALPHA))
+            .children(rows);
         panel = panel.child(list);
         panel
     }
@@ -2698,12 +2880,18 @@ impl BrainApp {
         let snippet = snippet_text(&f.snippet, &page.summary, hue, t);
         div()
             .id(("result", i))
+            // Its own height in the scrolling list, a wrapped title too.
+            .flex_none()
             .flex()
             .gap(px(10.))
             .px(px(search::ROW_PAD_X))
             .py(px(search::ROW_PAD_Y))
+            // Beside an orbit a title wraps onto a second line before it
+            // is cut.
             .when(compact, |d| {
-                d.h(px(search::ASIDE_ROW)).py(px(0.)).items_center()
+                d.min_h(px(search::ASIDE_ROW))
+                    .py(px(search::ASIDE_ROW_PAD))
+                    .items_center()
             })
             .when(picked, |d| d.bg(alpha(hue, 0.1)))
             .cursor_pointer()
@@ -2742,7 +2930,8 @@ impl BrainApp {
                                 div()
                                     .flex_1()
                                     .min_w_0()
-                                    .truncate()
+                                    .when(compact, |d| d.line_clamp(2).text_ellipsis())
+                                    .when(!compact, |d| d.truncate())
                                     .text_size(px(search::TITLE))
                                     .text_color(if picked { t.text } else { alpha(t.text, 0.9) })
                                     .when(picked, |d| d.font_weight(FontWeight::BOLD))
@@ -2775,7 +2964,7 @@ impl BrainApp {
     /// days worked on as a strip to pick from, and play and pause.
     fn replay_bar(&self, t: &Theme, cx: &mut Context<Self>) -> AnyElement {
         let right = if self.reading.is_some() {
-            reader::sheet_width(self.size.0) + chrome::INSET
+            reader::sheet_width(self.size.0, self.reader_k()) + chrome::INSET
         } else {
             chrome::INSET
         };
@@ -3005,7 +3194,7 @@ impl BrainApp {
     /// The theme's mark: the direction shown, and a click to the next.
     fn theme_button(&self, t: &Theme, cx: &mut Context<Self>) -> impl IntoElement {
         let right = if self.reading.is_some() {
-            reader::sheet_width(self.size.0) + chrome::INSET
+            reader::sheet_width(self.size.0, self.reader_k()) + chrome::INSET
         } else {
             chrome::INSET
         };
@@ -3035,41 +3224,88 @@ impl BrainApp {
     }
 
     fn sheet(&self, t: &Theme, cx: &mut Context<Self>) -> impl IntoElement {
-        let w = reader::sheet_width(self.size.0);
+        let w = reader::sheet_width(self.size.0, self.reader_k());
         let back = !self.back.is_empty();
+        // Back and close: drawn marks a pointer finds, on targets it can
+        // hit. The font's arrow and cross draw at a third of its size.
+        let (ink, raised) = (t.text2, t.raised);
+        let glyph = move |id: &'static str, back: bool, tip: &'static str| {
+            div()
+                .id(id)
+                .size(px(size::CONTROL))
+                .flex()
+                .items_center()
+                .justify_center()
+                .rounded(px(size::RADIUS))
+                .cursor_pointer()
+                .hover(move |s| s.bg(raised))
+                .tooltip(kit::tip(tip))
+                .child(
+                    canvas(
+                        |_, _, _| {},
+                        move |b: Bounds<Pixels>, _, window, _| {
+                            let o = b.origin;
+                            let at = |x: f32, y: f32| point(o.x + px(x), o.y + px(y));
+                            let g = chrome::GLYPH;
+                            let mut path = PathBuilder::stroke(px(chrome::GLYPH_LINE));
+                            if back {
+                                path.move_to(at(g, g / 2.));
+                                path.line_to(at(0., g / 2.));
+                                path.move_to(at(g / 2.2, g * 0.08));
+                                path.line_to(at(0., g / 2.));
+                                path.line_to(at(g / 2.2, g * 0.92));
+                            } else {
+                                path.move_to(at(0., 0.));
+                                path.line_to(at(g, g));
+                                path.move_to(at(g, 0.));
+                                path.line_to(at(0., g));
+                            }
+                            if let Ok(path) = path.build() {
+                                window.paint_path(path, ink);
+                            }
+                        },
+                    )
+                    .size(px(chrome::GLYPH)),
+                )
+        };
         let bar = div()
             .absolute()
-            .top(px(10.))
-            .right(px(14.))
+            .top(px(chrome::SHEET_BAR))
+            .right(px(chrome::SHEET_BAR))
             .flex()
             .gap(px(4.))
-            .text_size(px(tokens::reader::LEDE))
             .when(back, |d| {
                 d.child(
-                    div()
-                        .id("back")
-                        .px(px(8.))
-                        .py(px(2.))
-                        .rounded(px(4.))
-                        .cursor_pointer()
-                        .text_color(t.text2)
-                        .hover(|s| s.text_color(t.text).bg(t.raised))
-                        .on_click(cx.listener(|me, _, _, cx| me.go_back(cx)))
-                        .child("←"),
+                    glyph("back", true, "Back (Alt+Left)")
+                        .on_click(cx.listener(|me, _, _, cx| me.go_back(cx))),
                 )
             })
             .child(
-                div()
-                    .id("close")
-                    .px(px(8.))
-                    .py(px(2.))
-                    .rounded(px(4.))
-                    .cursor_pointer()
-                    .text_color(t.text2)
-                    .hover(|s| s.text_color(t.text).bg(t.raised))
-                    .on_click(cx.listener(|me, _, _, cx| me.close(cx)))
-                    .child("×"),
+                glyph("close", false, "Close the page (Esc)")
+                    .on_click(cx.listener(|me, _, _, cx| me.close(cx))),
             );
+        let said = self.said.clone().map(|words| {
+            div()
+                .absolute()
+                .bottom(px(chrome::INSET * 2.))
+                .left_0()
+                .right_0()
+                .flex()
+                .justify_center()
+                .child(
+                    div()
+                        .px(px(chrome::SWITCH_PAD_X))
+                        .py(px(6.))
+                        .rounded(px(chrome::RADIUS))
+                        .bg(t.raised)
+                        .border_1()
+                        .border_color(t.divider)
+                        .text_size(px(size::TEXT))
+                        .text_color(t.text)
+                        .child(words),
+                )
+        });
+        let me = cx.entity().downgrade();
         div()
             .absolute()
             .top(px(0.))
@@ -3089,10 +3325,21 @@ impl BrainApp {
             }])
             .on_mouse_move(|_, _, cx| cx.stop_propagation())
             .on_scroll(|_, _, cx| cx.stop_propagation())
+            // A click on the page is the page's: the sky under it does not
+            // take it as a click on a star.
+            .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+            .on_mouse_up(MouseButton::Left, |_, _, cx| cx.stop_propagation())
             .child(
                 AnyView::from(self.reader.clone()).cached(StyleRefinement::default().size_full()),
             )
+            .child(zoom::catch(self.reader_wheel.clone(), move |n, _, cx| {
+                let _ = me.update(cx, |me, cx| {
+                    let z = if n > 0 { Zoom::In } else { Zoom::Out };
+                    me.zoom_reader(z, n.abs(), cx)
+                });
+            }))
             .child(bar)
+            .children(said)
     }
 }
 
@@ -3170,5 +3417,28 @@ fn window_bounds(cx: &App) -> gpui::Bounds<gpui::Pixels> {
             gpui::Bounds::new(gpui::point(px(*x), px(*y)), gpui::size(px(*w), px(*h)))
         }
         _ => gpui::Bounds::centered(None, gpui::size(px(1456.), px(939.)), cx),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::name_lines;
+
+    #[test]
+    fn an_orbit_name_wraps_before_it_is_cut() {
+        // Ten pixels a letter.
+        let measure = |s: &str| s.chars().count() as f32 * 10.;
+        assert_eq!(
+            name_lines("Bronze bushings", 200., measure),
+            vec!["Bronze bushings"]
+        );
+        assert_eq!(
+            name_lines("Time sync without a network", 200., measure),
+            vec!["Time sync", "without a network"]
+        );
+        // No split fits: cut to the room, never past it.
+        let cut = name_lines("Synchronisation-without-networks", 120., measure);
+        assert_eq!(cut.len(), 1);
+        assert!(measure(&cut[0]) <= 120.);
     }
 }

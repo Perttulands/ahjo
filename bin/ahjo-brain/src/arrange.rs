@@ -82,8 +82,29 @@ pub fn orbit(corpus: &Corpus, sky: &Sky, sun: usize, view: Rect, evidence: bool)
     }
     groups.sort_by(|a, b| a.2.total_cmp(&b.2).then(a.0.cmp(&b.0)));
     let total: usize = groups.iter().map(|g| g.1.len()).sum();
-    // The outermost ring leaves room beside it for the planets' names.
-    let outer = (view.w / 2. - orbit::ROOM_X)
+    // The outermost ring leaves room beside it for the planets' names: as
+    // much as the longest of them needs, while the ring keeps its least.
+    // A long name takes two lines, so its wider line is a little over half.
+    let longest = groups
+        .iter()
+        .flat_map(|g| &g.1)
+        .map(|&p| corpus.pages[p].title.chars().count())
+        .max()
+        .unwrap_or(0)
+        .min(orbit::NAME_MOST);
+    let longest = if longest > orbit::NAME_LINE {
+        (longest / 2 + orbit::NAME_LINE_SLACK).max(orbit::NAME_LINE)
+    } else {
+        longest
+    };
+    let names = longest as f32 * crate::tokens::sky::PAGE_NAME * orbit::NAME_CHAR
+        + orbit::NAME_OFF
+        + orbit::NAME_PAD;
+    let room_x = names.clamp(
+        orbit::ROOM_X,
+        (view.w / 2. - orbit::RING_LEAST).max(orbit::ROOM_X),
+    );
+    let outer = (view.w / 2. - room_x)
         .min(view.h / 2. - orbit::ROOM_Y)
         .max(60.);
     let radius = if total > orbit::CROWD {
@@ -199,6 +220,32 @@ mod tests {
             (p.angle + std::f32::consts::FRAC_PI_2).rem_euclid(std::f32::consts::TAU)
         };
         assert!(ring.windows(2).all(|w| angle(w[0]) <= angle(w[1])));
+    }
+
+    #[test]
+    fn a_long_name_gets_room_beside_the_ring() {
+        let long = "Time sync without a network";
+        assert!(long.len() > orbit::NAME_LINE);
+        let corpus = crate::corpus::Corpus::new(vec![
+            parse("knowledge/hub/hub.md", "# Hub\n[[a1]]"),
+            parse("knowledge/hub/a1.md", &format!("# {long}")),
+        ]);
+        let sky = layout(&corpus, &Placement::new());
+        let hub = corpus.by_path("knowledge/hub/hub.md").unwrap();
+        // The sky beside an open page at full screen.
+        let view = Rect {
+            x: 0.,
+            y: 72.,
+            w: 1030.,
+            h: 970.,
+        };
+        let o = orbit(&corpus, &sky, hub, view, true);
+        // Whole on two lines: "Time sync" over "without a network".
+        let beside = view.w / 2. - o.radius - orbit::NAME_OFF;
+        let needs =
+            "without a network".len() as f32 * crate::tokens::sky::PAGE_NAME * orbit::NAME_CHAR;
+        assert!(beside >= needs, "{beside} beside the ring, {needs} needed");
+        assert!(o.radius >= orbit::RING_LEAST);
     }
 
     #[test]
