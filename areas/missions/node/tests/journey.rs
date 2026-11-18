@@ -285,7 +285,11 @@ async fn cli_authors_two_steps_answers_gate_and_finishes_with_fake_sessions() {
     let cursor = waiting["cursor"].as_u64().unwrap();
     let status = cli(&node, "run", &["status", run]).await;
     let seq = status["waitingGates"][0]["requestedSeq"].as_u64().unwrap();
-    let expected = format!("ahjo gate approve {run} {gate} --requested-seq {seq}");
+    // The suggestion reaches the node the command named.
+    let expected = format!(
+        "ahjo gate approve --node {}/ {run} {gate} --requested-seq {seq}",
+        node.url()
+    );
     assert!(
         waiting["next"]
             .as_array()

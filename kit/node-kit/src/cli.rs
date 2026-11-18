@@ -34,6 +34,7 @@ fn usage_error(message: String) -> anyhow::Error {
 /// one this machine runs, or `--node` among `args`.
 pub async fn run(noun: &str, args: &[String], out: &mut impl Write) -> Result<i32> {
     let (node, args) = take_node(args)?;
+    let named = node.clone();
     // An address is the node the command talks to; an id is the node the
     // tool runs on, reached through the one it talks to.
     let (url, on) = match node {
@@ -73,9 +74,13 @@ pub async fn run(noun: &str, args: &[String], out: &mut impl Write) -> Result<i3
             Some(near) => format!(" (did you mean {near}?)"),
             None => String::new(),
         };
-        return Err(usage_error(format!(
-            "no command {noun}{nearest}; this node's commands are {}{off}",
-            known.join(", ")
+        return Err(usage_error(aimed(
+            &format!(
+                "no command {noun}{nearest}; this node's commands are {}{off}",
+                known.join(", ")
+            ),
+            named.as_deref(),
+            &tools,
         )));
     }
     let Some(verb) = args.first().filter(|v| !v.starts_with('-')) else {
@@ -89,8 +94,10 @@ pub async fn run(noun: &str, args: &[String], out: &mut impl Write) -> Result<i3
             Some(near) => format!(" (did you mean ahjo {noun} {near}?)"),
             None => String::new(),
         };
-        return Err(usage_error(format!(
-            "no command {noun} {verb}{nearest}; ahjo {noun} lists its verbs"
+        return Err(usage_error(aimed(
+            &format!("no command {noun} {verb}{nearest}; ahjo {noun} lists its verbs"),
+            named.as_deref(),
+            &tools,
         )));
     };
     let rest = &args[1..];
@@ -113,15 +120,23 @@ pub async fn run(noun: &str, args: &[String], out: &mut impl Write) -> Result<i3
     let failed = answer["isError"].as_bool().unwrap_or(false);
     let text = answer["content"][0]["text"].as_str().unwrap_or("");
     if failed {
+        // A suggested command reaches the node this one was sent to.
+        let aim = |text: &str| aimed(text, named.as_deref(), &tools);
         match serde_json::from_str::<Error>(text) {
-            Ok(error) if json_out => eprintln!("{}", json!({ "error": error })),
-            Ok(error) => eprintln!("ahjo {noun} {verb}: {error}"),
-            Err(_) => eprintln!("ahjo {noun} {verb}: {text}"),
+            Ok(mut error) => {
+                error.message = aim(&error.message);
+                match json_out {
+                    true => eprintln!("{}", json!({ "error": error })),
+                    false => eprintln!("ahjo {noun} {verb}: {error}"),
+                }
+            }
+            Err(_) => eprintln!("ahjo {noun} {verb}: {}", aim(text)),
         }
         return Ok(1);
     }
     let mut value: Value =
         serde_json::from_str(text).unwrap_or_else(|_| Value::String(text.into()));
+    aim(&mut value, named.as_deref(), &tools);
     if json_out {
         writeln!(out, "{}", serde_json::to_string_pretty(&value)?)?;
     } else {
@@ -196,6 +211,72 @@ fn listing(tools: &[Value]) -> String {
         })
         .collect::<Vec<_>>()
         .join("\n\n")
+}
+
+/// Every string in `value` with its suggested commands aimed at `node`.
+fn aim(value: &mut Value, node: Option<&str>, tools: &[Value]) {
+    match value {
+        Value::String(text) => *text = aimed(text, node, tools),
+        Value::Array(items) => items.iter_mut().for_each(|v| aim(v, node, tools)),
+        Value::Object(fields) => fields.values_mut().for_each(|v| aim(v, node, tools)),
+        _ => {}
+    }
+}
+
+/// `text` with `--node <node>` after each `ahjo <noun> <verb>` it suggests
+/// (or `ahjo <noun>`), so following a suggestion reaches the node the
+/// command named. Without a named node the text is as it was.
+fn aimed(text: &str, node: Option<&str>, tools: &[Value]) -> String {
+    let Some(node) = node else {
+        return text.to_owned();
+    };
+    let flag = if node
+        .bytes()
+        .all(|b| b.is_ascii_alphanumeric() || b"_-.:/".contains(&b))
+    {
+        format!(" --node {node}")
+    } else {
+        format!(" --node '{}'", node.replace('\'', "'\\''"))
+    };
+    let known = nouns(tools);
+    let word = |s: &str| {
+        s.find(|c: char| !(c.is_ascii_lowercase() || c == '-' || c == '_'))
+            .unwrap_or(s.len())
+    };
+    let mut out = String::with_capacity(text.len());
+    let mut rest = text;
+    while let Some(at) = rest.find("ahjo ") {
+        let starts = rest[..at]
+            .chars()
+            .next_back()
+            .is_none_or(|c| !(c.is_alphanumeric() || c == '_' || c == '-'));
+        let after = &rest[at + 5..];
+        let noun = &after[..word(after)];
+        let mut end = None;
+        if starts && known.iter().any(|k| k == noun) {
+            end = Some(at + 5 + noun.len());
+            if let Some(tail) = after[noun.len()..].strip_prefix(' ') {
+                let verb = &tail[..word(tail)];
+                let tool = format!("{noun}_{}", verb.replace('-', "_"));
+                if !verb.is_empty() && tools.iter().any(|t| name(t) == tool) {
+                    end = Some(at + 5 + noun.len() + 1 + verb.len());
+                }
+            }
+        }
+        match end {
+            Some(end) => {
+                out.push_str(&rest[..end]);
+                out.push_str(&flag);
+                rest = &rest[end..];
+            }
+            None => {
+                out.push_str(&rest[..at + 5]);
+                rest = &rest[at + 5..];
+            }
+        }
+    }
+    out.push_str(rest);
+    out
 }
 
 fn take_node(args: &[String]) -> Result<(Option<String>, Vec<String>)> {
@@ -389,7 +470,7 @@ fn help(noun: &str, verb: &str, tool: &Value) -> String {
         if let Some(d) = spec["description"].as_str() {
             line.push_str(&format!(": {d}"));
         }
-        if let Some(values) = spec["enum"].as_array() {
+        if let Some(values) = spec["enum"].as_array().filter(|v| !v.is_empty()) {
             let values: Vec<String> = values.iter().map(|v| v.to_string()).collect();
             line.push_str(&format!(" (one of {})", values.join(", ")));
         }
@@ -763,6 +844,41 @@ mod tests {
         let two = json!({"type": "object", "properties": {
             "path": {"type": "string"}, "all": {"type": "boolean"}}});
         assert!(parse(&two, &args(&["/srv"])).is_err(), "two could be meant");
+    }
+
+    #[test]
+    fn a_suggested_command_reaches_the_node_that_was_named() {
+        let tools = [
+            json!({"name": "session_list"}),
+            json!({"name": "mission_run"}),
+            json!({"name": "hook_add"}),
+        ];
+        let said = "no session named x; ahjo session list shows them";
+        assert_eq!(aimed(said, None, &tools), said, "no --node, no change");
+        assert_eq!(
+            aimed(said, Some("http://127.0.0.1:7399"), &tools),
+            "no session named x; ahjo session list --node http://127.0.0.1:7399 shows them"
+        );
+        assert_eq!(
+            aimed("ahjo mission run demo --inputs '{}'", Some("lab"), &tools),
+            "ahjo mission run --node lab demo --inputs '{}'"
+        );
+        assert_eq!(
+            aimed("`ahjo hook add` or ahjo session", Some("lab"), &tools),
+            "`ahjo hook add --node lab` or ahjo session --node lab"
+        );
+        let untouched = "ahjo serve, or ahjo nouns, or myahjo session list";
+        assert_eq!(aimed(untouched, Some("lab"), &tools), untouched);
+        let mut answer = json!({"next": ["ahjo session list"], "valid": true});
+        aim(&mut answer, Some("lab"), &tools);
+        assert_eq!(answer["next"][0], "ahjo session list --node lab");
+    }
+
+    #[test]
+    fn an_empty_choice_is_not_listed() {
+        let tool = json!({"name": "session_launch", "inputSchema": {"type": "object",
+            "properties": {"user": {"type": "string", "enum": []}}}});
+        assert!(!help("session", "launch", &tool).contains("one of"));
     }
 
     fn schema() -> Value {
