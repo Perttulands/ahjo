@@ -69,7 +69,10 @@ pub(crate) fn check_gate(gate: &mut Gate) -> Result<(), Error> {
     for kind in &gate.kinds {
         let kind = kind.trim();
         if !["code", "formation", "human"].contains(&kind) {
-            return Err(Error::new("invalid_gate_kind", "invalid gate kind"));
+            return Err(Error::new(
+                "invalid_gate_kind",
+                format!("invalid gate kind {kind:?}: a gate is human, formation (a judge) or code"),
+            ));
         }
         if !kinds.iter().any(|k| k == kind) {
             kinds.push(kind.to_owned());
