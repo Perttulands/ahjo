@@ -38,8 +38,11 @@ pub fn free_layout_position(
     fn snap(n: i64) -> i64 {
         (n.max(112).saturating_add(14) / 28) * 28
     }
+    // Read rows left to right and then down from the desired place. The
+    // search has no ceiling: below the lowest card every row is free, so it
+    // ends however many cards a mission holds.
     let (mut x, mut y) = (snap(desired_x), snap(desired_y));
-    for _ in 0..24 {
+    loop {
         if occupied
             .iter()
             .all(|(ox, oy)| ox.abs_diff(x) >= 308 || oy.abs_diff(y) >= 280)
@@ -53,13 +56,17 @@ pub fn free_layout_position(
         x = x.saturating_add(336);
         if x > 1900 {
             x = 112;
-            y = y.saturating_add(336);
+            y = match y.checked_add(336) {
+                Some(y) => y,
+                None => {
+                    return Err(Error::new(
+                        "conflict",
+                        "no free layout position: saved cards fill the bottom of the canvas",
+                    ));
+                }
+            };
         }
     }
-    Err(Error::new(
-        "conflict",
-        "no free layout position within bounded search",
-    ))
 }
 impl Store {
     pub fn find_free_layout_position(

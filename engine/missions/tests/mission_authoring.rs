@@ -1222,7 +1222,7 @@ fn restored_node_allocates_new_wire_id_when_original_is_taken() {
 }
 
 #[test]
-fn placement_refuses_a_full_bounded_search_and_a_foreign_layout() {
+fn placement_has_no_ceiling_and_refuses_a_foreign_layout() {
     use ahjo_mission_engine::free_layout_position;
     use ahjo_mission_model::{Formation, Layout, LayoutNode, Mission};
     let mut mission = Mission {
@@ -1234,8 +1234,10 @@ fn placement_refuses_a_full_bounded_search_and_a_foreign_layout() {
         mission_id: mission.id.clone(),
         ..Default::default()
     };
+    // Far more cards than the old bounded search could step past: the
+    // place found is the first free one, beside the last of them.
     let (mut x, mut y) = (112, 112);
-    for index in 0..24 {
+    for index in 0..57 {
         let id = format!("f{index}");
         mission.formations.push(Formation {
             id: id.clone(),
@@ -1248,13 +1250,8 @@ fn placement_refuses_a_full_bounded_search_and_a_foreign_layout() {
             y += 336;
         }
     }
-    assert_eq!(
-        free_layout_position(&mission, Some(&layout), 112, 112)
-            .unwrap_err()
-            .code
-            .as_str(),
-        "conflict"
-    );
+    let free = free_layout_position(&mission, Some(&layout), 112, 112).unwrap();
+    assert_eq!((free.x, free.y), (112 + 336 * 3, 112 + 336 * 9));
     layout.mission_id = "other".into();
     assert_eq!(
         free_layout_position(&mission, Some(&layout), 0, 0)

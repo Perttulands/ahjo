@@ -3,7 +3,7 @@
 //! the steps yet; an agent reading the notes staffs and briefs them.
 use crate::Missions;
 use ahjo_core::Error;
-use ahjo_missions_contract::{self as wire, NotePatch};
+use ahjo_missions_contract::{self as wire, NotePatch, Precondition};
 use serde_json::json;
 
 /// The rough steps written one per line (or separated by `;`), trimmed,
@@ -17,9 +17,49 @@ pub(crate) fn steps(text: &str) -> Vec<String> {
 }
 
 /// Fill the new, empty mission `slug` with `steps` chained from its Input
-/// to a Done end, and keep `note` as what it is for. A failure stops
-/// here: what was made so far stays, as any edit does.
+/// to a Done end, and keep `note` as what it is for. Creating a sketch is
+/// all or nothing: on a failure the half-made mission is removed with its
+/// archive, and the error says so.
 pub(crate) fn fill(
+    m: &Missions,
+    slug: &str,
+    steps: &[String],
+    note: &str,
+    actor: &str,
+) -> Result<(), Error> {
+    let Err(error) = sketch(m, slug, steps, note, actor) else {
+        return Ok(());
+    };
+    let message = match discard(m, slug) {
+        Ok(()) => format!(
+            "{}; the mission was not created and nothing of it is left, so create it again once that is put right",
+            error.message
+        ),
+        Err(left) => format!(
+            "{}; the half-made mission {slug} could not be removed ({}), so delete it with `ahjo mission delete {slug}` before creating it again",
+            error.message, left.message
+        ),
+    };
+    m.changed();
+    Err(Error::new(error.code, message))
+}
+
+/// Remove the mission `slug` this sketch made, archive and all.
+fn discard(m: &Missions, slug: &str) -> Result<(), Error> {
+    let current = m.store.mission_edit(slug)?;
+    let deleted = m.store.delete_mission(
+        slug,
+        Precondition {
+            rev: current.mission.rev,
+            etag: current.etag,
+        },
+    )?;
+    m.store
+        .remove_mission_archive(&deleted.slug, &deleted.archive_id)?;
+    Ok(())
+}
+
+fn sketch(
     m: &Missions,
     slug: &str,
     steps: &[String],

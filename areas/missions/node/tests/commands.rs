@@ -1245,3 +1245,91 @@ async fn a_mission_is_sketched_from_rough_steps() {
     );
     node.stop().await;
 }
+
+/// A sketch as long as a person might type is made whole and laid out as
+/// Arrange lays it out, every card in a place of its own.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_long_sketch_is_made_whole_and_arranged() {
+    let node = Node::start(&[sessions::LISTING, ahjo_work::LISTING, LAB], "")
+        .await
+        .unwrap();
+    for count in [15, 60] {
+        let slug = format!("long{count}");
+        let steps: Vec<_> = (1..=count).map(|i| format!("Step {i}")).collect();
+        let made = node
+            .call("mission_new", json!({"slug":slug,"steps":steps.join("\n")}))
+            .await
+            .unwrap();
+        assert_eq!(made["steps"].as_array().unwrap().len(), count, "{made}");
+        let read = node
+            .call("mission_inspect", json!({"mission":slug}))
+            .await
+            .unwrap();
+        let last = read["steps"].as_array().unwrap().last().unwrap().clone();
+        assert_eq!(last["next"], "end (done)", "{read}");
+        let nodes = |layout: serde_json::Value| {
+            let mut v: Vec<(String, i64, i64)> = (layout["layout"]["nodes"].as_array())
+                .unwrap()
+                .iter()
+                .map(|n| {
+                    let id = n["id"].as_str().unwrap().to_owned();
+                    (id, n["x"].as_i64().unwrap(), n["y"].as_i64().unwrap())
+                })
+                .collect();
+            v.sort();
+            v
+        };
+        let built = nodes(
+            node.call("layout_show", json!({"mission":slug}))
+                .await
+                .unwrap(),
+        );
+        // The Input, every step and Done.
+        assert_eq!(built.len(), count + 2);
+        let arranged = nodes(
+            node.call("mission_arrange", json!({"mission":slug}))
+                .await
+                .unwrap(),
+        );
+        assert_eq!(built, arranged, "a sketch is left as Arrange lays it out");
+        let mut places: Vec<_> = built.iter().map(|(_, x, y)| (x, y)).collect();
+        places.sort();
+        places.dedup();
+        assert_eq!(places.len(), built.len(), "two cards share a place");
+    }
+    node.stop().await;
+}
+
+/// A sketch that cannot be finished leaves nothing behind, and the error
+/// says the mission was not created.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_failed_sketch_leaves_no_mission() {
+    let node = Node::start(&[sessions::LISTING, ahjo_work::LISTING, LAB], "")
+        .await
+        .unwrap();
+    // The steps are made first; the note, too large to keep, fails last.
+    let failed = node
+        .call(
+            "mission_new",
+            json!({"slug":"half","steps":"Collect\nWrite","note":"x".repeat(70 * 1024)}),
+        )
+        .await
+        .unwrap_err();
+    assert_eq!(failed.code, "note_too_large", "{failed:?}");
+    assert!(
+        failed.message.contains("the mission was not created"),
+        "{failed:?}"
+    );
+    let missing = node
+        .call("mission_inspect", json!({"mission":"half"}))
+        .await
+        .unwrap_err();
+    assert_eq!(missing.code, "not_found");
+    let archives = node.call("mission_archives", json!({})).await.unwrap();
+    assert_eq!(archives["archives"], json!([]), "{archives}");
+    // The name is free again.
+    node.call("mission_new", json!({"slug":"half","steps":"Collect"}))
+        .await
+        .unwrap();
+    node.stop().await;
+}
