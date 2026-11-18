@@ -136,6 +136,11 @@ impl AgentsPage {
             );
             return;
         }
+        // Another folder or harness is not shown as the one before it
+        // while it is read.
+        if v.dir != dir || v.node != node || other_harness {
+            v.shape = None;
+        }
         if v.dir != dir || v.node != node {
             v.pick = Pick::None;
             v.file = None;
