@@ -108,7 +108,9 @@ fn description(name: &str) -> &'static str {
             "Permanently remove a listed mission archive's definition, layout and associated notes; unrelated notes and run history remain."
         }
         "mission_inspect" => "Read a mission and its graph.",
-        "mission_validate" => "Report errors and warnings on a mission.",
+        "mission_validate" => {
+            "Say whether a mission can run, with its errors and warnings and the next command."
+        }
         "mission_new" => {
             "Create a mission: empty, or with --example a copy of a staffed, wired example to start from (mission examples lists them)."
         }
@@ -344,10 +346,40 @@ async fn call(m: Missions, name: &str, a: Value) -> Result<Value, Error> {
         "mission_validate" => {
             let edit = m.store.mission_edit(required(&a, "mission")?)?;
             let report = validate(&edit.mission, &m.store.roles(), &Harnesses::from_host());
-            let valid = report.errors.is_empty();
-            Ok(
-                json!({"node":node,"valid":valid,"summary":validation_summary(report.errors.len(), report.warnings.len()),"missionRev":edit.mission.rev,"missionEtag":edit.etag,"errors":report.errors,"warnings":report.warnings}),
-            )
+            // Valid means a run can start: an Input card with no wire out is
+            // only a warning while drafting, but `mission run` refuses it.
+            let unwired = report
+                .warnings
+                .iter()
+                .find(|f| f.code == wire::Code::MissionNotRunnable);
+            let valid = report.errors.is_empty() && unwired.is_none();
+            let slug = shell_word(&edit.mission.slug);
+            let (summary, next) = match unwired {
+                Some(finding) if report.errors.is_empty() => {
+                    let to = edit
+                        .mission
+                        .formations
+                        .first()
+                        .map_or_else(|| "<step-id>".to_owned(), |step| shell_word(&step.id));
+                    (
+                        format!("not runnable: {}", finding.message),
+                        Some(format!("ahjo mission wire {slug} --to {to}")),
+                    )
+                }
+                _ if valid => (
+                    validation_summary(0, report.warnings.len()),
+                    Some(run_command(&slug, &edit.mission)),
+                ),
+                _ => (
+                    validation_summary(report.errors.len(), report.warnings.len()),
+                    None,
+                ),
+            };
+            let mut answer = json!({"node":node,"valid":valid,"summary":summary,"missionRev":edit.mission.rev,"missionEtag":edit.etag,"errors":report.errors,"warnings":report.warnings});
+            if let Some(next) = next {
+                answer["next"] = json!(next);
+            }
+            Ok(answer)
         }
         "mission_edit" => {
             let id = required(&a, "mission")?;
@@ -789,6 +821,31 @@ async fn wait(m: Missions, a: &Value) -> Result<Value, Error> {
         .collect();
     Ok(
         json!({"outcome":answer.outcome,"status":run.status,"cursor":answer.cursor,"asks":asks,"next":next,"outputs":outputs}),
+    )
+}
+
+/// The command that starts a run of a valid mission, with each input it
+/// requires to be filled in.
+fn run_command(slug: &str, mission: &wire::Mission) -> String {
+    let card = mission.input_cards.first();
+    let required: Vec<String> = match card.map(|c| &c.inputs) {
+        Some(inputs) if !inputs.is_empty() => inputs
+            .iter()
+            .filter(|input| input.required)
+            .map(|input| input.name.clone())
+            .collect(),
+        _ => vec!["brief".into()],
+    };
+    if required.is_empty() {
+        return format!("ahjo mission run {slug}");
+    }
+    let values: serde_json::Map<String, Value> = required
+        .into_iter()
+        .map(|name| (name, json!("...")))
+        .collect();
+    format!(
+        "ahjo mission run {slug} --inputs '{}'",
+        Value::Object(values)
     )
 }
 

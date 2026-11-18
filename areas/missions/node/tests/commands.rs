@@ -627,15 +627,47 @@ async fn a_simple_mission_needs_no_seat_or_port_names() {
     node.call("end_create", json!({"mission":"plain","title":"Done"}))
         .await
         .unwrap();
-    node.call("mission_wire", json!({"mission":"plain","to":"Answer"}))
-        .await
-        .unwrap();
     node.call(
         "formation_wire",
         json!({"mission":"plain","from":"Answer","to":"Done"}),
     )
     .await
     .unwrap();
+    // Without a wire from its Input card the mission cannot run, and
+    // validate says so, with the command that fixes it.
+    let unwired = node
+        .call("mission_validate", json!({"mission":"plain"}))
+        .await
+        .unwrap();
+    assert_eq!(unwired["errors"], json!([]), "{unwired}");
+    assert_eq!(unwired["valid"], false, "{unwired}");
+    assert!(
+        unwired["summary"]
+            .as_str()
+            .unwrap()
+            .starts_with("not runnable: "),
+        "{unwired}"
+    );
+    assert_eq!(
+        unwired["next"],
+        format!("ahjo mission wire plain --to {step_id}")
+    );
+    node.call("mission_wire", json!({"mission":"plain","to":"Answer"}))
+        .await
+        .unwrap();
+    let valid = node
+        .call("mission_validate", json!({"mission":"plain"}))
+        .await
+        .unwrap();
+    assert_eq!(
+        (&valid["valid"], &valid["summary"], &valid["next"]),
+        (
+            &json!(true),
+            &json!("valid"),
+            &json!("ahjo mission run plain --inputs '{\"brief\":\"...\"}'")
+        ),
+        "{valid}"
+    );
     let edges = node
         .call("mission_inspect", json!({"mission":"plain"}))
         .await
