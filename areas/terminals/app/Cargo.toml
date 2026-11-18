@@ -41,7 +41,6 @@ ahjo-terminals = { path = "../node" }
 ahjo-files = { path = "../../files/node" }
 ahjo-files-app = { path = "../../files/app" }
 ahjo-work-app = { path = "../../work/app" }
-ahjo-brain-app = { path = "../../brain/app" }
 ahjo-testkit = { path = "../../../kit/testkit" }
 ahjo-node-kit = { path = "../../../kit/node-kit" }
 ahjo-term = { path = "../../../engine/term" }

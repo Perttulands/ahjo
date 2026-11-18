@@ -245,7 +245,7 @@ mod tests {
     /// leader key, and what Ahjo does with it. `None` is the app's or no
     /// page's. Work owns leader B / Alt+B (column rather than a separate
     /// Beads tab), leader I / Alt+I (close its beside card), and leader R /
-    /// Alt+R (report); Brain owns leader L / Alt+L. The shell owns leader ? / Alt+K and leader K.
+    /// Alt+R (report). The shell owns leader ? / Alt+K and leader K.
     /// Files owns leader O / Alt+O instead of CHROTE's leader F / Alt+O,
     /// leaving Alt+F to the shell. There is no Agents tab or resident, so
     /// their G and Enter chords have no action.

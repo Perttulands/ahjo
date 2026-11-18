@@ -448,12 +448,7 @@ fn nothing_opened_on_the_page_resizes_a_session(cx: &mut TestAppContext) {
     let (shell, cx, settings) = open_pages_with_alpha(
         &running,
         "opened-size",
-        &[
-            terminals,
-            ahjo_files_app::build,
-            ahjo_work_app::build,
-            ahjo_brain_app::build,
-        ],
+        &[terminals, ahjo_files_app::build, ahjo_work_app::build],
         cx,
     );
     // Wide enough that a drawer could have moved the window aside.
@@ -628,12 +623,9 @@ fn nothing_opened_on_the_page_resizes_a_session(cx: &mut TestAppContext) {
         cx.debug_bounds("terminals-beside").is_none()
     });
 
-    // Work and Brain lie over the windows the same way: their panels
-    // (Alt+B, Alt+L), ...
-    for (keys, drawn, what) in [
-        ("alt-b", "work-panel", "the Work panel"),
-        ("alt-l", "brain-search", "the Brain panel"),
-    ] {
+    // Work lies over the windows the same way: its panel (Alt+B), ...
+    {
+        let (keys, drawn, what) = ("alt-b", "work-panel", "the Work panel");
         cx.simulate_keystrokes(keys);
         until(cx, what, |cx| {
             cx.debug_bounds("terminals-beside").is_some() && cx.debug_bounds(drawn).is_some()
@@ -689,7 +681,6 @@ fn nothing_opened_on_the_page_resizes_a_session(cx: &mut TestAppContext) {
     for (page_id, thing) in [
         ("files", vec!["--path", path.as_str()]),
         ("work", vec!["--item", "parvi-pnu.7"]),
-        ("brain", vec![]),
     ] {
         let args: Vec<String> = ["open", "--page", page_id]
             .into_iter()
@@ -734,13 +725,7 @@ fn what_lies_over_the_windows_takes_every_click_inside_it(cx: &mut TestAppContex
     let (shell, cx, settings) = open_pages_with_alpha(
         &running,
         "over",
-        &[
-            terminals,
-            toy,
-            ahjo_files_app::build,
-            ahjo_work_app::build,
-            ahjo_brain_app::build,
-        ],
+        &[terminals, toy, ahjo_files_app::build, ahjo_work_app::build],
         cx,
     );
     cx.simulate_resize(gpui::size(px(1440.), px(900.)));
@@ -882,9 +867,10 @@ fn what_lies_over_the_windows_takes_every_click_inside_it(cx: &mut TestAppContex
         term_focused(cx),
         "Esc from Files gives the terminal the keyboard"
     );
-    // Work and Brain: what is typed goes to their find, so the first Esc
-    // clears it and the second closes the panel.
-    for (keys, drawn) in [("alt-b", "work-panel-search"), ("alt-l", "brain-search")] {
+    // Work: what is typed goes to its find, so the first Esc clears it and
+    // the second closes the panel.
+    {
+        let (keys, drawn) = ("alt-b", "work-panel-search");
         cx.simulate_keystrokes(keys);
         until(cx, drawn, |cx| cx.debug_bounds(drawn).is_some());
         cx.simulate_input(MARK);

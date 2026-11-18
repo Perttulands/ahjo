@@ -29,7 +29,6 @@ ahjo-scheduled-app = { path = "../../areas/scheduled/app" }
 ahjo-files-app = { path = "../../areas/files/app" }
 ahjo-host-app = { path = "../../areas/host/app" }
 ahjo-work-app = { path = "../../areas/work/app" }
-ahjo-brain-app = { path = "../../areas/brain/app" }
 ahjo-missions-app = { path = "../../areas/missions/app" }
 
 # Linux builds are for testing on an invisible X display; the product is Windows.
@@ -43,3 +42,4 @@ embed-resource = "3"
 [dev-dependencies]
 async-channel = "2"
 gpui = { package = "gpui-pre", version = "=0.3.12", features = ["test-support"] }
+serde_json = "1"

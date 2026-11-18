@@ -1,10 +1,11 @@
 # Ahjo
 
 Ahjo is three apps on one app kit. Ahjo Swarm is the operator's agent
-workspace: terminals, files, work, brain, host and missions in one Rust binary,
-used through a native app and the `ahjo` CLI. Ahjo Brain and Ahjo Desk are
-standalone apps. `VISION.md` says what Swarm is for, `DESIGN.md` what good
-looks like in the app and `ARCHITECTURE.md` how it is built.
+workspace: terminals, files, work, host and missions in one Rust binary, used
+through a native app and the `ahjo` CLI, which also reaches the brain. Ahjo
+Brain and Ahjo Desk are standalone apps. `VISION.md` says what Swarm is for,
+`DESIGN.md` what good looks like in the app and `ARCHITECTURE.md` how it is
+built.
 
 ## The operator works on this machine while you do
 

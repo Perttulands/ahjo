@@ -67,5 +67,5 @@ The brain and the decision desk are their own apps, Ahjo Brain and Ahjo Desk,
 each with one purpose: exploring what we know, and the shared surface where an
 agent publishes something (a picture, a video, a rendered page, a question) and
 the operator responds freely, in prose and by marking what he sees. They share
-Swarm's look and are not opened from it. Swarm's Brain tab goes when Ahjo Brain
-replaces it.
+Swarm's look and are not opened from it. Swarm has no Brain tab; its agents
+reach the brain through `ahjo brain`.

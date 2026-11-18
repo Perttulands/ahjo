@@ -40,7 +40,8 @@ app's package is `ahjo-app-<name>` (`ahjo-app-swarm`, `ahjo-app-brain`,
 `ahjo-app-desk`), since `ahjo-brain` is the brain area's node crate; its
 binary is the name the operator runs. The areas are terminals, files, work,
 brain, host, scheduled, agents and missions; fleet becomes one after the first
-release. Launching sessions and agent events live in terminals. Settings is not
+release. The brain area has no page in Swarm: Ahjo Brain is where it is read,
+and its node side serves the `ahjo brain` commands. Launching sessions and agent events live in terminals. Settings is not
 an area: the shell's Settings page lists what pages declare.
 
 ## Rules the compiler holds
@@ -161,7 +162,7 @@ reserves, or whose `everywhere` chords share a key, naming both;
   layout has room (`Host::beside`), as the terminals draw a file a link
   named.
 - **Panels.** A page may also open a view of its own beside the terminals
-  without being asked (Files, Work and Brain each have one, toggled by an
+  without being asked (Files and Work each have one, toggled by an
   `everywhere` chord): the same `Host::show_beside`, so it lies over the
   terminal windows and no shared session changes size. While a view a page
   lent is open beside another, that page's channels stay on, as while it

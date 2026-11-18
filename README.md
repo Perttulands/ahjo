@@ -4,8 +4,9 @@ Ahjo is a family of three apps on one app kit: Ahjo Swarm, where you run your
 agents; Ahjo Brain, for exploring what we know; and Ahjo Desk, where agents
 publish and you answer.
 
-Ahjo Swarm holds sessions, files, work, brain, host and missions in one Rust
-binary, `ahjo`, with a native app for you and a CLI for your agent.
+Ahjo Swarm holds sessions, files, work, host and missions in one Rust binary,
+`ahjo`, with a native app for you and a CLI for your agent; the CLI reaches the
+brain too.
 
 `VISION.md` says what Swarm is for. `ARCHITECTURE.md` says how it is built.
 
