@@ -188,6 +188,27 @@ pub fn inside(dir: &str, segment: &str, folders: &[String]) -> Vec<Suggestion> {
         .collect()
 }
 
+/// The folder in `dir` that typing `segment` leads to, written as Tab
+/// completes it: the one named so, or the only one whose name starts so,
+/// case aside. None for an empty segment or several candidates.
+pub fn leads_to(dir: &str, segment: &str, folders: &[String]) -> Option<String> {
+    if segment.is_empty() {
+        return None;
+    }
+    let rows = inside(dir, segment, folders);
+    let exact = format!("{dir}{segment}");
+    let named = rows.iter().find(|r| r.path == exact).or_else(|| {
+        let exact = exact.to_lowercase();
+        rows.iter().find(|r| r.path.to_lowercase() == exact)
+    });
+    let row = match named {
+        Some(row) => row,
+        None if rows.len() == 1 => &rows[0],
+        None => return None,
+    };
+    Some(row.complete.clone())
+}
+
 /// A letter as the search compares it, case aside.
 fn fold(c: char) -> char {
     c.to_lowercase().next().unwrap_or(c)
@@ -352,6 +373,15 @@ pub fn folders(
         }
     }
     out
+}
+
+/// The harness after `now` in `all`, or before it, round at the ends;
+/// none when there is no other.
+pub fn neighbour(all: &[String], now: &str, down: bool) -> Option<String> {
+    let n = all.len();
+    let at = all.iter().position(|h| h == now)?;
+    let next = if down { (at + 1) % n } else { (at + n - 1) % n };
+    (next != at).then(|| all[next].clone())
 }
 
 #[cfg(test)]
@@ -630,5 +660,32 @@ mod tests {
             folders(&launched, &["~".into()], &live, "", None),
             ["/srv/a", "/tmp/proj", "~", "/srv/b"]
         );
+    }
+
+    #[test]
+    fn typing_leads_to_the_folder_named_or_the_only_one_left() {
+        let folders = ["srv".to_string(), "srv-old".into(), "home".into()];
+        assert_eq!(leads_to("/", "srv", &folders).as_deref(), Some("/srv/"));
+        assert_eq!(leads_to("/", "h", &folders).as_deref(), Some("/home/"));
+        assert_eq!(leads_to("/", "s", &folders), None);
+        assert_eq!(leads_to("/", "", &folders), None);
+        assert_eq!(
+            leads_to("C:\\", "Srv", &folders).as_deref(),
+            Some("C:\\srv\\")
+        );
+    }
+
+    #[test]
+    fn the_next_harness_goes_round_and_a_lone_one_stays() {
+        let all = [
+            "shell".to_string(),
+            "claude".to_string(),
+            "codex".to_string(),
+        ];
+        assert_eq!(neighbour(&all, "shell", true).as_deref(), Some("claude"));
+        assert_eq!(neighbour(&all, "codex", true).as_deref(), Some("shell"));
+        assert_eq!(neighbour(&all, "shell", false).as_deref(), Some("codex"));
+        assert_eq!(neighbour(&all[..1], "shell", true), None);
+        assert_eq!(neighbour(&all, "gone", true), None);
     }
 }

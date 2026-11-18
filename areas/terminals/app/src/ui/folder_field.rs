@@ -2,8 +2,8 @@
 //! takes a folder three ways. Untouched, the list under it offers the
 //! launcher's folders; a fragment ranks them with every project on the
 //! node; a path lists the folders
-//! under what is typed, on the launcher's node. Tab completes the lit row,
-//! the arrows move, Enter takes the lit row or the typed path. The list
+//! under what is typed, on the launcher's node. Tab completes the lit row
+//! and, once the folder is written out, goes on; the arrows move, Enter takes the lit row or the typed path. The list
 //! keeps one height whatever it holds, so nothing moves under the pointer.
 //! Its rules live in `store::launch`.
 
@@ -29,6 +29,8 @@ pub enum FolderEvent {
     Changed,
     /// Enter: launch with the folder as it now stands.
     Submit,
+    /// Tab with nothing left to complete: on to the next field.
+    Next,
 }
 
 /// One folder listing, or the node's reason it could not be read.
@@ -54,9 +56,11 @@ pub struct FolderField {
     editing: bool,
     /// The lit row, for the value it was moved on.
     lit: Option<(String, Option<usize>)>,
-    listing: Option<Listing>,
-    /// The (node, folder) being read now.
-    reading: Option<(String, String)>,
+    /// The folders read since the field took the keyboard, so a folder
+    /// typed again, or one read ahead, lists at once.
+    listings: Vec<Listing>,
+    /// The (node, folder)s being read now.
+    reading: Vec<(String, String)>,
     /// Every project on the node, which a fragment searches with what is
     /// offered: the node's last walk, for the node it came from.
     projects: Option<(String, Vec<String>)>,
@@ -93,8 +97,8 @@ impl FolderField {
             home: None,
             editing: false,
             lit: None,
-            listing: None,
-            reading: None,
+            listings: Vec::new(),
+            reading: Vec::new(),
             projects: None,
             asking: None,
         }
@@ -121,7 +125,7 @@ impl FolderField {
         cx: &mut Context<Self>,
     ) {
         if self.node != node || self.offered_user != user {
-            self.listing = None;
+            self.listings.clear();
             self.offered.clear();
         }
         let asked = self.projects.as_ref().map(|p| p.0.as_str()) == Some(node)
@@ -168,11 +172,9 @@ impl FolderField {
                     &launch::searched(&self.offered, projects, self.home.as_deref()),
                 )
             }
-            FolderList::Inside { dir, segment } => match &self.listing {
-                Some(l) if l.node == self.node && l.dir == *dir => {
-                    launch::inside(dir, segment, l.folders.as_deref().unwrap_or_default())
-                }
-                _ => vec![],
+            FolderList::Inside { dir, segment } => match self.listed(dir) {
+                Some(l) => launch::inside(dir, segment, l.folders.as_deref().unwrap_or_default()),
+                None => vec![],
             },
         }
     }
@@ -204,7 +206,7 @@ impl FolderField {
                 if !self.editing {
                     self.field.update(cx, |f, cx| f.select_everything(cx));
                 }
-                self.listing = None;
+                self.listings.clear();
                 let node = self.node.clone();
                 self.ask_projects(&node, cx);
             }
@@ -223,9 +225,17 @@ impl FolderField {
                     .or(Some(0))
                     .and_then(|i| rows.get(i))
                 else {
+                    cx.emit(FolderEvent::Next);
                     return;
                 };
                 let complete = row.complete.clone();
+                // The folder is written out already: Tab is the way on, as
+                // anywhere. A separator typed after it lists inside.
+                let value = self.value(cx);
+                if complete == value || row.path == value {
+                    cx.emit(FolderEvent::Next);
+                    return;
+                }
                 self.field.update(cx, |f, cx| f.set(&complete, false, cx));
                 self.editing = true;
                 self.read(cx);
@@ -259,20 +269,34 @@ impl FolderField {
         cx.emit(FolderEvent::Changed);
     }
 
-    /// Reads the folder typed so far on the node, once per folder.
+    /// What the node said is in `dir`, when it has.
+    fn listed(&self, dir: &str) -> Option<&Listing> {
+        self.listings
+            .iter()
+            .find(|l| l.node == self.node && l.dir == dir)
+    }
+
+    /// Reads the folder typed so far on the node, once per folder, and
+    /// the one folder in it the typing leads to, so the separator after
+    /// its name lists it at once.
     fn read(&mut self, cx: &mut Context<Self>) {
-        let FolderList::Inside { dir, .. } = self.list(cx) else {
+        let FolderList::Inside { dir, segment } = self.list(cx) else {
             return;
         };
-        let at = (self.node.clone(), dir.clone());
-        let listed = self
-            .listing
-            .as_ref()
-            .is_some_and(|l| l.node == at.0 && l.dir == at.1);
-        if listed || self.reading.as_ref() == Some(&at) || self.node.is_empty() {
+        let ahead = self
+            .listed(&dir)
+            .and_then(|l| launch::leads_to(&dir, &segment, l.folders.as_deref().ok()?));
+        for dir in std::iter::once(dir).chain(ahead) {
+            self.read_dir(dir, cx);
+        }
+    }
+
+    fn read_dir(&mut self, dir: String, cx: &mut Context<Self>) {
+        let at = (self.node.clone(), dir);
+        if self.listed(&at.1).is_some() || self.reading.contains(&at) || self.node.is_empty() {
             return;
         }
-        self.reading = Some(at.clone());
+        self.reading.push(at.clone());
         let path = format!("/api/terminal/folders?path={}", http::enc(&at.1));
         let task = self
             .host
@@ -280,16 +304,13 @@ impl FolderField {
         cx.spawn(async move |this, cx| {
             let answer = http::json::<Vec<String>>(task.await);
             let _ = this.update(cx, |f, cx| {
-                if f.reading.as_ref() != Some(&at) {
-                    return;
-                }
-                f.reading = None;
-                let folders = answer;
-                f.listing = Some(Listing {
+                f.reading.retain(|r| *r != at);
+                f.listings.push(Listing {
                     node: at.0,
                     dir: at.1,
-                    folders,
+                    folders: answer,
                 });
+                f.read(cx);
                 cx.notify();
             });
         })
@@ -329,8 +350,8 @@ impl FolderField {
         match list {
             FolderList::Offered => "Nothing recent".into(),
             FolderList::Matching => "No folder matches".into(),
-            FolderList::Inside { dir, .. } => match &self.listing {
-                Some(l) if l.node == self.node && l.dir == *dir => match l.folders {
+            FolderList::Inside { dir, .. } => match self.listed(dir) {
+                Some(l) => match l.folders {
                     Err(ref why) => why.clone(),
                     Ok(_) => "No folders here".into(),
                 },

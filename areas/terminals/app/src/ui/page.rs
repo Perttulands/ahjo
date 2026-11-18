@@ -1808,9 +1808,23 @@ impl Render for Terminals {
         // the focus while it lives elsewhere, so its closing is enough.
         let beside = self.host.beside(cx).is_some();
         let beside_closed = std::mem::replace(&mut self.beside_open, beside) && !beside;
-        if self.shown && self.surfaces.is_empty() && (beside_closed || window.focused(cx).is_none())
-        {
-            window.focus(&self.term_focus, cx);
+        // An empty window's keys are its launcher's: the terminal would drop
+        // them, having no session to type into.
+        let w = self.settings.workspace.focus;
+        let launcher = self
+            .launchers
+            .get(w)
+            .filter(|_| self.settings.workspace.shown(w).is_none())
+            .cloned();
+        let nowhere = window.focused(cx).is_none();
+        if self.shown && self.surfaces.is_empty() {
+            match launcher {
+                Some(l) if beside_closed || nowhere || self.term_focus.is_focused(window) => {
+                    l.update(cx, |l, cx| l.focus_first(window, cx));
+                }
+                None if beside_closed || nowhere => window.focus(&self.term_focus, cx),
+                _ => {}
+            }
         }
         self.render_terminals(window, cx)
     }

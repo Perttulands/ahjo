@@ -67,8 +67,12 @@ impl Launcher {
         let name = cx.new(|cx| TextField::new(cx, "session-name"));
         cx.subscribe_in(&folder, window, |l: &mut Self, _, ev, window, cx| {
             l.problem = None;
-            if let FolderEvent::Submit = ev {
-                l.launch(window, cx);
+            match ev {
+                FolderEvent::Submit => l.launch(window, cx),
+                FolderEvent::Next => {
+                    ahjo_app_kit::widgets::field::focus(&l.flags, window, cx);
+                }
+                FolderEvent::Changed => {}
             }
             cx.notify();
         })
@@ -76,6 +80,16 @@ impl Launcher {
         for f in [&flags, &name] {
             cx.subscribe_in(f, window, |l: &mut Self, f, ev, window, cx| match ev {
                 FieldEvent::Submit => l.launch(window, cx),
+                // Tab goes round the fields: folder, flags, name.
+                FieldEvent::Tab => {
+                    if *f == l.flags {
+                        // The name was made up, so typing replaces it.
+                        l.name.update(cx, |n, cx| n.select_everything(cx));
+                        ahjo_app_kit::widgets::field::focus(&l.name, window, cx);
+                    } else {
+                        l.focus_first(window, cx);
+                    }
+                }
                 FieldEvent::Changed => {
                     if *f == l.name {
                         l.named = !l.name.read(cx).text.is_empty();
@@ -194,6 +208,14 @@ impl Launcher {
             });
         }
         cx.notify();
+    }
+
+    /// Alt+Down and Alt+Up choose the next and the previous harness, from
+    /// whichever field has the keyboard.
+    fn step_harness(&mut self, down: bool, now: &str, all: &[String], cx: &mut Context<Self>) {
+        if let Some(next) = launch::neighbour(all, now, down) {
+            self.choose(&next, cx);
+        }
     }
 
     fn choose(&mut self, harness: &str, cx: &mut Context<Self>) {
@@ -569,6 +591,7 @@ impl Render for Launcher {
                     .cursor_pointer()
                     .children(crate::harness::harness_mark(&h.id, 14., cx))
                     .child(launch::harness_label(&h.id))
+                    .tooltip(kit::tip("Alt+Up and Alt+Down choose"))
                     .on_click(cx.listener(move |l, _, _, cx| l.choose(&id, cx))),
             );
         }
@@ -881,8 +904,18 @@ impl Render for Launcher {
             // The notify line keeps its room when a shell has none, so the
             // launch button stays where it was across harnesses.
             .child(div().min_h(px(NOTIFY_ROW)).children(notify));
+        let ids: Vec<String> = conf.harnesses.iter().map(|h| h.id.clone()).collect();
+        let now = harness.clone();
         kit::panel(&t)
             .track_focus(&self.focus)
+            .on_key_down(cx.listener(move |l, e: &gpui::KeyDownEvent, _, cx| {
+                let k = &e.keystroke;
+                let plain_alt = k.modifiers.alt && !k.modifiers.control && !k.modifiers.shift;
+                if plain_alt && (k.key == "down" || k.key == "up") {
+                    l.step_harness(k.key == "down", &now, &ids, cx);
+                    cx.stop_propagation();
+                }
+            }))
             .w(px(size::LAUNCHER))
             .max_w_full()
             .min_h_0()

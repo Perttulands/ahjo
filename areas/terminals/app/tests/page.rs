@@ -3252,6 +3252,12 @@ fn launcher_completes_a_folder_outside_files_roots(cx: &mut TestAppContext) {
         cx.debug_bounds("launch-label-0-Launch fake in subfolder")
             .is_some()
     });
+    // With nothing left to complete, Tab goes on to the flags.
+    cx.simulate_keystrokes("tab end");
+    cx.simulate_input(" --tabbed");
+    until(cx, "typed into the flags", |cx| {
+        cx.debug_bounds("flag-line-0---marker --tabbed").is_some()
+    });
     scroll_to_launch(cx, "launcher-scroll-0");
     until(cx, "launch available", |cx| {
         cx.debug_bounds("launch-0")
@@ -3259,7 +3265,7 @@ fn launcher_completes_a_folder_outside_files_roots(cx: &mut TestAppContext) {
             .is_some_and(|(button, viewport)| viewport.contains(&button.center()))
     });
     click(cx, "launch-0".into());
-    let expected = format!("{}|--marker", chosen.display());
+    let expected = format!("{}|--marker --tabbed", chosen.display());
     let deadline = Instant::now() + Duration::from_secs(15);
     loop {
         cx.run_until_parked();
@@ -3267,7 +3273,7 @@ fn launcher_completes_a_folder_outside_files_roots(cx: &mut TestAppContext) {
         if runs.lines().any(|line| {
             line.split_once('|').is_some_and(|(folder, flags)| {
                 std::path::Path::new(folder).canonicalize().ok() == chosen.canonicalize().ok()
-                    && flags == "--marker"
+                    && flags == "--marker --tabbed"
             })
         }) {
             break;
