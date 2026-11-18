@@ -8,5 +8,8 @@ pub const RESULT_PAD_Y: f32 = 6.;
 pub const SNIPPET_GAP: f32 = 2.;
 
 pub const EDITOR_HEIGHT: f32 = 320.;
+/// The widest a line of a page's prose runs: about eighty letters of the
+/// reading face, so a wide window does not make lines too long to follow.
+pub const MEASURE: f32 = 560.;
 
 pub const MARK: f32 = 0.25;

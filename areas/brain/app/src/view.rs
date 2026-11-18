@@ -564,6 +564,7 @@ impl BrainPage {
         let anchor = self.anchor.clone();
         let scroll = self.scroll.clone();
         let body = markdown::render(&look, "brain-body", &blocks)
+            .max_w(px(MEASURE))
             .debug_selector(|| "brain-prose".into())
             .on_children_prepainted(move |bounds, window, cx| {
                 selection.borrow_mut().laid_out();
