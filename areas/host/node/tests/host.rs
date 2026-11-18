@@ -287,10 +287,26 @@ async fn socket_subscription_starts_with_state_streams_readings_and_stops() {
             .code,
         contract::SERVICE_FAILED
     );
-    let event = read(&mut socket).await;
-    assert_eq!(event[0], contract::HOST_EVENT);
-    let event: contract::EventFrame = serde_json::from_slice(&event[1..]).unwrap();
-    assert_eq!(event.event.kind, "service");
+    // Readings keep streaming beside events, each on its own clock, so a
+    // reading (or another event, such as the kernel killing a process) may
+    // come first: wait for the service's event.
+    let event = tokio::time::timeout(Duration::from_secs(12), async {
+        loop {
+            let frame = read(&mut socket).await;
+            match frame[0] {
+                contract::HOST_READING => continue,
+                contract::HOST_EVENT => {
+                    let event: contract::EventFrame = serde_json::from_slice(&frame[1..]).unwrap();
+                    if event.event.kind == "service" {
+                        return event;
+                    }
+                }
+                kind => panic!("a frame of kind {kind} while waiting for the event"),
+            }
+        }
+    })
+    .await
+    .expect("the service's event");
     assert!(event.event.failure);
     socket
         .send(Message::Binary(contract::encode_on(false).into()))
