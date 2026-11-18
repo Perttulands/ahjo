@@ -375,21 +375,6 @@ pub fn remember(recent: &mut Vec<String>, id: &str, limit: usize) {
     recent.truncate(limit);
 }
 
-/// A name for a narrow row: the head and the tail kept, the middle elided,
-/// so `service-controller-agent` reads `service-contro…agent`.
-pub fn elide_middle(name: &str, max: usize) -> String {
-    let chars: Vec<char> = name.chars().collect();
-    if chars.len() <= max || max < 4 {
-        return name.to_string();
-    }
-    let tail = max / 4;
-    let head = max - 1 - tail;
-    let mut s: String = chars[..head].iter().collect();
-    s.push('…');
-    s.extend(&chars[chars.len() - tail..]);
-    s
-}
-
 /// Shorten a rail name at hyphen boundaries, preserving its identifying end.
 pub fn rail_name(name: &str, max: usize) -> String {
     if name.chars().count() <= max || max < 2 {
@@ -677,16 +662,11 @@ mod tests {
     }
 
     #[test]
-    fn durations_and_elision() {
+    fn durations() {
         assert_eq!(ago(40_000), "40s");
         assert_eq!(ago(300_000), "5m");
         assert_eq!(ago(3 * 3_600_000), "3h");
         assert_eq!(ago(2 * 86_400_000), "2d");
-        assert_eq!(
-            elide_middle("service-controller-agent", 20),
-            "service-contro…agent"
-        );
-        assert_eq!(elide_middle("short", 20), "short");
     }
 
     #[test]

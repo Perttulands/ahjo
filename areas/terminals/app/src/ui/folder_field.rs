@@ -4,12 +4,12 @@
 //! node; a path lists the folders
 //! under what is typed, on the launcher's node. Tab completes the lit row
 //! and, once the folder is written out, goes on; the arrows move, Enter takes the lit row or the typed path. The list
-//! keeps one height whatever it holds, so nothing moves under the pointer.
+//! takes the room its rows need until typing starts, then keeps the room of
+//! its most rows while the launcher is open, so nothing moves as it fills.
 //! Its rules live in `store::launch`.
 
 use crate::http;
 use crate::store::launch::{self, FolderList, Suggestion};
-use crate::store::sessions;
 use crate::theme::theme;
 use ahjo_app_kit::Host;
 use ahjo_app_kit::host::Request;
@@ -18,11 +18,9 @@ use ahjo_app_kit::widgets::kit;
 use ahjo_core::NodeId;
 use gpui::{Context, Entity, EventEmitter, Window, div, prelude::*, px};
 
-/// Rows the list shows at once; it is this tall whatever it holds.
+/// Rows the list shows at once, at most.
 const ROWS: usize = 6;
 const ROW_H: f32 = 20.;
-/// Characters a row shows before it elides the middle of a long path.
-const ROW_CHARS: usize = 52;
 
 pub enum FolderEvent {
     /// The folder changed, typed or picked.
@@ -48,6 +46,9 @@ pub struct FolderField {
     host: Host,
     /// What the list offers before anything is typed.
     offered: Vec<String>,
+    /// Typing has given the list its full room, which it keeps until the
+    /// launcher starts afresh.
+    grown: bool,
     offered_user: String,
     /// The node's home folder for that user, when the node said.
     home: Option<String>,
@@ -93,6 +94,7 @@ impl FolderField {
             node: String::new(),
             host,
             offered: vec![],
+            grown: false,
             offered_user: String::new(),
             home: None,
             editing: false,
@@ -141,6 +143,7 @@ impl FolderField {
 
     pub fn reset_recent(&mut self) {
         self.offered.clear();
+        self.grown = false;
     }
 
     fn value(&self, cx: &gpui::App) -> String {
@@ -196,6 +199,7 @@ impl FolderField {
         match ev {
             FieldEvent::Changed => {
                 self.editing = true;
+                self.grown = true;
                 self.read(cx);
                 cx.emit(FolderEvent::Changed);
             }
@@ -377,9 +381,14 @@ impl Render for FolderField {
             FolderList::Matching => "Matching",
             FolderList::Inside { .. } => "Folders",
         };
+        let shown_rows = if self.grown {
+            ROWS
+        } else {
+            rows.len().clamp(1, ROWS)
+        };
         let mut body = div()
             .id(("folder-rows", self.id))
-            .h(px(ROW_H * ROWS as f32))
+            .h(px(ROW_H * shown_rows as f32))
             .overflow_y_scroll()
             .flex()
             .flex_col();
@@ -414,8 +423,16 @@ impl Render for FolderField {
                     .when(lit == Some(n), |d| d.bg(t.accent_soft()))
                     .cursor_pointer()
                     .hover(|s| s.text_color(t.text))
-                    // The end of a path says which folder it is.
-                    .child(sessions::elide_middle(&row.path, ROW_CHARS))
+                    // Its middle gives way: the end of a path says which
+                    // folder it is.
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .overflow_hidden()
+                            .text_ellipsis_middle()
+                            .child(row.path.clone()),
+                    )
                     .on_click(cx.listener(move |f, _, _, cx| f.pick(&path, cx))),
             );
         }

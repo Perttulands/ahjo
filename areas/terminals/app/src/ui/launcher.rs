@@ -881,15 +881,16 @@ impl Render for Launcher {
                     .text_color(t.dim)
                     .overflow_hidden()
                     .whitespace_nowrap()
+                    // A long command gives way in its middle, its flags at
+                    // the end still in view.
+                    .text_ellipsis_middle()
                     .debug_selector({
                         let flags = flags.clone();
                         move || format!("flag-line-{i}-{flags}")
                     })
-                    .child(if preview.is_empty() {
-                        "a shell".to_string()
-                    } else {
-                        preview
-                    }),
+                    // The command a launch runs; a shell's says nothing,
+                    // and its line keeps its room so nothing moves.
+                    .when(!preview.is_empty(), |d| d.child(format!("Runs: {preview}"))),
             )
             .child(div().mt(px(6.)).child(kit::label(&t, "Name")))
             .child(self.name.clone())

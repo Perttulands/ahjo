@@ -355,43 +355,55 @@ impl Terminals {
                         _ => None,
                     }),
             )
+            // The name takes the room it needs, up to all of it; the
+            // program's name beside it has what is left. The name is what a
+            // person looks for.
             .child(
                 div()
                     .flex_1()
                     .min_w_0()
-                    .py(px(3.))
                     .flex()
-                    .flex_col()
-                    .overflow_hidden()
-                    .whitespace_nowrap()
+                    .items_center()
+                    .gap(px(6.))
                     .child(
-                        name_label(&s.name)
-                            .id(gpui::SharedString::from(format!("name-{}", key.text())))
-                            .tooltip(kit::tip(name.clone())),
+                        div()
+                            .flex_none()
+                            .max_w_full()
+                            .min_w_0()
+                            .py(px(3.))
+                            .flex()
+                            .flex_col()
+                            .overflow_hidden()
+                            .whitespace_nowrap()
+                            .child(
+                                name_label(&s.name)
+                                    .id(gpui::SharedString::from(format!("name-{}", key.text())))
+                                    .tooltip(kit::tip(name.clone())),
+                            )
+                            .children(asks.as_ref().map(|question| {
+                                let question = question.lines().find(|l| !l.trim().is_empty());
+                                div()
+                                    .debug_selector(|| "row-asks".into())
+                                    .text_size(px(11.))
+                                    .text_color(t.needs)
+                                    .overflow_hidden()
+                                    .text_ellipsis()
+                                    .child(match question {
+                                        Some(q) => format!("Asks: {}", q.trim()),
+                                        None => "Asks for your answer".to_string(),
+                                    })
+                            }))
+                            .children(mark.as_ref().filter(|e| !e.summary.is_empty()).map(|e| {
+                                div()
+                                    .text_size(px(11.))
+                                    .text_color(t.dim)
+                                    .overflow_hidden()
+                                    .text_ellipsis()
+                                    .child(e.summary.clone())
+                            })),
                     )
-                    .children(asks.as_ref().map(|question| {
-                        let question = question.lines().find(|l| !l.trim().is_empty());
-                        div()
-                            .debug_selector(|| "row-asks".into())
-                            .text_size(px(11.))
-                            .text_color(t.needs)
-                            .overflow_hidden()
-                            .text_ellipsis()
-                            .child(match question {
-                                Some(q) => format!("Asks: {}", q.trim()),
-                                None => "Asks for your answer".to_string(),
-                            })
-                    }))
-                    .children(mark.as_ref().filter(|e| !e.summary.is_empty()).map(|e| {
-                        div()
-                            .text_size(px(11.))
-                            .text_color(t.dim)
-                            .overflow_hidden()
-                            .text_ellipsis()
-                            .child(e.summary.clone())
-                    })),
+                    .children(command_word(t, s)),
             )
-            .children(command_word(t, s))
             .children(
                 glyphs(s)
                     .into_iter()
@@ -690,13 +702,22 @@ fn command_word(t: &Theme, s: &Session) -> Option<AnyElement> {
     match sessions::running(s) {
         sessions::Running::Command(c) if c != s.name => Some(
             div()
-                .flex_none()
-                .max_w(px(64.))
-                .overflow_hidden()
-                .whitespace_nowrap()
-                .text_size(px(10.))
-                .text_color(t.dim)
-                .child(c.to_string())
+                // In the room the session's name leaves, at the row's end.
+                .flex_1()
+                .min_w_0()
+                .flex()
+                .justify_end()
+                .child(
+                    div()
+                        .min_w_0()
+                        .max_w(px(64.))
+                        .overflow_hidden()
+                        .whitespace_nowrap()
+                        .text_ellipsis()
+                        .text_size(px(10.))
+                        .text_color(t.dim)
+                        .child(c.to_string()),
+                )
                 .into_any_element(),
         ),
         _ => None,
