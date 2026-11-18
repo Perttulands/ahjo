@@ -1,9 +1,12 @@
-//! The same arrangement goldens Archon's Go store and dashboard use.
+//! Arrangement goldens. The boards are Archon's; the places are Ahjo's
+//! since it wraps a mission into rows only when one row would not read on
+//! a full-size window, with one card's room for notes between cards rather
+//! than two.
 use ahjo_mission_engine::arrange;
 use ahjo_mission_model::{Layout, LayoutNode, Mission};
 
 #[test]
-fn arrangements_match_archons_goldens() {
+fn arrangements_match_the_goldens() {
     for name in ["arrange-golden.json", "arrange-long-golden.json"] {
         let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("tests/parity")

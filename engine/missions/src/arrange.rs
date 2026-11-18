@@ -189,32 +189,83 @@ pub fn arrange(mission: &Mission, layout: &Layout) -> Layout {
     for id in order {
         columns.entry(depths[&id]).or_default().push(id);
     }
+    // Each column's cards top to bottom, a card's room under it for its
+    // notes, and the column's width and height.
+    let columns: Vec<(Vec<String>, i64, i64)> = columns
+        .values()
+        .map(|ids| {
+            let mut stack = Vec::new();
+            for id in ids {
+                stacked(id, &below, &mut stack);
+            }
+            let (mut width, mut height) = (0, 0);
+            for id in &stack {
+                let (w, h) = size(&items[id]);
+                width = width.max(w);
+                height = snap(height + h);
+            }
+            (stack, width, height)
+        })
+        .collect();
+    let per_row = per_row(&columns);
     let mut nodes = Vec::new();
-    let (mut x, mut row_y, mut row_bottom) = (112, 112, 112);
-    for (column, ids) in columns.values().enumerate() {
-        if column > 0 && column % 4 == 0 {
-            x = 112;
+    let (mut x, mut row_y, mut row_bottom) = (MARGIN, MARGIN, MARGIN);
+    for (column, (stack, width, _)) in columns.into_iter().enumerate() {
+        if column > 0 && column % per_row == 0 {
+            x = MARGIN;
             row_y = row_bottom;
         }
-        let (mut y, mut width) = (row_y, 0);
-        for id in ids {
-            let mut stack = Vec::new();
-            stacked(id, &below, &mut stack);
-            for id in stack {
-                let item = &items[&id];
-                let (w, h) = size(item);
-                nodes.push(LayoutNode { id, x, y });
-                y = snap(y + h + 112);
-                width = width.max(w);
-            }
+        let mut y = row_y;
+        for id in stack {
+            let (_, h) = size(&items[&id]);
+            nodes.push(LayoutNode { id, x, y });
+            y = snap(y + h);
         }
         row_bottom = row_bottom.max(y);
-        x = snap(x + width + 84);
+        x = snap(x + width + GAP_X);
     }
     Layout {
         nodes,
         ..layout.clone()
     }
+}
+
+/// Where the board starts, and the room between columns for their wires.
+const MARGIN: i64 = 112;
+const GAP_X: i64 = 84;
+/// The canvas of a full-size window (1920x1080, side panels open), and
+/// the least zoom a card's words read at; the app opens a board no smaller.
+const CANVAS: (f64, f64) = (1400., 960.);
+const READABLE: f64 = 0.85;
+
+/// How many columns a row holds, rows read left to right and then down:
+/// as many as still read on a full-size window's canvas, so a short
+/// mission is one row; a longer one wraps into the rows that show it at
+/// the largest zoom.
+fn per_row(columns: &[(Vec<String>, i64, i64)]) -> usize {
+    let zoom = |n: usize| {
+        let (mut width, mut height) = (MARGIN, MARGIN);
+        let mut widest = 0;
+        for row in columns.chunks(n) {
+            widest = widest.max(row.iter().map(|(_, w, _)| w + GAP_X).sum::<i64>());
+            height += row.iter().map(|(_, _, h)| *h).max().unwrap_or(0);
+        }
+        width += widest;
+        (CANVAS.0 / width as f64)
+            .min(CANVAS.1 / height as f64)
+            .min(1.)
+    };
+    let all = columns.len().max(1);
+    if let Some(n) = (1..=all).rev().find(|&n| zoom(n) >= READABLE) {
+        return n;
+    }
+    let mut best = (f64::MIN, all);
+    for n in (1..=all).rev() {
+        if zoom(n) > best.0 {
+            best = (zoom(n), n);
+        }
+    }
+    best.1
 }
 
 fn stacked(id: &str, below: &BTreeMap<String, Vec<String>>, out: &mut Vec<String>) {

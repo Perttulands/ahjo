@@ -550,7 +550,12 @@ impl MissionsPage {
                                 .font_weight(FontWeight::BOLD)
                                 .child(title.to_uppercase()),
                         )
-                        .child("OPEN"),
+                        // Whether the thread still wants an answer.
+                        .child(if resolved(entries) {
+                            "RESOLVED"
+                        } else {
+                            "OPEN"
+                        }),
                 )
                 .when(!byline.is_empty(), |d| d.child(byline))
                 .child(div().line_clamp(4).child(summary))
