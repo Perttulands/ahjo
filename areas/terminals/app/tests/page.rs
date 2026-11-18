@@ -3593,9 +3593,27 @@ fn ctrl_wheel_zooms_the_terminal_under_it_and_peek_is_typed_into(cx: &mut TestAp
         tmux(&running, &["capture-pane", "-p", "-t", "beta"]).contains("peek-42")
     });
     let over = cx.debug_bounds("peek-body").expect("Peek").center();
+    // Peek is drawn in the last place the page lays terminals out.
+    let filled = page.read_with(cx, |p, _| p.geo.borrow().last().unwrap().font);
+    let filled = filled.expect("Peek drawn") as u8;
+    assert!(
+        filled > 14,
+        "unzoomed, Peek fills its room past the Settings size"
+    );
     ctrl_wheel(cx, over, 1.);
     page.read_with(cx, |p, _| {
-        assert_eq!(p.settings.peek_font, Some(15), "Peek zooms its own text");
+        assert_eq!(
+            p.settings.peek_font, None,
+            "Peek grows no larger than the grid fits"
+        );
+    });
+    ctrl_wheel(cx, over, -1.);
+    page.read_with(cx, |p, _| {
+        assert_eq!(
+            p.settings.peek_font,
+            Some(filled - 1),
+            "Peek zooms its own text"
+        );
         assert_eq!(p.settings.workspace.windows()[0].font, None);
         let beta = p.fleet.all.iter().find(|s| s.name == "beta").unwrap();
         let pane = beta.panes[0].id;
@@ -3603,6 +3621,10 @@ fn ctrl_wheel_zooms_the_terminal_under_it_and_peek_is_typed_into(cx: &mut TestAp
             p.fleet.claimed(&beta.node, pane).is_none(),
             "Peek asked tmux for no size"
         );
+    });
+    cx.simulate_keystrokes("ctrl-0");
+    page.read_with(cx, |p, _| {
+        assert_eq!(p.settings.peek_font, None, "Ctrl+0 fills Peek again")
     });
     cx.simulate_keystrokes("shift-escape");
     until(cx, "Shift+Escape closes Peek", |cx| {

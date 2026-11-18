@@ -1486,8 +1486,14 @@ impl Terminals {
 
     /// Terminal `i`'s text size: Peek's or the window's own, else the
     /// Settings size.
+    /// The size terminal `i` is drawn at, or, when its grid is set
+    /// elsewhere, the most it is drawn at. Peek not zoomed fills its room:
+    /// the session's whole grid at the largest size that fits.
     pub(super) fn font_of(&self, i: usize) -> f32 {
-        self.settings.font(self.own_font(i))
+        match self.own_font(i) {
+            None if i == PEEK_SLOT => size::TERM_MAX,
+            own => self.settings.font(own),
+        }
     }
 
     fn own_font(&self, i: usize) -> Option<u8> {
@@ -1506,6 +1512,9 @@ impl Terminals {
     /// is at now. A window sized by this app asks its session for the grid
     /// the new size holds, as a window resized does; Peek never does.
     pub(super) fn zoom_slot(&mut self, i: usize, z: Zoom, n: i32, cx: &mut Context<Self>) {
+        if i == PEEK_SLOT {
+            return self.zoom_peek(z, n, cx);
+        }
         let before = self.font_of(i);
         let Some(own) = self.settings.zoom_font(self.own_font(i), z, n) else {
             return;
@@ -1527,15 +1536,44 @@ impl Terminals {
             ""
         };
         let text = match drawn.filter(|_| capped) {
-            Some(d) => format!(
-                "Text {size} px; the session's whole grid fits at {d} px here{}",
-                if i == PEEK_SLOT {
-                    ". Attach sizes it to a window"
-                } else {
-                    ""
-                }
-            ),
+            Some(d) => format!("Text {size} px; the session's whole grid fits at {d} px here"),
             None => format!("Text {size} px{reset}"),
+        };
+        self.toast(&text, cx);
+        cx.notify();
+    }
+
+    /// Peek's zoom: from the size it is drawn at, which unzoomed fills its
+    /// room; no larger than the session's grid fits, since Peek never
+    /// resizes the session. Ctrl+0 fills the room again.
+    fn zoom_peek(&mut self, z: Zoom, n: i32, cx: &mut Context<Self>) {
+        let own = self.settings.peek_font;
+        let drawn = self.geo.borrow()[PEEK_SLOT].font;
+        let fill = if own.is_none() { drawn } else { None };
+        let at = own
+            .map(f32::from)
+            .or(drawn)
+            .unwrap_or(self.settings.font_size);
+        let to = match z {
+            Zoom::Reset if own.is_none() => return,
+            Zoom::Reset => None,
+            Zoom::In => zoom::step(at, n, 1., size::TERM_MIN, size::TERM_MAX),
+            Zoom::Out => zoom::step(at, -n, 1., size::TERM_MIN, size::TERM_MAX),
+        };
+        let grows = matches!(z, Zoom::In) && (own.is_none() || to.is_none());
+        if grows {
+            let most = fill.or(drawn).unwrap_or(at);
+            self.toast(
+                &format!("Peek shows the whole session at {most} px; Attach gives it a window sized to it"),
+                cx,
+            );
+            return;
+        }
+        self.settings.peek_font = to.map(|v| v.round() as u8);
+        self.save(cx);
+        let text = match to {
+            Some(v) => format!("Text {v} px · Ctrl+0 fills Peek"),
+            None => "Text fills Peek".to_string(),
         };
         self.toast(&text, cx);
         cx.notify();
