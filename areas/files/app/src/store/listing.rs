@@ -38,11 +38,22 @@ pub fn natural(a: &str, b: &str) -> Ordering {
 /// beside the copy, but it is the node's bookkeeping, not the operator's.
 pub const STAGING: &str = ".ahjo-transfer-";
 
-/// The entries a folder shows, in order.
+/// What an editor keeps beside a file while it is open (vim's swap, an
+/// Emacs lock, a backup): never the operator's work, so neither the tree
+/// nor the changes show it.
+pub fn editor_scratch(name: &str) -> bool {
+    name.starts_with(".#")
+        || name.ends_with('~')
+        || name.starts_with('.') && [".swp", ".swo", ".swn"].iter().any(|e| name.ends_with(e))
+}
+
+/// The entries a folder shows, in order: not the node's staging, git's
+/// own folder or an editor's scratch.
 pub fn shown(entries: &[Entry]) -> Vec<&Entry> {
     let mut out: Vec<&Entry> = entries
         .iter()
-        .filter(|e| !(e.folder && e.name.starts_with(STAGING)))
+        .filter(|e| !(e.folder && (e.name.starts_with(STAGING) || e.name == ".git")))
+        .filter(|e| !editor_scratch(&e.name))
         .collect();
     out.sort_by(|a, b| {
         let hidden = |e: &Entry| e.name.starts_with('.');
@@ -72,6 +83,20 @@ mod tests {
         let mut v = vec!["file10", "File2", "file1", "a", "file02b"];
         v.sort_by(|a, b| natural(a, b));
         assert_eq!(v, ["a", "file1", "File2", "file02b", "file10"]);
+    }
+
+    #[test]
+    fn git_and_editor_scratch_are_not_shown() {
+        let all = [
+            e(".git", true),
+            e("src", true),
+            e(".lib.rs.swp", false),
+            e("notes.md~", false),
+            e(".gitignore", false),
+            e("Cargo.lock", false),
+        ];
+        let names: Vec<_> = shown(&all).iter().map(|e| e.name.as_str()).collect();
+        assert_eq!(names, ["src", "Cargo.lock", ".gitignore"]);
     }
 
     #[test]

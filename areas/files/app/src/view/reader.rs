@@ -3,7 +3,7 @@
 //! outline of a long document, the find opened over the file (Reader),
 //! what changed grouped by where (Review) and a folder shown as a place.
 use super::*;
-use crate::store::who;
+use crate::store::{listing, who};
 use ahjo_app_kit::theme::alpha;
 use ahjo_app_kit::widgets::markdown::{self, Block};
 use ahjo_app_kit::widgets::select;
@@ -55,11 +55,21 @@ pub(super) fn review_lines(p: &FilesPage) -> Vec<Line> {
     let mut out = vec![];
     // What git says is not committed, a repository at a time: those a
     // session works in first.
-    let mut repos: Vec<_> = p.repos.iter().filter(|(_, f)| !f.is_empty()).collect();
+    let mut repos: Vec<_> = p
+        .repos
+        .iter()
+        .filter(|(_, f)| {
+            f.iter()
+                .any(|f| !listing::editor_scratch(paths::base_name(&f.path)))
+        })
+        .collect();
     repos.sort_by_key(|(repo, _)| (!p.worked_in(repo), repo.to_string()));
     for (repo, files) in &repos {
         out.push(Line::Group((*repo).clone(), 0));
-        let mut files: Vec<_> = files.iter().collect();
+        let mut files: Vec<_> = files
+            .iter()
+            .filter(|f| !listing::editor_scratch(paths::base_name(&f.path)))
+            .collect();
         files.sort_by_key(|f| (f.state != 'C', &f.path));
         for f in files.iter().take(UNCOMMITTED) {
             out.push(Line::Recent(
@@ -180,7 +190,13 @@ impl FilesPage {
                 t,
                 match self.repos.get(&path) {
                     // A repository's line counts what is not committed.
-                    Some(files) if newest == 0 => format!("{} uncommitted", files.len()),
+                    Some(files) if newest == 0 => format!(
+                        "{} uncommitted",
+                        files
+                            .iter()
+                            .filter(|f| !listing::editor_scratch(paths::base_name(&f.path)))
+                            .count()
+                    ),
                     _ => format::ago(newest),
                 },
                 None,
