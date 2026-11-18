@@ -108,19 +108,30 @@ pub struct Metrics {
 }
 
 /// The cell of the terminal font at `font_px`, its width snapped to device
-/// pixels so a row of cells never drifts.
+/// pixels so a row of cells never drifts. A terminal keeps its own text
+/// size whatever the app's zoom (`Window::ui_scale`): the font is drawn at
+/// `font_px` on the screen, so a session's grid stays as it was.
 pub fn metrics(window: &Window, font_px: f32) -> Metrics {
     let ts = window.text_system();
     let id = ts.resolve_font(&font(false, false, false));
-    let fs = px(font_px);
+    let ui = window.ui_scale();
+    let fs = px(font_px / ui);
     let w = ts.advance(id, fs, 'W').map(|s| s.width).unwrap_or(fs * 0.6);
-    let h = (ts.ascent(id, fs) + ts.descent(id, fs).abs()).ceil();
+    let h = f32::from(ts.ascent(id, fs) + ts.descent(id, fs).abs());
+    let h = px((h * ui).ceil() / ui);
     let sf = window.scale_factor();
     let w = px((f32::from(w) * sf).floor().max(1.) / sf);
     Metrics {
         font_size: fs,
         cell: size(w, h),
     }
+}
+
+/// The text size a terminal drawn at `font_size` has on the screen, in the
+/// half pixels its sizes step by: what the operator set, whatever the
+/// app's zoom.
+pub fn design_px(font_size: Pixels, window: &Window) -> f32 {
+    (f32::from(font_size) * window.ui_scale() * 2.).round() / 2.
 }
 
 /// For a pane whose grid someone else sets: the largest font, in half-pixel

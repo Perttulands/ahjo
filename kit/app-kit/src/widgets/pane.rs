@@ -447,7 +447,9 @@ pub fn line(t: &Theme, name: impl Into<SharedString>, value: impl IntoElement) -
                 .flex()
                 .items_center()
                 .text_color(t.text2)
-                .child(name.into()),
+                // A name longer than its column wraps instead of running
+                // under the value (a narrow or zoomed window).
+                .child(div().w_full().child(name.into())),
         )
         .child(
             div()

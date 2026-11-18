@@ -48,6 +48,8 @@ pub struct Shell {
     pub(crate) status_expiry: Option<(std::time::SystemTime, Task<()>)>,
     /// The fades after a page or a theme is chosen.
     pub(crate) veils: crate::veil::Veils,
+    /// The wheel's part of a step toward the app's zoom.
+    pub(crate) app_wheel: std::rc::Rc<std::cell::Cell<ahjo_app_kit::zoom::Wheel>>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -167,7 +169,10 @@ impl Shell {
         let host = Host::new(&hub);
         let mut subscriptions = vec![
             cx.subscribe_in(&hub, window, Self::hub_event),
-            cx.observe(&hub, |_, _, cx| cx.notify()),
+            cx.observe_in(&hub, window, |s, _, window, cx| {
+                s.apply_size(window, cx);
+                cx.notify();
+            }),
         ];
         let me = cx.entity_id();
         subscriptions.extend(pages.iter().map(|p| p.redraws(me, cx)));
@@ -183,6 +188,8 @@ impl Shell {
         if !pages.is_empty() {
             cx.defer_in(window, |s, window, cx| s.show(0, window, cx));
         }
+        let size = hub.read(cx).settings.size;
+        window.set_ui_scale(ahjo_app_kit::zoom::app::scale(size), cx);
         Self {
             hub,
             host,
@@ -201,7 +208,25 @@ impl Shell {
             page_keys,
             status_expiry: None,
             veils: Default::default(),
+            app_wheel: Default::default(),
             _subscriptions: subscriptions,
+        }
+    }
+
+    /// Draws the window at the app's size the settings keep.
+    fn apply_size(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let size = self.hub.read(cx).settings.size;
+        let scale = ahjo_app_kit::zoom::app::scale(size);
+        if window.ui_scale() != scale {
+            window.set_ui_scale(scale, cx);
+        }
+    }
+
+    /// A zoom key no surface with a zoom of its own took sizes the app.
+    pub(crate) fn zoom_key(&mut self, e: &KeyDownEvent, _: &mut Window, cx: &mut Context<Self>) {
+        if let Some(z) = ahjo_app_kit::zoom::from_key(&e.keystroke) {
+            cx.stop_propagation();
+            self.hub.update(cx, |h, cx| h.zoom_app(z, 1, cx));
         }
     }
 

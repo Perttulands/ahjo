@@ -32,6 +32,8 @@ pub struct Settings {
     pub show_keys: bool,
     /// The theme's direction, by its key (`theme::Direction::key`).
     pub theme: String,
+    /// The whole app's size, in percent (`zoom::app`).
+    pub size: u16,
     /// The side panel (sessions and files, on every page) is open; put
     /// away it is a narrow edge.
     pub side_open: bool,
@@ -68,6 +70,7 @@ impl Default for Settings {
             keys: true,
             show_keys: false,
             theme: crate::theme::Direction::default().key().into(),
+            size: crate::zoom::app::DEFAULT,
             side_open: true,
             places: Default::default(),
             sections: Map::new(),

@@ -9,6 +9,7 @@ use ahjo_app_kit::link::client::LinkState;
 use ahjo_app_kit::menu::{Menu, MenuRow, Pick};
 use ahjo_app_kit::theme::{self, Theme, alpha, motion, size, theme};
 use ahjo_app_kit::widgets::{boundary, kit};
+use ahjo_app_kit::zoom::Zoom;
 use gpui::{
     Animation, AnimationExt, AnyElement, Context, ElementId, MouseButton, MouseDownEvent, Window,
     anchored, deferred, div, ease_out_quint, point, prelude::*, px,
@@ -687,6 +688,7 @@ impl Render for Shell {
             .font_family(theme::FAMILY)
             .text_size(px(size::TEXT))
             .capture_key_down(cx.listener(Self::capture_key))
+            .on_key_down(cx.listener(Self::zoom_key))
             .child(self.render_tab_bar(window, cx))
             .child(
                 div().flex_1().min_h_0().flex().children(side).child(
@@ -705,6 +707,13 @@ impl Render for Shell {
             .children(self.render_layers(Cover::Window, cx))
             .children(self.render_echo(cx))
             .children(self.veils.theme())
+            .child(ahjo_app_kit::zoom::app_catch(self.app_wheel.clone(), {
+                let hub = self.hub.downgrade();
+                move |n, _, cx| {
+                    let z = if n > 0 { Zoom::In } else { Zoom::Out };
+                    let _ = hub.update(cx, |h, cx| h.zoom_app(z, n.abs(), cx));
+                }
+            }))
     }
 }
 

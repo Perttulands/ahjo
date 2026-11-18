@@ -237,6 +237,19 @@ impl Hub {
         }
     }
 
+    /// Sizes the whole app by a zoom gesture made over no surface with a
+    /// zoom of its own, keeps it and says the size it is at now. The shell
+    /// draws its window at the size kept.
+    pub fn zoom_app(&mut self, z: crate::zoom::Zoom, n: i32, cx: &mut Context<Self>) {
+        let Some(to) = crate::zoom::app::zoomed(self.settings.size, z, n) else {
+            return;
+        };
+        self.settings.size = to;
+        self.save(cx);
+        self.toast(&crate::zoom::app::words(to), cx);
+        cx.notify();
+    }
+
     /// What each page answers, as the shell mounted them.
     pub fn set_answers(&mut self, answers: Vec<(&'static str, &'static [Answers])>) {
         self.answers = answers;

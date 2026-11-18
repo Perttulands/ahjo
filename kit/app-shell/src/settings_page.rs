@@ -18,6 +18,7 @@ use ahjo_app_kit::theme::{Direction, Theme, size, theme};
 use ahjo_app_kit::widgets::field::{self, FieldEvent, TextField};
 use ahjo_app_kit::widgets::kit::{self, Kind};
 use ahjo_app_kit::widgets::pane;
+use ahjo_app_kit::zoom::Zoom;
 use ahjo_app_kit::{Control, Host, Hub, Page, Setting};
 use ahjo_core::NodeId;
 use gpui::{
@@ -34,6 +35,9 @@ pub const ID: &str = "settings";
 const APP: &[Setting] = &[
     Setting::choice("theme", "Theme", "night", Direction::CHOICES)
         .note("Odin's ravens three ways, or a colour theme from your editor."),
+    Setting::number("size", "Zoom", 100., (75., 200., 5.)).note(
+        "The whole app's text and spacing. Ctrl+wheel, Ctrl+= or Ctrl+- anywhere without a zoom of its own; Ctrl+0 resets. Terminals keep their own text size.",
+    ),
     Setting::text("node", "Node", DEFAULT_NODE)
         .note("The node this app talks to, as http://host:port. Enter connects."),
     Setting::toggle("keys", "Shortcuts", true)
@@ -295,6 +299,39 @@ impl SettingsPage {
             .into_any_element()
     }
 
+    /// The app's zoom: a step down, the size, a step up, and Reset while it
+    /// is not 100%.
+    fn size_control(&self, t: &Theme, cx: &mut Context<Self>) -> AnyElement {
+        let now = self.hub.read(cx).settings.size;
+        let zoom = |name: &'static str, words: &'static str, z: Zoom, cx: &mut Context<Self>| {
+            kit::button(t, name, words, Kind::Plain)
+                .debug_selector(move || name.into())
+                .on_click(cx.listener(move |p, _, _, cx| {
+                    p.hub.update(cx, |h, cx| h.zoom_app(z, 1, cx));
+                    cx.notify();
+                }))
+        };
+        div()
+            .flex()
+            .items_center()
+            .gap(px(8.))
+            .child(zoom("setting-app-size-down", "−", Zoom::Out, cx))
+            .child(
+                div()
+                    .min_w(px(size::CONTROL * 2.))
+                    .flex()
+                    .justify_center()
+                    .text_color(t.text)
+                    .debug_selector(move || format!("setting-app-size:{now}"))
+                    .child(format!("{now}%")),
+            )
+            .child(zoom("setting-app-size-up", "+", Zoom::In, cx))
+            .when(now != ahjo_app_kit::zoom::app::DEFAULT, |row| {
+                row.child(zoom("setting-app-size-reset", "Reset", Zoom::Reset, cx))
+            })
+            .into_any_element()
+    }
+
     /// Asks the connected node for its config.
     fn read_node_config(&mut self, cx: &mut Context<Self>) {
         let asked = self
@@ -468,6 +505,7 @@ impl SettingsPage {
                 "node" => Value::from(hub.settings.node.clone()),
                 "show_keys" => Value::from(hub.settings.show_keys),
                 "theme" => Value::from(hub.settings.theme.clone()),
+                "size" => Value::from(hub.settings.size),
                 _ => Value::from(hub.settings.keys),
             },
             Owner::Page(id) => {
@@ -517,6 +555,9 @@ impl SettingsPage {
                     h.apply_theme(cx);
                 } else if key == "show_keys" {
                     h.settings.show_keys = value.as_bool().unwrap_or(false);
+                } else if key == "size" {
+                    let size = value.as_u64().unwrap_or(100);
+                    h.settings.size = u16::try_from(size).unwrap_or(u16::MAX);
                 } else {
                     h.settings.keys = value.as_bool().unwrap_or(true);
                 }
@@ -542,6 +583,9 @@ impl SettingsPage {
         let key = setting.key;
         if owner == Owner::App && key == "theme" {
             return self.theme_control(t, cx);
+        }
+        if owner == Owner::App && key == "size" {
+            return self.size_control(t, cx);
         }
         let id = format!("setting-{}-{key}", owner.name());
         let value = self.value(owner, key, cx);

@@ -76,6 +76,9 @@ mod inside {
         url: String,
         at: Option<Bounds<Pixels>>,
         shown: bool,
+        /// The window's zoom, set before the view opens: the app's pixels
+        /// are this many of the system's.
+        ui: f32,
     }
 
     impl WebPage {
@@ -102,6 +105,7 @@ mod inside {
                 url: url.into(),
                 at: None,
                 shown: false,
+                ui: window.ui_scale(),
             })
         }
 
@@ -115,15 +119,16 @@ mod inside {
             }
             if self.at != Some(bounds) {
                 self.at = Some(bounds);
+                let ui = self.ui;
                 let rect = Rect {
                     position: LogicalPosition::new(
-                        f32::from(bounds.origin.x),
-                        f32::from(bounds.origin.y),
+                        f32::from(bounds.origin.x) * ui,
+                        f32::from(bounds.origin.y) * ui,
                     )
                     .into(),
                     size: LogicalSize::new(
-                        f32::from(bounds.size.width),
-                        f32::from(bounds.size.height),
+                        f32::from(bounds.size.width) * ui,
+                        f32::from(bounds.size.height) * ui,
                     )
                     .into(),
                 };

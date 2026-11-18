@@ -592,6 +592,17 @@ pub fn chosen() -> (Theme, Option<String>) {
     }
 }
 
+/// The app's size chosen in Ahjo Swarm's settings (`zoom::app`), as
+/// [`chosen`] reads the theme, for a window of the kit that runs on its own:
+/// what its window's measures are multiplied by.
+pub fn chosen_scale() -> f32 {
+    let size = crate::settings::path()
+        .and_then(|p| std::fs::read_to_string(p).ok())
+        .and_then(|text| crate::settings::Settings::parse(&text))
+        .map_or(crate::zoom::app::DEFAULT, |s| s.size);
+    crate::zoom::app::scale(size)
+}
+
 impl Default for Theme {
     fn default() -> Self {
         Self::new(Direction::default())

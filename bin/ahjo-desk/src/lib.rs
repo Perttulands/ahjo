@@ -64,7 +64,11 @@ pub fn run() {
                 window_min_size: Some(size(px(tokens::WINDOW_MIN.0), px(tokens::WINDOW_MIN.1))),
                 ..Default::default()
             },
-            |window, cx| cx.new(|cx| app::DeskApp::new(config.desks, notice, window, cx)),
+            |window, cx| {
+                // The app's zoom chosen in Ahjo Swarm.
+                window.set_ui_scale(ahjo_app_kit::theme::chosen_scale(), cx);
+                cx.new(|cx| app::DeskApp::new(config.desks, notice, window, cx))
+            },
         );
         if let Err(e) = opened {
             panic!("the window did not open: {e}");

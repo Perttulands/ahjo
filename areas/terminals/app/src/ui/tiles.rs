@@ -190,7 +190,8 @@ impl Terminals {
                     s.hover_link(None, cx);
                 }
             }))
-            .on_scroll(cx.listener(Self::term_scroll));
+            .on_scroll(cx.listener(Self::term_scroll))
+            .child(Self::zoom_claim(cx));
         // A press that began in a window is followed outside it, and outside
         // the app's window while the button is held.
         let entity = cx.entity();
@@ -1272,7 +1273,7 @@ impl Terminals {
                     cell: Some(m.cell),
                     rows: s.rows,
                     cols: s.cols,
-                    font: Some(f32::from(m.font_size)),
+                    font: Some(paint::design_px(m.font_size, window)),
                     display_offset: s.term.grid().display_offset(),
                     dock: dock.map(|d| d.0),
                     dock_origin: dock.filter(|_| same).map(|d| d.1),
@@ -1647,8 +1648,12 @@ impl Terminals {
             return;
         }
         // Ctrl+=, Ctrl+- and Ctrl+0 zoom this terminal, as browsers do.
-        // At the end of the range the key is still the zoom's.
-        if let Some(z) = zoom::from_key(k) {
+        // At the end of the range the key is still the zoom's. A window
+        // with no session (its launcher) has no text of its own: the key
+        // goes on to the app's zoom.
+        if let Some(z) = zoom::from_key(k)
+            && (w == PEEK_SLOT || self.settings.workspace.shown(w).is_some())
+        {
             self.zoom_slot(w, z, 1, cx);
             cx.stop_propagation();
             return;
@@ -1674,6 +1679,15 @@ impl Terminals {
             self.send_input(&b, cx);
             cx.stop_propagation();
         }
+    }
+
+    /// Ctrl+wheel over a terminal's body zooms it, not the app.
+    pub(super) fn zoom_claim(cx: &mut Context<Self>) -> impl IntoElement {
+        let me = cx.weak_entity();
+        zoom::claim(move |p, cx| {
+            me.upgrade()
+                .is_some_and(|me| me.read(cx).window_at(p).is_some())
+        })
     }
 
     /// The terminal under the pointer: Peek's while it is open over the

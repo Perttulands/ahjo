@@ -370,7 +370,9 @@ impl MissionsPage {
                 }
                 p.canvas.menu = None;
                 cx.notify();
-            }));
+            }))
+            // Its Ctrl+wheel is the board's zoom, not the whole app's.
+            .child(ahjo_app_kit::zoom::claim(|_, _| true));
         layer = layer.child(wires(
             t,
             &board,

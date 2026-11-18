@@ -82,7 +82,10 @@ adds its own panel of missions and runs.
 - **One zoom.** What the operator reads or works in (a terminal, code and
   its changes, a picture, a page read) zooms the same way: Ctrl+wheel over
   it, Ctrl+= and Ctrl+-, Ctrl+0 back. Each keeps its own size across runs
-  and says it when it changes.
+  and says it when it changes. Anywhere else (a list, a form, the bars, a
+  dialog) the same gestures zoom the whole app, kept as Zoom in Settings:
+  everything grows together, so every page lays out at 130% as at 100%.
+  Terminals keep their own text size through it; the rest zoom on top.
 - **Words only when they change what you do.** Keys live in tooltips and the
   Keys overlay.
 - **Send is the same everywhere.** Anything you can look at can be sent to a

@@ -5,8 +5,8 @@
 //! its own level where it keeps its other settings; this reads the gesture.
 
 use gpui::{
-    App, DispatchPhase, HitboxBehavior, IntoElement, Keystroke, ScrollDelta, ScrollEvent, Styled,
-    Window, canvas,
+    App, DispatchPhase, HitboxBehavior, IntoElement, Keystroke, Pixels, Point, ScrollDelta,
+    ScrollEvent, Styled, Window, canvas,
 };
 use std::cell::Cell;
 use std::rc::Rc;
@@ -20,7 +20,123 @@ pub enum Zoom {
 }
 
 /// How zooming reads in the Keys panel.
-pub const HINT: &str = "Zoom: Ctrl+wheel over a terminal, code, a picture or a page you read; Ctrl+= and Ctrl+- from the keyboard; Ctrl+0 resets it.";
+pub const HINT: &str = "Zoom: Ctrl+wheel over a terminal, code, a picture or a page you read zooms it; anywhere else, the whole app. Ctrl+= and Ctrl+- from the keyboard; Ctrl+0 resets.";
+
+/// The whole app's size, in percent of its own measures: the `size`
+/// setting. Terminals keep their text size through it; code, pictures and
+/// the mission canvas zoom on top of it.
+pub mod app {
+    use super::Zoom;
+
+    pub const DEFAULT: u16 = 100;
+    pub const MIN: u16 = 75;
+    pub const MAX: u16 = 200;
+    pub const STEP: u16 = 5;
+
+    /// What a window's measures are multiplied by at `percent`, held in range.
+    pub fn scale(percent: u16) -> f32 {
+        f32::from(percent.clamp(MIN, MAX)) / 100.
+    }
+
+    /// The size a gesture takes `at` to, `n` steps at a time; `None` when
+    /// it would not change.
+    pub fn zoomed(at: u16, z: Zoom, n: i32) -> Option<u16> {
+        let to = match z {
+            Zoom::Reset => DEFAULT,
+            Zoom::In | Zoom::Out => {
+                let n = if z == Zoom::In { n } else { -n };
+                // From a size off the steps (typed into app.json), the first
+                // step lands on one.
+                let base = i32::from(at.clamp(MIN, MAX));
+                let snapped = if n > 0 {
+                    base - base % i32::from(STEP)
+                } else {
+                    base + (i32::from(STEP) - base % i32::from(STEP)) % i32::from(STEP)
+                };
+                (snapped + n * i32::from(STEP)).clamp(i32::from(MIN), i32::from(MAX)) as u16
+            }
+        };
+        (to != at).then_some(to)
+    }
+
+    /// What the toast says at `percent`.
+    pub fn words(percent: u16) -> String {
+        if percent == DEFAULT {
+            format!("App zoom {percent}%")
+        } else {
+            format!("App zoom {percent}% · Ctrl+0 resets")
+        }
+    }
+}
+
+thread_local! {
+    /// A surface with its own zoom took this wheel event's Ctrl+wheel.
+    static CLAIMED: Cell<bool> = const { Cell::new(false) };
+}
+
+/// Put over a surface with a zoom of its own that reads Ctrl+wheel in its
+/// own scroll handler (a terminal, the mission canvas): the wheel there
+/// stays the surface's, and the app's zoom leaves it alone. `over` says
+/// whether a point in it is where the surface zooms (a terminal's body, not
+/// its head).
+pub fn claim(over: impl Fn(Point<Pixels>, &App) -> bool + 'static) -> impl IntoElement {
+    canvas(
+        |bounds, window, _| window.insert_hitbox(bounds, HitboxBehavior::Normal),
+        move |_, hitbox, window, _| {
+            window.on_mouse_event(move |e: &ScrollEvent, phase, window, cx| {
+                if phase == DispatchPhase::Capture
+                    && e.modifiers.control
+                    && hitbox.should_handle_scroll(window)
+                    && over(e.position, cx)
+                {
+                    CLAIMED.set(true);
+                }
+            });
+        },
+    )
+    .absolute()
+    .top_0()
+    .left_0()
+    .size_full()
+}
+
+/// The app's zoom: takes every Ctrl+wheel no surface took and gives `on`
+/// its steps, before any list scrolls by it. Drawn last of all (a deferred
+/// element above every other), so each surface's own [`catch`] or
+/// [`claim`] has heard the wheel first, a layer's too.
+pub fn app_catch(
+    wheel: Rc<Cell<Wheel>>,
+    on: impl Fn(i32, &mut Window, &mut App) + 'static,
+) -> impl IntoElement {
+    gpui::deferred(
+        canvas(
+            |_, _, _| (),
+            move |_, _, window, _| {
+                let wheel = wheel.clone();
+                window.on_mouse_event(move |e: &ScrollEvent, phase, window, cx| {
+                    if phase != DispatchPhase::Capture {
+                        return;
+                    }
+                    if CLAIMED.replace(false) {
+                        return;
+                    }
+                    let mut w = wheel.get();
+                    let steps = w.steps(e);
+                    wheel.set(w);
+                    if let Some(n) = steps {
+                        cx.stop_propagation();
+                        if n != 0 {
+                            on(n, window, cx);
+                        }
+                    }
+                });
+            },
+        )
+        .absolute()
+        .size_0(),
+    )
+    .with_priority(usize::MAX)
+}
 
 /// The zoom a key asks for: Ctrl, without Alt or the platform key, and
 /// `=`, `+`, `-` or `0`. Shift is allowed, since `+` takes it on many layouts.
@@ -90,6 +206,8 @@ pub fn catch(
                 wheel.set(w);
                 if let Some(n) = steps {
                     cx.stop_propagation();
+                    // The app's zoom never hears it, so nothing claimed it.
+                    CLAIMED.set(false);
                     if n != 0 {
                         on(n, window, cx);
                     }
@@ -171,6 +289,24 @@ mod tests {
         let bit = wheel(ScrollDelta::Pixels(point(px(0.), px(30.))), true);
         assert_eq!(w.steps(&bit), Some(0));
         assert_eq!(w.steps(&bit), Some(1), "60 pixels made one step");
+    }
+
+    #[test]
+    fn the_app_zoom_steps_in_fives_within_its_range_and_resets_to_100() {
+        use app::zoomed;
+        assert_eq!(zoomed(100, Zoom::In, 1), Some(105));
+        assert_eq!(zoomed(100, Zoom::In, 6), Some(130));
+        assert_eq!(zoomed(100, Zoom::Out, 2), Some(90));
+        assert_eq!(zoomed(130, Zoom::Reset, 1), Some(100));
+        assert_eq!(zoomed(100, Zoom::Reset, 1), None);
+        assert_eq!(zoomed(app::MAX, Zoom::In, 1), None);
+        assert_eq!(zoomed(app::MIN, Zoom::Out, 3), None);
+        // A size typed off the steps lands on one at the first step.
+        assert_eq!(zoomed(112, Zoom::In, 1), Some(115));
+        assert_eq!(zoomed(112, Zoom::Out, 1), Some(110));
+        assert_eq!(zoomed(500, Zoom::Out, 1), Some(195));
+        assert_eq!(app::scale(115), 1.15);
+        assert_eq!(app::scale(5), 0.75, "held in range");
     }
 
     #[test]

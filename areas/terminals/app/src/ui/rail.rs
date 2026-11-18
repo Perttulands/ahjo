@@ -659,6 +659,7 @@ impl Terminals {
                         .on_mouse_up(MouseButton::Middle, cx.listener(Self::term_mouse_up))
                         .on_mouse_up(MouseButton::Right, cx.listener(Self::term_mouse_up))
                         .on_scroll(cx.listener(Self::term_scroll))
+                        .child(Self::zoom_claim(cx))
                         .child(header)
                         .child(
                             div()

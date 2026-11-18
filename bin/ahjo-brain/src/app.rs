@@ -3148,7 +3148,11 @@ pub fn open_window(start: Start, cx: &mut App) {
             app_id: Some("ahjo-brain".into()),
             ..Default::default()
         },
-        |window, cx| cx.new(|cx| BrainApp::new(start, window, cx)),
+        |window, cx| {
+            // The app's zoom chosen in Ahjo Swarm.
+            window.set_ui_scale(ahjo_app_kit::theme::chosen_scale(), cx);
+            cx.new(|cx| BrainApp::new(start, window, cx))
+        },
     );
     if let Err(e) = opened {
         panic!("the window did not open: {e}");

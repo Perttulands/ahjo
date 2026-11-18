@@ -230,6 +230,20 @@ can leave without taking Swarm along. Revisit this when a product gets users
 outside this machine with its own release rhythm, or when the kit has been
 stable long enough to version.
 
+## The app's zoom
+
+The app's zoom (`zoom::app`, the `size` setting) is the window's own scale
+in GPUI, which `vendor/gpui-pre` adds to the release this repository pins
+(`Window::set_ui_scale`, marked `Ahjo:` in its `window.rs` and
+`platform.rs`): the display's scale factor is multiplied by it and the
+viewport and every input position divided, as a browser's zoom does. Every
+measure (tokens, a page's own pixels, what a canvas draws, a measured text
+width) grows together, so no view knows the zoom and a layout right at
+100% is right at 130%. GPUI's rem size would scale only what is written in
+rems, and the apps size everything in pixels, much of it in arithmetic
+with measured widths. Raising `gpui-pre` means applying the same few lines
+to the new release.
+
 ## Why this shape
 
 Work on Ahjo is done by many agents at once. The shape keeps one piece of work
