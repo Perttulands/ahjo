@@ -185,6 +185,10 @@ pub struct Settings {
     /// The reader's body size as zoomed; none is its own size.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub reader_text: Option<f32>,
+    /// The whole app's size in percent (`zoom::app`), once zoomed here;
+    /// none opens at Ahjo Swarm's.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub app_size: Option<u16>,
     #[serde(flatten)]
     pub rest: serde_json::Map<String, serde_json::Value>,
 }
@@ -275,10 +279,12 @@ mod tests {
         assert_eq!(s.reader_text, None);
         s.theme = "signal".into();
         s.reader_text = Some(18.5);
+        s.app_size = Some(115);
         write_settings(&path, &s).unwrap();
         let back = read_settings(&path).unwrap();
         assert_eq!(back.theme, "signal");
         assert_eq!(back.reader_text, Some(18.5));
+        assert_eq!(back.app_size, Some(115));
         assert_eq!(back.rest["later"], 1);
         std::fs::write(&path, "{not json").unwrap();
         assert!(read_settings(&path).is_err());

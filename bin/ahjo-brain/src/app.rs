@@ -292,6 +292,10 @@ pub struct BrainApp {
     /// A word the app says for a moment (the zoom), and which saying it is.
     said: Option<String>,
     said_gen: u64,
+    /// The whole app's size in percent, by the one zoom rule: Ctrl+wheel
+    /// and the zoom keys anywhere but the page read.
+    app_size: u16,
+    app_wheel: Rc<std::cell::Cell<zoom::Wheel>>,
 }
 
 impl Focusable for BrainApp {
@@ -331,7 +335,14 @@ impl BrainApp {
         let (settings_path, settings, settings_broken) = start.settings;
         let reader_text = reader_size(&settings);
         reader.update(cx, |r, cx| r.set_text(reader_text, cx));
+        // Its own size once zoomed here, else the one chosen in Swarm.
+        let app_size = settings
+            .app_size
+            .unwrap_or_else(|| (ahjo_app_kit::theme::chosen_scale() * 100.).round() as u16);
+        window.set_ui_scale(zoom::app::scale(app_size), cx);
         let mut app = BrainApp {
+            app_size,
+            app_wheel: Rc::default(),
             reader_text,
             reader_wheel: Rc::default(),
             results_scroll: ScrollHandle::new(),
@@ -760,10 +771,57 @@ impl BrainApp {
         self.say(format!("Text {to} px{reset}"), cx);
         // The orbit gives the wider sheet its room.
         self.replanned = true;
+        self.settings.reader_text = (to != tokens::reader::BODY).then_some(to);
+        self.keep_settings();
+        cx.notify();
+    }
+
+    /// The one zoom rule anywhere but the page read: the whole app `n`
+    /// steps bigger or smaller, or back to 100%; kept, and said.
+    fn zoom_app(&mut self, z: Zoom, n: i32, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(to) = zoom::app::zoomed(self.app_size, z, n) else {
+            return;
+        };
+        self.app_size = to;
+        window.set_ui_scale(zoom::app::scale(to), cx);
+        self.say(zoom::app::words(to), cx);
+        self.replanned = true;
+        self.settings.app_size = Some(to);
+        self.keep_settings();
+        cx.notify();
+    }
+
+    /// What the app says for a moment, low in the middle of what it is
+    /// about: the page read, else the window.
+    fn said_view(&self, t: &Theme) -> Option<gpui::Div> {
+        self.said.clone().map(|words| {
+            div()
+                .absolute()
+                .bottom(px(chrome::INSET * 2.))
+                .left_0()
+                .right_0()
+                .flex()
+                .justify_center()
+                .child(
+                    div()
+                        .px(px(chrome::SWITCH_PAD_X))
+                        .py(px(6.))
+                        .rounded(px(chrome::RADIUS))
+                        .bg(t.raised)
+                        .border_1()
+                        .border_color(t.divider)
+                        .text_size(px(size::TEXT))
+                        .text_color(t.text)
+                        .child(words),
+                )
+        })
+    }
+
+    /// Writes the settings, unless the file did not read.
+    fn keep_settings(&mut self) {
         if self.settings_broken.is_none()
             && let Some(path) = self.settings_path.clone()
         {
-            self.settings.reader_text = (to != tokens::reader::BODY).then_some(to);
             match source::write_settings(&path, &self.settings) {
                 Ok(()) => self.settings_seen = source::changed(&path),
                 Err(e) => {
@@ -771,7 +829,13 @@ impl BrainApp {
                 }
             }
         }
-        cx.notify();
+    }
+
+    /// The pointer is over the page read, where zooming sizes its text.
+    fn over_sheet(&self, window: &Window) -> bool {
+        self.reading.is_some()
+            && f32::from(window.mouse_position().x)
+                >= self.size.0 - reader::sheet_width(self.size.0, self.reader_k())
     }
 
     /// Says `words` for a moment.
@@ -1303,11 +1367,14 @@ impl BrainApp {
         let ks = &e.keystroke;
         let m = &ks.modifiers;
         let typing = self.field.read(cx).is_focused(window);
-        // The page read zooms by the one rule, wherever the keyboard is.
-        if self.reading.is_some()
-            && let Some(z) = zoom::from_key(ks)
-        {
-            self.zoom_reader(z, 1, cx);
+        // The one zoom rule: the keys zoom what the wheel would under the
+        // pointer, the page read's text over it, else the whole app.
+        if let Some(z) = zoom::from_key(ks) {
+            if self.over_sheet(window) {
+                self.zoom_reader(z, 1, cx);
+            } else {
+                self.zoom_app(z, 1, window, cx);
+            }
             cx.stop_propagation();
             return;
         }
@@ -2656,8 +2723,20 @@ impl Render for BrainApp {
         }
         if self.reading.is_some() {
             root = root.child(self.sheet(&t, cx));
+        } else {
+            root = root.children(self.said_view(&t));
         }
-        root
+        // Ctrl+wheel the page read did not take sizes the whole app.
+        let me = cx.entity().downgrade();
+        root.child(zoom::app_catch(
+            self.app_wheel.clone(),
+            move |n, window, cx| {
+                let _ = me.update(cx, |me, cx| {
+                    let z = if n > 0 { Zoom::In } else { Zoom::Out };
+                    me.zoom_app(z, n.abs(), window, cx)
+                });
+            },
+        ))
     }
 }
 
@@ -3284,27 +3363,7 @@ impl BrainApp {
                 glyph("close", false, "Close the page (Esc)")
                     .on_click(cx.listener(|me, _, _, cx| me.close(cx))),
             );
-        let said = self.said.clone().map(|words| {
-            div()
-                .absolute()
-                .bottom(px(chrome::INSET * 2.))
-                .left_0()
-                .right_0()
-                .flex()
-                .justify_center()
-                .child(
-                    div()
-                        .px(px(chrome::SWITCH_PAD_X))
-                        .py(px(6.))
-                        .rounded(px(chrome::RADIUS))
-                        .bg(t.raised)
-                        .border_1()
-                        .border_color(t.divider)
-                        .text_size(px(size::TEXT))
-                        .text_color(t.text)
-                        .child(words),
-                )
-        });
+        let said = self.said_view(t);
         let me = cx.entity().downgrade();
         div()
             .absolute()

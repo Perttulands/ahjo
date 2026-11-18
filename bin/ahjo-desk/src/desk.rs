@@ -84,6 +84,34 @@ pub fn write_drafts(path: &std::path::Path, text: &str) -> Result<(), String> {
     std::fs::rename(&part, path).map_err(fail)
 }
 
+/// The whole app's size once zoomed here (`zoom::app`), beside `desk.json`:
+/// the Desk opens at Ahjo Swarm's until it has its own.
+pub fn size_path() -> Option<PathBuf> {
+    config_path().map(|p| p.with_file_name("desk-size.json"))
+}
+
+#[derive(Default, Serialize, Deserialize)]
+struct Kept {
+    size: Option<u16>,
+}
+
+/// The size kept at `path`; none when it was never written.
+pub fn read_size(path: &std::path::Path) -> Result<Option<u16>, String> {
+    match std::fs::read_to_string(path) {
+        Ok(text) => serde_json::from_str::<Kept>(&text)
+            .map(|k| k.size)
+            .map_err(|e| format!("{}: {e}", path.display())),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(e) => Err(format!("{}: {e}", path.display())),
+    }
+}
+
+/// Keeps `size` at `path`, whole.
+pub fn write_size(path: &std::path::Path, size: u16) -> Result<(), String> {
+    let text = serde_json::to_string(&Kept { size: Some(size) }).map_err(|e| e.to_string())?;
+    write_drafts(path, &text)
+}
+
 /// The desks named by `--desk` (repeated), else `AHJO_DESK_DESKS` (comma
 /// separated), else the config file's.
 pub fn load(args: &[String]) -> (Config, Option<String>) {
@@ -316,5 +344,22 @@ mod tests {
             media_path("KQ3", 2, "m1", true),
             "/thumb/KQ3/r2/m1".to_string()
         );
+    }
+}
+
+#[cfg(test)]
+mod size_tests {
+    use super::*;
+
+    #[test]
+    fn the_app_size_is_kept_and_read_back() {
+        let dir = std::env::temp_dir().join(format!("desk-size-{}", std::process::id()));
+        let path = dir.join("desk-size.json");
+        assert_eq!(read_size(&path), Ok(None));
+        write_size(&path, 115).unwrap();
+        assert_eq!(read_size(&path), Ok(Some(115)));
+        std::fs::write(&path, "{not json").unwrap();
+        assert!(read_size(&path).is_err());
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 }

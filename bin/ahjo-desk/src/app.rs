@@ -192,6 +192,10 @@ pub struct DeskApp {
     /// A page takes clicks as marks rather than following them.
     pub page_comment: bool,
     aim: Option<Aim>,
+    /// The whole app's size in percent, by the one zoom rule: Ctrl+wheel
+    /// anywhere but a picture, and the zoom keys.
+    app_size: u16,
+    app_wheel: Rc<Cell<ahjo_app_kit::zoom::Wheel>>,
     pub toast: Option<(String, bool)>,
     toast_gen: u64,
     pub sending: bool,
@@ -312,6 +316,8 @@ impl DeskApp {
             drawing: None,
             page_comment: false,
             aim: Some(Aim::Words),
+            app_size: (window.ui_scale() * 100.).round() as u16,
+            app_wheel: Rc::default(),
             toast: None,
             toast_gen: 0,
             sending: false,
@@ -1436,6 +1442,31 @@ impl DeskApp {
         cx.notify();
     }
 
+    /// The whole app `n` steps bigger or smaller, or back to 100%; kept,
+    /// and said.
+    pub fn zoom_app(
+        &mut self,
+        z: ahjo_app_kit::zoom::Zoom,
+        n: i32,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        use ahjo_app_kit::zoom::app;
+        let Some(to) = app::zoomed(self.app_size, z, n) else {
+            return;
+        };
+        self.app_size = to;
+        window.set_ui_scale(app::scale(to), cx);
+        match desk::size_path().map(|p| desk::write_size(&p, to)) {
+            Some(Err(e)) => self.say(format!("{} · not kept: {e}", app::words(to)), true, cx),
+            _ => self.say(app::words(to), false, cx),
+        }
+    }
+
+    pub fn app_wheel_handle(&self) -> Rc<Cell<ahjo_app_kit::zoom::Wheel>> {
+        self.app_wheel.clone()
+    }
+
     pub fn say(&mut self, words: impl Into<String>, error: bool, cx: &mut Context<Self>) {
         self.toast = Some((words.into(), error));
         self.toast_gen += 1;
@@ -1600,6 +1631,12 @@ impl DeskApp {
     /// the keyboard to the surface, where letters pick tools and arrows
     /// step. Ctrl+Enter sends from anywhere.
     pub fn on_key(&mut self, e: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
+        // The zoom keys size the whole app, wherever the keyboard is: the
+        // picture zooms by its own keys and the wheel.
+        if let Some(z) = ahjo_app_kit::zoom::from_key(&e.keystroke) {
+            cx.stop_propagation();
+            return self.zoom_app(z, 1, window, cx);
+        }
         let key = e.keystroke.key.as_str();
         let m = &e.keystroke.modifiers;
         if m.control && !m.alt {

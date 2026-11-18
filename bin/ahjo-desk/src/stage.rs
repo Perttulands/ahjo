@@ -345,6 +345,7 @@ impl DeskApp {
         let drawing = self.tool != Tool::Look && shown_natural.is_some();
         let stage = div()
             .id("stage")
+            .relative()
             .size_full()
             .flex()
             .flex_col()
@@ -360,6 +361,9 @@ impl DeskApp {
                 }
             })
             .children(rows)
+            // The wheel here zooms the pictures, Ctrl or not; the app's zoom
+            // leaves it to them.
+            .child(ahjo_app_kit::zoom::claim(|_, _| true))
             .on_scroll(cx.listener(move |app, e: &ScrollEvent, window, cx| {
                 // A wheel's notch is one step however many lines it says;
                 // a touchpad's pixels zoom smoothly.

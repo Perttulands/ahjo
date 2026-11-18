@@ -85,8 +85,20 @@ impl Render for DeskApp {
             .text_color(t.text)
             .font_family(FAMILY)
             .text_size(px(META))
+            .relative()
             .child(self.header(&t, cx))
             .child(div().flex_1().min_h_0().child(body))
+            // Ctrl+wheel a picture did not take sizes the whole app.
+            .child(ahjo_app_kit::zoom::app_catch(self.app_wheel_handle(), {
+                let me = cx.entity().downgrade();
+                move |n, window, cx| {
+                    let _ = me.update(cx, |app, cx| {
+                        use ahjo_app_kit::zoom::Zoom;
+                        let z = if n > 0 { Zoom::In } else { Zoom::Out };
+                        app.zoom_app(z, n.abs(), window, cx)
+                    });
+                }
+            }))
     }
 }
 

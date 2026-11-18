@@ -65,8 +65,18 @@ pub fn run() {
                 ..Default::default()
             },
             |window, cx| {
-                // The app's zoom chosen in Ahjo Swarm.
-                window.set_ui_scale(ahjo_app_kit::theme::chosen_scale(), cx);
+                // Its own size once zoomed here, else the one chosen in
+                // Ahjo Swarm.
+                let own = desk::size_path().map(|p| desk::read_size(&p));
+                let scale = match &own {
+                    Some(Ok(Some(size))) => ahjo_app_kit::zoom::app::scale(*size),
+                    _ => ahjo_app_kit::theme::chosen_scale(),
+                };
+                window.set_ui_scale(scale, cx);
+                let notice = match own {
+                    Some(Err(e)) => Some(notice.map_or(e.clone(), |n| format!("{n} · {e}"))),
+                    _ => notice,
+                };
                 cx.new(|cx| app::DeskApp::new(config.desks, notice, window, cx))
             },
         );
