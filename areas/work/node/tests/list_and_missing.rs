@@ -49,11 +49,33 @@ async fn list_filters_closed_without_changing_the_page_and_missing_is_not_found(
             .map(|v| v["id"].as_str().unwrap().to_owned())
             .collect::<Vec<_>>()
     };
-    assert_eq!(ids(&list["items"]).len(), 3);
-    assert!(!ids(&list["items"]).contains(&"tst-1mt".to_owned()));
-    assert!(!ids(&list["projects"][0]["items"]).contains(&"tst-1mt".to_owned()));
+    // Each item once, under its project, without its text or whole family.
+    assert!(list.get("items").is_none(), "{list}");
+    let items = &list["projects"][0]["items"];
+    assert_eq!(ids(items).len(), 3);
+    assert!(!ids(items).contains(&"tst-1mt".to_owned()));
+    for item in items.as_array().unwrap() {
+        assert!(
+            item.get("body").is_none() && item.get("family").is_none(),
+            "{item}"
+        );
+    }
+    let blocked = items
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|item| item["id"] == "tst-qq9.2")
+        .unwrap();
+    assert_eq!(blocked["parent"], "tst-qq9", "{blocked}");
     assert!(
-        list["items"]
+        blocked["blocked_by"]
+            .as_array()
+            .unwrap()
+            .contains(&json!("tst-qq9.1")),
+        "{blocked}"
+    );
+    assert!(
+        items
             .as_array()
             .unwrap()
             .iter()
@@ -68,7 +90,6 @@ async fn list_filters_closed_without_changing_the_page_and_missing_is_not_found(
         0
     );
     let all: Value = serde_json::from_slice(&out).unwrap();
-    assert!(ids(&all["items"]).contains(&"tst-1mt".to_owned()));
     assert!(ids(&all["projects"][0]["items"]).contains(&"tst-1mt".to_owned()));
 
     // A search reads every word, in titles and text, closed items too.

@@ -1,12 +1,14 @@
 //! Shared Work wire types and channel constants.
 
 pub mod item;
+pub mod list;
 pub mod model;
 mod resolver;
 pub mod text;
 /// The syntax of a work item's reference, for pages that recognise one in text.
 pub use ahjo_work_ref as work_ref;
 pub use item::{Family, Item};
+pub use list::{Line, List, Listed};
 pub use model::*;
 pub use resolver::{Resolver, Resolving};
 pub const WATCH: u8 = 0x98;

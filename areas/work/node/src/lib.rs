@@ -7,7 +7,7 @@ mod work;
 use ahjo_core::{Error, NodeId};
 use ahjo_node_kit::args::{flag, object, text};
 use ahjo_node_kit::{Area, BoxFuture, Built, Channel, Client, Command, Listing, Setup};
-use ahjo_work_contract::{Resolver, Resolving};
+use ahjo_work_contract::{List, Resolver, Resolving};
 use anyhow::Result;
 use axum::Router;
 use serde::Deserialize;
@@ -81,7 +81,7 @@ impl Area for WorkArea {
         let (work, node) = (self.work.clone(), self.node.clone());
         let list = Command::new(
             "work_list",
-            "List non-closed work items, including blocked and deferred; use --all to include closed and merged items.",
+            "List each project's open work items, blocked and deferred ones included, one line each: id, title, status, kind, priority, parent and blockers. --all adds closed and merged ones; work show gives an item's text and family.",
             || object(json!({"all": {"type":"boolean", "default":false}}), &[]),
             move |args| {
                 let (work, node) = (work.clone(), node.clone());
@@ -91,20 +91,16 @@ impl Area for WorkArea {
                     let _watching = work.subscribe();
                     let requested = work.refresh();
                     let read = async {
-                        let mut snapshot = serde_json::to_value(&*work.refreshed(requested).await)
-                            .map_err(failed)?;
-                        if !all {
-                            omit_closed(&mut snapshot);
-                        }
-                        snapshot["items"] = json!(listed_items(&snapshot));
-                        if snapshot["projects"].as_array().is_some_and(Vec::is_empty) {
-                            snapshot["none"] = json!(format!(
+                        let list = List::of(&*work.refreshed(requested).await, all);
+                        let mut answer = serde_json::to_value(&list).map_err(failed)?;
+                        if list.projects.is_empty() {
+                            answer["none"] = json!(format!(
                                 "this node reads no projects; to read one, {}",
                                 work::ADDING
                             ));
                         }
-                        snapshot["node"] = json!(node);
-                        Ok(snapshot)
+                        answer["node"] = json!(node);
+                        Ok(answer)
                     };
                     tokio::time::timeout(Duration::from_secs(30), read)
                         .await
@@ -128,15 +124,22 @@ impl Area for WorkArea {
                     let read = async {
                         let snapshot = work.refreshed(requested).await;
                         let found = snapshot.matching(&terms);
-                        let board = serde_json::to_value(&*snapshot).map_err(failed)?;
-                        let items: Vec<_> = listed_items(&board)
-                            .into_iter()
-                            .filter(|item| {
-                                item["reference"]
-                                    .as_str()
-                                    .is_some_and(|r| found.iter().any(|f| f == r))
-                            })
-                            .collect();
+                        let list = List::keeping(&snapshot, |reference, _| {
+                            found.iter().any(|f| f == reference)
+                        });
+                        // Each found item, with its project.
+                        let mut items = Vec::new();
+                        for listed in &list.projects {
+                            for line in &listed.items {
+                                let mut item = json!({"project": listed.project});
+                                if let serde_json::Value::Object(fields) =
+                                    serde_json::to_value(line).map_err(failed)?
+                                {
+                                    item.as_object_mut().expect("an object").extend(fields);
+                                }
+                                items.push(item);
+                            }
+                        }
                         Ok(json!({"node": node, "items": items}))
                     };
                     tokio::time::timeout(Duration::from_secs(30), read)
@@ -195,44 +198,6 @@ impl Area for WorkArea {
         Some(Box::new(Socket(work::Channel::new(self.work.clone()))))
     }
 }
-/// Filter only the command's copy of the board; the page keeps its full history.
-fn omit_closed(snapshot: &mut serde_json::Value) {
-    for project in snapshot["projects"].as_array_mut().into_iter().flatten() {
-        for (list, status) in [("items", "status"), ("issues", "state"), ("pulls", "state")] {
-            if let Some(items) = project
-                .get_mut(list)
-                .and_then(serde_json::Value::as_array_mut)
-            {
-                items.retain(|item| !matches!(item[status].as_str(), Some("closed" | "merged")));
-            }
-        }
-    }
-}
-/// A flat index makes the board's items visible in the generic CLI renderer,
-/// which otherwise shows only each project's scalar fields.
-fn listed_items(snapshot: &serde_json::Value) -> Vec<serde_json::Value> {
-    let mut items = Vec::new();
-    for project in snapshot["projects"].as_array().into_iter().flatten() {
-        match project["tracker"].as_str() {
-            Some("beads") => {
-                for item in project["items"].as_array().into_iter().flatten() {
-                    items.push(json!({"project": project["folder"], "id": item["id"], "reference": item["reference"], "title": item["title"], "status": item["status"]}));
-                }
-            }
-            Some("github") => {
-                for (key, kind) in [("issues", "issue"), ("pulls", "pull")] {
-                    for item in project[key].as_array().into_iter().flatten() {
-                        let repo = project["name"].as_str().unwrap_or("");
-                        let number = item["number"].as_u64().unwrap_or_default();
-                        items.push(json!({"project": repo, "id": number, "reference": format!("gh:{repo}#{number}"), "title": item["title"], "status": item["state"], "kind": kind}));
-                    }
-                }
-            }
-            _ => {}
-        }
-    }
-    items
-}
 fn failed(e: impl std::fmt::Display) -> Error {
     Error::new("tracker_error", e.to_string())
 }
@@ -245,22 +210,5 @@ impl Channel for Socket {
     }
     fn next(&mut self) -> BoxFuture<'_, Option<Vec<u8>>> {
         Box::pin(async move { Some(self.0.next().await) })
-    }
-}
-
-#[cfg(test)]
-mod command_tests {
-    use super::*;
-
-    #[test]
-    fn command_filter_keeps_active_items_and_draft_pulls() {
-        let mut board = json!({"projects": [
-            {"tracker":"beads", "items":[{"status":"open"},{"status":"in_progress"},{"status":"blocked"},{"status":"closed"}]},
-            {"tracker":"github", "issues":[{"state":"open"},{"state":"closed"}], "pulls":[{"state":"draft"},{"state":"open"},{"state":"closed"},{"state":"merged"}]}
-        ]});
-        omit_closed(&mut board);
-        assert_eq!(board["projects"][0]["items"].as_array().unwrap().len(), 3);
-        assert_eq!(board["projects"][1]["issues"].as_array().unwrap().len(), 1);
-        assert_eq!(board["projects"][1]["pulls"].as_array().unwrap().len(), 2);
     }
 }

@@ -95,7 +95,7 @@ fn reports_file_to_beads_and_github_with_context_and_escape_discards(cx: &mut Te
                     .unwrap(),
                 0
             );
-            assert!(String::from_utf8(output).unwrap().contains("gh:o/r#70"));
+            assert!(String::from_utf8(output).unwrap().contains("id=o/r#70"));
             let show = vec![
                 "show".to_owned(),
                 "--node".into(),

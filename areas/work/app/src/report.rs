@@ -7,7 +7,7 @@ use ahjo_app_kit::theme::{FAMILY, theme};
 use ahjo_app_kit::widgets::field::{FieldEvent, TextField};
 use ahjo_app_kit::widgets::kit::{self, Kind};
 use ahjo_core::NodeId;
-use ahjo_work_contract::{ProjectView, Snapshot};
+use ahjo_work_contract::List;
 use gpui::{AppContext, Context, Entity, Focusable, Render, Window, div, prelude::*, px};
 use serde_json::{Value, json};
 
@@ -90,17 +90,14 @@ impl Report {
                         .and_then(|v| {
                             v["result"]["content"][0]["text"]
                                 .as_str()
-                                .and_then(|s| serde_json::from_str::<Snapshot>(s).ok())
+                                .and_then(|s| serde_json::from_str::<List>(s).ok())
                         });
-                    if let Some(snapshot) = parsed {
+                    if let Some(list) = parsed {
                         report
                             .projects
-                            .extend(snapshot.projects.into_iter().map(|p| Project {
+                            .extend(list.projects.into_iter().map(|p| Project {
                                 node: node.id.clone(),
-                                name: match p {
-                                    ProjectView::Beads(s) => s.folder,
-                                    ProjectView::Github(r) => r.name,
-                                },
+                                name: p.project,
                             }));
                         if report.selected.is_none()
                             && report
