@@ -722,6 +722,13 @@ fn aborting_a_blocked_run_ends_the_detached_seat() {
             "seat_cleanup",
             serde_json::json!({"sessionName":"scratch-seat","outcome":"left_shutdown"}),
         ),
+        // Blocked before the restart, so the restart leaves it blocked. A
+        // run cut mid-step is resumed on restart, and its new attempt would
+        // race the abort below to end the seat.
+        (
+            "run_blocked",
+            serde_json::json!({"code":"seat_gone","reason":"The step's terminal closed","blockedNodeId":"fmn_work","resumeAllowed":true,"resumePolicy":"explicit"}),
+        ),
     ] {
         ledger
             .append(ahjo_mission_engine::RunEvent {
