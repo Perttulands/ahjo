@@ -1671,7 +1671,8 @@ impl Render for MissionsPage {
                 let (head, body) = self.mission_detail(&t, &m, cx);
                 pane::detail(
                     &t,
-                    "missions-detail",
+                    // Each mission keeps its own scroll; another opens at its top.
+                    gpui::SharedString::from(format!("missions-detail-{}", m.slug)),
                     head,
                     div()
                         .flex()
