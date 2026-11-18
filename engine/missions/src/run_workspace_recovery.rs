@@ -3,7 +3,7 @@ use crate::coordinator::Control;
 use crate::run_worker::{append_live, event};
 use crate::run_workspace::{commit_turn, remove, turn_path};
 use crate::{Coordinator, RunEvent, Workspaces, Worktree};
-use ahjo_mission_model::RunStart;
+use ahjo_mission_model::{Mission, RunStart};
 use serde_json::json;
 use std::{
     io,
@@ -17,6 +17,7 @@ use std::{
 pub(crate) fn cleanup(
     c: &Coordinator,
     id: &str,
+    mission: &Mission,
     req: &RunStart,
     workspace: &Path,
     control: &Control,
@@ -44,7 +45,7 @@ pub(crate) fn cleanup(
         if !pending || settled || control.canceled.load(std::sync::atomic::Ordering::Acquire) {
             let path = turn_path(c, id, &start.node_id, start.attempt);
             if !settled {
-                kept.extend(keep(c, id, &events, start, &path)?);
+                kept.extend(keep(c, id, mission, &events, start, &path)?);
             }
             remove(workspace, &path)?;
         }
@@ -75,6 +76,7 @@ pub(crate) fn kept_branch(id: &str, node: &str, attempt: i64) -> String {
 fn keep(
     c: &Coordinator,
     id: &str,
+    mission: &Mission,
     events: &[RunEvent],
     start: &RunEvent,
     path: &Path,
@@ -111,17 +113,21 @@ fn keep(
     }
     let branch = kept_branch(id, node, attempt);
     git(path, &["branch", "--force", &branch, &head])?;
-    let checkout = events[0]
+    let repository = events[0]
         .data
-        .get("checkout")
+        .get("repository")
         .and_then(|v| v.as_str())
         .unwrap_or("");
+    let step = (mission.formation(node).map(|f| f.title.as_str()))
+        .or_else(|| mission.gate(node).map(|g| g.title.as_str()))
+        .filter(|title| !title.is_empty())
+        .unwrap_or(node);
     let detail = format!(
-        "What step {node} attempt {attempt} wrote is kept on branch {branch}{}.",
-        if checkout.is_empty() {
+        "What {step} wrote in attempt {attempt} is kept on branch {branch}{}.",
+        if repository.is_empty() {
             String::new()
         } else {
-            format!(" in {checkout}")
+            format!(" of {repository}")
         }
     );
     // Written directly: a stopped run still records where its work went
@@ -155,6 +161,7 @@ fn git(cwd: &Path, args: &[&str]) -> io::Result<String> {
 pub(crate) fn recover_pending(
     c: &Coordinator,
     id: &str,
+    mission: &Mission,
     req: &RunStart,
     workspace: &Path,
     control: &Control,
@@ -162,7 +169,7 @@ pub(crate) fn recover_pending(
     if req.repository.is_empty() {
         return Ok(());
     }
-    cleanup(c, id, req, workspace, control)?;
+    cleanup(c, id, mission, req, workspace, control)?;
     let events = c.ledger(id)?.read().map_err(crate::error::to_io)?;
     for pending in events.iter().filter(|e| e.kind == "node_output_pending") {
         if events.iter().any(|e| {

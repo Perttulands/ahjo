@@ -40,7 +40,7 @@ pub fn execute(
     let cleanup = if control.stopping.load(Ordering::Acquire) {
         Ok(Vec::new())
     } else {
-        crate::run_workspace_recovery::cleanup(&c, &id, &req, &workspace, &control)
+        crate::run_workspace_recovery::cleanup(&c, &id, &mission, &req, &workspace, &control)
     };
     let kept = cleanup
         .as_ref()
@@ -308,7 +308,7 @@ fn execute_inner(
     control: &Arc<Control>,
 ) -> io::Result<Outcome> {
     crate::run_capture::recover(c, id, mission, req, &workspace, control)?;
-    crate::run_workspace_recovery::recover_pending(c, id, req, &workspace, control)?;
+    crate::run_workspace_recovery::recover_pending(c, id, mission, req, &workspace, control)?;
     if req.formation_id.is_empty() {
         return crate::run_scheduler::schedule(c, id, mission, req, workspace, control);
     }
