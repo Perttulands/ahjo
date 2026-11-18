@@ -1018,10 +1018,13 @@ impl AgentsPage {
                     cx,
                 )
                 .when(s.load == Load::Off, |d| d.opacity(tokens::DIMMED))
+                // A description that wraps keeps the name on its first line.
+                .items_start()
                 .child(
                     div()
                         .flex_none()
-                        .max_w(px(tokens::SKILL_W))
+                        .w(px(tokens::SKILL_W))
+                        .py(px(size::LABEL_BOTTOM))
                         .overflow_hidden()
                         .whitespace_nowrap()
                         .text_ellipsis()
@@ -1042,7 +1045,11 @@ impl AgentsPage {
                         })
                         .child(s.why.clone().unwrap_or_else(|| s.description.clone())),
                 )
-                .child(pane::meta(t, s.origin.word(), None));
+                .child(div().py(px(size::LABEL_BOTTOM)).child(pane::meta(
+                    t,
+                    s.origin.word(),
+                    None,
+                )));
             section = section.child(row);
         }
         if shape.skills.is_empty() {
@@ -1146,11 +1153,6 @@ impl AgentsPage {
                 if v.editing {
                     head = head
                         .child(
-                            pane::act(t, "shape-discard", "Discard").on_click(
-                                cx.listener(|s, _, window, cx| s.file_discard(window, cx)),
-                            ),
-                        )
-                        .child(
                             kit::button(
                                 t,
                                 "shape-save",
@@ -1159,6 +1161,11 @@ impl AgentsPage {
                             )
                             .debug_selector(|| "shape-save".into())
                             .on_click(cx.listener(|s, _, _, cx| s.file_save(cx))),
+                        )
+                        .child(
+                            pane::act(t, "shape-discard", "Discard").on_click(
+                                cx.listener(|s, _, window, cx| s.file_discard(window, cx)),
+                            ),
                         );
                 } else {
                     head = head.child(

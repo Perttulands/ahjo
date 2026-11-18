@@ -211,10 +211,6 @@ impl AgentsPage {
         if v.editing {
             head = head
                 .child(
-                    pane::act(t, "skill-discard", "Discard")
-                        .on_click(cx.listener(|s, _, window, cx| s.file_discard(window, cx))),
-                )
-                .child(
                     kit::button(
                         t,
                         "skill-save",
@@ -223,6 +219,10 @@ impl AgentsPage {
                     )
                     .debug_selector(|| "skill-save".into())
                     .on_click(cx.listener(|s, _, _, cx| s.file_save(cx))),
+                )
+                .child(
+                    pane::act(t, "skill-discard", "Discard")
+                        .on_click(cx.listener(|s, _, window, cx| s.file_discard(window, cx))),
                 );
         } else {
             head = head.child(

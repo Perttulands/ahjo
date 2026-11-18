@@ -1727,7 +1727,14 @@ impl Element for CodeElement {
             }
         });
         if moved {
-            window.refresh();
+            // This frame drew the rows found for the old width: draw again
+            // once it is over. A refresh asked for while drawing is lost,
+            // and a view nothing else redraws would keep the old rows.
+            let code = self.code.clone();
+            window.on_next_frame(move |window, cx| {
+                code.update(cx, |_, cx| cx.notify());
+                window.refresh();
+            });
         }
     }
 }
