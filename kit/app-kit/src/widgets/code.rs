@@ -142,20 +142,44 @@ fn line_height() -> Pixels {
     px((size::TEXT * 1.55).round())
 }
 
+/// Letters a wrapped line's later rows stand in by, under its own indent
+/// as an editor's do; none when the indent would leave a row too little.
+fn hang_of(shown: &str, cols: usize) -> usize {
+    let indent = shown.chars().take_while(|c| *c == ' ').count();
+    if cols == 0 || indent + HANG_ROOM > cols {
+        0
+    } else {
+        indent
+    }
+}
+
+/// The fewest letters a hanging row keeps beside its indent.
+const HANG_ROOM: usize = 16;
+
 /// A shown line cut into rows of at most `cols` letters (none: one row),
 /// in bytes: after the last space that fits, or mid-word when a word is
-/// longer than a row.
+/// longer than a row. Rows after the first hold their indent fewer.
 fn segments_of(shown: &str, cols: usize) -> Vec<Range<usize>> {
     if cols == 0 {
         return vec![0..shown.len()];
     }
+    let hang = hang_of(shown, cols);
     let chars: Vec<(usize, char)> = shown.char_indices().collect();
     let byte = |k: usize| chars.get(k).map_or(shown.len(), |c| c.0);
     let mut out = vec![];
     let mut start = 0;
-    while chars.len() - start > cols {
-        let end = start + cols;
-        let cut = (start + 1..=end)
+    loop {
+        // The first row holds its indent; later rows stand under it.
+        let (room, lead) = if out.is_empty() {
+            (cols, hang)
+        } else {
+            (cols - hang, 0)
+        };
+        if chars.len() - start <= room {
+            break;
+        }
+        let end = start + room;
+        let cut = (start + lead + 1..=end)
             .rev()
             .find(|&k| chars[k - 1].1 == ' ')
             .unwrap_or(end);
@@ -500,6 +524,15 @@ impl Code {
     /// The stretches of a shown line each row draws, in bytes of it.
     fn segments(&self, shown: &str) -> Vec<Range<usize>> {
         segments_of(shown, if self.wrap { self.cols } else { 0 })
+    }
+
+    /// How far right row `k` of a shown line starts: a later row of a
+    /// wrapped line stands under the line's indent.
+    fn row_x(&self, shown: &str, k: usize, char_w: Pixels) -> Pixels {
+        match (self.wrap, k) {
+            (true, 1..) => char_w * hang_of(shown, self.cols) as f32,
+            _ => px(0.),
+        }
     }
 
     pub fn text(&self) -> &str {
@@ -1100,7 +1133,8 @@ impl Code {
         let segs = self.segments(&shown);
         let seg = segs[k.min(segs.len() - 1)].clone();
         let shaped = shape(window, &shown[seg.clone()], MEASURE, &[]);
-        let x = (p.x - b.origin.x + self.left).max(px(0.));
+        let lead = self.row_x(&shown, k.min(segs.len() - 1), self.char_w);
+        let x = (p.x - b.origin.x + self.left - lead).max(px(0.));
         r.start + from_shown(line, seg.start + shaped.closest_index_for_x(x))
     }
 
@@ -1294,7 +1328,7 @@ impl EntityInputHandler for Code {
             .position(|s| at_shown < s.end)
             .unwrap_or(segs.len() - 1);
         let shaped = shape(window, &shown[segs[k].clone()], MEASURE, &[]);
-        let x = shaped.x_for_index(at_shown - segs[k].start);
+        let x = shaped.x_for_index(at_shown - segs[k].start) + self.row_x(&shown, k, self.char_w);
         let y = ((self.row_starts[n] + k) as f32 - self.top) * line_height();
         Some(Bounds::new(
             point(b.origin.x + x - self.left, b.origin.y + y),
@@ -1466,6 +1500,7 @@ impl Element for CodeElement {
                 let seg = segs[k].clone();
                 let last = k + 1 == segs.len();
                 let y = bounds.origin.y + lh * drawn as f32 - offset;
+                let x0 = x0 + c.row_x(&shown, k, char_w);
                 let part: Vec<_> = coloured
                     .iter()
                     .filter(|(cr, _)| cr.end > seg.start && cr.start < seg.end)
@@ -1715,6 +1750,24 @@ mod tests {
         ];
         assert_eq!(change_starts(&marks), vec![2, 9, 12]);
         assert!(change_starts(&[]).is_empty());
+    }
+
+    #[test]
+    fn a_wrapped_line_goes_on_under_its_own_indent() {
+        // Four spaces of indent: later rows hold four letters fewer, and
+        // the first row is not cut inside its indent.
+        let line = "    Self { name, kind, path }";
+        assert_eq!(hang_of(line, 20), 4);
+        let rows = segments_of(line, 20);
+        assert_eq!(
+            rows,
+            vec![0..17, 17..29],
+            "the first row ends after \"name, \""
+        );
+        assert!(rows[1..].iter().all(|r| r.len() <= 16));
+        // An indent that would leave a row too little does not hang.
+        assert_eq!(hang_of(&" ".repeat(10), 20), 0);
+        assert_eq!(hang_of("    x", 0), 0);
     }
 
     #[test]
