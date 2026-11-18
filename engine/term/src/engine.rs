@@ -1024,30 +1024,29 @@ async fn supervise(shared: Arc<Shared>, mut stopped: oneshot::Receiver<()>) {
         }
     }
 
-    // Stop: ask every client to detach, then wait for them.
-    let requests: Vec<_> = shared
-        .state
-        .lock()
-        .unwrap()
-        .sessions
-        .values()
-        .filter(|session| session.following)
-        .map(|session| session.requests.clone())
-        .collect();
-    for request in requests {
-        let _ = request.send(Request::Stop).await;
+    // Stop: ask every client to detach, then wait for them. A session can
+    // start being followed (a launch or a viewer wants it) while this waits
+    // on another one, so each is asked again before it is waited on.
+    let following = |id: &str| {
+        let state = shared.state.lock().unwrap();
+        let session = state.sessions.get(id)?;
+        session.following.then(|| session.requests.clone())
+    };
+    let mut asked = HashSet::new();
+    for id in tasks.keys() {
+        if let Some(request) = following(id) {
+            let _ = request.send(Request::Stop).await;
+            asked.insert(id.clone());
+        }
     }
     for (id, task) in tasks {
-        if shared.lazy
-            && shared
-                .state
-                .lock()
-                .unwrap()
-                .sessions
-                .get(&id)
-                .is_some_and(|s| !s.following)
-        {
-            task.abort();
+        match following(&id) {
+            Some(request) if !asked.contains(&id) => {
+                let _ = request.send(Request::Stop).await;
+            }
+            Some(_) => {}
+            None if shared.lazy => task.abort(),
+            None => {}
         }
         let _ = task.await;
     }
