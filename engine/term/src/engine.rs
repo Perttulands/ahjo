@@ -73,6 +73,13 @@ const REDRAW_LAYOUTS: usize = 4;
 /// the last of it.
 const LOOK_AFTER: Duration = Duration::from_millis(500);
 
+/// A session nobody follows has its screens read for a waiting prompt once
+/// it wrote and has then been quiet this long (tmux counts whole seconds)…
+const QUIET_READ: Duration = Duration::from_secs(1);
+
+/// …or, while it keeps writing, this long after the last read.
+const BUSY_READ: Duration = Duration::from_secs(5);
+
 /// A session's badge facts, read when its windows or clients change, when
 /// it goes quiet after output (a program started or ended), and when a
 /// browser connects. Not a tmux subscription: those cost tmux a format
@@ -150,6 +157,10 @@ struct Session {
     /// A listing-only session has no control client until output is needed.
     follow: Option<Arc<Notify>>,
     following: bool,
+    /// While nobody follows it: the last output its screens were read for
+    /// a waiting prompt at, whether that read came after the output's
+    /// second had passed, and when it was made.
+    read: Option<(Option<SystemTime>, bool, tokio::time::Instant)>,
 }
 
 impl Session {
@@ -963,6 +974,7 @@ async fn supervise(shared: Arc<Shared>, mut stopped: oneshot::Receiver<()>) {
                             activity: Activity::default(),
                             follow: follow.clone(),
                             following: !shared.lazy,
+                            read: None,
                         },
                     );
                     shared.bump();
@@ -977,6 +989,9 @@ async fn supervise(shared: Arc<Shared>, mut stopped: oneshot::Receiver<()>) {
                         follow,
                     ));
                     tasks.insert(id, task);
+                }
+                if let Some(discovered) = &discovered {
+                    read_unfollowed(&shared, discovered).await;
                 }
             }
             Err(error) => eprintln!("ahjo: listing sessions: {error:#}"),
@@ -1189,6 +1204,70 @@ fn discover_unfollowed(shared: &Shared, session: &str, name: &str, found: &Disco
     drop(state);
     if changed {
         shared.bump();
+    }
+}
+
+/// Reads the screens of sessions nobody follows for a waiting prompt, so an
+/// agent that asks in the background shows as waiting without anyone
+/// opening it. A session is read when the listing says it wrote since its
+/// last read and has gone quiet, as a prompt does, so a quiet session costs
+/// nothing and a busy one a capture every [`BUSY_READ`]. `capture-pane`
+/// only reads: the session gets no client, size or activity from it.
+async fn read_unfollowed(shared: &Shared, found: &Discovery) {
+    let now = tokio::time::Instant::now();
+    let due: Vec<(String, Vec<PaneId>)> = {
+        let mut state = shared.state.lock().unwrap();
+        state
+            .sessions
+            .iter_mut()
+            .filter(|(_, session)| !session.following)
+            .filter_map(|(id, session)| {
+                let wrote = found.activity.get(id).copied();
+                // tmux counts whole seconds: only a read made after the
+                // second of the last output can have seen all of it.
+                let quiet = wrote
+                    .and_then(|at| at.elapsed().ok())
+                    .is_none_or(|quiet| quiet >= QUIET_READ);
+                let due = match session.read {
+                    None => true,
+                    Some((at, settled, _)) if at == wrote => !settled && quiet,
+                    Some((_, _, when)) => quiet || now.duration_since(when) >= BUSY_READ,
+                };
+                due.then(|| {
+                    session.read = Some((wrote, quiet, now));
+                    (id.clone(), session.panes.clone())
+                })
+            })
+            .collect()
+    };
+    for (session, panes) in due {
+        let mut changed = false;
+        for id in panes {
+            let target = format!("%{id}");
+            let Ok(text) = shared
+                .backend
+                .command(&["capture-pane", "-p", "-t", &target])
+                .await
+            else {
+                continue;
+            };
+            let waiting = crate::waiting::waiting(text.lines());
+            let mut state = shared.state.lock().unwrap();
+            // A follower that came meanwhile reads its own screen.
+            if state.sessions.get(&session).is_none_or(|s| s.following) {
+                break;
+            }
+            if let Some(pane) = state.panes.get_mut(&id)
+                && pane.owner == session
+                && pane.waiting != waiting
+            {
+                pane.waiting = waiting;
+                changed = true;
+            }
+        }
+        if changed {
+            shared.bump();
+        }
     }
 }
 

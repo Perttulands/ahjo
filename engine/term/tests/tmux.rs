@@ -1078,6 +1078,89 @@ async fn sees_a_prompt_wait_and_clear() {
     engine.stop().await;
 }
 
+/// ahjo-ufz: an agent that asks in a session nobody has opened shows as
+/// waiting, and stops when answered, without the node attaching to it.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_prompt_in_a_session_nobody_follows_waits_and_clears() {
+    let Some(server) = Server::start() else {
+        return;
+    };
+    server.new_session("early", 80, 24);
+    server.new_session("late", 80, 24);
+    server.run(&["send-keys", "-t", "early", PROMPT, "Enter"]);
+    eventually("the early prompt on screen", || {
+        capture(&server, "early")
+            .contains("Esc to cancel")
+            .then_some(())
+    })
+    .await;
+
+    let engine = Engine::start_lazy(server.socket());
+    let looking = engine.look();
+    let early = eventually("the early prompt waits", || {
+        let waiting = waiting_in(&engine, "early")?;
+        (!waiting.is_empty()).then_some(waiting)
+    })
+    .await;
+    assert_eq!(early[0].1, "Do you want to proceed?");
+    assert_eq!(waiting_in(&engine, "late"), Some(vec![]));
+
+    server.run(&["send-keys", "-t", "late", PROMPT, "Enter"]);
+    eventually("the late prompt waits", || {
+        (!waiting_in(&engine, "late")?.is_empty()).then_some(())
+    })
+    .await;
+    server.run(&["send-keys", "-t", "late", "1", "Enter"]);
+    eventually("the late prompt clears", || {
+        waiting_in(&engine, "late")?.is_empty().then_some(())
+    })
+    .await;
+    assert!(!waiting_in(&engine, "early").unwrap().is_empty());
+    assert!(
+        server.clients().is_empty(),
+        "reading for a prompt attached to a session"
+    );
+    drop(looking);
+    engine.stop().await;
+}
+
+/// ahjo-m97: a session a test server starts with its default shell, as a
+/// launch does, reads no profile and shows a fixed prompt, whoever runs it.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_test_servers_shell_reads_no_profile() {
+    let Some(server) = Server::start() else {
+        return;
+    };
+    let home = server.dir().join("home");
+    std::fs::create_dir(&home).unwrap();
+    for profile in [".profile", ".bash_profile", ".bashrc"] {
+        std::fs::write(home.join(profile), "echo PROFILE-READ\nPS1='profile> '\n").unwrap();
+    }
+    let started = server
+        .command()
+        .env("HOME", &home)
+        .args(["new-session", "-d", "-s", "plain", "-x", "80", "-y", "24"])
+        .status()
+        .unwrap();
+    assert!(started.success());
+    let shell = server.run(&["show-options", "-gv", "default-shell"]);
+    server.run(&[
+        "new-session",
+        "-d",
+        "-s",
+        "login",
+        &format!("exec '{}' -l", shell.trim()),
+    ]);
+    for session in ["plain", "login"] {
+        let screen = eventually("the shell's prompt", || {
+            let screen = capture(&server, session);
+            (!screen.trim().is_empty()).then_some(screen)
+        })
+        .await;
+        assert_eq!(screen.trim(), "$", "{session} shows {screen:?}");
+    }
+}
+
 /// A streamed command that tmux refuses says why, as other commands do.
 #[tokio::test(flavor = "multi_thread")]
 async fn a_failed_stream_reports_what_tmux_said() {
