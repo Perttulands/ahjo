@@ -364,7 +364,53 @@ pub fn describe(s: &Schedule) -> String {
             format!("{when} at {h:02}:{m:02}")
         }
         None if expression.is_empty() => "No schedule".into(),
-        None => format!("Cron {expression}"),
+        None => cron_words(expression).unwrap_or_else(|| format!("Cron {expression}")),
+    }
+}
+
+/// The cron shapes people write that read as a sentence: every N minutes
+/// or hours, at a minute past each hour, a day of each month. `None` for
+/// the rest, which keep their cron text.
+fn cron_words(expression: &str) -> Option<String> {
+    let f: Vec<&str> = expression.split_whitespace().collect();
+    let [minute, hour, day, month, weekday] = f[..] else {
+        return None;
+    };
+    if month != "*" {
+        return None;
+    }
+    let num = |s: &str, most: u32| s.parse::<u32>().ok().filter(|n| *n <= most);
+    let step = |s: &str| match s {
+        "*" => Some(1),
+        s => s.strip_prefix("*/")?.parse::<u32>().ok().filter(|n| *n > 0),
+    };
+    let every = |n: u32, one: &str, many: &str| match n {
+        1 => format!("Every {one}"),
+        n => format!("Every {n} {many}"),
+    };
+    let when = match (step(minute), num(minute, 59), step(hour), num(hour, 23)) {
+        // `*/15 * …`: every so many minutes.
+        (Some(n), _, Some(1), _) => every(n, "minute", "minutes"),
+        // `0 */3 …`, `30 * …`: every so many hours, at a minute past.
+        (_, Some(m), Some(n), _) => match m {
+            0 => every(n, "hour", "hours"),
+            m => format!("{} at :{m:02}", every(n, "hour", "hours")),
+        },
+        // `30 9 1 * *`: a day of each month.
+        (_, Some(m), _, Some(h)) if weekday == "*" => {
+            let d = num(day, 31).filter(|d| *d > 0)?;
+            return Some(format!("Day {d} of each month at {h:02}:{m:02}"));
+        }
+        _ => return None,
+    };
+    if day != "*" {
+        return None;
+    }
+    match weekday {
+        "*" => Some(when),
+        "1-5" => Some(format!("{when} on weekdays")),
+        "0,6" | "6,0" => Some(format!("{when} at weekends")),
+        _ => None,
     }
 }
 
@@ -711,6 +757,23 @@ mod tests {
         assert_eq!(describe(&cron("0 9 * * 1,2,3,4,5")), "Weekdays at 09:00");
         assert_eq!(describe(&cron("0 9 * * 0,6")), "Sat, Sun at 09:00");
         assert_eq!(describe(&cron("15 16 * * *")), "Daily at 16:15");
+        assert_eq!(describe(&cron("0 */3 * * *")), "Every 3 hours");
+        assert_eq!(describe(&cron("0 * * * *")), "Every hour");
+        assert_eq!(describe(&cron("30 */2 * * *")), "Every 2 hours at :30");
+        assert_eq!(describe(&cron("*/15 * * * *")), "Every 15 minutes");
+        assert_eq!(describe(&cron("* * * * *")), "Every minute");
+        assert_eq!(
+            describe(&cron("*/10 * * * 1-5")),
+            "Every 10 minutes on weekdays"
+        );
+        assert_eq!(
+            describe(&cron("30 9 1 * *")),
+            "Day 1 of each month at 09:30"
+        );
+        // What does not read as a sentence keeps its cron text.
+        assert_eq!(describe(&cron("0 9-17 * * *")), "Cron 0 9-17 * * *");
+        assert_eq!(describe(&cron("0 0 1 1 *")), "Cron 0 0 1 1 *");
+        assert_eq!(describe(&cron("0 */3 1 * *")), "Cron 0 */3 1 * *");
         let every = |m| Schedule {
             kind: "interval".into(),
             every_minutes: m,

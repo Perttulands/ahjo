@@ -523,8 +523,14 @@ impl ScheduledPage {
                                 .child(pane::cell(form::when(Some(r.started_at))))
                                 .into_any_element(),
                             pane::cell(by).text_color(t.text2).into_any_element(),
-                            pane::cell(result)
+                            // The whole result, wrapped: it is why a run
+                            // failed, and the column has the room.
+                            div()
+                                .min_w_0()
+                                .py(px(size::LABEL_BOTTOM))
+                                .whitespace_normal()
                                 .text_color(if ok { t.text2 } else { t.error })
+                                .child(result)
                                 .into_any_element(),
                         ],
                     )
@@ -629,14 +635,6 @@ impl ScheduledPage {
                 },
             ))
             .child(
-                pane::act(t, "form-cancel", "Cancel")
-                    .tooltip(kit::tip("Esc"))
-                    .on_click(cx.listener(|page, _, _, cx| {
-                        page.state.close(now_ms());
-                        cx.notify();
-                    })),
-            )
-            .child(
                 kit::button(
                     t,
                     "form-save",
@@ -651,6 +649,14 @@ impl ScheduledPage {
                         page.save(cx)
                     }
                 })),
+            )
+            .child(
+                pane::act(t, "form-cancel", "Cancel")
+                    .tooltip(kit::tip("Esc"))
+                    .on_click(cx.listener(|page, _, _, cx| {
+                        page.state.close(now_ms());
+                        cx.notify();
+                    })),
             );
         let body = div()
             .flex()
@@ -714,7 +720,7 @@ impl ScheduledPage {
                         .child(
                             div()
                                 .when(on, |d| d.debug_selector(move || chosen))
-                                .when(!running, |d| d.text_color(t.dim))
+                                .when(!running && !on, |d| d.text_color(t.dim))
                                 .child(target_name(&target)),
                         )
                         .on_click(cx.listener(move |page, _, _, cx| page.pick(&at, &session, cx))),
@@ -843,16 +849,9 @@ fn target_name(t: &Target) -> String {
 }
 
 /// A choice pressed or not: a mode, a session, a weekday, a zone, a unit.
-/// Pressed reads on a quiet fill in weight, as a chosen row does.
+/// Pressed is filled, as every chosen option in the app is.
 fn toggle(t: &Theme, id: String, label: &str, on: bool) -> gpui::Stateful<Div> {
-    kit::button(t, SharedString::from(id), label.to_string(), Kind::Plain)
-        .when(on, |b| {
-            b.bg(t.raised)
-                .border_color(t.text2)
-                .text_color(t.text)
-                .font_weight(FontWeight::SEMIBOLD)
-        })
-        .when(!on, |b| b.text_color(t.text2))
+    kit::option(t, SharedString::from(id), label.to_string(), on)
 }
 
 fn unit(

@@ -76,6 +76,8 @@ pub struct ScheduledPage {
     pub(crate) scroll: ScrollHandle,
     /// The chosen task moved by a key: the next draw scrolls to it.
     pub(crate) reveal: bool,
+    /// Itself, for its keys as the keys panel runs them.
+    me: gpui::WeakEntity<Self>,
 }
 
 impl Page for ScheduledPage {
@@ -119,6 +121,19 @@ impl Page for ScheduledPage {
         if shown {
             self.read_all(cx);
         }
+    }
+
+    /// The keys the list takes, so the keys panel lists them.
+    fn chords(&self, _: &App) -> Vec<ahjo_app_kit::chords::Chord> {
+        let (new, edit) = (self.me.clone(), self.me.clone());
+        vec![
+            ahjo_app_kit::chords::Chord::on_page("N", "New scheduled task", move |window, cx| {
+                let _ = new.update(cx, |page, cx| page.new_task(window, cx));
+            }),
+            ahjo_app_kit::chords::Chord::on_page("Enter", "Edit the task", move |window, cx| {
+                let _ = edit.update(cx, |page, cx| page.edit_shown(window, cx));
+            }),
+        ]
     }
 }
 
@@ -179,6 +194,7 @@ impl ScheduledPage {
             focus: cx.focus_handle(),
             scroll: ScrollHandle::new(),
             reveal: false,
+            me: cx.weak_entity(),
         }
     }
 
@@ -407,9 +423,7 @@ impl ScheduledPage {
                 "home" => 0,
                 "end" => order.len().saturating_sub(1),
                 "enter" => {
-                    if let Some((node, task)) = self.shown_task() {
-                        let form = TaskForm::edit(node, task);
-                        self.open(form, window, cx);
+                    if self.edit_shown(window, cx) {
                         cx.stop_propagation();
                     }
                     return;
@@ -433,6 +447,16 @@ impl ScheduledPage {
         }
         cx.stop_propagation();
         cx.notify();
+    }
+
+    /// Edit opens on the task on show; whether there was one.
+    pub(crate) fn edit_shown(&mut self, window: &mut Window, cx: &mut Context<Self>) -> bool {
+        let Some((node, task)) = self.shown_task() else {
+            return false;
+        };
+        let form = TaskForm::edit(node, task);
+        self.open(form, window, cx);
+        true
     }
 
     /// New task: on the node of the selected task, or the first live node
