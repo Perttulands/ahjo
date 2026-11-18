@@ -232,3 +232,46 @@ fn a_reveal_of_an_agent_opens_its_folder_by_its_harness(cx: &mut TestAppContext)
     });
     std::fs::remove_dir_all(settings).unwrap();
 }
+
+#[gpui::test]
+fn the_reader_follows_a_switch_of_harness(cx: &mut TestAppContext) {
+    let running = start();
+    let settings = fresh_dir("ahjo-agents-page-switch");
+    cx.executor().allow_parking();
+    cx.update(ahjo_app_shell::prepare);
+    let url = running.url.clone();
+    let path = settings.join("app.json");
+    let (shell, cx) = cx.add_window_view(move |window, cx| {
+        ahjo_app_shell::start(&[ahjo_agents_app::build], Some(url), Some(path), window, cx)
+    });
+    until(cx, "the node connection", |cx| {
+        shell.read_with(cx, |s, cx| {
+            s.hub().read(cx).fleet.here().state == LinkState::Open
+        })
+    });
+    let opened = |path: PathBuf| -> &'static str {
+        Box::leak(format!("shape-open-{}", path.to_string_lossy()).into_boxed_str())
+    };
+    let mine = opened(running.home.join(".claude/CLAUDE.md"));
+    let project = opened(running.home.join("proj/AGENTS.md"));
+    click(cx, "shape-folder");
+    cx.simulate_input(&running.home.join("proj").to_string_lossy());
+    cx.simulate_keystrokes("enter");
+    // Claude Code's own file, which Codex does not read, is opened.
+    click(cx, "shape-instruction-0");
+    until(cx, "the operator's CLAUDE.md open", |cx| {
+        cx.debug_bounds(mine).is_some()
+    });
+    click(cx, "shape-harness-codex");
+    until(cx, "Codex's file open instead", |cx| {
+        cx.debug_bounds(project).is_some()
+    });
+    assert!(cx.debug_bounds(mine).is_none());
+    // A file both harnesses read stays open across the switch back.
+    click(cx, "shape-harness-claude");
+    until(cx, "Claude Code's instructions", |cx| {
+        cx.debug_bounds("shape-instruction-1").is_some()
+    });
+    assert!(cx.debug_bounds(project).is_some());
+    std::fs::remove_dir_all(settings).unwrap();
+}

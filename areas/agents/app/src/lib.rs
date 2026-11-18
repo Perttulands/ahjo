@@ -18,11 +18,11 @@ mod tokens {
     pub const P4: f32 = 4.;
     pub const P8: f32 = 8.;
     /// The Agent view: the anatomy's share of the detail and its least,
-    /// and the least the reader beside it keeps, so a narrow window still
-    /// shows a file's name and lines of words.
+    /// and the least the reader beside it keeps. A detail narrower than
+    /// both shows one of them at a time.
     pub const ANATOMY: f32 = 0.55;
-    pub const ANATOMY_MIN: f32 = 360.;
-    pub const READER_MIN: f32 = 220.;
+    pub const ANATOMY_MIN: f32 = 340.;
+    pub const READER_MIN: f32 = 320.;
     /// An instruction's origin, its size bar and its size.
     pub const ORIGIN_W: f32 = 64.;
     pub const BAR_W: f32 = 72.;

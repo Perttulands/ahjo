@@ -128,17 +128,19 @@ impl AgentsPage {
             cx.notify();
             return;
         };
+        let other_harness = harness.as_ref().is_some_and(|h| *h != v.harness);
+        if (v.dir != dir || v.node != node || other_harness) && v.editing {
+            self.host.report(
+                Status::failure("Save or discard the open file first (Ctrl+S, Escape)"),
+                cx,
+            );
+            return;
+        }
         if v.dir != dir || v.node != node {
-            if v.editing {
-                self.host.report(
-                    Status::failure("Save or discard the open file first (Ctrl+S, Escape)"),
-                    cx,
-                );
-                return;
-            }
             v.pick = Pick::None;
             v.file = None;
             v.editing = false;
+            v.reading = false;
         }
         v.node = node;
         v.dir = dir.clone();
@@ -180,6 +182,13 @@ impl AgentsPage {
                     sh::remember(&mut page.kept.recent, &shape.dir);
                     let _ = page.host.set_setting(&page.kept, cx);
                     let v = &mut page.shape;
+                    // What the other harness, or the folder before a
+                    // change on disk, had open is not this one's: the
+                    // reader follows what is shown.
+                    if !v.editing && !sh::holds(&shape, &v.pick) {
+                        v.pick = Pick::None;
+                        v.file = None;
+                    }
                     // The reader opens on what the folder itself tells its
                     // agent, rather than on an empty half.
                     let first = (v.pick == Pick::None && !v.editing)
@@ -258,6 +267,7 @@ impl AgentsPage {
             }
             Pick::None => {}
         }
+        self.shape.reading = pick != Pick::None;
         self.shape.pick = pick;
         cx.notify();
     }
@@ -607,8 +617,39 @@ impl AgentsPage {
                 pane::vacant(t, words, None).when_some(colour, |d, c| d.text_color(c)),
             );
         };
+        // Too narrow for both columns (a small window, the app zoomed in):
+        // one at a time, the part picked read in place of the anatomy.
+        let side = if self.host.side_open(cx) {
+            size::SIDE
+        } else {
+            size::SIDE_SHUT
+        };
+        let room = f32::from(window.viewport_size().width) - side - size::LIST;
+        if room < tokens::ANATOMY_MIN + tokens::READER_MIN {
+            let body = if self.shape.reading {
+                div()
+                    .size_full()
+                    .bg(t.surface)
+                    .flex()
+                    .flex_col()
+                    .child(self.reader_pane(t, &shape, true, window, cx))
+            } else {
+                div().size_full().child(
+                    div()
+                        .id("shape-anatomy")
+                        .size_full()
+                        .overflow_y_scroll()
+                        .p(px(size::PAD))
+                        .flex()
+                        .flex_col()
+                        .gap(px(size::SECTION_GAP))
+                        .child(self.anatomy(t, &shape, cx)),
+                )
+            };
+            return pane::detail_frame(head, body);
+        }
         let anatomy = self.anatomy(t, &shape, cx);
-        let reader = self.reader_pane(t, &shape, window, cx);
+        let reader = self.reader_pane(t, &shape, false, window, cx);
         let body = div()
             .size_full()
             .flex()
@@ -1113,15 +1154,17 @@ impl AgentsPage {
     }
 
     /// The reader beside the anatomy: the part picked, read or edited.
+    /// `alone`: it stands in place of the anatomy, and offers the way back.
     fn reader_pane(
         &mut self,
         t: &Theme,
         shape: &Shape,
+        alone: bool,
         _: &mut Window,
         cx: &mut Context<Self>,
     ) -> Div {
         let v = &self.shape;
-        let bar = || {
+        let bar = |cx: &mut Context<Self>| {
             div()
                 .flex_none()
                 .h(px(size::TAB_BAR))
@@ -1131,6 +1174,17 @@ impl AgentsPage {
                 .gap(px(size::HEAD_GAP))
                 .border_b_1()
                 .border_color(t.divider)
+                .when(alone, |d| {
+                    d.child(
+                        pane::act(t, "shape-back", "‹ Back")
+                            .debug_selector(|| "shape-back".into())
+                            .tooltip(kit::tip("Back to everything the agent gets"))
+                            .on_click(cx.listener(|s, _, _, cx| {
+                                s.shape.reading = false;
+                                cx.notify();
+                            })),
+                    )
+                })
         };
         let short = |p: &str| sh::short(p, shape.root.as_deref(), &shape.home);
         match v.pick.clone() {
@@ -1140,7 +1194,10 @@ impl AgentsPage {
                 None,
             )),
             Pick::File(path) => {
-                let mut head = bar().child(pane::title(t, short(&path)));
+                let opened = format!("shape-open-{path}");
+                let mut head = bar(cx)
+                    .debug_selector(move || opened)
+                    .child(pane::title(t, short(&path)));
                 let Some(file) = &v.file else {
                     return div()
                         .flex()
@@ -1220,7 +1277,7 @@ impl AgentsPage {
                         None,
                     ));
                 }
-                let mut head = bar().child(pane::title(t, if new { "New hook" } else { "Hook" }));
+                let mut head = bar(cx).child(pane::title(t, if new { "New hook" } else { "Hook" }));
                 if let (Some(h), false) = (&hook, new) {
                     let (file, at, was) = (h.file.clone(), h.at.clone(), h.run.clone());
                     head = head.child(
@@ -1301,7 +1358,7 @@ impl AgentsPage {
                 let new = matches!(v.pick, Pick::NewSetting(_));
                 let current = v.setting().cloned();
                 let mut head =
-                    bar().child(pane::title(t, if new { "New setting" } else { "Setting" }));
+                    bar(cx).child(pane::title(t, if new { "New setting" } else { "Setting" }));
                 if let (Some(s), false) = (&current, new) {
                     let (file, key) = (s.file.clone(), s.key.clone());
                     head = head.child(

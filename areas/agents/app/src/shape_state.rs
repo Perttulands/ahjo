@@ -52,6 +52,9 @@ pub struct ShapeView {
     pub close_editor: bool,
     /// The skills list shows only those the agent does not see.
     pub show_off_skills: bool,
+    /// Where the page has room for one column only, the part picked is
+    /// read in place of the anatomy until Back.
+    pub reading: bool,
 }
 
 impl ShapeView {
@@ -233,6 +236,26 @@ pub fn opening(shape: &Shape) -> Option<String> {
         })
         .or_else(|| shape.instructions.iter().find(|i| i.load == Load::Start))
         .map(|i| i.path.clone())
+}
+
+/// Whether what is picked is part of `shape`: a file it reads or a skill
+/// it sees, a hook or setting it has, or a new one for a file it reads.
+/// What another harness or folder showed is not, and is not kept open.
+pub fn holds(shape: &Shape, pick: &Pick) -> bool {
+    let has_file = |path: &str| shape.files.iter().any(|f| f.path == path);
+    match pick {
+        Pick::None => true,
+        Pick::File(path) => {
+            shape.instructions.iter().any(|i| &i.path == path)
+                || shape.skills.iter().any(|s| &s.path == path)
+        }
+        Pick::Hook(file, at) => shape.hooks.iter().any(|h| &h.file == file && &h.at == at),
+        Pick::Setting(key, file) => shape
+            .settings
+            .iter()
+            .any(|s| &s.key == key && &s.file == file),
+        Pick::NewHook(file) | Pick::NewSetting(file) => has_file(file),
+    }
 }
 
 /// The folders the list offers: running agents' first, then recent ones,
