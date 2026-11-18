@@ -8,7 +8,7 @@ use super::place;
 use crate::remote::Remote;
 use crate::store::settings::launched_in;
 use crate::store::workspace::LinkState;
-use crate::store::{devices, launch, launch_flags, sessions};
+use crate::store::{devices, launch, launch_flags};
 use crate::theme::{size, theme};
 use ahjo_app_kit::host::{Host, Request};
 use ahjo_app_kit::widgets::field::{FieldEvent, TextField};
@@ -16,9 +16,6 @@ use ahjo_app_kit::widgets::kit::{self, Kind};
 use ahjo_core::NodeId;
 use ahjo_terminals_contract::Launch;
 use gpui::{Context, Entity, FocusHandle, ScrollHandle, WeakEntity, Window, div, prelude::*, px};
-
-/// How many launched-in folders a node keeps.
-const LAUNCHED_KEPT: usize = 5;
 
 /// The launcher in the Send drawer, after the windows': its session is
 /// pasted into rather than put in a window.
@@ -382,16 +379,11 @@ impl Launcher {
             let window = (index != SEND).then_some(index);
             s.report(&format!("Launching {name}…"), false, None);
             s.track_launch(&node, id, l, window, tab);
+            s.remember_folder_of(&node, id);
             if index == SEND {
                 s.send_launching(&node, id);
             }
             s.settings.last_harness = Some(harness.clone());
-            let launched = s
-                .settings
-                .launched_folders
-                .entry(launched_in(&node, &user))
-                .or_default();
-            sessions::remember(launched, &folder, LAUNCHED_KEPT);
             let default = conf
                 .as_ref()
                 .and_then(|l| l.harnesses.iter().find(|h| h.id == harness))

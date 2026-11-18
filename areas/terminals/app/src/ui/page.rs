@@ -8,7 +8,7 @@ use super::surface::{self, Surface};
 use crate::remote::Notice;
 use crate::remotes::{PaneAt, Remotes};
 use crate::store::sessions::{self, Key};
-use crate::store::settings::{Kept, Settings};
+use crate::store::settings::{Kept, Settings, launched_in};
 use crate::store::workspace::{LinkState, TileState};
 use crate::term::screen::Screen;
 use crate::theme::size;
@@ -224,7 +224,13 @@ pub struct PendingLaunch {
     window: Option<usize>,
     tab: usize,
     status_revision: u64,
+    /// A launcher's launch: its folder joins the recent ones once it
+    /// started, so a folder that failed is not offered again.
+    pub remember_folder: bool,
 }
+
+/// How many launched-in folders a node keeps.
+const LAUNCHED_KEPT: usize = 5;
 
 pub struct Terminals {
     pub host: Host,
@@ -769,6 +775,7 @@ impl Terminals {
                     window: window_index,
                     tab,
                     status_revision,
+                    remember_folder,
                 }) = self.launches.remove(&(node.to_string(), id))
                 else {
                     return;
@@ -778,6 +785,14 @@ impl Terminals {
                 self.restarting
                     .retain(|k| !(k.node == node && k.name == name));
                 if ok {
+                    if remember_folder {
+                        let launched = self
+                            .settings
+                            .launched_folders
+                            .entry(launched_in(node, &launch.user))
+                            .or_default();
+                        sessions::remember(launched, &launch.folder, LAUNCHED_KEPT);
+                    }
                     let key = Key {
                         node: node.to_string(),
                         user: launch.user.clone(),
@@ -975,8 +990,17 @@ impl Terminals {
                 window,
                 tab,
                 status_revision: self.status_revision,
+                remember_folder: false,
             },
         );
+    }
+
+    /// The launch `id` on `node` came from a launcher: see
+    /// [`PendingLaunch::remember_folder`].
+    pub(super) fn remember_folder_of(&mut self, node: &str, id: u32) {
+        if let Some(p) = self.launches.get_mut(&(node.to_string(), id)) {
+            p.remember_folder = true;
+        }
     }
 
     pub fn toast(&mut self, text: &str, cx: &mut Context<Self>) {

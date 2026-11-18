@@ -3287,6 +3287,63 @@ fn launcher_completes_a_folder_outside_files_roots(cx: &mut TestAppContext) {
         );
         std::thread::sleep(Duration::from_millis(20));
     }
+    // A folder that started a session is offered next time.
+    let page = PAGE.with(|p| p.borrow().clone()).unwrap();
+    until(cx, "the folder joins the recent ones", |cx| {
+        page.read_with(cx, |p, _| {
+            p.settings
+                .launched_folders
+                .values()
+                .flatten()
+                .any(|f| f.contains("subfolder"))
+        })
+    });
+    let _ = std::fs::remove_dir_all(settings.parent().unwrap());
+}
+
+/// A launch the node refused leaves its folder out of the recent ones, so
+/// the next launch does not start from a folder that is not there.
+#[gpui::test]
+fn a_failed_launch_is_not_offered_again(cx: &mut TestAppContext) {
+    let Some(running) = start_with_restart_harness("terminals-failed-folder", true, true) else {
+        return;
+    };
+    let settings = ahjo_testkit::fresh_dir("failed-folder-settings").join("app.json");
+    cx.executor().allow_parking();
+    cx.update(ahjo_app_shell::prepare);
+    let (url, path) = (running.url.clone(), settings.clone());
+    let (shell, cx) = cx.add_window_view(move |window, cx| {
+        ahjo_app_shell::start(&[terminals], Some(url), Some(path), window, cx)
+    });
+    until(cx, "fake harness offered", |cx| {
+        cx.debug_bounds("harness-0-fake").is_some()
+    });
+    let missing = running.fixture.join("not-there");
+    let page = PAGE.with(|p| p.borrow().clone()).unwrap();
+    cx.update(|window, cx| {
+        page.update(cx, |p, cx| {
+            p.launchers[0].update(cx, |l, cx| l.focus_first(window, cx))
+        })
+    });
+    cx.simulate_keystrokes("ctrl-a");
+    cx.simulate_input(&missing.display().to_string());
+    cx.simulate_keystrokes("enter");
+    until(cx, "the node refused", |cx| {
+        shell.read_with(cx, |s, cx| {
+            s.hub()
+                .read(cx)
+                .status
+                .as_ref()
+                .is_some_and(|s| s.text.starts_with("Could not launch"))
+        })
+    });
+    page.read_with(cx, |p, _| {
+        let recent: Vec<&String> = p.settings.launched_folders.values().flatten().collect();
+        assert!(
+            !recent.iter().any(|f| f.contains("not-there")),
+            "{recent:?}"
+        );
+    });
     let _ = std::fs::remove_dir_all(settings.parent().unwrap());
 }
 
