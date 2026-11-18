@@ -252,13 +252,15 @@ fn tree_lines(p: &FilesPage, rows: Vec<Row>) -> Vec<Line> {
     }
     if none {
         out.push(Line::Note {
-            text: if p.tree.away {
+            text: if p.no_node {
+                "Not connected to the node.".into()
+            } else if p.tree.away {
                 "The device does not answer".into()
             } else {
                 "Reading…".into()
             },
             depth: 0,
-            error: p.tree.away,
+            error: p.tree.away || p.no_node,
         });
     }
     out
@@ -1399,6 +1401,7 @@ impl FilesPage {
     /// the same tree as its list, from the focused session's folder.
     pub fn render_side(&mut self, cx: &mut Context<Self>) -> AnyElement {
         let t = theme(cx).clone();
+        self.no_node = self.tree.node.is_empty() && self.host.offline(cx);
         let lines = side_lines(self, cx);
         let n = lines.len();
         // A new pick (a file opened on the page, most often) is brought into
@@ -1454,6 +1457,7 @@ impl FilesPage {
 impl Render for FilesPage {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         self.release_pictures(window);
+        self.no_node = self.tree.node.is_empty() && self.host.offline(cx);
         if self.newest_due {
             cx.defer_in(window, |page, window, cx| page.open_newest(window, cx));
         }

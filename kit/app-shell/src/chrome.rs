@@ -214,7 +214,7 @@ impl Shell {
                     .px(px(END_PAD))
                     .text_color(colour)
                     .tooltip(kit::tip(format!(
-                        "{address}: what this window shows may be out of date"
+                        "{address} does not answer: what this window shows may be out of date"
                     )))
                     .child(words)
             }))

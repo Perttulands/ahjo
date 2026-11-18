@@ -122,7 +122,6 @@ pub(crate) fn button(t: &Theme, id: &str) -> Stateful<Div> {
         .child(swatch(t))
         .child(t.direction.label())
         .child(div().text_color(t.dim).child("▾"))
-        .tooltip(kit::tip("↑ ↓ try a theme, Enter keeps it, Esc goes back"))
 }
 
 /// The open list, over the page below its button: put it in the button's
@@ -195,6 +194,18 @@ pub(crate) fn list(
                 .mt(px(4.))
                 .w(px(WIDTH))
                 .child(rows)
+                // How the keys work, said where they work: under the list,
+                // not over it.
+                .child(
+                    div()
+                        .px(px(size::ROW_PAD))
+                        .py(px(6.))
+                        .border_t_1()
+                        .border_color(t.divider)
+                        .text_size(px(size::SMALL))
+                        .text_color(t.dim)
+                        .child("↑ ↓ try  ·  Enter keeps  ·  Esc goes back"),
+                )
                 .with_animation(
                     "theme-picker-in",
                     Animation::new(Duration::from_millis(motion::PANEL_IN))

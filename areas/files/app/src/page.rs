@@ -103,6 +103,9 @@ pub struct FilesPage {
     pub host: Host,
     pub focus: FocusHandle,
     pub tree: Tree,
+    /// No node has answered since the app started, and none answers now:
+    /// the tree says so instead of reading. Kept as each draw begins.
+    pub no_node: bool,
     pub query: Entity<TextField>,
     pub find: Option<Find>,
     find_revision: u64,
@@ -581,6 +584,7 @@ impl FilesPage {
             beside: false,
             shown: false,
             beside_view: None,
+            no_node: false,
             restored: false,
             beside_from: "",
             me: cx.weak_entity(),

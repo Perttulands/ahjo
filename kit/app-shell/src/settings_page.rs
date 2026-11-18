@@ -15,14 +15,14 @@ use ahjo_app_kit::link::client::LinkState;
 use ahjo_app_kit::page::Meta;
 use ahjo_app_kit::settings::DEFAULT_NODE;
 use ahjo_app_kit::theme::{Direction, Theme, size, theme};
-use ahjo_app_kit::widgets::field::{FieldEvent, TextField};
+use ahjo_app_kit::widgets::field::{self, FieldEvent, TextField};
 use ahjo_app_kit::widgets::kit::{self, Kind};
 use ahjo_app_kit::widgets::pane;
 use ahjo_app_kit::{Control, Host, Hub, Page, Setting};
 use ahjo_core::NodeId;
 use gpui::{
-    AnyElement, App, AppContext, Context, Div, Entity, FocusHandle, KeyDownEvent, SharedString,
-    Subscription, Window, div, prelude::*, px,
+    AnyElement, App, AppContext, Context, Div, Entity, FocusHandle, Focusable, KeyDownEvent,
+    SharedString, Subscription, Window, div, prelude::*, px,
 };
 use serde_json::Value;
 use std::collections::HashMap;
@@ -138,12 +138,25 @@ impl Page for SettingsPage {
         }
         if id == "theme" {
             self.picker_open(window, cx);
+        } else if let Some(field) = self
+            .fields
+            .get(&(Owner::App, "node"))
+            .filter(|_| id == "node")
+        {
+            // Asked for by someone the node does not answer: the caret
+            // waits in its address.
+            field::focus(field, window, cx);
         }
         cx.notify();
     }
 
-    fn focus(&self, _: &App) -> Option<FocusHandle> {
-        self.picker.as_ref().map(|_| self.picker_focus.clone())
+    /// The picker while it is open, else the search: typing finds a
+    /// setting, and the arrows there step through the groups.
+    fn focus(&self, cx: &App) -> Option<FocusHandle> {
+        Some(match self.picker {
+            Some(_) => self.picker_focus.clone(),
+            None => self.search.focus_handle(cx),
+        })
     }
 }
 
@@ -185,10 +198,14 @@ impl SettingsPage {
             fields.insert((owner, key), field);
         }
         let search = cx.new(|cx| TextField::new(cx, "Search settings"));
-        subscriptions.push(cx.subscribe(&search, |_, _, ev: &FieldEvent, cx| {
-            if let FieldEvent::Changed = ev {
-                cx.notify();
+        subscriptions.push(cx.subscribe(&search, |page, _, ev: &FieldEvent, cx| {
+            match ev {
+                FieldEvent::Changed => {}
+                FieldEvent::Down => page.step(1),
+                FieldEvent::Up => page.step(-1),
+                _ => return,
             }
+            cx.notify();
         }));
         Self {
             hub,
@@ -203,6 +220,14 @@ impl SettingsPage {
             picker: None,
             picker_focus: cx.focus_handle(),
         }
+    }
+
+    /// The arrows in the search step through the groups.
+    fn step(&mut self, by: isize) {
+        let groups = self.groups();
+        let at = groups.iter().position(|(g, _)| *g == self.chosen);
+        let to = at.map_or(0, |i| i.saturating_add_signed(by).min(groups.len() - 1));
+        self.chosen = groups[to].0;
     }
 
     fn picker_open(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -299,15 +324,32 @@ impl SettingsPage {
         matches: &dyn Fn(&str) -> bool,
         cx: &mut Context<Self>,
     ) -> Vec<AnyElement> {
+        // The node's own section goes by the group's name alone.
         let named = |part: &str| match within {
-            Some(group) => format!("{group} · {part}"),
-            None => part.to_string(),
+            Some(group) if group != part => format!("{group} · {part}"),
+            _ => part.to_string(),
         };
+        // A search shows what matches, not that the node did not answer.
+        if within.is_some() && !matches!(self.node_config, Some(Ok(_))) {
+            return vec![];
+        }
+        let apart = self.hub.read(cx).fleet.here().state != LinkState::Open;
         let mut parts = vec![];
         let config = match &self.node_config {
             None => {
                 return vec![
                     pane::empty(t, "Reading the node's configuration…", None).into_any_element(),
+                ];
+            }
+            Some(Err(_)) if apart => {
+                return vec![
+                    pane::empty(
+                        t,
+                        "Not connected to the node. Its configuration shows here when it answers; \
+                         the address this app dials is under App.",
+                        None,
+                    )
+                    .into_any_element(),
                 ];
             }
             Some(Err(why)) => {
@@ -322,7 +364,14 @@ impl SettingsPage {
             }
             Some(Ok(config)) => config,
         };
-        for (name, keys) in config["sections"].as_object().into_iter().flatten() {
+        // The node's own section first, then the areas by name.
+        let mut sections: Vec<_> = config["sections"]
+            .as_object()
+            .into_iter()
+            .flatten()
+            .collect();
+        sections.sort_by_key(|(name, _)| name.as_str() != "node");
+        for (name, keys) in sections {
             let mut part = pane::section(t, named(&words(name, true)));
             let mut any = false;
             for (key, value) in keys.as_object().into_iter().flatten() {
@@ -445,15 +494,23 @@ impl SettingsPage {
     /// Keeps a new value: the shell's own take effect here, a page's go
     /// into its section and the page hears it.
     fn write(&mut self, owner: Owner, key: &'static str, value: Value, cx: &mut Context<Self>) {
+        let value = if owner == Owner::App && key == "node" {
+            match node_address(value.as_str().unwrap_or_default()) {
+                Ok(node) => Value::from(node),
+                // What is kept and dialled stays; what was typed stays to
+                // be put right.
+                Err(why) => {
+                    self.host.report(Status::failure(why), cx);
+                    return;
+                }
+            }
+        } else {
+            value
+        };
         self.hub.update(cx, |h, cx| match owner {
             Owner::App => {
                 if key == "node" {
-                    let node = value.as_str().unwrap_or_default();
-                    h.settings.node = if node.is_empty() {
-                        DEFAULT_NODE.into()
-                    } else {
-                        node.into()
-                    };
+                    h.settings.node = value.as_str().unwrap_or_default().into();
                     h.connect(cx);
                 } else if key == "theme" {
                     h.settings.theme = value.as_str().unwrap_or_default().into();
@@ -647,6 +704,31 @@ impl SettingsPage {
             Group::Node => self.node_parts(t, within.then_some("Node"), matches, cx),
         }
     }
+}
+
+/// A node's address as typed, made whole: nothing typed is this
+/// computer's own node, and `host:port` gets its `http://`. What could
+/// not be an address is refused in words instead of dialled for ever.
+fn node_address(typed: &str) -> Result<String, String> {
+    let typed = typed.trim().trim_end_matches('/');
+    if typed.is_empty() {
+        return Ok(DEFAULT_NODE.into());
+    }
+    let (scheme, host) = match typed.strip_prefix("https://") {
+        Some(host) => ("https://", host),
+        None => ("http://", typed.strip_prefix("http://").unwrap_or(typed)),
+    };
+    let plain = !host.is_empty()
+        && !host.contains("://")
+        && host
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || ".-:[]_".contains(c));
+    if !plain {
+        return Err(format!(
+            "“{typed}” is not a node's address: write it as http://host:port."
+        ));
+    }
+    Ok(format!("{scheme}{host}"))
 }
 
 /// What a node's config key is called here: the few every node has by
@@ -902,6 +984,22 @@ impl Render for SettingsPage {
 #[cfg(test)]
 mod compact_tests {
     use super::*;
+
+    #[test]
+    fn a_typed_node_address_is_made_whole_or_refused() {
+        assert_eq!(node_address("  ").as_deref(), Ok(DEFAULT_NODE));
+        assert_eq!(node_address("rig:7310/").as_deref(), Ok("http://rig:7310"));
+        assert_eq!(
+            node_address("http://127.0.0.1:7310").as_deref(),
+            Ok("http://127.0.0.1:7310")
+        );
+        assert_eq!(
+            node_address("https://rig.tail.ts.net").as_deref(),
+            Ok("https://rig.tail.ts.net")
+        );
+        assert!(node_address("not a url").is_err());
+        assert!(node_address("ftp://rig").is_err());
+    }
 
     #[test]
     fn a_long_list_says_its_kind_once_and_its_folders_from_where_they_share() {

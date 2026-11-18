@@ -107,8 +107,13 @@ impl Shell {
     pub(crate) fn view_changed(&mut self, cx: &mut Context<Self>) {
         let here = self.hub.read(cx).fleet.here();
         let link = here.link_id();
+        // A node that went has forgotten this app: when the link opens
+        // again, on the same link or not, it is told afresh.
+        if here.state != LinkState::Open {
+            self.view.told = None;
+            return;
+        }
         if self.view.waiting.is_some()
-            || here.state != LinkState::Open
             || self.view.told.as_ref() == Some(&(link, self.view_snapshot()))
         {
             return;

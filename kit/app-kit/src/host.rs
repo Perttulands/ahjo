@@ -285,6 +285,16 @@ impl Host {
         self.read(cx, |h| h.link(node.as_str())).flatten()
     }
 
+    /// No node answers: the serving node's link went or was refused, as
+    /// the top bar's offline words say. A page with nothing read yet says
+    /// so rather than that it is reading.
+    pub fn offline(&self, cx: &App) -> bool {
+        self.read(cx, |h| {
+            matches!(h.fleet.here().state, LinkState::Lost | LinkState::Refused)
+        })
+        .unwrap_or(false)
+    }
+
     /// The fleet as last seen, by node: each node's device and environment,
     /// also while it is away.
     pub fn places(&self, cx: &App) -> BTreeMap<String, Place> {
