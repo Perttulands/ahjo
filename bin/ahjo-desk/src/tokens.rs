@@ -10,10 +10,10 @@ use ahjo_app_kit::theme::size;
 
 pub use ahjo_app_kit::theme::size::{PAD, RADIUS, SMALL, TEXT};
 
-/// Type: the ask's title, the words under it.
+/// Type: the ask's title, and the Desk's own name in its bar. Words to
+/// read are the theme's reading size (`Theme::ty.read`).
 pub const TITLE: f32 = 18.;
 pub const BODY: f32 = 14.;
-pub const BODY_LINE: f32 = 1.45;
 /// A number worth reading at a glance (the waiting count).
 pub const COUNT: f32 = 20.;
 
@@ -70,6 +70,8 @@ pub const ZOOM_STEP: f32 = 1.25;
 pub const STAGE_PAD: f32 = 16.;
 /// How long a notice stays.
 pub const TOAST_MS: u64 = 3200;
+/// How soon after a change his unsent answers are written to disk.
+pub const KEEP_DRAFTS_MS: u64 = 400;
 
 /// A mark's ink when it names none: the store's and the web desk's.
 pub const MARK_INK: u32 = 0xd7b879;

@@ -467,7 +467,7 @@ impl DeskApp {
                         .py(px(4.))
                         .rounded(px(tokens::RADIUS))
                         .bg(alpha(t.bg, 0.78))
-                        .text_size(px(SMALL))
+                        .text_size(px(TEXT))
                         .text_color(t.text)
                         .when(is_rec, |d| {
                             d.child(

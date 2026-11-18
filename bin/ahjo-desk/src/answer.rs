@@ -4,15 +4,17 @@
 //! wants. Pure, so each payload is tested here and nowhere needs a server.
 
 use crate::model::{Ask, Form, Mark, Question};
+use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 
 /// The words a question gets when it does not say enough to be answered:
 /// it goes back to the agent as his answer to that question.
 pub const UNCLEAR: &str = "Unclear: this question is not complete in itself. Ask it again with what it refers to, what is being decided and why it matters now.";
 
 /// What he said on one question of a grill.
-#[derive(Clone, Debug, Default, PartialEq)]
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
 pub struct Said {
     pub pick: Option<usize>,
     pub words: String,
@@ -28,7 +30,8 @@ impl Said {
 }
 
 /// A draft answer to one round of one ask.
-#[derive(Clone, Debug, Default, PartialEq)]
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
 pub struct Draft {
     /// The option he leans to, when the ask has options: never needed.
     pub pick: Option<usize>,
@@ -67,6 +70,45 @@ impl Draft {
             || self.grill.values().any(Said::answered)
             || self.marks.is_some()
     }
+}
+
+/// Which draft: the desk (where it listens, which outlives the window's
+/// order of desks), the ask and its round.
+pub type DraftKey = (String, String, u32);
+
+/// One draft as it is kept between launches.
+#[derive(Serialize, Deserialize)]
+struct Kept {
+    desk: String,
+    ask: String,
+    round: u32,
+    draft: Draft,
+}
+
+/// The drafts worth keeping, as the file holds them: only what sending
+/// would lose, so an ask opened and left leaves nothing behind.
+pub fn keep(drafts: &HashMap<DraftKey, Draft>) -> String {
+    let mut kept: Vec<Kept> = drafts
+        .iter()
+        .filter(|(_, d)| d.touched())
+        .map(|((desk, ask, round), draft)| Kept {
+            desk: desk.clone(),
+            ask: ask.clone(),
+            round: *round,
+            draft: draft.clone(),
+        })
+        .collect();
+    kept.sort_by(|a, b| (&a.desk, &a.ask, a.round).cmp(&(&b.desk, &b.ask, b.round)));
+    serde_json::to_string_pretty(&kept).unwrap_or_else(|_| "[]".into())
+}
+
+/// The drafts a file kept.
+pub fn kept(text: &str) -> Result<HashMap<DraftKey, Draft>, String> {
+    let kept: Vec<Kept> = serde_json::from_str(text).map_err(|e| e.to_string())?;
+    Ok(kept
+        .into_iter()
+        .map(|k| ((k.desk, k.ask, k.round), k.draft))
+        .collect())
 }
 
 /// How he sends what he has.
@@ -151,6 +193,39 @@ mod tests {
 
     fn ask(json: &str) -> Ask {
         serde_json::from_str(json).unwrap()
+    }
+
+    #[test]
+    fn a_draft_and_its_marks_outlive_the_window() {
+        let mut drafts = HashMap::new();
+        let mark: Mark = serde_json::from_str(
+            r#"{"id":"k1","kind":"pin","media":"m1","points":[[0.5,0.25]],"text":"the rim","anchor":{"x":1}}"#,
+        )
+        .unwrap();
+        let mut grill = BTreeMap::new();
+        grill.insert(
+            "q2".to_string(),
+            Said {
+                pick: Some(1),
+                words: "the second".into(),
+                ..Said::default()
+            },
+        );
+        let written = Draft {
+            pick: Some(0),
+            words: "Quieter, and the rim wetter".into(),
+            grill,
+            at: Some(1),
+            marks: Some(vec![mark]),
+        };
+        let desk = "http://127.0.0.1:8774".to_string();
+        drafts.insert((desk.clone(), "AQ2".into(), 2), written.clone());
+        // Opened and left: nothing to lose, nothing kept.
+        drafts.insert((desk.clone(), "AQ3".into(), 1), Draft::default());
+        let back = kept(&keep(&drafts)).unwrap();
+        assert_eq!(back.len(), 1);
+        assert_eq!(back[&(desk, "AQ2".to_string(), 2)], written);
+        assert!(kept("not json").is_err());
     }
 
     #[test]

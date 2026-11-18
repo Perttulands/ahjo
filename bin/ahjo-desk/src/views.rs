@@ -11,7 +11,7 @@ use crate::app::{Aim, DeskApp, Reach, Reached};
 use crate::marks;
 use crate::model::{self, Ask, Choice, Form, MediaKind, Question};
 use crate::tokens::{self, BODY, GAP, GAP_SMALL, PAD, SMALL, TEXT};
-use ahjo_app_kit::theme::{FAMILY, Theme, alpha, rgb, theme};
+use ahjo_app_kit::theme::{FAMILY, Theme, alpha, rgb, theme, ty};
 use ahjo_app_kit::widgets::kit::{self, Kind};
 use ahjo_app_kit::widgets::pane;
 use gpui::{
@@ -23,6 +23,7 @@ impl Render for DeskApp {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         self.take_aim(window, cx);
         self.keep_page();
+        self.keep_drafts(cx);
         let t = theme(cx).clone();
         let wide = f32::from(window.viewport_size().width);
         let (rail_w, column_w) = tokens::columns(wide);
@@ -289,10 +290,11 @@ impl DeskApp {
             }
             meta.push(age(&ask.created_at));
             let key = k.clone();
+            let url = &self.desks[k.0].place.url;
             let started = self
                 .drafts
                 .iter()
-                .any(|((d, id, _), draft)| *d == k.0 && *id == k.1 && draft.touched());
+                .any(|((d, id, _), draft)| d == url && *id == k.1 && draft.touched());
             let thumb = thumb.filter(|_| width >= tokens::RAIL_THUMBS);
             rows.push(
                 div()
@@ -327,7 +329,7 @@ impl DeskApp {
                                             .flex()
                                             .items_center()
                                             .gap(px(GAP_SMALL))
-                                            .text_size(px(SMALL))
+                                            .text_size(px(TEXT))
                                             .child(
                                                 div()
                                                     .size(px(8.))
@@ -350,6 +352,9 @@ impl DeskApp {
                                     .child(
                                         div()
                                             .line_clamp(2)
+                                            .font_family(t.ty.reading)
+                                            .text_size(px(t.ty.read))
+                                            .line_height(relative(1.3))
                                             .font_weight(if on {
                                                 FontWeight::SEMIBOLD
                                             } else {
@@ -375,7 +380,7 @@ impl DeskApp {
                     // cuts what the ask is and how long it has waited.
                     .child(
                         div()
-                            .text_size(px(SMALL))
+                            .text_size(px(TEXT))
                             .text_color(t.dim)
                             .truncate()
                             .child(meta.join(" · ")),
@@ -453,18 +458,25 @@ impl DeskApp {
             .bg(t.surface)
             .border_b_1()
             .border_color(t.divider)
-            .text_size(px(SMALL))
+            .text_size(px(TEXT))
             .text_color(t.text2)
-            .child(div().size(px(8.)).rounded(px(2.)).bg(t.identity_of(&desk)))
-            .child(format!(
+            .child(
+                div()
+                    .flex_none()
+                    .size(px(8.))
+                    .rounded(px(2.))
+                    .bg(t.identity_of(&desk)),
+            )
+            // In a narrow window the words give way, never the button.
+            .child(div().flex_1().min_w_0().truncate().child(format!(
                 "{desk} {} · {} · {}",
                 ask.id,
                 kind_word(ask),
                 ask.bead
-            ))
-            .child(div().flex_1())
+            )))
             .child(
                 kit::button(t, "web", "Open on web", Kind::Quiet)
+                    .flex_none()
                     .tooltip(kit::tip("O · the web desk, on this ask"))
                     .on_click(cx.listener(|app, _: &ClickEvent, _, cx| app.open_on_web(cx))),
             );
@@ -498,7 +510,7 @@ impl DeskApp {
             .flex()
             .flex_col()
             .gap(px(GAP_SMALL + 2.))
-            .child(div().text_size(px(SMALL)).text_color(t.dim).child(format!(
+            .child(div().text_size(px(TEXT)).text_color(t.dim).child(format!(
                 "{by} · round {} · {}",
                 round.round(),
                 age(&round.created_at)
@@ -518,7 +530,7 @@ impl DeskApp {
         if let Some(doc) = &round.doc {
             turn = turn.child(
                 div()
-                    .text_size(px(SMALL))
+                    .text_size(px(TEXT))
                     .text_color(t.text2)
                     .child(format!("Document: {}", doc.name)),
             );
@@ -538,7 +550,7 @@ impl DeskApp {
             if !shown.is_empty() {
                 turn = turn.child(
                     div()
-                        .text_size(px(SMALL))
+                        .text_size(px(TEXT))
                         .text_color(t.dim)
                         .child(format!("Showed: {}", shown.join(" · "))),
                 );
@@ -660,6 +672,8 @@ impl DeskApp {
                         div()
                             .flex_1()
                             .min_w_0()
+                            .font_family(t.ty.reading)
+                            .text_size(px(t.ty.read))
                             .font_weight(FontWeight::SEMIBOLD)
                             .child(q.title.clone()),
                     ),
@@ -679,7 +693,7 @@ impl DeskApp {
                     }
                 })
                 .unwrap_or_else(|| "nothing".into());
-            card = card.child(div().text_size(px(SMALL)).text_color(t.dim).child(format!(
+            card = card.child(div().text_size(px(TEXT)).text_color(t.dim).child(format!(
                 "Round {round} asked “{}”; you said {was}",
                 old.title.trim()
             )));
@@ -712,7 +726,7 @@ impl DeskApp {
             card = card.child(recommend_box(t, "The agent recommends", &q.recommend));
         }
         let (words, colour) = said_words(t, q, &said);
-        card = card.child(div().text_size(px(SMALL)).text_color(colour).child(if now {
+        card = card.child(div().text_size(px(TEXT)).text_color(colour).child(if now {
             format!("You: {words}")
         } else {
             format!("You said: {words}")
@@ -779,7 +793,7 @@ impl DeskApp {
                         .items_center()
                         .gap(px(GAP_SMALL))
                         .child(number(t, n, ink))
-                        .child(div().text_size(px(SMALL)).text_color(t.text2).child(what))
+                        .child(div().text_size(px(TEXT)).text_color(t.text2).child(what))
                         .child(div().flex_1())
                         .child(
                             kit::button(
@@ -802,11 +816,11 @@ impl DeskApp {
                 } else if m.text.trim().is_empty() {
                     div()
                         .text_color(t.dim)
-                        .text_size(px(SMALL))
+                        .text_size(px(TEXT))
                         .child("No words on it yet")
                         .into_any_element()
                 } else {
-                    div().line_clamp(2).child(m.text.clone()).into_any_element()
+                    prose(t, &m.text, false).line_clamp(2).into_any_element()
                 })
                 .on_click(cx.listener(move |app, _: &ClickEvent, _, cx| {
                     app.select_mark(Some(id.clone()), true, cx);
@@ -823,7 +837,7 @@ impl DeskApp {
                 div()
                     .px(px(GAP))
                     .pt(px(GAP_SMALL))
-                    .text_size(px(SMALL))
+                    .text_size(px(TEXT))
                     .text_color(t.dim)
                     .child("Your marks · they go with your words"),
             )
@@ -884,12 +898,7 @@ impl DeskApp {
             }
         } else if form == Form::Open && !ask.options.is_empty() {
             has_top = true;
-            top = top.child(
-                div()
-                    .text_size(px(SMALL))
-                    .text_color(t.dim)
-                    .child("Lean to"),
-            );
+            top = top.child(div().text_size(px(TEXT)).text_color(t.dim).child("Lean to"));
             for (i, _) in ask.options.iter().enumerate() {
                 let letter = model::letter(&ask.options, i);
                 let label = model::label(&ask.options, i);
@@ -906,7 +915,7 @@ impl DeskApp {
             }
             top = top.child(
                 div()
-                    .text_size(px(SMALL))
+                    .text_size(px(TEXT))
                     .text_color(t.dim)
                     .child("· optional"),
             );
@@ -985,7 +994,7 @@ impl DeskApp {
             )
             .child(actions)
             .when(!status.is_empty(), |d| {
-                d.child(div().text_size(px(SMALL)).text_color(t.text2).child(status))
+                d.child(div().text_size(px(TEXT)).text_color(t.text2).child(status))
             })
             .into_any_element()
     }
@@ -1042,7 +1051,7 @@ fn his_turn(t: &Theme, round: &Ask) -> AnyElement {
         .border_color(alpha(t.accent, 0.35))
         .child(
             div()
-                .text_size(px(SMALL))
+                .text_size(px(TEXT))
                 .text_color(t.text2)
                 .child(format!("You · {what} · {}", age(&a.at))),
         )
@@ -1052,7 +1061,7 @@ fn his_turn(t: &Theme, round: &Ask) -> AnyElement {
         .children(
             marks
                 .into_iter()
-                .map(|m| div().text_size(px(SMALL)).text_color(t.text2).child(m)),
+                .map(|m| div().text_size(px(TEXT)).text_color(t.text2).child(m)),
         )
         .into_any_element()
 }
@@ -1071,7 +1080,7 @@ fn comment(t: &Theme, c: &model::Comment) -> AnyElement {
         .rounded(px(tokens::RADIUS))
         .border_1()
         .border_color(t.divider)
-        .child(div().text_size(px(SMALL)).text_color(t.dim).child(format!(
+        .child(div().text_size(px(TEXT)).text_color(t.dim).child(format!(
             "{} · {}",
             if his { "You" } else { c.author.as_str() },
             age(&c.at)
@@ -1097,8 +1106,8 @@ fn no_desks(t: &Theme) -> AnyElement {
 fn prose(t: &Theme, words: &str, faint: bool) -> Div {
     div()
         .font_family(t.ty.reading)
-        .text_size(px(BODY))
-        .line_height(relative(tokens::BODY_LINE))
+        .text_size(px(t.ty.read))
+        .line_height(relative(ty::READ_LEADING))
         .text_color(if faint { t.text2 } else { t.text })
         .child(words.trim().to_string())
 }
@@ -1135,34 +1144,29 @@ fn option_row(
                         .flex()
                         .flex_wrap()
                         .gap(px(GAP_SMALL))
-                        .child(div().font_weight(FontWeight::SEMIBOLD).child(label))
+                        .items_baseline()
+                        .child(
+                            div()
+                                .font_family(t.ty.reading)
+                                .text_size(px(t.ty.read))
+                                .font_weight(FontWeight::SEMIBOLD)
+                                .child(label),
+                        )
                         .when(rec, |d| {
                             d.child(
                                 div()
-                                    .text_size(px(SMALL))
+                                    .text_size(px(TEXT))
                                     .text_color(t.accent)
                                     .child("Recommended"),
                             )
                         }),
                 )
                 .when(!o.why.trim().is_empty(), |d| {
-                    d.child(
-                        div()
-                            .text_size(px(SMALL))
-                            .text_color(t.text2)
-                            .child(o.why.clone()),
-                    )
+                    d.child(prose(t, &o.why, true))
                 })
                 .when(
                     rec && !why_rec.trim().is_empty() && why_rec.trim() != o.why.trim(),
-                    |d| {
-                        d.child(
-                            div()
-                                .text_size(px(SMALL))
-                                .text_color(t.text2)
-                                .child(why_rec),
-                        )
-                    },
+                    |d| d.child(prose(t, &why_rec, true)),
                 ),
         )
 }
@@ -1187,7 +1191,7 @@ fn recommend_box(t: &Theme, label: &str, words: &str) -> Div {
                 .gap(px(2.))
                 .child(
                     div()
-                        .text_size(px(SMALL))
+                        .text_size(px(TEXT))
                         .text_color(t.accent)
                         .child(label.to_string()),
                 )
@@ -1216,7 +1220,7 @@ fn chip(
         .when(on, |d| d.bg(t.accent).text_color(t.on_accent()))
         .when(!on, |d| d.hover(|d| d.bg(t.accent_soft())))
         .cursor_pointer()
-        .text_size(px(SMALL))
+        .text_size(px(TEXT))
         .children(state.map(|c| div().size(px(6.)).rounded_full().bg(c)))
         .child(words.to_string())
 }
@@ -1268,7 +1272,7 @@ fn key_letter(t: &Theme, letter: &str, on: bool) -> Div {
         .border_color(if on { t.accent } else { t.text2 })
         .when(on, |d| d.bg(t.accent).text_color(t.on_accent()))
         .font_weight(FontWeight::BOLD)
-        .text_size(px(SMALL))
+        .text_size(px(TEXT))
         .child(letter.to_string())
 }
 
@@ -1321,16 +1325,19 @@ fn clip_words(s: &str, n: usize) -> String {
     }
 }
 
-/// The recommendation's reason, after the option's name it starts with.
+/// The recommendation's reason, after the option's name it starts with,
+/// as a sentence of its own.
 fn rest_of(recommend: &str, name: &str) -> String {
-    recommend
+    let rest = recommend
         .trim()
         .strip_prefix(name)
-        .map(|r| {
-            r.trim_start_matches([':', '.', ',', '—', '-', ' '])
-                .to_string()
-        })
-        .unwrap_or_else(|| recommend.to_string())
+        .map(|r| r.trim_start_matches([':', '.', ',', '—', '-', ' ']))
+        .unwrap_or(recommend);
+    let mut letters = rest.chars();
+    match letters.next() {
+        Some(first) => first.to_uppercase().chain(letters).collect(),
+        None => String::new(),
+    }
 }
 
 fn kind_word(ask: &Ask) -> &'static str {

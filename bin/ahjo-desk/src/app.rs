@@ -4,7 +4,7 @@
 //! one in front, its rounds as a dialogue, what he has written and marked
 //! on it so far, and the surface that shows and takes marks.
 
-use crate::answer::{self, Draft, Said, Verdict};
+use crate::answer::{self, Draft, DraftKey, Said, Verdict};
 use crate::desk::{self, Place};
 use crate::marks::{self, Tool};
 use crate::model::{self, Ask, Form, Mark, Media, MediaKind};
@@ -156,13 +156,17 @@ pub enum Aim {
     Surface,
 }
 
-type DraftKey = (usize, String, u32);
-
 pub struct DeskApp {
     pub focus: FocusHandle,
     pub desks: Vec<DeskState>,
     pub current: Option<Key>,
     pub drafts: HashMap<DraftKey, Draft>,
+    /// Where the drafts are kept between launches (none when the file
+    /// there did not read: it is left as it is), whether they changed
+    /// since, and whether a write is on its way.
+    drafts_at: Option<std::path::PathBuf>,
+    drafts_changed: bool,
+    drafts_keeping: bool,
     pub view: View,
     pub pictures: HashMap<String, Pic>,
     picture_order: VecDeque<String>,
@@ -212,13 +216,20 @@ impl DeskApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
+        let read = ahjo_app_kit::theme::theme(cx).ty.read;
         let words = cx.new(|cx| {
             TextField::new(cx, "Your thoughts, in your words")
                 .prose()
                 .reading()
+                .text_size(read)
         });
         cx.subscribe_in(&words, window, Self::on_words).detach();
-        let mark_note = cx.new(|cx| TextField::new(cx, "What about it?").multiline().reading());
+        let mark_note = cx.new(|cx| {
+            TextField::new(cx, "What about it?")
+                .multiline()
+                .reading()
+                .text_size(read)
+        });
         cx.subscribe_in(&mark_note, window, Self::on_mark_note)
             .detach();
         cx.observe_window_activation(window, |this, window, cx| {
@@ -240,6 +251,25 @@ impl DeskApp {
             }
         })
         .detach();
+        // What he had written and marked when the window last closed.
+        let (drafts, drafts_at, notice) = match desk::drafts_path() {
+            Some(path) => match desk::read_drafts(&path) {
+                Ok(drafts) => (drafts, Some(path), notice),
+                Err(e) => (
+                    HashMap::new(),
+                    None,
+                    Some(format!(
+                        "Your unsent answers did not read, and are left as they were: {e}"
+                    )),
+                ),
+            },
+            None => (HashMap::new(), None, notice),
+        };
+        let this = cx.weak_entity();
+        window.on_window_should_close(cx, move |_, cx| {
+            let _ = this.update(cx, |app, _| app.keep_drafts_now());
+            true
+        });
         let mut app = Self {
             focus: cx.focus_handle(),
             desks: places
@@ -251,7 +281,10 @@ impl DeskApp {
                 })
                 .collect(),
             current: None,
-            drafts: HashMap::new(),
+            drafts,
+            drafts_at,
+            drafts_changed: false,
+            drafts_keeping: false,
             view: View::default(),
             pictures: HashMap::new(),
             picture_order: VecDeque::new(),
@@ -324,7 +357,8 @@ impl DeskApp {
 
     fn draft_key(&self) -> Option<DraftKey> {
         let k = self.current.as_ref()?;
-        Some((k.0, k.1.clone(), self.ask(k)?.round()))
+        let desk = self.desks.get(k.0)?.place.url.clone();
+        Some((desk, k.1.clone(), self.ask(k)?.round()))
     }
 
     pub fn draft(&self) -> Draft {
@@ -335,7 +369,40 @@ impl DeskApp {
 
     pub fn draft_mut(&mut self) -> Option<&mut Draft> {
         let k = self.draft_key()?;
+        self.drafts_changed = true;
         Some(self.drafts.entry(k).or_default())
+    }
+
+    /// Keeps the drafts on disk a moment after they change, so a window
+    /// closed or a machine gone down loses at most that moment.
+    pub fn keep_drafts(&mut self, cx: &mut Context<Self>) {
+        if !self.drafts_changed || self.drafts_keeping || self.drafts_at.is_none() {
+            return;
+        }
+        self.drafts_keeping = true;
+        cx.spawn(async move |this, cx| {
+            cx.background_executor()
+                .timer(Duration::from_millis(tokens::KEEP_DRAFTS_MS))
+                .await;
+            let _ = this.update(cx, |app, cx| {
+                app.keep_drafts_now();
+                app.drafts_keeping = false;
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+
+    /// Writes the drafts as they are now.
+    fn keep_drafts_now(&mut self) {
+        let Some(path) = &self.drafts_at else { return };
+        if !self.drafts_changed {
+            return;
+        }
+        self.drafts_changed = false;
+        if let Err(e) = desk::write_drafts(path, &answer::keep(&self.drafts)) {
+            self.notice = Some(format!("Your unsent answers could not be kept: {e}"));
+        }
     }
 
     /// Opens the ask he chose, with the keyboard in his words.
@@ -1290,7 +1357,9 @@ impl DeskApp {
                         if let Some(a) = app.desks[key.0].asks.iter_mut().find(|a| a.id == now.id) {
                             *a = now;
                         }
-                        app.drafts.retain(|k, _| !(k.0 == key.0 && k.1 == key.1));
+                        let url = &app.desks[key.0].place.url;
+                        app.drafts.retain(|k, _| !(&k.0 == url && k.1 == key.1));
+                        app.drafts_changed = true;
                         app.say(format!("Sent · {title}"), false, cx);
                         if app.current.as_ref() == Some(&key) {
                             app.open(next.filter(|n| app.ask(n).is_some_and(|a| a.is_open())), cx);
@@ -1349,6 +1418,17 @@ impl DeskApp {
                     Ok(asks) => {
                         app.desks[d].asks = asks;
                         app.desks[d].reach = Reach::Ok;
+                        // A draft for a round closed or moved on is
+                        // answered: it is not kept.
+                        let (url, open) = (&app.desks[d].place.url, &app.desks[d].asks);
+                        let before = app.drafts.len();
+                        app.drafts.retain(|(desk, id, round), _| {
+                            desk != url
+                                || open
+                                    .iter()
+                                    .any(|a| &a.id == id && a.round() == *round && a.is_open())
+                        });
+                        app.drafts_changed |= app.drafts.len() != before;
                     }
                     Err(e) => app.desks[d].reach = Reach::Failed(e),
                 }

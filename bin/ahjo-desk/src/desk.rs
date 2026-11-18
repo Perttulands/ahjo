@@ -55,6 +55,35 @@ pub fn config_path() -> Option<PathBuf> {
     ahjo_app_kit::settings::path().map(|p| p.with_file_name("desk.json"))
 }
 
+/// His unsent answers and marks, beside `desk.json`, so closing the window
+/// loses none of them.
+pub fn drafts_path() -> Option<PathBuf> {
+    config_path().map(|p| p.with_file_name("desk-drafts.json"))
+}
+
+/// The drafts kept at `path`; none when it was never written.
+pub fn read_drafts(
+    path: &std::path::Path,
+) -> Result<std::collections::HashMap<crate::answer::DraftKey, crate::answer::Draft>, String> {
+    match std::fs::read_to_string(path) {
+        Ok(text) => crate::answer::kept(&text).map_err(|e| format!("{}: {e}", path.display())),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(Default::default()),
+        Err(e) => Err(format!("{}: {e}", path.display())),
+    }
+}
+
+/// Writes the drafts whole, so a window closed mid-write leaves the last
+/// whole file rather than half of one.
+pub fn write_drafts(path: &std::path::Path, text: &str) -> Result<(), String> {
+    let fail = |e: std::io::Error| format!("{}: {e}", path.display());
+    if let Some(dir) = path.parent() {
+        std::fs::create_dir_all(dir).map_err(fail)?;
+    }
+    let part = path.with_extension("json.part");
+    std::fs::write(&part, text).map_err(fail)?;
+    std::fs::rename(&part, path).map_err(fail)
+}
+
 /// The desks named by `--desk` (repeated), else `AHJO_DESK_DESKS` (comma
 /// separated), else the config file's.
 pub fn load(args: &[String]) -> (Config, Option<String>) {
