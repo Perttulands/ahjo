@@ -6,6 +6,7 @@ mod handover;
 mod notify;
 mod routes;
 mod run_routes;
+mod sketch;
 
 use ahjo_mission_engine::{
     Coordinator, LocalSeats, RunSettings, SeatExecutor, Store, TranscriptRoots,

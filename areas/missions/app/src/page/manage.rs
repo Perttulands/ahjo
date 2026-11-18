@@ -26,6 +26,10 @@ enum Doing {
 struct Form {
     doing: Doing,
     name: Entity<TextField>,
+    /// What a new mission is for, kept as its note.
+    intent: Entity<TextField>,
+    /// A new mission's rough steps, one per line.
+    steps: Entity<TextField>,
     /// The example a new mission starts as a copy of; none starts empty.
     example: Option<&'static ahjo_missions_contract::Example>,
     problem: Option<String>,
@@ -45,7 +49,13 @@ impl MissionsPage {
             Doing::Create { .. } => "",
             Doing::Rename { title, .. } | Doing::Archive { title, .. } => title.as_str(),
         };
-        (form.name.read(cx).text != baseline).then(|| "Mission name".into())
+        if form.name.read(cx).text != baseline {
+            return Some("Mission name".into());
+        }
+        (matches!(form.doing, Doing::Create { .. })
+            && !(form.intent.read(cx).text.trim().is_empty()
+                && form.steps.read(cx).text.trim().is_empty()))
+        .then(|| "New mission".into())
     }
     pub(super) fn open_mission_create(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if self.unsaved(cx).is_some() {
@@ -130,19 +140,60 @@ impl MissionsPage {
             field.set(title, true, cx);
             field
         });
+        let intent = cx.new(|cx| {
+            TextField::new(
+                cx,
+                "As rough as you like: what it makes, for whom, what good looks like",
+            )
+            .prose()
+        });
+        let steps = cx.new(|cx| {
+            TextField::new(
+                cx,
+                "One per line, such as\nGather merged PRs\nDraft\nReview",
+            )
+            .prose()
+        });
         cx.observe(&name, |_, _, cx| cx.notify()).detach();
-        cx.subscribe(&name, |page, _, event: &FieldEvent, cx| {
-            if matches!(event, FieldEvent::Submit | FieldEvent::SubmitAlt) {
-                page.submit_manage(cx);
-            }
-        })
-        .detach();
+        for field in [&name, &intent, &steps] {
+            cx.subscribe_in(
+                field,
+                window,
+                |page, field, event: &FieldEvent, window, cx| {
+                    let Some(form) = page.manage.form.as_ref() else {
+                        return;
+                    };
+                    // Enter in the name, and Ctrl+Enter anywhere, creates it;
+                    // Tab goes to the next field shown.
+                    let mut order = vec![form.name.clone()];
+                    if matches!(form.doing, Doing::Create { .. }) {
+                        order.push(form.intent.clone());
+                        if form.example.is_none() {
+                            order.push(form.steps.clone());
+                        }
+                    }
+                    let at = order.iter().position(|f| f == field);
+                    match event {
+                        FieldEvent::SubmitAlt => page.submit_manage(cx),
+                        FieldEvent::Submit if at == Some(0) => page.submit_manage(cx),
+                        FieldEvent::Tab => {
+                            let next = &order[at.map_or(0, |i| (i + 1) % order.len())];
+                            ahjo_app_kit::widgets::field::focus(next, window, cx);
+                        }
+                        _ => {}
+                    }
+                },
+            )
+            .detach();
+        }
         if !matches!(doing, Doing::Archive { .. }) {
             ahjo_app_kit::widgets::field::focus(&name, window, cx);
         }
         self.manage.form = Some(Form {
             doing,
             name,
+            intent,
+            steps,
             example: None,
             problem: None,
             busy: false,
@@ -181,6 +232,12 @@ impl MissionsPage {
         let title = form.name.read(cx).text.trim().to_owned();
         let doing = form.doing.clone();
         let example = form.example;
+        let intent = form.intent.read(cx).text.clone();
+        let steps = if example.is_none() {
+            form.steps.read(cx).text.clone()
+        } else {
+            String::new()
+        };
         // An example names the mission after itself until it is renamed.
         let title = match example {
             Some(e) if title.is_empty() => e.title.to_owned(),
@@ -207,7 +264,7 @@ impl MissionsPage {
         }
         let request = match &doing {
             Doing::Create { node } => Request::new("POST", NodeId(node.clone()), "/api/missions")
-                .json(&json!({"title":title, "example":example.map(|e| e.name).unwrap_or(""), "updatedBy":"human:operator"})),
+                .json(&json!({"title":title, "example":example.map(|e| e.name).unwrap_or(""), "note":intent, "steps":steps, "updatedBy":"human:operator"})),
             Doing::Rename {
                 node,
                 slug,
@@ -317,7 +374,7 @@ impl MissionsPage {
         let mut list = div().flex().flex_col().gap(px(size::RADIUS)).child(row(
             "mission-example-empty".into(),
             "Empty",
-            "Nothing yet: build it on the canvas.",
+            "Just what you wrote, or nothing yet.",
             chosen.is_none(),
             None,
         ));
@@ -400,8 +457,24 @@ impl MissionsPage {
                         })
                         // Start empty, or from an example that is staffed and
                         // wired already.
+                        // What it is for and its rough steps: a sketch an
+                        // agent turns into a mission that runs.
                         .when(matches!(form.doing, Doing::Create { .. }), |d| {
-                            d.child(kit::label(t, "Start from")).child(self.example_choice(t, form.example, cx))
+                            d.child(kit::label(t, "What are you making?")).child(
+                                div()
+                                    .debug_selector(|| "mission-form-intent".into())
+                                    .child(form.intent.clone()),
+                            )
+                        })
+                        .when(matches!(form.doing, Doing::Create { .. }) && form.example.is_none(), |d| {
+                            d.child(kit::label(t, "Rough steps")).child(
+                                div()
+                                    .debug_selector(|| "mission-form-steps".into())
+                                    .child(form.steps.clone()),
+                            )
+                        })
+                        .when(matches!(form.doing, Doing::Create { .. }), |d| {
+                            d.child(kit::label(t, "Or start from")).child(self.example_choice(t, form.example, cx))
                         })
                         .when_some(form.problem.clone(), |d, problem| {
                             d.child(

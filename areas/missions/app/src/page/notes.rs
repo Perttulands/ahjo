@@ -47,17 +47,22 @@ fn author(value: &str) -> (bool, String) {
     }
 }
 fn when(note: &Note) -> String {
-    let timestamp = note
-        .created_at
-        .chars()
-        .take(16)
-        .collect::<String>()
-        .replace('T', " ");
+    let timestamp =
+        crate::store::words::short_time(&note.created_at, time::OffsetDateTime::now_utc());
+    let timestamp = if note.resolves {
+        format!("{timestamp} · resolved it")
+    } else {
+        timestamp
+    };
     if note.edited_at.is_some() {
         format!("{timestamp} · edited")
     } else {
         timestamp
     }
+}
+/// Whether a thread is answered for good: its latest entry resolves it.
+fn resolved(entries: &[Note]) -> bool {
+    entries.last().is_some_and(|note| note.resolves)
 }
 fn thread<'a>(notes: &'a NotesDocument, target: &str) -> &'a [Note] {
     if target == MISSION_THREAD {
@@ -71,6 +76,23 @@ fn thread<'a>(notes: &'a NotesDocument, target: &str) -> &'a [Note] {
             .unwrap_or(&[])
     }
 }
+/// The thread a note is in.
+fn note_target(page: &MissionsPage, id: &str) -> String {
+    page.notes
+        .as_ref()
+        .and_then(|notes| {
+            std::iter::once((MISSION_THREAD, &notes.mission))
+                .chain(
+                    notes
+                        .elements
+                        .iter()
+                        .map(|t| (t.node_id.as_str(), &t.entries)),
+                )
+                .find(|(_, entries)| entries.iter().any(|n| n.id == id))
+                .map(|(target, _)| target.to_owned())
+        })
+        .unwrap_or_else(|| MISSION_THREAD.into())
+}
 fn home(card: &board::Card, below: f32) -> (f32, f32) {
     (
         card.x.max(card.x + card.w - STICKY_W),
@@ -78,6 +100,141 @@ fn home(card: &board::Card, below: f32) -> (f32, f32) {
     )
 }
 impl MissionsPage {
+    /// Note: one word beside anything a note can go on, opening a field
+    /// right there.
+    pub(super) fn note_act(&self, t: &Theme, target: &str, cx: &mut Context<Self>) -> AnyElement {
+        let selector = format!("flow-note-{target}");
+        let target = target.to_owned();
+        pane::act(t, SharedString::from(selector.clone()), "Note")
+            .debug_selector(move || selector.clone())
+            .tooltip(kit::tip("Write a note here"))
+            .on_click(cx.listener(move |page, _, window, cx| {
+                page.open_canvas_note(target.clone(), window, cx)
+            }))
+            .into_any_element()
+    }
+    /// A thread as Flow shows it, under what it is on: each note as paper
+    /// in its author's colour, and the field when a note is being written
+    /// here. None when there is nothing to show.
+    pub(super) fn flow_thread(
+        &self,
+        t: &Theme,
+        target: &str,
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
+        let entries = self
+            .notes
+            .as_ref()
+            .map(|n| thread(n, target))
+            .unwrap_or(&[]);
+        let open = self.note_paper.open.as_deref() == Some(target);
+        if entries.is_empty() && !open {
+            return None;
+        }
+        let done = resolved(entries);
+        let mut list = div()
+            .debug_selector({
+                let selector = format!("flow-thread-{target}");
+                move || selector.clone()
+            })
+            .flex()
+            .flex_col()
+            .gap(px(GAP))
+            .pt(px(GAP))
+            .max_w(px(size::READING));
+        for note in entries {
+            let (agent, name) = author(&note.author);
+            let (fill, edge) = paper(t, agent);
+            let mut head = div()
+                .flex()
+                .items_center()
+                .gap(px(GAP))
+                .text_size(px(size::SMALL))
+                .font_weight(FontWeight::BOLD)
+                .child(div().flex_1().child(format!("{name} · {}", when(note))));
+            if note.author == AUTHOR && !open {
+                let (id, text) = (note.id.clone(), note.text.clone());
+                let selector = format!("flow-note-edit-{}", note.id);
+                head = head.child(
+                    kit::button(t, SharedString::from(selector.clone()), "Edit", Kind::Quiet)
+                        .text_color(t.bg)
+                        .debug_selector(move || selector.clone())
+                        .on_click(cx.listener(move |page, _, window, cx| {
+                            page.open_canvas_note(note_target(page, &id), window, cx);
+                            page.select_note(&id, &text, cx);
+                            ahjo_app_kit::widgets::field::focus(&page.note, window, cx);
+                        })),
+                );
+            }
+            let entry = div()
+                .flex()
+                .flex_col()
+                .px(px(size::ROW_PAD))
+                .py(px(GAP))
+                .border_l(px(size::RADIUS))
+                .border_color(edge)
+                .bg(fill)
+                .text_color(t.bg)
+                .when(done, |d| d.opacity(0.75))
+                .child(head)
+                .child(note.text.clone());
+            list = list.child(entry);
+        }
+        if open {
+            list = list.child(self.note_field(t, target, entries.is_empty(), cx));
+        }
+        Some(list.into_any_element())
+    }
+    /// The field a note is written in, with its Save and Discard.
+    fn note_field(&self, t: &Theme, target: &str, first: bool, cx: &mut Context<Self>) -> Div {
+        let save = format!("flow-note-save-{target}");
+        let label = if self.note_saving {
+            "Saving…"
+        } else if self.note_id.is_some() {
+            "Save edit"
+        } else if first {
+            "Add note"
+        } else {
+            "Reply"
+        };
+        div()
+            .flex()
+            .flex_col()
+            .gap(px(GAP))
+            .child(
+                div()
+                    .debug_selector(|| "flow-note-field".into())
+                    .child(self.note.clone()),
+            )
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .gap(px(GAP))
+                    .child(
+                        div()
+                            .flex_1()
+                            .text_size(px(size::SMALL))
+                            .text_color(t.dim)
+                            .child("Ctrl+Enter keeps it, Esc puts it away"),
+                    )
+                    .child(
+                        kit::button(t, "flow-note-discard", "Discard", Kind::Quiet).on_click(
+                            cx.listener(|page, _, _, cx| {
+                                page.discard_note(cx);
+                                page.close_canvas_note(cx);
+                            }),
+                        ),
+                    )
+                    .child(
+                        kit::button(t, SharedString::from(save.clone()), label, Kind::Primary)
+                            .debug_selector(move || save.clone())
+                            .when(!self.note_saving, |d| {
+                                d.on_click(cx.listener(|page, _, _, cx| page.add_note(false, cx)))
+                            }),
+                    ),
+            )
+    }
     /// Keep a failed notes read visible and let the operator retry it.
     pub(super) fn load_canvas_notes(&mut self, node: String, slug: String, cx: &mut Context<Self>) {
         if self.note_paper.loading {

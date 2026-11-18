@@ -42,10 +42,19 @@ A page is judged by three questions, in this order:
   one project's work as parents and children. Every chart reads out the
   day under the mouse, and the item beside the list shows its relations
   as cards.
-- **Missions.** Chain sessions into repeatable runs of several agents. The
-  graph is a diagram: typed cards, coloured ports, visible loops and gates.
-  A step uses a named agent's live session or starts one; a mission's
-  sessions are ordinary sessions under the mission's prefix.
+- **Missions.** Chain sessions into repeatable runs of several agents. A
+  person does not build a mission by hand: they sketch it in seconds (a
+  name, what it is for, a few rough steps) and write notes on it, on the
+  mission, a step, a gate, a limit or a wire, as plain multi-line text where
+  they read it. An agent picks it up from one command (`ahjo mission
+  inspect`), builds a version that runs, and answers the notes in place,
+  resolving the ones it took up. The page exists so a person understands a
+  complex flow: in what order the steps run, who does each, and where the
+  gates and limits are and what each checks or caps, readable without
+  opening a card. The graph is a diagram: typed cards, coloured ports,
+  visible loops and gates. A step uses a named agent's live session or
+  starts one; a mission's sessions are ordinary sessions under the
+  mission's prefix.
 - **Scheduled.** What will run when, and how the last run went.
 - **Host.** Is this machine all right now, with services as part of the
   answer.

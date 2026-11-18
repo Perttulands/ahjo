@@ -199,6 +199,15 @@ async fn create(State(m): State<Missions>, input: JsonBody<Value>) -> ResultResp
         }
     }
     let result = result.ok_or_else(|| bad("no untitled mission name available"))?;
+    // A sketch: rough steps, one per line, and what the mission is for.
+    let steps = crate::sketch::steps(s(&v, "steps"));
+    let result = if steps.is_empty() && s(&v, "note").trim().is_empty() {
+        result
+    } else {
+        let slug = result.mission.slug.clone();
+        crate::sketch::fill(&m, &slug, &steps, s(&v, "note"), s(&v, "updatedBy"))?;
+        m.store.mission_edit(&slug)?
+    };
     m.changed();
     let mut r = tagged(
         json!({"mission":tagged_mission(result.mission,&result.etag)}),

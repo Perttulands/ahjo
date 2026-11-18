@@ -208,3 +208,52 @@ fn canvas_note_pin_opens_thread_and_preserves_edits(cx: &mut TestAppContext) {
     assert_eq!(entries.len(), 1);
     assert_eq!(entries[0]["text"], "Concurrent note");
 }
+
+/// The opening Flow view is where notes are written: Note beside a step
+/// opens a field in place, Ctrl+Enter keeps it, and it reads there.
+#[gpui::test]
+fn a_note_is_written_in_flow_beside_its_step(cx: &mut TestAppContext) {
+    let running = start();
+    let settings = std::env::temp_dir()
+        .join(format!("ahjo-flow-notes-{}", std::process::id()))
+        .join("app.json");
+    std::fs::create_dir_all(settings.parent().unwrap()).unwrap();
+    cx.executor().allow_parking();
+    cx.update(ahjo_app_shell::prepare);
+    let url = running.url.clone();
+    let (_, cx) = cx.add_window_view(move |window, cx| {
+        ahjo_app_shell::start(
+            &[ahjo_missions_app::build],
+            Some(url),
+            Some(settings),
+            window,
+            cx,
+        )
+    });
+    let mission = format!("mission-{}-hello", running.node);
+    until(cx, "mission", |cx| has(cx, &mission));
+    click(cx, &mission);
+    until(cx, "Note beside the step", |cx| {
+        has(cx, "flow-note-fmn_work")
+    });
+    click(cx, "flow-note-fmn_work");
+    until(cx, "field in place", |cx| has(cx, "flow-note-field"));
+    cx.simulate_input("Keep it short");
+    cx.simulate_keystrokes("ctrl-enter");
+    until(cx, "the note read in place", |cx| {
+        has(cx, "flow-thread-fmn_work") && !has(cx, "flow-note-field")
+    });
+    let runtime = tokio::runtime::Runtime::new().unwrap();
+    let doc = runtime.block_on(async {
+        let client = NodeClient::new(Some(&format!("{}/", running.url))).unwrap();
+        client
+            .request(http::Method::GET, "/api/missions/hello/notes", None, None)
+            .await
+            .unwrap()
+            .0
+    });
+    assert_eq!(
+        doc["notes"]["elements"][0]["entries"][0]["text"],
+        "Keep it short"
+    );
+}

@@ -116,7 +116,7 @@ fn description(name: &str) -> &'static str {
             "Say whether a mission can run, with its errors and warnings and the next command."
         }
         "mission_new" => {
-            "Create a mission: empty, or with --example a copy of a staffed, wired example to start from (mission examples lists them). Answers with what was made and its steps; mission inspect reads the whole graph."
+            "Create a mission: empty, sketched from --steps (rough steps chained from the Input to Done, nobody doing them yet) with --note saying what it is for, or with --example a copy of a staffed, wired example (mission examples lists them). Answers with what was made and its steps; mission inspect reads the whole graph."
         }
         "mission_examples" => "List the example missions a new mission can start from.",
         "mission_edit" => "Apply one mission authoring operation.",
@@ -164,7 +164,12 @@ fn schema(name: &str) -> Value {
         "mission_purge_archive" => {
             object(json!({"slug":s,"archive_id":s}), &["slug", "archive_id"])
         }
-        "mission_new" => object(json!({"slug":s,"title":s,"example":s}), &["slug"]),
+        "mission_new" => object(
+            json!({"slug":s,"title":s,"example":s,
+                "steps":{"type":"string","description":"Rough steps, one per line or separated by ;, chained from the Input to Done."},
+                "note":{"type":"string","description":"What the mission is for, kept as its note."}}),
+            &["slug"],
+        ),
         "mission_examples" => object(json!({}), &[]),
         "mission_edit" => object(
             json!({"mission":s,"change":obj,"rev":i}),
@@ -432,6 +437,10 @@ async fn call(m: Missions, name: &str, a: Value) -> Result<Value, Error> {
         }
         "mission_new" => {
             let slug = required(&a, "slug")?;
+            let steps = crate::sketch::steps(optional(&a, "steps", "")?);
+            if !steps.is_empty() && maybe_text(&a, "example").map_err(bad)?.is_some() {
+                return Err(bad("--steps sketches a new mission; leave out --example"));
+            }
             let edit = match maybe_text(&a, "example").map_err(bad)? {
                 Some(example) => m.store.create_example(
                     slug,
@@ -443,6 +452,20 @@ async fn call(m: Missions, name: &str, a: Value) -> Result<Value, Error> {
                     .store
                     .create_mission(slug, optional(&a, "title", slug)?, "agent:ahjo")?,
             };
+            let steps = crate::sketch::steps(optional(&a, "steps", "")?);
+            if !steps.is_empty() && !edit.mission.formations.is_empty() {
+                return Err(bad(
+                    "--steps sketches an empty mission; leave out --example",
+                ));
+            }
+            crate::sketch::fill(
+                &m,
+                &edit.mission.slug,
+                &steps,
+                optional(&a, "note", "")?,
+                "agent:ahjo",
+            )?;
+            let edit = m.store.mission_edit(&edit.mission.slug)?;
             m.changed();
             // A receipt, not the graph: mission inspect reads that.
             let mission = &edit.mission;

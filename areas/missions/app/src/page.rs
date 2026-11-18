@@ -250,6 +250,11 @@ impl MissionsPage {
             Self::watch_editor_field(field, cx);
         }
         cx.subscribe(&page.note, |page, field, event: &FieldEvent, cx| {
+            // Ctrl+Enter keeps the note, as it sends everywhere else.
+            if matches!(event, FieldEvent::SubmitAlt) {
+                page.add_note(false, cx);
+                return;
+            }
             if matches!(event, FieldEvent::Changed)
                 && page.note_etag.is_none()
                 && field.read(cx).text != page.note_base
@@ -974,7 +979,7 @@ impl MissionsPage {
         });
         let mut body = patch.clone();
         body["expectedRev"] = json!(mission.rev);
-        body["updatedBy"] = json!("user:ahjo-swarm");
+        body["updatedBy"] = json!("human:operator");
         let request = Request::new("PATCH", NodeId(node), mission_path(&slug))
             .header("If-Match", etag)
             .json(&body);
@@ -1132,6 +1137,12 @@ impl MissionsPage {
                                 page.note_base.clear();
                                 page.note_etag = None;
                                 page.note.update(cx, |f, cx| f.set("", false, cx));
+                                // In Flow a note kept is read in place;
+                                // the field goes. The canvas keeps its
+                                // thread open.
+                                if !page.mission_canvas_mode {
+                                    page.note_paper.open = None;
+                                }
                             } else if sent_id.is_some() && !delete {
                                 page.note_id = sent_id;
                                 page.note_base = sent_text;

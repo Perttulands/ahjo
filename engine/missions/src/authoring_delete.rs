@@ -73,7 +73,10 @@ pub(crate) fn apply(
         "rev",
         toml_edit::value(current.mission.rev + 1),
     );
-    if !actor.is_empty() {
+    // A change by someone unnamed is not credited to whoever changed it last.
+    if actor.is_empty() {
+        doc.as_table_mut().remove("updatedBy");
+    } else {
         crate::write::set(doc.as_table_mut(), "updatedBy", toml_edit::value(actor));
     }
     crate::write::set(

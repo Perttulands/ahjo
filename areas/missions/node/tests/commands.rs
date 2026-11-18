@@ -1159,6 +1159,15 @@ async fn an_agent_picks_up_a_mission_from_its_notes() {
         .unwrap();
     assert_eq!(read["notes"], "4 threads, 3 open");
     assert_eq!(read["about"][1]["resolves"], true);
+    // A later note opens the thread again.
+    node.call("mission_note", note("", "One more thing"))
+        .await
+        .unwrap();
+    let read = node
+        .call("mission_inspect", json!({"mission":"ship"}))
+        .await
+        .unwrap();
+    assert_eq!(read["notes"], "4 threads, 4 open");
 
     // Only the author changes a note; anyone may answer it.
     let mine = asked["note"].as_str().unwrap();
@@ -1187,5 +1196,52 @@ async fn an_agent_picks_up_a_mission_from_its_notes() {
         .await
         .unwrap_err();
     assert_eq!(missing.code, "not_found");
+    node.stop().await;
+}
+
+/// A mission sketched from rough steps reads in their order, from the
+/// Input to Done, with what it is for as its note.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_mission_is_sketched_from_rough_steps() {
+    let node = Node::start(&[sessions::LISTING, ahjo_work::LISTING, LAB], "")
+        .await
+        .unwrap();
+    node.call(
+        "mission_new",
+        json!({"slug":"digest","steps":"Collect\nGroup; Write\n\n","note":"A Monday digest"}),
+    )
+    .await
+    .unwrap();
+    let read = node
+        .call("mission_inspect", json!({"mission":"digest"}))
+        .await
+        .unwrap();
+    let order: Vec<_> = (read["steps"].as_array().unwrap().iter())
+        .map(|s| (s["step"].as_str().unwrap(), s["next"].as_str().unwrap()))
+        .collect();
+    assert_eq!(
+        order,
+        [
+            ("Collect", "2 Group"),
+            ("Group", "3 Write"),
+            ("Write", "end (done)")
+        ],
+        "{read}"
+    );
+    assert_eq!(read["input"][0]["next"], "1 Collect");
+    assert_eq!(read["about"][0]["text"], "A Monday digest");
+    let mixed = node
+        .call(
+            "mission_new",
+            json!({"slug":"both","steps":"One","example":"write-and-review"}),
+        )
+        .await
+        .unwrap_err();
+    assert_eq!(mixed.code, "bad_request");
+    assert!(
+        node.call("mission_inspect", json!({"mission":"both"}))
+            .await
+            .is_err()
+    );
     node.stop().await;
 }

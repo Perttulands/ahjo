@@ -147,7 +147,7 @@ impl MissionsPage {
                 };
                 let mut body = patch.clone();
                 body["expectedRev"] = json!(mission.rev);
-                body["updatedBy"] = json!("user:ahjo-swarm");
+                body["updatedBy"] = json!("human:operator");
                 Request::new("PATCH", NodeId(pending.node.clone()), path)
                     .header("If-Match", etag)
                     .json(&body)

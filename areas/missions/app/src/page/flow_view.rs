@@ -5,7 +5,7 @@ use ahjo_app_kit::menu::MenuRow;
 use ahjo_app_kit::theme::Theme;
 use ahjo_app_kit::widgets::pane::{self, Col};
 use ahjo_missions_contract::{MISSION_THREAD, Mission};
-use gpui::SharedString;
+use gpui::{AnyElement, SharedString};
 
 /// Runs listed under a mission; the rest are in the list's filter.
 const RUNS_SHOWN: usize = 20;
@@ -80,6 +80,7 @@ impl MissionsPage {
         }
         let flow = flow::build(mission);
         let mut body = div().flex().flex_col().gap(px(size::SECTION_GAP));
+        body = body.child(self.intent(t, mission, cx));
         let mut about = div().flex().flex_col();
         for card in &mission.input_cards {
             let selector = format!("flow-input-{}", card.id);
@@ -151,6 +152,10 @@ impl MissionsPage {
             if super::canvas::asks_you(mission) {
                 lines = lines.child(pane::line(t, "Asks you", "at its gates"));
             }
+            lines = lines
+                .children(self.limits_on(t, mission, &card.id, cx))
+                .child(div().flex().child(self.note_act(t, &card.id, cx)))
+                .children(self.flow_thread(t, &card.id, cx));
             about = about.child(lines);
         }
         body = body.child(about);
@@ -159,17 +164,33 @@ impl MissionsPage {
             steps = steps.child(self.step_block(t, mission, step, cx));
         }
         body = body.child(steps);
-        if let Some(notes) = self.notes.as_ref().filter(|n| !n.mission.is_empty()) {
-            let mut section = pane::section(t, "Notes");
-            for note in &notes.mission {
-                section = section.child(
+        if !mission.ends.is_empty() {
+            let mut ends = pane::section(t, "Ends");
+            for end in &mission.ends {
+                ends = ends.child(
                     div()
+                        .flex()
+                        .flex_col()
                         .pb(px(size::HEAD_GAP))
-                        .text_color(t.text2)
-                        .child(note.text.clone()),
+                        .child(
+                            div()
+                                .flex()
+                                .items_center()
+                                .gap(px(size::HEAD_GAP))
+                                .child(pane::cell({
+                                    let name = mission.node_name(&end.id);
+                                    if name.eq_ignore_ascii_case(&end.outcome) {
+                                        name.to_owned()
+                                    } else {
+                                        format!("{name} ({})", end.outcome)
+                                    }
+                                }))
+                                .child(self.note_act(t, &end.id, cx)),
+                        )
+                        .children(self.flow_thread(t, &end.id, cx)),
                 );
             }
-            body = body.child(section);
+            body = body.child(ends);
         }
         body = body.children(self.mission_runs(t, cx));
         (head, body)
@@ -416,7 +437,8 @@ impl MissionsPage {
                         pane::act(t, SharedString::from(edit_selector.clone()), "Edit")
                             .debug_selector(move || edit_selector.clone())
                             .on_click(cx.listener(move |page, _, _, cx| page.edit_step(&id, cx))),
-                    ),
+                    )
+                    .child(self.note_act(t, &step.id, cx)),
             );
         let quiet = |text: String| div().text_color(t.text2).child(text);
         match &step.kind {
@@ -428,6 +450,9 @@ impl MissionsPage {
                                 .text_color(t.error)
                                 .child("Nobody does this step yet."),
                         );
+                    } else if formation.slots.iter().all(|slot| slot.harness.is_empty()) {
+                        // A sketched step: who does it is still open.
+                        block = block.child(pane::meta(t, "Nobody chosen to do it yet", None));
                     } else {
                         let who = formation
                             .slots
@@ -496,6 +521,7 @@ impl MissionsPage {
                             ),
                             None,
                         ));
+                        block = block.children(self.flow_thread(t, judge, cx));
                     }
                 }
                 block = block.child(pane::meta(
@@ -524,28 +550,82 @@ impl MissionsPage {
                 None,
             ));
         }
-        for limit in mission
-            .limits
-            .iter()
-            .filter(|limit| limit.target == step.id)
-        {
-            let mut words = Vec::new();
-            if let Some(n) = limit.rounds {
-                words.push(format!("{n} rounds"));
-            }
-            if let Some(n) = limit.seconds {
-                words.push(crate::store::words::duration_text(n));
-            }
-            if let Some(n) = limit.tokens {
-                words.push(format!("{n} tokens"));
-            }
-            block = block.child(pane::meta(
-                t,
-                format!("at most {}, then {}", words.join(", "), limit.when_spent),
-                None,
-            ));
+        block = block.children(self.flow_thread(t, &step.id, cx));
+        block.children(self.limits_on(t, mission, &step.id, cx))
+    }
+
+    /// The limits on a step, or on the whole mission when on its Input:
+    /// what each caps and what happens then, in the colour of a stop.
+    fn limits_on(
+        &self,
+        t: &Theme,
+        mission: &Mission,
+        target: &str,
+        cx: &mut Context<Self>,
+    ) -> Vec<AnyElement> {
+        let mut out = Vec::new();
+        for limit in mission.limits.iter().filter(|limit| limit.target == target) {
+            out.push(
+                div()
+                    .flex()
+                    .items_center()
+                    .gap(px(size::HEAD_GAP))
+                    .child(pane::meta(
+                        t,
+                        format!("Limit: {}", crate::store::words::limit_line(limit)),
+                        Some(t.needs),
+                    ))
+                    .child(self.note_act(t, &limit.id, cx))
+                    .into_any_element(),
+            );
+            out.extend(self.flow_thread(t, &limit.id, cx));
         }
-        block
+        out
+    }
+
+    /// What the mission is for, in the operator's words, first: the
+    /// mission's own notes, with a field to write them in.
+    fn intent(&self, t: &Theme, mission: &Mission, cx: &mut Context<Self>) -> Div {
+        let mut section = pane::section(t, "What it is for");
+        let changed = (!mission.updated_at.is_empty()).then(|| {
+            let when = crate::store::words::short_time(
+                &mission.updated_at,
+                time::OffsetDateTime::now_utc(),
+            );
+            match mission.updated_by.split_once(':') {
+                Some(("agent", name)) => format!("Changed {when} by {name}"),
+                _ => format!("Changed {when}"),
+            }
+        });
+        match self.flow_thread(t, MISSION_THREAD, cx) {
+            Some(thread) => section = section.child(thread),
+            None => {
+                let button = "flow-intent";
+                section = section.child(
+                    div()
+                        .flex()
+                        .items_center()
+                        .gap(px(size::HEAD_GAP))
+                        .child(div().text_color(t.text2).child(
+                            "Write what you are making, as roughly as you like: an agent \
+                             reads it with ahjo mission inspect and builds from it.",
+                        ))
+                        .child(
+                            kit::button(t, button, "Write it", Kind::Primary)
+                                .debug_selector(move || button.into())
+                                .on_click(cx.listener(|page, _, window, cx| {
+                                    page.open_canvas_note(MISSION_THREAD.into(), window, cx)
+                                })),
+                        ),
+                );
+            }
+        }
+        if self.note_paper.open.as_deref() != Some(MISSION_THREAD)
+            && self.notes.as_ref().is_some_and(|n| !n.mission.is_empty())
+        {
+            section = section.child(div().flex().child(self.note_act(t, MISSION_THREAD, cx)));
+        }
+        section.children(changed.map(|words| pane::meta(t, words, None)))
     }
 
     /// The mission's runs, newest first; each opens.
