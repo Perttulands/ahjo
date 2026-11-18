@@ -1,7 +1,7 @@
 //! Canvas note pins and sticky threads, carried from the original Missions page.
-use super::canvas::View;
+use super::canvas::{CARD_SMALL, CARD_TEXT, View};
 use super::*;
-use ahjo_app_kit::theme::{Theme, rgb};
+use ahjo_app_kit::theme::Theme;
 use ahjo_missions_contract::{
     MISSION_THREAD, Mission,
     document::{Note, NotesDocument},
@@ -12,6 +12,8 @@ const STICKY_W: f32 = 240.;
 const OPEN_W: f32 = 320.;
 const GAP: f32 = 6.;
 pub(super) const STICKY_ROOM: f32 = 130.;
+/// The least room a closed paper is drawn in: its title, byline and a line.
+const STICKY_MIN: f32 = 84.;
 const PIN: f32 = 22.;
 const PIN_IN: f32 = 9.;
 const PIN_MIN: f32 = 16.;
@@ -23,12 +25,51 @@ pub(super) struct NotesUi {
     loading: bool,
     error: Option<String>,
 }
-fn paper(t: &Theme, agent: bool) -> (Hsla, Hsla) {
-    if agent {
-        (rgb(t.ansi[12]), rgb(t.ansi[4]))
+/// How much of its author's colour an open note is tinted with: enough
+/// to tell it from the page, never enough to read as a bar.
+const TINT: f32 = 0.08;
+
+/// A note's look, an annotation rather than a banner: a rule at its left
+/// in its author's colour (the agent's the accent, the operator's amber),
+/// a faint tint of it while the thread is open, and the plain page with a
+/// grey rule once it is resolved.
+struct Paper {
+    rule: Hsla,
+    fill: Hsla,
+    text: Hsla,
+}
+fn paper(t: &Theme, agent: bool, done: bool) -> Paper {
+    let own = if agent { t.accent } else { t.needs };
+    if done {
+        Paper {
+            rule: t.divider,
+            fill: own.opacity(0.),
+            text: t.text2,
+        }
     } else {
-        (rgb(t.ansi[11]), rgb(t.ansi[3]))
+        Paper {
+            rule: own,
+            fill: own.opacity(TINT),
+            text: t.text,
+        }
     }
+}
+/// The small line over a note: who, in their colour, and when.
+fn byline(t: &Theme, note: &Note, done: bool) -> Div {
+    let (agent, name) = author(&note.author);
+    div()
+        .flex()
+        .gap(px(GAP))
+        .text_size(px(size::SMALL))
+        .text_color(t.text2)
+        .child(
+            div()
+                .font_weight(FontWeight::BOLD)
+                .text_color(paper(t, agent, done).rule)
+                .when(done, |d| d.text_color(t.text2))
+                .child(name),
+        )
+        .child(when(note))
 }
 fn author(value: &str) -> (bool, String) {
     let (prefix, name) = value.split_once(':').unwrap_or((value, ""));
@@ -143,21 +184,18 @@ impl MissionsPage {
             .pt(px(GAP))
             .max_w(px(size::READING));
         for note in entries {
-            let (agent, name) = author(&note.author);
-            let (fill, edge) = paper(t, agent);
+            let (agent, _) = author(&note.author);
+            let look = paper(t, agent, done);
             let mut head = div()
                 .flex()
                 .items_center()
                 .gap(px(GAP))
-                .text_size(px(size::SMALL))
-                .font_weight(FontWeight::BOLD)
-                .child(div().flex_1().child(format!("{name} · {}", when(note))));
+                .child(byline(t, note, done).flex_1());
             if note.author == AUTHOR && !open {
                 let (id, text) = (note.id.clone(), note.text.clone());
                 let selector = format!("flow-note-edit-{}", note.id);
                 head = head.child(
                     kit::button(t, SharedString::from(selector.clone()), "Edit", Kind::Quiet)
-                        .text_color(t.bg)
                         .debug_selector(move || selector.clone())
                         .on_click(cx.listener(move |page, _, window, cx| {
                             page.open_canvas_note(note_target(page, &id), window, cx);
@@ -169,13 +207,13 @@ impl MissionsPage {
             let entry = div()
                 .flex()
                 .flex_col()
+                .gap(px(EDGE))
                 .px(px(size::ROW_PAD))
                 .py(px(GAP))
-                .border_l(px(size::RADIUS))
-                .border_color(edge)
-                .bg(fill)
-                .text_color(t.bg)
-                .when(done, |d| d.opacity(0.75))
+                .border_l(px(EDGE))
+                .border_color(look.rule)
+                .bg(look.fill)
+                .text_color(look.text)
                 .child(head)
                 .child(note.text.clone());
             list = list.child(entry);
@@ -184,6 +222,42 @@ impl MissionsPage {
             list = list.child(self.note_field(t, target, entries.is_empty(), cx));
         }
         Some(list.into_any_element())
+    }
+    /// The notes on the wires leaving `node`, each under a line saying
+    /// which wire, for Flow to put under the step's "then" line.
+    pub(super) fn flow_wire_threads(
+        &self,
+        t: &Theme,
+        mission: &Mission,
+        node: &str,
+        cx: &mut Context<Self>,
+    ) -> Vec<AnyElement> {
+        let mut out = Vec::new();
+        let prefix = format!("{node}:");
+        for wire in mission
+            .connections
+            .iter()
+            .filter(|c| c.from.starts_with(&prefix) || c.from == node)
+        {
+            let Some(thread) = self.flow_thread(t, &wire.id, cx) else {
+                continue;
+            };
+            let to = wire.to.split(':').next().unwrap_or_default();
+            let route = wire.from.split_once(':').map_or("", |(_, port)| port);
+            let on = match route {
+                "pass" | "fail" => format!("On the {route} wire to {}", mission.node_name(to)),
+                _ => format!("On the wire to {}", mission.node_name(to)),
+            };
+            out.push(
+                div()
+                    .pt(px(GAP))
+                    .text_color(t.text2)
+                    .child(on)
+                    .into_any_element(),
+            );
+            out.push(thread);
+        }
+        out
     }
     /// The field a note is written in, with its Save and Discard.
     fn note_field(&self, t: &Theme, target: &str, first: bool, cx: &mut Context<Self>) -> Div {
@@ -368,6 +442,24 @@ impl MissionsPage {
             if entries.is_empty() && !open {
                 continue;
             }
+            // A closed paper never covers another card: it takes the room
+            // down to the next card under it, and where there is too little
+            // for a line, the card's pin alone says a thread is there.
+            let at = home(card, 0.);
+            let room = board
+                .cards
+                .iter()
+                .filter(|other| {
+                    other.id != card.id
+                        && other.y + other.h > at.1
+                        && other.x < at.0 + STICKY_W
+                        && other.x + other.w > at.0
+                })
+                .map(|other| other.y - GAP - at.1)
+                .fold(f32::INFINITY, f32::min);
+            if !open && room < STICKY_MIN {
+                continue;
+            }
             if card.kind == board::Kind::Input {
                 input_sticky = true;
             }
@@ -376,10 +468,47 @@ impl MissionsPage {
                 &card.id,
                 mission.node_name(&card.id),
                 entries,
-                home(card, 0.),
+                at,
+                (!open).then_some(room),
                 view,
                 cx,
             ));
+        }
+        // A note on a wire: a pin at the wire's middle, its thread opening
+        // there. Closed, the pin alone, so no paper lies across the wires.
+        // Only connections: a limit's or a judge's line shares its card's id.
+        for wire in board
+            .wires
+            .iter()
+            .filter(|w| mission.connections.iter().any(|c| c.id == w.id))
+        {
+            let entries = thread(notes, &wire.id);
+            let open = self.note_paper.open.as_deref() == Some(wire.id.as_str());
+            if entries.is_empty() && !open {
+                continue;
+            }
+            let middle = (
+                (wire.from.0 + wire.to.0) / 2.,
+                wire.lane.unwrap_or((wire.from.1 + wire.to.1) / 2.),
+            );
+            out.push(self.canvas_wire_pin(t, &wire.id, entries, middle, view, cx));
+            if open {
+                let name = format!(
+                    "{} → {}",
+                    mission.node_name(&wire.from_node),
+                    mission.node_name(&wire.to_node)
+                );
+                out.push(self.canvas_sticky(
+                    t,
+                    &wire.id,
+                    &name,
+                    entries,
+                    (middle.0, middle.1 + PIN),
+                    None,
+                    view,
+                    cx,
+                ));
+            }
         }
         let at = match board
             .cards
@@ -412,7 +541,15 @@ impl MissionsPage {
                 .filter(|card| {
                     card.x < at.0 + width && card.x + card.w > at.0 && card.y + card.h > at.1
                 })
-                .fold(at.1, |y, card| y.max(card.y + card.h + GAP)),
+                // Below a card's own paper too, where it has one.
+                .fold(at.1, |y, card| {
+                    let paper = if thread(notes, &card.id).is_empty() {
+                        0.
+                    } else {
+                        STICKY_ROOM
+                    };
+                    y.max(card.y + card.h + GAP + paper)
+                }),
         );
         // The mission's own paper appears once it holds something or is
         // being written; Note in the head opens it.
@@ -427,6 +564,7 @@ impl MissionsPage {
             "Mission notes",
             thread(notes, MISSION_THREAD),
             at,
+            None,
             view,
             cx,
         ));
@@ -457,7 +595,7 @@ impl MissionsPage {
         } else {
             top + inset
         };
-        let (fill, edge) = paper(t, false);
+        let look = paper(t, false, false);
         let target = card.id.clone();
         let chosen = self.editor.as_ref().is_some_and(|ed| ed.id == card.id);
         let selector = format!("canvas-note-pin-{target}");
@@ -469,11 +607,11 @@ impl MissionsPage {
             .top(px(y))
             .size(px(size))
             .border_1()
-            .border_color(edge)
-            .when(has, |d| d.bg(fill).shadow_sm())
+            .border_color(look.rule)
+            .when(has, |d| d.bg(t.raised).shadow_sm())
             .text_size(px((size::TEXT * z).max(size::SMALL)))
             .font_weight(FontWeight::BOLD)
-            .text_color(t.bg)
+            .text_color(look.rule)
             .flex()
             .items_center()
             .justify_center()
@@ -494,6 +632,53 @@ impl MissionsPage {
             }))
             .into_any_element()
     }
+    /// The pin of a wire's thread, centred on the wire, the latest note as
+    /// its tooltip.
+    fn canvas_wire_pin(
+        &self,
+        t: &Theme,
+        target: &str,
+        entries: &[Note],
+        (x, y): (f32, f32),
+        view: &View,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let z = view.zoom();
+        let side = (PIN * z).max(PIN_MIN);
+        let (x, y) = view.position(x, y);
+        let done = resolved(entries);
+        let look = paper(t, entries.last().is_some_and(|n| author(&n.author).0), done);
+        let tip = entries
+            .last()
+            .map(|n| format!("{}: {}", author(&n.author).1, n.text))
+            .unwrap_or_else(|| "Add a note".into());
+        let selector = format!("canvas-wire-note-{target}");
+        let target = target.to_owned();
+        div()
+            .id(SharedString::from(selector.clone()))
+            .debug_selector(move || selector.clone())
+            .absolute()
+            .left(px(x - side / 2.))
+            .top(px(y - side / 2.))
+            .size(px(side))
+            .rounded_full()
+            .border_1()
+            .border_color(look.rule)
+            .bg(t.raised)
+            .text_color(look.rule)
+            .text_size(px((size::TEXT * z).max(size::SMALL)))
+            .flex()
+            .items_center()
+            .justify_center()
+            .cursor_pointer()
+            .child("▰")
+            .tooltip(kit::tip(tip))
+            .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+            .on_click(cx.listener(move |page, _, window, cx| {
+                page.open_canvas_note(target.clone(), window, cx)
+            }))
+            .into_any_element()
+    }
     #[allow(clippy::too_many_arguments)]
     fn canvas_sticky(
         &self,
@@ -502,6 +687,7 @@ impl MissionsPage {
         title: &str,
         entries: &[Note],
         at: (f32, f32),
+        room: Option<f32>,
         view: &View,
         cx: &mut Context<Self>,
     ) -> AnyElement {
@@ -509,7 +695,8 @@ impl MissionsPage {
         let (x, y) = view.position(at.0, at.1);
         let open = self.note_paper.open.as_deref() == Some(target);
         let latest = entries.last();
-        let (fill, edge) = paper(t, latest.is_some_and(|note| author(&note.author).0));
+        let done = resolved(entries);
+        let look = paper(t, latest.is_some_and(|note| author(&note.author).0), done);
         let selector = format!("canvas-note-{target}");
         let base = div()
             .id(SharedString::from(selector.clone()))
@@ -522,42 +709,44 @@ impl MissionsPage {
             .flex()
             .flex_col()
             .gap(px(GAP * z))
+            // Opaque over the board, so no wire shows through its words.
             .border_1()
-            .border_l(px(size::RADIUS * z))
-            .border_color(edge)
-            .bg(fill)
-            .text_color(t.bg)
-            .shadow_lg()
-            .text_size(px(size::TEXT * z))
+            .border_l(px(EDGE.max(EDGE * z)))
+            .border_color(look.rule)
+            .bg(t.raised)
+            .text_color(look.text)
+            .shadow_sm()
+            .text_size(px(CARD_TEXT * z))
             .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation());
         if !open {
             let target = target.to_owned();
             let summary = latest
                 .map(|note| note.text.clone())
                 .unwrap_or_else(|| "Write what this mission is for.".into());
-            let byline = latest
-                .map(|note| format!("{} · {}", author(&note.author).1, when(note)))
-                .unwrap_or_default();
             return base
+                .when_some(room, |d, room| d.max_h(px(room * z)).overflow_hidden())
                 .cursor_pointer()
                 .child(
                     div()
                         .flex()
                         .items_center()
+                        .text_size(px(CARD_SMALL * z))
                         .child(
                             div()
                                 .flex_1()
                                 .font_weight(FontWeight::BOLD)
-                                .child(title.to_uppercase()),
+                                .child(title.to_owned()),
                         )
                         // Whether the thread still wants an answer.
-                        .child(if resolved(entries) {
-                            "RESOLVED"
-                        } else {
-                            "OPEN"
-                        }),
+                        .child(
+                            div()
+                                .text_color(if done { t.text2 } else { look.rule })
+                                .child(if done { "resolved" } else { "open" }),
+                        ),
                 )
-                .when(!byline.is_empty(), |d| d.child(byline))
+                .when_some(latest, |d, note| {
+                    d.child(byline(t, note, done).text_size(px(CARD_SMALL * z)))
+                })
                 .child(div().line_clamp(4).child(summary))
                 .when(entries.len() > 1, |d| {
                     d.child(format!("+{} earlier", entries.len() - 1))
@@ -581,23 +770,22 @@ impl MissionsPage {
             let edit_text = note.text.clone();
             let delete_text = note.text.clone();
             let entry_selector = format!("canvas-note-entry-{}-{}", note.id, name);
-            let (_, entry_edge) = paper(t, author(&note.author).0);
+            let entry_edge = paper(t, author(&note.author).0, done).rule;
             let mut entry = div()
                 .debug_selector(move || entry_selector.clone())
                 .flex()
                 .flex_col()
                 .p(px(GAP * z))
-                .border_1()
-                .border_l(px(size::RADIUS * z))
+                .border_l(px(EDGE.max(EDGE * z)))
                 .border_color(entry_edge)
-                .child(format!("{} · {}", name, when(note)))
+                .child(byline(t, note, done).text_size(px(CARD_SMALL * z)))
                 .child(note.text.clone());
             if note.author == AUTHOR {
                 let edit_selector = format!("canvas-note-edit-{}", note.id);
                 let delete_selector = format!("canvas-note-delete-{}", note.id);
                 entry = entry.child(div().flex()
-                    .child(kit::button(t, SharedString::from(edit_selector.clone()), "Edit", Kind::Quiet).text_color(t.bg).debug_selector(move || edit_selector.clone()).on_click(cx.listener(move |page, _, window, cx| { page.select_note(&edit_id, &edit_text, cx); if page.note_id.as_deref() == Some(edit_id.as_str()) { ahjo_app_kit::widgets::field::focus(&page.note, window, cx); } })))
-                    .child(kit::button(t, SharedString::from(delete_selector.clone()), "Delete", Kind::Quiet).text_color(t.bg).debug_selector(move || delete_selector.clone()).on_click(cx.listener(move |page, _, _, cx| {
+                    .child(kit::button(t, SharedString::from(edit_selector.clone()), "Edit", Kind::Quiet).debug_selector(move || edit_selector.clone()).on_click(cx.listener(move |page, _, window, cx| { page.select_note(&edit_id, &edit_text, cx); if page.note_id.as_deref() == Some(edit_id.as_str()) { ahjo_app_kit::widgets::field::focus(&page.note, window, cx); } })))
+                    .child(kit::button(t, SharedString::from(delete_selector.clone()), "Delete", Kind::Quiet).debug_selector(move || delete_selector.clone()).on_click(cx.listener(move |page, _, _, cx| {
                         if page.note_saving || page.note.read(cx).text != page.note_base { page.state.error = Some("Save or discard the current note draft before deleting an entry.".into()); cx.notify(); return; }
                         page.select_note(&delete_id, &delete_text, cx);
                         page.add_note(true, cx);
@@ -622,7 +810,7 @@ impl MissionsPage {
                     div()
                         .flex_1()
                         .font_weight(FontWeight::BOLD)
-                        .child(title.to_uppercase()),
+                        .child(title.to_owned()),
                 )
                 .child(
                     kit::button(
@@ -631,7 +819,6 @@ impl MissionsPage {
                         "×",
                         Kind::Quiet,
                     )
-                    .text_color(t.bg)
                     .debug_selector(move || close_selector.clone())
                     .on_click(cx.listener(|page, _, _, cx| page.close_canvas_note(cx))),
                 ),
@@ -652,7 +839,6 @@ impl MissionsPage {
                     |d| {
                         d.child(
                             kit::button(t, "canvas-note-discard", "Discard", Kind::Quiet)
-                                .text_color(t.bg)
                                 .on_click(cx.listener(|page, _, _, cx| page.discard_note(cx))),
                         )
                     },

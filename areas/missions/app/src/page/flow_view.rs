@@ -155,7 +155,8 @@ impl MissionsPage {
             lines = lines
                 .children(self.limits_on(t, mission, &card.id, cx))
                 .child(div().flex().child(self.note_act(t, &card.id, cx)))
-                .children(self.flow_thread(t, &card.id, cx));
+                .children(self.flow_thread(t, &card.id, cx))
+                .children(self.flow_wire_threads(t, mission, &card.id, cx));
             about = about.child(lines);
         }
         body = body.child(about);
@@ -440,7 +441,11 @@ impl MissionsPage {
                     )
                     .child(self.note_act(t, &step.id, cx)),
             );
-        let quiet = |text: String| div().text_color(t.text2).child(text);
+        // The lines under a step's title, at text size in the secondary
+        // colour: who does it, where it leads, what decides. The brief is
+        // what the step is, so it reads in the text colour.
+        let sub = |text: String| div().text_color(t.text2).child(text);
+        let quiet = |text: String| div().text_color(t.text).child(text);
         match &step.kind {
             flow::StepKind::Formation { next } => {
                 if let Some(formation) = mission.formations.iter().find(|f| f.id == step.id) {
@@ -452,21 +457,17 @@ impl MissionsPage {
                         );
                     } else if formation.slots.iter().all(|slot| slot.harness.is_empty()) {
                         // A sketched step: who does it is still open.
-                        block = block.child(pane::meta(t, "Nobody chosen to do it yet", None));
+                        block = block.child(sub("Nobody chosen to do it yet".into()));
                     } else {
+                        // Who, not the session they will work in: that is
+                        // the step's own detail.
                         let who = formation
                             .slots
                             .iter()
-                            .map(|slot| {
-                                format!(
-                                    "{} in {}",
-                                    crate::store::words::who(slot),
-                                    crate::store::words::session_of(mission, formation, slot)
-                                )
-                            })
+                            .map(crate::store::words::who)
                             .collect::<Vec<_>>()
                             .join(", ");
-                        block = block.child(pane::meta(t, who, Some(t.text2)));
+                        block = block.child(sub(who));
                     }
                     if let Some(brief) = &formation.brief
                         && !brief.goal.trim().is_empty()
@@ -478,11 +479,8 @@ impl MissionsPage {
                         );
                     }
                 }
-                block = block.child(pane::meta(
-                    t,
-                    format!("then {}", run::target_words(next)),
-                    None,
-                ));
+                block = block.child(sub(format!("then {}", run::target_words(next))));
+                block = block.children(self.flow_wire_threads(t, mission, &step.id, cx));
             }
             flow::StepKind::Gate {
                 deciders,
@@ -499,7 +497,7 @@ impl MissionsPage {
                     })
                     .collect::<Vec<_>>()
                     .join(" and ");
-                block = block.child(pane::meta(t, format!("decided by {who}"), Some(t.text2)));
+                block = block.child(sub(format!("decided by {who}")));
                 if let Some(gate) = mission.gates.iter().find(|g| g.id == step.id)
                     && !gate.criterion.is_empty()
                 {
@@ -507,48 +505,37 @@ impl MissionsPage {
                 }
                 for judge in judges {
                     if let Some(formation) = mission.formations.iter().find(|f| &f.id == judge) {
-                        block = block.child(pane::meta(
-                            t,
-                            format!(
-                                "judged by {}: {}",
-                                mission.node_name(judge),
-                                formation
-                                    .slots
-                                    .iter()
-                                    .map(crate::store::words::who)
-                                    .collect::<Vec<_>>()
-                                    .join(", ")
-                            ),
-                            None,
-                        ));
+                        block = block.child(sub(format!(
+                            "judged by {}: {}",
+                            mission.node_name(judge),
+                            formation
+                                .slots
+                                .iter()
+                                .map(crate::store::words::who)
+                                .collect::<Vec<_>>()
+                                .join(", ")
+                        )));
                         block = block.children(self.flow_thread(t, judge, cx));
                     }
                 }
-                block = block.child(pane::meta(
-                    t,
-                    format!(
-                        "pass: {}; fail: {}",
-                        run::target_words(pass),
-                        run::target_words(fail)
-                    ),
-                    None,
-                ));
+                block = block.child(sub(format!(
+                    "pass: {}; fail: {}",
+                    run::target_words(pass),
+                    run::target_words(fail)
+                )));
+                block = block.children(self.flow_wire_threads(t, mission, &step.id, cx));
             }
         }
         if step.parallel.len() > 1 {
-            block = block.child(pane::meta(
-                t,
-                format!(
-                    "alongside {}",
-                    step.parallel
-                        .iter()
-                        .filter(|other| **other != step.id)
-                        .map(|other| mission.node_name(other))
-                        .collect::<Vec<_>>()
-                        .join(", ")
-                ),
-                None,
-            ));
+            block = block.child(sub(format!(
+                "alongside {}",
+                step.parallel
+                    .iter()
+                    .filter(|other| **other != step.id)
+                    .map(|other| mission.node_name(other))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            )));
         }
         block = block.children(self.flow_thread(t, &step.id, cx));
         block.children(self.limits_on(t, mission, &step.id, cx))
@@ -570,11 +557,11 @@ impl MissionsPage {
                     .flex()
                     .items_center()
                     .gap(px(size::HEAD_GAP))
-                    .child(pane::meta(
-                        t,
-                        format!("Limit: {}", crate::store::words::limit_line(limit)),
-                        Some(t.needs),
-                    ))
+                    .child(
+                        div()
+                            .text_color(t.needs)
+                            .child(format!("Limit: {}", crate::store::words::limit_line(limit))),
+                    )
                     .child(self.note_act(t, &limit.id, cx))
                     .into_any_element(),
             );

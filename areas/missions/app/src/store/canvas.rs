@@ -14,31 +14,31 @@ pub const STEP_W: f32 = 320.;
 pub const WIDE_W: f32 = 336.;
 pub const INPUT_W: f32 = 260.;
 pub const GATE_W: f32 = 300.;
-pub const GATE_H: f32 = 84.;
+pub const GATE_H: f32 = 96.;
 pub const END_W: f32 = 200.;
-pub const END_H: f32 = 56.;
+pub const END_H: f32 = 60.;
 /// A Limit card: a sticky note under the card it caps.
 pub const LIMIT_W: f32 = 220.;
-pub const LIMIT_H: f32 = 64.;
+pub const LIMIT_H: f32 = 72.;
 /// How far under its target a Limit card sits until it is placed.
 const LIMIT_GAP: f32 = 32.;
 /// An IN or OUT row.
-pub const IO_ROW: f32 = 34.;
+pub const IO_ROW: f32 = 36.;
 /// A step's head: number, title, two lines of brief; a run adds its chips.
-pub const STEP_HEAD: f32 = 92.;
+pub const STEP_HEAD: f32 = 106.;
 /// Without a brief the head only needs room for the title and passport.
-pub const STEP_HEAD_EMPTY: f32 = 78.;
+pub const STEP_HEAD_EMPTY: f32 = 86.;
 pub const RUN_CHIPS: f32 = 30.;
 /// The slots' body: its padding, each slot and the gap between them.
 pub const BODY_PAD: f32 = 18.;
-pub const SLOT_H: f32 = 58.;
+pub const SLOT_H: f32 = 68.;
 pub const SLOT_GAP: f32 = 8.;
 /// The dashed box holding an orchestrated step's workers or a peer group.
 pub const POOL_PAD: f32 = 24.;
 /// An Input card: eyebrow and title, goal, then one line for each fact.
-pub const INPUT_HEAD: f32 = 74.;
-pub const INPUT_GOAL: f32 = 40.;
-pub const INPUT_LINE: f32 = 22.;
+pub const INPUT_HEAD: f32 = 80.;
+pub const INPUT_GOAL: f32 = 46.;
+pub const INPUT_LINE: f32 = 24.;
 pub const INPUT_FOOT: f32 = 14.;
 /// A port's dot, and how near a drop must land to take it.
 pub const PORT: f32 = 18.;

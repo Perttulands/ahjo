@@ -257,3 +257,50 @@ fn a_note_is_written_in_flow_beside_its_step(cx: &mut TestAppContext) {
         "Keep it short"
     );
 }
+
+#[gpui::test]
+fn a_note_on_a_wire_shows_under_its_step_and_on_the_board(cx: &mut TestAppContext) {
+    let running = start();
+    let runtime = tokio::runtime::Runtime::new().unwrap();
+    let client = NodeClient::new(Some(&format!("{}/", running.url))).unwrap();
+    // As an agent leaves it: on the wire from the step to its end.
+    let (_, etag) = runtime
+        .block_on(client.request(http::Method::GET, "/api/missions/hello/notes", None, None))
+        .unwrap();
+    let wrote = runtime.block_on(client.request(
+        http::Method::PATCH,
+        "/api/missions/hello/notes",
+        Some(serde_json::json!({
+            "target": "edge_done", "text": "Only when it passed", "author": "agent:test",
+            "action": "append"
+        })),
+        Some(&etag),
+    ));
+    assert!(wrote.is_ok(), "{wrote:?}");
+    let settings = std::env::temp_dir()
+        .join(format!("ahjo-wire-notes-{}", std::process::id()))
+        .join("app.json");
+    std::fs::create_dir_all(settings.parent().unwrap()).unwrap();
+    cx.executor().allow_parking();
+    cx.update(ahjo_app_shell::prepare);
+    let url = running.url.clone();
+    let (_, cx) = cx.add_window_view(move |window, cx| {
+        ahjo_app_shell::start(
+            &[ahjo_missions_app::build],
+            Some(url),
+            Some(settings),
+            window,
+            cx,
+        )
+    });
+    let mission = format!("mission-{}-hello", running.node);
+    until(cx, "mission", |cx| has(cx, &mission));
+    click(cx, &mission);
+    until(cx, "the wire's note in Flow", |cx| {
+        has(cx, "flow-thread-edge_done")
+    });
+    click(cx, "mission-mode-canvas");
+    until(cx, "the wire's pin on the board", |cx| {
+        has(cx, "canvas-wire-note-edge_done")
+    });
+}

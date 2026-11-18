@@ -22,7 +22,12 @@ const CURVE_REACH: f32 = 40.;
 const CURVE_DOWN: f32 = 60.;
 const DASH_SHORT: f32 = 3.;
 const DASH_LONG: f32 = 5.;
-const TITLE_SIZE: f32 = 16.;
+const TITLE_SIZE: f32 = 18.;
+/// A card's words at world size: at the zoom a board opens at, never below
+/// 0.85, its small words read at the page's small size and its text at the
+/// page's text size.
+pub(super) const CARD_SMALL: f32 = 13.;
+pub(super) const CARD_TEXT: f32 = 15.;
 const RING_SIZE: f32 = 30.;
 const GAP: f32 = 8.;
 /// A finding's mark beside a control's size.
@@ -385,12 +390,12 @@ impl MissionsPage {
                 div()
                     .absolute()
                     .left(px(x))
-                    .top(px(y - size::SMALL * view.zoom))
+                    .top(px(y - CARD_SMALL * view.zoom))
                     .debug_selector(move || selector.clone())
                     .px(px(CHIP_PAD * view.zoom))
                     .rounded(px(size::RADIUS * view.zoom))
                     .bg(t.bg)
-                    .text_size(px(size::SMALL * view.zoom))
+                    .text_size(px(CARD_SMALL * view.zoom))
                     .text_color(colour)
                     .whitespace_nowrap()
                     .child(format!("↺ {}", mission.node_name(&w.to_node))),
@@ -515,14 +520,23 @@ impl MissionsPage {
             layer = layer.child(self.canvas_menu(t, mission, at, &view, cx));
         }
         let fit = board.clone();
+        // The board's own controls, in a strip under it: never over a card.
         let controls = div()
-            .absolute()
-            .occlude()
-            .right(px(PAD))
-            .bottom(px(PAD))
+            .flex_none()
             .flex()
-            .flex_col()
+            .items_center()
+            .justify_end()
             .gap(px(size::RADIUS))
+            .px(px(PAD))
+            .py(px(size::RADIUS))
+            .border_t_1()
+            .border_color(t.divider)
+            .child(
+                div()
+                    .text_size(px(size::SMALL))
+                    .text_color(t.text2)
+                    .child(format!("{:.0}%", view.zoom * 100.)),
+            )
             .child(
                 kit::button(t, "canvas-in", "+", Kind::Plain)
                     .debug_selector(|| "canvas-in".into())
@@ -560,12 +574,7 @@ impl MissionsPage {
                         .debug_selector(|| "arrange".into())
                         .on_click(cx.listener(|p, _, _, cx| p.arrange(cx))),
                 )
-            })
-            .child(
-                div()
-                    .text_size(px(size::SMALL))
-                    .child(format!("{:.0}%", view.zoom * 100.)),
-            );
+            });
         if let Some(id) = &self.reveal_card {
             let selector = format!("mission-reveal-{id}");
             layer = layer.child(
@@ -580,7 +589,9 @@ impl MissionsPage {
         div()
             .size_full()
             .flex()
-            .child(layer.flex_1().min_w_0().min_h_0().child(controls))
+            .flex_col()
+            .child(layer.flex_1().min_w_0().min_h_0())
+            .child(controls)
     }
 
     /// The mark of a card that has findings: astride its top-left corner,
@@ -624,7 +635,7 @@ impl MissionsPage {
                 .rounded_full()
                 .bg(self.finding_color(t, issues.iter().any(|(_, error)| *error)))
                 .text_color(t.bg)
-                .text_size(px(size::SMALL * z))
+                .text_size(px(CARD_SMALL * z))
                 .flex()
                 .items_center()
                 .justify_center()
@@ -774,7 +785,7 @@ impl MissionsPage {
                     .rounded(px(size::RADIUS * z))
                     .bg(t.raised)
                     .text_color(t.text2)
-                    .text_size(px(size::SMALL * z))
+                    .text_size(px(CARD_SMALL * z))
                     .cursor_pointer()
                     .child(format!(
                         "{count} attempt{}",
@@ -1165,7 +1176,7 @@ fn card_face(
 ) -> Div {
     let label = |text: String, colour: Hsla| {
         div()
-            .text_size(px(size::SMALL * z))
+            .text_size(px(CARD_SMALL * z))
             .text_color(colour)
             .truncate()
             .child(text)
@@ -1238,7 +1249,7 @@ fn card_face(
                                     .flex()
                                     .items_center()
                                     .justify_center()
-                                    .text_size(px(size::SMALL * z))
+                                    .text_size(px(CARD_SMALL * z))
                                     .text_color(t.text2)
                                     .child(n.to_string()),
                             )
@@ -1256,7 +1267,7 @@ fn card_face(
                 .when_some(brief, |d, brief| {
                     d.child(
                         div()
-                            .text_size(px(size::SMALL * z))
+                            .text_size(px(CARD_SMALL * z))
                             .text_color(t.text2)
                             .min_w_0()
                             .line_clamp(2)
@@ -1391,7 +1402,7 @@ fn card_face(
                     .px(px(POOL_LABEL * z))
                     .flex()
                     .items_center()
-                    .text_size(px(size::SMALL * z))
+                    .text_size(px(CARD_SMALL * z))
                     .text_color(colour)
                     .child(div().truncate().child(text))
             };
@@ -1422,7 +1433,7 @@ fn card_face(
                         .px(px(POOL_LABEL * z))
                         .overflow_hidden()
                         .line_clamp(2)
-                        .text_size(px(size::SMALL * z))
+                        .text_size(px(CARD_SMALL * z))
                         .text_color(t.text2)
                         .child(c.goal.clone()),
                 )
@@ -1466,7 +1477,7 @@ fn card_face(
                         .child(
                             div()
                                 .font_weight(FontWeight::BOLD)
-                                .text_size(px(size::TEXT * z))
+                                .text_size(px(CARD_TEXT * z))
                                 .truncate()
                                 .child(format!(
                                     "{}{}",
@@ -1497,7 +1508,7 @@ fn card_face(
                         .child(
                             div()
                                 .line_clamp(2)
-                                .text_size(px(size::SMALL * z))
+                                .text_size(px(CARD_SMALL * z))
                                 .text_color(t.text2)
                                 .child(g.criterion.clone()),
                         ),
@@ -1532,7 +1543,7 @@ fn card_face(
                 .child(
                     div()
                         .font_weight(FontWeight::BOLD)
-                        .text_size(px(size::TEXT * z))
+                        .text_size(px(CARD_TEXT * z))
                         .truncate()
                         .child(l.title.clone()),
                 )
@@ -1573,7 +1584,7 @@ fn card_face(
                         .child(
                             div()
                                 .font_weight(FontWeight::BOLD)
-                                .text_size(px(size::TEXT * z))
+                                .text_size(px(CARD_TEXT * z))
                                 .child(e.title.clone()),
                         ),
                 )
@@ -1603,7 +1614,7 @@ fn chip(z: f32, text: &str, colour: Hsla) -> Div {
         .py(px(EDGE * z))
         .rounded(px(size::RADIUS * z))
         .bg(ahjo_app_kit::theme::alpha(colour, CHIP_ALPHA))
-        .text_size(px(size::SMALL * z))
+        .text_size(px(CARD_SMALL * z))
         .text_color(colour)
         .child(text.to_uppercase())
 }
@@ -1656,7 +1667,7 @@ fn slot_row(
                 .flex_col()
                 .child(
                     div()
-                        .text_size(px(size::SMALL * z))
+                        .text_size(px(CARD_SMALL * z))
                         .text_color(t.dim)
                         .truncate()
                         .child(match role {
@@ -1672,7 +1683,7 @@ fn slot_row(
                 // shows it.
                 .child(
                     div()
-                        .text_size(px(size::TEXT * z))
+                        .text_size(px(CARD_TEXT * z))
                         .font_weight(FontWeight::BOLD)
                         .truncate()
                         .debug_selector({
@@ -1683,7 +1694,7 @@ fn slot_row(
                 )
                 .child(
                     div()
-                        .text_size(px(size::SMALL * z))
+                        .text_size(px(CARD_SMALL * z))
                         .text_color(t.text2)
                         .truncate()
                         .child(crate::store::words::slot_line(slot)),
