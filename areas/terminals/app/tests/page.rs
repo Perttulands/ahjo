@@ -1715,8 +1715,11 @@ fn send_chooses_a_pane_and_defaults_to_the_focused_pane(cx: &mut TestAppContext)
     // report the loss instead of silently sending into the other pane.
     click(cx, "send-pane-selected-1".into());
     tmux(&running, &["kill-pane", "-t", &panes[1]]);
-    until(cx, "remaining pane offered", |cx| {
+    // The other pane was offered all along: the chosen one going from the
+    // choices is what says the page has heard of the loss.
+    until(cx, "only the remaining pane offered", |cx| {
         cx.debug_bounds("send-pane-0").is_some()
+            && cx.debug_bounds("send-pane-selected-1").is_none()
     });
     click(cx, "send-go".into());
     until(cx, "pane loss reported", |cx| {
