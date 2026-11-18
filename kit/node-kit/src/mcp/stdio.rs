@@ -1,6 +1,7 @@
 //! `ahjo mcp`: MCP over stdio for agents that start their servers as
-//! processes. It relays each line to the local node's `/mcp` and prints the
-//! answer, so the node serves and logs every call either way.
+//! processes. It relays each line to the local node's `/mcp`, or with areas
+//! named to `/mcp/<area>,...`, and prints the answer, so the node serves and
+//! logs every call either way.
 
 use anyhow::{Context, Result, bail};
 use serde_json::{Value, json};
@@ -9,15 +10,20 @@ use tokio::net::TcpStream;
 
 use super::http::PATH;
 
-/// Relays stdin to the node at `node` (`addr:port`) until stdin ends.
-pub async fn stdio(node: &str) -> Result<()> {
+/// Relays stdin to the node at `node` (`addr:port`) until stdin ends: to
+/// the servers of `areas`, or every one when none is named.
+pub async fn stdio(node: &str, areas: &[String]) -> Result<()> {
+    let path = match areas {
+        [] => PATH.to_owned(),
+        areas => format!("{PATH}/{}", areas.join(",")),
+    };
     let mut lines = BufReader::new(tokio::io::stdin()).lines();
     let mut stdout = tokio::io::stdout();
     while let Some(line) = lines.next_line().await? {
         if line.trim().is_empty() {
             continue;
         }
-        let answer = match post(node, &line).await {
+        let answer = match post(node, &path, &line).await {
             Ok(answer) => answer,
             Err(error) => failed(&line, &format!("ahjo node at {node}: {error:#}")),
         };
@@ -31,10 +37,10 @@ pub async fn stdio(node: &str) -> Result<()> {
 }
 
 /// The node's answer to one message: `None` for a notification's 202.
-async fn post(node: &str, message: &str) -> Result<Option<String>> {
+async fn post(node: &str, path: &str, message: &str) -> Result<Option<String>> {
     let mut stream = TcpStream::connect(node).await.context("connecting")?;
     let request = format!(
-        "POST {PATH} HTTP/1.1\r\nHost: {node}\r\nUser-Agent: ahjo-mcp-stdio\r\n\
+        "POST {path} HTTP/1.1\r\nHost: {node}\r\nUser-Agent: ahjo-mcp-stdio\r\n\
          Content-Type: application/json\r\nAccept: application/json, text/event-stream\r\n\
          Content-Length: {}\r\nConnection: close\r\n\r\n{message}",
         message.len()

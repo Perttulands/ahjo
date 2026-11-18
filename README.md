@@ -54,6 +54,7 @@ three.
 
 Everything the app does, an agent can do with `ahjo <noun> <verb>`:
 `ahjo help` lists the running node's commands, `ahjo <noun>` a noun's verbs
-with their arguments, and `--json` answers in JSON. `ahjo mcp` serves the same
-commands as MCP tools. `skills/ahjo` teaches an agent to use them, and
+with their arguments, and `--json` answers in JSON. The same commands are MCP
+tools, one server per area: `/mcp/<area>` on the node, or `ahjo mcp --area
+<area>` over stdio. `skills/ahjo` teaches an agent to use them, and
 `skills/change-ahjo` to change Ahjo itself.

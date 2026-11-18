@@ -1,22 +1,23 @@
 //! MCP's streamable HTTP transport, on the node's own port: one JSON-RPC
-//! message per POST to `/mcp`, answered with JSON. The server opens no
-//! streams of its own, so GET is refused, as the transport allows.
+//! message per POST to `/mcp` (every area) or `/mcp/<area>[,<area>...]`,
+//! answered with JSON. The server opens no streams of its own, so GET is
+//! refused, as the transport allows.
 
 use std::net::SocketAddr;
 use std::sync::Arc;
 
 use axum::Router;
 use axum::body::Body;
-use axum::extract::{ConnectInfo, Request, State};
+use axum::extract::{ConnectInfo, Path, Request, State};
 use axum::http::{HeaderMap, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use axum::routing::post;
 use serde_json::Value;
 
-use super::Mcp;
 use super::rpc::{self, Caller};
+use super::{Mcp, Reach};
 
-/// The path the endpoint answers on.
+/// The path every area's tools answer on; one area's are under it.
 pub const PATH: &str = "/mcp";
 
 /// The largest message taken: a 64 KiB text with room for JSON's escapes.
@@ -27,16 +28,38 @@ const FUNNEL: &str = "tailscale-funnel-request";
 
 pub(super) fn routes(mcp: Arc<Mcp>) -> Router {
     Router::new()
-        .route(PATH, post(message).get(no_stream).delete(no_stream))
+        .route(PATH, post(every).get(no_stream).delete(no_stream))
+        .route(
+            &format!("{PATH}/{{areas}}"),
+            post(some).get(no_stream).delete(no_stream),
+        )
         .with_state(mcp)
 }
 
-async fn message(State(mcp): State<Arc<Mcp>>, request: Request) -> Response {
+async fn every(State(mcp): State<Arc<Mcp>>, request: Request) -> Response {
+    let reach = mcp.everything();
+    message(&mcp, &reach, request).await
+}
+
+async fn some(
+    State(mcp): State<Arc<Mcp>>,
+    Path(areas): Path<String>,
+    request: Request,
+) -> Response {
+    match mcp.reach(&areas) {
+        Ok(reach) => message(&mcp, &reach, request).await,
+        // A public request learns nothing, not even which areas there are.
+        Err(_) if request.headers().contains_key(FUNNEL) => refused(),
+        Err(why) => (StatusCode::NOT_FOUND, why).into_response(),
+    }
+}
+
+async fn message(mcp: &Mcp, reach: &Reach, request: Request) -> Response {
     let (parts, body) = request.into_parts();
     // There is no public endpoint (VISION.md): a Funnel request gets
     // nothing, whatever the node's serve settings.
     if parts.headers.contains_key(FUNNEL) {
-        return (StatusCode::FORBIDDEN, "the public MCP door is not open").into_response();
+        return refused();
     }
     let Ok(body) = axum::body::to_bytes(body, MAX_MESSAGE).await else {
         return (StatusCode::PAYLOAD_TOO_LARGE, "the message is too large").into_response();
@@ -49,7 +72,7 @@ async fn message(State(mcp): State<Arc<Mcp>>, request: Request) -> Response {
         who: who(peer, &parts.headers),
     };
     let answer = match serde_json::from_slice::<Value>(&body) {
-        Ok(message) => rpc::answer(&mcp, &caller, &message).await,
+        Ok(message) => rpc::answer(mcp, reach, &caller, &message).await,
         Err(error) => Some(rpc::unreadable(&error)),
     };
     match answer {
@@ -60,6 +83,10 @@ async fn message(State(mcp): State<Arc<Mcp>>, request: Request) -> Response {
             .into_response(),
         None => StatusCode::ACCEPTED.into_response(),
     }
+}
+
+fn refused() -> Response {
+    (StatusCode::FORBIDDEN, "the public MCP door is not open").into_response()
 }
 
 async fn no_stream() -> Response {

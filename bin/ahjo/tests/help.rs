@@ -148,6 +148,10 @@ fn own_commands_have_help_and_a_wrong_command_line_exits_2() {
         (&["serve", "--bogus"][..], "usage: ahjo serve"),
         (&["version", "extra"], "usage: ahjo version"),
         (&["mcp", "--bogus"], "usage: ahjo mcp"),
+        (
+            &["mcp", "--area", "nope"],
+            "no area nope; the areas are agents, terminals",
+        ),
         (&["install", "--bogus", "x"], "usage: ahjo install"),
         (&["upgrade", "--root", "x"], "usage: ahjo upgrade"),
         (&["--bogus"], "ahjo --help"),

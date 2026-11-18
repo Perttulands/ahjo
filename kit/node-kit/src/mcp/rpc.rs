@@ -4,7 +4,7 @@
 
 use serde_json::{Value, json};
 
-use super::{Mcp, call_log};
+use super::{Mcp, Reach, call_log};
 use ahjo_core::Error;
 
 /// The protocol versions this server speaks, newest first. Tools here use
@@ -22,8 +22,13 @@ pub(super) struct Caller {
 
 type Answer = Result<Value, (i64, String)>;
 
-/// The answer to one message, if it wants one.
-pub(super) async fn answer(mcp: &Mcp, caller: &Caller, message: &Value) -> Option<Value> {
+/// The answer to one message to the servers `reach` names, if it wants one.
+pub(super) async fn answer(
+    mcp: &Mcp,
+    reach: &Reach,
+    caller: &Caller,
+    message: &Value,
+) -> Option<Value> {
     let Some(method) = message.get("method").and_then(Value::as_str) else {
         // An answer from the caller needs none; anything else is malformed.
         return (message.get("result").is_none() && message.get("error").is_none())
@@ -32,10 +37,10 @@ pub(super) async fn answer(mcp: &Mcp, caller: &Caller, message: &Value) -> Optio
     let id = message.get("id")?;
     let params = message.get("params").unwrap_or(&Value::Null);
     let answer = match method {
-        "initialize" => Ok(initialize(params)),
+        "initialize" => Ok(initialize(params, &mcp.instructions(reach))),
         "ping" => Ok(json!({})),
-        "tools/list" => Ok(mcp.list()),
-        "tools/call" => call(mcp, caller, params).await,
+        "tools/list" => Ok(mcp.list(reach)),
+        "tools/call" => call(mcp, reach, caller, params).await,
         _ => Err((METHOD_NOT_FOUND, format!("no method {method}"))),
     };
     Some(reply(id, answer))
@@ -55,7 +60,7 @@ fn reply(id: &Value, answer: Answer) -> Value {
     }
 }
 
-fn initialize(params: &Value) -> Value {
+fn initialize(params: &Value, instructions: &str) -> Value {
     let asked = params.get("protocolVersion").and_then(Value::as_str);
     let version = asked
         .and_then(|asked| VERSIONS.iter().find(|v| **v == asked))
@@ -64,20 +69,23 @@ fn initialize(params: &Value) -> Value {
         "protocolVersion": version,
         "capabilities": { "tools": { "listChanged": false } },
         "serverInfo": { "name": "ahjo", "version": crate::VERSION },
-        "instructions": "Ahjo: the operator's node. Each tool is one of its commands, \
-            also run as `ahjo <noun> <verb>`.",
+        "instructions": instructions,
     })
 }
 
-async fn call(mcp: &Mcp, caller: &Caller, params: &Value) -> Answer {
+async fn call(mcp: &Mcp, reach: &Reach, caller: &Caller, params: &Value) -> Answer {
     let name = params
         .get("name")
         .and_then(Value::as_str)
         .ok_or((INVALID_PARAMS, "name is required".to_owned()))?;
-    let Some(command) = mcp.command(name) else {
+    let Some(command) = mcp.command(reach, name) else {
         // An unknown name could be anything, so the log doesn't echo it.
         call_log::record(caller, "<unknown>", mcp.node.as_str(), "unknown");
-        return Err((INVALID_PARAMS, format!("Unknown tool: {name}")));
+        let elsewhere = match mcp.server_of(name) {
+            Some(server) => format!("; it is on {}/{server}", super::PATH),
+            None => String::new(),
+        };
+        return Err((INVALID_PARAMS, format!("Unknown tool: {name}{elsewhere}")));
     };
     let mut args = params.get("arguments").cloned().unwrap_or(json!({}));
     let outcome = match mcp.target(&mut args) {

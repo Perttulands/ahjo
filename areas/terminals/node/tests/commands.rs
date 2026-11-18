@@ -162,10 +162,11 @@ async fn speaks_the_mcp_lifecycle_and_offers_every_session_tool() {
             "session_seen",
         ]
     );
-    // Every tool reaches the fleet: `node` names where it runs.
+    // `node` is taken by every tool but listed by none: an MCP client names
+    // the node in the URL (`?node=`), the command line with --node.
     for tool in answer["result"]["tools"].as_array().unwrap() {
-        assert_eq!(
-            tool["inputSchema"]["properties"]["node"]["type"], "string",
+        assert!(
+            tool["inputSchema"]["properties"].get("node").is_none(),
             "{tool}"
         );
     }

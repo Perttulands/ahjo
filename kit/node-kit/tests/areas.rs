@@ -427,6 +427,7 @@ async fn foreign_origins_and_rebinding_hosts_are_refused() {
         ("/api/health", "", 200),
         ("/ws", UPGRADE, 101),
         ("/mcp", "", 405),
+        ("/mcp/lights", "", 405),
         ("/api/lights", "", 200),
     ] {
         for (host, origin, admitted, case) in cases {
@@ -544,6 +545,155 @@ async fn ahjo(noun: &str, args: &[&str], url: &str) -> (i32, Value) {
     (code, serde_json::from_slice(&out).unwrap_or(Value::Null))
 }
 
+/// Shades: a second area, with one command and nothing else.
+struct Shades;
+
+impl Area for Shades {
+    fn commands(&self) -> Vec<Command> {
+        vec![Command::new(
+            "shades_close",
+            "Close the shades.",
+            || json!({ "type": "object", "properties": {}, "required": [] }),
+            |_| async { Ok(json!("closed")) },
+        )]
+    }
+}
+
+fn shades(_: &Setup) -> anyhow::Result<Built> {
+    Built::now(Shades)
+}
+
+/// One JSON-RPC message posted to `path`: the HTTP status and the answer,
+/// over a plain socket so a refused path's status and text are seen.
+async fn rpc(node: &Running, path: &str, message: Value) -> (u16, String) {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    let (address, body) = (node.address, message.to_string());
+    let mut stream = tokio::net::TcpStream::connect(address).await.unwrap();
+    let request = format!(
+        "POST {path} HTTP/1.1\r\nHost: {address}\r\nContent-Type: application/json\r\n\
+         Content-Length: {}\r\nConnection: close\r\n\r\n{body}",
+        body.len()
+    );
+    stream.write_all(request.as_bytes()).await.unwrap();
+    let mut response = String::new();
+    stream.read_to_string(&mut response).await.unwrap();
+    let (head, body) = response.split_once("\r\n\r\n").unwrap();
+    let status = head.split(' ').nth(1).unwrap().parse().unwrap();
+    (status, body.to_owned())
+}
+
+fn tool_names(answer: &str) -> Vec<String> {
+    let answer: Value = serde_json::from_str(answer).unwrap();
+    answer["result"]["tools"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|t| t["name"].as_str().unwrap().to_owned())
+        .collect()
+}
+
+/// Each area is an MCP server of its own, the node's own commands another,
+/// and `/mcp` every one: a client pays only for the tools it asked for, and
+/// the command line still sees every command.
+#[tokio::test(flavor = "multi_thread")]
+async fn each_area_is_an_mcp_server_and_the_cli_sees_them_all() {
+    let shades_listed = listed("shades", &[], &["shades_close"], shades);
+    let node = start(&[LIGHTS_LISTED, shades_listed], "").await.unwrap();
+    let list = json!({ "jsonrpc": "2.0", "id": 1, "method": "tools/list" });
+    let names = async |path: &str| {
+        let (status, body) = rpc(&node, path, list.clone()).await;
+        assert_eq!(status, 200, "{path}: {body}");
+        tool_names(&body)
+    };
+    assert_eq!(names("/mcp/lights").await, ["lights_switch"]);
+    assert_eq!(names("/mcp/shades").await, ["shades_close"]);
+    assert_eq!(
+        names("/mcp/node").await,
+        ["config_show", "view_show", "view_open"]
+    );
+    assert_eq!(
+        names("/mcp/shades,lights").await,
+        ["lights_switch", "shades_close"],
+        "several, in the node's order"
+    );
+    assert_eq!(
+        names("/mcp").await,
+        [
+            "lights_switch",
+            "shades_close",
+            "config_show",
+            "view_show",
+            "view_open"
+        ]
+    );
+
+    // No tool lists `node`, nor an empty `required`.
+    let (_, body) = rpc(&node, "/mcp", list.clone()).await;
+    let tools: Value = serde_json::from_str(&body).unwrap();
+    for tool in tools["result"]["tools"].as_array().unwrap() {
+        let schema = &tool["inputSchema"];
+        assert!(schema["properties"].get("node").is_none(), "{tool}");
+        assert!(schema.get("required") != Some(&json!([])), "{tool}");
+    }
+
+    // A server says which it is and where the others are.
+    let initialize = json!({ "jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {} });
+    let (_, body) = rpc(&node, "/mcp/lights", initialize).await;
+    let said: Value = serde_json::from_str(&body).unwrap();
+    let instructions = said["result"]["instructions"].as_str().unwrap();
+    assert!(instructions.contains("lights tools"), "{instructions}");
+    assert!(
+        instructions.contains("/mcp/shades, /mcp/node"),
+        "{instructions}"
+    );
+
+    // A tool asked of another server is refused, naming its own.
+    let call = json!({
+        "jsonrpc": "2.0", "id": 2, "method": "tools/call",
+        "params": { "name": "shades_close", "arguments": {} },
+    });
+    let (_, body) = rpc(&node, "/mcp/lights", call.clone()).await;
+    let refused: Value = serde_json::from_str(&body).unwrap();
+    assert_eq!(
+        refused["error"]["message"],
+        "Unknown tool: shades_close; it is on /mcp/shades"
+    );
+    let (_, body) = rpc(&node, "/mcp/shades", call).await;
+    let answered: Value = serde_json::from_str(&body).unwrap();
+    assert_eq!(answered["result"]["content"][0]["text"], r#""closed""#);
+
+    // A server there is not is 404, naming those there are.
+    let (status, body) = rpc(&node, "/mcp/lights,nope", list.clone()).await;
+    assert_eq!(status, 404);
+    assert_eq!(
+        body,
+        "no MCP server nope; this node's are lights, shades, node"
+    );
+
+    // The command line reads every server in one list.
+    let url = format!("http://{}/", node.address);
+    let index = ahjo_node_kit::cli::index(Some(&url)).await.unwrap();
+    for noun in ["lights", "shades", "config", "view"] {
+        assert!(index.contains(&format!("  {noun} ")), "{noun}: {index}");
+    }
+    node.stop().await.unwrap();
+}
+
+/// An area turned off is said to be, not unknown.
+#[tokio::test(flavor = "multi_thread")]
+async fn an_area_turned_off_is_no_mcp_server_and_says_so() {
+    let node = start(&[LIGHTS_LISTED], "[lights]\nenabled = false\n")
+        .await
+        .unwrap();
+    let list = json!({ "jsonrpc": "2.0", "id": 1, "method": "tools/list" });
+    let (status, body) = rpc(&node, "/mcp/lights", list).await;
+    assert_eq!(
+        (status, body.as_str()),
+        (404, "the area lights is turned off on this node")
+    );
+    node.stop().await.unwrap();
+}
+
 /// The node's own command and route show its config file as it loaded it.
 #[tokio::test(flavor = "multi_thread")]
 async fn config_show_answers_the_file_and_each_section() {
@@ -637,6 +787,25 @@ async fn view_open_reaches_the_app_and_answers_its_answer() {
     assert_eq!(
         tool(&client, "view_open", args).await.unwrap_err(),
         "no_app"
+    );
+    // The brain's page moved to Ahjo Brain: said with or without an app.
+    let call = json!({
+        "jsonrpc": "2.0", "id": 1, "method": "tools/call",
+        "params": { "name": "view_open", "arguments": { "page": "brain" } },
+    });
+    let (answer, _) = client
+        .request(Method::POST, "/mcp", Some(call), None)
+        .await
+        .unwrap();
+    let error: Error =
+        serde_json::from_str(answer["result"]["content"][0]["text"].as_str().unwrap()).unwrap();
+    assert_eq!(error.code, "no_page");
+    assert!(
+        error
+            .message
+            .contains("the brain lives in the Ahjo Brain app"),
+        "{}",
+        error.message
     );
 
     let (mut ws, _) = tokio_tungstenite::connect_async(format!("ws://{}/ws", node.address))

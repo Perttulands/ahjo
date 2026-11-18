@@ -84,8 +84,16 @@ real list, and `ahjo kinds` prints who owns which kinds.
   goes to the channel of the area owning its kind; each channel pushes its own.
 - **Commands.** A command is a `noun_verb` name (the verb may be several words: `formation_set_type` is `ahjo formation set-type`), a description, an input
   schema and a call answering JSON or the error shape. `node-kit` serves it as
-  an MCP tool on `/mcp` and as the CLI verb `ahjo noun verb`. A `node`
-  argument names where it runs.
+  an MCP tool and as the CLI verb `ahjo noun verb`. A `node` argument names
+  where it runs; MCP's lists leave it out while only this node can.
+- **MCP servers.** Each area's tools are an MCP server of their own at
+  `/mcp/<area>`, and the node's own commands at `/mcp/node`; `/mcp/a,b`
+  serves several and `/mcp` every one. A client connects to what it needs and
+  pays only for those tools: the missions area alone is about half of every
+  tool's schema, and an agent reading the brain need not carry it. A tool
+  asked of a server that does not have it is refused naming the one that
+  does. `ahjo mcp --area <area>`, again for more, is the same over stdio. The
+  command line reads `/mcp`, so it sees every command in one request.
 - **One node at a time.** A request names its node with `?node=` on any route
   and on `/ws`, a command call with its `node` argument. Relaying to other
   nodes is not built: one naming another node is refused as `unknown_node`
@@ -99,14 +107,16 @@ real list, and `ahjo kinds` prints who owns which kinds.
   applies it.
 - **The node's own commands.** Every node has a few commands whatever areas
   it serves (`node-kit`'s `own::COMMANDS`: `config_show`, `view_show`,
-  `view_open`); a listing that names one is refused.
+  `view_open`); a listing that names one is refused, as is an area named
+  `node`, the name of the node's own config section and MCP server.
 - **View control.** The node keeps the view-control kinds itself: a client
   that reports the page it shows (0xb0) is an app until it goes. `ahjo view
   show` lists what each app shows; `ahjo view open --page <id> [--path|item|
-  run|mission|document|session|setting|service <id>] [--step]` sends the apps a view command
+  run|mission|session|setting|service|agent <id>] [--step]` sends the apps a view command
   (0xb8) and answers the first answer (0xb1): `no_app` with none connected,
   `timeout` after 5 s. The app shows the page and hands it the thing as an
-  `Ask::Reveal`, on this node.
+  `Ask::Reveal`, on this node. A page Swarm no longer has (`brain`) is
+  refused by the node itself as `no_page`, saying where it went.
 - **Provided interfaces.** What one area offers others is a narrow trait that
   lives with its provider's contract or engine crate, never in `node-kit`. The
   provider fills the slot keyed by that trait (`setup.provided.provide`) while
@@ -277,7 +287,8 @@ restart signals only the node and a tmux server it started lives on.
 `ahjo install --root ~/.local/share/ahjo` wrote it there (listening on
 127.0.0.1:7310, which Windows Tailscale serves as tailnet port 7300), linked
 into `~/.config/systemd/user`, and the ChatGPT tunnel's unit and profile,
-which reach the node's `/mcp`. The `change-ahjo` skill has the steps.
+which reach the node's `/mcp`: every area, until the profile names the
+servers ChatGPT should see. The `change-ahjo` skill has the steps.
 
 `bin/ahjo/tests/install.rs` runs all three against a stand-in `systemctl` on
 `PATH`, with a node, a tmux server and a session of the test's own.

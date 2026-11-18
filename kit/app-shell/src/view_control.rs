@@ -184,7 +184,14 @@ impl Shell {
             .pages
             .iter()
             .position(|p| p.meta.id == open.page)
-            .ok_or_else(|| format!("this app has no page {}", open.page))?;
+            .ok_or_else(|| {
+                let pages: Vec<&str> = self.pages.iter().map(|p| p.meta.id).collect();
+                format!(
+                    "this app has no page {}; its pages are {}",
+                    open.page,
+                    pages.join(", ")
+                )
+            })?;
         if let Some(ask) = &open.reveal {
             let meta = &self.pages[i].meta;
             if !meta.answers.iter().any(|a| ask.answered_by(a)) {

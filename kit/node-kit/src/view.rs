@@ -23,10 +23,20 @@ const VIEW_DO: u8 = 0xb8;
 /// How long `view_open` waits for the app.
 const WAIT: Duration = Duration::from_secs(5);
 
-/// The things `view_open` shows on a page, at most one at a time.
+/// The things `view_open` shows on a page, at most one at a time: each is
+/// what one of Ahjo Swarm's pages reveals.
 const THINGS: &[&str] = &[
-    "path", "item", "run", "mission", "document", "session", "setting", "service",
+    "path", "item", "run", "mission", "session", "setting", "service", "agent",
 ];
+
+/// Pages Ahjo Swarm no longer has, and where what they showed is now. The
+/// node answers these itself, app or none, so an agent is told where to go
+/// rather than that the app has no such page.
+const MOVED: &[(&str, &str)] = &[(
+    "brain",
+    "Ahjo Swarm has no brain page: the brain lives in the Ahjo Brain app. \
+     From here, ahjo brain search and ahjo brain read reach it.",
+)];
 
 /// The connected apps, by their client.
 #[derive(Default)]
@@ -174,17 +184,14 @@ pub(crate) fn commands(views: &Arc<Views>, node: NodeId) -> Vec<Command> {
     let mut properties = Map::new();
     properties.insert(
         "page".into(),
-        json!({ "type": "string", "description": "The page's id: sessions, files, work, …" }),
+        json!({ "type": "string", "description": "sessions, files, agents, work, missions, scheduled, host or settings" }),
     );
     for thing in THINGS {
-        properties.insert(
-            (*thing).into(),
-            json!({ "type": "string", "description": format!("The {thing} to show on it (at most one thing).") }),
-        );
+        properties.insert((*thing).into(), json!({ "type": "string" }));
     }
     properties.insert(
         "step".into(),
-        json!({ "type": "string", "description": "The part of it to show: a run's step." }),
+        json!({ "type": "string", "description": "A run's step, or an agent's harness." }),
     );
     let schema = json!({ "type": "object", "properties": properties, "required": ["page"] });
     vec![
@@ -199,8 +206,9 @@ pub(crate) fn commands(views: &Arc<Views>, node: NodeId) -> Vec<Command> {
         ),
         Command::new(
             "view_open",
-            "Open a page in the operator's Ahjo Swarm app, and one thing on it: a path, item, run, \
-             mission, document, session, setting or service. Answers with what the app shows now.",
+            "Open a page in the operator's Ahjo Swarm app, and at most one thing on it: a session, \
+             path, agent (a folder; --step names the harness), item, mission, run, service or \
+             setting. Answers with what the app shows now.",
             move || schema.clone(),
             move |args: Value| {
                 let views = opening.clone();
@@ -220,6 +228,9 @@ fn open_command(args: Value, node: &NodeId) -> Result<Value, Error> {
         _ => Err(invalid(format!("{key} is text"))),
     };
     let page = text("page")?.ok_or_else(|| invalid("view open names a page".into()))?;
+    if let Some((_, moved)) = MOVED.iter().find(|(gone, _)| *gone == page) {
+        return Err(Error::new("no_page", *moved));
+    }
     let mut command = json!({ "do": "open", "page": page });
     let mut things = Vec::new();
     for thing in THINGS {

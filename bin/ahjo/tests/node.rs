@@ -173,7 +173,13 @@ async fn ahjo_mcp_relays_stdio_to_the_node() {
     let node = serve(&tmux);
     listed(node.address, "alpha").await;
     let mut child = tokio::process::Command::new(AHJO)
-        .args(["mcp", "--node", &node.address.to_string()])
+        .args([
+            "mcp",
+            "--area",
+            "terminals",
+            "--node",
+            &node.address.to_string(),
+        ])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .kill_on_drop(true)
@@ -188,6 +194,7 @@ async fn ahjo_mcp_relays_stdio_to_the_node() {
         json!({ "jsonrpc": "2.0", "method": "notifications/initialized" }),
         json!({ "jsonrpc": "2.0", "id": 2, "method": "tools/call",
                 "params": { "name": "session_list", "arguments": {} } }),
+        json!({ "jsonrpc": "2.0", "id": 3, "method": "tools/list" }),
     ];
     for message in messages {
         stdin
@@ -216,6 +223,16 @@ async fn ahjo_mcp_relays_stdio_to_the_node() {
             .iter()
             .any(|s| s["name"] == "alpha"),
         "{sessions}"
+    );
+    // --area terminals: the sessions' tools, and no other area's.
+    let answer = next(&mut stdout).await;
+    let tools = answer["result"]["tools"].as_array().unwrap();
+    assert!(!tools.is_empty());
+    assert!(
+        tools
+            .iter()
+            .all(|t| t["name"].as_str().unwrap().starts_with("session_")),
+        "{answer}"
     );
 
     drop(stdin);

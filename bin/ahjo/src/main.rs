@@ -21,7 +21,7 @@ usage:
   ahjo install [--app file] [--root dir] ...           this build as a systemd user unit
   ahjo upgrade [--app file] ...                        replace the installed build; sessions stay
   ahjo uninstall [--unit name]                         take the unit and its build away
-  ahjo mcp [--node addr:port]                          the node's commands as MCP tools on stdio
+  ahjo mcp [--area name]... [--node addr:port]         the node's commands as MCP tools on stdio
   ahjo kinds                                           who owns which frame kinds
   ahjo hook <url> [--then command...] [payload]        (run by a program's own hook)
   ahjo --version                                       this build's version
@@ -31,7 +31,7 @@ With --json the answer is JSON on stdout, and an error is {\"error\":{\"code\",\
 Exit codes: 0 done, 1 the command failed, 2 the command line was wrong, 3 no node answers.";
 
 const SERVE_USAGE: &str = "usage: ahjo serve [--config file] [--listen addr:port]";
-const MCP_USAGE: &str = "usage: ahjo mcp [--node addr:port]";
+const MCP_USAGE: &str = "usage: ahjo mcp [--area name]... [--node addr:port]";
 const VERSION_USAGE: &str = "usage: ahjo version [--json] [--node addr:port]";
 const HELP_USAGE: &str = "usage: ahjo help [noun|--all] [--node id|url]";
 
@@ -55,9 +55,13 @@ as a systemd user unit.
             "{MCP_USAGE}
 Serve the node's commands as MCP tools over stdin and stdout, for an agent
 harness that starts its servers as programs. The tools are the commands
-ahjo help lists, named <noun>_<verb>.
+ahjo help lists, named <noun>_<verb>. Each area is a server of its own, so
+a harness that needs only some pays only for their tools; without --area
+it serves every one. Over HTTP the same are /mcp/<area>[,<area>...] and /mcp.
 
-  --node  addr:port: the node to relay to (default: this machine's)"
+  --area  one of {} (node: the node's own commands); again for more
+  --node  addr:port: the node to relay to (default: this machine's)",
+            servers().join(", ")
         ),
         "version" => format!(
             "{VERSION_USAGE}
@@ -168,12 +172,9 @@ async fn run(command: &str, args: &[String]) -> Result<i32> {
             Ok(0)
         }
         "mcp" => {
-            let node = match args {
-                [] => ahjo_node_kit::address::local(),
-                [flag, node] if flag == "--node" => node.clone(),
-                _ => return Err(usage("mcp takes only --node", MCP_USAGE)),
-            };
-            mcp::stdio(&node).await.map(|()| 0)
+            let (node, areas) = mcp_arguments(args)?;
+            let node = node.unwrap_or_else(ahjo_node_kit::address::local);
+            mcp::stdio(&node, &areas).await.map(|()| 0)
         }
         flag if flag.starts_with('-') => Err(usage(
             format!("unknown flag {flag}"),
@@ -181,6 +182,44 @@ async fn run(command: &str, args: &[String]) -> Result<i32> {
         )),
         noun => cli::run(noun, args, &mut std::io::stdout()).await,
     }
+}
+
+/// Every MCP server a node can have: one per area, and the node's own.
+fn servers() -> Vec<&'static str> {
+    AREAS
+        .iter()
+        .map(|area| area.name)
+        .chain([mcp::NODE])
+        .collect()
+}
+
+/// The node and the areas of `ahjo mcp`.
+fn mcp_arguments(args: &[String]) -> Result<(Option<String>, Vec<String>)> {
+    let (mut node, mut areas) = (None, Vec::new());
+    let mut args = args.iter();
+    while let Some(arg) = args.next() {
+        let mut value = |flag: &str| {
+            args.next()
+                .filter(|v| !v.is_empty())
+                .cloned()
+                .ok_or_else(|| usage(format!("{flag} needs a value"), MCP_USAGE))
+        };
+        match arg.as_str() {
+            "--node" => node = Some(value("--node")?),
+            "--area" => {
+                let area = value("--area")?;
+                if !servers().contains(&area.as_str()) {
+                    return Err(usage(
+                        format!("no area {area}; the areas are {}", servers().join(", ")),
+                        MCP_USAGE,
+                    ));
+                }
+                areas.push(area);
+            }
+            other => return Err(usage(format!("unexpected {other}"), MCP_USAGE)),
+        }
+    }
+    Ok((node, areas))
 }
 
 /// `ahjo help`: the usage and the node's commands, or one noun's verbs.

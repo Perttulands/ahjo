@@ -124,9 +124,13 @@ async fn services_and_commands_use_the_same_catalog_and_coded_errors() {
             "service_log"
         ]
     );
+    // `node` is taken by every tool but listed by none: an MCP client names
+    // the node in the URL (`?node=`), the command line with --node.
     for tool in tools {
-        assert_eq!(tool["inputSchema"]["properties"]["node"]["type"], "string");
+        assert!(tool["inputSchema"]["properties"].get("node").is_none());
     }
+    let here = json!({"node": node.id()});
+    assert!(node.call("service_list", here).await.is_ok());
     let listed = node.call("service_list", json!({})).await.unwrap();
     assert_eq!(listed["services"][0]["state"], "running");
     let answer = node

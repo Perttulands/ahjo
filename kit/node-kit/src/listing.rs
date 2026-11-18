@@ -22,11 +22,18 @@ pub struct Listing {
 }
 
 /// Refuses areas that share a name, a frame kind or a command, naming
-/// both, any that takes a reserved kind or one of the node's own commands
-/// ([`crate::own::COMMANDS`]), and commands not named `noun_verb`.
+/// both, any that takes a reserved kind, the node's own name (its config
+/// section and MCP server) or one of its commands ([`crate::own::COMMANDS`]),
+/// and commands not named `noun_verb`.
 pub fn check(areas: &[Listing]) -> Result<(), Error> {
     let conflict = |message: String| Error::new("area_conflict", message);
     for (i, area) in areas.iter().enumerate() {
+        if area.name == crate::config::NODE {
+            return Err(conflict(format!(
+                "an area is named {}, which is the node's own section and MCP server",
+                area.name
+            )));
+        }
         if let Some(owner) = frame::reserved(area.kinds) {
             return Err(conflict(format!(
                 "area {} owns frame kinds of {owner}",
@@ -141,6 +148,11 @@ mod tests {
         assert_eq!(
             message(&[own]),
             "area c has the command config_show, which is the node's own"
+        );
+        let node = listing(crate::config::NODE, &[], &[]);
+        assert_eq!(
+            message(&[node]),
+            "an area is named node, which is the node's own section and MCP server"
         );
         let named = listing("c", &[], &["list"]);
         assert_eq!(
