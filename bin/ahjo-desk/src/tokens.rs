@@ -25,6 +25,16 @@ pub const GAP_SMALL: f32 = 6.;
 /// The conversation beside the surface, and the queue rail.
 pub const COLUMN: f32 = 460.;
 pub const RAIL: f32 = 300.;
+/// In a narrow window both give way so the surface keeps the most room:
+/// never narrower than these, and the window never narrower than
+/// [`WINDOW_MIN`].
+pub const COLUMN_MIN: f32 = 320.;
+pub const RAIL_MIN: f32 = 200.;
+pub const RAIL_SHARE: f32 = 0.21;
+pub const COLUMN_SHARE: f32 = 0.32;
+pub const WINDOW_MIN: (f32, f32) = (880., 560.);
+/// Under this width a queue row drops its picture: its words need the room.
+pub const RAIL_THUMBS: f32 = 260.;
 /// How wide the conversation stands when there is nothing to look at, and
 /// how wide the document reads.
 pub const READING: f32 = 820.;
@@ -82,6 +92,14 @@ pub const VIDEO_BEHIND: usize = 90;
 /// Pictures kept decoded, in bytes.
 pub const PICTURE_CACHE: usize = 900 << 20;
 
+/// The queue rail's and the conversation's widths in a window `wide`.
+pub fn columns(wide: f32) -> (f32, f32) {
+    (
+        (wide * RAIL_SHARE).clamp(RAIL_MIN, RAIL),
+        (wide * COLUMN_SHARE).clamp(COLUMN_MIN, COLUMN),
+    )
+}
+
 /// A mark's ink as the store keeps it (`#rrggbb`), else [`MARK_INK`].
 pub fn ink(color: Option<&str>) -> u32 {
     color
@@ -89,4 +107,19 @@ pub fn ink(color: Option<&str>) -> u32 {
         .filter(|c| c.len() == 6)
         .and_then(|c| u32::from_str_radix(c, 16).ok())
         .unwrap_or(MARK_INK)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_surface_keeps_room_in_a_narrow_window() {
+        // Wide: both stand at their full measure.
+        assert_eq!(columns(1600.), (RAIL, COLUMN));
+        // At the narrowest window the surface still has a third of it.
+        let (rail, column) = columns(WINDOW_MIN.0);
+        assert!(rail >= RAIL_MIN && column >= COLUMN_MIN);
+        assert!(WINDOW_MIN.0 - rail - column >= WINDOW_MIN.0 / 3.);
+    }
 }

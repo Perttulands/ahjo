@@ -61,6 +61,7 @@ pub fn run() {
                     ..Default::default()
                 }),
                 app_id: Some("ahjo-desk".into()),
+                window_min_size: Some(size(px(tokens::WINDOW_MIN.0), px(tokens::WINDOW_MIN.1))),
                 ..Default::default()
             },
             |window, cx| cx.new(|cx| app::DeskApp::new(config.desks, notice, window, cx)),

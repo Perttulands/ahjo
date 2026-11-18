@@ -7,12 +7,13 @@
 //! to one, but his words are the answer.
 
 use crate::answer::{Said, Verdict};
-use crate::app::{Aim, DeskApp, Reach};
+use crate::app::{Aim, DeskApp, Reach, Reached};
 use crate::marks;
 use crate::model::{self, Ask, Choice, Form, MediaKind, Question};
 use crate::tokens::{self, BODY, GAP, GAP_SMALL, PAD, SMALL, TEXT};
 use ahjo_app_kit::theme::{FAMILY, Theme, alpha, rgb, theme};
 use ahjo_app_kit::widgets::kit::{self, Kind};
+use ahjo_app_kit::widgets::pane;
 use gpui::{
     AnyElement, ClickEvent, Context, Div, FontWeight, Hsla, IntoElement, ObjectFit, Render,
     SharedString, Stateful, StyledImage, Window, div, img, prelude::*, px, relative,
@@ -23,11 +24,13 @@ impl Render for DeskApp {
         self.take_aim(window, cx);
         self.keep_page();
         let t = theme(cx).clone();
+        let wide = f32::from(window.viewport_size().width);
+        let (rail_w, column_w) = tokens::columns(wide);
         let body = if self.desks.is_empty() {
             no_desks(&t)
         } else {
             let main = match self.current_ask().cloned() {
-                None => self.all_clear(&t),
+                None => self.all_clear(&t, cx),
                 Some(ask) if self.items().is_empty() => div()
                     .size_full()
                     .flex()
@@ -54,7 +57,7 @@ impl Render for DeskApp {
                     )
                     .child(
                         div()
-                            .w(px(tokens::COLUMN))
+                            .w(px(column_w))
                             .flex_none()
                             .h_full()
                             .border_l_1()
@@ -66,7 +69,7 @@ impl Render for DeskApp {
             div()
                 .size_full()
                 .flex()
-                .child(self.rail(&t, cx))
+                .child(self.rail(&t, rail_w, cx))
                 .child(div().flex_1().min_w_0().h_full().child(main))
                 .into_any_element()
         };
@@ -91,6 +94,7 @@ impl DeskApp {
 
     fn header(&mut self, t: &Theme, cx: &mut Context<Self>) -> Div {
         let waiting = self.queue().len();
+        let known = self.reached() == Reached::Some;
         let mut desks = div().flex().items_center().gap(px(GAP));
         for d in &self.desks {
             let n = d.asks.iter().filter(|a| a.is_open()).count();
@@ -160,8 +164,17 @@ impl DeskApp {
                                 div()
                                     .text_size(px(tokens::COUNT))
                                     .font_weight(FontWeight::SEMIBOLD)
-                                    .text_color(if waiting > 0 { t.needs } else { t.done })
-                                    .child(waiting.to_string()),
+                                    .text_color(match (waiting, known) {
+                                        (_, false) => t.dim,
+                                        (0, true) => t.done,
+                                        _ => t.needs,
+                                    })
+                                    // A count nobody read is not a zero.
+                                    .child(if known {
+                                        waiting.to_string()
+                                    } else {
+                                        "–".to_string()
+                                    }),
                             )
                             .child(div().text_color(t.text2).child("waiting")),
                     ),
@@ -182,8 +195,9 @@ impl DeskApp {
             )
     }
 
-    fn all_clear(&self, t: &Theme) -> AnyElement {
-        let reached = self.desks.iter().any(|d| matches!(d.reach, Reach::Ok));
+    /// Nothing to answer: every desk read and none waiting, the desks
+    /// still being reached, or none of them answering.
+    fn all_clear(&self, t: &Theme, cx: &mut Context<Self>) -> AnyElement {
         let failed: Vec<String> = self
             .desks
             .iter()
@@ -192,45 +206,46 @@ impl DeskApp {
                 _ => None,
             })
             .collect();
-        div()
-            .size_full()
-            .flex()
-            .flex_col()
-            .items_center()
-            .justify_center()
-            .gap(px(GAP))
-            .child(
-                div()
-                    .font_family(t.ty.display)
-                    .font_weight(t.ty.display_weight)
-                    .text_size(px(tokens::TITLE))
-                    .child(if reached {
-                        "All clear"
-                    } else {
-                        "Reaching the desks"
-                    }),
+        let trouble = failed
+            .into_iter()
+            .chain(self.notice.clone())
+            .map(|f| div().text_color(t.error).child(f).into_any_element());
+        let lines = |d: Div| {
+            d.flex()
+                .flex_col()
+                .items_center()
+                .gap(px(GAP_SMALL))
+                .text_center()
+        };
+        match self.reached() {
+            Reached::Some => pane::vacant(
+                t,
+                "All clear. Nobody is waiting on you; a new ask shows here as an agent posts it.",
+                Some(lines(div()).children(trouble).into_any_element()),
             )
-            .child(div().text_color(t.text2).child(if reached {
-                "Nobody is waiting on you. New asks appear here as agents post them."
-            } else {
-                "The desks have not answered yet."
-            }))
-            .children(
-                failed
-                    .into_iter()
-                    .map(|f| div().text_color(t.error).child(f)),
+            .into_any_element(),
+            Reached::Waiting => pane::vacant(t, "Reaching the desks…", None).into_any_element(),
+            Reached::None => pane::vacant(
+                t,
+                "No desk is answering. The Desk reads each one again when it comes back.",
+                Some(
+                    lines(div())
+                        .children(trouble)
+                        .child(div().pt(px(GAP_SMALL)).child(
+                            kit::button(t, "try-again", "Try again", Kind::Primary).on_click(
+                                cx.listener(|app, _: &ClickEvent, _, cx| app.refresh_all(cx)),
+                            ),
+                        ))
+                        .into_any_element(),
+                ),
             )
-            .children(
-                self.notice
-                    .clone()
-                    .map(|n| div().text_color(t.error).child(n)),
-            )
-            .into_any_element()
+            .into_any_element(),
+        }
     }
 
     // ---- The queue ----
 
-    fn rail(&mut self, t: &Theme, cx: &mut Context<Self>) -> AnyElement {
+    fn rail(&mut self, t: &Theme, width: f32, cx: &mut Context<Self>) -> AnyElement {
         let queue = self.queue();
         let mut rows = Vec::new();
         for (i, k) in queue.iter().enumerate() {
@@ -278,11 +293,13 @@ impl DeskApp {
                 .drafts
                 .iter()
                 .any(|((d, id, _), draft)| *d == k.0 && *id == k.1 && draft.touched());
+            let thumb = thumb.filter(|_| width >= tokens::RAIL_THUMBS);
             rows.push(
                 div()
                     .id(("row", i))
                     .flex()
-                    .gap(px(GAP))
+                    .flex_col()
+                    .gap(px(2.))
                     .px(px(GAP))
                     .py(px(GAP_SMALL + 2.))
                     .border_l_2()
@@ -296,66 +313,80 @@ impl DeskApp {
                     .cursor_pointer()
                     .child(
                         div()
-                            .flex_1()
-                            .min_w_0()
                             .flex()
-                            .flex_col()
-                            .gap(px(2.))
+                            .gap(px(GAP))
                             .child(
                                 div()
+                                    .flex_1()
+                                    .min_w_0()
                                     .flex()
-                                    .items_center()
-                                    .gap(px(GAP_SMALL))
-                                    .text_size(px(SMALL))
+                                    .flex_col()
+                                    .gap(px(2.))
                                     .child(
-                                        div().size(px(8.)).rounded(px(2.)).bg(t.identity_of(&desk)),
+                                        div()
+                                            .flex()
+                                            .items_center()
+                                            .gap(px(GAP_SMALL))
+                                            .text_size(px(SMALL))
+                                            .child(
+                                                div()
+                                                    .size(px(8.))
+                                                    .rounded(px(2.))
+                                                    .bg(t.identity_of(&desk)),
+                                            )
+                                            .child(
+                                                div()
+                                                    .text_color(t.text2)
+                                                    .child(format!("{desk} {}", ask.id)),
+                                            )
+                                            .when(started, |d| {
+                                                d.child(
+                                                    div()
+                                                        .text_color(t.accent)
+                                                        .child("· your draft"),
+                                                )
+                                            }),
                                     )
                                     .child(
                                         div()
-                                            .text_color(t.text2)
-                                            .child(format!("{desk} {}", ask.id)),
-                                    )
-                                    .when(started, |d| {
-                                        d.child(div().text_color(t.accent).child("· your draft"))
-                                    }),
+                                            .line_clamp(2)
+                                            .font_weight(if on {
+                                                FontWeight::SEMIBOLD
+                                            } else {
+                                                FontWeight::NORMAL
+                                            })
+                                            .child(ask.title.clone()),
+                                    ),
                             )
-                            .child(
-                                div()
-                                    .line_clamp(2)
-                                    .font_weight(if on {
-                                        FontWeight::SEMIBOLD
-                                    } else {
-                                        FontWeight::NORMAL
-                                    })
-                                    .child(ask.title.clone()),
-                            )
-                            .child(
-                                div()
-                                    .text_size(px(SMALL))
-                                    .text_color(t.dim)
-                                    .truncate()
-                                    .child(meta.join(" · ")),
-                            ),
+                            .when_some(thumb, |d, image| {
+                                d.child(
+                                    div()
+                                        .flex_none()
+                                        .w(px(tokens::ROW_THUMB_W))
+                                        .h(px(tokens::ROW_THUMB_H))
+                                        .rounded(px(tokens::RADIUS))
+                                        .overflow_hidden()
+                                        .bg(t.raised)
+                                        .child(img(image).size_full().object_fit(ObjectFit::Cover)),
+                                )
+                            }),
                     )
-                    .when_some(thumb, |d, image| {
-                        d.child(
-                            div()
-                                .flex_none()
-                                .w(px(tokens::ROW_THUMB_W))
-                                .h(px(tokens::ROW_THUMB_H))
-                                .rounded(px(tokens::RADIUS))
-                                .overflow_hidden()
-                                .bg(t.raised)
-                                .child(img(image).size_full().object_fit(ObjectFit::Cover)),
-                        )
-                    })
+                    // Under the title and its picture, so the picture never
+                    // cuts what the ask is and how long it has waited.
+                    .child(
+                        div()
+                            .text_size(px(SMALL))
+                            .text_color(t.dim)
+                            .truncate()
+                            .child(meta.join(" · ")),
+                    )
                     .on_click(cx.listener(move |app, _: &ClickEvent, _, cx| {
                         app.open(Some(key.clone()), cx)
                     })),
             );
         }
         div()
-            .w(px(tokens::RAIL))
+            .w(px(width))
             .flex_none()
             .h_full()
             .flex()

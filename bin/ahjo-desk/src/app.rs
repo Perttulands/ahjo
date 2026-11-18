@@ -33,6 +33,32 @@ pub enum Reach {
     Failed(String),
 }
 
+/// How the desks stand together: at least one read, none read while some
+/// are still being reached, or none answering at all.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Reached {
+    Some,
+    Waiting,
+    None,
+}
+
+/// What a set of desks comes to.
+pub fn reached<'a>(each: impl Iterator<Item = &'a Reach>) -> Reached {
+    let mut waiting = false;
+    for r in each {
+        match r {
+            Reach::Ok => return Reached::Some,
+            Reach::Loading => waiting = true,
+            Reach::Failed(_) => {}
+        }
+    }
+    if waiting {
+        Reached::Waiting
+    } else {
+        Reached::None
+    }
+}
+
 pub struct DeskState {
     pub place: Place,
     pub asks: Vec<Ask>,
@@ -265,6 +291,10 @@ impl DeskApp {
     }
 
     // ---- The queue ----
+
+    pub fn reached(&self) -> Reached {
+        reached(self.desks.iter().map(|d| &d.reach))
+    }
 
     /// Every open ask, quickest first, then the longest waiting: each
     /// answer frees an agent, and the quick ones first free the most
@@ -1303,6 +1333,12 @@ impl DeskApp {
 
     fn refresh(&mut self, d: usize, cx: &mut Context<Self>) {
         let base = self.desks[d].place.url.clone();
+        // A desk that did not answer is being asked again: say so, or
+        // trying again looks like nothing happened until it times out.
+        if matches!(self.desks[d].reach, Reach::Failed(_)) {
+            self.desks[d].reach = Reach::Loading;
+            cx.notify();
+        }
         cx.spawn(async move |this, cx| {
             let got = desk::runtime()
                 .spawn(desk::asks(base))
