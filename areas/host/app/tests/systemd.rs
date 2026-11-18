@@ -255,7 +255,7 @@ fn disposable_systemd_service_and_host_health_journey(cx: &mut TestAppContext) {
         .to_string();
     let answer = refused(&node.url, "/api/services/missing/restart");
     assert!(answer.contains(&words), "{answer}");
-    let host = command(&node.url, "host", &["show"]);
+    let host = command(&node.url, "host", &["show", "--full"]);
     assert!(
         host["events"]
             .as_array()
