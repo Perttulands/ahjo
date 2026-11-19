@@ -149,3 +149,31 @@ pub struct Save {
     #[serde(default)]
     pub summary: String,
 }
+
+/// A page file of the corpus as it stands: what an app reading the brain
+/// from another machine lists before it asks for the texts that changed.
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
+pub struct File {
+    pub path: String,
+    pub size: u64,
+    /// When it last changed, in nanoseconds since 1970.
+    pub modified: u64,
+}
+
+/// Every page file of the corpus, by path.
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
+pub struct Files {
+    pub files: Vec<File>,
+}
+
+/// Pages' whole texts, asked for by path (`POST /api/brain/texts`).
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
+pub struct Texts {
+    pub texts: Vec<Text>,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
+pub struct Text {
+    pub path: String,
+    pub text: String,
+}

@@ -3,8 +3,12 @@
 //! `view_send`, and the node hands it to the Swarm app connected to it,
 //! which opens Send to Session holding it, so the session is picked where
 //! the sessions are.
+//!
+//! The other machines whose brains can be read are Swarm's too: the places
+//! its fleet last saw, by device, each with the address its node answered at.
 
 use crate::citadel::{post_to, split_answer};
+use crate::mirror::Remote;
 use ahjo_app_kit::settings::{self, DEFAULT_NODE, Settings};
 use serde_json::{Value, json};
 use std::time::Duration;
@@ -18,6 +22,46 @@ pub fn node() -> String {
         .filter(|p| p.exists())
         .map(|p| Settings::load(&p).0.node)
         .unwrap_or_else(|| DEFAULT_NODE.to_string())
+}
+
+/// The other machines Ahjo Swarm knows, one a device, by name: each read
+/// through the first of its nodes with an address.
+pub fn places() -> Vec<Remote> {
+    let Some(path) = settings::path().filter(|p| p.exists()) else {
+        return vec![];
+    };
+    others(&Settings::load(&path).0, this_machine().as_deref())
+}
+
+fn others(s: &Settings, here: Option<&str>) -> Vec<Remote> {
+    let mut out: Vec<Remote> = vec![];
+    for place in s.places.values() {
+        let device = place.device.trim();
+        if device.is_empty()
+            || place.address.is_empty()
+            || here.is_some_and(|h| h.eq_ignore_ascii_case(device))
+            || out.iter().any(|r| r.name.eq_ignore_ascii_case(device))
+        {
+            continue;
+        }
+        out.push(Remote {
+            name: device.to_string(),
+            url: format!("http://{}", place.address),
+        });
+    }
+    out.sort_by(|a, b| a.name.cmp(&b.name));
+    out
+}
+
+/// This machine's name, as its node names its device: the hostname, in
+/// lower case (WSL takes Windows' name).
+fn this_machine() -> Option<String> {
+    let name = if cfg!(windows) {
+        std::env::var("COMPUTERNAME").ok()
+    } else {
+        std::fs::read_to_string("/proc/sys/kernel/hostname").ok()
+    }?;
+    Some(name.trim().to_lowercase()).filter(|n| !n.is_empty())
 }
 
 /// What one sends of a page: what an agent reads it by.
@@ -89,5 +133,24 @@ mod tests {
         let old = br#"{"jsonrpc":"2.0","id":1,"error":{"code":-32602,"message":"Unknown tool: view_send"}}"#;
         assert!(read_answer(old).unwrap_err().contains("older"));
         assert_eq!(reference("knowledge/a/b.md"), "brain page knowledge/a/b.md");
+    }
+
+    #[test]
+    fn the_other_machines_are_swarms_places_but_this_one() {
+        let s: Settings = serde_json::from_value(json!({"places": {
+            "n1": {"device": "landmass", "environment": "wsl", "address": "100.64.0.1:7300"},
+            "n2": {"device": "rig", "environment": "linux", "address": "100.64.0.2:7300"},
+            "n3": {"device": "rig", "environment": "windows", "address": "100.64.0.3:7300"},
+            "n4": {"device": "away", "environment": "linux"},
+        }}))
+        .unwrap();
+        let names: Vec<(String, String)> = others(&s, Some("landmass"))
+            .into_iter()
+            .map(|r| (r.name, r.url))
+            .collect();
+        assert_eq!(
+            names,
+            [("rig".to_string(), "http://100.64.0.2:7300".to_string())]
+        );
     }
 }

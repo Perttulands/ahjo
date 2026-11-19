@@ -87,6 +87,37 @@ fn paths(list: &Value) -> Vec<&str> {
 }
 
 #[tokio::test]
+async fn lists_the_page_files_and_reads_their_texts_for_another_machine() {
+    let corpus = Corpus::new("files");
+    corpus.write("knowledge/a.md", "# A\n\n[[b]]\n");
+    corpus.write("knowledge/b.md", "# B\n");
+    corpus.write("knowledge/notes.txt", "not a page");
+    corpus.write(".git/stray.md", "# Stray\n");
+    let addr = serve_brain(Some(&corpus.0), None).await;
+
+    let (status, listed) = get(addr, "/api/brain/files").await;
+    assert_eq!(status, 200);
+    assert_eq!(
+        paths(&listed["files"]),
+        ["knowledge/a.md", "knowledge/b.md"]
+    );
+    assert_eq!(listed["files"][1]["size"], 4);
+    assert!(listed["files"][0]["modified"].as_u64().unwrap() > 0);
+
+    let asked = serde_json::json!({"paths": ["knowledge/b.md", "knowledge/gone.md"]});
+    let (status, read) = request(addr, "POST", "/api/brain/texts", Some(asked)).await;
+    assert_eq!(status, 200);
+    assert_eq!(
+        read["texts"],
+        serde_json::json!([{"path": "knowledge/b.md", "text": "# B\n"}])
+    );
+
+    let outside = serde_json::json!({"paths": ["../secret.md"]});
+    let (status, _) = request(addr, "POST", "/api/brain/texts", Some(outside)).await;
+    assert_eq!(status, 403, "a path out of the corpus is refused");
+}
+
+#[tokio::test]
 async fn reads_a_page_with_its_links_and_backlinks() {
     let corpus = Corpus::new("read");
     corpus.write(

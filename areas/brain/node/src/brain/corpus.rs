@@ -7,7 +7,7 @@
 //! backlinks come from one walk of the corpus on each read: nothing is
 //! indexed or cached, so the reader always sees the checkout as it is.
 
-use ahjo_brain_contract::{Collection, Link, Page, PageRef};
+use ahjo_brain_contract::{Collection, File, Link, Page, PageRef, Text};
 use std::fs;
 use std::io::Read;
 use std::path::{Component, Path, PathBuf};
@@ -21,6 +21,9 @@ use super::refusal::Refusal;
 
 /// The most bytes read from one page: the Brain shows prose, not archives.
 pub const PAGE_LIMIT: u64 = 1 << 20;
+
+/// The most pages one read of texts takes: an app asks in batches.
+pub const TEXTS_LIMIT: usize = 500;
 
 pub struct Corpus {
     root: PathBuf,
@@ -210,6 +213,52 @@ impl Corpus {
             Ok(_) => Err(outside()),
             Err(_) => Err(Refusal::new(StatusCode::NOT_FOUND, "No such page")),
         }
+    }
+
+    /// Every page file, with its size and when it last changed.
+    pub fn listing(&self) -> Vec<File> {
+        self.files()
+            .into_iter()
+            .filter_map(|(file, path)| {
+                let meta = fs::metadata(&file).ok()?;
+                let modified = meta
+                    .modified()
+                    .ok()?
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .ok()?
+                    .as_nanos() as u64;
+                Some(File {
+                    path,
+                    size: meta.len(),
+                    modified,
+                })
+            })
+            .collect()
+    }
+
+    /// The whole texts of the pages at `paths`; one not there is left out.
+    pub fn texts(&self, paths: &[String]) -> Result<Vec<Text>, Refusal> {
+        if paths.len() > TEXTS_LIMIT {
+            return Err(Refusal::new(
+                StatusCode::BAD_REQUEST,
+                format!("At most {TEXTS_LIMIT} pages at a time"),
+            ));
+        }
+        let mut texts = Vec::with_capacity(paths.len());
+        for path in paths {
+            let file = match self.existing(path) {
+                Ok(file) => file,
+                Err(r) if r.status == StatusCode::NOT_FOUND => continue,
+                Err(r) => return Err(r),
+            };
+            if let Ok(text) = read_page(&file) {
+                texts.push(Text {
+                    path: path.clone(),
+                    text,
+                });
+            }
+        }
+        Ok(texts)
     }
 
     /// Every page in the corpus, by path. Dot-folders and symlinks are left

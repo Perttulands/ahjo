@@ -11,6 +11,7 @@ mod citadel;
 mod corpus;
 mod editor;
 mod history;
+mod mirror;
 mod paint;
 mod reader;
 mod sky;
@@ -23,7 +24,7 @@ use app::{Bench, Start};
 use gpui::App;
 use std::borrow::Cow;
 
-const USAGE: &str = "ahjo-brain [--brain <folder>] [--citadel <url>] [--theme <theme, as app.json names it>] [--search <words>] [--open <page>] [--bench <seconds>] [--where]";
+const USAGE: &str = "ahjo-brain [--brain <folder>] [--citadel <url>] [--from <another machine's node url>] [--theme <theme, as app.json names it>] [--search <words>] [--open <page>] [--bench <seconds>] [--where]";
 
 fn value(args: &[String], name: &str) -> Option<String> {
     args.iter()
@@ -39,7 +40,12 @@ pub fn run() {
         return;
     }
     if args.iter().any(|a| a == "--where") {
-        std::process::exit(tell_where(&source::find(&args)));
+        let here = source::find(&args);
+        let place = match source::asked_from(&args) {
+            Some(remote) => here.reading(remote),
+            None => here,
+        };
+        std::process::exit(tell_where(&place));
     }
     let bench = value(&args, "--bench").map(|s| match s.parse::<f32>() {
         Ok(s) => Bench::new(s, launched),
@@ -68,6 +74,7 @@ pub fn run() {
     let direction = flag.or_else(|| Direction::from_key(&settings.theme));
     let start = Start {
         place: source::find(&args),
+        from: source::asked_from(&args),
         settings: (path, settings, broken),
         query: value(&args, "--search"),
         open: value(&args, "--open"),
@@ -108,6 +115,16 @@ fn tell_where(place: &source::Where) -> i32 {
         return 1;
     };
     println!("brain:  {}", root.display());
+    if let Some(remote) = &place.from {
+        println!("from:   {} ({})", remote.name, remote.url);
+        match mirror::sync(&remote.url, place.cache.as_deref().unwrap_or(root)) {
+            Ok(s) => println!("copied: {} pages, {} gone", s.fetched, s.removed),
+            Err(e) => {
+                println!("copied: failed: {e}");
+                return 1;
+            }
+        }
+    }
     let kept = place
         .cache
         .as_ref()

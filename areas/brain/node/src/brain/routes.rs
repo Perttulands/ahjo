@@ -3,12 +3,12 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use ahjo_brain_contract::{Changes, Collections, Listing, Results, Save};
+use ahjo_brain_contract::{Changes, Collections, Files, Listing, Results, Save, Texts};
 use axum::extract::rejection::JsonRejection;
 use axum::extract::{Query, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
-use axum::routing::get;
+use axum::routing::{get, post};
 use axum::{Json, Router};
 
 use super::{Brain, Refusal};
@@ -30,6 +30,8 @@ pub fn routes<S: Clone + Send + Sync + 'static>(brain: Arc<Brain>) -> Router<S> 
         .route("/api/brain/collections", get(collections))
         .route("/api/brain/collection", get(collection))
         .route("/api/brain/changes", get(changes))
+        .route("/api/brain/files", get(files))
+        .route("/api/brain/texts", post(texts))
         .with_state(brain)
 }
 
@@ -47,6 +49,26 @@ fn param<'a>(params: &'a HashMap<String, String>, name: &str) -> &'a str {
 async fn search(State(brain): State<Arc<Brain>>, Query(params): Params) -> Response {
     let results = brain.search(param(&params, "q")).await;
     answer(results.map(|results| Results { results }))
+}
+
+async fn files(State(brain): State<Arc<Brain>>) -> Response {
+    answer(brain.files().await.map(|files| Files { files }))
+}
+
+#[derive(serde::Deserialize)]
+struct TextsRequest {
+    paths: Vec<String>,
+}
+
+async fn texts(
+    State(brain): State<Arc<Brain>>,
+    body: Result<Json<TextsRequest>, JsonRejection>,
+) -> Response {
+    let Ok(Json(asked)) = body else {
+        let why = "The body is not {\"paths\": [...]}";
+        return Refusal::new(StatusCode::BAD_REQUEST, why).into_response();
+    };
+    answer(brain.texts(asked.paths).await.map(|texts| Texts { texts }))
 }
 
 async fn page(State(brain): State<Arc<Brain>>, Query(params): Params) -> Response {

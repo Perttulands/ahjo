@@ -37,10 +37,10 @@ struct Answer {
 pub fn split_url(url: &str) -> Result<(String, String), String> {
     let rest = url
         .strip_prefix("http://")
-        .ok_or_else(|| format!("the Citadel URL {url:?} must start with http://"))?;
+        .ok_or_else(|| format!("the URL {url:?} must start with http://"))?;
     let (authority, prefix) = rest.split_at(rest.find('/').unwrap_or(rest.len()));
     if authority.is_empty() || authority.contains('@') {
-        return Err(format!("the Citadel URL {url:?} names no host"));
+        return Err(format!("the URL {url:?} names no host"));
     }
     let authority = if authority
         .rsplit_once(':')
@@ -118,10 +118,24 @@ pub fn post_to(
     body: &serde_json::Value,
     wait: Duration,
 ) -> Result<Vec<u8>, String> {
+    ask(who, "POST", url, path, Some(body), wait, ANSWER_LIMIT)
+}
+
+/// One request to `path` under `url`, with a JSON body or none, and its
+/// whole answer, read up to `limit` bytes.
+pub fn ask(
+    who: &str,
+    method: &str,
+    url: &str,
+    path: &str,
+    body: Option<&serde_json::Value>,
+    wait: Duration,
+    limit: u64,
+) -> Result<Vec<u8>, String> {
     let (authority, prefix) = split_url(url)?;
-    let body = body.to_string();
+    let body = body.map(|b| b.to_string()).unwrap_or_default();
     let request = format!(
-        "POST {prefix}{path} HTTP/1.1\r\nHost: {authority}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+        "{method} {prefix}{path} HTTP/1.1\r\nHost: {authority}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
         body.len()
     );
     let addr = authority
@@ -138,7 +152,7 @@ pub fn post_to(
         .map_err(|e| format!("asking {who}: {e}"))?;
     let mut answer = vec![];
     stream
-        .take(ANSWER_LIMIT)
+        .take(limit)
         .read_to_end(&mut answer)
         .map_err(|e| format!("reading {who}'s answer: {e}"))?;
     Ok(answer)

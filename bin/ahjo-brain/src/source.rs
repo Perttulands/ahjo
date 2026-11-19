@@ -4,6 +4,9 @@
 //! - The brain's files: `--brain <dir>` or `BRAIN_ROOT`; otherwise
 //!   `/srv/data/context` on Linux, and on Windows the first WSL distribution
 //!   that has it, through `\\wsl.localhost\<distro>\srv\data\context`.
+//! - Another machine's brain: `--from <node url>` (`BRAIN_FROM`), or one of
+//!   Ahjo Swarm's places chosen in the app, read through its node into a
+//!   copy kept in the cache (`mirror`), read only.
 //! - Context Citadel, for ranked search: `--citadel <url>` or
 //!   `BRAIN_CITADEL`; otherwise `http://127.0.0.1:3200`, which on Windows
 //!   reaches a WSL service bound to loopback through WSL's localhost
@@ -19,6 +22,7 @@
 //!   Until a theme is chosen here, the one chosen in Ahjo Swarm is drawn.
 
 use crate::corpus::Entry;
+use crate::mirror::{self, Remote};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -27,10 +31,27 @@ pub const DEFAULT_CITADEL: &str = "http://127.0.0.1:3200";
 const LINUX_ROOT: &str = "/srv/data/context";
 const WSL_ROOT: &str = r"srv\data\context";
 
+#[derive(Clone)]
 pub struct Where {
     pub brain: Option<PathBuf>,
     pub citadel: String,
     pub cache: Option<PathBuf>,
+    /// The other machine the brain is read from; none is this one's.
+    pub from: Option<Remote>,
+}
+
+impl Where {
+    /// Where `remote`'s brain is read, from this launch's cache: its copy,
+    /// which keeps its own scan beside it.
+    pub fn reading(&self, remote: Remote) -> Where {
+        let home = self.cache.as_ref().map(|c| mirror::home(c, &remote.url));
+        Where {
+            brain: home.as_deref().map(mirror::pages),
+            citadel: self.citadel.clone(),
+            cache: home,
+            from: Some(remote),
+        }
+    }
 }
 
 fn arg(args: &[String], name: &str) -> Option<String> {
@@ -54,7 +75,17 @@ pub fn find(args: &[String]) -> Where {
         brain,
         citadel,
         cache,
+        from: None,
     }
+}
+
+/// The other machine asked for at launch: `--from <node url>` or
+/// `BRAIN_FROM`, named by its host.
+pub fn asked_from(args: &[String]) -> Option<Remote> {
+    let url = arg(args, "--from").or_else(|| std::env::var("BRAIN_FROM").ok())?;
+    let name = url.trim_start_matches("http://");
+    let name = name.split([':', '/']).next().unwrap_or(name).to_string();
+    Some(Remote { name, url })
 }
 
 fn default_root() -> Option<PathBuf> {

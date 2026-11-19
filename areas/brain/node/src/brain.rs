@@ -14,6 +14,9 @@
 //!   when it last changed.
 //! - `GET /api/brain/changes?limit=` — the newest commits and the pages
 //!   each touched.
+//! - `GET /api/brain/files` — every page file with its size and when it
+//!   changed, and `POST /api/brain/texts` — `{ paths }`: those pages' whole
+//!   texts. Ahjo Brain on another machine keeps a copy of the corpus by them.
 
 mod citadel;
 mod corpus;
@@ -29,7 +32,9 @@ use std::sync::Arc;
 use anyhow::Result;
 use axum::http::StatusCode;
 
-pub use ahjo_brain_contract::{Change, Collection, Commit, Found, Listed, Page, PageRef};
+pub use ahjo_brain_contract::{
+    Change, Collection, Commit, File, Found, Listed, Page, PageRef, Text,
+};
 
 pub use refusal::{Refusal, code as refusal_code};
 pub use routes::routes;
@@ -184,6 +189,17 @@ impl Brain {
         })
         .await?;
         Ok(Read { found, error })
+    }
+
+    /// Every page file with its size and when it last changed.
+    pub async fn files(&self) -> Result<Vec<File>, Refusal> {
+        blocking(self.corpus()?, |c| Ok(c.listing())).await
+    }
+
+    /// The whole texts of the pages at `paths`, at most
+    /// [`corpus::TEXTS_LIMIT`] at a time; one not there is left out.
+    pub async fn texts(&self, paths: Vec<String>) -> Result<Vec<Text>, Refusal> {
+        blocking(self.corpus()?, move |c| c.texts(&paths)).await
     }
 
     fn corpus(&self) -> Result<Arc<corpus::Corpus>, Refusal> {

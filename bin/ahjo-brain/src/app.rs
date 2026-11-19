@@ -17,6 +17,7 @@ use crate::citadel::{self, Hit};
 use crate::corpus::{self, Corpus, Entry};
 use crate::editor::{self, Editor, EditorEvent};
 use crate::history::{self, History};
+use crate::mirror::{self, Remote};
 use crate::paint::{self, Align, Dot, Face, Label, Light, Line, Picture, Ring, Shape};
 use crate::reader::{self, Reader};
 use crate::sky::{self, Rect, Role, Sky};
@@ -223,6 +224,8 @@ impl Bench {
 /// What the app is told at launch.
 pub struct Start {
     pub place: Where,
+    /// Another machine's brain to read instead of this one's.
+    pub from: Option<Remote>,
     /// The app's settings file, what it held, and why it did not read.
     pub settings: (Option<PathBuf>, source::Settings, Option<String>),
     pub query: Option<String>,
@@ -231,7 +234,19 @@ pub struct Start {
 }
 
 pub struct BrainApp {
+    /// Where the brain read is: this machine's, or another's copy.
     place: Where,
+    /// This machine's brain, as the launch found it.
+    here: Where,
+    /// The other machines a brain can be read from, as Swarm last saw them,
+    /// and whether their list is open.
+    others: Vec<Remote>,
+    choosing: bool,
+    /// Another machine's copy is being brought up to date.
+    syncing: bool,
+    /// Why the copy read is as last copied: the other machine did not
+    /// answer.
+    away_from: Option<String>,
     data: Option<Rc<Data>>,
     entries: Vec<Entry>,
     marker: Option<SystemTime>,
@@ -343,6 +358,7 @@ impl BrainApp {
             .app_size
             .unwrap_or_else(|| (ahjo_app_kit::theme::chosen_scale() * 100.).round() as u16);
         window.set_ui_scale(zoom::app::scale(app_size), cx);
+        let others = crate::swarm::places();
         let mut app = BrainApp {
             app_size,
             app_wheel: Rc::default(),
@@ -357,7 +373,22 @@ impl BrainApp {
             settings_path,
             settings,
             settings_broken,
-            place: start.place,
+            here: start.place.clone(),
+            place: match start.from {
+                // Named as Swarm names it, when Swarm knows it.
+                Some(remote) => start.place.reading(
+                    others
+                        .iter()
+                        .find(|r| r.url == remote.url)
+                        .cloned()
+                        .unwrap_or(remote),
+                ),
+                None => start.place,
+            },
+            others,
+            choosing: false,
+            syncing: false,
+            away_from: None,
             data: None,
             entries: vec![],
             marker: None,
@@ -416,6 +447,8 @@ impl BrainApp {
             return;
         };
         let cache = self.place.cache.clone();
+        let from = self.place.from.clone();
+        self.syncing = from.is_some();
         self.marker = source::marker(&root);
         cx.spawn(async move |me, cx| {
             let kept = cx
@@ -432,12 +465,44 @@ impl BrainApp {
                     .await;
                 placement = built.1.placement(&built.0);
                 let entries = kept.entries.clone();
-                let _ = me.update(cx, |me, cx| me.arrive(built, entries, cx));
+                let _ = me.update(cx, |me, cx| {
+                    if me.place.brain.as_ref() == Some(&root) {
+                        me.arrive(built, entries, cx)
+                    }
+                });
             } else {
                 let _ = me.update(cx, |me, cx| {
-                    me.status = Some("Reading the brain for the first time…".into());
+                    me.status = Some(match &from {
+                        Some(r) => format!("Copying {}'s brain to this machine…", r.name),
+                        None => "Reading the brain for the first time…".into(),
+                    });
                     cx.notify();
                 });
+            }
+            if let (Some(remote), Some(home)) = (from.clone(), cache.clone()) {
+                let synced = cx
+                    .background_spawn(async move { mirror::sync(&remote.url, &home) })
+                    .await;
+                let stop = me
+                    .update(cx, |me, cx| {
+                        if me.place.brain.as_ref() != Some(&root) {
+                            return true;
+                        }
+                        me.syncing = false;
+                        me.away_from = synced.as_ref().err().cloned();
+                        let Err(e) = synced else { return false };
+                        if kept.entries.is_empty() {
+                            me.status = Some(format!("{}'s brain did not come: {e}", remote.name));
+                            cx.notify();
+                            return true;
+                        }
+                        cx.notify();
+                        false
+                    })
+                    .unwrap_or(true);
+                if stop {
+                    return;
+                }
             }
             let scanned = cx
                 .background_spawn({
@@ -450,6 +515,9 @@ impl BrainApp {
                 Ok(e) => e,
                 Err(e) => {
                     let _ = me.update(cx, |me, cx| {
+                        if me.place.brain.as_ref() != Some(&root) {
+                            return;
+                        }
                         me.status = Some(format!("The brain did not read: {e}"));
                         cx.notify();
                     });
@@ -459,6 +527,9 @@ impl BrainApp {
             if entries.is_empty() && kept.entries.is_empty() {
                 // Read, and nothing in it: say so instead of reading on.
                 let _ = me.update(cx, |me, cx| {
+                    if me.place.brain.as_ref() != Some(&root) {
+                        return;
+                    }
                     me.status = Some(no_pages(&root));
                     cx.notify();
                 });
@@ -475,7 +546,11 @@ impl BrainApp {
                 .await;
             let placement = built.1.placement(&built.0);
             let saved = entries.clone();
-            let _ = me.update(cx, |me, cx| me.arrive(built, entries, cx));
+            let _ = me.update(cx, |me, cx| {
+                if me.place.brain.as_ref() == Some(&root) {
+                    me.arrive(built, entries, cx)
+                }
+            });
             if let Some(cache) = cache {
                 let root_name = root.display().to_string();
                 cx.background_spawn(async move {
@@ -506,11 +581,93 @@ impl BrainApp {
         if self.data.is_none() {
             return;
         }
+        if let Some(remote) = self.place.from.clone() {
+            self.sync_again(remote, cx);
+            return;
+        }
         let now = source::marker(&root);
         if now == self.marker {
             return;
         }
         self.marker = now;
+        self.rescan(root, cx);
+    }
+
+    /// Reads the brain of `remote`, or this machine's: the sky, the lists and
+    /// the search start again from it.
+    fn read_from(&mut self, remote: Option<Remote>, cx: &mut Context<Self>) {
+        self.choosing = false;
+        if self.place.from == remote {
+            cx.notify();
+            return;
+        }
+        self.close(cx);
+        self.back.clear();
+        self.field.update(cx, |f, cx| f.set("", false, cx));
+        self.query.clear();
+        self.results.clear();
+        self.pick = None;
+        self.replay = None;
+        self.hover = None;
+        self.hover_system = None;
+        self.flight = None;
+        self.open_on_arrival = None;
+        self.data = None;
+        self.entries.clear();
+        self.framed = false;
+        self.syncing = false;
+        self.away_from = None;
+        self.place = match remote {
+            Some(r) => self.here.reading(r),
+            None => self.here.clone(),
+        };
+        self.status = Some("Looking for the brain…".into());
+        self.load(cx);
+        cx.notify();
+    }
+
+    /// Opens or closes the list of machines whose brain can be read.
+    fn choose_from(&mut self, cx: &mut Context<Self>) {
+        self.choosing = !self.choosing;
+        if self.choosing {
+            self.others = crate::swarm::places();
+        }
+        cx.notify();
+    }
+
+    /// Brings another machine's copy up to date, and reads it again when
+    /// anything came.
+    fn sync_again(&mut self, remote: Remote, cx: &mut Context<Self>) {
+        let (Some(home), Some(root)) = (self.place.cache.clone(), self.place.brain.clone()) else {
+            return;
+        };
+        if self.syncing {
+            return;
+        }
+        self.syncing = true;
+        cx.spawn(async move |me, cx| {
+            let url = remote.url.clone();
+            let synced = cx
+                .background_spawn(async move { mirror::sync(&url, &home) })
+                .await;
+            let _ = me.update(cx, |me, cx| {
+                me.syncing = false;
+                // Another brain was chosen meanwhile.
+                if me.place.from.as_ref() != Some(&remote) {
+                    return;
+                }
+                me.away_from = synced.as_ref().err().cloned();
+                match synced {
+                    Ok(s) if s.changed() => me.rescan(root, cx),
+                    _ => cx.notify(),
+                }
+            });
+        })
+        .detach();
+    }
+
+    /// Reads the brain at `root` again and shows what changed.
+    fn rescan(&mut self, root: PathBuf, cx: &mut Context<Self>) {
         let known = self.entries.clone();
         let placement = self
             .data
@@ -537,7 +694,11 @@ impl BrainApp {
                 .await;
             let placement = built.1.placement(&built.0);
             let saved = entries.clone();
-            let _ = me.update(cx, |me, cx| me.arrive(built, entries, cx));
+            let _ = me.update(cx, |me, cx| {
+                if me.place.brain.as_ref() == Some(&root) {
+                    me.arrive(built, entries, cx)
+                }
+            });
             if let Some(cache) = cache {
                 let root = root.display().to_string();
                 cx.background_spawn(async move {
@@ -851,6 +1012,7 @@ impl BrainApp {
     fn say(&mut self, words: String, cx: &mut Context<Self>) {
         self.said = Some(words);
         self.said_gen += 1;
+        cx.notify();
         let said = self.said_gen;
         cx.spawn(async move |me, cx| {
             cx.background_executor()
@@ -931,6 +1093,7 @@ impl BrainApp {
             cx.notify();
         }
         let url = self.place.citadel.clone();
+        let from = self.place.from.as_ref().map(|r| r.url.clone());
         cx.spawn(async move |me, cx| {
             // Typing on: only the words it rests on are asked.
             cx.background_executor()
@@ -940,7 +1103,12 @@ impl BrainApp {
                 return;
             }
             let hits = cx
-                .background_spawn(async move { citadel::search(&url, &q) })
+                .background_spawn(async move {
+                    match from {
+                        Some(node) => mirror::search(&node, &q),
+                        None => citadel::search(&url, &q),
+                    }
+                })
                 .await;
             let _ = me.update(cx, |me, cx| {
                 if me.asked == asked {
@@ -1093,6 +1261,14 @@ impl BrainApp {
             return;
         };
         if self.editing.is_some() {
+            return;
+        }
+        if let Some(remote) = &self.place.from {
+            let words = format!(
+                "This is {}'s brain, read only: write it there.",
+                remote.name
+            );
+            self.say(words, cx);
             return;
         }
         let page = data.corpus.pages[p].clone();
@@ -2875,26 +3051,45 @@ impl Render for BrainApp {
                 status.clone(),
                 None,
             )));
-        } else if let Some(d) = &self.data {
-            let counts = format!(
-                "{} pages · {} subjects · {} links",
-                d.corpus.pages.len(),
-                d.corpus.subjects.len(),
-                d.corpus.links.len()
-            );
+        }
+        // The counts, and whose brain they count: the switch stays while
+        // another brain comes, so a slow one can be left.
+        let counts = self
+            .data
+            .as_ref()
+            .filter(|_| self.status.is_none())
+            .map(|d| {
+                format!(
+                    "{} pages · {} subjects · {} links",
+                    d.corpus.pages.len(),
+                    d.corpus.subjects.len(),
+                    d.corpus.links.len()
+                )
+            });
+        let switch = self.place.from.is_some() || !self.others.is_empty();
+        if counts.is_some() || switch {
             root = root.child(
                 div()
                     .absolute()
                     .left(px(chrome::INSET))
-                    .bottom(px(chrome::INSET))
+                    .bottom(px(
+                        chrome::INSET - (chrome::SWITCH_HEIGHT - chrome::FOOT) / 2.
+                    ))
+                    .h(px(chrome::SWITCH_HEIGHT))
+                    .flex()
+                    .items_center()
+                    .gap(px(8.))
                     .text_size(px(chrome::TEXT))
                     .text_color(t.dim)
-                    .child(counts),
+                    .children(counts)
+                    .when(switch, |d| d.child(self.source_switch(&t, cx))),
             );
         }
-        if self.status.is_none() && self.data.is_some() {
+        // Another machine's copy has no history of its own to replay.
+        if self.status.is_none() && self.data.is_some() && self.place.from.is_none() {
             root = root.child(self.replay_bar(&t, cx));
         }
+
         if let Some(chip) = self.evidence_chip(&t, cx) {
             root = root.child(chip);
         }
@@ -3026,10 +3221,16 @@ impl BrainApp {
                             .rounded(px(7.))
                             .bg(t.error),
                     )
-                    .child(
-                        "Citadel is not answering, so only titles and aliases are \
-                         matched here.",
-                    ),
+                    .child(match &self.place.from {
+                        Some(r) => format!(
+                            "{}'s search is not answering, so only titles and aliases \
+                             are matched here.",
+                            r.name
+                        ),
+                        None => "Citadel is not answering, so only titles and aliases are \
+                                 matched here."
+                            .to_string(),
+                    }),
             );
         }
         if self.results.is_empty() && self.answered == self.asked {
@@ -3470,6 +3671,103 @@ impl BrainApp {
     }
 
     /// The theme's mark: the direction shown, and a click to the next.
+    /// Whose brain is read, at the foot of the search column: this
+    /// machine's, or one of the others Ahjo Swarm knows, in a list it opens.
+    fn source_switch(&self, t: &Theme, cx: &mut Context<Self>) -> impl IntoElement {
+        let label = match (&self.place.from, &self.away_from) {
+            (Some(r), Some(_)) => format!("{}'s brain, as last copied", r.name),
+            (Some(r), None) => format!("{}'s brain", r.name),
+            (None, _) => "This machine's brain".to_string(),
+        };
+        let tip = match &self.away_from {
+            Some(e) => format!("{e}. Read another machine's brain"),
+            None => "Read another machine's brain".to_string(),
+        };
+        let row = |id: SharedString, words: String, here: bool| {
+            div()
+                .id(id)
+                .h(px(chrome::SWITCH_HEIGHT))
+                .px(px(chrome::SWITCH_PAD_X))
+                .flex()
+                .items_center()
+                .gap(px(8.))
+                .rounded(px(chrome::RADIUS))
+                .cursor_pointer()
+                .text_color(if here { t.text } else { t.text2 })
+                .hover(|s| s.text_color(t.text).bg(t.raised))
+                .child(
+                    div()
+                        .size(px(6.))
+                        .rounded(px(6.))
+                        .when(here, |d| d.bg(t.accent)),
+                )
+                .child(words)
+        };
+        let mut list = div()
+            .absolute()
+            .left_0()
+            .bottom(px(chrome::SWITCH_HEIGHT + 4.))
+            .min_w(px(220.))
+            .flex()
+            .flex_col()
+            .p(px(4.))
+            .rounded(px(chrome::RADIUS))
+            .bg(t.raised)
+            .border_1()
+            .border_color(t.divider);
+        if self.choosing {
+            list = list.child(
+                row(
+                    "from-here".into(),
+                    "This machine".into(),
+                    self.place.from.is_none(),
+                )
+                .on_click(cx.listener(|me, _, _, cx| me.read_from(None, cx))),
+            );
+            for (i, r) in self.others.iter().enumerate() {
+                let here = self.place.from.as_ref() == Some(r);
+                let remote = r.clone();
+                list = list.child(
+                    row(format!("from-{i}").into(), r.name.clone(), here).on_click(
+                        cx.listener(move |me, _, _, cx| me.read_from(Some(remote.clone()), cx)),
+                    ),
+                );
+            }
+            if self.others.is_empty() {
+                list = list.child(
+                    div()
+                        .px(px(chrome::SWITCH_PAD_X))
+                        .py(px(4.))
+                        .text_color(t.dim)
+                        .child("Ahjo Swarm knows no other machine."),
+                );
+            }
+        }
+        div()
+            .relative()
+            .occlude()
+            .when(self.choosing, |d| d.child(list))
+            .child(
+                div()
+                    .id("from")
+                    .h(px(chrome::SWITCH_HEIGHT))
+                    .px(px(chrome::SWITCH_PAD_X))
+                    .flex()
+                    .items_center()
+                    .rounded(px(chrome::RADIUS))
+                    .bg(veil(t, chrome::PANEL_ALPHA))
+                    .cursor_pointer()
+                    .text_color(t.text2)
+                    .hover(|s| s.text_color(t.text).bg(t.raised))
+                    .tooltip(kit::tip(tip))
+                    .when(self.away_from.is_some(), |d| {
+                        d.child(div().mr(px(8.)).size(px(7.)).rounded(px(7.)).bg(t.error))
+                    })
+                    .on_click(cx.listener(|me, _, _, cx| me.choose_from(cx)))
+                    .child(label),
+            )
+    }
+
     fn theme_button(&self, t: &Theme, cx: &mut Context<Self>) -> impl IntoElement {
         let right = if self.reading.is_some() {
             reader::sheet_width(self.size.0, self.reader_k()) + chrome::INSET
@@ -3557,7 +3855,7 @@ impl BrainApp {
                     .tooltip(kit::tip("Send it to a session, in Ahjo Swarm"))
                     .on_click(cx.listener(|me, _, _, cx| me.send_page(cx))),
             )
-            .when(self.editing.is_none(), |d| {
+            .when(self.editing.is_none() && self.place.from.is_none(), |d| {
                 d.child(
                     kit::button(t, "edit", "Edit", kit::Kind::Quiet)
                         .tooltip(kit::tip("Write this page (E)"))
