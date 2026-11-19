@@ -9,6 +9,7 @@ mod arrange;
 mod camera;
 mod citadel;
 mod corpus;
+mod editor;
 mod history;
 mod paint;
 mod reader;

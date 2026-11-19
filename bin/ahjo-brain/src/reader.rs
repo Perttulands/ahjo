@@ -37,6 +37,9 @@ pub struct Reader {
     /// comes up on the link it went down on.
     link_over: Rc<RefCell<Option<(ElementId, usize)>>>,
     link_down: Rc<RefCell<Option<(ElementId, usize)>>>,
+    /// The page as it is being written (its title and summary), shown
+    /// live instead of as the brain last read it.
+    live: Option<(String, String)>,
 }
 
 impl Reader {
@@ -51,6 +54,7 @@ impl Reader {
             text: r::BODY,
             link_over: Rc::default(),
             link_down: Rc::default(),
+            live: None,
         }
     }
 
@@ -111,6 +115,7 @@ impl Reader {
         self.data = Some(data.clone());
         self.page = Some(page);
         self.body = None;
+        self.live = None;
         self.scroll.set_offset(gpui::point(px(0.), px(0.)));
         cx.notify();
         let read = cx.background_spawn(async move {
@@ -138,6 +143,50 @@ impl Reader {
             let _ = me.update(cx, |me, cx| {
                 if me.asked == asked {
                     me.body = Some(body);
+                    cx.notify();
+                }
+            });
+        })
+        .detach();
+    }
+
+    /// Reads the page shown from its file again, as the brain holds it.
+    pub fn reread(&mut self, cx: &mut Context<Self>) {
+        if let (Some(data), Some(page)) = (self.data.clone(), self.page) {
+            let at = self.scroll.offset();
+            self.page = None;
+            self.show(data, page, cx);
+            self.scroll.set_offset(at);
+        }
+    }
+
+    /// Shows the page read as `text` says it, as it is being written: its
+    /// title, summary and body, where the page was scrolled to.
+    pub fn preview(&mut self, text: String, cx: &mut Context<Self>) {
+        let (Some(data), Some(page)) = (self.data.clone(), self.page) else {
+            return;
+        };
+        self.asked += 1;
+        let asked = self.asked;
+        let path = data.corpus.pages[page].path.clone();
+        cx.spawn(async move |me, cx| {
+            let (entry, body) = cx
+                .background_spawn(async move {
+                    let entry = corpus::parse(&path, &text);
+                    let body = without_title(corpus::body(&text), &entry.title);
+                    (entry, body)
+                })
+                .await;
+            let linked = wiki_links_named(&body, |target| {
+                data.corpus
+                    .resolve(target)
+                    .map(|p| data.corpus.pages[p].title.clone())
+            });
+            let blocks = cx.background_spawn(async move { parse(&linked) }).await;
+            let _ = me.update(cx, |me, cx| {
+                if me.asked == asked {
+                    me.live = Some((entry.title, entry.summary));
+                    me.body = Some(Ok(blocks));
                     cx.notify();
                 }
             });
@@ -655,6 +704,10 @@ impl Render for Reader {
         }
         let minutes = (page.words as f32 / 220.).ceil().max(1.) as u32;
         meta.push(format!("{minutes} min read"));
+        let (title, summary) = self
+            .live
+            .clone()
+            .unwrap_or_else(|| (page.title.clone(), page.summary.clone()));
         let head = div()
             .flex()
             .flex_col()
@@ -682,15 +735,15 @@ impl Render for Reader {
                     .font_family(t.ty.display)
                     .font_weight(t.ty.display_weight)
                     .text_color(t.text)
-                    .child(page.title.clone()),
+                    .child(title),
             )
-            .when(!page.summary.is_empty(), |d| {
+            .when(!summary.is_empty(), |d| {
                 d.child(
                     div()
                         .text_size(px(r::LEDE * k))
                         .line_height(px(r::LEDE_LINE * k))
                         .text_color(t.text2)
-                        .child(page.summary.clone()),
+                        .child(summary),
                 )
             });
         let body: AnyElement = match &self.body {

@@ -471,3 +471,22 @@ pub mod chrome {
 pub fn veil(t: &Theme, a: f32) -> Hsla {
     alpha(t.surface, a)
 }
+
+/// Editing a page in place.
+pub mod editor {
+    /// The Markdown's size: a little over the chrome's, for prose.
+    pub const TEXT: f32 = 14.;
+    pub const PAD: f32 = 16.;
+    pub const BAR: f32 = 48.;
+    /// The pages `[[` offers, and their list's width.
+    pub const PICKS: usize = 8;
+    pub const PICK_W: f32 = 380.;
+    /// A pause in typing this long and the page beside follows, and the
+    /// draft is kept.
+    pub const SETTLE_MS: u64 = 150;
+    /// The least the source takes beside the page; less, and it takes the
+    /// window.
+    pub const LEAST: f32 = 480.;
+    /// The source's widest: about ninety letters a line, wrapped.
+    pub const MEASURE: f32 = 860.;
+}

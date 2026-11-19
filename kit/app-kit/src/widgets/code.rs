@@ -303,6 +303,17 @@ impl Code {
         self.selected.clone()
     }
 
+    /// Where the caret was last drawn, in the window: for what the owner
+    /// shows beside it (a completion). None before it is drawn.
+    pub fn caret_bounds(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Option<Bounds<Pixels>> {
+        let at = self.to_utf16(self.cursor());
+        self.bounds_for_range(at..at, Bounds::default(), window, cx)
+    }
+
     /// Washes the stretches a find found (in order, apart), none to clear.
     pub fn set_found(&mut self, found: Vec<Range<usize>>, cx: &mut Context<Self>) {
         if self.found != found {

@@ -6,7 +6,10 @@ only over the node's WebSocket and HTTP interface.
 
 Apps with one purpose of their own are separate binaries on the same app kit,
 so they share Swarm's look but not its shell. `ahjo-brain` is Ahjo Brain, the
-company brain as a night sky with its search and reader. `ahjo-desk` is Ahjo
+company brain as a night sky with its search, reader and editor. It reads the
+brain's files directly and writes a page only through Context Citadel's write
+route, the brain's one writer, which runs `brain check` and commits; a page
+another writer changed meanwhile is not written over unasked. `ahjo-desk` is Ahjo
 Desk, the surface where agents publish and the operator answers in his words
 and marks: it talks only to the decision desks' HTTP API (`/srv/desk`), never
 to a node, keeps marks in the desk's one format, and decodes H.264 itself so

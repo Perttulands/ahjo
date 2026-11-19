@@ -15,6 +15,7 @@ use crate::arrange::{self, Orbit};
 use crate::camera::{Camera, Flight, ease_in_out, ease_out};
 use crate::citadel::{self, Hit};
 use crate::corpus::{self, Corpus, Entry};
+use crate::editor::{self, Editor, EditorEvent};
 use crate::history::{self, History};
 use crate::paint::{self, Align, Dot, Face, Label, Light, Line, Picture, Ring, Shape};
 use crate::reader::{self, Reader};
@@ -296,6 +297,8 @@ pub struct BrainApp {
     /// and the zoom keys anywhere but the page read.
     app_size: u16,
     app_wheel: Rc<std::cell::Cell<zoom::Wheel>>,
+    /// The page read, being written in place beside itself.
+    editing: Option<Entity<Editor>>,
 }
 
 impl Focusable for BrainApp {
@@ -398,6 +401,7 @@ impl BrainApp {
             leave_field: false,
             // The field takes the keys from the start (above).
             typing: true,
+            editing: None,
         };
         app.load(cx);
         app
@@ -682,6 +686,11 @@ impl BrainApp {
         }
         if let Some(p) = self.reading {
             self.reader.update(cx, |r, cx| r.show(data.clone(), p, cx));
+            // Written meanwhile: the page beside the source stays as written.
+            if let Some(ed) = &self.editing {
+                let text = ed.read(cx).text(cx).to_string();
+                self.reader.update(cx, |r, cx| r.preview(text, cx));
+            }
         }
         if let Some(path) = self.open_on_arrival.take()
             && let Some(p) = data
@@ -1036,6 +1045,9 @@ impl BrainApp {
         let Some(data) = self.data.clone() else {
             return;
         };
+        if self.reading != Some(page) {
+            self.stop_editing(cx);
+        }
         self.reading = Some(page);
         self.link = None;
         self.hover = None;
@@ -1043,6 +1055,120 @@ impl BrainApp {
         self.replanned = true;
         self.reader.update(cx, |r, cx| r.show(data, page, cx));
         self.leave_field = true;
+        cx.notify();
+    }
+
+    // ---- Editing the page read in place.
+
+    /// The file of the page at `path` in the brain.
+    pub fn file_of(&self, path: &str) -> Option<PathBuf> {
+        self.data.as_ref().map(|d| d.root.join(path))
+    }
+
+    /// Writes the page read in place: its file (and a draft kept from
+    /// before) read off the UI thread, then the source beside the page.
+    fn edit(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let (Some(data), Some(p)) = (self.data.clone(), self.reading) else {
+            return;
+        };
+        if self.editing.is_some() {
+            return;
+        }
+        let page = data.corpus.pages[p].clone();
+        let file = data.root.join(&page.path);
+        let cache = self.place.cache.clone();
+        // The pages a link may name: lately changed first, as `[[` offers
+        // them before anything is typed.
+        let mut order: Vec<usize> = data.recent.clone();
+        let seen: HashSet<usize> = order.iter().copied().collect();
+        order.extend((0..data.corpus.pages.len()).filter(|i| !seen.contains(i)));
+        let names: Rc<Vec<editor::Name>> = Rc::new(
+            order
+                .into_iter()
+                .filter(|&i| i != p)
+                .map(|i| {
+                    let q = &data.corpus.pages[i];
+                    editor::Name {
+                        slug: q.slug.clone(),
+                        title: q.title.clone(),
+                        aliases: q.aliases.clone(),
+                        hue: data.hues[q.subject],
+                        subject: data.corpus.subjects[q.subject].name.clone(),
+                    }
+                })
+                .collect(),
+        );
+        let path = page.path.clone();
+        let read = cx.background_spawn(async move {
+            let base = std::fs::read(&file)
+                .map(|b| String::from_utf8_lossy(&b).into_owned())
+                .map_err(|e| format!("{}: {e}", file.display()))?;
+            let draft = cache.as_ref().and_then(|c| editor::read_draft(c, &path));
+            Ok::<_, String>((base, draft))
+        });
+        let citadel = self.place.citadel.clone();
+        let cache = self.place.cache.clone();
+        let window_handle = window.window_handle();
+        cx.spawn(async move |me, cx| {
+            let read = read.await;
+            let _ = cx.update_window(window_handle, |_, window, cx| {
+                let _ = me.update(cx, |me, cx| {
+                    let (base, draft) = match read {
+                        Ok(r) => r,
+                        Err(e) => {
+                            me.say(format!("This page did not read: {e}"), cx);
+                            return;
+                        }
+                    };
+                    if me.reading != Some(p) || me.editing.is_some() {
+                        return;
+                    }
+                    let opened = editor::Opened {
+                        path: page.path.clone(),
+                        title: page.title.clone(),
+                        base,
+                        draft,
+                    };
+                    let app = cx.entity().downgrade();
+                    let ed =
+                        cx.new(|cx| Editor::new(app, opened, names, citadel, cache, window, cx));
+                    cx.subscribe_in(&ed, window, |me, ed, ev, window, cx| match ev {
+                        EditorEvent::Changed => {
+                            let text = ed.read(cx).text(cx).to_string();
+                            me.reader.update(cx, |r, cx| r.preview(text, cx));
+                        }
+                        EditorEvent::Saved => me.look_again(cx),
+                        EditorEvent::Leave => {
+                            me.stop_editing(cx);
+                            window.focus(&me.focus, cx);
+                        }
+                    })
+                    .detach();
+                    let text = ed.read(cx).text(cx).to_string();
+                    if text != ed.read(cx).saved_text() {
+                        me.reader.update(cx, |r, cx| r.preview(text, cx));
+                    }
+                    let code = ed.read(cx).code.clone();
+                    ahjo_app_kit::widgets::code::Code::focus(&code, window, cx);
+                    me.editing = Some(ed);
+                    cx.notify();
+                });
+            });
+        })
+        .detach();
+    }
+
+    /// Back to reading: the page as the brain holds it. A page written and
+    /// not saved stays a draft, to come back to.
+    fn stop_editing(&mut self, cx: &mut Context<Self>) {
+        let Some(ed) = self.editing.take() else {
+            return;
+        };
+        ed.update(cx, |ed, cx| ed.keep(cx));
+        if ed.read(cx).unsaved(cx) {
+            self.say("Your draft is kept. E writes on.".into(), cx);
+        }
+        self.reader.update(cx, |r, cx| r.reread(cx));
         cx.notify();
     }
 
@@ -1057,6 +1183,7 @@ impl BrainApp {
     }
 
     pub fn close(&mut self, cx: &mut Context<Self>) {
+        self.stop_editing(cx);
         self.reading = None;
         self.back.clear();
         self.trace = None;
@@ -1391,6 +1518,22 @@ impl BrainApp {
             } else {
                 self.zoom_app(z, 1, window, cx);
             }
+            cx.stop_propagation();
+            return;
+        }
+        // Writing in place, the keys are the source's; Ctrl+E goes back to
+        // reading as it came.
+        if self.editing.is_some() {
+            if (m.control || m.platform) && !m.alt && ks.key == "e" {
+                self.stop_editing(cx);
+                window.focus(&self.focus, cx);
+                cx.stop_propagation();
+            }
+            return;
+        }
+        // E (or Ctrl+E) writes the page read in place.
+        if self.reading.is_some() && !typing && ks.key == "e" && !m.alt && !m.shift {
+            self.edit(window, cx);
             cx.stop_propagation();
             return;
         }
@@ -2748,6 +2891,9 @@ impl Render for BrainApp {
         }
         if self.reading.is_some() {
             root = root.child(self.sheet(&t, cx));
+            if let Some(ed) = &self.editing {
+                root = root.child(self.source_pane(ed));
+            }
         } else {
             root = root.children(self.said_view(&t));
         }
@@ -3385,6 +3531,13 @@ impl BrainApp {
             .right(px(chrome::SHEET_BAR))
             .flex()
             .gap(px(4.))
+            .when(self.editing.is_none(), |d| {
+                d.child(
+                    kit::button(t, "edit", "Edit", kit::Kind::Quiet)
+                        .tooltip(kit::tip("Write this page (E)"))
+                        .on_click(cx.listener(|me, _, window, cx| me.edit(window, cx))),
+                )
+            })
             .when(back, |d| {
                 d.child(
                     glyph("back", true, "Back (Alt+Left)")
@@ -3431,6 +3584,32 @@ impl BrainApp {
             }))
             .child(bar)
             .children(said)
+    }
+}
+
+impl BrainApp {
+    /// The page's source, left of the page it makes; the whole window when
+    /// the page leaves too little beside it.
+    fn source_pane(&self, ed: &Entity<Editor>) -> impl IntoElement {
+        let sheet = reader::sheet_width(self.size.0, self.reader_k());
+        let room = self.size.0 - sheet;
+        let w = if room >= tokens::editor::LEAST {
+            room
+        } else {
+            self.size.0
+        };
+        div()
+            .absolute()
+            .top(px(0.))
+            .left(px(0.))
+            .w(px(w))
+            .h_full()
+            .occlude()
+            .on_mouse_move(|_, _, cx| cx.stop_propagation())
+            .on_scroll(|_, _, cx| cx.stop_propagation())
+            .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+            .on_mouse_up(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+            .child(ed.clone())
     }
 }
 

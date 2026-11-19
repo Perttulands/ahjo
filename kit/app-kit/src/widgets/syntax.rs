@@ -439,6 +439,123 @@ const JSONC: Lang = Lang {
     caseless: false,
 };
 
+/// Markdown, coloured by its marks rather than its words: headings, list
+/// and quote marks, code, links, emphasis marks and front matter's keys.
+/// Not chosen by a file's name (the Files app shows Markdown plain); an
+/// editor of prose asks for it. A static, so `spans` knows it by address.
+pub static MARKDOWN: Lang = Lang {
+    line: NONE,
+    blocks: &[("```", "```", Token::String), ("~~~", "~~~", Token::String)],
+    quotes: "",
+    spanning: "",
+    keywords: NONE,
+    caseless: false,
+};
+
+/// A Markdown line's coloured stretches (see `MARKDOWN`).
+fn markdown_spans(line: &str, carry: Carry) -> (Vec<(Range<usize>, Token)>, Carry) {
+    let whole = |token| (!line.is_empty()).then_some((0..line.len(), token));
+    let trimmed = line.trim_start();
+    let indent = line.len() - trimmed.len();
+    // Inside a fence until its own mark closes it.
+    if let Carry::Block(b) = carry {
+        let next = if trimmed.starts_with(MARKDOWN.blocks[b].0) {
+            Carry::Nothing
+        } else {
+            carry
+        };
+        return (whole(Token::String).into_iter().collect(), next);
+    }
+    if let Some(b) = MARKDOWN
+        .blocks
+        .iter()
+        .position(|(o, ..)| trimmed.starts_with(o))
+    {
+        return (whole(Token::String).into_iter().collect(), Carry::Block(b));
+    }
+    let hashes = trimmed.chars().take_while(|c| *c == '#').count();
+    if (1..=6).contains(&hashes) && trimmed[hashes..].chars().next().is_none_or(|c| c == ' ') {
+        return (whole(Token::Keyword).into_iter().collect(), Carry::Nothing);
+    }
+    let bare = trimmed.trim_end();
+    if bare.len() >= 3
+        && ["-", "*", "_"]
+            .iter()
+            .any(|m| bare.replace(' ', "").chars().all(|c| c.to_string() == *m))
+    {
+        return (whole(Token::Comment).into_iter().collect(), Carry::Nothing);
+    }
+    let mut out = vec![];
+    let mut at = indent;
+    // A quote's marks, then a list's.
+    while line[at..].starts_with('>') {
+        let end = at + 1 + usize::from(line[at + 1..].starts_with(' '));
+        out.push((at..end, Token::Comment));
+        at = end;
+    }
+    let rest = &line[at..];
+    let digits = rest.chars().take_while(char::is_ascii_digit).count();
+    let marker = if rest.starts_with("- ") || rest.starts_with("* ") || rest.starts_with("+ ") {
+        Some(2)
+    } else if digits > 0 && (rest[digits..].starts_with(". ") || rest[digits..].starts_with(") ")) {
+        Some(digits + 2)
+    } else {
+        None
+    };
+    if let Some(len) = marker {
+        let boxed = ["[ ] ", "[x] ", "[X] "]
+            .iter()
+            .any(|b| rest[len..].starts_with(b));
+        let len = len + if boxed { 4 } else { 0 };
+        out.push((at..at + len, Token::Number));
+        at += len;
+    } else if indent == 0 && out.is_empty() {
+        // Front matter's `key:` (lower case, as the brain writes them).
+        let key = rest
+            .find(|c: char| !(c.is_ascii_lowercase() || c == '_' || c == '-'))
+            .unwrap_or(rest.len());
+        if key > 0
+            && rest[key..].starts_with(':')
+            && rest[key + 1..].chars().next().is_none_or(|c| c == ' ')
+        {
+            out.push((0..key + 1, Token::Keyword));
+            at = key + 1;
+        }
+    }
+    while at < line.len() {
+        let rest = &line[at..];
+        let close = |open: usize, end: &str| rest[open..].find(end).map(|k| open + k + end.len());
+        let found = if rest.starts_with('`') {
+            close(1, "`").map(|n| (n, Token::String))
+        } else if rest.starts_with("[[") {
+            close(2, "]]").map(|n| (n, Token::String))
+        } else if rest.starts_with('[') {
+            // `[words](address)`: the words as a link, the address dim.
+            close(1, "](").and_then(|mid| {
+                close(mid, ")").map(|end| {
+                    out.push((at..at + mid - 1, Token::String));
+                    out.push((at + mid - 1..at + end, Token::Comment));
+                    (end, Token::Comment)
+                })
+            })
+        } else if rest.starts_with("**") || rest.starts_with("__") {
+            Some((2, Token::Comment))
+        } else {
+            None
+        };
+        match found {
+            Some((n, token)) => {
+                if !out.last().is_some_and(|(r, _)| r.end == at + n) {
+                    out.push((at..at + n, token));
+                }
+                at += n;
+            }
+            None => at += rest.chars().next().map_or(1, char::len_utf8),
+        }
+    }
+    (out, Carry::Nothing)
+}
+
 /// The language a file's name says, if it is one coloured.
 pub fn lang(name: &str) -> Option<&'static Lang> {
     let lower = name.to_lowercase();
@@ -495,6 +612,9 @@ fn string_end(line: &str, from: usize, quote: char) -> Option<usize> {
 /// The coloured stretches of `line`, which starts inside `carry`, and what
 /// the next line starts inside. Stretches not listed are plain.
 pub fn spans(lang: &Lang, line: &str, carry: Carry) -> (Vec<(Range<usize>, Token)>, Carry) {
+    if std::ptr::eq(lang, &MARKDOWN) {
+        return markdown_spans(line, carry);
+    }
     let mut out = vec![];
     let mut at = 0;
     // Finish what the line starts inside.
@@ -682,6 +802,61 @@ mod tests {
             .into_iter()
             .map(|(r, t)| (&line[r], t))
             .collect()
+    }
+
+    #[test]
+    fn markdown_is_coloured_by_its_marks() {
+        let md = &MARKDOWN;
+        assert_eq!(
+            tokens(md, "## Where it goes"),
+            [("## Where it goes", Token::Keyword)]
+        );
+        assert_eq!(tokens(md, "#hashtag"), []);
+        assert_eq!(
+            tokens(md, "- [ ] see [[sky-map]] and `code`"),
+            [
+                ("- [ ] ", Token::Number),
+                ("[[sky-map]]", Token::String),
+                ("`code`", Token::String)
+            ]
+        );
+        assert_eq!(
+            tokens(md, "12. a [site](http://x) **bold**"),
+            [
+                ("12. ", Token::Number),
+                ("[site]", Token::String),
+                ("(http://x)", Token::Comment),
+                ("**", Token::Comment),
+                ("**", Token::Comment)
+            ]
+        );
+        assert_eq!(
+            tokens(md, "summary: \"a: b\""),
+            [("summary:", Token::Keyword)]
+        );
+        assert_eq!(tokens(md, "Note that: prose"), []);
+        assert_eq!(
+            tokens(md, "> - quoted"),
+            [("> ", Token::Comment), ("- ", Token::Number)]
+        );
+        assert_eq!(tokens(md, "---"), [("---", Token::Comment)]);
+        // A fence holds its lines until it closes; its words are not marks.
+        let text = "```rust\n# not a heading\n```\n# Heading";
+        let found: Vec<_> = highlight(md, text)
+            .into_iter()
+            .map(|(r, t)| (&text[r], t))
+            .collect();
+        assert_eq!(
+            found,
+            [
+                ("```rust", Token::String),
+                ("# not a heading", Token::String),
+                ("```", Token::String),
+                ("# Heading", Token::Keyword)
+            ]
+        );
+        // Other languages are unchanged by it.
+        assert!(lang("notes.md").is_none());
     }
 
     #[test]

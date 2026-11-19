@@ -55,10 +55,61 @@ pub fn split_url(url: &str) -> Result<(String, String), String> {
 
 /// The pages matching `query`, best first. Blocking: run it off the UI.
 pub fn search(url: &str, query: &str) -> Result<Vec<Hit>, String> {
+    let body = serde_json::json!({ "query": query, "limit": RESULTS });
+    let answer = post(url, "search", &body, TIMEOUT)?;
+    parse_answer(&answer)
+}
+
+/// What Citadel says of a page written.
+#[derive(Clone, Debug, Deserialize, PartialEq)]
+pub struct Written {
+    /// False when the page already read that way.
+    pub committed: bool,
+    #[serde(default)]
+    pub revision: String,
+}
+
+/// Writes a page through Citadel, the brain's one writer: it refuses a
+/// page another writer has changed and not committed, and runs `brain
+/// check` on it before it commits, putting the page back when the check
+/// refuses. Blocking: run it off the UI.
+pub fn write(url: &str, path: &str, content: &str, message: &str) -> Result<Written, String> {
+    let body = serde_json::json!({ "path": path, "content": content, "message": message });
+    let raw = post(url, "write", &body, WRITE_TIMEOUT)?;
+    let (status, body) = split_answer(&raw)?;
+    if status != 200 {
+        return Err(refusal(status, body));
+    }
+    serde_json::from_slice(body)
+        .map_err(|_| "Citadel answered the write in a way not understood".into())
+}
+
+/// Citadel's own words for a refusal, or its status.
+fn refusal(status: u16, body: &[u8]) -> String {
+    #[derive(Deserialize)]
+    struct Refused {
+        error: String,
+    }
+    match serde_json::from_slice::<Refused>(body) {
+        Ok(r) => r.error.trim().to_string(),
+        Err(_) => format!("Citadel refused ({status})"),
+    }
+}
+
+/// A commit runs `brain check`, which Citadel gives two minutes.
+const WRITE_TIMEOUT: Duration = Duration::from_secs(130);
+
+/// Posts `body` to `/v1/library/<route>` and reads the whole answer.
+fn post(
+    url: &str,
+    route: &str,
+    body: &serde_json::Value,
+    wait: Duration,
+) -> Result<Vec<u8>, String> {
     let (authority, prefix) = split_url(url)?;
-    let body = serde_json::json!({ "query": query, "limit": RESULTS }).to_string();
+    let body = body.to_string();
     let request = format!(
-        "POST {prefix}/v1/library/search HTTP/1.1\r\nHost: {authority}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+        "POST {prefix}/v1/library/{route} HTTP/1.1\r\nHost: {authority}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
         body.len()
     );
     let addr = authority
@@ -69,7 +120,7 @@ pub fn search(url: &str, query: &str) -> Result<Vec<Hit>, String> {
     let mut stream = TcpStream::connect_timeout(&addr, TIMEOUT)
         .map_err(|e| format!("Citadel did not answer at {authority}: {e}"))?;
     stream
-        .set_read_timeout(Some(TIMEOUT))
+        .set_read_timeout(Some(wait))
         .and_then(|_| stream.set_write_timeout(Some(TIMEOUT)))
         .and_then(|_| stream.write_all(request.as_bytes()))
         .map_err(|e| format!("asking Citadel: {e}"))?;
@@ -78,10 +129,11 @@ pub fn search(url: &str, query: &str) -> Result<Vec<Hit>, String> {
         .take(ANSWER_LIMIT)
         .read_to_end(&mut answer)
         .map_err(|e| format!("reading Citadel's answer: {e}"))?;
-    parse_answer(&answer)
+    Ok(answer)
 }
 
-fn parse_answer(raw: &[u8]) -> Result<Vec<Hit>, String> {
+/// An answer's status and body.
+fn split_answer(raw: &[u8]) -> Result<(u16, &[u8]), String> {
     let split = raw
         .windows(4)
         .position(|w| w == b"\r\n\r\n")
@@ -92,16 +144,21 @@ fn parse_answer(raw: &[u8]) -> Result<Vec<Hit>, String> {
         .nth(1)
         .and_then(|s| s.parse::<u16>().ok())
         .unwrap_or(0);
-    if status != 200 {
-        return Err(format!("Citadel refused the search ({status})"));
-    }
     if head
         .to_ascii_lowercase()
         .contains("transfer-encoding: chunked")
     {
         return Err("Citadel answered in chunks, which this client does not read".into());
     }
-    serde_json::from_slice::<Answer>(&raw[split + 4..])
+    Ok((status, &raw[split + 4..]))
+}
+
+fn parse_answer(raw: &[u8]) -> Result<Vec<Hit>, String> {
+    let (status, body) = split_answer(raw)?;
+    if status != 200 {
+        return Err(format!("Citadel refused the search ({status})"));
+    }
+    serde_json::from_slice::<Answer>(body)
         .map(|a| a.results)
         .map_err(|_| "Citadel answered with something other than results".to_string())
 }
@@ -154,5 +211,30 @@ mod tests {
     #[test]
     fn a_refusal_is_an_error_not_an_empty_answer() {
         assert!(parse_answer(b"HTTP/1.1 403 Forbidden\r\n\r\n{}").is_err());
+    }
+
+    #[test]
+    fn a_write_says_why_the_brain_refused_it() {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let server = std::thread::spawn(move || {
+            let (mut s, _) = listener.accept().unwrap();
+            let mut buf = [0u8; 4096];
+            let n = s.read(&mut buf).unwrap();
+            let body =
+                r#"{"error":"brain check refuses this commit:\nbroken link [[nope]] in a.md"}"#;
+            write!(
+                s,
+                "HTTP/1.1 422 Unprocessable\r\nContent-Length: {}\r\n\r\n{body}",
+                body.len()
+            )
+            .unwrap();
+            String::from_utf8_lossy(&buf[..n]).to_string()
+        });
+        let said = write(&format!("http://127.0.0.1:{port}"), "a.md", "x", "m").unwrap_err();
+        assert!(said.ends_with("broken link [[nope]] in a.md"), "{said}");
+        let asked = server.join().unwrap();
+        assert!(asked.starts_with("POST /v1/library/write HTTP/1.1"));
+        assert!(asked.contains(r#""path":"a.md""#));
     }
 }
