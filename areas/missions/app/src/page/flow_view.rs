@@ -1,5 +1,5 @@
-//! A mission as defined, read top to bottom, and the head it wears while
-//! its steps are changed on the canvas.
+//! A mission's head over its board, and Flow: the mission as defined,
+//! read top to bottom, in the panel beside the board.
 use super::*;
 use ahjo_app_kit::menu::MenuRow;
 use ahjo_app_kit::theme::Theme;
@@ -44,39 +44,18 @@ impl MissionsPage {
                     .debug_selector(move || button.clone())
                     .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
                     .on_click(cx.listener(|page, _, _, cx| {
-                        page.mission_canvas_mode = true;
                         page.add_card(board::Kind::Input, cx);
                     })),
                 ),
             )
     }
 
-    /// A mission as defined, read top to bottom: what it asks for and
-    /// gives back, its steps and who does each, then its runs.
-    pub(super) fn mission_detail(
-        &self,
-        t: &Theme,
-        mission: &Mission,
-        cx: &mut Context<Self>,
-    ) -> (Div, Div) {
-        let head = self.mission_head(t, mission, cx);
+    /// Flow: the mission as defined, read top to bottom: what it asks for
+    /// and gives back, its steps and who does each, then its runs.
+    pub(super) fn mission_flow(&self, t: &Theme, mission: &Mission, cx: &mut Context<Self>) -> Div {
         if mission.input_cards.is_empty() && mission.formations.is_empty() {
-            let button = "flow-empty-input";
-            let body = pane::empty(
-                t,
-                "Nothing in this mission yet.",
-                Some(
-                    kit::button(t, button, "Define it", Kind::Primary)
-                        .debug_selector(move || button.into())
-                        .on_click(cx.listener(|page, _, _, cx| {
-                            page.mission_canvas_mode = true;
-                            page.add_card(board::Kind::Input, cx);
-                        }))
-                        .into_any_element(),
-                ),
-            )
-            .debug_selector(|| "flow-empty".into());
-            return (head, body);
+            return pane::empty(t, "Nothing in this mission yet.", None)
+                .debug_selector(|| "flow-empty".into());
         }
         let flow = flow::build(mission);
         let mut body = div().flex().flex_col().gap(px(size::SECTION_GAP));
@@ -194,11 +173,18 @@ impl MissionsPage {
             body = body.child(ends);
         }
         body = body.children(self.mission_runs(t, cx));
-        (head, body)
+        body
     }
 
-    /// The mission's head: its name, Start, Edit, and the rest in a menu.
-    fn mission_head(&self, t: &Theme, mission: &Mission, cx: &mut Context<Self>) -> Div {
+    /// The mission's head over its board: its name, Start (or what it still
+    /// lacks), adding a step, undo and redo, Flow, and the rest in a menu.
+    pub(super) fn mission_head(
+        &self,
+        t: &Theme,
+        mission: &Mission,
+        flow_shown: bool,
+        cx: &mut Context<Self>,
+    ) -> Div {
         let title = if mission.title.trim().is_empty() {
             mission.slug.clone()
         } else {
@@ -206,10 +192,11 @@ impl MissionsPage {
         };
         let ready = self.mission_run_ready();
         let complete = self.validation_complete();
-        // An empty mission's body already says how to begin.
+        let busy = self.writing;
+        // An empty mission's board already says how to begin.
         let empty = mission.input_cards.is_empty() && mission.formations.is_empty();
-        // Start only when it can run; until then, what it still lacks,
-        // one click from the canvas where it is done.
+        // Start only when it can run; until then, how much it still lacks,
+        // listed under the board.
         let start = if ready {
             kit::button(t, "prepare-run", "Start", Kind::Primary)
                 .debug_selector(|| "prepare-run".into())
@@ -219,89 +206,14 @@ impl MissionsPage {
         } else {
             let todo = self.todo(mission).len();
             if complete && todo > 0 && !empty {
-                pane::act(t, "mission-todo", format!("{todo} to do before it can run"))
+                pane::meta(t, format!("{todo} to do before it can run"), None)
                     .debug_selector(|| "mission-todo".into())
-                    .on_click(cx.listener(|p, _, _, cx| {
-                        p.mission_canvas_mode = true;
-                        cx.notify();
-                    }))
                     .into_any_element()
             } else {
                 div().into_any_element()
             }
         };
         let failed = self.validation_failed();
-        pane::head(t)
-            .child(pane::title(t, title))
-            .child(
-                div()
-                    .debug_selector(move || {
-                        if complete {
-                            "mission-validation-complete".into()
-                        } else {
-                            "mission-validation-pending".into()
-                        }
-                    })
-                    .child(
-                        div()
-                            .debug_selector(move || {
-                                if ready {
-                                    "mission-run-ready".into()
-                                } else {
-                                    "mission-run-quiet".into()
-                                }
-                            })
-                            .child(start),
-                    ),
-            )
-            .when(!empty, |d| {
-                d.child(
-                    pane::act(t, "mission-mode-canvas", "Edit")
-                        .debug_selector(|| "mission-mode-canvas".into())
-                        .tooltip(kit::tip("Change its steps and who does them"))
-                        .on_click(cx.listener(|p, _, _, cx| {
-                            p.mission_canvas_mode = true;
-                            cx.notify();
-                        })),
-                )
-            })
-            .child(
-                pane::act(t, "mission-more", "…")
-                    .debug_selector(|| "mission-more".into())
-                    .on_click(cx.listener(move |p, e: &gpui::ClickEvent, _, cx| {
-                        let page = cx.entity().downgrade();
-                        let mut rows = Vec::new();
-                        if failed {
-                            let page = page.clone();
-                            rows.push(MenuRow::new("Check again", move |_, cx| {
-                                let _ = page.update(cx, |p, cx| {
-                                    p.validation.clear();
-                                    p.sync_validation(cx);
-                                    cx.notify();
-                                });
-                            }));
-                        }
-                        let rename = page.clone();
-                        rows.push(MenuRow::new("Rename…", move |window, cx| {
-                            let _ = rename.update(cx, |p, cx| p.open_mission_rename(window, cx));
-                        }));
-                        rows.push(MenuRow::new("Delete…", move |window, cx| {
-                            let _ = page.update(cx, |p, cx| p.open_mission_archive(window, cx));
-                        }));
-                        p.host.menu(rows, e.position(), cx);
-                    })),
-            )
-    }
-
-    /// The head while the mission's steps are being changed on the canvas.
-    pub(super) fn edit_head(&self, t: &Theme, mission: &Mission, cx: &mut Context<Self>) -> Div {
-        let title = if mission.title.trim().is_empty() {
-            mission.slug.clone()
-        } else {
-            mission.title.clone()
-        };
-        let busy = self.writing;
-        let complete = self.validation_complete();
         let add = |id: &'static str, text: &'static str, kind: board::Kind| {
             pane::act(t, id, text)
                 .debug_selector(move || id.into())
@@ -309,7 +221,7 @@ impl MissionsPage {
         };
         pane::head(t)
             .child(
-                pane::title(t, format!("Editing {title}"))
+                pane::title(t, title)
                     .child(div().debug_selector(move || {
                         if complete {
                             "mission-validation-complete".into()
@@ -324,6 +236,17 @@ impl MissionsPage {
                             "board-ready".into()
                         }
                     })),
+            )
+            .child(
+                div()
+                    .debug_selector(move || {
+                        if ready {
+                            "mission-run-ready".into()
+                        } else {
+                            "mission-run-quiet".into()
+                        }
+                    })
+                    .child(start),
             )
             .when(mission.input_cards.is_empty(), |d| {
                 d.child(add("new-input", "Add input", board::Kind::Input))
@@ -357,13 +280,32 @@ impl MissionsPage {
                 )
             })
             .child(
-                // Gates, ends and the mission's note are rarer than steps.
-                pane::act(t, "edit-more", "…")
-                    .debug_selector(|| "edit-more".into())
+                pane::act(
+                    t,
+                    "mission-flow",
+                    if flow_shown { "Hide Flow" } else { "Flow" },
+                )
+                .debug_selector(|| "mission-flow".into())
+                .tooltip(kit::tip("The mission in words, beside its board"))
+                .on_click(cx.listener(move |p, _, _, cx| {
+                    p.flow_open = Some(!flow_shown);
+                    p.canvas.room_changed();
+                    // A step open in the editor gives way to Flow.
+                    if !flow_shown && p.unsaved(cx).is_none() {
+                        p.editor = None;
+                    }
+                    cx.notify();
+                })),
+            )
+            .child(
+                // Gates, limits, ends and the mission's note are rarer than
+                // steps; renaming and deleting rarer still.
+                pane::act(t, "mission-more", "…")
+                    .debug_selector(|| "mission-more".into())
                     .tooltip(kit::tip(
-                        "Add a gate, a limit or an end, or note the mission",
+                        "Add a gate, a limit or an end, note the mission, rename or delete it",
                     ))
-                    .on_click(cx.listener(|p, e: &gpui::ClickEvent, _, cx| {
+                    .on_click(cx.listener(move |p, e: &gpui::ClickEvent, _, cx| {
                         let page = cx.entity().downgrade();
                         let add = |label: &'static str, kind: board::Kind| {
                             let page = page.clone();
@@ -376,25 +318,32 @@ impl MissionsPage {
                             add("Add limit", board::Kind::Limit),
                             add("Add end", board::Kind::End),
                         ];
+                        let note = page.clone();
                         rows.push(MenuRow::new("Note on the mission", move |window, cx| {
-                            let _ = page.update(cx, |p, cx| {
+                            let _ = note.update(cx, |p, cx| {
                                 p.open_canvas_note(MISSION_THREAD.into(), window, cx)
                             });
+                        }));
+                        if failed {
+                            let page = page.clone();
+                            rows.push(MenuRow::new("Check again", move |_, cx| {
+                                let _ = page.update(cx, |p, cx| {
+                                    p.validation.clear();
+                                    p.sync_validation(cx);
+                                    cx.notify();
+                                });
+                            }));
+                        }
+                        let rename = page.clone();
+                        rows.push(MenuRow::new("Rename…", move |window, cx| {
+                            let _ = rename.update(cx, |p, cx| p.open_mission_rename(window, cx));
+                        }));
+                        rows.push(MenuRow::new("Delete…", move |window, cx| {
+                            let _ = page.update(cx, |p, cx| p.open_mission_archive(window, cx));
                         }));
                         p.host.menu(rows, e.position(), cx);
                     })),
             )
-            // One Done at a time: while a card is open, its own Done.
-            .when(self.editor.is_none(), |d| {
-                d.child(
-                    kit::button(t, "mission-mode-flow", "Done", Kind::Plain)
-                        .debug_selector(|| "mission-mode-flow".into())
-                        .on_click(cx.listener(|p, _, _, cx| {
-                            p.mission_canvas_mode = false;
-                            cx.notify();
-                        })),
-                )
-            })
     }
 
     /// One step as read: its number and name, who does it, its brief, and
@@ -411,8 +360,8 @@ impl MissionsPage {
         let edit_selector = format!("flow-edit-{id}");
         // A step asked for by name stands out, marked as on the canvas.
         let revealed = self.reveal_card.as_deref() == Some(step.id.as_str());
-        // Chosen here or on the board beside: marked on both.
-        let chosen = self.beside && self.flow_focus.as_deref() == Some(step.id.as_str());
+        // Chosen here or on the board: marked on both.
+        let chosen = self.flow_focus.as_deref() == Some(step.id.as_str());
         let marker = format!("mission-reveal-{id}");
         let chosen_marker = format!("flow-chosen-{id}");
         let places = self.flow_places.clone();
@@ -425,7 +374,7 @@ impl MissionsPage {
             .flex()
             .flex_col()
             .pb(px(size::PAD))
-            // Where the step stands, for the board beside to scroll to it.
+            // Where the step stands, for the board to scroll Flow to it.
             .child(
                 gpui::canvas(
                     move |bounds, _, _| {
@@ -466,12 +415,10 @@ impl MissionsPage {
                                 let selector = format!("flow-title-{title_id}");
                                 move || selector
                             })
-                            .when(self.beside, |d| {
-                                d.cursor_pointer()
-                                    .on_click(cx.listener(move |page, _, _, cx| {
-                                        page.choose_in_flow(&title_id, false, cx)
-                                    }))
-                            }),
+                            .cursor_pointer()
+                            .on_click(cx.listener(move |page, _, _, cx| {
+                                page.choose_in_flow(&title_id, false, cx)
+                            })),
                     )
                     .child(
                         pane::act(t, SharedString::from(edit_selector.clone()), "Edit")

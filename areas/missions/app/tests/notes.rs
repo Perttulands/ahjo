@@ -103,8 +103,6 @@ fn canvas_note_pin_opens_thread_and_preserves_edits(cx: &mut TestAppContext) {
     let mission = format!("mission-{}-hello", running.node);
     until(cx, "mission", |cx| has(cx, &mission));
     click(cx, &mission);
-    until(cx, "canvas mode", |cx| has(cx, "mission-mode-canvas"));
-    click(cx, "mission-mode-canvas");
     until(cx, "note pin", |cx| has(cx, "canvas-note-pin-fmn_work"));
     for id in ["inp_hello", "fmn_work", "end_done"] {
         let card = cx
@@ -299,14 +297,15 @@ fn a_note_on_a_wire_shows_under_its_step_and_on_the_board(cx: &mut TestAppContex
     until(cx, "the wire's note in Flow", |cx| {
         has(cx, "flow-thread-edge_done")
     });
-    click(cx, "mission-mode-canvas");
     until(cx, "the wire's pin on the board", |cx| {
         has(cx, "canvas-wire-note-edge_done")
     });
 }
 
 #[gpui::test]
-fn a_wide_window_shows_flow_beside_the_board(cx: &mut TestAppContext) {
+fn a_wide_window_shows_flow_beside_the_board_and_a_narrow_one_behind_its_toggle(
+    cx: &mut TestAppContext,
+) {
     let running = start();
     let settings = std::env::temp_dir()
         .join(format!("ahjo-beside-{}", std::process::id()))
@@ -329,16 +328,26 @@ fn a_wide_window_shows_flow_beside_the_board(cx: &mut TestAppContext) {
     until(cx, "mission", |cx| has(cx, &mission));
     click(cx, &mission);
     until(cx, "Flow beside the board", |cx| {
-        has(cx, "missions-board-beside") && has(cx, "mission-card-fmn_work")
+        has(cx, "missions-flow") && has(cx, "mission-card-fmn_work")
     });
-    // A card chosen on the board is marked in Flow.
-    click(cx, "mission-card-fmn_work");
+    // A step chosen in Flow is marked on both.
+    click(cx, "flow-title-fmn_work");
     until(cx, "the step marked in Flow", |cx| {
         has(cx, "flow-chosen-fmn_work")
     });
-    // Narrower, one view again, with Edit to switch.
+    // Narrower, the board alone, Flow behind its toggle.
     cx.simulate_resize(gpui::size(gpui::px(1280.), gpui::px(900.)));
-    until(cx, "Flow alone", |cx| {
-        !has(cx, "missions-board-beside") && has(cx, "flow-step-fmn_work")
+    until(cx, "the board alone", |cx| {
+        !has(cx, "missions-flow") && has(cx, "mission-card-fmn_work")
     });
+    click(cx, "mission-flow");
+    until(cx, "Flow opened by hand", |cx| {
+        has(cx, "missions-flow") && has(cx, "flow-step-fmn_work")
+    });
+    // Kept as left, wider again.
+    click(cx, "mission-flow");
+    until(cx, "Flow closed by hand", |cx| !has(cx, "missions-flow"));
+    cx.simulate_resize(gpui::size(gpui::px(1920.), gpui::px(1080.)));
+    cx.run_until_parked();
+    assert!(!has(cx, "missions-flow"));
 }

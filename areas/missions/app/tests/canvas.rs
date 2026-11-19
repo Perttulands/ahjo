@@ -108,10 +108,6 @@ fn canvas_ports_drag_move_zoom_and_undo(cx: &mut TestAppContext) {
         cx.simulate_click(at, Modifiers::none());
     };
     click(cx, &mission);
-    until(cx, "mode controls", |cx| {
-        cx.debug_bounds("mission-mode-canvas").is_some()
-    });
-    click(cx, "mission-mode-canvas");
     until(cx, "canvas", |cx| {
         cx.debug_bounds("mission-card-fmn_work").is_some()
     });

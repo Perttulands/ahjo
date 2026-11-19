@@ -2,7 +2,7 @@
 use ahjo_app_kit::link::client::LinkState;
 use ahjo_node_kit::{Listing, NodeClient};
 use ahjo_testkit::{node::Node, sessions};
-use gpui::{Modifiers, TestAppContext, VisualTestContext};
+use gpui::{TestAppContext, VisualTestContext};
 use serde_json::json;
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
@@ -128,11 +128,8 @@ fn run_is_only_emphasized_for_a_current_runnable_mission(cx: &mut TestAppContext
     assert!(cx.debug_bounds("prepare-run").is_none());
     let rail = cx.debug_bounds("missions-rail").unwrap();
     assert_eq!(rail.size.width, gpui::px(ahjo_app_kit::theme::size::LIST));
-    let canvas = cx.debug_bounds("mission-mode-canvas").unwrap().center();
-    cx.simulate_click(canvas, Modifiers::none());
-    until(cx, "canvas mode", |cx| {
-        cx.debug_bounds("mission-canvas").is_some()
-    });
+    // It opened on its board.
+    assert!(cx.debug_bounds("mission-canvas").is_some());
     // The board says what stands between the mission and a run.
     until(cx, "the unwired Input listed as to do", |cx| {
         cx.debug_bounds("canvas-findings").is_some()
@@ -144,15 +141,13 @@ fn run_is_only_emphasized_for_a_current_runnable_mission(cx: &mut TestAppContext
         assert_eq!(valid["errors"].as_array().unwrap().len(), 0, "{valid}");
         assert!(!valid["warnings"].as_array().unwrap().iter().any(|w| w["code"] == "mission_not_runnable"));
     });
-    // The page re-reads the changed mission and validates it again; until
-    // then Done is not on screen to be clicked. The old report still says
-    // complete, so wait for the new one: complete with nothing left to do.
+    // The page re-reads the changed mission and validates it again. The
+    // old report still says complete, so wait for the new one: complete
+    // with nothing left to do.
     until(cx, "validation refreshed while editing", |cx| {
         cx.debug_bounds("mission-validation-complete").is_some()
             && cx.debug_bounds("canvas-findings").is_none()
     });
-    let done = cx.debug_bounds("mission-mode-flow").unwrap().center();
-    cx.simulate_click(done, Modifiers::none());
     until(cx, "wired mission is runnable", |cx| {
         cx.debug_bounds("mission-run-ready").is_some()
     });

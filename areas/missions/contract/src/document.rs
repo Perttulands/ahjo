@@ -84,12 +84,16 @@ impl<'de> Deserialize<'de> for MissionDocument {
 pub struct LayoutDocument {
     pub layout: Layout,
     pub etag: String,
+    /// The places are Arrange's own, or there are none: nobody has placed
+    /// a card by hand, so a view may lay the cards out for its own room.
+    pub arranged: bool,
 }
 impl Serialize for LayoutDocument {
     fn serialize<S: Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
         let mut v = serde_json::to_value(&self.layout).map_err(serde::ser::Error::custom)?;
         rename(&mut v, LAYOUT);
         v["etag"] = Value::String(self.etag.clone());
+        v["arranged"] = Value::Bool(self.arranged);
         v.serialize(s)
     }
 }
@@ -102,10 +106,14 @@ impl<'de> Deserialize<'de> for LayoutDocument {
         let etag = fields
             .remove("etag")
             .ok_or_else(|| serde::de::Error::missing_field("etag"))?;
+        let arranged = fields
+            .remove("arranged")
+            .is_some_and(|v| v == Value::Bool(true));
         rename(&mut v, &reverse(LAYOUT));
         Ok(Self {
             layout: serde_json::from_value(v).map_err(serde::de::Error::custom)?,
             etag: serde_json::from_value(etag).map_err(serde::de::Error::custom)?,
+            arranged,
         })
     }
 }

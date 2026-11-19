@@ -221,8 +221,7 @@ impl MissionsPage {
                                 });
                                 page.state.mission_etag = response.mission.etag;
                                 page.state.mission = Some(response.mission.mission);
-                                page.state.layout_etag = Some(response.layout.etag);
-                                page.state.layout = Some(response.layout.layout);
+                                page.state.set_layout(response.layout);
                             }
                             Err(error) => {
                                 page.history_finished(pending, Some(error.to_string()), true, cx);
@@ -238,8 +237,7 @@ impl MissionsPage {
                                     rev: mission.rev,
                                     layout: Some(response.layout.etag.clone()),
                                 });
-                                page.state.layout_etag = Some(response.layout.etag);
-                                page.state.layout = Some(response.layout.layout);
+                                page.state.set_layout(response.layout);
                             }
                             Err(error) => {
                                 page.history_finished(pending, Some(error.to_string()), true, cx);
@@ -349,8 +347,8 @@ impl MissionsPage {
                     None => { page.state.mission_etag = None; page.state.mission = None; }
                 }
                 match layout {
-                    Some(response) => { page.state.layout_etag = Some(response.layout.etag); page.state.layout = Some(response.layout.layout); }
-                    None => { page.state.layout_etag = None; page.state.layout = None; }
+                    Some(response) => page.state.set_layout(response.layout),
+                    None => page.state.clear_layout(),
                 }
                 if page.state.mission.is_none() || page.state.layout.is_none() {
                     page.state.error = Some("Could not reload the mission and layout after the failed edit. Reopen the mission before editing.".into());
