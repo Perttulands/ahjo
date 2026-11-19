@@ -339,8 +339,15 @@ pub mod search {
     pub const ASIDE_ROW: f32 = 32.;
     pub const ASIDE_ROW_PAD: f32 = 4.;
     pub const ORBIT_LEAST: f32 = 680.;
-    /// The room the orbit is left before the results beside it widen.
-    pub const ORBIT_WANTS: f32 = 760.;
+    /// The room the orbit is left before the results beside it widen:
+    /// the orbit grows with the window first.
+    pub const ORBIT_WANTS: f32 = 1100.;
+    /// What changed lately widens to its longest title, up to this and
+    /// never past this share of the window.
+    pub const RECENT_MOST: f32 = 760.;
+    pub const RECENT_SHARE: f32 = 0.42;
+    /// A letter of the list's mono type, as a share of its size.
+    pub const MONO_ADVANCE: f32 = 0.6;
 }
 
 /// The orbit a page read stands at the centre of.
@@ -373,7 +380,7 @@ pub mod orbit {
     /// The ring leaves room for a name of this many letters on one line;
     /// a longer one is reckoned as two lines, the wider a few letters over
     /// half.
-    pub const NAME_LINE: usize = 20;
+    pub const NAME_LINE: usize = 16;
     pub const NAME_LINE_SLACK: usize = 4;
     pub const NAME_CHAR: f32 = 0.62;
     pub const NAME_OFF: f32 = 14.;
@@ -392,16 +399,16 @@ pub mod replay {
 /// The reader.
 pub mod reader {
     /// The sheet's share of the window, its least and its most.
-    pub const SHARE: f32 = 0.46;
+    pub const SHARE: f32 = 0.42;
     pub const MIN: f32 = 520.;
-    pub const MAX: f32 = 820.;
+    pub const MAX: f32 = 728.;
     /// Less sky than this beside the sheet is no use: the sheet takes the
     /// whole window instead.
     pub const SKY_LEAST: f32 = 380.;
     pub const PAD_X: f32 = 44.;
     pub const PAD_TOP: f32 = 36.;
-    /// The widest a line of prose runs.
-    pub const MEASURE: f32 = 700.;
+    /// The widest a line of prose runs: about eighty letters.
+    pub const MEASURE: f32 = 640.;
     pub const TITLE: f32 = 27.;
     pub const TITLE_LINE: f32 = 36.;
     pub const LEDE: f32 = 16.;

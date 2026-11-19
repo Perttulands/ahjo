@@ -1156,15 +1156,31 @@ impl BrainApp {
     fn search_width(&self) -> f32 {
         if self.aside() {
             // Beside an orbit, as wide as the orbit's room leaves.
-            let w = self.size.0;
-            return (w
-                - reader::sheet_width(w, self.reader_k())
-                - chrome::INSET * 2.
-                - search::ORBIT_WANTS)
-                .clamp(search::ASIDE, search::WIDTH);
+            if let Some(rail) = rail_beside_orbit(self.size.0, self.reader_k()) {
+                return rail;
+            }
         }
         (self.size.0 - chrome::INSET * 3. - chrome::SWITCH_ROOM)
             .clamp(chrome::SEARCH_LEAST, search::WIDTH)
+    }
+
+    /// What changed lately, as wide as its longest row needs, while the sky
+    /// keeps most of the window; never narrower than the search.
+    fn recent_width(&self) -> f32 {
+        let least = self.search_width();
+        let Some(data) = &self.data else { return least };
+        let letter = |size: f32| size * search::MONO_ADVANCE;
+        let row = data
+            .recent
+            .iter()
+            .map(|&p| data.corpus.pages[p].title.chars().count())
+            .max()
+            .unwrap_or(0) as f32
+            * letter(search::TITLE)
+            // The dot, the gaps, "13 days ago" and the padding.
+            + 7. + 20. + 12. * letter(search::SNIPPET) + search::ROW_PAD_X * 2.;
+        let most = search::RECENT_MOST.min(self.size.0 * search::RECENT_SHARE);
+        row.min(most).max(least)
     }
 
     /// Whether what changed lately shows under the search: before anything
@@ -1180,11 +1196,9 @@ impl BrainApp {
     /// Whether the ranked results stay beside the orbit of the page read:
     /// only when there are some and the orbit keeps its room.
     fn aside(&self) -> bool {
-        let w = self.size.0;
         self.reading.is_some()
             && !self.results.is_empty()
-            && w - reader::sheet_width(w, self.reader_k()) - search::ASIDE - chrome::INSET * 2.
-                >= search::ORBIT_LEAST
+            && rail_beside_orbit(self.size.0, self.reader_k()).is_some()
     }
 
     /// A page open is the sky turned into its orbit.
@@ -1204,10 +1218,12 @@ impl BrainApp {
         // The list under the search covers the sky's left; beside an
         // orbit only when it stays there. So does what changed lately.
         let listed = !self.results.is_empty() && (self.reading.is_none() || self.aside());
-        let left = if !listed && !self.recent_shown() {
-            0.
-        } else {
+        let left = if self.recent_shown() {
+            self.recent_width() + chrome::INSET * 2.
+        } else if listed {
             self.search_width() + chrome::INSET * 2.
+        } else {
+            0.
         };
         let top = search::FIELD_HEIGHT + chrome::INSET * 2.;
         // The replay's bar lies over the sky's foot.
@@ -1526,6 +1542,15 @@ fn reader_size(s: &source::Settings) -> f32 {
 }
 
 /// A corpus and its sky, off the UI thread.
+/// How wide the ranked results stand beside the orbit of a page read in a
+/// window `w` wide, or none when the orbit would not keep its room. The
+/// orbit grows with the window first; the list widens only past that.
+fn rail_beside_orbit(w: f32, k: f32) -> Option<f32> {
+    let room = w - reader::sheet_width(w, k) - chrome::INSET * 2.;
+    (room - search::ASIDE >= search::ORBIT_LEAST)
+        .then(|| (room - search::ORBIT_WANTS).clamp(search::ASIDE, search::WIDTH))
+}
+
 fn build(entries: Vec<Entry>, placement: &sky::Placement) -> (Corpus, Sky) {
     let corpus = Corpus::new(entries);
     let sky = sky::layout(&corpus, placement);
@@ -2780,17 +2805,24 @@ impl BrainApp {
     /// The search, and under it what it found, while a page is not being
     /// read over it.
     fn search_panel(&self, t: &Theme, typing: bool, cx: &mut Context<Self>) -> impl IntoElement {
+        let recent = typing && self.query.is_empty() && self.recent_shown();
+        let width = if recent {
+            self.recent_width()
+        } else {
+            self.search_width()
+        };
         let mut panel = div()
             .absolute()
             .left(px(chrome::INSET))
             .top(px(chrome::INSET))
-            .w(px(self.search_width()))
+            .w(px(width))
             .flex()
             .flex_col()
             .gap(px(search::LIST_GAP))
             .occlude()
             .child(
                 div()
+                    .w(px(self.search_width()))
                     .h(px(search::FIELD_HEIGHT))
                     .flex()
                     .items_center()
@@ -2801,7 +2833,7 @@ impl BrainApp {
             );
         let Some(data) = &self.data else { return panel };
         if self.query.is_empty() {
-            if typing && self.recent_shown() {
+            if recent {
                 panel = panel.child(self.recent(data, t, cx));
             }
             return panel;
@@ -3481,7 +3513,54 @@ fn window_bounds(cx: &App) -> gpui::Bounds<gpui::Pixels> {
 
 #[cfg(test)]
 mod tests {
-    use super::name_lines;
+    use super::{name_lines, rail_beside_orbit};
+    use crate::arrange;
+    use crate::corpus::parse;
+    use crate::sky::{Placement, Rect, layout};
+    use crate::tokens::{chrome, search};
+
+    /// The orbit of a page read, with its results beside it, in a window
+    /// `w` by `h`: its ring's radius.
+    fn ring_in(w: f32, h: f32) -> f32 {
+        let mut pages = vec![parse(
+            "knowledge/hub/hub.md",
+            "# Packing a tide clock for freight\n[[a1]] [[a2]] [[b1]] [[b2]]",
+        )];
+        for (path, title) in [
+            ("knowledge/a/a1.md", "Supplier list for small parts"),
+            ("knowledge/a/a2.md", "Calibrating against a port table"),
+            ("knowledge/b/b1.md", "Mixed tides in the inner fjords"),
+            ("knowledge/b/b2.md", "Assembly order"),
+        ] {
+            pages.push(parse(path, &format!("# {title}")));
+        }
+        let corpus = crate::corpus::Corpus::new(pages);
+        let sky = layout(&corpus, &Placement::new());
+        let hub = corpus.by_path("knowledge/hub/hub.md").unwrap();
+        let sheet = crate::reader::sheet_width(w, 1.);
+        let left = rail_beside_orbit(w, 1.).map_or(0., |r| r + chrome::INSET * 2.);
+        let top = search::FIELD_HEIGHT + chrome::INSET * 2.;
+        let view = Rect {
+            x: left,
+            y: top,
+            w: w - sheet - left,
+            h: h - top - chrome::INSET - chrome::FOOT,
+        };
+        arrange::orbit(&corpus, &sky, hub, view, true).radius
+    }
+
+    #[test]
+    fn the_orbit_grows_with_the_window() {
+        // Full HD keeps the results beside the orbit, and the ring takes
+        // a good part of the height it has (it once stopped at 155).
+        assert_eq!(rail_beside_orbit(1920., 1.), Some(search::ASIDE));
+        let full_hd = ring_in(1920., 1080.);
+        assert!(full_hd >= 225., "a ring of {full_hd} at 1920x1080");
+        // A larger window, a larger ring; a smaller one, smaller.
+        assert!(ring_in(2560., 1440.) > full_hd * 1.4);
+        assert!(ring_in(1472., 978.) < full_hd);
+        assert!(ring_in(1472., 978.) >= 210.);
+    }
 
     #[test]
     fn an_orbit_name_wraps_before_it_is_cut() {
