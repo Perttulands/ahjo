@@ -39,9 +39,25 @@ pub struct Store {
     pub mission_etag: Option<String>,
     pub layout_etag: Option<String>,
     pub layout: Option<Layout>,
+    /// The places are Arrange's own (or none): the board lays its cards out
+    /// for the room it is shown in until a card is placed by hand.
+    pub layout_arranged: bool,
     pub error: Option<String>,
 }
 impl Store {
+    /// Prototype (proto/board-v3): the node does not say whether the places
+    /// are Arrange's own, so the board always lays itself out for its room.
+    /// A load counts as arranged; a move saved by hand does not.
+    pub fn set_layout(&mut self, layout: Layout, etag: String, arranged: bool) {
+        self.layout_etag = Some(etag);
+        self.layout = Some(layout);
+        self.layout_arranged = arranged;
+    }
+    pub fn clear_layout(&mut self) {
+        self.layout_etag = None;
+        self.layout = None;
+        self.layout_arranged = false;
+    }
     /// Resolves a reveal on a named node, or across nodes in live-node order.
     pub fn find_reveal(
         &self,

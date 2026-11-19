@@ -595,15 +595,11 @@ fn starts_a_run_sees_active_step_answers_gate_and_shows_admission_findings(
             )
             .unwrap();
     });
-    until(cx, "mission after run", |cx| {
-        cx.debug_bounds("mission-mode-canvas").is_some()
+    // A note on the whole mission is written from the mission's menu.
+    until(cx, "the mission's menu", |cx| {
+        cx.debug_bounds("mission-more").is_some()
     });
-    // A note on the whole mission is written while editing it.
-    click(cx, "mission-mode-canvas");
-    until(cx, "the editor's menu", |cx| {
-        cx.debug_bounds("edit-more").is_some()
-    });
-    click(cx, "edit-more");
+    click(cx, "mission-more");
     until(cx, "mission note", |cx| {
         cx.debug_bounds("menu-label-Note on the mission").is_some()
     });
@@ -630,14 +626,13 @@ fn starts_a_run_sees_active_step_answers_gate_and_shows_admission_findings(
     until(cx, "bad mission", |cx| {
         cx.debug_bounds("flow-step-empty").is_some()
     });
-    // Start is offered only to a mission that can run; this one says what
-    // it still lacks, and that leads to the canvas where it is done.
+    // Start is offered only to a mission that can run; this one says how
+    // much it still lacks, listed under its board.
     until(cx, "what it lacks", |cx| {
         cx.debug_bounds("mission-todo").is_some()
     });
     assert!(cx.debug_bounds("prepare-run").is_none());
-    click(cx, "mission-todo");
-    until(cx, "the to-do above the canvas", |cx| {
+    until(cx, "the to-do under the board", |cx| {
         cx.debug_bounds("canvas-findings").is_some() && cx.debug_bounds("canvas-play-inp").is_some()
     });
     // Its Input's play control still tries, and the node says why not.

@@ -306,8 +306,7 @@ impl MissionsPage {
                             page.state.selected = None;
                             page.state.mission = None;
                             page.state.mission_etag = None;
-                            page.state.layout = None;
-                            page.state.layout_etag = None;
+                            page.state.clear_layout();
                             page.notes = None;
                             page.editor = None;
                             page.history = undo::History::default();
@@ -319,8 +318,7 @@ impl MissionsPage {
                                 page.history.record(undo::Entry { label:"mission name".into(), steps:vec![undo::Step::board(rename_patch(old_title))] });
                                 page.state.mission_etag = Some(result.mission_etag);
                                 page.state.mission = Some(result.mission);
-                                page.state.layout_etag = Some(result.layout_etag);
-                                page.state.layout = Some(result.layout);
+                                page.state.set_layout(result.layout, result.layout_etag, true);
                                 page.manage.form = None;
                             }
                             Err(error) => form.problem = Some(format!("The rename may have succeeded, but the answer could not be read: {error}. Check the mission before retrying.")),

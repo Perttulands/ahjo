@@ -238,7 +238,6 @@ fn evidence_links_and_attempt_images(cx: &mut TestAppContext) {
     until(cx, "mission flow", |cx| {
         cx.debug_bounds("flow-step-fmn_work").is_some()
     });
-    click(cx, "mission-mode-canvas");
     until(cx, "mission", |cx| {
         cx.debug_bounds("mission-card-fmn_work").is_some()
     });

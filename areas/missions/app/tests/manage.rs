@@ -232,10 +232,9 @@ fn designs_a_multi_gate_mission_and_shows_findings_on_the_canvas(cx: &mut TestAp
     let mission = format!("mission-{}-design-journey", running.node);
     until(cx, "mission listing", |cx| has(cx, &mission));
     click(cx, &mission);
-    // An empty mission begins with Define it, which adds its Input.
-    until(cx, "how to begin", |cx| has(cx, "flow-empty-input"));
-    assert!(!has(cx, "mission-mode-canvas"));
-    click(cx, "flow-empty-input");
+    // An empty mission opens on its board, which says to add its Input.
+    until(cx, "how to begin", |cx| has(cx, "canvas-empty-input"));
+    click(cx, "canvas-empty-input");
     let rt = tokio::runtime::Runtime::new().unwrap();
     let client = NodeClient::new(Some(&format!("{}/", running.url))).unwrap();
     let read = || {
@@ -276,7 +275,7 @@ fn designs_a_multi_gate_mission_and_shows_findings_on_the_canvas(cx: &mut TestAp
     ] {
         until(cx, "board ready for edit", |cx| has(cx, "board-ready"));
         if button != "new-step" {
-            click(cx, "edit-more");
+            click(cx, "mission-more");
             until(cx, "the rarer cards", |cx| has(cx, button));
         }
         click(cx, button);
@@ -324,7 +323,7 @@ fn designs_a_multi_gate_mission_and_shows_findings_on_the_canvas(cx: &mut TestAp
     ] {
         until(cx, "board ready for edit", |cx| has(cx, "board-ready"));
         if button != "new-step" {
-            click(cx, "edit-more");
+            click(cx, "mission-more");
             until(cx, "the rarer cards", |cx| has(cx, button));
         }
         click(cx, button);

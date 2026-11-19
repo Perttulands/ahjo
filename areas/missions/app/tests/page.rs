@@ -128,8 +128,7 @@ fn opens_a_fixture_mission_on_the_canvas(cx: &mut TestAppContext) {
             "Deliver the result"
         );
     });
-    let mode = cx.debug_bounds("mission-mode-canvas").unwrap().center();
-    cx.simulate_click(mode, Modifiers::none());
+    // The mission is on its board beside Flow all along.
     until(cx, "step on canvas", |cx| {
         cx.debug_bounds("mission-card-fmn_work").is_some()
     });
@@ -288,11 +287,6 @@ fn cli_authored_graph_and_layout_open_on_the_canvas(cx: &mut TestAppContext) {
         cx.debug_bounds(selector).is_some()
     });
     let at = cx.debug_bounds(selector).unwrap().center();
-    cx.simulate_click(at, Modifiers::none());
-    until(cx, "canvas control", |cx| {
-        cx.debug_bounds("mission-mode-canvas").is_some()
-    });
-    let at = cx.debug_bounds("mission-mode-canvas").unwrap().center();
     cx.simulate_click(at, Modifiers::none());
     for id in std::iter::once(&input)
         .chain(steps.iter().map(|s| &s.0))

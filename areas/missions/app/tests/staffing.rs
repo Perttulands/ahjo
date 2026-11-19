@@ -169,10 +169,6 @@ fn catalog_pickers_offer_sorted_roles_and_model_efforts_and_save_the_choice(
             )
             .unwrap()
     });
-    until(cx, "mission mode", |cx| {
-        cx.debug_bounds("mission-mode-canvas").is_some()
-    });
-    click(cx, "mission-mode-canvas");
     until(cx, "mission", |cx| {
         cx.debug_bounds("mission-card-fmn_work").is_some()
     });

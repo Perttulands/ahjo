@@ -221,8 +221,8 @@ impl MissionsPage {
                                 });
                                 page.state.mission_etag = Some(response.mission_etag);
                                 page.state.mission = Some(response.mission);
-                                page.state.layout_etag = Some(response.layout_etag);
-                                page.state.layout = Some(response.layout);
+                                page.state
+                                    .set_layout(response.layout, response.layout_etag, true);
                             }
                             Err(error) => {
                                 page.history_finished(pending, Some(error.to_string()), true, cx);
@@ -238,8 +238,7 @@ impl MissionsPage {
                                     rev: mission.rev,
                                     layout: Some(response.etag.clone()),
                                 });
-                                page.state.layout_etag = Some(response.etag);
-                                page.state.layout = Some(response.layout);
+                                page.state.set_layout(response.layout, response.etag, true);
                             }
                             Err(error) => {
                                 page.history_finished(pending, Some(error.to_string()), true, cx);
@@ -349,8 +348,8 @@ impl MissionsPage {
                     None => { page.state.mission_etag = None; page.state.mission = None; }
                 }
                 match layout {
-                    Some(response) => { page.state.layout_etag = Some(response.etag); page.state.layout = Some(response.layout); }
-                    None => { page.state.layout_etag = None; page.state.layout = None; }
+                    Some(response) => page.state.set_layout(response.layout, response.etag, true),
+                    None => page.state.clear_layout(),
                 }
                 if page.state.mission.is_none() || page.state.layout.is_none() {
                     page.state.error = Some("Could not reload the mission and layout after the failed edit. Reopen the mission before editing.".into());

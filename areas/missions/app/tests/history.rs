@@ -138,10 +138,6 @@ fn undo_and_redo_replay_both_wires_of_a_removed_shared_input(cx: &mut TestAppCon
             )
             .unwrap()
     });
-    until(cx, "mission mode", |cx| {
-        cx.debug_bounds("mission-mode-canvas").is_some()
-    });
-    click(cx, "mission-mode-canvas");
     until(cx, "mission", |cx| {
         cx.debug_bounds("mission-card-fmn_work").is_some()
     });

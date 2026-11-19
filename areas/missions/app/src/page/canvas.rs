@@ -15,32 +15,41 @@ const ZOOM_STEP: f32 = 1.2;
 const FIT_MARGIN: f32 = 80.;
 /// The least zoom a card's words read at. A board that fits whole only
 /// smaller opens at this zoom on its start; Fit still shows it whole.
-const READABLE: f32 = 0.85;
-/// The least zoom the board beside Flow is drawn at: its titles still
-/// read, its small words only just. A mission it cannot show whole at this
-/// size runs down past the pane and scrolls; Fit still shows it whole.
-pub(super) const BESIDE_FLOOR: f32 = 0.6;
-/// The strip on the right the zoom controls stand in; new cards keep out.
+const READABLE: f32 = 0.8;
 const DRAG_SLOP: f32 = 3.;
 const CURVE_REACH: f32 = 40.;
 const CURVE_DOWN: f32 = 60.;
 const DASH_SHORT: f32 = 3.;
 const DASH_LONG: f32 = 5.;
-const TITLE_SIZE: f32 = 18.;
+const TITLE_SIZE: f32 = 16.;
 /// A card's words at world size: at the zoom a board opens at, never below
-/// 0.85, its small words read at the page's small size and its text at the
-/// page's text size.
-pub(super) const CARD_SMALL: f32 = 13.;
-pub(super) const CARD_TEXT: f32 = 15.;
-const RING_SIZE: f32 = 30.;
+/// 0.8, its small words still read and its text reads at the page's size.
+pub(super) const CARD_SMALL: f32 = 11.5;
+pub(super) const CARD_TEXT: f32 = 13.;
+/// Archon's dot grid, in the board's space: a dot every `DOT`, a faint line
+/// every `GRID`, drawn in the text colour at these strengths.
+const DOT: f32 = 28.;
+const GRID: f32 = 112.;
+const DOT_ALPHA: f32 = 0.09;
+const GRID_ALPHA: f32 = 0.025;
+const DOT_SIZE: f32 = 1.5;
+/// The zoom controls' stack in the board's corner, and what Fit keeps clear.
+const ZOOM_BUTTON: (f32, f32) = (76., 32.);
+const WIRE: f32 = 1.5;
+const RING_SIZE: f32 = 26.;
+/// A card's inner padding across and down, at Archon's density.
+const CARD_PAD: f32 = 12.;
+const HEAD_PAD: f32 = 8.;
+/// A step's number in its ring.
+const NUMBER: f32 = 18.;
 const GAP: f32 = 8.;
 /// A finding's mark beside a control's size.
 const BADGE_SCALE: f32 = 0.75;
 const SLOT_PAD: f32 = 10.;
 const POOL_LABEL: f32 = 14.;
 const CHIP_PAD: f32 = 6.;
-const GATE_MARK: f32 = 46.;
-const END_MARK: f32 = 22.;
+const GATE_MARK: f32 = 40.;
+const END_MARK: f32 = 18.;
 const CHIP_ALPHA: f32 = 0.14;
 #[derive(Clone, Debug)]
 enum Drag {
@@ -101,6 +110,13 @@ impl View {
     }
     pub(super) fn invalidate_fit(&mut self) {
         self.fitted = false;
+    }
+    /// The board's room changed by the operator's own choice (Flow shown or
+    /// hidden): framed again for it, unless the view was moved by hand.
+    pub(super) fn room_changed(&mut self) {
+        if !self.touched {
+            self.reopen();
+        }
     }
     /// Back to the view the board opened at (Ctrl+0): framed again on the
     /// next draw, as a board just opened is.
@@ -189,7 +205,7 @@ impl View {
         if w <= 0. || h <= 0. {
             return;
         }
-        let (x, y, bw, bh) = board::extent(board);
+        let (x, y, bw, bh) = shown_extent(board);
         let z = ((w - FIT_MARGIN) / bw)
             .min((h - FIT_MARGIN) / bh)
             .clamp(ZOOM_MIN, 1.);
@@ -218,7 +234,7 @@ impl View {
             return;
         }
         let (_, _, w, h) = self.bounds.get();
-        let (x, y, bw, bh) = board::extent(board);
+        let (x, y, bw, bh) = shown_extent(board);
         let floor = if across {
             ((w - FIT_MARGIN) / bw).clamp(floor, 1.)
         } else {
@@ -242,22 +258,48 @@ impl View {
     }
 }
 
+/// What a fit frames: the board, and under its lowest cards the room
+/// their notes and the mission's paper hang in.
+fn shown_extent(board: &board::Board) -> (f32, f32, f32, f32) {
+    let (x, y, w, h) = board::extent(board);
+    (x, y, w, h + board::NOTE_ROOM)
+}
+
 impl MissionsPage {
-    /// The board as drawn. Beside Flow it is read only and shows no run (no
-    /// run chips, no room for them), and is laid out for the pane it has
-    /// rather than at its saved places, which are for the whole window.
+    /// The board as drawn: at its saved places, or until it has any, in
+    /// reading rows shaped for the room it has, each card keeping room
+    /// under it for its notes.
     pub(super) fn shown_board(&self, mission: &Mission, running: bool) -> board::Board {
         let flow = flow::build(mission);
-        if self.beside {
-            let layout = board::shaped(mission, &flow, self.canvas.room(), BESIDE_FLOOR);
-            return board::board(mission, &flow, &layout, false);
+        // Places nobody chose by hand (Arrange's own, or none) give way to
+        // the reading rows for this room.
+        let mut layout = match &self.state.layout {
+            Some(l) if !self.state.layout_arranged => l.nodes.clone(),
+            _ => vec![],
+        };
+        // Cards the saved places miss stand where the reading rows put
+        // them.
+        let missing = |id: &str| !layout.iter().any(|p| p.id == id);
+        let ids = mission
+            .input_cards
+            .iter()
+            .map(|c| &c.id)
+            .chain(mission.formations.iter().map(|f| &f.id))
+            .chain(mission.gates.iter().map(|g| &g.id))
+            .chain(mission.ends.iter().map(|e| &e.id));
+        if ids.into_iter().any(|id| missing(id)) {
+            // A Limit card stands under what it caps; on a board laid out
+            // whole, where the rows leave it room.
+            let whole = layout.is_empty();
+            let shaped: Vec<LayoutNode> = self
+                .shaped_layout(mission)
+                .into_iter()
+                .filter(|p| {
+                    missing(&p.id) && (whole || !mission.limits.iter().any(|l| l.id == p.id))
+                })
+                .collect();
+            layout.extend(shaped);
         }
-        let mut layout = self
-            .state
-            .layout
-            .as_ref()
-            .map(|l| l.nodes.clone())
-            .unwrap_or_default();
         if let Some(Drag::Card { id, now, .. }) = &self.canvas.drag {
             layout.retain(|p| p.id != *id);
             layout.push(LayoutNode {
@@ -267,6 +309,24 @@ impl MissionsPage {
             });
         }
         board::board(mission, &flow, &layout, running)
+    }
+    /// The mission in reading rows for the board's room, with room under
+    /// each card that has notes: how it opens until arranged, and Arrange.
+    pub(super) fn shaped_layout(&self, mission: &Mission) -> Vec<LayoutNode> {
+        let noted = self.noted_cards();
+        board::shaped(
+            mission,
+            &flow::build(mission),
+            self.canvas.room(),
+            READABLE,
+            &|id| {
+                if noted.contains(id) {
+                    board::NOTE_ROOM
+                } else {
+                    0.
+                }
+            },
+        )
     }
     pub(super) fn render_canvas(
         &mut self,
@@ -409,27 +469,38 @@ impl MissionsPage {
             cx.weak_entity(),
             self.generation,
             &findings,
-            running || self.state.layout.is_some(),
+            Fitting {
+                ready: running || self.state.layout.is_some(),
+                placed: running
+                    || (!self.state.layout_arranged
+                        && self
+                            .state
+                            .layout
+                            .as_ref()
+                            .is_some_and(|l| !l.nodes.is_empty())),
+                running,
+            },
         ));
-        // A loop back says where it returns to, on its lane.
+        // A loop back says where it returns to, beside its first turn.
         for w in board.wires.iter().filter(|w| w.back) {
-            let lane = w.lane.unwrap_or_default();
-            let (x, y) = view.position((w.from.0 + w.to.0) / 2., lane);
+            let Some(label) = w.label else { continue };
+            let z = view.zoom;
+            let (x, y) = view.position(label.0, label.1);
             let colour = if w.route == "fail" { t.fail } else { t.wire };
             let selector = format!("canvas-loop-{}", w.id);
             layer = layer.child(
                 div()
                     .absolute()
-                    .left(px(x))
-                    .top(px(y - CARD_SMALL * view.zoom))
+                    .left(px(x + GAP * z))
+                    .top(px(y + CHIP_PAD * z))
                     .debug_selector(move || selector.clone())
-                    .px(px(CHIP_PAD * view.zoom))
-                    .rounded(px(size::RADIUS * view.zoom))
-                    .bg(t.bg)
-                    .text_size(px(CARD_SMALL * view.zoom))
+                    .text_size(px(CARD_SMALL * z))
                     .text_color(colour)
                     .whitespace_nowrap()
-                    .child(format!("↺ {}", mission.node_name(&w.to_node))),
+                    .child(format!(
+                        "↺ {}",
+                        mission.node_name(&w.to_node).to_uppercase()
+                    )),
             );
         }
         for card in &board.cards {
@@ -472,11 +543,8 @@ impl MissionsPage {
                     .child(self.empty_mission(t, "canvas-empty", cx)),
             );
         }
-        // Beside Flow the notes are read in Flow; the board shows the shape.
-        if !self.beside {
-            for note in self.canvas_notes(t, mission, &board, &view, cx) {
-                layer = layer.child(note);
-            }
+        for note in self.canvas_notes(t, mission, &board, &view, cx) {
+            layer = layer.child(note);
         }
         if !running {
             for port in &ports {
@@ -497,12 +565,7 @@ impl MissionsPage {
                 .wires
                 .iter()
                 .find(|wire| wire.id == edge.id)
-                .map(|wire| {
-                    (
-                        (wire.from.0 + wire.to.0) / 2.,
-                        wire.lane.unwrap_or((wire.from.1 + wire.to.1) / 2.),
-                    )
-                })
+                .map(board::Wire::middle)
                 .or_else(|| {
                     ports
                         .iter()
@@ -554,61 +617,111 @@ impl MissionsPage {
             layer = layer.child(self.canvas_menu(t, mission, at, &view, cx));
         }
         let fit = board.clone();
-        // The board's own controls, in a strip under it: never over a card.
-        let controls = div()
-            .flex_none()
-            .flex()
-            .items_center()
-            .justify_end()
-            .gap(px(size::RADIUS))
-            .px(px(PAD))
-            .py(px(size::RADIUS))
-            .border_t_1()
-            .border_color(t.divider)
-            .child(
+        // The board's own controls, Archon's stack in its corner: zoom in
+        // and out, Arrange and Fit, the zoom beside them.
+        let (bw, bh) = ZOOM_BUTTON;
+        let button =
+            |id: &'static str, selector: &'static str, text: &'static str, tip: &'static str| {
                 div()
-                    .text_size(px(size::SMALL))
+                    .id(id)
+                    .debug_selector(move || selector.into())
+                    .w(px(bw))
+                    .h(px(bh))
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .text_size(px(if text.len() > 2 {
+                        size::SMALL - 2.
+                    } else {
+                        size::TEXT + 2.
+                    }))
                     .text_color(t.text2)
-                    .child(format!("{:.0}%", view.zoom * 100.)),
-            )
+                    .bg(t.surface)
+                    .cursor_pointer()
+                    .hover(|d| d.bg(t.raised).text_color(t.text))
+                    .tooltip(kit::tip(tip))
+                    .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                    .child(text)
+            };
+        let mut stack = div()
+            .flex()
+            .flex_col()
+            .border_1()
+            .border_color(t.divider)
+            .rounded(px(size::RADIUS))
+            .overflow_hidden()
+            .shadow_md()
             .child(
-                kit::button(t, "canvas-in", "+", Kind::Plain)
-                    .debug_selector(|| "canvas-in".into())
-                    .on_click(cx.listener(|p, _, _, cx| {
+                button("canvas-in", "canvas-in", "+", "Zoom in (Ctrl+=)").on_click(cx.listener(
+                    |p, _, _, cx| {
                         p.canvas.step(true);
                         cx.notify();
-                    })),
+                    },
+                )),
             )
             .child(
-                kit::button(t, "canvas-out", "−", Kind::Plain)
-                    .debug_selector(|| "canvas-out".into())
+                button("canvas-out", "canvas-out", "−", "Zoom out (Ctrl+-)")
+                    .border_t_1()
+                    .border_color(t.divider)
                     .on_click(cx.listener(|p, _, _, cx| {
                         p.canvas.step(false);
                         cx.notify();
                     })),
-            )
-            .child(
-                kit::button(t, "canvas-fit", "Fit", Kind::Plain)
-                    .debug_selector(|| "canvas-fit".into())
-                    .tooltip(kit::tip(
-                        "Show the whole mission (Ctrl+0: back to how it opened)",
-                    ))
-                    .on_click(cx.listener(move |p, _, _, cx| {
-                        // The view is the operator's again: it stops
-                        // following an edited card and frames each change.
-                        p.canvas.follow = None;
-                        p.canvas.touched = false;
-                        p.canvas.fit(&fit);
-                        cx.notify();
-                    })),
-            )
-            .when(!running, |d| {
-                d.child(
-                    kit::button(t, "canvas-arrange", "Arrange", Kind::Plain)
-                        .debug_selector(|| "arrange".into())
-                        .on_click(cx.listener(|p, _, _, cx| p.arrange(cx))),
+            );
+        if !running {
+            stack = stack.child(
+                button(
+                    "canvas-arrange",
+                    "arrange",
+                    "ARRANGE",
+                    "Lay the cards out in run order",
                 )
-            });
+                .border_t_1()
+                .border_color(t.divider)
+                .on_click(cx.listener(|p, _, _, cx| p.arrange(cx))),
+            );
+        }
+        stack = stack.child(
+            button(
+                "canvas-fit",
+                "canvas-fit",
+                "FIT",
+                "Show the whole mission (Ctrl+0: back to how it opened)",
+            )
+            .border_t_1()
+            .border_color(t.divider)
+            .on_click(cx.listener(move |p, _, _, cx| {
+                // The view is the operator's again: it stops following an
+                // edited card and frames each change.
+                p.canvas.follow = None;
+                p.canvas.touched = false;
+                p.canvas.fit(&fit);
+                cx.notify();
+            })),
+        );
+        let controls = div()
+            .absolute()
+            .right(px(PAD))
+            .bottom(px(PAD))
+            .flex()
+            .items_end()
+            .gap(px(GAP))
+            .child(
+                div()
+                    .debug_selector(|| "canvas-zoom".into())
+                    .px(px(GAP))
+                    .h(px(bh))
+                    .flex()
+                    .items_center()
+                    .border_1()
+                    .border_color(t.divider)
+                    .rounded(px(size::RADIUS))
+                    .bg(t.surface)
+                    .text_size(px(size::SMALL))
+                    .text_color(t.text2)
+                    .child(format!("{:.0}%", view.zoom * 100.)),
+            )
+            .child(stack);
         if let Some(id) = &self.reveal_card {
             let selector = format!("mission-reveal-{id}");
             layer = layer.child(
@@ -620,12 +733,7 @@ impl MissionsPage {
                     .child(format!("Card: {}", mission.node_name(id))),
             );
         }
-        div()
-            .size_full()
-            .flex()
-            .flex_col()
-            .child(layer.flex_1().min_w_0().min_h_0())
-            .child(controls)
+        div().size_full().relative().child(layer).child(controls)
     }
 
     /// The mark of a card that has findings: astride its top-left corner,
@@ -705,7 +813,7 @@ impl MissionsPage {
         let id = card.id.clone();
         let from = (card.x, card.y);
         let selector = format!("mission-card-{id}");
-        let face = card_face(t, mission, card, z, running && !self.beside, state);
+        let face = card_face(t, mission, card, z, running, state);
         let issues: Vec<_> = findings
             .iter()
             .filter(|(finding, _)| finding.node_id == id)
@@ -741,16 +849,13 @@ impl MissionsPage {
             .h(px(card.h * z))
             .overflow_hidden()
             .border_1()
-            // The step chosen in Flow beside the board stands out on it.
-            .when(
-                self.beside && self.flow_focus.as_deref() == Some(&id),
-                |d| d.border_2(),
-            )
+            // The step chosen in Flow, or last opened here, stands out.
+            .when(self.flow_focus.as_deref() == Some(&id), |d| d.border_2())
             .border_color(if !issues.is_empty() && self.run_tried {
                 issue_color
             } else if self.reveal_card.as_deref() == Some(&id)
                 || card.kind == board::Kind::Input
-                || (self.beside && self.flow_focus.as_deref() == Some(&id))
+                || self.flow_focus.as_deref() == Some(&id)
             {
                 t.accent
             } else {
@@ -842,13 +947,6 @@ impl MissionsPage {
         } else {
             rendered
         };
-        if running && self.beside {
-            // Beside Flow, a card is where to read about it.
-            let step = card.id.clone();
-            return rendered.on_click(cx.listener(move |page, _, _, cx| {
-                page.choose_in_flow(&step, true, cx);
-            }));
-        }
         if running {
             return rendered.cursor_default();
         }
@@ -957,12 +1055,52 @@ impl MissionsPage {
             x: to.0.round() as i64,
             y: to.1.round() as i64,
         };
-        self.canvas_layout(vec![after], vec![before], cx);
+        // A board laid out for the room it is shown in (never placed by
+        // hand, or not saved in full): the first move keeps every card
+        // where it now stands.
+        let saved = self.state.layout.as_ref().map(|l| &l.nodes);
+        let unsaved = |c: &board::Card| !saved.is_some_and(|n| n.iter().any(|p| p.id == c.id));
+        let rest: Vec<LayoutNode> = match self.state.mission.as_ref() {
+            Some(m) => {
+                let board = self.shown_board(m, false);
+                if self.state.layout_arranged || board.cards.iter().any(unsaved) {
+                    board
+                        .cards
+                        .iter()
+                        .filter(|c| c.id != id)
+                        .map(|c| LayoutNode {
+                            id: c.id.clone(),
+                            x: c.x.round() as i64,
+                            y: c.y.round() as i64,
+                        })
+                        .collect()
+                } else {
+                    vec![]
+                }
+            }
+            None => vec![],
+        };
+        let mut nodes = rest.clone();
+        nodes.push(after);
+        let mut reverse = rest;
+        reverse.push(before);
+        self.canvas_layout(
+            EditLayout {
+                nodes: Some(nodes),
+                ..Default::default()
+            },
+            reverse,
+            false,
+            cx,
+        );
     }
-    fn canvas_layout(
+    /// Save a change to the board's places (`{"nodes":…}`, or
+    /// `{"arrange":true}` for Arrange's own), undone by `reverse`.
+    pub(super) fn canvas_layout(
         &mut self,
-        nodes: Vec<LayoutNode>,
+        change: EditLayout,
         reverse: Vec<LayoutNode>,
+        reframe: bool,
         cx: &mut Context<Self>,
     ) {
         if self.writing || self.editor.as_ref().is_some_and(|e| e.busy) {
@@ -983,11 +1121,7 @@ impl MissionsPage {
             format!("{}/layout", mission_path(&slug)),
         )
         .header("If-Match", etag);
-        let body = EditLayout {
-            nodes: Some(nodes),
-            ..Default::default()
-        };
-        let request = match edits::with_json_body(request, &body) {
+        let request = match edits::with_json_body(request, &change) {
             Ok(request) => request,
             Err(error) => {
                 self.state.error = Some(error.to_string());
@@ -1008,9 +1142,12 @@ impl MissionsPage {
                     Ok(answer) if answer.ok() => {
                         match serde_json::from_slice::<LayoutResponse>(&answer.body) {
                             Ok(v) => {
-                                let etag = v.etag;
-                                p.state.layout = Some(v.layout);
-                                p.state.layout_etag = Some(etag.clone());
+                                let etag = v.etag.clone();
+                                // A move by hand keeps its places.
+                                p.state.set_layout(v.layout, v.etag, reframe);
+                                if reframe {
+                                    p.canvas.reopen();
+                                }
                                 let entry = undo::Entry {
                                     label: "move".into(),
                                     steps: vec![undo::Step::Layout(reverse)],
@@ -1082,6 +1219,16 @@ impl MissionsPage {
     }
 }
 
+/// When the board is fitted to its room: once its layout is in (`ready`),
+/// reshaped on a resize unless someone `placed` its cards, and shown as a
+/// run shows it while `running`.
+#[derive(Clone, Copy)]
+struct Fitting {
+    ready: bool,
+    placed: bool,
+    running: bool,
+}
+
 fn wires(
     t: &ahjo_app_kit::theme::Theme,
     board: &board::Board,
@@ -1089,9 +1236,13 @@ fn wires(
     entity: gpui::WeakEntity<MissionsPage>,
     generation: u64,
     findings: &[(ahjo_missions_contract::Finding, bool)],
-    ready_to_fit: bool,
+    fitting: Fitting,
 ) -> impl IntoElement {
-    let fit_board = board.clone();
+    let Fitting {
+        ready: ready_to_fit,
+        placed,
+        running,
+    } = fitting;
     let list = board.wires.clone();
     let errors: std::collections::HashSet<_> = findings
         .iter()
@@ -1100,6 +1251,10 @@ fn wires(
         .collect();
     let accent = t.accent;
     let (work, pass, fail, quiet, error) = (t.wire, t.pass, t.fail, t.dim, t.error);
+    let grid = (
+        ahjo_app_kit::theme::alpha(t.text, DOT_ALPHA),
+        ahjo_app_kit::theme::alpha(t.text, GRID_ALPHA),
+    );
     let bounds = view.bounds.clone();
     let loose = match &view.drag {
         Some(Drag::Wire { start, now, .. }) => Some((*start, *now)),
@@ -1120,16 +1275,15 @@ fn wires(
             // itself stays where it is, so nothing moves under the pointer
             // when the panel closes.
             let resized = (before.2, before.3) != (bounds.get().2, bounds.get().3);
-            // Beside Flow the board is laid out for its pane, so a new
-            // size lays it out and frames it again. On its own it stays put.
-            if resized && before.2 > 0. {
+            // A board nobody placed is laid out for the room it has, so a
+            // new size lays it out and frames it again. Placed, it stays
+            // put.
+            if resized && before.2 > 0. && !placed {
                 let entity = entity.clone();
                 cx.defer(move |cx| {
                     let _ = entity.update(cx, |page, cx| {
-                        if page.beside {
-                            page.canvas.reopen();
-                            cx.notify();
-                        }
+                        page.canvas.reopen();
+                        cx.notify();
                     });
                 });
             }
@@ -1141,19 +1295,14 @@ fn wires(
             }
             if ready_to_fit && !view.fitted {
                 let entity = entity.clone();
-                let fit_board = fit_board.clone();
                 cx.defer(move |cx| {
                     let _ = entity.update(cx, |page, cx| {
                         if page.generation == generation && !page.canvas.fitted {
-                            // Beside Flow the board is laid out for the pane
-                            // as it now is, and opens as large as fits it.
-                            let mission = page.state.mission.clone();
-                            match mission {
-                                Some(m) if page.beside => {
-                                    let board = page.shown_board(&m, false);
-                                    page.canvas.open(&board, BESIDE_FLOOR, true);
-                                }
-                                _ => page.canvas.open(&fit_board, READABLE, false),
+                            // Laid out for the board as it now is, and
+                            // framed so.
+                            if let Some(m) = page.state.mission.clone() {
+                                let board = page.shown_board(&m, running);
+                                page.canvas.open(&board, READABLE, false);
                             }
                             if page.canvas.fitted {
                                 cx.notify();
@@ -1169,6 +1318,7 @@ fn wires(
                     b.origin.y + px(p.1 * z + view.pan.1),
                 )
             };
+            paint_grid(window, b, &view, grid);
             for w in &list {
                 let colour = if errors.contains(&w.id) {
                     error
@@ -1180,51 +1330,16 @@ fn wires(
                         _ => work,
                     }
                 };
-                let (a, end) = (at(w.from), at(w.to));
-                let mut path = PathBuilder::stroke(px(EDGE));
-                // A judge's question and answer, and a Limit card's link,
+                let mut path = PathBuilder::stroke(px(WIRE));
+                // A judge's question and answer, and a Limit card's tether,
                 // are dotted; a loop back is dashed.
                 if matches!(w.route.as_str(), "judge" | "limit") {
                     path = path.dash_array(&[px(DASH_SHORT), px(DASH_LONG)]);
                 } else if w.back {
-                    path = path.dash_array(&[px(DASH_LONG * 2.), px(DASH_LONG)]);
+                    path = path.dash_array(&[px(DASH_LONG * 1.2), px(DASH_LONG)]);
                 }
-                path.move_to(a);
-                if let Some(lane) = w.lane {
-                    let out = px(board::LOOP_OUT * z);
-                    let y = at((0., lane)).y;
-                    for p in [
-                        point(a.x + out, a.y),
-                        point(a.x + out, y),
-                        point(end.x - out, y),
-                        point(end.x - out, end.y),
-                        end,
-                    ] {
-                        path.line_to(p);
-                    }
-                } else if w.route == "limit" {
-                    path.line_to(end);
-                } else {
-                    let reach = px(((w.to.0 - w.from.0).abs() / 2.).max(CURVE_REACH) * z);
-                    let down = px(CURVE_DOWN * z);
-                    let (ca, cb) = if w.route == "judge" {
-                        (
-                            if w.to.1 > w.from.1 {
-                                point(a.x, a.y + down)
-                            } else {
-                                point(a.x + reach, a.y)
-                            },
-                            if w.to.1 < w.from.1 {
-                                point(end.x, end.y + down)
-                            } else {
-                                point(end.x - reach, end.y)
-                            },
-                        )
-                    } else {
-                        (point(a.x + reach, a.y), point(end.x - reach, end.y))
-                    };
-                    path.cubic_bezier_to(end, ca, cb);
-                }
+                let points: Vec<_> = w.points.iter().map(|p| at(*p)).collect();
+                rounded(&mut path, &points, px(board::CORNER * z));
                 if let Ok(path) = path.build() {
                     window.paint_path(path, colour);
                 }
@@ -1245,6 +1360,87 @@ fn wires(
     .absolute()
     .inset_0()
     .size_full()
+}
+
+/// A course of straight runs, its corners rounded to `radius` (less where a
+/// run is too short for it).
+fn rounded(path: &mut PathBuilder, points: &[Point<Pixels>], radius: Pixels) {
+    let Some(first) = points.first() else { return };
+    path.move_to(*first);
+    for i in 1..points.len().saturating_sub(1) {
+        let (a, p, b) = (points[i - 1], points[i], points[i + 1]);
+        let len =
+            |u: Point<Pixels>, v: Point<Pixels>| f32::from(u.x - v.x).hypot(f32::from(u.y - v.y));
+        let (into, out) = (len(a, p), len(p, b));
+        if into < 0.5 || out < 0.5 {
+            continue;
+        }
+        let r = f32::from(radius).min(into / 2.).min(out / 2.);
+        let toward = |from: Point<Pixels>, to: Point<Pixels>, d: f32, len: f32| {
+            point(
+                from.x + (to.x - from.x) * (d / len),
+                from.y + (to.y - from.y) * (d / len),
+            )
+        };
+        path.line_to(toward(p, a, r, into));
+        path.curve_to(toward(p, b, r, out), p);
+    }
+    if let Some(last) = points.last().filter(|_| points.len() > 1) {
+        path.line_to(*last);
+    }
+}
+
+/// Archon's grid under the board: faint lines every `GRID` and a dot every
+/// `DOT`, in the board's space so they pan and zoom with it.
+fn paint_grid(window: &mut Window, b: Bounds<Pixels>, view: &View, (dot, line): (Hsla, Hsla)) {
+    let z = view.zoom;
+    let (w, h) = (f32::from(b.size.width), f32::from(b.size.height));
+    let first = |pan: f32, step: f32| (pan.rem_euclid(step * z)) - step * z;
+    let mut x = first(view.pan.0, GRID);
+    while x < w {
+        window.paint_quad(gpui::fill(
+            Bounds::new(
+                point(b.origin.x + px(x), b.origin.y),
+                gpui::size(px(1.), b.size.height),
+            ),
+            line,
+        ));
+        x += GRID * z;
+    }
+    let mut y = first(view.pan.1, GRID);
+    while y < h {
+        window.paint_quad(gpui::fill(
+            Bounds::new(
+                point(b.origin.x, b.origin.y + px(y)),
+                gpui::size(b.size.width, px(1.)),
+            ),
+            line,
+        ));
+        y += GRID * z;
+    }
+    // Too far out, the dots would be a haze: the lines alone then.
+    if DOT * z < 10. {
+        return;
+    }
+    let d = DOT_SIZE.max(1.);
+    let mut y = first(view.pan.1, DOT);
+    while y < h {
+        let mut x = first(view.pan.0, DOT);
+        while x < w {
+            window.paint_quad(
+                gpui::fill(
+                    Bounds::new(
+                        point(b.origin.x + px(x - d / 2.), b.origin.y + px(y - d / 2.)),
+                        gpui::size(px(d), px(d)),
+                    ),
+                    dot,
+                )
+                .corner_radii(px(d / 2.)),
+            );
+            x += DOT * z;
+        }
+        y += DOT * z;
+    }
 }
 
 fn card_face(
@@ -1292,10 +1488,10 @@ fn card_face(
                     div()
                         .h(px(board::IO_ROW * z))
                         .flex_none()
-                        .px(px(PAD * z))
+                        .px(px(CARD_PAD * z))
                         .flex()
                         .items_center()
-                        .gap(px(PAD * z))
+                        .gap(px(GAP * z))
                         .border_b_1()
                         .border_color(t.divider)
                         .child(label("IN".into(), t.dim))
@@ -1313,7 +1509,7 @@ fn card_face(
                 .min_w_0()
                 .flex()
                 .flex_col()
-                .gap(px(size::RADIUS * z))
+                .gap(px(EDGE * z))
                 .child(
                     div()
                         .flex()
@@ -1323,7 +1519,7 @@ fn card_face(
                             d.child(
                                 div()
                                     .flex_none()
-                                    .size(px(END_MARK * z))
+                                    .size(px(NUMBER * z))
                                     .rounded_full()
                                     .border_1()
                                     .border_color(t.dim)
@@ -1364,8 +1560,8 @@ fn card_face(
             let head = div()
                 .h(px(board::step_head(f, running) * z))
                 .flex_none()
-                .px(px(PAD * z))
-                .py(px(PAD * z))
+                .px(px(CARD_PAD * z))
+                .py(px(HEAD_PAD * z))
                 .border_b_1()
                 .border_color(t.divider)
                 .flex()
@@ -1386,7 +1582,7 @@ fn card_face(
             let mut body = div()
                 .h(px(board::body_h(&f.kind, f.slots.len()) * z))
                 .flex_none()
-                .px(px(SLOT_PAD * z))
+                .px(px(GAP * z))
                 .py(px(board::BODY_PAD * z))
                 .flex()
                 .flex_col()
@@ -1409,7 +1605,14 @@ fn card_face(
                     .rounded(px(GAP * z))
                     .child(
                         label(
-                            if f.kind == "peer" { "PEERS" } else { "WORKERS" }.into(),
+                            {
+                                let n = f.slots.iter().filter(|s| !s.controller).count();
+                                if f.kind == "peer" {
+                                    format!("PEERS · {n} TOGETHER")
+                                } else {
+                                    format!("WORKERS · {n} AT ONCE")
+                                }
+                            },
                             t.dim,
                         )
                         .absolute()
@@ -1446,10 +1649,10 @@ fn card_face(
                     div()
                         .h(px(board::IO_ROW * z))
                         .flex_none()
-                        .px(px(PAD * z))
+                        .px(px(CARD_PAD * z))
                         .flex()
                         .items_center()
-                        .gap(px(PAD * z))
+                        .gap(px(GAP * z))
                         .border_t_1()
                         .border_color(t.divider)
                         .child(label("OUT".into(), t.dim))
@@ -1480,7 +1683,7 @@ fn card_face(
             let line = |text: String, colour: Hsla| {
                 div()
                     .h(px(board::INPUT_LINE * z))
-                    .px(px(POOL_LABEL * z))
+                    .px(px(CARD_PAD * z))
                     .flex()
                     .items_center()
                     .text_size(px(CARD_SMALL * z))
@@ -1494,11 +1697,11 @@ fn card_face(
                 .child(
                     div()
                         .h(px(board::INPUT_HEAD * z))
-                        .px(px(POOL_LABEL * z))
-                        .pt(px(PAD * z))
+                        .px(px(CARD_PAD * z))
+                        .pt(px(CARD_PAD * z))
                         .flex()
                         .flex_col()
-                        .gap(px(CHIP_PAD * z))
+                        .gap(px(EDGE * z))
                         .child(label("◆ INPUT".into(), t.accent))
                         .child(
                             div()
@@ -1511,9 +1714,11 @@ fn card_face(
                 .child(
                     div()
                         .h(px(board::INPUT_GOAL * z))
-                        .px(px(POOL_LABEL * z))
+                        .min_w_0()
+                        .px(px(CARD_PAD * z))
                         .overflow_hidden()
                         .line_clamp(2)
+                        .text_ellipsis()
                         .text_size(px(CARD_SMALL * z))
                         .text_color(t.text2)
                         .child(c.goal.clone()),
@@ -1529,12 +1734,42 @@ fn card_face(
             let Some(g) = mission.gates.iter().find(|g| g.id == card.id) else {
                 return div();
             };
+            let who = g
+                .kinds
+                .iter()
+                .map(|kind| match kind.as_str() {
+                    "formation" => "JUDGE".to_owned(),
+                    "human" => "YOU".to_owned(),
+                    other => other.to_uppercase(),
+                })
+                .collect::<Vec<_>>()
+                .join(" + ");
+            let number = flow::build(mission).numbers.get(&g.id).copied();
+            // A judge sending a step back that a limit caps at its best
+            // attempt: the best of so many.
+            let eyebrow = match (number, best_of(mission, &g.id)) {
+                (Some(n), Some(k)) => format!("{n} · BEST OF {k}"),
+                (None, Some(k)) => format!("BEST OF {k}"),
+                (Some(n), None) => format!("{n} · GATE · {who}"),
+                (None, None) => format!("GATE · {who}"),
+            };
+            // Each word beside its port, the ports close by the middle.
+            let beside_port =
+                |text: &'static str, colour: Hsla, dy: f32, selector: &'static str| {
+                    label(text.into(), colour)
+                        .debug_selector(move || selector.into())
+                        .absolute()
+                        .right(px(CARD_PAD * z))
+                        .top(px((card.h / 2. + dy - CARD_SMALL * 0.7) * z))
+                };
             div()
                 .size_full()
+                .relative()
                 .flex()
                 .items_center()
-                .gap(px(PAD * z))
-                .p(px(PAD * z))
+                .gap(px(CARD_PAD * z))
+                .pl(px(CARD_PAD * z))
+                .pr(px((CARD_PAD + 40.) * z))
                 .child(
                     div()
                         .size(px(GATE_MARK * z))
@@ -1555,59 +1790,36 @@ fn card_face(
                         .min_w_0()
                         .flex()
                         .flex_col()
+                        .child(label(eyebrow, t.dim))
                         .child(
                             div()
                                 .font_weight(FontWeight::BOLD)
                                 .text_size(px(CARD_TEXT * z))
                                 .truncate()
-                                .child(format!(
-                                    "{}{}",
-                                    flow::build(mission)
-                                        .numbers
-                                        .get(&g.id)
-                                        .map(|n| format!("{n}  "))
-                                        .unwrap_or_default(),
-                                    g.title
-                                )),
+                                .child(g.title.clone()),
                         )
                         .child(
                             div()
-                                .flex()
-                                .gap(px(size::RADIUS * z))
-                                .children(g.kinds.iter().map(|kind| {
-                                    let word = match kind.as_str() {
-                                        "formation" => "judge",
-                                        "human" => "you",
-                                        other => other,
-                                    };
-                                    label(word.to_owned(), t.text2)
-                                        .px(px(size::RADIUS * z))
-                                        .border_1()
-                                        .border_color(t.divider)
-                                })),
-                        )
-                        .child(
-                            div()
+                                .min_w_0()
                                 .line_clamp(2)
+                                .text_ellipsis()
                                 .text_size(px(CARD_SMALL * z))
                                 .text_color(t.text2)
                                 .child(g.criterion.clone()),
                         ),
                 )
-                .child(
-                    div()
-                        .flex()
-                        .flex_col()
-                        .pt(px(size::CONTROL * z))
-                        .child(
-                            label("✓ PASS".into(), t.pass)
-                                .debug_selector(|| "canvas-gate-pass-label".into()),
-                        )
-                        .child(
-                            label("× FAIL".into(), t.fail)
-                                .debug_selector(|| "canvas-gate-fail-label".into()),
-                        ),
-                )
+                .child(beside_port(
+                    "PASS",
+                    t.pass,
+                    -board::GATE_PORTS,
+                    "canvas-gate-pass-label",
+                ))
+                .child(beside_port(
+                    "FAIL",
+                    t.fail,
+                    board::GATE_PORTS,
+                    "canvas-gate-fail-label",
+                ))
         }
         board::Kind::Limit => {
             let Some(l) = mission.limits.iter().find(|l| l.id == card.id) else {
@@ -1618,8 +1830,7 @@ fn card_face(
                 .flex()
                 .flex_col()
                 .justify_center()
-                .gap(px(EDGE * z))
-                .px(px(PAD * z))
+                .px(px(CARD_PAD * z))
                 .child(label("⏱ LIMIT".into(), t.dim))
                 .child(
                     div()
@@ -1643,8 +1854,8 @@ fn card_face(
                 .size_full()
                 .flex()
                 .items_center()
-                .gap(px(PAD * z))
-                .px(px(PAD * z))
+                .gap(px(GAP * z))
+                .px(px(CARD_PAD * 1.5 * z))
                 .child(
                     div()
                         .size(px(END_MARK * z))
@@ -1716,13 +1927,18 @@ fn slot_row(
         crate::store::words::role_name(&slot.agent_id),
         crate::store::words::harness_name(&slot.harness)
     );
+    // A slot no agent works yet: Archon's dashed ring with a plus.
+    let empty = slot.harness.trim().is_empty();
     let ring = div()
         .size(px(RING_SIZE * z))
         .flex_none()
         .rounded_full()
-        .border_2()
+        .border_1()
+        .when(empty, |d| d.border_dashed())
         .border_color(if slot.controller {
             ahjo_app_kit::theme::rgb(t.ansi[3])
+        } else if empty {
+            t.dim
         } else {
             t.text2
         })
@@ -1730,7 +1946,15 @@ fn slot_row(
         .flex()
         .items_center()
         .justify_center()
+        .text_color(t.dim)
+        .when(empty, |d| d.child("+"))
         .children(mark);
+    let label = crate::store::words::slot_label(slot).to_uppercase();
+    let what = if empty {
+        "No agent yet".to_owned()
+    } else {
+        crate::store::words::slot_line(slot)
+    };
     div()
         .h(px(board::SLOT_H * z))
         .debug_selector(move || selector.clone())
@@ -1746,20 +1970,6 @@ fn slot_row(
                 .min_w_0()
                 .flex()
                 .flex_col()
-                .child(
-                    div()
-                        .text_size(px(CARD_SMALL * z))
-                        .text_color(t.dim)
-                        .truncate()
-                        .child(match role {
-                            Some(role) => format!(
-                                "{} · {}",
-                                crate::store::words::slot_label(slot).to_uppercase(),
-                                role.to_uppercase()
-                            ),
-                            None => crate::store::words::slot_label(slot).to_uppercase(),
-                        }),
-                )
                 // The agent by the session it works in, as the session list
                 // shows it.
                 .child(
@@ -1778,7 +1988,10 @@ fn slot_row(
                         .text_size(px(CARD_SMALL * z))
                         .text_color(t.text2)
                         .truncate()
-                        .child(crate::store::words::slot_line(slot)),
+                        .child(match role {
+                            Some(role) => format!("{label} · {role} · {what}"),
+                            None => format!("{label} · {what}"),
+                        }),
                 ),
         )
 }
@@ -1819,7 +2032,7 @@ fn harness_mark(harness: &str, text: Hsla, secondary: Hsla, z: f32) -> Option<gp
     }).clone());
     Some(
         gpui::img(image)
-            .size(px(TITLE_SIZE * z))
+            .size(px(CARD_TEXT * z))
             .flex_none()
             .into_any_element(),
     )
@@ -2169,6 +2382,22 @@ fn new_limit(target: &str, x: i64, y: i64) -> MissionChange {
         x,
         y,
     }
+}
+
+fn best_of(mission: &Mission, gate: &str) -> Option<i64> {
+    let back = format!("{gate}:{}", ahjo_missions_contract::GATE_FAIL);
+    mission
+        .connections
+        .iter()
+        .filter(|c| c.from == back)
+        .filter_map(|c| c.to.split(':').next())
+        .find_map(|step| {
+            mission
+                .limits
+                .iter()
+                .find(|l| l.target == step && l.when_spent == "best")
+                .and_then(|l| l.rounds)
+        })
 }
 
 #[cfg(test)]
