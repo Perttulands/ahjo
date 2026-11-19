@@ -197,27 +197,38 @@ reserves, or whose `everywhere` chords share a key, naming both;
   hands it a view (`Host::show_beside`), which the asker draws where its
   layout has room (`Host::beside`), as the terminals draw a file a link
   named.
-- **Panels.** A page may also open a view of its own beside the terminals
-  without being asked (Files, Work and Brain each have one, toggled by an
-  `everywhere` chord): the same `Host::show_beside`, so it lies over the
-  terminal windows and no shared session changes size. While a view a page
-  lent is open beside another, that page's channels stay on, as while it
-  shows.
+- **Views beside.** A page may also open a view of its own beside the
+  terminals without being asked, toggled by an `everywhere` chord (Work's
+  on Alt+B, Files' find on Alt+O, Brain's on Alt+L): the same
+  `Host::show_beside`, so it lies over the terminal windows and no shared
+  session changes size. While a view a page lent is open beside another,
+  that page's channels stay on, as while it shows.
 - **Side panel.** The column at the window's left is the shell's, on every
-  page: each page may lend it one section (`Host::lend_side`), drawn in the
-  pages' order (Sessions, then Files), and the operator puts it away to a
-  narrow edge and back (`Host::set_side_open`, kept in `app.json`). On the
+  page: each page may lend it one section (`Host::lend_side`), and the
+  operator puts it away to a narrow edge and back (`Host::set_side_open`,
+  kept in `app.json`). Sessions lends its rail, on every page. On the
   Sessions page that column is the rail that was always there; on other
-  pages it narrows the page. What still holds: a shared session's terminal
-  windows never change size because a panel opens or another page shows.
-  Only the operator's own act resizes them, as putting the panel away
-  does, the way putting the rail away always did. A lent section keeps its page's channels on while the panel is
-  open, and a section acts through its page (a session goes to Sessions, a
-  file opens in Files), so a page's own lists stay its own. A section says
-  where it shows (`SideOn`): Sessions' rail on every page, its own too,
-  since that page draws it nowhere else; Files' tree on the other pages
-  only, since on Files the list holds the same tree, drawn by the same page
-  from the same store, so the operator never sees two.
+  pages it narrows the page. A lent section keeps its page's channels on
+  while the panel is open, and acts through its page (a session goes to
+  Sessions), so a page's own lists stay its own. A section says where it
+  shows (`SideOn`).
+- **Edge panel.** A page may lend one panel to an edge of the window
+  (`Host::lend_panel`), beside the page rather than over it: Files lends its
+  tree, at the right unless its setting says left, on the other pages only,
+  since on Files the list holds the same tree. One switch shows and hides
+  every edge panel, Ctrl+B as in VS Code and Files' chord (Alt+E, VS Code's
+  Explorer key), sliding in and out; its width is dragged at its inner
+  edge. Both are kept
+  in `app.json`. Ctrl+B is the shell's only when what has the keyboard did
+  not take it: a terminal always takes it (tmux's prefix, a harness's
+  background key, readline), so Alt+E is the way from a terminal. A file
+  picked in it opens beside the terminals on Sessions and on the Files page
+  elsewhere.
+- **Window sizes.** A shared session's terminal windows change size only for
+  the operator's own act: putting a panel away or bringing it back,
+  dragging an edge, opening Send. A page showing, a view beside, the
+  output search or Peek never resizes them; they lie over the windows.
+  Resizes settle before they reach tmux, so a sliding panel sends one.
 - **Unsaved work.** The shell owns the window's one close handler. A page
   guards itself, or a view it shows beside another page, with
   `Host::guard_close`, which names what that view holds unsaved; while any

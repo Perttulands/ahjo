@@ -624,11 +624,7 @@ impl AgentsPage {
         };
         // Too narrow for both columns (a small window, the app zoomed in):
         // one at a time, the part picked read in place of the anatomy.
-        let side = if self.host.side_open(cx) {
-            size::SIDE
-        } else {
-            size::SIDE_SHUT
-        };
+        let side = self.host.side_room(cx);
         let room = f32::from(window.viewport_size().width) - side - size::LIST;
         if room < tokens::ANATOMY_MIN + tokens::READER_MIN {
             let body = if self.shape.reading {

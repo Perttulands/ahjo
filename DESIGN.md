@@ -71,8 +71,11 @@ A page is judged by three questions, in this order:
   answer.
 - **Settings.** Every setting, said plainly, changed in place.
 
-The Sessions and Files panels are available on every tab. The Missions tab
-adds its own panel of missions and runs.
+The Sessions panel stands at the left on every tab. The Files panel stands
+at an edge of its own on the other tabs, the right unless set to the left,
+and goes and comes back with Ctrl+B as in VS Code (Alt+E from a terminal,
+which keeps its Ctrl+B). The Missions tab adds its own panel of missions and
+runs.
 
 ## One app
 

@@ -159,14 +159,10 @@ impl Terminals {
             .into_any_element()
     }
 
-    /// The width the windows' row has, beside the side panel.
+    /// The width the windows' row has, beside the side panel and the Files
+    /// panel.
     pub(super) fn workspace_room(&self, window: &Window, cx: &gpui::App) -> f32 {
-        let side = if self.host.side_open(cx) {
-            size::SIDE
-        } else {
-            size::SIDE_SHUT
-        };
-        window.viewport_size().width / px(1.) - side
+        window.viewport_size().width / px(1.) - self.host.side_room(cx)
     }
 
     fn render_grid(&mut self, cx: &mut Context<Self>) -> impl IntoElement {
@@ -1830,7 +1826,9 @@ impl Terminals {
             cx.stop_propagation();
             return;
         }
-        if e.prefer_character_input {
+        // A window with no session (its launcher) has no program to type
+        // into: its keys go on, so Ctrl+B there reaches the app.
+        if e.prefer_character_input || self.focused_pane().is_none() {
             return;
         }
         let app_cursor = self

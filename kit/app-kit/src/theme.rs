@@ -42,6 +42,13 @@ pub mod size {
     /// edge it leaves when put away.
     pub const SIDE: f32 = 260.;
     pub const SIDE_SHUT: f32 = 36.;
+    /// A page's panel (Files): as it first opens, and the least and most
+    /// it is dragged to.
+    pub const PANEL: f32 = 300.;
+    pub const PANEL_MIN: f32 = 200.;
+    pub const PANEL_MAX: f32 = 640.;
+    /// The grip on a panel's inner edge.
+    pub const PANEL_GRIP: f32 = 6.;
     /// A tab card's gap above it.
     pub const TAB_CARD_TOP: f32 = 6.;
     /// The bar under the shown tab, and its inset from the tab's sides.
@@ -126,6 +133,8 @@ pub mod motion {
     /// A menu or a layer opening, and how far a menu drops into place.
     pub const PANEL_IN: u64 = 140;
     pub const PANEL_DROP: f32 = 6.;
+    /// A page's panel (Files) sliding open or away.
+    pub const PANEL_SLIDE: u64 = 160;
     /// The active tab's mark drawing out from its middle.
     pub const TAB_IN: u64 = 220;
 }

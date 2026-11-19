@@ -75,6 +75,23 @@ pub enum SideOn {
     OtherPages,
 }
 
+/// Which edge of the window a page's panel stands at.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Edge {
+    Left,
+    #[default]
+    Right,
+}
+
+/// A page's panel: a column of its own at an edge of the window, apart
+/// from the side panel, opened and put away by Ctrl+B as in VS Code.
+#[derive(Clone)]
+pub struct Panel {
+    pub view: AnyView,
+    pub on: SideOn,
+    pub edge: Edge,
+}
+
 /// What the shell hears from the hub, after the update that caused it.
 pub enum HubEvent {
     /// A frame for the page whose kinds hold it.
@@ -151,6 +168,10 @@ pub struct Hub {
     /// The sections of the side panel, by the page that lent each, with
     /// the pages each shows on.
     side: HashMap<&'static str, (AnyView, SideOn)>,
+    /// The panels pages lent, by the page that lent each.
+    panels: HashMap<&'static str, Panel>,
+    /// The page the window shows, as the shell last drew it.
+    shown: Option<&'static str>,
     /// The views that may hold unsaved work, each with the page it is from.
     guards: Vec<Guard>,
 }
@@ -219,6 +240,8 @@ impl Hub {
             widens: HashSet::new(),
             whole: HashSet::new(),
             side: HashMap::new(),
+            panels: HashMap::new(),
+            shown: None,
             guards: vec![],
         }
     }
@@ -759,6 +782,67 @@ impl Hub {
     pub fn lends(&self, page: &str) -> bool {
         self.beside.values().any(|(from, _)| *from == page)
             || (self.settings.side_open && self.side.contains_key(page))
+            || (self.settings.panel_open && self.panels.contains_key(page))
+    }
+
+    /// Page `page`'s panel.
+    pub fn panel(&self, page: &str) -> Option<Panel> {
+        self.panels.get(page).cloned()
+    }
+
+    /// Lends `panel` as page `page`'s, or takes it back.
+    pub fn set_panel(&mut self, page: &'static str, panel: Option<Panel>, cx: &mut Context<Self>) {
+        match panel {
+            Some(panel) => self.panels.insert(page, panel),
+            None => self.panels.remove(page),
+        };
+        cx.emit(HubEvent::Lent(page));
+        cx.notify();
+    }
+
+    /// The panels that stand while page `shown` shows, open or put away.
+    pub fn panels_on(&self, shown: &str) -> Vec<(&'static str, Panel)> {
+        let mut on: Vec<(&'static str, Panel)> = self
+            .panels
+            .iter()
+            .filter(|(page, p)| !(p.on == SideOn::OtherPages && **page == shown))
+            .map(|(page, p)| (*page, p.clone()))
+            .collect();
+        on.sort_by_key(|(page, _)| *page);
+        on
+    }
+
+    /// Opens or puts away the panels, kept for the next run.
+    pub fn set_panel_open(&mut self, open: bool, cx: &mut Context<Self>) {
+        if self.settings.panel_open == open {
+            return;
+        }
+        self.settings.panel_open = open;
+        self.save(cx);
+        let lenders: Vec<&'static str> = self.panels.keys().copied().collect();
+        for page in lenders {
+            cx.emit(HubEvent::Lent(page));
+        }
+        cx.notify();
+    }
+
+    /// The panels' width as dragged; `keep` writes it for the next run.
+    pub fn set_panel_width(&mut self, width: f32, keep: bool, cx: &mut Context<Self>) {
+        self.settings.panel_width = crate::settings::panel_width(width);
+        if keep {
+            self.save(cx);
+        }
+        cx.notify();
+    }
+
+    /// The page the window shows.
+    pub fn shown(&self) -> Option<&'static str> {
+        self.shown
+    }
+
+    /// The shell shows page `page`.
+    pub fn set_shown(&mut self, page: Option<&'static str>) {
+        self.shown = page;
     }
 
     /// Page `page`'s section of the side panel, and the pages it shows on.

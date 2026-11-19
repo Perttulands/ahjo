@@ -59,7 +59,7 @@ fn chords(page: &WeakEntity<Terminals>, tabs: usize) -> Vec<Chord> {
             Action::SearchSessions,
         ),
         chord("n", "Launcher in the focused window", Action::Launcher).alt("n", Some(false)),
-        chord("tab", "Sessions and files panel", Action::Sessions).alt("a", Some(false)),
+        chord("tab", "Sessions panel", Action::Sessions).alt("a", Some(false)),
         chord("s", "Send from the focused session", Action::Send).alt("s", Some(false)),
         // Ahjo's own, on letters CHROTE leaves free: V for view, H for
         // history (Alt+F is the shell's forward-word).
@@ -277,7 +277,7 @@ mod tests {
             ("+", false, Some("Add a window")),
             ("-", false, Some("Remove the last empty window")),
             ("n", false, Some("Launcher in the focused window")),
-            ("a", false, Some("Sessions and files panel")),
+            ("a", false, Some("Sessions panel")),
             ("s", false, Some("Send from the focused session")),
             ("2", false, Some("Sessions tab 2")),
             ("6", false, Some("Sessions tab 6")),
@@ -316,7 +316,7 @@ mod tests {
             after_leader(&bare("tab", "\t"), &all)
                 .map(|r| r.label)
                 .as_deref(),
-            Some("Sessions and files panel")
+            Some("Sessions panel")
         );
         assert!(
             after_leader(&bare("enter", "\r"), &all).is_none(),

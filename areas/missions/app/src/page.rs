@@ -1633,11 +1633,7 @@ impl Render for MissionsPage {
         self.sync_validation(cx);
         let t = theme(cx).clone();
         self.choose_first(cx);
-        let side = if self.host.side_open(cx) {
-            size::SIDE
-        } else {
-            size::SIDE_SHUT
-        };
+        let side = self.host.side_room(cx);
         // In a narrow page the board takes the whole page, so its cards are
         // drawn large enough to read; the list comes back with Done.
         let narrow = f32::from(window.viewport_size().width) - side < NARROW;

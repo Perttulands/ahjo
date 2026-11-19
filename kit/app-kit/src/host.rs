@@ -547,6 +547,63 @@ impl Host {
         self.update(cx, |h, cx| h.set_side_open(open, cx));
     }
 
+    /// Lends `view` as this page's panel: a column of its own at the
+    /// window's `edge`, on the pages `on` says, opened and put away with
+    /// Ctrl+B. While it is open this page's channels stay on.
+    pub fn lend_panel(
+        &self,
+        view: AnyView,
+        on: crate::hub::SideOn,
+        edge: crate::hub::Edge,
+        cx: &mut App,
+    ) {
+        let page = self.page;
+        assert!(!page.is_empty(), "a panel is lent by a page's own host");
+        let panel = crate::hub::Panel { view, on, edge };
+        self.update(cx, |h, cx| h.set_panel(page, Some(panel), cx));
+    }
+
+    /// Whether the panels are open.
+    pub fn panel_open(&self, cx: &App) -> bool {
+        self.read(cx, |h| h.settings.panel_open).unwrap_or(true)
+    }
+
+    /// Opens or puts away the panels, kept for the next run.
+    pub fn set_panel_open(&self, open: bool, cx: &mut App) {
+        self.update(cx, |h, cx| h.set_panel_open(open, cx));
+    }
+
+    /// The panels' width.
+    pub fn panel_width(&self, cx: &App) -> f32 {
+        self.read(cx, |h| h.settings.panel_width)
+            .unwrap_or(crate::theme::size::PANEL)
+    }
+
+    /// The page the window shows.
+    pub fn shown_page(&self, cx: &App) -> Option<&'static str> {
+        self.read(cx, |h| h.shown()).flatten()
+    }
+
+    /// The width the side panel and the open panels take from the window
+    /// while this page shows: what is left is the page's.
+    pub fn side_room(&self, cx: &App) -> f32 {
+        let page = self.page;
+        self.read(cx, |h| {
+            let side = if h.settings.side_open {
+                crate::theme::size::SIDE
+            } else {
+                crate::theme::size::SIDE_SHUT
+            };
+            let panels = if h.settings.panel_open && !h.panels_on(page).is_empty() {
+                h.settings.panel_width
+            } else {
+                0.
+            };
+            side + panels
+        })
+        .unwrap_or(crate::theme::size::SIDE)
+    }
+
     /// Shows this page.
     pub fn show(&self, cx: &mut App) {
         let page = self.page;

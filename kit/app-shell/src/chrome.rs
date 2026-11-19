@@ -4,7 +4,7 @@
 
 use crate::shell::Shell;
 use ahjo_app_kit::host::{Cover, Status};
-use ahjo_app_kit::hub::{SideOn, Surface, Toast};
+use ahjo_app_kit::hub::{Edge, SideOn, Surface, Toast};
 use ahjo_app_kit::link::client::LinkState;
 use ahjo_app_kit::menu::{Menu, MenuRow, Pick};
 use ahjo_app_kit::theme::{self, Theme, alpha, motion, size, theme};
@@ -14,7 +14,7 @@ use gpui::{
     Anchor, Animation, AnimationExt, AnyElement, Context, ElementId, MouseButton, MouseDownEvent,
     Window, anchored, deferred, div, ease_out_quint, point, prelude::*, px,
 };
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 /// The padding of the words at the bar's right end (Keys, a link that is
 /// not open).
@@ -651,7 +651,7 @@ impl Shell {
                     .child(
                         kit::button(t, "side-open", "›", kit::Kind::Quiet)
                             .debug_selector(|| "side-open".into())
-                            .tooltip(kit::tip("Show sessions and files  Alt+A"))
+                            .tooltip(kit::tip("Show sessions  Alt+A"))
                             .on_click(move |_, _, cx| {
                                 hub.update(cx, |h, cx| h.set_side_open(true, cx));
                             }),
@@ -678,6 +678,168 @@ impl Shell {
     }
 }
 
+impl Shell {
+    /// The panels pages lent at `edge` (Files, at the right unless its
+    /// page says left), stacked in one column the operator sizes by its
+    /// inner edge. Ctrl+B opens and puts them away: they slide, and the
+    /// page beside takes their room or gives it back.
+    fn render_panels(
+        &mut self,
+        edge: Edge,
+        t: &Theme,
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
+        let shown = self.shown_page().unwrap_or_default();
+        let hub = self.hub.read(cx);
+        let off = hub.areas_off();
+        let open = hub.settings.panel_open;
+        let width = hub.settings.panel_width;
+        let views: Vec<gpui::AnyView> = hub
+            .panels_on(shown)
+            .into_iter()
+            .filter(|(page, p)| {
+                p.edge == edge
+                    && !self.pages.iter().any(|m| {
+                        m.meta.id == *page
+                            && m.meta.area.is_some_and(|a| off.iter().any(|o| o == a))
+                    })
+            })
+            .map(|(_, p)| p.view)
+            .collect();
+        // A change of open since the last frame starts a slide; while one
+        // runs, a panel put away is still drawn, narrowing.
+        let slide = Duration::from_millis(motion::PANEL_SLIDE);
+        if self.panel_drawn != Some(open) {
+            if self.panel_drawn.is_some() {
+                self.panel_moved = Some(Instant::now());
+                cx.spawn(async move |this, cx| {
+                    cx.background_executor().timer(slide).await;
+                    let _ = this.update(cx, |_, cx| cx.notify());
+                })
+                .detach();
+            }
+            self.panel_drawn = Some(open);
+        }
+        let moving = self.panel_moved.filter(|at| at.elapsed() < slide);
+        if views.is_empty() || (!open && moving.is_none()) {
+            return None;
+        }
+        let left = edge == Edge::Left;
+        let mut column = div()
+            .size_full()
+            .flex()
+            .flex_col()
+            .bg(t.surface)
+            .when(left, |d| d.border_r_1())
+            .when(!left, |d| d.border_l_1())
+            .border_color(t.divider);
+        for (n, view) in views.into_iter().enumerate() {
+            column = column.child(
+                div()
+                    .flex_auto()
+                    .min_h(px(size::ROW * 4.))
+                    .flex()
+                    .flex_col()
+                    .when(n > 0, |d| d.border_t_1().border_color(t.divider))
+                    .child(view),
+            );
+        }
+        let grip = div()
+            .id(("panel-grip", left as usize))
+            .debug_selector(|| "panel-grip".into())
+            .absolute()
+            .top_0()
+            .bottom_0()
+            .w(px(size::PANEL_GRIP))
+            .when(left, |d| d.right(px(-size::PANEL_GRIP / 2.)))
+            .when(!left, |d| d.left(px(-size::PANEL_GRIP / 2.)))
+            .cursor_col_resize()
+            .hover(|d| d.bg(t.accent_soft()))
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(|s, _, _, cx| {
+                    s.panel_dragging = true;
+                    cx.stop_propagation();
+                }),
+            );
+        let frame = div()
+            .id(("panel", left as usize))
+            .debug_selector(move || format!("panel-{}", if left { "left" } else { "right" }))
+            .flex_none()
+            .h_full()
+            .relative()
+            .overflow_hidden()
+            .child(
+                div()
+                    .absolute()
+                    .top_0()
+                    .bottom_0()
+                    .w(px(width))
+                    .when(left, |d| d.right_0())
+                    .when(!left, |d| d.left_0())
+                    .child(column),
+            )
+            .child(grip);
+        let element = match moving {
+            Some(at) => {
+                let id = ElementId::Name(format!("panel-slide-{left}-{at:?}").into());
+                frame
+                    .with_animation(
+                        id,
+                        Animation::new(slide).with_easing(ease_out_quint()),
+                        move |d, x| d.w(px(width * if open { x } else { 1. - x })),
+                    )
+                    .into_any_element()
+            }
+            None => frame.w(px(width)).into_any_element(),
+        };
+        Some(element)
+    }
+
+    /// While a panel's edge is dragged, the whole window follows the
+    /// pointer, so it never slips off the thin grip.
+    fn render_panel_drag(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        if !self.panel_dragging {
+            return None;
+        }
+        Some(
+            div()
+                .id("panel-drag")
+                .absolute()
+                .inset_0()
+                .cursor_col_resize()
+                .on_mouse_move(cx.listener(|s, e: &gpui::MouseMoveEvent, window, cx| {
+                    let x = e.position.x / px(1.);
+                    let room = window.viewport_size().width / px(1.);
+                    let shown = s.shown_page().unwrap_or_default();
+                    let hub = s.hub.read(cx);
+                    let left = hub
+                        .panels_on(shown)
+                        .first()
+                        .is_some_and(|(_, p)| p.edge == Edge::Left);
+                    let side = if hub.settings.side_open {
+                        size::SIDE
+                    } else {
+                        size::SIDE_SHUT
+                    };
+                    let width = if left { x - side } else { room - x };
+                    s.hub
+                        .update(cx, |h, cx| h.set_panel_width(width, false, cx));
+                }))
+                .on_mouse_up(
+                    MouseButton::Left,
+                    cx.listener(|s, _, _, cx| {
+                        s.panel_dragging = false;
+                        let width = s.hub.read(cx).settings.panel_width;
+                        s.hub.update(cx, |h, cx| h.set_panel_width(width, true, cx));
+                        cx.notify();
+                    }),
+                )
+                .into_any_element(),
+        )
+    }
+}
+
 impl Render for Shell {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let t = theme(cx).clone();
@@ -685,6 +847,8 @@ impl Render for Shell {
         self.veils.note(self.shown, &t);
         let page = self.render_page(window, cx);
         let side = self.render_side(&t, cx);
+        let left = self.render_panels(Edge::Left, &t, cx);
+        let right = self.render_panels(Edge::Right, &t, cx);
         div()
             .id("shell")
             .key_context("Shell")
@@ -701,18 +865,26 @@ impl Render for Shell {
             .on_key_down(cx.listener(Self::zoom_key))
             .child(self.render_tab_bar(window, cx))
             .child(
-                div().flex_1().min_h_0().flex().children(side).child(
-                    div()
-                        .id("page")
-                        .flex_1()
-                        .min_w_0()
-                        .h_full()
-                        .relative()
-                        .child(page)
-                        .children(self.veils.page())
-                        .children(self.render_layers(Cover::Page, cx)),
-                ),
+                div()
+                    .flex_1()
+                    .min_h_0()
+                    .flex()
+                    .children(side)
+                    .children(left)
+                    .child(
+                        div()
+                            .id("page")
+                            .flex_1()
+                            .min_w_0()
+                            .h_full()
+                            .relative()
+                            .child(page)
+                            .children(self.veils.page())
+                            .children(self.render_layers(Cover::Page, cx)),
+                    )
+                    .children(right),
             )
+            .children(self.render_panel_drag(cx))
             .children(self.render_notices(cx))
             .children(self.render_layers(Cover::Window, cx))
             .children(self.render_echo(cx))

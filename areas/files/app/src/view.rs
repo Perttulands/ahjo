@@ -732,7 +732,9 @@ impl FilesPage {
         let indent = row.depth as f32 * INDENT;
         let room = match place {
             Place::List => self.row_letters(indent + DISCLOSURE),
-            Place::Side => letters(size::SIDE - 2. * size::ROW_PAD - indent - DISCLOSURE),
+            Place::Side => {
+                letters(self.host.panel_width(cx) - 2. * size::ROW_PAD - indent - DISCLOSURE)
+            }
         };
         let reading = self
             .opened
@@ -827,9 +829,9 @@ impl FilesPage {
                     p.activate_as(e.click_count() > 1, w, cx);
                 })),
             // The page is not drawn: a folder opens or closes in place, a
-            // file opens on the page.
-            Place::Side => line.on_click(cx.listener(move |p, _, _, cx| {
-                p.side_pick(&path, folder, cx);
+            // file beside the terminals or on the page.
+            Place::Side => line.on_click(cx.listener(move |p, _, window, cx| {
+                p.side_pick(&path, folder, window, cx);
             })),
         }
         .into_any_element()
@@ -1405,8 +1407,9 @@ impl FilesPage {
 }
 
 impl FilesPage {
-    /// This page's section of the side panel, drawn on the other pages:
-    /// the same tree as its list, from the focused session's folder.
+    /// This page's panel, drawn on the other pages: the same tree as its
+    /// list, from the focused session's folder, under a head that puts the
+    /// panel away.
     pub fn render_side(&mut self, cx: &mut Context<Self>) -> AnyElement {
         let t = theme(cx).clone();
         self.no_node = self.tree.node.is_empty() && self.host.offline(cx);
@@ -1452,10 +1455,21 @@ impl FilesPage {
             .flex_col()
             .child(
                 div()
-                    .px(px(size::ROW_PAD))
+                    .pl(px(size::ROW_PAD))
+                    .pr(px(4.))
                     .pt(px(size::LABEL_TOP))
                     .pb(px(size::LABEL_BOTTOM))
-                    .child(kit::group_label(&t, "Files").text_color(t.text)),
+                    .flex()
+                    .items_center()
+                    .child(kit::group_label(&t, "Files").flex_1().text_color(t.text))
+                    .child(
+                        kit::button(&t, "files-panel-hide", "×", Kind::Quiet)
+                            .debug_selector(|| "files-panel-hide".into())
+                            .tooltip(kit::tip("Hide files  Ctrl+B"))
+                            .on_click(cx.listener(|p, _, _, cx| {
+                                p.host.set_panel_open(false, cx);
+                            })),
+                    ),
             )
             .child(list)
             .into_any_element()

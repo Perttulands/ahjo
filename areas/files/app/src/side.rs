@@ -1,9 +1,10 @@
-//! The Files section of the side panel, on the other pages: the page's own
+//! The Files panel, on the other pages (Ctrl+B): the page's own
 //! tree, drawn by the page, so its folders open, its change marks and its
 //! pick are the same in both places. It starts at the folder of the session
 //! in the focused terminal window while that session is on the tree's
-//! device, else at the roots. A folder opens in place; a file opens on the
-//! Files page. On the Files page the list holds the tree and this gives way.
+//! device, else at the roots. A folder opens in place; a file opens beside
+//! the terminals on Sessions, else on the Files page. On the Files page the
+//! list holds the tree and this gives way.
 
 use crate::FilesPage;
 use gpui::{Context, Entity, Subscription, WeakEntity, Window, div, prelude::*};

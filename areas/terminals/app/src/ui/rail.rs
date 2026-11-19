@@ -97,7 +97,7 @@ impl Terminals {
             .child(
                 kit::button(&t, "rail-close", "‹", Kind::Quiet)
                     .debug_selector(|| "rail-close".into())
-                    .tooltip(kit::tip("Hide sessions and files  Alt+A"))
+                    .tooltip(kit::tip("Hide sessions  Alt+A"))
                     .on_click(cx.listener(|s, _, window, cx| {
                         s.run(super::chords::Action::Sessions, window, cx);
                     })),

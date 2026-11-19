@@ -34,9 +34,14 @@ pub struct Settings {
     pub theme: String,
     /// The whole app's size, in percent (`zoom::app`).
     pub size: u16,
-    /// The side panel (sessions and files, on every page) is open; put
+    /// The side panel (the sessions, on every page) is open; put
     /// away it is a narrow edge.
     pub side_open: bool,
+    /// The panels a page lends (Files) are open; Ctrl+B opens and puts
+    /// them away.
+    pub panel_open: bool,
+    /// The panels' width, as last dragged.
+    pub panel_width: f32,
     /// The fleet as last seen: each node's device and environment, so an
     /// away device keeps its name until it answers again, across restarts
     /// too, and an address to serve through while the configured node is
@@ -72,10 +77,21 @@ impl Default for Settings {
             theme: crate::theme::Direction::default().key().into(),
             size: crate::zoom::app::DEFAULT,
             side_open: true,
+            panel_open: true,
+            panel_width: crate::theme::size::PANEL,
             places: Default::default(),
             sections: Map::new(),
         }
     }
+}
+
+/// A panel width as kept: between the least and the most a panel takes.
+pub fn panel_width(width: f32) -> f32 {
+    use crate::theme::size;
+    if !width.is_finite() {
+        return size::PANEL;
+    }
+    width.clamp(size::PANEL_MIN, size::PANEL_MAX)
 }
 
 pub fn path() -> Option<PathBuf> {

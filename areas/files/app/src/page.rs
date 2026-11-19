@@ -139,9 +139,11 @@ pub struct FilesPage {
     pub(crate) name_room: crate::view::Width,
     pub(crate) list_room: crate::view::Width,
     pub list_scroll: UniformListScrollHandle,
-    /// Whether this is the page's own view, which lends the side panel its
-    /// Files section; and that section's scroll.
+    /// Whether this is the page's own view, which lends the window its
+    /// Files panel; and that panel's scroll.
     pub(crate) lends_side: bool,
+    /// The panel this page lends, to lend again at another edge.
+    pub(crate) panel_view: Option<gpui::AnyView>,
     /// A folder Down was pressed on before its contents came: the pick
     /// steps into it when they do.
     step_due: Option<String>,
@@ -342,14 +344,29 @@ impl Page for FilesPage {
             ],
         )
         .note("Beside the open files: the folder tree, what changed by session, or nothing."),
+        ahjo_app_kit::Setting::choice("panel", "Panel", "right", &[("right", "Right"), ("left", "Left")])
+            .note("The edge of the window the Files panel stands at on the other pages. Ctrl+B or Alt+E shows and hides it."),
     ];
     fn chords(&self, _: &App) -> Vec<ahjo_app_kit::chords::Chord> {
         let me = self.me.clone();
         vec![
-            ahjo_app_kit::chords::Chord::new("o", "Files panel", move |window, cx| {
-                let _ = me.update(cx, |page, cx| page.toggle_panel(window, cx));
+            ahjo_app_kit::chords::Chord::new("o", "Files beside, to find a file", {
+                let me = me.clone();
+                move |window, cx| {
+                    let _ = me.update(cx, |page, cx| page.toggle_panel(window, cx));
+                }
             })
             .alt("o", Some(false))
+            .everywhere(),
+            // VS Code's Explorer key; Ctrl+B too, where a terminal does
+            // not have the keyboard.
+            ahjo_app_kit::chords::Chord::new("e", "Files panel", move |_, cx| {
+                let _ = me.update(cx, |page, cx| {
+                    let open = page.host.panel_open(cx);
+                    page.host.set_panel_open(!open, cx);
+                });
+            })
+            .alt("e", Some(false))
             .everywhere(),
         ]
     }
@@ -362,6 +379,7 @@ impl Page for FilesPage {
             self.side = kept.side;
             self.laid_out(window, cx);
         }
+        self.lend_panel(cx);
     }
     fn shown(&mut self, on: bool, window: &mut Window, cx: &mut Context<Self>) {
         self.shown = on;
@@ -602,6 +620,7 @@ impl FilesPage {
             list_room: Default::default(),
             list_scroll: UniformListScrollHandle::new(),
             lends_side: false,
+            panel_view: None,
             step_due: None,
             side_scroll: UniformListScrollHandle::new(),
             side_scrolled_to: None,
@@ -686,7 +705,7 @@ impl FilesPage {
         self.host.report(Status::failure(text), cx);
     }
 
-    /// The Files panel (Alt+O): this page's view beside the terminals,
+    /// Files beside the terminals (Alt+O): this page's view beside them,
     /// at the focused session's folder, or away again. It is the same view
     /// a printed path opens, over the windows, so no session changes size.
     fn toggle_panel(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -727,6 +746,20 @@ impl FilesPage {
         } else {
             ahjo_app_kit::widgets::field::focus(&query, window, cx);
         }
+    }
+
+    /// Lends the window the Files panel, at the edge the settings say.
+    pub(crate) fn lend_panel(&self, cx: &mut App) {
+        let Some(view) = self.panel_view.clone() else {
+            return;
+        };
+        let kept: store::Kept = self.host.setting(cx).unwrap_or_default();
+        self.host.lend_panel(
+            view,
+            ahjo_app_kit::hub::SideOn::OtherPages,
+            kept.panel_edge(),
+            cx,
+        );
     }
 
     /// The view this page opens beside another, made the first time.
@@ -786,13 +819,23 @@ impl FilesPage {
             path: folder,
         })
     }
-    /// A row clicked in the side panel: the page is not shown, so a folder
-    /// opens or closes in place (the panel's first one stays open) and a
-    /// file opens on the page.
-    pub(crate) fn side_pick(&mut self, path: &str, folder: bool, cx: &mut Context<Self>) {
+    /// A row clicked in the Files panel: the page is not shown, so a
+    /// folder opens or closes in place (the panel's first one stays open)
+    /// and a file opens beside the terminals while they show, as a path
+    /// clicked in one does, else on the page.
+    pub(crate) fn side_pick(
+        &mut self,
+        path: &str,
+        folder: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         self.tree.select(path);
         self.pick = Some(Pick::Node(path.to_owned()));
-        if !folder {
+        if !folder && self.host.shown_page(cx) == Some(PANEL_BESIDE) {
+            let node = NodeId(self.tree.node.clone());
+            self.open_beside(PANEL_BESIDE, node, path.to_owned(), window, cx);
+        } else if !folder {
             let ask = Ask::OpenPath {
                 node: NodeId(self.tree.node.clone()),
                 path: path.to_owned(),

@@ -54,6 +54,12 @@ pub struct Shell {
     /// answerer's index and the asker's. Leaving the asker tells the
     /// answerer it is hidden, so what it opened over the asker goes too.
     pub(crate) over: Option<(usize, usize)>,
+    /// The panels as last drawn: open or not, and when they last began to
+    /// slide open or away.
+    pub(crate) panel_drawn: Option<bool>,
+    pub(crate) panel_moved: Option<Instant>,
+    /// A panel's inner edge is being dragged.
+    pub(crate) panel_dragging: bool,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -214,6 +220,9 @@ impl Shell {
             veils: Default::default(),
             app_wheel: Default::default(),
             over: None,
+            panel_drawn: None,
+            panel_moved: None,
+            panel_dragging: false,
             _subscriptions: subscriptions,
         }
     }
@@ -232,7 +241,22 @@ impl Shell {
         if let Some(z) = ahjo_app_kit::zoom::from_key(&e.keystroke) {
             cx.stop_propagation();
             self.hub.update(cx, |h, cx| h.zoom_app(z, 1, cx));
+        } else if panel_key(&e.keystroke) && self.toggle_panel(cx) {
+            cx.stop_propagation();
         }
+    }
+
+    /// Opens or puts away the panels standing on the page shown, as
+    /// Ctrl+B does; whether there were any.
+    pub(crate) fn toggle_panel(&mut self, cx: &mut Context<Self>) -> bool {
+        let shown = self.shown_page().unwrap_or_default();
+        let hub = self.hub.read(cx);
+        if hub.panels_on(shown).is_empty() {
+            return false;
+        }
+        let open = !hub.settings.panel_open;
+        self.hub.update(cx, |h, cx| h.set_panel_open(open, cx));
+        true
     }
 
     pub fn hub(&self) -> &Entity<Hub> {
@@ -262,6 +286,8 @@ impl Shell {
         {
             self.pages[answerer].shown(false, window, cx);
         }
+        let id = self.pages[i].meta.id;
+        self.hub.update(cx, |h, _| h.set_shown(Some(id)));
         if let Some(old) = old {
             self.pages[old].shown(false, window, cx);
             self.sync_channels(old, cx);
@@ -632,6 +658,15 @@ impl gpui::Focusable for Shell {
     fn focus_handle(&self, _: &App) -> FocusHandle {
         self.focus.clone()
     }
+}
+
+/// Ctrl+B, VS Code's key for its side bar: the panels open or go. It
+/// reaches the app only when what has the keyboard leaves it, so a
+/// terminal always gets its own Ctrl+B (tmux's prefix, Claude Code's
+/// "run in the background", the shell's back-a-letter).
+pub(crate) fn panel_key(k: &gpui::Keystroke) -> bool {
+    let m = &k.modifiers;
+    k.key == "b" && m.control && !m.alt && !m.shift && !m.platform && !m.function
 }
 
 #[cfg(test)]

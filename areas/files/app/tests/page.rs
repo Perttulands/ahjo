@@ -201,7 +201,7 @@ fn modified(path: &std::path::Path, seconds_ago: u64) {
         .unwrap();
 }
 
-/// Alt+O opens the Files panel beside the terminals, from any page: the
+/// Alt+O opens Files beside the terminals, from any page: the
 /// same view a printed path opens, which browses, sends and remembers.
 #[gpui::test]
 fn files_panel_browses_sends_and_remembers_beside_the_terminals(cx: &mut TestAppContext) {
@@ -232,7 +232,7 @@ fn files_panel_browses_sends_and_remembers_beside_the_terminals(cx: &mut TestApp
     assert!(shell.update(cx, |s, cx| {
         ahjo_app_kit::chords::rows(&s.chords(cx))
             .iter()
-            .any(|row| row.label == "Files panel")
+            .any(|row| row.label == "Files beside, to find a file")
     }));
     cx.simulate_keystrokes("alt-o");
     tree(cx, "file-row-folder");
