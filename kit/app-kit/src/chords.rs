@@ -79,7 +79,9 @@ impl Chord {
         self
     }
 
-    /// Other keys a layout types the Alt key's character with.
+    /// Other keys a layout types the Alt key's character with: each is
+    /// that layout's own character, so it matches with whatever Shift it
+    /// takes (Alt+Shift+2 reaches the app as Alt+" or Alt+@).
     pub fn or_layout(mut self, layout: &'static [&'static str]) -> Self {
         if let Some(d) = &mut self.direct {
             d.layout = layout;
@@ -196,10 +198,8 @@ pub fn direct(k: &KeyLike, chords: &[Chord]) -> Option<Row> {
     }
     let i = chords.iter().rposition(|c| {
         c.direct.as_ref().is_some_and(|d| {
-            d.shift.is_none_or(|s| s == k.shift)
-                && std::iter::once(d.key)
-                    .chain(d.layout.iter().copied())
-                    .any(|w| same_key(w, k))
+            (d.shift.is_none_or(|s| s == k.shift) && same_key(d.key, k))
+                || d.layout.iter().any(|w| same_key(w, k))
         })
     })?;
     rows(chords).into_iter().nth(i)
