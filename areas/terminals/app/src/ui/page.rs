@@ -7,9 +7,10 @@ use super::launcher::Launcher;
 use super::surface::{self, Surface};
 use crate::remote::Notice;
 use crate::remotes::{PaneAt, Remotes};
+use crate::store::layout::Side;
 use crate::store::sessions::{self, Key};
 use crate::store::settings::{Kept, Settings, launched_in};
-use crate::store::workspace::{LinkState, TileState};
+use crate::store::workspace::{Arrange, LinkState, MAX_WINDOWS, TileState};
 use crate::term::screen::Screen;
 use ahjo_app_kit::Host;
 use ahjo_app_kit::chords::Chord;
@@ -41,14 +42,34 @@ pub enum Act {
     NewTab,
     CloseTab(usize),
     ClearTab(usize),
-    SavePreset,
-    RestorePreset(usize),
-    DeletePreset(usize),
+    /// Keeps the active tab's arrangement on a number key, asking its
+    /// name.
+    SaveView(u8),
+    /// Lays the active tab out as the view on a number key keeps it.
+    RecallView(u8),
+    RenameView(u8),
+    DeleteView(u8),
+    /// The active tab's windows laid out afresh, or their sizes evened.
+    Arrange(Arrange),
+    EvenOut,
     Peek(Key),
     /// A terminal's own text size goes: a window's, or Peek's.
     ResetZoom(usize),
-    /// A new empty window beside window `n`, right of it in the row.
-    SplitRight(usize),
+    /// A new empty window beside window `n`, on a side.
+    Split(usize, Side),
+    /// Closes a window of the shown tab; its sessions run on.
+    CloseWindow(usize),
+    /// Two windows of the shown tab trade places, with what they hold.
+    Swap(usize, usize),
+    /// Puts the session's folder on the clipboard.
+    CopyPath(Key),
+    /// Takes ended sessions' tags out of every window.
+    ClearEnded(Vec<Key>),
+    /// Picks these sessions in the rail, and only them.
+    PickKeys(Vec<Key>),
+    KillKeys(Vec<Key>),
+    /// The offer to tidy up waits until there is more.
+    TidyLater,
     Send(Key),
     Attach(Key, usize),
     Unassign(Key),
@@ -281,7 +302,7 @@ pub struct Terminals {
     pub pictures: crate::store::pictures::Pictures<std::sync::Arc<gpui::RenderImage>>,
     /// The grid each window's body would hold at the terminal font,
     /// as last painted: what a launch into it asks the node for (#161).
-    pub launch_grids: Rc<RefCell<[Option<Grid>; 4]>>,
+    pub launch_grids: Rc<RefCell<[Option<Grid>; MAX_WINDOWS]>>,
     /// The window a drag selection started in.
     pub selecting: Option<usize>,
     /// Lines a selection drag held outside its grid scrolls each tick, and
@@ -356,14 +377,17 @@ pub struct Terminals {
     /// Renames asked of a node, by node and request: the session's key as
     /// it was, and its new name.
     pub renames: HashMap<(String, u32), (Key, String)>,
-    pub dragging_over: Option<usize>,
-    /// The seam a drag is over: after which window of the shown tab.
-    pub seam_over: Option<usize>,
+    /// Each window of the shown tab as last laid out.
+    pub tile_bounds: Rc<RefCell<[Option<Bounds<Pixels>>; MAX_WINDOWS]>>,
+    /// The window a drag is over, and where in it.
+    pub drop_at: Option<(usize, super::tiles::Zone)>,
+    /// What is being dragged over the windows.
+    pub in_air: Option<super::tiles::Dragged>,
     /// A divider between windows being dragged.
     pub divider: Option<super::tiles::DividerDrag>,
-    /// The windows' grid as last laid out, which a divider's drag is a
-    /// share of.
-    pub grid_bounds: std::rc::Rc<std::cell::Cell<Bounds<Pixels>>>,
+    /// Each group of the layout as last laid out, by its path, which a
+    /// divider's drag is a share of.
+    pub group_bounds: Rc<RefCell<HashMap<Vec<usize>, Bounds<Pixels>>>>,
     /// The rail's list, whose scrollbar shows where it is.
     pub rail_scroll: gpui::ScrollHandle,
     /// Where the last menu a row was picked from stood.
@@ -501,10 +525,11 @@ impl Terminals {
             rail_focus: cx.focus_handle(),
             mice: HashMap::new(),
             renames: HashMap::new(),
-            dragging_over: None,
-            seam_over: None,
+            tile_bounds: Rc::default(),
+            drop_at: None,
+            in_air: None,
             divider: None,
-            grid_bounds: Default::default(),
+            group_bounds: Default::default(),
             rail_scroll: Default::default(),
             menu_at: Point::default(),
             restarting: HashSet::new(),
@@ -612,14 +637,15 @@ impl Terminals {
                         s.close(surface::RENAME_SESSION, cx);
                         s.rename_session(k, name.trim());
                     }
-                    Some(Surface::PresetName(_)) => {
-                        s.close(surface::PRESET_NAME, cx);
-                        match s.settings.workspace.save_preset(&name) {
-                            Ok(Some(n)) => s.report(&format!("Layout '{n}' saved"), false, None),
-                            Ok(None) => {}
-                            Err(why) => s.report(&why, true, None),
+                    Some(Surface::ViewName(_, key, rename)) => {
+                        s.close(surface::VIEW_NAME, cx);
+                        if rename {
+                            s.settings.workspace.rename_view(key, &name);
+                            s.save(cx);
+                            cx.notify();
+                        } else {
+                            s.keep_view(key, Some(&name), cx);
                         }
-                        s.save(cx);
                     }
                     _ => {}
                 }
@@ -1082,7 +1108,7 @@ impl Terminals {
                 self.find_query.focus_handle(cx)
             }
             Surface::Peek => self.peek_focus.clone(),
-            Surface::RenameTab(_) | Surface::RenameSession(_) | Surface::PresetName(_) => {
+            Surface::RenameTab(_) | Surface::RenameSession(_) | Surface::ViewName(..) => {
                 self.rename_field.focus_handle(cx)
             }
         };
@@ -1193,21 +1219,86 @@ impl Terminals {
                 }
                 self.settings.workspace.clear(i);
             }
-            Act::SavePreset => {
-                self.rename_field.update(cx, |f, cx| f.set("", false, cx));
-                self.open(Surface::PresetName(self.menu_at), window, cx);
+            Act::SaveView(key) | Act::RenameView(key) => {
+                let rename = matches!(act, Act::RenameView(_));
+                let name = match ws.view(key) {
+                    Some(v) => v.name.clone(),
+                    None => ws.view_name(),
+                };
+                self.rename_field.update(cx, |f, cx| f.set(&name, true, cx));
+                self.open(Surface::ViewName(self.menu_at, key, rename), window, cx);
                 return;
             }
-            Act::RestorePreset(i) => {
-                if let Some(name) = ws.restore_preset(i) {
-                    self.histories.clear();
-                    self.report(&format!("Layout '{name}' loaded"), false, None);
+            Act::RecallView(key) => {
+                self.recall_view(key, cx);
+                return;
+            }
+            Act::DeleteView(key) => {
+                if let Some(name) = ws.delete_view(key) {
+                    self.report(&format!("View {key} ({name}) deleted"), false, None);
                 }
             }
-            Act::DeletePreset(i) => {
-                if let Some(name) = ws.delete_preset(i) {
-                    self.report(&format!("Preset '{name}' deleted"), false, None);
+            Act::Arrange(how) => {
+                ws.arrange(how);
+                self.histories.clear();
+            }
+            Act::EvenOut => ws.even_out(),
+            Act::Split(w, side) => {
+                if !ws.split(w, side) {
+                    self.report("Eight windows is the most a tab holds.", false, None);
                 }
+            }
+            Act::CloseWindow(w) => {
+                if let Some(Some(p)) = self.window_panes().get(w) {
+                    self.fleet.release(&p.node, p.pane);
+                }
+                if self.settings.workspace.close_window(w) {
+                    self.histories.clear();
+                }
+            }
+            Act::Swap(a, b) => {
+                if self.settings.workspace.swap(a, b) {
+                    self.histories.clear();
+                }
+            }
+            Act::ClearEnded(keys) => {
+                let n = ws.clear_ended(&keys);
+                self.histories.clear();
+                let text = match n {
+                    1 => "Cleared 1 ended session from its window".to_string(),
+                    n => format!("Cleared {n} ended sessions from their windows"),
+                };
+                self.report(&text, false, None);
+            }
+            Act::PickKeys(keys) => {
+                self.pick.clear();
+                for k in &keys {
+                    self.pick.toggle(&k.text());
+                }
+                self.host.set_side_open(true, cx);
+                window.focus(&self.rail_focus, cx);
+                self.report(
+                    &format!(
+                        "Picked {} in the list: Delete offers to kill them",
+                        keys.len()
+                    ),
+                    false,
+                    None,
+                );
+                cx.notify();
+                return;
+            }
+            Act::KillKeys(keys) => self.kill_sessions(&keys, true),
+            Act::TidyLater => self.settings.tidy_seen = self.tidy().texts(),
+            Act::CopyPath(k) => {
+                match self.fleet.session(&k).and_then(|s| s.cwd.clone()) {
+                    Some(path) => {
+                        cx.write_to_clipboard(gpui::ClipboardItem::new_string(path.clone()));
+                        self.report(&format!("Copied {path}"), false, None);
+                    }
+                    None => self.report(&format!("{} has no folder to copy", k.name), true, None),
+                }
+                return;
             }
             Act::Peek(k) => {
                 self.open_peek(k, window, cx);
@@ -1309,12 +1400,6 @@ impl Terminals {
                 return;
             }
             Act::Restart(k) => self.restart(k),
-            Act::SplitRight(w) => {
-                if !self.settings.workspace.split_after(w) {
-                    self.report("Four windows is the most a tab holds.", false, None);
-                }
-                self.histories.clear();
-            }
         }
         self.sync(cx);
         self.save(cx);

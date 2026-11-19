@@ -19,6 +19,7 @@ use ahjo_core::NodeId;
 use ahjo_node_kit::Listing;
 use ahjo_terminals_app::Terminals;
 use ahjo_terminals_app::store::sessions::Key;
+use ahjo_terminals_app::store::workspace::MAX_WINDOWS;
 use ahjo_terminals_contract::SessionList;
 use ahjo_testkit::node::Node;
 use ahjo_testkit::tmux::Server;
@@ -1330,7 +1331,7 @@ fn launches_use_each_tile_grid(cx: &mut TestAppContext) {
     });
     until(cx, "four tile grids", |cx| {
         page.read_with(cx, |p, _| {
-            p.launch_grids.borrow().iter().all(Option::is_some)
+            p.launch_grids.borrow().iter().take(4).all(Option::is_some)
         })
     });
     for i in 0..4 {
@@ -1441,12 +1442,14 @@ fn launches_use_each_tile_grid(cx: &mut TestAppContext) {
         cx.debug_bounds("send-body").is_some()
     });
     scroll_to_launch(cx, "send-body");
+    // Send's launcher comes after one per window.
+    let send_launch: &'static str = Box::leak(format!("launch-{MAX_WINDOWS}").into_boxed_str());
     until(cx, "visible send launch button", |cx| {
-        cx.debug_bounds("launch-4")
+        cx.debug_bounds(send_launch)
             .zip(cx.debug_bounds("send-body"))
             .is_some_and(|(button, viewport)| viewport.contains(&button.center()))
     });
-    click(cx, "launch-4".into());
+    click(cx, send_launch.into());
     let mut new_name = String::new();
     until(cx, "send session", |_cx| {
         let now = tmux(&running, &["list-sessions", "-F", "#{session_name}"]);
@@ -2660,8 +2663,8 @@ fn clicking_a_marked_session_clears_its_mark(cx: &mut TestAppContext) {
     let _ = std::fs::remove_dir_all(settings.parent().unwrap());
 }
 
-/// Alt+N with every window of the tab holding a session opens the launcher
-/// in a new tab and leaves those windows as they were.
+/// Alt+N with all eight windows of the tab holding a session opens the
+/// launcher in a new tab and leaves those windows as they were.
 #[gpui::test]
 fn the_launcher_opens_a_new_tab_when_the_windows_are_full(cx: &mut TestAppContext) {
     let Some(running) = start("terminals-launch-full") else {
@@ -2669,7 +2672,7 @@ fn the_launcher_opens_a_new_tab_when_the_windows_are_full(cx: &mut TestAppContex
     };
     let (_shell, cx, settings) = open_with_alpha(&running, "launch-full", cx);
     let page = PAGE.with(|p| p.borrow().clone()).unwrap();
-    let full: Vec<Key> = (0..4)
+    let full: Vec<Key> = (0..MAX_WINDOWS)
         .map(|i| Key {
             node: running.node.clone(),
             user: String::new(),
@@ -2679,7 +2682,7 @@ fn the_launcher_opens_a_new_tab_when_the_windows_are_full(cx: &mut TestAppContex
     cx.update(|_, cx| {
         page.update(cx, |p, _| {
             let ws = &mut p.settings.workspace;
-            ws.set_windows(0, 4);
+            ws.set_windows(0, MAX_WINDOWS);
             for (w, key) in full.iter().enumerate() {
                 ws.bind_in(0, w, key.clone(), None);
             }
@@ -2691,7 +2694,7 @@ fn the_launcher_opens_a_new_tab_when_the_windows_are_full(cx: &mut TestAppContex
         assert_eq!((ws.count, ws.active), (2, 1), "a new tab is shown");
         assert!(ws.windows()[ws.focus].is_empty(), "its window is free");
         assert!(
-            ws.tabs[0].windows.iter().take(4).all(|w| !w.is_empty()),
+            ws.tabs[0].windows.iter().all(|w| !w.is_empty()),
             "the full tab is kept"
         );
     });
@@ -2884,7 +2887,7 @@ fn selection_copies_when_mouse_releases_outside_the_tile(cx: &mut TestAppContext
 /// Arrange a real session using the same page actions as the tab menus and
 /// drag another session from the rail into an empty window.
 #[gpui::test]
-fn arrange_tabs_preset_drag_and_sizing_on_a_live_node(cx: &mut TestAppContext) {
+fn arrange_tabs_view_drag_and_sizing_on_a_live_node(cx: &mut TestAppContext) {
     let Some(running) = start("terminals-arrange-journey") else {
         return;
     };
@@ -2938,16 +2941,28 @@ fn arrange_tabs_preset_drag_and_sizing_on_a_live_node(cx: &mut TestAppContext) {
                 .is_some_and(|b| b.key.name == "beta")
         })
     });
-    run_item(cx, 0, "Save layout as preset");
+    // Kept as view 1 from the tab menu, under a name typed over the one
+    // its sessions gave it.
+    let keep = page.read_with(cx, |p, _| {
+        let menu = p.tab_menu(0);
+        let views = &menu.iter().find(|r| r.label == "Views").unwrap().sub;
+        let keep = &views
+            .iter()
+            .find(|r| r.label == "Keep this tab as view")
+            .unwrap()
+            .sub;
+        keep[0].act.clone().unwrap()
+    });
+    cx.update(|window, cx| page.update(cx, |p, cx| p.act(keep, window, cx)));
+    cx.simulate_keystrokes("ctrl-a");
     cx.simulate_input("Morning");
     cx.simulate_keystrokes("enter");
-    until(cx, "preset saved", |cx| {
+    until(cx, "view kept", |cx| {
         page.read_with(cx, |p, _| {
             p.settings
                 .workspace
-                .presets
-                .iter()
-                .any(|p| p.name == "Morning")
+                .view(1)
+                .is_some_and(|v| v.name == "Morning" && v.tab.count == 2)
         })
     });
     until(cx, "tab add control", |cx| {
@@ -2969,25 +2984,31 @@ fn arrange_tabs_preset_drag_and_sizing_on_a_live_node(cx: &mut TestAppContext) {
     until(cx, "tab removed", |cx| {
         page.read_with(cx, |p, _| p.settings.workspace.shown_tabs().len() == 1)
     });
-    let restore = page.read_with(cx, |p, _| {
-        p.tab_menu(0)
-            .into_iter()
-            .find(|r| r.label == "Restore preset")
-            .unwrap()
-            .sub
-            .into_iter()
-            .find(|r| r.label == "Morning")
-            .unwrap()
-            .act
-            .unwrap()
+    // Down to one window, then the view lays the two out again.
+    let sub_act = |cx: &mut VisualTestContext, menu: &str, label: &str| {
+        let action = page.read_with(cx, |p, _| {
+            p.tab_menu(0)
+                .into_iter()
+                .find(|r| r.label == menu)
+                .unwrap()
+                .sub
+                .into_iter()
+                .find(|r| r.label == label)
+                .unwrap()
+                .act
+                .unwrap()
+        });
+        cx.update(|window, cx| page.update(cx, |p, cx| p.act(action, window, cx)));
+    };
+    sub_act(cx, "Windows", "1");
+    until(cx, "one window", |cx| {
+        page.read_with(cx, |p, _| p.settings.workspace.windows().len() == 1)
     });
-    cx.update(|window, cx| page.update(cx, |p, cx| p.act(restore, window, cx)));
-    until(cx, "preset restores beta", |cx| {
+    sub_act(cx, "Views", "1  Morning");
+    until(cx, "the view restores beta", |cx| {
         page.read_with(cx, |p, _| {
-            p.settings
-                .workspace
-                .shown(1)
-                .is_some_and(|b| b.key.name == "beta")
+            let ws = &p.settings.workspace;
+            ws.windows().len() == 2 && ws.shown(1).is_some_and(|b| b.key.name == "beta")
         })
     });
     until(cx, "every shown window sizes its session", |cx| {

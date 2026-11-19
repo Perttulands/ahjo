@@ -34,7 +34,7 @@ pub const FIND: &str = "find";
 pub const PEEK: &str = "peek";
 pub const RENAME_TAB: &str = "rename-tab";
 pub const RENAME_SESSION: &str = "rename-session";
-pub const PRESET_NAME: &str = "preset-name";
+pub const VIEW_NAME: &str = "view-name";
 
 /// A surface over the page, and what it is about.
 #[derive(Clone, Debug)]
@@ -46,8 +46,9 @@ pub enum Surface {
     /// Its field is drawn in the tab itself.
     RenameTab(usize),
     RenameSession(Key),
-    /// Naming a preset, where the menu was.
-    PresetName(Point<Pixels>),
+    /// Naming the view kept on a number key, where the menu was: keeping
+    /// the arrangement on screen there, or only renaming it.
+    ViewName(Point<Pixels>, u8, bool),
 }
 
 impl Surface {
@@ -59,14 +60,14 @@ impl Surface {
             Surface::Peek => PEEK,
             Surface::RenameTab(_) => RENAME_TAB,
             Surface::RenameSession(_) => RENAME_SESSION,
-            Surface::PresetName(_) => PRESET_NAME,
+            Surface::ViewName(..) => VIEW_NAME,
         }
     }
 
     /// The drawers and Peek cover the page; the small dialogs the window.
     pub fn cover(&self) -> Cover {
         match self {
-            Surface::RenameSession(_) | Surface::PresetName(_) => Cover::Window,
+            Surface::RenameSession(_) | Surface::ViewName(..) => Cover::Window,
             _ => Cover::Page,
         }
     }
@@ -125,7 +126,7 @@ impl Terminals {
                 "Enter renames · Esc keeps the name",
                 cx,
             )),
-            Surface::PresetName(at) => Some(self.render_preset_name(at, cx)),
+            Surface::ViewName(at, key, rename) => Some(self.render_view_name(at, key, rename, cx)),
         }
     }
 }

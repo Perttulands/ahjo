@@ -6,8 +6,9 @@ use super::page::{Act, Geo, MenuItem, PEEK_SLOT, Terminals};
 use super::place;
 use crate::remote::SharedScreen;
 use crate::remotes::PaneAt;
+use crate::store::layout::{self, Axis, Side as Edge, Split};
 use crate::store::sessions::{self, Key};
-use crate::store::workspace::{Binding, MAX_WINDOWS, TileState};
+use crate::store::workspace::{Binding, LEAST_SHARE, MAX_WINDOWS, TileState, Workspace};
 use crate::term::links::{self, Link};
 use crate::term::paint::{self, Look};
 use crate::term::screen::Screen;
@@ -53,38 +54,127 @@ fn window_art(t: &Theme) -> Option<gpui::Img> {
     })
 }
 
-/// What a window says while a drop on it would land there.
-fn drop_note(t: &Theme) -> gpui::Div {
-    div()
+/// What a window shows while a drop on it would land: the part of it the
+/// session or window would take, and what releasing does.
+fn drop_note(t: &Theme, landing: &Landing) -> gpui::Div {
+    let (edge, text) = match landing {
+        Landing::Into(_) => (None, "Release to add here"),
+        Landing::Split(_, e) => (Some(*e), "Release for a new window"),
+        Landing::Move(_, _, e) => (Some(*e), "Release to move the window here"),
+    };
+    // The label keeps clear of the pointer, which is a quarter or more
+    // in from every edge for Into and within a quarter of its edge
+    // otherwise: it sits at the top, or at the half's inner end.
+    let half = div()
         .absolute()
-        .inset_0()
         .flex()
-        .items_center()
-        .justify_center()
-        .bg(alpha(t.accent, 0.12))
+        .p(px(24.))
+        .bg(alpha(t.accent, 0.16))
+        .border_2()
+        .border_color(t.accent)
         .child(
             kit::panel(t)
                 .px(px(14.))
                 .py(px(8.))
                 .text_color(t.text)
-                .child("Release to add"),
-        )
+                .child(text),
+        );
+    let half = match edge {
+        None => half.inset_0().justify_center().items_start(),
+        Some(Edge::Left) => (half.left_0().top_0().bottom_0().w(relative(0.5)))
+            .items_center()
+            .justify_end(),
+        Some(Edge::Right) => (half.right_0().top_0().bottom_0().w(relative(0.5)))
+            .items_center()
+            .justify_start(),
+        Some(Edge::Top) => (half.left_0().right_0().top_0().h(relative(0.5)))
+            .justify_center()
+            .items_end(),
+        Some(Edge::Bottom) => (half.left_0().right_0().bottom_0().h(relative(0.5)))
+            .justify_center()
+            .items_start(),
+    };
+    div().absolute().inset_0().child(half)
 }
 
 /// A session dragged from the rail, or a tag from window `from`, onto a
-/// window or a seam.
+/// window.
 #[derive(Clone)]
 pub struct Dragged {
     pub key: Key,
     pub from: Option<usize>,
 }
 
-impl Dragged {
-    /// Whether dropping on window `i` would change anything: a tag dropped
-    /// on the window it lives in has nowhere to land, so it shows no
-    /// "Release to add".
-    pub fn lands_on(&self, i: usize) -> bool {
-        self.from != Some(i)
+/// Where in a window a drop is: near an edge, beside it; else in it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Zone {
+    Center,
+    Edge(Edge),
+}
+
+/// How near an edge, as a share of the window, a drop goes beside it.
+const EDGE_REACH: f32 = 0.25;
+
+/// The zone of a window at `b` the pointer at `p` is in.
+pub fn zone(b: Bounds<Pixels>, p: gpui::Point<Pixels>) -> Zone {
+    let w = f32::from(b.size.width).max(1.);
+    let h = f32::from(b.size.height).max(1.);
+    let x = f32::from(p.x - b.origin.x) / w;
+    let y = f32::from(p.y - b.origin.y) / h;
+    let near = [
+        (x, Edge::Left),
+        (1. - x, Edge::Right),
+        (y, Edge::Top),
+        (1. - y, Edge::Bottom),
+    ];
+    match near.into_iter().min_by(|a, b| a.0.total_cmp(&b.0)) {
+        Some((d, e)) if d < EDGE_REACH => Zone::Edge(e),
+        _ => Zone::Center,
+    }
+}
+
+/// What a drop does.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Landing {
+    /// The session becomes window `0`'s tag on screen.
+    Into(usize),
+    /// A new window beside window `0` takes the session.
+    Split(usize, Edge),
+    /// The window that holds only the session moves beside window `1`.
+    Move(usize, usize, Edge),
+}
+
+/// What dropping `key` (a tag of window `from`, or a rail row) in `zone`
+/// of window `i` does, if anything. A session alone in its window takes
+/// the window with it; an empty window just takes the session; a tab with
+/// every window shown adds it as a tag.
+pub fn landing(
+    ws: &Workspace,
+    key: &Key,
+    from: Option<usize>,
+    i: usize,
+    zone: Zone,
+) -> Option<Landing> {
+    let windows = ws.windows();
+    let target = windows.get(i)?;
+    let src = from.or_else(|| {
+        ws.bound(key)
+            .filter(|(tab, w)| *tab == ws.active && *w < windows.len())
+            .map(|(_, w)| w)
+    });
+    let alone = src.filter(|j| {
+        windows
+            .get(*j)
+            .is_some_and(|w| w.sessions.len() == 1 && &w.sessions[0].key == key)
+    });
+    let into = (src != Some(i)).then_some(Landing::Into(i));
+    match zone {
+        Zone::Edge(e) if !target.is_empty() => match alone {
+            Some(j) => (j != i).then_some(Landing::Move(j, i, e)),
+            None if windows.len() < MAX_WINDOWS => Some(Landing::Split(i, e)),
+            None => into,
+        },
+        _ => into,
     }
 }
 
@@ -103,19 +193,20 @@ impl Render for DragPreview {
     }
 }
 
-/// A divider between windows: after a column, or between the two rows.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Divide {
-    Column(usize),
-    Rows,
+/// A divider being dragged: the group it divides (its path in the
+/// layout), the part it follows, where the press was, the group's shares
+/// then and how many pixels the two parts either side of it had.
+pub struct DividerDrag {
+    pub path: Vec<usize>,
+    pub after: usize,
+    pub axis: Axis,
+    pub from: gpui::Point<Pixels>,
+    pub shares: Vec<u16>,
+    pub pair: f32,
 }
 
-/// A divider being dragged: which, where the press was and the shares then.
-pub struct DividerDrag {
-    pub at: Divide,
-    pub from: gpui::Point<Pixels>,
-    pub sizes: crate::store::workspace::Sizes,
-}
+/// The fewest pixels a divider leaves a window.
+const LEAST_PX: f32 = 90.;
 
 /// What a window's terminal draws from.
 pub(super) struct Source {
@@ -173,24 +264,19 @@ impl Terminals {
     fn render_grid(&mut self, cx: &mut Context<Self>) -> impl IntoElement {
         let t = theme(cx).clone();
         let n = self.settings.workspace.windows().len();
-        // A row or a tag in the air is the only reason a seam exists: a drop
-        // there makes the next window and lands the session in it.
-        let seams = cx.has_active_drag() && n < MAX_WINDOWS;
-        if !seams {
-            self.seam_over = None;
-        }
         if !cx.has_active_drag() {
-            self.dragging_over = None;
+            self.drop_at = None;
+            self.in_air = None;
         }
-        let tiles: Vec<AnyElement> = (0..n).map(|i| self.render_tile(i, cx)).collect();
-        let mut grid = div()
+        let mut tiles: Vec<Option<AnyElement>> =
+            (0..n).map(|i| Some(self.render_tile(i, cx))).collect();
+        let grid = div()
             .id("grid")
             .track_focus(&self.term_focus)
             .flex_1()
             .min_h_0()
             .flex()
             .flex_col()
-            .gap(px(size::TILE_GAP))
             .p(px(size::TILE_GAP))
             .bg(t.raised)
             .on_key_down(cx.listener(Self::term_key))
@@ -210,7 +296,7 @@ impl Terminals {
         // A press that began in a window is followed outside it, and outside
         // the app's window while the button is held.
         let entity = cx.entity();
-        grid = grid.child(
+        let grid = grid.child(
             canvas(
                 |_, _, _| (),
                 move |_, _, window, _| {
@@ -225,122 +311,103 @@ impl Terminals {
             .absolute()
             .size_0(),
         );
-        let laid = self.grid_bounds.clone();
-        grid = grid.child(
-            canvas(|_, _, _| (), move |bounds, _, _, _| laid.set(bounds))
+        let layout = self.settings.workspace.tab().layout.clone();
+        let laid = self.render_split(&layout, &mut vec![], &mut tiles, &t, cx);
+        grid.child(laid)
+    }
+
+    /// A part of the layout: a window, or a row or column of parts with a
+    /// divider between each two.
+    fn render_split(
+        &mut self,
+        split: &Split,
+        path: &mut Vec<usize>,
+        tiles: &mut [Option<AnyElement>],
+        t: &Theme,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let (axis, parts) = match split {
+            Split::Window(w) => {
+                return tiles
+                    .get_mut(*w)
+                    .and_then(Option::take)
+                    .unwrap_or_else(|| div().into_any_element());
+            }
+            Split::Group { axis, parts } => (*axis, parts),
+        };
+        let groups = self.group_bounds.clone();
+        let at = path.clone();
+        let mut g = div()
+            .flex_1()
+            .min_w_0()
+            .min_h_0()
+            .size_full()
+            .flex()
+            .gap(px(size::TILE_GAP))
+            .relative()
+            .child(
+                canvas(
+                    |_, _, _| (),
+                    move |b, _, _, _| {
+                        groups.borrow_mut().insert(at.clone(), b);
+                    },
+                )
                 .absolute()
                 .inset_0(),
-        );
-        let mut tiles = tiles.into_iter();
-        // One row of up to three, or two rows of two (`columns`). Every layout that can still grow is one row, so a seam is always
-        // between two windows side by side.
-        let rows: Vec<usize> = if n == 4 { vec![2, 2] } else { vec![n] };
-        let sizes = self.settings.workspace.tab().sizes();
-        let row_count = rows.len();
-        for (row, count) in rows.into_iter().enumerate() {
-            let share = match (row_count, row) {
-                (1, _) => 1.,
-                (_, 0) => f32::from(sizes.top),
-                _ => 1000. - f32::from(sizes.top),
-            };
-            let mut r = div()
-                .flex_grow(share)
-                .flex_shrink(1.)
-                .flex_basis(px(0.))
-                .min_h_0()
-                .flex()
-                .flex_row()
-                .gap(px(size::TILE_GAP))
-                .relative();
-            for k in 0..count {
-                if let Some(tile) = tiles.next() {
-                    let seam = (seams && k + 1 < count).then(|| self.seam(k, &t, cx));
-                    // Without a drop in the air, the gap is a divider.
-                    let divider =
-                        (!seams && k + 1 < count).then(|| self.divider(Divide::Column(k), &t, cx));
-                    let weight = sizes.columns.get(k).copied().unwrap_or(1000);
-                    r = r.child(
-                        div()
-                            .flex_grow(f32::from(weight))
-                            .flex_shrink(1.)
-                            .flex_basis(px(0.))
-                            .min_w_0()
-                            .h_full()
-                            .flex()
-                            .relative()
-                            .child(tile)
-                            .children(seam)
-                            .children(divider),
-                    );
-                }
-            }
-            if row == 0 && row_count == 2 {
-                r = r.child(self.divider(Divide::Rows, &t, cx));
-            }
-            grid = grid.child(r);
+            );
+        g = match axis {
+            Axis::Row => g.flex_row(),
+            Axis::Column => g.flex_col(),
+        };
+        let n = parts.len();
+        for (k, (share, part)) in parts.iter().enumerate() {
+            path.push(k);
+            let inner = self.render_split(part, path, tiles, t, cx);
+            path.pop();
+            let divider = (k + 1 < n).then(|| self.divider(path, k, axis, t, cx));
+            g = g.child(
+                div()
+                    .flex_grow(f32::from(*share))
+                    .flex_shrink(1.)
+                    .flex_basis(px(0.))
+                    .min_w_0()
+                    .min_h_0()
+                    .when(axis == Axis::Row, |d| d.h_full())
+                    .when(axis == Axis::Column, |d| d.w_full())
+                    .flex()
+                    .relative()
+                    .child(inner)
+                    .children(divider),
+            );
         }
-        grid
+        g.into_any_element()
     }
 
-    /// The seam after window `after`: the gap to the next window and a pad
-    /// either side, painted over both so it takes the drop.
-    fn seam(&self, after: usize, t: &Theme, cx: &mut Context<Self>) -> AnyElement {
-        let over = self.seam_over == Some(after);
-        let reach = size::TILE_GAP + 2. * size::SEAM_PAD;
-        deferred(
-            div()
-                .id(("seam", after))
-                .absolute()
-                .top_0()
-                .bottom_0()
-                .right(px(-(size::TILE_GAP + size::SEAM_PAD)))
-                .w(px(reach))
-                .flex()
-                .justify_center()
-                .child(
-                    div()
-                        .w(px(size::TILE_GAP))
-                        .h_full()
-                        .when(over, |d| d.bg(t.accent)),
-                )
-                .on_drag_move(
-                    cx.listener(move |s, e: &gpui::DragMoveEvent<Dragged>, _, cx| {
-                        let here = e.bounds.contains(&e.event.position);
-                        if here && s.seam_over != Some(after) {
-                            s.seam_over = Some(after);
-                            s.dragging_over = None;
-                            cx.notify();
-                        } else if !here && s.seam_over == Some(after) {
-                            s.seam_over = None;
-                            cx.notify();
-                        }
-                    }),
-                )
-                // seam_over stays until the drag is over (render_grid), so
-                // the window under the seam refuses this drop either way.
-                .on_drop(cx.listener(|s, d: &Dragged, window, cx| {
-                    s.dragging_over = None;
-                    s.add_window_with(d.key.clone(), window, cx);
-                })),
-        )
-        .with_priority(1)
-        .into_any_element()
-    }
-
-    /// The divider after column `k`, or between the rows: the gap and a pad
-    /// either side, over both windows. Dragged, it moves the windows' shares
-    /// (the sessions resize once it rests); a double-click evens them.
-    fn divider(&self, at: Divide, t: &Theme, cx: &mut Context<Self>) -> AnyElement {
+    /// The divider after part `after` of the group at `path`: the gap and
+    /// a pad either side, over both parts. Dragged, it moves the two parts'
+    /// shares (the sessions resize once it rests); a double-click evens the
+    /// group.
+    fn divider(
+        &self,
+        path: &[usize],
+        after: usize,
+        axis: Axis,
+        t: &Theme,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         let reach = size::TILE_GAP + 2. * size::SEAM_PAD;
         let out = px(-(size::TILE_GAP + size::SEAM_PAD));
-        let held = self.divider.as_ref().is_some_and(|d| d.at == at);
-        let id = match at {
-            Divide::Column(k) => ("divider", k),
-            Divide::Rows => ("divider", MAX_WINDOWS),
-        };
+        let held = self
+            .divider
+            .as_ref()
+            .is_some_and(|d| d.path == path && d.after == after);
+        let name = format!(
+            "divider-{}{after}",
+            path.iter().map(|k| format!("{k}.")).collect::<String>()
+        );
         let line = div().when(held, |d| d.bg(t.accent));
-        let (e, line) = match at {
-            Divide::Column(_) => (
+        let (e, line) = match axis {
+            Axis::Row => (
                 div()
                     .top_0()
                     .bottom_0()
@@ -351,7 +418,7 @@ impl Terminals {
                     .cursor(gpui::CursorStyle::ResizeLeftRight),
                 line.w(px(size::TILE_GAP)).h_full(),
             ),
-            Divide::Rows => (
+            Axis::Column => (
                 div()
                     .left_0()
                     .right_0()
@@ -364,9 +431,11 @@ impl Terminals {
                 line.h(px(size::TILE_GAP)).w_full(),
             ),
         };
+        let path = path.to_vec();
+        let selector = name.clone();
         deferred(
-            e.id(id)
-                .debug_selector(move || format!("divider-{}", id.1))
+            e.id(gpui::ElementId::Name(name.into()))
+                .debug_selector(move || selector.clone())
                 .absolute()
                 .group("divider")
                 .child(line.group_hover("divider", |d| d.bg(t.accent_soft())))
@@ -374,21 +443,7 @@ impl Terminals {
                     MouseButton::Left,
                     cx.listener(move |s, e: &MouseDownEvent, _, cx| {
                         cx.stop_propagation();
-                        let sizes = s.settings.workspace.tab().sizes();
-                        if e.click_count >= 2 {
-                            s.divider = None;
-                            s.settings
-                                .workspace
-                                .set_sizes(crate::store::workspace::Sizes::even(sizes.count));
-                            s.save(cx);
-                        } else {
-                            s.divider = Some(DividerDrag {
-                                at,
-                                from: e.position,
-                                sizes,
-                            });
-                        }
-                        cx.notify();
+                        s.press_divider(&path, after, axis, e, cx);
                     }),
                 ),
         )
@@ -396,44 +451,138 @@ impl Terminals {
         .into_any_element()
     }
 
-    /// A divider's drag moved to `p`: the windows either side share their
+    fn press_divider(
+        &mut self,
+        path: &[usize],
+        after: usize,
+        axis: Axis,
+        e: &MouseDownEvent,
+        cx: &mut Context<Self>,
+    ) {
+        let Some((_, parts)) = self.settings.workspace.tab().layout.group(path) else {
+            return;
+        };
+        let shares: Vec<u16> = parts.iter().map(|p| p.0).collect();
+        if e.click_count >= 2 {
+            self.divider = None;
+            if let Some((_, parts)) = self.settings.workspace.layout_mut().group_mut(path) {
+                for p in parts.iter_mut() {
+                    p.0 = layout::EVEN;
+                }
+            }
+            self.save(cx);
+            cx.notify();
+            return;
+        }
+        let Some(b) = self.group_bounds.borrow().get(path).copied() else {
+            return;
+        };
+        let length = match axis {
+            Axis::Row => f32::from(b.size.width),
+            Axis::Column => f32::from(b.size.height),
+        };
+        let room = length - (shares.len() as f32 - 1.) * size::TILE_GAP;
+        let all: f32 = shares.iter().map(|s| f32::from(*s)).sum();
+        let pair = room * (f32::from(shares[after]) + f32::from(shares[after + 1])) / all;
+        self.divider = Some(DividerDrag {
+            path: path.to_vec(),
+            after,
+            axis,
+            from: e.position,
+            shares,
+            pair,
+        });
+        cx.notify();
+    }
+
+    /// A divider's drag moved to `p`: the parts either side share their
     /// room as it says.
     pub(super) fn drag_divider(&mut self, p: gpui::Point<Pixels>, cx: &mut Context<Self>) {
         let Some(d) = &self.divider else {
             return;
         };
-        let grid = self.grid_bounds.get();
-        let mut sizes = d.sizes.clone();
-        let edge = 2. * size::TILE_GAP;
-        match d.at {
-            Divide::Column(k) => {
-                let n = sizes.columns.len() as f32;
-                let all: f32 = sizes.columns.iter().map(|w| f32::from(*w)).sum();
-                let room = f32::from(grid.size.width) - edge - (n - 1.) * size::TILE_GAP;
-                let pair = f32::from(sizes.columns[k]) + f32::from(sizes.columns[k + 1]);
-                let pair_px = room * pair / all;
-                if pair_px > 0. {
-                    sizes.drag_column(k, f32::from(p.x - d.from.x) / pair_px);
-                }
-            }
-            Divide::Rows => {
-                let room = f32::from(grid.size.height) - edge - size::TILE_GAP;
-                if room > 0. {
-                    sizes.drag_rows(f32::from(p.y - d.from.y) / room);
-                }
-            }
+        if d.pair <= 0. {
+            return;
         }
-        self.settings.workspace.set_sizes(sizes);
+        let moved = match d.axis {
+            Axis::Row => f32::from(p.x - d.from.x),
+            Axis::Column => f32::from(p.y - d.from.y),
+        };
+        let mut shares = d.shares.clone();
+        let least = LEAST_SHARE.max(LEAST_PX / d.pair);
+        layout::drag(&mut shares, d.after, moved / d.pair, least);
+        let path = d.path.clone();
+        match self.settings.workspace.layout_mut().group_mut(&path) {
+            Some((_, parts)) if parts.len() == shares.len() => {
+                for (part, s) in parts.iter_mut().zip(shares) {
+                    part.0 = s;
+                }
+            }
+            _ => self.divider = None,
+        }
         cx.notify();
     }
 
-    /// Shows the next window and binds `key` in it (a drop on a seam).
-    fn add_window_with(&mut self, key: Key, window: &mut Window, cx: &mut Context<Self>) {
-        if self.settings.workspace.add_window() {
-            let w = self.settings.workspace.focus;
-            self.attach(key, w, window, cx);
+    /// The zone of window `i` a drag is over, as its move says.
+    fn drag_over(&mut self, i: usize, e: &gpui::DragMoveEvent<Dragged>, cx: &mut Context<Self>) {
+        let here = e.bounds.contains(&e.event.position);
+        let now = here.then(|| (i, zone(e.bounds, e.event.position)));
+        if self.in_air.is_none() {
+            self.in_air = Some(e.drag(cx).clone());
+        }
+        if here && self.drop_at != now {
+            self.drop_at = now;
+            cx.notify();
+        } else if !here && self.drop_at.is_some_and(|(w, _)| w == i) {
+            self.drop_at = None;
+            cx.notify();
         }
     }
+
+    /// Where the drag in the air would land, if released now.
+    pub fn landing_now(&self, d: &Dragged) -> Option<Landing> {
+        let (i, z) = self.drop_at?;
+        landing(&self.settings.workspace, &d.key, d.from, i, z)
+    }
+
+    /// A drop: the session goes into a window, into a new one beside it,
+    /// or its window moves.
+    pub fn land(&mut self, d: &Dragged, l: Landing, window: &mut Window, cx: &mut Context<Self>) {
+        let ws = &mut self.settings.workspace;
+        match l {
+            Landing::Into(i) => {
+                // The window the session leaves empty closes.
+                let emptied = d.from.filter(|j| {
+                    ws.windows()
+                        .get(*j)
+                        .is_some_and(|w| w.sessions.len() == 1 && w.sessions[0].key == d.key)
+                });
+                self.attach(d.key.clone(), i, window, cx);
+                if let Some(j) = emptied
+                    && self.settings.workspace.close_window(j)
+                {
+                    self.settings.workspace.focus = if i > j { i - 1 } else { i };
+                    self.histories.clear();
+                    self.sync(cx);
+                    self.save(cx);
+                }
+            }
+            Landing::Split(i, e) => {
+                if ws.split(i, e) {
+                    let w = ws.focus;
+                    self.attach(d.key.clone(), w, window, cx);
+                }
+            }
+            Landing::Move(j, i, e) => {
+                if ws.move_window(j, i, e) {
+                    self.save(cx);
+                    window.focus(&self.term_focus, cx);
+                }
+            }
+        }
+        cx.notify();
+    }
+
     pub(super) fn source(
         &self,
         i: usize,
@@ -478,8 +627,10 @@ impl Terminals {
         let binding = ws.shown(i).cloned();
         let head = self.tile_head(i, focused, &t, cx);
         let state = self.fleet.tile(binding.as_ref());
-        // Over a seam, the drop is the seam's, whatever window it overlaps.
-        let drop_over = self.dragging_over == Some(i) && self.seam_over.is_none();
+        let landing = (self.in_air.as_ref())
+            .and_then(|d| self.landing_now(d))
+            .filter(|_| self.drop_at.is_some_and(|(w, _)| w == i));
+        let drop_over = landing.is_some();
         let frame = div()
             .id(("tile", i))
             .debug_selector(move || format!("window-{i}"))
@@ -499,23 +650,17 @@ impl Terminals {
             .overflow_hidden()
             .on_drag_move(
                 cx.listener(move |s, e: &gpui::DragMoveEvent<Dragged>, _, cx| {
-                    // A tag over the window it lives in has nowhere to land.
-                    // Whether a seam is under the pointer is the seam's to
-                    // say, whichever hears the move first.
-                    let over = e.bounds.contains(&e.event.position) && e.drag(cx).lands_on(i);
-                    if over && s.dragging_over != Some(i) {
-                        s.dragging_over = Some(i);
-                        cx.notify();
-                    } else if !over && s.dragging_over == Some(i) {
-                        s.dragging_over = None;
-                        cx.notify();
-                    }
+                    s.drag_over(i, e, cx)
                 }),
             )
             .on_drop(cx.listener(move |s, d: &Dragged, window, cx| {
-                s.dragging_over = None;
-                if d.lands_on(i) && s.seam_over.is_none() {
-                    s.attach(d.key.clone(), i, window, cx);
+                let l = s
+                    .drop_at
+                    .filter(|(w, _)| *w == i)
+                    .and_then(|_| s.landing_now(d));
+                s.drop_at = None;
+                if let Some(l) = l {
+                    s.land(d, l, window, cx);
                 }
             }));
         let body: AnyElement = match state {
@@ -674,6 +819,7 @@ impl Terminals {
             }
         };
         let grids = self.launch_grids.clone();
+        let tiles = self.tile_bounds.clone();
         let font = self.font_of(i);
         // An empty window has no head yet; the session launched in it will.
         let tagged = !self.settings.workspace.windows()[i].sessions.is_empty();
@@ -684,6 +830,7 @@ impl Terminals {
                 let pad = px(2. * size::TERM_PAD);
                 let inner = gpui::size(b.size.width - pad, b.size.height - pad - px(head_to_come));
                 grids.borrow_mut()[i] = Some(paint::grid_for(inner, paint::metrics(window, font)));
+                tiles.borrow_mut()[i] = Some(b);
             },
         )
         .absolute()
@@ -716,7 +863,7 @@ impl Terminals {
             )
             .child(measure)
             .child(body)
-            .when(drop_over, |d| d.child(drop_note(&t)));
+            .children(landing.map(|l| drop_note(&t, &l)));
         // An empty window has no tags, so no strip for them.
         frame
             .when(tagged, |f| f.child(head))
@@ -1057,12 +1204,19 @@ impl Terminals {
         if live {
             items.push(MenuItem::new("Rename session…", Act::Rename(key.clone())));
             items.push(self.copy_row(key));
+            items.push(MenuItem::new(
+                "Copy folder path",
+                Act::CopyPath(key.clone()),
+            ));
+            items.push(MenuItem::rule());
         }
+        items.extend(super::views::layout_rows(&self.settings.workspace, i));
         items.push(MenuItem::new(
             "Remove from window",
             Act::Remove(i, key.clone()),
         ));
         if live {
+            items.push(MenuItem::rule());
             items.push(MenuItem::new("Kill session", Act::Kill(key.clone())).danger());
         }
         items
@@ -1097,15 +1251,19 @@ impl Terminals {
         }
         items.extend(self.zoom_row(i));
         items.push(MenuItem::rule());
-        if self.settings.workspace.windows().len() < MAX_WINDOWS {
-            items.push(MenuItem::new("Split right", Act::SplitRight(i)));
-        }
         items.push(MenuItem::new("Rename session…", Act::Rename(key.clone())));
         items.push(self.copy_row(key));
+        items.push(MenuItem::new(
+            "Copy folder path",
+            Act::CopyPath(key.clone()),
+        ));
+        items.push(MenuItem::rule());
+        items.extend(super::views::layout_rows(&self.settings.workspace, i));
         items.push(MenuItem::new(
             "Remove from window",
             Act::Remove(i, key.clone()),
         ));
+        items.push(MenuItem::rule());
         items.push(MenuItem::new("Kill session", Act::Kill(key.clone())).danger());
         items
     }
@@ -1922,6 +2080,17 @@ impl Terminals {
             .body
             .is_some_and(|b| b.contains(&e.position));
         let Some(at) = self.slot_pane(i).filter(|_| in_body) else {
+            // A window with no live terminal: a right click offers its
+            // session's menu, or the layout's.
+            if !peek && e.button == MouseButton::Right {
+                let ws = &self.settings.workspace;
+                let items = match ws.shown(i).map(|b| b.key.clone()) {
+                    Some(key) => self.session_menu(i, &key),
+                    None => super::views::layout_rows(ws, i),
+                };
+                self.menu(items, e.position, window, cx);
+                cx.stop_propagation();
+            }
             return;
         };
         if peek {
@@ -2480,21 +2649,65 @@ fn peek_view(
 mod tests {
     use super::*;
 
-    #[test]
-    fn a_drop_lands_only_where_it_would_change_something() {
-        let key = Key {
+    fn key(name: &str) -> Key {
+        Key {
             node: "n".into(),
             user: String::new(),
-            name: "a".into(),
-        };
-        let tag = Dragged {
-            key: key.clone(),
-            from: Some(1),
-        };
-        assert!(!tag.lands_on(1));
-        assert!(tag.lands_on(0));
-        let row = Dragged { key, from: None };
-        assert!((0..MAX_WINDOWS).all(|i| row.lands_on(i)));
+            name: name.into(),
+        }
+    }
+
+    #[test]
+    fn a_drop_lands_only_where_it_would_change_something() {
+        // a alone in 0, b and c in 1, 2 empty.
+        let mut ws = Workspace::default();
+        ws.set_windows(0, 3);
+        ws.bind(0, key("a"), None);
+        ws.bind(1, key("b"), None);
+        ws.bind(1, key("c"), None);
+        let at =
+            |k: &str, from: Option<usize>, i: usize, z: Zone| landing(&ws, &key(k), from, i, z);
+        let right = Zone::Edge(Edge::Right);
+        // A tag on its own window: only an edge, and only with company.
+        assert_eq!(at("a", Some(0), 0, Zone::Center), None);
+        assert_eq!(at("a", Some(0), 0, right), None);
+        assert_eq!(
+            at("b", Some(1), 1, right),
+            Some(Landing::Split(1, Edge::Right))
+        );
+        // A session alone in its window takes the window with it.
+        assert_eq!(
+            at("a", Some(0), 1, right),
+            Some(Landing::Move(0, 1, Edge::Right))
+        );
+        assert_eq!(
+            at("a", None, 1, right),
+            Some(Landing::Move(0, 1, Edge::Right)),
+            "from the rail too"
+        );
+        assert_eq!(at("a", Some(0), 1, Zone::Center), Some(Landing::Into(1)));
+        // An empty window is filled, whatever the zone.
+        assert_eq!(at("b", Some(1), 2, right), Some(Landing::Into(2)));
+        // A session on no window splits beside one.
+        assert_eq!(
+            at("d", None, 0, Zone::Edge(Edge::Top)),
+            Some(Landing::Split(0, Edge::Top))
+        );
+        assert_eq!(at("d", None, 9, Zone::Center), None);
+        // With every window shown, an edge adds a tag.
+        ws.set_windows(0, MAX_WINDOWS);
+        let full = landing(&ws, &key("d"), None, 0, right);
+        assert_eq!(full, Some(Landing::Into(0)));
+    }
+
+    #[test]
+    fn the_zone_is_the_nearest_edge_within_a_quarter() {
+        let b = Bounds::new(point(px(100.), px(100.)), gpui::size(px(400.), px(200.)));
+        assert_eq!(zone(b, point(px(300.), px(200.))), Zone::Center);
+        assert_eq!(zone(b, point(px(120.), px(200.))), Zone::Edge(Edge::Left));
+        assert_eq!(zone(b, point(px(480.), px(150.))), Zone::Edge(Edge::Right));
+        assert_eq!(zone(b, point(px(300.), px(110.))), Zone::Edge(Edge::Top));
+        assert_eq!(zone(b, point(px(300.), px(290.))), Zone::Edge(Edge::Bottom));
     }
 
     /// Peek zoomed past its room follows the cursor along the row, and a

@@ -13,7 +13,7 @@ use ahjo_app_kit::widgets::kit::{self, Kind};
 use ahjo_app_kit::widgets::pane;
 use gpui::{
     AnyElement, ContentMask, Context, FontWeight, KeyDownEvent, MouseButton, MouseDownEvent,
-    Window, anchored, canvas, deferred, div, point, prelude::*, px,
+    Window, canvas, deferred, div, prelude::*, px,
 };
 use std::collections::HashMap;
 
@@ -160,7 +160,7 @@ impl Terminals {
                     .on_click(cx.listener(|s, _, window, cx| s.act(Act::NewTab, window, cx))),
             );
         }
-        bar.into_any_element()
+        bar.child(self.render_views(cx)).into_any_element()
     }
 
     /// Scrolls tab `i` into the strip. The scroll lands as the strip is
@@ -171,7 +171,7 @@ impl Terminals {
     }
 
     /// Every Sessions tab's menu, CHROTE's: the tab, its layout and
-    /// presets, then what acts on its windows.
+    /// views, then what acts on its windows.
     pub fn tab_menu(&self, i: usize) -> Vec<MenuItem> {
         tab_menu(&self.settings.workspace, i)
     }
@@ -184,25 +184,15 @@ pub(super) fn tab_menu(ws: &Workspace, i: usize) -> Vec<MenuItem> {
     let windows = (1..=MAX_WINDOWS)
         .map(|w| MenuItem::new(w.to_string(), Act::Windows(i, w)).checked(n == w))
         .collect();
-    let restore = if ws.presets.is_empty() {
-        vec![MenuItem::note("No presets")]
-    } else {
-        (ws.presets.iter().enumerate())
-            .map(|(k, p)| MenuItem::new(p.name.clone(), Act::RestorePreset(k)))
-            .collect()
-    };
     let mut items = vec![
         MenuItem::new("Rename tab", Act::RenameTab(i)),
         MenuItem::rule(),
         MenuItem::sub("Windows", Some(n.to_string()), windows),
-        MenuItem::new("Save layout as preset", Act::SavePreset),
-        MenuItem::sub("Restore preset", None, restore),
     ];
-    if !ws.presets.is_empty() {
-        let delete = (ws.presets.iter().enumerate())
-            .map(|(k, p)| MenuItem::new(p.name.clone(), Act::DeletePreset(k)).danger())
-            .collect();
-        items.push(MenuItem::sub("Delete preset", None, delete));
+    // Arranging and views act on the tab on screen.
+    if i == ws.active {
+        items.push(MenuItem::sub("Arrange", None, super::views::arrange_rows()));
+        items.push(MenuItem::sub("Views", None, super::views::views_menu(ws)));
     }
     let bound = tab.shown().iter().any(|w| !w.is_empty());
     let clear = MenuItem::new("Clear tab assignments", Act::ClearTab(i)).danger();
@@ -261,41 +251,6 @@ impl Terminals {
                 ),
         )
         .with_priority(5)
-        .into_any_element()
-    }
-
-    /// Naming a preset, in a panel where the tab menu stood: the menu
-    /// becomes the editor, as CHROTE's does.
-    pub(super) fn render_preset_name(
-        &mut self,
-        at: gpui::Point<gpui::Pixels>,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        let t = theme(cx).clone();
-        deferred(
-            self.scrim(surface::PRESET_NAME, cx).child(
-                anchored()
-                    .position(point(at.x, at.y))
-                    .snap_to_window_with_margin(px(8.))
-                    .child(
-                        kit::panel(&t)
-                            .w(px(260.))
-                            .p(px(10.))
-                            .flex()
-                            .flex_col()
-                            .gap(px(6.))
-                            .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
-                            .child(kit::label(&t, "Preset name"))
-                            .child(self.rename_field.clone())
-                            .child(kit::note(
-                                &t,
-                                "Enter saves every tab's windows · Esc cancels",
-                                Some(t.dim),
-                            )),
-                    ),
-            ),
-        )
-        .with_priority(10)
         .into_any_element()
     }
 
@@ -879,21 +834,30 @@ mod tests {
     }
 
     #[test]
-    fn presets_are_saved_from_the_menu_and_restored_from_a_submenu() {
+    fn views_are_kept_and_shown_from_the_tab_menu() {
         let mut ws = Workspace::default();
         let menu = tab_menu(&ws, 0);
-        assert_eq!(
-            row(&menu, "Save layout as preset").act,
-            Some(Act::SavePreset)
-        );
-        assert!(row(&menu, "Restore preset").sub[0].act.is_none());
-        assert!(menu.iter().all(|m| m.label != "Delete preset"));
-        ws.save_preset("Morning").unwrap();
+        let views = &row(&menu, "Views").sub;
+        assert!(views[0].act.is_none(), "says there are none yet");
+        let keep = &row(views, "Keep this tab as view").sub;
+        assert_eq!(keep.len(), 9);
+        assert_eq!(keep[2].act, Some(Act::SaveView(3)));
+        assert_eq!(keep[2].chord.as_deref(), Some("Alt+Shift+3"));
+        assert!(views.iter().all(|m| m.label != "Delete view"));
+        ws.save_view(3, Some("Morning"));
         let menu = tab_menu(&ws, 0);
-        let restore = &row(&menu, "Restore preset").sub;
-        assert_eq!(restore[0].label, "Morning");
-        assert_eq!(restore[0].act, Some(Act::RestorePreset(0)));
-        assert!(row(&menu, "Delete preset").sub[0].danger);
+        let views = &row(&menu, "Views").sub;
+        assert_eq!(views[0].label, "3  Morning");
+        assert_eq!(views[0].act, Some(Act::RecallView(3)));
+        assert!(row(views, "Delete view").sub[0].danger);
+        let arrange = &row(&menu, "Arrange").sub;
+        assert_eq!(
+            arrange[0].act,
+            Some(Act::Arrange(crate::store::workspace::Arrange::Row))
+        );
+        // A tab not on screen is not arranged from its menu.
+        ws.add_tab();
+        assert!(tab_menu(&ws, 0).iter().all(|m| m.label != "Arrange"));
     }
 
     #[test]

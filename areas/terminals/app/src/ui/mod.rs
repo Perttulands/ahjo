@@ -12,4 +12,6 @@ mod rail;
 mod send;
 mod session_acts;
 mod surface;
+mod tidy;
 mod tiles;
+mod views;

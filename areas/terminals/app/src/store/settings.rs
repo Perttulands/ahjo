@@ -48,6 +48,10 @@ pub struct Settings {
     pub kept: BTreeMap<String, Vec<Kept>>,
     /// The last known incarnation and restart recipe of each session.
     pub restarts: BTreeMap<String, Restart>,
+    /// What the offer to tidy up held when it was waved away
+    /// (`store::tidy`), so it stays quiet until something new joins it.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub tidy_seen: Vec<String>,
 }
 
 /// What the Settings page lists for the terminals, each under its field's
@@ -111,6 +115,7 @@ impl Default for Settings {
             workspace: Workspace::default(),
             kept: Default::default(),
             restarts: Default::default(),
+            tidy_seen: vec![],
         }
     }
 }

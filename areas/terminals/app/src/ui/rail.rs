@@ -58,6 +58,7 @@ impl Render for Rail {
 impl Terminals {
     pub fn render_rail(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         let t = theme(cx).clone();
+        let tidy = self.render_tidy(cx);
         // The list's head as every page has it: the filter, then the acts.
         // Searching what sessions printed starts from the same words, as
         // the list's first row, so the head holds one search.
@@ -209,6 +210,7 @@ impl Terminals {
             .flex_col()
             .child(header)
             .children(search)
+            .children(tidy)
             .child(
                 div()
                     .relative()
@@ -528,13 +530,20 @@ impl Terminals {
             MenuItem::new("Send…", Act::Send(key.clone())).chord("Alt+S"),
             MenuItem::new("Rename…", Act::Rename(key.clone())),
             self.copy_row(key),
+            MenuItem::new("Copy folder path", Act::CopyPath(key.clone())),
         ];
+        // Up to eight windows: one row, or a row per window behind one.
         let n = self.settings.workspace.windows().len();
-        for w in 0..n {
+        if n == 1 {
             items.push(MenuItem::new(
-                format!("Attach to window {}", w + 1),
-                Act::Attach(key.clone(), w),
+                "Attach to window",
+                Act::Attach(key.clone(), 0),
             ));
+        } else {
+            let to = (0..n)
+                .map(|w| MenuItem::new(format!("Window {}", w + 1), Act::Attach(key.clone(), w)))
+                .collect();
+            items.push(MenuItem::sub("Attach to window", None, to));
         }
         if self.settings.workspace.bound(key).is_some() {
             items.push(MenuItem::new("Unassign", Act::Unassign(key.clone())));

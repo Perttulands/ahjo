@@ -1,22 +1,26 @@
 //! The terminal workspace, as CHROTE's (ADR-0017 decision 5): tabs, each a
-//! layout of one to four windows, each window holding the sessions the
-//! operator bound to it as tags, one of them on screen. A binding is intent,
-//! not a cache of live sessions: it stays until the operator removes it,
-//! whatever happens to the session. A session is bound in one window at a
-//! time; binding it elsewhere moves it.
+//! layout of windows split side by side and stacked as the operator likes
+//! (`layout::Split`), each window holding the sessions the operator bound
+//! to it as tags, one of them on screen. A binding is intent, not a cache
+//! of live sessions: it stays until the operator removes it, whatever
+//! happens to the session. A session is bound in one window at a time;
+//! binding it elsewhere moves it.
 //!
-//! Every tab keeps four windows and every workspace six tabs; the counts say
-//! how many are shown. Showing fewer hides the rest with their bindings and
-//! names, and showing more brings them back: a layout shrinks, it never
-//! forgets. The app owns all of this; losing it loses a layout, never work.
+//! Every tab keeps eight windows and every workspace six tabs; the counts
+//! say how many are shown, and the shown windows are the layout's leaves.
+//! Fewer windows hide the rest with their bindings and names, and more
+//! bring them back: a layout shrinks, it never forgets, except a window
+//! the operator closes. The app owns all of this; losing it loses a
+//! layout, never work.
 
-use super::presets::Preset;
+use super::layout::{Side, Split};
 use super::sessions::{Key, find};
+use super::views::View;
 use ahjo_terminals_contract::Session;
 use serde::{Deserialize, Serialize};
 
 pub const MAX_TABS: usize = 6;
-pub const MAX_WINDOWS: usize = 4;
+pub const MAX_WINDOWS: usize = 8;
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Binding {
@@ -87,7 +91,7 @@ impl Window {
         self.sessions.is_empty()
     }
 
-    fn holds(&self, key: &Key) -> Option<usize> {
+    pub(super) fn holds(&self, key: &Key) -> Option<usize> {
         self.sessions.iter().position(|b| &b.key == key)
     }
 
@@ -107,85 +111,87 @@ fn windows() -> Vec<Window> {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(from = "StoredTab")]
 pub struct Tab {
-    /// The operator's name for it; unnamed tabs read Terminal, Terminal 2…
+    /// The operator's name for it; unnamed tabs read Sessions, Sessions 2…
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
-    /// Always four; the first `count` are shown.
-    #[serde(default)]
+    /// Always eight; the first `count` are shown.
     pub windows: Vec<Window>,
-    #[serde(default)]
     pub count: usize,
-    /// Where its dividers were dragged to, for the layout they were dragged
-    /// in; none, or another layout, is even.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub sizes: Option<Sizes>,
+    /// How the shown windows share the tab: its leaves are `0..count`.
+    pub layout: Split,
 }
 
-/// How the windows of a layout share it, in thousandths: a weight per
-/// column (the two rows of four windows share their columns) and the top
-/// row's share of the height.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct Sizes {
-    /// The window count these sizes were dragged in.
-    pub count: usize,
-    pub columns: Vec<u16>,
+/// A tab as stored: today's, or one from before the layout tree, whose
+/// windows stood in one row of up to three or two rows of two, with the
+/// weights their dividers were dragged to for that many windows.
+#[derive(Deserialize)]
+struct StoredTab {
+    #[serde(default)]
+    name: Option<String>,
+    #[serde(default)]
+    windows: Vec<Window>,
+    #[serde(default)]
+    count: usize,
+    #[serde(default)]
+    layout: Option<Split>,
+    #[serde(default)]
+    sizes: Option<OldSizes>,
+}
+
+#[derive(Deserialize)]
+struct OldSizes {
+    count: usize,
+    columns: Vec<u16>,
     #[serde(default = "half")]
-    pub top: u16,
+    top: u16,
 }
 
 fn half() -> u16 {
     500
 }
 
-/// The smallest share, in thousandths, a divider leaves a window of the
-/// room it splits.
-pub const LEAST_SHARE: f32 = 120.;
-
-/// The columns a layout of `n` windows has: one row of up to three, or
-/// two rows of two.
-pub fn columns(n: usize) -> usize {
-    if n == 4 { 2 } else { n.max(1) }
-}
-
-impl Sizes {
-    pub fn even(count: usize) -> Self {
-        Self {
+impl From<StoredTab> for Tab {
+    fn from(s: StoredTab) -> Self {
+        let count = shown_count(s.count, s.windows.len());
+        let layout = s.layout.unwrap_or_else(|| {
+            let dragged = s
+                .sizes
+                .as_ref()
+                .filter(|z| z.count == count)
+                .map(|z| (&z.columns[..], z.top));
+            Split::from_columns(count, dragged)
+        });
+        let mut t = Self {
+            name: s.name,
+            windows: s.windows,
             count,
-            columns: vec![1000; columns(count)],
-            top: 500,
-        }
-    }
-
-    /// Moves the divider after column `k` by `by`, a fraction of the room
-    /// the two columns either side of it have together.
-    pub fn drag_column(&mut self, k: usize, by: f32) {
-        let Some(pair) = self.columns.get(k..k + 2) else {
-            return;
+            layout,
         };
-        let both = f32::from(pair[0]) + f32::from(pair[1]);
-        let left = (f32::from(pair[0]) + by * both).clamp(
-            both * LEAST_SHARE / 1000.,
-            both * (1. - LEAST_SHARE / 1000.),
-        );
-        self.columns[k] = left.round() as u16;
-        self.columns[k + 1] = (both - left).round() as u16;
-    }
-
-    /// Moves the divider between the rows by `by`, a fraction of the height.
-    pub fn drag_rows(&mut self, by: f32) {
-        let top = (f32::from(self.top) + by * 1000.).clamp(LEAST_SHARE, 1000. - LEAST_SHARE);
-        self.top = top.round() as u16;
+        mend(&mut t);
+        t
     }
 }
+
+/// How many windows a stored tab shows: as it says, else every window it
+/// kept, as before the count was kept.
+fn shown_count(count: usize, kept: usize) -> usize {
+    let n = if count == 0 { kept.max(1) } else { count };
+    n.min(MAX_WINDOWS)
+}
+
+/// The least share of the room a divider leaves either window, and the
+/// fewest pixels.
+pub const LEAST_SHARE: f32 = 0.08;
 
 impl Tab {
-    fn new() -> Self {
+    pub fn new() -> Self {
         Self {
             name: None,
             windows: windows(),
             count: 1,
-            sizes: None,
+            layout: Split::Window(0),
         }
     }
 
@@ -193,14 +199,63 @@ impl Tab {
         &self.windows[..self.count]
     }
 
-    /// How its shown windows share the layout: as dragged for this layout,
-    /// else even.
-    pub fn sizes(&self) -> Sizes {
-        self.sizes
-            .clone()
-            .filter(|s| s.count == self.count && s.columns.len() == columns(self.count))
-            .filter(|s| s.columns.iter().all(|w| *w > 0) && (1..1000).contains(&s.top))
-            .unwrap_or_else(|| Sizes::even(self.count))
+    /// Its shown windows in reading order: left to right, top to bottom.
+    pub fn order(&self) -> Vec<usize> {
+        self.layout.windows()
+    }
+
+    /// Hides window `w` behind the shown ones, with what it holds: its
+    /// room goes to the windows beside it, and the windows after it move
+    /// down one. False for the last window.
+    pub(super) fn hide(&mut self, w: usize) -> bool {
+        if self.count <= 1 || w >= self.count || !self.layout.remove(w) {
+            return false;
+        }
+        let gone = self.windows.remove(w);
+        self.windows.insert(self.count - 1, gone);
+        self.layout.renumber(&|x| if x > w { x - 1 } else { x });
+        self.count -= 1;
+        true
+    }
+
+    /// Shows hidden window `count` beside `at`, on `side`.
+    fn reveal(&mut self, at: usize, side: Side) -> bool {
+        if self.count >= MAX_WINDOWS || at >= self.count {
+            return false;
+        }
+        let new = self.count;
+        if !self.layout.insert(at, side, new) {
+            return false;
+        }
+        self.count += 1;
+        true
+    }
+
+    /// The window with the most room, and the side its longer edge splits
+    /// on, in a tab as wide as a desktop.
+    fn roomiest(&self) -> (usize, Side) {
+        let mut rects = vec![];
+        self.layout.rects(0., 0., 16., 9., &mut rects);
+        rects
+            .into_iter()
+            .max_by(|a, b| (a.1[2] * a.1[3]).total_cmp(&(b.1[2] * b.1[3])))
+            .map(|(w, r)| {
+                (
+                    w,
+                    if r[2] >= r[3] {
+                        Side::Right
+                    } else {
+                        Side::Bottom
+                    },
+                )
+            })
+            .unwrap_or((0, Side::Right))
+    }
+}
+
+impl Default for Tab {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -213,9 +268,10 @@ pub struct Workspace {
     pub active: usize,
     /// The focused window in the active tab.
     pub focus: usize,
-    /// Layouts saved by name, at most ten (CHROTE's cap).
+    /// Arrangements kept on the number keys, as an RTS keeps its control
+    /// groups (`views`).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub presets: Vec<Preset>,
+    pub views: Vec<View>,
 }
 
 impl Default for Workspace {
@@ -225,7 +281,7 @@ impl Default for Workspace {
             count: 1,
             active: 0,
             focus: 0,
-            presets: vec![],
+            views: vec![],
         }
     }
 }
@@ -258,15 +314,13 @@ impl Workspace {
         &self.tabs[self.active]
     }
 
-    fn tab_mut(&mut self) -> &mut Tab {
+    pub(super) fn tab_mut(&mut self) -> &mut Tab {
         &mut self.tabs[self.active]
     }
 
-    /// Sets how the active tab's windows share it; even sizes forget the
-    /// drag.
-    pub fn set_sizes(&mut self, sizes: Sizes) {
-        let even = Sizes::even(sizes.count);
-        self.tab_mut().sizes = (sizes != even).then_some(sizes);
+    /// The active tab's layout, to drag its dividers.
+    pub fn layout_mut(&mut self) -> &mut Split {
+        &mut self.tab_mut().layout
     }
 
     /// The windows of the active tab on screen.
@@ -323,59 +377,157 @@ impl Workspace {
         true
     }
 
-    /// Shows one more window: the next hidden one, with what it held.
+    /// Shows one more window: the next hidden one, with what it held, in
+    /// the half of the roomiest window.
     pub fn add_window(&mut self) -> bool {
-        let n = self.windows().len();
-        if n >= MAX_WINDOWS {
+        let (at, side) = self.tab().roomiest();
+        if !self.tab_mut().reveal(at, side) {
             return false;
         }
-        self.tab_mut().count += 1;
-        self.focus = n;
+        self.focus = self.windows().len() - 1;
         true
     }
 
-    /// Opens an empty window right after window `at`, the windows after it
-    /// moving along; false when the tab holds all it can.
-    pub fn split_after(&mut self, at: usize) -> bool {
+    /// Opens an empty window beside window `at`, on `side`, and focuses
+    /// it; false when the tab holds all it can.
+    pub fn split(&mut self, at: usize, side: Side) -> bool {
         let n = self.windows().len();
         if n >= MAX_WINDOWS || at >= n {
             return false;
         }
-        let t = self.tab_mut();
-        t.windows[n] = Window::default();
-        t.windows[at + 1..=n].rotate_right(1);
-        t.count += 1;
-        self.focus = at + 1;
-        true
-    }
-
-    /// Hides the last window if it is empty: the layout does not shrink
-    /// over somebody's live terminal (Alt+Minus).
-    pub fn remove_window(&mut self) -> bool {
-        let w = self.windows();
-        if w.len() <= 1 || !w[w.len() - 1].is_empty() {
+        self.tab_mut().windows[n] = Window::default();
+        if !self.tab_mut().reveal(at, side) {
             return false;
         }
-        self.tab_mut().count -= 1;
-        self.focus = self.focus.min(self.windows().len() - 1);
+        self.focus = n;
         true
     }
 
-    /// Sets how many windows tab `tab` shows; the rest are hidden with
-    /// their bindings (the tab menu's Windows).
+    /// Closes window `w` of the active tab: its tags go with it (their
+    /// sessions run on) and the windows beside it take its room. The last
+    /// window stays.
+    pub fn close_window(&mut self, w: usize) -> bool {
+        let order = self.tab().order();
+        let Some(at) = order.iter().position(|x| *x == w) else {
+            return false;
+        };
+        // Focus goes to the window before it in reading order, else after.
+        let next = if at > 0 {
+            order[at - 1]
+        } else {
+            order.get(1).copied().unwrap_or(0)
+        };
+        let t = self.tab_mut();
+        if !t.hide(w) {
+            return false;
+        }
+        let n = t.count;
+        t.windows[n] = Window::default();
+        let was = self.focus;
+        let focus = if was == w { next } else { was };
+        self.focus = if focus > w { focus - 1 } else { focus };
+        true
+    }
+
+    /// Closes the active tab's empty window: the focused one if it is
+    /// empty, else the last; false when none is, or it is the only one.
+    pub fn remove_empty_window(&mut self) -> bool {
+        let windows = self.windows();
+        let w = if windows.get(self.focus).is_some_and(Window::is_empty) {
+            Some(self.focus)
+        } else {
+            windows.iter().rposition(Window::is_empty)
+        };
+        w.is_some_and(|w| self.close_window(w))
+    }
+
+    /// Moves window `w` beside window `to`, on `side`, with its tags.
+    pub fn move_window(&mut self, w: usize, to: usize, side: Side) -> bool {
+        let n = self.windows().len();
+        if w >= n || to >= n || !self.tab_mut().layout.place(w, to, side) {
+            return false;
+        }
+        self.focus = w;
+        true
+    }
+
+    /// Windows `a` and `b` of the active tab trade places with what they
+    /// hold; focus follows the focused one's sessions.
+    pub fn swap(&mut self, a: usize, b: usize) -> bool {
+        let n = self.windows().len();
+        if a == b || a >= n || b >= n {
+            return false;
+        }
+        self.tab_mut().windows.swap(a, b);
+        if self.focus == a {
+            self.focus = b;
+        } else if self.focus == b {
+            self.focus = a;
+        }
+        true
+    }
+
+    /// Lays the active tab's windows out afresh, in reading order: side by
+    /// side, stacked, or as an even grid.
+    pub fn arrange(&mut self, how: Arrange) {
+        let order = self.tab().order();
+        let n = order.len();
+        let t = self.tab_mut();
+        // The windows take the places their reading order says.
+        let mut windows: Vec<Window> = order.iter().map(|w| t.windows[*w].clone()).collect();
+        windows.extend(t.windows.drain(n..));
+        t.windows = windows;
+        t.layout = match how {
+            Arrange::Row => line(super::layout::Axis::Row, n),
+            Arrange::Column => line(super::layout::Axis::Column, n),
+            Arrange::Grid => Split::even(n),
+        };
+        self.focus = order.iter().position(|w| *w == self.focus).unwrap_or(0);
+    }
+
+    /// Gives every part of the active tab's layout the same share.
+    pub fn even_out(&mut self) {
+        fn even(s: &mut Split) {
+            if let Split::Group { parts, .. } = s {
+                for (share, p) in parts.iter_mut() {
+                    *share = super::layout::EVEN;
+                    even(p);
+                }
+            }
+        }
+        even(&mut self.tab_mut().layout);
+    }
+
+    /// Sets how many windows tab `tab` shows: the last ones are hidden
+    /// with their bindings, or the hidden ones come back, each in the half
+    /// of the roomiest window (the tab menu's Windows).
     pub fn set_windows(&mut self, tab: usize, n: usize) {
         let Some(t) = self.tabs.get_mut(tab) else {
             return;
         };
-        t.count = n.clamp(1, MAX_WINDOWS);
+        let n = n.clamp(1, MAX_WINDOWS);
+        while t.count > n {
+            let last = t.count - 1;
+            t.hide(last);
+        }
+        while t.count < n {
+            let (at, side) = t.roomiest();
+            if !t.reveal(at, side) {
+                break;
+            }
+        }
         if tab == self.active {
             self.focus = self.focus.min(t.count - 1);
         }
     }
 
-    pub fn focus_window(&mut self, index: isize) {
-        let n = self.windows().len() as isize;
-        self.focus = index.rem_euclid(n) as usize;
+    /// Focuses the window `by` steps along the reading order, round the
+    /// ends.
+    pub fn focus_step(&mut self, by: isize) {
+        let order = self.tab().order();
+        let at = order.iter().position(|w| *w == self.focus).unwrap_or(0) as isize;
+        let n = order.len() as isize;
+        self.focus = order[(at + by).rem_euclid(n) as usize];
     }
 
     /// Binds a session to window `window` of tab `tab` as its tag on
@@ -500,30 +652,28 @@ impl Workspace {
     /// ones that hold a session, so a restart shows terminals rather than
     /// empty frames; a tab keeps one window at least.
     pub fn fold_empty(&mut self) {
-        let focused = self
-            .windows()
-            .get(self.focus)
-            .filter(|w| !w.is_empty())
-            .map(|_| {
-                self.windows()[..self.focus]
-                    .iter()
-                    .filter(|w| !w.is_empty())
-                    .count()
-            });
+        let focused = self.shown(self.focus).map(|b| b.key.clone());
         for t in &mut self.tabs {
-            let shown: Vec<Window> = t.windows.drain(..t.count).collect();
-            let (full, empty): (Vec<_>, Vec<_>) = shown.into_iter().partition(|w| !w.is_empty());
-            t.count = full.len().max(1);
-            t.windows.splice(0..0, full.into_iter().chain(empty));
+            for w in (0..t.count).rev() {
+                if t.windows[w].is_empty() {
+                    t.hide(w);
+                }
+            }
         }
-        self.focus = focused.unwrap_or(0);
+        self.focus = focused
+            .and_then(|k| self.windows().iter().position(|w| w.holds(&k).is_some()))
+            .unwrap_or(0);
     }
 
     /// Reads a stored workspace, mending what is out of range; `None` if it
     /// isn't one. A workspace stored before hidden tabs and windows shows
     /// what it had.
     pub fn parse(v: serde_json::Value) -> Option<Self> {
+        let presets = super::views::from_presets(&v);
         let mut ws: Workspace = serde_json::from_value(v).ok()?;
+        if ws.views.is_empty() {
+            ws.views = presets;
+        }
         if ws.tabs.is_empty() {
             return None;
         }
@@ -538,7 +688,7 @@ impl Workspace {
         }
         ws.active = ws.active.min(ws.count - 1);
         ws.focus = ws.focus.min(ws.windows().len() - 1);
-        super::presets::mend(&mut ws.presets);
+        super::views::mend(&mut ws.views);
         ws.dedupe();
         Some(ws)
     }
@@ -559,14 +709,35 @@ impl Workspace {
     }
 }
 
-/// Four windows, one to four of them shown.
+/// Eight windows, one to eight of them shown, and a layout of exactly
+/// those.
 pub(super) fn mend(t: &mut Tab) {
     t.windows.truncate(MAX_WINDOWS);
-    if t.count == 0 {
-        t.count = t.windows.len().max(1);
-    }
-    t.count = t.count.min(MAX_WINDOWS);
+    t.count = shown_count(t.count, t.windows.len());
     t.windows.resize_with(MAX_WINDOWS, Window::default);
+    if !t.layout.holds_exactly(t.count) {
+        t.layout = Split::even(t.count);
+    }
+}
+
+/// How the tab menu's Arrange lays the windows out.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Arrange {
+    Row,
+    Column,
+    Grid,
+}
+
+fn line(axis: super::layout::Axis, n: usize) -> Split {
+    if n == 1 {
+        return Split::Window(0);
+    }
+    Split::Group {
+        axis,
+        parts: (0..n)
+            .map(|w| (super::layout::EVEN, Split::Window(w)))
+            .collect(),
+    }
 }
 
 /// The label a tab carries: its name as given, or Sessions, Sessions 2…
@@ -631,57 +802,75 @@ mod tests {
         }
     }
 
-    /// A dragged divider is kept with the layout it was dragged in, stays
-    /// within reach of both windows, survives a save, and another window
-    /// count lays out evenly again.
     #[test]
-    fn split_right_opens_an_empty_window_beside_the_one_split() {
-        let key = |name: &str| Key {
-            node: "n".into(),
-            user: String::new(),
-            name: name.into(),
-        };
+    fn a_split_opens_an_empty_window_on_the_side_asked() {
         let mut ws = Workspace::default();
         ws.bind_in(0, 0, key("a"), None);
         assert!(ws.add_window());
         ws.bind_in(0, 1, key("b"), None);
-        assert!(ws.split_after(0));
-        let names: Vec<_> = ws
-            .windows()
-            .iter()
-            .map(|w| w.sessions.first().map(|b| b.key.name.clone()))
-            .collect();
-        assert_eq!(names, [Some("a".into()), None, Some("b".into())]);
-        assert_eq!(ws.focus, 1);
-        assert!(ws.split_after(2));
-        assert!(!ws.split_after(0), "four is the most");
+        assert!(ws.split(0, Side::Bottom));
+        assert_eq!(ws.focus, 2);
+        assert!(ws.windows()[2].is_empty());
+        assert_eq!(ws.tab().order(), [0, 2, 1], "below a, before b");
+        let mut rects = vec![];
+        ws.tab().layout.rects(0., 0., 2., 2., &mut rects);
+        assert_eq!(rects[1], (2, [0., 1., 1., 1.]), "under a, in its column");
+        while ws.split(0, Side::Right) {}
+        assert_eq!(ws.windows().len(), MAX_WINDOWS, "eight is the most");
     }
 
     #[test]
-    fn dividers_are_kept_with_their_layout() {
+    fn a_closed_window_gives_its_room_and_the_rest_keep_their_tags() {
+        let mut ws = Workspace::default();
+        ws.bind(0, key("a"), None);
+        ws.split(0, Side::Right);
+        ws.bind(1, key("b"), None);
+        ws.split(1, Side::Bottom);
+        ws.bind(2, key("c"), None);
+        assert!(ws.close_window(1));
+        assert_eq!(ws.windows().len(), 2);
+        assert_eq!(ws.shown(0).unwrap().key, key("a"));
+        assert_eq!(ws.shown(1).unwrap().key, key("c"), "c moved down one");
+        assert_eq!(ws.bound(&key("b")), None, "its tags went with it");
+        assert_eq!(ws.tab().order(), [0, 1]);
+        assert_eq!(ws.focus, 1, "focus stays on c");
+        assert!(ws.close_window(0));
+        assert_eq!(ws.focus, 0);
+        assert!(!ws.close_window(0), "the last window stays");
+        assert!(ws.tab().windows[1..].iter().all(Window::is_empty));
+    }
+
+    #[test]
+    fn a_window_moves_with_its_tags_and_the_layout_can_be_arranged() {
+        let mut ws = Workspace::default();
+        ws.set_windows(0, 3);
+        ws.bind(0, key("a"), None);
+        ws.bind(2, key("c"), None);
+        assert!(ws.move_window(0, 2, Side::Bottom));
+        assert_eq!(ws.tab().order(), [1, 2, 0]);
+        assert_eq!(ws.focus, 0);
+        assert!(!ws.move_window(1, 1, Side::Left));
+        ws.arrange(Arrange::Column);
+        assert_eq!(ws.tab().order(), [0, 1, 2]);
+        assert_eq!(ws.shown(1).unwrap().key, key("c"));
+        assert_eq!(ws.shown(2).unwrap().key, key("a"));
+        assert_eq!(ws.focus, 2, "focus followed a");
+    }
+
+    #[test]
+    fn dividers_are_kept_and_evened() {
         let mut ws = Workspace::default();
         ws.add_window();
-        assert_eq!(ws.tab().sizes().columns, [1000, 1000]);
-        let mut s = ws.tab().sizes();
-        s.drag_column(0, 0.25);
-        assert_eq!(s.columns, [1500, 500]);
-        s.drag_column(0, 0.9);
-        assert_eq!(s.columns, [1760, 240], "never under the least share");
-        ws.set_sizes(s.clone());
+        let (_, parts) = ws.layout_mut().group_mut(&[]).unwrap();
+        let mut shares: Vec<u16> = parts.iter().map(|p| p.0).collect();
+        crate::store::layout::drag(&mut shares, 0, 0.25, LEAST_SHARE);
+        for (p, s) in parts.iter_mut().zip(&shares) {
+            p.0 = *s;
+        }
         let back = Workspace::parse(serde_json::to_value(&ws).unwrap()).unwrap();
-        assert_eq!(back.tab().sizes(), s);
-        ws.add_window();
-        assert_eq!(ws.tab().sizes().columns, [1000, 1000, 1000]);
-        ws.remove_window();
-        assert_eq!(ws.tab().sizes(), s, "back to two, the drag is back");
-        // Four windows: two columns and the rows' split.
-        ws.set_windows(0, 4);
-        let mut four = ws.tab().sizes();
-        four.drag_rows(-0.2);
-        assert_eq!((four.columns.len(), four.top), (2, 300));
-        // Even is no drag at all: a double-click forgets it.
-        ws.set_sizes(Sizes::even(4));
-        assert_eq!(ws.tab().sizes, None);
+        assert_eq!(back.tab().layout, ws.tab().layout, "kept across a restart");
+        ws.even_out();
+        assert_eq!(ws.tab().layout, Split::even(2));
     }
 
     fn tags(w: &Window) -> Vec<&str> {
@@ -749,29 +938,21 @@ mod tests {
     #[test]
     fn fewer_windows_hide_the_rest_with_their_bindings() {
         let mut ws = Workspace::default();
-        for _ in 0..5 {
-            ws.add_window();
-        }
+        ws.set_windows(0, 4);
         assert_eq!(ws.windows().len(), 4);
         ws.bind(3, key("a"), None);
-        assert!(
-            !ws.remove_window(),
-            "the layout does not shrink over a bound window"
-        );
         ws.set_windows(0, 2);
         assert_eq!(ws.windows().len(), 2);
         assert_eq!(ws.focus, 1);
+        assert!(ws.tab().layout.holds_exactly(2));
         assert_eq!(ws.bound(&key("a")), None, "hidden");
         assert_eq!(ws.on_screen().count(), 0);
         ws.add_window();
         ws.add_window();
         assert_eq!(ws.shown(3).unwrap().key, key("a"), "and back");
-        ws.unbind(3, &key("a"));
-        assert!(ws.remove_window());
-        assert_eq!(ws.windows().len(), 3);
-        assert_eq!(ws.focus, 2);
-        ws.set_windows(0, 9);
-        assert_eq!(ws.windows().len(), 4);
+        ws.set_windows(0, 99);
+        assert_eq!(ws.windows().len(), MAX_WINDOWS);
+        assert!(ws.tab().layout.holds_exactly(MAX_WINDOWS));
     }
 
     #[test]
@@ -849,13 +1030,19 @@ mod tests {
     }
 
     #[test]
-    fn focus_wraps_both_ways() {
+    fn focus_steps_in_reading_order_and_wraps() {
         let mut ws = Workspace::default();
-        ws.set_windows(0, 3);
-        ws.focus_window(3);
+        ws.set_windows(0, 2);
+        ws.split(0, Side::Bottom);
+        ws.focus = 0;
+        ws.focus_step(1);
+        assert_eq!(ws.focus, 2, "below the first, before the one beside it");
+        ws.focus_step(1);
+        assert_eq!(ws.focus, 1);
+        ws.focus_step(1);
         assert_eq!(ws.focus, 0);
-        ws.focus_window(-1);
-        assert_eq!(ws.focus, 2);
+        ws.focus_step(-1);
+        assert_eq!(ws.focus, 1);
     }
 
     #[test]
@@ -933,8 +1120,9 @@ mod tests {
         assert_eq!(ws.tabs.len(), MAX_TABS);
         assert_eq!(ws.tabs[0].windows.len(), MAX_WINDOWS);
         assert_eq!(ws.tabs[0].count, 1);
-        assert_eq!(ws.tabs[1].count, 4);
-        assert_eq!((ws.active, ws.focus), (1, 3));
+        assert_eq!(ws.tabs[1].count, 5, "every window it kept");
+        assert!(ws.tabs[1].layout.holds_exactly(5));
+        assert_eq!((ws.active, ws.focus), (1, 4));
         assert_eq!(tab_label(&ws.tabs[1], 1), "ops");
         assert_eq!(ws.shown(0).unwrap().key, key("a"));
         assert!(Workspace::parse(serde_json::json!({"tabs":[]})).is_none());

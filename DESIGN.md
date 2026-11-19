@@ -30,7 +30,11 @@ A page is judged by three questions, in this order:
   writes to sessions with it while reading them. Peek is a full terminal on a session without a window:
   typed into, scrolled and selected as in a window, at the session's own
   size; Esc goes to the session, Shift+Esc or a click outside closes it,
-  and Attach gives it a window sized to it.
+  and Attach gives it a window sized to it. The windows are the operator's
+  to arrange: a session dragged to any window's edge or middle, every divider
+  moved, and an arrangement kept as a view on Alt+Shift+1 to 9, recalled as
+  an RTS recalls a control group. Ended and long-idle sessions are offered
+  for clearing once, quietly; a live one goes only on the operator's click.
 - **Files.** Read and change what agents wrote, beside the session that wrote
   it. At least as good as VS Code at finding, reading and editing a file.
   Being redesigned from a prototype.

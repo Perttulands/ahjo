@@ -23,6 +23,10 @@ pub enum Action {
     Overview,
     Find,
     Reported,
+    /// The focused window's menu, for the keyboard.
+    Menu,
+    /// The view on a number key: shown, or kept there if it is free.
+    View(u8),
 }
 
 /// Every chord acting on `page`, its `tabs` first, as CHROTE lists them.
@@ -72,7 +76,26 @@ fn chords(page: &WeakEntity<Terminals>, tabs: usize) -> Vec<Chord> {
             Action::Reported,
         )
         .alt("j", Some(false)),
+        // M for menu: everything a right click offers, from the keyboard.
+        chord("m", "Menu of the focused window", Action::Menu).alt("m", Some(false)),
     ]);
+    // Views on Alt+Shift and a digit, as an RTS keeps control groups: Alt
+    // and a digit are the tabs, and Ctrl+Alt is AltGr, which types @ { [
+    // on a Finnish keyboard. With Shift the platform sends the digit's
+    // shifted character, which the layouts differ on; where they clash (&
+    // and ( ) the Finnish one wins.
+    for (k, (digit, shifted)) in VIEW_KEYS.iter().enumerate() {
+        let key = k as u8 + 1;
+        all.push(
+            chord(
+                "",
+                &format!("View {key}: show it, or keep this tab there"),
+                Action::View(key),
+            )
+            .alt(digit, Some(true))
+            .or_layout(shifted),
+        );
+    }
     // Peek keeps Escape for the program in it; Shift+Esc closes it from
     // anywhere on the page (the kit's dismissal).
     let peek = page.clone();
@@ -87,6 +110,20 @@ fn chords(page: &WeakEntity<Terminals>, tabs: usize) -> Vec<Chord> {
 
 /// The keys of the tabs, Alt+1 to Alt+6.
 const TAB_KEYS: [&str; crate::store::workspace::MAX_TABS] = ["1", "2", "3", "4", "5", "6"];
+
+/// The keys of the views, Alt+Shift+1 to 9: each digit, and the characters
+/// Shift gives it on a Finnish keyboard and on a US one.
+const VIEW_KEYS: [(&str, &[&str]); crate::store::views::VIEW_KEYS as usize] = [
+    ("1", &["!"]),
+    ("2", &["\"", "@"]),
+    ("3", &["#"]),
+    ("4", &["¤", "$"]),
+    ("5", &["%"]),
+    ("6", &["&", "^"]),
+    ("7", &["/"]),
+    ("8", &["(", "*"]),
+    ("9", &[")"]),
+];
 
 impl Terminals {
     /// Every chord of the page.
@@ -106,17 +143,32 @@ impl Terminals {
                 }
                 self.host.show(cx);
             }
-            Action::NextWindow => ws.focus_window(ws.focus as isize + 1),
-            Action::PreviousWindow => ws.focus_window(ws.focus as isize - 1),
+            Action::NextWindow => ws.focus_step(1),
+            Action::PreviousWindow => ws.focus_step(-1),
             Action::AddWindow => {
                 if !ws.add_window() {
-                    self.report("Four windows is the most a tab holds.", false, None);
+                    self.report("Eight windows is the most a tab holds.", false, None);
                 }
             }
             Action::RemoveWindow => {
-                if !ws.remove_window() {
-                    self.report("Only an empty last window can be removed.", false, None);
+                if ws.remove_empty_window() {
+                    self.histories.clear();
+                } else {
+                    self.report(
+                        "No empty window to remove; Alt+M offers Close window.",
+                        false,
+                        None,
+                    );
                 }
+            }
+            Action::Menu => {
+                self.host.show(cx);
+                self.focused_menu(window, cx);
+                return;
+            }
+            Action::View(key) => {
+                self.view_key(key, cx);
+                return;
             }
             Action::Launcher => {
                 self.host.show(cx);
@@ -140,7 +192,7 @@ impl Terminals {
                     }
                     new_tab = true;
                     room(ws).or_else(|| {
-                        // The tab shown again still held four sessions.
+                        // The tab shown again was full too.
                         new_tab = false;
                         ws.close_tab(ws.active);
                         ws.show_tab(back);
@@ -333,6 +385,46 @@ mod tests {
         assert_eq!(close.leader, "");
     }
 
+    /// Alt+Shift and a digit reach the app as the digit's shifted
+    /// character, the layout's own: each view takes its Finnish and its US
+    /// one, and none of them is another chord's.
+    #[test]
+    fn views_answer_alt_shift_and_a_digit_on_either_layout() {
+        let all = chords(&WeakEntity::new_invalid(), 6);
+        let view = |key: &str| {
+            direct(&alt(key, key, false), &all)
+                .map(|r| r.label.split(':').next().unwrap().to_string())
+        };
+        for (ch, want) in [
+            ("!", "View 1"),
+            ("\"", "View 2"),
+            ("@", "View 2"),
+            ("¤", "View 4"),
+            ("$", "View 4"),
+            ("&", "View 6"),
+            ("/", "View 7"),
+            ("(", "View 8"),
+            (")", "View 9"),
+        ] {
+            assert_eq!(view(ch).as_deref(), Some(want), "Alt+{ch}");
+        }
+        // Windows sends 9 with Shift as it is.
+        let nine = direct(&alt("9", "9", true), &all).unwrap();
+        assert!(nine.label.starts_with("View 9"));
+        assert_eq!(nine.caps, ["Alt", "Shift", "9"]);
+        // Alt and a digit stay the tabs; AltGr (Ctrl+Alt) stays the layout's.
+        assert_eq!(view("2").as_deref(), Some("Sessions tab 2"));
+        let altgr = KeyLike {
+            ctrl: true,
+            ..alt("2", "@", false)
+        };
+        assert!(direct(&altgr, &all).is_none());
+        assert_eq!(
+            direct(&alt("m", "m", false), &all).unwrap().label,
+            "Menu of the focused window"
+        );
+    }
+
     #[test]
     fn a_tab_past_the_shown_ones_is_a_no_op_chord() {
         let all = chords(&WeakEntity::new_invalid(), 1);
@@ -351,6 +443,7 @@ mod tests {
         let r = rows(&chords(&WeakEntity::new_invalid(), 3));
         assert_eq!(r[0].label, "Sessions tab 1");
         assert_eq!(filter(&r, "window add").len(), 1);
-        assert_eq!(filter(&r, "alt shift").len(), 1);
+        // Previous window, and the nine views.
+        assert_eq!(filter(&r, "alt shift").len(), 10);
     }
 }
