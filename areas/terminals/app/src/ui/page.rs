@@ -268,8 +268,8 @@ pub struct Terminals {
     beside_open: bool,
     /// Holds the keyboard for the view beside, so Esc closes it.
     pub beside_focus: gpui::FocusHandle,
-    /// Its edge is being dragged.
-    pub beside_resizing: bool,
+    /// Its edge is being dragged: from where, and the width then.
+    pub beside_resizing: Option<(f32, f32)>,
     /// What is open over the page, bottom first, as this page opened it.
     pub surfaces: Vec<Surface>,
     /// Status lines said since the page last handed them to the app.
@@ -449,7 +449,7 @@ impl Terminals {
             put_away: vec![],
             beside_open: false,
             beside_focus: cx.focus_handle(),
-            beside_resizing: false,
+            beside_resizing: None,
             surfaces: vec![],
             said,
             geo: Rc::new(RefCell::new([Geo::default(); SLOTS])),

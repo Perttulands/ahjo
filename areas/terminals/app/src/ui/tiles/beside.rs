@@ -74,8 +74,8 @@ impl Terminals {
             )
             .on_mouse_down(
                 MouseButton::Left,
-                cx.listener(|s, _, _, cx| {
-                    s.beside_resizing = true;
+                cx.listener(move |s, e: &gpui::MouseDownEvent, _, cx| {
+                    s.beside_resizing = Some((e.position.x / px(1.), width));
                     cx.stop_propagation();
                 }),
             );
@@ -112,9 +112,7 @@ impl Terminals {
     /// While the edge is dragged: a layer over the page that follows the
     /// pointer and keeps the width when the button comes up.
     pub(super) fn render_beside_drag(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
-        if !self.beside_resizing {
-            return None;
-        }
+        let (from, was) = self.beside_resizing?;
         Some(
             div()
                 .id("beside-drag")
@@ -123,14 +121,13 @@ impl Terminals {
                 .cursor_col_resize()
                 .on_mouse_move(cx.listener(move |s, e: &MouseMoveEvent, window, cx| {
                     if e.pressed_button != Some(MouseButton::Left) {
-                        s.beside_resizing = false;
+                        s.beside_resizing = None;
                         s.save(cx);
                     } else {
                         let room = s.workspace_room(window, cx) - size::BESIDE_SEAM;
-                        // The grip is on its left: the width runs from the
-                        // pointer to the right edge.
-                        let right = window.viewport_size().width / px(1.);
-                        let w = right - e.position.x / px(1.) - size::BESIDE_SEAM / 2.;
+                        // The grip is on its left: the width grows as the
+                        // pointer goes left of where the drag began.
+                        let w = was + from - e.position.x / px(1.);
                         s.settings.beside_width = Some(beside::width(Some(w), room));
                     }
                     cx.notify();
@@ -138,7 +135,7 @@ impl Terminals {
                 .on_mouse_up(
                     MouseButton::Left,
                     cx.listener(|s, _, _, cx| {
-                        s.beside_resizing = false;
+                        s.beside_resizing = None;
                         s.save(cx);
                         cx.notify();
                     }),
