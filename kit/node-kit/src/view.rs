@@ -222,6 +222,7 @@ pub(crate) fn commands(views: &Arc<Views>, node: NodeId) -> Vec<Command> {
         ),
         Command::new(
             "view_send",
+            Effect::Writes,
             "Hand text to a session through the operator's Ahjo Swarm app, as its Send does: \
              the app opens Send to Session holding the text, and the operator picks the \
              session and sends it. Another app (Ahjo Brain's Send) reaches Swarm this way. \
