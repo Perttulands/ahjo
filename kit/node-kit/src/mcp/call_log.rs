@@ -6,6 +6,12 @@ pub(super) fn record(caller: &Caller, tool: &str, target: &str, outcome: &str) {
     eprintln!("{}", line(caller, tool, target, outcome));
 }
 
+/// A command a tool set's `swarm_read` or `swarm_run` ran, beside the
+/// line that tool's own call makes.
+pub(super) fn relayed(through: &str, tool: &str, target: &str, outcome: &str) {
+    eprintln!("ahjo: mcp {through} ran {tool} target={target:?} {outcome}");
+}
+
 fn line(caller: &Caller, tool: &str, target: &str, outcome: &str) -> String {
     format!(
         "ahjo: mcp {:?} {tool} target={:?} {outcome}",

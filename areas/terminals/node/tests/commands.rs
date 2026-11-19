@@ -160,6 +160,10 @@ async fn speaks_the_mcp_lifecycle_and_offers_every_session_tool() {
             "session_kill",
             "session_mouse",
             "session_seen",
+            "project_find",
+            "handoff_start",
+            "handoff_status",
+            "handoff_reply",
         ]
     );
     // `node` is taken by every tool but listed by none: an MCP client names

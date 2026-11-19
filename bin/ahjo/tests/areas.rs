@@ -11,6 +11,7 @@ use ahjo_node_kit::listing;
 #[test]
 fn the_listed_areas_do_not_conflict() {
     listing::check(ahjo::AREAS).unwrap();
+    ahjo_node_kit::mcp::check(ahjo::TOOL_SETS, ahjo::AREAS).unwrap();
     for area in ahjo::AREAS {
         for command in area.commands {
             let noun = command.split('_').next().unwrap();

@@ -30,6 +30,10 @@ These are the commands advertised by the enabled areas. Run `ahjo <noun> <verb> 
 
 `ahjo gate approve`, `ahjo gate create`, `ahjo gate delete`, `ahjo gate judge`, `ahjo gate pick`, `ahjo gate reject`, `ahjo gate request`, `ahjo gate update`.
 
+## handoff
+
+`ahjo handoff reply`, `ahjo handoff start`, `ahjo handoff status`.
+
 ## host
 
 `ahjo host show`.
@@ -45,6 +49,10 @@ These are the commands advertised by the enabled areas. Run `ahjo <noun> <verb> 
 ## mission
 
 `ahjo mission archives`, `ahjo mission arrange`, `ahjo mission create`, `ahjo mission delete`, `ahjo mission edit`, `ahjo mission examples`, `ahjo mission input`, `ahjo mission inspect`, `ahjo mission list`, `ahjo mission move`, `ahjo mission new`, `ahjo mission note`, `ahjo mission notes`, `ahjo mission output`, `ahjo mission prefix`, `ahjo mission purge-archive`, `ahjo mission rename`, `ahjo mission reply`, `ahjo mission resolve`, `ahjo mission run`, `ahjo mission update`, `ahjo mission validate`, `ahjo mission wire`.
+
+## project
+
+`ahjo project find`.
 
 ## role
 

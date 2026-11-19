@@ -8,15 +8,17 @@
 mod call_log;
 mod http;
 mod rpc;
+mod sets;
 mod stdio;
 
 use ahjo_core::{Error, NodeId};
 use axum::Router;
 use serde_json::{Value, json};
 
-use crate::Command;
+use crate::{Command, Effect};
 
 pub use http::PATH;
+pub use sets::{SET_TOOLS, ToolSet, check};
 pub use stdio::stdio;
 
 /// The group the node's own commands ([`crate::own`]) are served in. No
@@ -29,20 +31,62 @@ pub(crate) struct Group {
     pub commands: Vec<Command>,
 }
 
-/// The tools: every built area's commands, by area.
+/// A tool set as served: its tools, found among the groups, and its own.
+struct Set {
+    name: &'static str,
+    instructions: &'static str,
+    tools: Vec<Command>,
+}
+
+/// The tools: every built area's commands, by area, and the tool sets.
 pub(crate) struct Mcp {
     node: NodeId,
     groups: Vec<Group>,
+    sets: Vec<Set>,
     /// Areas the config turned off, named when a client asks for one.
     off: Vec<&'static str>,
 }
 
-/// The groups one endpoint serves, as indexes into [`Mcp::groups`].
-pub(crate) struct Reach(Vec<usize>);
+/// What one endpoint serves: groups, as indexes into [`Mcp::groups`], or
+/// one tool set.
+pub(crate) enum Reach {
+    Groups(Vec<usize>),
+    Set(usize),
+}
 
 impl Mcp {
-    pub(crate) fn new(node: NodeId, groups: Vec<Group>, off: Vec<&'static str>) -> Mcp {
-        Mcp { node, groups, off }
+    pub(crate) fn new(
+        node: NodeId,
+        groups: Vec<Group>,
+        off: Vec<&'static str>,
+        sets: &[ToolSet],
+    ) -> Mcp {
+        let every: std::sync::Arc<[Command]> = groups
+            .iter()
+            .flat_map(|g| g.commands.iter().cloned())
+            .collect();
+        let sets = sets
+            .iter()
+            .map(|set| Set {
+                name: set.name,
+                instructions: set.instructions,
+                // A command of an area turned off is not there to serve.
+                tools: set
+                    .tools
+                    .iter()
+                    .filter_map(|&tool| {
+                        sets::own(tool, &every, &node)
+                            .or_else(|| every.iter().find(|c| c.name == tool).cloned())
+                    })
+                    .collect(),
+            })
+            .collect();
+        Mcp {
+            node,
+            groups,
+            sets,
+            off,
+        }
     }
 
     pub(crate) fn routes(self) -> Router {
@@ -51,11 +95,15 @@ impl Mcp {
 
     /// Every group, as `/mcp` serves them.
     fn everything(&self) -> Reach {
-        Reach((0..self.groups.len()).collect())
+        Reach::Groups((0..self.groups.len()).collect())
     }
 
-    /// The groups `names` (`a,b`) asks for, or why there is no such server.
+    /// The groups `names` (`a,b`) asks for, or the one tool set it names,
+    /// or why there is no such server.
     fn reach(&self, names: &str) -> Result<Reach, String> {
+        if let Some(at) = self.sets.iter().position(|s| s.name == names) {
+            return Ok(Reach::Set(at));
+        }
         let mut reach = Vec::new();
         for name in names.split(',') {
             match self.groups.iter().position(|g| g.name == name) {
@@ -64,54 +112,45 @@ impl Mcp {
                 None if self.off.contains(&name) => {
                     return Err(format!("the area {name} is turned off on this node"));
                 }
+                None if self.sets.iter().any(|s| s.name == name) => {
+                    return Err(format!("{PATH}/{name} is a tool set of its own"));
+                }
                 None => {
+                    let mut servers = self.names(&self.everything());
+                    servers.extend(self.sets.iter().map(|s| s.name));
                     return Err(format!(
                         "no MCP server {name}; this node's are {}",
-                        self.names(&self.everything()).join(", ")
+                        servers.join(", ")
                     ));
                 }
             }
         }
         // In the node's order, however they were named.
         reach.sort_unstable();
-        Ok(Reach(reach))
+        Ok(Reach::Groups(reach))
     }
 
     fn names(&self, reach: &Reach) -> Vec<&'static str> {
-        reach.0.iter().map(|&at| self.groups[at].name).collect()
+        match reach {
+            Reach::Groups(at) => at.iter().map(|&at| self.groups[at].name).collect(),
+            Reach::Set(at) => vec![self.sets[*at].name],
+        }
     }
 
-    fn commands<'a>(&'a self, reach: &'a Reach) -> impl Iterator<Item = &'a Command> {
-        reach
-            .0
-            .iter()
-            .flat_map(|&at| self.groups[at].commands.iter())
+    fn commands<'a>(&'a self, reach: &'a Reach) -> Box<dyn Iterator<Item = &'a Command> + 'a> {
+        match reach {
+            Reach::Groups(at) => {
+                Box::new(at.iter().flat_map(|&at| self.groups[at].commands.iter()))
+            }
+            Reach::Set(at) => Box::new(self.sets[*at].tools.iter()),
+        }
     }
 
     /// The tools `reach` serves, as `tools/list` answers. Each runs on this
     /// node; `node` is taken (the command line names the node with it) but
     /// not listed, since no other node is reached yet.
     fn list(&self, reach: &Reach) -> Value {
-        let tools: Vec<Value> = self
-            .commands(reach)
-            .map(|command| {
-                let mut schema = (command.schema)();
-                // An empty `required` says nothing.
-                if let Some(fields) = schema.as_object_mut()
-                    && fields
-                        .get("required")
-                        .and_then(Value::as_array)
-                        .is_some_and(Vec::is_empty)
-                {
-                    fields.remove("required");
-                }
-                json!({
-                    "name": command.name,
-                    "description": command.description,
-                    "inputSchema": schema,
-                })
-            })
-            .collect();
+        let tools: Vec<Value> = self.commands(reach).map(tool).collect();
         json!({ "tools": tools })
     }
 
@@ -119,17 +158,28 @@ impl Mcp {
         self.commands(reach).find(|command| command.name == name)
     }
 
-    /// The server a tool is on, for a client that asked another for it.
-    fn server_of(&self, tool: &str) -> Option<&'static str> {
-        self.groups
+    /// Where else a tool is, for a client that asked a server without it.
+    fn elsewhere(&self, reach: &Reach, tool: &str) -> String {
+        let server = self
+            .groups
             .iter()
             .find(|g| g.commands.iter().any(|c| c.name == tool))
-            .map(|g| g.name)
+            .map(|g| g.name);
+        match (reach, server) {
+            (Reach::Set(at), Some(_)) if self.sets[*at].reaches_every() => {
+                "; run it here with swarm_read or swarm_run".to_owned()
+            }
+            (_, Some(server)) => format!("; it is on {PATH}/{server}"),
+            (_, None) => String::new(),
+        }
     }
 
     /// What `initialize` tells a client: which servers it reached, and the
-    /// others it could.
+    /// others it could; a tool set says its own.
     fn instructions(&self, reach: &Reach) -> String {
+        if let Reach::Set(at) = reach {
+            return self.sets[*at].instructions.to_owned();
+        }
         let here = self.names(reach);
         let others: Vec<String> = self
             .groups
@@ -151,16 +201,54 @@ impl Mcp {
         }
         text
     }
+}
 
-    /// Takes `node` out of a call's arguments: this node unless they name
-    /// another, which this node cannot reach.
-    fn target(&self, args: &mut Value) -> Result<(), Error> {
-        let named = args.as_object_mut().and_then(|args| args.remove("node"));
-        match named {
-            None | Some(Value::Null) => Ok(()),
-            Some(Value::String(wanted)) if wanted == self.node.as_str() => Ok(()),
-            Some(Value::String(wanted)) => Err(crate::serve::elsewhere(&wanted)),
-            Some(_) => Err(Error::new("invalid_argument", "node is a string")),
-        }
+impl Set {
+    /// Whether it has the tools that run any command.
+    fn reaches_every(&self) -> bool {
+        self.tools.iter().any(|t| t.name == sets::RUN)
+    }
+}
+
+/// One tool as `tools/list` gives it: name, title, description, schema and
+/// what it does ([`Effect`]) as MCP's annotations.
+fn tool(command: &Command) -> Value {
+    let mut schema = (command.schema)();
+    // An empty `required` says nothing.
+    if let Some(fields) = schema.as_object_mut()
+        && fields
+            .get("required")
+            .and_then(Value::as_array)
+            .is_some_and(Vec::is_empty)
+    {
+        fields.remove("required");
+    }
+    let annotations = match command.effect {
+        Effect::Reads => json!({ "readOnlyHint": true, "openWorldHint": command.open_world }),
+        effect => json!({
+            "readOnlyHint": false,
+            "destructiveHint": effect == Effect::Destroys,
+            "idempotentHint": effect == Effect::Sets,
+            "openWorldHint": command.open_world,
+        }),
+    };
+    json!({
+        "name": command.name,
+        "title": command.title(),
+        "description": command.description,
+        "inputSchema": schema,
+        "annotations": annotations,
+    })
+}
+
+/// Takes `node` out of a call's arguments: this node unless they name
+/// another, which this node cannot reach.
+fn target(node: &NodeId, args: &mut Value) -> Result<(), Error> {
+    let named = args.as_object_mut().and_then(|args| args.remove("node"));
+    match named {
+        None | Some(Value::Null) => Ok(()),
+        Some(Value::String(wanted)) if wanted == node.as_str() => Ok(()),
+        Some(Value::String(wanted)) => Err(crate::serve::elsewhere(&wanted)),
+        Some(_) => Err(Error::new("invalid_argument", "node is a string")),
     }
 }

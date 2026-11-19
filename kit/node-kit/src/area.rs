@@ -89,6 +89,39 @@ pub trait Channel: Send {
 
 type Call = dyn Fn(Value) -> BoxFuture<'static, Result<Value, Error>> + Send + Sync;
 
+/// What running a command does to the node and what it reaches, declared
+/// with the command: an MCP client reads it as the tool's annotations
+/// (ChatGPT asks before every call of a tool that does not only read).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Effect {
+    /// Only reads: changes nothing.
+    Reads,
+    /// Adds or changes something, and doing it again does it again.
+    Writes,
+    /// Changes something to the state the arguments name, so doing it
+    /// again changes nothing more.
+    Sets,
+    /// Deletes, ends or overwrites something that cannot be had back.
+    Destroys,
+}
+
+impl Effect {
+    /// Whether it changes nothing.
+    pub fn reads(self) -> bool {
+        self == Effect::Reads
+    }
+
+    /// Its word in what lists commands: reads, writes, sets or destroys.
+    pub fn word(self) -> &'static str {
+        match self {
+            Effect::Reads => "reads",
+            Effect::Writes => "writes",
+            Effect::Sets => "sets",
+            Effect::Destroys => "destroys",
+        }
+    }
+}
+
 /// One definition behind an MCP tool `noun_verb` and the CLI's
 /// `ahjo noun verb`.
 #[derive(Clone)]
@@ -96,6 +129,10 @@ pub struct Command {
     /// `noun_verb`: a noun, then a verb of one or more words, joined by
     /// single underscores.
     pub name: &'static str,
+    pub effect: Effect,
+    /// It reaches beyond this machine (GitHub, a remote), not only the
+    /// node and its files.
+    pub open_world: bool,
     pub description: &'static str,
     /// The arguments' JSON Schema, asked for each time the tools are listed,
     /// so it may offer what the node has now.
@@ -106,6 +143,7 @@ pub struct Command {
 impl Command {
     pub fn new<F, Fut>(
         name: &'static str,
+        effect: Effect,
         description: &'static str,
         schema: impl Fn() -> Value + Send + Sync + 'static,
         call: F,
@@ -116,9 +154,27 @@ impl Command {
     {
         Self {
             name,
+            effect,
+            open_world: false,
             description,
             schema: Arc::new(schema),
             call: Arc::new(move |args| Box::pin(call(args))),
         }
+    }
+
+    /// Marks it as reaching beyond this machine.
+    pub fn open_world(mut self) -> Self {
+        self.open_world = true;
+        self
+    }
+
+    /// What a person reads for it: its words, as `ahjo` takes them
+    /// (`session_list` is "Session list").
+    pub fn title(&self) -> String {
+        let mut words = self.name.replace('_', " ");
+        if let Some(first) = words.get_mut(..1) {
+            first.make_ascii_uppercase();
+        }
+        words
     }
 }

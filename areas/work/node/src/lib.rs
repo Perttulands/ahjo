@@ -6,7 +6,7 @@ mod work;
 
 use ahjo_core::{Error, NodeId};
 use ahjo_node_kit::args::{flag, object, text};
-use ahjo_node_kit::{Area, BoxFuture, Built, Channel, Client, Command, Listing, Setup};
+use ahjo_node_kit::{Area, BoxFuture, Built, Channel, Client, Command, Effect, Listing, Setup};
 use ahjo_work_contract::{List, Resolver, Resolving};
 use anyhow::Result;
 use axum::Router;
@@ -81,6 +81,7 @@ impl Area for WorkArea {
         let (work, node) = (self.work.clone(), self.node.clone());
         let list = Command::new(
             "work_list",
+            Effect::Reads,
             "List each project's open work items, blocked and deferred ones included, one line each: id, title, status, kind, priority, parent and blockers. --all adds closed and merged ones; work show gives an item's text and family.",
             || object(json!({"all": {"type":"boolean", "default":false}}), &[]),
             move |args| {
@@ -111,6 +112,7 @@ impl Area for WorkArea {
         let (work, node) = (self.work.clone(), self.node.clone());
         let search = Command::new(
             "work_search",
+            Effect::Reads,
             "Find the items, closed ones too, holding every word of the query in their id, title, labels or text, as the Work page's search does.",
             || object(json!({"query": {"type":"string"}}), &["query"]),
             move |args| {
@@ -151,6 +153,7 @@ impl Area for WorkArea {
         let (work, node) = (self.work.clone(), self.node.clone());
         let show = Command::new(
             "work_show",
+            Effect::Reads,
             "One work item and its family.",
             || object(json!({"ref": {"type":"string"}}), &["ref"]),
             move |args| {
@@ -174,6 +177,7 @@ impl Area for WorkArea {
         let work = self.work.clone();
         let create = Command::new(
             "work_create",
+            Effect::Writes,
             "File an item in a configured project, for example: \
              ahjo work create /srv/app 'Login fails' 'What fails, and how to see it'.",
             || {
@@ -192,7 +196,11 @@ impl Area for WorkArea {
                 }
             },
         );
-        vec![list, search, show, create]
+        // Each may reach GitHub, for a project that lives there.
+        [list, search, show, create]
+            .into_iter()
+            .map(Command::open_world)
+            .collect()
     }
     fn channel(&self, _: Client) -> Option<Box<dyn Channel>> {
         Some(Box::new(Socket(work::Channel::new(self.work.clone()))))

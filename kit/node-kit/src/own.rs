@@ -11,7 +11,7 @@ use axum::response::IntoResponse;
 use axum::routing::get;
 use serde_json::{Value, json};
 
-use crate::Command;
+use crate::{Command, Effect};
 use ahjo_core::NodeId;
 
 use crate::config::Config;
@@ -58,6 +58,7 @@ pub(crate) fn commands(own: &Arc<Own>) -> Vec<Command> {
     );
     let mut commands = vec![Command::new(
         "config_show",
+        Effect::Reads,
         described,
         || {
             json!({

@@ -11,7 +11,7 @@ use ahjo_core::{Error, NodeId};
 use serde_json::{Map, Value, json};
 use tokio::sync::mpsc;
 
-use crate::{BoxFuture, Channel, Client, Command};
+use crate::{BoxFuture, Channel, Client, Command, Effect};
 
 /// What an app shows, up.
 const VIEW: u8 = 0xb0;
@@ -199,6 +199,7 @@ pub(crate) fn commands(views: &Arc<Views>, node: NodeId) -> Vec<Command> {
     vec![
         Command::new(
             "view_show",
+            Effect::Reads,
             "What each Ahjo Swarm app connected to this node shows: its page.",
             || json!({ "type": "object", "properties": {} }),
             move |_| {
@@ -208,6 +209,7 @@ pub(crate) fn commands(views: &Arc<Views>, node: NodeId) -> Vec<Command> {
         ),
         Command::new(
             "view_open",
+            Effect::Sets,
             "Open a page in the operator's Ahjo Swarm app, and at most one thing on it: a session, \
              path, agent (a folder; --step names the harness), item, mission, run, service or \
              setting. Answers with what the app shows now.",

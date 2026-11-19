@@ -90,7 +90,10 @@ real list, and `ahjo kinds` prints who owns which kinds.
 - **Commands.** A command is a `noun_verb` name (the verb may be several words: `formation_set_type` is `ahjo formation set-type`), a description, an input
   schema and a call answering JSON or the error shape. `node-kit` serves it as
   an MCP tool and as the CLI verb `ahjo noun verb`. A `node` argument names
-  where it runs; MCP's lists leave it out while only this node can.
+  where it runs; MCP's lists leave it out while only this node can. Each
+  command declares its effect (reads, writes, sets, destroys), which its
+  tool carries as MCP annotations: a client such as ChatGPT asks the
+  operator before every tool not marked read-only, so a read must say so.
 - **MCP servers.** Each area's tools are an MCP server of their own at
   `/mcp/<area>`, and the node's own commands at `/mcp/node`; `/mcp/a,b`
   serves several and `/mcp` every one. A client connects to what it needs and
@@ -99,6 +102,14 @@ real list, and `ahjo kinds` prints who owns which kinds.
   asked of a server that does not have it is refused naming the one that
   does. `ahjo mcp --area <area>`, again for more, is the same over stdio. The
   command line reads `/mcp`, so it sees every command in one request.
+- **Tool sets.** A binary may name tool sets (`ahjo`'s `TOOL_SETS`), each an
+  MCP server at `/mcp/<set>` of chosen commands from any area, shaped for one
+  client: `chatgpt` holds the handoff, work and host tools. A set may add
+  `swarm_commands`, which finds every other command by words, and
+  `swarm_read` and `swarm_run`, which run one through the same call and
+  `node` check as `tools/call`, each only for its kind: a read never needs
+  confirming, a change always does. So the client carries a dozen tools'
+  schemas and still reaches all of them. The three exist only in a set.
 - **One node at a time.** A request names its node with `?node=` on any route
   and on `/ws`, a command call with its `node` argument. Relaying to other
   nodes is not built: one naming another node is refused as `unknown_node`

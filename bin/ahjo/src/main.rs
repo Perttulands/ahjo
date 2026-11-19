@@ -2,7 +2,7 @@
 
 use std::path::PathBuf;
 
-use ahjo::{AREAS, install};
+use ahjo::{AREAS, TOOL_SETS, install};
 use ahjo_core::Error;
 use ahjo_node_kit::identity::Identity;
 use ahjo_node_kit::{
@@ -184,12 +184,14 @@ async fn run(command: &str, args: &[String]) -> Result<i32> {
     }
 }
 
-/// Every MCP server a node can have: one per area, and the node's own.
+/// Every MCP server a node can have: one per area, the node's own, and
+/// each tool set.
 fn servers() -> Vec<&'static str> {
     AREAS
         .iter()
         .map(|area| area.name)
         .chain([mcp::NODE])
+        .chain(TOOL_SETS.iter().map(|set| set.name))
         .collect()
 }
 
@@ -361,13 +363,14 @@ async fn serve(args: &[String]) -> Result<()> {
         }
     }
     let config = Config::load(&file)?;
-    let running = ahjo_node_kit::start(
+    let running = ahjo_node_kit::start_with(
         Options {
             dir,
             config,
             listen,
         },
         AREAS,
+        TOOL_SETS,
     )
     .await?;
     stopped().await;

@@ -2,7 +2,7 @@ use crate::brain::Brain;
 use ahjo_brain_contract::{BAD_REQUEST, BRAIN_ERROR, NOT_FOUND, UNAVAILABLE};
 use ahjo_core::Error;
 use ahjo_node_kit::{
-    Command,
+    Command, Effect,
     args::{maybe_text, object, text},
 };
 use serde_json::json;
@@ -26,6 +26,7 @@ pub fn commands(
     vec![
         Command::new(
             "brain_search",
+            Effect::Reads,
             "Search the brain for pages.",
             || object(json!({"query": {"type":"string"}}), &["query"]),
             move |args| {
@@ -44,6 +45,7 @@ pub fn commands(
         ),
         Command::new(
             "brain_read",
+            Effect::Reads,
             "Read a brain page.",
             || object(json!({"path": {"type":"string"}}), &["path"]),
             move |args| {
@@ -65,6 +67,7 @@ pub fn commands(
         ),
         Command::new(
             "brain_save",
+            Effect::Writes,
             "Save a page as a commit; base is the page's last commit hash from brain read. Omit base to save the current clean page.",
             || {
                 object(
@@ -102,6 +105,7 @@ pub fn commands(
         ),
         Command::new(
             "brain_collections",
+            Effect::Reads,
             "List the brain's collections and page counts.",
             || object(json!({}), &[]),
             move |_| {
@@ -118,6 +122,7 @@ pub fn commands(
         ),
         Command::new(
             "brain_changes",
+            Effect::Reads,
             "List recent commits, newest first, with their pages.",
             || {
                 object(
@@ -157,6 +162,7 @@ pub fn commands(
         ),
         Command::new(
             "brain_send",
+            Effect::Writes,
             "Send a page reference to a session; use user/name if the name is ambiguous.",
             || {
                 object(

@@ -6,8 +6,8 @@
 use std::sync::Arc;
 
 use ahjo_core::{Error, NodeId};
-use ahjo_node_kit::Command;
 use ahjo_node_kit::args::{flag, maybe_text, object, text};
+use ahjo_node_kit::{Command, Effect};
 use ahjo_scheduled_contract::{BAD_REQUEST, NOT_FOUND, Schedule, Target};
 use anyhow::{Context, Result, bail};
 use serde_json::{Value, json};
@@ -56,6 +56,7 @@ fn task_properties() -> Value {
 fn command<F, Fut>(
     ctx: &Arc<Ctx>,
     name: &'static str,
+    effect: Effect,
     description: &'static str,
     schema: fn() -> Value,
     call: F,
@@ -65,7 +66,7 @@ where
     Fut: Future<Output = Result<Value, Error>> + Send + 'static,
 {
     let ctx = ctx.clone();
-    Command::new(name, description, schema, move |args| {
+    Command::new(name, effect, description, schema, move |args| {
         call(ctx.clone(), args)
     })
 }
@@ -76,6 +77,7 @@ pub(crate) fn commands(ctx: &Arc<Ctx>) -> Vec<Command> {
         command(
             ctx,
             "scheduled_list",
+            Effect::Reads,
             "List the scheduled prompts: id, name, sessions, schedule, next run, \
         last status, and whether paused or held.",
             || object(json!({}), &[]),
@@ -84,6 +86,7 @@ pub(crate) fn commands(ctx: &Arc<Ctx>) -> Vec<Command> {
         command(
             ctx,
             "scheduled_show",
+            Effect::Reads,
             "One scheduled prompt in full, with its recent runs and audit.",
             id_schema,
             |ctx, args| async move { show(&ctx, &args) },
@@ -91,6 +94,7 @@ pub(crate) fn commands(ctx: &Arc<Ctx>) -> Vec<Command> {
         command(
             ctx,
             "scheduled_create",
+            Effect::Writes,
             "Schedule a prompt into sessions, every N minutes or on a cron. Example: \
              ahjo scheduled create nudge 'Check the build' ops build --every 60",
             || {
@@ -103,6 +107,7 @@ pub(crate) fn commands(ctx: &Arc<Ctx>) -> Vec<Command> {
         command(
             ctx,
             "scheduled_edit",
+            Effect::Sets,
             "Change a scheduled prompt; what is not given stays.",
             || {
                 let mut properties = task_properties();
@@ -114,6 +119,7 @@ pub(crate) fn commands(ctx: &Arc<Ctx>) -> Vec<Command> {
         command(
             ctx,
             "scheduled_copy",
+            Effect::Writes,
             "Duplicate a scheduled prompt, paused, as the view's Duplicate does.",
             || {
                 object(
@@ -126,6 +132,7 @@ pub(crate) fn commands(ctx: &Arc<Ctx>) -> Vec<Command> {
         command(
             ctx,
             "scheduled_pause",
+            Effect::Sets,
             "Pause a scheduled prompt.",
             id_schema,
             |ctx, args| async move { act(&ctx, &args, "pause").await },
@@ -133,6 +140,7 @@ pub(crate) fn commands(ctx: &Arc<Ctx>) -> Vec<Command> {
         command(
             ctx,
             "scheduled_resume",
+            Effect::Sets,
             "Resume a paused or held scheduled prompt.",
             id_schema,
             |ctx, args| async move { act(&ctx, &args, "resume").await },
@@ -140,6 +148,7 @@ pub(crate) fn commands(ctx: &Arc<Ctx>) -> Vec<Command> {
         command(
             ctx,
             "scheduled_run",
+            Effect::Writes,
             "Send a scheduled prompt now, whatever its schedule.",
             id_schema,
             |ctx, args| async move { act(&ctx, &args, "run").await },
@@ -147,6 +156,7 @@ pub(crate) fn commands(ctx: &Arc<Ctx>) -> Vec<Command> {
         command(
             ctx,
             "scheduled_delete",
+            Effect::Destroys,
             "Delete a scheduled prompt.",
             id_schema,
             |ctx, args| async move { act(&ctx, &args, "delete").await },

@@ -4,7 +4,7 @@ use ahjo_core::Error;
 use ahjo_mission_engine::{AdmissionFailure, Harnesses, validate};
 use ahjo_missions_contract::{self as wire, LayoutPatch, NotePatch, Precondition, RunStart};
 use ahjo_node_kit::{
-    Command,
+    Command, Effect,
     args::{flag, maybe_text, object, text},
 };
 use serde_json::{Value, json};
@@ -90,6 +90,7 @@ pub fn commands(missions: &Missions) -> Vec<Command> {
             let m = missions.clone();
             Command::new(
                 name,
+                effect(name),
                 description(name),
                 move || schema(name),
                 move |args| {
@@ -99,6 +100,68 @@ pub fn commands(missions: &Missions) -> Vec<Command> {
             )
         })
         .collect()
+}
+/// What each mission command does.
+fn effect(name: &str) -> Effect {
+    match name {
+        "mission_list" | "mission_archives" | "mission_inspect" | "mission_validate"
+        | "mission_examples" | "mission_notes" | "layout_show" | "run_list" | "run_status"
+        | "run_wait" | "run_evidence" | "run_attempts" | "run_gates" | "run_seats" | "run_logs"
+        | "gate_request" | "formation_list" | "formation_inspect" => Effect::Reads,
+        "mission_new"
+        | "mission_reply"
+        | "mission_run"
+        | "formation_run"
+        | "run_resume"
+        | "run_land"
+        | "gate_approve"
+        | "gate_reject"
+        | "gate_pick"
+        | "mission_create"
+        | "mission_wire"
+        | "formation_create"
+        | "formation_add_input"
+        | "formation_add_output"
+        | "formation_wire"
+        | "gate_create"
+        | "end_create"
+        | "limit_create" => Effect::Writes,
+        "mission_resolve"
+        | "layout_edit"
+        | "mission_arrange"
+        | "mission_rename"
+        | "mission_prefix"
+        | "mission_move"
+        | "mission_update"
+        | "formation_rename"
+        | "formation_place"
+        | "formation_set_type"
+        | "formation_assign"
+        | "formation_unassign"
+        | "formation_agent"
+        | "formation_fresh"
+        | "formation_set_brief"
+        | "formation_set_port"
+        | "gate_update"
+        | "gate_judge"
+        | "end_update"
+        | "limit_update" => Effect::Sets,
+        "mission_purge_archive"
+        | "mission_edit"
+        | "mission_note"
+        | "run_abort"
+        | "run_delete"
+        | "mission_delete"
+        | "mission_input"
+        | "mission_output"
+        | "formation_set_slots"
+        | "formation_unwire"
+        | "formation_delete"
+        | "gate_delete"
+        | "end_delete"
+        | "limit_delete" => Effect::Destroys,
+        _ => unreachable!("{name} has no effect declared"),
+    }
 }
 fn description(name: &str) -> &'static str {
     match name {

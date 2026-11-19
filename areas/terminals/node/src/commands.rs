@@ -7,8 +7,8 @@ use std::sync::Arc;
 use std::time::UNIX_EPOCH;
 
 use ahjo_core::{Error, NodeId};
-use ahjo_node_kit::Command;
 use ahjo_node_kit::args::{flag, maybe_text, object, text};
+use ahjo_node_kit::{Command, Effect};
 use ahjo_terminals_contract::{COMMAND_FAILED, MAX_SEND};
 use anyhow::{Context, Result, bail};
 use serde_json::{Value, json};
@@ -25,16 +25,18 @@ pub(crate) struct Ctx {
     pub node: NodeId,
     pub hub: Arc<Hub>,
     pub launcher: Arc<Launcher>,
+    pub projects: Arc<crate::projects::Projects>,
 }
 
 /// One command: its schema from `ctx` as the tools are listed, and its
 /// call with `ctx` once the sessions are listed, whose failure is a
 /// [`COMMAND_FAILED`] error.
 macro_rules! command {
-    ($ctx:expr, $name:expr, $description:expr, |$s:ident| $schema:expr, $call:path) => {{
+    ($ctx:expr, $name:expr, $effect:expr, $description:expr, |$s:ident| $schema:expr, $call:path) => {{
         let (schema_ctx, call_ctx) = ($ctx.clone(), $ctx.clone());
         Command::new(
             $name,
+            $effect,
             $description,
             move || {
                 let $s: &Ctx = &schema_ctx;
@@ -61,6 +63,7 @@ pub(crate) fn commands(ctx: &Arc<Ctx>) -> Vec<Command> {
         command!(
             ctx,
             "session_list",
+            Effect::Reads,
             "List the sessions on this node: id, name, panes, whether \
         they are active, when they last wrote, and the question a pane waits on.",
             |_ctx| object(json!({}), &[]),
@@ -69,6 +72,7 @@ pub(crate) fn commands(ctx: &Arc<Ctx>) -> Vec<Command> {
         command!(
             ctx,
             "session_read",
+            Effect::Reads,
             "Read the visible screen of a session's pane as plain text.",
             |_ctx| object(target_properties(json!({})), &["session"]),
             read_screen
@@ -76,6 +80,7 @@ pub(crate) fn commands(ctx: &Arc<Ctx>) -> Vec<Command> {
         command!(
             ctx,
             "session_send",
+            Effect::Writes,
             "Type text into a session's pane as one paste, then press Enter \
         unless enter is false. Answers once tmux has taken it.",
             |_ctx| {
@@ -92,49 +97,54 @@ pub(crate) fn commands(ctx: &Arc<Ctx>) -> Vec<Command> {
         command!(
             ctx,
             "session_launch",
+            Effect::Writes,
             "Start a new session running a harness in a folder. Answers with \
         the new session's id once it is listed.",
             |ctx| {
                 let launcher = ctx.launcher.get();
                 let harnesses: Vec<&str> =
                     launcher.harnesses.iter().map(|h| h.id.as_str()).collect();
-                object(
-                    json!({
-                        "harness": { "type": "string", "enum": harnesses },
-                        "folder": {
-                            "type": "string",
-                            "description": "Absolute or under ~.",
-                            "examples": launcher.folders,
-                        },
-                        "name": {
-                            "type": "string",
-                            "description": "Letters, digits, _ and -, at most 50.",
-                        },
-                        "flags": {
-                            "type": "string",
-                            "description": "The whole flag line; the harness's defaults if absent.",
-                        },
-                        "user": {
-                            "type": "string",
-                            "enum": ctx.hub.users(),
-                            "description": "Whose tmux server runs it; the node's own if absent.",
-                        },
-                        "cols": { "type": "integer", "minimum": 1, "maximum": 65535, "description": "Initial terminal columns; supply with rows." },
-                        "rows": { "type": "integer", "minimum": 1, "maximum": 65535, "description": "Initial terminal rows; supply with cols." },
-                        "notify": {
-                            "type": "boolean",
-                            "default": false,
-                            "description": "Report when the agent finishes or waits on input.",
-                        },
-                    }),
-                    &["harness", "folder", "name"],
-                )
+                let mut properties = json!({
+                    "harness": { "type": "string", "enum": harnesses },
+                    "folder": {
+                        "type": "string",
+                        "description": "Absolute or under ~.",
+                        "examples": launcher.folders,
+                    },
+                    "name": {
+                        "type": "string",
+                        "description": "Letters, digits, _ and -, at most 50.",
+                    },
+                    "flags": {
+                        "type": "string",
+                        "description": "The whole flag line; the harness's defaults if absent.",
+                    },
+                    "cols": { "type": "integer", "minimum": 1, "maximum": 65535, "description": "Initial terminal columns; supply with rows." },
+                    "rows": { "type": "integer", "minimum": 1, "maximum": 65535, "description": "Initial terminal rows; supply with cols." },
+                    "notify": {
+                        "type": "boolean",
+                        "default": false,
+                        "description": "Report when the agent finishes or waits on input.",
+                    },
+                });
+                // Only a node that follows other users' servers has a choice
+                // to offer: an empty enum would take no value at all.
+                let users = ctx.hub.users();
+                if !users.is_empty() {
+                    properties["user"] = json!({
+                        "type": "string",
+                        "enum": users,
+                        "description": "Whose tmux server runs it; the node's own if absent.",
+                    });
+                }
+                object(properties, &["harness", "folder", "name"])
             },
             launch_agent
         ),
         command!(
             ctx,
             "session_copy",
+            Effect::Writes,
             "Copy a session's running harness in its folder on the same user, under the next free family name.",
             |_ctx| {
                 object(
@@ -147,6 +157,7 @@ pub(crate) fn commands(ctx: &Arc<Ctx>) -> Vec<Command> {
         command!(
             ctx,
             "session_history",
+            Effect::Reads,
             "Read a pane's scrollback and screen as plain text, oldest line \
         first: the newest 200 lines, or the newest last lines, or with all every \
         line. A cut answer says how many lines it left out.",
@@ -164,6 +175,7 @@ pub(crate) fn commands(ctx: &Arc<Ctx>) -> Vec<Command> {
         command!(
             ctx,
             "session_search",
+            Effect::Reads,
             "Search every pane's scrollback for text. Case matters only if \
         the query has a capital letter. Answers with each matching line and the \
         lines either side, at most 500.",
@@ -173,6 +185,7 @@ pub(crate) fn commands(ctx: &Arc<Ctx>) -> Vec<Command> {
         command!(
             ctx,
             "session_keys",
+            Effect::Writes,
             "Press keys in a session's pane, in order. Each key is a name \
         (Enter, Tab, Escape, BSpace, Space, Up, Down, Left, Right, Home, End, \
         PageUp, PageDown, Delete, C-c and other C-<letter>) or else text typed as it is.",
@@ -189,6 +202,7 @@ pub(crate) fn commands(ctx: &Arc<Ctx>) -> Vec<Command> {
         command!(
             ctx,
             "session_rename",
+            Effect::Sets,
             "Rename a session. Refused if another session on its tmux \
         server has the name. Answers once the session list shows the new name.",
             |_ctx| {
@@ -208,6 +222,7 @@ pub(crate) fn commands(ctx: &Arc<Ctx>) -> Vec<Command> {
         command!(
             ctx,
             "session_kill",
+            Effect::Destroys,
             "End a session and everything running in it.",
             |_ctx| {
                 object(
@@ -220,6 +235,7 @@ pub(crate) fn commands(ctx: &Arc<Ctx>) -> Vec<Command> {
         command!(
             ctx,
             "session_mouse",
+            Effect::Sets,
             "Turn tmux's mouse mode on or off on every tmux server this \
         node follows. On, the wheel scrolls a session's history and a drag \
         selects inside tmux; off, the wheel and clicks go to the program.",
@@ -234,6 +250,7 @@ pub(crate) fn commands(ctx: &Arc<Ctx>) -> Vec<Command> {
         command!(
             ctx,
             "session_seen",
+            Effect::Sets,
             "Mark a session's last report (finished, needs-input) as seen, \
         so it stops showing as news.",
             |_ctx| {
@@ -243,6 +260,121 @@ pub(crate) fn commands(ctx: &Arc<Ctx>) -> Vec<Command> {
                 )
             },
             seen
+        ),
+        command!(
+            ctx,
+            "project_find",
+            Effect::Reads,
+            "Find project folders on this machine by a fragment of their name or path \
+        (\"kor\" finds /srv/games/korpi), best match first, each with whether it has Git and \
+        Beads. Use this when the user names a project and you need its folder.",
+            |_ctx| {
+                object(
+                    json!({ "query": {
+                        "type": "string",
+                        "description": "A fragment of the project's name, or words in its path.",
+                    } }),
+                    &["query"],
+                )
+            },
+            crate::handoff::find_project
+        ),
+        command!(
+            ctx,
+            "handoff_start",
+            Effect::Writes,
+            "Hand work to a coding agent on Swarm. Use this when the user wants an agent \
+        (Codex, Claude Code) to take over work from this conversation. It opens a session in \
+        the project's folder, gives the agent the brief as its first message, waits up to a \
+        minute for it to start, and answers the session to follow and a line to tell the user. \
+        Write the brief to stand on its own: the goal, what was decided, constraints, what \
+        counts as done, and links (brain [[slugs]], a Bead id).",
+            |ctx| {
+                let launcher = ctx.launcher.get();
+                let agents: Vec<&str> = launcher
+                    .harnesses
+                    .iter()
+                    .map(|h| h.id.as_str())
+                    .filter(|id| *id != crate::launch::SHELL)
+                    .collect();
+                let mut harness = json!({ "type": "string" });
+                if let Some(first) = agents.first() {
+                    harness["enum"] = json!(agents);
+                    harness["description"] = json!(format!("The agent; {first} if not said."));
+                }
+                object(
+                    json!({
+                        "project": {
+                            "type": "string",
+                            "description": "The project's folder, or a fragment of its name as project_find takes it.",
+                        },
+                        "brief": {
+                            "type": "string",
+                            "description": "The agent's first message, standing on its own.",
+                        },
+                        "harness": harness,
+                        "name": {
+                            "type": "string",
+                            "description": "The session's name: letters, digits, _ and -; the folder's name if not said.",
+                        },
+                        "work": {
+                            "type": "string",
+                            "description": "A work item (Bead id) the agent is to own, named at the end of the brief.",
+                        },
+                    }),
+                    &["project", "brief"],
+                )
+            },
+            crate::handoff::start
+        ),
+        command!(
+            ctx,
+            "handoff_status",
+            Effect::Reads,
+            "Where an agent's session is: working, needs-input (with the question its screen \
+        asks), finished (with its last report), idle (at its prompt with no finished turn \
+        reported) or gone, and the bottom of its screen. Use this to follow a handoff or any \
+        session. With wait, it answers as soon as the agent stops working, waiting at most \
+        that many seconds.",
+            |_ctx| {
+                object(
+                    json!({
+                        "session": { "type": "string", "description": "A session id or name." },
+                        "wait": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": crate::handoff::MAX_WAIT,
+                            "description": "Seconds to wait while the agent works; 0 if not said.",
+                        },
+                        "lines": {
+                            "type": "integer",
+                            "minimum": 1,
+                            "description": "How many of the screen's bottom lines (40 if not said).",
+                        },
+                    }),
+                    &["session"],
+                )
+            },
+            crate::handoff::status
+        ),
+        command!(
+            ctx,
+            "handoff_reply",
+            Effect::Writes,
+            "Answer an agent or send it a follow-up: the text is typed into its session and \
+        submitted. While its screen asks with a menu (handoff_status says needs-input and shows \
+        the options), the text is the option's number, pressed as a key. Answers where the \
+        agent is just after.",
+            |_ctx| {
+                object(
+                    json!({
+                        "session": { "type": "string", "description": "A session id or name." },
+                        "text": { "type": "string" },
+                    }),
+                    &["session", "text"],
+                )
+            },
+            crate::handoff::reply
         ),
     ]
 }
@@ -637,7 +769,7 @@ async fn target(ctx: &Ctx, args: &Value) -> Result<(SessionInfo, PaneId)> {
 }
 
 /// The session `wanted` names, by id or else by unique name.
-fn find(ctx: &Ctx, wanted: &str) -> Result<SessionInfo> {
+pub(crate) fn find(ctx: &Ctx, wanted: &str) -> Result<SessionInfo> {
     let sessions = ctx.hub.sessions();
     if let Some(session) = sessions.iter().find(|s| s.id == wanted) {
         return Ok(session.clone());

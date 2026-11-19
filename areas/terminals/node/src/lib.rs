@@ -20,6 +20,7 @@ mod channel;
 mod commands;
 mod flags;
 mod frames;
+mod handoff;
 mod hub;
 mod launch;
 mod launcher;
@@ -67,6 +68,10 @@ pub const LISTING: Listing = Listing {
         "session_kill",
         "session_mouse",
         "session_seen",
+        "project_find",
+        "handoff_start",
+        "handoff_status",
+        "handoff_reply",
     ],
     build,
 };
@@ -132,6 +137,7 @@ pub fn build(setup: &Setup) -> Result<Built> {
         ctx: Arc::new(Ctx {
             node: setup.node.id.clone(),
             hub,
+            projects: Arc::new(projects::Projects::new(launcher.clone())),
             launcher,
         }),
     })
@@ -192,7 +198,7 @@ impl Area for Terminals {
             .with_state(self.ctx.hub.clone())
             .merge(agent_events::routes(self.ctx.hub.clone()))
             .merge(flags::routes(self.ctx.launcher.clone()))
-            .merge(projects::routes(self.ctx.launcher.clone()))
+            .merge(projects::routes(self.ctx.projects.clone()))
     }
 
     fn commands(&self) -> Vec<Command> {

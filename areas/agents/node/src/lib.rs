@@ -14,7 +14,7 @@ mod tools;
 use ahjo_agents_contract::{FAILED, FETCH_FAILED, LINK, LINKED, REPORT, SYNC, SYNCED, WATCH};
 use ahjo_core::Error;
 use ahjo_node_kit::args::{object, text};
-use ahjo_node_kit::{Area, BoxFuture, Built, Channel, Client, Command, Listing, Setup};
+use ahjo_node_kit::{Area, BoxFuture, Built, Channel, Client, Command, Effect, Listing, Setup};
 use ahjo_term::Sessions;
 use anyhow::{Context, Result};
 use serde::Deserialize;
@@ -207,6 +207,7 @@ impl Area for AgentsArea {
         );
         let show = Command::new(
             "agents_show",
+            Effect::Reads,
             "Report this node's agent tools, skills and checkouts.",
             || object(json!({}), &[]),
             move |_| {
@@ -230,6 +231,7 @@ impl Area for AgentsArea {
         );
         let sync = Command::new(
             "agents_sync",
+            Effect::Writes,
             "Sync a skills checkout in a terminal session.",
             || object(json!({"checkout":{"type":"string"}}), &["checkout"]),
             move |args| {
@@ -263,6 +265,7 @@ impl Area for AgentsArea {
         );
         let link = Command::new(
             "agents_link",
+            Effect::Writes,
             "Link a skills checkout's skills into the skills folders missing them.",
             || object(json!({"checkout":{"type":"string"}}), &["checkout"]),
             move |args| {
@@ -278,7 +281,8 @@ impl Area for AgentsArea {
                 }
             },
         );
-        let mut commands = vec![show, sync, link];
+        // A sync fetches the checkout's remote.
+        let mut commands = vec![show, sync.open_world(), link];
         commands.extend(shape::routes::commands(
             self.shapes.clone(),
             self.node.clone(),

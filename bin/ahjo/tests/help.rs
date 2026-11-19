@@ -9,6 +9,7 @@ impl Area for One {
     fn commands(&self) -> Vec<Command> {
         vec![Command::new(
             self.0,
+            ahjo_node_kit::Effect::Reads,
             "A test command.",
             || json!({"type":"object","properties":{}}),
             |_| async { Ok(json!({})) },

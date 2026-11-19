@@ -79,12 +79,23 @@ pub struct Running {
 /// Builds the areas `config` leaves on, in `areas`' order, checks them and
 /// serves them.
 pub async fn start(options: Options, areas: &[Listing]) -> Result<Running> {
+    start_with(options, areas, &[]).await
+}
+
+/// As [`start`], serving also the tool sets `sets` ([`mcp::ToolSet`]),
+/// each at `/mcp/<name>`.
+pub async fn start_with(
+    options: Options,
+    areas: &[Listing],
+    sets: &[mcp::ToolSet],
+) -> Result<Running> {
     let Options {
         dir,
         config,
         listen,
     } = options;
     listing::check(areas)?;
+    mcp::check(sets, areas)?;
     let names: Vec<&str> = areas.iter().map(|area| area.name).collect();
     config.known(&names)?;
     let section = config.node()?;
@@ -165,7 +176,7 @@ pub async fn start(options: Options, areas: &[Listing]) -> Result<Running> {
         .route("/api/version", get(version))
         .with_state(shared.clone())
         .merge(own::routes(own))
-        .merge(Mcp::new(node.id.clone(), groups, shared.off.clone()).routes());
+        .merge(Mcp::new(node.id.clone(), groups, shared.off.clone(), sets).routes());
     for (_, area) in &shared.areas {
         app = app.merge(area.routes());
     }

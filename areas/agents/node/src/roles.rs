@@ -2,7 +2,7 @@
 use ahjo_agents_contract::roles::{Note, PATH, Role, Roles, Unreadable, Usage};
 use ahjo_core::Error;
 use ahjo_mission_engine::{RoleCard, RoleEdit, RoleStore};
-use ahjo_node_kit::{Command, args::object};
+use ahjo_node_kit::{Command, Effect, args::object};
 use axum::{
     Router,
     body::Bytes,
@@ -374,7 +374,14 @@ pub fn commands(s: Arc<Service>, node: String) -> Vec<Command> {
             "role_delete" => "Delete a role; a built-in one comes back as shipped.",
             _ => "List the saved characters: a role with its harness, model and effort.",
         };
-        Command::new(name, description, move || {
+        let effect = match name {
+            "role_list" | "role_inspect" | "role_usage" | "role_characters" => Effect::Reads,
+            "role_new" => Effect::Writes,
+            "role_edit" | "role_retire" | "role_restore" => Effect::Sets,
+            "role_delete" => Effect::Destroys,
+            _ => unreachable!("{name} has no effect declared"),
+        };
+        Command::new(name, effect, description, move || {
             let (props, required) = match name {
                 "role_list" => (json!({"capable":{"type":"string"},"assignable":{"type":"boolean"},"full":{"type":"boolean"}}), vec![]),
                 "role_characters" => (json!({}), vec![]),

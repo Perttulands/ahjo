@@ -8,8 +8,8 @@ use ahjo_agents_contract::shape::{
     SettingEdit, Write,
 };
 use ahjo_core::Error;
-use ahjo_node_kit::Command;
 use ahjo_node_kit::args::object;
+use ahjo_node_kit::{Command, Effect};
 use axum::{
     Json, Router,
     extract::{Query, State},
@@ -206,8 +206,16 @@ pub fn commands(roots: Option<Arc<Roots>>, node: String) -> Vec<Command> {
     defs.into_iter()
         .map(|(name, description, props, required)| {
             let (roots, node) = (roots.clone(), node.clone());
+            let effect = match name {
+                "agents_shape" | "agents_read" => Effect::Reads,
+                "agents_hook_add" => Effect::Writes,
+                "agents_hook_set" | "agents_hook_switch" | "agents_setting_set" => Effect::Sets,
+                "agents_write" | "agents_hook_remove" => Effect::Destroys,
+                _ => unreachable!("{name} has no effect declared"),
+            };
             Command::new(
                 name,
+                effect,
                 description,
                 move || object(props.clone(), &required),
                 move |args| {

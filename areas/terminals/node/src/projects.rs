@@ -101,63 +101,127 @@ struct Walked {
     projects: Arc<Vec<String>>,
 }
 
-struct Search {
+/// The projects under the launcher's search roots, as last walked.
+pub struct Projects {
     launcher: Arc<Launcher>,
     last: Mutex<Option<Walked>>,
     /// A walk behind an answer is running.
     walking: Mutex<bool>,
 }
 
-pub fn routes(launcher: Arc<Launcher>) -> Router {
-    Router::new()
-        .route("/api/terminal/projects", get(projects))
-        .with_state(Arc::new(Search {
+impl Projects {
+    pub fn new(launcher: Arc<Launcher>) -> Projects {
+        Projects {
             launcher,
             last: Mutex::new(None),
             walking: Mutex::new(false),
-        }))
+        }
+    }
+
+    /// The roots the walk looks under now.
+    pub fn roots(&self) -> Vec<PathBuf> {
+        self.launcher.look();
+        self.launcher
+            .get()
+            .search_roots(crate::launch::own_home().as_deref())
+    }
+
+    /// Every project under the search roots: the last walk if there was
+    /// one of these roots, walking again behind it once it is older than
+    /// [`FRESH`]; else a walk now.
+    pub async fn list(self: &Arc<Self>) -> Arc<Vec<String>> {
+        let roots = self.roots();
+        let (known, stale) = {
+            let last = self.last.lock().unwrap();
+            match last.as_ref().filter(|w| w.roots == roots) {
+                Some(w) => (Some(w.projects.clone()), w.at.elapsed() >= FRESH),
+                None => (None, true),
+            }
+        };
+        if let Some(projects) = known {
+            if stale && !std::mem::replace(&mut *self.walking.lock().unwrap(), true) {
+                let search = self.clone();
+                tokio::task::spawn_blocking(move || {
+                    let projects = Arc::new(find(&roots));
+                    *search.last.lock().unwrap() = Some(Walked {
+                        roots,
+                        at: Instant::now(),
+                        projects,
+                    });
+                    *search.walking.lock().unwrap() = false;
+                });
+            }
+            return projects;
+        }
+        let walked = {
+            let roots = roots.clone();
+            tokio::task::spawn_blocking(move || find(&roots)).await
+        };
+        let projects = Arc::new(walked.unwrap_or_default());
+        *self.last.lock().unwrap() = Some(Walked {
+            roots,
+            at: Instant::now(),
+            projects: projects.clone(),
+        });
+        projects
+    }
+}
+
+pub fn routes(projects: Arc<Projects>) -> Router {
+    Router::new()
+        .route("/api/terminal/projects", get(listed))
+        .with_state(projects)
 }
 
 /// `GET /api/terminal/projects`: every project under the search roots.
-async fn projects(State(search): State<Arc<Search>>) -> Response {
-    search.launcher.look();
-    let roots = search
-        .launcher
-        .get()
-        .search_roots(crate::launch::own_home().as_deref());
-    let (known, stale) = {
-        let last = search.last.lock().unwrap();
-        match last.as_ref().filter(|w| w.roots == roots) {
-            Some(w) => (Some(w.projects.clone()), w.at.elapsed() >= FRESH),
-            None => (None, true),
-        }
-    };
-    if let Some(projects) = known {
-        if stale && !std::mem::replace(&mut *search.walking.lock().unwrap(), true) {
-            let search = search.clone();
-            tokio::task::spawn_blocking(move || {
-                let projects = Arc::new(find(&roots));
-                *search.last.lock().unwrap() = Some(Walked {
-                    roots,
-                    at: Instant::now(),
-                    projects,
-                });
-                *search.walking.lock().unwrap() = false;
-            });
-        }
-        return axum::Json(&*projects).into_response();
+async fn listed(State(projects): State<Arc<Projects>>) -> Response {
+    axum::Json(&*projects.list().await).into_response()
+}
+
+/// How well a project's path answers a query, best first; `None` if not
+/// at all. Its folder's name equal to the query, then starting with it,
+/// then holding it, then its whole path holding every word.
+pub fn rank(path: &str, query: &str) -> Option<u8> {
+    let query = query.trim().to_lowercase();
+    let lower = path.to_lowercase();
+    let name = lower
+        .trim_end_matches(['/', '\\'])
+        .rsplit(['/', '\\'])
+        .next()
+        .unwrap_or_default();
+    if query.is_empty() {
+        return Some(4);
     }
-    let walked = {
-        let roots = roots.clone();
-        tokio::task::spawn_blocking(move || find(&roots)).await
-    };
-    let projects = Arc::new(walked.unwrap_or_default());
-    *search.last.lock().unwrap() = Some(Walked {
-        roots,
-        at: Instant::now(),
-        projects: projects.clone(),
-    });
-    axum::Json(&*projects).into_response()
+    if name == query {
+        Some(0)
+    } else if name.starts_with(&query) {
+        Some(1)
+    } else if name.contains(&query) {
+        Some(2)
+    } else if query.split_whitespace().all(|word| lower.contains(word)) {
+        Some(3)
+    } else {
+        None
+    }
+}
+
+/// The projects among `paths` that answer `query`, best first, then
+/// shortest path, with each one's rank.
+pub fn matching<'a>(paths: &'a [String], query: &str) -> Vec<(u8, &'a str)> {
+    let mut found: Vec<(u8, &str)> = paths
+        .iter()
+        .filter_map(|path| Some((rank(path, query)?, path.as_str())))
+        .collect();
+    found.sort_by_key(|&(rank, path)| (rank, path.len(), path));
+    found
+}
+
+/// Whether a folder holds a project: Git, Beads, or both.
+pub fn kinds(path: &Path) -> (bool, bool) {
+    (
+        path.join(".git").symlink_metadata().is_ok(),
+        path.join(".beads").is_dir(),
+    )
 }
 
 #[cfg(test)]
@@ -198,6 +262,33 @@ mod tests {
             "a project under two roots is listed once"
         );
         std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn a_query_finds_its_name_first_then_names_holding_it_then_paths() {
+        let paths: Vec<String> = [
+            "/srv/games/korpi-old",
+            "/srv/games/korpi",
+            "/srv/korpikuusi",
+            "/home/me/notes",
+            "/srv/games/kauri",
+        ]
+        .map(String::from)
+        .to_vec();
+        let found: Vec<&str> = matching(&paths, "Korpi").iter().map(|f| f.1).collect();
+        assert_eq!(
+            found,
+            [
+                "/srv/games/korpi",
+                "/srv/korpikuusi",
+                "/srv/games/korpi-old"
+            ]
+        );
+        assert_eq!(matching(&paths, "korpi")[0].0, 0);
+        let games: Vec<&str> = matching(&paths, "games kau").iter().map(|f| f.1).collect();
+        assert_eq!(games, ["/srv/games/kauri"]);
+        assert!(matching(&paths, "nothing").is_empty());
+        assert_eq!(matching(&paths, "").len(), paths.len());
     }
 
     #[test]

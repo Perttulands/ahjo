@@ -4,7 +4,7 @@ use std::{sync::Arc, time::Duration};
 use ahjo_core::Error;
 use ahjo_host_contract::{BAD_REQUEST, SERVICE_FAILED};
 use ahjo_node_kit::{
-    Command,
+    Command, Effect,
     args::{object, text},
     events::Log,
 };
@@ -16,27 +16,31 @@ pub(crate) fn commands(services: Arc<Services>, events: Arc<Log>, node: String) 
     [
         (
             "host_show",
+            Effect::Reads,
             "This node's host facts and current reading (CPU, memory, swap, disks, GPUs). \
              --full adds the heaviest processes and recent events.",
         ),
-        ("service_list", "List this node's services and their state."),
+        ("service_list", Effect::Reads, "List this node's services and their state."),
         (
             "service_show",
+            Effect::Reads,
             "Show one service and the state of its units.",
         ),
-        ("service_start", "Start every unit of a service."),
-        ("service_stop", "Stop every unit of a service."),
+        ("service_start", Effect::Sets, "Start every unit of a service."),
+        ("service_stop", Effect::Sets, "Stop every unit of a service."),
         (
             "service_restart",
+            Effect::Writes,
             "Stop every unit of a service, then start them.",
         ),
         (
             "service_log",
+            Effect::Reads,
             "The last lines a service's units logged, oldest first.",
         ),
     ]
     .into_iter()
-    .map(|(name, description)| {
+    .map(|(name, effect, description)| {
         let (services, events, node) = (services.clone(), events.clone(), node.clone());
         let schema = move || {
             if name == "host_show" {
@@ -61,7 +65,7 @@ pub(crate) fn commands(services: Arc<Services>, events: Arc<Log>, node: String) 
                 )
             }
         };
-        Command::new(name, description, schema, move |args: Value| {
+        Command::new(name, effect, description, schema, move |args: Value| {
             let (services, events, node) = (services.clone(), events.clone(), node.clone());
             async move {
                 if name == "host_show" {

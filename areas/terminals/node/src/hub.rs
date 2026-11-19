@@ -438,6 +438,12 @@ impl Hub {
         server.engine.screen(pane)
     }
 
+    /// A pane's visible cells and cursor, once seeded.
+    pub fn read_screen(&self, pane: PaneId) -> Option<ahjo_term::Screen> {
+        let (server, pane) = self.pane(pane)?;
+        server.engine.read_screen(pane)
+    }
+
     pub fn text(&self, pane: PaneId) -> Option<String> {
         let (server, pane) = self.pane(pane)?;
         server.engine.text(pane)

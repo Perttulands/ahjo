@@ -81,14 +81,11 @@ async fn call(mcp: &Mcp, reach: &Reach, caller: &Caller, params: &Value) -> Answ
     let Some(command) = mcp.command(reach, name) else {
         // An unknown name could be anything, so the log doesn't echo it.
         call_log::record(caller, "<unknown>", mcp.node.as_str(), "unknown");
-        let elsewhere = match mcp.server_of(name) {
-            Some(server) => format!("; it is on {}/{server}", super::PATH),
-            None => String::new(),
-        };
+        let elsewhere = mcp.elsewhere(reach, name);
         return Err((INVALID_PARAMS, format!("Unknown tool: {name}{elsewhere}")));
     };
     let mut args = params.get("arguments").cloned().unwrap_or(json!({}));
-    let outcome = match mcp.target(&mut args) {
+    let outcome = match super::target(&mcp.node, &mut args) {
         Ok(()) => (command.call)(args).await,
         Err(error) => Err(error),
     };

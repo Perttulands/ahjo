@@ -9,8 +9,9 @@ use std::sync::atomic::{AtomicU32, Ordering};
 use ahjo_core::Error;
 use ahjo_core::Hello;
 use ahjo_core::frame::Kinds;
+use ahjo_node_kit::mcp::ToolSet;
 use ahjo_node_kit::{
-    Area, BoxFuture, Build, Built, Channel, Client, Command, Config, Listing, NodeClient,
+    Area, BoxFuture, Build, Built, Channel, Client, Command, Config, Effect, Listing, NodeClient,
     NodeError, Options, Running, Setup,
 };
 use axum::Router;
@@ -57,6 +58,7 @@ impl Area for Lights {
     fn commands(&self) -> Vec<Command> {
         vec![Command::new(
             self.command,
+            ahjo_node_kit::Effect::Sets,
             "Switch the lights. Answers with how bright they are.",
             || json!({ "type": "object", "properties": { "level": { "type": "integer" } } }),
             |args: Value| async move {
@@ -99,6 +101,10 @@ fn lights(_: &Setup) -> anyhow::Result<Built> {
 }
 
 async fn start(areas: &[Listing], config: &str) -> anyhow::Result<Running> {
+    start_with(areas, &[], config).await
+}
+
+async fn start_with(areas: &[Listing], sets: &[ToolSet], config: &str) -> anyhow::Result<Running> {
     static NEXT: AtomicU32 = AtomicU32::new(0);
     let dir = std::env::temp_dir().join(format!(
         "ahjo-areas-{}-{}",
@@ -107,13 +113,14 @@ async fn start(areas: &[Listing], config: &str) -> anyhow::Result<Running> {
     ));
     std::fs::create_dir_all(&dir)?;
     let config = Config::parse(config, dir.clone())?;
-    ahjo_node_kit::start(
+    ahjo_node_kit::start_with(
         Options {
             dir,
             config,
             listen: Some("127.0.0.1:0".into()),
         },
         areas,
+        sets,
     )
     .await
 }
@@ -329,6 +336,7 @@ impl Area for Said {
         let word = self.word;
         vec![Command::new(
             "lamps_say",
+            ahjo_node_kit::Effect::Reads,
             "Says the word the lights offer.",
             || json!({ "type": "object" }),
             move |_| async move { Ok(json!(word)) },
@@ -552,6 +560,7 @@ impl Area for Shades {
     fn commands(&self) -> Vec<Command> {
         vec![Command::new(
             "shades_close",
+            ahjo_node_kit::Effect::Sets,
             "Close the shades.",
             || json!({ "type": "object", "properties": {}, "required": [] }),
             |_| async { Ok(json!("closed")) },
@@ -677,6 +686,262 @@ async fn each_area_is_an_mcp_server_and_the_cli_sees_them_all() {
     for noun in ["lights", "shades", "config", "view"] {
         assert!(index.contains(&format!("  {noun} ")), "{noun}: {index}");
     }
+    node.stop().await.unwrap();
+}
+
+/// A clock: one command that reads and one that destroys.
+struct Clock;
+
+impl Area for Clock {
+    fn commands(&self) -> Vec<Command> {
+        let empty = || json!({ "type": "object", "properties": {} });
+        vec![
+            Command::new(
+                "clock_read",
+                Effect::Reads,
+                "Read the clock's time.",
+                empty,
+                |_| async { Ok(json!("noon")) },
+            ),
+            Command::new(
+                "clock_reset",
+                Effect::Destroys,
+                "Reset the clock, losing its time.",
+                empty,
+                |_| async { Ok(json!("reset")) },
+            ),
+        ]
+    }
+}
+
+fn clock(_: &Setup) -> anyhow::Result<Built> {
+    Built::now(Clock)
+}
+
+const CLOCK_LISTED: Listing = listed("clock", &[], &["clock_read", "clock_reset"], clock);
+
+/// A set for a client that wants the clock and to reach the rest.
+const HOME: ToolSet = ToolSet {
+    name: "home",
+    tools: &["clock_read", "swarm_commands", "swarm_read", "swarm_run"],
+    instructions: "The home: read the clock, find the rest.",
+};
+
+/// One `tools/call` on `path`: the tool's answer, or its error's code.
+async fn called(node: &Running, path: &str, tool: &str, arguments: Value) -> Result<Value, String> {
+    let call = json!({
+        "jsonrpc": "2.0", "id": 1, "method": "tools/call",
+        "params": { "name": tool, "arguments": arguments },
+    });
+    let (status, body) = rpc(node, path, call).await;
+    assert_eq!(status, 200, "{body}");
+    let answer: Value = serde_json::from_str(&body).unwrap();
+    let result = &answer["result"];
+    let text: Value = serde_json::from_str(result["content"][0]["text"].as_str().unwrap()).unwrap();
+    if result["isError"] == true {
+        Err(text["code"].as_str().unwrap().to_owned())
+    } else {
+        Ok(text)
+    }
+}
+
+/// Every tool says what it does to the world, from its command's effect,
+/// so a client asks before a write and not before a read.
+#[tokio::test(flavor = "multi_thread")]
+async fn every_tool_is_annotated_from_its_commands_effect() {
+    let node = start(&[LIGHTS_LISTED, CLOCK_LISTED], "").await.unwrap();
+    let list = json!({ "jsonrpc": "2.0", "id": 1, "method": "tools/list" });
+    let (_, body) = rpc(&node, "/mcp", list).await;
+    let answer: Value = serde_json::from_str(&body).unwrap();
+    let tools = answer["result"]["tools"].as_array().unwrap();
+    let tool = |name: &str| tools.iter().find(|t| t["name"] == name).unwrap().clone();
+    assert_eq!(tool("clock_read")["title"], "Clock read");
+    assert_eq!(
+        tool("clock_read")["annotations"],
+        json!({ "readOnlyHint": true, "openWorldHint": false })
+    );
+    assert_eq!(
+        tool("lights_switch")["annotations"],
+        json!({ "readOnlyHint": false, "destructiveHint": false, "idempotentHint": true, "openWorldHint": false })
+    );
+    assert_eq!(
+        tool("clock_reset")["annotations"],
+        json!({ "readOnlyHint": false, "destructiveHint": true, "idempotentHint": false, "openWorldHint": false })
+    );
+    for tool in tools {
+        assert!(tool["annotations"]["readOnlyHint"].is_boolean(), "{tool}");
+    }
+    node.stop().await.unwrap();
+}
+
+/// A tool set is an MCP server of chosen commands from any area, with
+/// tools of its own that find and run every other command, each only for
+/// what it is: a read through `swarm_read`, a change through `swarm_run`.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_tool_set_serves_its_commands_and_reaches_the_rest_as_they_are() {
+    let node = start_with(&[LIGHTS_LISTED, CLOCK_LISTED], &[HOME], "")
+        .await
+        .unwrap();
+    let list = json!({ "jsonrpc": "2.0", "id": 1, "method": "tools/list" });
+    let (status, body) = rpc(&node, "/mcp/home", list.clone()).await;
+    assert_eq!(status, 200, "{body}");
+    assert_eq!(
+        tool_names(&body),
+        ["clock_read", "swarm_commands", "swarm_read", "swarm_run"]
+    );
+    let answer: Value = serde_json::from_str(&body).unwrap();
+    let annotations = |at: usize| answer["result"]["tools"][at]["annotations"].clone();
+    assert_eq!(annotations(2)["readOnlyHint"], true, "swarm_read");
+    assert_eq!(annotations(3)["destructiveHint"], true, "swarm_run");
+    let (_, every) = rpc(&node, "/mcp", list.clone()).await;
+    assert!(
+        !tool_names(&every).iter().any(|t| t.starts_with("swarm_")),
+        "the set's own tools are only in the set"
+    );
+    let initialize = json!({ "jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {} });
+    let (_, body) = rpc(&node, "/mcp/home", initialize).await;
+    let said: Value = serde_json::from_str(&body).unwrap();
+    assert_eq!(
+        said["result"]["instructions"],
+        "The home: read the clock, find the rest."
+    );
+    let (status, body) = rpc(&node, "/mcp/home,clock", list.clone()).await;
+    assert_eq!(status, 404, "{body}");
+
+    // What it lists it runs; what it does not, it says how to reach.
+    assert_eq!(
+        called(&node, "/mcp/home", "clock_read", json!({})).await,
+        Ok(json!("noon"))
+    );
+    let call = json!({
+        "jsonrpc": "2.0", "id": 2, "method": "tools/call",
+        "params": { "name": "clock_reset", "arguments": {} },
+    });
+    let (_, body) = rpc(&node, "/mcp/home", call).await;
+    assert!(
+        body.contains("Unknown tool: clock_reset; run it here with swarm_read or swarm_run"),
+        "{body}"
+    );
+
+    // Found by words, with how to run each.
+    let found = called(
+        &node,
+        "/mcp/home",
+        "swarm_commands",
+        json!({ "query": "reset clock" }),
+    )
+    .await
+    .unwrap();
+    assert_eq!(found["commands"][0]["name"], "clock_reset", "{found}");
+    assert_eq!(found["commands"][0]["run_with"], "swarm_run");
+
+    // A read runs as a read, a change as a change, never the other way.
+    let read = async |tool: &str, command: &str, arguments: Value| {
+        called(
+            &node,
+            "/mcp/home",
+            tool,
+            json!({ "command": command, "arguments": arguments }),
+        )
+        .await
+    };
+    assert_eq!(
+        read("swarm_read", "clock_read", json!({})).await,
+        Ok(json!("noon"))
+    );
+    assert_eq!(
+        read("swarm_read", "clock_reset", json!({})).await,
+        Err("not_read_only".into())
+    );
+    assert_eq!(
+        read("swarm_read", "lights_switch", json!({ "level": 2 })).await,
+        Err("not_read_only".into())
+    );
+    assert_eq!(
+        read("swarm_run", "clock_read", json!({})).await,
+        Err("read_only".into())
+    );
+    assert_eq!(
+        read("swarm_run", "lights_switch", json!({ "level": 2 })).await,
+        Ok(json!({ "level": 2 }))
+    );
+    // The command's own checks and the node's still hold.
+    assert_eq!(
+        read("swarm_run", "lights_switch", json!({})).await,
+        Err("no_level".into())
+    );
+    assert_eq!(
+        read("swarm_run", "clock_reset", json!({ "node": "elsewhere" })).await,
+        Err("unknown_node".into())
+    );
+    assert_eq!(
+        read("swarm_run", "config_show", json!({})).await,
+        Err("read_only".into()),
+        "the node's own commands are reached too"
+    );
+    assert_eq!(
+        read("swarm_read", "nope", json!({})).await,
+        Err("unknown_command".into())
+    );
+    node.stop().await.unwrap();
+}
+
+/// A set that would shadow a server or name a tool no area has refuses to
+/// start.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_tool_set_naming_what_is_not_there_refuses_to_start() {
+    for (set, says) in [
+        (
+            ToolSet {
+                name: "clock",
+                ..HOME
+            },
+            "has the name of another MCP server",
+        ),
+        (
+            ToolSet {
+                tools: &["clock_read", "clock_wind"],
+                ..HOME
+            },
+            "names clock_wind, which no area lists",
+        ),
+        (
+            ToolSet {
+                tools: &["clock_read", "clock_read"],
+                ..HOME
+            },
+            "names clock_read twice",
+        ),
+    ] {
+        let error = match start_with(&[CLOCK_LISTED], &[set], "").await {
+            Ok(node) => {
+                node.stop().await.unwrap();
+                panic!("{} started", set.name);
+            }
+            Err(error) => format!("{error:#}"),
+        };
+        assert!(error.contains(says), "{error}");
+    }
+    // A set whose area is turned off serves what remains.
+    let node = start_with(&[CLOCK_LISTED], &[HOME], "[clock]\nenabled = false\n")
+        .await
+        .unwrap();
+    let list = json!({ "jsonrpc": "2.0", "id": 1, "method": "tools/list" });
+    let (_, body) = rpc(&node, "/mcp/home", list).await;
+    assert_eq!(
+        tool_names(&body),
+        ["swarm_commands", "swarm_read", "swarm_run"]
+    );
+    assert_eq!(
+        called(
+            &node,
+            "/mcp/home",
+            "swarm_read",
+            json!({ "command": "clock_read" })
+        )
+        .await,
+        Err("unknown_command".into())
+    );
     node.stop().await.unwrap();
 }
 

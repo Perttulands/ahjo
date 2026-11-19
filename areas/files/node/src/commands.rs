@@ -2,7 +2,7 @@
 use crate::{Files, FilesError};
 use ahjo_core::Error;
 use ahjo_node_kit::{
-    Command,
+    Command, Effect,
     args::{flag, maybe_text, object, text},
 };
 use base64::{Engine as _, engine::general_purpose::STANDARD};
@@ -132,6 +132,7 @@ pub fn commands(files: Arc<Files>, home: Option<PathBuf>) -> Vec<Command> {
             let home = home.clone();
             Command::new(
                 name,
+                effect(name),
                 description,
                 move || {
                     let mut fields = serde_json::Map::new();
@@ -155,6 +156,20 @@ pub fn commands(files: Arc<Files>, home: Option<PathBuf>) -> Vec<Command> {
             )
         })
         .collect()
+}
+
+/// What each file command does.
+fn effect(name: &str) -> Effect {
+    match name {
+        "file_list" | "file_read" | "file_diff" | "file_status" | "file_recent"
+        | "file_download" | "file_find" | "file_locate" | "file_search" | "file_transfer" => {
+            Effect::Reads
+        }
+        "file_move" | "file_copy" | "file_resume" => Effect::Writes,
+        "file_mkdir" => Effect::Sets,
+        "file_upload" | "file_write" | "file_delete" => Effect::Destroys,
+        _ => unreachable!("{name} has no effect declared"),
+    }
 }
 
 async fn run(

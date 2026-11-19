@@ -28,6 +28,7 @@ impl Area for Responses {
             .map(|&name| {
                 Command::new(
                     name,
+                    ahjo_node_kit::Effect::Reads,
                     "Test response",
                     || json!({"type":"object","properties":{}}),
                     move |_| async move { Ok(answer(name)) },
