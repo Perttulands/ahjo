@@ -141,30 +141,52 @@ pub fn find(query: &str, text: &str) -> Option<Hit> {
 /// little less when only another field has it, so a name that matches
 /// ranks first. The matched characters are the name's.
 pub fn find_fields(query: &str, fields: &[&str]) -> Option<Hit> {
+    find_each_field(query, fields).map(|h| Hit {
+        score: h.score,
+        at: h.at.into_iter().next().unwrap_or_default(),
+    })
+}
+
+/// How a thing known by several fields matched: its score as
+/// [`find_fields`] gives it, and the matched characters of each field, in
+/// the fields' order, so a row found by its folder can mark the folder.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct FieldsHit {
+    pub score: i64,
+    pub at: Vec<Vec<usize>>,
+}
+
+/// [`find_fields`], with each word's letters marked in the field that
+/// found it.
+pub fn find_each_field(query: &str, fields: &[&str]) -> Option<FieldsHit> {
     let (name, rest) = fields.split_first()?;
-    let mut all = Hit {
+    let mut all = FieldsHit {
         score: 0,
-        at: vec![],
+        at: vec![vec![]; fields.len()],
     };
     for w in query.split_whitespace() {
         let in_name = word(w, name);
         let elsewhere = rest
             .iter()
-            .filter_map(|f| word(w, f))
-            .map(|h| h.score - 4)
-            .max();
-        match (in_name, elsewhere) {
-            (Some(hit), Some(other)) if other > hit.score => all.score += other,
-            (Some(hit), _) => {
-                all.score += hit.score;
-                all.at.extend(hit.at);
-            }
-            (None, Some(other)) => all.score += other,
+            .enumerate()
+            .filter_map(|(i, f)| word(w, f).map(|h| (i + 1, h)))
+            .map(|(i, h)| (i, h.score - 4, h.at))
+            // The best, the first field of those as good.
+            .rev()
+            .max_by_key(|(_, score, _)| *score);
+        let (field, score, at) = match (in_name, elsewhere) {
+            (Some(hit), Some(other)) if other.1 > hit.score => other,
+            (Some(hit), _) => (0, hit.score, hit.at),
+            (None, Some(other)) => other,
             (None, None) => return None,
-        }
+        };
+        all.score += score;
+        all.at[field].extend(at);
     }
-    all.at.sort_unstable();
-    all.at.dedup();
+    for at in &mut all.at {
+        at.sort_unstable();
+        at.dedup();
+    }
     Some(all)
 }
 
@@ -235,6 +257,24 @@ mod tests {
         // Only the name's letters are marked.
         assert_eq!(elsewhere.at, Vec::<usize>::new());
         assert_eq!(named.at, vec![0, 1, 2, 3]);
+    }
+
+    #[test]
+    fn each_word_marks_the_field_that_found_it() {
+        // A row found by its folder marks the folder, not the name.
+        let fields = ["api-tests", "claude", "harbour"];
+        let hit = find_each_field("hrbr", &fields).unwrap();
+        assert_eq!(hit.at, vec![vec![], vec![], vec![0, 2, 3, 6]]);
+        assert_eq!(hit.score, find_fields("hrbr", &fields).unwrap().score);
+        // Two words, two fields: the name and the program.
+        let hit = find_each_field("api cla", &fields).unwrap();
+        assert_eq!(hit.at, vec![vec![0, 1, 2], vec![0, 1, 2], vec![]]);
+        // Where the name has it, the name is marked.
+        let hit = find_each_field("tests", &["api-tests", "tests"]).unwrap();
+        assert_eq!(hit.at, vec![vec![4, 5, 6, 7, 8], vec![]]);
+        // Of two other fields as good, the first is marked.
+        let hit = find_each_field("docs", &["x", "docs", "docs"]).unwrap();
+        assert_eq!(hit.at, vec![vec![], vec![0, 1, 2, 3], vec![]]);
     }
 
     #[test]

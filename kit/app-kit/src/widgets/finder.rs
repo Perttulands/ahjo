@@ -26,7 +26,8 @@ pub struct Choice {
     /// Its name, as the row shows it and the search reads it first.
     pub label: String,
     /// Other words the search finds it by (its program, folder, device),
-    /// each a field of its own; not drawn.
+    /// each a field of its own; drawn only where the typed words found it
+    /// there, its letters marked.
     pub also: Vec<String>,
     /// A few dim words at the row's end.
     pub detail: Option<String>,
@@ -169,23 +170,23 @@ impl Finder {
         self.cursor = self.top();
     }
 
-    /// The rows shown, best first, each with the letters of its name that
-    /// matched.
-    pub fn shown(&self) -> Vec<(&Choice, Vec<usize>)> {
+    /// The rows shown, best first, each with the letters that matched in
+    /// each of its fields: its name's first, then those of `also`.
+    pub fn shown(&self) -> Vec<(&Choice, Vec<Vec<usize>>)> {
         let words = &self.words;
         let kept: Vec<&Choice> = self
             .choices
             .iter()
             .filter(|c| self.chip.is_none_or(|k| c.kinds.contains(&k)))
             .collect();
-        let mut found: Vec<(usize, fuzzy::Hit)> = kept
+        let mut found: Vec<(usize, fuzzy::FieldsHit)> = kept
             .iter()
             .enumerate()
             .filter_map(|(i, c)| {
                 let fields: Vec<&str> = std::iter::once(c.label.as_str())
                     .chain(c.also.iter().map(String::as_str))
                     .collect();
-                fuzzy::find_fields(words, &fields).map(|h| (i, h))
+                fuzzy::find_each_field(words, &fields).map(|h| (i, h))
             })
             .collect();
         found.sort_by_key(|(i, h)| (std::cmp::Reverse(h.score), *i));
@@ -238,7 +239,7 @@ impl Finder {
         &self,
         i: usize,
         c: &Choice,
-        at: &[usize],
+        at: &[Vec<usize>],
         first: bool,
         t: &Theme,
         cx: &mut Context<Self>,
@@ -311,19 +312,48 @@ impl Finder {
                     .text_ellipsis()
                     .when(first, |d| d.text_color(t.text2))
                     .when(chosen, |d| d.font_weight(FontWeight::SEMIBOLD))
-                    .child(marked_letters(&c.label, at, t)),
+                    .child(marked_letters(&c.label, at.first().map_or(&[], |a| a), t)),
             )
-            .when_some(c.detail.clone(), |d, words| {
-                d.child(
-                    div()
-                        .flex_none()
-                        .text_size(px(size::SMALL))
-                        .text_color(t.dim)
-                        .child(words),
-                )
-            })
+            .children(found_by(c, at, t))
             .into_any_element()
     }
+}
+
+/// What a row says at its end, each with its letters marked: the other
+/// fields the typed words found it by, then its detail, marked too where
+/// it is one of them.
+fn row_end<'a>(c: &'a Choice, at: &'a [Vec<usize>]) -> Vec<(&'a str, &'a [usize])> {
+    let mut detail: Option<(&str, &[usize])> = c.detail.as_deref().map(|d| (d, &[][..]));
+    let mut out = vec![];
+    for (field, marks) in c.also.iter().zip(at.iter().skip(1)) {
+        if marks.is_empty() {
+            continue;
+        }
+        match detail {
+            Some((words, _)) if words == field => detail = Some((words, marks)),
+            _ => out.push((field.as_str(), marks.as_slice())),
+        }
+    }
+    out.extend(detail);
+    out
+}
+
+fn found_by(c: &Choice, at: &[Vec<usize>], t: &Theme) -> Vec<AnyElement> {
+    row_end(c, at)
+        .into_iter()
+        .map(|(words, marks)| {
+            div()
+                .flex_none()
+                .max_w(px(size::FINDER_FOUND_BY))
+                .overflow_hidden()
+                .whitespace_nowrap()
+                .text_ellipsis()
+                .text_size(px(size::SMALL))
+                .text_color(t.dim)
+                .child(marked_letters(words, marks, t))
+                .into_any_element()
+        })
+        .collect()
 }
 
 /// `label` with the letters at `at` (character indices) in the accent.
@@ -347,7 +377,7 @@ pub fn marked_letters(label: &str, at: &[usize], t: &Theme) -> StyledText {
 impl Render for Finder {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let t = theme(cx).clone();
-        let shown: Vec<(Choice, Vec<usize>)> = self
+        let shown: Vec<(Choice, Vec<Vec<usize>>)> = self
             .shown()
             .into_iter()
             .map(|(c, at)| (c.clone(), at))
@@ -513,4 +543,32 @@ pub fn marks_after(ev: &FinderEvent, marked: &mut Vec<SharedString>) {
 pub fn focus(finder: &Entity<Finder>, window: &mut Window, cx: &mut App) {
     let q = finder.read(cx).query.clone();
     crate::widgets::field::focus(&q, window, cx);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_row_found_by_another_field_shows_it_marked() {
+        let c = Choice {
+            label: "api-tests".into(),
+            also: vec!["claude".into(), "harbour".into(), "box".into()],
+            detail: Some("claude".into()),
+            ..Default::default()
+        };
+        let none: Vec<usize> = vec![];
+        // Found by its name: the detail alone, unmarked.
+        let at = vec![vec![0], none.clone(), none.clone(), none.clone()];
+        assert_eq!(row_end(&c, &at), vec![("claude", &[][..])]);
+        // Found by its folder: the folder, marked, before the detail.
+        let at = vec![none.clone(), none.clone(), vec![0, 2], none.clone()];
+        assert_eq!(
+            row_end(&c, &at),
+            vec![("harbour", &[0, 2][..]), ("claude", &[][..])]
+        );
+        // Found by its program, which the detail says: the detail marked.
+        let at = vec![none.clone(), vec![0, 1], none.clone(), none];
+        assert_eq!(row_end(&c, &at), vec![("claude", &[0, 1][..])]);
+    }
 }

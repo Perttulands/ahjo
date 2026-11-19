@@ -51,6 +51,9 @@ pub mod size {
     /// it is caught, across the edge.
     pub const PANEL_GRIP: f32 = 6.;
     pub const PANEL_GRIP_HIT: f32 = 16.;
+    /// The widest a finder row's other words (a folder that found it) are
+    /// drawn at its end.
+    pub const FINDER_FOUND_BY: f32 = 160.;
     /// A tab card's gap above it.
     pub const TAB_CARD_TOP: f32 = 6.;
     /// The bar under the shown tab, and its inset from the tab's sides.
