@@ -86,6 +86,9 @@ pub struct Pair {
     pub hunk: Option<String>,
     /// Taken out, put in or changed, not kept as it was.
     pub changed: bool,
+    /// On the first line where one side is left empty: how many lines the
+    /// other side has there with nothing against them.
+    pub alone: usize,
 }
 
 pub fn pairs(rows: &[Row]) -> Vec<Pair> {
@@ -100,6 +103,7 @@ pub fn pairs(rows: &[Row]) -> Vec<Pair> {
                     new: None,
                     hunk: Some(r.text.clone()),
                     changed: false,
+                    alone: 0,
                 });
                 i += 1;
             }
@@ -109,6 +113,7 @@ pub fn pairs(rows: &[Row]) -> Vec<Pair> {
                     new: r.new.map(|n| (n, r.text.clone())),
                     hunk: None,
                     changed: false,
+                    alone: 0,
                 });
                 i += 1;
             }
@@ -124,12 +129,14 @@ pub fn pairs(rows: &[Row]) -> Vec<Pair> {
                     .take_while(|r| r.kind == Kind::Add)
                     .collect();
                 i += came.len();
-                for k in 0..gone.len().max(came.len()) {
+                let (paired, most) = (gone.len().min(came.len()), gone.len().max(came.len()));
+                for k in 0..most {
                     out.push(Pair {
                         old: gone.get(k).map(|r| (r.old.unwrap_or(0), r.text.clone())),
                         new: came.get(k).map(|r| (r.new.unwrap_or(0), r.text.clone())),
                         hunk: None,
                         changed: true,
+                        alone: if k == paired { most - paired } else { 0 },
                     });
                 }
             }
@@ -295,18 +302,19 @@ mod tests {
                     p.old.as_ref().map(|o| o.0),
                     p.new.as_ref().map(|n| n.0),
                     p.changed,
+                    p.alone,
                 )
             })
             .collect();
         assert_eq!(
             sides,
             [
-                (None, None, false),
-                (Some(3), Some(3), false),
-                (Some(4), Some(4), true),
-                (Some(5), None, true),
-                (Some(6), Some(5), false),
-                (None, Some(6), true),
+                (None, None, false, 0),
+                (Some(3), Some(3), false, 0),
+                (Some(4), Some(4), true, 0),
+                (Some(5), None, true, 1),
+                (Some(6), Some(5), false, 0),
+                (None, Some(6), true, 1),
             ]
         );
         assert_eq!(

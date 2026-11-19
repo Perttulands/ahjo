@@ -14,8 +14,6 @@ use std::rc::Rc;
 const SIDE_BY_SIDE: f32 = 960.;
 /// A changed line's wash.
 const WASH: f32 = 0.12;
-/// The side a line is missing from: a faint fill where it would be.
-const ABSENT: f32 = 0.03;
 /// A line's height at text `text` pixels: the code's.
 fn line(text: f32) -> f32 {
     (text * 1.55).round()
@@ -456,25 +454,44 @@ fn pair_row(
             .into_any_element();
     }
     let side = |line: &Option<(usize, String)>, colour: gpui::Hsla, new: bool| {
-        let present = line.is_some();
+        // A side with no line here: the other side's lines went out (or
+        // came in) with nothing in their place. It stays empty, and its
+        // first line says so.
+        let Some(line) = line else {
+            return div()
+                .flex_1()
+                .min_w_0()
+                .h_full()
+                .flex()
+                .items_center()
+                .when(p.alone > 0, |d| {
+                    let n = p.alone;
+                    let lines = if n == 1 { "line" } else { "lines" };
+                    let what = if new { "removed" } else { "added" };
+                    // Under the numbers' column on the side, its words
+                    // where the code would start; the side keeps its half.
+                    d.child(div().flex_none().w(px(number_width(digits, text))))
+                        .child(
+                            div()
+                                .min_w_0()
+                                .overflow_hidden()
+                                .whitespace_nowrap()
+                                .text_size(px(size::SMALL * text / size::TEXT))
+                                .text_color(t.dim)
+                                .child(format!("{n} {lines} {what}")),
+                        )
+                });
+        };
         div()
             .flex_1()
             .min_w_0()
             .h_full()
             .flex()
             .items_center()
-            .when(p.changed && present, |d| d.bg(alpha(colour, WASH)))
-            // A side with no line here: the other side's lines came in or
-            // went out.
-            .when(!present, |d| d.bg(alpha(t.text, ABSENT)))
+            .when(p.changed, |d| d.bg(alpha(colour, WASH)))
             .text_color(if p.changed { t.text } else { t.text2 })
-            .child(number(t, line.as_ref().map(|l| l.0), digits, text))
-            .child(text_cell(
-                t,
-                line.as_ref().map_or("", |l| l.1.as_str()),
-                line.as_ref().and_then(|l| sides.paint(l.0, new)),
-                left,
-            ))
+            .child(number(t, Some(line.0), digits, text))
+            .child(text_cell(t, &line.1, sides.paint(line.0, new), left))
     };
     line_box(text)
         .child(side(&p.old, t.error, false))
