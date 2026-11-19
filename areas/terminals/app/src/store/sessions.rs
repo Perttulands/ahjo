@@ -136,14 +136,25 @@ pub fn search<'a>(sessions: &'a [Session], query: &str) -> Vec<&'a Session> {
     let mut found: Vec<(i64, usize, &Session)> = sessions
         .iter()
         .enumerate()
-        .filter_map(|(i, s)| {
-            let program = s.command.as_deref().map(program).unwrap_or("");
-            let fields = [s.name.as_str(), program, folder(s)];
-            fuzzy::find_fields(query, &fields).map(|h| (h.score, i, s))
-        })
+        .filter_map(|(i, s)| fuzzy::find_fields(query, &fields(s)).map(|h| (h.score, i, s)))
         .collect();
     found.sort_by_key(|(score, i, _)| (std::cmp::Reverse(*score), *i));
     found.into_iter().map(|(_, _, s)| s).collect()
+}
+
+/// What [`search`] finds a session by: its name, its program, its folder.
+fn fields(s: &Session) -> [&str; 3] {
+    let program = s.command.as_deref().map(program).unwrap_or("");
+    [s.name.as_str(), program, folder(s)]
+}
+
+/// The letters of the session's name (character indices) that the words
+/// typed found it by, as [`search`] reads them; none where only its
+/// program or folder has them.
+pub fn found_in_name(s: &Session, query: &str) -> Vec<usize> {
+    fuzzy::find_each_field(query, &fields(s))
+        .and_then(|h| h.at.into_iter().next())
+        .unwrap_or_default()
 }
 
 /// The last name of the session's folder, "" if it reports none.
@@ -389,8 +400,36 @@ pub fn remember(recent: &mut Vec<String>, id: &str, limit: usize) {
 
 /// Shorten a rail name at hyphen boundaries, preserving its identifying end.
 pub fn rail_name(name: &str, max: usize) -> String {
+    match rail_cut(name, max) {
+        Some((head, tail)) => format!("{}…{}", &name[..head], &name[tail..]),
+        None => name.to_owned(),
+    }
+}
+
+/// [`rail_name`], with the letters at `at` in `name` (character indices,
+/// as [`found_in_name`] gives them) where they stand in what it keeps.
+pub fn rail_name_marked(name: &str, max: usize, at: &[usize]) -> (String, Vec<usize>) {
+    let Some((head, tail)) = rail_cut(name, max) else {
+        return (name.to_owned(), at.to_vec());
+    };
+    let kept = name[..head].chars().count();
+    let from = name[..tail].chars().count();
+    let marks = at
+        .iter()
+        .filter_map(|&i| match i {
+            i if i < kept => Some(i),
+            i if i >= from => Some(i - from + kept + 1),
+            _ => None,
+        })
+        .collect();
+    (rail_name(name, max), marks)
+}
+
+/// Where [`rail_name`] cuts `name`: the end of the head it keeps and the
+/// start of its tail, in bytes, with `…` between; none if it is kept whole.
+fn rail_cut(name: &str, max: usize) -> Option<(usize, usize)> {
     if name.chars().count() <= max || max < 2 {
-        return name.to_owned();
+        return None;
     }
     let boundaries: Vec<usize> = name.match_indices('-').map(|(i, _)| i + 1).collect();
     let tail_start = boundaries
@@ -402,15 +441,8 @@ pub fn rail_name(name: &str, max: usize) -> String {
         .unwrap_or(0);
     let tail = &name[tail_start..];
     if tail.chars().count() + 1 >= max {
-        let tail: String = name
-            .chars()
-            .rev()
-            .take(max - 1)
-            .collect::<Vec<_>>()
-            .into_iter()
-            .rev()
-            .collect();
-        return format!("…{tail}");
+        let from = name.char_indices().rev().nth(max - 2).map_or(0, |(i, _)| i);
+        return Some((0, from));
     }
     let budget = max - 1 - tail.chars().count();
     let prefix_end = boundaries
@@ -418,7 +450,7 @@ pub fn rail_name(name: &str, max: usize) -> String {
         .copied()
         .rfind(|&i| i < tail_start && name[..i].chars().count() <= budget)
         .unwrap_or(0);
-    format!("{}…{tail}", &name[..prefix_end])
+    Some((prefix_end, tail_start))
 }
 
 /// A name split for tail-preserving truncation, as CHROTE's
@@ -708,6 +740,33 @@ mod tests {
             "ahjo-…fin-terminals"
         );
         assert_eq!(rail_name("short", 22), "short");
+    }
+
+    #[test]
+    fn the_letters_that_found_a_session_are_marked_where_its_shortened_name_keeps_them() {
+        let mut a = s("ahjo-move-fin-terminals");
+        a.command = Some("claude".into());
+        a.cwd = Some("/srv/harbour".into());
+        // The name's letters, not its program's or its folder's.
+        assert_eq!(found_in_name(&a, "fin"), vec![10, 11, 12]);
+        assert_eq!(found_in_name(&a, "hrbr"), Vec::<usize>::new());
+        assert_eq!(found_in_name(&a, "ahjo clau"), vec![0, 1, 2, 3]);
+        // "ahjo-…fin-terminals": the head and the tail keep their letters,
+        // the tail's moved up to after the ellipsis; the cut ones go.
+        let (label, at) = rail_name_marked(&a.name, 22, &[0, 5, 10, 14]);
+        assert_eq!(label, "ahjo-…fin-terminals");
+        assert_eq!(at, vec![0, 6, 10]);
+        let chars: Vec<char> = label.chars().collect();
+        assert_eq!((chars[0], chars[6], chars[10]), ('a', 'f', 't'));
+        // A tail too long for a head: the last letters alone.
+        let (label, at) = rail_name_marked("averyveryverylongname", 8, &[0, 20]);
+        assert_eq!(label, "…ongname");
+        assert_eq!(at, vec![7]);
+        // A name kept whole keeps its marks.
+        assert_eq!(
+            rail_name_marked("short", 22, &[1]),
+            ("short".into(), vec![1])
+        );
     }
 
     #[test]

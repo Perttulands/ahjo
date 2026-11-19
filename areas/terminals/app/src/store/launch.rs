@@ -183,10 +183,13 @@ pub fn folder_list(value: &str, editing: bool) -> FolderList {
 
 /// A row of the Folder field's list: the folder, and what Tab writes, which
 /// for a listed folder ends in its separator so the next Tab lists inside.
-#[derive(Debug, PartialEq)]
+#[derive(Debug, Default, PartialEq)]
 pub struct Suggestion {
     pub path: String,
     pub complete: String,
+    /// The letters of `path` (character indices) that what was typed found
+    /// it by, to be marked.
+    pub at: Vec<usize>,
 }
 
 /// The folders in `dir` whose name starts with `segment`, case aside, in
@@ -201,9 +204,13 @@ pub fn inside(dir: &str, segment: &str, folders: &[String]) -> Vec<Suggestion> {
     plain
         .into_iter()
         .chain(dotted)
-        .map(|n| Suggestion {
-            path: format!("{dir}{n}"),
-            complete: format!("{dir}{n}{sep}"),
+        .map(|n| {
+            let from = dir.chars().count();
+            Suggestion {
+                path: format!("{dir}{n}"),
+                complete: format!("{dir}{n}{sep}"),
+                at: (from..from + segment.chars().count()).collect(),
+            }
         })
         .collect()
 }
@@ -235,22 +242,54 @@ pub fn matching(fragment: &str, offered: &[String]) -> Vec<Suggestion> {
     if fragment.trim().is_empty() {
         return vec![];
     }
-    let mut found: Vec<(&String, i64)> = offered
+    let mut found: Vec<(&String, fuzzy::Hit)> = offered
         .iter()
         .filter_map(|path| {
-            let parts: Vec<&str> = path.split(['/', '\\']).filter(|p| !p.is_empty()).collect();
-            let tail = parts[parts.len().saturating_sub(2)..].join("/");
-            fuzzy::find(fragment, &tail).map(|hit| (path, hit.score))
+            let (tail, at) = last_two(path);
+            let hit = fuzzy::find(fragment, &tail)?;
+            let marks = hit.at.iter().filter_map(|&i| at.get(i).copied()).collect();
+            Some((
+                path,
+                fuzzy::Hit {
+                    score: hit.score,
+                    at: marks,
+                },
+            ))
         })
         .collect();
-    found.sort_by_key(|entry| std::cmp::Reverse(entry.1));
+    found.sort_by_key(|entry| std::cmp::Reverse(entry.1.score));
     found
         .into_iter()
-        .map(|(f, _)| Suggestion {
+        .map(|(f, hit)| Suggestion {
             path: f.clone(),
             complete: f.clone(),
+            at: hit.at,
         })
         .collect()
+}
+
+/// The last two names of `path`, joined by `/`, as a fragment searches
+/// them, with where each of their characters stands in `path`.
+fn last_two(path: &str) -> (String, Vec<usize>) {
+    let mut parts: Vec<(usize, &str)> = vec![];
+    let mut from = 0;
+    for part in path.split(['/', '\\']) {
+        if !part.is_empty() {
+            parts.push((from, part));
+        }
+        from += part.chars().count() + 1;
+    }
+    let mut tail = String::new();
+    let mut at = vec![];
+    for (n, (from, part)) in parts[parts.len().saturating_sub(2)..].iter().enumerate() {
+        if n > 0 {
+            tail.push('/');
+            at.push(from - 1);
+        }
+        tail.push_str(part);
+        at.extend(*from..from + part.chars().count());
+    }
+    (tail, at)
 }
 
 /// A folder as the launcher writes it: under `home`, the node's own home
@@ -537,6 +576,27 @@ mod tests {
         assert_eq!(first("wealth").as_deref(), Some("/home/operator/wealth/"));
         assert_eq!(first("kor").as_deref(), Some("/srv/games/korpi"));
         assert_eq!(first("KOR").as_deref(), Some("/srv/games/korpi"));
+    }
+
+    #[test]
+    fn a_suggestion_marks_the_letters_that_found_it_in_its_path() {
+        let offered = [
+            "/home/operator/repos/VSK-Zone".to_string(),
+            r"C:\repos\same".to_string(),
+        ];
+        let marked = |q| -> Vec<String> {
+            let found = matching(q, &offered);
+            let s = &found[0];
+            let chars: Vec<char> = s.path.chars().collect();
+            s.at.iter().map(|&i| chars[i].to_string()).collect()
+        };
+        assert_eq!(marked("rep VSK"), ["r", "e", "p", "V", "S", "K"]);
+        assert_eq!(marked("rpsm"), ["r", "p", "s", "m"]);
+        let found = matching("rep VSK", &offered);
+        assert_eq!(found[0].at, vec![15, 16, 17, 21, 22, 23]);
+        // Listed inside a folder, the start that was typed.
+        let inside = inside("/srv/", "ch", &["chrote".to_string()]);
+        assert_eq!(inside[0].at, vec![5, 6]);
     }
 
     /// A project under the home folder is found once, however the launcher

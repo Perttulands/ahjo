@@ -14,6 +14,7 @@ use crate::store::devices;
 use crate::store::sessions::{self, Key};
 use crate::store::workspace::LinkState;
 use crate::theme::{Theme, size, theme};
+use ahjo_app_kit::widgets::finder::marked_letters;
 use ahjo_app_kit::widgets::kit::{self, Kind};
 use ahjo_app_kit::widgets::{field, pane};
 use ahjo_terminals_contract::{AgentEvent, EventKind, Session};
@@ -332,6 +333,7 @@ impl Terminals {
         };
         let (k1, k2, k3) = (key.clone(), key.clone(), key.clone());
         let name = s.name.clone();
+        let found = sessions::found_in_name(s, &self.rail_search.read(cx).text);
         let id = gpui::SharedString::from(format!("row-{}", key.text()));
         let selector = id.to_string();
         let group = id.clone();
@@ -408,7 +410,7 @@ impl Terminals {
                             .overflow_hidden()
                             .whitespace_nowrap()
                             .child(
-                                name_label(&s.name)
+                                name_label(&s.name, &found, t)
                                     .id(gpui::SharedString::from(format!("name-{}", key.text())))
                                     .tooltip(kit::tip(name.clone())),
                             )
@@ -805,28 +807,44 @@ pub(super) fn running_mark(t: &Theme, s: &Session, cx: &gpui::App) -> Option<Any
 }
 
 /// A session's name as CHROTE's `SessionLabel` draws it: the head clipped
-/// with an ellipsis when the row is narrow, the tail always whole.
-fn name_label(name: &str) -> gpui::Div {
-    clipped_name(&sessions::rail_name(name, size::RAIL_NAME_COLUMNS))
+/// with an ellipsis when the row is narrow, the tail always whole, and the
+/// letters at `at` that the search found it by marked.
+fn name_label(name: &str, at: &[usize], t: &Theme) -> gpui::Div {
+    let (label, at) = sessions::rail_name_marked(name, size::RAIL_NAME_COLUMNS, at);
+    let (head, tail) = sessions::split_name(&label);
+    let cut = head.chars().count();
+    let (in_head, in_tail): (Vec<usize>, Vec<usize>) = at.iter().partition(|&&i| i < cut);
+    let in_tail: Vec<usize> = in_tail.into_iter().map(|i| i - cut).collect();
+    clipped(
+        (!head.is_empty()).then(|| marked_letters(head, &in_head, t)),
+        marked_letters(tail, &in_tail, t),
+    )
 }
 
 /// A name that gives way from its head when its room is short, its tail
 /// (what tells sessions apart) always whole.
 pub(super) fn clipped_name(label: &str) -> gpui::Div {
     let (head, tail) = sessions::split_name(label);
+    clipped(
+        (!head.is_empty()).then(|| head.to_string()),
+        tail.to_string(),
+    )
+}
+
+fn clipped(head: Option<impl IntoElement>, tail: impl IntoElement) -> gpui::Div {
     div()
         .min_w_0()
         .flex()
-        .when(!head.is_empty(), |d| {
+        .when_some(head, |d, head| {
             d.child(
                 div()
                     .min_w_0()
                     .overflow_hidden()
                     .text_ellipsis()
-                    .child(head.to_string()),
+                    .child(head),
             )
         })
-        .child(div().flex_none().child(tail.to_string()))
+        .child(div().flex_none().child(tail))
 }
 
 /// The badges as CHROTE's row has them: one glyph each, windows and panes

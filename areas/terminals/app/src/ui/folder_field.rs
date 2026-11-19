@@ -14,6 +14,7 @@ use crate::theme::theme;
 use ahjo_app_kit::Host;
 use ahjo_app_kit::host::Request;
 use ahjo_app_kit::widgets::field::{FieldEvent, TextField};
+use ahjo_app_kit::widgets::finder::marked_letters;
 use ahjo_app_kit::widgets::kit;
 use ahjo_core::NodeId;
 use gpui::{Context, Entity, EventEmitter, Window, div, prelude::*, px};
@@ -163,6 +164,7 @@ impl FolderField {
                 .map(|p| Suggestion {
                     path: p.clone(),
                     complete: p.clone(),
+                    at: vec![],
                 })
                 .collect(),
             FolderList::Matching => {
@@ -435,7 +437,7 @@ impl Render for FolderField {
                             .min_w_0()
                             .overflow_hidden()
                             .text_ellipsis_middle()
-                            .child(row.path.clone()),
+                            .child(marked_letters(&row.path, &row.at, &t)),
                     )
                     .on_click(cx.listener(move |f, _, _, cx| f.pick(&path, cx))),
             );
