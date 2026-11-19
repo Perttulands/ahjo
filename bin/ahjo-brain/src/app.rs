@@ -1232,7 +1232,16 @@ impl BrainApp {
         let (Some(data), Some(p)) = (self.data.clone(), self.reading) else {
             return;
         };
-        let text = crate::swarm::reference(&data.corpus.pages[p].path);
+        let path = &data.corpus.pages[p].path;
+        // Another machine's page is named where it lives; its file there
+        // is not known here.
+        let text = match &self.place.from {
+            Some(r) => format!("brain page {path} on {}", r.name),
+            None => crate::swarm::reference(&crate::swarm::file_on_node(
+                &data.root.to_string_lossy(),
+                path,
+            )),
+        };
         let sent = cx.background_spawn(async move {
             let node = crate::swarm::node();
             crate::swarm::send(&node, &text)

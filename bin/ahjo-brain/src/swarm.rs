@@ -64,9 +64,23 @@ fn this_machine() -> Option<String> {
     Some(name.trim().to_lowercase()).filter(|n| !n.is_empty())
 }
 
-/// What one sends of a page: what an agent reads it by.
-pub fn reference(path: &str) -> String {
-    format!("brain page {path}")
+/// What one sends of a page: its file, as the Brain tab sent it, which an
+/// agent on the node opens.
+pub fn reference(file: &str) -> String {
+    format!("brain page {file}")
+}
+
+/// The file of the page at `path` under `root` as an agent on the node
+/// reads it: the brain through a WSL share (Windows) is the distribution's
+/// own path.
+pub fn file_on_node(root: &str, path: &str) -> String {
+    for share in [r"\\wsl.localhost\", r"\\wsl$\"] {
+        if let Some((_, inside)) = root.strip_prefix(share).and_then(|r| r.split_once('\\')) {
+            let inside = inside.replace('\\', "/");
+            return format!("/{}/{path}", inside.trim_end_matches('/'));
+        }
+    }
+    format!("{}/{path}", root.trim_end_matches(['/', '\\']))
 }
 
 /// Hands `text` to Swarm's Send. Blocking: run it off the UI.
@@ -132,7 +146,25 @@ mod tests {
         );
         let old = br#"{"jsonrpc":"2.0","id":1,"error":{"code":-32602,"message":"Unknown tool: view_send"}}"#;
         assert!(read_answer(old).unwrap_err().contains("older"));
-        assert_eq!(reference("knowledge/a/b.md"), "brain page knowledge/a/b.md");
+        assert_eq!(
+            reference("/srv/data/context/knowledge/a/b.md"),
+            "brain page /srv/data/context/knowledge/a/b.md"
+        );
+        assert_eq!(
+            file_on_node(
+                r"\\wsl.localhost\Ubuntu\srv\data\context",
+                "knowledge/a/b.md"
+            ),
+            "/srv/data/context/knowledge/a/b.md"
+        );
+        assert_eq!(
+            file_on_node(r"\\wsl$\Ubuntu\srv\data\context\", "knowledge/a/b.md"),
+            "/srv/data/context/knowledge/a/b.md"
+        );
+        assert_eq!(
+            file_on_node("/srv/data/context/", "knowledge/a/b.md"),
+            "/srv/data/context/knowledge/a/b.md"
+        );
     }
 
     #[test]
