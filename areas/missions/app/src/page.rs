@@ -42,17 +42,11 @@ const APPLY_AFTER: std::time::Duration = std::time::Duration::from_millis(600);
 const BESIDE_W: f32 = 560.;
 /// How much a dialog's backdrop dims the page behind it.
 const SCRIM: f32 = 0.7;
-/// The least a page shows the list beside the board in: under it the
-/// board's cards would be drawn too small to read.
-const NARROW: f32 = size::LIST + 460.;
-/// The least a detail shows Flow and the board side by side in: Flow at
-/// its measure and a board wide enough to see the mission's shape. Below
-/// it the detail shows one of them, with Edit to switch.
-const SPLIT_AT: f32 = size::MEASURE + BOARD_MIN;
-const BOARD_MIN: f32 = 560.;
-/// Flow's share of a split detail, kept between the measure and the
-/// reading width; the board takes the rest.
-const FLOW_SHARE: f32 = 0.45;
+/// Flow, the mission in words, as a panel beside its board.
+const FLOW_W: f32 = 380.;
+/// The least a detail opens with Flow beside the board in: the board keeps
+/// room to show a mission's shape. Narrower, Flow waits behind its toggle.
+const FLOW_AT: f32 = FLOW_W + 680.;
 pub struct MissionsPage {
     host: Host,
     focus: FocusHandle,
@@ -61,10 +55,10 @@ pub struct MissionsPage {
     navigator: navigator::Navigator,
     manage: manage::Manage,
     canvas: canvas::View,
-    mission_canvas_mode: bool,
-    /// The board stands beside Flow, read only, the whole mission fitted.
-    beside: bool,
-    /// The step chosen in Flow or on the board beside it, marked on both.
+    /// Flow beside the board, as the operator last left it; until then,
+    /// open when the detail is wide enough for both.
+    flow_open: Option<bool>,
+    /// The step chosen in Flow or on the board, marked on both.
     flow_focus: Option<String>,
     flow_scroll: gpui::ScrollHandle,
     /// Where each step stood in Flow at the last draw, to scroll to it.
@@ -187,7 +181,7 @@ impl MissionsPage {
             navigator: navigator::Navigator::new(cx),
             manage: manage::Manage::default(),
             canvas: canvas::View::default(),
-            mission_canvas_mode: false,
+            flow_open: None,
             editor_more: false,
             note_paper: notes::NotesUi::default(),
             run: run::RunUi::new(cx),
@@ -232,7 +226,6 @@ impl MissionsPage {
             wanted: None,
             carry: None,
             reveal_card: None,
-            beside: false,
             flow_focus: None,
             flow_scroll: Default::default(),
             flow_places: Default::default(),
@@ -560,7 +553,7 @@ impl MissionsPage {
         self.run = run::RunUi::new(cx);
         if self.state.selected.as_ref() != Some(&(node.clone(), slug.clone())) {
             self.canvas = canvas::View::default();
-            self.mission_canvas_mode = false;
+            self.flow_focus = None;
             self.run_tried = false;
         }
         self.reveal_card = None;
@@ -572,10 +565,9 @@ impl MissionsPage {
         self.state.mission = None;
         self.state.mission_etag = None;
         self.validation.clear();
-        self.state.layout_etag = None;
+        self.state.clear_layout();
         self.editor = None;
         self.history = undo::History::default();
-        self.state.layout = None;
         self.notes = None;
         self.note_id = None;
         self.note_base.clear();
@@ -615,8 +607,7 @@ impl MissionsPage {
                             if layout {
                                 match serde_json::from_slice::<LayoutResponse>(&answer.body) {
                                     Ok(v) => {
-                                        page.state.layout_etag = Some(v.layout.etag);
-                                        page.state.layout = Some(v.layout.layout);
+                                        page.state.set_layout(v.layout);
                                     }
                                     Err(e) => page.state.error = Some(e.to_string()),
                                 }
@@ -662,8 +653,10 @@ impl MissionsPage {
         }
     }
     fn edit_step(&mut self, id: &str, cx: &mut Context<Self>) {
-        // The card being edited stays in view beside the editor.
+        // The card being edited stays in view beside the editor, and is
+        // the one marked in Flow when the editor closes.
         self.canvas.follow(Some(id.to_owned()));
+        self.flow_focus = Some(id.to_owned());
         if self.writing || self.editor.as_ref().is_some_and(|e| e.busy) {
             return;
         }
@@ -1053,8 +1046,7 @@ impl MissionsPage {
                                 }
                                 page.state.mission_etag = v.mission.etag;
                                 page.state.mission = Some(v.mission.mission);
-                                page.state.layout_etag = Some(v.layout.etag);
-                                page.state.layout = Some(v.layout.layout);
+                                page.state.set_layout(v.layout);
                                 page.state.error = None;
                                 page.created_step(&mission, cx);
                                 if std::mem::take(&mut page.staff_pending) {
@@ -1180,9 +1172,9 @@ impl MissionsPage {
                                 page.note_etag = None;
                                 page.note.update(cx, |f, cx| f.set("", false, cx));
                                 // In Flow a note kept is read in place;
-                                // the field goes. The canvas keeps its
+                                // the field goes. The board keeps its
                                 // thread open.
-                                if !page.mission_canvas_mode {
+                                if page.note_paper.in_flow {
                                     page.note_paper.open = None;
                                 }
                             } else if sent_id.is_some() && !delete {
@@ -1418,51 +1410,28 @@ impl MissionsPage {
             "model":self.model.read(cx).text, "effort":self.effort.read(cx).text}});
         self.write_board(patch, WriteMode::Edit, cx);
     }
+    /// Arrange: the places go back to Arrange's own, so the board lays its
+    /// cards out in reading rows for its room, in run order, each keeping
+    /// room for its notes, and keeps doing so as the mission grows, until a
+    /// card is placed by hand. Undone as a move is, and framed again.
     fn arrange(&mut self, cx: &mut Context<Self>) {
         if self.writing {
             return;
         }
-        let (Some((node, slug)), Some(etag)) =
-            (self.state.selected.clone(), self.state.layout_etag.clone())
-        else {
+        let Some(m) = self.state.mission.clone() else {
             return;
         };
-        let path = format!("{}/layout", mission_path(&slug));
-        let request = Request::new("PATCH", NodeId(node), path)
-            .header("If-Match", etag)
-            .json(&json!({"arrange":true}));
-        self.writing = true;
-        let asked = self.host.request(request, cx);
-        let generation = self.generation;
-        cx.spawn(async move |this, cx| {
-            let result = asked.await;
-            let _ = this.update(cx, |page, cx| {
-                if page.generation != generation {
-                    return;
-                }
-                page.writing = false;
-                match result {
-                    Ok(a) if a.ok() => match serde_json::from_slice::<LayoutResponse>(&a.body) {
-                        Ok(v) => {
-                            page.state.layout_etag = Some(v.layout.etag);
-                            page.state.layout = Some(v.layout.layout);
-                        }
-                        Err(e) => page.state.error = Some(e.to_string()),
-                    },
-                    Ok(a) => {
-                        page.state.error = Some(
-                            serde_json::from_slice::<ErrorResponse>(&a.body)
-                                .map(|e| format!("{}: {}", e.error.code, e.error.message))
-                                .unwrap_or_else(|_| a.error_text()),
-                        )
-                    }
-                    Err(e) => page.state.error = Some(format!("{}: {}", e.code, e.message)),
-                }
-                cx.notify();
-            });
-        })
-        .detach();
-        cx.notify();
+        let before = self
+            .shown_board(&m, false)
+            .cards
+            .iter()
+            .map(|c| ahjo_missions_contract::LayoutNode {
+                id: c.id.clone(),
+                x: c.x.round() as i64,
+                y: c.y.round() as i64,
+            })
+            .collect();
+        self.canvas_layout(json!({"arrange":true}), before, true, cx);
     }
     fn delete_card(&mut self, cx: &mut Context<Self>) {
         let Some(ed) = &mut self.editor else {
@@ -1638,24 +1607,7 @@ impl Render for MissionsPage {
         } else {
             size::SIDE_SHUT
         };
-        // In a narrow page the board takes the whole page, so its cards are
-        // drawn large enough to read; the list comes back with Done.
-        let narrow = f32::from(window.viewport_size().width) - side < NARROW;
         let room = f32::from(window.viewport_size().width) - side - size::LIST;
-        let beside = room >= SPLIT_AT
-            && !self.mission_canvas_mode
-            && self.run.selected.is_none()
-            && self
-                .state
-                .mission
-                .as_ref()
-                .is_some_and(|m| !m.input_cards.is_empty() || !m.formations.is_empty());
-        if beside != self.beside {
-            // The one board is framed again for where it now stands.
-            self.beside = beside;
-            self.canvas.reopen();
-        }
-        let mut board = false;
         let list = self.render_navigator(&t, cx);
         let error = self.state.error.clone().map(|e| {
             div()
@@ -1698,87 +1650,59 @@ impl Render for MissionsPage {
                 None => pane::detail(&t, "missions-run", head, body.children(error)),
             }
         } else if let Some(m) = self.state.mission.clone() {
-            if self.mission_canvas_mode {
-                board = true;
-                let head = self.edit_head(&t, &m, cx);
-                let todo = self.todo_band(&t, &m);
-                pane::detail_frame(
-                    head,
+            // A mission opens on its board; Flow, the mission in words,
+            // stands beside it when there is room, or behind its toggle.
+            // One panel at a time: an open step's editor takes its place.
+            let empty = m.input_cards.is_empty() && m.formations.is_empty();
+            let flow_shown =
+                self.editor.is_none() && self.flow_open.unwrap_or(room >= FLOW_AT && !empty);
+            let head = self.mission_head(&t, &m, flow_shown, cx);
+            let todo = self.todo_band(&t, &m);
+            let board = div()
+                .flex_1()
+                .min_w_0()
+                .h_full()
+                .flex()
+                .flex_col()
+                // Below the board, so neither covers a card nor moves the
+                // board when it comes or goes.
+                .child(
                     div()
-                        .size_full()
-                        .flex()
-                        .flex_col()
-                        // Below the board, so neither covers a card nor
-                        // moves the board when it comes or goes.
-                        .child(
-                            div()
-                                .id("missions-board-scroll")
-                                .flex_1()
-                                .min_h_0()
-                                .overflow_scroll()
-                                .child(self.render_canvas(&t, &m, false, cx)),
-                        )
-                        .children(
-                            error.map(|e| div().flex_none().px(px(PAD)).py(px(TAB_GAP)).child(e)),
-                        )
-                        .children(todo),
+                        .id("missions-board")
+                        .debug_selector(|| "missions-board".into())
+                        .flex_1()
+                        .min_h_0()
+                        .overflow_hidden()
+                        .child(self.render_canvas(&t, &m, false, cx)),
                 )
-            } else if beside {
-                let (head, body) = self.mission_detail(&t, &m, cx);
-                let flow_w = (room * FLOW_SHARE).clamp(size::MEASURE, size::READING);
-                pane::detail_frame(
-                    head,
-                    div()
-                        .size_full()
-                        .flex()
-                        .child(
-                            div()
-                                .id(gpui::SharedString::from(format!(
-                                    "missions-detail-{}",
-                                    m.slug
-                                )))
-                                .debug_selector(|| "missions-flow-beside".into())
-                                .track_scroll(&self.flow_scroll)
-                                .flex_none()
-                                .w(px(flow_w))
-                                .h_full()
-                                .overflow_y_scroll()
-                                .child(
-                                    div()
-                                        .p(px(size::PAD))
-                                        .flex()
-                                        .flex_col()
-                                        .gap(px(size::SECTION_GAP))
-                                        .children(error)
-                                        .child(body),
-                                ),
-                        )
-                        .child(
-                            div()
-                                .debug_selector(|| "missions-board-beside".into())
-                                .flex_1()
-                                .min_w_0()
-                                .h_full()
-                                .border_l_1()
-                                .border_color(t.divider)
-                                .child(self.render_canvas(&t, &m, true, cx)),
-                        ),
-                )
-            } else {
-                let (head, body) = self.mission_detail(&t, &m, cx);
-                pane::detail(
-                    &t,
-                    // Each mission keeps its own scroll; another opens at its top.
-                    gpui::SharedString::from(format!("missions-detail-{}", m.slug)),
-                    head,
-                    div()
-                        .flex()
-                        .flex_col()
-                        .gap(px(size::SECTION_GAP))
-                        .children(error)
-                        .child(body),
-                )
-            }
+                .children(error.map(|e| div().flex_none().px(px(PAD)).py(px(TAB_GAP)).child(e)))
+                .children(todo);
+            let flow = flow_shown.then(|| {
+                let body = self.mission_flow(&t, &m, cx);
+                div()
+                    .id(gpui::SharedString::from(format!(
+                        "missions-detail-{}",
+                        m.slug
+                    )))
+                    .debug_selector(|| "missions-flow".into())
+                    .track_scroll(&self.flow_scroll)
+                    .flex_none()
+                    .w(px(FLOW_W))
+                    .h_full()
+                    .overflow_y_scroll()
+                    .border_l_1()
+                    .border_color(t.divider)
+                    .bg(t.surface)
+                    .child(
+                        div()
+                            .p(px(size::PAD))
+                            .flex()
+                            .flex_col()
+                            .gap(px(size::SECTION_GAP))
+                            .child(body),
+                    )
+            });
+            pane::detail_frame(head, div().size_full().flex().child(board).children(flow))
         } else if let Some(error) = error {
             let retry = self.state.selected.is_some().then(|| {
                 pane::act(&t, "retry-mission-definition", "Try again")
@@ -1841,12 +1765,7 @@ impl Render for MissionsPage {
         let start_form = self.run_start_form(&t, window, cx);
         let attempts_form = self.attempts_form(&t, cx);
         let stop_form = self.stop_form(&t, cx);
-        let frame = if board && narrow {
-            div().size_full().flex().bg(t.bg).child(detail)
-        } else {
-            pane::page(&t, list, detail)
-        };
-        frame
+        pane::page(&t, list, detail)
             .id("missions-root")
             .track_focus(&self.focus)
             .relative()
@@ -1858,7 +1777,7 @@ impl Render for MissionsPage {
                 if (key.modifiers.control || key.modifiers.platform) && (key.key == "z" || key.key == "y") && window.focused(cx).is_some_and(|focus| focus == page.focus) {
                     page.step_history(key.key == "y" || key.modifiers.shift, cx);
                     cx.stop_propagation();
-                } else if let Some(zoom) = ahjo_app_kit::zoom::from_key(key).filter(|_| page.mission_canvas_mode && window.focused(cx).is_some_and(|focus| focus == page.focus)) {
+                } else if let Some(zoom) = ahjo_app_kit::zoom::from_key(key).filter(|_| page.state.mission.is_some() && window.focused(cx).is_some_and(|focus| focus == page.focus)) {
                     // The canvas zooms as every surface does; Ctrl+0 goes
                     // back to the view it opened at.
                     match zoom {

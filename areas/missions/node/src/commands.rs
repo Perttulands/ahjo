@@ -390,8 +390,21 @@ fn notes(edit: wire::NotesEdit) -> Result<Value, Error> {
         edit.notes, edit.etag,
     ))
 }
-pub(super) fn layout(edit: wire::LayoutEdit) -> Result<Value, Error> {
+/// Whether a mission's places are still Arrange's own, or it has none:
+/// nobody placed a card by hand, so an agent's additions are arranged with
+/// the rest and a view may lay the cards out for its own room.
+pub(super) fn arranged(mission: &wire::Mission, layout: &wire::Layout) -> bool {
+    let place = |nodes: &[wire::LayoutNode]| {
+        let mut v: Vec<_> = nodes.iter().map(|n| (n.id.clone(), n.x, n.y)).collect();
+        v.sort();
+        v
+    };
+    layout.nodes.is_empty()
+        || place(&ahjo_mission_engine::arrange(mission, layout).nodes) == place(&layout.nodes)
+}
+pub(super) fn layout(mission: &wire::Mission, edit: wire::LayoutEdit) -> Result<Value, Error> {
     value(wire::document::LayoutDocument {
+        arranged: arranged(mission, &edit.layout),
         layout: edit.layout,
         etag: edit.etag,
     })
@@ -659,8 +672,10 @@ async fn call(m: Missions, name: &str, a: Value) -> Result<Value, Error> {
             Ok(note_receipt(node, edited, &current.notes))
         }
         "layout_show" => {
-            let edit = m.store.layout_edit(required(&a, "mission")?)?;
-            Ok(json!({"node":node,"layout":layout(edit)?}))
+            let id = required(&a, "mission")?;
+            let edit = m.store.layout_edit(id)?;
+            let mission = m.store.mission_edit(id)?.mission;
+            Ok(json!({"node":node,"layout":layout(&mission, edit)?}))
         }
         "layout_edit" => {
             let id = required(&a, "mission")?;
@@ -670,8 +685,8 @@ async fn call(m: Missions, name: &str, a: Value) -> Result<Value, Error> {
                 .ok_or_else(|| bad("change must be an object"))?;
             let current = m.store.layout_edit(id)?;
             let etag = optional(&a, "etag", &current.etag)?;
+            let mission = m.store.mission_edit(id)?.mission;
             let patch = if change["arrange"] == true {
-                let mission = m.store.read_mission(id)?;
                 LayoutPatch::Nodes(ahjo_mission_engine::arrange(&mission, &current.layout).nodes)
             } else if let Some(v) = change.get("nodes") {
                 LayoutPatch::Nodes(serde_json::from_value(v.clone()).map_err(bad)?)
@@ -682,7 +697,7 @@ async fn call(m: Missions, name: &str, a: Value) -> Result<Value, Error> {
             };
             let edited = m.store.patch_layout(id, etag, patch)?;
             m.changed();
-            Ok(json!({"node":node,"layout":layout(edited)?}))
+            Ok(json!({"node":node,"layout":layout(&mission, edited)?}))
         }
         "mission_run" | "formation_run" => start(m, name, &a).await,
         "run_list" => Ok(

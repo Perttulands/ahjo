@@ -767,7 +767,9 @@ pub fn call(m: &Missions, name: &str, input: &Value) -> std::result::Result<Valu
             m.store
                 .patch_layout(selector, &current_layout.etag, LayoutPatch::Nodes(nodes))?;
         m.changed();
-        return Ok(json!({"node":m.node,"layout":super::commands::layout(result)?}));
+        return Ok(
+            json!({"node":m.node,"layout":super::commands::layout(&current.mission, result)?}),
+        );
     }
     if (name == "mission_input" || name == "mission_output") && args.pos.len() == 1 {
         let id = selected_input(&before, None).map_err(bad)?;
@@ -814,17 +816,8 @@ pub fn call(m: &Missions, name: &str, input: &Value) -> std::result::Result<Valu
     }
     // A mission still laid out as Arrange lays it out stays that way as an
     // agent adds to it; one a person has placed by hand keeps their places.
-    let arranged = {
-        let layout = m.store.layout_edit(selector)?.layout;
-        let place = |nodes: &[wire::LayoutNode]| {
-            let mut v: Vec<_> = nodes.iter().map(|n| (n.id.clone(), n.x, n.y)).collect();
-            v.sort();
-            v
-        };
-        layout.nodes.is_empty()
-            || place(&ahjo_mission_engine::arrange(&current.mission, &layout).nodes)
-                == place(&layout.nodes)
-    };
+    let arranged =
+        super::commands::arranged(&current.mission, &m.store.layout_edit(selector)?.layout);
     let change = json!({operation:fields});
     let patch = wire::patch::decode(&change).map_err(bad)?;
     let result = m.store.patch(

@@ -541,7 +541,12 @@ async fn a_mission_built_through_commands_stays_arranged() {
         v.sort();
         v
     };
-    let built = places(&call("layout_show", json!({"mission":"line"})).await);
+    let shown = call("layout_show", json!({"mission":"line"})).await;
+    assert_eq!(
+        shown["layout"]["arranged"], true,
+        "the layout says it is as Arrange lays it out"
+    );
+    let built = places(&shown);
     assert_eq!(built.len(), 4);
     let arranged = places(&call("mission_arrange", json!({"mission":"line"})).await);
     assert_eq!(
@@ -557,6 +562,16 @@ async fn a_mission_built_through_commands_stays_arranged() {
         end.as_str(),
     ];
     assert!(ids.windows(2).all(|w| x(w[0]) < x(w[1])));
+    // A card a person moved is theirs: the layout no longer says arranged.
+    call(
+        "mission_move",
+        json!({"mission":"line","card":ids[1],"x":x(ids[1]) + 40,"y":500}),
+    )
+    .await;
+    let moved = call("layout_show", json!({"mission":"line"})).await;
+    assert_eq!(moved["layout"]["arranged"], false);
+    let rearranged = call("mission_arrange", json!({"mission":"line"})).await;
+    assert_eq!(rearranged["layout"]["arranged"], true);
     node.stop().await;
 }
 

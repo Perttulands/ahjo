@@ -61,6 +61,7 @@ fn mission_layout_and_edit_documents_use_http_names() {
             ..Default::default()
         },
         etag: "l".into(),
+        arranged: true,
     };
     let edit = EditResponse {
         mission: response.mission,
@@ -110,7 +111,7 @@ fn remaining_envelopes_and_queries_round_trip() {
     round::<EditLayout>(json!({"arrange":true}));
     round::<EditLayout>(json!({"edges":[{"id":"e","lane":"top"}]}));
     round::<LayoutResponse>(
-        json!({"layout":{"schema":1,"missionId":"m","missionRev":1,"nodes":[],"edges":[],"etag":"e"}}),
+        json!({"layout":{"schema":1,"missionId":"m","missionRev":1,"nodes":[],"edges":[],"etag":"e","arranged":true}}),
     );
     round::<GateRequestResponse>(
         json!({"request":{"gateId":"g","requestedSeq":2,"criterion":"Ready?","input":{"text":"yes","truncated":false}}}),

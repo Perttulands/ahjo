@@ -33,9 +33,22 @@ pub struct Store {
     pub mission_etag: Option<String>,
     pub layout_etag: Option<String>,
     pub layout: Option<Layout>,
+    /// The places are Arrange's own (or none): the board lays its cards out
+    /// for the room it is shown in until a card is placed by hand.
+    pub layout_arranged: bool,
     pub error: Option<String>,
 }
 impl Store {
+    pub fn set_layout(&mut self, doc: ahjo_missions_contract::document::LayoutDocument) {
+        self.layout_etag = Some(doc.etag);
+        self.layout = Some(doc.layout);
+        self.layout_arranged = doc.arranged;
+    }
+    pub fn clear_layout(&mut self) {
+        self.layout_etag = None;
+        self.layout = None;
+        self.layout_arranged = false;
+    }
     /// Resolves a reveal on a named node, or across nodes in live-node order.
     pub fn find_reveal(
         &self,

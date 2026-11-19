@@ -121,8 +121,13 @@ fn tagged_mission(v: ahjo_missions_contract::Mission, etag: &str) -> Value {
     })
     .expect("mission serializes")
 }
-fn layout_value(v: ahjo_missions_contract::Layout, etag: &str) -> Value {
+fn layout_value(
+    mission: &ahjo_missions_contract::Mission,
+    v: ahjo_missions_contract::Layout,
+    etag: &str,
+) -> Value {
     serde_json::to_value(ahjo_missions_contract::document::LayoutDocument {
+        arranged: crate::commands::arranged(mission, &v),
         layout: v,
         etag: etag.into(),
     })
@@ -255,9 +260,10 @@ async fn edit(
         m.changed();
     }
     let layout = m.store.layout_edit(&id)?;
+    let layout = layout_value(&e.mission, layout.layout, &layout.etag);
     let prior = mission(before.mission);
     let current = tagged_mission(e.mission, &e.etag);
-    let mut body = json!({"mission":current,"layout":layout_value(layout.layout,&layout.etag)});
+    let mut body = json!({"mission":current,"layout":layout});
     for (op, list, key) in [
         ("createInputCard", "inputCards", "inputCard"),
         ("createFormation", "formations", "formation"),
@@ -387,8 +393,9 @@ async fn edit_notes(
 }
 async fn layout(State(m): State<Missions>, Path(id): Path<String>) -> ResultResponse {
     let e = m.store.layout_edit(&id)?;
+    let mission = m.store.mission_edit(&id)?.mission;
     Ok(tagged(
-        json!({"layout":layout_value(e.layout,&e.etag)}),
+        json!({"layout":layout_value(&mission, e.layout,&e.etag)}),
         &e.etag,
     ))
 }
@@ -399,10 +406,10 @@ async fn edit_layout(
     input: JsonBody<Value>,
 ) -> ResultResponse {
     let v = body(input, "bad_request")?;
+    let mission = m.store.mission_edit(&id)?.mission;
     let p = if v["arrange"].as_bool() == Some(true) {
-        let e = m.store.mission_edit(&id)?;
         let l = m.store.layout_edit(&id)?;
-        LayoutPatch::Nodes(ahjo_mission_engine::arrange(&e.mission, &l.layout).nodes)
+        LayoutPatch::Nodes(ahjo_mission_engine::arrange(&mission, &l.layout).nodes)
     } else if let Some(nodes) = v.get("nodes") {
         LayoutPatch::Nodes(serde_json::from_value(nodes.clone()).map_err(|e| bad(e.to_string()))?)
     } else if let Some(edges) = v.get("edges") {
@@ -413,7 +420,7 @@ async fn edit_layout(
     let e = m.store.patch_layout(&id, etag(&h), p)?;
     m.changed();
     Ok(tagged(
-        json!({"layout":layout_value(e.layout,&e.etag)}),
+        json!({"layout":layout_value(&mission, e.layout,&e.etag)}),
         &e.etag,
     ))
 }
