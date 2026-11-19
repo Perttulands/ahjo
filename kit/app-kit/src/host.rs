@@ -412,6 +412,15 @@ impl Host {
             .unwrap_or_else(|| Err(Error::new("closed", "The app is closing.")))
     }
 
+    /// [`Host::ask`], and this page stays shown: the page that answers
+    /// draws over it, where that page is live here (its panel is open on
+    /// this page). Otherwise the answering page is shown, as for an ask.
+    pub fn ask_over(&self, ask: Ask, cx: &mut App) -> Result<(), Error> {
+        let from = self.page;
+        self.update(cx, |h, cx| h.ask_over(from, ask, cx))
+            .unwrap_or_else(|| Err(Error::new("closed", "The app is closing.")))
+    }
+
     /// The view an answer put beside this page, if one is open there.
     pub fn beside(&self, cx: &App) -> Option<AnyView> {
         self.read(cx, |h| h.beside(self.page)).flatten()

@@ -84,10 +84,13 @@ pub enum HubEvent {
         body: Vec<u8>,
     },
     /// Page `to` answers this, which page `from` asked (`""`: the shell).
+    /// `over`: `from` stays shown where `to` is live on it, and `to`
+    /// answers over it ([`crate::Host::ask_over`]).
     Ask {
         to: &'static str,
         from: &'static str,
         ask: Ask,
+        over: bool,
     },
     /// Show this page.
     Show(&'static str),
@@ -865,6 +868,27 @@ impl Hub {
         ask: Ask,
         cx: &mut Context<Self>,
     ) -> Result<(), Error> {
+        self.ask_from(from, ask, false, cx)
+    }
+
+    /// [`Hub::ask`], answered over page `from` where its answerer is live
+    /// there.
+    pub fn ask_over(
+        &mut self,
+        from: &'static str,
+        ask: Ask,
+        cx: &mut Context<Self>,
+    ) -> Result<(), Error> {
+        self.ask_from(from, ask, true, cx)
+    }
+
+    fn ask_from(
+        &mut self,
+        from: &'static str,
+        ask: Ask,
+        over: bool,
+        cx: &mut Context<Self>,
+    ) -> Result<(), Error> {
         let to = self
             .answers
             .iter()
@@ -872,7 +896,12 @@ impl Hub {
             .map(|(id, _)| *id);
         match to {
             Some(to) => {
-                cx.emit(HubEvent::Ask { to, from, ask });
+                cx.emit(HubEvent::Ask {
+                    to,
+                    from,
+                    ask,
+                    over,
+                });
                 Ok(())
             }
             None => {

@@ -50,6 +50,10 @@ pub struct Shell {
     pub(crate) veils: crate::veil::Veils,
     /// The wheel's part of a step toward the app's zoom.
     pub(crate) app_wheel: std::rc::Rc<std::cell::Cell<ahjo_app_kit::zoom::Wheel>>,
+    /// A page answering over another ([`HubEvent::Ask`]'s `over`): the
+    /// answerer's index and the asker's. Leaving the asker tells the
+    /// answerer it is hidden, so what it opened over the asker goes too.
+    pub(crate) over: Option<(usize, usize)>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -209,6 +213,7 @@ impl Shell {
             status_expiry: None,
             veils: Default::default(),
             app_wheel: Default::default(),
+            over: None,
             _subscriptions: subscriptions,
         }
     }
@@ -251,6 +256,12 @@ impl Shell {
             return;
         }
         let old = self.shown.replace(i);
+        if let Some((answerer, asker)) = self.over.take()
+            && i != asker
+            && i != answerer
+        {
+            self.pages[answerer].shown(false, window, cx);
+        }
         if let Some(old) = old {
             self.pages[old].shown(false, window, cx);
             self.sync_channels(old, cx);
@@ -308,10 +319,19 @@ impl Shell {
                     log::warn!("a frame of kind {kind:#04x} from {node} that no page takes");
                 }
             }
-            HubEvent::Ask { to, from, ask } => {
+            HubEvent::Ask {
+                to,
+                from,
+                ask,
+                over,
+            } => {
                 if let Some(i) = self.index_of(to) {
-                    if !ask.beside() {
+                    let over = *over && self.hub.read(cx).lends(to);
+                    if !ask.beside() && !over {
                         self.show(i, window, cx);
+                    }
+                    if over && let Some(f) = self.index_of(from) {
+                        self.over = Some((i, f));
                     }
                     self.pages[i].answer(ask.clone(), from, window, cx);
                 }

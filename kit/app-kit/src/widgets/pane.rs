@@ -330,6 +330,7 @@ pub fn act(t: &Theme, id: impl Into<ElementId>, text: impl Into<SharedString>) -
 /// Send: hands `reference` to a session (the focused one, as Send to
 /// Session aims) through [`Ask::Send`]. The same words in the same place
 /// on every page: last before a head's own actions, or at a row's end.
+/// The page stays shown, with Send over it ([`Host::ask_over`]).
 pub fn send(t: &Theme, id: impl Into<ElementId>, host: &Host, reference: String) -> Stateful<Div> {
     let host = host.clone();
     act(t, id, "Send")
@@ -339,7 +340,7 @@ pub fn send(t: &Theme, id: impl Into<ElementId>, host: &Host, reference: String)
                 reference: reference.clone(),
                 target: None,
             };
-            if let Err(e) = host.ask(ask, cx) {
+            if let Err(e) = host.ask_over(ask, cx) {
                 host.report(Status::failure(format!("Not sent: {}", e.message)), cx);
             }
         })

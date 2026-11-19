@@ -92,6 +92,25 @@ impl Render for Toy {
             )
             .child(
                 div()
+                    .id("toy-send-over")
+                    .debug_selector(|| "toy-send-over".into())
+                    .w(px(80.))
+                    .h(px(30.))
+                    .child("Send here")
+                    .on_click({
+                        let host = host.clone();
+                        move |_, _, cx| {
+                            let ask = Ask::Send {
+                                reference: REFERENCE.into(),
+                                target: None,
+                            };
+                            host.ask_over(ask, cx)
+                                .expect("the Sessions page answers it");
+                        }
+                    }),
+            )
+            .child(
+                div()
                     .id("toy-send-beta")
                     .debug_selector(|| "toy-send-beta".into())
                     .w(px(80.))
@@ -459,6 +478,42 @@ fn a_page_hands_a_reference_into_a_session_through_send(cx: &mut TestAppContext)
     until(cx, "the reference's output in the session", |cx| {
         shown(cx).contains("sent-42")
     });
+    let _ = std::fs::remove_dir_all(settings.parent().expect("its folder"));
+}
+
+#[gpui::test]
+fn send_asked_over_a_page_leaves_that_page_shown(cx: &mut TestAppContext) {
+    let Some(running) = start("terminals-page-send-over") else {
+        return;
+    };
+    let (shell, cx, settings) = open_with_alpha(&running, "over", cx);
+    click(cx, "tab-toy".into());
+    until(cx, "the toy page to show", |cx| {
+        shell.read_with(cx, |s, _| s.shown_page()) == Some("toy")
+    });
+    click(cx, "toy-send-over".into());
+    // Send opens over the page that asked, which stays shown (Work's
+    // Send, DESIGN.md: sending an item keeps the operator on Work).
+    until(cx, "the Send drawer", |cx| {
+        cx.debug_bounds("send-go").is_some()
+    });
+    assert_eq!(shell.read_with(cx, |s, _| s.shown_page()), Some("toy"));
+    click(cx, "send-go".into());
+    until(cx, "the drawer to close once sent", |cx| {
+        cx.debug_bounds("send-go").is_none()
+    });
+    assert_eq!(shell.read_with(cx, |s, _| s.shown_page()), Some("toy"));
+    // Left open over the page, it is the Sessions page's own drawer
+    // there too.
+    click(cx, "toy-send-over".into());
+    until(cx, "the Send drawer again", |cx| {
+        cx.debug_bounds("send-go").is_some()
+    });
+    click(cx, "tab-sessions-0".into());
+    until(cx, "the Sessions page", |cx| {
+        shell.read_with(cx, |s, _| s.shown_page()) == Some("sessions")
+    });
+    assert!(cx.debug_bounds("send-go").is_some());
     let _ = std::fs::remove_dir_all(settings.parent().expect("its folder"));
 }
 
