@@ -76,6 +76,8 @@ pub struct ScheduledPage {
     pub(crate) scroll: ScrollHandle,
     /// The chosen task moved by a key: the next draw scrolls to it.
     pub(crate) reveal: bool,
+    /// The week as last worked out, and what it was worked out from.
+    pub(crate) week: std::cell::RefCell<Option<(u64, std::rc::Rc<crate::week::Week>)>>,
     /// Itself, for its keys as the keys panel runs them.
     me: gpui::WeakEntity<Self>,
 }
@@ -194,6 +196,7 @@ impl ScheduledPage {
             focus: cx.focus_handle(),
             scroll: ScrollHandle::new(),
             reveal: false,
+            week: Default::default(),
             me: cx.weak_entity(),
         }
     }

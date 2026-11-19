@@ -1,7 +1,9 @@
 //! The Scheduled page: what will run when, and how the last run went. The
-//! tasks soonest first in the list, and beside them the chosen task (Edit,
-//! Run now, Pause or Resume, Duplicate, Delete asked twice) or the form
-//! (Prompt, Send to, When, Name). Each node keeps its own tasks and sends
+//! tasks soonest first in the list; beside them the week across every task
+//! (each one's runs over the last day and the next seven, and which two
+//! reach one session close together) over the chosen task (Edit, Run now,
+//! Pause or Resume, Duplicate, Delete asked twice), or the form (Prompt,
+//! Send to, When, Name). Each node keeps its own tasks and sends
 //! them into its own sessions, so a task's sessions are all on one node,
 //! and the list names the device only when tasks stand on more than one.
 //!
@@ -16,6 +18,7 @@ mod page;
 mod state;
 mod tokens;
 mod view;
+mod week;
 
 use ahjo_app_kit::{Mounted, mount};
 use gpui::App;

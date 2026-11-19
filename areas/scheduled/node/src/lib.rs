@@ -28,7 +28,6 @@
 mod commands;
 mod routes;
 mod runner;
-mod schedule;
 mod service;
 mod store;
 

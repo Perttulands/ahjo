@@ -2,50 +2,15 @@
 //! interval and cron, the editor Every, Daily, Weekly and Cron; and the plain
 //! words a task is described in.
 
-use ahjo_scheduled_contract::{Schedule, Target, Task};
+use ahjo_scheduled_contract::{Schedule, Target, Task, schedule};
 use jiff::Timestamp;
 
 use crate::ACTOR;
 
-/// An interval's length in minutes, from `everyMinutes` or `duration`.
+/// An interval's length in minutes, from `everyMinutes` or `duration`, as
+/// the node reads it.
 pub fn interval_minutes(s: &Schedule) -> Option<f64> {
-    if s.every_minutes > 0 {
-        return Some(s.every_minutes as f64);
-    }
-    go_seconds(s.duration.trim())
-        .filter(|s| *s > 0.)
-        .map(|s| s / 60.)
-}
-
-/// A Go duration's seconds (`1h30m`, `90s`), as the node reads it.
-fn go_seconds(text: &str) -> Option<f64> {
-    let mut rest = text.strip_prefix('+').unwrap_or(text);
-    if rest.is_empty() {
-        return None;
-    }
-    let mut seconds = 0.;
-    while !rest.is_empty() {
-        let digits = rest
-            .find(|c: char| !(c.is_ascii_digit() || c == '.'))
-            .unwrap_or(rest.len());
-        let value: f64 = rest[..digits].parse().ok()?;
-        rest = &rest[digits..];
-        let unit_end = rest
-            .find(|c: char| c.is_ascii_digit() || c == '.')
-            .unwrap_or(rest.len());
-        let scale = match &rest[..unit_end] {
-            "ns" => 1e-9,
-            "us" | "µs" | "μs" => 1e-6,
-            "ms" => 1e-3,
-            "s" => 1.,
-            "m" => 60.,
-            "h" => 3600.,
-            _ => return None,
-        };
-        rest = &rest[unit_end..];
-        seconds += value * scale;
-    }
-    Some(seconds)
+    schedule::interval(s).ok().map(|d| d.as_secs_f64() / 60.)
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

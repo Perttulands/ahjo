@@ -1,12 +1,28 @@
 //! When a task fires: an interval, or five cron fields read in an IANA time
 //! zone, as CHROTE's `schedule.go` reads them (both day fields must match;
-//! 7 is Sunday too).
+//! 7 is Sunday too). The node keeps each task's next run by it, and the app
+//! lays out the coming week by it, so both read a schedule the same way.
 
-use ahjo_scheduled_contract::Schedule;
 use jiff::tz::TimeZone;
 use jiff::{SignedDuration, Timestamp};
 
-use crate::Invalid;
+use crate::Schedule;
+
+/// Why a schedule does not read, in words.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Invalid(pub String);
+
+impl Invalid {
+    pub fn new(m: impl Into<String>) -> Invalid {
+        Invalid(m.into())
+    }
+}
+
+impl std::fmt::Display for Invalid {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
 
 /// Trims and defaults the fields, and checks that the trigger can name a
 /// future run.
@@ -44,25 +60,63 @@ pub fn next_run(s: &Schedule, after: Timestamp) -> Result<Timestamp, Invalid> {
     }
     let tz = zone(&s.timezone)?;
     let cron = Cron::parse(&s.expression)?;
-    // The next whole minute, then minute by minute in absolute time, read in
-    // the zone: a minute a clock change skips never matches, as in CHROTE.
-    let minute = after.as_second().div_euclid(60) * 60 + 60;
-    let mut at = Timestamp::from_second(minute).map_err(|_| Invalid::new("time out of range"))?;
-    for _ in 0..5 * 366 * 24 * 60 {
-        let local = at.to_zoned(tz.clone());
-        if cron.matches(&local) {
-            return Ok(at);
-        }
-        at = at
-            .checked_add(SignedDuration::from_mins(1))
-            .map_err(|_| Invalid::new("time out of range"))?;
-    }
-    Err(Invalid::new(
-        "cron expression has no match in the next five years",
-    ))
+    let until = after
+        .checked_add(SignedDuration::from_hours(5 * 366 * 24))
+        .unwrap_or(Timestamp::MAX);
+    cron.next(&tz, after, until)
+        .ok_or_else(|| Invalid::new("cron expression has no match in the next five years"))
 }
 
-fn interval(s: &Schedule) -> Result<SignedDuration, Invalid> {
+/// Every firing in `[from, until)`, the first at `first` where it is known
+/// (a task's `nextRun`, which may differ from the schedule's own reading
+/// after a missed run); at most `most`, which also says when it stopped
+/// short. A schedule that does not read fires never.
+pub fn runs_between(
+    s: &Schedule,
+    first: Option<Timestamp>,
+    from: Timestamp,
+    until: Timestamp,
+    most: usize,
+) -> (Vec<Timestamp>, bool) {
+    let mut out = vec![];
+    let Ok(s) = normalize(s.clone()) else {
+        return (out, false);
+    };
+    let mut at = match first {
+        Some(at) if at >= from => Some(at),
+        _ => from
+            .checked_sub(SignedDuration::from_secs(1))
+            .ok()
+            .and_then(|before| next_run(&s, before).ok()),
+    };
+    if s.kind == "interval" {
+        let Ok(step) = interval(&s) else {
+            return (out, false);
+        };
+        while let Some(t) = at.filter(|t| *t < until) {
+            if out.len() == most {
+                return (out, true);
+            }
+            out.push(t);
+            at = t.checked_add(step).ok();
+        }
+        return (out, false);
+    }
+    let (Ok(tz), Ok(cron)) = (zone(&s.timezone), Cron::parse(&s.expression)) else {
+        return (out, false);
+    };
+    while let Some(t) = at.filter(|t| *t < until) {
+        if out.len() == most {
+            return (out, true);
+        }
+        out.push(t);
+        at = cron.next(&tz, t, until);
+    }
+    (out, false)
+}
+
+/// An interval schedule's length.
+pub fn interval(s: &Schedule) -> Result<SignedDuration, Invalid> {
     if s.every_minutes < 0 {
         return Err(Invalid::new("interval everyMinutes must be positive"));
     }
@@ -159,12 +213,39 @@ impl Cron {
         })
     }
 
-    fn matches(&self, t: &jiff::Zoned) -> bool {
-        self.minute.has(t.minute() as usize)
-            && self.hour.has(t.hour() as usize)
-            && self.day.has(t.day() as usize)
-            && self.month.has(t.month() as usize)
-            && self.week.has(t.weekday().to_sunday_zero_offset() as usize)
+    /// The first minute strictly after `after` and before `until` that
+    /// matches, read in `tz`. It walks absolute minutes, so a minute a
+    /// clock change skips never matches, as in CHROTE; a day or an hour
+    /// that cannot match is stepped over whole.
+    fn next(&self, tz: &TimeZone, after: Timestamp, until: Timestamp) -> Option<Timestamp> {
+        let minute = after.as_second().div_euclid(60) * 60 + 60;
+        let mut at = Timestamp::from_second(minute).ok()?;
+        while at < until {
+            let local = at.to_zoned(tz.clone());
+            let day = self.day.has(local.day() as usize)
+                && self.month.has(local.month() as usize)
+                && self
+                    .week
+                    .has(local.weekday().to_sunday_zero_offset() as usize);
+            if !day {
+                let midnight = local.date().tomorrow().ok()?.to_zoned(tz.clone()).ok()?;
+                at = midnight
+                    .timestamp()
+                    .max(at.checked_add(SignedDuration::from_mins(1)).ok()?);
+                continue;
+            }
+            if !self.hour.has(local.hour() as usize) {
+                at = at
+                    .checked_add(SignedDuration::from_mins(60 - local.minute() as i64))
+                    .ok()?;
+                continue;
+            }
+            if self.minute.has(local.minute() as usize) {
+                return Some(at);
+            }
+            at = at.checked_add(SignedDuration::from_mins(1)).ok()?;
+        }
+        None
     }
 }
 
@@ -313,6 +394,56 @@ mod tests {
         let mut nowhere = helsinki.clone();
         nowhere.timezone = "Mars/Olympus".into();
         assert!(normalize(nowhere).is_err());
+    }
+
+    #[test]
+    fn the_runs_in_a_week_start_at_the_known_next_run_and_stop_at_the_cap() {
+        let from = at("2026-06-27T12:00:00Z");
+        let until = at("2026-07-04T12:00:00Z");
+        // Weekdays at 09:00: Mon 29 to Fri 3, five of them.
+        let (runs, short) = runs_between(&sched("cron", "0 9 * * 1-5", 0), None, from, until, 100);
+        assert_eq!(runs.first(), Some(&at("2026-06-29T09:00:00Z")));
+        assert_eq!(runs.len(), 5);
+        assert!(!short);
+        // An interval counts from the node's next run, not from now.
+        let (runs, _) = runs_between(
+            &sched("interval", "", 60 * 24),
+            Some(at("2026-06-27T18:30:00Z")),
+            from,
+            until,
+            100,
+        );
+        assert_eq!(runs.first(), Some(&at("2026-06-27T18:30:00Z")));
+        assert_eq!(runs.len(), 7);
+        // Every minute is cut short and says so.
+        let (runs, short) = runs_between(&sched("cron", "* * * * *", 0), None, from, until, 50);
+        assert_eq!(runs.len(), 50);
+        assert!(short);
+        // A schedule that does not read fires never.
+        let (runs, _) = runs_between(&sched("cron", "61 * * * *", 0), None, from, until, 50);
+        assert!(runs.is_empty());
+    }
+
+    #[test]
+    fn a_cron_run_falls_on_the_wall_clock_across_a_clock_change() {
+        // Europe/Helsinki goes from +3 to +2 on 2026-10-25 at 04:00.
+        let mut daily = sched("cron", "30 0 * * *", 0);
+        daily.timezone = "Europe/Helsinki".into();
+        let (runs, _) = runs_between(
+            &daily,
+            None,
+            at("2026-10-24T12:00:00Z"),
+            at("2026-10-27T12:00:00Z"),
+            10,
+        );
+        assert_eq!(
+            runs,
+            vec![
+                at("2026-10-24T21:30:00Z"),
+                at("2026-10-25T22:30:00Z"),
+                at("2026-10-26T22:30:00Z"),
+            ]
+        );
     }
 
     #[test]

@@ -165,6 +165,18 @@ pub fn detail_beside(
     aside: Option<AnyElement>,
     narrow: Narrow,
 ) -> Div {
+    framed(
+        t,
+        head,
+        div().id(id),
+        beside(body, aside, narrow),
+        Some(size::MEASURE + size::ASIDE_GAP + size::ASIDE_MAX),
+    )
+}
+
+/// [`detail_beside`]'s two columns on their own, for a detail that puts
+/// something across its whole width above them.
+pub fn beside(body: impl IntoElement, aside: Option<AnyElement>, narrow: Narrow) -> Div {
     let main = div()
         .flex_grow(1.)
         .flex_shrink(1.)
@@ -176,7 +188,7 @@ pub fn detail_beside(
         .gap(px(size::SECTION_GAP))
         .child(body);
     let pair = div().w_full().flex();
-    let pair = match narrow {
+    match narrow {
         // Reversed, the aside's line stands above the body's when the two
         // do not fit side by side.
         Narrow::Above => pair.flex_wrap_reverse(),
@@ -196,14 +208,7 @@ pub fn detail_beside(
             .flex_col()
             .gap(px(size::SECTION_GAP))
             .child(aside)
-    }));
-    framed(
-        t,
-        head,
-        div().id(id),
-        pair,
-        Some(size::MEASURE + size::ASIDE_GAP + size::ASIDE_MAX),
-    )
+    }))
 }
 
 /// Where a [`detail_beside`]'s aside goes when the detail is too narrow

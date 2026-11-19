@@ -35,8 +35,8 @@ use anyhow::Context;
 use jiff::Timestamp;
 use tokio::sync::{Notify, Semaphore, watch};
 
-use crate::schedule;
 use crate::store::{self, Store};
+use ahjo_scheduled_contract::schedule;
 
 /// The kind of event the area records when it holds a task back.
 const EVENT: &str = "scheduled";
@@ -61,6 +61,12 @@ pub struct Invalid(String);
 impl Invalid {
     pub fn new(m: impl Into<String>) -> Invalid {
         Invalid(m.into())
+    }
+}
+
+impl From<schedule::Invalid> for Invalid {
+    fn from(e: schedule::Invalid) -> Invalid {
+        Invalid(e.0)
     }
 }
 
@@ -769,7 +775,7 @@ impl Scheduled {
                 return invalid("target unixUser contains invalid characters");
             }
         }
-        task.schedule = schedule::normalize(task.schedule.clone())?;
+        task.schedule = schedule::normalize(task.schedule.clone()).map_err(Invalid::from)?;
         recompute(task, now)?;
         let labels: HashSet<String> = task.targets.iter().map(Target::label).collect();
         task.session_ids.retain(|label, _| labels.contains(label));

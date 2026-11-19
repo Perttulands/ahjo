@@ -121,7 +121,7 @@ impl ScheduledPage {
 
     /// Every node's tasks in the list's order: the live ones soonest
     /// first, then the paused and the disabled by name.
-    fn ordered(&self) -> Vec<(&str, &Task)> {
+    pub(crate) fn ordered(&self) -> Vec<(&str, &Task)> {
         let mut all: Vec<(&str, &Task)> = self
             .state
             .nodes
@@ -325,20 +325,9 @@ impl ScheduledPage {
                     ),
             )
             .on_click(cx.listener(move |page, e: &ClickEvent, window, cx| {
-                let key = (pick_node.clone(), pick_id.clone());
-                if page.state.form.is_some() {
-                    if !page.state.may_leave(now_ms()) {
-                        cx.notify();
-                        return;
-                    }
-                    page.state.form = None;
-                    page.state.dirty = false;
+                if !page.choose(&pick_node, &pick_id, cx) {
+                    return;
                 }
-                if page.state.selected.as_ref() != Some(&key) {
-                    page.state.notice = None;
-                    page.state.error = None;
-                }
-                page.state.selected = Some(key);
                 if e.click_count() >= 2
                     && let Some(task) = page.state.task(&pick_node, &pick_id).cloned()
                 {
@@ -346,9 +335,44 @@ impl ScheduledPage {
                 } else {
                     window.focus(&page.focus, cx);
                 }
-                cx.notify();
             }))
             .into_any_element()
+    }
+
+    /// Shows a task, leaving the form only as its own rule allows: false
+    /// when it stays.
+    pub(crate) fn choose(&mut self, node: &str, id: &str, cx: &mut Context<Self>) -> bool {
+        let key = (node.to_string(), id.to_string());
+        cx.notify();
+        if self.state.form.is_some() {
+            if !self.state.may_leave(now_ms()) {
+                return false;
+            }
+            self.state.form = None;
+            self.state.dirty = false;
+        }
+        if self.state.selected.as_ref() != Some(&key) {
+            self.state.notice = None;
+            self.state.error = None;
+        }
+        self.state.selected = Some(key);
+        true
+    }
+
+    /// A click that shows a task from the week, its row brought into view.
+    pub(crate) fn chooser(
+        &self,
+        node: &str,
+        id: &str,
+        cx: &mut Context<Self>,
+    ) -> impl Fn(&ClickEvent, &mut Window, &mut App) + 'static {
+        let (node, id) = (node.to_string(), id.to_string());
+        cx.listener(move |page, _: &ClickEvent, window, cx| {
+            if page.choose(&node, &id, cx) {
+                page.reveal = true;
+                window.focus(&page.focus, cx);
+            }
+        })
     }
 
     /// What the last action came to, or why it failed: one line on top of
@@ -541,7 +565,20 @@ impl ScheduledPage {
                 .child(pane::table(t, &RUNS, rows))
                 .into_any_element()
         });
-        pane::detail_beside(t, "scheduled-detail", head, body, runs, pane::Narrow::Below)
+        // The week across every task stands over the chosen one, the whole
+        // detail's width: it answers what will run when.
+        let week = self.week_view(t, (node, task.id.as_str()), cx);
+        pane::detail_wide(
+            t,
+            "scheduled-detail",
+            head,
+            div()
+                .flex()
+                .flex_col()
+                .gap(px(size::SECTION_GAP))
+                .child(week)
+                .child(pane::beside(body, runs, pane::Narrow::Below)),
+        )
     }
 
     /// What the head's "…" offers: the actions a task needs now and then.

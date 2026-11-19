@@ -10,6 +10,8 @@
 
 use std::collections::BTreeMap;
 
+pub mod schedule;
+
 use jiff::Timestamp;
 use serde::{Deserialize, Serialize};
 
