@@ -59,7 +59,7 @@ pub const PASTED_H: f32 = 56.;
 pub const SETTINGS_W: f32 = 860.;
 pub const SECTION_GAP: f32 = 28.;
 pub const SETTINGS_FIELD: f32 = 320.;
-pub const THEME_CARD: f32 = 148.;
+pub const THEME_CARD: f32 = 160.;
 /// The list of his marks before it scrolls.
 pub const MARKS_MAX_H: f32 = 220.;
 /// A queue row's picture.

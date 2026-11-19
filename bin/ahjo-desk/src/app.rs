@@ -198,6 +198,8 @@ pub struct DeskApp {
     pub node_check: Option<Result<String, String>>,
     /// Pictures he pasted still on their way to the desk.
     pub pasting: usize,
+    /// Hands jobs he pressed Done on, until their check comes out.
+    pub checking: std::collections::HashSet<Key>,
     /// The selected mark's words.
     pub mark_note: Entity<TextField>,
     pub selected: Option<String>,
@@ -350,6 +352,7 @@ impl DeskApp {
             node_field,
             node_check: None,
             pasting: 0,
+            checking: Default::default(),
             mark_note,
             selected: None,
             tool: Tool::Look,
@@ -1601,6 +1604,7 @@ impl DeskApp {
                                     .any(|a| &a.id == id && a.round() == *round && a.is_open())
                         });
                         app.drafts_changed |= app.drafts.len() != before;
+                        app.checked(d, cx);
                     }
                     Err(e) => app.desks[d].reach = Reach::Failed(e),
                 }
@@ -1761,6 +1765,65 @@ impl DeskApp {
             .detach();
         }
         self.pictures.get(&key)
+    }
+
+    // ---- Hands jobs ----
+
+    /// Done on the hands job in front: the desk checks `out/`; his words
+    /// go with it.
+    pub fn hands_done(&mut self, cx: &mut Context<Self>) {
+        let Some(key) = self.current.clone() else {
+            return;
+        };
+        let Some(ask) = self.ask(&key).cloned() else {
+            return;
+        };
+        if !ask.is_open() || ask.check.as_ref().is_some_and(|c| c.running) {
+            return;
+        }
+        let base = self.desks[key.0].place.url.clone();
+        let words = self.draft().words.trim().to_string();
+        self.checking.insert(key.clone());
+        cx.spawn(async move |this, cx| {
+            let got = desk::runtime()
+                .spawn(desk::done(base, ask.id.clone(), ask.round(), words))
+                .await
+                .unwrap_or_else(|e| Err(e.to_string()));
+            let _ = this.update(cx, |app, cx| {
+                if let Err(e) = got {
+                    app.checking.remove(&key);
+                    app.say(format!("The check did not start: {e}"), true, cx);
+                }
+                app.refresh(key.0, cx);
+            });
+        })
+        .detach();
+        cx.notify();
+    }
+
+    /// The checks he started on desk `d` that came out: a pass is sent,
+    /// and its agent told; a fail says why.
+    fn checked(&mut self, d: usize, cx: &mut Context<Self>) {
+        let mine: Vec<Key> = self.checking.iter().filter(|k| k.0 == d).cloned().collect();
+        for key in mine {
+            let Some(ask) = self.ask(&key).cloned() else {
+                self.checking.remove(&key);
+                continue;
+            };
+            match &ask.check {
+                Some(c) if c.running => {}
+                Some(c) if c.ok || !ask.is_open() => {
+                    self.checking.remove(&key);
+                    self.say(format!("Done · {} · {}", ask.title, c.summary), false, cx);
+                    self.tell(&ask, cx);
+                }
+                Some(c) => {
+                    self.checking.remove(&key);
+                    self.say(format!("The check did not pass: {}", c.summary), true, cx);
+                }
+                None => {}
+            }
+        }
     }
 
     // ---- Telling the agent ----

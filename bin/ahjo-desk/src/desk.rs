@@ -330,6 +330,21 @@ pub fn same_place(a: &str, b: &str) -> bool {
     norm(a) == norm(b)
 }
 
+/// Done on a hands job: the desk runs its check on `out/`; a pass
+/// answers the ask, and the change feed says how it came out.
+pub async fn done(base: String, id: String, round: u32, words: String) -> Result<(), String> {
+    let body = serde_json::json!({"round": round, "comment": words});
+    request(
+        &base,
+        "POST",
+        &format!("/api/asks/{id}/done"),
+        Some(serde_json::to_vec(&body).map_err(|e| e.to_string())?),
+        Duration::from_secs(20),
+    )
+    .await
+    .map(|_| ())
+}
+
 /// Keeps a picture he pasted on the desk, for his answer to ask `id`: the
 /// desk answers with the name it keeps it under and where.
 pub async fn attach(
@@ -420,6 +435,7 @@ pub fn note(ask: &Ask) -> String {
         .map(|a| match a.verdict.as_str() {
             "pick" => format!("picked {}", a.options.join(", ")),
             "accept" => "looks good".into(),
+            "acknowledge" => "done; the check passed".into(),
             "send back" => "sent it back".into(),
             "elsewhere" => "answered elsewhere".into(),
             "grill" => format!(

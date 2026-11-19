@@ -53,8 +53,9 @@ impl DeskApp {
             .size_full()
             .overflow_y_scroll()
             .flex()
-            .justify_center()
-            .child(page)
+            .flex_col()
+            .items_center()
+            .child(page.flex_none())
             .into_any_element()
     }
 
@@ -63,14 +64,8 @@ impl DeskApp {
         let swarm = ahjo_app_kit::theme::chosen().0;
         let mut grid = div().flex().flex_wrap().gap(px(GAP));
         grid = grid.child(
-            theme_card(
-                t,
-                &swarm,
-                "As in Ahjo Swarm",
-                chosen.is_none(),
-                "theme-swarm",
-            )
-            .on_click(cx.listener(|app, _: &ClickEvent, _, cx| app.set_theme(None, cx))),
+            theme_card(t, &swarm, "As in Swarm", chosen.is_none(), "swarm")
+                .on_click(cx.listener(|app, _: &ClickEvent, _, cx| app.set_theme(None, cx))),
         );
         for d in Direction::ALL {
             let th = Theme::new(d);
@@ -191,12 +186,6 @@ impl DeskApp {
                                     div()
                                         .flex_1()
                                         .min_w_0()
-                                        .px(px(GAP_SMALL))
-                                        .py(px(4.))
-                                        .rounded(px(tokens::RADIUS))
-                                        .border_1()
-                                        .border_color(t.divider)
-                                        .bg(t.bg)
                                         .child(self.node_field.clone()),
                                 )
                                 .child(button(t, "node-check", "Check", Kind::Plain).on_click(

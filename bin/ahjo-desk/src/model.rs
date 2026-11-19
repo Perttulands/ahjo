@@ -89,6 +89,23 @@ pub struct Answer {
     pub attachments: Vec<Attached>,
 }
 
+/// The check a hands job's Done runs on its `out/`.
+#[derive(Clone, Debug, Default, Deserialize, PartialEq)]
+#[serde(default)]
+pub struct Check {
+    pub running: bool,
+    pub ok: bool,
+    pub summary: String,
+    pub lines: Vec<CheckLine>,
+}
+
+#[derive(Clone, Debug, Default, Deserialize, PartialEq)]
+#[serde(default)]
+pub struct CheckLine {
+    pub ok: bool,
+    pub text: String,
+}
+
 /// A picture he pasted into an answer, as the desk keeps it.
 #[derive(Clone, Debug, Default, Deserialize, PartialEq)]
 #[serde(default)]
@@ -175,6 +192,10 @@ pub struct Ask {
     pub questions: Vec<Question>,
     pub doc: Option<Doc>,
     pub folder: Option<String>,
+    /// A hands job's folders in CHROTE Files (`in`, `out`) and its guide.
+    pub links: BTreeMap<String, String>,
+    /// A hands job's check: running, or how it came out.
+    pub check: Option<Check>,
     pub answer: Option<Answer>,
     pub comments: Vec<Comment>,
     pub marks: Vec<Mark>,

@@ -188,8 +188,10 @@ pub fn payload(ask: &Ask, draft: &Draft, verdict: Verdict, marks: usize) -> Resu
             Verdict::Send if !words.is_empty() || !pictures.is_empty() => {
                 Ok(with("send back", vec![]))
             }
-            Verdict::Send => Err("Say what stops the job, or mark it answered elsewhere".into()),
-            _ => Err("A job for your hands is done where the job is (Open on web)".into()),
+            Verdict::Send => {
+                Err("Press Done once out/ holds the work, or say what stops the job".into())
+            }
+            _ => Err("A job for your hands is done with Done: the desk checks out/".into()),
         },
         Form::Open => match verdict {
             Verdict::LooksGood => Ok(with("accept", vec![])),

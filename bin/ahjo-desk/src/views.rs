@@ -1007,6 +1007,23 @@ impl DeskApp {
                         .on_click(cx.listener(|app, _: &ClickEvent, _, cx| app.toggle_unclear(cx))),
                 );
             }
+        } else if form == Form::Hands {
+            for (side, words) in [("in", "Open in/"), ("out", "Open out/"), ("guide", "Guide")] {
+                if let Some(url) = ask.links.get(side).cloned() {
+                    has_top = true;
+                    top = top.child(
+                        chip(
+                            t,
+                            SharedString::from(format!("link-{side}")),
+                            words,
+                            false,
+                            None,
+                        )
+                        .tooltip(kit::tip(url.clone()))
+                        .on_click(move |_, _, cx| cx.open_url(&url)),
+                    );
+                }
+            }
         } else if form == Form::Open && !ask.options.is_empty() {
             has_top = true;
             top = top.child(div().text_size(px(META)).text_color(t.dim).child("Lean to"));
@@ -1041,11 +1058,34 @@ impl DeskApp {
             (_, Some(i)) => format!("Send · {}", model::letter(&ask.options, i)),
             _ => "Send".to_string(),
         };
+        let hands = form == Form::Hands;
+        let running = ask.check.as_ref().is_some_and(|c| c.running);
         let mut actions = div()
             .flex()
             .flex_wrap()
             .items_center()
             .gap(px(GAP_SMALL))
+            // A hands job is done by doing it: Done checks out/, and his
+            // words go with it.
+            .when(hands, |d| {
+                d.child(
+                    button(
+                        t,
+                        "done",
+                        if running {
+                            "Checking out/…"
+                        } else {
+                            "Done · check out/"
+                        },
+                        Kind::Primary,
+                    )
+                    .when(running, |b| b.opacity(0.6))
+                    .tooltip(kit::tip(
+                        "The desk checks what you put in out/; a pass answers the job",
+                    ))
+                    .on_click(cx.listener(|app, _: &ClickEvent, _, cx| app.hands_done(cx))),
+                )
+            })
             .child(
                 action(
                     t,
@@ -1056,7 +1096,7 @@ impl DeskApp {
                     } else {
                         "Ctrl Enter"
                     },
-                    Kind::Primary,
+                    if hands { Kind::Plain } else { Kind::Primary },
                 )
                 .when(self.sending, |d| d.opacity(0.5))
                 .on_click(cx.listener(|app, _: &ClickEvent, window, cx| {
@@ -1085,13 +1125,16 @@ impl DeskApp {
                     })),
             );
         }
-        actions = actions.child(div().flex_1()).child(
-            button(t, "elsewhere", "Answered elsewhere", Kind::Quiet)
-                .tooltip(kit::tip(
-                    "You told the agent in its session or by voice: this closes the ask with your words as a note",
-                ))
-                .on_click(cx.listener(|app, _: &ClickEvent, window, cx| app.send(Verdict::Elsewhere, window, cx))),
-        );
+        // The way out stands on the line under the actions, quiet, so the
+        // actions keep one line in the column.
+        let elsewhere = button(t, "elsewhere", "Answered elsewhere", Kind::Quiet)
+            .flex_none()
+            .tooltip(kit::tip(
+                "You told the agent in its session or by voice: this closes the ask with your words as a note",
+            ))
+            .on_click(cx.listener(|app, _: &ClickEvent, window, cx| {
+                app.send(Verdict::Elsewhere, window, cx)
+            }));
         let goes: Vec<String> = [
             (marks, "mark", "marks"),
             (draft.pictures.len(), "picture", "pictures"),
@@ -1107,7 +1150,7 @@ impl DeskApp {
         };
         let status = match (self.config.tell_session, ask.session.trim()) {
             (true, s) if !s.is_empty() => {
-                let told = format!("{s} is told when you send");
+                let told = format!("Send tells {s}");
                 if status.is_empty() {
                     told
                 } else {
@@ -1126,12 +1169,26 @@ impl DeskApp {
             .border_color(t.divider)
             .bg(t.surface)
             .when(has_top, |d| d.child(top))
+            .children(ask.check.as_ref().map(|c| check_block(t, c)))
             .child(self.words.clone())
             .children(pasted)
             .child(actions)
-            .when(!status.is_empty(), |d| {
-                d.child(div().text_size(px(META)).text_color(t.text2).child(status))
-            })
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .gap(px(GAP_SMALL))
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .truncate()
+                            .text_size(px(META))
+                            .text_color(t.text2)
+                            .child(status),
+                    )
+                    .child(elsewhere),
+            )
             .into_any_element()
     }
 }
@@ -1222,7 +1279,19 @@ impl DeskApp {
         }
         let mut strip = div().flex().flex_wrap().gap(px(GAP_SMALL));
         for id in &ids {
-            strip = strip.child(self.pasted_thumb(t, desk, &round.id, id, cx));
+            let url = format!(
+                "{}{}",
+                self.desks[desk].place.url,
+                crate::desk::attachment_path(&round.id, id)
+            );
+            strip = strip.child(
+                div()
+                    .id(SharedString::from(format!("sent-{}-{id}", round.id)))
+                    .cursor_pointer()
+                    .tooltip(kit::tip("Open it whole in the browser"))
+                    .on_click(move |_, _, cx| cx.open_url(&url))
+                    .child(self.pasted_thumb(t, desk, &round.id, id, cx)),
+            );
         }
         Some(strip)
     }
@@ -1261,6 +1330,32 @@ impl DeskApp {
             _ => frame.w(px(h * 1.5)),
         }
     }
+}
+
+/// How a hands job's check came out, or that it runs.
+fn check_block(t: &Theme, c: &model::Check) -> Div {
+    let (head, ink) = match (c.running, c.ok) {
+        (true, _) => ("Checking out/… up to a minute".to_string(), t.text2),
+        (_, true) => (format!("Check passed · {}", c.summary), t.done),
+        _ => (format!("Check failed · {}", c.summary), t.error),
+    };
+    div()
+        .flex()
+        .flex_col()
+        .gap(px(2.))
+        .p(px(GAP_SMALL))
+        .rounded(px(tokens::RADIUS))
+        .border_1()
+        .border_color(alpha(ink, 0.5))
+        .child(div().text_size(px(META)).text_color(ink).child(head))
+        .when(!c.running, |d| {
+            d.children(c.lines.iter().map(|l| {
+                div()
+                    .text_size(px(META))
+                    .text_color(if l.ok { t.text2 } else { t.error })
+                    .child(format!("{} {}", if l.ok { "✓" } else { "✗" }, l.text))
+            }))
+        })
 }
 
 fn answer_unclear_tip() -> String {
@@ -1313,6 +1408,13 @@ fn his_turn(t: &Theme, round: &Ask, pictures: Option<Div>) -> AnyElement {
         })
         .children(pictures)
         .children(
+            round
+                .check
+                .as_ref()
+                .filter(|c| !c.running)
+                .map(|c| check_block(t, c)),
+        )
+        .children(
             marks
                 .into_iter()
                 .map(|m| div().text_size(px(META)).text_color(t.text2).child(m)),
@@ -1328,7 +1430,13 @@ fn verdict_words(a: &model::Answer, round: &Ask) -> String {
         "send back" => "Sent back".into(),
         "acknowledge" => "Done".into(),
         "reject" => "Rejected".into(),
-        "marks" => "Your words and marks".into(),
+        "marks" => match (round.marks.len(), a.attachments.len()) {
+            (0, 0) => "Your words".into(),
+            (0, 1) => "Your words and a picture".into(),
+            (0, n) => format!("Your words and {n} pictures"),
+            (1, _) => "Your words and a mark".into(),
+            (n, _) => format!("Your words and {n} marks"),
+        },
         "elsewhere" => "Answered elsewhere".into(),
         "grill" => format!("Answered {} of {}", a.answers.len(), round.questions.len()),
         v => v.to_string(),
