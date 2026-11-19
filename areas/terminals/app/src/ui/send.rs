@@ -15,7 +15,8 @@
 //! drawer stays, keeps only the sessions it did not reach and says why for
 //! each. Where the reason is a rule rather than a failure (a shell would
 //! run the line naming a session; an outcome unknown might have arrived),
-//! the operator can send anyway. Closing gives the focus back to what had
+//! the operator can send anyway, by the button beside the line or Alt+Enter
+//! from anywhere in the drawer. Closing gives the focus back to what had
 //! it, and the width dragged at the inner edge is remembered on this
 //! device. The rules are `store::send`'s.
 
@@ -28,11 +29,12 @@ use crate::store::sessions::{self, Key};
 use crate::theme::{alpha, size, theme};
 use ahjo_app_kit::widgets::finder::{self, Choice, FinderEvent, Lead};
 use ahjo_app_kit::widgets::kit::{self, Kind};
+use ahjo_app_kit::widgets::pane;
 use ahjo_core::NodeId;
 use ahjo_terminals_contract::Outcome;
 use gpui::{
-    AnyElement, AsyncApp, ClickEvent, Context, ExternalPaths, FontWeight, MouseButton,
-    MouseMoveEvent, SharedString, WeakEntity, Window, div, prelude::*, px,
+    AnyElement, AsyncApp, ClickEvent, Context, ExternalPaths, FontWeight, KeyDownEvent,
+    MouseButton, MouseMoveEvent, SharedString, WeakEntity, Window, div, prelude::*, px,
 };
 use std::path::PathBuf;
 
@@ -731,6 +733,7 @@ impl Terminals {
             .bg(t.surface)
             .border_color(t.divider)
             .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+            .on_key_down(cx.listener(|s, e: &KeyDownEvent, _, cx| s.anyway_key(e, cx)))
             .drag_over::<ExternalPaths>(move |d, _, _, _| d.bg(alpha(t.accent, 0.08)))
             .on_drop(
                 cx.listener(|s, paths: &ExternalPaths, _, cx| s.send_attach(paths.paths(), cx)),
@@ -827,17 +830,9 @@ impl Terminals {
         let Some(r) = &self.send.reference else {
             return vec![];
         };
-        let targets: Vec<_> = self
-            .send_targets
-            .iter()
-            .map(|k| self.fleet.session(k))
-            .collect();
-        let names: Vec<&str> = self.send_targets.iter().map(|k| k.name.as_str()).collect();
-        let left_out = match self.send.new_agent {
-            true => vec![],
-            false => send::left_out(self.send.names_a_session, &targets, &names),
-        };
-        let dropped = !left_out.is_empty() && !self.send.anyway && left_out.len() == names.len();
+        let left_out = self.send_left_out();
+        let dropped =
+            !left_out.is_empty() && !self.send.anyway && left_out.len() == self.send_targets.len();
         let mut out = vec![
             div()
                 .id("send-reference")
@@ -894,14 +889,52 @@ impl Terminals {
                     kit::button(t, selector, act, Kind::Quiet)
                         .flex_none()
                         .debug_selector(move || selector.into())
-                        .on_click(cx.listener(|s, _, _, cx| {
-                            s.send.anyway = !s.send.anyway;
-                            cx.notify();
-                        })),
+                        .tooltip(kit::tip("Alt+Enter, from anywhere in Send"))
+                        .on_click(cx.listener(|s, _, _, cx| s.toggle_anyway(cx))),
+                )
+                // The key where the choice is: Tab goes from the message to
+                // the sessions, so the keyboard reaches it by this alone.
+                .child(
+                    div()
+                        .flex_none()
+                        .pt(px(4.))
+                        .child(pane::meta(t, "Alt+Enter", None)),
                 )
                 .into_any_element(),
         );
         out
+    }
+
+    /// The targets the line naming a session is left out for: those at a
+    /// shell prompt, which would run it as a command.
+    fn send_left_out(&self) -> Vec<String> {
+        if self.send.new_agent || self.send.reference.is_none() {
+            return vec![];
+        }
+        let targets: Vec<_> = self
+            .send_targets
+            .iter()
+            .map(|k| self.fleet.session(k))
+            .collect();
+        let names: Vec<&str> = self.send_targets.iter().map(|k| k.name.as_str()).collect();
+        send::left_out(self.send.names_a_session, &targets, &names)
+    }
+
+    /// Send anyway, or Leave it out again.
+    fn toggle_anyway(&mut self, cx: &mut Context<Self>) {
+        self.send.anyway = !self.send.anyway;
+        cx.notify();
+    }
+
+    /// Alt+Enter anywhere in the drawer is the button beside the
+    /// reference: Send anyway, or Leave it out.
+    fn anyway_key(&mut self, e: &KeyDownEvent, cx: &mut Context<Self>) {
+        let k = &e.keystroke;
+        let alt_only = k.modifiers.alt && !k.modifiers.control && !k.modifiers.shift;
+        if alt_only && k.key == "enter" && !self.send_left_out().is_empty() {
+            cx.stop_propagation();
+            self.toggle_anyway(cx);
+        }
     }
 
     /// How the last send went where it did not simply arrive: each session

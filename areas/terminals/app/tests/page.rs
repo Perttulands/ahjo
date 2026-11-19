@@ -3511,6 +3511,50 @@ fn send_anyway_gives_a_shell_the_line_naming_a_session(cx: &mut TestAppContext) 
     let _ = std::fs::remove_dir_all(settings.parent().unwrap());
 }
 
+/// The keyboard reaches Send anyway and Leave it out: Tab from the message
+/// goes to the sessions, so Alt+Enter is their key, from the message too.
+#[gpui::test]
+fn alt_enter_sends_anyway_from_the_message(cx: &mut TestAppContext) {
+    let Some(running) = start("terminals-send-anyway-key") else {
+        return;
+    };
+    let (_shell, cx, settings) = open_with_alpha(&running, "send-anyway-key", cx);
+    let page = PAGE.with(|p| p.borrow().clone()).unwrap();
+    until(cx, "beta listed", |cx| {
+        page.read_with(cx, |p, _| p.fleet.all.iter().any(|s| s.name == "beta"))
+    });
+    cx.simulate_keystrokes("alt-s");
+    let beta = format!("send-target-{}::beta", running.node);
+    let row: &'static str = Box::leak(beta.clone().into_boxed_str());
+    until(cx, "beta offered", |cx| cx.debug_bounds(row).is_some());
+    click(cx, beta);
+    until(cx, "left out for the shell", |cx| {
+        cx.debug_bounds("send-anyway").is_some()
+    });
+    let typing = |cx: &mut VisualTestContext| {
+        page.update_in(cx, |p, window, cx| p.send_note.read(cx).is_focused(window))
+    };
+    assert!(typing(cx), "the message has the keyboard");
+    cx.simulate_keystrokes("alt-enter");
+    until(cx, "sent anyway, with the way back", |cx| {
+        cx.debug_bounds("send-leave-out").is_some()
+    });
+    cx.simulate_keystrokes("alt-enter");
+    until(cx, "left out again", |cx| {
+        cx.debug_bounds("send-anyway").is_some()
+    });
+    cx.simulate_keystrokes("alt-enter");
+    until(cx, "and anyway once more", |cx| {
+        cx.debug_bounds("send-leave-out").is_some()
+    });
+    assert!(typing(cx), "the keyboard stays in the message");
+    cx.simulate_keystrokes("enter");
+    until(cx, "the shell got the line naming alpha", |_| {
+        tmux(&running, &["capture-pane", "-p", "-t", "beta"]).contains("session alpha on ")
+    });
+    let _ = std::fs::remove_dir_all(settings.parent().unwrap());
+}
+
 /// A second node following the same scratch server is not a sizing viewer.
 #[gpui::test]
 fn opening_a_session_sizes_it_with_another_node_following(cx: &mut TestAppContext) {
