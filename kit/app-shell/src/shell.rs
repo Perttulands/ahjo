@@ -541,6 +541,11 @@ impl Shell {
     /// decides what becomes of it.
     pub fn capture_key(&mut self, e: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
         let k = Self::key_like(e);
+        if self.menu_key(&k, window, cx) {
+            cx.stop_propagation();
+            cx.notify();
+            return;
+        }
         let all = self.chords(cx);
         let hub = self.hub.read(cx);
         let keyboard = Keyboard {
@@ -603,6 +608,37 @@ impl Shell {
             }
         }
         cx.notify();
+    }
+
+    /// The keys of a menu on top: Up and Down move its keyboard row, Enter,
+    /// Space or Right picks it. True if the key was the menu's.
+    fn menu_key(&mut self, k: &KeyLike, window: &mut Window, cx: &mut Context<Self>) -> bool {
+        if k.alt || k.ctrl || k.shift || k.platform {
+            return false;
+        }
+        let cursor = match self.hub.read(cx).stack.top() {
+            Some(Surface::Menu(m)) => m.cursor,
+            _ => return false,
+        };
+        let by = match k.key.as_str() {
+            "down" => 1,
+            "up" => -1,
+            "enter" | "space" | "right" => {
+                let Some(i) = cursor else {
+                    return false;
+                };
+                self.menu_pick(i, window, cx);
+                return true;
+            }
+            _ => return false,
+        };
+        self.hub.update(cx, |h, cx| {
+            if let Some(Surface::Menu(m)) = h.stack.top_mut() {
+                m.step(by);
+            }
+            cx.notify();
+        });
+        true
     }
 
     /// Runs a chord once this update is over, so it may use anything,

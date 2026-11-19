@@ -439,6 +439,7 @@ impl Shell {
                 continue;
             }
             let armed = menu.armed == Some(i);
+            let keyed = menu.cursor == Some(i);
             let label = if armed {
                 format!("{}? Click again", row.label)
             } else {
@@ -482,6 +483,7 @@ impl Shell {
                     .when(!inert, |d| {
                         d.cursor_pointer().hover(|d| d.bg(t.accent_light()))
                     })
+                    .when(keyed && !armed, |d| d.bg(t.accent_light()))
                     .when(armed, |d| d.bg(alpha(t.error, 0.15)))
                     .child(line)
                     .children(row.hint.clone().map(|h| {
@@ -533,8 +535,8 @@ impl Shell {
         .into_any_element()
     }
 
-    /// A click on row `i` of the open menu.
-    fn menu_pick(&mut self, i: usize, window: &mut Window, cx: &mut Context<Self>) {
+    /// A click on row `i` of the open menu, or Enter on its keyboard row.
+    pub(crate) fn menu_pick(&mut self, i: usize, window: &mut Window, cx: &mut Context<Self>) {
         let pick = self.hub.update(cx, |h, cx| {
             let pick = match h.stack.top_mut() {
                 Some(Surface::Menu(m)) => m.pick(i),

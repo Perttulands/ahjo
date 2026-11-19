@@ -95,6 +95,9 @@ pub struct Menu {
     /// The button it opened from, when a press on one opened it: the menu
     /// stands under it, clear of the buttons beside it.
     pub under: Option<crate::pointer::Pressed>,
+    /// The row the keyboard is on: Up and Down move it, Enter or Right
+    /// picks it. None until a key moves it, or from a key that opened it.
+    pub cursor: Option<usize>,
 }
 
 /// What a click on row `index` of a menu comes to.
@@ -108,6 +111,25 @@ pub enum Pick {
 }
 
 impl Menu {
+    /// Moves the keyboard's row `by` rows over the rows it can pick,
+    /// round the ends; from none, Down takes the first and Up the last.
+    pub fn step(&mut self, by: isize) {
+        let live: Vec<usize> = (0..self.rows.len())
+            .filter(|i| !self.rows[*i].inert())
+            .collect();
+        if live.is_empty() {
+            self.cursor = None;
+            return;
+        }
+        let n = live.len() as isize;
+        let at = match self.cursor.and_then(|c| live.iter().position(|i| *i == c)) {
+            Some(at) => (at as isize + by).rem_euclid(n),
+            None if by < 0 => n - 1,
+            None => 0,
+        };
+        self.cursor = Some(live[at as usize]);
+    }
+
     pub fn pick(&mut self, index: usize) -> Pick {
         let Some(row) = self.rows.get(index).cloned() else {
             return Pick::Nothing;
@@ -118,6 +140,10 @@ impl Menu {
         if !row.sub.is_empty() {
             self.rows = row.sub;
             self.armed = None;
+            // Opened from the keyboard, the keyboard goes on in it.
+            if self.cursor.take().is_some() {
+                self.step(1);
+            }
             return Pick::Stays;
         }
         if row.danger && self.armed != Some(index) {
@@ -151,6 +177,7 @@ mod tests {
             at: Default::default(),
             armed: None,
             under: None,
+            cursor: None,
         };
         assert!(matches!(m.pick(0), Pick::Nothing));
         assert!(matches!(m.pick(3), Pick::Nothing), "refused");
@@ -161,5 +188,39 @@ mod tests {
         assert_eq!(m.rows.len(), 1);
         assert!(matches!(m.pick(0), Pick::Run(_)));
         assert!(MenuRow::rule().is_rule() && !MenuRow::note("x").is_rule());
+    }
+
+    #[test]
+    fn the_keyboard_steps_over_rows_it_cannot_pick_and_goes_on_into_a_sub_menu() {
+        let mut m = Menu {
+            rows: vec![
+                MenuRow::note("Says"),
+                MenuRow::new("Split", |_, _| {}),
+                MenuRow::rule(),
+                MenuRow::new("Claim", |_, _| {}).refused("Nothing to claim."),
+                MenuRow::sub(
+                    "Windows",
+                    None,
+                    vec![MenuRow::note("Pick one"), MenuRow::new("1", |_, _| {})],
+                ),
+            ],
+            at: Default::default(),
+            armed: None,
+            under: None,
+            cursor: None,
+        };
+        m.step(1);
+        assert_eq!(m.cursor, Some(1));
+        m.step(1);
+        assert_eq!(m.cursor, Some(4), "past the rule and the refused row");
+        m.step(1);
+        assert_eq!(m.cursor, Some(1), "round the end");
+        m.step(-1);
+        assert_eq!(m.cursor, Some(4));
+        assert!(matches!(m.pick(4), Pick::Stays));
+        assert_eq!(m.cursor, Some(1), "on the sub-menu's first row");
+        m.cursor = None;
+        m.step(-1);
+        assert_eq!(m.cursor, Some(1), "Up from none takes the last");
     }
 }

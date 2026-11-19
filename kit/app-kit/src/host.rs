@@ -354,6 +354,20 @@ impl Host {
         self.open_menu(rows, at, Some(armed), cx);
     }
 
+    /// Opens a menu at `at` for the keyboard: its first row it can pick
+    /// is chosen, so Enter runs it and the arrows move on.
+    pub fn menu_keyed(&self, rows: Vec<MenuRow>, at: Point<Pixels>, cx: &mut App) {
+        let mut menu = Menu {
+            rows,
+            at,
+            armed: None,
+            under: None,
+            cursor: None,
+        };
+        menu.step(1);
+        self.update(cx, |h, cx| h.open(Surface::Menu(menu), cx));
+    }
+
     fn open_menu(&self, rows: Vec<MenuRow>, at: Point<Pixels>, armed: Option<usize>, cx: &mut App) {
         let under = crate::pointer::pressed_at(at, cx);
         let menu = Menu {
@@ -361,6 +375,7 @@ impl Host {
             at,
             armed,
             under,
+            cursor: None,
         };
         self.update(cx, |h, cx| h.open(Surface::Menu(menu), cx));
     }
