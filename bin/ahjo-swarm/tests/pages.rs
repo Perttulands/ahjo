@@ -23,8 +23,9 @@ fn the_listed_pages_mount_together(cx: &mut TestAppContext) {
     );
 }
 
-/// Swarm had a Brain tab; Ahjo Brain is its own app now. A settings file
-/// the tab wrote to still opens, keeps what it holds, and shows no Brain.
+/// Swarm had a Brain tab; Ahjo Brain is its own app now, and Swarm keeps
+/// only the Brain panel (Alt+L). A settings file the tab wrote to still
+/// opens, keeps what it holds, and shows no Brain tab.
 #[gpui::test]
 fn a_settings_file_from_the_brain_tab_still_opens(cx: &mut TestAppContext) {
     let dir = std::env::temp_dir().join(format!("ahjo-swarm-brain-tab-{}", std::process::id()));
@@ -35,12 +36,16 @@ fn a_settings_file_from_the_brain_tab_still_opens(cx: &mut TestAppContext) {
     let cx = cx.add_empty_window();
     let (tx, _rx) = async_channel::unbounded();
     let settings = path.clone();
-    let (ids, theme, brain) = cx.update(|window, cx| {
+    let (tabs, theme, brain) = cx.update(|window, cx| {
         let hub = cx.new(|_| Hub::new(Net::start(), tx, Some(settings)));
         let pages = mount(ahjo_app_swarm::PAGES, &hub, window, cx).unwrap();
         let settings = &hub.read(cx).settings;
         (
-            pages.iter().map(|p| p.meta.id).collect::<Vec<_>>(),
+            pages
+                .iter()
+                .filter(|p| p.meta.tab)
+                .map(|p| p.meta.id)
+                .collect::<Vec<_>>(),
             settings.theme.clone(),
             settings.sections.get("brain").cloned(),
         )
@@ -48,6 +53,6 @@ fn a_settings_file_from_the_brain_tab_still_opens(cx: &mut TestAppContext) {
     assert_eq!(theme, "nord", "the file was read");
     assert_eq!(brain, Some(serde_json::json!({"read": 18})), "and kept");
     assert!(!path.with_extension("json.broken").exists());
-    assert!(!ids.contains(&"brain"), "there is no Brain page: {ids:?}");
+    assert!(!tabs.contains(&"brain"), "there is no Brain tab: {tabs:?}");
     std::fs::remove_dir_all(&dir).unwrap();
 }

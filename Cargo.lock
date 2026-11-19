@@ -273,6 +273,7 @@ dependencies = [
  "ahjo-agents-app",
  "ahjo-app-kit",
  "ahjo-app-shell",
+ "ahjo-brain-app",
  "ahjo-files-app",
  "ahjo-host-app",
  "ahjo-missions-app",
@@ -305,6 +306,26 @@ dependencies = [
  "serde_json",
  "tokio",
  "tower",
+]
+
+[[package]]
+name = "ahjo-brain-app"
+version = "0.0.1"
+dependencies = [
+ "ahjo-app-kit",
+ "ahjo-app-shell",
+ "ahjo-brain",
+ "ahjo-brain-contract",
+ "ahjo-core",
+ "ahjo-terminals",
+ "ahjo-terminals-app",
+ "ahjo-testkit",
+ "axum",
+ "gpui-pre",
+ "jiff",
+ "serde",
+ "serde_json",
+ "tokio",
 ]
 
 [[package]]

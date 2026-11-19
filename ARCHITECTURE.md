@@ -40,8 +40,10 @@ app's package is `ahjo-app-<name>` (`ahjo-app-swarm`, `ahjo-app-brain`,
 `ahjo-app-desk`), since `ahjo-brain` is the brain area's node crate; its
 binary is the name the operator runs. The areas are terminals, files, work,
 brain, host, scheduled, agents and missions; fleet becomes one after the first
-release. The brain area has no page in Swarm: Ahjo Brain is where it is read,
-and its node side serves the `ahjo brain` commands. Launching sessions and agent events live in terminals. Settings is not
+release. The brain area's only part in Swarm is its Alt+L panel over the
+terminals, a page without a tab: Ahjo Brain is where the brain is read at
+length and edited, and its node side serves the `ahjo brain` commands and the
+panel. Launching sessions and agent events live in terminals. Settings is not
 an area: the shell's Settings page lists what pages declare.
 
 ## Rules the compiler holds
@@ -136,7 +138,8 @@ real list, and `ahjo kinds` prints who owns which kinds.
 
 A page is a build function in `bin/ahjo-swarm`'s `PAGES`, held by the shell in
 `kit/app-shell`. Built from a `Host`, it answers with one entity implementing
-`app-kit`'s `Page`: an id, a title, the node area it needs (its tab hides while
+`app-kit`'s `Page`: an id, a title, whether it has a tab (one without is
+never shown and lives by its chords and what it lends), the node area it needs (its tab hides while
 every node has that area off), its frame kinds, the channels it turns on while
 shown, the asks it answers and its chords. The shell owns the window, the tab
 bar, the dismissal stack, the leader, the status line and the node connection,
@@ -172,7 +175,7 @@ reserves, or whose `everywhere` chords share a key, naming both;
   layout has room (`Host::beside`), as the terminals draw a file a link
   named.
 - **Panels.** A page may also open a view of its own beside the terminals
-  without being asked (Files and Work each have one, toggled by an
+  without being asked (Files, Work and Brain each have one, toggled by an
   `everywhere` chord): the same `Host::show_beside`, so it lies over the
   terminal windows and no shared session changes size. While a view a page
   lent is open beside another, that page's channels stay on, as while it

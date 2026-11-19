@@ -15,6 +15,7 @@ pub const PAGES: &[Build] = &[
     ahjo_files_app::build,
     ahjo_agents_app::build,
     ahjo_work_app::build,
+    ahjo_brain_app::build,
     ahjo_missions_app::build,
     ahjo_scheduled_app::build,
     ahjo_host_app::build,
