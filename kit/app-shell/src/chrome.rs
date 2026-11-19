@@ -127,7 +127,7 @@ impl Shell {
         // The pages with a tab, and whether each draws its own.
         let mut drawn: Vec<(usize, Option<gpui::AnyElement>)> = vec![];
         for (i, page) in self.pages.iter().enumerate() {
-            if page.meta.area.is_some_and(|a| off.iter().any(|o| o == a)) {
+            if !page.meta.tab || page.meta.area.is_some_and(|a| off.iter().any(|o| o == a)) {
                 continue;
             }
             drawn.push((i, page.tabs(self.shown == Some(i), window, cx)));

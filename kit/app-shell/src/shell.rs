@@ -185,8 +185,8 @@ impl Shell {
             .filter_map(|(i, p)| Some((i, page_key(p.meta.key?))))
             .map(|(i, (leader, alt, shift))| (i, leader, alt, shift))
             .collect();
-        if !pages.is_empty() {
-            cx.defer_in(window, |s, window, cx| s.show(0, window, cx));
+        if let Some(first) = pages.iter().position(|p| p.meta.tab) {
+            cx.defer_in(window, move |s, window, cx| s.show(first, window, cx));
         }
         let size = hub.read(cx).settings.size;
         window.set_ui_scale(ahjo_app_kit::zoom::app::scale(size), cx);
@@ -244,9 +244,10 @@ impl Shell {
     }
 
     /// Shows page `i`: the one shown before hides and turns its channels
-    /// off unless it lent a view beside a page, this one turns its on.
+    /// off unless it lent a view beside a page, this one turns its on. A
+    /// page without a tab is never shown.
     pub fn show(&mut self, i: usize, window: &mut Window, cx: &mut Context<Self>) {
-        if self.shown == Some(i) {
+        if self.shown == Some(i) || !self.pages[i].meta.tab {
             return;
         }
         let old = self.shown.replace(i);
@@ -279,14 +280,14 @@ impl Shell {
         }
     }
 
-    /// Shows the page with this id. False when there is none.
+    /// Shows the page with this id. False when there is none to show.
     pub fn show_id(&mut self, id: &str, window: &mut Window, cx: &mut Context<Self>) -> bool {
         match self.index_of(id) {
-            Some(i) => {
+            Some(i) if self.pages[i].meta.tab => {
                 self.show(i, window, cx);
                 true
             }
-            None => false,
+            _ => false,
         }
     }
 
@@ -621,6 +622,7 @@ mod tests {
         Meta {
             id,
             title: id,
+            tab: true,
             key: None,
             area: None,
             kinds,

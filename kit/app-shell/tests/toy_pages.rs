@@ -3,7 +3,7 @@
 //! chords and each other through their Host (asks, a view beside the
 //! asker, a read model, a lent view keeping its page's channel on), against a fake node
 //! this test starts. A third,
-//! whose area every node turned off, has no tab.
+//! whose area every node turned off, has no tab; a fourth never has one.
 
 use ahjo_app_kit::chords::Chord;
 use ahjo_app_kit::host::{Layer, Request};
@@ -347,7 +347,27 @@ fn gamma(host: Host, window: &mut Window, cx: &mut gpui::App) -> Mounted {
     mount(host, window, cx, |_, _, _| Gamma)
 }
 
-const PAGES: &[Build] = &[Alpha::build, Beta::build, gamma];
+/// A page without a tab: never shown, it lives by what it lends.
+struct Delta;
+
+impl Page for Delta {
+    const ID: &'static str = "toy-d";
+    const TITLE: &'static str = "Delta";
+    const TAB: bool = false;
+}
+
+impl Render for Delta {
+    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+        div()
+    }
+}
+
+fn delta(host: Host, window: &mut Window, cx: &mut gpui::App) -> Mounted {
+    mount(host, window, cx, |_, _, _| Delta)
+}
+
+/// Delta first: the app opens on the first page that has a tab.
+const PAGES: &[Build] = &[delta, Alpha::build, Beta::build, gamma];
 
 /// A node of one environment: it says hello with area `dark` off, answers
 /// `GET /toy`, and once the toy channel is on sends one toy frame. What
@@ -514,6 +534,10 @@ fn two_toy_pages_plug_in_through_their_host(cx: &mut TestAppContext) {
     assert!(cx.debug_bounds("tab-label-Alpha").is_some());
     assert!(cx.debug_bounds("tab-toy-b").is_some());
     assert!(cx.debug_bounds("tab-toy-c").is_none(), "its area is off");
+    assert!(cx.debug_bounds("tab-toy-d").is_none(), "it has no tab");
+    assert_eq!(shell.read_with(cx, |s, _| s.shown_page()), Some("toy-a"));
+    let shown = shell.update_in(cx, |s, window, cx| s.show_id("toy-d", window, cx));
+    assert!(!shown, "a page without a tab is never shown");
     assert_eq!(shell.read_with(cx, |s, _| s.shown_page()), Some("toy-a"));
 
     // Shown, Alpha turned its channel on, heard its frame and asked over HTTP.

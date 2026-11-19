@@ -183,9 +183,14 @@ impl Shell {
         let i = self
             .pages
             .iter()
-            .position(|p| p.meta.id == open.page)
+            .position(|p| p.meta.tab && p.meta.id == open.page)
             .ok_or_else(|| {
-                let pages: Vec<&str> = self.pages.iter().map(|p| p.meta.id).collect();
+                let pages: Vec<&str> = self
+                    .pages
+                    .iter()
+                    .filter(|p| p.meta.tab)
+                    .map(|p| p.meta.id)
+                    .collect();
                 format!(
                     "this app has no page {}; its pages are {}",
                     open.page,

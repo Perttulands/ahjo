@@ -18,6 +18,10 @@ pub trait Page: Render + Sized + 'static {
     const ID: &'static str;
     /// Its tab.
     const TITLE: &'static str;
+    /// Whether it has a tab. A page without one is never shown: it lives
+    /// by its chords and the views it lends beside other pages (Swarm's
+    /// brain area has only its Alt+L panel over the terminals).
+    const TAB: bool = true;
     /// The key that shows it from anywhere: a letter is Alt+Shift and the
     /// letter, or the leader then the capital; any other key is Alt and
     /// the key, or the leader then the key.
@@ -108,6 +112,8 @@ pub type Build = fn(Host, &mut Window, &mut App) -> Mounted;
 pub struct Meta {
     pub id: &'static str,
     pub title: &'static str,
+    /// Whether it has a tab and can be shown ([`Page::TAB`]).
+    pub tab: bool,
     pub key: Option<char>,
     pub area: Option<&'static str>,
     pub kinds: Kinds,
@@ -143,6 +149,7 @@ pub fn mount<P: Page>(
         meta: Meta {
             id: P::ID,
             title: P::TITLE,
+            tab: P::TAB,
             key: P::KEY,
             area: P::AREA,
             kinds: P::KINDS,
