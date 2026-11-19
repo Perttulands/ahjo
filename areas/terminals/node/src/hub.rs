@@ -48,12 +48,13 @@ impl Server {
     }
 }
 
-/// A tmux window and the pane it currently shows.
+/// A tmux window and the pane it currently shows, with that pane's folder.
 #[derive(Debug, serde::Serialize)]
 pub struct WindowInfo {
     pub index: u32,
     pub name: String,
     pub pane: u32,
+    pub cwd: String,
 }
 
 pub struct Hub {
@@ -174,13 +175,13 @@ impl Hub {
                 "-t",
                 id,
                 "-F",
-                "#{window_index}\t#{pane_id}\t#{window_name}",
+                "#{window_index}\t#{pane_id}\t#{pane_current_path}\t#{window_name}",
             ])
             .await?;
         output
             .lines()
             .map(|line| {
-                let mut fields = line.splitn(3, '\t');
+                let mut fields = line.splitn(4, '\t');
                 let index = fields.next().context("missing window index")?.parse()?;
                 let pane: u32 = fields
                     .next()
@@ -188,9 +189,15 @@ impl Hub {
                     .strip_prefix('%')
                     .context("invalid pane")?
                     .parse()?;
+                let cwd = fields.next().context("missing pane folder")?.to_owned();
                 let name = fields.next().context("missing window name")?.to_owned();
                 let pane = self.pane_id(server, pane).context("pane id too large")?;
-                Ok(WindowInfo { index, name, pane })
+                Ok(WindowInfo {
+                    index,
+                    name,
+                    pane,
+                    cwd,
+                })
             })
             .collect()
     }

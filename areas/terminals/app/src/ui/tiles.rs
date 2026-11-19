@@ -2082,40 +2082,58 @@ impl Terminals {
     }
 
     /// A link was clicked: an address opens in the browser, a path in the
-    /// file viewer beside, on the device of the window's session, and a
-    /// diagram drawn beside.
+    /// file viewer beside, on the device of the window's session, at the
+    /// line named after it, and a diagram drawn beside. A relative path is
+    /// the folder's of the pane the window shows, which tmux is asked for,
+    /// as the session's own folder is its active pane's.
     fn open_link(&mut self, i: usize, target: links::Target, cx: &mut Context<Self>) {
-        match target {
-            links::Target::Url(url) => {
-                cx.open_url(&url);
-                return;
-            }
-            links::Target::Diagram(source) => {
-                self.open_diagram(source, cx);
-                return;
-            }
-            _ => {}
-        }
-        let node = match self.histories.get(&i) {
-            Some(h) => Some(h.pane.node.clone()),
-            None => self.slot_pane(i).map(|a| a.node),
+        let pane = match self.histories.get(&i) {
+            Some(h) => Some(h.pane.clone()),
+            None => self.slot_pane(i),
         };
-        let Some(node) = node else { return };
         let ask = match target {
-            links::Target::Path(path) => Ask::OpenPath {
-                node: NodeId(node),
-                path: links::resolve(self.cwd_of(i).as_deref(), &path),
-                beside: true,
-            },
-            links::Target::WorkItem(id) => Ask::Reveal {
-                what: "item".into(),
-                id,
-                node: Some(NodeId(node)),
-                part: None,
-                beside: true,
-            },
-            links::Target::Url(_) | links::Target::Diagram(_) => unreachable!(),
+            links::Target::Url(url) => return cx.open_url(&url),
+            links::Target::Diagram(source) => return self.open_diagram(source, cx),
+            links::Target::WorkItem(id) => {
+                let Some(pane) = pane else { return };
+                Ask::Reveal {
+                    what: "item".into(),
+                    id,
+                    node: Some(NodeId(pane.node)),
+                    part: None,
+                    beside: true,
+                }
+            }
+            links::Target::Path(path, line) => {
+                let Some(pane) = pane else { return };
+                let session = self.fleet.session_of_pane(&pane.node, pane.pane);
+                let cwd = session.and_then(|s| s.cwd.clone());
+                let id = session.map(|s| s.id.clone()).unwrap_or_default();
+                if path.starts_with(['/', '~']) || id.is_empty() {
+                    let path = links::resolve(cwd.as_deref(), &path);
+                    open_path(NodeId(pane.node), path, line)
+                } else {
+                    let uri = format!("/api/terminal/windows?session={}", crate::http::enc(&id));
+                    let node = NodeId(pane.node.clone());
+                    let task = self.host.request(Request::get(node.clone(), uri), cx);
+                    cx.spawn(async move |this, cx| {
+                        let folder = crate::http::json::<Vec<TmuxWindow>>(task.await)
+                            .ok()
+                            .and_then(|w| w.into_iter().find(|w| w.pane == pane.pane)?.cwd)
+                            .or(cwd);
+                        let path = links::resolve(folder.as_deref(), &path);
+                        let _ =
+                            this.update(cx, |s, cx| s.ask_link(open_path(node, path, line), cx));
+                    })
+                    .detach();
+                    return;
+                }
+            }
         };
+        self.ask_link(ask, cx);
+    }
+
+    fn ask_link(&mut self, ask: Ask, cx: &mut Context<Self>) {
         if let Err(e) = self.host.ask(ask, cx) {
             self.report(&e.message, true, None);
         }
@@ -2508,4 +2526,26 @@ struct TmuxWindow {
     index: u32,
     name: String,
     pane: u32,
+    /// The folder of the pane it shows; absent from an older node.
+    #[serde(default)]
+    cwd: Option<String>,
+}
+
+/// Opens a file beside the page, at `line` if one is named: as Files
+/// reveals a path at a part of it.
+fn open_path(node: NodeId, path: String, line: Option<u32>) -> Ask {
+    match line {
+        None => Ask::OpenPath {
+            node,
+            path,
+            beside: true,
+        },
+        Some(line) => Ask::Reveal {
+            what: "path".into(),
+            id: path,
+            node: Some(node),
+            part: Some(line.to_string()),
+            beside: true,
+        },
+    }
 }

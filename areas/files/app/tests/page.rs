@@ -294,7 +294,7 @@ fn terminal_panel_search_and_printed_path_open_beside(cx: &mut TestAppContext) {
         format!(
             "{}find marker\n{}",
             "line\n".repeat(11),
-            "tail\n".repeat(30)
+            "tail\n".repeat(80)
         ),
     )
     .unwrap();
@@ -407,6 +407,39 @@ fn terminal_panel_search_and_printed_path_open_beside(cx: &mut TestAppContext) {
             && cx.debug_bounds("file-view-note.txt").is_some()
     });
     assert_eq!(shell.read_with(cx, |s, _| s.shown_page()), Some("sessions"));
+    // A path as agents print it, relative to the pane's folder and with
+    // its line and column, opens at that line.
+    let printed = "edited note.txt:30:7";
+    tmux.run(&[
+        "send-keys",
+        "-t",
+        "alpha",
+        &format!("printf '%s\\n' '{printed}'"),
+        "Enter",
+    ]);
+    let position = |cx: &mut VisualTestContext| {
+        terminal.read_with(cx, |p, _| {
+            let text = p.window_text(0)?;
+            let (row, line) = text
+                .lines()
+                .enumerate()
+                .find(|(_, line)| line.trim() == printed)?;
+            let col = line.find("note.txt")?;
+            let geo = p.geo.borrow()[0];
+            let (origin, cell) = (geo.origin?, geo.cell?);
+            Some(gpui::point(
+                origin.x + cell.width * (col as f32 + 1.5),
+                origin.y + cell.height * (row as f32 + 0.5),
+            ))
+        })
+    };
+    until(cx, "the relative path printed", |cx| position(cx).is_some());
+    let at = position(cx).unwrap();
+    cx.simulate_click(at, Modifiers::none());
+    until(cx, "line 30 in view, three lines above it", |cx| {
+        cx.debug_bounds("file-view-note.txt").is_some()
+            && cx.debug_bounds("files-code-top-27").is_some()
+    });
     drop(running);
     std::fs::remove_dir_all(root).unwrap();
 }

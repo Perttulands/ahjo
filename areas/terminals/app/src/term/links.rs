@@ -23,7 +23,8 @@ use alacritty_terminal::term::cell::Flags;
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Target {
     Url(String),
-    Path(String),
+    /// A path, and the line named after it (`main.rs:12`, `main.rs:12:5`).
+    Path(String, Option<u32>),
     WorkItem(String),
     /// A mermaid diagram's source, drawn on its header.
     Diagram(String),
@@ -341,7 +342,10 @@ impl Text {
         for (i, n) in paths(&self.chars) {
             if !self.cut(i, n) {
                 links.push(Link {
-                    target: Target::Path(self.chars[i..i + n].iter().collect()),
+                    target: Target::Path(
+                        self.chars[i..i + n].iter().collect(),
+                        line_after(&self.chars[i + n..]),
+                    ),
                     cells: self.cells(i, n),
                 });
             }
@@ -355,7 +359,10 @@ impl Text {
                     .any(|link| cells.iter().any(|cell| link.cells.contains(cell)))
             {
                 links.push(Link {
-                    target: Target::Path(self.chars[i..i + n].iter().collect()),
+                    target: Target::Path(
+                        self.chars[i..i + n].iter().collect(),
+                        line_after(&self.chars[i + n..]),
+                    ),
                     cells,
                 });
             }
@@ -447,6 +454,17 @@ fn run(t: &[char], i: usize) -> usize {
 }
 
 const TRAILING: &str = ".,;:)]}'\"/";
+
+/// The line a path names just after it, as compilers and agents write it:
+/// `:12`, or `:12:5` with a column, which Files does not go to.
+fn line_after(t: &[char]) -> Option<u32> {
+    let digits: String = t
+        .strip_prefix(&[':'])?
+        .iter()
+        .take_while(|c| c.is_ascii_digit())
+        .collect();
+    digits.parse().ok().filter(|n| *n > 0)
+}
 
 /// The length of `t` without the punctuation that ends a sentence.
 fn trailing_trimmed(t: &[char]) -> usize {
@@ -646,7 +664,7 @@ mod tests {
         let paths: Vec<(String, i32)> = in_lines(&s.term, Line(0), Line(2))
             .into_iter()
             .filter_map(|l| match l.target {
-                Target::Path(p) => Some((p, l.cells[0].line.0)),
+                Target::Path(p, _) => Some((p, l.cells[0].line.0)),
                 _ => None,
             })
             .collect();
@@ -677,15 +695,35 @@ mod tests {
     }
 
     #[test]
-    fn a_path_opens_without_its_line_number_or_punctuation() {
+    fn a_path_opens_at_its_line_without_its_punctuation() {
         let s = screen(60, 2, "wrote /srv/ahjo/src/main.rs:12, done");
         let l = link(&s, 0, 8).unwrap();
-        assert_eq!(l.target, Target::Path("/srv/ahjo/src/main.rs".into()));
+        assert_eq!(
+            l.target,
+            Target::Path("/srv/ahjo/src/main.rs".into(), Some(12))
+        );
         assert_eq!(link(&s, 0, 3), None);
         // A lone slash, or a word with slashes but no file in it, is not a link.
         let s = screen(60, 2, "a/b and / alone");
         assert_eq!(link(&s, 0, 1), None);
         assert_eq!(link(&s, 0, 8), None);
+    }
+
+    #[test]
+    fn the_line_after_a_path_is_carried_and_anything_else_is_not() {
+        let s = screen(
+            80,
+            2,
+            "at /a/b.rs:7:3 and cc.rs:0 and dd.rs:x and /e/f.md: done, gg.py:12.",
+        );
+        let at = |col| link(&s, 0, col).map(|l| l.target);
+        assert_eq!(at(4), Some(Target::Path("/a/b.rs".into(), Some(7))));
+        assert_eq!(at(20), Some(Target::Path("cc.rs".into(), None)));
+        assert_eq!(at(32), Some(Target::Path("dd.rs".into(), None)));
+        assert_eq!(at(44), Some(Target::Path("/e/f.md".into(), None)));
+        assert_eq!(at(59), Some(Target::Path("gg.py".into(), Some(12))));
+        // The line number is not drawn as the link.
+        assert_eq!(link(&s, 0, 12), None);
     }
 
     #[test]
@@ -696,9 +734,9 @@ mod tests {
             "edited src/ui/rail.rs:12 and notes.txt. see ./run and v2.1.3 e.g. x",
         );
         let at = |col| link(&s, 0, col).map(|l| l.target);
-        assert_eq!(at(9), Some(Target::Path("src/ui/rail.rs".into())));
-        assert_eq!(at(31), Some(Target::Path("notes.txt".into())));
-        assert_eq!(at(47), Some(Target::Path("./run".into())));
+        assert_eq!(at(9), Some(Target::Path("src/ui/rail.rs".into(), Some(12))));
+        assert_eq!(at(31), Some(Target::Path("notes.txt".into(), None)));
+        assert_eq!(at(47), Some(Target::Path("./run".into(), None)));
         // A version, an abbreviation and a plain word are not files.
         assert_eq!(at(56), None);
         assert_eq!(at(63), None);
@@ -710,7 +748,7 @@ mod tests {
         let s = screen(40, 2, "日本 👍 /tmp/x.txt");
         // 日本 takes four cells, the space one, 👍 two, the space one.
         let l = link(&s, 0, 8).expect("the path starts at column 8");
-        assert_eq!(l.target, Target::Path("/tmp/x.txt".into()));
+        assert_eq!(l.target, Target::Path("/tmp/x.txt".into(), None));
         assert_eq!(l.cells.first(), Some(&Point::new(Line(0), Column(8))));
         assert_eq!(l.cells.last(), Some(&Point::new(Line(0), Column(17))));
         // The right half of a wide character is that character's cell.
@@ -721,7 +759,7 @@ mod tests {
     fn a_quoted_path_broken_at_the_margin_opens_whole() {
         // Claude Code breaks a long line itself and indents what follows.
         let s = screen(19, 4, "  Read(\"/srv/ahjo/c\n  rates/app/x.rs\")\n");
-        let want = Target::Path("/srv/ahjo/crates/app/x.rs".into());
+        let want = Target::Path("/srv/ahjo/crates/app/x.rs".into(), None);
         assert_eq!(link(&s, 0, 10).unwrap().target, want);
         let l = link(&s, 1, 4).unwrap();
         assert_eq!(l.target, want);
@@ -735,7 +773,7 @@ mod tests {
         let s = screen(30, 4, "  Read(\"/srv/ahjo/c\n  rates/app/x.rs\")\n");
         assert_eq!(
             link(&s, 0, 10).unwrap().target,
-            Target::Path("/srv/ahjo/c".into())
+            Target::Path("/srv/ahjo/c".into(), None)
         );
         assert_eq!(link(&s, 1, 4), None);
     }
@@ -743,7 +781,7 @@ mod tests {
     #[test]
     fn a_path_the_terminal_wrapped_is_one_link() {
         let s = screen(12, 3, "x /home/user/notes.md");
-        let want = Target::Path("/home/user/notes.md".into());
+        let want = Target::Path("/home/user/notes.md".into(), None);
         assert_eq!(link(&s, 0, 4).unwrap().target, want);
         assert_eq!(link(&s, 1, 2).unwrap().target, want);
     }
@@ -767,7 +805,7 @@ mod tests {
             );
         }
         assert!(link(&s, 0, 43).is_none());
-        assert!(matches!(link(&s, 0, 50).unwrap().target, Target::Path(_)));
+        assert!(matches!(link(&s, 0, 50).unwrap().target, Target::Path(..)));
         let s = screen(12, 3, "x parvi-pnu.7.3");
         let want = Target::WorkItem("parvi-pnu.7.3".into());
         assert_eq!(link(&s, 0, 4).unwrap().target, want);
@@ -805,14 +843,14 @@ mod tests {
              \n  Relative path: areas/terminals/app/src/term/deeply/nested/\n  \
              folder/long_file_name_for_wrapping_tests.rs:2:5",
         );
-        let long = Some(Target::Path(format!("{DEEP}/{LONG}")));
+        let long = Some(Target::Path(format!("{DEEP}/{LONG}"), None));
         assert_eq!(
             path_on(&s, &[(2, 4), (2, 59), (3, 4), (4, 30), (5, 6)]),
             vec![long.clone(); 5]
         );
-        let notes = Some(Target::Path(format!("{DEEP}/notes.txt")));
+        let notes = Some(Target::Path(format!("{DEEP}/notes.txt"), None));
         assert_eq!(path_on(&s, &[(6, 10), (7, 20)]), vec![notes; 2]);
-        let relative = Some(Target::Path(LONG.into()));
+        let relative = Some(Target::Path(LONG.into(), Some(2)));
         assert_eq!(path_on(&s, &[(9, 20), (10, 2)]), vec![relative; 2]);
         // The indentation and the line number are not the path.
         assert_eq!(link(&s, 3, 1), None);
@@ -832,7 +870,7 @@ mod tests {
              ed/folder/another_quite_long_name.md\n      \
              1 This is a single-line markdown file",
         );
-        let md = Some(Target::Path(MD.into()));
+        let md = Some(Target::Path(MD.into(), None));
         assert_eq!(
             path_on(&s, &[(2, 5), (2, 44), (3, 5), (3, 30)]),
             vec![md; 4]
@@ -851,7 +889,7 @@ mod tests {
              with one line, then list every file you touched",
         );
         let l = link(&s, 0, 20).unwrap();
-        assert_eq!(l.target, Target::Path(MD.into()));
+        assert_eq!(l.target, Target::Path(MD.into(), None));
         assert!(l.cells.iter().all(|c| c.line.0 <= 1));
         assert_eq!(link(&s, 2, 3), None);
     }
@@ -869,9 +907,9 @@ mod tests {
              4cf2-b148-2088dc57b999/scratchpad/links/proj/\n    \
              notes.txt",
         );
-        let md = Some(Target::Path(format!("{DEEP}/{MD}")));
+        let md = Some(Target::Path(format!("{DEEP}/{MD}"), None));
         assert_eq!(path_on(&s, &[(0, 6), (1, 4), (2, 10), (3, 4)]), vec![md; 4]);
-        let notes = Some(Target::Path(format!("{DEEP}/notes.txt")));
+        let notes = Some(Target::Path(format!("{DEEP}/notes.txt"), None));
         assert_eq!(path_on(&s, &[(4, 5), (6, 6)]), vec![notes; 2]);
         // The bracket around it is not part of it.
         assert_eq!(link(&s, 3, 37), None);
@@ -882,7 +920,7 @@ mod tests {
             "• Edited areas/terminals/app/src/term/deeply/nested/folder/\n\
              long_file_name_for_wrapping_tests.rs (+1 -0)",
         );
-        let long = Some(Target::Path(LONG.into()));
+        let long = Some(Target::Path(LONG.into(), None));
         assert_eq!(path_on(&s, &[(0, 12), (1, 0)]), vec![long; 2]);
         assert_eq!(link(&s, 1, 39), None);
     }
@@ -912,13 +950,16 @@ mod tests {
              in the folder /tmp/out/build\n  which holds it",
         );
         let at = |row, col| link(&s, row, col).map(|l| l.target);
-        assert_eq!(at(0, 12), Some(Target::Path("/tmp/out/report.md".into())));
+        assert_eq!(
+            at(0, 12),
+            Some(Target::Path("/tmp/out/report.md".into(), None))
+        );
         assert_eq!(at(1, 3), None);
-        assert_eq!(at(2, 18), Some(Target::Path("/tmp/out/build".into())));
+        assert_eq!(at(2, 18), Some(Target::Path("/tmp/out/build".into(), None)));
         assert_eq!(at(3, 3), None);
         // ... but a name broken just after its first letters is.
         let s = screen(20, 3, "  saved /tmp/a/out.t\n  xt and more");
-        let want = Some(Target::Path("/tmp/a/out.txt".into()));
+        let want = Some(Target::Path("/tmp/a/out.txt".into(), None));
         assert_eq!(path_on(&s, &[(0, 9), (1, 2)]), vec![want; 2]);
     }
 
@@ -936,7 +977,7 @@ mod tests {
                 .links()
                 .into_iter()
                 .filter_map(|l| match l.target {
-                    Target::Path(p) => Some(p),
+                    Target::Path(p, _) => Some(p),
                     _ => None,
                 })
                 .collect()

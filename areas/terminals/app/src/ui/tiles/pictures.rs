@@ -44,7 +44,7 @@ pub struct Place {
 impl Place {
     fn key(&self, target: &Target) -> Option<Key> {
         match target {
-            Target::Path(p) if pictures::format(p).is_some() => Some(Key::File {
+            Target::Path(p, _) if pictures::format(p).is_some() => Some(Key::File {
                 node: self.node.clone(),
                 path: links::resolve(self.cwd.as_deref(), p),
             }),

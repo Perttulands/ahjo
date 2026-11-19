@@ -169,8 +169,17 @@ async fn window_picker_lists_the_active_pane_of_each_window_on_its_server() {
     first.new_session("first", 80, 24);
     second.new_session("alpha", 80, 24);
     second.run(&["rename-window", "-t", "alpha:0", "editor"]);
-    second.run(&["new-window", "-d", "-t", "alpha:3", "-n", "build"]);
-    second.run(&["split-window", "-t", "alpha:3"]);
+    second.run(&[
+        "new-window",
+        "-d",
+        "-t",
+        "alpha:3",
+        "-n",
+        "build",
+        "-c",
+        "/",
+    ]);
+    second.run(&["split-window", "-t", "alpha:3", "-c", "/"]);
     let active = second.run(&["display-message", "-p", "-t", "alpha:3", "#{pane_id}"]);
     let active: u32 = active.trim().trim_start_matches('%').parse().unwrap();
     let a = std::sync::Arc::new(Engine::start(first.socket()));
@@ -202,6 +211,8 @@ async fn window_picker_lists_the_active_pane_of_each_window_on_its_server() {
         [(0, "editor"), (3, "build")]
     );
     assert_eq!(windows[1].pane, (1 << 24) | active);
+    // The folder of the pane it shows, not the session's active pane's.
+    assert_eq!(windows[1].cwd, "/");
     assert!(hub.windows("$999999").await.is_err());
     a.stop().await;
     b.stop().await;

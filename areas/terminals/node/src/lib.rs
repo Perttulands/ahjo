@@ -266,8 +266,9 @@ struct WindowQuery {
     session: String,
 }
 
-/// `GET /api/terminal/windows?session=<id>`: a session's windows and the
-/// pane each shows, read when its picker opens.
+/// `GET /api/terminal/windows?session=<id>`: a session's windows, the pane
+/// each shows and that pane's folder, read when its picker opens or a
+/// relative path printed in it is opened.
 async fn windows(State(hub): State<Arc<Hub>>, Query(query): Query<WindowQuery>) -> Response {
     match hub.windows(&query.session).await {
         Ok(windows) => axum::Json(windows).into_response(),

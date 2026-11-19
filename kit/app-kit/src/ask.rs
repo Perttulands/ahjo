@@ -21,8 +21,8 @@ pub enum Ask {
         beside: bool,
     },
     /// Show a thing where it lives: `what` names its kind (a path, an item,
-    /// a run, a document), `id` which one, on `node` if
-    /// one is named, at `part` of it if one is (a run's step); `beside` the
+    /// a run, a document), `id` which one, on `node` if one is named, at
+    /// `part` of it if one is (a run's step, a file's line); `beside` the
     /// page that asked, or as the answering page.
     Reveal {
         what: String,

@@ -459,11 +459,32 @@ impl Page for FilesPage {
         match ask {
             Ask::OpenPath { node, path, beside } => {
                 if beside {
-                    self.open_beside(from, node, path, window, cx);
+                    self.open_beside(from, node, path, None, window, cx);
                 } else {
                     self.on_node(node.as_str(), cx);
                     self.show_in_tree(&path, cx);
                     self.open(path, window, cx)
+                }
+            }
+            // A file revealed at a part of it, its line (a path a session
+            // printed as `main.rs:12`), opens there.
+            Ask::Reveal {
+                what,
+                id,
+                node,
+                part: Some(line),
+                beside,
+            } if what == "path" && line.parse::<usize>().is_ok() => {
+                let line = line.parse().ok();
+                if beside {
+                    let node = node.unwrap_or_else(|| NodeId(self.tree.node.clone()));
+                    self.open_beside(from, node, id, line, window, cx);
+                } else {
+                    if let Some(n) = node {
+                        self.on_node(n.as_str(), cx);
+                    }
+                    self.show_in_tree(&id, cx);
+                    self.open_at(id, line, window, cx);
                 }
             }
             Ask::Reveal { what, id, node, .. } if what == "path" => {
@@ -834,7 +855,7 @@ impl FilesPage {
         self.pick = Some(Pick::Node(path.to_owned()));
         if !folder && self.host.shown_page(cx) == Some(PANEL_BESIDE) {
             let node = NodeId(self.tree.node.clone());
-            self.open_beside(PANEL_BESIDE, node, path.to_owned(), window, cx);
+            self.open_beside(PANEL_BESIDE, node, path.to_owned(), None, window, cx);
         } else if !folder {
             let ask = Ask::OpenPath {
                 node: NodeId(self.tree.node.clone()),
@@ -855,6 +876,7 @@ impl FilesPage {
         from: &'static str,
         node: NodeId,
         path: String,
+        line: Option<usize>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
@@ -863,7 +885,7 @@ impl FilesPage {
             p.beside_from = from;
             p.on_node(node.as_str(), cx);
             p.show_in_tree(&path, cx);
-            p.open(path, window, cx);
+            p.open_at(path, line, window, cx);
             p.watch(window, cx);
         });
         if from == PANEL_BESIDE {
