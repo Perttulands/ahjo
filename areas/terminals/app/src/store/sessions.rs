@@ -1,6 +1,7 @@
 //! Finding and describing sessions: the rail's groups and search, the marks
 //! a row carries, and Send's ranking. Pure, so it is tested on its own.
 
+use ahjo_app_kit::text::fuzzy;
 use ahjo_terminals_contract::{AgentEvent, EventKind, Session};
 use serde::{Deserialize, Serialize};
 
@@ -125,24 +126,32 @@ pub fn groups<'a>(all: &[Session], shown: &[&'a Session]) -> Vec<(String, Vec<&'
     out
 }
 
-/// Sessions whose name holds every word typed, case aside. Names that start
-/// with the first word come first; otherwise the list's order stands.
+/// Sessions found by the words typed, forgivingly ([`fuzzy`]): by name,
+/// else by the program they run or their folder; best first, names that
+/// start with what was typed before the rest.
 pub fn search<'a>(sessions: &'a [Session], query: &str) -> Vec<&'a Session> {
-    let words: Vec<String> = query.split_whitespace().map(str::to_lowercase).collect();
-    if words.is_empty() {
+    if query.trim().is_empty() {
         return sessions.iter().collect();
     }
-    let found: Vec<&Session> = sessions
+    let mut found: Vec<(i64, usize, &Session)> = sessions
         .iter()
-        .filter(|s| {
-            let n = s.name.to_lowercase();
-            words.iter().all(|w| n.contains(w.as_str()))
+        .enumerate()
+        .filter_map(|(i, s)| {
+            let program = s.command.as_deref().map(program).unwrap_or("");
+            let fields = [s.name.as_str(), program, folder(s)];
+            fuzzy::find_fields(query, &fields).map(|h| (h.score, i, s))
         })
         .collect();
-    let starts = |s: &&Session| s.name.to_lowercase().starts_with(&words[0]);
-    let (mut a, b): (Vec<_>, Vec<_>) = found.into_iter().partition(starts);
-    a.extend(b);
-    a
+    found.sort_by_key(|(score, i, _)| (std::cmp::Reverse(*score), *i));
+    found.into_iter().map(|(_, _, s)| s).collect()
+}
+
+/// The last name of the session's folder, "" if it reports none.
+pub fn folder(s: &Session) -> &str {
+    s.cwd
+        .as_deref()
+        .and_then(|c| c.rsplit(['/', '\\']).find(|x| !x.is_empty()))
+        .unwrap_or("")
 }
 
 pub struct Badge {
@@ -358,10 +367,7 @@ pub fn activity(s: &Session, now_ms: u64) -> String {
 
 /// Send's targets: with nothing typed, recent targets first (most recent
 /// first), then the rest in the list's order; with a query, the search.
-pub fn targets<'a>(sessions: &'a [Session], recent: &[String], query: &str) -> Vec<&'a Session> {
-    if !query.trim().is_empty() {
-        return search(sessions, query);
-    }
+pub fn targets<'a>(sessions: &'a [Session], recent: &[String]) -> Vec<&'a Session> {
     let rank = |s: &Session| {
         recent
             .iter()
@@ -544,6 +550,22 @@ mod tests {
         assert_eq!(search(&list, "  ").len(), 3);
     }
 
+    /// A slip, letters apart or the program it runs still find a session,
+    /// best first.
+    #[test]
+    fn search_forgives_and_reads_the_program_and_folder() {
+        let mut list = [s("db-migrate"), s("docs-writer"), s("harbour-ops")];
+        list[1].command = Some("claude".into());
+        list[2].cwd = Some("/home/x/harbour".into());
+        let names =
+            |q: &str| -> Vec<String> { search(&list, q).iter().map(|s| s.name.clone()).collect() };
+        assert_eq!(names("dbm"), ["db-migrate"]);
+        assert_eq!(names("mirgate"), ["db-migrate"]);
+        assert_eq!(names("claude"), ["docs-writer"]);
+        assert_eq!(names("harbuor"), ["harbour-ops"]);
+        assert!(names("zebra").is_empty());
+    }
+
     #[test]
     fn badges_only_say_what_one_terminal_does_not_show() {
         let mut x = s("a");
@@ -654,7 +676,7 @@ mod tests {
     fn send_ranks_recent_first_and_remembers_five() {
         let list = [s("b"), s("c"), s("a")];
         let recent = vec![Key::of(&list[1]).text()];
-        let t: Vec<&str> = targets(&list, &recent, "")
+        let t: Vec<&str> = targets(&list, &recent)
             .iter()
             .map(|s| s.name.as_str())
             .collect();

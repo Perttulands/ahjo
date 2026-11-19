@@ -33,13 +33,66 @@ pub fn message(reference: Option<&str>, note: &str, files: &[String]) -> String 
 /// by a line (`session_reference`) for the agent that reads it; a shell
 /// would run that line as a command, so a shell gets the note alone. Any
 /// other reference is the thing sent, and goes as it is.
+///
+/// `anyway` is the operator's Send anyway: the line goes to a shell too.
 pub fn reference_for<'a>(
     reference: Option<&'a str>,
     names_a_session: bool,
     target: Option<&Session>,
+    anyway: bool,
 ) -> Option<&'a str> {
-    let shell = target.is_some_and(|s| crate::store::sessions::running(s) == Running::Nothing);
-    reference.filter(|_| !(names_a_session && shell))
+    reference.filter(|_| anyway || !(names_a_session && at_prompt(target)))
+}
+
+/// The target is at a shell prompt: a line naming a session would run
+/// there as a command.
+fn at_prompt(target: Option<&Session>) -> bool {
+    target.is_some_and(|s| crate::store::sessions::running(s) == Running::Nothing)
+}
+
+/// The targets that would get the note without the line naming a session
+/// (`reference_for`), by name.
+pub fn left_out(
+    names_a_session: bool,
+    targets: &[Option<&Session>],
+    names: &[&str],
+) -> Vec<String> {
+    if !names_a_session {
+        return vec![];
+    }
+    targets
+        .iter()
+        .zip(names)
+        .filter(|(t, _)| at_prompt(**t))
+        .map(|(_, n)| n.to_string())
+        .collect()
+}
+
+/// Names as a sentence reads them: `a`, `a and b`, `a, b and c`.
+pub fn names(list: &[String]) -> String {
+    match list {
+        [] => String::new(),
+        [one] => one.clone(),
+        [rest @ .., last] => format!("{} and {last}", rest.join(", ")),
+    }
+}
+
+/// What the operator is told once a send to several arrived everywhere.
+pub fn arrived_all(names_sent: &[String], enter: bool) -> String {
+    match names_sent {
+        [one] => arrived(one, false, enter),
+        _ if enter => format!("Sent to {}", names(names_sent)),
+        _ => format!("Pasted into {}", names(names_sent)),
+    }
+}
+
+/// What the Send button says: whom it sends to.
+pub fn go_words(targets: &[String]) -> String {
+    match targets {
+        [] => "Pick a target".into(),
+        [one] => format!("Send to {one}"),
+        many => format!("Send to {} sessions", many.len()),
+    }
 }
 
 /// The line naming a session handed over, in words the receiving agent can
@@ -242,21 +295,50 @@ mod tests {
             ..Default::default()
         };
         let line = Some("session shell-one on landmass/wsl");
-        assert_eq!(reference_for(line, true, Some(&with("claude"))), line);
-        assert_eq!(reference_for(line, true, Some(&with("aider"))), line);
-        assert_eq!(reference_for(line, true, Some(&with("bash"))), None);
-        assert_eq!(reference_for(line, true, Some(&with("pwsh.exe"))), None);
+        assert_eq!(
+            reference_for(line, true, Some(&with("claude")), false),
+            line
+        );
+        assert_eq!(reference_for(line, true, Some(&with("aider")), false), line);
+        assert_eq!(reference_for(line, true, Some(&with("bash")), false), None);
+        assert_eq!(
+            reference_for(line, true, Some(&with("pwsh.exe")), false),
+            None
+        );
         assert_eq!(
             message(
-                reference_for(line, true, Some(&with("bash"))),
+                reference_for(line, true, Some(&with("bash")), false),
                 "echo hi",
                 &[]
             ),
             "echo hi"
         );
+        // Send anyway: the operator chose to have the shell get it too.
+        assert_eq!(reference_for(line, true, Some(&with("bash")), true), line);
         // A file or an item handed over is what is sent, to a shell too.
         let path = Some("path /srv/x.rs");
-        assert_eq!(reference_for(path, false, Some(&with("bash"))), path);
+        assert_eq!(reference_for(path, false, Some(&with("bash")), false), path);
+        // Of several targets, the shells are named as left out.
+        let (agent, shell) = (with("claude"), with("bash"));
+        assert_eq!(
+            left_out(true, &[Some(&agent), Some(&shell)], &["docs", "shell-one"]),
+            ["shell-one"]
+        );
+        assert!(left_out(false, &[Some(&shell)], &["shell-one"]).is_empty());
+    }
+
+    #[test]
+    fn several_targets_are_named_as_a_sentence_names_them() {
+        let n = |v: &[&str]| v.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        assert_eq!(go_words(&[]), "Pick a target");
+        assert_eq!(go_words(&n(&["alpha"])), "Send to alpha");
+        assert_eq!(go_words(&n(&["a", "b", "c"])), "Send to 3 sessions");
+        assert_eq!(arrived_all(&n(&["alpha"]), true), "Sent to alpha");
+        assert_eq!(arrived_all(&n(&["a", "b"]), true), "Sent to a and b");
+        assert_eq!(
+            arrived_all(&n(&["a", "b", "c"]), false),
+            "Pasted into a, b and c"
+        );
     }
 
     #[test]

@@ -311,9 +311,10 @@ pub struct Terminals {
     pub launchers: Vec<Entity<Launcher>>,
     pub rail_search: Entity<TextField>,
     pub send_note: Entity<TextField>,
-    pub send_query: Entity<TextField>,
-    pub send_target: Option<Key>,
-    pub send_cursor: usize,
+    /// Send's list of sessions to send to.
+    pub send_finder: Entity<ahjo_app_kit::widgets::finder::Finder>,
+    /// The sessions Send sends to, in the order they were chosen.
+    pub send_targets: Vec<Key>,
     pub send: super::send::Draft,
     pub find_query: Entity<TextField>,
     pub find_cursor: usize,
@@ -415,7 +416,11 @@ impl Terminals {
                 .multiline()
                 .attachments()
         });
-        let send_query = field(cx, "Find a session…");
+        let send_finder = cx.new(|cx| {
+            ahjo_app_kit::widgets::finder::Finder::new("send-target", "Find sessions…", cx)
+                .several()
+                .rows(crate::theme::size::SEND_TARGET_ROWS as usize)
+        });
         let find_query = field(cx, "Search every session's output…");
         let rename_field = field(cx, "Name");
         let weak = cx.weak_entity();
@@ -472,9 +477,8 @@ impl Terminals {
             launchers,
             rail_search,
             send_note,
-            send_query,
-            send_target: None,
-            send_cursor: 0,
+            send_finder,
+            send_targets: vec![],
             send: Default::default(),
             find_query,
             find_cursor: 0,
@@ -554,6 +558,8 @@ impl Terminals {
             |s, _, ev, window, cx| match ev {
                 FieldEvent::Submit => s.send_now(true, window, cx),
                 FieldEvent::SubmitAlt => s.send_now(false, window, cx),
+                // Tab goes to the sessions it is sent to, and back.
+                FieldEvent::Tab => ahjo_app_kit::widgets::finder::focus(&s.send_finder, window, cx),
                 FieldEvent::Changed => cx.notify(),
                 _ => {}
             },
@@ -567,36 +573,13 @@ impl Terminals {
             },
         )
         .detach();
-        cx.subscribe_in(&self.send_query.clone(), window, |s, _, ev, window, cx| {
-            let q = s.send_query.read(cx).text.clone();
-            let n = s.send_targets(&q).len();
-            match ev {
-                FieldEvent::Changed => s.send_cursor = 0,
-                FieldEvent::Up => s.send_cursor = s.send_cursor.saturating_sub(1),
-                FieldEvent::Down => s.send_cursor = (s.send_cursor + 1).min(n.saturating_sub(1)),
-                FieldEvent::Submit | FieldEvent::Tab => {
-                    // Only a row the operator typed toward and sees lit is
-                    // taken; with nothing typed, Enter picks nothing.
-                    let t = if q.trim().is_empty() {
-                        vec![]
-                    } else {
-                        s.send_targets(&q)
-                    };
-                    if let Some(x) = t.get(s.send_cursor) {
-                        let target = Key::of(x);
-                        if s.send_target.as_ref() != Some(&target) {
-                            s.send.pane = None;
-                        }
-                        s.send.new_agent = false;
-                        s.send_target = Some(target);
-                    }
-                    s.send_query.update(cx, |f, cx| f.set("", false, cx));
-                    field::focus(&s.send_note, window, cx);
-                }
-                _ => {}
-            }
-            cx.notify();
-        })
+        cx.subscribe_in(
+            &self.send_finder.clone(),
+            window,
+            |s, _, ev: &ahjo_app_kit::widgets::finder::FinderEvent, window, cx| {
+                s.send_finder_event(ev, window, cx);
+            },
+        )
         .detach();
         cx.subscribe_in(&self.find_query.clone(), window, |s, _, ev, window, cx| {
             let n = s.fleet.found().map_or(0, |(m, _)| m.len());
@@ -902,12 +885,12 @@ impl Terminals {
                     if let Some(record) = self.settings.restarts.remove(&old.text()) {
                         self.settings.restarts.insert(new.text(), record);
                     }
-                    for k in [
-                        self.peek.as_mut().map(|p| &mut p.key),
-                        self.send_target.as_mut(),
-                    ]
-                    .into_iter()
-                    .flatten()
+                    for k in self
+                        .peek
+                        .as_mut()
+                        .map(|p| &mut p.key)
+                        .into_iter()
+                        .chain(self.send_targets.iter_mut())
                     {
                         if *k == old {
                             *k = new.clone();
@@ -1077,8 +1060,8 @@ impl Terminals {
         self.surfaces.push(s.clone());
         let focus = match &s {
             Surface::Send => {
-                if self.send_target.is_none() {
-                    self.send_query.focus_handle(cx)
+                if self.send_targets.is_empty() {
+                    self.send_finder.read(cx).query.focus_handle(cx)
                 } else {
                     self.send_note.focus_handle(cx)
                 }

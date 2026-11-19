@@ -1,19 +1,23 @@
-//! Send to Session, the one hand-off (CHROTE's `SendDrawer`): a drawer over
-//! the windows by the one rule ([`surface::at_edge`]), so no session changes
-//! size for it; when it covers its target's window it shows that session's
-//! last lines. Every surface opens it through [`Terminals::handoff`] with a
+//! Send to Session, the one hand-off (CHROTE's `SendDrawer`): a drawer at
+//! the right of the windows, which make room for it, so it never covers a
+//! session. Every surface opens it through [`Terminals::handoff`] with a
 //! reference to what it was showing; the reference is shown, not edited,
-//! and the note under it is the operator's. Enter sends (paste and submit),
-//! Shift+Enter breaks the line, Ctrl+Enter or Paste only pastes. Files
-//! dropped on the drawer or attached land on the target's node and their
-//! paths follow the note. "New agent…" launches one and pastes the message
-//! into it without submitting, once the node finds it ready for a paste.
+//! and the note under it is the operator's. It sends to one session or
+//! several, found and marked in the shared finder
+//! ([`ahjo_app_kit::widgets::finder`]): Enter takes the lit one, Tab marks
+//! another. Enter in the note sends (paste and submit), Shift+Enter breaks
+//! the line, Ctrl+Enter or Paste only pastes. Files dropped on the drawer
+//! or attached land on each target's node and their paths follow the note.
+//! "New agent…" launches one and pastes the message into it without
+//! submitting, once the node finds it ready for a paste.
 //!
-//! A send that arrived closes the drawer; one that failed keeps it with the
-//! words of why; one whose outcome is unknown keeps it and refuses to send
-//! again until the operator has looked. Closing gives the focus back to
-//! what had it, and the width dragged at the inner edge is remembered on
-//! this device. The rules are `store::send`'s.
+//! A send that arrived everywhere closes the drawer; where one failed the
+//! drawer stays, keeps only the sessions it did not reach and says why for
+//! each. Where the reason is a rule rather than a failure (a shell would
+//! run the line naming a session; an outcome unknown might have arrived),
+//! the operator can send anyway. Closing gives the focus back to what had
+//! it, and the width dragged at the inner edge is remembered on this
+//! device. The rules are `store::send`'s.
 
 use super::launcher::SEND;
 use super::page::Terminals;
@@ -22,14 +26,24 @@ use crate::http;
 use crate::store::send;
 use crate::store::sessions::{self, Key};
 use crate::theme::{alpha, size, theme};
+use ahjo_app_kit::widgets::finder::{self, Choice, FinderEvent, Lead};
 use ahjo_app_kit::widgets::kit::{self, Kind};
 use ahjo_core::NodeId;
 use ahjo_terminals_contract::Outcome;
 use gpui::{
     AnyElement, AsyncApp, ClickEvent, Context, ExternalPaths, FontWeight, MouseButton,
-    MouseMoveEvent, WeakEntity, Window, div, prelude::*, px,
+    MouseMoveEvent, SharedString, WeakEntity, Window, div, prelude::*, px,
 };
 use std::path::PathBuf;
+
+/// Where attachments land: a node, and the user there.
+type Landing = (String, String);
+
+/// The finder's row for a new agent, and its chips.
+const NEW_AGENT: &str = "new-agent";
+const AGENTS: &str = "agents";
+const SHELLS: &str = "shells";
+const WAITING: &str = "waiting";
 
 /// The drawer's state besides its fields: what it hands over and how the
 /// last send went.
@@ -45,8 +59,16 @@ pub struct Draft {
     pub files: Vec<Attachment>,
     /// Why the last send did not simply arrive, shown above the actions.
     pub said: Option<String>,
-    /// The last send's outcome is unknown: no sending again from here.
+    /// Where the last send did not arrive, by session, and why.
+    pub missed: Vec<(Key, String)>,
+    /// Where the last send of several arrived, by name.
+    pub reached: Vec<String>,
+    /// A send's outcome is unknown: no sending again from here until the
+    /// operator says to.
     pub stuck: bool,
+    /// The operator chose to send the line naming a session to a shell
+    /// too.
+    pub anyway: bool,
     /// The picker's "New agent…" row is chosen.
     pub new_agent: bool,
     /// Explicitly chosen pane; absent means the target tile's pane.
@@ -55,15 +77,15 @@ pub struct Draft {
     pub launch: Option<(String, u32)>,
     /// The drawer's launched session (node, id), awaiting its first pane.
     pub waiting: Option<(String, String)>,
-    /// A send in flight, by request, whether it was a launch's paste, and
-    /// whether it presses Enter.
-    pub sending: Option<(u32, Key, bool, bool)>,
+    /// The sends in flight, by request, each with its session, whether it
+    /// was a launch's paste, and whether it presses Enter.
+    pub sending: Vec<(u32, Key, bool, bool)>,
     /// Files being written on the target's node.
     pub uploading: bool,
     /// The focused window's grid as the drawer opened, for its launch.
     pub launch_grid: Option<super::page::Grid>,
-    /// The inner edge is being dragged.
-    pub resizing: bool,
+    /// The inner edge is being dragged: from where, and the width then.
+    pub resizing: Option<(f32, f32)>,
 }
 
 /// A local file or a clipboard image kept in memory until sent.
@@ -99,8 +121,11 @@ impl Terminals {
         )
     }
 
-    pub(super) fn send_targets(&self, query: &str) -> Vec<&ahjo_terminals_contract::Session> {
-        sessions::targets(&self.fleet.all, &self.settings.recent_targets, query)
+    /// The sessions Send can go to: every one but the source, recent
+    /// targets first, as the finder offers them.
+    fn send_choices(&self) -> Vec<Choice> {
+        let focused = self.focused_key();
+        sessions::targets(&self.fleet.all, &self.settings.recent_targets)
             .into_iter()
             .filter(|s| {
                 self.send
@@ -108,7 +133,51 @@ impl Terminals {
                     .as_ref()
                     .is_none_or(|source| !sessions::is(s, source))
             })
+            .map(|s| {
+                let key = Key::of(s);
+                let program = match sessions::running(s) {
+                    sessions::Running::Harness(h) => Some(h),
+                    sessions::Running::Command(c) => Some(c),
+                    sessions::Running::Nothing => None,
+                };
+                let mut kinds = vec![];
+                if sessions::is_agent(s) {
+                    kinds.push(AGENTS);
+                }
+                if sessions::running(s) == sessions::Running::Nothing {
+                    kinds.push(SHELLS);
+                }
+                if sessions::waiting(s).is_some() {
+                    kinds.push(WAITING);
+                }
+                let device = self.where_is(&s.node).map(|p| p.device).unwrap_or_default();
+                Choice {
+                    id: key.text().into(),
+                    label: s.name.clone(),
+                    also: vec![
+                        program.unwrap_or("").to_string(),
+                        sessions::folder(s).to_string(),
+                        device,
+                    ],
+                    detail: if focused.as_ref() == Some(&key) {
+                        Some("focused window".into())
+                    } else {
+                        program.map(str::to_string)
+                    },
+                    lead: match (sessions::waiting(s), &s.user) {
+                        (Some(_), _) => Lead::Waiting,
+                        (None, Some(u)) => Lead::User(u.clone()),
+                        (None, None) => Lead::None,
+                    },
+                    kinds,
+                }
+            })
             .collect()
+    }
+
+    /// The session a finder row names.
+    fn send_key(&self, id: &str) -> Option<Key> {
+        self.fleet.all.iter().map(Key::of).find(|k| k.text() == id)
     }
 
     /// Opens Send to Session with `reference`, the line naming what the
@@ -124,6 +193,10 @@ impl Terminals {
         self.handoff_from(reference, target, None, false, window, cx);
     }
 
+    fn busy(&self) -> bool {
+        !self.send.sending.is_empty() || self.send.uploading || self.send.waiting.is_some()
+    }
+
     fn handoff_from(
         &mut self,
         reference: Option<String>,
@@ -133,7 +206,7 @@ impl Terminals {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if self.send.sending.is_some() || self.send.uploading || self.send.waiting.is_some() {
+        if self.busy() {
             // The last one is still on its way: its draft stays until it lands.
             self.open(Surface::Send, window, cx);
             return;
@@ -146,9 +219,8 @@ impl Terminals {
             launch_grid,
             ..Default::default()
         };
-        self.send_target = target;
-        self.send_cursor = 0;
-        self.send_query.update(cx, |f, cx| f.set("", false, cx));
+        self.send_targets = target.into_iter().collect();
+        self.send_finder.update(cx, |f, cx| f.clear(cx));
         self.send_note.update(cx, |f, cx| f.set("", false, cx));
         self.open(Surface::Send, window, cx);
     }
@@ -161,31 +233,68 @@ impl Terminals {
         }
     }
 
-    /// Picks a target from the list; the picker's own row is a new agent.
-    fn pick(&mut self, target: Option<Key>, window: &mut Window, cx: &mut Context<Self>) {
-        self.send.new_agent = target.is_none();
-        if self.send_target != target {
-            self.send.pane = None;
-        }
-        if self.send.new_agent {
-            let l = self.launchers[SEND].clone();
-            l.update(cx, |l, cx| l.focus_first(window, cx));
-        } else {
-            self.send_target = target;
-            ahjo_app_kit::widgets::field::focus(&self.send_note, window, cx);
+    /// What the finder heard: a session taken goes alone unless others are
+    /// marked, when it joins them; a mark adds or takes away one.
+    pub(super) fn send_finder_event(
+        &mut self,
+        ev: &FinderEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        match ev {
+            FinderEvent::Leave => {
+                ahjo_app_kit::widgets::field::focus(&self.send_note, window, cx);
+                return;
+            }
+            FinderEvent::Take(id) if id.as_ref() == NEW_AGENT => {
+                self.send.new_agent = true;
+                let l = self.launchers[SEND].clone();
+                l.update(cx, |l, cx| l.focus_first(window, cx));
+            }
+            FinderEvent::Take(id) => {
+                let Some(k) = self.send_key(id) else {
+                    return;
+                };
+                self.send.new_agent = false;
+                if self.send_targets.len() > 1 {
+                    if !self.send_targets.contains(&k) {
+                        self.send_targets.push(k);
+                    }
+                } else {
+                    if self.send_targets.first() != Some(&k) {
+                        self.send.pane = None;
+                    }
+                    self.send_targets = vec![k];
+                }
+                self.send_finder.update(cx, |f, cx| f.clear(cx));
+                ahjo_app_kit::widgets::field::focus(&self.send_note, window, cx);
+            }
+            FinderEvent::Mark(_) | FinderEvent::MarkAll(_) => {
+                self.send.new_agent = false;
+                let mut marked: Vec<SharedString> =
+                    self.send_targets.iter().map(|k| k.text().into()).collect();
+                finder::marks_after(ev, &mut marked);
+                self.send_targets = marked.iter().filter_map(|id| self.send_key(id)).collect();
+                self.send.pane = None;
+            }
         }
         self.send.said = None;
+        self.send.missed.clear();
         self.send.stuck = false;
         cx.notify();
     }
 
-    /// Send (Enter) or Paste only (Ctrl+Enter) to the chosen target.
+    /// Takes `k` off the sessions Send goes to.
+    fn send_drop(&mut self, k: &Key, cx: &mut Context<Self>) {
+        self.send_targets.retain(|t| t != k);
+        self.send.missed.retain(|(t, _)| t != k);
+        self.send.pane = None;
+        cx.notify();
+    }
+
+    /// Send (Enter) or Paste only (Ctrl+Enter) to the chosen targets.
     pub fn send_now(&mut self, enter: bool, window: &mut Window, cx: &mut Context<Self>) {
-        if self.send.sending.is_some()
-            || self.send.uploading
-            || self.send.waiting.is_some()
-            || self.send.stuck
-        {
+        if self.busy() || self.send.stuck {
             return;
         }
         if self.send.new_agent {
@@ -197,53 +306,68 @@ impl Terminals {
         if self.draft_text(cx).trim().is_empty() && self.send.files.is_empty() {
             return;
         }
-        let Some(k) = self.send_target.clone() else {
-            ahjo_app_kit::widgets::field::focus(&self.send_query, window, cx);
+        if self.send_targets.is_empty() {
+            finder::focus(&self.send_finder, window, cx);
             return;
-        };
-        self.deliver(k, enter, false, cx);
+        }
+        self.deliver(self.send_targets.clone(), enter, false, cx);
     }
 
     fn draft_text(&self, cx: &Context<Self>) -> String {
         let note = self.send_note.read(cx).text.clone();
-        send::message(self.sent_reference(), &note, &[])
-    }
-
-    /// The reference as the chosen target gets it (`send::reference_for`);
-    /// a new agent reads it.
-    fn sent_reference(&self) -> Option<&str> {
         let reference = self.send.reference.as_deref();
-        if self.send.new_agent {
-            return reference;
-        }
-        let target = (self.send_target.as_ref()).and_then(|k| self.fleet.session(k));
-        send::reference_for(reference, self.send.names_a_session, target)
+        send::message(reference, &note, &[])
     }
 
-    /// Writes the attachments on `k`'s node, then pastes the message.
-    fn deliver(&mut self, k: Key, enter: bool, launched: bool, cx: &mut Context<Self>) {
+    /// The reference as target `k` gets it (`send::reference_for`).
+    fn reference_to(&self, k: &Key) -> Option<&str> {
+        send::reference_for(
+            self.send.reference.as_deref(),
+            self.send.names_a_session,
+            self.fleet.session(k),
+            self.send.anyway,
+        )
+    }
+
+    /// Writes the attachments on each target's node, once a node, then
+    /// pastes the message into each.
+    fn deliver(&mut self, targets: Vec<Key>, enter: bool, launched: bool, cx: &mut Context<Self>) {
         self.send.said = None;
-        let Some(pane) = self.send_pane(&k) else {
-            self.send.said = Some(format!("{} has no pane to paste into.", k.name));
-            cx.notify();
-            return;
-        };
+        self.send.missed.clear();
+        self.send.reached.clear();
         let files = self.send.files.clone();
         if files.is_empty() {
-            self.paste(k, pane, enter, launched, vec![], cx);
+            for k in targets {
+                self.paste(k, enter, launched, vec![], cx);
+            }
+            self.settle(enter, cx);
             return;
         }
         self.send.uploading = true;
-        let node = NodeId(k.node.clone());
-        let user = k.user.clone();
         cx.spawn(async move |this, cx| {
-            let written = write_drops(&this, &node, &user, &files, cx).await;
+            // Each node and user written to once: where, and the paths
+            // there or why not.
+            let mut written: Vec<(Landing, Result<Vec<String>, String>)> = vec![];
+            for k in &targets {
+                let at = (k.node.clone(), k.user.clone());
+                if written.iter().any(|(w, _)| *w == at) {
+                    continue;
+                }
+                let node = NodeId(k.node.clone());
+                let paths = write_drops(&this, &node, &k.user, &files, cx).await;
+                written.push((at, paths));
+            }
             let _ = this.update(cx, |s, cx| {
                 s.send.uploading = false;
-                match written {
-                    Ok(paths) => s.paste(k, pane, enter, launched, paths, cx),
-                    Err(why) => s.send.said = Some(why),
+                for k in targets {
+                    let at = (k.node.clone(), k.user.clone());
+                    match written.iter().find(|(w, _)| *w == at).map(|(_, p)| p) {
+                        Some(Ok(paths)) => s.paste(k, enter, launched, paths.clone(), cx),
+                        Some(Err(why)) => s.send.missed.push((k, why.clone())),
+                        None => {}
+                    }
                 }
+                s.settle(enter, cx);
                 cx.notify();
             });
         })
@@ -251,10 +375,10 @@ impl Terminals {
         cx.notify();
     }
 
+    /// Pastes the message into `k`'s pane, or notes why it could not be.
     fn paste(
         &mut self,
         k: Key,
-        pane: u32,
         enter: bool,
         launched: bool,
         files: Vec<String>,
@@ -262,79 +386,120 @@ impl Terminals {
     ) {
         let note = self.send_note.read(cx).text.clone();
         let Some(s) = self.fleet.session(&k) else {
-            self.send.said = Some(format!("{} is not running.", k.name));
+            let why = format!("{} is not running.", k.name);
+            self.send.missed.push((k, why));
             return;
         };
+        let Some(pane) = self.send_pane(&k) else {
+            let why = format!("{} has no pane to paste into.", k.name);
+            self.send.missed.push((k, why));
+            return;
+        };
+        if !s.panes.iter().any(|p| p.id == pane) {
+            let why = format!("The selected pane of {} is gone; choose another.", k.name);
+            self.send.missed.push((k, why));
+            return;
+        }
         // A launched agent may not report its program yet; it is an agent.
         let reference = match launched {
             true => self.send.reference.as_deref(),
-            false => send::reference_for(
-                self.send.reference.as_deref(),
-                self.send.names_a_session,
-                Some(s),
-            ),
+            false => self.reference_to(&k),
         };
         let text = send::message(reference, &note, &files);
-        if !s.panes.iter().any(|p| p.id == pane) {
-            self.send.said = Some(format!(
-                "The selected pane of {} is gone; choose another.",
-                k.name
-            ));
-            cx.notify();
-            return;
-        }
         // A launched agent may still be starting: the node waits until it
         // is ready for the paste (#242).
         match self.fleet.paste_to(&k.node, pane, &text, enter, launched) {
             Ok(id) => {
                 self.answered(&k, cx);
-                self.send.sending = Some((id, k, launched, enter));
+                self.send.sending.push((id, k, launched, enter));
             }
-            Err(e) => self.send.said = Some(e),
+            Err(why) => self.send.missed.push((k, why)),
+        }
+        cx.notify();
+    }
+
+    /// Nothing is in flight any more: everywhere reached closes the
+    /// drawer; otherwise it stays with the sessions not reached and why.
+    fn settle(&mut self, enter: bool, cx: &mut Context<Self>) {
+        if self.busy() {
+            return;
+        }
+        let reached = std::mem::take(&mut self.send.reached);
+        for name in &reached {
+            if let Some(k) = self.send_targets.iter().find(|k| &k.name == name).cloned() {
+                sessions::remember(&mut self.settings.recent_targets, &k.text(), 5);
+            }
+        }
+        if self.send.missed.is_empty() {
+            if reached.is_empty() {
+                return;
+            }
+            self.send.files.clear();
+            self.send_note.update(cx, |f, cx| f.set("", false, cx));
+            self.close(surface::SEND, cx);
+            self.report(&send::arrived_all(&reached, enter), false, None);
+            self.save(cx);
+        } else {
+            // Only those not reached stay to be sent again.
+            let missed: Vec<Key> = self.send.missed.iter().map(|(k, _)| k.clone()).collect();
+            self.send_targets.retain(|k| missed.contains(k));
+            if !reached.is_empty() {
+                self.send.said = Some(format!("Arrived in {}.", send::names(&reached)));
+            }
+            let why: Vec<String> = self.send.missed.iter().map(|(_, w)| w.clone()).collect();
+            self.report(&why.join(" "), true, None);
+            self.save(cx);
         }
         cx.notify();
     }
 
     /// The chosen pane, otherwise the pane shown by the target's tile,
-    /// otherwise the target's first pane.
+    /// otherwise the target's first pane. A pane is chosen only while
+    /// Send goes to one session.
     fn send_pane(&self, key: &Key) -> Option<u32> {
         let session = self.fleet.session(key)?;
-        self.send.pane.or_else(|| {
-            let ws = &self.settings.workspace;
-            ws.shown(ws.focus)
-                .filter(|binding| &binding.key == key)
-                .or_else(|| {
-                    ws.windows()
-                        .iter()
-                        .filter_map(|w| w.shown())
-                        .find(|binding| &binding.key == key)
-                })
-                .and_then(|binding| binding.pane)
-                .filter(|id| session.panes.iter().any(|pane| pane.id == *id))
-                .or_else(|| session.panes.first().map(|pane| pane.id))
-        })
+        self.send
+            .pane
+            .filter(|_| self.send_targets.len() == 1)
+            .or_else(|| {
+                let ws = &self.settings.workspace;
+                ws.shown(ws.focus)
+                    .filter(|binding| &binding.key == key)
+                    .or_else(|| {
+                        ws.windows()
+                            .iter()
+                            .filter_map(|w| w.shown())
+                            .find(|binding| &binding.key == key)
+                    })
+                    .and_then(|binding| binding.pane)
+                    .filter(|id| session.panes.iter().any(|pane| pane.id == *id))
+                    .or_else(|| session.panes.first().map(|pane| pane.id))
+            })
     }
 
     /// The node said what became of a send.
     pub(super) fn send_delivered(&mut self, id: u32, outcome: Outcome, cx: &mut Context<Self>) {
-        let Some((_, k, launched, enter)) = self.send.sending.take_if(|(i, ..)| *i == id) else {
+        let Some(at) = self.send.sending.iter().position(|(i, ..)| *i == id) else {
             return;
         };
+        let (_, k, launched, enter) = self.send.sending.remove(at);
         match send::said(outcome, &k.name) {
-            None => {
-                sessions::remember(&mut self.settings.recent_targets, &k.text(), 5);
+            None if launched => {
                 self.send.files.clear();
                 self.send_note.update(cx, |f, cx| f.set("", false, cx));
                 self.close(surface::SEND, cx);
                 self.report(&send::arrived(&k.name, launched, enter), false, None);
                 self.save(cx);
+                cx.notify();
+                return;
             }
+            None => self.send.reached.push(k.name.clone()),
             Some(why) => {
-                self.send.stuck = outcome == Outcome::Unknown;
-                self.report(&why, true, None);
-                self.send.said = Some(why);
+                self.send.stuck |= outcome == Outcome::Unknown;
+                self.send.missed.push((k, why));
             }
         }
+        self.settle(enter, cx);
         cx.notify();
     }
 
@@ -376,9 +541,9 @@ impl Terminals {
             return;
         };
         self.send.waiting = None;
-        self.send_target = Some(key.clone());
+        self.send_targets = vec![key.clone()];
         self.send.pane = None;
-        self.deliver(key, enter, true, cx);
+        self.deliver(vec![key], enter, true, cx);
     }
 
     /// Files from this computer, dropped on the drawer or picked.
@@ -421,18 +586,26 @@ impl Terminals {
         );
     }
 
+    /// The width the drawer takes from the windows while it is open, its
+    /// edge included; nothing while it is closed.
+    pub(super) fn send_room(&self, window: &Window, cx: &gpui::App) -> f32 {
+        if !self.surfaces.iter().any(|s| matches!(s, Surface::Send)) {
+            return 0.;
+        }
+        let room = window.viewport_size().width / px(1.) - self.host.side_room(cx);
+        send::width(self.settings.send_width, room)
+    }
+
     pub(super) fn render_send(
         &mut self,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let t = theme(cx).clone();
-        // The room left of a view beside, which the drawer lies against.
-        let inset = self.beside_inset(window, cx);
-        let room = window.viewport_size().width / px(1.) - inset;
-        let width = send::width(self.settings.send_width, room);
-        let busy =
-            self.send.sending.is_some() || self.send.uploading || self.send.waiting.is_some();
+        // The windows made room for it at the right (`send_room`).
+        let width = self.send_room(window, cx);
+        let busy = self.busy();
+        self.offer_send_targets(cx);
         let mut body = div()
             .id("send-body")
             .debug_selector(|| "send-body".into())
@@ -443,11 +616,10 @@ impl Terminals {
             .flex()
             .flex_col()
             .gap(px(8.))
-            .child(self.render_send_aimed(&t))
-            .child(self.send_query.clone())
-            .child(self.render_send_targets(cx));
+            .child(self.render_send_aimed(&t, cx))
+            .child(self.send_finder.clone());
         if !self.send.new_agent
-            && let Some(key) = self.send_target.as_ref()
+            && let [key] = self.send_targets.as_slice()
             && let Some(session) = self.fleet.session(key)
             && (session.panes.len() > 1
                 || self
@@ -481,6 +653,7 @@ impl Terminals {
                     .on_click(cx.listener(move |s, _, _, cx| {
                         s.send.pane = Some(id);
                         s.send.said = None;
+                        s.send.missed.clear();
                         cx.notify();
                     })),
                 );
@@ -497,59 +670,23 @@ impl Terminals {
                 .child(self.launchers[SEND].clone());
         }
         body = body.child(div().mt(px(8.)).child(kit::label(&t, "Message")));
-        // A shell or a program gets the note alone: the line is shown struck
-        // through, saying why, so what arrives is what was seen.
-        let dropped = self.send.reference.is_some() && self.sent_reference().is_none();
-        if let Some(r) = &self.send.reference {
-            body = body.child(
-                div()
-                    .id("send-reference")
-                    .when(dropped, |d| d.line_through().opacity(0.6))
-                    .flex_none()
-                    .px(px(8.))
-                    .py(px(4.))
-                    .bg(t.raised)
-                    .rounded(px(size::RADIUS))
-                    .border_1()
-                    .border_color(t.divider)
-                    .text_size(px(size::SMALL))
-                    .text_color(t.text2)
-                    .overflow_hidden()
-                    .whitespace_nowrap()
-                    .text_ellipsis()
-                    .child(r.clone()),
-            );
-            if dropped && let Some(k) = self.send_target.as_ref() {
-                body = body.child(kit::note(
-                    &t,
-                    format!(
-                        "Not sent: {} is at a shell prompt, which would run it as a command.",
-                        k.name
-                    ),
-                    Some(t.dim),
-                ));
-            }
-        }
+        body = body.children(self.render_send_reference(&t, cx));
         body = body
             .child(self.send_note.clone())
             .child(self.render_send_files(&t, cx));
-        if let Some(why) = &self.send.said {
-            body = body.child(kit::note(&t, why.clone(), Some(t.error)));
-        }
+        body = body.children(self.render_send_said(&t, cx));
         // Nothing goes until a target is chosen, and the button says which.
-        let aimed = (!self.send.new_agent)
-            .then(|| self.send_target.clone())
-            .flatten();
-        let blocked = busy || self.send.stuck || aimed.is_none();
+        let aimed: Vec<String> = match self.send.new_agent {
+            true => vec![],
+            false => self.send_targets.iter().map(|k| k.name.clone()).collect(),
+        };
+        let blocked = busy || self.send.stuck || aimed.is_empty();
         let go = if self.send.uploading {
             "Attaching…".to_string()
         } else if busy {
             "Sending…".to_string()
         } else {
-            match &aimed {
-                Some(k) => format!("Send to {}", k.name),
-                None => "Pick a target".to_string(),
-            }
+            send::go_words(&aimed)
         };
         body = body.child(
             div()
@@ -586,129 +723,265 @@ impl Terminals {
                         })),
                 ),
         );
-        // Below the actions, so coming and going it never moves them.
-        body = body.children(self.render_send_covered(&t, room - width));
-        let drawer = surface::at_edge(
-            div().id("send").debug_selector(|| "send-drawer".into()),
-            inset,
-        )
-        .bottom_0()
-        .border_l_1()
-        .w(px(width))
-        .flex()
-        .bg(t.surface)
-        .border_color(t.divider)
-        .shadow_lg()
-        .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
-        .drag_over::<ExternalPaths>(move |d, _, _, _| d.bg(alpha(t.accent, 0.08)))
-        .on_drop(cx.listener(|s, paths: &ExternalPaths, _, cx| s.send_attach(paths.paths(), cx)))
-        .child(
-            div()
-                .id("send-grip")
-                .flex_none()
-                .w(px(size::DRAWER_GRIP))
-                .h_full()
-                .cursor_col_resize()
-                .hover(|d| d.bg(t.accent_soft()))
-                .on_mouse_down(
-                    MouseButton::Left,
-                    cx.listener(|s, _, _, cx| {
-                        s.send.resizing = true;
-                        cx.stop_propagation();
-                    }),
-                ),
-        )
-        .child(
-            div()
-                .flex_1()
-                .min_w_0()
-                .flex()
-                .flex_col()
-                .child(self.render_send_head(&t, cx))
-                .child(body),
-        );
-        let resizing = self.send.resizing;
+        let drawer = surface::at_edge(div().id("send").debug_selector(|| "send-drawer".into()), 0.)
+            .bottom_0()
+            .border_l_1()
+            .w(px(width))
+            .flex()
+            .bg(t.surface)
+            .border_color(t.divider)
+            .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+            .drag_over::<ExternalPaths>(move |d, _, _, _| d.bg(alpha(t.accent, 0.08)))
+            .on_drop(
+                cx.listener(|s, paths: &ExternalPaths, _, cx| s.send_attach(paths.paths(), cx)),
+            )
+            .child(
+                div()
+                    .id("send-grip")
+                    .debug_selector(|| "send-grip".into())
+                    .flex_none()
+                    .w(px(size::DRAWER_GRIP))
+                    .h_full()
+                    .cursor_col_resize()
+                    .hover(|d| d.bg(t.accent_soft()))
+                    .on_mouse_down(
+                        MouseButton::Left,
+                        cx.listener(move |s, e: &gpui::MouseDownEvent, _, cx| {
+                            s.send.resizing = Some((e.position.x / px(1.), width));
+                            cx.stop_propagation();
+                        }),
+                    ),
+            )
+            .child(
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .flex()
+                    .flex_col()
+                    .child(self.render_send_head(&t, cx))
+                    .child(body),
+            );
+        // Nothing lies over the windows: they made room, and stay at hand
+        // to read or type in while the drawer is open.
+        let room = window.viewport_size().width / px(1.) - self.host.side_room(cx);
         div()
             .absolute()
             .inset_0()
-            .child(self.scrim(surface::SEND, cx).bg(alpha(t.bg, 0.3)))
             .child(drawer)
-            .when(resizing, |d| {
-                d.cursor_col_resize()
-                    .on_mouse_move(cx.listener(move |s, e: &MouseMoveEvent, _, cx| {
-                        let w = room - e.position.x / px(1.);
-                        s.settings.send_width = Some(send::width(Some(w), room));
-                        cx.notify();
-                    }))
-                    .on_mouse_up(
-                        MouseButton::Left,
-                        cx.listener(|s, _, _, cx| {
-                            s.send.resizing = false;
-                            s.save(cx);
+            .when_some(self.send.resizing, |d, (from, was)| {
+                d.child(
+                    div()
+                        .absolute()
+                        .inset_0()
+                        .occlude()
+                        .cursor_col_resize()
+                        .on_mouse_move(cx.listener(move |s, e: &MouseMoveEvent, _, cx| {
+                            let w = was + from - e.position.x / px(1.);
+                            s.settings.send_width = Some(send::width(Some(w), room));
                             cx.notify();
-                        }),
-                    )
+                        }))
+                        .on_mouse_up(
+                            MouseButton::Left,
+                            cx.listener(|s, _, _, cx| {
+                                s.send.resizing = None;
+                                s.save(cx);
+                                cx.notify();
+                            }),
+                        ),
+                )
             })
             .into_any_element()
     }
 
-    /// The aimed session's last lines, when its window lies under the
-    /// drawer, whose left edge is at `edge`: the drawer stays where it is
-    /// (it never moves under the pointer) and shows what it covers.
-    fn render_send_covered(&self, t: &crate::theme::Theme, edge: f32) -> Option<gpui::Div> {
-        let k = self.send_target.as_ref().filter(|_| !self.send.new_agent)?;
-        let ws = &self.settings.workspace;
-        let i = (0..ws.windows().len()).find(|&i| ws.shown(i).is_some_and(|b| &b.key == k))?;
-        let body = self.geo.borrow().get(i).and_then(|g| g.body)?;
-        if f32::from(body.origin.x + body.size.width) <= edge {
-            return None;
-        }
-        let pane = self.window_panes().get(i).cloned().flatten()?;
-        let text = self.fleet.screen(&pane.node, pane.pane)?.lock().text();
-        let mut lines: Vec<&str> = text
-            .lines()
-            .rev()
-            .filter(|l| !l.trim().is_empty())
-            .collect();
-        lines.truncate(size::SEND_TAIL);
-        lines.reverse();
-        Some(
-            div()
-                .debug_selector(|| "send-covered".into())
-                .flex_none()
-                .mt(px(8.))
-                .flex()
-                .flex_col()
-                .child(kit::label(t, format!("{}, last lines", k.name)))
-                .text_size(px(size::SMALL))
-                .text_color(t.dim)
-                .children(lines.into_iter().map(|l| {
-                    div()
-                        .whitespace_nowrap()
-                        .overflow_hidden()
-                        .text_ellipsis()
-                        .child(l.to_string())
-                })),
-        )
+    /// Hands the finder what it lists: a new agent first, then the
+    /// sessions, recent ones first, with the chosen ones checked.
+    fn offer_send_targets(&mut self, cx: &mut Context<Self>) {
+        let first = Choice {
+            id: NEW_AGENT.into(),
+            label: "New agent…".into(),
+            ..Default::default()
+        };
+        let choices = self.send_choices();
+        let chosen: Vec<SharedString> = match self.send.new_agent {
+            true => vec![NEW_AGENT.into()],
+            false => self.send_targets.iter().map(|k| k.text().into()).collect(),
+        };
+        self.send_finder.update(cx, |f, _| {
+            f.offer(
+                Some(first),
+                choices,
+                vec![(AGENTS, "Agents"), (SHELLS, "Shells"), (WAITING, "Waiting")],
+                chosen,
+            )
+        });
     }
 
-    /// The target, named where the drawer starts: what Enter sends to.
-    fn render_send_aimed(&self, t: &crate::theme::Theme) -> gpui::Div {
-        let aimed = (!self.send.new_agent)
-            .then(|| self.send_target.clone())
-            .flatten();
+    /// The line naming what was handed over: shown as it goes. Where a
+    /// target is at a shell prompt it is left out for that one, struck
+    /// through and saying why, with Send anyway beside it.
+    fn render_send_reference(
+        &self,
+        t: &crate::theme::Theme,
+        cx: &mut Context<Self>,
+    ) -> Vec<AnyElement> {
+        let Some(r) = &self.send.reference else {
+            return vec![];
+        };
+        let targets: Vec<_> = self
+            .send_targets
+            .iter()
+            .map(|k| self.fleet.session(k))
+            .collect();
+        let names: Vec<&str> = self.send_targets.iter().map(|k| k.name.as_str()).collect();
+        let left_out = match self.send.new_agent {
+            true => vec![],
+            false => send::left_out(self.send.names_a_session, &targets, &names),
+        };
+        let dropped = !left_out.is_empty() && !self.send.anyway && left_out.len() == names.len();
+        let mut out = vec![
+            div()
+                .id("send-reference")
+                .debug_selector(|| "send-reference".into())
+                .when(dropped, |d| d.line_through().opacity(0.6))
+                .flex_none()
+                .px(px(8.))
+                .py(px(4.))
+                .bg(t.raised)
+                .rounded(px(size::RADIUS))
+                .border_1()
+                .border_color(t.divider)
+                .text_size(px(size::SMALL))
+                .text_color(t.text2)
+                .overflow_hidden()
+                .whitespace_nowrap()
+                .text_ellipsis()
+                .child(r.clone())
+                .into_any_element(),
+        ];
+        if left_out.is_empty() {
+            return out;
+        }
+        let who = send::names(&left_out);
+        let one = left_out.len() == 1;
+        let (words, act, selector) = if self.send.anyway {
+            (
+                format!("Sent to {who} too, where a shell would run it as a command."),
+                "Leave it out",
+                "send-leave-out",
+            )
+        } else {
+            (
+                format!(
+                    "Not sent to {who}: {} at a shell prompt, which would run it as a command.",
+                    if one { "it is" } else { "they are" }
+                ),
+                "Send anyway",
+                "send-anyway",
+            )
+        };
+        out.push(
+            div()
+                .flex()
+                .items_start()
+                .gap(px(8.))
+                .child(
+                    div()
+                        .flex_1()
+                        .min_w_0()
+                        .child(kit::note(t, words, Some(t.dim))),
+                )
+                .child(
+                    kit::button(t, selector, act, Kind::Quiet)
+                        .flex_none()
+                        .debug_selector(move || selector.into())
+                        .on_click(cx.listener(|s, _, _, cx| {
+                            s.send.anyway = !s.send.anyway;
+                            cx.notify();
+                        })),
+                )
+                .into_any_element(),
+        );
+        out
+    }
+
+    /// How the last send went where it did not simply arrive: each session
+    /// not reached and why, and Send again where nobody knows whether it
+    /// arrived.
+    fn render_send_said(&self, t: &crate::theme::Theme, cx: &mut Context<Self>) -> Vec<AnyElement> {
+        let mut out = vec![];
+        if let Some(why) = &self.send.said {
+            out.push(kit::note(t, why.clone(), Some(t.text2)).into_any_element());
+        }
+        for (k, why) in &self.send.missed {
+            let name = k.name.clone();
+            out.push(
+                kit::note(t, why.clone(), Some(t.error))
+                    .debug_selector(move || format!("send-missed-{name}"))
+                    .into_any_element(),
+            );
+        }
+        if self.send.stuck {
+            out.push(
+                div()
+                    .flex()
+                    .items_center()
+                    .gap(px(8.))
+                    .child(div().flex_1().min_w_0().child(kit::note(
+                        t,
+                        "Look at the session first: sending again may paste it twice.",
+                        Some(t.dim),
+                    )))
+                    .child(
+                        kit::button(t, "send-again", "Send again", Kind::Plain)
+                            .flex_none()
+                            .debug_selector(|| "send-again".into())
+                            .on_click(cx.listener(|s, _, window, cx| {
+                                s.send.stuck = false;
+                                s.send_now(true, window, cx);
+                            })),
+                    )
+                    .into_any_element(),
+            );
+        }
+        out
+    }
+
+    /// Whom it goes to, named where the drawer starts: what Enter sends
+    /// to, each with a way to take it off.
+    fn render_send_aimed(&self, t: &crate::theme::Theme, cx: &mut Context<Self>) -> gpui::Div {
         let line = div()
             .flex_none()
-            .h(px(size::ROW))
+            .min_h(px(size::ROW))
             .flex()
+            .flex_wrap()
             .items_center()
-            .gap(px(6.));
-        match aimed {
-            Some(k) => {
-                let name = k.name.clone();
-                let focused = self.focused_key().as_ref() == Some(&k);
-                line.debug_selector(move || format!("send-aimed-{name}"))
-                    .child(div().text_color(t.text2).child("To"))
+            .gap(px(6.))
+            .child(div().text_color(t.text2).child("To"));
+        if self.send.new_agent {
+            return line.child(div().font_weight(FontWeight::SEMIBOLD).child("a new agent"));
+        }
+        if self.send_targets.is_empty() {
+            return line
+                .debug_selector(|| "send-aimed-none".into())
+                .child(div().text_color(t.dim).child("pick sessions below"));
+        }
+        let focused = self.focused_key();
+        let names: Vec<String> = self.send_targets.iter().map(|k| k.name.clone()).collect();
+        let mut line = line.debug_selector(move || format!("send-aimed-{}", names.join(",")));
+        for (i, k) in self.send_targets.iter().enumerate() {
+            let gone = k.clone();
+            line = line.child(
+                div()
+                    .h(px(22.))
+                    .pl(px(8.))
+                    .flex()
+                    .items_center()
+                    .gap(px(2.))
+                    .rounded_full()
+                    .bg(t.accent_light())
+                    .border_1()
+                    .border_color(t.divider)
+                    .min_w_0()
                     .child(
                         div()
                             .min_w_0()
@@ -716,25 +989,39 @@ impl Terminals {
                             .whitespace_nowrap()
                             .text_ellipsis()
                             .font_weight(FontWeight::SEMIBOLD)
-                            .child(k.name),
+                            .child(k.name.clone()),
                     )
-                    .when(focused, |d| {
+                    .when(focused.as_ref() == Some(k), |d| {
                         d.child(
                             div()
+                                .pl(px(4.))
                                 .text_size(px(size::SMALL))
                                 .text_color(t.dim)
-                                .child("the focused window"),
+                                .child("focused"),
                         )
                     })
-            }
-            None if self.send.new_agent => {
-                line.child(div().text_color(t.text2).child("To a new agent"))
-            }
-            None => line
-                .debug_selector(|| "send-aimed-none".into())
-                .child(div().text_color(t.text2).child("To"))
-                .child(div().text_color(t.dim).child("pick a session")),
+                    .child(
+                        div()
+                            .id(("send-drop", i))
+                            .debug_selector({
+                                let name = k.name.clone();
+                                move || format!("send-drop-{name}")
+                            })
+                            .size(px(20.))
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .rounded_full()
+                            .text_color(t.text2)
+                            .cursor_pointer()
+                            .hover(|d| d.text_color(t.text).bg(t.accent_soft()))
+                            .tooltip(kit::tip("Not to this one"))
+                            .child("×")
+                            .on_click(cx.listener(move |s, _, _, cx| s.send_drop(&gone, cx))),
+                    ),
+            );
         }
+        line
     }
 
     fn render_send_head(&self, t: &crate::theme::Theme, cx: &mut Context<Self>) -> gpui::Div {
@@ -749,91 +1036,13 @@ impl Terminals {
                 div()
                     .flex_1()
                     .font_weight(FontWeight::SEMIBOLD)
-                    .child("Send to session"),
+                    .child("Send to sessions"),
             )
             .child(
                 kit::button(t, "send-close", "Close", Kind::Quiet)
                     .tooltip(kit::tip("Esc"))
                     .on_click(cx.listener(|s, _, _, cx| s.close(surface::SEND, cx))),
             )
-    }
-
-    /// The picker: a new agent first, then the sessions, recent ones first.
-    fn render_send_targets(&self, cx: &mut Context<Self>) -> gpui::Stateful<gpui::Div> {
-        let t = theme(cx).clone();
-        let query = self.send_query.read(cx).text.clone();
-        let focused = self.focused_key();
-        let target = (!self.send.new_agent)
-            .then(|| self.send_target.clone())
-            .flatten();
-        let row = |id: (&'static str, usize), chosen: bool| {
-            div()
-                .id(id)
-                // Rows keep their height; the list scrolls instead of
-                // squeezing them.
-                .flex_none()
-                .h(px(size::ROW))
-                .px(px(8.))
-                .flex()
-                .items_center()
-                .gap(px(6.))
-                .cursor_pointer()
-                .when(chosen, |d| {
-                    d.bg(t.accent_light())
-                        .font_weight(gpui::FontWeight::SEMIBOLD)
-                })
-                .hover(|d| d.bg(t.accent_soft()))
-        };
-        let mut targets = div()
-            .id("send-targets")
-            .flex_none()
-            // Whole rows, so the last one shown is never cut through.
-            .max_h(px(size::SEND_TARGET_ROWS * size::ROW))
-            .overflow_y_scroll()
-            .flex()
-            .flex_col()
-            .child(
-                row(("target-new", 0), self.send.new_agent)
-                    .debug_selector(|| "target-new".into())
-                    .child(div().flex_1().text_color(t.text2).child("New agent…"))
-                    .on_click(cx.listener(|s, _, window, cx| s.pick(None, window, cx))),
-            );
-        let list = self.send_targets(&query);
-        let cursor = self.send_cursor.min(list.len().saturating_sub(1));
-        for (i, s) in list.iter().enumerate() {
-            let key = Key::of(s);
-            let k = key.clone();
-            let selector = format!("send-target-{}", key.text());
-            targets = targets.child(
-                row(("target", i), target.as_ref() == Some(&key))
-                    .debug_selector(move || selector.clone())
-                    .when(i == cursor && !query.is_empty(), |d| d.bg(t.raised))
-                    .when_some(s.user.clone(), |d, u| d.child(kit::user_square(&t, &u)))
-                    .when(sessions::waiting(s).is_some(), |d| {
-                        d.child(kit::waiting_dot(&t))
-                    })
-                    .child(
-                        div()
-                            .flex_1()
-                            .min_w_0()
-                            .overflow_hidden()
-                            .whitespace_nowrap()
-                            .child(s.name.clone()),
-                    )
-                    .when(focused.as_ref() == Some(&key), |d| {
-                        d.child(
-                            div()
-                                .text_size(px(10.))
-                                .text_color(t.dim)
-                                .child("focused window"),
-                        )
-                    })
-                    .on_click(
-                        cx.listener(move |sh, _, window, cx| sh.pick(Some(k.clone()), window, cx)),
-                    ),
-            );
-        }
-        targets
     }
 
     /// The attached files, each with a way to take it off again.

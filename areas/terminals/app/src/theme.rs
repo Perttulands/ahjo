@@ -55,8 +55,6 @@ pub mod size {
     pub const DRAWER_ROOM: f32 = 480.;
     /// Scrollback search shares the same space rules as Send.
     pub const FIND_DRAWER: f32 = 460.;
-    /// How many of its last lines Send shows of a target it covers.
-    pub const SEND_TAIL: usize = 3;
     /// The grip at the drawer's inner edge that resizes it.
     pub const DRAWER_GRIP: f32 = 6.;
     pub const LAUNCHER: f32 = 420.;

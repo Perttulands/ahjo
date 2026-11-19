@@ -3,6 +3,7 @@
 //! session (`src/launch.rs`): the preview is a promise, but for the hooks
 //! Notify adds, which its own switch stands for.
 
+use ahjo_app_kit::text::fuzzy;
 use ahjo_terminals_contract::Session;
 
 /// What a launch types into the new session's shell. Empty for the shell.
@@ -228,58 +229,10 @@ pub fn leads_to(dir: &str, segment: &str, folders: &[String]) -> Option<String> 
     Some(row.complete.clone())
 }
 
-/// A letter as the search compares it, case aside.
-fn fold(c: char) -> char {
-    c.to_lowercase().next().unwrap_or(c)
-}
-
-/// CHROTE's fuzzy score for a word. Scores are doubled to keep the gap
-/// penalty (1.5 per skipped character) integral.
-fn word_score(word: &str, candidate: &str) -> Option<i64> {
-    let text: Vec<char> = candidate.chars().collect();
-    let lowered: Vec<char> = text.iter().map(|c| fold(*c)).collect();
-    let mut previous = vec![None; text.len()];
-    for (letter_index, letter) in word.chars().map(fold).enumerate() {
-        let mut next = vec![None; text.len()];
-        for (i, ch) in text.iter().enumerate() {
-            if lowered[i] != letter {
-                continue;
-            }
-            let start = i == 0
-                || !text[i - 1].is_ascii_alphanumeric()
-                || (text[i - 1].is_ascii_lowercase() && ch.is_ascii_uppercase());
-            let base = 2 + if start { 6 } else { 0 };
-            next[i] = if letter_index == 0 {
-                Some(base)
-            } else {
-                (0..i)
-                    .filter_map(|j| {
-                        previous[j].map(|score| {
-                            score
-                                + base
-                                + if j + 1 == i {
-                                    6
-                                } else {
-                                    -3 * (i - j - 1) as i64
-                                }
-                        })
-                    })
-                    .max()
-            };
-        }
-        previous = next;
-    }
-    previous
-        .into_iter()
-        .flatten()
-        .max()
-        .map(|score| (score * 5).max(1))
-}
-
-/// Rank the last two path segments as CHROTE does, keeping input order on ties.
+/// Rank the last two path segments with the app's one forgiving search
+/// ([`fuzzy`]), keeping input order on ties.
 pub fn matching(fragment: &str, offered: &[String]) -> Vec<Suggestion> {
-    let words: Vec<&str> = fragment.split_whitespace().collect();
-    if words.is_empty() {
+    if fragment.trim().is_empty() {
         return vec![];
     }
     let mut found: Vec<(&String, i64)> = offered
@@ -287,8 +240,7 @@ pub fn matching(fragment: &str, offered: &[String]) -> Vec<Suggestion> {
         .filter_map(|path| {
             let parts: Vec<&str> = path.split(['/', '\\']).filter(|p| !p.is_empty()).collect();
             let tail = parts[parts.len().saturating_sub(2)..].join("/");
-            let score: Option<i64> = words.iter().map(|w| word_score(w, &tail)).sum();
-            score.map(|score| (path, score))
+            fuzzy::find(fragment, &tail).map(|hit| (path, hit.score))
         })
         .collect();
     found.sort_by_key(|entry| std::cmp::Reverse(entry.1));

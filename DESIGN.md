@@ -26,7 +26,8 @@ A page is judged by three questions, in this order:
   name and remembers how the operator launches. Sessions are shared with
   other places. A session fits the window it is shown in; nothing opened over
   it resizes or disturbs it, and nothing over it lets a click or a key
-  through to it. Peek is a full terminal on a session without a window:
+  through to it. Send is the one thing the windows make room for, since one
+  writes to sessions with it while reading them. Peek is a full terminal on a session without a window:
   typed into, scrolled and selected as in a window, at the session's own
   size; Esc goes to the session, Shift+Esc or a click outside closes it,
   and Attach gives it a window sized to it.
@@ -100,8 +101,14 @@ runs.
 - **Words only when they change what you do.** Keys live in tooltips and the
   Keys overlay.
 - **Send is the same everywhere.** Anything you can look at can be sent to a
-  session, the same way, from the same place, and Send opens over the page
-  you are on, which stays where it was.
+  session or several, the same way, from the same place, and Send opens
+  over the page you are on, which stays where it was. Where a rule holds
+  part of it back, it says so and offers to send anyway.
+- **One way to find a thing.** Every list one searches (sessions, a target,
+  a folder) finds as one types, forgivingly: letters apart, words in any
+  order, a slipped letter. A list to pick from marks the letters that found
+  each row, the keyboard does it all (Up, Down, Enter, Tab to mark
+  another), and chips narrow a long one by kind.
 - **Beside, not over.** What opens from a session docks beside the terminals
   and leaves them as they were.
 - **Fast.** A page shows what it has at once and fills in; nothing blocks on

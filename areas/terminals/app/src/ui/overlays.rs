@@ -590,10 +590,10 @@ impl Terminals {
             Some((i, matches.len(), name, m.line, m.context[1].clone()))
         });
         let query = self.find_query.read(cx).text.clone();
-        let inset = self.beside_inset(window, cx);
+        let inset = self.beside_inset(window, cx) + self.send_room(window, cx);
         let width = crate::store::send::width(
             Some(size::FIND_DRAWER),
-            window.viewport_size().width / px(1.) - inset,
+            window.viewport_size().width / px(1.) - self.host.side_room(cx) - inset,
         );
         let lead = hit_lead(width, &query);
         if let Some((matches, _)) = &found {

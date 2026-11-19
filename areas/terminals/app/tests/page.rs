@@ -468,7 +468,7 @@ fn a_page_hands_a_reference_into_a_session_through_send(cx: &mut TestAppContext)
     });
     assert_eq!(shell.read_with(cx, |s, _| s.shown_page()), Some("sessions"));
     let page = PAGE.with(|p| p.borrow().clone()).expect("the page");
-    let aimed = page.read_with(cx, |p, _| p.send_target.clone());
+    let aimed = page.read_with(cx, |p, _| p.send_targets.first().cloned());
     assert_eq!(aimed.map(|k| k.name), Some("alpha".to_string()));
     assert!(
         cx.debug_bounds("send-aimed-alpha").is_some(),
@@ -532,7 +532,7 @@ fn an_ask_that_names_a_session_aims_send_at_it_not_at_the_focused_one(cx: &mut T
         cx.debug_bounds("send-go").is_some()
     });
     let page = PAGE.with(|p| p.borrow().clone()).expect("the page");
-    let aimed = page.read_with(cx, |p, _| p.send_target.clone());
+    let aimed = page.read_with(cx, |p, _| p.send_targets.first().cloned());
     assert_eq!(
         aimed,
         Some(Key {
@@ -591,10 +591,12 @@ fn other_pages_read_the_sessions_and_open_views_beside_them(cx: &mut TestAppCont
     let _ = std::fs::remove_dir_all(settings.parent().expect("its folder"));
 }
 
-/// What the operator opens on the page lies over the windows: Send, the
+/// What the operator opens on the page lies over the windows: the
 /// scrollback search and Overview, and a view beside them opened, its edge
 /// dragged, given the whole area and closed with Esc, all leave every
-/// session at the size it had, here and for every other client.
+/// session at the size it had, here and for every other client. Send is
+/// the one the windows make room for
+/// (`send_drawer_makes_room_beside_a_lone_window`).
 #[gpui::test]
 fn nothing_opened_on_the_page_resizes_a_session(cx: &mut TestAppContext) {
     let Some(running) = start_config("terminals-opened-size", false, false, true, false) else {
@@ -652,7 +654,6 @@ fn nothing_opened_on_the_page_resizes_a_session(cx: &mut TestAppContext) {
     };
 
     for (keys, drawn, what) in [
-        ("alt-s", "send-drawer", "Send"),
         ("alt-h", "find-drawer", "the scrollback search"),
         ("alt-v", "overview-grid", "Overview"),
     ] {
@@ -670,14 +671,18 @@ fn nothing_opened_on_the_page_resizes_a_session(cx: &mut TestAppContext) {
     cx.update(|_, cx| toy.show_beside("sessions", note.into(), cx));
     cx.run_until_parked();
     let beside = cx.debug_bounds("terminals-beside").expect("drawn over");
-    let right = cx.update(|window, _| window.viewport_size().width);
+    // The terminals end where the Files panel stands.
+    let right = cx
+        .debug_bounds("panel-right")
+        .expect("the Files panel")
+        .left();
     assert!(
         (beside.right() - right).abs() < px(1.),
-        "at the right edge, where lines end: {beside:?}"
+        "at the terminals' right edge, where lines end: {beside:?}"
     );
     unchanged(cx, "with a view beside");
-    // Send and the search lie against the view's left edge, leaving it in
-    // sight; Esc closes them and leaves the view.
+    // The search lies against the view's left edge, leaving it in sight;
+    // Send stands right of both. Esc closes them and leaves the view.
     for (keys, drawn, what) in [
         ("alt-s", "send-drawer", "Send"),
         ("alt-h", "find-drawer", "the scrollback search"),
@@ -685,11 +690,19 @@ fn nothing_opened_on_the_page_resizes_a_session(cx: &mut TestAppContext) {
         cx.simulate_keystrokes(keys);
         cx.run_until_parked();
         let drawer = cx.debug_bounds(drawn).expect(drawn);
-        assert!(
-            (drawer.right() - beside.left()).abs() < px(1.),
-            "{what} beside the view: {drawer:?} {beside:?}"
-        );
-        unchanged(cx, &format!("with {what} and a view beside open"));
+        if drawn == "send-drawer" {
+            let moved = cx.debug_bounds("terminals-beside").expect("the view");
+            assert!(
+                moved.right() <= drawer.left() + px(1.),
+                "the view left of Send: {moved:?} {drawer:?}"
+            );
+        } else {
+            assert!(
+                (drawer.right() - beside.left()).abs() < px(1.),
+                "{what} beside the view: {drawer:?} {beside:?}"
+            );
+            unchanged(cx, &format!("with {what} and a view beside open"));
+        }
         cx.simulate_keystrokes("escape");
         cx.run_until_parked();
         assert!(cx.debug_bounds(drawn).is_none(), "Esc closed {what}");
@@ -1077,7 +1090,18 @@ fn what_lies_over_the_windows_takes_every_click_inside_it(cx: &mut TestAppContex
         } else {
             inside(over)
         };
-        poke(cx, at, "window-1");
+        // Send lies over no window: they made room for it.
+        let under = if drawn == "send-drawer" {
+            let window = cx.debug_bounds("window-1").expect("window 1");
+            assert!(
+                window.right() <= over.left(),
+                "Send {over:?} beside window 1 {window:?}, not over it"
+            );
+            drawn
+        } else {
+            "window-1"
+        };
+        poke(cx, at, under);
         untouched(cx, drawn, 0);
         cx.simulate_keystrokes("escape");
         cx.run_until_parked();
@@ -1410,9 +1434,9 @@ fn launches_use_each_tile_grid(cx: &mut TestAppContext) {
     })
     .unwrap();
     until(cx, "new agent choice", |cx| {
-        cx.debug_bounds("target-new").is_some()
+        cx.debug_bounds("send-target-first").is_some()
     });
-    click(cx, "target-new".into());
+    click(cx, "send-target-first".into());
     until(cx, "send launcher", |cx| {
         cx.debug_bounds("send-body").is_some()
     });
@@ -1780,9 +1804,9 @@ fn send_chooses_a_pane_and_defaults_to_the_focused_pane(cx: &mut TestAppContext)
     until(cx, "pane loss reported", |cx| {
         page.read_with(cx, |p, _| {
             p.send
-                .said
-                .as_deref()
-                .is_some_and(|s| s.contains("selected pane") && s.contains("gone"))
+                .missed
+                .iter()
+                .any(|(_, s)| s.contains("selected pane") && s.contains("gone"))
         })
     });
     assert!(!tmux(&running, &["capture-pane", "-p", "-t", &panes[0]]).contains("echo next"));
@@ -1807,7 +1831,7 @@ fn send_chooses_a_pane_and_defaults_to_the_focused_pane(cx: &mut TestAppContext)
     .unwrap();
     until(cx, "single-pane target", |cx| {
         page.read_with(cx, |p, _| {
-            p.send_target.as_ref().is_some_and(|k| k.name == "beta")
+            p.send_targets.iter().map(|k| k.name.as_str()).eq(["beta"])
         })
     });
     cx.run_until_parked();
@@ -3101,7 +3125,7 @@ fn window_send_uses_the_clicked_window_as_source(cx: &mut TestAppContext) {
             p.send.reference
         );
         assert!(
-            p.send_target.is_none(),
+            p.send_targets.is_empty(),
             "a window must not target itself by default"
         );
     });
@@ -3309,31 +3333,181 @@ fn typing_while_reading_history_reaches_the_program_and_keeps_the_history(cx: &m
     let _ = std::fs::remove_dir_all(settings.parent().unwrap());
 }
 
-/// Send lies over one window across the page on its right, where its lines
-/// end, not over the left where they start.
+/// Send stands at the right of the windows, which make room for it: it
+/// covers none of a lone window, and the window has its width back once it
+/// closes.
 #[gpui::test]
-fn send_drawer_lies_over_a_lone_window_on_its_right(cx: &mut TestAppContext) {
+fn send_drawer_makes_room_beside_a_lone_window(cx: &mut TestAppContext) {
     let Some(running) = start("terminals-send-layout") else {
         return;
     };
     let (_shell, cx, settings) = open_with_alpha(&running, "send-layout", cx);
     let page = PAGE.with(|p| p.borrow().clone()).unwrap();
     cx.simulate_resize(gpui::size(px(1440.), px(900.)));
-    until(cx, "terminal geometry", |cx| {
-        page.read_with(cx, |p, _| p.geo.borrow()[0].body.is_some())
-    });
+    let body = |cx: &mut VisualTestContext| page.read_with(cx, |p, _| p.geo.borrow()[0].body);
+    until(cx, "terminal geometry", |cx| body(cx).is_some());
+    let whole = body(cx).unwrap().size.width;
     cx.simulate_keystrokes("alt-s");
-    until(cx, "drawer over the window's right", |cx| {
+    until(cx, "the window narrowed left of the drawer", |cx| {
         let Some(drawer) = cx.debug_bounds("send-drawer") else {
             return false;
         };
-        page.read_with(cx, |p, _| {
-            p.geo.borrow()[0].body.is_some_and(|body| {
-                body.origin.x < drawer.origin.x && drawer.origin.x < body.origin.x + body.size.width
-            })
-        })
+        body(cx)
+            .is_some_and(|b| b.origin.x + b.size.width <= drawer.origin.x && b.size.width < whole)
     });
     assert!(!shown(cx).trim().is_empty());
+    cx.simulate_keystrokes("escape");
+    until(cx, "the window's width back", |cx| {
+        cx.debug_bounds("send-drawer").is_none() && body(cx).is_some_and(|b| b.size.width == whole)
+    });
+    let _ = std::fs::remove_dir_all(settings.parent().unwrap());
+}
+
+/// The Files panel stands at the right of the windows, which give it room.
+/// A focused terminal keeps Ctrl+B (tmux's prefix, an agent's background
+/// key), so it stays; Alt+E hides it and the window widens, and Ctrl+B
+/// where nothing takes it brings it back.
+#[gpui::test]
+fn the_files_panel_goes_and_comes_with_its_keys_and_a_terminal_keeps_ctrl_b(
+    cx: &mut TestAppContext,
+) {
+    let Some(running) = start("terminals-files-panel") else {
+        return;
+    };
+    let (shell, cx, settings) = open_pages_with_alpha(
+        &running,
+        "files-panel",
+        &[terminals, toy, ahjo_files_app::build],
+        cx,
+    );
+    let page = PAGE.with(|p| p.borrow().clone()).unwrap();
+    cx.simulate_resize(gpui::size(px(1440.), px(900.)));
+    let body = |cx: &mut VisualTestContext| page.read_with(cx, |p, _| p.geo.borrow()[0].body);
+    until(cx, "the panel at the windows' right", |cx| {
+        let Some(panel) = cx.debug_bounds("panel-right") else {
+            return false;
+        };
+        body(cx).is_some_and(|b| b.origin.x + b.size.width <= panel.origin.x)
+    });
+    let beside = body(cx).unwrap().size.width;
+    assert!(
+        cx.update(|window, cx| page.read(cx).term_focus.is_focused(window)),
+        "alpha's terminal has the keyboard"
+    );
+    cx.simulate_keystrokes("ctrl-b");
+    cx.run_until_parked();
+    assert!(
+        cx.debug_bounds("panel-right").is_some(),
+        "the terminal took Ctrl+B"
+    );
+    cx.simulate_keystrokes("alt-e");
+    until(cx, "the panel gone and the window wider", |cx| {
+        cx.debug_bounds("panel-right").is_none() && body(cx).is_some_and(|b| b.size.width > beside)
+    });
+    // Where nothing takes it, Ctrl+B is the app's.
+    cx.update(|window, cx| {
+        let focus = gpui::Focusable::focus_handle(shell.read(cx), cx);
+        window.focus(&focus, cx);
+    });
+    cx.simulate_keystrokes("ctrl-b");
+    until(cx, "the panel back", |cx| {
+        cx.debug_bounds("panel-right").is_some()
+    });
+    let _ = std::fs::remove_dir_all(settings.parent().unwrap());
+}
+
+/// One message to several sessions: each marked in the finder (a click on
+/// its box, or Tab), named under To, and sent to all with one Send; the
+/// drawer closes once every one has it.
+#[gpui::test]
+fn send_goes_to_every_session_marked(cx: &mut TestAppContext) {
+    let Some(running) = start("terminals-send-several") else {
+        return;
+    };
+    let (shell, cx, settings) = open_with_alpha(&running, "send-several", cx);
+    let page = PAGE.with(|p| p.borrow().clone()).unwrap();
+    until(cx, "beta listed", |cx| {
+        page.read_with(cx, |p, _| p.fleet.all.iter().any(|s| s.name == "beta"))
+    });
+    let host = shell.read_with(cx, |s, _| Host::new(s.hub()).for_page("toy", &[]));
+    cx.update(|_, cx| {
+        host.ask(
+            Ask::Send {
+                reference: "echo several-$((40+2))".into(),
+                target: None,
+            },
+            cx,
+        )
+    })
+    .unwrap();
+    until(cx, "the Send drawer", |cx| {
+        cx.debug_bounds("send-go").is_some()
+    });
+    // Aimed at the focused window's alpha; in the finder, typing finds
+    // beta and Tab marks it too.
+    let aimed = |cx: &mut VisualTestContext| -> Vec<String> {
+        page.read_with(cx, |p, _| {
+            p.send_targets.iter().map(|k| k.name.clone()).collect()
+        })
+    };
+    until(cx, "aimed at alpha", |cx| aimed(cx) == ["alpha"]);
+    // The note has the keyboard; Tab goes to the finder.
+    cx.simulate_keystrokes("tab");
+    cx.simulate_input("bta");
+    cx.simulate_keystrokes("tab");
+    until(cx, "beta marked", |cx| aimed(cx) == ["alpha", "beta"]);
+    // With the words gone every session shows again; a click on a row's
+    // box unmarks it, and marks it again.
+    cx.simulate_keystrokes("ctrl-a backspace");
+    let alpha = format!("send-target-mark-{}::alpha", running.node);
+    click(cx, alpha.clone());
+    until(cx, "alpha unmarked", |cx| aimed(cx) == ["beta"]);
+    click(cx, alpha);
+    until(cx, "both named under To", |cx| {
+        cx.debug_bounds("send-aimed-beta,alpha").is_some()
+    });
+    click(cx, "send-go".into());
+    for session in ["alpha", "beta"] {
+        until(cx, &format!("{session} ran it"), |_| {
+            tmux(&running, &["capture-pane", "-p", "-t", session])
+                .lines()
+                .any(|l| l.trim() == "several-42")
+        });
+    }
+    until(cx, "the drawer closed", |cx| {
+        cx.debug_bounds("send-drawer").is_none()
+    });
+    let _ = std::fs::remove_dir_all(settings.parent().unwrap());
+}
+
+/// A shell would run the line naming a session as a command, so it is left
+/// out for one, said so, and Send anyway sends it all the same.
+#[gpui::test]
+fn send_anyway_gives_a_shell_the_line_naming_a_session(cx: &mut TestAppContext) {
+    let Some(running) = start("terminals-send-anyway") else {
+        return;
+    };
+    let (_shell, cx, settings) = open_with_alpha(&running, "send-anyway", cx);
+    let page = PAGE.with(|p| p.borrow().clone()).unwrap();
+    until(cx, "beta listed", |cx| {
+        page.read_with(cx, |p, _| p.fleet.all.iter().any(|s| s.name == "beta"))
+    });
+    cx.simulate_keystrokes("alt-s");
+    let beta = format!("send-target-{}::beta", running.node);
+    let row: &'static str = Box::leak(beta.clone().into_boxed_str());
+    until(cx, "beta offered", |cx| cx.debug_bounds(row).is_some());
+    click(cx, beta);
+    until(cx, "left out for the shell, with Send anyway", |cx| {
+        cx.debug_bounds("send-anyway").is_some()
+    });
+    click(cx, "send-anyway".into());
+    until(cx, "and the way back", |cx| {
+        cx.debug_bounds("send-leave-out").is_some()
+    });
+    click(cx, "send-go".into());
+    until(cx, "the shell got the line naming alpha", |_| {
+        tmux(&running, &["capture-pane", "-p", "-t", "beta"]).contains("session alpha on ")
+    });
     let _ = std::fs::remove_dir_all(settings.parent().unwrap());
 }
 

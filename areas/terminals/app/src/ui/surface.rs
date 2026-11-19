@@ -10,12 +10,15 @@ use gpui::{
     WeakEntity, Window, div,
 };
 
-/// Where everything that opens over the windows lies: Send, the output
-/// search and a view beside them. The one rule: at the right edge of the
-/// terminals, full height, because a terminal's lines and its prompt start
-/// at its left; what it covers is only the ends of lines. No session
-/// changes size for it. Send and the search lie `inset` in from it, at the
-/// left edge of a view beside, so the view stays in sight
+/// Where the drawers lie: Send, the output search and a view beside the
+/// windows. The one rule: at the right edge of the terminals, full height,
+/// because a terminal's lines and its prompt start at its left. Send is
+/// the exception that proves it: one writes to sessions with it while
+/// reading them, so the windows make room for it instead
+/// (`Terminals::send_room`), and it lies right of them. The search and a
+/// view beside lie over the windows, so no session changes size for a
+/// glance; the search lies `inset` in from the right, at the left edge of
+/// a view beside or of Send, so they stay in sight
 /// ([`Terminals::beside_inset`]).
 ///
 /// What lies over the windows takes every pointer event inside it: a click,

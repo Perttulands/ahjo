@@ -154,15 +154,20 @@ impl Terminals {
                 .child(self.render_grid(cx))
                 .children(beside),
         );
+        // Send stands at the right, and the windows make room for it.
+        let send = self.send_room(window, cx);
+        if send > 0. {
+            row = row.child(div().flex_none().w(px(send)).h_full());
+        }
         row.relative()
             .children(self.render_beside_drag(cx))
             .into_any_element()
     }
 
-    /// The width the windows' row has, beside the side panel and the Files
-    /// panel.
+    /// The width the windows' row has, beside the side panel, the Files
+    /// panel and Send.
     pub(super) fn workspace_room(&self, window: &Window, cx: &gpui::App) -> f32 {
-        window.viewport_size().width / px(1.) - self.host.side_room(cx)
+        window.viewport_size().width / px(1.) - self.host.side_room(cx) - self.send_room(window, cx)
     }
 
     fn render_grid(&mut self, cx: &mut Context<Self>) -> impl IntoElement {
