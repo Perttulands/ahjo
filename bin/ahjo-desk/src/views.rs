@@ -48,33 +48,36 @@ impl Render for DeskApp {
                             .child(self.conversation(&t, &ask, window, cx)),
                     )
                     .into_any_element(),
-                Some(ask) => div()
+                Some(ask) => self.proto_layout(&t, &ask, column_w, window, cx),
+            };
+            // PROTOTYPE (proto/desk-layout): AHJO_DESK_LAYOUT picks where
+            // the queue stands.
+            match layout().as_str() {
+                "b" => div()
                     .size_full()
                     .flex()
+                    .child(self.strip(&t, cx))
+                    .child(div().flex_1().min_w_0().h_full().child(main))
+                    .into_any_element(),
+                "c" => div()
+                    .size_full()
+                    .flex()
+                    .child(div().flex_1().min_w_0().h_full().child(main))
                     .child(
                         div()
-                            .flex_1()
-                            .min_w_0()
-                            .h_full()
-                            .child(self.stage(window, cx)),
-                    )
-                    .child(
-                        div()
-                            .w(px(column_w))
                             .flex_none()
-                            .h_full()
                             .border_l_1()
                             .border_color(t.divider)
-                            .child(self.conversation(&t, &ask, window, cx)),
+                            .child(self.rail(&t, 300., cx)),
                     )
                     .into_any_element(),
-            };
-            div()
-                .size_full()
-                .flex()
-                .child(self.rail(&t, rail_w, cx))
-                .child(div().flex_1().min_w_0().h_full().child(main))
-                .into_any_element()
+                _ => div()
+                    .size_full()
+                    .flex()
+                    .child(self.rail(&t, rail_w, cx))
+                    .child(div().flex_1().min_w_0().h_full().child(main))
+                    .into_any_element(),
+            }
         };
         div()
             .id("desk")
@@ -104,7 +107,121 @@ impl Render for DeskApp {
     }
 }
 
+/// PROTOTYPE: which layout to draw (`AHJO_DESK_LAYOUT`): empty, today's.
+fn layout() -> String {
+    std::env::var("AHJO_DESK_LAYOUT").unwrap_or_default()
+}
+
 impl DeskApp {
+    /// PROTOTYPE: the ask in front, with his answer central and the thing
+    /// looked at beside it.
+    fn proto_layout(
+        &mut self,
+        t: &Theme,
+        ask: &Ask,
+        column_w: f32,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let stage = div()
+            .flex_1()
+            .min_w_0()
+            .h_full()
+            .child(self.stage(window, cx));
+        let talk = |w: f32| {
+            div()
+                .w(px(w))
+                .flex_none()
+                .h_full()
+                .border_x_1()
+                .border_color(t.divider)
+        };
+        match layout().as_str() {
+            // A: the answer in the middle, what it is about to its right.
+            "a" => div()
+                .size_full()
+                .flex()
+                .child(talk(tokens::PROTO_TALK).child(self.conversation(t, ask, window, cx)))
+                .child(stage)
+                .into_any_element(),
+            // B: the queue folded to a strip; the answer wide in the middle,
+            // the picture to its right.
+            "b" => div()
+                .size_full()
+                .flex()
+                .child(talk(tokens::PROTO_TALK_WIDE).child(self.conversation(t, ask, window, cx)))
+                .child(stage)
+                .into_any_element(),
+            // C: the picture to the left, the answer next to it in the
+            // middle, the queue at the far right.
+            "c" => div()
+                .size_full()
+                .flex()
+                .child(stage)
+                .child(talk(tokens::PROTO_TALK).child(self.conversation(t, ask, window, cx)))
+                .into_any_element(),
+            _ => div()
+                .size_full()
+                .flex()
+                .child(stage)
+                .child(
+                    div()
+                        .w(px(column_w))
+                        .flex_none()
+                        .h_full()
+                        .border_l_1()
+                        .border_color(t.divider)
+                        .child(self.conversation(t, ask, window, cx)),
+                )
+                .into_any_element(),
+        }
+    }
+
+    /// PROTOTYPE: the queue folded to a strip of numbers, the one in front
+    /// lit; a click opens one.
+    fn strip(&mut self, t: &Theme, cx: &mut Context<Self>) -> AnyElement {
+        let listed = self.listed();
+        let mut col = div()
+            .w(px(tokens::PROTO_STRIP))
+            .h_full()
+            .flex_none()
+            .flex()
+            .flex_col()
+            .items_center()
+            .gap(px(GAP_SMALL))
+            .py(px(GAP))
+            .border_r_1()
+            .border_color(t.divider)
+            .bg(t.surface);
+        for key in listed {
+            let Some(a) = self.ask(&key) else { continue };
+            let on = self.current.as_ref() == Some(&key);
+            let name = self.desks[key.0].name();
+            let id = a.id.clone();
+            let open = key.clone();
+            col = col.child(
+                div()
+                    .id(SharedString::from(format!("strip-{}-{id}", key.0)))
+                    .w(px(tokens::PROTO_STRIP - 12.))
+                    .py(px(6.))
+                    .flex()
+                    .flex_col()
+                    .items_center()
+                    .rounded(px(tokens::RADIUS))
+                    .cursor_pointer()
+                    .when(on, |d| d.bg(t.accent_soft()).text_color(t.text))
+                    .when(!on, |d| d.text_color(t.text2))
+                    .tooltip(kit::tip(a.title.clone()))
+                    .child(div().size(px(8.)).rounded(px(2.)).bg(t.identity_of(&name)))
+                    .child(div().text_size(px(CAP_TEXT)).child(id))
+                    .on_click(cx.listener(move |app, _: &ClickEvent, _, cx| {
+                        app.open(Some(open.clone()), cx)
+                    })),
+            );
+        }
+        col.into_any_element()
+    }
+
     // ---- The header ----
 
     fn header(&mut self, t: &Theme, cx: &mut Context<Self>) -> Div {
@@ -586,7 +703,10 @@ impl DeskApp {
             .child(
                 div()
                     .id("turns")
-                    .flex_1()
+                    // PROTOTYPE B: his words follow the question, not
+                    // the window's foot.
+                    .when(layout() != "b", |d| d.flex_1())
+                    .when(layout() == "b", |d| d.flex_shrink(1.))
                     .min_h_0()
                     .overflow_y_scroll()
                     .child(turns),

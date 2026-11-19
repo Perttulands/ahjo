@@ -213,3 +213,9 @@ mod tests {
         assert!(grid(12, room, 16. / 9., 2.).1 < SIDE_LEAST);
     }
 }
+
+/// PROTOTYPE: the answer's column in the middle, wide when the queue is
+/// folded, and the folded queue's strip.
+pub const PROTO_TALK: f32 = 720.;
+pub const PROTO_TALK_WIDE: f32 = 860.;
+pub const PROTO_STRIP: f32 = 72.;
