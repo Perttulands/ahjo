@@ -10,6 +10,7 @@ use crate::store::work::Status;
 use crate::store::work::timeline::{day_label, range_label};
 use crate::tokens::{self, *};
 use crate::view::on_days;
+use crate::words;
 use crate::{Moved, Work};
 use ahjo_app_kit::theme::{Theme, size};
 use ahjo_app_kit::widgets::{kit, pane};
@@ -24,6 +25,24 @@ impl Work {
         detail: Div,
         cx: &mut Context<Self>,
     ) -> Div {
+        let folded = self.chart_folded;
+        let fold = pane::act(
+            t,
+            "work-chart-fold",
+            if folded { "Show chart" } else { "Hide chart" },
+        )
+        .debug_selector(|| "work-chart-fold".into())
+        .tooltip(kit::tip(if folded {
+            "Show what opened and finished each day  C"
+        } else {
+            "Fold the chart away to this line  C"
+        }))
+        .on_click(cx.listener(move |w, _, _, cx| w.fold_chart(!folded, cx)));
+        let head = if folded {
+            self.folded_head(t, cx)
+        } else {
+            self.band_head(t, None, cx)
+        };
         let band = div()
             .flex_none()
             .flex()
@@ -31,15 +50,17 @@ impl Work {
             .bg(t.surface)
             .border_b_1()
             .border_color(t.divider)
-            .child(self.band_head(t, None, cx))
-            .child(
-                div()
-                    .debug_selector(|| "work-strip".into())
-                    .cursor(gpui::CursorStyle::Crosshair)
-                    .h(px(STRIP_H))
-                    .w_full()
-                    .child(self.picture(t, Shape::Strip, cx)),
-            );
+            .child(head.child(fold))
+            .when(!folded, |d| {
+                d.child(
+                    div()
+                        .debug_selector(|| "work-strip".into())
+                        .cursor(gpui::CursorStyle::Crosshair)
+                        .h(px(STRIP_H))
+                        .w_full()
+                        .child(self.picture(t, Shape::Strip, cx)),
+                )
+            });
         div()
             .size_full()
             .flex()
@@ -143,6 +164,43 @@ impl Work {
             .child(swatch(t, tokens::opened(t), "Opened", false))
             .child(swatch(t, t.done, "Finished", false))
             .child(swatch(t, t.chart, "Open", true))
+    }
+
+    /// The strip's line when its chart is folded away: the days still
+    /// chosen, else what is open and how the last week went.
+    fn folded_head(&self, t: &Theme, cx: &mut Context<Self>) -> Div {
+        let head = div()
+            .h(px(size::TAB_BAR))
+            .px(px(size::HEAD_PAD))
+            .flex()
+            .items_center()
+            .gap(px(size::HEAD_GAP))
+            .text_size(px(size::SMALL));
+        let head = match self.range {
+            Some(r) => head.child(
+                pane::act(t, "work-range", format!("{}  ×", range_label(r)))
+                    .debug_selector(|| "work-range".into())
+                    .text_color(t.text)
+                    .tooltip(kit::tip("Let the days go (Esc)"))
+                    .on_click(cx.listener(|w, _, _, cx| w.clear_range(cx))),
+            ),
+            None => {
+                let tl = &self.timeline;
+                let days = tokens::OPENING_RANGE;
+                let week =
+                    crate::store::work::timeline::Range::between(tl.last() + 1 - days, tl.last());
+                let (opened, closed) = tl.totals(week);
+                head.child(
+                    div()
+                        .debug_selector(|| "work-chart-folded".into())
+                        .text_color(t.text2)
+                        .child(format!(
+                            "The last {days} days: {opened} opened, {closed} finished"
+                        )),
+                )
+            }
+        };
+        head.child(div().flex_1())
     }
 
     /// The time page's scope: every project, or the one chosen.
@@ -340,6 +398,7 @@ impl Work {
         // The states first: five rows that a long project list would
         // otherwise push out of sight.
         let mut rows: Vec<AnyElement> = vec![pane::label(t, "State").into_any_element()];
+        // Each with its mark, so the facets are the list's key.
         for state in [
             Status::Open,
             Status::InProgress,
@@ -348,18 +407,23 @@ impl Work {
             Status::Closed,
         ] {
             let chosen = self.state == Some(state);
+            let n = self.state_counts[state as usize];
+            let selector = format!("work-state-{}", state.label());
+            let s = selector.clone();
             rows.push(
-                facet(
-                    t,
-                    format!("work-state-{}", state.label()),
-                    state.label().into(),
-                    self.state_counts[state as usize],
-                    chosen,
-                )
-                .on_click(
-                    cx.listener(move |w, _, _, cx| w.show_state((!chosen).then_some(state), cx)),
-                )
-                .into_any_element(),
+                pane::row(t, SharedString::from(selector), chosen)
+                    .debug_selector(move || s)
+                    .when(n == 0 && !chosen, |d| d.text_color(t.dim))
+                    .child(crate::view::mark(t, state))
+                    .child(pane::cell(words::state(state)))
+                    .child(pane::meta(t, n.to_string(), None))
+                    .tooltip(kit::tip(words::state_means(state)))
+                    .on_click(
+                        cx.listener(move |w, _, _, cx| {
+                            w.show_state((!chosen).then_some(state), cx)
+                        }),
+                    )
+                    .into_any_element(),
             );
         }
         rows.extend([

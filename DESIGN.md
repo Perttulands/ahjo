@@ -39,8 +39,12 @@ A page is judged by three questions, in this order:
   for what is out of sync; Roles has another.
 - **Work.** See the open work across projects and how it moves over time.
   The strip comes first: a chart of what opened and finished each day over
-  the open line, facets for state and project, and the rows with type,
-  state, priority and age. Time gives the chart the page and says what
+  the open line (folded away to one line when the operator wants the
+  room), facets for state and project, and the rows with type,
+  state, priority and age. Items read at first sight to someone who has
+  never used the tracker: states, kinds and priorities in plain words
+  that say what they mean, the state marks keyed in the facets, and a
+  group's items under it with how far it has come. Time gives the chart the page and says what
   opened, finished or sat idle in the days dragged across it. Tree keeps
   one project's work as parents and children. Every chart reads out the
   day under the mouse, and the item beside the list shows its relations
@@ -93,7 +97,8 @@ adds its own panel of missions and runs.
 - **Words only when they change what you do.** Keys live in tooltips and the
   Keys overlay.
 - **Send is the same everywhere.** Anything you can look at can be sent to a
-  session, the same way, from the same place.
+  session, the same way, from the same place, and Send opens over the page
+  you are on, which stays where it was.
 - **Beside, not over.** What opens from a session docks beside the terminals
   and leaves them as they were.
 - **Fast.** A page shows what it has at once and fills in; nothing blocks on

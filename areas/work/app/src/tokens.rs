@@ -19,6 +19,14 @@ pub const PROJECT_ACT_W: f32 = 160.;
 /// A row's state glyph and its age, in fixed columns so titles line up.
 pub const GLYPH_W: f32 = 14.;
 pub const AGE_W: f32 = 34.;
+/// A row's kind of work and its priority, in columns of their own.
+pub const KIND_W: f32 = 56.;
+pub const PRIORITY_W: f32 = 44.;
+/// The line down a group's indent, under its mark.
+pub const GUIDE_W: f32 = 1.;
+/// A group's progress bar: its length and thickness.
+pub const METER_W: f32 = 36.;
+pub const METER_H: f32 = 4.;
 /// The most a row's away project name takes.
 pub const AWAY_W: f32 = 120.;
 

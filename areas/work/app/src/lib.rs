@@ -14,6 +14,7 @@ mod tests;
 mod text;
 pub(crate) mod tokens;
 mod view;
+mod words;
 
 use ahjo_app_kit::ask::{Answers, Ask};
 use ahjo_app_kit::widgets::field::{self, FieldEvent, TextField};
@@ -198,6 +199,8 @@ pub struct Work {
     grip: Option<(f32, f32)>,
     /// The strip and the time page show every project, not the chosen one.
     every: bool,
+    /// The strip's chart is folded away to one line; kept.
+    chart_folded: bool,
     /// The strip's state facet: only work in this state.
     state: Option<Status>,
     /// What the time page lists of the range.
@@ -288,6 +291,7 @@ impl Page for Work {
         let close = self.me.clone();
         let report = self.me.clone();
         let (layout, search, pick) = (self.me.clone(), self.me.clone(), self.me.clone());
+        let fold = self.me.clone();
         vec![
             ahjo_app_kit::chords::Chord::new("r", "Report", move |window, cx| {
                 let _ = report.update(cx, |work, cx| work.open_report(window, cx));
@@ -323,6 +327,17 @@ impl Page for Work {
             ahjo_app_kit::chords::Chord::on_page("P", "Pick a project", move |window, cx| {
                 let _ = pick.update(cx, |work, cx| work.start_picking(window, cx));
             }),
+            ahjo_app_kit::chords::Chord::on_page(
+                "C",
+                "Fold the chart away, or show it",
+                move |_, cx| {
+                    let _ = fold.update(cx, |work, cx| {
+                        if work.layout == Layout::Strip {
+                            work.fold_chart(!work.chart_folded, cx);
+                        }
+                    });
+                },
+            ),
         ]
     }
     fn focus(&self, _: &App) -> Option<FocusHandle> {
@@ -403,6 +418,7 @@ impl Work {
             list_drawn: Rc::new(std::cell::Cell::new((0., tokens::LIST_W))),
             grip: None,
             every: layout == Layout::Time,
+            chart_folded: settings["chart_folded"].as_bool().unwrap_or(false),
             state: None,
             moved: Moved::Opened,
             timeline: Rc::default(),
@@ -959,6 +975,13 @@ impl Work {
         }
     }
 
+    /// Folds the strip's chart away to one line, or shows it; kept.
+    pub fn fold_chart(&mut self, folded: bool, cx: &mut Context<Self>) {
+        self.chart_folded = folded;
+        self.keep("chart_folded", serde_json::json!(folded), cx);
+        cx.notify();
+    }
+
     pub fn keep_list(&mut self, cx: &mut Context<Self>) {
         if let Some(w) = self.list_w {
             self.keep("list_width", serde_json::json!(w.round()), cx);
@@ -1186,6 +1209,10 @@ impl Work {
                 self.start_picking(window, cx);
                 true
             }
+            "c" if self.layout == Layout::Strip => {
+                self.fold_chart(!self.chart_folded, cx);
+                true
+            }
             _ => false,
         };
         if handled {
@@ -1295,8 +1322,9 @@ impl Work {
         if let Some(line) = self.line() {
             // The terminals choose the target by their own rule (the
             // terminal this item sits beside, else the last one sent to),
-            // never by guessing from the item's folder.
-            let _ = self.host.ask(
+            // never by guessing from the item's folder. Work stays shown,
+            // with Send over it.
+            let _ = self.host.ask_over(
                 Ask::Send {
                     reference: line,
                     target: None,

@@ -52,7 +52,13 @@ pub fn parse(json: &str, node: &str, folder: &str) -> Result<Vec<Item>> {
             priority: bead.priority,
             url: None,
             author: bead.created_by.clone(),
-            assignees: bead.assignee.iter().cloned().collect(),
+            // An empty assignee is nobody.
+            assignees: bead
+                .assignee
+                .iter()
+                .filter(|a| !a.trim().is_empty())
+                .cloned()
+                .collect(),
             labels: bead.labels.clone(),
             created: bead.created_at.clone(),
             updated: bead.updated_at.clone(),

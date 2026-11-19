@@ -7,6 +7,7 @@ use crate::store::work::timeline::{Range, range_label};
 use crate::store::work::{Row, Status, Tracker, prose, when};
 use crate::text::Text;
 use crate::tokens::*;
+use crate::words;
 use crate::{Entry, Layout, Moved, Work};
 use ahjo_app_kit::hub::now_ms;
 use ahjo_app_kit::theme::{FAMILY, Theme, size, theme};
@@ -29,14 +30,14 @@ pub(crate) enum Place {
     Panel,
 }
 
-/// A status as the operator needs to see it: under way and blocked are
-/// said, ready is not.
+/// A status as the operator needs to see it: under way, blocked, on hold
+/// and done are said, to do is not.
 pub(crate) fn status_meta(t: &Theme, r: &Row) -> Option<(String, Hsla)> {
+    let word = words::row_state(r).to_lowercase();
     match r.status {
-        Status::InProgress => Some(("in progress".into(), t.running)),
-        Status::Blocked => Some(("blocked".into(), t.text2)),
-        Status::Deferred => Some(("deferred".into(), t.dim)),
-        Status::Closed => Some((raw_label(r), t.dim)),
+        Status::InProgress => Some((word, t.running)),
+        Status::Blocked => Some((word, t.text2)),
+        Status::Deferred | Status::Closed => Some((word, t.dim)),
         Status::Open => None,
     }
 }
@@ -410,9 +411,11 @@ impl Work {
         row
     }
 
-    /// A row of the list: its state, its title, what kind of work it is
-    /// when not a plain task, a high priority, its project when another's,
-    /// and how long since it last moved.
+    /// A row of the list: its state, its title (a group's in bold, with
+    /// how far it has come), its project when another's, and in columns
+    /// of their own what kind of work it is, a priority that puts it
+    /// ahead, and how long since it last moved. Under a group, a line
+    /// down from its mark ties its items to it.
     pub(crate) fn item_row(
         &self,
         t: &Theme,
@@ -431,31 +434,31 @@ impl Work {
             r.status,
             Status::Closed | Status::Deferred | Status::Blocked
         );
-        // Only what changes what the operator does next earns a word: a
-        // bug, and work marked most urgent.
-        let kind = (r.kind == "bug").then(|| r.kind.clone());
-        let priority = r.priority.filter(|p| *p == 0);
+        let progress = self.progress(row);
+        let group = r.kind == "epic" || progress.is_some();
+        let kind = words::kind_in_list(&r.kind).then(|| words::kind(&r.kind));
+        let priority = r
+            .priority
+            .filter(|p| words::priority_in_list(*p))
+            .map(|p| (p, words::priority(p)));
         let age = r
             .closed
             .filter(|_| r.status == Status::Closed)
             .or(r.updated)
             .map(|u| when::short_age(u, now_ms()));
+        let depth = depth.min(MAX_DEPTH);
         pane::row(t, ("work-row", at), chosen)
             .debug_selector(move || selector)
             .h(px(size::ROW))
-            .pl(px(
-                size::ROW_PAD - size::ROW_INSET + depth.min(MAX_DEPTH) as f32 * INDENT
-            ))
+            .children((depth > 0).then(|| guides(t, depth)))
             .child(glyph(t, r))
             .child(
                 pane::cell(r.title.clone())
+                    .when(group, |d| d.font_weight(FontWeight::SEMIBOLD))
                     .when(quiet && !chosen, |d| d.text_color(t.dim))
                     .when(!quiet && !chosen, |d| d.text_color(t.text)),
             )
-            .children(kind.map(|k| pane::meta(t, k, None)))
-            .children(priority.map(|p| {
-                pane::meta(t, format!("P{p}"), Some(t.text)).font_weight(FontWeight::SEMIBOLD)
-            }))
+            .children(progress.map(|(done, all)| meter(t, done, all, true)))
             .children(project.map(|p| {
                 pane::meta(t, p, None)
                     .max_w(px(AWAY_W))
@@ -463,6 +466,40 @@ impl Work {
                     .whitespace_nowrap()
                     .text_ellipsis()
             }))
+            .child(
+                div()
+                    .id(("work-kind", at))
+                    .flex_none()
+                    .w(px(KIND_W))
+                    .overflow_hidden()
+                    .whitespace_nowrap()
+                    .text_ellipsis()
+                    .text_size(px(size::SMALL))
+                    .text_color(if group || r.kind == "bug" {
+                        t.text2
+                    } else {
+                        t.dim
+                    })
+                    .when_some(kind, |d, (word, means)| {
+                        d.child(word)
+                            .when_some(means, |d, means| d.tooltip(kit::tip(means)))
+                    }),
+            )
+            .child(
+                div()
+                    .id(("work-priority", at))
+                    .flex_none()
+                    .w(px(PRIORITY_W))
+                    .text_size(px(size::SMALL))
+                    .when_some(priority, |d, (p, (word, means))| {
+                        d.child(word)
+                            .tooltip(kit::tip(means))
+                            .when(p == 0, |d| {
+                                d.text_color(t.text).font_weight(FontWeight::SEMIBOLD)
+                            })
+                            .when(p > 0, |d| d.text_color(t.text2))
+                    }),
+            )
             .child(
                 pane::meta(t, age.unwrap_or_default(), None)
                     .w(px(AGE_W))
@@ -485,6 +522,71 @@ impl Work {
                 }),
             )
             .into_any_element()
+    }
+
+    /// What the item is, in words anyone reads: its state, its kind and
+    /// its priority, each saying what it means when hovered, and for a
+    /// group how far its items have come.
+    fn what_it_is(&self, t: &Theme, row: usize) -> Div {
+        let r = &self.board.rows[row];
+        let ink = match r.status {
+            Status::InProgress => t.running,
+            Status::Closed => t.done,
+            Status::Deferred => t.dim,
+            Status::Open | Status::Blocked => t.text2,
+        };
+        let (kind, kind_means) = words::kind(&r.kind);
+        let dot = || div().text_color(t.dim).child("·");
+        let mut line = div()
+            .debug_selector(|| "work-what".into())
+            .flex()
+            .flex_wrap()
+            .items_center()
+            .gap(px(size::HEAD_GAP))
+            .child(glyph(t, r))
+            .child(
+                div()
+                    .id("work-what-state")
+                    .text_color(ink)
+                    .child(words::row_state(r))
+                    .tooltip(kit::tip(words::state_means(r.status))),
+            )
+            .child(dot())
+            .child(
+                div()
+                    .id("work-what-kind")
+                    .text_color(t.text2)
+                    .child(words::capital(&kind))
+                    .when_some(kind_means, |d, m| d.tooltip(kit::tip(m))),
+            );
+        if let Some(p) = r.priority {
+            let (word, means) = words::priority(p);
+            line = line.child(dot()).child(
+                div()
+                    .id("work-what-priority")
+                    .text_color(if p <= 1 { t.text } else { t.text2 })
+                    .when(p == 0, |d| d.font_weight(FontWeight::SEMIBOLD))
+                    .child(format!("{} priority", words::capital(word)))
+                    .tooltip(kit::tip(means)),
+            );
+        }
+        if let Some((done, all)) = self.progress(row) {
+            line = line.child(dot()).child(meter(t, done, all, false));
+        }
+        line
+    }
+
+    /// How far a group of work has come: of the items under it, how many
+    /// are done. None for an item with nothing under it.
+    pub(crate) fn progress(&self, row: usize) -> Option<(usize, usize)> {
+        let children = &self.board.links.children[row];
+        (!children.is_empty()).then(|| {
+            let done = children
+                .iter()
+                .filter(|&&c| self.board.rows[c].status == Status::Closed)
+                .count();
+            (done, children.len())
+        })
     }
 
     /// The projects to choose from: most open work first, each with how
@@ -621,10 +723,7 @@ impl Work {
         let names_project = id
             .strip_prefix(p.label.as_str())
             .is_some_and(|rest| rest.starts_with(['-', '#']));
-        let mut facts = vec![id, r.kind.clone()];
-        if let Some(pr) = r.priority {
-            facts.push(format!("P{pr}"));
-        }
+        let mut facts = vec![id];
         // An id that starts with the project's name already names it.
         if !names_project {
             facts.push(p.label.clone());
@@ -638,23 +737,28 @@ impl Work {
         if !r.labels.is_empty() {
             facts.push(r.labels.join(" "));
         }
-        let status = status_meta(t, r);
         let mut body = div().flex().flex_col().gap(px(size::SECTION_GAP)).child(
             div()
                 .flex()
-                .flex_wrap()
-                .gap(px(size::HEAD_GAP))
-                .text_size(px(size::SMALL))
-                .text_color(t.dim)
-                .children(status.map(|(s, c)| div().text_color(c).child(s)))
-                // Each its own piece, so a narrow detail wraps the line
-                // between facts instead of cutting the last one off.
-                .children(
-                    facts.into_iter().enumerate().map(
-                        |(i, f)| {
-                            if i == 0 { f } else { format!("· {f}") }
-                        },
-                    ),
+                .flex_col()
+                .gap(px(SPACE_XS))
+                .child(self.what_it_is(t, row))
+                .child(
+                    div()
+                        .flex()
+                        .flex_wrap()
+                        .gap(px(size::HEAD_GAP))
+                        .text_size(px(size::SMALL))
+                        .text_color(t.dim)
+                        // Each its own piece, so a narrow detail wraps
+                        // the line between facts instead of cutting the
+                        // last one off.
+                        .children(
+                            facts
+                                .into_iter()
+                                .enumerate()
+                                .map(|(i, f)| if i == 0 { f } else { format!("· {f}") }),
+                        ),
                 ),
         );
         if let Some(pf) = &r.pull {
@@ -756,8 +860,20 @@ impl Work {
         } else {
             &fam.pulls
         };
-        let children = self.family(t, "Children", &fam.children, place, cx);
-        let pulls = self.family(t, pulls_label, pulls, place, cx);
+        // A group's items, and how far they have come.
+        let held = match self.progress(row) {
+            Some((done, all)) => {
+                let what = if r.kind == "epic" {
+                    "In this epic"
+                } else {
+                    "Under it"
+                };
+                format!("{what}, {}", words::progress(done, all))
+            }
+            None => "Under it".into(),
+        };
+        let children = self.family(t, CHILDREN, held, &fam.children, place, cx);
+        let pulls = self.family(t, pulls_label, pulls_label.into(), pulls, place, cx);
         if !on_page {
             return (body.children(children).children(pulls), None);
         }
@@ -775,10 +891,12 @@ impl Work {
 
     /// A section of the item's family: each a row with its title and its
     /// state, which shows that item; one no store read stays as written.
+    #[allow(clippy::too_many_arguments)]
     fn family(
         &self,
         t: &Theme,
         label: &'static str,
+        words: String,
         refs: &[String],
         place: Place,
         cx: &mut Context<Self>,
@@ -799,7 +917,7 @@ impl Work {
         rows.sort_by_key(|(k, _, found)| (closed(found), *k));
         let finished = rows.iter().filter(|(_, _, f)| closed(f)).count();
         let fold = finished > 0 && label != PART_OF && !self.show_finished;
-        let section = pane::section(t, label);
+        let section = pane::section(t, words);
         let mut list = div().flex().flex_col().mx(px(-(size::ROW_PAD)));
         for (k, reference, found) in rows {
             if fold && closed(&found) {
@@ -886,6 +1004,8 @@ impl Work {
 }
 
 const PART_OF: &str = "Part of";
+/// The key of a group's items in selectors; the section says it in words.
+const CHILDREN: &str = "Children";
 
 impl Work {
     /// What the item stands in: what it is part of, what it waits on and
@@ -1056,26 +1176,89 @@ fn card_label(t: &Theme, label: &'static str) -> Div {
         .child(label)
 }
 
-/// The tracker's own status word, as the operator knows it.
-pub(crate) fn raw_label(r: &Row) -> String {
-    match (r.status, r.raw_status.as_str()) {
-        (Status::Blocked, "open") => "blocked".into(),
-        (_, raw) => raw.replace('_', " "),
-    }
+/// A row's state as a mark ([`mark`]).
+pub(crate) fn glyph(t: &Theme, r: &Row) -> Div {
+    mark(t, r.status)
 }
 
-/// A row's state as a mark: open a ring, under way half full in the
-/// running colour, blocked full, deferred a dash, finished a tick in the
-/// done colour.
-pub(crate) fn glyph(t: &Theme, r: &Row) -> Div {
-    let (mark, ink) = match r.status {
+/// A state as a mark: to do a ring, under way half full in the running
+/// colour, blocked full, on hold a dash, done a tick in the done colour.
+/// The facets show each beside its word, as the list's key.
+pub(crate) fn mark(t: &Theme, s: Status) -> Div {
+    let (mark, ink) = match s {
         Status::Open => ("○", t.dim),
         Status::InProgress => ("◐", t.running),
         Status::Blocked => ("●", t.text2),
         Status::Deferred => ("–", t.dim),
         Status::Closed => ("✓", t.done),
     };
-    div().flex_none().w(px(GLYPH_W)).text_color(ink).child(mark)
+    div()
+        .flex_none()
+        .w(px(GLYPH_W))
+        .flex()
+        .justify_center()
+        .text_color(ink)
+        .child(mark)
+}
+
+/// The lines down the indent of a row `depth` deep: one under the mark of
+/// each group it stands in, so a group's items read as its own.
+fn guides(t: &Theme, depth: usize) -> Div {
+    let mut d = div()
+        .flex_none()
+        .relative()
+        .w(px(depth as f32 * INDENT))
+        .h_full()
+        // The row's gap after it would push the mark past its depth.
+        .mr(px(-size::HEAD_GAP));
+    for level in 0..depth {
+        d = d.child(
+            div()
+                .absolute()
+                .top_0()
+                .bottom_0()
+                .left(px(level as f32 * INDENT + (GLYPH_W - GUIDE_W) / 2.))
+                .w(px(GUIDE_W))
+                .bg(t.divider),
+        );
+    }
+    d
+}
+
+/// How far a group has come: a short bar filled in the done colour and,
+/// in the list, `3/7` (`3 of 7 done` elsewhere).
+pub(crate) fn meter(t: &Theme, done: usize, all: usize, short: bool) -> Div {
+    let share = if all == 0 {
+        0.
+    } else {
+        done as f32 / all as f32
+    };
+    div()
+        .flex_none()
+        .flex()
+        .items_center()
+        .gap(px(SPACE_XS))
+        .text_size(px(size::SMALL))
+        .text_color(t.dim)
+        .child(
+            div()
+                .w(px(METER_W))
+                .h(px(METER_H))
+                .rounded(px(METER_H / 2.))
+                .bg(t.divider)
+                .child(
+                    div()
+                        .h_full()
+                        .w(px(METER_W * share))
+                        .rounded(px(METER_H / 2.))
+                        .bg(t.done),
+                ),
+        )
+        .child(if short {
+            format!("{done}/{all}")
+        } else {
+            words::progress(done, all)
+        })
 }
 
 /// An error's first line with words in it: a tool's hints and blank
