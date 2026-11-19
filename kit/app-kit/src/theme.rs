@@ -47,8 +47,10 @@ pub mod size {
     pub const PANEL: f32 = 300.;
     pub const PANEL_MIN: f32 = 200.;
     pub const PANEL_MAX: f32 = 640.;
-    /// The grip on a panel's inner edge.
+    /// The grip on a panel's inner edge: the line it lights, and how wide
+    /// it is caught, across the edge.
     pub const PANEL_GRIP: f32 = 6.;
+    pub const PANEL_GRIP_HIT: f32 = 16.;
     /// A tab card's gap above it.
     pub const TAB_CARD_TOP: f32 = 6.;
     /// The bar under the shown tab, and its inset from the tab's sides.

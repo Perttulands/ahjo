@@ -744,17 +744,28 @@ impl Shell {
                     .child(view),
             );
         }
+        // The grip is caught well either side of the edge, wider than the
+        // line it lights; it lies outside the frame, which clips its panel
+        // as it slides, and is drawn over the page beside.
         let grip = div()
             .id(("panel-grip", left as usize))
             .debug_selector(|| "panel-grip".into())
+            .group("panel-grip")
             .absolute()
             .top_0()
             .bottom_0()
-            .w(px(size::PANEL_GRIP))
-            .when(left, |d| d.right(px(-size::PANEL_GRIP / 2.)))
-            .when(!left, |d| d.left(px(-size::PANEL_GRIP / 2.)))
+            .w(px(size::PANEL_GRIP_HIT))
+            .when(left, |d| d.right(px(-size::PANEL_GRIP_HIT / 2.)))
+            .when(!left, |d| d.left(px(-size::PANEL_GRIP_HIT / 2.)))
+            .flex()
+            .justify_center()
             .cursor_col_resize()
-            .hover(|d| d.bg(t.accent_soft()))
+            .child(
+                div()
+                    .w(px(size::PANEL_GRIP))
+                    .h_full()
+                    .group_hover("panel-grip", |d| d.bg(t.accent_soft())),
+            )
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(|s, _, _, cx| {
@@ -778,9 +789,8 @@ impl Shell {
                     .when(left, |d| d.right_0())
                     .when(!left, |d| d.left_0())
                     .child(column),
-            )
-            .child(grip);
-        let element = match moving {
+            );
+        let frame = match moving {
             Some(at) => {
                 let id = ElementId::Name(format!("panel-slide-{left}-{at:?}").into());
                 frame
@@ -793,7 +803,15 @@ impl Shell {
             }
             None => frame.w(px(width)).into_any_element(),
         };
-        Some(element)
+        Some(
+            div()
+                .flex_none()
+                .h_full()
+                .relative()
+                .child(frame)
+                .child(deferred(grip))
+                .into_any_element(),
+        )
     }
 
     /// While a panel's edge is dragged, the whole window follows the
