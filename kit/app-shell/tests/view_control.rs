@@ -1,4 +1,4 @@
-//! View control end to end: `ahjo view show` and `ahjo view open` against a
+//! View control end to end: `ahjo view show`, `open` and `send` against a
 //! testkit node, with the headless shell connected to it showing two toy
 //! pages defined here.
 
@@ -26,13 +26,13 @@ impl Render for Other {
     }
 }
 
-/// Answers reveals of paths, keeping what it was asked.
+/// Answers reveals of paths and sends, keeping what it was asked.
 struct Files;
 
 impl Page for Files {
     const ID: &'static str = "files";
     const TITLE: &'static str = "Files";
-    const ANSWERS: &'static [Answers] = &[Answers::Reveal("path")];
+    const ANSWERS: &'static [Answers] = &[Answers::Reveal("path"), Answers::Send];
 
     fn answer(&mut self, ask: Ask, _: &'static str, _: &mut Window, _: &mut Context<Self>) {
         REVEALED.with(|r| r.borrow_mut().push(ask));
@@ -130,6 +130,23 @@ fn an_agent_opens_a_page_and_a_path_on_it_in_the_app(cx: &mut TestAppContext) {
             [Ask::Reveal { what, id, .. }] if what == "path" && id == "/tmp/x"
         ),
         "{revealed:?}"
+    );
+
+    // Another app's Send, through the node: the page that sends comes
+    // forward holding the text.
+    REVEALED.with(|r| r.borrow_mut().clear());
+    let (code, _) = ahjo(&rt, cx, &url, &["open", "--page", "other"]);
+    assert_eq!(code, 0);
+    let (code, sent) = ahjo(&rt, cx, &url, &["send", "--text", "brain page a.md"]);
+    assert_eq!(code, 0);
+    assert_eq!(sent, json!({ "page": "files" }));
+    let asked = REVEALED.with(|r| r.borrow().clone());
+    assert_eq!(
+        asked,
+        [Ask::Send {
+            reference: "brain page a.md".into(),
+            target: None
+        }]
     );
 
     rt.block_on(node.stop());

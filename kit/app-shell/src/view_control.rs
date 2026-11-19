@@ -2,7 +2,9 @@
 //! page the window shows, when its link opens and after each change, and
 //! an agent's `open` command arrives from it and is answered. The command
 //! names a page by its id and at most one thing to show on it, which goes
-//! to the page as an ask to reveal it.
+//! to the page as an ask to reveal it. A `send` command (another app's
+//! Send, through the node) goes as an ask to send to the page that sends to
+//! sessions, which comes forward with the window.
 
 use crate::shell::Shell;
 use ahjo_app_kit::Ask;
@@ -85,6 +87,18 @@ pub fn command(json: &[u8]) -> Result<Open, String> {
     Ok(Open { page, reveal })
 }
 
+/// A `send` command's text, or `None` for any other command.
+pub fn send(json: &[u8]) -> Result<Option<String>, String> {
+    let v: Value = serde_json::from_slice(json).map_err(|e| format!("not a view command: {e}"))?;
+    if v["do"] != "send" {
+        return Ok(None);
+    }
+    match v["reference"].as_str() {
+        Some(r) if !r.trim().is_empty() => Ok(Some(r.to_string())),
+        _ => Err("send names what to send".into()),
+    }
+}
+
 #[derive(Default)]
 pub struct ViewControl {
     /// What the serving node was last told, on which link.
@@ -163,7 +177,12 @@ impl Shell {
             log::warn!("a view command frame too short to answer was ignored");
             return;
         };
-        let answer = match command(json).and_then(|open| self.view_open(open, window, cx)) {
+        let done = match send(json) {
+            Ok(Some(reference)) => self.view_send(reference, window, cx),
+            Ok(None) => command(json).and_then(|open| self.view_open(open, window, cx)),
+            Err(e) => Err(e),
+        };
+        let answer = match done {
             Ok(view) => serde_json::json!({ "ok": true, "view": view }),
             Err(error) => serde_json::json!({ "ok": false, "error": error }),
         };
@@ -172,6 +191,29 @@ impl Shell {
             .fleet
             .here()
             .send(view_done(id, answer.to_string().as_bytes()));
+    }
+
+    /// Another app's Send: the page that sends to sessions comes forward,
+    /// with the window, holding `reference`.
+    fn view_send(
+        &mut self,
+        reference: String,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Result<View, String> {
+        let ask = Ask::Send {
+            reference,
+            target: None,
+        };
+        let i = self
+            .pages
+            .iter()
+            .position(|p| p.meta.tab && p.meta.answers.iter().any(|a| ask.answered_by(a)))
+            .ok_or("this app has no page that sends to a session")?;
+        self.show(i, window, cx);
+        self.pages[i].answer(ask, "", window, cx);
+        window.activate_window();
+        Ok(self.view_snapshot())
     }
 
     fn view_open(
@@ -256,5 +298,15 @@ mod tests {
             command(br#"{"do":"close","tab":1}"#),
             Err("this app does not do \"close\"".into())
         );
+    }
+
+    #[test]
+    fn send_names_what_to_send() {
+        assert_eq!(
+            send(br#"{"do":"send","reference":"brain page a.md"}"#),
+            Ok(Some("brain page a.md".into()))
+        );
+        assert_eq!(send(br#"{"do":"open","page":"p"}"#), Ok(None));
+        assert!(send(br#"{"do":"send","reference":" "}"#).is_err());
     }
 }

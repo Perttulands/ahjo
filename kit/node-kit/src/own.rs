@@ -19,7 +19,7 @@ use crate::serve::Failure;
 use crate::view::{self, Views};
 
 /// The names of the node's own commands.
-pub const COMMANDS: &[&str] = &["config_show", "view_show", "view_open"];
+pub const COMMANDS: &[&str] = &["config_show", "view_show", "view_open", "view_send"];
 
 /// What the node's own commands and routes read.
 pub(crate) struct Own {

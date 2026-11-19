@@ -1058,6 +1058,27 @@ impl BrainApp {
         cx.notify();
     }
 
+    /// Hands the page read to Ahjo Swarm's Send, where its session is
+    /// picked; says how it went.
+    fn send_page(&mut self, cx: &mut Context<Self>) {
+        let (Some(data), Some(p)) = (self.data.clone(), self.reading) else {
+            return;
+        };
+        let text = crate::swarm::reference(&data.corpus.pages[p].path);
+        let sent = cx.background_spawn(async move {
+            let node = crate::swarm::node();
+            crate::swarm::send(&node, &text)
+        });
+        cx.spawn(async move |me, cx| {
+            let words = match sent.await {
+                Ok(()) => "In Ahjo Swarm's Send: pick the session there.".to_string(),
+                Err(e) => format!("Not sent: {e}"),
+            };
+            let _ = me.update(cx, |me, cx| me.say(words, cx));
+        })
+        .detach();
+    }
+
     // ---- Editing the page read in place.
 
     /// The file of the page at `path` in the brain.
@@ -3531,6 +3552,11 @@ impl BrainApp {
             .right(px(chrome::SHEET_BAR))
             .flex()
             .gap(px(4.))
+            .child(
+                kit::button(t, "send", "Send", kit::Kind::Quiet)
+                    .tooltip(kit::tip("Send it to a session, in Ahjo Swarm"))
+                    .on_click(cx.listener(|me, _, _, cx| me.send_page(cx))),
+            )
             .when(self.editing.is_none(), |d| {
                 d.child(
                     kit::button(t, "edit", "Edit", kit::Kind::Quiet)

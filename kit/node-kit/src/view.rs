@@ -1,6 +1,6 @@
 //! View control, the node's side (docs/protocol.md, View): each connected
-//! app reports the page it shows (0xb0); `view_open` sends it a view
-//! command (0xb8) and answers with the app's answer (0xb1).
+//! app reports the page it shows (0xb0); `view_open` and `view_send` send it
+//! a view command (0xb8) and answer with the app's answer (0xb1).
 
 use std::collections::{BTreeMap, HashMap};
 use std::sync::atomic::{AtomicU32, Ordering};
@@ -177,10 +177,12 @@ impl Drop for Link {
     }
 }
 
-/// `view_show` and `view_open`. A thing opened is on `node`, this node.
+/// `view_show`, `view_open` and `view_send`. A thing opened is on `node`,
+/// this node.
 pub(crate) fn commands(views: &Arc<Views>, node: NodeId) -> Vec<Command> {
     let shown = views.clone();
     let opening = views.clone();
+    let sending = views.clone();
     let mut properties = Map::new();
     properties.insert(
         "page".into(),
@@ -216,7 +218,39 @@ pub(crate) fn commands(views: &Arc<Views>, node: NodeId) -> Vec<Command> {
                 async move { views.open(command?).await }
             },
         ),
+        Command::new(
+            "view_send",
+            "Hand text to a session through the operator's Ahjo Swarm app, as its Send does: \
+             the app opens Send to Session holding the text, and the operator picks the \
+             session and sends it. Another app (Ahjo Brain's Send) reaches Swarm this way. \
+             Answers with what the app shows now.",
+            || {
+                json!({
+                    "type": "object",
+                    "properties": {
+                        "text": { "type": "string", "description": "What to send, such as brain page knowledge/x/y.md." },
+                    },
+                    "required": ["text"],
+                })
+            },
+            move |args: Value| {
+                let views = sending.clone();
+                let command = send_command(&args);
+                async move { views.open(command?).await }
+            },
+        ),
     ]
+}
+
+/// The view command `view_send`'s arguments ask for.
+fn send_command(args: &Value) -> Result<Value, Error> {
+    match &args["text"] {
+        Value::String(t) if !t.trim().is_empty() => Ok(json!({ "do": "send", "reference": t })),
+        _ => Err(Error::new(
+            "invalid_argument",
+            "view send needs the text to send",
+        )),
+    }
 }
 
 /// The view command `view_open`'s arguments ask for, as the app reads it.

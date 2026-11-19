@@ -112,7 +112,7 @@ real list, and `ahjo kinds` prints who owns which kinds.
   applies it.
 - **The node's own commands.** Every node has a few commands whatever areas
   it serves (`node-kit`'s `own::COMMANDS`: `config_show`, `view_show`,
-  `view_open`); a listing that names one is refused, as is an area named
+  `view_open`, `view_send`); a listing that names one is refused, as is an area named
   `node`, the name of the node's own config section and MCP server.
 - **View control.** The node keeps the view-control kinds itself: a client
   that reports the page it shows (0xb0) is an app until it goes. `ahjo view
@@ -121,7 +121,11 @@ real list, and `ahjo kinds` prints who owns which kinds.
   (0xb8) and answers the first answer (0xb1): `no_app` with none connected,
   `timeout` after 5 s. The app shows the page and hands it the thing as an
   `Ask::Reveal`, on this node. A page Swarm no longer has (`brain`) is
-  refused by the node itself as `no_page`, saying where it went.
+  refused by the node itself as `no_page`, saying where it went. `ahjo view
+  send --text <text>` is how another app reaches Swarm's Send (Ahjo Brain's
+  Send hands `brain page <file>`): the app brings forward the page that
+  answers `Ask::Send` and hands it the text, so the operator picks the
+  session in Swarm's Send to Session.
 - **Provided interfaces.** What one area offers others is a narrow trait that
   lives with its provider's contract or engine crate, never in `node-kit`. The
   provider fills the slot keyed by that trait (`setup.provided.provide`) while

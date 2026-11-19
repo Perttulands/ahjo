@@ -106,34 +106,46 @@ fn post(
     body: &serde_json::Value,
     wait: Duration,
 ) -> Result<Vec<u8>, String> {
+    post_to("Citadel", url, &format!("/v1/library/{route}"), body, wait)
+}
+
+/// Posts JSON to `path` under `url` (Citadel's, or a node's: `who`, for
+/// what an error says) and reads the whole answer.
+pub fn post_to(
+    who: &str,
+    url: &str,
+    path: &str,
+    body: &serde_json::Value,
+    wait: Duration,
+) -> Result<Vec<u8>, String> {
     let (authority, prefix) = split_url(url)?;
     let body = body.to_string();
     let request = format!(
-        "POST {prefix}/v1/library/{route} HTTP/1.1\r\nHost: {authority}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+        "POST {prefix}{path} HTTP/1.1\r\nHost: {authority}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
         body.len()
     );
     let addr = authority
         .to_socket_addrs()
-        .map_err(|e| format!("Citadel at {authority}: {e}"))?
+        .map_err(|e| format!("{who} at {authority}: {e}"))?
         .next()
-        .ok_or_else(|| format!("Citadel at {authority} has no address"))?;
+        .ok_or_else(|| format!("{who} at {authority} has no address"))?;
     let mut stream = TcpStream::connect_timeout(&addr, TIMEOUT)
-        .map_err(|e| format!("Citadel did not answer at {authority}: {e}"))?;
+        .map_err(|e| format!("{who} did not answer at {authority}: {e}"))?;
     stream
         .set_read_timeout(Some(wait))
         .and_then(|_| stream.set_write_timeout(Some(TIMEOUT)))
         .and_then(|_| stream.write_all(request.as_bytes()))
-        .map_err(|e| format!("asking Citadel: {e}"))?;
+        .map_err(|e| format!("asking {who}: {e}"))?;
     let mut answer = vec![];
     stream
         .take(ANSWER_LIMIT)
         .read_to_end(&mut answer)
-        .map_err(|e| format!("reading Citadel's answer: {e}"))?;
+        .map_err(|e| format!("reading {who}'s answer: {e}"))?;
     Ok(answer)
 }
 
 /// An answer's status and body.
-fn split_answer(raw: &[u8]) -> Result<(u16, &[u8]), String> {
+pub fn split_answer(raw: &[u8]) -> Result<(u16, &[u8]), String> {
     let split = raw
         .windows(4)
         .position(|w| w == b"\r\n\r\n")

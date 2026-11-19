@@ -68,7 +68,7 @@ These are the commands advertised by the enabled areas. Run `ahjo <noun> <verb> 
 
 ## view
 
-`ahjo view open`, `ahjo view show`.
+`ahjo view open`, `ahjo view send`, `ahjo view show`.
 
 ## work
 

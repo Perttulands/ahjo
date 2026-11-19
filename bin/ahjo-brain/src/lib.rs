@@ -15,6 +15,7 @@ mod paint;
 mod reader;
 mod sky;
 mod source;
+mod swarm;
 mod tokens;
 
 use ahjo_app_kit::theme::{Direction, FONT_FILES, Theme};

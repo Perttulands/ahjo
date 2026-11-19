@@ -609,7 +609,7 @@ async fn each_area_is_an_mcp_server_and_the_cli_sees_them_all() {
     assert_eq!(names("/mcp/shades").await, ["shades_close"]);
     assert_eq!(
         names("/mcp/node").await,
-        ["config_show", "view_show", "view_open"]
+        ["config_show", "view_show", "view_open", "view_send"]
     );
     assert_eq!(
         names("/mcp/shades,lights").await,
@@ -623,7 +623,8 @@ async fn each_area_is_an_mcp_server_and_the_cli_sees_them_all() {
             "shades_close",
             "config_show",
             "view_show",
-            "view_open"
+            "view_open",
+            "view_send"
         ]
     );
 
@@ -746,7 +747,7 @@ async fn config_show_answers_the_file_and_each_section() {
         .iter()
         .filter_map(|t| t["name"].as_str())
         .collect();
-    for own in ["config_show", "view_show", "view_open"] {
+    for own in ["config_show", "view_show", "view_open", "view_send"] {
         assert!(names.contains(&own), "{names:?}");
     }
     node.stop().await.unwrap();
@@ -857,6 +858,34 @@ async fn view_open_reaches_the_app_and_answers_its_answer() {
     .await
     .unwrap();
     assert_eq!(opening.await.unwrap(), Ok(json!({ "page": "files" })));
+
+    // Text to send reaches the app as a send, answered as an open is.
+    assert_eq!(
+        tool(&client, "view_send", json!({ "text": " " }))
+            .await
+            .unwrap_err(),
+        "invalid_argument"
+    );
+    let sending = {
+        let client = NodeClient::new(Some(&url)).unwrap();
+        tokio::spawn(async move {
+            let args = json!({ "text": "brain page knowledge/a/b.md" });
+            tool(&client, "view_send", args).await
+        })
+    };
+    let told = ws.next().await.unwrap().unwrap().into_data();
+    let command: Value = serde_json::from_slice(&told[5..]).unwrap();
+    assert_eq!(
+        command,
+        json!({ "do": "send", "reference": "brain page knowledge/a/b.md" })
+    );
+    let answer = br#"{"ok":true,"view":{"page":"sessions"}}"#;
+    ws.send(Message::Binary(
+        [&[0xb1][..], &told[1..5], answer].concat().into(),
+    ))
+    .await
+    .unwrap();
+    assert_eq!(sending.await.unwrap(), Ok(json!({ "page": "sessions" })));
 
     // An app that does not answer.
     let args = json!({ "page": "files" });
