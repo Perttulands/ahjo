@@ -125,6 +125,15 @@ async fn a_brief_is_handed_to_an_agent_followed_and_answered() {
         .await
         .unwrap();
     assert!(none["none"].as_str().unwrap().contains("absolute path"));
+    let fragment = h
+        .call("project_find", json!({ "query": "kor" }))
+        .await
+        .unwrap();
+    assert_eq!(
+        fragment["projects"][0]["path"],
+        h.project("games/korpi"),
+        "{fragment}"
+    );
 
     // A fragment two projects answer as well is refused, naming both.
     let tied = h

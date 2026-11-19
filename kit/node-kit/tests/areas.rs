@@ -766,7 +766,7 @@ async fn every_tool_is_annotated_from_its_commands_effect() {
     );
     assert_eq!(
         tool("clock_reset")["annotations"],
-        json!({ "readOnlyHint": false, "destructiveHint": true, "idempotentHint": false, "openWorldHint": false })
+        json!({ "readOnlyHint": false, "destructiveHint": true, "openWorldHint": false })
     );
     for tool in tools {
         assert!(tool["annotations"]["readOnlyHint"].is_boolean(), "{tool}");

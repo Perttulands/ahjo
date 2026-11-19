@@ -223,15 +223,19 @@ fn tool(command: &Command) -> Value {
     {
         fields.remove("required");
     }
-    let annotations = match command.effect {
-        Effect::Reads => json!({ "readOnlyHint": true, "openWorldHint": command.open_world }),
+    // Each hint whose default is wrong for it; `idempotentHint` is false
+    // unless said, the others true.
+    let mut annotations = match command.effect {
+        Effect::Reads => json!({ "readOnlyHint": true }),
         effect => json!({
             "readOnlyHint": false,
             "destructiveHint": effect == Effect::Destroys,
-            "idempotentHint": effect == Effect::Sets,
-            "openWorldHint": command.open_world,
         }),
     };
+    if command.effect == Effect::Sets {
+        annotations["idempotentHint"] = json!(true);
+    }
+    annotations["openWorldHint"] = json!(command.open_world);
     json!({
         "name": command.name,
         "title": command.title(),

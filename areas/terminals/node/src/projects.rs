@@ -212,7 +212,9 @@ pub fn matching<'a>(paths: &'a [String], query: &str) -> Vec<(u8, &'a str)> {
         .iter()
         .filter_map(|path| Some((rank(path, query)?, path.as_str())))
         .collect();
-    found.sort_by_key(|&(rank, path)| (rank, path.len(), path));
+    // Among equals, the shortest folder name is nearest what was typed.
+    let name = |path: &str| path.rsplit(['/', '\\']).next().unwrap_or(path).len();
+    found.sort_by_key(|&(rank, path)| (rank, name(path), path.len(), path));
     found
 }
 
@@ -280,9 +282,10 @@ mod tests {
             found,
             [
                 "/srv/games/korpi",
-                "/srv/korpikuusi",
-                "/srv/games/korpi-old"
-            ]
+                "/srv/games/korpi-old",
+                "/srv/korpikuusi"
+            ],
+            "its own name first, then the shortest names holding it"
         );
         assert_eq!(matching(&paths, "korpi")[0].0, 0);
         let games: Vec<&str> = matching(&paths, "games kau").iter().map(|f| f.1).collect();
