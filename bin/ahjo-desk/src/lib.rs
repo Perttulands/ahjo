@@ -14,6 +14,7 @@ pub mod marks;
 pub mod model;
 pub mod page;
 pub mod player;
+pub mod settings;
 pub mod stage;
 pub mod tokens;
 pub mod video;
@@ -21,6 +22,7 @@ pub mod views;
 
 use gpui::{App, AppContext, Bounds, WindowBounds, WindowOptions, point, px, size};
 
+use ahjo_app_kit::theme::{Direction, Theme};
 use ahjo_app_kit::widgets::field;
 use std::borrow::Cow;
 
@@ -39,7 +41,7 @@ fn bounds(cx: &App) -> Bounds<gpui::Pixels> {
 /// The app: `ahjo-desk [--desk [Name=]http://127.0.0.1:8774]...`.
 pub fn run() {
     let args: Vec<String> = std::env::args().skip(1).collect();
-    let (config, notice) = desk::load(&args);
+    let loaded = desk::load(&args);
     gpui_platform::application().run(move |cx: &mut App| {
         let fonts = ahjo_app_kit::theme::FONT_FILES
             .iter()
@@ -48,8 +50,12 @@ pub fn run() {
         if let Err(e) = cx.text_system().add_fonts(fonts) {
             panic!("the bundled fonts did not load: {e}");
         }
-        let (theme, unknown) = ahjo_app_kit::theme::chosen();
-        let notice = notice.or(unknown);
+        // Its own theme once chosen here, else the one chosen in Ahjo Swarm.
+        let (theme, unknown) = match Direction::from_key(&loaded.config.theme) {
+            Some(d) => (Theme::new(d), None),
+            None => ahjo_app_kit::theme::chosen(),
+        };
+        let notice = loaded.notice.clone().or(unknown);
         cx.set_global(theme);
         field::bind_keys(cx);
         cx.set_app_identity("io.ahjo.desk", "Ahjo Desk");
@@ -77,7 +83,7 @@ pub fn run() {
                     Some(Err(e)) => Some(notice.map_or(e.clone(), |n| format!("{n} · {e}"))),
                     _ => notice,
                 };
-                cx.new(|cx| app::DeskApp::new(config.desks, notice, window, cx))
+                cx.new(|cx| app::DeskApp::new(loaded, notice, window, cx))
             },
         );
         if let Err(e) = opened {

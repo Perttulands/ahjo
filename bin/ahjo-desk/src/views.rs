@@ -27,7 +27,9 @@ impl Render for DeskApp {
         let t = theme(cx).clone();
         let wide = f32::from(window.viewport_size().width);
         let (rail_w, column_w) = tokens::columns(wide);
-        let body = if self.desks.is_empty() {
+        let body = if self.settings_open {
+            self.settings_view(&t, window, cx)
+        } else if self.desks.is_empty() {
             no_desks(&t)
         } else {
             let main = match self.current_ask().cloned() {
@@ -201,6 +203,14 @@ impl DeskApp {
                     .children(toast),
             )
             .child(desks)
+            .child(
+                button(t, "settings", "Settings", Kind::Quiet)
+                    .when(self.settings_open, |b| b.text_color(t.accent))
+                    .tooltip(kit::tip("Ctrl ,"))
+                    .on_click(cx.listener(|app, _: &ClickEvent, window, cx| {
+                        app.toggle_settings(window, cx)
+                    })),
+            )
             .child(
                 button(t, "refresh", "Refresh", Kind::Quiet)
                     .tooltip(kit::tip("R"))
@@ -521,17 +531,20 @@ impl DeskApp {
             .map(|k| self.desks[k.0].name())
             .unwrap_or_default();
         let mut turns = div().flex().flex_col().gap(px(GAP + 4.)).p(px(GAP));
+        let at = key.as_ref().map_or(0, |k| k.0);
         for past in &ask.history {
+            let pics = self.sent_pictures(t, at, past, cx);
             turns = turns
                 .child(self.agent_turn(t, past, false, cx))
-                .children(past.answer.as_ref().map(|_| his_turn(t, past)))
+                .children(past.answer.as_ref().map(|_| his_turn(t, past, pics)))
                 .children(past.comments.iter().map(|c| comment(t, c)));
         }
         let open = ask.is_open();
+        let pics = self.sent_pictures(t, at, ask, cx);
         turns = turns
             .child(self.agent_turn(t, ask, open, cx))
             .children(ask.comments.iter().map(|c| comment(t, c)))
-            .children((!open).then(|| his_turn(t, ask)));
+            .children((!open).then(|| his_turn(t, ask, pics)));
         let head = div()
             .flex_none()
             .h(px(tokens::TOOLS))
@@ -1019,6 +1032,7 @@ impl DeskApp {
             );
         }
         let marks = draft.marks(ask).len();
+        let pasted = self.pasted_strip(t, ask, &draft.pictures, cx);
         let send_word = match (form, draft.pick.and_then(|i| ask.options.get(i).map(|_| i))) {
             (Form::Hands, _) => "Send back".to_string(),
             (Form::Grill, _) => {
@@ -1033,11 +1047,21 @@ impl DeskApp {
             .items_center()
             .gap(px(GAP_SMALL))
             .child(
-                action(t, "send", &send_word, "Ctrl Enter", Kind::Primary)
-                    .when(self.sending, |d| d.opacity(0.5))
-                    .on_click(cx.listener(|app, _: &ClickEvent, window, cx| {
-                        app.send(Verdict::Send, window, cx)
-                    })),
+                action(
+                    t,
+                    "send",
+                    &send_word,
+                    if self.config.enter_sends {
+                        "Enter"
+                    } else {
+                        "Ctrl Enter"
+                    },
+                    Kind::Primary,
+                )
+                .when(self.sending, |d| d.opacity(0.5))
+                .on_click(cx.listener(|app, _: &ClickEvent, window, cx| {
+                    app.send(Verdict::Send, window, cx)
+                })),
             );
         if form == Form::Open {
             actions = actions.child(
@@ -1068,10 +1092,29 @@ impl DeskApp {
                 ))
                 .on_click(cx.listener(|app, _: &ClickEvent, window, cx| app.send(Verdict::Elsewhere, window, cx))),
         );
-        let status = match marks {
+        let goes: Vec<String> = [
+            (marks, "mark", "marks"),
+            (draft.pictures.len(), "picture", "pictures"),
+        ]
+        .into_iter()
+        .filter(|(n, ..)| *n > 0)
+        .map(|(n, one, many)| format!("{n} {}", if n == 1 { one } else { many }))
+        .collect();
+        let status = match goes.len() {
             0 => String::new(),
-            1 => "1 mark goes with it".into(),
-            n => format!("{n} marks go with it"),
+            _ if marks + draft.pictures.len() == 1 => format!("{} goes with it", goes[0]),
+            _ => format!("{} go with it", goes.join(" and ")),
+        };
+        let status = match (self.config.tell_session, ask.session.trim()) {
+            (true, s) if !s.is_empty() => {
+                let told = format!("{s} is told when you send");
+                if status.is_empty() {
+                    told
+                } else {
+                    format!("{status} · {told}")
+                }
+            }
+            _ => status,
         };
         div()
             .flex_none()
@@ -1083,13 +1126,8 @@ impl DeskApp {
             .border_color(t.divider)
             .bg(t.surface)
             .when(has_top, |d| d.child(top))
-            .child(
-                div()
-                    .id("words")
-                    .max_h(px(tokens::WORDS_MAX_H))
-                    .overflow_y_scroll()
-                    .child(self.words.clone()),
-            )
+            .child(self.words.clone())
+            .children(pasted)
             .child(actions)
             .when(!status.is_empty(), |d| {
                 d.child(div().text_size(px(META)).text_color(t.text2).child(status))
@@ -1098,12 +1136,139 @@ impl DeskApp {
     }
 }
 
+impl DeskApp {
+    /// The pictures he pasted into the answer he is writing: each small,
+    /// with a way to take it out, and those still on their way.
+    fn pasted_strip(
+        &mut self,
+        t: &Theme,
+        ask: &Ask,
+        ids: &[String],
+        cx: &mut Context<Self>,
+    ) -> Option<Div> {
+        if ids.is_empty() && self.pasting == 0 {
+            return None;
+        }
+        let at = self.current.as_ref().map_or(0, |k| k.0);
+        let mut strip = div().flex().flex_wrap().items_center().gap(px(GAP_SMALL));
+        for id in ids {
+            let pic = self.pasted_thumb(t, at, &ask.id, id, cx);
+            let gone = id.clone();
+            strip = strip.child(
+                div()
+                    .id(SharedString::from(format!("pasted-{id}")))
+                    .relative()
+                    .child(pic)
+                    .child(
+                        div()
+                            .id(SharedString::from(format!("unpaste-{id}")))
+                            .absolute()
+                            .top(px(-6.))
+                            .right(px(-6.))
+                            .size(px(18.))
+                            .rounded_full()
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .bg(t.raised)
+                            .border_1()
+                            .border_color(t.divider)
+                            .text_size(px(tokens::CAP_TEXT))
+                            .text_color(t.text2)
+                            .cursor_pointer()
+                            .hover(|d| d.text_color(t.error))
+                            .tooltip(kit::tip("Take it out of the answer"))
+                            .child("×")
+                            .on_click(cx.listener(move |app, _: &ClickEvent, _, cx| {
+                                app.unpaste(&gone, cx)
+                            })),
+                    ),
+            );
+        }
+        if self.pasting > 0 {
+            strip = strip.child(
+                div()
+                    .h(px(tokens::PASTED_H))
+                    .px(px(GAP))
+                    .flex()
+                    .items_center()
+                    .rounded(px(tokens::RADIUS))
+                    .border_1()
+                    .border_color(t.divider)
+                    .text_color(t.dim)
+                    .child("Adding the picture…"),
+            );
+        }
+        Some(strip)
+    }
+
+    /// The pictures that went with a sent answer, at a size to recognise.
+    fn sent_pictures(
+        &mut self,
+        t: &Theme,
+        desk: usize,
+        round: &Ask,
+        cx: &mut Context<Self>,
+    ) -> Option<Div> {
+        let ids: Vec<String> = round
+            .answer
+            .as_ref()?
+            .attachments
+            .iter()
+            .map(|a| a.id.clone())
+            .collect();
+        if ids.is_empty() {
+            return None;
+        }
+        let mut strip = div().flex().flex_wrap().gap(px(GAP_SMALL));
+        for id in &ids {
+            strip = strip.child(self.pasted_thumb(t, desk, &round.id, id, cx));
+        }
+        Some(strip)
+    }
+
+    fn pasted_thumb(
+        &mut self,
+        t: &Theme,
+        desk: usize,
+        ask: &str,
+        id: &str,
+        cx: &mut Context<Self>,
+    ) -> Div {
+        let h = tokens::PASTED_H;
+        let frame = div()
+            .h(px(h))
+            .rounded(px(tokens::RADIUS))
+            .overflow_hidden()
+            .border_1()
+            .border_color(t.divider)
+            .bg(t.raised);
+        match self.pasted_picture(desk, ask, id, cx) {
+            Some(crate::app::Pic::Ready {
+                image, w, h: ih, ..
+            }) => {
+                let w = (w / ih.max(1.) * h).clamp(h * 0.5, h * 3.);
+                frame
+                    .w(px(w))
+                    .child(img(image.clone()).size_full().object_fit(ObjectFit::Cover))
+            }
+            Some(crate::app::Pic::Failed(e)) => frame
+                .w(px(h * 1.5))
+                .p(px(4.))
+                .text_size(px(tokens::CAP_TEXT))
+                .text_color(t.error)
+                .child(e.clone()),
+            _ => frame.w(px(h * 1.5)),
+        }
+    }
+}
+
 fn answer_unclear_tip() -> String {
     "The question does not say enough to answer: it goes back to be asked again".into()
 }
 
 /// His answer to a round, as the desk keeps it: his turn in the dialogue.
-fn his_turn(t: &Theme, round: &Ask) -> AnyElement {
+fn his_turn(t: &Theme, round: &Ask, pictures: Option<Div>) -> AnyElement {
     let Some(a) = &round.answer else {
         return div().into_any_element();
     };
@@ -1146,6 +1311,7 @@ fn his_turn(t: &Theme, round: &Ask) -> AnyElement {
         .when(!a.comment.trim().is_empty(), |d| {
             d.child(prose(t, &a.comment, false))
         })
+        .children(pictures)
         .children(
             marks
                 .into_iter()
@@ -1323,7 +1489,7 @@ fn recommend_box(t: &Theme, label: &str, words: &str) -> Div {
 }
 
 /// A small toggle: on, filled; a dot in `state`'s colour when given.
-fn chip(
+pub(crate) fn chip(
     t: &Theme,
     id: impl Into<gpui::ElementId>,
     words: &str,

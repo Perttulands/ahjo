@@ -39,11 +39,95 @@ impl Place {
     }
 }
 
-/// What the app keeps: the desks it starts from.
-#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+/// What the app keeps (`desk.json`): the desks it starts from and how he
+/// set it up. What it does not know of the file is kept as it reads.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Config {
     pub desks: Vec<Place>,
+    /// The theme's direction by its key; empty, the one chosen in Ahjo
+    /// Swarm.
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub theme: String,
+    /// Which asks come first in the waiting list.
+    pub order: Order,
+    /// Enter sends; Shift+Enter starts a new line. Otherwise Enter starts
+    /// a new line and Ctrl+Enter sends.
+    pub enter_sends: bool,
+    /// Tell the asking agent's session when an answer is sent, through
+    /// Ahjo Swarm's node.
+    pub tell_session: bool,
+    /// The node that reaches the sessions; empty, the one Ahjo Swarm
+    /// talks to.
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub node: String,
+    #[serde(flatten)]
+    pub rest: serde_json::Map<String, serde_json::Value>,
+}
+
+impl Default for Config {
+    fn default() -> Self {
+        Self {
+            desks: vec![],
+            theme: String::new(),
+            order: Order::default(),
+            enter_sends: false,
+            tell_session: true,
+            node: String::new(),
+            rest: Default::default(),
+        }
+    }
+}
+
+/// How the waiting list is ordered.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum Order {
+    /// The quickest to answer first, then the longest waiting: each answer
+    /// frees an agent, and the quick ones free the most soonest.
+    #[default]
+    Quickest,
+    /// The longest waiting first.
+    Oldest,
+    /// The newest first.
+    Newest,
+}
+
+impl Order {
+    pub const ALL: [Order; 3] = [Order::Quickest, Order::Oldest, Order::Newest];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Order::Quickest => "Quickest first",
+            Order::Oldest => "Oldest first",
+            Order::Newest => "Newest first",
+        }
+    }
+}
+
+impl Config {
+    /// The node that reaches the sessions: as set here, else Ahjo Swarm's.
+    pub fn node(&self) -> String {
+        if !self.node.trim().is_empty() {
+            return self.node.trim().trim_end_matches('/').to_string();
+        }
+        ahjo_app_kit::settings::path()
+            .and_then(|p| std::fs::read_to_string(p).ok())
+            .and_then(|t| ahjo_app_kit::settings::Settings::parse(&t))
+            .map(|s| s.node)
+            .unwrap_or_else(|| ahjo_app_kit::settings::DEFAULT_NODE.into())
+            .trim_end_matches('/')
+            .to_string()
+    }
+}
+
+/// Writes the settings to `desk.json`, whole.
+pub fn write_config(config: &Config) -> Result<(), String> {
+    let Some(path) = config_path() else {
+        return Err("there is no place for the Desk's settings".into());
+    };
+    let text = serde_json::to_string_pretty(config).map_err(|e| e.to_string())?;
+    write_drafts(&path, &text)
 }
 
 /// `AHJO_DESK_CONFIG`, else `desk.json` beside Ahjo Swarm's `app.json`
@@ -112,31 +196,53 @@ pub fn write_size(path: &std::path::Path, size: u16) -> Result<(), String> {
     write_drafts(path, &text)
 }
 
-/// The desks named by `--desk` (repeated), else `AHJO_DESK_DESKS` (comma
-/// separated), else the config file's.
-pub fn load(args: &[String]) -> (Config, Option<String>) {
-    let (mut config, notice) = match config_path().map(std::fs::read_to_string) {
+/// What the Desk starts from: its settings as `desk.json` keeps them, the
+/// desks it opens on, and whether the file read (or was never written), so
+/// a change can be written back without losing anything.
+pub struct Loaded {
+    pub config: Config,
+    pub places: Vec<Place>,
+    pub notice: Option<String>,
+    pub kept: bool,
+}
+
+/// The settings in `desk.json`, and the desks named by `--desk`
+/// (repeated), else `AHJO_DESK_DESKS` (comma separated), else the file's.
+pub fn load(args: &[String]) -> Loaded {
+    let (config, notice, kept) = match config_path().map(std::fs::read_to_string) {
         Some(Ok(text)) => match serde_json::from_str::<Config>(&text) {
-            Ok(c) => (c, None),
-            Err(e) => (Config::default(), Some(format!("desk.json: {e}"))),
+            Ok(c) => (c, None, true),
+            Err(e) => (
+                Config::default(),
+                Some(format!(
+                    "desk.json does not read, so settings are not kept: {e}"
+                )),
+                false,
+            ),
         },
-        _ => (Config::default(), None),
+        _ => (Config::default(), None, true),
     };
     let given: Vec<Place> = args
         .windows(2)
         .filter(|w| w[0] == "--desk")
         .map(|w| Place::parse(&w[1]))
         .collect();
-    if !given.is_empty() {
-        config.desks = given;
+    let places = if !given.is_empty() {
+        given
     } else if let Ok(list) = std::env::var("AHJO_DESK_DESKS") {
-        config.desks = list
-            .split(',')
+        list.split(',')
             .filter(|s| !s.trim().is_empty())
             .map(Place::parse)
-            .collect();
+            .collect()
+    } else {
+        config.desks.clone()
+    };
+    Loaded {
+        config,
+        places,
+        notice,
+        kept,
     }
-    (config, notice)
 }
 
 /// The runtime the requests run on, off the UI thread.
@@ -222,6 +328,112 @@ pub fn same_place(a: &str, b: &str) -> bool {
             .to_ascii_lowercase()
     };
     norm(a) == norm(b)
+}
+
+/// Keeps a picture he pasted on the desk, for his answer to ask `id`: the
+/// desk answers with the name it keeps it under and where.
+pub async fn attach(
+    base: String,
+    id: String,
+    bytes: Vec<u8>,
+) -> Result<crate::model::Attached, String> {
+    let (status, body) = http::send(
+        &base,
+        "POST",
+        &format!("/api/asks/{id}/attachments"),
+        &[],
+        Some(("application/octet-stream", &bytes)),
+        Duration::from_secs(60),
+    )
+    .await
+    .map_err(|e| format!("the desk did not answer: {e}"))?;
+    match status {
+        200..=299 => serde_json::from_slice(&body)
+            .map_err(|e| format!("the desk's answer does not read: {e}")),
+        // A desk server from before pictures: it says so in its own way.
+        404 => Err("this desk takes no pictures yet: it needs restarting (desk@<project>)".into()),
+        s => Err(http::error_text(s, &body)),
+    }
+}
+
+pub fn attachment_path(ask: &str, id: &str) -> String {
+    format!("/attachment/{ask}/{id}")
+}
+
+/// Types `note` into session `session` through the node at `node` and
+/// presses Enter (the node's `session_send`).
+pub async fn tell(node: String, session: String, note: String) -> Result<(), String> {
+    let body = serde_json::json!({
+        "jsonrpc": "2.0", "id": 1, "method": "tools/call",
+        "params": {"name": "session_send", "arguments": {"session": session, "text": note, "enter": true}},
+    });
+    let bytes = request(
+        &node,
+        "POST",
+        "/mcp",
+        Some(serde_json::to_vec(&body).map_err(|e| e.to_string())?),
+        Duration::from_secs(10),
+    )
+    .await
+    .map_err(|e| {
+        e.replace(
+            "the desk did not answer",
+            "Ahjo Swarm's node did not answer",
+        )
+    })?;
+    let v: serde_json::Value = serde_json::from_slice(&bytes)
+        .map_err(|e| format!("the node's answer does not read: {e}"))?;
+    if let Some(e) = v.get("error") {
+        return Err(e["message"]
+            .as_str()
+            .unwrap_or("the node refused")
+            .to_string());
+    }
+    // A tool that failed answers with its words as the result.
+    if v["result"]["isError"].as_bool() == Some(true) {
+        let words = v["result"]["content"][0]["text"]
+            .as_str()
+            .unwrap_or("the send failed");
+        return Err(words.to_string());
+    }
+    Ok(())
+}
+
+/// Whether the node at `node` is there: the device it runs on.
+pub async fn node_health(node: String) -> Result<String, String> {
+    let bytes = request(&node, "GET", "/api/health", None, Duration::from_secs(5))
+        .await
+        .map_err(|e| e.replace("the desk did not answer", "the node did not answer"))?;
+    let v: serde_json::Value = serde_json::from_slice(&bytes)
+        .map_err(|e| format!("the node's answer does not read: {e}"))?;
+    match v["status"].as_str() {
+        Some("ok") => Ok(v["device"].as_str().unwrap_or("").to_string()),
+        _ => Err("that is not an Ahjo node".into()),
+    }
+}
+
+/// The note an agent's session gets when he answers its ask.
+pub fn note(ask: &Ask) -> String {
+    let said = ask
+        .answer
+        .as_ref()
+        .map(|a| match a.verdict.as_str() {
+            "pick" => format!("picked {}", a.options.join(", ")),
+            "accept" => "looks good".into(),
+            "send back" => "sent it back".into(),
+            "elsewhere" => "answered elsewhere".into(),
+            "grill" => format!(
+                "answered {} of {} questions",
+                a.answers.len(),
+                ask.questions.len()
+            ),
+            _ => "answered in his words".into(),
+        })
+        .unwrap_or_else(|| "answered".into());
+    format!(
+        "Desk: WisQi answered {} ({said}). Read it with: desk show {}",
+        ask.id, ask.id
+    )
 }
 
 /// Puts his marks on an ask (the whole list), refused when the ask moved
@@ -312,6 +524,41 @@ pub async fn follow(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn settings_keep_what_they_do_not_know_and_start_as_he_would_want() {
+        let c: Config = serde_json::from_str("{}").unwrap();
+        assert!(c.tell_session && !c.enter_sends && c.order == Order::Quickest);
+        let text =
+            r#"{"desks":[{"url":"http://h:1"}],"theme":"nord","order":"oldest","later":{"x":1}}"#;
+        let c: Config = serde_json::from_str(text).unwrap();
+        assert_eq!((c.theme.as_str(), c.order), ("nord", Order::Oldest));
+        let back: serde_json::Value = serde_json::to_value(&c).unwrap();
+        assert_eq!(
+            back["later"]["x"], 1,
+            "a setting from a later Desk survives"
+        );
+        assert_eq!(back["desks"][0]["url"], "http://h:1");
+        let c = Config {
+            node: " http://127.0.0.1:7310/ ".into(),
+            ..Config::default()
+        };
+        assert_eq!(c.node(), "http://127.0.0.1:7310");
+    }
+
+    #[test]
+    fn the_note_says_who_answered_what_and_how_to_read_it() {
+        let ask: Ask = serde_json::from_str(
+            r#"{"id":"AQ7","kind":"decide","status":"answered","session":"aq-lead","answer":{"verdict":"pick","options":["B"]}}"#,
+        )
+        .unwrap();
+        let n = note(&ask);
+        assert!(
+            n.contains("AQ7") && n.contains("picked B") && n.contains("desk show AQ7"),
+            "{n}"
+        );
+        assert!(!n.contains('\n'), "one line, so Enter sends it whole");
+    }
 
     #[test]
     fn a_desk_is_named_or_bare() {

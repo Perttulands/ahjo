@@ -85,6 +85,16 @@ pub struct Answer {
     pub comment: String,
     pub answers: BTreeMap<String, GrillAnswer>,
     pub at: String,
+    /// The pictures he pasted into it.
+    pub attachments: Vec<Attached>,
+}
+
+/// A picture he pasted into an answer, as the desk keeps it.
+#[derive(Clone, Debug, Default, Deserialize, PartialEq)]
+#[serde(default)]
+pub struct Attached {
+    pub id: String,
+    pub path: String,
 }
 
 #[derive(Clone, Debug, Default, Deserialize, PartialEq)]
@@ -157,6 +167,8 @@ pub struct Ask {
     pub recommend: String,
     pub project: String,
     pub asked_by: String,
+    /// The tmux session the ask was posted from: told when he answers.
+    pub session: String,
     pub status: String,
     pub media: Vec<Media>,
     pub options: Vec<Choice>,

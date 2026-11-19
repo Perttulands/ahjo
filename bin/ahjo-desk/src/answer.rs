@@ -43,6 +43,9 @@ pub struct Draft {
     pub at: Option<usize>,
     /// The marks as he has them now; none, as the desk has them.
     pub marks: Option<Vec<Mark>>,
+    /// The pictures he pasted, as the desk keeps them for this ask
+    /// (`pasted-1.png`): they go with his answer.
+    pub pictures: Vec<String>,
 }
 
 impl Draft {
@@ -69,6 +72,7 @@ impl Draft {
             || !self.words.trim().is_empty()
             || self.grill.values().any(Said::answered)
             || self.marks.is_some()
+            || !self.pictures.is_empty()
     }
 }
 
@@ -130,7 +134,16 @@ pub enum Verdict {
 pub fn payload(ask: &Ask, draft: &Draft, verdict: Verdict, marks: usize) -> Result<Value, String> {
     let words = draft.words.trim();
     let round = ask.round();
-    let with = |v: &str, options: Vec<String>| json!({"round": round, "verdict": v, "options": options, "comment": words});
+    let pictures = &draft.pictures;
+    let with = |v: &str, options: Vec<String>| {
+        let mut p = json!({"round": round, "verdict": v, "options": options, "comment": words});
+        if !pictures.is_empty() {
+            p["attachments"] = json!(pictures);
+        }
+        p
+    };
+    // A picture says something, as a mark does.
+    let marks = marks + pictures.len();
     if verdict == Verdict::Elsewhere {
         return Ok(with("elsewhere", vec![]));
     }
@@ -172,7 +185,9 @@ pub fn payload(ask: &Ask, draft: &Draft, verdict: Verdict, marks: usize) -> Resu
             Ok(p)
         }
         Form::Hands => match verdict {
-            Verdict::Send if !words.is_empty() => Ok(with("send back", vec![])),
+            Verdict::Send if !words.is_empty() || !pictures.is_empty() => {
+                Ok(with("send back", vec![]))
+            }
             Verdict::Send => Err("Say what stops the job, or mark it answered elsewhere".into()),
             _ => Err("A job for your hands is done where the job is (Open on web)".into()),
         },
@@ -217,6 +232,7 @@ mod tests {
             grill,
             at: Some(1),
             marks: Some(vec![mark]),
+            pictures: vec!["pasted-1.png".into()],
         };
         let desk = "http://127.0.0.1:8774".to_string();
         drafts.insert((desk.clone(), "AQ2".into(), 2), written.clone());
@@ -294,6 +310,33 @@ mod tests {
         let p = payload(&hands, &d, Verdict::Elsewhere, 0).unwrap();
         assert_eq!(p["comment"], "Told it in the session");
         assert_eq!(p["options"], json!([]), "a pick does not go with it");
+    }
+
+    #[test]
+    fn a_pasted_picture_goes_with_the_answer_and_is_enough_alone() {
+        let a = ask(r#"{"id":"AQ1","kind":"look","status":"open","round":1}"#);
+        let mut d = Draft::default();
+        assert!(payload(&a, &d, Verdict::Send, 0).is_err());
+        d.pictures = vec!["pasted-1.png".into()];
+        assert!(d.touched(), "a picture is kept with the draft");
+        let p = payload(&a, &d, Verdict::Send, 0).unwrap();
+        assert_eq!(p["verdict"], "marks");
+        assert_eq!(p["attachments"], json!(["pasted-1.png"]));
+        let g = ask(
+            r#"{"id":"BQ1","kind":"grill","status":"open","questions":[{"id":"q1","title":"Sky?"}]}"#,
+        );
+        assert_eq!(
+            payload(&g, &d, Verdict::Send, 0).unwrap()["attachments"],
+            json!(["pasted-1.png"])
+        );
+        d.pictures.clear();
+        assert!(payload(&a, &d, Verdict::Send, 0).is_err());
+        assert!(
+            payload(&a, &d, Verdict::LooksGood, 0)
+                .unwrap()
+                .get("attachments")
+                .is_none()
+        );
     }
 
     #[test]

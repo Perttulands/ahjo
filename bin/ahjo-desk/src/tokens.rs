@@ -49,8 +49,17 @@ pub const RAIL_THUMBS: f32 = 260.;
 pub const READING: f32 = 820.;
 /// His turn in the conversation stands in from the left by this much.
 pub const REPLY_INDENT: f32 = 40.;
-/// The most room his words take before they scroll.
-pub const WORDS_MAX_H: f32 = 320.;
+/// The most lines his words grow to before they scroll inside their box,
+/// the caret always in sight.
+pub const WORDS_LINES: usize = 12;
+/// A pasted picture beside his words.
+pub const PASTED_H: f32 = 56.;
+/// Settings: the page's width, the space between its sections, the node
+/// field, and a theme's card.
+pub const SETTINGS_W: f32 = 860.;
+pub const SECTION_GAP: f32 = 28.;
+pub const SETTINGS_FIELD: f32 = 320.;
+pub const THEME_CARD: f32 = 148.;
 /// The list of his marks before it scrolls.
 pub const MARKS_MAX_H: f32 = 220.;
 /// A queue row's picture.

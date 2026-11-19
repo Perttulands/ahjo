@@ -12,12 +12,13 @@ use crate::page::{self, FromPage};
 use crate::player::{Out, Player};
 use crate::tokens;
 use crate::video::Clip;
-use ahjo_app_kit::widgets::field::{self, FieldEvent, TextField};
+use ahjo_app_kit::widgets::field::{self, AttachmentEvent, FieldEvent, TextField};
 use ahjo_app_kit::widgets::markdown::{self, Block};
 use ahjo_app_kit::widgets::select::Selectable;
 use gpui::{
-    App, AppContext, AsyncApp, Bounds, Context, Entity, FocusHandle, Focusable, ImageFormat,
-    KeyDownEvent, Pixels, Point, RenderImage, WeakEntity, Window,
+    App, AppContext, AsyncApp, Bounds, ClipboardEntry, ClipboardItem, Context, Entity, FocusHandle,
+    Focusable, ImageFormat, KeyDownEvent, Pixels, Point, RenderImage, Subscription, WeakEntity,
+    Window,
 };
 use std::cell::{Cell, RefCell};
 use std::collections::{HashMap, VecDeque};
@@ -184,6 +185,19 @@ pub struct DeskApp {
     clip_loading: Option<String>,
     /// His words: always there, the keyboard's home.
     pub words: Entity<TextField>,
+    _words: Vec<Subscription>,
+    /// How he set the Desk up (`desk.json`), and whether it can be written
+    /// back (it read, or was never written).
+    pub config: desk::Config,
+    config_kept: bool,
+    /// The Settings view is in front of the asks.
+    pub settings_open: bool,
+    /// Settings' field for the node that reaches sessions.
+    pub node_field: Entity<TextField>,
+    /// What the node said when last checked from Settings.
+    pub node_check: Option<Result<String, String>>,
+    /// Pictures he pasted still on their way to the desk.
+    pub pasting: usize,
     /// The selected mark's words.
     pub mark_note: Entity<TextField>,
     pub selected: Option<String>,
@@ -194,7 +208,7 @@ pub struct DeskApp {
     aim: Option<Aim>,
     /// The whole app's size in percent, by the one zoom rule: Ctrl+wheel
     /// anywhere but a picture, and the zoom keys.
-    app_size: u16,
+    pub app_size: u16,
     app_wheel: Rc<Cell<ahjo_app_kit::zoom::Wheel>>,
     pub toast: Option<(String, bool)>,
     toast_gen: u64,
@@ -229,19 +243,38 @@ pub struct DeskApp {
 
 impl DeskApp {
     pub fn new(
-        places: Vec<Place>,
+        loaded: desk::Loaded,
         notice: Option<String>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
-        let read = ahjo_app_kit::theme::theme(cx).ty.read;
-        let words = cx.new(|cx| {
-            TextField::new(cx, "Your thoughts, in your words")
-                .prose()
-                .reading()
-                .text_size(read)
+        let desk::Loaded {
+            config,
+            places,
+            kept: config_kept,
+            ..
+        } = loaded;
+        let (words, _words) = Self::words_field(config.enter_sends, window, cx);
+        let node_field = cx.new(|cx| {
+            let mut f = TextField::new(cx, &config.node());
+            f.set(&config.node, false, cx);
+            f
         });
-        cx.subscribe_in(&words, window, Self::on_words).detach();
+        cx.subscribe_in(&node_field, window, |app, f, e, _, cx| {
+            if let FieldEvent::Changed | FieldEvent::Submit = e {
+                let text = f.read(cx).text.trim().to_string();
+                if app.config.node != text {
+                    app.config.node = text;
+                    app.node_check = None;
+                    app.keep_config(cx);
+                }
+                if *e == FieldEvent::Submit {
+                    app.check_node(cx);
+                }
+            }
+        })
+        .detach();
+        let read = ahjo_app_kit::theme::theme(cx).ty.read;
         let mark_note = cx.new(|cx| {
             TextField::new(cx, "What about it?")
                 .multiline()
@@ -310,6 +343,13 @@ impl DeskApp {
             clip_failed: HashMap::new(),
             clip_loading: None,
             words,
+            _words,
+            config,
+            config_kept,
+            settings_open: false,
+            node_field,
+            node_check: None,
+            pasting: 0,
             mark_note,
             selected: None,
             tool: Tool::Look,
@@ -351,9 +391,9 @@ impl DeskApp {
         reached(self.desks.iter().map(|d| &d.reach))
     }
 
-    /// Every open ask, quickest first, then the longest waiting: each
-    /// answer frees an agent, and the quick ones first free the most
-    /// agents soonest.
+    /// Every open ask, in the order he chose: by default the quickest
+    /// first, then the longest waiting, since each answer frees an agent
+    /// and the quick ones free the most agents soonest.
     pub fn queue(&self) -> Vec<Key> {
         let mut open: Vec<(&Ask, usize)> = self
             .desks
@@ -361,11 +401,15 @@ impl DeskApp {
             .enumerate()
             .flat_map(|(d, s)| s.asks.iter().filter(|a| a.is_open()).map(move |a| (a, d)))
             .collect();
-        open.sort_by(|(a, _), (b, _)| {
-            model::effort(a)
-                .cmp(&model::effort(b))
-                .then_with(|| a.created_at.cmp(&b.created_at))
-        });
+        match self.config.order {
+            desk::Order::Quickest => open.sort_by(|(a, _), (b, _)| {
+                model::effort(a)
+                    .cmp(&model::effort(b))
+                    .then_with(|| a.created_at.cmp(&b.created_at))
+            }),
+            desk::Order::Oldest => open.sort_by(|(a, _), (b, _)| a.created_at.cmp(&b.created_at)),
+            desk::Order::Newest => open.sort_by(|(a, _), (b, _)| b.created_at.cmp(&a.created_at)),
+        }
         open.into_iter().map(|(a, d)| (d, a.id.clone())).collect()
     }
 
@@ -1245,9 +1289,40 @@ impl DeskApp {
     ) {
         match e {
             FieldEvent::Changed => self.words_changed(cx),
-            FieldEvent::SubmitAlt => self.send(Verdict::Send, window, cx),
+            // Enter sends when he chose it (the field is then not prose).
+            FieldEvent::SubmitAlt | FieldEvent::Submit => self.send(Verdict::Send, window, cx),
             _ => {}
         }
+    }
+
+    /// His words' field: it grows with what he writes up to a dozen lines,
+    /// then scrolls inside itself with the caret always in sight. Enter
+    /// starts a new line, or sends when he chose that in Settings.
+    fn words_field(
+        enter_sends: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> (Entity<TextField>, Vec<Subscription>) {
+        let read = ahjo_app_kit::theme::theme(cx).ty.read;
+        let words = cx.new(|cx| {
+            let f = TextField::new(cx, "Your thoughts, in your words")
+                .reading()
+                .text_size(read)
+                .max_lines(tokens::WORDS_LINES)
+                .attachments();
+            if enter_sends {
+                f.multiline()
+            } else {
+                f.prose()
+            }
+        });
+        let subs = vec![
+            cx.subscribe_in(&words, window, Self::on_words),
+            cx.subscribe_in(&words, window, |app, _, e: &AttachmentEvent, _, cx| {
+                app.paste_pictures(e.0.clone(), cx)
+            }),
+        ];
+        (words, subs)
     }
 
     /// His words, kept with what they answer.
@@ -1430,6 +1505,9 @@ impl DeskApp {
                         app.drafts.retain(|k, _| !(&k.0 == url && k.1 == key.1));
                         app.drafts_changed = true;
                         app.say(format!("Sent · {title}"), false, cx);
+                        if let Some(a) = app.ask(&key).cloned() {
+                            app.tell(&a, cx);
+                        }
                         if app.current.as_ref() == Some(&key) {
                             app.open(next.filter(|n| app.ask(n).is_some_and(|a| a.is_open())), cx);
                         }
@@ -1572,6 +1650,228 @@ impl DeskApp {
         }
     }
 
+    // ---- Pictures he pastes ----
+
+    /// What he pasted that is a picture (one copied, or picture files)
+    /// goes to the desk for the ask in front, and with his answer to it.
+    fn paste_pictures(&mut self, item: ClipboardItem, cx: &mut Context<Self>) {
+        let Some(key) = self.current.clone() else {
+            return;
+        };
+        let Some(ask) = self.ask(&key) else { return };
+        if !ask.is_open() {
+            return self.say("This ask is answered: nothing more goes with it", true, cx);
+        }
+        let mut pasted = vec![];
+        for entry in item.entries() {
+            match entry {
+                ClipboardEntry::Image(i) => pasted.push(Pasted::Bytes(i.format, i.bytes.clone())),
+                ClipboardEntry::ExternalPaths(p) => {
+                    pasted.extend(p.paths().iter().cloned().map(Pasted::File))
+                }
+                _ => {}
+            }
+        }
+        if pasted.is_empty() {
+            return;
+        }
+        let base = self.desks[key.0].place.url.clone();
+        let id = ask.id.clone();
+        let draft: DraftKey = (base.clone(), id.clone(), ask.round());
+        self.pasting += pasted.len();
+        cx.notify();
+        cx.spawn(async move |this, cx| {
+            for p in pasted {
+                let ready = cx
+                    .background_executor()
+                    .spawn(async move { p.ready() })
+                    .await;
+                let got = match ready {
+                    Ok(bytes) => desk::runtime()
+                        .spawn(desk::attach(base.clone(), id.clone(), bytes))
+                        .await
+                        .unwrap_or_else(|e| Err(e.to_string())),
+                    Err(e) => Err(e),
+                };
+                let _ = this.update(cx, |app, cx| {
+                    app.pasting = app.pasting.saturating_sub(1);
+                    match got {
+                        Ok(a) => {
+                            app.drafts
+                                .entry(draft.clone())
+                                .or_default()
+                                .pictures
+                                .push(a.id);
+                            app.drafts_changed = true;
+                        }
+                        Err(e) => app.say(format!("The picture did not go: {e}"), true, cx),
+                    }
+                    cx.notify();
+                });
+            }
+        })
+        .detach();
+    }
+
+    /// Takes a pasted picture out of his answer. The desk keeps the file;
+    /// it goes nowhere unless sent.
+    pub fn unpaste(&mut self, id: &str, cx: &mut Context<Self>) {
+        if let Some(d) = self.draft_mut() {
+            d.pictures.retain(|p| p != id);
+        }
+        cx.notify();
+    }
+
+    /// A picture he pasted into an answer to ask `ask` on desk `desk`, as
+    /// it stands, fetched when not yet asked for.
+    pub fn pasted_picture(
+        &mut self,
+        desk: usize,
+        ask: &str,
+        id: &str,
+        cx: &mut Context<Self>,
+    ) -> Option<&Pic> {
+        let base = self.desks.get(desk)?.place.url.clone();
+        let key = format!("{base}{}", desk::attachment_path(ask, id));
+        if !self.pictures.contains_key(&key) {
+            self.pictures.insert(key.clone(), Pic::Loading);
+            self.picture_order.push_back(key.clone());
+            let (slot, path, format) = (
+                key.clone(),
+                desk::attachment_path(ask, id),
+                image_format(id),
+            );
+            cx.spawn(async move |this, cx| {
+                let svg = cx.update(|cx| cx.svg_renderer());
+                let got = match desk::runtime().spawn(desk::media(base, path)).await {
+                    Ok(Ok(bytes)) => match decode(cx, format, bytes, svg).await {
+                        Some((image, w, h)) => Pic::Ready {
+                            image,
+                            w,
+                            h,
+                            full: true,
+                        },
+                        None => Pic::Failed("The picture does not decode".into()),
+                    },
+                    Ok(Err(e)) => Pic::Failed(e),
+                    Err(e) => Pic::Failed(e.to_string()),
+                };
+                Self::put(&this, cx, &slot, got);
+            })
+            .detach();
+        }
+        self.pictures.get(&key)
+    }
+
+    // ---- Telling the agent ----
+
+    /// He answered `ask`: its session hears so through Ahjo Swarm, when
+    /// he wants that and the ask says where it came from. A note that does
+    /// not arrive is said, not hidden.
+    pub fn tell(&mut self, ask: &Ask, cx: &mut Context<Self>) {
+        if !self.config.tell_session || ask.session.trim().is_empty() {
+            return;
+        }
+        let (node, session, note) = (self.config.node(), ask.session.clone(), desk::note(ask));
+        cx.spawn(async move |this, cx| {
+            let got = desk::runtime()
+                .spawn(desk::tell(node, session.clone(), note))
+                .await
+                .unwrap_or_else(|e| Err(e.to_string()));
+            let _ = this.update(cx, |app, cx| match got {
+                Ok(()) => {
+                    if let Some((words, false)) = &app.toast {
+                        let words = format!("{words} · {session} told");
+                        app.say(words, false, cx);
+                    }
+                }
+                Err(e) => app.say(format!("Sent, but {session} was not told: {e}"), true, cx),
+            });
+        })
+        .detach();
+    }
+
+    // ---- Settings ----
+
+    pub fn toggle_settings(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.settings_open = !self.settings_open;
+        if self.settings_open {
+            window.focus(&self.focus, cx);
+        } else {
+            self.aim(Aim::Words, cx);
+        }
+        cx.notify();
+    }
+
+    /// Writes the settings, unless `desk.json` did not read: then writing
+    /// would lose what it holds, and the notice says so.
+    fn keep_config(&mut self, cx: &mut Context<Self>) {
+        if !self.config_kept {
+            return;
+        }
+        if let Err(e) = desk::write_config(&self.config) {
+            self.say(format!("Settings are not kept: {e}"), true, cx);
+        }
+    }
+
+    /// Draws the whole app in theme `d` and keeps it; none, as in Ahjo
+    /// Swarm.
+    pub fn set_theme(&mut self, d: Option<ahjo_app_kit::theme::Direction>, cx: &mut Context<Self>) {
+        let theme = match d {
+            Some(d) => ahjo_app_kit::theme::Theme::new(d),
+            None => ahjo_app_kit::theme::chosen().0,
+        };
+        self.config.theme = d.map(|d| d.key().to_string()).unwrap_or_default();
+        cx.set_global(theme);
+        cx.refresh_windows();
+        self.keep_config(cx);
+    }
+
+    pub fn set_order(&mut self, order: desk::Order, cx: &mut Context<Self>) {
+        self.config.order = order;
+        self.keep_config(cx);
+        cx.notify();
+    }
+
+    pub fn toggle_tell(&mut self, cx: &mut Context<Self>) {
+        self.config.tell_session = !self.config.tell_session;
+        self.keep_config(cx);
+        cx.notify();
+    }
+
+    /// Enter sends, or starts a new line: his words' field is made anew,
+    /// with what he had written in it.
+    pub fn toggle_enter_sends(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.config.enter_sends = !self.config.enter_sends;
+        let (words, subs) = Self::words_field(self.config.enter_sends, window, cx);
+        self.words = words;
+        self._words = subs;
+        self.point_words(cx);
+        self.keep_config(cx);
+        cx.notify();
+    }
+
+    /// Asks the node whether it is there, for Settings to say.
+    pub fn check_node(&mut self, cx: &mut Context<Self>) {
+        let node = self.config.node();
+        self.node_check = None;
+        cx.spawn(async move |this, cx| {
+            let got = desk::runtime()
+                .spawn(desk::node_health(node))
+                .await
+                .unwrap_or_else(|e| Err(e.to_string()));
+            let _ = this.update(cx, |app, cx| {
+                app.node_check = Some(got.map(|device| match device.as_str() {
+                    "" => "Reached".to_string(),
+                    d => format!("Reached · {d}"),
+                }));
+                cx.notify();
+            });
+        })
+        .detach();
+        cx.notify();
+    }
+
     /// Adds the desks the configured ones name (`/api/desks`) on the same
     /// host, so naming one desk finds the rest.
     fn discover(&mut self, cx: &mut Context<Self>) {
@@ -1639,11 +1939,44 @@ impl DeskApp {
         }
         let key = e.keystroke.key.as_str();
         let m = &e.keystroke.modifiers;
+        if m.control && !m.alt && key == "," {
+            return self.toggle_settings(window, cx);
+        }
+        // Settings stand in front of the asks: their keys wait.
+        if self.settings_open {
+            if key == "escape" {
+                self.toggle_settings(window, cx);
+            }
+            return;
+        }
         if m.control && !m.alt {
             match key {
                 "pagedown" => return self.step_ask(1, cx),
                 "pageup" => return self.step_ask(-1, cx),
                 "enter" if !self.typing(window, cx) => return self.send(Verdict::Send, window, cx),
+                // Pasted anywhere, a picture goes with the answer and words
+                // go into it.
+                "v" if !self.typing(window, cx) && !self.read_only() => {
+                    if let Some(item) = cx.read_from_clipboard() {
+                        let picture = item.entries().iter().any(|e| {
+                            matches!(
+                                e,
+                                ClipboardEntry::Image(_) | ClipboardEntry::ExternalPaths(_)
+                            )
+                        });
+                        if picture {
+                            self.paste_pictures(item, cx);
+                        } else if let Some(text) = item.text() {
+                            self.words.update(cx, |f, cx| {
+                                let text = f.text.clone() + &text.replace("\r\n", "\n");
+                                f.set(&text, false, cx);
+                            });
+                            self.words_changed(cx);
+                            self.aim(Aim::Words, cx);
+                        }
+                    }
+                    return;
+                }
                 _ => {}
             }
         }
@@ -1800,7 +2133,54 @@ fn image_format(path: &str) -> ImageFormat {
         Some("webp") => ImageFormat::Webp,
         Some("gif") => ImageFormat::Gif,
         Some("bmp") => ImageFormat::Bmp,
+        Some("tif" | "tiff") => ImageFormat::Tiff,
         _ => ImageFormat::Png,
+    }
+}
+
+/// One thing he pasted that may be a picture.
+enum Pasted {
+    Bytes(ImageFormat, Vec<u8>),
+    File(std::path::PathBuf),
+}
+
+impl Pasted {
+    /// The picture as the desk takes it: PNG, JPEG, GIF or WebP as they
+    /// are, any other picture (a bitmap from a Windows screenshot) as PNG.
+    fn ready(self) -> Result<Vec<u8>, String> {
+        let (format, bytes) = match self {
+            Pasted::Bytes(f, b) => (f, b),
+            Pasted::File(path) => {
+                let name = path
+                    .file_name()
+                    .map(|n| n.to_string_lossy().to_string())
+                    .unwrap_or_default();
+                let ext = name.rsplit('.').next().unwrap_or("").to_ascii_lowercase();
+                if !matches!(
+                    ext.as_str(),
+                    "png" | "jpg" | "jpeg" | "gif" | "webp" | "bmp" | "tif" | "tiff"
+                ) {
+                    return Err(format!("{name} is not a picture"));
+                }
+                let bytes = std::fs::read(&path).map_err(|e| format!("{name}: {e}"))?;
+                (image_format(&name), bytes)
+            }
+        };
+        match format {
+            ImageFormat::Png | ImageFormat::Jpeg | ImageFormat::Gif | ImageFormat::Webp => {
+                Ok(bytes)
+            }
+            ImageFormat::Svg => Err("a drawing (SVG) does not go as a picture".into()),
+            _ => {
+                let picture = image::load_from_memory(&bytes)
+                    .map_err(|e| format!("the picture does not read: {e}"))?;
+                let mut png = std::io::Cursor::new(vec![]);
+                picture
+                    .write_to(&mut png, image::ImageFormat::Png)
+                    .map_err(|e| format!("the picture does not turn to PNG: {e}"))?;
+                Ok(png.into_inner())
+            }
+        }
     }
 }
 
