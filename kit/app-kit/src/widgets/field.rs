@@ -117,6 +117,16 @@ pub struct TextField {
     bounds: Option<Bounds<Pixels>>,
     /// How far a single line is scrolled left so the caret stays in view.
     scroll: Pixels,
+    /// A text area at most this many lines high: past it, the text scrolls
+    /// inside the field, which keeps the caret in view as it moves.
+    max_lines: Option<usize>,
+    /// How far a capped text area is scrolled up, how high its text is,
+    /// and the caret and length it was last kept in view for.
+    scroll_y: Pixels,
+    content_h: Pixels,
+    followed: (usize, usize),
+    /// Where Up and Down aim across rows of different lengths.
+    goal_x: Option<Pixels>,
     selecting: bool,
     was_focused: bool,
 }
@@ -148,6 +158,11 @@ impl TextField {
             lines: vec![],
             bounds: None,
             scroll: px(0.),
+            max_lines: None,
+            scroll_y: px(0.),
+            content_h: px(0.),
+            followed: (0, 0),
+            goal_x: None,
             selecting: false,
             was_focused: false,
         }
@@ -174,6 +189,14 @@ impl TextField {
     /// room to draft in before anything is written.
     pub fn min_lines(mut self, lines: usize) -> Self {
         self.min_lines = lines.max(1);
+        self
+    }
+
+    /// A text area that grows with its text up to `lines` lines, then
+    /// scrolls inside itself, always showing the caret: what is being typed
+    /// is never out of sight.
+    pub fn max_lines(mut self, lines: usize) -> Self {
+        self.max_lines = Some(lines.max(1));
         self
     }
 
@@ -240,6 +263,7 @@ impl TextField {
     fn move_to(&mut self, at: usize, cx: &mut Context<Self>) {
         self.selected = at..at;
         self.reversed = false;
+        self.goal_x = None;
         cx.notify();
     }
 
@@ -317,6 +341,7 @@ impl TextField {
         let at = r.start + s.len();
         self.selected = at..at;
         self.reversed = false;
+        self.goal_x = None;
         self.changed(cx);
     }
 
@@ -456,35 +481,98 @@ impl TextField {
         cx.emit(FieldEvent::SubmitAlt);
     }
     fn up(&mut self, _: &Up, _: &mut Window, cx: &mut Context<Self>) {
-        if self.multiline && self.text[..self.cursor()].contains('\n') {
-            let start = self.line_start(self.cursor());
-            let col = self.cursor() - start;
-            let prev = self.line_start(start - 1);
-            let at = (prev + col).min(start - 1);
-            self.move_to(self.text.floor_char_boundary(at), cx);
-            return;
-        }
-        cx.emit(FieldEvent::Up);
+        self.step_row(-1, cx);
     }
     fn down(&mut self, _: &Down, _: &mut Window, cx: &mut Context<Self>) {
-        if self.multiline && self.text[self.cursor()..].contains('\n') {
-            let start = self.line_start(self.cursor());
-            let col = self.cursor() - start;
-            let next = self.line_end(self.cursor()) + 1;
-            let at = (next + col).min(self.line_end(next));
-            self.move_to(self.text.floor_char_boundary(at), cx);
-            return;
+        self.step_row(1, cx);
+    }
+
+    /// Up or Down in a text area: to the row above or below as it is drawn
+    /// (wrapped rows too), keeping the column it aimed at. Past the first
+    /// or last row a prose field goes to the text's start or end, and then
+    /// the owner hears Up or Down; any other field's owner hears it at once.
+    fn step_row(&mut self, dir: i32, cx: &mut Context<Self>) {
+        let event = if dir < 0 {
+            FieldEvent::Up
+        } else {
+            FieldEvent::Down
+        };
+        if !self.multiline {
+            return cx.emit(event);
         }
-        cx.emit(FieldEvent::Down);
+        let lh = line_height(self.text_size);
+        let at = self.cursor();
+        let Some(p) = self.position_of(at, lh).filter(|_| !self.text.is_empty()) else {
+            return self.step_logical(dir, event, cx);
+        };
+        let top = self.origin().map_or(p.y, |o| o.y);
+        let x = self.goal_x.unwrap_or(p.x);
+        // An offset where a row wraps is drawn at the end of the row above
+        // and is the start of the next: a step that lands where it was
+        // goes a row further.
+        for rows in 1..=2 {
+            let y = p.y + lh * (dir * rows) as f32 + lh / 2.;
+            if y < top || y >= top + self.content_h.max(lh) {
+                break;
+            }
+            let to = self.index_at(point(x, y), lh);
+            if to != at {
+                self.move_to(to, cx);
+                self.goal_x = Some(x);
+                return;
+            }
+        }
+        let edge = if dir < 0 { 0 } else { self.text.len() };
+        if self.prose && at != edge {
+            return self.move_to(edge, cx);
+        }
+        cx.emit(event);
+    }
+
+    /// Up or Down by the text's own lines, before it has been drawn.
+    fn step_logical(&mut self, dir: i32, event: FieldEvent, cx: &mut Context<Self>) {
+        let at = self.cursor();
+        if dir < 0 && self.text[..at].contains('\n') {
+            let start = self.line_start(at);
+            let col = at - start;
+            let prev = self.line_start(start - 1);
+            let to = (prev + col).min(start - 1);
+            return self.move_to(self.text.floor_char_boundary(to), cx);
+        }
+        if dir > 0 && self.text[at..].contains('\n') {
+            let col = at - self.line_start(at);
+            let next = self.line_end(at) + 1;
+            let to = (next + col).min(self.line_end(next));
+            return self.move_to(self.text.floor_char_boundary(to), cx);
+        }
+        cx.emit(event);
     }
     fn tab(&mut self, _: &Tab, _: &mut Window, cx: &mut Context<Self>) {
         cx.emit(FieldEvent::Tab);
     }
 
-    /// Where the text starts drawing: the box, less the sideways scroll.
+    /// Where the text starts drawing: the box, less the scroll.
     fn origin(&self) -> Option<Point<Pixels>> {
         self.bounds
-            .map(|b| point(b.origin.x - self.scroll, b.origin.y))
+            .map(|b| point(b.origin.x - self.scroll, b.origin.y - self.scroll_y))
+    }
+
+    /// The wheel over a text area taller than its box scrolls its text;
+    /// the caret is left where it is.
+    fn wheel(&mut self, e: &gpui::ScrollEvent, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(b) = self.bounds else { return };
+        let room = (self.content_h - b.size.height).max(px(0.));
+        if room <= px(0.) {
+            return;
+        }
+        let dy = e.delta.pixel_delta(line_height(self.text_size)).y;
+        let to = (self.scroll_y - dy).clamp(px(0.), room);
+        if to != self.scroll_y {
+            self.scroll_y = to;
+            cx.stop_propagation();
+            cx.notify();
+        }
+        let _ = window;
     }
 
     fn index_at(&self, p: Point<Pixels>, line_height: Pixels) -> usize {
@@ -810,7 +898,12 @@ impl Element for TextElement {
                 .iter()
                 .map(|(_, l)| l.size(lh).height.max(lh))
                 .fold(px(0.), |a, b| a + b);
-            style.size.height = h.max(lh * 3.).into();
+            let h = h.max(lh * 3.);
+            style.size.height = match f.max_lines {
+                Some(n) => h.min(lh * n as f32),
+                None => h,
+            }
+            .into();
         } else {
             style.size.height = lh.into();
         }
@@ -839,10 +932,42 @@ impl Element for TextElement {
             };
             f.scroll
         });
-        let origin = point(bounds.origin.x - scroll, bounds.origin.y);
+        let lh = line_height(self.field.read(cx).text_size);
+        let content_h: Pixels = lines
+            .iter()
+            .map(|(_, l)| l.size(lh).height.max(lh))
+            .fold(px(0.), |a, b| a + b);
+        // A capped text area keeps its caret in view as it moves or the
+        // text changes; the wheel moves it otherwise.
+        let scroll_y = self.field.update(cx, |f, _| {
+            f.content_h = content_h;
+            let room = (content_h - bounds.size.height).max(px(0.));
+            let now = (f.cursor(), f.text.len());
+            if f.max_lines.is_some() && now != f.followed {
+                f.followed = now;
+                let mut y = px(0.);
+                for (start, line) in &lines {
+                    if now.0 >= *start && now.0 <= start + line.len() {
+                        if let Some(p) = line.position_for_index(now.0 - start, lh) {
+                            y += p.y;
+                        }
+                        break;
+                    }
+                    y += line.size(lh).height.max(lh);
+                }
+                if y < f.scroll_y {
+                    f.scroll_y = y;
+                }
+                if y + lh > f.scroll_y + bounds.size.height {
+                    f.scroll_y = y + lh - bounds.size.height;
+                }
+            }
+            f.scroll_y = f.scroll_y.clamp(px(0.), room);
+            f.scroll_y
+        });
+        let origin = point(bounds.origin.x - scroll, bounds.origin.y - scroll_y);
         let f = self.field.read(cx);
         let t = theme(cx);
-        let lh = line_height(f.text_size);
         let mut quads = vec![];
         let mut cursor = None;
         let pos = |at: usize| -> Option<Point<Pixels>> {
@@ -927,12 +1052,13 @@ impl Element for TextElement {
             cx,
         );
         let x = bounds.origin.x - self.field.read(cx).scroll;
+        let top = bounds.origin.y - self.field.read(cx).scroll_y;
         // The text stays in its box, however far it runs.
         window.with_content_mask(Some(ContentMask { bounds }), |window| {
             for q in pre.quads.drain(..) {
                 window.paint_quad(q);
             }
-            let mut y = bounds.origin.y;
+            let mut y = top;
             for (_, line) in &pre.lines {
                 let _ = line.paint(point(x, y), lh, gpui::TextAlign::Left, None, window, cx);
                 y += line.size(lh).height.max(lh);
@@ -1001,6 +1127,9 @@ impl Render for TextField {
             .on_mouse_up(MouseButton::Left, cx.listener(Self::mouse_up))
             .on_mouse_up_out(MouseButton::Left, cx.listener(Self::mouse_up))
             .on_mouse_move(cx.listener(Self::mouse_move))
+            .when(self.max_lines.is_some(), |d| {
+                d.on_scroll(cx.listener(Self::wheel))
+            })
             .w_full()
             .px(px(8.))
             .py(px(if self.multiline { 6. } else { 3. }))
@@ -1096,6 +1225,71 @@ mod tests {
         assert_eq!(keep_in_view(s, px(0.), px(250.), w), px(0.));
         // Deleting the tail pulls the text back rather than show empty space.
         assert_eq!(keep_in_view(s, px(80.), px(80.), w), px(0.));
+    }
+
+    /// A text area in a window 300 px wide, drawn once with `text`.
+    fn area<'a>(
+        cx: &'a mut gpui::TestAppContext,
+        text: &str,
+        build: fn(TextField) -> TextField,
+    ) -> (Entity<TextField>, &'a mut gpui::VisualTestContext) {
+        cx.update(|cx| cx.set_global(crate::theme::Theme::default()));
+        let (f, cx) = cx.add_window_view(move |_, cx| build(TextField::new(cx, "")));
+        cx.simulate_resize(sz(px(300.), px(800.)));
+        f.update(cx, |f, cx| f.set(text, false, cx));
+        cx.run_until_parked();
+        (f, cx)
+    }
+
+    #[gpui::test]
+    fn down_reaches_every_wrapped_row_and_then_the_end(cx: &mut gpui::TestAppContext) {
+        let words = "a sentence that runs on well past the edge of a narrow box ".repeat(6);
+        let (f, cx) = area(cx, &words, |f| f.prose());
+        let lh = line_height(size::TEXT);
+        let rows = f.read_with(cx, |f, _| {
+            (f.lines[0].1.size(lh).height / lh).round() as usize
+        });
+        assert!(rows > 3, "the text wraps into {rows} rows");
+        f.update(cx, |f, cx| f.move_to(0, cx));
+        let mut seen = vec![];
+        for _ in 0..rows + 2 {
+            cx.update(|window, cx| f.update(cx, |f, cx| f.down(&Down, window, cx)));
+            cx.run_until_parked();
+            seen.push(f.read_with(cx, |f, _| f.cursor()));
+        }
+        // Each Down moves forward a row; the last row's Down goes to the end.
+        assert!(
+            seen.windows(2).take(rows - 1).all(|w| w[0] < w[1]),
+            "{seen:?}"
+        );
+        assert_eq!(*seen.last().unwrap(), words.len());
+        for _ in 0..rows + 2 {
+            cx.update(|window, cx| f.update(cx, |f, cx| f.up(&Up, window, cx)));
+            cx.run_until_parked();
+        }
+        assert_eq!(f.read_with(cx, |f, _| f.cursor()), 0);
+    }
+
+    #[gpui::test]
+    fn a_capped_area_keeps_the_caret_in_view_as_it_grows(cx: &mut gpui::TestAppContext) {
+        let lines = (1..=40)
+            .map(|n| format!("line {n}"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let (f, cx) = area(cx, &lines, |f| f.prose().max_lines(6));
+        let lh = line_height(size::TEXT);
+        let shows = |f: &TextField| {
+            let b = f.bounds.unwrap();
+            let p = f.position_of(f.cursor(), lh).unwrap();
+            p.y >= b.origin.y && p.y + lh <= b.origin.y + b.size.height + px(0.5)
+        };
+        f.read_with(cx, |f, _| {
+            assert!(f.bounds.unwrap().size.height <= lh * 6. + px(0.5), "capped");
+            assert!(shows(f), "the end, where the caret is, is in view");
+        });
+        f.update(cx, |f, cx| f.move_to(0, cx));
+        cx.run_until_parked();
+        f.read_with(cx, |f, _| assert!(shows(f) && f.scroll_y == px(0.)));
     }
 
     #[gpui::test]
