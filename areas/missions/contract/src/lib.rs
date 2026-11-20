@@ -160,11 +160,14 @@ pub mod document;
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct MissionResponse {
-    pub mission: document::MissionDocument,
+    pub mission: Mission,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub etag: Option<String>,
 }
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct LayoutResponse {
-    pub layout: document::LayoutDocument,
+    pub layout: Layout,
+    pub etag: String,
 }
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct NotesResponse {
@@ -200,10 +203,11 @@ pub struct GateRequestResponse {
 }
 /// Additional fields name the node created or deleted by this particular edit.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
 pub struct EditResponse {
-    pub mission: document::MissionDocument,
-    pub layout: document::LayoutDocument,
+    pub mission: Mission,
+    pub mission_etag: String,
+    pub layout: Layout,
+    pub layout_etag: String,
     #[serde(flatten)]
     pub changed: std::collections::BTreeMap<String, serde_json::Value>,
 }

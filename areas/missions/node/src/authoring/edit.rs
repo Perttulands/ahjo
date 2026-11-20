@@ -1,7 +1,9 @@
 //! Translate CLI authoring commands into one node edit.
 use super::{
-    Args, Side, endpoint, only_slot, select, selected_input, set_node_flag, slot_id, value_flags,
+    Args, Side, endpoint, only_slot, select, select_formation, selected_input, set_node_flag,
+    slot_id, value_flags,
 };
+use ahjo_missions_contract::{Mission, MissionInput, MissionOutput, Slot};
 use anyhow::{Context, Result, bail};
 use serde_json::{Value, json};
 
@@ -9,9 +11,19 @@ pub(super) fn operation<'a>(
     noun: &str,
     verb: &str,
     a: &Args,
-    m: &Value,
+    m: &Mission,
 ) -> Result<(&'a str, Value, Option<&'a str>)> {
-    let node = |list: &str| -> Result<String> { select(m, list, a.arg(1)?) };
+    let node = |kind: &str| -> Result<String> {
+        let selector = a.arg(1)?;
+        let id = match kind {
+            "formation" => &select_formation(m, selector)?.id,
+            "gate" => &select(&m.gates, selector, |n| (&n.id, &n.title))?.id,
+            "end" => &select(&m.ends, selector, |n| (&n.id, &n.title))?.id,
+            "limit" => &select(&m.limits, selector, |n| (&n.id, &n.title))?.id,
+            _ => unreachable!(),
+        };
+        Ok(id.clone())
+    };
     let mut v = value_flags(
         a,
         &[
@@ -37,20 +49,11 @@ pub(super) fn operation<'a>(
     let result = match (noun, verb) {
         ("mission", "create") => ("createInputCard", Some("inputCard")),
         ("mission", "update") => {
-            v["id"] = json!(selected_input(m, a.pos.get(1).map(String::as_str))?);
+            v["id"] = json!(selected_input(m, a.pos.get(1).map(String::as_str))?.id);
             ("updateInputCard", None)
         }
         ("mission", "input" | "output") => {
-            let id = selected_input(m, None)?;
-            let card = m["inputCards"]
-                .as_array()
-                .unwrap()
-                .iter()
-                .find(|n| n["id"] == id)
-                .unwrap();
-            let key = if verb == "input" { "inputs" } else { "outputs" };
-            let mut items = card[key].as_array().cloned().unwrap_or_default();
-            let name = a.arg(1)?;
+            let card = selected_input(m, None)?;
             if a.has("required") && a.has("optional") {
                 bail!("give --required or --optional, not both")
             }
@@ -61,36 +64,52 @@ pub(super) fn operation<'a>(
             {
                 bail!("--delete takes no other input or output flags")
             }
-            let index = items.iter().position(|x| x["name"] == name);
-            if a.has("delete") {
-                let index = index.context("input or output not found")?;
-                items.remove(index);
+            if verb == "input" {
+                let items = edit_declarations(
+                    &card.inputs,
+                    a,
+                    |item| &item.name,
+                    |old, name| {
+                        let mut item = old.unwrap_or_else(|| MissionInput {
+                            name: name.into(),
+                            kind: "text".into(),
+                            ..Default::default()
+                        });
+                        declaration_flags(
+                            a,
+                            &mut item.kind,
+                            &mut item.description,
+                            &mut item.required,
+                        );
+                        item
+                    },
+                )?;
+                v = json!({"id":card.id,"inputs":items});
             } else {
-                let mut item = index
-                    .map(|i| items[i].clone())
-                    .unwrap_or(json!({"name":name,"kind":"text","required":false}));
-                for (flag, key) in [
-                    ("kind", "kind"),
-                    ("description", "description"),
-                    ("from", "from"),
-                ] {
-                    if let Some(x) = a.flag(flag) {
-                        item[key] = json!(x)
-                    }
-                }
-                if a.has("required") {
-                    item["required"] = json!(true)
-                }
-                if a.has("optional") {
-                    item["required"] = json!(false)
-                }
-                if let Some(index) = index {
-                    items[index] = item
-                } else {
-                    items.push(item)
-                }
+                let items = edit_declarations(
+                    &card.outputs,
+                    a,
+                    |item| &item.name,
+                    |old, name| {
+                        let mut item = old.unwrap_or_else(|| MissionOutput {
+                            name: name.into(),
+                            kind: "text".into(),
+                            ..Default::default()
+                        });
+                        declaration_flags(
+                            a,
+                            &mut item.kind,
+                            &mut item.description,
+                            &mut item.required,
+                        );
+                        if let Some(from) = a.flag("from") {
+                            item.from = from.into();
+                        }
+                        item
+                    },
+                )?;
+                v = json!({"id":card.id,"outputs":items});
             }
-            v = json!({"id":id,key:items});
             ("updateInputCard", None)
         }
         ("formation", "create") => {
@@ -98,11 +117,11 @@ pub(super) fn operation<'a>(
             ("createFormation", Some("formation"))
         }
         ("formation", "delete") => {
-            v = json!({"id":node("formations")?});
+            v = json!({"id":node("formation")?});
             ("deleteFormation", None)
         }
         ("formation", "rename") => {
-            v = json!({"id":node("formations")?,"title":a.arg(2)?});
+            v = json!({"id":node("formation")?,"title":a.arg(2)?});
             ("updateFormation", None)
         }
         ("formation", "place") => {
@@ -115,11 +134,11 @@ pub(super) fn operation<'a>(
             if !place.is_empty() && !place.contains('/') {
                 bail!("place is device/environment, or home");
             }
-            v = json!({"id":node("formations")?,"device":place});
+            v = json!({"id":node("formation")?,"device":place});
             ("updateFormation", None)
         }
         ("formation", "set-type") => {
-            let id = node("formations")?;
+            let id = node("formation")?;
             let keep = a
                 .flag("keep-slot")
                 .map(|s| slot_id(m, &id, s))
@@ -129,13 +148,7 @@ pub(super) fn operation<'a>(
             ("setFormationType", None)
         }
         ("formation", "set-slots") => {
-            let id = node("formations")?;
-            let formation = m["formations"]
-                .as_array()
-                .unwrap()
-                .iter()
-                .find(|f| f["id"] == id)
-                .unwrap();
+            let formation = select_formation(m, a.arg(1)?)?;
             let controller = a.flag("controller").unwrap_or("");
             let mut slots = Vec::new();
             for entry in a.flags.get("slot").into_iter().flatten() {
@@ -143,28 +156,30 @@ pub(super) fn operation<'a>(
                 if slot_id.is_empty() || label.is_empty() {
                     bail!("--slot needs id=label");
                 }
-                let mut slot = formation["slots"]
-                    .as_array()
-                    .into_iter()
-                    .flatten()
-                    .find(|s| s["id"] == slot_id)
+                let mut slot = formation
+                    .slots
+                    .iter()
+                    .find(|s| s.id == slot_id)
                     .cloned()
-                    .unwrap_or(json!({"id":slot_id}));
-                slot["label"] = json!(label);
-                slot["controller"] = json!(slot_id == controller);
+                    .unwrap_or_else(|| Slot {
+                        id: slot_id.into(),
+                        ..Default::default()
+                    });
+                slot.label = label.into();
+                slot.controller = slot_id == controller;
                 slots.push(slot);
             }
             if slots.is_empty() {
                 bail!("at least one --slot is required");
             }
-            if !controller.is_empty() && !slots.iter().any(|s| s["id"] == controller) {
+            if !controller.is_empty() && !slots.iter().any(|s| s.id == controller) {
                 bail!("--controller must name a slot");
             }
-            v = json!({"id":id,"type":formation["type"],"slots":slots});
+            v = json!({"id":formation.id,"type":formation.kind,"slots":slots});
             ("setFormationType", None)
         }
         ("formation", "assign" | "unassign") => {
-            let id = node("formations")?;
+            let id = node("formation")?;
             let slot = match a.flag("slot") {
                 Some(selector) => slot_id(m, &id, selector)?,
                 None => only_slot(m, &id)?,
@@ -173,7 +188,7 @@ pub(super) fn operation<'a>(
             ("assignSlot", None)
         }
         ("formation", "agent") => {
-            let id = node("formations")?;
+            let id = node("formation")?;
             let slot = match a.flag("slot") {
                 Some(selector) => slot_id(m, &id, selector)?,
                 None => only_slot(m, &id)?,
@@ -188,14 +203,14 @@ pub(super) fn operation<'a>(
                 "off" | "false" => false,
                 _ => bail!("fresh is on or off"),
             };
-            v = json!({"id":node("formations")?,"fresh":fresh});
+            v = json!({"id":node("formation")?,"fresh":fresh});
             ("updateFormation", None)
         }
         ("formation", "set-brief") => {
             if let Some(repository) = a.flag("repository") {
                 v["repository"] = json!(repository);
             }
-            v["formationId"] = json!(node("formations")?);
+            v["formationId"] = json!(node("formation")?);
             if let Some(bead) = a.flag("bead") {
                 v["work"] = json!(bead);
             }
@@ -205,11 +220,11 @@ pub(super) fn operation<'a>(
             ("setBrief", None)
         }
         ("formation", "add-input" | "add-output") => {
-            v = json!({"formationId":node("formations")?,"direction":if verb=="add-input"{"input"}else{"output"},"label":a.flag("label").context("--label is required")?,"kind":a.flag("kind").unwrap_or("")});
+            v = json!({"formationId":node("formation")?,"direction":if verb=="add-input"{"input"}else{"output"},"label":a.flag("label").context("--label is required")?,"kind":a.flag("kind").unwrap_or("")});
             ("addPort", None)
         }
         ("formation", "set-port") => {
-            let formation = node("formations")?;
+            let formation = node("formation")?;
             let full = endpoint(m, &format!("{formation}:{}", a.arg(2)?), Side::From)?;
             v["formationId"] = json!(formation);
             v["portId"] = json!(full.split_once(':').unwrap().1);
@@ -226,9 +241,9 @@ pub(super) fn operation<'a>(
         }
         ("mission", "wire") => {
             let (input, to) = if a.pos.len() == 2 {
-                (selected_input(m, None)?, a.arg(1)?)
+                (&selected_input(m, None)?.id, a.arg(1)?)
             } else {
-                (selected_input(m, Some(a.arg(1)?))?, a.arg(2)?)
+                (&selected_input(m, Some(a.arg(1)?))?.id, a.arg(2)?)
             };
             v = json!({"from":format!("{input}:out"),"to":endpoint(m,to,Side::To)?});
             ("wireConnection", None)
@@ -250,7 +265,7 @@ pub(super) fn operation<'a>(
             ("createGate", Some("gate"))
         }
         ("gate", "update") => {
-            v["id"] = json!(node("gates")?);
+            v["id"] = json!(node("gate")?);
             if a.has("clear-check") {
                 if ["check", "check-version", "check-value"]
                     .iter()
@@ -274,46 +289,46 @@ pub(super) fn operation<'a>(
             ("updateGate", None)
         }
         ("gate", "delete") => {
-            v = json!({"id":node("gates")?});
+            v = json!({"id":node("gate")?});
             ("deleteGate", None)
         }
         ("gate", "judge") => {
             if a.has("detach") {
-                v = json!({"gateId":node("gates")?});
+                v = json!({"gateId":node("gate")?});
                 ("detachGateJudge", None)
             } else {
                 let chain = a
                     .flag("chain")
                     .context("--chain is required")?
                     .split(',')
-                    .map(|s| select(m, "formations", s))
+                    .map(|s| select_formation(m, s).map(|step| &step.id))
                     .collect::<Result<Vec<_>>>()?;
-                v = json!({"gateId":node("gates")?,"chain":chain});
+                v = json!({"gateId":node("gate")?,"chain":chain});
                 ("setGateJudge", None)
             }
         }
         ("end", "create") => ("createEnd", Some("end")),
         ("end", "update") => {
-            v["id"] = json!(node("ends")?);
+            v["id"] = json!(node("end")?);
             ("updateEnd", None)
         }
         ("end", "delete") => {
-            v = json!({"id":node("ends")?});
+            v = json!({"id":node("end")?});
             ("deleteEnd", None)
         }
         ("limit", "create" | "update") => {
             if verb == "update" {
-                v["id"] = json!(node("limits")?)
+                v["id"] = json!(node("limit")?)
             }
             if let Some(target) = a.flag("target") {
                 v["target"] = json!(if target.is_empty() {
                     String::new()
                 } else if target == "input" {
-                    selected_input(m, None)?
-                } else if let Ok(id) = select(m, "formations", target) {
-                    id
+                    selected_input(m, None)?.id.clone()
+                } else if let Ok(step) = select_formation(m, target) {
+                    step.id.clone()
                 } else {
-                    selected_input(m, Some(target))?
+                    selected_input(m, Some(target))?.id.clone()
                 });
             }
             for (flag, key) in [
@@ -340,13 +355,52 @@ pub(super) fn operation<'a>(
             )
         }
         ("limit", "delete") => {
-            v = json!({"id":node("limits")?});
+            v = json!({"id":node("limit")?});
             ("deleteLimit", None)
         }
         _ => bail!("{noun} {verb} is not implemented"),
     };
     Ok((result.0, v, result.1))
 }
+fn edit_declarations<T: Clone>(
+    existing: &[T],
+    args: &Args,
+    name_of: impl Fn(&T) -> &str,
+    update: impl FnOnce(Option<T>, &str) -> T,
+) -> Result<Vec<T>> {
+    let name = args.arg(1)?;
+    let mut items = existing.to_vec();
+    let index = items.iter().position(|item| name_of(item) == name);
+    if args.has("delete") {
+        items.remove(index.context("input or output not found")?);
+    } else if let Some(index) = index {
+        let item = items.remove(index);
+        items.insert(index, update(Some(item), name));
+    } else {
+        items.push(update(None, name));
+    }
+    Ok(items)
+}
+
+fn declaration_flags(
+    args: &Args,
+    kind: &mut String,
+    description: &mut String,
+    required: &mut bool,
+) {
+    if let Some(value) = args.flag("kind") {
+        *kind = value.into();
+    }
+    if let Some(value) = args.flag("description") {
+        *description = value.into();
+    }
+    if args.has("required") {
+        *required = true;
+    } else if args.has("optional") {
+        *required = false;
+    }
+}
+
 fn duration(s: &str) -> Result<i64> {
     if s.is_empty() {
         return Ok(0);

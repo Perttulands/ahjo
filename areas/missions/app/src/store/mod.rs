@@ -241,7 +241,6 @@ pub(crate) mod flow_tests {
         serde_json::from_str::<ahjo_missions_contract::MissionResponse>(json)
             .unwrap()
             .mission
-            .mission
     }
 
     #[test]

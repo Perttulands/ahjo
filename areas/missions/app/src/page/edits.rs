@@ -204,7 +204,7 @@ impl MissionsPage {
                         match serde_json::from_slice::<EditResponse>(&answer.body) {
                             Ok(response) => {
                                 let reverse = if reverse.is_empty() {
-                                    undo::answered(patch, &mission, &response.mission.mission)
+                                    undo::answered(patch, &mission, &response.mission)
                                 } else {
                                     reverse
                                 };
@@ -216,13 +216,13 @@ impl MissionsPage {
                                     accept_editor_operation(base, submitted, patch);
                                 }
                                 pending.wrote = Some(undo::Version {
-                                    rev: response.mission.mission.rev,
-                                    layout: Some(response.layout.etag.clone()),
+                                    rev: response.mission.rev,
+                                    layout: Some(response.layout_etag.clone()),
                                 });
-                                page.state.mission_etag = response.mission.etag;
-                                page.state.mission = Some(response.mission.mission);
-                                page.state.layout_etag = Some(response.layout.etag);
-                                page.state.layout = Some(response.layout.layout);
+                                page.state.mission_etag = Some(response.mission_etag);
+                                page.state.mission = Some(response.mission);
+                                page.state.layout_etag = Some(response.layout_etag);
+                                page.state.layout = Some(response.layout);
                             }
                             Err(error) => {
                                 page.history_finished(pending, Some(error.to_string()), true, cx);
@@ -236,10 +236,10 @@ impl MissionsPage {
                                 pending.reverses.extend(reverse);
                                 pending.wrote = Some(undo::Version {
                                     rev: mission.rev,
-                                    layout: Some(response.layout.etag.clone()),
+                                    layout: Some(response.etag.clone()),
                                 });
-                                page.state.layout_etag = Some(response.layout.etag);
-                                page.state.layout = Some(response.layout.layout);
+                                page.state.layout_etag = Some(response.etag);
+                                page.state.layout = Some(response.layout);
                             }
                             Err(error) => {
                                 page.history_finished(pending, Some(error.to_string()), true, cx);
@@ -345,11 +345,11 @@ impl MissionsPage {
                 let mission = mission.ok().filter(|answer| answer.ok()).and_then(|answer| serde_json::from_slice::<MissionResponse>(&answer.body).ok());
                 let layout = layout.ok().filter(|answer| answer.ok()).and_then(|answer| serde_json::from_slice::<LayoutResponse>(&answer.body).ok());
                 match mission {
-                    Some(response) => { page.state.mission_etag = response.mission.etag; page.state.mission = Some(response.mission.mission); }
+                    Some(response) => { page.state.mission_etag = response.etag; page.state.mission = Some(response.mission); }
                     None => { page.state.mission_etag = None; page.state.mission = None; }
                 }
                 match layout {
-                    Some(response) => { page.state.layout_etag = Some(response.layout.etag); page.state.layout = Some(response.layout.layout); }
+                    Some(response) => { page.state.layout_etag = Some(response.etag); page.state.layout = Some(response.layout); }
                     None => { page.state.layout_etag = None; page.state.layout = None; }
                 }
                 if page.state.mission.is_none() || page.state.layout.is_none() {

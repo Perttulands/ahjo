@@ -250,18 +250,18 @@ fn designs_a_multi_gate_mission_and_shows_findings_on_the_canvas(cx: &mut TestAp
             .clone()
     };
     until(cx, "input saved", |_| {
-        read()["inputCards"].as_array().unwrap().len() == 1
+        read()["inputCard"].as_array().unwrap().len() == 1
     });
     // The + beside the Input adds the next step, wired from it and open
     // for editing.
-    let input = read()["inputCards"][0]["id"].as_str().unwrap().to_owned();
+    let input = read()["inputCard"][0]["id"].as_str().unwrap().to_owned();
     let next = format!("canvas-next-{input}");
     until(cx, "next-step button", |cx| has(cx, &next));
     click(cx, &next);
     until(cx, "next step wired", |_| {
         let m = read();
-        m["formations"].as_array().unwrap().len() == 1
-            && m["connections"]
+        m["formation"].as_array().unwrap().len() == 1
+            && m["connection"]
                 .as_array()
                 .unwrap()
                 .iter()
@@ -271,8 +271,8 @@ fn designs_a_multi_gate_mission_and_shows_findings_on_the_canvas(cx: &mut TestAp
     // Once something follows the Input, its + is gone: no wire runs past it.
     until(cx, "+ gone once wired", |cx| !has(cx, &next));
     for (button, field, count) in [
-        ("new-step", "formations", 2),
-        ("menu-label-Add gate", "gates", 1),
+        ("new-step", "formation", 2),
+        ("menu-label-Add gate", "gate", 1),
     ] {
         until(cx, "board ready for edit", |cx| has(cx, "board-ready"));
         if button != "new-step" {
@@ -284,7 +284,7 @@ fn designs_a_multi_gate_mission_and_shows_findings_on_the_canvas(cx: &mut TestAp
             read()[field].as_array().unwrap().len() == count
         });
     }
-    let gate_id = read()["gates"][0]["id"].as_str().unwrap().to_owned();
+    let gate_id = read()["gate"][0]["id"].as_str().unwrap().to_owned();
     until(cx, "board ready to arrange", |cx| has(cx, "board-ready"));
     click(cx, "arrange");
     until(cx, "arranged layout saved", |_| {
@@ -297,7 +297,7 @@ fn designs_a_multi_gate_mission_and_shows_findings_on_the_canvas(cx: &mut TestAp
             ))
             .unwrap()
             .0;
-        layout["layout"]["nodes"]
+        layout["layout"]["node"]
             .as_array()
             .unwrap()
             .iter()
@@ -317,10 +317,10 @@ fn designs_a_multi_gate_mission_and_shows_findings_on_the_canvas(cx: &mut TestAp
     cx.simulate_input("formation");
     click(cx, "step-save");
     until(cx, "judge gate saved", |cx| !has(cx, "step-extra"));
-    assert_eq!(read()["gates"][0]["kinds"][0], "formation");
+    assert_eq!(read()["gate"][0]["kinds"][0], "formation");
     for (button, field, count) in [
-        ("menu-label-Add gate", "gates", 2),
-        ("menu-label-Add end", "ends", 1),
+        ("menu-label-Add gate", "gate", 2),
+        ("menu-label-Add end", "end", 1),
     ] {
         until(cx, "board ready for edit", |cx| has(cx, "board-ready"));
         if button != "new-step" {
@@ -333,10 +333,10 @@ fn designs_a_multi_gate_mission_and_shows_findings_on_the_canvas(cx: &mut TestAp
         });
     }
     let doc = read();
-    assert_eq!(doc["gates"][1]["kinds"][0], "human");
+    assert_eq!(doc["gate"][1]["kinds"][0], "human");
     let selector = format!(
         "validation-card-{}",
-        doc["formations"][0]["id"].as_str().unwrap()
+        doc["formation"][0]["id"].as_str().unwrap()
     );
     until(cx, "finding on a step card", |cx| has(cx, &selector));
 }

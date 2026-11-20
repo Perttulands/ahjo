@@ -358,8 +358,8 @@ mod tests {
         assert_eq!(kinds, ["human"]);
     }
     #[test]
-    fn restore_formation_reads_the_public_json_shape() {
-        let body = json!({"restoreNode":{"gate":null,"formation":{"id":"f","type":"solo","title":"Work","inputs":[{"id":"in","label":"Input"}],"outputs":[],"slots":[{"id":"s","label":"Agent","controller":false}]}}});
+    fn restore_formation_reads_the_stored_shape() {
+        let body = json!({"restoreNode":{"gate":null,"formation":{"id":"f","type":"solo","title":"Work","input":[{"id":"in","label":"Input"}],"output":[],"slot":[{"id":"s","label":"Agent","controller":false}]}}});
         let MissionChange::RestoreNode {
             node: crate::RestoredNode::Formation(formation),
             ..

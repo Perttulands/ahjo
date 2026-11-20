@@ -612,16 +612,16 @@ impl MissionsPage {
                             if layout {
                                 match serde_json::from_slice::<LayoutResponse>(&answer.body) {
                                     Ok(v) => {
-                                        page.state.layout_etag = Some(v.layout.etag);
-                                        page.state.layout = Some(v.layout.layout);
+                                        page.state.layout_etag = Some(v.etag);
+                                        page.state.layout = Some(v.layout);
                                     }
                                     Err(e) => page.state.error = Some(e.to_string()),
                                 }
                             } else {
                                 match serde_json::from_slice::<MissionResponse>(&answer.body) {
                                     Ok(v) => {
-                                        page.state.mission_etag = v.mission.etag;
-                                        page.state.mission = Some(v.mission.mission);
+                                        page.state.mission_etag = v.etag;
+                                        page.state.mission = Some(v.mission);
                                         if let Some((value, folder)) = page.carry.take() {
                                             page.start_with(&value, &folder, cx);
                                         }
@@ -988,7 +988,7 @@ impl MissionsPage {
                         match serde_json::from_slice::<EditResponse>(&answer.body) {
                             Ok(v) => {
                                 let steps = if reverse.is_empty() {
-                                    undo::answered(&patch, &mission, &v.mission.mission)
+                                    undo::answered(&patch, &mission, &v.mission)
                                 } else {
                                     reverse
                                 };
@@ -1000,8 +1000,8 @@ impl MissionsPage {
                                     steps,
                                 };
                                 page.history.wrote(undo::Version {
-                                    rev: v.mission.mission.rev,
-                                    layout: Some(v.layout.etag.clone()),
+                                    rev: v.mission.rev,
+                                    layout: Some(v.layout_etag.clone()),
                                 });
                                 match mode {
                                     WriteMode::Edit => page.history.record(entry),
@@ -1016,15 +1016,13 @@ impl MissionsPage {
                                     {
                                         base.accept_fields(sent, range.clone());
                                     }
-                                    ed.rev = v.mission.mission.rev;
-                                    if let Some(etag) = &v.mission.etag {
-                                        ed.etag = etag.clone();
-                                    }
+                                    ed.rev = v.mission.rev;
+                                    ed.etag.clone_from(&v.mission_etag);
                                 }
-                                page.state.mission_etag = v.mission.etag;
-                                page.state.mission = Some(v.mission.mission);
-                                page.state.layout_etag = Some(v.layout.etag);
-                                page.state.layout = Some(v.layout.layout);
+                                page.state.mission_etag = Some(v.mission_etag);
+                                page.state.mission = Some(v.mission);
+                                page.state.layout_etag = Some(v.layout_etag);
+                                page.state.layout = Some(v.layout);
                                 page.state.error = None;
                                 page.created_step(&mission, cx);
                                 if std::mem::take(&mut page.staff_pending) {
@@ -1417,8 +1415,8 @@ impl MissionsPage {
                 match result {
                     Ok(a) if a.ok() => match serde_json::from_slice::<LayoutResponse>(&a.body) {
                         Ok(v) => {
-                            page.state.layout_etag = Some(v.layout.etag);
-                            page.state.layout = Some(v.layout.layout);
+                            page.state.layout_etag = Some(v.etag);
+                            page.state.layout = Some(v.layout);
                         }
                         Err(e) => page.state.error = Some(e.to_string()),
                     },

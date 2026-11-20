@@ -2,7 +2,9 @@
 mod edit;
 use crate::Missions;
 use ahjo_core::Error;
-use ahjo_missions_contract::{self as wire, LayoutPatch, Precondition};
+use ahjo_missions_contract::{
+    self as wire, Formation, InputCard, LayoutPatch, Mission, MissionInput, Precondition,
+};
 use anyhow::{Context, Result, bail};
 use serde_json::{Value, json};
 use std::collections::HashMap;
@@ -28,40 +30,39 @@ impl Args {
         self.flags.get("file").cloned().unwrap_or_default()
     }
 }
-fn text(v: &Value, k: &str) -> String {
-    v[k].as_str().unwrap_or("").into()
-}
-fn select(m: &Value, list: &str, selector: &str) -> Result<String> {
-    let nodes = m[list].as_array().context("node returned no list")?;
-    let matches: Vec<_> = nodes
-        .iter()
-        .filter(|n| n["id"] == selector || n["title"] == selector)
-        .collect();
-    match matches.as_slice() {
-        [one] => Ok(text(one, "id")),
-        [] => bail!("{selector:?} not found"),
+fn select<'a, T>(
+    items: &'a [T],
+    selector: &str,
+    names: impl Fn(&T) -> (&str, &str),
+) -> Result<&'a T> {
+    let mut matches = items.iter().filter(|item| {
+        let (id, title) = names(item);
+        id == selector || title == selector
+    });
+    match (matches.next(), matches.next()) {
+        (Some(item), None) => Ok(item),
+        (None, _) => bail!("{selector:?} not found"),
         _ => bail!("{selector:?} is ambiguous"),
     }
 }
-fn slot_id(m: &Value, formation_id: &str, selector: &str) -> Result<String> {
-    let formation = m["formations"]
-        .as_array()
-        .into_iter()
-        .flatten()
-        .find(|f| f["id"] == formation_id)
-        .context("formation not found")?;
-    let matches: Vec<_> = formation["slots"]
-        .as_array()
-        .into_iter()
-        .flatten()
-        .filter(|s| s["id"] == selector || s["label"] == selector)
-        .collect();
-    match matches.as_slice() {
-        [slot] => Ok(text(slot, "id")),
-        [] => bail!("slot {selector:?} not found"),
+
+fn select_formation<'a>(m: &'a Mission, selector: &str) -> Result<&'a Formation> {
+    select(&m.formations, selector, |f| (&f.id, &f.title))
+}
+
+fn slot_id(m: &Mission, formation_id: &str, selector: &str) -> Result<String> {
+    let formation = m.formation(formation_id).context("formation not found")?;
+    let mut matching = formation
+        .slots
+        .iter()
+        .filter(|s| s.id == selector || s.label == selector);
+    match (matching.next(), matching.next()) {
+        (Some(slot), None) => Ok(slot.id.clone()),
+        (None, _) => bail!("slot {selector:?} not found"),
         _ => bail!("slot {selector:?} is ambiguous"),
     }
 }
+
 /// Which end of a connection an endpoint names, so a bare node can stand for
 /// its only port on that side.
 #[derive(Clone, Copy, PartialEq)]
@@ -69,109 +70,111 @@ enum Side {
     From,
     To,
 }
+
 /// A step with one seat needs no --slot; one with several names them.
-fn only_slot(m: &Value, formation_id: &str) -> Result<String> {
-    let formation = m["formations"]
-        .as_array()
-        .into_iter()
-        .flatten()
-        .find(|f| f["id"] == formation_id)
-        .context("step not found")?;
-    let slots: Vec<_> = formation["slots"]
-        .as_array()
-        .into_iter()
-        .flatten()
-        .collect();
-    match slots.as_slice() {
-        [slot] => Ok(text(slot, "id")),
-        _ => bail!(
+fn only_slot(m: &Mission, formation_id: &str) -> Result<String> {
+    let formation = m.formation(formation_id).context("step not found")?;
+    match formation.slots.as_slice() {
+        [slot] => Ok(slot.id.clone()),
+        slots => bail!(
             "this step has several seats; name one with --slot: {}",
             slots
                 .iter()
-                .map(|s| text(s, "label"))
+                .map(|s| s.label.as_str())
                 .collect::<Vec<_>>()
                 .join(", ")
         ),
     }
 }
-fn endpoint(m: &Value, endpoint: &str, side: Side) -> Result<String> {
-    let (node, port) = endpoint.split_once(':').unwrap_or((endpoint, ""));
-    let mut found = Vec::new();
-    for key in ["inputCards", "formations", "gates", "ends"] {
-        for item in m[key].as_array().into_iter().flatten() {
-            if item["id"] == node || item["title"] == node {
-                found.push((key, item))
-            }
-        }
-    }
-    let (list, node) = match found.as_slice() {
-        [found] => *found,
-        [] => bail!("node {node:?} not found"),
-        _ => bail!("node {node:?} is ambiguous"),
-    };
-    let id = text(node, "id");
-    let port = if !port.is_empty() {
-        port.to_owned()
-    } else if list == "formations" {
-        let key = if side == Side::From {
-            "outputs"
-        } else {
-            "inputs"
-        };
-        let ports: Vec<_> = node[key].as_array().into_iter().flatten().collect();
-        match ports.as_slice() {
-            [one] => text(one, "id"),
-            [] => bail!("{:?} has no {key}; add one first", text(node, "title")),
-            _ => bail!(
-                "{:?} has several {key}; name one as {}:<port>, one of {}",
-                text(node, "title"),
-                text(node, "title"),
-                ports
-                    .iter()
-                    .map(|p| text(p, "label"))
-                    .collect::<Vec<_>>()
-                    .join(", ")
-            ),
-        }
-    } else if list == "ends" || (list == "gates" && side == Side::To) {
-        "in".to_owned()
-    } else if list == "gates" {
-        bail!(
-            "a gate has two ways out; name one as {}:pass or {}:fail",
-            text(node, "title"),
-            text(node, "title")
+
+enum Endpoint<'a> {
+    Input,
+    Formation(&'a Formation),
+    Gate,
+    End,
+}
+
+fn endpoint(m: &Mission, endpoint: &str, side: Side) -> Result<String> {
+    let (selector, port) = endpoint.split_once(':').unwrap_or((endpoint, ""));
+    let mut matches = m
+        .input_cards
+        .iter()
+        .map(|card| (&card.id, &card.title, Endpoint::Input))
+        .chain(
+            m.formations
+                .iter()
+                .map(|card| (&card.id, &card.title, Endpoint::Formation(card))),
         )
-    } else {
-        "out".to_owned()
+        .chain(
+            m.gates
+                .iter()
+                .map(|card| (&card.id, &card.title, Endpoint::Gate)),
+        )
+        .chain(
+            m.ends
+                .iter()
+                .map(|card| (&card.id, &card.title, Endpoint::End)),
+        )
+        .filter(|(id, title, _)| *id == selector || *title == selector);
+    let (id, title, kind) = match (matches.next(), matches.next()) {
+        (Some(found), None) => found,
+        (None, _) => bail!("node {selector:?} not found"),
+        _ => bail!("node {selector:?} is ambiguous"),
     };
-    let port = port.as_str();
-    if let Some(ports) = node
-        .get("slots")
-        .and_then(|_| node.get("inputs"))
-        .and_then(Value::as_array)
-    {
-        let matches: Vec<_> = ports
+    let port = if !port.is_empty() {
+        port
+    } else {
+        match kind {
+            Endpoint::Formation(formation) => {
+                let (ports, key) = if side == Side::From {
+                    (&formation.outputs, "outputs")
+                } else {
+                    (&formation.inputs, "inputs")
+                };
+                match ports.as_slice() {
+                    [one] => &one.id,
+                    [] => bail!("{title:?} has no {key}; add one first"),
+                    _ => bail!(
+                        "{title:?} has several {key}; name one as {title}:<port>, one of {}",
+                        ports
+                            .iter()
+                            .map(|p| p.label.as_str())
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    ),
+                }
+            }
+            Endpoint::End => "in",
+            Endpoint::Gate if side == Side::To => "in",
+            Endpoint::Gate => {
+                bail!("a gate has two ways out; name one as {title}:pass or {title}:fail")
+            }
+            Endpoint::Input => "out",
+        }
+    };
+    if let Endpoint::Formation(formation) = kind {
+        let mut matching = formation
+            .inputs
             .iter()
-            .chain(node["outputs"].as_array().into_iter().flatten())
-            .filter(|p| p["id"] == port || p["label"] == port)
-            .collect();
-        return match matches.as_slice() {
-            [p] => Ok(format!("{id}:{}", text(p, "id"))),
-            [] => bail!("port {port:?} not found"),
+            .chain(&formation.outputs)
+            .filter(|p| p.id == port || p.label == port);
+        return match (matching.next(), matching.next()) {
+            (Some(port), None) => Ok(format!("{id}:{}", port.id)),
+            (None, _) => bail!("port {port:?} not found"),
             _ => bail!("port {port:?} is ambiguous"),
         };
     }
     Ok(format!("{id}:{port}"))
 }
-fn selected_input(m: &Value, selector: Option<&str>) -> Result<String> {
-    if let Some(s) = selector {
-        return select(m, "inputCards", s);
+
+fn selected_input<'a>(m: &'a Mission, selector: Option<&str>) -> Result<&'a InputCard> {
+    if let Some(selector) = selector {
+        return select(&m.input_cards, selector, |card| (&card.id, &card.title));
     }
-    let cards = m["inputCards"].as_array().context("missing input cards")?;
-    if cards.len() != 1 {
-        bail!("mission needs exactly one Input card")
+    match m.input_cards.as_slice() {
+        [card] => Ok(card),
+        _ => bail!("mission needs exactly one Input card"),
     }
-    Ok(text(&cards[0], "id"))
 }
 fn value_flags(args: &Args, fields: &[(&str, &str)]) -> Value {
     let mut v = json!({});
@@ -711,16 +714,12 @@ pub fn call(m: &Missions, name: &str, input: &Value) -> std::result::Result<Valu
     }
     let selector = required(input, "mission")?;
     let current = m.store.mission_edit(selector)?;
-    let before = super::commands::document(current.mission.clone(), current.etag.clone())?;
+    let before = &current.mission;
     if name == "formation_list" {
-        return Ok(json!({"node":m.node,"formations":before["formations"],"etag":current.etag}));
+        return Ok(json!({"node":m.node,"formation":before.formations,"etag":current.etag}));
     }
     if name == "formation_inspect" {
-        let id = select(&before, "formations", args.arg(1).map_err(bad)?).map_err(bad)?;
-        let formation = before["formations"]
-            .as_array()
-            .and_then(|v| v.iter().find(|n| n["id"] == id))
-            .ok_or_else(|| bad("formation not found"))?;
+        let formation = select_formation(before, args.arg(1).map_err(bad)?).map_err(bad)?;
         return Ok(json!({"node":m.node,"formation":formation,"etag":current.etag}));
     }
     if name == "mission_delete" {
@@ -742,12 +741,26 @@ pub fn call(m: &Missions, name: &str, input: &Value) -> std::result::Result<Valu
             ahjo_mission_engine::arrange(&current.mission, &current_layout.layout).nodes
         } else {
             let card = required(input, "card")?;
-            let matches: Vec<_> = ["inputCards", "formations", "gates", "ends", "limits"]
-                .iter()
-                .filter_map(|list| select(&before, list, card).ok())
-                .collect();
+            let matches: Vec<_> = [
+                select(&before.input_cards, card, |n| (&n.id, &n.title))
+                    .ok()
+                    .map(|n| &n.id),
+                select_formation(before, card).ok().map(|n| &n.id),
+                select(&before.gates, card, |n| (&n.id, &n.title))
+                    .ok()
+                    .map(|n| &n.id),
+                select(&before.ends, card, |n| (&n.id, &n.title))
+                    .ok()
+                    .map(|n| &n.id),
+                select(&before.limits, card, |n| (&n.id, &n.title))
+                    .ok()
+                    .map(|n| &n.id),
+            ]
+            .into_iter()
+            .flatten()
+            .collect();
             let id = match matches.as_slice() {
-                [id] => id.clone(),
+                [id] => (*id).clone(),
                 [] => return Err(Error::new("not_found", "card not found")),
                 _ => return Err(bad("card is ambiguous")),
             };
@@ -767,28 +780,25 @@ pub fn call(m: &Missions, name: &str, input: &Value) -> std::result::Result<Valu
             m.store
                 .patch_layout(selector, &current_layout.etag, LayoutPatch::Nodes(nodes))?;
         m.changed();
-        return Ok(json!({"node":m.node,"layout":super::commands::layout(result)?}));
+        return Ok(json!({"node":m.node,"layout":result.layout,"etag":result.etag}));
     }
     if (name == "mission_input" || name == "mission_output") && args.pos.len() == 1 {
-        let id = selected_input(&before, None).map_err(bad)?;
-        let card = before["inputCards"]
-            .as_array()
-            .and_then(|v| v.iter().find(|c| c["id"] == id))
-            .ok_or_else(|| bad("input card not found"))?;
-        let key = if name == "mission_input" {
-            "inputs"
-        } else {
-            "outputs"
-        };
-        let mut items = card[key].as_array().cloned().unwrap_or_default();
-        if key == "inputs" && items.is_empty() {
-            let mut brief = json!({"name":"brief","kind":"text","required":true});
-            if let Some(hint) = card["inputHint"].as_str() {
-                brief["description"] = json!(hint);
-            }
-            items.push(brief);
+        let card = selected_input(before, None).map_err(bad)?;
+        if name == "mission_output" {
+            return Ok(json!({"node":m.node,"mission":selector,"outputs":card.outputs}));
         }
-        return Ok(json!({"node":m.node,"mission":selector,key:items}));
+        let implicit = [MissionInput {
+            name: "brief".into(),
+            kind: "text".into(),
+            required: true,
+            description: card.input_hint.clone(),
+        }];
+        let inputs = if card.inputs.is_empty() {
+            implicit.as_slice()
+        } else {
+            card.inputs.as_slice()
+        };
+        return Ok(json!({"node":m.node,"mission":selector,"inputs":inputs}));
     }
     let (operation, mut fields, created) = if name == "mission_rename" {
         ("title", json!(required(input, "title")?), None)
@@ -798,7 +808,7 @@ pub fn call(m: &Missions, name: &str, input: &Value) -> std::result::Result<Valu
     } else {
         let (noun, verb) = name.split_once('_').ok_or_else(|| bad("invalid command"))?;
         let verb = verb.replace('_', "-");
-        edit::operation(noun, &verb, &args, &before).map_err(bad)?
+        edit::operation(noun, &verb, &args, before).map_err(bad)?
     };
     if created.is_some() && input.get("x").is_none() && input.get("y").is_none() {
         let layout = m.store.layout_edit(selector)?;
@@ -843,38 +853,101 @@ pub fn call(m: &Missions, name: &str, input: &Value) -> std::result::Result<Valu
             .patch_layout(selector, &layout.etag, LayoutPatch::Nodes(nodes))?;
     }
     m.changed();
-    let after = super::commands::document(result.mission, result.etag)?;
-    Ok(brief_answer(&m.node, &before, &after, created))
+    Ok(brief_answer(
+        &m.node,
+        before,
+        &result.mission,
+        &result.etag,
+        created,
+    ))
 }
 
-/// An edit answers with what it changed, not the whole mission: the cards
-/// and connections that are new or different, and the ids of those removed.
-/// `ahjo mission inspect` shows the whole.
-fn brief_answer(node: &str, before: &Value, after: &Value, created: Option<&str>) -> Value {
-    let mut answer = json!({"node":node,"mission":after["slug"],"title":after["title"],"rev":after["rev"],"etag":after["etag"]});
+pub(super) fn creation_key(change: &Value) -> Option<&'static str> {
+    [
+        ("createInputCard", "inputCard"),
+        ("createFormation", "formation"),
+        ("createGate", "gate"),
+        ("createEnd", "end"),
+        ("createLimit", "limit"),
+    ]
+    .into_iter()
+    .find_map(|(op, key)| change.get(op).is_some().then_some(key))
+}
+
+pub(super) fn added_card(key: &str, before: &Mission, after: &Mission) -> Option<Value> {
+    fn added<T: serde::Serialize>(
+        before: &[T],
+        after: &[T],
+        id: impl Fn(&T) -> &str,
+    ) -> Option<Value> {
+        after
+            .iter()
+            .find(|item| !before.iter().any(|old| id(old) == id(item)))
+            .map(|item| json!(item))
+    }
+    match key {
+        "inputCard" => added(&before.input_cards, &after.input_cards, |n| &n.id),
+        "formation" => added(&before.formations, &after.formations, |n| &n.id),
+        "gate" => added(&before.gates, &after.gates, |n| &n.id),
+        "end" => added(&before.ends, &after.ends, |n| &n.id),
+        "limit" => added(&before.limits, &after.limits, |n| &n.id),
+        _ => None,
+    }
+}
+
+/// An edit answers with changed cards and wires and the ids that disappeared.
+fn brief_answer(
+    node: &str,
+    before: &Mission,
+    after: &Mission,
+    etag: &str,
+    created: Option<&str>,
+) -> Value {
+    let mut answer =
+        json!({"node":node,"mission":after.slug,"title":after.title,"rev":after.rev,"etag":etag});
     let mut changed = Vec::new();
     let mut removed = Vec::new();
-    for (key, items) in after.as_object().into_iter().flatten() {
-        let Some(items) = items.as_array() else {
-            continue;
-        };
-        let old = before[key].as_array().cloned().unwrap_or_default();
-        changed.extend(items.iter().filter(|item| !old.contains(item)).cloned());
-        removed.extend(
-            old.iter()
-                .filter(|o| {
-                    o.get("id").is_some() && !items.iter().any(|item| item["id"] == o["id"])
-                })
-                .map(|o| o["id"].clone()),
-        );
-        if let Some(created) = created
-            && key == created_list(created)
-            && let Some(item) = items
+    fn delta<T: PartialEq + serde::Serialize>(
+        before: &[T],
+        after: &[T],
+        id: impl Fn(&T) -> &str,
+        changed: &mut Vec<Value>,
+        removed: &mut Vec<String>,
+    ) {
+        changed.extend(
+            after
                 .iter()
-                .find(|item| !old.iter().any(|o| o["id"] == item["id"]))
-        {
-            answer[created] = item.clone();
-        }
+                .filter(|item| !before.contains(item))
+                .map(|item| json!(item)),
+        );
+        removed.extend(
+            before
+                .iter()
+                .filter(|old| !after.iter().any(|item| id(item) == id(old)))
+                .map(|old| id(old).to_owned()),
+        );
+    }
+    macro_rules! compare {
+        ($list:ident) => {
+            delta(
+                &before.$list,
+                &after.$list,
+                |n| &n.id,
+                &mut changed,
+                &mut removed,
+            )
+        };
+    }
+    compare!(input_cards);
+    compare!(formations);
+    compare!(gates);
+    compare!(ends);
+    compare!(limits);
+    compare!(connections);
+    if let Some(key) = created
+        && let Some(card) = added_card(key, before, after)
+    {
+        answer[key] = card;
     }
     if !changed.is_empty() {
         answer["changed"] = json!(changed);
@@ -883,14 +956,4 @@ fn brief_answer(node: &str, before: &Value, after: &Value, created: Option<&str>
         answer["removed"] = json!(removed);
     }
     answer
-}
-fn created_list(key: &str) -> &'static str {
-    match key {
-        "inputCard" => "inputCards",
-        "formation" => "formations",
-        "gate" => "gates",
-        "end" => "ends",
-        "limit" => "limits",
-        _ => unreachable!(),
-    }
 }

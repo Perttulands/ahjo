@@ -298,7 +298,7 @@ impl MissionsPage {
                 match result {
                     Ok(answer) if answer.ok() => match &doing {
                         Doing::Create { node } => match serde_json::from_slice::<MissionResponse>(&answer.body) {
-                            Ok(result) => { let slug = result.mission.mission.slug; page.manage.form = None; page.open(node.clone(), slug, cx); },
+                            Ok(result) => { let slug = result.mission.slug; page.manage.form = None; page.open(node.clone(), slug, cx); },
                             Err(error) => form.problem = Some(format!("The mission may have been created, but the answer could not be read: {error}. Check the list before retrying.")),
                         },
                         Doing::Archive { .. } => {
@@ -315,12 +315,12 @@ impl MissionsPage {
                         }
                         Doing::Rename { title: old_title, .. } => match serde_json::from_slice::<EditResponse>(&answer.body) {
                             Ok(result) => {
-                                page.history.wrote(undo::Version { rev:result.mission.mission.rev, layout:Some(result.layout.etag.clone()) });
+                                page.history.wrote(undo::Version { rev:result.mission.rev, layout:Some(result.layout_etag.clone()) });
                                 page.history.record(undo::Entry { label:"mission name".into(), steps:vec![undo::Step::board(rename_patch(old_title))] });
-                                page.state.mission_etag = result.mission.etag;
-                                page.state.mission = Some(result.mission.mission);
-                                page.state.layout_etag = Some(result.layout.etag);
-                                page.state.layout = Some(result.layout.layout);
+                                page.state.mission_etag = Some(result.mission_etag);
+                                page.state.mission = Some(result.mission);
+                                page.state.layout_etag = Some(result.layout_etag);
+                                page.state.layout = Some(result.layout);
                                 page.manage.form = None;
                             }
                             Err(error) => form.problem = Some(format!("The rename may have succeeded, but the answer could not be read: {error}. Check the mission before retrying.")),

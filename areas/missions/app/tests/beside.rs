@@ -49,7 +49,7 @@ fn start() -> Running {
                     )
                     .await
                     .unwrap();
-                let ids = doc["mission"]["formations"]
+                let ids = doc["mission"]["formation"]
                     .as_array()
                     .unwrap()
                     .iter()

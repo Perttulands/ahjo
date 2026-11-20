@@ -1008,8 +1008,8 @@ impl MissionsPage {
                     Ok(answer) if answer.ok() => {
                         match serde_json::from_slice::<LayoutResponse>(&answer.body) {
                             Ok(v) => {
-                                let etag = v.layout.etag;
-                                p.state.layout = Some(v.layout.layout);
+                                let etag = v.etag;
+                                p.state.layout = Some(v.layout);
                                 p.state.layout_etag = Some(etag.clone());
                                 let entry = undo::Entry {
                                     label: "move".into(),

@@ -2,7 +2,7 @@
 //! notes, the precondition it is checked against, and what it answers.
 
 use schemars::JsonSchema;
-use serde::{Deserialize, Deserializer, Serialize, Serializer};
+use serde::{Deserialize, Deserializer, Serialize};
 
 use crate::{
     End, Formation, Gate, InputCard, Layout, LayoutEdge, LayoutNode, Limit, Mission, MissionInput,
@@ -598,11 +598,7 @@ pub struct InputCardUpdate {
 #[serde(rename_all = "camelCase", try_from = "RestoredCards")]
 pub enum RestoredNode {
     InputCard(InputCard),
-    Formation(
-        #[serde(serialize_with = "restore_formation::serialize")]
-        #[schemars(schema_with = "restore_formation::schema")]
-        Formation,
-    ),
+    Formation(Formation),
     Gate(Gate),
     End(End),
     Limit(Limit),
@@ -613,8 +609,6 @@ pub enum RestoredNode {
 #[serde(rename_all = "camelCase")]
 struct RestoredCards {
     input_card: Option<InputCard>,
-    #[serde(default, deserialize_with = "restore_formation::deserialize_optional")]
-    #[schemars(schema_with = "restore_formation::optional_schema")]
     formation: Option<Formation>,
     gate: Option<Gate>,
     end: Option<End>,
@@ -638,66 +632,6 @@ impl TryFrom<RestoredCards> for RestoredNode {
             (Some(node), None) => Ok(node),
             _ => Err("restoreNode requires exactly one node"),
         }
-    }
-}
-
-// A restored step uses the plural names in a mission's public JSON.
-mod restore_formation {
-    use super::*;
-    use serde_json::Value;
-
-    const FIELDS: [(&str, &str); 3] = [
-        ("input", "inputs"),
-        ("output", "outputs"),
-        ("slot", "slots"),
-    ];
-
-    pub fn deserialize_optional<'de, D: Deserializer<'de>>(
-        deserializer: D,
-    ) -> Result<Option<Formation>, D::Error> {
-        let mut value = Value::deserialize(deserializer)?;
-        if let Some(fields) = value.as_object_mut() {
-            for (stored, public) in FIELDS {
-                if let Some(value) = fields.remove(public) {
-                    fields.insert(stored.into(), value);
-                }
-            }
-        }
-        serde_json::from_value(value).map_err(serde::de::Error::custom)
-    }
-
-    pub fn serialize<S: Serializer>(
-        formation: &Formation,
-        serializer: S,
-    ) -> Result<S::Ok, S::Error> {
-        let mut value = serde_json::to_value(formation).map_err(serde::ser::Error::custom)?;
-        let fields = value
-            .as_object_mut()
-            .expect("a formation serializes as an object");
-        for (stored, public) in FIELDS {
-            if let Some(value) = fields.remove(stored) {
-                fields.insert(public.into(), value);
-            }
-        }
-        value.serialize(serializer)
-    }
-
-    pub fn schema(generator: &mut schemars::SchemaGenerator) -> schemars::Schema {
-        let mut schema = Formation::json_schema(generator);
-        if let Some(fields) = schema.get_mut("properties").and_then(Value::as_object_mut) {
-            for (stored, public) in FIELDS {
-                if let Some(value) = fields.remove(stored) {
-                    fields.insert(public.into(), value);
-                }
-            }
-        }
-        schema
-    }
-
-    pub fn optional_schema(generator: &mut schemars::SchemaGenerator) -> schemars::Schema {
-        schemars::json_schema!({
-            "anyOf": [schema(generator), {"type": "null"}]
-        })
     }
 }
 

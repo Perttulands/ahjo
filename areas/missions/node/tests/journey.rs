@@ -125,7 +125,7 @@ async fn cli_authors_two_steps_answers_gate_and_finishes_with_fake_sessions() {
         .await;
         let step = &result["formation"];
         let id = step["id"].as_str().unwrap().to_owned();
-        let slot = step["slots"][0]["id"].as_str().unwrap();
+        let slot = step["slot"][0]["id"].as_str().unwrap();
         cli(
             &node,
             "formation",
@@ -149,8 +149,8 @@ async fn cli_authors_two_steps_answers_gate_and_finishes_with_fake_sessions() {
         )
         .await;
         steps.push((
-            format!("{id}:{}", step["inputs"][0]["id"].as_str().unwrap()),
-            format!("{id}:{}", step["outputs"][0]["id"].as_str().unwrap()),
+            format!("{id}:{}", step["input"][0]["id"].as_str().unwrap()),
+            format!("{id}:{}", step["output"][0]["id"].as_str().unwrap()),
             id,
         ));
     }

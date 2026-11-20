@@ -455,22 +455,10 @@ async fn blocking<T: Send + 'static>(
 fn value<T: serde::Serialize>(v: T) -> Result<Value, Error> {
     serde_json::to_value(v).map_err(|e| Error::new("internal", e.to_string()))
 }
-pub(super) fn document(mission: wire::Mission, etag: String) -> Result<Value, Error> {
-    value(wire::document::MissionDocument {
-        mission,
-        etag: Some(etag),
-    })
-}
 fn notes(edit: wire::NotesEdit) -> Result<Value, Error> {
     value(wire::document::NotesDocument::from_notes(
         edit.notes, edit.etag,
     ))
-}
-pub(super) fn layout(edit: wire::LayoutEdit) -> Result<Value, Error> {
-    value(wire::document::LayoutDocument {
-        layout: edit.layout,
-        etag: edit.etag,
-    })
 }
 fn admission(e: AdmissionFailure) -> Error {
     match e {
@@ -576,7 +564,7 @@ async fn call(m: Missions, name: &str, a: Value) -> Result<Value, Error> {
             let selector = required(&a, "mission")?;
             let edit = m.store.mission_edit(selector)?;
             if boolean(&a, "full")? {
-                return Ok(json!({"node":node,"mission":document(edit.mission,edit.etag)?}));
+                return Ok(json!({"node":node,"mission":edit.mission,"etag":edit.etag}));
             }
             let notes = m.store.notes_edit(selector)?.notes;
             let report = validate(&edit.mission, &m.store.roles(), &Harnesses::from_host());
@@ -638,9 +626,9 @@ async fn call(m: Missions, name: &str, a: Value) -> Result<Value, Error> {
             {
                 return Err(Error::new("conflict", "mission changed"));
             }
-            let before = document(current.mission.clone(), current.etag.clone())?;
+            let before = current.mission;
             let precondition = Precondition {
-                rev: current.mission.rev,
+                rev: before.rev,
                 etag: current.etag,
             };
             let edited = match request.changes {
@@ -652,29 +640,12 @@ async fn call(m: Missions, name: &str, a: Value) -> Result<Value, Error> {
                 }
             }?;
             m.changed();
-            let after = document(edited.mission, edited.etag)?;
-            let mut answer = json!({"node":node,"mission":after});
-            for (operation, list, key) in [
-                ("createInputCard", "inputCards", "inputCard"),
-                ("createFormation", "formations", "formation"),
-                ("createGate", "gates", "gate"),
-                ("createEnd", "ends", "end"),
-                ("createLimit", "limits", "limit"),
-            ] {
-                if change.get(operation).is_some() {
-                    let prior = before[list].as_array();
-                    if let Some(created) = answer["mission"][list]
-                        .as_array()
-                        .and_then(|items| {
-                            items.iter().find(|item| {
-                                !prior.is_some_and(|p| p.iter().any(|old| old["id"] == item["id"]))
-                            })
-                        })
-                        .cloned()
-                    {
-                        answer[key] = created;
-                    }
-                }
+            let added = crate::authoring::creation_key(change).and_then(|key| {
+                crate::authoring::added_card(key, &before, &edited.mission).map(|card| (key, card))
+            });
+            let mut answer = json!({"node":node,"mission":edited.mission,"etag":edited.etag});
+            if let Some((key, card)) = added {
+                answer[key] = card;
             }
             Ok(answer)
         }
@@ -741,7 +712,7 @@ async fn call(m: Missions, name: &str, a: Value) -> Result<Value, Error> {
         }
         "layout_show" => {
             let edit = m.store.layout_edit(required(&a, "mission")?)?;
-            Ok(json!({"node":node,"layout":layout(edit)?}))
+            Ok(json!({"node":node,"layout":edit.layout,"etag":edit.etag}))
         }
         "layout_edit" => {
             let id = required(&a, "mission")?;
@@ -763,7 +734,7 @@ async fn call(m: Missions, name: &str, a: Value) -> Result<Value, Error> {
             };
             let edited = m.store.patch_layout(id, etag, patch)?;
             m.changed();
-            Ok(json!({"node":node,"layout":layout(edited)?}))
+            Ok(json!({"node":node,"layout":edited.layout,"etag":edited.etag}))
         }
         "mission_run" | "formation_run" => start(m, name, &a).await,
         "run_list" => Ok(

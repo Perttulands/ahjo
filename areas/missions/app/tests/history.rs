@@ -163,7 +163,7 @@ fn undo_and_redo_replay_both_wires_of_a_removed_shared_input(cx: &mut TestAppCon
             .0
     };
     let targets = |doc: &serde_json::Value| {
-        doc["mission"]["connections"]
+        doc["mission"]["connection"]
             .as_array()
             .unwrap()
             .iter()

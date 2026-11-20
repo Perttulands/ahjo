@@ -155,7 +155,7 @@ fn canvas_ports_drag_move_zoom_and_undo(cx: &mut TestAppContext) {
         let (layout, _) = rt
             .block_on(client.request(http::Method::GET, "/api/missions/hello/layout", None, None))
             .unwrap();
-        if layout["layout"]["nodes"]
+        if layout["layout"]["node"]
             .as_array()
             .is_some_and(|a| a.iter().any(|n| n["id"] == "fmn_work"))
         {
@@ -212,7 +212,7 @@ fn canvas_ports_drag_move_zoom_and_undo(cx: &mut TestAppContext) {
         let (doc, _) = rt
             .block_on(client.request(http::Method::GET, "/api/missions/hello", None, None))
             .unwrap();
-        if !doc["mission"]["connections"]
+        if !doc["mission"]["connection"]
             .as_array()
             .unwrap()
             .iter()
@@ -248,7 +248,7 @@ fn canvas_ports_drag_move_zoom_and_undo(cx: &mut TestAppContext) {
         let (doc, _) = rt
             .block_on(client.request(http::Method::GET, "/api/missions/hello", None, None))
             .unwrap();
-        if doc["mission"]["connections"]
+        if doc["mission"]["connection"]
             .as_array()
             .unwrap()
             .iter()
@@ -292,7 +292,7 @@ fn canvas_ports_drag_move_zoom_and_undo(cx: &mut TestAppContext) {
         let (doc, _) = rt
             .block_on(client.request(http::Method::GET, "/api/missions/hello", None, None))
             .unwrap();
-        if !doc["mission"]["gates"].as_array().unwrap().is_empty() {
+        if !doc["mission"]["gate"].as_array().unwrap().is_empty() {
             break;
         }
         assert!(Instant::now() < deadline);

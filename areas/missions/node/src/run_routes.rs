@@ -77,10 +77,8 @@ async fn events(State(c): State<Coordinator>, Path(id): Path<String>) -> ResultR
 async fn frozen(State(c): State<Coordinator>, Path(id): Path<String>) -> ResultResponse {
     let mission = c.frozen_mission(&id)?;
     Ok(Json(contract::MissionResponse {
-        mission: contract::document::MissionDocument {
-            mission,
-            etag: None,
-        },
+        mission,
+        etag: None,
     })
     .into_response())
 }

@@ -64,7 +64,7 @@ async fn http_restores_a_deleted_formation_and_fences_notes_and_layout() {
         Some(&tag),
     )
     .await;
-    assert_eq!(deleted["mission"]["formations"], json!([]));
+    assert_eq!(deleted["mission"]["formation"], json!([]));
     let (restored, _) = send(
         &c,
         Method::PATCH,
@@ -73,7 +73,7 @@ async fn http_restores_a_deleted_formation_and_fences_notes_and_layout() {
         Some(&tag),
     )
     .await;
-    assert_eq!(restored["mission"]["formations"][0]["id"], id);
+    assert_eq!(restored["mission"]["formation"][0]["id"], id);
     let (_, notes_tag) = c
         .request(Method::GET, "/api/missions/demo/notes", None, None)
         .await
@@ -134,7 +134,7 @@ async fn derives_named_slug_and_rejects_duplicate_without_clobbering() {
     let (first, tag) = send(&c, Method::POST, "/api/missions", body.clone(), None).await;
     assert_eq!(first["mission"]["slug"], "release-plan");
     assert_eq!(first["mission"]["title"], "Release Plan!");
-    assert_eq!(first["mission"]["etag"], tag);
+    assert_eq!(first["etag"], tag);
     assert_error(
         c.request(Method::POST, "/api/missions", Some(body), None)
             .await
@@ -302,7 +302,7 @@ async fn http_patch_uses_the_same_schema_and_stages_a_batch() {
     .await;
     assert_eq!(after["mission"]["rev"], 2);
     assert_eq!(after["mission"]["title"], "Changed");
-    assert_eq!(after["mission"]["formations"][0]["title"], "Work");
+    assert_eq!(after["mission"]["formation"][0]["title"], "Work");
     assert_eq!(after["layout"]["missionRev"], 2);
     node.stop().await;
 }

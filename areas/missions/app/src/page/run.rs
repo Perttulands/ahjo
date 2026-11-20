@@ -183,7 +183,7 @@ impl MissionsPage {
                 }
                 match result {
                     Ok(a) if a.ok() => match serde_json::from_slice::<MissionResponse>(&a.body) {
-                        Ok(m) => page.run.frozen = Some(m.mission.mission),
+                        Ok(m) => page.run.frozen = Some(m.mission),
                         Err(e) => page.run.error = Some(e.to_string()),
                     },
                     Ok(a) => page.run.error = Some(a.error_text()),

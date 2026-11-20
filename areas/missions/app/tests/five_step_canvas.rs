@@ -186,7 +186,7 @@ fn five_step_canvas_can_pan_zoom_and_connect_visible_ports(cx: &mut TestAppConte
     until(cx, "new step connection", |_| {
         rt.block_on(client.request(http::Method::GET, "/api/missions/hello", None, None))
             .unwrap()
-            .0["mission"]["connections"]
+            .0["mission"]["connection"]
             .as_array()
             .unwrap()
             .iter()

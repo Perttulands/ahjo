@@ -233,7 +233,7 @@ fn catalog_pickers_offer_sorted_roles_and_model_efforts_and_save_the_choice(
             .block_on(client.request(http::Method::GET, "/api/missions/hello", None, None))
             .unwrap();
         let response: MissionResponse = serde_json::from_value(body).unwrap();
-        let mission = response.mission.mission;
+        let mission = response.mission;
         (mission.rev, mission.formations[0].slots[0].clone())
     };
     until(cx, "staffing saved", |_| {

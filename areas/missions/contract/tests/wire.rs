@@ -34,42 +34,63 @@ fn requests_and_responses_round_trip() {
 }
 
 #[test]
-fn mission_layout_and_edit_documents_use_http_names() {
-    let mission = Mission {
-        schema: 1,
-        id: "m".into(),
-        formations: vec![Formation {
-            id: "f".into(),
-            ..Default::default()
-        }],
-        ..Default::default()
-    };
-    let response = MissionResponse {
-        mission: document::MissionDocument {
-            mission,
-            etag: Some("e".into()),
-        },
-    };
-    let value = serde_json::to_value(&response).unwrap();
-    assert!(value["mission"].get("inputCards").is_some());
-    assert!(value["mission"]["formations"][0].get("slots").is_some());
-    assert_eq!(value["mission"]["tools"], json!([]));
-    round::<MissionResponse>(value.clone());
-    let layout = document::LayoutDocument {
-        layout: Layout {
-            schema: 1,
-            ..Default::default()
-        },
-        etag: "l".into(),
-    };
+fn mission_layout_and_edit_responses_carry_the_stored_shapes() {
+    let mission = Mission::parse(
+        r#"
+schema = 1
+id = "m"
+slug = "demo"
+rev = 2
+[[formation]]
+id = "f"
+type = "solo"
+[[formation.slot]]
+id = "s"
+label = "Writer"
+"#,
+    )
+    .unwrap();
+    let layout = Layout::parse(
+        r#"
+schema = 1
+missionId = "m"
+missionRev = 2
+[[node]]
+id = "f"
+x = 10
+y = 20
+"#,
+    )
+    .unwrap();
+    let mission_value = serde_json::to_value(&mission).unwrap();
+    let layout_value = serde_json::to_value(&layout).unwrap();
+    let response = serde_json::to_value(MissionResponse {
+        mission: mission.clone(),
+        etag: Some("m2".into()),
+    })
+    .unwrap();
+    assert_eq!(response, json!({"mission":mission_value,"etag":"m2"}));
+    round::<MissionResponse>(response);
+    let response = serde_json::to_value(LayoutResponse {
+        layout: layout.clone(),
+        etag: "l2".into(),
+    })
+    .unwrap();
+    assert_eq!(response, json!({"layout":layout_value,"etag":"l2"}));
+    round::<LayoutResponse>(response);
     let edit = EditResponse {
-        mission: response.mission,
+        mission,
+        mission_etag: "m2".into(),
         layout,
+        layout_etag: "l2".into(),
         changed: [("gateId".into(), json!("g"))].into(),
     };
-    let value = serde_json::to_value(edit).unwrap();
-    assert!(value["layout"].get("nodes").is_some());
-    round::<EditResponse>(value);
+    let response = serde_json::to_value(edit).unwrap();
+    assert_eq!(
+        response,
+        json!({"mission":mission_value,"mission_etag":"m2","layout":layout_value,"layout_etag":"l2","gateId":"g"}),
+    );
+    round::<EditResponse>(response);
 }
 
 #[test]
@@ -110,7 +131,7 @@ fn remaining_envelopes_and_queries_round_trip() {
     round::<EditLayout>(json!({"arrange":true}));
     round::<EditLayout>(json!({"edges":[{"id":"e","lane":"top"}]}));
     round::<LayoutResponse>(
-        json!({"layout":{"schema":1,"missionId":"m","missionRev":1,"nodes":[],"edges":[],"etag":"e"}}),
+        json!({"layout":{"schema":1,"missionId":"m","missionRev":1,"node":[],"edge":[]},"etag":"e"}),
     );
     round::<GateRequestResponse>(
         json!({"request":{"gateId":"g","requestedSeq":2,"criterion":"Ready?","input":{"text":"yes","truncated":false}}}),

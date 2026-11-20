@@ -1,3 +1,4 @@
+use ahjo_missions_contract::{Layout, Mission};
 use ahjo_node_kit::{Listing, NodeClient, NodeError};
 use ahjo_testkit::{node::Node, sessions};
 use axum::http::Method;
@@ -38,6 +39,16 @@ async fn mission_routes_on_a_node_with_fake_sessions() {
         .await
         .unwrap();
     assert_eq!(edited["mission"]["title"], "Renamed");
+    let (wire, mission_etag) = client
+        .request(Method::GET, "/api/missions/example", None, None)
+        .await
+        .unwrap();
+    let stored_mission =
+        std::fs::read_to_string(node.dir().join("missions/missions/example.mission.toml")).unwrap();
+    let stored_mission = Mission::parse(&stored_mission).unwrap();
+    assert_eq!(wire, json!({"mission":stored_mission,"etag":mission_etag}));
+    assert_eq!(edited["mission"], wire["mission"]);
+    assert_eq!(edited["mission_etag"], mission_etag);
     let (notes, notes_etag) = client
         .request(Method::GET, "/api/missions/example/notes", None, None)
         .await
@@ -62,8 +73,8 @@ async fn mission_routes_on_a_node_with_fake_sessions() {
         .request(Method::GET, "/api/missions/example/layout", None, None)
         .await
         .unwrap();
-    assert!(layout["layout"]["nodes"].is_array());
-    let (changed_layout, _) = client
+    assert!(layout["layout"]["node"].is_array());
+    let (changed_layout, changed_layout_etag) = client
         .request(
             Method::PATCH,
             "/api/missions/example/layout",
@@ -72,7 +83,22 @@ async fn mission_routes_on_a_node_with_fake_sessions() {
         )
         .await
         .unwrap();
-    assert_eq!(changed_layout["layout"]["nodes"][0]["x"], 10);
+    assert_eq!(changed_layout["layout"]["node"][0]["x"], 10);
+    let stored_layout =
+        std::fs::read_to_string(node.dir().join("missions/layout/example.layout.toml")).unwrap();
+    let stored_layout = Layout::parse(&stored_layout).unwrap();
+    assert_eq!(
+        changed_layout,
+        json!({"layout":stored_layout,"etag":changed_layout_etag})
+    );
+    let (read_layout, read_layout_etag) = client
+        .request(Method::GET, "/api/missions/example/layout", None, None)
+        .await
+        .unwrap();
+    assert_eq!(
+        (read_layout, read_layout_etag),
+        (changed_layout, changed_layout_etag)
+    );
     for (method, path, body) in [
         (Method::POST, "/api/runs/run_missing/resume", json!({})),
         (

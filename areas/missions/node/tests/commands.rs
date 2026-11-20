@@ -135,10 +135,10 @@ async fn mission_edit_rejects_an_unknown_role_and_uses_work_in_both_brief_operat
     .unwrap();
     let inspect = || node.call("mission_inspect", json!({"mission":"pair","full":true}));
     let before = inspect().await.unwrap();
-    let step = &before["mission"]["formations"][0];
+    let step = &before["mission"]["formation"][0];
     let id = &step["id"];
     let change = json!({"assignSlot":{
-        "formationId": id, "slotId": step["slots"][0]["id"],
+        "formationId": id, "slotId": step["slot"][0]["id"],
         "role": "planner", "harness": "claude-code", "effort": "high"
     }});
     let error = node
@@ -181,7 +181,7 @@ async fn mission_edit_rejects_an_unknown_role_and_uses_work_in_both_brief_operat
             .await
             .unwrap();
         assert_eq!(
-            inspect().await.unwrap()["mission"]["formations"][0]["brief"]["work"],
+            inspect().await.unwrap()["mission"]["formation"][0]["brief"]["work"],
             work
         );
     }
@@ -280,7 +280,7 @@ async fn author_and_run_with_tools() {
     assert!(
         node.call("layout_show", json!({"mission":"demo"}))
             .await
-            .unwrap()["layout"]["nodes"]
+            .unwrap()["layout"]["node"]
             .is_array()
     );
     assert_eq!(
@@ -289,7 +289,7 @@ async fn author_and_run_with_tools() {
             json!({"mission":"demo","change":{"nodes":[{"id":id,"x":10,"y":20}]}})
         )
         .await
-        .unwrap()["layout"]["nodes"][0]["x"],
+        .unwrap()["layout"]["node"][0]["x"],
         10
     );
     let folder = node.dir().join("missions/missions");
@@ -610,23 +610,23 @@ async fn a_mission_built_through_commands_stays_arranged() {
     };
     call(
         "mission_wire",
-        json!({"mission":"line","input":input,"to":port(0, "inputs")}),
+        json!({"mission":"line","input":input,"to":port(0, "input")}),
     )
     .await;
     call(
         "formation_wire",
-        json!({"mission":"line","from":port(0, "outputs"),"to":port(1, "inputs")}),
+        json!({"mission":"line","from":port(0, "output"),"to":port(1, "input")}),
     )
     .await;
     let end = call("end_create", json!({"mission":"line","title":"Done"})).await;
     let end = end["end"]["id"].as_str().unwrap().to_owned();
     call(
         "formation_wire",
-        json!({"mission":"line","from":port(1, "outputs"),"to":format!("{end}:in")}),
+        json!({"mission":"line","from":port(1, "output"),"to":format!("{end}:in")}),
     )
     .await;
     let places = |layout: &serde_json::Value| {
-        let mut v: Vec<(String, i64, i64)> = layout["layout"]["nodes"]
+        let mut v: Vec<(String, i64, i64)> = layout["layout"]["node"]
             .as_array()
             .unwrap()
             .iter()
@@ -745,8 +745,8 @@ async fn a_simple_mission_needs_no_seat_or_port_names() {
         )
         .await
         .unwrap();
-    assert_eq!(assigned["changed"][0]["slots"][0]["harness"], "claude-code");
-    assert!(assigned.get("formations").is_none() && assigned["mission"] == "plain");
+    assert_eq!(assigned["changed"][0]["slot"][0]["harness"], "claude-code");
+    assert!(assigned.get("formation").is_none() && assigned["mission"] == "plain");
     node.call("end_create", json!({"mission":"plain","title":"Done"}))
         .await
         .unwrap();
@@ -794,7 +794,7 @@ async fn a_simple_mission_needs_no_seat_or_port_names() {
     let edges = node
         .call("mission_inspect", json!({"mission":"plain","full":true}))
         .await
-        .unwrap()["mission"]["connections"]
+        .unwrap()["mission"]["connection"]
         .to_string();
     assert!(edges.matches(&step_id).count() == 2, "{edges}");
     let wrong = node
@@ -851,7 +851,7 @@ async fn specialized_authoring_commands_build_and_edit_a_graph() {
     assert!(
         node.call("formation_list", json!({"mission":"board"}))
             .await
-            .unwrap()["formations"]
+            .unwrap()["formation"]
             .is_array()
     );
     assert_eq!(
@@ -920,7 +920,7 @@ async fn specialized_authoring_commands_build_and_edit_a_graph() {
         )
         .await
         .unwrap();
-    assert_eq!(stamped["changed"][0]["slots"][0]["effort"], "high");
+    assert_eq!(stamped["changed"][0]["slot"][0]["effort"], "high");
     node.call(
         "formation_unassign",
         json!({"mission":"board","formation":step_id,"slot":"seat"}),
@@ -942,7 +942,7 @@ async fn specialized_authoring_commands_build_and_edit_a_graph() {
         )
         .await
         .unwrap();
-    let input_port = with_input["changed"][0]["inputs"]
+    let input_port = with_input["changed"][0]["input"]
         .as_array()
         .unwrap()
         .iter()
@@ -958,7 +958,7 @@ async fn specialized_authoring_commands_build_and_edit_a_graph() {
         )
         .await
         .unwrap();
-    let output_port = with_output["changed"][0]["outputs"]
+    let output_port = with_output["changed"][0]["output"]
         .as_array()
         .unwrap()
         .iter()
@@ -1369,7 +1369,7 @@ async fn a_long_sketch_is_made_whole_and_arranged() {
         let last = read["steps"].as_array().unwrap().last().unwrap().clone();
         assert_eq!(last["next"], "end (done)", "{read}");
         let nodes = |layout: serde_json::Value| {
-            let mut v: Vec<(String, i64, i64)> = (layout["layout"]["nodes"].as_array())
+            let mut v: Vec<(String, i64, i64)> = (layout["layout"]["node"].as_array())
                 .unwrap()
                 .iter()
                 .map(|n| {
@@ -1498,16 +1498,16 @@ async fn mission_edit_batches_commit_once_or_leave_the_mission_and_layout_untouc
     let after: serde_json::Value = serde_json::from_slice(&output).unwrap();
     assert_eq!(after["mission"]["rev"], rev + 1);
     assert_eq!(after["mission"]["title"], "New");
-    assert_eq!(after["mission"]["formations"][0]["title"], "Work");
-    assert_eq!(after["mission"]["ends"][0]["title"], "Done");
+    assert_eq!(after["mission"]["formation"][0]["title"], "Work");
+    assert_eq!(after["mission"]["end"][0]["title"], "Done");
     assert_eq!(inspect().await.unwrap()["mission"], after["mission"]);
 
     let after_layout = layout().await.unwrap();
     assert_eq!(after_layout["layout"]["missionRev"], rev + 1);
-    let nodes = after_layout["layout"]["nodes"].as_array().unwrap();
+    let nodes = after_layout["layout"]["node"].as_array().unwrap();
     for (id, x, y) in [
-        (&after["mission"]["formations"][0]["id"], 10, 20),
-        (&after["mission"]["ends"][0]["id"], 100, 200),
+        (&after["mission"]["formation"][0]["id"], 10, 20),
+        (&after["mission"]["end"][0]["id"], 100, 200),
     ] {
         assert!(
             nodes

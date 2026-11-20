@@ -2,7 +2,9 @@
 use super::Missions;
 use ahjo_mission_engine::{Harnesses, validate};
 use ahjo_missions_contract::patch;
-use ahjo_missions_contract::{LayoutPatch, NotePatch, Precondition};
+use ahjo_missions_contract::{
+    EditResponse, LayoutPatch, LayoutResponse, MissionResponse, NotePatch, Precondition,
+};
 use axum::{
     Json, Router,
     body::Bytes,
@@ -71,8 +73,8 @@ fn bad(s: impl Into<String>) -> ApiError {
 fn ok(value: Value) -> Response {
     Json(value).into_response()
 }
-fn tagged(value: Value, etag: &str) -> Response {
-    let mut r = ok(value);
+fn tagged(value: impl serde::Serialize, etag: &str) -> Response {
+    let mut r = Json(value).into_response();
     if let Ok(h) = etag.parse() {
         r.headers_mut().insert(header::ETAG, h);
     }
@@ -85,27 +87,6 @@ fn etag(h: &HeaderMap) -> &str {
 }
 fn s<'a>(v: &'a Value, k: &str) -> &'a str {
     v[k].as_str().unwrap_or("")
-}
-fn mission(v: ahjo_missions_contract::Mission) -> Value {
-    serde_json::to_value(ahjo_missions_contract::document::MissionDocument {
-        mission: v,
-        etag: None,
-    })
-    .expect("mission serializes")
-}
-fn tagged_mission(v: ahjo_missions_contract::Mission, etag: &str) -> Value {
-    serde_json::to_value(ahjo_missions_contract::document::MissionDocument {
-        mission: v,
-        etag: Some(etag.into()),
-    })
-    .expect("mission serializes")
-}
-fn layout_value(v: ahjo_missions_contract::Layout, etag: &str) -> Value {
-    serde_json::to_value(ahjo_missions_contract::document::LayoutDocument {
-        layout: v,
-        etag: etag.into(),
-    })
-    .expect("layout serializes")
 }
 async fn list(State(m): State<Missions>) -> ResultResponse {
     let v = m.store.list_missions()?;
@@ -189,7 +170,10 @@ async fn create(State(m): State<Missions>, input: JsonBody<Value>) -> ResultResp
     };
     m.changed();
     let mut r = tagged(
-        json!({"mission":tagged_mission(result.mission,&result.etag)}),
+        MissionResponse {
+            mission: result.mission,
+            etag: Some(result.etag.clone()),
+        },
         &result.etag,
     );
     *r.status_mut() = StatusCode::CREATED;
@@ -198,7 +182,10 @@ async fn create(State(m): State<Missions>, input: JsonBody<Value>) -> ResultResp
 async fn read(State(m): State<Missions>, Path(id): Path<String>) -> ResultResponse {
     let e = m.store.mission_edit(&id)?;
     Ok(tagged(
-        json!({"mission":tagged_mission(e.mission,&e.etag)}),
+        MissionResponse {
+            mission: e.mission,
+            etag: Some(e.etag.clone()),
+        },
         &e.etag,
     ))
 }
@@ -225,30 +212,11 @@ async fn edit(
         m.changed();
     }
     let layout = m.store.layout_edit(&id)?;
-    let prior = mission(before.mission);
-    let current = tagged_mission(e.mission, &e.etag);
-    let mut body = json!({"mission":current,"layout":layout_value(layout.layout,&layout.etag)});
-    for (op, list, key) in [
-        ("createInputCard", "inputCards", "inputCard"),
-        ("createFormation", "formations", "formation"),
-        ("createGate", "gates", "gate"),
-        ("createEnd", "ends", "end"),
-        ("createLimit", "limits", "limit"),
-    ] {
-        if v.get(op).is_some() {
-            let old = prior[list].as_array();
-            if let Some(node) = body["mission"][list]
-                .as_array()
-                .and_then(|nodes| {
-                    nodes.iter().find(|node| {
-                        !old.is_some_and(|nodes| nodes.iter().any(|old| old["id"] == node["id"]))
-                    })
-                })
-                .cloned()
-            {
-                body[key] = node;
-            }
-        }
+    let mut changed = std::collections::BTreeMap::new();
+    if let Some(key) = crate::authoring::creation_key(&v)
+        && let Some(card) = crate::authoring::added_card(key, &before.mission, &e.mission)
+    {
+        changed.insert(key.into(), card);
     }
     for (op, key) in [
         ("deleteFormation", "formationId"),
@@ -258,10 +226,19 @@ async fn edit(
         ("deleteInputCard", "inputCardId"),
     ] {
         if let Some(id) = v[op]["id"].as_str() {
-            body[key] = json!(id);
+            changed.insert(key.into(), json!(id));
         }
     }
-    Ok(tagged(body, &e.etag))
+    Ok(tagged(
+        EditResponse {
+            mission: e.mission,
+            mission_etag: e.etag.clone(),
+            layout: layout.layout,
+            layout_etag: layout.etag,
+            changed,
+        },
+        &e.etag,
+    ))
 }
 async fn delete(
     State(m): State<Missions>,
@@ -358,7 +335,10 @@ async fn edit_notes(
 async fn layout(State(m): State<Missions>, Path(id): Path<String>) -> ResultResponse {
     let e = m.store.layout_edit(&id)?;
     Ok(tagged(
-        json!({"layout":layout_value(e.layout,&e.etag)}),
+        LayoutResponse {
+            layout: e.layout,
+            etag: e.etag.clone(),
+        },
         &e.etag,
     ))
 }
@@ -383,7 +363,10 @@ async fn edit_layout(
     let e = m.store.patch_layout(&id, etag(&h), p)?;
     m.changed();
     Ok(tagged(
-        json!({"layout":layout_value(e.layout,&e.etag)}),
+        LayoutResponse {
+            layout: e.layout,
+            etag: e.etag.clone(),
+        },
         &e.etag,
     ))
 }

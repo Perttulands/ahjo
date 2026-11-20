@@ -352,10 +352,10 @@ impl MissionsPage {
                     limit.as_deref(),
                     &base,
                     &draft,
-                    &response.mission.mission,
+                    &response.mission,
                 );
-                page.state.mission_etag = response.mission.etag;
-                page.state.mission = Some(response.mission.mission);
+                page.state.mission_etag = response.etag;
+                page.state.mission = Some(response.mission);
                 match ops {
                     Err(problems) => {
                         page.writing = false;

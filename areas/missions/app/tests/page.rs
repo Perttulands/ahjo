@@ -124,7 +124,7 @@ fn opens_a_fixture_mission_on_the_canvas(cx: &mut TestAppContext) {
             .await
             .unwrap();
         assert_eq!(
-            doc["mission"]["formations"][0]["brief"]["goal"],
+            doc["mission"]["formation"][0]["brief"]["goal"],
             "Deliver the result"
         );
     });
@@ -171,7 +171,7 @@ fn opens_a_fixture_mission_on_the_canvas(cx: &mut TestAppContext) {
             .await
             .unwrap();
         assert_eq!(doc["mission"]["title"], "Changed elsewhere");
-        let formation = doc["mission"]["formations"]
+        let formation = doc["mission"]["formation"]
             .as_array()
             .unwrap()
             .iter()
@@ -210,8 +210,8 @@ fn cli_authored_graph_and_layout_open_on_the_canvas(cx: &mut TestAppContext) {
         for title in ["Draft", "Polish", "Judge"] {
             let step = cli(u, "formation", &["create", "cli-board", "--type", "solo", "--title", title]).await["formation"].clone();
             let id = step["id"].as_str().unwrap().to_owned();
-            let input = format!("{id}:{}", step["inputs"][0]["id"].as_str().unwrap());
-            let output = format!("{id}:{}", step["outputs"][0]["id"].as_str().unwrap());
+            let input = format!("{id}:{}", step["input"][0]["id"].as_str().unwrap());
+            let output = format!("{id}:{}", step["output"][0]["id"].as_str().unwrap());
             steps.push((id, input, output));
         }
         let judge = cli(u, "gate", &["create", "cli-board", "--title", "Judge gate", "--kinds", "formation"]).await["gate"]["id"].as_str().unwrap().to_owned();
@@ -277,7 +277,7 @@ fn cli_authored_graph_and_layout_open_on_the_canvas(cx: &mut TestAppContext) {
         .unwrap()
         .0;
     assert!(
-        layout["layout"]["nodes"]
+        layout["layout"]["node"]
             .as_array()
             .unwrap()
             .iter()
