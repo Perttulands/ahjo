@@ -5,8 +5,8 @@
 
 mod claude;
 mod codex;
+pub mod commands;
 pub mod edit;
-pub mod routes;
 
 use ahjo_core::Error;
 use ahjo_harness_contract::shape::{Instruction, Load, Origin, SeenSkill, Shape, Source};

@@ -8,15 +8,14 @@
 //! its most rows while the launcher is open, so nothing moves as it fills.
 //! Its rules live in `store::launch`.
 
-use crate::http;
 use crate::store::launch::{self, FolderList, Suggestion};
 use crate::theme::theme;
 use ahjo_app_kit::Host;
-use ahjo_app_kit::host::Request;
 use ahjo_app_kit::widgets::field::{FieldEvent, TextField};
 use ahjo_app_kit::widgets::finder::marked_letters;
 use ahjo_app_kit::widgets::kit;
 use ahjo_core::NodeId;
+use ahjo_terminals_contract::commands::{ListProjects, SessionFolders};
 use gpui::{Context, Entity, EventEmitter, Window, div, prelude::*, px};
 
 /// Rows the list shows at once, at most.
@@ -307,12 +306,13 @@ impl FolderField {
             return;
         }
         self.reading.push(at.clone());
-        let path = format!("/api/terminal/folders?path={}", http::enc(&at.1));
-        let task = self
-            .host
-            .request(Request::get(NodeId(at.0.clone()), path), cx);
+        let task = self.host.call(
+            NodeId(at.0.clone()),
+            SessionFolders { path: at.1.clone() },
+            cx,
+        );
         cx.spawn(async move |this, cx| {
-            let answer = http::json::<Vec<String>>(task.await);
+            let answer = task.await.map(|a| a.folders).map_err(|e| e.message);
             let _ = this.update(cx, |f, cx| {
                 f.reading.retain(|r| *r != at);
                 f.listings.push(Listing {
@@ -334,19 +334,19 @@ impl FolderField {
             return;
         }
         self.asking = Some(node.to_string());
-        let task = self.host.request(
-            Request::get(NodeId(node.to_string()), "/api/terminal/projects"),
-            cx,
-        );
+        let task = self
+            .host
+            .call(NodeId(node.to_string()), ListProjects {}, cx);
         let node = node.to_string();
         cx.spawn(async move |this, cx| {
-            let answer = http::json::<Vec<String>>(task.await);
+            let answer = task.await;
             let _ = this.update(cx, |f, cx| {
                 if f.asking.as_deref() == Some(node.as_str()) {
                     f.asking = None;
                 }
                 // A node that could not say keeps what it said last.
-                if let Ok(projects) = answer {
+                if let Ok(answer) = answer {
+                    let projects = answer.projects;
                     f.projects = Some((node, projects));
                     cx.notify();
                 }

@@ -15,10 +15,10 @@ use crate::term::screen::Screen;
 use crate::term::{keys, mouse};
 use crate::theme::{Theme, alpha, size, theme};
 use ahjo_app_kit::Ask;
-use ahjo_app_kit::host::Request;
 use ahjo_app_kit::widgets::kit::{self, Kind};
 use ahjo_app_kit::zoom::{self, Zoom};
 use ahjo_core::NodeId;
+use ahjo_terminals_contract::commands::SessionWindows;
 use alacritty_terminal::index::{Column, Line, Point as GridPoint, Side};
 use alacritty_terminal::selection::{Selection, SelectionType};
 use alacritty_terminal::term::TermMode;
@@ -1300,21 +1300,22 @@ impl Terminals {
         let Some(session) = self.fleet.session(&key) else {
             return;
         };
-        let path = format!(
-            "/api/terminal/windows?session={}",
-            crate::http::enc(&session.id)
-        );
+        let session_id = session.id.clone();
         let selected = self
             .window_panes()
             .get(i)
             .cloned()
             .flatten()
             .map(|p| p.pane);
-        let task = self
-            .host
-            .request(Request::get(NodeId(key.node.clone()), path), cx);
+        let task = self.host.call(
+            NodeId(key.node.clone()),
+            SessionWindows {
+                session: session_id,
+            },
+            cx,
+        );
         cx.spawn(async move |this, cx| {
-            let items = match crate::http::json::<Vec<TmuxWindow>>(task.await) {
+            let items = match task.await.map(|a| a.windows) {
                 Ok(windows) if !windows.is_empty() => windows
                     .into_iter()
                     .map(|w| {
@@ -1326,7 +1327,10 @@ impl Terminals {
                     })
                     .collect(),
                 Ok(_) => vec![MenuItem::note("No tmux windows found")],
-                Err(e) => vec![MenuItem::note(format!("Could not load windows: {e}"))],
+                Err(e) => vec![MenuItem::note(format!(
+                    "Could not load windows: {}",
+                    e.message
+                ))],
             };
             let _ = this.update(cx, |s, cx| {
                 let rows = items.into_iter().map(|i| i.row(&s.me)).collect();
@@ -2282,13 +2286,18 @@ impl Terminals {
                     let path = links::resolve(cwd.as_deref(), &path);
                     open_path(NodeId(pane.node), path, line)
                 } else {
-                    let uri = format!("/api/terminal/windows?session={}", crate::http::enc(&id));
                     let node = NodeId(pane.node.clone());
-                    let task = self.host.request(Request::get(node.clone(), uri), cx);
+                    let task = self
+                        .host
+                        .call(node.clone(), SessionWindows { session: id }, cx);
                     cx.spawn(async move |this, cx| {
-                        let folder = crate::http::json::<Vec<TmuxWindow>>(task.await)
+                        let folder = task
+                            .await
                             .ok()
-                            .and_then(|w| w.into_iter().find(|w| w.pane == pane.pane)?.cwd)
+                            .map(|a| a.windows)
+                            .and_then(|w| {
+                                w.into_iter().find(|w| w.pane == pane.pane).map(|w| w.cwd)
+                            })
                             .or(cwd);
                         let path = links::resolve(folder.as_deref(), &path);
                         let _ =
@@ -2645,6 +2654,25 @@ fn peek_view(
     (pan, most, Some(cursor))
 }
 
+/// Opens a file beside the page, at `line` if one is named: as Files
+/// reveals a path at a part of it.
+fn open_path(node: NodeId, path: String, line: Option<u32>) -> Ask {
+    match line {
+        None => Ask::OpenPath {
+            node,
+            path,
+            beside: true,
+        },
+        Some(line) => Ask::Reveal {
+            what: "path".into(),
+            id: path,
+            node: Some(node),
+            part: Some(line.to_string()),
+            beside: true,
+        },
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2731,34 +2759,5 @@ mod tests {
         assert!(pan <= 121 && 121 + 4 < pan + 50, "{pan}");
         // Back at the start of the line, the view goes back to the start.
         assert_eq!(peek_view(true, 50., 200, (0, 4), (pan, followed)).0, 0);
-    }
-}
-
-#[derive(serde::Deserialize)]
-struct TmuxWindow {
-    index: u32,
-    name: String,
-    pane: u32,
-    /// The folder of the pane it shows; absent from an older node.
-    #[serde(default)]
-    cwd: Option<String>,
-}
-
-/// Opens a file beside the page, at `line` if one is named: as Files
-/// reveals a path at a part of it.
-fn open_path(node: NodeId, path: String, line: Option<u32>) -> Ask {
-    match line {
-        None => Ask::OpenPath {
-            node,
-            path,
-            beside: true,
-        },
-        Some(line) => Ask::Reveal {
-            what: "path".into(),
-            id: path,
-            node: Some(node),
-            part: Some(line.to_string()),
-            beside: true,
-        },
     }
 }

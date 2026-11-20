@@ -7,7 +7,6 @@ use ahjo_issue_contract::commands::*;
 use ahjo_issue_contract::{List, Resolver, Resolving};
 use ahjo_node_kit::{Area, BoxFuture, Built, Channel, Client, Command, Effect, Listing, Setup};
 use anyhow::Result;
-use axum::Router;
 pub use issues::{Bd, Gh};
 use issues::{Config, Issues};
 use serde::Deserialize;
@@ -17,7 +16,14 @@ use std::time::Duration;
 pub const LISTING: Listing = Listing {
     name: "issue",
     kinds: ahjo_issue_contract::KINDS,
-    commands: &["issue_list", "issue_search", "issue_show", "issue_create"],
+    commands: &[
+        "issue_list",
+        "issue_search",
+        "issue_show",
+        "issue_create",
+        "issue_snapshot_text",
+        "issue_snapshot_search",
+    ],
     build,
 };
 
@@ -96,9 +102,6 @@ struct WorkArea {
     node: NodeId,
 }
 impl Area for WorkArea {
-    fn routes(&self) -> Router {
-        issues::routes(self.work.clone())
-    }
     fn commands(&self) -> Vec<Command> {
         let (work, node) = (self.work.clone(), self.node.to_string());
         let list = Command::typed("issue_list", Effect::Reads, move |args: ListIssues| {
@@ -168,7 +171,13 @@ impl Area for WorkArea {
                     }
                 })?;
                 let line = work.reference_line(&item).await;
-                Ok(IssueShown { node, item, line })
+                let family = work.family(&item);
+                Ok(IssueShown {
+                    node,
+                    item,
+                    line,
+                    family,
+                })
             }
         });
         let work = self.work.clone();
@@ -186,8 +195,39 @@ impl Area for WorkArea {
                 })
             }
         });
-        // Each may reach GitHub, for a project that lives there.
-        [list, search, show, create]
+        let work = self.work.clone();
+        let text = Command::for_request(Effect::Reads, move |args: SnapshotText| {
+            let work = work.clone();
+            async move {
+                if let Some(text) = work.last().text(&args.reference) {
+                    return Ok(SnapshotTextRead {
+                        text: text.to_owned(),
+                    });
+                }
+                let reference = work.resolve(&args.reference).await.map_err(failed)?;
+                let item = work.item(&reference).await.map_err(|error| {
+                    if error.downcast_ref::<issues::MissingItem>().is_some() {
+                        Error::new("not_found", error.to_string())
+                    } else {
+                        failed(error)
+                    }
+                })?;
+                Ok(SnapshotTextRead { text: item.body })
+            }
+        });
+        let work = self.work.clone();
+        let snapshot_search = Command::for_request(Effect::Reads, move |args: SnapshotSearch| {
+            let snapshot = work.last();
+            async move {
+                let terms = ahjo_issue_contract::text::terms(&args.query);
+                let references = tokio::task::spawn_blocking(move || snapshot.matching(&terms))
+                    .await
+                    .map_err(|error| Error::new("search_failed", error.to_string()))?;
+                Ok(SnapshotMatches { references })
+            }
+        });
+        // Tracker reads and writes may reach GitHub.
+        [list, search, show, create, text, snapshot_search]
             .into_iter()
             .map(Command::open_world)
             .collect()

@@ -141,25 +141,49 @@ async fn list_filters_closed_without_changing_the_page_and_missing_is_not_found(
     .await
     .unwrap();
     assert!(ids(&frame["projects"][0]["items"]).contains(&"tst-1mt".to_owned()));
+    // Snapshot text and matching use the same raw snapshot as the lean push.
+    let reference = frame["projects"][0]["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|item| item["id"] == "tst-qq9.1")
+        .unwrap()["reference"]
+        .as_str()
+        .unwrap();
+    let text = node
+        .call("issue_snapshot_text", json!({"reference": reference}))
+        .await
+        .unwrap();
+    assert_eq!(text["text"], "Run bd list in the store folder.");
+    let matches = node
+        .call("issue_snapshot_search", json!({"query":"store folder"}))
+        .await
+        .unwrap();
+    assert!(
+        matches["references"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|r| r == reference)
+    );
+    assert!(
+        frame["projects"][0]["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|item| item["body"] == "")
+    );
     let error = node
         .call("issue_show", json!({"ref":"tst-missing"}))
         .await
         .unwrap_err();
     assert_eq!(error.code, "not_found");
     assert!(error.message.contains("tst-missing"));
-    let client = ahjo_node_kit::NodeClient::new(Some(&node.url())).unwrap();
-    let error = client
-        .request(
-            axum::http::Method::GET,
-            "/api/issue/item?ref=tst-missing",
-            None,
-            None,
-        )
+    let missing_text = node
+        .call("issue_snapshot_text", json!({"reference":"tst-missing"}))
         .await
         .unwrap_err();
-    let error = error.downcast_ref::<ahjo_node_kit::NodeError>().unwrap();
-    assert_eq!(error.status, axum::http::StatusCode::NOT_FOUND);
-    assert_eq!(error.code, "not_found");
+    assert_eq!(missing_text.code, "not_found");
     drop(ws);
     node.stop().await;
     std::fs::remove_dir_all(dir).unwrap();

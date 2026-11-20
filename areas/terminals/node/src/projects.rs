@@ -11,11 +11,6 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use axum::Router;
-use axum::extract::State;
-use axum::response::{IntoResponse, Response};
-use axum::routing::get;
-
 use crate::launcher::Launcher;
 
 /// How far under a root the walk looks: where a project's own folder sits
@@ -165,17 +160,6 @@ impl Projects {
         });
         projects
     }
-}
-
-pub fn routes(projects: Arc<Projects>) -> Router {
-    Router::new()
-        .route("/api/terminal/projects", get(listed))
-        .with_state(projects)
-}
-
-/// `GET /api/terminal/projects`: every project under the search roots.
-async fn listed(State(projects): State<Arc<Projects>>) -> Response {
-    axum::Json(&*projects.list().await).into_response()
 }
 
 /// How well a project's path answers a query, best first; `None` if not

@@ -27,6 +27,7 @@ pub(crate) struct Ctx {
     pub hub: Arc<Hub>,
     pub launcher: Arc<Launcher>,
     pub projects: Arc<crate::projects::Projects>,
+    pub flags: Arc<crate::flags::Catalogue>,
 }
 
 fn command<Input, Output, Fut>(
@@ -56,6 +57,10 @@ fn failed(error: anyhow::Error) -> Error {
 
 pub(crate) fn commands(ctx: &Arc<Ctx>) -> Vec<Command> {
     vec![
+        session_launch_flags(ctx),
+        session_folders(),
+        project_list(ctx),
+        session_windows(ctx),
         command(ctx, "session_list", Effect::Reads, list_sessions),
         command(ctx, "session_read", Effect::Reads, read),
         command(ctx, "session_send", Effect::Writes, send_text),
@@ -72,6 +77,101 @@ pub(crate) fn commands(ctx: &Arc<Ctx>) -> Vec<Command> {
         command(ctx, "handoff_status", Effect::Reads, handoff::status),
         command(ctx, "handoff_reply", Effect::Writes, handoff::reply),
     ]
+}
+
+fn session_launch_flags(ctx: &Arc<Ctx>) -> Command {
+    let catalogue = ctx.flags.clone();
+    Command::typed(
+        "session_launch_flags",
+        Effect::Reads,
+        move |args: SessionLaunchFlags| {
+            let catalogue = catalogue.clone();
+            async move {
+                crate::flags::get_flags(&catalogue, &args.harness)
+                    .await
+                    .map(|flags| SessionLaunchFlagsListed { flags })
+            }
+        },
+    )
+}
+
+fn session_folders() -> Command {
+    Command::typed(
+        "session_folders",
+        Effect::Reads,
+        |args: SessionFolders| async move {
+            let path = std::path::PathBuf::from(args.path);
+            if !path.is_absolute() {
+                return Err(Error::new(COMMAND_FAILED, "An absolute folder is required"));
+            }
+            let result = async {
+                let mut entries = tokio::fs::read_dir(&path).await?;
+                let mut names = Vec::new();
+                while let Some(entry) = entries.next_entry().await? {
+                    if tokio::fs::metadata(entry.path())
+                        .await
+                        .is_ok_and(|m| m.is_dir())
+                    {
+                        names.push(entry.file_name().to_string_lossy().into_owned());
+                    }
+                }
+                names.sort();
+                Ok::<_, std::io::Error>(names)
+            }
+            .await;
+            result
+                .map(|folders| SessionFoldersListed { folders })
+                .map_err(|error| {
+                    Error::new(
+                        COMMAND_FAILED,
+                        format!("Cannot list {}: {error}", path.display()),
+                    )
+                })
+        },
+    )
+}
+
+fn project_list(ctx: &Arc<Ctx>) -> Command {
+    let projects = ctx.projects.clone();
+    Command::typed("project_list", Effect::Reads, move |_: ListProjects| {
+        let projects = projects.clone();
+        async move {
+            Ok(ProjectsListed {
+                projects: (*projects.list().await).clone(),
+            })
+        }
+    })
+}
+
+fn session_windows(ctx: &Arc<Ctx>) -> Command {
+    let ctx = ctx.clone();
+    Command::typed(
+        "session_windows",
+        Effect::Reads,
+        move |args: SessionWindows| {
+            let ctx = ctx.clone();
+            async move {
+                let session = find(&ctx, &args.session)
+                    .map_err(|error| Error::new(COMMAND_FAILED, format!("{error:#}")))?;
+                ctx.hub
+                    .windows(&session.id)
+                    .await
+                    .map(|windows| {
+                        let windows = windows
+                            .into_iter()
+                            .map(|w| TerminalWindow {
+                                index: w.index,
+                                name: w.name,
+                                pane: w.pane,
+                                cwd: w.cwd,
+                            })
+                            .collect::<Vec<_>>();
+                        SessionWindowsListed { windows }
+                    })
+                    .map_err(|error| Error::new(COMMAND_FAILED, format!("{error:#}")))
+            }
+        },
+    )
 }
 
 async fn copy(ctx: Arc<Ctx>, args: SessionCopy) -> Result<SessionLaunched> {

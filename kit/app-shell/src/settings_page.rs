@@ -3,14 +3,14 @@
 //! one group each in the list, and the connected node's configuration.
 //! Settings is not an area: what is listed comes from the pages, and a
 //! change goes into the declaring page's section, which then hears
-//! [`Page::settings_changed`]. The node's configuration (`/api/config`) is
+//! [`Page::settings_changed`]. The node's configuration (`config show`) is
 //! read each time the page comes forward or the node's link opens while it
 //! shows, and shown as named settings; it changes by editing its file.
 //! Typing in the search shows every setting that matches, from every group.
 
 use crate::theme_picker::{self, Key, Picker};
 use ahjo_app_kit::ask::{Answers, Ask};
-use ahjo_app_kit::host::{Request, Status};
+use ahjo_app_kit::host::Status;
 use ahjo_app_kit::link::client::LinkState;
 use ahjo_app_kit::page::Meta;
 use ahjo_app_kit::settings::DEFAULT_NODE;
@@ -20,7 +20,10 @@ use ahjo_app_kit::widgets::kit::{self, Kind};
 use ahjo_app_kit::widgets::pane;
 use ahjo_app_kit::zoom::Zoom;
 use ahjo_app_kit::{Control, Host, Hub, Page, Setting};
-use ahjo_core::NodeId;
+use ahjo_core::{
+    NodeId,
+    commands::{ConfigShow, ConfigShown},
+};
 use gpui::{
     AnyElement, App, AppContext, Context, Div, Entity, FocusHandle, Focusable, KeyDownEvent,
     SharedString, Subscription, Window, div, prelude::*, px,
@@ -77,7 +80,7 @@ pub struct SettingsPage {
     chosen: Group,
     search: Entity<TextField>,
     /// The connected node's config as it last answered, or why it did not.
-    node_config: Option<Result<Value, String>>,
+    node_config: Option<Result<ConfigShown, String>>,
     /// The pages that declare settings, in the app's order.
     pages: Vec<Meta>,
     /// A field for each text setting.
@@ -336,13 +339,9 @@ impl SettingsPage {
     fn read_node_config(&mut self, cx: &mut Context<Self>) {
         let asked = self
             .host
-            .request(Request::get(NodeId::default(), "/api/config"), cx);
+            .call(NodeId::default(), ConfigShow { section: None }, cx);
         cx.spawn(async move |this, cx| {
-            let got = match asked.await {
-                Ok(a) if a.ok() => serde_json::from_slice(&a.body).map_err(|e| e.to_string()),
-                Ok(a) => Err(a.error_text()),
-                Err(e) => Err(e.message),
-            };
+            let got = asked.await.map_err(|error| error.message);
             let _ = this.update(cx, |p, cx| {
                 p.node_config = Some(got);
                 cx.notify();
@@ -402,16 +401,12 @@ impl SettingsPage {
             Some(Ok(config)) => config,
         };
         // The node's own section first, then the areas by name.
-        let mut sections: Vec<_> = config["sections"]
-            .as_object()
-            .into_iter()
-            .flatten()
-            .collect();
+        let mut sections: Vec<_> = config.sections.iter().collect();
         sections.sort_by_key(|(name, _)| name.as_str() != "node");
         for (name, keys) in sections {
             let mut part = pane::section(t, named(&words(name, true)));
             let mut any = false;
-            for (key, value) in keys.as_object().into_iter().flatten() {
+            for (key, value) in keys {
                 let label = config_label(name, key);
                 if !matches(&label) && !matches(name) {
                     continue;
@@ -443,7 +438,7 @@ impl SettingsPage {
                 parts.push(part.into_any_element());
             }
         }
-        let path = config["path"].as_str().unwrap_or_default().to_string();
+        let path = config.path.display().to_string();
         if matches("file") || matches(&path) {
             let selector = format!("node-config:path:{path}");
             let open = path.clone();

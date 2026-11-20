@@ -127,7 +127,7 @@ real list, and `ahjo kinds` prints who owns which kinds.
 - **Config.** `config.toml` in the node's folder has a `[node]` section and one
   section per area, read by that area. `enabled = false` leaves an area unbuilt
   and listed as off in `/api/health`; a section no area reads refuses to start.
-  `ahjo config show [--section]` and `GET /api/config` answer the file's
+  `ahjo config show [--section]` answers the file's
   path and each section as the node loaded it, and the Settings page shows
   the connected node's read-only; an agent edits the file and a restart
   applies it.

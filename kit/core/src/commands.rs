@@ -20,6 +20,11 @@ pub struct ConfigShown {
     pub sections: BTreeMap<String, Map<String, Value>>,
 }
 
+impl crate::command::TypedCommand for ConfigShow {
+    const NAME: &'static str = "config_show";
+    type Output = ConfigShown;
+}
+
 /// Show which page each connected Ahjo Swarm app is on.
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -41,11 +46,11 @@ pub struct AppView {
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ViewOpen {
-    /// sessions, files, harness, work, missions, scheduled, host or settings.
+    /// sessions, files, harness, issue, missions, scheduled, host or settings.
     pub page: String,
     /// A file path to reveal.
     pub path: Option<String>,
-    /// A work item to reveal.
+    /// An issue to reveal.
     pub item: Option<String>,
     /// A mission run to reveal.
     pub run: Option<String>,

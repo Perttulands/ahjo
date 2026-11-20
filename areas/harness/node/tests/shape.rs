@@ -453,6 +453,16 @@ async fn edits_land_in_the_file_they_came_from() {
     .unwrap();
     let saved: Value = serde_json::from_str(&std::fs::read_to_string(&settings).unwrap()).unwrap();
     assert_eq!(saved["env"]["FOO"], "bar");
+    // The page encodes JSON text before calling the same command, keeping
+    // string values that happen to look like JSON from changing type.
+    node.call(
+        "harness_setting_set",
+        json!({"harness": "claude", "file": settings, "key": "env.FOO", "value": "\"true\""}),
+    )
+    .await
+    .unwrap();
+    let saved: Value = serde_json::from_str(&std::fs::read_to_string(&settings).unwrap()).unwrap();
+    assert_eq!(saved["env"]["FOO"], "true");
     node.call(
         "harness_setting_set",
         json!({"harness": "claude", "file": settings, "key": "env.FOO", "unset": true}),

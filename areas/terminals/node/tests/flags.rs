@@ -1,7 +1,6 @@
 #![cfg(unix)]
-use ahjo_node_kit::{NodeClient, NodeError};
 use ahjo_testkit::{fresh_dir, node::Node, tmux::write_script};
-use axum::http::Method;
+use serde_json::json;
 use std::time::{Duration, Instant};
 
 #[tokio::test]
@@ -34,15 +33,13 @@ async fn configured_help_and_timeout() {
     )
     .await
     .unwrap();
-    let client = NodeClient::new(Some(&node.url())).unwrap();
-    let (answer, _) = client
-        .request(Method::GET, "/api/launch/flags?harness=fast", None, None)
+    let answer = node
+        .call("session_launch_flags", json!({"harness":"fast"}))
         .await
         .unwrap();
-    assert_eq!(answer[0]["name"], "--verbose");
-    assert_eq!(answer[0]["description"], "Verbose output");
-    client
-        .request(Method::GET, "/api/launch/flags?harness=fast", None, None)
+    assert_eq!(answer["flags"][0]["name"], "--verbose");
+    assert_eq!(answer["flags"][0]["description"], "Verbose output");
+    node.call("session_launch_flags", json!({"harness":"fast"}))
         .await
         .unwrap();
     assert_eq!(std::fs::read_to_string(&calls).unwrap().lines().count(), 1);
@@ -53,29 +50,22 @@ async fn configured_help_and_timeout() {
                 .set_modified(std::time::SystemTime::UNIX_EPOCH + Duration::from_secs(100)),
         )
         .unwrap();
-    client
-        .request(Method::GET, "/api/launch/flags?harness=fast", None, None)
+    node.call("session_launch_flags", json!({"harness":"fast"}))
         .await
         .unwrap();
     assert_eq!(std::fs::read_to_string(&calls).unwrap().lines().count(), 2);
 
-    let error = client
-        .request(Method::GET, "/api/launch/flags?harness=unknown", None, None)
+    let error = node
+        .call("session_launch_flags", json!({"harness":"unknown"}))
         .await
         .unwrap_err();
-    assert_eq!(
-        error.downcast_ref::<NodeError>().unwrap().code,
-        "unknown_harness"
-    );
+    assert_eq!(error.code, "unknown_harness");
     let started = Instant::now();
-    let error = client
-        .request(Method::GET, "/api/launch/flags?harness=slow", None, None)
+    let error = node
+        .call("session_launch_flags", json!({"harness":"slow"}))
         .await
         .unwrap_err();
-    assert_eq!(
-        error.downcast_ref::<NodeError>().unwrap().code,
-        "harness_help_timeout"
-    );
+    assert_eq!(error.code, "harness_help_timeout");
     assert!(started.elapsed() < Duration::from_secs(5));
     node.stop().await;
     std::fs::remove_dir_all(dir).unwrap();

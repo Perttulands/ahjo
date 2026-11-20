@@ -1,19 +1,10 @@
 //! What shapes an agent started in a folder: the instruction files that
 //! load, the skills it sees, its hooks, the settings that change how it
 //! behaves and the servers that give it tools, each with the file it comes
-//! from. Also the edits the page makes to them. HTTP wire data; no I/O.
+//! from. Also the edits the page makes to them. Typed wire data; no I/O.
 
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-
-/// `GET ?dir=<folder>&harness=<id>`: a [`Shape`].
-pub const PATH: &str = "/api/harness/shape";
-/// `GET ?path=` reads a [`Text`]; `PUT` a [`Write`] saves one.
-pub const FILE: &str = "/api/harness/file";
-/// `POST` a [`HookEdit`]: add, change, remove, switch a hook.
-pub const HOOK: &str = "/api/harness/hook";
-/// `POST` a [`SettingEdit`]: set or unset one setting.
-pub const SETTING: &str = "/api/harness/setting";
 
 /// A file changed on disk since it was read: read it again.
 pub const STALE: &str = "harness_stale";

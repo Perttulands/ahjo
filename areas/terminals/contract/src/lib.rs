@@ -19,7 +19,9 @@ pub use down::{
 pub const KINDS: Kinds = &[0x01..=0x02, 0x10..=0x1a, 0x1e..=0x29, 0x2b..=0x2b];
 
 /// A harness option reported by its help output.
-#[derive(Clone, Debug, serde::Deserialize, serde::Serialize, PartialEq, Eq)]
+#[derive(
+    Clone, Debug, serde::Deserialize, serde::Serialize, schemars::JsonSchema, PartialEq, Eq,
+)]
 pub struct Flag {
     pub name: String,
     pub short: Option<String>,

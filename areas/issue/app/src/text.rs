@@ -1,11 +1,10 @@
 //! Items' text, which the snapshot leaves out: read from the item's node
 //! when the item shows, and searched on the nodes when the search changes.
 use crate::Issue;
-use ahjo_app_kit::host::Request;
 use ahjo_core::NodeId;
+use ahjo_issue_contract::commands::{SnapshotSearch, SnapshotText};
 use gpui::Context;
 use std::collections::HashSet;
-use std::time::Duration;
 
 /// One item's text as the page has it.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -15,9 +14,6 @@ pub(crate) enum Text {
     Read(String),
     Failed(String),
 }
-
-/// How long a read of one item's text or a search may take.
-const WITHIN: Duration = Duration::from_secs(30);
 
 impl Issue {
     /// The text of `row`, read from its node if the board left it out and
@@ -40,31 +36,16 @@ impl Issue {
         let (reference, updated) = (r.reference.clone(), r.updated);
         self.texts
             .insert(reference.clone(), (updated, Text::Reading(older)));
-        let task = self.host.request(
-            Request::get(
-                NodeId(node),
-                format!("/api/issue/text?ref={}", encode(&reference)),
-            )
-            .within(WITHIN),
+        let task = self.host.call(
+            NodeId(node),
+            SnapshotText {
+                reference: reference.clone(),
+            },
             cx,
         );
         cx.spawn(async move |this, cx| {
             let text = match task.await {
-                Ok(answer) if answer.ok() => {
-                    match serde_json::from_slice::<serde_json::Value>(&answer.body) {
-                        Ok(v) => match v["text"].as_str() {
-                            Some(text) => Text::Read(text.to_owned()),
-                            None => Text::Failed("the node sent no text".into()),
-                        },
-                        Err(e) => Text::Failed(e.to_string()),
-                    }
-                }
-                // A node from before the text left the snapshot sent it
-                // with the item: this one has none.
-                Ok(answer) if answer.status == 404 && !answer.body.starts_with(b"{") => {
-                    Text::Read(String::new())
-                }
-                Ok(answer) => Text::Failed(answer.error_text()),
+                Ok(answer) => Text::Read(answer.text),
                 Err(error) => Text::Failed(error.message),
             };
             let _ = this.update(cx, |w, cx| {
@@ -114,39 +95,20 @@ impl Issue {
             return;
         }
         for node in self.snapshots.keys() {
-            let task = self.host.request(
-                Request::get(
-                    NodeId(node.clone()),
-                    format!("/api/issue/search?q={}", encode(&query)),
-                )
-                .within(WITHIN),
+            let task = self.host.call(
+                NodeId(node.clone()),
+                SnapshotSearch {
+                    query: query.clone(),
+                },
                 cx,
             );
             let query = query.clone();
             cx.spawn(async move |this, cx| {
                 let answer = task.await;
                 let _ = this.update(cx, |w, cx| {
-                    let found = match answer {
-                        Ok(answer) if answer.ok() => {
-                            serde_json::from_slice::<serde_json::Value>(&answer.body)
-                                .map_err(|e| e.to_string())
-                                .map(|v| {
-                                    v["references"]
-                                        .as_array()
-                                        .into_iter()
-                                        .flatten()
-                                        .filter_map(|r| r.as_str().map(str::to_owned))
-                                        .collect::<Vec<_>>()
-                                })
-                        }
-                        // A node from before the text left the snapshot
-                        // has no search: its rows carry their text.
-                        Ok(answer) if answer.status == 404 && !answer.body.starts_with(b"{") => {
-                            Ok(vec![])
-                        }
-                        Ok(answer) => Err(answer.error_text()),
-                        Err(error) => Err(error.message),
-                    };
+                    let found = answer
+                        .map(|answer| answer.references)
+                        .map_err(|error| error.message);
                     if w.text_hits.0 != query {
                         return;
                     }
@@ -169,17 +131,4 @@ impl Issue {
             .detach();
         }
     }
-}
-
-/// `s` as a query parameter's value.
-pub(crate) fn encode(s: &str) -> String {
-    s.bytes()
-        .map(|b| {
-            if b.is_ascii_alphanumeric() || b"-._~".contains(&b) {
-                (b as char).to_string()
-            } else {
-                format!("%{b:02X}")
-            }
-        })
-        .collect()
 }

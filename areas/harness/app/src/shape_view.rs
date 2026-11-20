@@ -4,7 +4,7 @@
 //! at the start and later, the skills it sees, its hooks, settings and
 //! servers) and on the right the one part opened, read or edited in place.
 
-use crate::shape_state::{self as sh, Load, Pick, Shape, Text};
+use crate::shape_state::{self as sh, Load, Pick, Shape};
 use crate::{HarnessPage, tokens};
 use ahjo_app_kit::host::Status;
 use ahjo_app_kit::theme::{Theme, size, theme};
@@ -12,11 +12,14 @@ use ahjo_app_kit::widgets::code::{Code, CodeEvent};
 use ahjo_app_kit::widgets::field::{FieldEvent, TextField};
 use ahjo_app_kit::widgets::kit::{self, Kind};
 use ahjo_app_kit::widgets::{markdown, pane, syntax};
+use ahjo_harness_contract::commands::{
+    AddHook, AtNode, HookEdited, ReadFile, ReadShape, RemoveHook, SetHook, SetSetting, SwitchHook,
+};
 use gpui::{
     AnyElement, AppContext, Context, Div, Entity, Hsla, SharedString, Stateful, Window, div,
     prelude::*, px, relative,
 };
-use serde_json::{Value, json};
+use serde_json::Value;
 
 /// The entities the Agent and Skills views type into, made once.
 pub(crate) struct Inputs {
@@ -167,21 +170,20 @@ impl HarnessPage {
         }
         let asked = (v.dir.clone(), v.harness.clone());
         v.asking = Some(asked.clone());
-        let path = format!(
-            "{}?dir={}&harness={}",
-            sh::PATH,
-            sh::encode(&asked.0),
-            sh::encode(&asked.1)
-        );
+        let input = ReadShape {
+            dir: asked.0.clone(),
+            harness: Some(asked.1.clone()),
+        };
         let node = v.node.clone();
-        self.harness_request(&node, "GET", &path, None, cx, move |page, answer, cx| {
+        self.harness_call(&node, input, cx, move |page, answer, cx| {
             let v = &mut page.shape;
             if v.asking.as_ref() != Some(&asked) {
                 return;
             }
             v.asking = None;
-            match crate::request::response::<Shape>(answer) {
-                Ok(shape) => {
+            match answer {
+                Ok(answer) => {
+                    let shape = answer.result;
                     v.dir = shape.dir.clone();
                     // Only a folder that could be read is offered again.
                     sh::remember(&mut page.kept.recent, &shape.dir);
@@ -208,7 +210,7 @@ impl HarnessPage {
                 }
                 Err(e) => {
                     v.shape = None;
-                    v.error = Some(e);
+                    v.error = Some(e.to_string());
                 }
             }
             cx.notify();
@@ -281,10 +283,10 @@ impl HarnessPage {
         self.shape.file = None;
         self.shape.editing = false;
         let node = self.shape.node.clone();
-        let url = format!("{}?path={}", sh::FILE, sh::encode(&path));
-        self.harness_request(&node, "GET", &url, None, cx, move |page, answer, cx| {
-            match crate::request::response::<Text>(answer) {
-                Ok(text) => {
+        self.harness_call(&node, ReadFile { path }, cx, move |page, answer, cx| {
+            match answer {
+                Ok(answer) => {
+                    let text = answer.result;
                     let lang = syntax::lang(&text.path);
                     page.inputs.reader.update(cx, |c, cx| {
                         c.set_lang(lang, cx);
@@ -331,70 +333,117 @@ impl HarnessPage {
             return;
         }
         let text = self.inputs.reader.read(cx).text().to_owned();
-        let body = json!(sh::Write {
+        let body = sh::Write {
             path: file.path.clone(),
             text,
             etag: file.etag.clone(),
-        });
+        };
         self.shape.saving = true;
         let node = self.shape.node.clone();
-        self.harness_request(
-            &node,
-            "PUT",
-            sh::FILE,
-            Some(body),
-            cx,
-            |page, answer, cx| {
-                page.shape.saving = false;
-                match crate::request::response::<Text>(answer) {
-                    Ok(text) => {
-                        let shown = match &page.shape.shape {
-                            Some(sp) => sh::short(&text.path, sp.root.as_deref(), &sp.home),
-                            None => text.path.clone(),
-                        };
-                        page.host.toast(&format!("Saved {shown}"), cx);
-                        page.shape.file = Some(text);
-                        page.shape.editing = false;
-                        page.shape.close_editor = true;
-                        page.shape_load(cx);
-                        page.catalog_load(cx);
-                    }
-                    Err(e) => page
-                        .host
-                        .report(Status::failure(format!("Not saved: {e}")), cx),
+        self.harness_call(&node, body, cx, |page, answer, cx| {
+            page.shape.saving = false;
+            match answer {
+                Ok(answer) => {
+                    let text = answer.result;
+                    let shown = match &page.shape.shape {
+                        Some(sp) => sh::short(&text.path, sp.root.as_deref(), &sp.home),
+                        None => text.path.clone(),
+                    };
+                    page.host.toast(&format!("Saved {shown}"), cx);
+                    page.shape.file = Some(text);
+                    page.shape.editing = false;
+                    page.shape.close_editor = true;
+                    page.shape_load(cx);
+                    page.catalog_load(cx);
                 }
-                cx.notify();
-            },
-        );
+                Err(e) => page
+                    .host
+                    .report(Status::failure(format!("Not saved: {e}")), cx),
+            }
+            cx.notify();
+        });
         cx.notify();
     }
 
     fn hook_send(&mut self, change: sh::HookChange, file: String, cx: &mut Context<Self>) {
-        let edit = sh::HookEdit {
-            harness: self.shape.harness.clone(),
-            file,
-            change,
-        };
+        let harness = self.shape.harness.clone();
         let node = self.shape.node.clone();
-        self.harness_request(
-            &node,
-            "POST",
-            sh::HOOK,
-            Some(json!(edit)),
-            cx,
-            |page, answer, cx| {
-                match crate::request::response::<Value>(answer) {
-                    Ok(_) => {
-                        page.shape.pick = Pick::None;
-                        page.shape_load(cx);
-                    }
-                    Err(e) => page
-                        .host
-                        .report(Status::failure(format!("Hook not changed: {e}")), cx),
+        let done = |page: &mut Self,
+                    answer: Result<AtNode<HookEdited>, ahjo_core::Error>,
+                    cx: &mut Context<Self>| {
+            match answer {
+                Ok(_) => {
+                    page.shape.pick = Pick::None;
+                    page.shape_load(cx);
                 }
-                cx.notify();
-            },
-        );
+                Err(e) => page
+                    .host
+                    .report(Status::failure(format!("Hook not changed: {e}")), cx),
+            }
+            cx.notify();
+        };
+        match change {
+            sh::HookChange::Add { hook } => self.harness_call(
+                &node,
+                AddHook {
+                    harness,
+                    file,
+                    event: hook.event,
+                    matcher: hook.matcher,
+                    command: hook.command,
+                    timeout: hook.timeout,
+                },
+                cx,
+                done,
+            ),
+            sh::HookChange::Set { at, was, hook } => self.harness_call(
+                &node,
+                SetHook {
+                    harness,
+                    file,
+                    event: at.event,
+                    group: at.group,
+                    index: at.index,
+                    parked: Some(at.parked),
+                    was,
+                    new_event: Some(hook.event),
+                    new_matcher: hook.matcher,
+                    new_command: hook.command,
+                    new_timeout: hook.timeout,
+                },
+                cx,
+                done,
+            ),
+            sh::HookChange::Remove { at, was } => self.harness_call(
+                &node,
+                RemoveHook {
+                    harness,
+                    file,
+                    event: at.event,
+                    group: at.group,
+                    index: at.index,
+                    parked: Some(at.parked),
+                    was,
+                },
+                cx,
+                done,
+            ),
+            sh::HookChange::Switch { at, was, on } => self.harness_call(
+                &node,
+                SwitchHook {
+                    harness,
+                    file,
+                    event: at.event,
+                    group: at.group,
+                    index: at.index,
+                    parked: Some(at.parked),
+                    was,
+                    on,
+                },
+                cx,
+                done,
+            ),
+        }
     }
 
     fn hook_save(&mut self, cx: &mut Context<Self>) {
@@ -444,32 +493,30 @@ impl HarnessPage {
                 .report(Status::failure("A setting needs its key"), cx);
             return;
         }
-        let edit = sh::SettingEdit {
+        let unset = value.is_null();
+        // The command accepts JSON text for CLI callers. Encode even strings
+        // so words like "true" remain strings rather than changing type.
+        let value = (!unset).then(|| Value::String(value.to_string()));
+        let edit = SetSetting {
             harness: self.shape.harness.clone(),
             file,
             key,
             value,
+            unset: Some(unset),
         };
         let node = self.shape.node.clone();
-        self.harness_request(
-            &node,
-            "POST",
-            sh::SETTING,
-            Some(json!(edit)),
-            cx,
-            |page, answer, cx| {
-                match crate::request::response::<Value>(answer) {
-                    Ok(_) => {
-                        page.shape.pick = Pick::None;
-                        page.shape_load(cx);
-                    }
-                    Err(e) => page
-                        .host
-                        .report(Status::failure(format!("Setting not changed: {e}")), cx),
+        self.harness_call(&node, edit, cx, |page, answer, cx| {
+            match answer {
+                Ok(_) => {
+                    page.shape.pick = Pick::None;
+                    page.shape_load(cx);
                 }
-                cx.notify();
-            },
-        );
+                Err(e) => page
+                    .host
+                    .report(Status::failure(format!("Setting not changed: {e}")), cx),
+            }
+            cx.notify();
+        });
     }
 
     /// The folders the list offers: running sessions' first, then recent.

@@ -171,13 +171,6 @@ pub fn build(setup: &Setup) -> Result<Built> {
 }
 
 impl Area for HarnessArea {
-    fn routes(&self) -> axum::Router {
-        let router = axum::Router::new();
-        match &self.shapes {
-            Some(roots) => router.merge(shape::routes::routes(roots.clone())),
-            None => router,
-        }
-    }
     fn channel(&self, _: Client) -> Option<Box<dyn Channel>> {
         let (out, incoming) = mpsc::channel(32);
         Some(Box::new(Connection {
@@ -251,7 +244,7 @@ impl Area for HarnessArea {
         });
         // A sync fetches the checkout's remote.
         let mut commands = vec![show, sync.open_world(), link];
-        commands.extend(shape::routes::commands(
+        commands.extend(shape::commands::commands(
             self.shapes.clone(),
             self.node.clone(),
         ));

@@ -31,16 +31,11 @@ use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use ahjo_core::Error;
-use ahjo_node_kit::{Area, BoxFuture, Built, Channel, Client, Command, Failure, Listing, Setup};
+use ahjo_node_kit::{Area, BoxFuture, Built, Channel, Client, Command, Listing, Setup};
 use ahjo_term::backend::tmux::Socket;
 use ahjo_term::{Engine, Sessions};
 use anyhow::{Context, Result, bail};
 use axum::Router;
-use axum::extract::{Query, State};
-use axum::http::StatusCode;
-use axum::response::{IntoResponse, Response};
-use axum::routing::get;
 use serde::Deserialize;
 
 use agent_events::hooks::{self, Hooks};
@@ -56,6 +51,10 @@ pub const LISTING: Listing = Listing {
     name: NAME,
     kinds: ahjo_terminals_contract::KINDS,
     commands: &[
+        "session_launch_flags",
+        "session_folders",
+        "project_list",
+        "session_windows",
         "session_list",
         "session_read",
         "session_send",
@@ -137,6 +136,7 @@ pub fn build(setup: &Setup) -> Result<Built> {
             node: setup.node.id.clone(),
             hub,
             projects: Arc::new(projects::Projects::new(launcher.clone())),
+            flags: Arc::new(flags::Catalogue::new(launcher.clone())),
             launcher,
         }),
     })
@@ -191,13 +191,7 @@ fn own_engine(_holder: Option<&str>) -> Result<Engine> {
 
 impl Area for Terminals {
     fn routes(&self) -> Router {
-        Router::new()
-            .route("/api/terminal/windows", get(windows))
-            .route("/api/terminal/folders", get(folders))
-            .with_state(self.ctx.hub.clone())
-            .merge(agent_events::routes(self.ctx.hub.clone()))
-            .merge(flags::routes(self.ctx.launcher.clone()))
-            .merge(projects::routes(self.ctx.projects.clone()))
+        agent_events::routes(self.ctx.hub.clone())
     }
 
     fn commands(&self) -> Vec<Command> {
@@ -211,73 +205,5 @@ impl Area for Terminals {
 
     fn stop(&self) -> BoxFuture<'_, ()> {
         Box::pin(self.ctx.hub.stop())
-    }
-}
-
-#[derive(Deserialize)]
-struct FolderQuery {
-    path: String,
-}
-
-/// Folder completion uses the same user and filesystem as session launch.
-async fn folders(Query(query): Query<FolderQuery>) -> Response {
-    let path = std::path::PathBuf::from(&query.path);
-    if !path.is_absolute() {
-        return Failure(
-            StatusCode::BAD_REQUEST,
-            Error::new(
-                ahjo_terminals_contract::COMMAND_FAILED,
-                "An absolute folder is required",
-            ),
-        )
-        .into_response();
-    }
-    let result = async {
-        let mut entries = tokio::fs::read_dir(&path).await?;
-        let mut names = Vec::new();
-        while let Some(entry) = entries.next_entry().await? {
-            if tokio::fs::metadata(entry.path())
-                .await
-                .is_ok_and(|m| m.is_dir())
-            {
-                names.push(entry.file_name().to_string_lossy().into_owned());
-            }
-        }
-        names.sort();
-        Ok::<_, std::io::Error>(names)
-    }
-    .await;
-    match result {
-        Ok(names) => axum::Json(names).into_response(),
-        Err(error) => Failure(
-            StatusCode::BAD_REQUEST,
-            Error::new(
-                ahjo_terminals_contract::COMMAND_FAILED,
-                format!("Cannot list {}: {error}", path.display()),
-            ),
-        )
-        .into_response(),
-    }
-}
-
-#[derive(Deserialize)]
-struct WindowQuery {
-    session: String,
-}
-
-/// `GET /api/terminal/windows?session=<id>`: a session's windows, the pane
-/// each shows and that pane's folder, read when its picker opens or a
-/// relative path printed in it is opened.
-async fn windows(State(hub): State<Arc<Hub>>, Query(query): Query<WindowQuery>) -> Response {
-    match hub.windows(&query.session).await {
-        Ok(windows) => axum::Json(windows).into_response(),
-        Err(error) => Failure(
-            StatusCode::BAD_REQUEST,
-            Error::new(
-                ahjo_terminals_contract::COMMAND_FAILED,
-                format!("{error:#}"),
-            ),
-        )
-        .into_response(),
     }
 }

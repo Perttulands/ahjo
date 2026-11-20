@@ -410,3 +410,72 @@ pub enum ReplyKind {
     Key,
     Text,
 }
+
+/// List a harness's available launch flags from its help output.
+#[derive(Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct SessionLaunchFlags {
+    pub harness: String,
+}
+
+/// List child folders of an absolute directory.
+#[derive(Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct SessionFolders {
+    pub path: String,
+}
+
+/// List projects under the launcher's configured search roots.
+#[derive(Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ListProjects {}
+
+/// List the windows and active panes of a session.
+#[derive(Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct SessionWindows {
+    /// A session name or id from session list.
+    pub session: String,
+}
+
+#[derive(Debug, Deserialize, Serialize, JsonSchema)]
+pub struct TerminalWindow {
+    pub index: u32,
+    pub name: String,
+    pub pane: u32,
+    pub cwd: String,
+}
+
+#[derive(Debug, Deserialize, Serialize, JsonSchema)]
+pub struct SessionLaunchFlagsListed {
+    pub flags: Vec<crate::Flag>,
+}
+#[derive(Debug, Deserialize, Serialize, JsonSchema)]
+pub struct SessionFoldersListed {
+    pub folders: Vec<String>,
+}
+#[derive(Debug, Deserialize, Serialize, JsonSchema)]
+pub struct ProjectsListed {
+    pub projects: Vec<String>,
+}
+#[derive(Debug, Deserialize, Serialize, JsonSchema)]
+pub struct SessionWindowsListed {
+    pub windows: Vec<TerminalWindow>,
+}
+
+impl ahjo_core::TypedCommand for SessionLaunchFlags {
+    const NAME: &'static str = "session_launch_flags";
+    type Output = SessionLaunchFlagsListed;
+}
+impl ahjo_core::TypedCommand for SessionFolders {
+    const NAME: &'static str = "session_folders";
+    type Output = SessionFoldersListed;
+}
+impl ahjo_core::TypedCommand for ListProjects {
+    const NAME: &'static str = "project_list";
+    type Output = ProjectsListed;
+}
+impl ahjo_core::TypedCommand for SessionWindows {
+    const NAME: &'static str = "session_windows";
+    type Output = SessionWindowsListed;
+}

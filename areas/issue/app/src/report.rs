@@ -2,12 +2,12 @@
 use crate::{Issue, tokens::*};
 use ahjo_app_kit::Host;
 use ahjo_app_kit::ask::Ask;
-use ahjo_app_kit::host::{Layer, Request, Status};
+use ahjo_app_kit::host::{Layer, Status};
 use ahjo_app_kit::theme::{FAMILY, theme};
 use ahjo_app_kit::widgets::field::{FieldEvent, TextField};
 use ahjo_app_kit::widgets::kit::{self, Kind};
 use ahjo_core::NodeId;
-use ahjo_issue_contract::List;
+use ahjo_issue_contract::commands::{CreateIssue, IssueKind, ListIssues};
 use gpui::{AppContext, Context, Entity, Focusable, Render, Window, div, prelude::*, px};
 use serde_json::{Value, json};
 
@@ -80,18 +80,13 @@ impl Report {
         let nodes = self.host.nodes(cx);
         self.pending_projects = nodes.len();
         for node in nodes {
-            let task = self.host.request(Request::new("POST", node.id.clone(), "/mcp").json(&json!({"jsonrpc":"2.0", "id":1, "method":"tools/call", "params":{"name":"issue_list", "arguments":{}}})), cx);
+            let task = self
+                .host
+                .call(node.id.clone(), ListIssues { all: false }, cx);
             cx.spawn(async move |this, cx| {
                 let result = task.await;
                 let _ = this.update(cx, |report, cx| {
-                    let parsed = result
-                        .ok()
-                        .and_then(|answer| serde_json::from_slice::<Value>(&answer.body).ok())
-                        .and_then(|v| {
-                            v["result"]["content"][0]["text"]
-                                .as_str()
-                                .and_then(|s| serde_json::from_str::<List>(s).ok())
-                        });
+                    let parsed = result.ok();
                     if let Some(list) = parsed {
                         report
                             .projects
@@ -145,9 +140,14 @@ impl Report {
         } else {
             format!("{body}\n\n{}", self.context)
         };
-        let task = self.host.request(
-            Request::new("POST", project.node.clone(), "/api/issue/items")
-                .json(&json!({"project":project.name,"title":title,"description":description})),
+        let task = self.host.call(
+            project.node.clone(),
+            CreateIssue {
+                project: project.name.clone(),
+                title: title.to_owned(),
+                description,
+                kind: IssueKind::Bug,
+            },
             cx,
         );
         self.filing = true;
@@ -157,14 +157,9 @@ impl Report {
             let result = task.await;
             let _ = this.update(cx, |report, cx| {
                 report.filing = false;
-                let reference = match result {
-                    Ok(answer) if answer.ok() => serde_json::from_slice::<Value>(&answer.body)
-                        .ok()
-                        .and_then(|v| v["reference"].as_str().map(str::to_owned))
-                        .ok_or_else(|| "The node returned no item reference.".to_string()),
-                    Ok(answer) => Err(answer.error_text()),
-                    Err(error) => Err(error.message),
-                };
+                let reference = result
+                    .map(|answer| answer.reference)
+                    .map_err(|error| error.message);
                 match reference {
                     Ok(reference) => {
                         let id = reference

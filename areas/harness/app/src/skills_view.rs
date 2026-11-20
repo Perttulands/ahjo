@@ -102,21 +102,25 @@ impl HarnessPage {
         self.catalog.shapes.clear();
         let node = self.shape.node.clone();
         for (harness, _) in sh::HARNESSES {
-            let path = format!("{}?dir={}&harness={harness}", sh::PATH, sh::encode(&dir));
+            let input = ahjo_harness_contract::commands::ReadShape {
+                dir: dir.clone(),
+                harness: Some((*harness).into()),
+            };
             let asked = dir.clone();
-            self.harness_request(&node, "GET", &path, None, cx, move |page, answer, cx| {
+            self.harness_call(&node, input, cx, move |page, answer, cx| {
                 let c = &mut page.catalog;
                 if c.dir != asked {
                     return;
                 }
-                match crate::request::response::<Shape>(answer) {
-                    Ok(shape) => {
+                match answer {
+                    Ok(answer) => {
+                        let shape = answer.result;
                         c.shapes.retain(|s| s.harness != shape.harness);
                         c.shapes.push(shape);
                         c.shapes.sort_by(|a, b| a.harness.cmp(&b.harness));
                         c.error = None;
                     }
-                    Err(e) => c.error = Some(e),
+                    Err(e) => c.error = Some(e.to_string()),
                 }
                 cx.notify();
             });

@@ -26,6 +26,23 @@ async fn commands_and_channel_work_over_the_node() {
         .unwrap();
     let client = NodeClient::new(Some(&node.url())).unwrap();
 
+    for path in [
+        "/api/harness/shape",
+        "/api/harness/file",
+        "/api/harness/hook",
+        "/api/harness/setting",
+    ] {
+        let error = client
+            .request(Method::GET, path, None, None)
+            .await
+            .unwrap_err();
+        assert_eq!(
+            error.downcast_ref::<NodeError>().unwrap().status,
+            404,
+            "{path}"
+        );
+    }
+
     let (health, _) = client
         .request(Method::GET, "/api/health", None, None)
         .await

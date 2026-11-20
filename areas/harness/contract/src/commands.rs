@@ -183,3 +183,36 @@ pub struct SettingEdited {
     pub file: String,
     pub key: String,
 }
+
+impl ahjo_core::TypedCommand for ReadShape {
+    const NAME: &'static str = "harness_shape";
+    type Output = AtNode<crate::shape::Shape>;
+}
+impl ahjo_core::TypedCommand for ReadFile {
+    const NAME: &'static str = "harness_read";
+    type Output = AtNode<crate::shape::Text>;
+}
+impl ahjo_core::TypedCommand for crate::shape::Write {
+    const NAME: &'static str = "harness_write";
+    type Output = AtNode<crate::shape::Text>;
+}
+impl ahjo_core::TypedCommand for AddHook {
+    const NAME: &'static str = "harness_hook_add";
+    type Output = AtNode<HookEdited>;
+}
+impl ahjo_core::TypedCommand for SetHook {
+    const NAME: &'static str = "harness_hook_set";
+    type Output = AtNode<HookEdited>;
+}
+impl ahjo_core::TypedCommand for RemoveHook {
+    const NAME: &'static str = "harness_hook_remove";
+    type Output = AtNode<HookEdited>;
+}
+impl ahjo_core::TypedCommand for SwitchHook {
+    const NAME: &'static str = "harness_hook_switch";
+    type Output = AtNode<HookEdited>;
+}
+impl ahjo_core::TypedCommand for SetSetting {
+    const NAME: &'static str = "harness_setting_set";
+    type Output = AtNode<SettingEdited>;
+}

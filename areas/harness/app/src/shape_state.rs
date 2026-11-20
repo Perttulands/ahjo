@@ -195,20 +195,6 @@ pub fn value_words(v: &serde_json::Value) -> String {
     }
 }
 
-/// A query parameter's value, percent-encoded.
-pub fn encode(value: &str) -> String {
-    let mut out = String::new();
-    for b in value.bytes() {
-        match b {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' | b'/' => {
-                out.push(b as char)
-            }
-            _ => out.push_str(&format!("%{b:02X}")),
-        }
-    }
-    out
-}
-
 /// A skill's or document's text without its front matter, to read.
 pub fn without_front_matter(text: &str) -> &str {
     let Some(rest) = text.strip_prefix("---\n") else {

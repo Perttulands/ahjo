@@ -1,6 +1,6 @@
 //! The Issues channel of the browser protocol (`docs/protocol.md`, Issues): a
 //! browser watches the snapshot while its Issues tab is open. Items come
-//! without their text, which [`super::routes`] serves one item at a time.
+//! without their text, which the snapshot text command serves one item at a time.
 
 use anyhow::{Result, bail};
 

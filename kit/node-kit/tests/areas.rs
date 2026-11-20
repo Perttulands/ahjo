@@ -1079,7 +1079,7 @@ async fn an_area_turned_off_is_no_mcp_server_and_says_so() {
     node.stop().await.unwrap();
 }
 
-/// The node's own command and route show its config file as it loaded it.
+/// The node's typed config command shows the file as it loaded it.
 #[tokio::test(flavor = "multi_thread")]
 async fn config_show_answers_the_file_and_each_section() {
     let node = start(
@@ -1107,12 +1107,22 @@ async fn config_show_answers_the_file_and_each_section() {
 
     let client = NodeClient::new(Some(&url)).unwrap();
     let (answer, _) = client
-        .request(Method::GET, "/api/config?section=files", None, None)
+        .request(
+            Method::POST,
+            "/api/call/config_show",
+            Some(json!({"section":"files"})),
+            None,
+        )
         .await
         .unwrap();
     assert_eq!(answer, files);
     let refused = client
-        .request(Method::GET, "/api/config?section=nope", None, None)
+        .request(
+            Method::POST,
+            "/api/call/config_show",
+            Some(json!({"section":"nope"})),
+            None,
+        )
         .await
         .unwrap_err();
     assert_eq!(

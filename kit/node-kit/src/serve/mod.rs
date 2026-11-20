@@ -1,6 +1,6 @@
 //! Serving a node: its areas, built from the config, behind the trust check
 //! and the refusal of requests for other nodes, with the node's own
-//! `/api/health`, `/api/version`, `/api/config`, `/ws` and `/mcp`, the apps
+//! `/api/health`, `/api/version`, `/ws` and `/mcp`, the apps
 //! it hands out ([`apps`]), and its own commands ([`crate::own`]).
 //! Areas are checked before anything is served: two that share a name, a
 //! frame kind or a command refuse to start, naming both
@@ -192,7 +192,6 @@ pub async fn start_with_config_commit(
         .route("/api/health", get(health))
         .route("/api/version", get(version))
         .with_state(shared.clone())
-        .merge(own::routes(own))
         .merge(apps::routes(apps_dir, section.desk.clone()))
         .merge(Mcp::new(node.id.clone(), groups, shared.off.clone(), sets).routes());
     for (_, area) in &shared.areas {

@@ -1,16 +1,7 @@
 //! Help catalogue for configured harnesses.
 use crate::launcher::Launcher;
 use ahjo_core::Error;
-use ahjo_node_kit::Failure;
 use ahjo_terminals_contract::Flag;
-use axum::{
-    Json, Router,
-    extract::{Query, State},
-    http::StatusCode,
-    response::{IntoResponse, Response},
-    routing::get,
-};
-use serde::Deserialize;
 use std::{
     collections::HashMap,
     path::{Path, PathBuf},
@@ -19,57 +10,33 @@ use std::{
 };
 use tokio::{io::AsyncReadExt, sync::Mutex};
 
-struct Catalogue {
+pub(crate) struct Catalogue {
     launcher: Arc<Launcher>,
     cache: Mutex<HashMap<PathBuf, (SystemTime, Vec<Flag>)>>,
 }
-pub fn routes(launcher: Arc<Launcher>) -> Router {
-    Router::new()
-        .route("/api/launch/flags", get(flags))
-        .with_state(Arc::new(Catalogue {
+impl Catalogue {
+    pub(crate) fn new(launcher: Arc<Launcher>) -> Self {
+        Self {
             launcher,
             cache: Mutex::new(HashMap::new()),
-        }))
-}
-#[derive(Deserialize)]
-struct Request {
-    harness: String,
-}
-fn failure(status: StatusCode, code: &'static str, message: impl Into<String>) -> Response {
-    Failure(status, Error::new(code, message)).into_response()
-}
-async fn flags(
-    State(catalogue): State<Arc<Catalogue>>,
-    Query(request): Query<Request>,
-) -> Response {
-    match get_flags(&catalogue, &request.harness).await {
-        Ok(flags) => Json(flags).into_response(),
-        Err((status, code, message)) => failure(status, code, message),
+        }
     }
 }
-type FlagError = (StatusCode, &'static str, String);
-async fn get_flags(catalogue: &Catalogue, id: &str) -> Result<Vec<Flag>, FlagError> {
+pub(crate) async fn get_flags(catalogue: &Catalogue, id: &str) -> Result<Vec<Flag>, Error> {
     catalogue.launcher.look();
     let config = catalogue.launcher.get();
     let harness = config
         .harnesses
         .iter()
         .find(|h| h.id == id)
-        .ok_or_else(|| {
-            (
-                StatusCode::NOT_FOUND,
-                ahjo_terminals_contract::UNKNOWN_HARNESS,
-                "Unknown harness".into(),
-            )
-        })?;
+        .ok_or_else(|| Error::new(ahjo_terminals_contract::UNKNOWN_HARNESS, "Unknown harness"))?;
     if harness.command.is_empty() {
         return Ok(vec![]);
     }
     let path = resolve(&harness.command).ok_or_else(|| {
-        (
-            StatusCode::NOT_FOUND,
+        Error::new(
             ahjo_terminals_contract::HARNESS_NOT_FOUND,
-            "Harness binary not found in the node PATH".into(),
+            "Harness binary not found in the node PATH",
         )
     })?;
     let modified = std::fs::metadata(&path)
@@ -101,18 +68,16 @@ async fn get_flags(catalogue: &Catalogue, id: &str) -> Result<Vec<Flag>, FlagErr
     })
     .await
     .map_err(|_| {
-        (
-            StatusCode::GATEWAY_TIMEOUT,
+        Error::new(
             ahjo_terminals_contract::HARNESS_HELP_TIMEOUT,
-            "Harness help timed out".into(),
+            "Harness help timed out",
         )
     })?
     .map_err(internal)?;
     if !status.success() {
-        return Err((
-            StatusCode::BAD_GATEWAY,
+        return Err(Error::new(
             ahjo_terminals_contract::HARNESS_HELP_FAILED,
-            "Harness help failed".into(),
+            "Harness help failed",
         ));
     }
     let parsed = parse(&String::from_utf8_lossy(&output));
@@ -123,9 +88,8 @@ async fn get_flags(catalogue: &Catalogue, id: &str) -> Result<Vec<Flag>, FlagErr
         .insert(path, (modified, parsed.clone()));
     Ok(parsed)
 }
-fn internal(error: std::io::Error) -> FlagError {
-    (
-        StatusCode::INTERNAL_SERVER_ERROR,
+fn internal(error: std::io::Error) -> Error {
+    Error::new(
         ahjo_terminals_contract::HARNESS_HELP_ERROR,
         error.to_string(),
     )

@@ -23,7 +23,14 @@ use tokio_tungstenite::tungstenite::Message;
 fn commands_are_registered_for_cli_and_mcp() {
     assert_eq!(
         ahjo_issue::LISTING.commands,
-        &["issue_list", "issue_search", "issue_show", "issue_create"]
+        &[
+            "issue_list",
+            "issue_search",
+            "issue_show",
+            "issue_create",
+            "issue_snapshot_text",
+            "issue_snapshot_search"
+        ]
     );
 }
 
@@ -134,8 +141,7 @@ async fn cli_lists_shows_and_creates_a_work_item() {
         "{}",
         unknown.message
     );
-    let client = ahjo_node_kit::NodeClient::new(Some(&node.url())).unwrap();
-    let (created, _) = client.request(axum::http::Method::POST, "/api/issue/items", Some(json!({"project": dir.display().to_string(), "title":"Via HTTP", "description":"Body", "type":"feature"})), None).await.unwrap();
+    let created = node.call("issue_create", json!({"project": dir.display().to_string(), "title":"Via HTTP", "description":"Body", "type":"feature"})).await.unwrap();
     let http_id = created["reference"]
         .as_str()
         .unwrap()

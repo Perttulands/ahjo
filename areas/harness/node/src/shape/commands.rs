@@ -1,5 +1,4 @@
-//! The routes the page uses and the commands an agent uses, over the same
-//! reads and edits.
+//! Typed commands for reading and editing harness configuration.
 
 use super::{Roots, edit};
 use ahjo_core::Error;
@@ -8,21 +7,13 @@ use ahjo_harness_contract::commands::{
     AddHook, AtNode, HookEdited, ReadFile, ReadShape, RemoveHook, SetHook, SetSetting, SwitchHook,
 };
 use ahjo_harness_contract::shape::{
-    FILE, HOOK, HookAt, HookChange, HookEdit, HookSpec, INVALID, NOT_FOUND, PATH, SETTING, STALE,
-    SettingEdit, Write,
+    HookAt, HookChange, HookEdit, HookSpec, INVALID, NOT_FOUND, STALE, SettingEdit, Write,
 };
 use ahjo_node_kit::{Command, Effect};
-use axum::{
-    Json, Router,
-    extract::{Query, State},
-    http::StatusCode,
-    response::{IntoResponse, Response},
-    routing::{get, post},
-};
+use axum::http::StatusCode;
 use schemars::JsonSchema;
 use serde::{Serialize, de::DeserializeOwned};
-use serde_json::{Value, json};
-use std::collections::HashMap;
+use serde_json::Value;
 use std::sync::Arc;
 
 /// Runs `work` off the async threads: it reads and writes files.
@@ -34,16 +25,6 @@ async fn blocking<T: Send + 'static>(
         .map_err(|e| Error::new(FAILED, e.to_string()))?
 }
 
-fn reply<T: serde::Serialize>(result: Result<T, Error>) -> Response {
-    match result {
-        Ok(v) => Json(json!(v)).into_response(),
-        Err(e) => {
-            let status = failure_status(&e).unwrap_or(StatusCode::BAD_REQUEST);
-            (status, Json(json!({"error": e}))).into_response()
-        }
-    }
-}
-
 fn failure_status(error: &Error) -> Option<StatusCode> {
     Some(match error.code.as_str() {
         NOT_FOUND => StatusCode::NOT_FOUND,
@@ -51,48 +32,6 @@ fn failure_status(error: &Error) -> Option<StatusCode> {
         INVALID | FAILED => StatusCode::BAD_REQUEST,
         _ => return None,
     })
-}
-
-fn arg(q: &HashMap<String, String>, key: &str) -> Result<String, Error> {
-    q.get(key)
-        .cloned()
-        .ok_or_else(|| Error::new(INVALID, format!("{key} is required")))
-}
-
-pub fn routes(roots: Arc<Roots>) -> Router {
-    Router::new()
-        .route(PATH, get(shape))
-        .route(FILE, get(read).put(write))
-        .route(HOOK, post(hook))
-        .route(SETTING, post(setting))
-        .with_state(roots)
-}
-
-async fn shape(State(r): State<Arc<Roots>>, Query(q): Query<HashMap<String, String>>) -> Response {
-    reply(
-        blocking(move || {
-            let dir = arg(&q, "dir")?;
-            let harness = q.get("harness").cloned().unwrap_or_else(|| "claude".into());
-            super::read(&r, &dir, &harness)
-        })
-        .await,
-    )
-}
-
-async fn read(State(r): State<Arc<Roots>>, Query(q): Query<HashMap<String, String>>) -> Response {
-    reply(blocking(move || edit::read_text(&r, &arg(&q, "path")?)).await)
-}
-
-async fn write(State(r): State<Arc<Roots>>, Json(w): Json<Write>) -> Response {
-    reply(blocking(move || edit::write_text(&r, &w)).await)
-}
-
-async fn hook(State(r): State<Arc<Roots>>, Json(e): Json<HookEdit>) -> Response {
-    reply(blocking(move || edit::hook_edit(&r, &e)).await)
-}
-
-async fn setting(State(r): State<Arc<Roots>>, Json(e): Json<SettingEdit>) -> Response {
-    reply(blocking(move || edit::setting_edit(&r, &e)).await)
 }
 
 pub fn commands(roots: Option<Arc<Roots>>, node: String) -> Vec<Command> {

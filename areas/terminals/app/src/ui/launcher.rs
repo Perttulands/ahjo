@@ -10,11 +10,11 @@ use crate::store::settings::launched_in;
 use crate::store::workspace::LinkState;
 use crate::store::{devices, launch, launch_flags};
 use crate::theme::{size, theme};
-use ahjo_app_kit::host::{Host, Request};
+use ahjo_app_kit::host::Host;
 use ahjo_app_kit::widgets::field::{FieldEvent, TextField};
 use ahjo_app_kit::widgets::kit::{self, Kind};
 use ahjo_core::NodeId;
-use ahjo_terminals_contract::Launch;
+use ahjo_terminals_contract::{Launch, commands::SessionLaunchFlags};
 use gpui::{Context, Entity, FocusHandle, ScrollHandle, WeakEntity, Window, div, prelude::*, px};
 
 /// The launcher in the Send drawer, after the windows': its session is
@@ -230,12 +230,15 @@ impl Launcher {
         self.catalogue_key = Some(key.clone());
         self.catalogue = None;
         self.editing = None;
-        let path = format!("/api/launch/flags?harness={}", crate::http::enc(&key.1));
-        let task = self
-            .host
-            .request(Request::get(NodeId(key.0.clone()), path), cx);
+        let task = self.host.call(
+            NodeId(key.0.clone()),
+            SessionLaunchFlags {
+                harness: key.1.clone(),
+            },
+            cx,
+        );
         cx.spawn(async move |this, cx| {
-            let answer = crate::http::json(task.await);
+            let answer = task.await.map(|a| a.flags).map_err(|e| e.message);
             let _ = this.update(cx, |l, cx| {
                 if l.catalogue_key.as_ref() == Some(&key) {
                     l.catalogue = Some(answer);

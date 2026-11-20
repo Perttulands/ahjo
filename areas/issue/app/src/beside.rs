@@ -3,16 +3,13 @@
 //! its node with its family's titles.
 use crate::Issue;
 use crate::store::issue::Board;
-use crate::text::encode;
 use crate::view::Place;
-use ahjo_app_kit::host::Request;
 use ahjo_app_kit::theme::{FAMILY, theme};
 use ahjo_app_kit::widgets::pane;
 use ahjo_core::NodeId;
-use ahjo_issue_contract::{Item, ProjectView, Snapshot, StoreView};
+use ahjo_issue_contract::{Item, ProjectView, Snapshot, StoreView, commands::ShowIssue};
 use gpui::{AppContext, Context, Entity, IntoElement, Render, Window, div, prelude::*};
 use std::rc::Rc;
-use std::time::Duration;
 
 struct Card {
     work: Entity<Issue>,
@@ -114,9 +111,11 @@ impl Issue {
             }
         });
         host.show_beside(from, card.clone().into(), cx);
-        let task = host.request(
-            Request::get(node.clone(), format!("/api/issue/item?ref={}", encode(&id)))
-                .within(Duration::from_secs(95)),
+        let task = host.call(
+            node.clone(),
+            ShowIssue {
+                reference: id.clone(),
+            },
             cx,
         );
         // Whatever the page knows of the node's projects names a GitHub
@@ -127,27 +126,10 @@ impl Issue {
             .map(|s| s.projects.clone())
             .unwrap_or_default();
         cx.spawn(async move |_, cx| {
-            let result = match task.await {
-                Ok(answer) if answer.ok() => {
-                    serde_json::from_slice::<serde_json::Value>(&answer.body)
-                        .map_err(|e| (e.to_string(), false))
-                        .and_then(|v| {
-                            let line = v["line"].as_str().unwrap_or("").to_owned();
-                            let family: Vec<Item> =
-                                serde_json::from_value(v["family"].clone()).unwrap_or_default();
-                            serde_json::from_value::<Item>(v["item"].clone())
-                                .map(|item| (item, line, family))
-                                .map_err(|e| (e.to_string(), false))
-                        })
-                }
-                Ok(answer) => {
-                    let not_found = serde_json::from_slice::<serde_json::Value>(&answer.body)
-                        .ok()
-                        .is_some_and(|v| v["error"]["code"] == "not_found");
-                    Err((answer.error_text(), not_found))
-                }
-                Err(error) => Err((error.message, false)),
-            };
+            let result = task
+                .await
+                .map(|answer| (answer.item, answer.line, answer.family))
+                .map_err(|error| (error.message, error.code == "not_found"));
             card.update(cx, |card, cx| {
                 card.loading = false;
                 match result {

@@ -148,6 +148,10 @@ async fn speaks_the_mcp_lifecycle_and_offers_every_session_tool() {
     assert_eq!(
         names,
         [
+            "session_launch_flags",
+            "session_folders",
+            "project_list",
+            "session_windows",
             "session_list",
             "session_read",
             "session_send",
@@ -226,6 +230,22 @@ async fn lists_sessions_and_reads_a_screen() {
     let alpha = session_named(&sessions, "alpha");
     assert_eq!(alpha["panes"][0]["cols"], 100);
     assert_eq!(alpha["panes"][0]["rows"], 30);
+    let windows = node
+        .call("session_windows", json!({"session":alpha["id"]}))
+        .await
+        .unwrap();
+    let by_name = node
+        .call("session_windows", json!({"session":"alpha"}))
+        .await
+        .unwrap();
+    assert_eq!(by_name, windows);
+    assert_eq!(windows["windows"][0]["pane"], alpha["panes"][0]["id"]);
+    assert!(!windows["windows"][0]["cwd"].as_str().unwrap().is_empty());
+    assert!(
+        node.call("session_windows", json!({"session":"missing"}))
+            .await
+            .is_err()
+    );
 
     let mut screen = Value::Null;
     for _ in 0..100 {
@@ -1008,27 +1028,40 @@ async fn launcher_lists_accessible_folders_and_explains_missing_ones() {
         return;
     };
     std::fs::create_dir(node.other.join("inside")).unwrap();
-    let client = ahjo_node_kit::NodeClient::new(Some(&node.node.url())).unwrap();
-    let path = format!("/api/terminal/folders?path={}", node.other.display());
-    let (answer, _) = client
-        .request(axum::http::Method::GET, &path, None, None)
+    let project = node.folder.join("project");
+    std::fs::create_dir_all(project.join(".git")).unwrap();
+    let projects = node.call("project_list", json!({})).await.unwrap();
+    assert!(
+        projects["projects"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|path| path == &project.to_string_lossy().to_string())
+    );
+
+    let answer = node
+        .call("session_folders", json!({"path":node.other}))
         .await
         .unwrap();
     assert!(
-        answer
+        answer["folders"]
             .as_array()
             .unwrap()
             .iter()
             .any(|name| name == "inside")
     );
-    let missing = format!(
-        "/api/terminal/folders?path={}/missing",
-        node.other.display()
-    );
-    let error = client
-        .request(axum::http::Method::GET, &missing, None, None)
+    let error = node
+        .call(
+            "session_folders",
+            json!({"path":node.other.join("missing")}),
+        )
         .await
         .unwrap_err();
-    assert!(error.to_string().contains("Cannot list"), "{error}");
+    assert!(error.contains("Cannot list"), "{error}");
+    let error = node
+        .call("session_folders", json!({"path":"relative"}))
+        .await
+        .unwrap_err();
+    assert!(error.contains("absolute"), "{error}");
     node.stop().await;
 }
