@@ -833,7 +833,8 @@ pub(super) mod tests {
     async fn a_failed_read_keeps_what_was_read_and_says_why() {
         let fake = Fake::new(
             "failed",
-            "echo 'gh: HTTP 504' >&2; exit 1",
+            r#"while [ ! -f "${0%/*}/release-gh" ]; do sleep 0.01; done
+echo 'gh: HTTP 504' >&2; exit 1"#,
             "echo 'Error: database locked' >&2; exit 1",
         );
         let work = fake.work(vec![
@@ -843,11 +844,19 @@ pub(super) mod tests {
             }),
         ]);
         let mut watching = work.subscribe();
-        watching.next().await;
-        let mut read = watching.next().await;
-        // Each project publishes as its read lands, in no set order: wait
-        // for both.
-        while store(&read, 1).error.is_none() || repo(&read, 0).error.is_none() {
+        let mut read = tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                let snapshot = watching.next().await;
+                if store(&snapshot, 1).error.is_some() {
+                    break snapshot;
+                }
+            }
+        })
+        .await
+        .expect("the Beads error is published while GitHub is still reading");
+        assert_eq!(repo(&read, 0).error, None);
+        std::fs::write(fake.dir.join("release-gh"), "").unwrap();
+        while repo(&read, 0).error.is_none() {
             read = watching.next().await;
         }
         assert_eq!(repo(&read, 0).error.as_deref(), Some("HTTP 504"));
