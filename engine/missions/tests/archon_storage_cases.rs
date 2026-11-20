@@ -1,5 +1,5 @@
 use ahjo_mission_engine::Store;
-use ahjo_mission_model::{Patch, Precondition};
+use ahjo_mission_model::{MissionChange, Precondition};
 use std::sync::atomic::{AtomicU64, Ordering};
 static NEXT: AtomicU64 = AtomicU64::new(0);
 struct Scratch(std::path::PathBuf);
@@ -124,7 +124,12 @@ Line \u0023 two
     let edit = store.mission_edit("quoted").unwrap();
     assert_eq!(edit.mission.input_cards[0].goal, "Line one\nLine # two\n");
     let updated = store
-        .patch("quoted", pre(&edit), Patch::Title("New title".into()), "")
+        .patch(
+            "quoted",
+            pre(&edit),
+            MissionChange::Title("New title".into()),
+            "",
+        )
         .unwrap();
     assert_eq!(updated.mission.title, "New title");
     let after = std::fs::read_to_string(&path).unwrap();
@@ -149,7 +154,12 @@ fn invalid_definition_source_is_never_changed_by_an_edit() {
     std::fs::write(&path, &raw).unwrap();
     assert!(
         store
-            .patch("invalid", pre(&edit), Patch::Title("Changed".into()), "")
+            .patch(
+                "invalid",
+                pre(&edit),
+                MissionChange::Title("Changed".into()),
+                ""
+            )
             .is_err()
     );
     assert_eq!(std::fs::read_to_string(path).unwrap(), raw);
@@ -166,7 +176,12 @@ fn writes_follow_a_symlinked_definition_directory() {
     let store = Store::new(&dir.0);
     let edit = store.create_mission("linked", "Linked", "").unwrap();
     let edit = store
-        .patch("linked", pre(&edit), Patch::Title("Updated".into()), "")
+        .patch(
+            "linked",
+            pre(&edit),
+            MissionChange::Title("Updated".into()),
+            "",
+        )
         .unwrap();
     assert_eq!(edit.mission.title, "Updated");
     assert!(
@@ -236,7 +251,7 @@ fn invalid_layout_blocks_every_paired_node_create_and_delete() {
         .patch(
             "paired",
             pre(&edit),
-            Patch::CreateInputCard {
+            MissionChange::CreateInputCard {
                 title: "Input".into(),
                 goal: "".into(),
                 files: vec![],
@@ -251,7 +266,7 @@ fn invalid_layout_blocks_every_paired_node_create_and_delete() {
         .patch(
             "paired",
             pre(&edit),
-            Patch::CreateFormation {
+            MissionChange::CreateFormation {
                 kind: "solo".into(),
                 title: "Worker".into(),
                 x: 0,
@@ -264,7 +279,7 @@ fn invalid_layout_blocks_every_paired_node_create_and_delete() {
         .patch(
             "paired",
             pre(&edit),
-            Patch::CreateGate {
+            MissionChange::CreateGate {
                 title: "Review".into(),
                 kinds: vec!["human".into()],
                 criterion: "".into(),
@@ -287,7 +302,7 @@ fn invalid_layout_blocks_every_paired_node_create_and_delete() {
     );
     std::fs::write(&layout_path, &invalid).unwrap();
     let cases = vec![
-        Patch::CreateInputCard {
+        MissionChange::CreateInputCard {
             title: "New".into(),
             goal: "".into(),
             files: vec![],
@@ -295,13 +310,13 @@ fn invalid_layout_blocks_every_paired_node_create_and_delete() {
             x: 0,
             y: 0,
         },
-        Patch::CreateFormation {
+        MissionChange::CreateFormation {
             kind: "solo".into(),
             title: "New".into(),
             x: 0,
             y: 0,
         },
-        Patch::CreateGate {
+        MissionChange::CreateGate {
             title: "New".into(),
             kinds: vec!["human".into()],
             criterion: "".into(),
@@ -312,13 +327,13 @@ fn invalid_layout_blocks_every_paired_node_create_and_delete() {
             x: 0,
             y: 0,
         },
-        Patch::DeleteInputCard {
+        MissionChange::DeleteInputCard {
             id: edit.mission.input_cards[0].id.clone(),
         },
-        Patch::DeleteFormation {
+        MissionChange::DeleteFormation {
             id: edit.mission.formations[0].id.clone(),
         },
-        Patch::DeleteGate {
+        MissionChange::DeleteGate {
             id: edit.mission.gates[0].id.clone(),
         },
     ];
@@ -340,7 +355,7 @@ fn note_threads_allow_only_the_author_to_edit_or_delete() {
         .patch(
             "thread",
             pre(&edit),
-            Patch::CreateFormation {
+            MissionChange::CreateFormation {
                 kind: "solo".into(),
                 title: "Work".into(),
                 x: 0,
@@ -506,7 +521,7 @@ fn empty_and_populated_inline_node_arrays_are_editable() {
         .patch(
             "inline",
             pre(&edit),
-            Patch::CreateFormation {
+            MissionChange::CreateFormation {
                 kind: "solo".into(),
                 title: "Worker".into(),
                 x: 4,
@@ -520,7 +535,7 @@ fn empty_and_populated_inline_node_arrays_are_editable() {
         .patch(
             "inline",
             pre(&edit),
-            Patch::UpdateFormation {
+            MissionChange::UpdateFormation {
                 id: formation.clone(),
                 title: Some("Renamed".into()),
                 device: None,
@@ -534,7 +549,7 @@ fn empty_and_populated_inline_node_arrays_are_editable() {
         .patch(
             "inline",
             pre(&edit),
-            Patch::UpdateGate(ahjo_mission_model::GateUpdate {
+            MissionChange::UpdateGate(ahjo_mission_model::GateUpdate {
                 id: "gate_existing".into(),
                 criterion: Some("Approved".into()),
                 ..Default::default()
@@ -547,7 +562,7 @@ fn empty_and_populated_inline_node_arrays_are_editable() {
         .patch(
             "inline",
             pre(&edit),
-            Patch::DeleteFormation { id: formation },
+            MissionChange::DeleteFormation { id: formation },
             "",
         )
         .unwrap();
@@ -556,7 +571,7 @@ fn empty_and_populated_inline_node_arrays_are_editable() {
         .patch(
             "inline",
             pre(&edit),
-            Patch::DeleteGate {
+            MissionChange::DeleteGate {
                 id: "gate_existing".into(),
             },
             "",
@@ -578,7 +593,7 @@ fn populated_inline_formations_and_connections_can_be_updated_and_deleted() {
         .patch(
             "inline",
             pre(&edit),
-            Patch::UpdateFormation {
+            MissionChange::UpdateFormation {
                 id: "fmn_a".into(),
                 title: Some("Updated".into()),
                 device: None,
@@ -594,7 +609,7 @@ fn populated_inline_formations_and_connections_can_be_updated_and_deleted() {
             .patch(
                 "inline",
                 pre(edit),
-                Patch::UpdateFormation {
+                MissionChange::UpdateFormation {
                     id: "fmn_a".into(),
                     title: None,
                     device: Some(device.into()),
@@ -613,7 +628,7 @@ fn populated_inline_formations_and_connections_can_be_updated_and_deleted() {
         .patch(
             "inline",
             pre(&edit),
-            Patch::DeleteFormation { id: "fmn_a".into() },
+            MissionChange::DeleteFormation { id: "fmn_a".into() },
             "",
         )
         .unwrap();

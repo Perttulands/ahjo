@@ -71,7 +71,7 @@ an area: the shell's Settings page lists what pages declare.
    data in `engine/` that has no dependencies (`work-ref`, a work item's
    reference, shared by the work area and the mission engine). The one other
    is `mission-model`, the missions' wire data, which the mission engine uses
-   and which depends only on `core` and serde's data formats. `node` depends on
+   and which depends only on `core`, serde's data formats and their schemas. `node` depends on
    its `contract` and `node-kit`; `app` on its `contract` and `app-kit`. An
    area that needs another uses that area's `contract` or an interface it
    provides, never its `node` or `app` crate (tests may). `kit/` and `engine/`

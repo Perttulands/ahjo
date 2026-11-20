@@ -1,469 +1,213 @@
-//! Translate one HTTP mission mutation into the engine's authoring operation.
-use ahjo_mission_model::{
-    Brief, EndUpdate, GateUpdate, InputCardUpdate, Limit, LimitUpdate, Patch, RestoredNode,
-};
-use serde::de::DeserializeOwned;
-use serde_json::Value;
+//! Mission edit envelopes and diagnostics for the shared mutation type.
+use crate::MissionChange;
+use serde::Deserialize;
+use serde_json::{Map, Value};
+use std::sync::OnceLock;
 
-fn s(v: &Value, k: &str) -> String {
-    v[k].as_str().unwrap_or_default().to_owned()
-}
-fn o(v: &Value, k: &str) -> Option<String> {
-    v[k].as_str().map(str::to_owned)
-}
-fn n(v: &Value, k: &str) -> i64 {
-    v[k].as_i64().unwrap_or_default()
-}
-fn b(v: &Value, k: &str) -> bool {
-    v[k].as_bool().unwrap_or_default()
-}
-fn parse<T: DeserializeOwned>(v: &Value, k: &str) -> Result<T, String> {
-    serde_json::from_value(v[k].clone()).map_err(|e| format!("{k}: {e}"))
-}
-fn strings(v: &Value, k: &str) -> Result<Vec<String>, String> {
-    if v.get(k).is_none_or(Value::is_null) {
-        Ok(Vec::new())
-    } else {
-        parse(v, k)
-    }
+pub struct EditRequest {
+    pub rev: Option<i64>,
+    pub updated_by: String,
+    pub changes: Changes,
 }
 
-// HTTP callers may send this metadata alongside the operation or inside it.
-const PATCH_METADATA: &[&str] = &["expectedRev", "updatedBy"];
-
-fn validate_fields(op: &str, v: &Value, accepted: &[&str]) -> Result<(), String> {
-    let fields = v.as_object().ok_or("operation must be an object")?;
-    for key in fields.keys() {
-        if !accepted.contains(&key.as_str()) && !PATCH_METADATA.contains(&key.as_str()) {
-            return Err(unknown_field(op, key, &accepted.join(", ")));
-        }
-    }
-    for (key, value) in fields {
-        if value.is_null() {
-            continue;
-        }
-        let strings = [
-            "id",
-            "title",
-            "goal",
-            "humanChannel",
-            "inputHint",
-            "type",
-            "keepSlotId",
-            "formationId",
-            "slotId",
-            "agentId",
-            "harness",
-            "model",
-            "effort",
-            "work",
-            "direction",
-            "label",
-            "kind",
-            "portId",
-            "from",
-            "to",
-            "previousTo",
-            "criterion",
-            "check",
-            "checkVersion",
-            "checkValue",
-            "gateId",
-            "outcome",
-            "target",
-            "whenSpent",
-            "updatedBy",
-            "agent",
-        ];
-        let numbers = [
-            "expectedRev",
-            "x",
-            "y",
-            "rounds",
-            "seconds",
-            "warnSeconds",
-            "tokens",
-            "index",
-        ];
-        let flags = ["joinIfOccupied", "removePreviousInput", "fresh"];
-        if strings.contains(&key.as_str()) && !value.is_string()
-            || numbers.contains(&key.as_str()) && value.as_i64().is_none()
-            || flags.contains(&key.as_str()) && !value.is_boolean()
-        {
-            return Err(format!("{key} has the wrong type"));
-        }
-    }
-    Ok(())
+pub enum Changes {
+    Single(Box<MissionChange>),
+    Batch(Vec<MissionChange>),
 }
 
-fn unknown_field(op: &str, key: &str, accepted: &str) -> String {
-    format!("{op}: unknown field {key}; accepted fields: {accepted}")
-}
-
-// Keep the help and the decoder's accepted keys in the same table.
-macro_rules! operations {
-    (
-        scalars { $($scalar:literal => $description:literal,)* }
-        $($op:literal => [$first:literal $(=> $first_hint:literal)?
-            $(, $field:literal $(=> $hint:literal)?)*],)*
-    ) => {
-        /// Every operation `decode` takes, with the fields `mission edit` shows.
-        pub const OPERATIONS: &[(&str, &str)] = &[
-            $(($scalar, $description),)*
-            $(($op, concat!($first $(, $first_hint)? $(, ", ", $field $(, $hint)?)*)),)*
-        ];
-
-        fn accepted_fields(op: &str) -> Option<&'static [&'static str]> {
-            match op {
-                $($scalar => Some(&[]),)*
-                $($op => Some(&[$first $(, $field)*]),)*
-                _ => None,
-            }
-        }
-    };
-}
-
-operations! {
-    scalars {
-        "title" => "\"<the mission's new title>\", a string",
-        "prefix" => "\"<the run branches' prefix>\", a string",
-    }
-    "createInputCard" => ["title", "goal", "files" => "[]", "humanChannel" => " (notify|session)", "x", "y"],
-    "updateInputCard" => ["id", "title", "goal", "files" => "[]", "inputHint", "humanChannel", "inputs" => "[]", "outputs" => "[]"],
-    "deleteInputCard" => ["id"],
-    "createFormation" => ["type" => " (solo|peer|orchestrated)", "title", "x", "y"],
-    "updateFormation" => ["id", "title", "device", "fresh"],
-    "editFormation" => ["id", "title", "brief" => "{goal, repository, work, files[], links[]}"],
-    "setFormationType" => ["id", "type", "keepSlotId", "slots" => "[]"],
-    "deleteFormation" => ["id"],
-    "assignSlot" => ["formationId", "slotId", "agentId", "harness", "model", "effort"],
-    "nameAgent" => ["formationId", "slotId", "agent"],
-    "swapSlots" => ["fromFormation", "fromSlot", "toFormation", "toSlot"],
-    "makeController" => ["formationId", "slotId"],
-    "setBrief" => ["formationId", "goal", "repository", "work", "files" => "[]", "links" => "[]"],
-    "clearBrief" => ["formationId"],
-    "addPort" => ["formationId", "direction" => " (input|output)", "label", "kind" => " (text|file|folder)"],
-    "updatePort" => ["formationId", "portId", "label", "kind"],
-    "removePort" => ["formationId", "portId"],
-    "restorePort" => ["formationId", "direction", "port" => "{}", "index", "connections" => "[]"],
-    "wireConnection" => ["from", "to", "id", "joinIfOccupied"],
-    "unwireConnection" => ["from", "to"],
-    "rewireConnection" => ["from", "previousTo", "to", "joinIfOccupied", "removePreviousInput"],
-    "createGate" => ["title", "kinds" => "[] (code|formation|human, default human)", "criterion", "check", "checkVersion", "checkValue", "files" => "[]", "x", "y"],
-    "updateGate" => ["id", "title", "kinds" => "[]", "criterion", "check", "checkVersion", "checkValue", "files" => "[]"],
-    "setGateJudge" => ["gateId", "chain" => "[] (step ids)"],
-    "detachGateJudge" => ["gateId"],
-    "deleteGate" => ["id"],
-    "createEnd" => ["title", "outcome" => " (done|rejected)", "x", "y"],
-    "updateEnd" => ["id", "title", "outcome"],
-    "deleteEnd" => ["id"],
-    "createLimit" => ["title", "target", "rounds", "seconds", "warnSeconds", "tokens", "whenSpent", "x", "y"],
-    "updateLimit" => ["id", "title", "target", "rounds", "seconds", "warnSeconds", "tokens", "whenSpent"],
-    "deleteLimit" => ["id"],
-    "restoreNode" => ["inputCard" => "{}", "formation" => "{}", "gate" => "{}", "end" => "{}", "limit" => "{} (choose one node)", "connections" => "[]", "index", "x", "y"],
-}
-
-pub fn decode(body: &Value) -> Result<Patch, String> {
+/// Accept the historic single-operation form, and the revision-checked batch form.
+pub fn decode_request(body: &Value) -> Result<EditRequest, String> {
     let map = body.as_object().ok_or("expected an object")?;
-    let ops: Vec<_> = map
-        .keys()
-        .filter(|k| !PATCH_METADATA.contains(&k.as_str()))
-        .collect();
-    if ops.len() != 1 {
-        let names: Vec<_> = ops.iter().map(|x| x.as_str()).collect();
-        let joined = match names.as_slice() {
-            [] => "none".to_owned(),
-            [one] => (*one).to_owned(),
-            [a, b] => format!("{a} and {b}"),
-            many => format!(
-                "{} and {}",
-                many[..many.len() - 1].join(", "),
-                many[many.len() - 1]
-            ),
-        };
-        return Err(format!(
-            "a mission patch names one operation, and this one names {joined}: send them one at a time"
-        ));
+    if map.contains_key("changes") || map.contains_key("rev") {
+        #[derive(Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct Batch {
+            rev: i64,
+            changes: Vec<Value>,
+        }
+        let Batch { rev, changes } =
+            serde_json::from_value(body.clone()).map_err(|error| error.to_string())?;
+        if changes.is_empty() {
+            return Err("changes must contain at least one operation".into());
+        }
+        let changes = changes
+            .iter()
+            .enumerate()
+            .map(|(index, change)| {
+                decode(change).map_err(|error| format!("change at index {index}: {error}"))
+            })
+            .collect::<Result<_, _>>()?;
+        return Ok(EditRequest {
+            rev: Some(rev),
+            updated_by: String::new(),
+            changes: Changes::Batch(changes),
+        });
     }
-    let op = ops[0].as_str();
-    let v = &body[op];
-    let Some(accepted) = accepted_fields(op) else {
-        let known: Vec<_> = OPERATIONS.iter().map(|(name, _)| *name).collect();
-        return Err(format!(
-            "unknown operation {op}; the operations are {}",
-            known.join(", ")
-        ));
+
+    #[derive(Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct Metadata {
+        expected_rev: Option<i64>,
+        updated_by: Option<String>,
+    }
+    fn metadata(map: &mut Map<String, Value>) -> Result<Metadata, String> {
+        let metadata = ["expectedRev", "updatedBy"]
+            .into_iter()
+            .filter_map(|key| map.remove(key).map(|value| (key.into(), value)))
+            .collect();
+        serde_json::from_value(Value::Object(metadata)).map_err(|error| error.to_string())
+    }
+
+    let mut change = map.clone();
+    let outer = metadata(&mut change)?;
+    let inner = if change.len() == 1 {
+        change
+            .values_mut()
+            .next()
+            .and_then(Value::as_object_mut)
+            .map(metadata)
+            .transpose()?
+    } else {
+        None
     };
-    if !accepted.is_empty() {
-        validate_fields(op, v, accepted)?;
-    } else if let Some(key) = v.as_object().and_then(|fields| fields.keys().next()) {
-        return Err(unknown_field(op, key, "none (expects a string)"));
-    }
-    let id = || s(v, "id");
-    let fid = || s(v, "formationId");
-    let xy = || (n(v, "x"), n(v, "y"));
-    Ok(match op {
-        "title" => Patch::Title(v.as_str().ok_or("title must be a string")?.into()),
-        "prefix" => Patch::Prefix(v.as_str().ok_or("prefix must be a string")?.into()),
-        "createInputCard" => {
-            let (x, y) = xy();
-            Patch::CreateInputCard {
-                title: s(v, "title"),
-                goal: s(v, "goal"),
-                files: strings(v, "files")?,
-                human_channel: s(v, "humanChannel"),
-                x,
-                y,
-            }
-        }
-        "updateInputCard" => Patch::UpdateInputCard(InputCardUpdate {
-            id: id(),
-            title: o(v, "title"),
-            goal: o(v, "goal"),
-            files: v.get("files").map(|_| parse(v, "files")).transpose()?,
-            input_hint: o(v, "inputHint"),
-            human_channel: o(v, "humanChannel"),
-            inputs: v.get("inputs").map(|_| parse(v, "inputs")).transpose()?,
-            outputs: v.get("outputs").map(|_| parse(v, "outputs")).transpose()?,
-        }),
-        "deleteInputCard" => Patch::DeleteInputCard { id: id() },
-        "createFormation" => {
-            let (x, y) = xy();
-            Patch::CreateFormation {
-                kind: s(v, "type"),
-                title: s(v, "title"),
-                x,
-                y,
-            }
-        }
-        "deleteFormation" => Patch::DeleteFormation { id: id() },
-        "editFormation" => Patch::EditFormation {
-            id: id(),
-            title: s(v, "title"),
-            brief: parse(v, "brief")?,
-        },
-        "updateFormation" => Patch::UpdateFormation {
-            id: id(),
-            title: o(v, "title"),
-            device: o(v, "device"),
-            fresh: v["fresh"].as_bool(),
-        },
-        "setFormationType" => Patch::SetFormationType {
-            id: id(),
-            kind: s(v, "type"),
-            keep_slot_id: s(v, "keepSlotId"),
-            slots: v.get("slots").map(|_| parse(v, "slots")).transpose()?,
-        },
-        "assignSlot" => Patch::AssignSlot {
-            formation_id: fid(),
-            slot_id: s(v, "slotId"),
-            agent_id: s(v, "agentId"),
-            harness: s(v, "harness"),
-            model: s(v, "model"),
-            effort: s(v, "effort"),
-        },
-        "nameAgent" => Patch::NameAgent {
-            formation_id: fid(),
-            slot_id: s(v, "slotId"),
-            agent: s(v, "agent"),
-        },
-        "swapSlots" => Patch::SwapSlots {
-            from_formation: s(v, "fromFormation"),
-            from_slot: s(v, "fromSlot"),
-            to_formation: s(v, "toFormation"),
-            to_slot: s(v, "toSlot"),
-        },
-        "makeController" => Patch::MakeController {
-            formation_id: fid(),
-            slot_id: s(v, "slotId"),
-        },
-        "setBrief" => Patch::SetBrief {
-            formation_id: fid(),
-            brief: Brief {
-                repository: s(v, "repository"),
-                goal: s(v, "goal"),
-                work: s(v, "work"),
-                files: strings(v, "files")?,
-                links: strings(v, "links")?,
-            },
-        },
-        "clearBrief" => Patch::ClearBrief {
-            formation_id: fid(),
-        },
-        "addPort" => Patch::AddPort {
-            formation_id: fid(),
-            direction: s(v, "direction"),
-            label: s(v, "label"),
-            kind: s(v, "kind"),
-        },
-        "updatePort" => Patch::UpdatePort {
-            formation_id: fid(),
-            port_id: s(v, "portId"),
-            label: o(v, "label"),
-            kind: o(v, "kind"),
-        },
-        "removePort" => Patch::RemovePort {
-            formation_id: fid(),
-            port_id: s(v, "portId"),
-        },
-        "restorePort" => Patch::RestorePort {
-            formation_id: fid(),
-            direction: s(v, "direction"),
-            port: parse(v, "port")?,
-            index: v["index"].as_u64().map(|n| n as usize),
-            connections: strings_or(v, "connections")?,
-        },
-        "wireConnection" => Patch::WireConnection {
-            id: id(),
-            from: s(v, "from"),
-            to: s(v, "to"),
-            join_if_occupied: b(v, "joinIfOccupied"),
-        },
-        "unwireConnection" => Patch::UnwireConnection {
-            from: s(v, "from"),
-            to: s(v, "to"),
-        },
-        "rewireConnection" => Patch::RewireConnection {
-            from: s(v, "from"),
-            previous_to: s(v, "previousTo"),
-            to: s(v, "to"),
-            join_if_occupied: b(v, "joinIfOccupied"),
-            remove_previous_input: b(v, "removePreviousInput"),
-        },
-        "createGate" => {
-            let (x, y) = xy();
-            let mut kinds = strings(v, "kinds")?;
-            if kinds.is_empty() {
-                kinds.push("human".into());
-            }
-            Patch::CreateGate {
-                title: s(v, "title"),
-                kinds,
-                criterion: s(v, "criterion"),
-                check: s(v, "check"),
-                check_version: s(v, "checkVersion"),
-                check_value: s(v, "checkValue"),
-                files: strings(v, "files")?,
-                x,
-                y,
-            }
-        }
-        "updateGate" => Patch::UpdateGate(GateUpdate {
-            id: id(),
-            title: o(v, "title"),
-            kinds: v.get("kinds").map(|_| parse(v, "kinds")).transpose()?,
-            criterion: o(v, "criterion"),
-            check: o(v, "check"),
-            check_version: o(v, "checkVersion"),
-            check_value: o(v, "checkValue"),
-            files: v.get("files").map(|_| parse(v, "files")).transpose()?,
-        }),
-        "deleteGate" => Patch::DeleteGate { id: id() },
-        "setGateJudge" => Patch::SetGateJudge {
-            gate_id: s(v, "gateId"),
-            chain: strings(v, "chain")?,
-        },
-        "detachGateJudge" => Patch::DetachGateJudge {
-            gate_id: s(v, "gateId"),
-        },
-        "createEnd" => {
-            let (x, y) = xy();
-            Patch::CreateEnd {
-                title: s(v, "title"),
-                outcome: s(v, "outcome"),
-                x,
-                y,
-            }
-        }
-        "updateEnd" => Patch::UpdateEnd(EndUpdate {
-            id: id(),
-            title: o(v, "title"),
-            outcome: o(v, "outcome"),
-        }),
-        "deleteEnd" => Patch::DeleteEnd { id: id() },
-        "createLimit" => {
-            let (x, y) = xy();
-            Patch::CreateLimit {
-                limit: Limit {
-                    id: String::new(),
-                    title: s(v, "title"),
-                    target: s(v, "target"),
-                    rounds: v["rounds"].as_i64(),
-                    seconds: v["seconds"].as_i64(),
-                    warn_seconds: v["warnSeconds"].as_i64(),
-                    tokens: v["tokens"].as_i64(),
-                    when_spent: s(v, "whenSpent"),
-                },
-                x,
-                y,
-            }
-        }
-        "updateLimit" => Patch::UpdateLimit(LimitUpdate {
-            id: id(),
-            title: o(v, "title"),
-            target: o(v, "target"),
-            rounds: v["rounds"].as_i64(),
-            seconds: v["seconds"].as_i64(),
-            warn_seconds: v["warnSeconds"].as_i64(),
-            tokens: v["tokens"].as_i64(),
-            when_spent: o(v, "whenSpent"),
-        }),
-        "deleteLimit" => Patch::DeleteLimit { id: id() },
-        "restoreNode" => {
-            if ["inputCard", "formation", "gate", "end", "limit"]
-                .iter()
-                .filter(|key| v.get(**key).is_some_and(|n| !n.is_null()))
-                .count()
-                != 1
-            {
-                return Err("restoreNode requires exactly one node".into());
-            }
-            let node = if v.get("inputCard").is_some_and(|n| !n.is_null()) {
-                RestoredNode::InputCard(parse(v, "inputCard")?)
-            } else if v.get("formation").is_some_and(|n| !n.is_null()) {
-                let mut formation = v["formation"].clone();
-                let fields = formation
-                    .as_object_mut()
-                    .ok_or("formation must be an object")?;
-                for (from, to) in [
-                    ("inputs", "input"),
-                    ("outputs", "output"),
-                    ("slots", "slot"),
-                ] {
-                    if let Some(value) = fields.remove(from) {
-                        fields.insert(to.into(), value);
-                    }
-                }
-                RestoredNode::Formation(
-                    serde_json::from_value(formation).map_err(|e| format!("formation: {e}"))?,
-                )
-            } else if v.get("gate").is_some_and(|n| !n.is_null()) {
-                RestoredNode::Gate(parse(v, "gate")?)
-            } else if v.get("end").is_some_and(|n| !n.is_null()) {
-                RestoredNode::End(parse(v, "end")?)
-            } else if v.get("limit").is_some_and(|n| !n.is_null()) {
-                RestoredNode::Limit(parse(v, "limit")?)
-            } else {
-                return Err("restoreNode requires a node".into());
-            };
-            let (x, y) = xy();
-            Patch::RestoreNode {
-                node,
-                connections: strings_or(v, "connections")?,
-                index: v["index"].as_u64().map(|n| n as usize),
-                x,
-                y,
-            }
-        }
-        _ => unreachable!(),
+    let updated_by = outer.updated_by.filter(|actor| !actor.is_empty());
+    Ok(EditRequest {
+        rev: outer
+            .expected_rev
+            .or_else(|| inner.as_ref().and_then(|inner| inner.expected_rev)),
+        updated_by: updated_by
+            .or_else(|| inner.and_then(|inner| inner.updated_by))
+            .unwrap_or_default(),
+        changes: Changes::Single(Box::new(decode(&Value::Object(change))?)),
     })
 }
-fn strings_or<T: DeserializeOwned>(v: &Value, k: &str) -> Result<Vec<T>, String> {
-    if v.get(k).is_none() {
-        Ok(Vec::new())
-    } else {
-        parse(v, k)
+
+/// Deserialize one operation, explaining an unknown field with the same schema as help.
+pub fn decode(body: &Value) -> Result<MissionChange, String> {
+    serde_json::from_value(body.clone()).map_err(|error| {
+        let Some(map) = body.as_object() else {
+            return "expected an object".into();
+        };
+        if map.len() != 1 {
+            let names: Vec<_> = map.keys().map(String::as_str).collect();
+            let names = if names.is_empty() { "none".into() } else { names.join(", ") };
+            return format!("a mission patch names one operation, and this one names {names}: send them one at a time");
+        }
+        let (name, value) = map.iter().next().expect("one operation");
+        let Some(operation) = operations().iter().find(|operation| operation.name == name) else {
+            let known: Vec<_> = operations().iter().map(|operation| operation.name).collect();
+            return format!("unknown operation {name}; the operations are {}", known.join(", "));
+        };
+        if let Some(fields) = value.as_object()
+            && let Some(field) = fields.keys().find(|field| !operation.fields.contains(&field.as_str()))
+        {
+            let accepted = if operation.fields.is_empty() {
+                "none (expects a string)".into()
+            } else {
+                operation.fields.join(", ")
+            };
+            return format!("{name}: unknown field {field}; accepted fields: {accepted}");
+        }
+        format!("{name}: {error}")
+    })
+}
+
+pub fn operation_help() -> String {
+    operations()
+        .iter()
+        .map(|operation| {
+            if operation.fields.is_empty() {
+                format!("{} <string>", operation.name)
+            } else {
+                format!("{} {{{}}}", operation.name, operation.field_help)
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("; ")
+}
+
+struct Operation {
+    name: &'static str,
+    fields: Vec<&'static str>,
+    field_help: String,
+}
+
+fn operations() -> &'static [Operation] {
+    static SCHEMA: OnceLock<Value> = OnceLock::new();
+    static HELP: OnceLock<Vec<Operation>> = OnceLock::new();
+    HELP.get_or_init(|| {
+        let root = SCHEMA.get_or_init(|| schemars::schema_for!(MissionChange).to_value());
+        root["oneOf"]
+            .as_array()
+            .expect("externally tagged enum schema")
+            .iter()
+            .map(|variant| {
+                let (name, schema) = variant["properties"]
+                    .as_object()
+                    .expect("operation tag")
+                    .iter()
+                    .next()
+                    .expect("single operation tag");
+                let mut fields = Vec::new();
+                schema_fields(root, schema, &mut fields);
+                let field_help = fields
+                    .iter()
+                    .map(|(field, schema)| field_help(root, field, schema))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                Operation {
+                    name,
+                    fields: fields.into_iter().map(|(field, _)| field).collect(),
+                    field_help,
+                }
+            })
+            .collect()
+    })
+}
+
+fn referenced<'a>(root: &'a Value, schema: &'a Value) -> &'a Value {
+    match schema["$ref"].as_str() {
+        Some(reference) => root
+            .pointer(reference.strip_prefix('#').expect("local schema reference"))
+            .expect("operation schema exists"),
+        None => schema,
     }
+}
+
+fn schema_fields<'a>(root: &'a Value, schema: &'a Value, fields: &mut Vec<(&'a str, &'a Value)>) {
+    let schema = referenced(root, schema);
+    if let Some(properties) = schema["properties"].as_object() {
+        for (field, schema) in properties {
+            if !fields.iter().any(|(name, _)| name == field) {
+                fields.push((field, schema));
+            }
+        }
+    }
+    for keyword in ["allOf", "oneOf", "anyOf"] {
+        if let Some(parts) = schema[keyword].as_array() {
+            for part in parts {
+                schema_fields(root, part, fields);
+            }
+        }
+    }
+}
+
+fn field_help(root: &Value, field: &str, schema: &Value) -> String {
+    let schema = referenced(root, schema);
+    if schema.get("items").is_some() {
+        return format!("{field}[]");
+    }
+    let mut fields = Vec::new();
+    schema_fields(root, schema, &mut fields);
+    if fields.is_empty() {
+        return field.to_owned();
+    }
+    let fields = fields
+        .iter()
+        .map(|(name, schema)| field_help(root, name, schema))
+        .collect::<Vec<_>>()
+        .join(", ");
+    format!("{field}{{{fields}}}")
 }
 
 /// Keep duplicate operation keys visible: a JSON object naming the same edit
@@ -506,12 +250,13 @@ mod tests {
     use serde_json::json;
     #[test]
     fn every_operation_described_is_one_decode_takes() {
-        for (op, _) in OPERATIONS {
-            let value = match *op {
+        for operation in operations() {
+            let op = operation.name;
+            let value = match op {
                 "title" | "prefix" => json!("x"),
                 _ => json!({}),
             };
-            if let Err(error) = decode(&json!({ *op: value })) {
+            if let Err(error) = decode(&json!({ op: value })) {
                 assert!(!error.contains("unknown operation"), "{op}: {error}");
             }
         }
@@ -523,13 +268,14 @@ mod tests {
     }
     #[test]
     fn every_operation_rejects_unknown_fields_even_if_null() {
-        for &(op, _) in OPERATIONS {
+        for operation in operations() {
+            let op = operation.name;
             let error = decode(&json!({op: {"unexpected": null}})).unwrap_err();
             assert!(
                 error.contains(&format!("{op}: unknown field unexpected")),
                 "{error}"
             );
-            let fields = accepted_fields(op).unwrap();
+            let fields = &operation.fields;
             let expected = if fields.is_empty() {
                 "none (expects a string)".to_owned()
             } else {
@@ -559,7 +305,7 @@ mod tests {
     }
     #[test]
     fn gate_without_kinds_defaults_to_human() {
-        let Patch::CreateGate { kinds, .. } =
+        let MissionChange::CreateGate { kinds, .. } =
             decode(&json!({"createGate":{"title":"Signoff"}})).unwrap()
         else {
             panic!("expected gate")
@@ -568,9 +314,9 @@ mod tests {
     }
     #[test]
     fn restore_formation_reads_the_public_json_shape() {
-        let body = json!({"restoreNode":{"formation":{"id":"f","type":"solo","title":"Work","inputs":[{"id":"in","label":"Input"}],"outputs":[],"slots":[{"id":"s","label":"Agent","controller":false}]}}});
-        let Patch::RestoreNode {
-            node: RestoredNode::Formation(formation),
+        let body = json!({"restoreNode":{"gate":null,"formation":{"id":"f","type":"solo","title":"Work","inputs":[{"id":"in","label":"Input"}],"outputs":[],"slots":[{"id":"s","label":"Agent","controller":false}]}}});
+        let MissionChange::RestoreNode {
+            node: crate::RestoredNode::Formation(formation),
             ..
         } = decode(&body).unwrap()
         else {

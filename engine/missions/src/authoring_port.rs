@@ -1,6 +1,6 @@
 //! Edit formation ports and restore their wire identities on undo.
 use crate::Error;
-use ahjo_mission_model::{Mission, Patch, Port};
+use ahjo_mission_model::{Mission, MissionChange, Port};
 use toml_edit::{DocumentMut, Item, Value, value};
 fn missing() -> Error {
     Error::new("not_found", "formation or port")
@@ -50,9 +50,13 @@ fn insert(
     }
     Ok(())
 }
-pub(crate) fn apply(doc: &mut DocumentMut, mission: &Mission, patch: Patch) -> Result<bool, Error> {
+pub(crate) fn apply(
+    doc: &mut DocumentMut,
+    mission: &Mission,
+    patch: MissionChange,
+) -> Result<bool, Error> {
     match patch {
-        Patch::AddPort {
+        MissionChange::AddPort {
             formation_id,
             direction: dir,
             mut label,
@@ -72,7 +76,7 @@ pub(crate) fn apply(doc: &mut DocumentMut, mission: &Mission, patch: Patch) -> R
             };
             insert(doc, &formation_id, &dir, &port, None)?;
         }
-        Patch::UpdatePort {
+        MissionChange::UpdatePort {
             formation_id,
             port_id,
             label,
@@ -114,7 +118,7 @@ pub(crate) fn apply(doc: &mut DocumentMut, mission: &Mission, patch: Patch) -> R
                 crate::authoring_staff::set(port, "kind", &kind);
             }
         }
-        Patch::RemovePort {
+        MissionChange::RemovePort {
             formation_id,
             port_id,
         } => {
@@ -170,7 +174,7 @@ pub(crate) fn apply(doc: &mut DocumentMut, mission: &Mission, patch: Patch) -> R
                 }
             }
         }
-        Patch::RestorePort {
+        MissionChange::RestorePort {
             formation_id,
             direction: dir,
             mut port,
@@ -210,7 +214,7 @@ pub(crate) fn apply(doc: &mut DocumentMut, mission: &Mission, patch: Patch) -> R
                 crate::authoring_wire::apply(
                     doc,
                     &current,
-                    Patch::WireConnection {
+                    MissionChange::WireConnection {
                         id: connection.id,
                         from: connection.from,
                         to: connection.to,

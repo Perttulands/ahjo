@@ -79,8 +79,8 @@ fn patch_and_frames_round_trip() {
     )
     .unwrap();
     assert!(matches!(
-        patch::decode(&patch.0).unwrap(),
-        Patch::CreateGate { .. }
+        patch::decode_request(&patch.0).unwrap().changes,
+        patch::Changes::Single(change) if matches!(*change, MissionChange::CreateGate { .. })
     ));
     round::<patch::UniquePatch>(serde_json::to_value(patch).unwrap());
     assert!(

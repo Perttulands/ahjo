@@ -1,5 +1,5 @@
 use ahjo_mission_engine::Store;
-use ahjo_mission_model::{Patch, Precondition};
+use ahjo_mission_model::{MissionChange, Precondition};
 use std::sync::atomic::{AtomicU64, Ordering};
 static NEXT: AtomicU64 = AtomicU64::new(0);
 struct Scratch(std::path::PathBuf);
@@ -34,7 +34,7 @@ fn revision_and_etag_fence_changes_and_noop() {
         .patch(
             "work",
             pre(&created),
-            Patch::Title("Work".into()),
+            MissionChange::Title("Work".into()),
             "human:ui",
         )
         .unwrap();
@@ -44,7 +44,7 @@ fn revision_and_etag_fence_changes_and_noop() {
         .patch(
             "work",
             pre(&created),
-            Patch::Title("Next".into()),
+            MissionChange::Title("Next".into()),
             "human:ui",
         )
         .unwrap();
@@ -54,7 +54,7 @@ fn revision_and_etag_fence_changes_and_noop() {
             .patch(
                 "work",
                 pre(&created),
-                Patch::Title("Stale".into()),
+                MissionChange::Title("Stale".into()),
                 "human:ui"
             )
             .unwrap_err()
@@ -89,7 +89,7 @@ fn edit_preserves_comments_and_the_mission_symlink() {
         .patch(
             "work",
             pre(&before),
-            Patch::Title("Next".into()),
+            MissionChange::Title("Next".into()),
             "human:ui",
         )
         .unwrap();
@@ -114,7 +114,7 @@ fn create_nodes_with_default_shapes() {
         .patch(
             "work",
             pre(&edit),
-            Patch::CreateInputCard {
+            MissionChange::CreateInputCard {
                 title: "Input".into(),
                 goal: String::new(),
                 files: vec![],
@@ -129,7 +129,7 @@ fn create_nodes_with_default_shapes() {
         .patch(
             "work",
             pre(&edit),
-            Patch::CreateFormation {
+            MissionChange::CreateFormation {
                 x: 30,
                 y: 40,
                 kind: "orchestrated".into(),
@@ -142,7 +142,7 @@ fn create_nodes_with_default_shapes() {
         .patch(
             "work",
             pre(&edit),
-            Patch::CreateGate {
+            MissionChange::CreateGate {
                 title: "Review".into(),
                 x: 50,
                 y: 60,
@@ -160,7 +160,7 @@ fn create_nodes_with_default_shapes() {
         .patch(
             "work",
             pre(&edit),
-            Patch::CreateEnd {
+            MissionChange::CreateEnd {
                 title: String::new(),
                 x: 70,
                 y: 80,
@@ -179,7 +179,7 @@ fn create_nodes_with_default_shapes() {
         .patch(
             "work",
             pre(&edit),
-            Patch::DeleteFormation {
+            MissionChange::DeleteFormation {
                 id: formation_id.clone(),
             },
             "human:ui",
@@ -206,7 +206,7 @@ fn delete_archives_mission_layout_and_its_own_notes() {
         .patch(
             "work",
             pre(&edit),
-            Patch::CreateEnd {
+            MissionChange::CreateEnd {
                 title: String::new(),
                 outcome: String::new(),
                 x: 1,
@@ -264,7 +264,7 @@ fn join_creates_a_new_input_and_refusals_do_not_edit() {
             .patch(
                 "join",
                 pre(&edit),
-                Patch::CreateFormation {
+                MissionChange::CreateFormation {
                     kind: "solo".into(),
                     title: name.into(),
                     x: 0,
@@ -290,7 +290,7 @@ fn join_creates_a_new_input_and_refusals_do_not_edit() {
         .patch(
             "join",
             pre(&edit),
-            Patch::WireConnection {
+            MissionChange::WireConnection {
                 id: String::new(),
                 from: first.clone(),
                 to: to.clone(),
@@ -304,7 +304,7 @@ fn join_creates_a_new_input_and_refusals_do_not_edit() {
         .patch(
             "join",
             pre(&edit),
-            Patch::WireConnection {
+            MissionChange::WireConnection {
                 id: String::new(),
                 from: second.clone(),
                 to: to.clone(),
@@ -319,7 +319,7 @@ fn join_creates_a_new_input_and_refusals_do_not_edit() {
         .patch(
             "join",
             pre(&edit),
-            Patch::WireConnection {
+            MissionChange::WireConnection {
                 id: String::new(),
                 from: second,
                 to: to.clone(),
@@ -334,7 +334,7 @@ fn join_creates_a_new_input_and_refusals_do_not_edit() {
         .patch(
             "join",
             pre(&edit),
-            Patch::UnwireConnection { from: first, to },
+            MissionChange::UnwireConnection { from: first, to },
             "",
         )
         .unwrap();
@@ -483,7 +483,7 @@ fn type_changes_require_an_explicit_choice_before_dropping_staffed_slots() {
         .patch(
             "work",
             pre(&edit),
-            Patch::CreateFormation {
+            MissionChange::CreateFormation {
                 kind: "orchestrated".into(),
                 title: "Team".into(),
                 x: 0,
@@ -502,7 +502,7 @@ fn type_changes_require_an_explicit_choice_before_dropping_staffed_slots() {
         .patch(
             "work",
             pre(&edit),
-            Patch::SetFormationType {
+            MissionChange::SetFormationType {
                 id: formation.id.clone(),
                 kind: "orchestrated".into(),
                 keep_slot_id: String::new(),
@@ -515,7 +515,7 @@ fn type_changes_require_an_explicit_choice_before_dropping_staffed_slots() {
         .patch(
             "work",
             pre(&edit),
-            Patch::SetFormationType {
+            MissionChange::SetFormationType {
                 id: formation.id.clone(),
                 kind: "solo".into(),
                 keep_slot_id: String::new(),
@@ -529,7 +529,7 @@ fn type_changes_require_an_explicit_choice_before_dropping_staffed_slots() {
         .patch(
             "work",
             pre(&edit),
-            Patch::SetFormationType {
+            MissionChange::SetFormationType {
                 id: formation.id,
                 kind: "solo".into(),
                 keep_slot_id: slots[1].id.clone(),
@@ -550,7 +550,7 @@ fn staffing_is_validated_and_repeated_assignment_is_a_noop() {
         .patch(
             "work",
             pre(&edit),
-            Patch::CreateFormation {
+            MissionChange::CreateFormation {
                 kind: "solo".into(),
                 title: "Agent".into(),
                 x: 0,
@@ -561,7 +561,7 @@ fn staffing_is_validated_and_repeated_assignment_is_a_noop() {
         .unwrap();
     let formation = &edit.mission.formations[0];
     let (formation_id, slot_id) = (formation.id.clone(), formation.slots[0].id.clone());
-    let assignment = || Patch::AssignSlot {
+    let assignment = || MissionChange::AssignSlot {
         formation_id: formation_id.clone(),
         slot_id: slot_id.clone(),
         agent_id: "builder".into(),
@@ -577,7 +577,7 @@ fn staffing_is_validated_and_repeated_assignment_is_a_noop() {
         .patch(
             "work",
             pre(&edit),
-            Patch::AssignSlot {
+            MissionChange::AssignSlot {
                 formation_id,
                 slot_id,
                 agent_id: String::new(),
@@ -629,7 +629,7 @@ fn input_card_updates_validate_declarations_and_preserve_identity() {
         .patch(
             "work",
             pre(&edit),
-            Patch::CreateInputCard {
+            MissionChange::CreateInputCard {
                 title: "Input".into(),
                 goal: String::new(),
                 files: vec![],
@@ -661,7 +661,7 @@ fn input_card_updates_validate_declarations_and_preserve_identity() {
         .patch(
             "work",
             pre(&edit),
-            Patch::UpdateInputCard(update.clone()),
+            MissionChange::UpdateInputCard(update.clone()),
             "",
         )
         .unwrap();
@@ -669,7 +669,12 @@ fn input_card_updates_validate_declarations_and_preserve_identity() {
     assert_eq!(edit.mission.input_cards[0].inputs[0].kind, "text");
     assert_eq!(
         store
-            .patch("work", pre(&edit), Patch::UpdateInputCard(update), "")
+            .patch(
+                "work",
+                pre(&edit),
+                MissionChange::UpdateInputCard(update),
+                ""
+            )
             .unwrap()
             .etag,
         edit.etag
@@ -684,7 +689,12 @@ fn input_card_updates_validate_declarations_and_preserve_identity() {
     };
     assert_eq!(
         store
-            .patch("work", pre(&edit), Patch::UpdateInputCard(invalid), "")
+            .patch(
+                "work",
+                pre(&edit),
+                MissionChange::UpdateInputCard(invalid),
+                ""
+            )
             .unwrap_err()
             .code
             .as_str(),
@@ -703,7 +713,7 @@ fn deleted_node_and_port_restore_their_identities_and_wires() {
             .patch(
                 "work",
                 pre(&edit),
-                Patch::CreateFormation {
+                MissionChange::CreateFormation {
                     kind: "solo".into(),
                     title: title.into(),
                     x: 0,
@@ -721,7 +731,7 @@ fn deleted_node_and_port_restore_their_identities_and_wires() {
         .patch(
             "work",
             pre(&edit),
-            Patch::WireConnection {
+            MissionChange::WireConnection {
                 id: String::new(),
                 from: from.clone(),
                 to: to.clone(),
@@ -735,7 +745,7 @@ fn deleted_node_and_port_restore_their_identities_and_wires() {
         .patch(
             "work",
             pre(&edit),
-            Patch::RemovePort {
+            MissionChange::RemovePort {
                 formation_id: first.id.clone(),
                 port_id: first.outputs[0].id.clone(),
             },
@@ -747,7 +757,7 @@ fn deleted_node_and_port_restore_their_identities_and_wires() {
         .patch(
             "work",
             pre(&edit),
-            Patch::RestorePort {
+            MissionChange::RestorePort {
                 formation_id: first.id.clone(),
                 direction: "output".into(),
                 port: first.outputs[0].clone(),
@@ -762,7 +772,7 @@ fn deleted_node_and_port_restore_their_identities_and_wires() {
         .patch(
             "work",
             pre(&edit),
-            Patch::DeleteFormation {
+            MissionChange::DeleteFormation {
                 id: first.id.clone(),
             },
             "",
@@ -772,7 +782,7 @@ fn deleted_node_and_port_restore_their_identities_and_wires() {
         .patch(
             "work",
             pre(&edit),
-            Patch::RestoreNode {
+            MissionChange::RestoreNode {
                 node: RestoredNode::Formation(first.clone()),
                 connections: vec![wire.clone()],
                 index: Some(0),
@@ -788,7 +798,7 @@ fn deleted_node_and_port_restore_their_identities_and_wires() {
 
 #[test]
 fn judge_and_limit_edits_use_the_same_revision_path() {
-    use ahjo_mission_model::{GateUpdate, Limit, LimitUpdate};
+    use ahjo_mission_model::{GateUpdate, LimitUpdate};
     let dir = Scratch::new();
     let store = Store::new(&dir.0);
     let mut edit = store.create_mission("work", "Work", "").unwrap();
@@ -796,7 +806,7 @@ fn judge_and_limit_edits_use_the_same_revision_path() {
         .patch(
             "work",
             pre(&edit),
-            Patch::CreateFormation {
+            MissionChange::CreateFormation {
                 kind: "solo".into(),
                 title: "Judge".into(),
                 x: 0,
@@ -809,7 +819,7 @@ fn judge_and_limit_edits_use_the_same_revision_path() {
         .patch(
             "work",
             pre(&edit),
-            Patch::CreateGate {
+            MissionChange::CreateGate {
                 title: "Review".into(),
                 kinds: vec![],
                 criterion: String::new(),
@@ -829,7 +839,7 @@ fn judge_and_limit_edits_use_the_same_revision_path() {
         .patch(
             "work",
             pre(&edit),
-            Patch::SetGateJudge {
+            MissionChange::SetGateJudge {
                 gate_id: gate.clone(),
                 chain: vec![judge.clone()],
             },
@@ -841,7 +851,7 @@ fn judge_and_limit_edits_use_the_same_revision_path() {
         .patch(
             "work",
             pre(&edit),
-            Patch::SetGateJudge {
+            MissionChange::SetGateJudge {
                 gate_id: gate.clone(),
                 chain: vec![judge.clone()],
             },
@@ -853,7 +863,7 @@ fn judge_and_limit_edits_use_the_same_revision_path() {
         .patch(
             "work",
             pre(&edit),
-            Patch::DetachGateJudge {
+            MissionChange::DetachGateJudge {
                 gate_id: gate.clone(),
             },
             "",
@@ -865,7 +875,7 @@ fn judge_and_limit_edits_use_the_same_revision_path() {
         .patch(
             "work",
             pre(&edit),
-            Patch::UpdateGate(GateUpdate {
+            MissionChange::UpdateGate(GateUpdate {
                 id: gate,
                 criterion: Some("Review it".into()),
                 ..Default::default()
@@ -877,12 +887,14 @@ fn judge_and_limit_edits_use_the_same_revision_path() {
         .patch(
             "work",
             pre(&edit),
-            Patch::CreateLimit {
-                limit: Limit {
-                    target: judge,
-                    rounds: Some(3),
-                    ..Default::default()
-                },
+            MissionChange::CreateLimit {
+                title: String::new(),
+                target: judge,
+                rounds: Some(3),
+                seconds: None,
+                warn_seconds: None,
+                tokens: None,
+                when_spent: String::new(),
                 x: 0,
                 y: 0,
             },
@@ -894,7 +906,7 @@ fn judge_and_limit_edits_use_the_same_revision_path() {
         .patch(
             "work",
             pre(&edit),
-            Patch::UpdateLimit(LimitUpdate {
+            MissionChange::UpdateLimit(LimitUpdate {
                 id: limit,
                 rounds: Some(0),
                 ..Default::default()
@@ -910,21 +922,20 @@ fn concurrent_mission_edits_from_distinct_stores_do_not_both_win() {
     let dir = Scratch::new();
     let store = Store::new(&dir.0);
     let original = store.create_mission("work", "Work", "").unwrap();
-    let results =
-        std::thread::scope(|scope| {
-            let mut handles = Vec::new();
-            for title in ["One", "Two"] {
-                let store = Store::new(&dir.0);
-                let precondition = pre(&original);
-                handles.push(scope.spawn(move || {
-                    store.patch("work", precondition, Patch::Title(title.into()), "")
-                }));
-            }
-            handles
-                .into_iter()
-                .map(|h| h.join().unwrap())
-                .collect::<Vec<_>>()
-        });
+    let results = std::thread::scope(|scope| {
+        let mut handles = Vec::new();
+        for title in ["One", "Two"] {
+            let store = Store::new(&dir.0);
+            let precondition = pre(&original);
+            handles.push(scope.spawn(move || {
+                store.patch("work", precondition, MissionChange::Title(title.into()), "")
+            }));
+        }
+        handles
+            .into_iter()
+            .map(|h| h.join().unwrap())
+            .collect::<Vec<_>>()
+    });
     assert_eq!(results.iter().filter(|r| r.is_ok()).count(), 1);
     assert_eq!(
         results
@@ -954,7 +965,7 @@ fn node_create_does_not_publish_mission_if_layout_cannot_be_staged() {
     let result = store.patch(
         "work",
         pre(&before),
-        Patch::CreateEnd {
+        MissionChange::CreateEnd {
             title: String::new(),
             outcome: String::new(),
             x: 0,
@@ -977,7 +988,7 @@ fn removing_code_kind_clears_check_and_relative_files_are_refused() {
         .patch(
             "work",
             pre(&edit),
-            Patch::CreateGate {
+            MissionChange::CreateGate {
                 title: "Review".into(),
                 kinds: vec!["code".into()],
                 criterion: String::new(),
@@ -996,7 +1007,7 @@ fn removing_code_kind_clears_check_and_relative_files_are_refused() {
         .patch(
             "work",
             pre(&edit),
-            Patch::UpdateGate(GateUpdate {
+            MissionChange::UpdateGate(GateUpdate {
                 id: gate.clone(),
                 files: Some(vec!["relative.md".into()]),
                 ..Default::default()
@@ -1009,7 +1020,7 @@ fn removing_code_kind_clears_check_and_relative_files_are_refused() {
         .patch(
             "work",
             pre(&edit),
-            Patch::UpdateGate(GateUpdate {
+            MissionChange::UpdateGate(GateUpdate {
                 id: gate,
                 kinds: Some(vec!["human".into()]),
                 ..Default::default()
@@ -1030,7 +1041,7 @@ fn free_layout_position_accounts_for_saved_and_fallback_nodes() {
         .patch(
             "work",
             pre(&edit),
-            Patch::CreateFormation {
+            MissionChange::CreateFormation {
                 kind: "solo".into(),
                 title: "A".into(),
                 x: 112,
@@ -1054,7 +1065,7 @@ fn rewire_join_undo_removes_only_its_extra_port_and_keeps_wire_id() {
             .patch(
                 "work",
                 pre(&edit),
-                Patch::CreateFormation {
+                MissionChange::CreateFormation {
                     kind: "solo".into(),
                     title: title.into(),
                     x: 0,
@@ -1086,7 +1097,7 @@ fn rewire_join_undo_removes_only_its_extra_port_and_keeps_wire_id() {
         .patch(
             "work",
             pre(&edit),
-            Patch::WireConnection {
+            MissionChange::WireConnection {
                 id: String::new(),
                 from: a,
                 to: target.clone(),
@@ -1099,7 +1110,7 @@ fn rewire_join_undo_removes_only_its_extra_port_and_keeps_wire_id() {
         .patch(
             "work",
             pre(&edit),
-            Patch::WireConnection {
+            MissionChange::WireConnection {
                 id: String::new(),
                 from: b.clone(),
                 to: target,
@@ -1113,7 +1124,7 @@ fn rewire_join_undo_removes_only_its_extra_port_and_keeps_wire_id() {
         .patch(
             "work",
             pre(&edit),
-            Patch::RewireConnection {
+            MissionChange::RewireConnection {
                 from: b,
                 previous_to: joined.to.clone(),
                 to: other,
@@ -1138,7 +1149,7 @@ fn restored_node_allocates_new_wire_id_when_original_is_taken() {
             .patch(
                 "work",
                 pre(&edit),
-                Patch::CreateFormation {
+                MissionChange::CreateFormation {
                     kind: "solo".into(),
                     title: title.into(),
                     x: 0,
@@ -1166,7 +1177,7 @@ fn restored_node_allocates_new_wire_id_when_original_is_taken() {
         .patch(
             "work",
             pre(&edit),
-            Patch::WireConnection {
+            MissionChange::WireConnection {
                 id: "edge_original".into(),
                 from: b_out,
                 to: target_in,
@@ -1180,7 +1191,7 @@ fn restored_node_allocates_new_wire_id_when_original_is_taken() {
         .patch(
             "work",
             pre(&edit),
-            Patch::DeleteFormation { id: b.id.clone() },
+            MissionChange::DeleteFormation { id: b.id.clone() },
             "",
         )
         .unwrap();
@@ -1188,7 +1199,7 @@ fn restored_node_allocates_new_wire_id_when_original_is_taken() {
         .patch(
             "work",
             pre(&edit),
-            Patch::WireConnection {
+            MissionChange::WireConnection {
                 id: "edge_original".into(),
                 from: a_out,
                 to: other_in,
@@ -1201,7 +1212,7 @@ fn restored_node_allocates_new_wire_id_when_original_is_taken() {
         .patch(
             "work",
             pre(&edit),
-            Patch::RestoreNode {
+            MissionChange::RestoreNode {
                 node: RestoredNode::Formation(b.clone()),
                 connections: vec![original.clone()],
                 index: Some(1),
@@ -1264,7 +1275,7 @@ fn placement_has_no_ceiling_and_refuses_a_foreign_layout() {
 
 #[test]
 fn each_node_kind_round_trips_through_delete_and_restore() {
-    use ahjo_mission_model::{Limit, RestoredNode};
+    use ahjo_mission_model::RestoredNode;
     let dir = Scratch::new();
     let store = Store::new(&dir.0);
     let mut edit = store.create_mission("work", "Work", "").unwrap();
@@ -1272,7 +1283,7 @@ fn each_node_kind_round_trips_through_delete_and_restore() {
         .patch(
             "work",
             pre(&edit),
-            Patch::CreateInputCard {
+            MissionChange::CreateInputCard {
                 title: "Input".into(),
                 goal: "Do it".into(),
                 files: vec![],
@@ -1287,7 +1298,7 @@ fn each_node_kind_round_trips_through_delete_and_restore() {
         .patch(
             "work",
             pre(&edit),
-            Patch::CreateGate {
+            MissionChange::CreateGate {
                 title: "Check".into(),
                 kinds: vec!["human".into()],
                 criterion: "Confirm".into(),
@@ -1305,7 +1316,7 @@ fn each_node_kind_round_trips_through_delete_and_restore() {
         .patch(
             "work",
             pre(&edit),
-            Patch::CreateEnd {
+            MissionChange::CreateEnd {
                 title: "Done".into(),
                 outcome: "done".into(),
                 x: 0,
@@ -1318,13 +1329,14 @@ fn each_node_kind_round_trips_through_delete_and_restore() {
         .patch(
             "work",
             pre(&edit),
-            Patch::CreateLimit {
-                limit: Limit {
-                    title: "Cap".into(),
-                    target: edit.mission.input_cards[0].id.clone(),
-                    rounds: Some(3),
-                    ..Default::default()
-                },
+            MissionChange::CreateLimit {
+                title: "Cap".into(),
+                target: edit.mission.input_cards[0].id.clone(),
+                rounds: Some(3),
+                seconds: None,
+                warn_seconds: None,
+                tokens: None,
+                when_spent: String::new(),
                 x: 0,
                 y: 0,
             },
@@ -1339,10 +1351,10 @@ fn each_node_kind_round_trips_through_delete_and_restore() {
     ];
     for node in nodes {
         let delete = match &node {
-            RestoredNode::InputCard(n) => Patch::DeleteInputCard { id: n.id.clone() },
-            RestoredNode::Gate(n) => Patch::DeleteGate { id: n.id.clone() },
-            RestoredNode::End(n) => Patch::DeleteEnd { id: n.id.clone() },
-            RestoredNode::Limit(n) => Patch::DeleteLimit { id: n.id.clone() },
+            RestoredNode::InputCard(n) => MissionChange::DeleteInputCard { id: n.id.clone() },
+            RestoredNode::Gate(n) => MissionChange::DeleteGate { id: n.id.clone() },
+            RestoredNode::End(n) => MissionChange::DeleteEnd { id: n.id.clone() },
+            RestoredNode::Limit(n) => MissionChange::DeleteLimit { id: n.id.clone() },
             RestoredNode::Formation(_) => unreachable!(),
         };
         let before = edit.mission.clone();
@@ -1351,7 +1363,7 @@ fn each_node_kind_round_trips_through_delete_and_restore() {
             .patch(
                 "work",
                 pre(&edit),
-                Patch::RestoreNode {
+                MissionChange::RestoreNode {
                     node,
                     connections: vec![],
                     index: Some(0),
@@ -1387,7 +1399,7 @@ fn invalid_restore_leaves_mission_and_layout_untouched() {
         .patch(
             "work",
             pre(&edit),
-            Patch::RestoreNode {
+            MissionChange::RestoreNode {
                 node: RestoredNode::Formation(bad),
                 connections: vec![],
                 index: None,
@@ -1434,7 +1446,7 @@ fn gate_fail_feedback_can_share_an_occupied_input_without_a_join() {
         .patch(
             "work",
             pre(&edit),
-            Patch::CreateInputCard {
+            MissionChange::CreateInputCard {
                 title: "Input".into(),
                 goal: String::new(),
                 files: vec![],
@@ -1449,7 +1461,7 @@ fn gate_fail_feedback_can_share_an_occupied_input_without_a_join() {
         .patch(
             "work",
             pre(&edit),
-            Patch::CreateFormation {
+            MissionChange::CreateFormation {
                 kind: "solo".into(),
                 title: "Worker".into(),
                 x: 0,
@@ -1462,7 +1474,7 @@ fn gate_fail_feedback_can_share_an_occupied_input_without_a_join() {
         .patch(
             "work",
             pre(&edit),
-            Patch::CreateGate {
+            MissionChange::CreateGate {
                 title: "Review".into(),
                 kinds: vec!["human".into()],
                 criterion: String::new(),
@@ -1486,7 +1498,7 @@ fn gate_fail_feedback_can_share_an_occupied_input_without_a_join() {
         .patch(
             "work",
             pre(&edit),
-            Patch::WireConnection {
+            MissionChange::WireConnection {
                 id: String::new(),
                 from: input,
                 to: target.clone(),
@@ -1499,7 +1511,7 @@ fn gate_fail_feedback_can_share_an_occupied_input_without_a_join() {
         .patch(
             "work",
             pre(&edit),
-            Patch::WireConnection {
+            MissionChange::WireConnection {
                 id: String::new(),
                 from: fail,
                 to: target.clone(),
@@ -1519,7 +1531,7 @@ fn gate_fail_feedback_can_share_an_occupied_input_without_a_join() {
 
 #[test]
 fn repeated_brief_gate_and_controller_edits_save_nothing() {
-    use ahjo_mission_model::{Brief, GateUpdate};
+    use ahjo_mission_model::GateUpdate;
     let dir = Scratch::new();
     let store = Store::new(&dir.0);
     let mut edit = store.create_mission("work", "Work", "").unwrap();
@@ -1527,7 +1539,7 @@ fn repeated_brief_gate_and_controller_edits_save_nothing() {
         .patch(
             "work",
             pre(&edit),
-            Patch::CreateFormation {
+            MissionChange::CreateFormation {
                 kind: "orchestrated".into(),
                 title: "Team".into(),
                 x: 0,
@@ -1540,7 +1552,7 @@ fn repeated_brief_gate_and_controller_edits_save_nothing() {
         .patch(
             "work",
             pre(&edit),
-            Patch::CreateGate {
+            MissionChange::CreateGate {
                 title: "Review".into(),
                 kinds: vec!["code".into()],
                 criterion: "check".into(),
@@ -1558,21 +1570,19 @@ fn repeated_brief_gate_and_controller_edits_save_nothing() {
     let slot = edit.mission.formations[0].slots[1].id.clone();
     let gate = edit.mission.gates[0].id.clone();
     let patches = [
-        Patch::SetBrief {
+        MissionChange::SetBrief {
             formation_id: formation.clone(),
-            brief: Brief {
-                goal: "Do it".into(),
-                repository: String::new(),
-                work: "archon-demo".into(),
-                files: vec![],
-                links: vec![],
-            },
+            goal: "Do it".into(),
+            repository: String::new(),
+            work: "archon-demo".into(),
+            files: vec![],
+            links: vec![],
         },
-        Patch::MakeController {
+        MissionChange::MakeController {
             formation_id: formation,
             slot_id: slot,
         },
-        Patch::UpdateGate(GateUpdate {
+        MissionChange::UpdateGate(GateUpdate {
             id: gate,
             criterion: Some("approved".into()),
             ..Default::default()
@@ -1645,7 +1655,7 @@ fn restore_port_refusals_preserve_revision_and_etag() {
         .patch(
             "work",
             pre(&edit),
-            Patch::CreateFormation {
+            MissionChange::CreateFormation {
                 kind: "solo".into(),
                 title: "Work".into(),
                 x: 0,
@@ -1655,7 +1665,7 @@ fn restore_port_refusals_preserve_revision_and_etag() {
         )
         .unwrap();
     let formation = &edit.mission.formations[0];
-    let repeated = Patch::RestorePort {
+    let repeated = MissionChange::RestorePort {
         formation_id: formation.id.clone(),
         direction: "input".into(),
         port: formation.inputs[0].clone(),
@@ -1670,7 +1680,7 @@ fn restore_port_refusals_preserve_revision_and_etag() {
             .as_str(),
         "invalid_node_restore"
     );
-    let invalid = Patch::RestorePort {
+    let invalid = MissionChange::RestorePort {
         formation_id: formation.id.clone(),
         direction: "in".into(),
         port: formation.inputs[0].clone(),
@@ -1697,7 +1707,7 @@ fn formation_title_and_brief_commit_atomically() {
         .patch(
             "work",
             pre(&created),
-            Patch::CreateFormation {
+            MissionChange::CreateFormation {
                 kind: "solo".into(),
                 title: "Old".into(),
                 x: 0,
@@ -1717,7 +1727,7 @@ fn formation_title_and_brief_commit_atomically() {
             .patch(
                 "work",
                 pre(&created),
-                Patch::EditFormation {
+                MissionChange::EditFormation {
                     id: id.clone(),
                     title: "New".into(),
                     brief: Some(bad)
@@ -1735,7 +1745,7 @@ fn formation_title_and_brief_commit_atomically() {
         .patch(
             "work",
             pre(&created),
-            Patch::EditFormation {
+            MissionChange::EditFormation {
                 id,
                 title: "New".into(),
                 brief: Some(brief.clone()),
@@ -1758,7 +1768,7 @@ fn swapping_staffing_is_one_revision_and_reversible_across_formations() {
             .patch(
                 "work",
                 pre(&edit),
-                Patch::CreateFormation {
+                MissionChange::CreateFormation {
                     kind: "solo".into(),
                     title: title.into(),
                     x: 0,
@@ -1780,7 +1790,7 @@ fn swapping_staffing_is_one_revision_and_reversible_across_formations() {
         .patch(
             "work",
             pre(&edit),
-            Patch::AssignSlot {
+            MissionChange::AssignSlot {
                 formation_id: af.clone(),
                 slot_id: aslot.clone(),
                 agent_id: "builder".into(),
@@ -1791,7 +1801,7 @@ fn swapping_staffing_is_one_revision_and_reversible_across_formations() {
             "",
         )
         .unwrap();
-    let swap = || Patch::SwapSlots {
+    let swap = || MissionChange::SwapSlots {
         from_formation: af.clone(),
         from_slot: aslot.clone(),
         to_formation: bf.clone(),
@@ -1805,7 +1815,7 @@ fn swapping_staffing_is_one_revision_and_reversible_across_formations() {
     edit = store.patch("work", pre(&edit), swap(), "").unwrap();
     assert_eq!(edit.mission.formations[0].slots[0].agent_id, "builder");
     assert_eq!(edit.mission.formations[1].slots[0].agent_id, "");
-    let invalid = Patch::SwapSlots {
+    let invalid = MissionChange::SwapSlots {
         from_formation: af,
         from_slot: aslot,
         to_formation: bf,
@@ -1836,7 +1846,7 @@ fn deleted_mission_archives_can_be_listed_and_removed_without_touching_reused_sl
         .patch(
             "work",
             pre(&original),
-            Patch::CreateEnd {
+            MissionChange::CreateEnd {
                 title: "Done".into(),
                 outcome: "done".into(),
                 x: 10,

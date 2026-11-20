@@ -98,10 +98,10 @@ fn crates_of_areas() -> Vec<(String, PathBuf)> {
 }
 
 /// An engine crate that depends on nothing, or the mission model, which
-/// depends only on `core` and serde's data formats; either way a contract
+/// depends only on `core`, serde's data formats and their schemas. A contract
 /// using it still does no I/O.
 fn is_plain_engine_crate(path: &str) -> bool {
-    const MISSION_MODEL_USES: [&str; 4] = ["ahjo-core", "serde", "serde_json", "toml"];
+    const MISSION_MODEL_USES: [&str; 5] = ["ahjo-core", "schemars", "serde", "serde_json", "toml"];
     let dir = root().join(path);
     let manifest = manifest(&dir);
     let deps: Vec<&str> = manifest

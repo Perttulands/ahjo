@@ -1,6 +1,6 @@
 //! Wiring checks and the join-on-wire operation.
 use crate::Error;
-use ahjo_mission_model::{Connection, Mission, Patch, Port};
+use ahjo_mission_model::{Connection, Mission, MissionChange, Port};
 use toml_edit::{DocumentMut, Item};
 
 fn endpoint<'a>(mission: &Mission, endpoint: &'a str, output: bool) -> Option<&'a str> {
@@ -13,9 +13,13 @@ fn endpoint<'a>(mission: &Mission, endpoint: &'a str, output: bool) -> Option<&'
         .then(|| crate::graph::endpoint_node(endpoint))
 }
 
-pub(crate) fn apply(doc: &mut DocumentMut, mission: &Mission, patch: Patch) -> Result<(), Error> {
+pub(crate) fn apply(
+    doc: &mut DocumentMut,
+    mission: &Mission,
+    patch: MissionChange,
+) -> Result<(), Error> {
     match patch {
-        Patch::RewireConnection {
+        MissionChange::RewireConnection {
             from,
             previous_to,
             to,
@@ -34,7 +38,7 @@ pub(crate) fn apply(doc: &mut DocumentMut, mission: &Mission, patch: Patch) -> R
             apply(
                 doc,
                 mission,
-                Patch::UnwireConnection {
+                MissionChange::UnwireConnection {
                     from: from.clone(),
                     to: previous_to.clone(),
                 },
@@ -42,7 +46,7 @@ pub(crate) fn apply(doc: &mut DocumentMut, mission: &Mission, patch: Patch) -> R
             apply(
                 doc,
                 &remaining,
-                Patch::WireConnection {
+                MissionChange::WireConnection {
                     id: old.id.clone(),
                     from,
                     to: to.clone(),
@@ -111,7 +115,7 @@ pub(crate) fn apply(doc: &mut DocumentMut, mission: &Mission, patch: Patch) -> R
                 }
             }
         }
-        Patch::UnwireConnection { from, to } => {
+        MissionChange::UnwireConnection { from, to } => {
             let tables = doc
                 .get_mut("connection")
                 .and_then(Item::as_array_of_tables_mut)
@@ -125,7 +129,7 @@ pub(crate) fn apply(doc: &mut DocumentMut, mission: &Mission, patch: Patch) -> R
                 .ok_or_else(|| Error::new("not_found", "connection"))?;
             tables.remove(index);
         }
-        Patch::WireConnection {
+        MissionChange::WireConnection {
             mut id,
             from,
             mut to,

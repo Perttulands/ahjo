@@ -1,11 +1,10 @@
 //! Remove a node, its wires and dependent Limit cards as one edit.
-use crate::{Error, Store};
-use ahjo_mission_model::{Edit, Patch};
+use crate::Error;
+use ahjo_mission_model::{Mission, MissionChange};
 use std::collections::HashSet;
-use std::path::Path;
 use toml_edit::DocumentMut;
 
-fn remove(doc: &mut DocumentMut, key: &str, ids: &HashSet<String>) -> bool {
+pub(crate) fn remove(doc: &mut DocumentMut, key: &str, ids: &HashSet<String>) -> bool {
     let Some(tables) = doc
         .get_mut(key)
         .and_then(|item| item.as_array_of_tables_mut())
@@ -30,36 +29,32 @@ fn remove(doc: &mut DocumentMut, key: &str, ids: &HashSet<String>) -> bool {
 }
 
 pub(crate) fn apply(
-    store: &Store,
-    slug: &str,
-    target: &Path,
-    mut doc: DocumentMut,
-    current: Edit,
-    patch: Patch,
-    actor: &str,
-) -> Result<Edit, Error> {
+    doc: &mut DocumentMut,
+    mission: &Mission,
+    patch: MissionChange,
+) -> Result<HashSet<String>, Error> {
     let (key, id, remove_limits) = match patch {
-        Patch::DeleteInputCard { id } => ("inputCard", id, false),
-        Patch::DeleteFormation { id } => ("formation", id, true),
-        Patch::DeleteGate { id } => ("gate", id, false),
-        Patch::DeleteEnd { id } => ("end", id, false),
-        Patch::DeleteLimit { id } => ("limit", id, false),
+        MissionChange::DeleteInputCard { id } => ("inputCard", id, false),
+        MissionChange::DeleteFormation { id } => ("formation", id, true),
+        MissionChange::DeleteGate { id } => ("gate", id, false),
+        MissionChange::DeleteEnd { id } => ("end", id, false),
+        MissionChange::DeleteLimit { id } => ("limit", id, false),
         _ => unreachable!(),
     };
     let mut ids = HashSet::from([id.clone()]);
-    if !remove(&mut doc, key, &ids) {
+    if !remove(doc, key, &ids) {
         return Err(Error::new("not_found", format!("node {id:?}")));
     }
     if remove_limits {
-        for limit in &current.mission.limits {
+        for limit in &mission.limits {
             if limit.target == id {
                 ids.insert(limit.id.clone());
             }
         }
-        remove(&mut doc, "limit", &ids);
+        remove(doc, "limit", &ids);
     }
     let mut wires = HashSet::new();
-    for wire in &current.mission.connections {
+    for wire in &mission.connections {
         if [&wire.from, &wire.to]
             .iter()
             .any(|endpoint| ids.contains(endpoint.split(':').next().unwrap_or("")))
@@ -67,65 +62,6 @@ pub(crate) fn apply(
             wires.insert(wire.id.clone());
         }
     }
-    remove(&mut doc, "connection", &wires);
-    crate::write::set(
-        doc.as_table_mut(),
-        "rev",
-        toml_edit::value(current.mission.rev + 1),
-    );
-    // A change by someone unnamed is not credited to whoever changed it last.
-    if actor.is_empty() {
-        doc.as_table_mut().remove("updatedBy");
-    } else {
-        crate::write::set(doc.as_table_mut(), "updatedBy", toml_edit::value(actor));
-    }
-    crate::write::set(
-        doc.as_table_mut(),
-        "updatedAt",
-        toml_edit::value(crate::authoring::now()?),
-    );
-    let raw = doc.to_string();
-    let updated = crate::authoring::edit(&raw)?;
-    let layout_path = store
-        .root()
-        .join("layout")
-        .join(format!("{slug}.layout.toml"));
-    let layout = match crate::links::read_definition(&layout_path) {
-        Ok(raw) => {
-            let old = ahjo_mission_model::Layout::parse(&raw)?;
-            if old.mission_id != updated.mission.id {
-                return Err(Error::new("conflict", "layout belongs to another mission"));
-            }
-            let mut doc: DocumentMut = raw.parse().map_err(|e: toml_edit::TomlError| {
-                Error::new("invalid_definition", e.to_string())
-            })?;
-            crate::write::table_arrays(&mut doc, &["node"]);
-            remove(&mut doc, "node", &ids);
-            crate::write::set(
-                doc.as_table_mut(),
-                "missionRev",
-                toml_edit::value(updated.mission.rev),
-            );
-            crate::write::set(
-                doc.as_table_mut(),
-                "updatedAt",
-                toml_edit::value(updated.mission.updated_at.clone()),
-            );
-            let raw = doc.to_string();
-            ahjo_mission_model::Layout::parse(&raw)?;
-            Some(raw)
-        }
-        Err(error) if error.code == "not_found" => None,
-        Err(error) => return Err(error),
-    };
-    if let Some(layout_raw) = layout {
-        crate::write::pair(
-            (target, raw.as_bytes()),
-            (&layout_path, layout_raw.as_bytes()),
-        )
-        .map_err(crate::error::io)?;
-    } else {
-        crate::write::atomic(target, raw.as_bytes()).map_err(crate::error::io)?;
-    }
-    Ok(updated)
+    remove(doc, "connection", &wires);
+    Ok(ids)
 }

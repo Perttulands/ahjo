@@ -326,7 +326,7 @@ fn role_usage_reports_every_slot_in_every_mission() {
                     rev: edit.mission.rev,
                     etag: edit.etag.clone(),
                 },
-                ahjo_mission_model::Patch::CreateFormation {
+                ahjo_mission_model::MissionChange::CreateFormation {
                     kind: "orchestrated".into(),
                     title: "Pair".into(),
                     x: 0,
@@ -344,7 +344,7 @@ fn role_usage_reports_every_slot_in_every_mission() {
                         rev: edit.mission.rev,
                         etag: edit.etag.clone(),
                     },
-                    ahjo_mission_model::Patch::AssignSlot {
+                    ahjo_mission_model::MissionChange::AssignSlot {
                         formation_id: formation.id.clone(),
                         slot_id: slot.id,
                         agent_id: "builder".into(),

@@ -1,5 +1,5 @@
 use ahjo_mission_engine::Store;
-use ahjo_mission_model::{Patch, Precondition};
+use ahjo_mission_model::{MissionChange, Precondition};
 use std::sync::atomic::{AtomicU64, Ordering};
 static NEXT: AtomicU64 = AtomicU64::new(0);
 struct Scratch(std::path::PathBuf);
@@ -38,7 +38,7 @@ fn invalid_formation_shapes_are_refused_by_both_restore_paths() {
         .patch(
             "shape",
             pre(&edit),
-            Patch::CreateFormation {
+            MissionChange::CreateFormation {
                 kind: "solo".into(),
                 title: "Work".into(),
                 x: 3,
@@ -79,7 +79,7 @@ fn invalid_formation_shapes_are_refused_by_both_restore_paths() {
             .patch(
                 "shape",
                 pre(&edit),
-                Patch::SetFormationType {
+                MissionChange::SetFormationType {
                     id: id.clone(),
                     kind: kind.into(),
                     keep_slot_id: "".into(),
@@ -97,7 +97,7 @@ fn invalid_formation_shapes_are_refused_by_both_restore_paths() {
             .patch(
                 "shape",
                 pre(&edit),
-                Patch::RestoreNode {
+                MissionChange::RestoreNode {
                     node: RestoredNode::Formation(Formation {
                         id: "fmn_bad".into(),
                         kind: kind.into(),
@@ -135,7 +135,7 @@ fn restore_each_input_and_output_port_at_its_original_index() {
                 .patch(
                     "ports",
                     pre(&edit),
-                    Patch::CreateFormation {
+                    MissionChange::CreateFormation {
                         kind: "solo".into(),
                         title: title.into(),
                         x: 0,
@@ -156,7 +156,7 @@ fn restore_each_input_and_output_port_at_its_original_index() {
             .patch(
                 "ports",
                 pre(&edit),
-                Patch::AddPort {
+                MissionChange::AddPort {
                     formation_id: edited_id.clone(),
                     direction: direction.into(),
                     label: "Second".into(),
@@ -191,7 +191,7 @@ fn restore_each_input_and_output_port_at_its_original_index() {
             .patch(
                 "ports",
                 pre(&edit),
-                Patch::WireConnection {
+                MissionChange::WireConnection {
                     id: "edge_restore".into(),
                     from: format!("{source}:{}", from_port.id),
                     to: format!("{target}:{}", to_port.id),
@@ -206,7 +206,7 @@ fn restore_each_input_and_output_port_at_its_original_index() {
             .patch(
                 "ports",
                 pre(&edit),
-                Patch::RemovePort {
+                MissionChange::RemovePort {
                     formation_id: edited_id.clone(),
                     port_id: port.id.clone(),
                 },
@@ -218,7 +218,7 @@ fn restore_each_input_and_output_port_at_its_original_index() {
             .patch(
                 "ports",
                 pre(&edit),
-                Patch::RestorePort {
+                MissionChange::RestorePort {
                     formation_id: edited_id.clone(),
                     direction: direction.into(),
                     port: port.clone(),
@@ -243,7 +243,7 @@ fn restore_each_input_and_output_port_at_its_original_index() {
                 .patch(
                     "ports",
                     pre(&edit),
-                    Patch::RestorePort {
+                    MissionChange::RestorePort {
                         formation_id: edited_id.clone(),
                         direction: direction.into(),
                         port,
@@ -270,7 +270,7 @@ fn formation_type_restores_exact_slot_snapshot_and_rejects_bad_choices() {
         .patch(
             "type",
             pre(&edit),
-            Patch::CreateFormation {
+            MissionChange::CreateFormation {
                 kind: "orchestrated".into(),
                 title: "Desk".into(),
                 x: 0,
@@ -285,7 +285,7 @@ fn formation_type_restores_exact_slot_snapshot_and_rejects_bad_choices() {
         .patch(
             "type",
             pre(&edit),
-            Patch::SetFormationType {
+            MissionChange::SetFormationType {
                 id: formation.id.clone(),
                 kind: "solo".into(),
                 keep_slot_id: snapshot[1].id.clone(),
@@ -298,7 +298,7 @@ fn formation_type_restores_exact_slot_snapshot_and_rejects_bad_choices() {
         .patch(
             "type",
             pre(&edit),
-            Patch::SetFormationType {
+            MissionChange::SetFormationType {
                 id: formation.id.clone(),
                 kind: "orchestrated".into(),
                 keep_slot_id: "".into(),
@@ -354,7 +354,7 @@ fn formation_type_restores_exact_slot_snapshot_and_rejects_bad_choices() {
                 .patch(
                     "type",
                     pre(&edit),
-                    Patch::SetFormationType {
+                    MissionChange::SetFormationType {
                         id: id.into(),
                         kind: kind.into(),
                         keep_slot_id: keep.into(),
@@ -381,7 +381,7 @@ fn changing_gate_kinds_detaches_judge_without_touching_layout() {
         .patch(
             "judge",
             pre(&edit),
-            Patch::CreateFormation {
+            MissionChange::CreateFormation {
                 kind: "solo".into(),
                 title: "Reviewer".into(),
                 x: 0,
@@ -394,7 +394,7 @@ fn changing_gate_kinds_detaches_judge_without_touching_layout() {
         .patch(
             "judge",
             pre(&edit),
-            Patch::CreateGate {
+            MissionChange::CreateGate {
                 title: "Gate".into(),
                 kinds: vec!["code".into(), "formation".into()],
                 criterion: "Review".into(),
@@ -414,7 +414,7 @@ fn changing_gate_kinds_detaches_judge_without_touching_layout() {
         .patch(
             "judge",
             pre(&edit),
-            Patch::SetGateJudge {
+            MissionChange::SetGateJudge {
                 gate_id: gate.clone(),
                 chain: vec![judge],
             },
@@ -427,7 +427,7 @@ fn changing_gate_kinds_detaches_judge_without_touching_layout() {
         .patch(
             "judge",
             pre(&edit),
-            Patch::UpdateGate(ahjo_mission_model::GateUpdate {
+            MissionChange::UpdateGate(ahjo_mission_model::GateUpdate {
                 id: gate.clone(),
                 kinds: Some(vec!["code".into(), "human".into()]),
                 ..Default::default()
@@ -445,7 +445,7 @@ fn changing_gate_kinds_detaches_judge_without_touching_layout() {
         .patch(
             "judge",
             pre(&edit),
-            Patch::UpdateGate(ahjo_mission_model::GateUpdate {
+            MissionChange::UpdateGate(ahjo_mission_model::GateUpdate {
                 id: gate,
                 kinds: Some(vec!["human".into(), "formation".into()]),
                 ..Default::default()
@@ -469,7 +469,7 @@ fn join_keeps_gate_single_feed_and_rejects_stale_writes() {
             .patch(
                 "join-gate",
                 pre(&edit),
-                Patch::CreateFormation {
+                MissionChange::CreateFormation {
                     kind: "solo".into(),
                     title: title.into(),
                     x: 0,
@@ -483,7 +483,7 @@ fn join_keeps_gate_single_feed_and_rejects_stale_writes() {
         .patch(
             "join-gate",
             pre(&edit),
-            Patch::CreateGate {
+            MissionChange::CreateGate {
                 title: "Gate".into(),
                 kinds: vec!["human".into()],
                 criterion: "".into(),
@@ -507,7 +507,7 @@ fn join_keeps_gate_single_feed_and_rejects_stale_writes() {
     let second = from(1);
     let to = format!("{}:in", edit.mission.gates[0].id);
     let stale = pre(&edit);
-    let wire = |from: String| Patch::WireConnection {
+    let wire = |from: String| MissionChange::WireConnection {
         id: "".into(),
         from,
         to: to.clone(),
@@ -547,7 +547,7 @@ fn feedback_rewire_and_join_undo_preserve_pushback_exception() {
             .patch(
                 "feedback",
                 pre(&edit),
-                Patch::CreateFormation {
+                MissionChange::CreateFormation {
                     kind: "solo".into(),
                     title: title.into(),
                     x: 0,
@@ -561,7 +561,7 @@ fn feedback_rewire_and_join_undo_preserve_pushback_exception() {
         .patch(
             "feedback",
             pre(&edit),
-            Patch::CreateGate {
+            MissionChange::CreateGate {
                 title: "Review".into(),
                 kinds: vec!["human".into()],
                 criterion: "".into(),
@@ -594,7 +594,7 @@ fn feedback_rewire_and_join_undo_preserve_pushback_exception() {
         endpoint(2, true),
     );
     let fail = format!("{}:fail", edit.mission.gates[0].id);
-    let wire = |from: &str, to: &str| Patch::WireConnection {
+    let wire = |from: &str, to: &str| MissionChange::WireConnection {
         id: "".into(),
         from: from.into(),
         to: to.into(),
@@ -610,7 +610,7 @@ fn feedback_rewire_and_join_undo_preserve_pushback_exception() {
         .patch(
             "feedback",
             pre(&edit),
-            Patch::RewireConnection {
+            MissionChange::RewireConnection {
                 from: fail.clone(),
                 previous_to: research_in.clone(),
                 to: ship_in.clone(),
@@ -634,7 +634,7 @@ fn feedback_rewire_and_join_undo_preserve_pushback_exception() {
         .patch(
             "feedback",
             pre(&edit),
-            Patch::RewireConnection {
+            MissionChange::RewireConnection {
                 from: frame_out.clone(),
                 previous_to: ship_in.clone(),
                 to: research_in,
@@ -657,7 +657,7 @@ fn feedback_rewire_and_join_undo_preserve_pushback_exception() {
         .patch(
             "feedback",
             pre(&edit),
-            Patch::RewireConnection {
+            MissionChange::RewireConnection {
                 from: frame_out.clone(),
                 previous_to: joined,
                 to: ship_in.clone(),
@@ -694,7 +694,7 @@ fn restore_refuses_missing_foreign_and_occupied_connections_and_bad_nodes() {
             .patch(
                 "restore",
                 pre(&edit),
-                Patch::CreateFormation {
+                MissionChange::CreateFormation {
                     kind: "solo".into(),
                     title: title.into(),
                     x: 0,
@@ -713,7 +713,7 @@ fn restore_refuses_missing_foreign_and_occupied_connections_and_bad_nodes() {
         .patch(
             "restore",
             pre(&edit),
-            Patch::WireConnection {
+            MissionChange::WireConnection {
                 id: "edge_occupied".into(),
                 from: output(&other),
                 to: input(&target),
@@ -726,7 +726,7 @@ fn restore_refuses_missing_foreign_and_occupied_connections_and_bad_nodes() {
         .patch(
             "restore",
             pre(&edit),
-            Patch::DeleteFormation {
+            MissionChange::DeleteFormation {
                 id: build.id.clone(),
             },
             "",
@@ -805,7 +805,7 @@ fn restore_refuses_missing_foreign_and_occupied_connections_and_bad_nodes() {
             .patch(
                 "restore",
                 pre(&edit),
-                Patch::RestoreNode {
+                MissionChange::RestoreNode {
                     node,
                     connections,
                     index: None,
@@ -833,7 +833,7 @@ fn judge_chain_extends_its_return_and_refuses_occupied_inputs() {
             .patch(
                 "chain",
                 pre(&edit),
-                Patch::CreateFormation {
+                MissionChange::CreateFormation {
                     kind: "solo".into(),
                     title: title.into(),
                     x: 0,
@@ -847,7 +847,7 @@ fn judge_chain_extends_its_return_and_refuses_occupied_inputs() {
         .patch(
             "chain",
             pre(&edit),
-            Patch::CreateGate {
+            MissionChange::CreateGate {
                 title: "Review".into(),
                 kinds: vec!["human".into()],
                 criterion: "".into(),
@@ -879,7 +879,7 @@ fn judge_chain_extends_its_return_and_refuses_occupied_inputs() {
         .patch(
             "chain",
             pre(&edit),
-            Patch::WireConnection {
+            MissionChange::WireConnection {
                 id: "".into(),
                 from: endpoint(3, true),
                 to: endpoint(0, false),
@@ -888,7 +888,7 @@ fn judge_chain_extends_its_return_and_refuses_occupied_inputs() {
             "",
         )
         .unwrap();
-    let chain = |count: usize| Patch::SetGateJudge {
+    let chain = |count: usize| MissionChange::SetGateJudge {
         gate_id: gate.clone(),
         chain: formations
             .iter()
@@ -909,7 +909,7 @@ fn judge_chain_extends_its_return_and_refuses_occupied_inputs() {
         .patch(
             "chain",
             pre(&edit),
-            Patch::UnwireConnection {
+            MissionChange::UnwireConnection {
                 from: endpoint(3, true),
                 to: endpoint(0, false),
             },
@@ -961,7 +961,7 @@ fn refused_rewire_retains_original_and_occupied_connections() {
             .patch(
                 "rewire",
                 pre(&edit),
-                Patch::CreateFormation {
+                MissionChange::CreateFormation {
                     kind: "solo".into(),
                     title: title.into(),
                     x: 0,
@@ -994,7 +994,7 @@ fn refused_rewire_retains_original_and_occupied_connections() {
             .patch(
                 "rewire",
                 pre(&edit),
-                Patch::WireConnection {
+                MissionChange::WireConnection {
                     id: "".into(),
                     from: from.clone(),
                     to: to.clone(),
@@ -1009,7 +1009,7 @@ fn refused_rewire_retains_original_and_occupied_connections() {
         .patch(
             "rewire",
             pre(&edit),
-            Patch::RewireConnection {
+            MissionChange::RewireConnection {
                 from: frame_out,
                 previous_to: research_in,
                 to: ship_in,
@@ -1036,7 +1036,7 @@ fn removing_a_dynamic_port_prunes_only_its_connections() {
             .patch(
                 "ports",
                 pre(&edit),
-                Patch::CreateFormation {
+                MissionChange::CreateFormation {
                     kind: "solo".into(),
                     title: title.into(),
                     x: 0,
@@ -1051,7 +1051,7 @@ fn removing_a_dynamic_port_prunes_only_its_connections() {
         .patch(
             "ports",
             pre(&edit),
-            Patch::AddPort {
+            MissionChange::AddPort {
                 formation_id: target.clone(),
                 direction: "input".into(),
                 label: "Second".into(),
@@ -1072,7 +1072,7 @@ fn removing_a_dynamic_port_prunes_only_its_connections() {
             .patch(
                 "ports",
                 pre(&edit),
-                Patch::WireConnection {
+                MissionChange::WireConnection {
                     id: format!("edge_{i}"),
                     from: sources[i].clone(),
                     to: format!("{target}:{}", ports[i].id),
@@ -1086,7 +1086,7 @@ fn removing_a_dynamic_port_prunes_only_its_connections() {
         .patch(
             "ports",
             pre(&edit),
-            Patch::RemovePort {
+            MissionChange::RemovePort {
                 formation_id: target,
                 port_id: ports[1].id.clone(),
             },
@@ -1108,7 +1108,7 @@ fn orchestrated_snapshot_cannot_silently_remove_a_staffed_seat() {
         .patch(
             "peer",
             pre(&edit),
-            Patch::CreateFormation {
+            MissionChange::CreateFormation {
                 kind: "orchestrated".into(),
                 title: "Team".into(),
                 x: 0,
@@ -1122,7 +1122,7 @@ fn orchestrated_snapshot_cannot_silently_remove_a_staffed_seat() {
         .patch(
             "peer",
             pre(&edit),
-            Patch::AssignSlot {
+            MissionChange::AssignSlot {
                 formation_id: team.id.clone(),
                 slot_id: team.slots[1].id.clone(),
                 agent_id: "builder".into(),
@@ -1144,7 +1144,7 @@ fn orchestrated_snapshot_cannot_silently_remove_a_staffed_seat() {
         .patch(
             "peer",
             pre(&edit),
-            Patch::SetFormationType {
+            MissionChange::SetFormationType {
                 id: team.id.clone(),
                 kind: "orchestrated".into(),
                 keep_slot_id: "".into(),
@@ -1163,7 +1163,7 @@ fn orchestrated_snapshot_cannot_silently_remove_a_staffed_seat() {
         .patch(
             "peer",
             pre(&edit),
-            Patch::SetFormationType {
+            MissionChange::SetFormationType {
                 id: team.id.clone(),
                 kind: "orchestrated".into(),
                 keep_slot_id: "".into(),
@@ -1178,7 +1178,7 @@ fn orchestrated_snapshot_cannot_silently_remove_a_staffed_seat() {
         .patch(
             "peer",
             pre(&edit),
-            Patch::AssignSlot {
+            MissionChange::AssignSlot {
                 formation_id: team.id.clone(),
                 slot_id: team.slots[1].id.clone(),
                 agent_id: "".into(),
@@ -1193,7 +1193,7 @@ fn orchestrated_snapshot_cannot_silently_remove_a_staffed_seat() {
         .patch(
             "peer",
             pre(&edit),
-            Patch::SetFormationType {
+            MissionChange::SetFormationType {
                 id: team.id,
                 kind: "orchestrated".into(),
                 keep_slot_id: "".into(),

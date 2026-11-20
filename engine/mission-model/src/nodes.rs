@@ -8,7 +8,7 @@ pub const KIND_FILE: &str = "file";
 pub const KIND_FOLDER: &str = "folder";
 
 /// The mission's entry node (`[[inputCard]]`), with its `out` port.
-#[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq)]
+#[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq, schemars::JsonSchema)]
 #[serde(default, deny_unknown_fields, rename_all = "camelCase")]
 pub struct InputCard {
     pub id: String,
@@ -30,7 +30,7 @@ pub struct InputCard {
 }
 
 /// A named value each run supplies. Briefs reference it as `{name}`.
-#[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq)]
+#[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq, schemars::JsonSchema)]
 #[serde(default, deny_unknown_fields)]
 pub struct MissionInput {
     pub name: String,
@@ -42,7 +42,7 @@ pub struct MissionInput {
 }
 
 /// A named result a successful run promises, bound to one step output port.
-#[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq)]
+#[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq, schemars::JsonSchema)]
 #[serde(default, deny_unknown_fields)]
 pub struct MissionOutput {
     pub name: String,
@@ -57,7 +57,7 @@ pub struct MissionOutput {
 }
 
 /// A step: the team of agents that does it.
-#[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq)]
+#[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq, schemars::JsonSchema)]
 #[serde(default, deny_unknown_fields)]
 pub struct Formation {
     pub id: String,
@@ -86,7 +86,7 @@ pub const SOLO: &str = "solo";
 pub const PEER: &str = "peer";
 pub const ORCHESTRATED: &str = "orchestrated";
 
-#[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq)]
+#[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq, schemars::JsonSchema)]
 #[serde(default, deny_unknown_fields, rename_all = "camelCase")]
 pub struct Brief {
     pub goal: String,
@@ -102,7 +102,7 @@ pub struct Brief {
     pub links: Vec<String>,
 }
 
-#[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq)]
+#[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq, schemars::JsonSchema)]
 #[serde(default, deny_unknown_fields)]
 pub struct Port {
     pub id: String,
@@ -132,7 +132,7 @@ impl Port {
 }
 
 /// A position in a formation, owning what its seat runs.
-#[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq)]
+#[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq, schemars::JsonSchema)]
 #[serde(default, deny_unknown_fields, rename_all = "camelCase")]
 pub struct Slot {
     pub id: String,
@@ -174,7 +174,7 @@ impl Slot {
 
 /// A criterion with one or more kinds. Its ports are `in`, `pass`, `fail`
 /// and `judge`.
-#[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq)]
+#[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq, schemars::JsonSchema)]
 #[serde(default, deny_unknown_fields, rename_all = "camelCase")]
 pub struct Gate {
     pub id: String,
@@ -200,7 +200,7 @@ pub const GATE_FAIL: &str = "fail";
 pub const GATE_JUDGE: &str = "judge";
 
 /// Ends a path on purpose. Its only port is `in`.
-#[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq)]
+#[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq, schemars::JsonSchema)]
 #[serde(default, deny_unknown_fields)]
 pub struct End {
     pub id: String,
@@ -215,7 +215,7 @@ pub const REJECTED: &str = "rejected";
 
 /// Caps the rounds, time and tokens of one step, or of the whole mission when
 /// it covers the Input card. A knob is `None` when the card does not set it.
-#[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq)]
+#[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq, schemars::JsonSchema)]
 #[serde(default, deny_unknown_fields, rename_all = "camelCase")]
 pub struct Limit {
     pub id: String,
@@ -235,7 +235,7 @@ pub struct Limit {
 }
 
 /// A directed wire between `node-id:port-id` endpoints.
-#[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq)]
+#[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq, schemars::JsonSchema)]
 #[serde(default, deny_unknown_fields)]
 pub struct Connection {
     pub id: String,

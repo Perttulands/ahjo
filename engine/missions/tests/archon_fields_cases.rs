@@ -1,5 +1,5 @@
 use ahjo_mission_engine::Store;
-use ahjo_mission_model::{Patch, Precondition};
+use ahjo_mission_model::{MissionChange, Precondition};
 use std::sync::atomic::{AtomicU64, Ordering};
 static NEXT: AtomicU64 = AtomicU64::new(0);
 struct Scratch(std::path::PathBuf);
@@ -36,7 +36,7 @@ fn input_and_formation_titles_and_hint_can_be_set_and_cleared() {
         .patch(
             "updates",
             pre(&edit),
-            Patch::CreateInputCard {
+            MissionChange::CreateInputCard {
                 title: "Frame".into(),
                 goal: "Original".into(),
                 files: vec![],
@@ -51,7 +51,7 @@ fn input_and_formation_titles_and_hint_can_be_set_and_cleared() {
         .patch(
             "updates",
             pre(&edit),
-            Patch::CreateFormation {
+            MissionChange::CreateFormation {
                 kind: "solo".into(),
                 title: "Map".into(),
                 x: 1,
@@ -76,7 +76,7 @@ fn input_and_formation_titles_and_hint_can_be_set_and_cleared() {
             .patch(
                 "updates",
                 pre(&edit),
-                Patch::UpdateInputCard(ahjo_mission_model::InputCardUpdate {
+                MissionChange::UpdateInputCard(ahjo_mission_model::InputCardUpdate {
                     id: input.clone(),
                     title: Some(title.into()),
                     goal: Some(goal.into()),
@@ -98,7 +98,7 @@ fn input_and_formation_titles_and_hint_can_be_set_and_cleared() {
             .patch(
                 "updates",
                 pre(&edit),
-                Patch::UpdateFormation {
+                MissionChange::UpdateFormation {
                     id: formation.clone(),
                     title: Some(title.into()),
                     device: None,
@@ -115,7 +115,7 @@ fn input_and_formation_titles_and_hint_can_be_set_and_cleared() {
         .patch(
             "updates",
             pre(&edit),
-            Patch::UpdateInputCard(ahjo_mission_model::InputCardUpdate {
+            MissionChange::UpdateInputCard(ahjo_mission_model::InputCardUpdate {
                 id: input,
                 input_hint: Some("".into()),
                 ..Default::default()
@@ -142,7 +142,7 @@ fn gate_rejects_bad_kinds_and_checks_without_mutation() {
         .patch(
             "gate",
             pre(&edit),
-            Patch::CreateGate {
+            MissionChange::CreateGate {
                 title: "Review".into(),
                 kinds: vec!["code".into()],
                 criterion: "ready".into(),
@@ -204,7 +204,7 @@ fn gate_rejects_bad_kinds_and_checks_without_mutation() {
     ] {
         assert_eq!(
             store
-                .patch("gate", pre(&edit), Patch::UpdateGate(update), "")
+                .patch("gate", pre(&edit), MissionChange::UpdateGate(update), "")
                 .unwrap_err()
                 .code
                 .as_str(),
@@ -216,7 +216,7 @@ fn gate_rejects_bad_kinds_and_checks_without_mutation() {
         .patch(
             "gate",
             pre(&edit),
-            Patch::UpdateGate(ahjo_mission_model::GateUpdate {
+            MissionChange::UpdateGate(ahjo_mission_model::GateUpdate {
                 id,
                 title: Some("".into()),
                 criterion: Some("".into()),
@@ -255,7 +255,7 @@ fn slot_settings_round_trip_and_invalid_assignments_write_nothing() {
         .patch(
             "seat",
             pre(&edit),
-            Patch::CreateFormation {
+            MissionChange::CreateFormation {
                 kind: "solo".into(),
                 title: "Worker".into(),
                 x: 0,
@@ -277,7 +277,7 @@ fn slot_settings_round_trip_and_invalid_assignments_write_nothing() {
         ("reviewer", "", "", ""),
         ("reviewer", "openai-codex", "", ""),
     ] {
-        let patch = Patch::AssignSlot {
+        let patch = MissionChange::AssignSlot {
             formation_id: formation.clone(),
             slot_id: slot.clone(),
             agent_id: agent.into(),
@@ -304,7 +304,7 @@ fn slot_settings_round_trip_and_invalid_assignments_write_nothing() {
             .patch(
                 "seat",
                 pre(&edit),
-                Patch::AssignSlot {
+                MissionChange::AssignSlot {
                     formation_id: formation.clone(),
                     slot_id: slot.clone(),
                     agent_id: agent.into(),
@@ -339,7 +339,7 @@ fn repeated_node_type_port_and_judge_edits_keep_bytes_and_check_etags() {
         .patch(
             "same",
             pre(&edit),
-            Patch::CreateInputCard {
+            MissionChange::CreateInputCard {
                 title: "Input".into(),
                 goal: "Goal".into(),
                 files: vec![],
@@ -354,7 +354,7 @@ fn repeated_node_type_port_and_judge_edits_keep_bytes_and_check_etags() {
         .patch(
             "same",
             pre(&edit),
-            Patch::CreateFormation {
+            MissionChange::CreateFormation {
                 kind: "solo".into(),
                 title: "Worker".into(),
                 x: 0,
@@ -367,7 +367,7 @@ fn repeated_node_type_port_and_judge_edits_keep_bytes_and_check_etags() {
         .patch(
             "same",
             pre(&edit),
-            Patch::CreateGate {
+            MissionChange::CreateGate {
                 title: "Gate".into(),
                 kinds: vec!["human".into()],
                 criterion: "".into(),
@@ -385,31 +385,31 @@ fn repeated_node_type_port_and_judge_edits_keep_bytes_and_check_etags() {
     let input = edit.mission.input_cards[0].id.clone();
     let gate = edit.mission.gates[0].id.clone();
     let changes = vec![
-        Patch::UpdateInputCard(ahjo_mission_model::InputCardUpdate {
+        MissionChange::UpdateInputCard(ahjo_mission_model::InputCardUpdate {
             id: input,
             title: Some("Framed".into()),
             goal: Some("New goal".into()),
             ..Default::default()
         }),
-        Patch::UpdateFormation {
+        MissionChange::UpdateFormation {
             id: f.id.clone(),
             title: Some("Renamed".into()),
             device: None,
             fresh: None,
         },
-        Patch::SetFormationType {
+        MissionChange::SetFormationType {
             id: f.id.clone(),
             kind: "orchestrated".into(),
             keep_slot_id: "".into(),
             slots: None,
         },
-        Patch::UpdatePort {
+        MissionChange::UpdatePort {
             formation_id: f.id.clone(),
             port_id: f.inputs[0].id.clone(),
             label: Some("Updated".into()),
             kind: None,
         },
-        Patch::SetGateJudge {
+        MissionChange::SetGateJudge {
             gate_id: gate.clone(),
             chain: vec![f.id],
         },
@@ -449,7 +449,7 @@ fn brief_rejects_unsafe_work_references_without_writing() {
         .patch(
             "brief",
             pre(&edit),
-            Patch::CreateFormation {
+            MissionChange::CreateFormation {
                 kind: "solo".into(),
                 title: "Ship".into(),
                 x: 0,
@@ -474,13 +474,13 @@ fn brief_rejects_unsafe_work_references_without_writing() {
             .patch(
                 "brief",
                 pre(&edit),
-                Patch::SetBrief {
+                MissionChange::SetBrief {
                     formation_id: id.clone(),
-                    brief: ahjo_mission_model::Brief {
-                        goal: "Ship".into(),
-                        work: work.into(),
-                        ..Default::default()
-                    },
+                    goal: "Ship".into(),
+                    work: work.into(),
+                    repository: String::new(),
+                    files: vec![],
+                    links: vec![],
                 },
                 "",
             )
@@ -492,15 +492,13 @@ fn brief_rejects_unsafe_work_references_without_writing() {
         .patch(
             "brief",
             pre(&edit),
-            Patch::SetBrief {
+            MissionChange::SetBrief {
                 formation_id: id,
-                brief: ahjo_mission_model::Brief {
-                    goal: "Ship".into(),
-                    repository: String::new(),
-                    work: "srv-abc.2".into(),
-                    files: vec!["C:/work/src/SessionPanel.tsx".into()],
-                    links: vec!["https://example.com/spec".into()],
-                },
+                goal: "Ship".into(),
+                repository: String::new(),
+                work: "srv-abc.2".into(),
+                files: vec!["C:/work/src/SessionPanel.tsx".into()],
+                links: vec!["https://example.com/spec".into()],
             },
             "",
         )
@@ -515,13 +513,13 @@ fn brief_rejects_unsafe_work_references_without_writing() {
             .patch(
                 "brief",
                 pre(&latest),
-                Patch::SetBrief {
+                MissionChange::SetBrief {
                     formation_id: latest.mission.formations[0].id.clone(),
-                    brief: ahjo_mission_model::Brief {
-                        goal: "Ship".into(),
-                        work: work.into(),
-                        ..Default::default()
-                    },
+                    goal: "Ship".into(),
+                    work: work.into(),
+                    repository: String::new(),
+                    files: vec![],
+                    links: vec![],
                 },
                 "",
             )
@@ -539,7 +537,7 @@ fn slots_share_a_role_but_keep_settings_and_exactly_one_controller() {
         .patch(
             "team",
             pre(&edit),
-            Patch::CreateFormation {
+            MissionChange::CreateFormation {
                 kind: "orchestrated".into(),
                 title: "Team".into(),
                 x: 0,
@@ -557,7 +555,7 @@ fn slots_share_a_role_but_keep_settings_and_exactly_one_controller() {
             .patch(
                 "team",
                 pre(&edit),
-                Patch::AssignSlot {
+                MissionChange::AssignSlot {
                     formation_id: team.id.clone(),
                     slot_id: slot.id.clone(),
                     agent_id: "builder".into(),
@@ -573,7 +571,7 @@ fn slots_share_a_role_but_keep_settings_and_exactly_one_controller() {
         .patch(
             "team",
             pre(&edit),
-            Patch::MakeController {
+            MissionChange::MakeController {
                 formation_id: team.id,
                 slot_id: team.slots[1].id.clone(),
             },

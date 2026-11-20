@@ -264,3 +264,45 @@ async fn edits_are_checked_and_pushed_to_subscribers() {
     drop(socket);
     node.stop().await;
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn http_patch_uses_the_same_schema_and_stages_a_batch() {
+    let (node, client) = start().await;
+    let (_, tag) = send(
+        &client,
+        Method::POST,
+        "/api/missions",
+        json!({"slug":"batch","title":"Original"}),
+        None,
+    )
+    .await;
+    let path = "/api/missions/batch";
+    let error = client
+        .request(
+            Method::PATCH,
+            path,
+            Some(json!({"rev":1,"changes":[{"title":"Changed"},{"createEnd":{"bogus":42}}]})),
+            Some(&tag),
+        )
+        .await
+        .unwrap_err();
+    let error = error.downcast_ref::<NodeError>().unwrap();
+    assert_eq!(error.status, StatusCode::BAD_REQUEST);
+    assert_eq!(
+        error.message,
+        "change at index 1: createEnd: unknown field bogus; accepted fields: title, outcome, x, y"
+    );
+    let (after, _) = send(
+        &client,
+        Method::PATCH,
+        path,
+        json!({"rev":1,"changes":[{"createFormation":{"title":"Work"}},{"title":"Changed"}]}),
+        Some(&tag),
+    )
+    .await;
+    assert_eq!(after["mission"]["rev"], 2);
+    assert_eq!(after["mission"]["title"], "Changed");
+    assert_eq!(after["mission"]["formations"][0]["title"], "Work");
+    assert_eq!(after["layout"]["missionRev"], 2);
+    node.stop().await;
+}

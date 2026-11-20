@@ -1,8 +1,11 @@
 //! Revision-checked edits of mission definitions.
 use crate::{Error, Store};
-use ahjo_mission_model::{Edit, Mission, MissionDeletion, Patch, Precondition};
+use ahjo_mission_model::{
+    Edit, Layout, LayoutNode, Mission, MissionChange, MissionDeletion, Precondition,
+};
 use sha2::{Digest, Sha256};
-use std::path::PathBuf;
+use std::collections::HashSet;
+use std::path::{Path, PathBuf};
 use toml_edit::{DocumentMut, value};
 
 pub(crate) fn etag(raw: &str) -> String {
@@ -35,39 +38,39 @@ fn parse_document(raw: &str) -> Result<DocumentMut, Error> {
         .map_err(|e: toml_edit::TomlError| Error::new("invalid_definition", e.to_string()))
 }
 
-fn editable_arrays(patch: &Patch) -> &'static [&'static str] {
+fn editable_arrays(patch: &MissionChange) -> &'static [&'static str] {
     match patch {
-        Patch::Title(_) | Patch::Prefix(_) => &[],
-        Patch::UpdateInputCard(_) | Patch::CreateInputCard { .. } => &["inputCard"],
-        Patch::CreateFormation { .. }
-        | Patch::SetBrief { .. }
-        | Patch::ClearBrief { .. }
-        | Patch::UpdateFormation { .. }
-        | Patch::EditFormation { .. }
-        | Patch::AssignSlot { .. }
-        | Patch::NameAgent { .. }
-        | Patch::SwapSlots { .. }
-        | Patch::MakeController { .. }
-        | Patch::SetFormationType { .. } => &["formation"],
-        Patch::CreateGate { .. } => &["gate"],
-        Patch::CreateEnd { .. } | Patch::UpdateEnd(_) => &["end"],
-        Patch::CreateLimit { .. } | Patch::UpdateLimit(_) => &["limit"],
-        Patch::SetGateJudge { .. } | Patch::DetachGateJudge { .. } | Patch::UpdateGate(_) => {
-            &["gate", "connection"]
-        }
-        Patch::AddPort { .. }
-        | Patch::UpdatePort { .. }
-        | Patch::RemovePort { .. }
-        | Patch::RestorePort { .. }
-        | Patch::WireConnection { .. }
-        | Patch::RewireConnection { .. }
-        | Patch::UnwireConnection { .. } => &["formation", "connection"],
-        Patch::DeleteInputCard { .. } => &["inputCard", "connection"],
-        Patch::DeleteFormation { .. } => &["formation", "limit", "connection"],
-        Patch::DeleteGate { .. } => &["gate", "connection"],
-        Patch::DeleteEnd { .. } => &["end", "connection"],
-        Patch::DeleteLimit { .. } => &["limit", "connection"],
-        Patch::RestoreNode { .. } => &[
+        MissionChange::Title(_) | MissionChange::Prefix(_) => &[],
+        MissionChange::UpdateInputCard(_) | MissionChange::CreateInputCard { .. } => &["inputCard"],
+        MissionChange::CreateFormation { .. }
+        | MissionChange::SetBrief { .. }
+        | MissionChange::ClearBrief { .. }
+        | MissionChange::UpdateFormation { .. }
+        | MissionChange::EditFormation { .. }
+        | MissionChange::AssignSlot { .. }
+        | MissionChange::NameAgent { .. }
+        | MissionChange::SwapSlots { .. }
+        | MissionChange::MakeController { .. }
+        | MissionChange::SetFormationType { .. } => &["formation"],
+        MissionChange::CreateGate { .. } => &["gate"],
+        MissionChange::CreateEnd { .. } | MissionChange::UpdateEnd(_) => &["end"],
+        MissionChange::CreateLimit { .. } | MissionChange::UpdateLimit(_) => &["limit"],
+        MissionChange::SetGateJudge { .. }
+        | MissionChange::DetachGateJudge { .. }
+        | MissionChange::UpdateGate(_) => &["gate", "connection"],
+        MissionChange::AddPort { .. }
+        | MissionChange::UpdatePort { .. }
+        | MissionChange::RemovePort { .. }
+        | MissionChange::RestorePort { .. }
+        | MissionChange::WireConnection { .. }
+        | MissionChange::RewireConnection { .. }
+        | MissionChange::UnwireConnection { .. } => &["formation", "connection"],
+        MissionChange::DeleteInputCard { .. } => &["inputCard", "connection"],
+        MissionChange::DeleteFormation { .. } => &["formation", "limit", "connection"],
+        MissionChange::DeleteGate { .. } => &["gate", "connection"],
+        MissionChange::DeleteEnd { .. } => &["end", "connection"],
+        MissionChange::DeleteLimit { .. } => &["limit", "connection"],
+        MissionChange::RestoreNode { .. } => &[
             "inputCard",
             "formation",
             "gate",
@@ -172,7 +175,35 @@ impl Store {
         &self,
         selector: &str,
         precondition: Precondition,
-        patch: Patch,
+        patch: MissionChange,
+        actor: &str,
+    ) -> Result<Edit, Error> {
+        self.patch_changes(selector, precondition, [patch], false, actor)
+    }
+
+    /// Apply ordered changes under one precondition and publish one revision.
+    pub fn patch_batch(
+        &self,
+        selector: &str,
+        precondition: Precondition,
+        changes: Vec<MissionChange>,
+        actor: &str,
+    ) -> Result<Edit, Error> {
+        if changes.is_empty() {
+            return Err(Error::new(
+                "bad_request",
+                "changes must contain at least one operation",
+            ));
+        }
+        self.patch_changes(selector, precondition, changes, true, actor)
+    }
+
+    fn patch_changes(
+        &self,
+        selector: &str,
+        precondition: Precondition,
+        changes: impl IntoIterator<Item = MissionChange>,
+        batch: bool,
         actor: &str,
     ) -> Result<Edit, Error> {
         let scope = crate::write::locks(self.root(), "scope");
@@ -188,121 +219,44 @@ impl Store {
         let current = edit(&raw)?;
         check(&precondition, &current)?;
         let mut doc = parse_document(&raw)?;
-        crate::write::table_arrays(&mut doc, editable_arrays(&patch));
-        let layout_node = match patch {
-            Patch::Title(title) => {
-                if current.mission.title == title {
-                    return Ok(current);
+        let mut mission = current.mission.clone();
+        let layout_path = self
+            .root()
+            .join("layout")
+            .join(format!("{slug}.layout.toml"));
+        let mut layout = None;
+        let mut changed = false;
+        for (index, patch) in changes.into_iter().enumerate() {
+            let step = || {
+                let mut next = doc.clone();
+                let effect = apply_change(&mut next, &mission, patch)?;
+                if matches!(effect, ChangeEffect::Unchanged) {
+                    return Ok::<_, Error>(());
                 }
-                let decor = doc["title"].as_value().map(|v| v.decor().clone());
-                let mut updated = value(title);
-                if let (Some(decor), Some(v)) = (decor, updated.as_value_mut()) {
-                    *v.decor_mut() = decor;
+                let updated = Mission::parse(&next.to_string())?;
+                if !matches!(effect, ChangeEffect::Remove(_)) {
+                    check_supported(&mission, &updated)?;
                 }
-                doc["title"] = updated;
-                None
-            }
-            Patch::Prefix(prefix) => {
-                let prefix = prefix.trim().to_ascii_lowercase();
-                if !prefix.is_empty() && !ahjo_mission_model::valid_prefix(&prefix) {
-                    return Err(Error::new(
-                        "invalid_prefix",
-                        "a prefix is letters and digits only, at most 24 of them",
-                    ));
+                stage_layout(&mut layout, &layout_path, &updated, effect)?;
+                changed = true;
+                doc = next;
+                mission = updated;
+                Ok(())
+            };
+            step().map_err(|error| {
+                if batch {
+                    Error::new(
+                        error.code.as_str(),
+                        format!("change at index {index}: {}", error.message),
+                    )
+                } else {
+                    error
                 }
-                if current.mission.prefix == prefix {
-                    return Ok(current);
-                }
-                crate::authoring_staff::set(doc.as_table_mut(), "prefix", &prefix);
-                None
-            }
-            patch @ (Patch::SetGateJudge { .. } | Patch::DetachGateJudge { .. }) => {
-                if !crate::authoring_judge::apply(&mut doc, &current.mission, patch)? {
-                    return Ok(current);
-                }
-                None
-            }
-            patch @ Patch::CreateLimit { .. } => Some(crate::authoring_controls::create_limit(
-                &mut doc,
-                &current.mission,
-                patch,
-            )?),
-            patch @ (Patch::UpdateLimit(_) | Patch::UpdateEnd(_) | Patch::UpdateGate(_)) => {
-                if !crate::authoring_controls::update(&mut doc, &current.mission, patch)? {
-                    return Ok(current);
-                }
-                None
-            }
-            Patch::RestoreNode {
-                node,
-                connections,
-                index,
-                x,
-                y,
-            } => Some(crate::authoring_restore::apply(
-                &mut doc,
-                &current.mission,
-                node,
-                connections,
-                index,
-                x,
-                y,
-            )?),
-            patch @ (Patch::AddPort { .. }
-            | Patch::UpdatePort { .. }
-            | Patch::RemovePort { .. }
-            | Patch::RestorePort { .. }) => {
-                if !crate::authoring_port::apply(&mut doc, &current.mission, patch)? {
-                    return Ok(current);
-                }
-                None
-            }
-            Patch::UpdateInputCard(update) => {
-                if !crate::authoring_input::apply(&mut doc, &current.mission, update)? {
-                    return Ok(current);
-                }
-                None
-            }
-            patch @ (Patch::UpdateFormation { .. }
-            | Patch::EditFormation { .. }
-            | Patch::AssignSlot { .. }
-            | Patch::NameAgent { .. }
-            | Patch::SwapSlots { .. }
-            | Patch::MakeController { .. }
-            | Patch::SetBrief { .. }
-            | Patch::ClearBrief { .. }) => {
-                if !crate::authoring_staff::apply(&mut doc, &current.mission, patch)? {
-                    return Ok(current);
-                }
-                None
-            }
-            patch @ Patch::SetFormationType { .. } => {
-                if !crate::authoring_type::apply(&mut doc, &current.mission, patch)? {
-                    return Ok(current);
-                }
-                None
-            }
-            patch @ (Patch::WireConnection { .. }
-            | Patch::UnwireConnection { .. }
-            | Patch::RewireConnection { .. }) => {
-                crate::authoring_wire::apply(&mut doc, &current.mission, patch)?;
-                None
-            }
-            patch @ (Patch::DeleteInputCard { .. }
-            | Patch::DeleteFormation { .. }
-            | Patch::DeleteGate { .. }
-            | Patch::DeleteEnd { .. }
-            | Patch::DeleteLimit { .. }) => {
-                return crate::authoring_delete::apply(
-                    self, &slug, &target, doc, current, patch, actor,
-                );
-            }
-            other => Some(crate::authoring_create::apply(
-                &mut doc,
-                &current.mission,
-                other,
-            )?),
-        };
+            })?;
+        }
+        if !changed && !batch {
+            return Ok(current);
+        }
         crate::write::set(
             doc.as_table_mut(),
             "rev",
@@ -317,37 +271,212 @@ impl Store {
         crate::write::set(doc.as_table_mut(), "updatedAt", toml_edit::value(now()?));
         let raw = doc.to_string();
         let updated = edit(&raw)?;
-        // A legacy definition may be repaired one unsupported node at a time.
-        // Other edits cannot save a mission the runtime cannot execute.
-        let old = crate::validate::unsupported(&current.mission);
-        let unsupported = crate::validate::unsupported(&updated.mission);
-        let repairing = unsupported.len() < old.len()
-            && unsupported.iter().all(|finding| {
-                old.iter().any(|existing| {
-                    existing.code == finding.code && existing.node_id == finding.node_id
-                })
-            });
-        if !repairing && let Some(finding) = unsupported.first() {
-            return Err(Error::new(finding.code.as_str(), &finding.message));
-        }
-        let layout = if let Some(node) = layout_node {
-            Some(crate::authoring_create::layout(
-                self,
-                &slug,
-                &updated.mission,
-                node,
-            )?)
-        } else {
-            None
-        };
-        if let Some((path, layout_raw)) = layout {
-            crate::write::pair((&target, raw.as_bytes()), (&path, layout_raw.as_bytes()))
-                .map_err(crate::error::io)?;
+        if let Some(mut layout) = layout {
+            crate::write::set(
+                layout.as_table_mut(),
+                "missionRev",
+                value(updated.mission.rev),
+            );
+            crate::write::set(
+                layout.as_table_mut(),
+                "updatedAt",
+                value(updated.mission.updated_at.clone()),
+            );
+            let layout_raw = layout.to_string();
+            Layout::parse(&layout_raw)?;
+            crate::write::pair(
+                (&target, raw.as_bytes()),
+                (&layout_path, layout_raw.as_bytes()),
+            )
+            .map_err(crate::error::io)?;
         } else {
             crate::write::atomic(&target, raw.as_bytes()).map_err(crate::error::io)?;
         }
         Ok(updated)
     }
+}
+
+enum ChangeEffect {
+    Unchanged,
+    Changed,
+    Place(LayoutNode),
+    Remove(HashSet<String>),
+}
+
+fn apply_change(
+    doc: &mut DocumentMut,
+    mission: &Mission,
+    patch: MissionChange,
+) -> Result<ChangeEffect, Error> {
+    crate::write::table_arrays(doc, editable_arrays(&patch));
+    let effect = match patch {
+        MissionChange::Title(title) => {
+            if mission.title == title {
+                return Ok(ChangeEffect::Unchanged);
+            }
+            let decor = doc["title"].as_value().map(|v| v.decor().clone());
+            let mut updated = value(title);
+            if let (Some(decor), Some(v)) = (decor, updated.as_value_mut()) {
+                *v.decor_mut() = decor;
+            }
+            doc["title"] = updated;
+            ChangeEffect::Changed
+        }
+        MissionChange::Prefix(prefix) => {
+            let prefix = prefix.trim().to_ascii_lowercase();
+            if !prefix.is_empty() && !ahjo_mission_model::valid_prefix(&prefix) {
+                return Err(Error::new(
+                    "invalid_prefix",
+                    "a prefix is letters and digits only, at most 24 of them",
+                ));
+            }
+            if mission.prefix == prefix {
+                return Ok(ChangeEffect::Unchanged);
+            }
+            crate::authoring_staff::set(doc.as_table_mut(), "prefix", &prefix);
+            ChangeEffect::Changed
+        }
+        patch @ (MissionChange::SetGateJudge { .. } | MissionChange::DetachGateJudge { .. }) => {
+            if !crate::authoring_judge::apply(doc, mission, patch)? {
+                return Ok(ChangeEffect::Unchanged);
+            }
+            ChangeEffect::Changed
+        }
+        patch @ MissionChange::CreateLimit { .. } => ChangeEffect::Place(
+            crate::authoring_controls::create_limit(doc, mission, patch)?,
+        ),
+        patch @ (MissionChange::UpdateLimit(_)
+        | MissionChange::UpdateEnd(_)
+        | MissionChange::UpdateGate(_)) => {
+            if !crate::authoring_controls::update(doc, mission, patch)? {
+                return Ok(ChangeEffect::Unchanged);
+            }
+            ChangeEffect::Changed
+        }
+        MissionChange::RestoreNode {
+            node,
+            connections,
+            index,
+            x,
+            y,
+        } => ChangeEffect::Place(crate::authoring_restore::apply(
+            doc,
+            mission,
+            node,
+            connections,
+            index,
+            x,
+            y,
+        )?),
+        patch @ (MissionChange::AddPort { .. }
+        | MissionChange::UpdatePort { .. }
+        | MissionChange::RemovePort { .. }
+        | MissionChange::RestorePort { .. }) => {
+            if !crate::authoring_port::apply(doc, mission, patch)? {
+                return Ok(ChangeEffect::Unchanged);
+            }
+            ChangeEffect::Changed
+        }
+        MissionChange::UpdateInputCard(update) => {
+            if !crate::authoring_input::apply(doc, mission, update)? {
+                return Ok(ChangeEffect::Unchanged);
+            }
+            ChangeEffect::Changed
+        }
+        patch @ (MissionChange::UpdateFormation { .. }
+        | MissionChange::EditFormation { .. }
+        | MissionChange::AssignSlot { .. }
+        | MissionChange::NameAgent { .. }
+        | MissionChange::SwapSlots { .. }
+        | MissionChange::MakeController { .. }
+        | MissionChange::SetBrief { .. }
+        | MissionChange::ClearBrief { .. }) => {
+            if !crate::authoring_staff::apply(doc, mission, patch)? {
+                return Ok(ChangeEffect::Unchanged);
+            }
+            ChangeEffect::Changed
+        }
+        patch @ MissionChange::SetFormationType { .. } => {
+            if !crate::authoring_type::apply(doc, mission, patch)? {
+                return Ok(ChangeEffect::Unchanged);
+            }
+            ChangeEffect::Changed
+        }
+        patch @ (MissionChange::WireConnection { .. }
+        | MissionChange::UnwireConnection { .. }
+        | MissionChange::RewireConnection { .. }) => {
+            crate::authoring_wire::apply(doc, mission, patch)?;
+            ChangeEffect::Changed
+        }
+        patch @ (MissionChange::DeleteInputCard { .. }
+        | MissionChange::DeleteFormation { .. }
+        | MissionChange::DeleteGate { .. }
+        | MissionChange::DeleteEnd { .. }
+        | MissionChange::DeleteLimit { .. }) => {
+            ChangeEffect::Remove(crate::authoring_delete::apply(doc, mission, patch)?)
+        }
+        other => ChangeEffect::Place(crate::authoring_create::apply(doc, mission, other)?),
+    };
+    Ok(effect)
+}
+
+fn check_supported(before: &Mission, after: &Mission) -> Result<(), Error> {
+    // A legacy definition may be repaired one unsupported node at a time.
+    // Other edits cannot save a mission the runtime cannot execute.
+    let old = crate::validate::unsupported(before);
+    let unsupported = crate::validate::unsupported(after);
+    let repairing = unsupported.len() < old.len()
+        && unsupported.iter().all(|finding| {
+            old.iter().any(|existing| {
+                existing.code == finding.code && existing.node_id == finding.node_id
+            })
+        });
+    if !repairing && let Some(finding) = unsupported.first() {
+        return Err(Error::new(finding.code.as_str(), &finding.message));
+    }
+    Ok(())
+}
+
+fn stage_layout(
+    layout: &mut Option<DocumentMut>,
+    path: &Path,
+    mission: &Mission,
+    effect: ChangeEffect,
+) -> Result<(), Error> {
+    if matches!(effect, ChangeEffect::Changed | ChangeEffect::Unchanged) {
+        return Ok(());
+    }
+    if layout.is_none() {
+        *layout = match crate::links::read_definition(path) {
+            Ok(raw) => {
+                if Layout::parse(&raw)?.mission_id != mission.id {
+                    return Err(Error::new("conflict", "layout belongs to another mission"));
+                }
+                Some(parse_document(&raw)?)
+            }
+            Err(error) if error.code == "not_found" => None,
+            Err(error) => return Err(error),
+        };
+    }
+    match effect {
+        ChangeEffect::Place(node) => {
+            let layout = layout.get_or_insert_with(|| {
+                let mut doc = DocumentMut::new();
+                doc["schema"] = value(1);
+                doc["missionId"] = value(mission.id.clone());
+                doc
+            });
+            crate::authoring_create::append(layout, "node", &node)?;
+        }
+        ChangeEffect::Remove(ids) => {
+            if let Some(layout) = layout {
+                crate::write::table_arrays(layout, &["node"]);
+                crate::authoring_delete::remove(layout, "node", &ids);
+            }
+        }
+        _ => unreachable!(),
+    }
+    Ok(())
 }
 
 impl Store {

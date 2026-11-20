@@ -1,6 +1,6 @@
 //! Change a formation's shape without silently discarding staffed slots.
 use crate::Error;
-use ahjo_mission_model::{Mission, Patch, Slot};
+use ahjo_mission_model::{Mission, MissionChange, Slot};
 use std::collections::HashSet;
 use toml_edit::{DocumentMut, Item, value};
 fn invalid(message: &str) -> Error {
@@ -21,8 +21,12 @@ fn new_slot(label: &str, controller: bool) -> Result<Slot, Error> {
         ..Slot::default()
     })
 }
-pub(crate) fn apply(doc: &mut DocumentMut, mission: &Mission, patch: Patch) -> Result<bool, Error> {
-    let Patch::SetFormationType {
+pub(crate) fn apply(
+    doc: &mut DocumentMut,
+    mission: &Mission,
+    patch: MissionChange,
+) -> Result<bool, Error> {
+    let MissionChange::SetFormationType {
         id,
         kind,
         keep_slot_id,

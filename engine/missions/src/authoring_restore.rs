@@ -1,6 +1,6 @@
 //! Restore a deleted node, its wires and its canvas position in one edit.
 use crate::Error;
-use ahjo_mission_model::{Connection, LayoutNode, Mission, Patch, RestoredNode};
+use ahjo_mission_model::{Connection, LayoutNode, Mission, MissionChange, RestoredNode};
 use serde::Serialize;
 use std::collections::HashSet;
 use toml_edit::{ArrayOfTables, DocumentMut, Item};
@@ -183,7 +183,7 @@ pub(crate) fn apply(
         crate::authoring_wire::apply(
             doc,
             &current,
-            Patch::WireConnection {
+            MissionChange::WireConnection {
                 id: wire.id,
                 from: wire.from,
                 to: wire.to,

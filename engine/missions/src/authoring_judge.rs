@@ -1,15 +1,19 @@
 //! Judge chain attachment and detachment.
 use crate::Error;
-use ahjo_mission_model::{Mission, Patch};
+use ahjo_mission_model::{Mission, MissionChange};
 use std::collections::BTreeSet;
 use toml_edit::{DocumentMut, Item, value};
 fn missing() -> Error {
     Error::new("not_found", "gate or judge formation")
 }
-pub(crate) fn apply(doc: &mut DocumentMut, mission: &Mission, patch: Patch) -> Result<bool, Error> {
+pub(crate) fn apply(
+    doc: &mut DocumentMut,
+    mission: &Mission,
+    patch: MissionChange,
+) -> Result<bool, Error> {
     let (gate_id, chain) = match patch {
-        Patch::SetGateJudge { gate_id, chain } => (gate_id, Some(chain)),
-        Patch::DetachGateJudge { gate_id } => (gate_id, None),
+        MissionChange::SetGateJudge { gate_id, chain } => (gate_id, Some(chain)),
+        MissionChange::DetachGateJudge { gate_id } => (gate_id, None),
         _ => unreachable!(),
     };
     let gate = mission.gate(&gate_id).ok_or_else(missing)?;
@@ -110,7 +114,7 @@ pub(crate) fn apply(doc: &mut DocumentMut, mission: &Mission, patch: Patch) -> R
         crate::authoring_wire::apply(
             doc,
             &current,
-            Patch::WireConnection {
+            MissionChange::WireConnection {
                 id: String::new(),
                 from,
                 to,

@@ -2,7 +2,7 @@
 use crate::Missions;
 use ahjo_core::Error;
 use ahjo_mission_engine::{AdmissionFailure, Harnesses, validate};
-use ahjo_missions_contract::{self as wire, LayoutPatch, NotePatch, Precondition, RunStart};
+use ahjo_missions_contract::{self as wire, LayoutPatch, NotePatch, Precondition, RunStart, patch};
 use ahjo_node_kit::{
     Command, Effect,
     args::{flag, maybe_text, object, text},
@@ -182,7 +182,7 @@ fn description(name: &str) -> &'static str {
             "Create a mission: empty, sketched from --steps (rough steps chained from the Input to Done, nobody doing them yet) with --note saying what it is for, or with --example a copy of a staffed, wired example (mission examples lists them). Answers with what was made and its steps; mission inspect reads the whole graph."
         }
         "mission_examples" => "List the example missions a new mission can start from.",
-        "mission_edit" => "Apply one mission authoring operation.",
+        "mission_edit" => "Apply one mission authoring operation or a batch in one revision.",
         "mission_notes" => "Read every note thread as it is stored, by what it is on.",
         "mission_note" => {
             "Write a note on the mission, or with --target on a step, gate, limit, end, the Input card or a wire (id, title, or From->To). --edit <note-id> changes your own note and --delete <note-id> removes it. --author names you, e.g. --author claude-7."
@@ -217,22 +217,15 @@ fn description(name: &str) -> &'static str {
         _ => unreachable!(),
     }
 }
-/// What `mission edit`'s change holds: one operation and its fields.
 fn edit_change() -> String {
-    let operations: Vec<String> = wire::patch::OPERATIONS
-        .iter()
-        .map(|(name, fields)| match fields.starts_with('"') {
-            true => format!("{name}: {fields}"),
-            false => format!("{name} {{{fields}}}"),
-        })
-        .collect();
     format!(
         "One operation, as {{\"<operation>\": {{<fields>}}}}, e.g. \
          {{\"createEnd\": {{\"title\": \"Done\", \"outcome\": \"done\"}}}}. \
+         Or send {{\"rev\": n, \"changes\": [<operation>, ...]}} to apply a batch in one revision. \
          Ids are those mission inspect --full shows; a wire end is <node-id>:<port-id>. \
          The named commands (formation create, mission wire, gate update...) do the common edits; \
          this is for the rest. Operations and their fields: {}.",
-        operations.join("; ")
+        patch::operation_help()
     )
 }
 
@@ -633,26 +626,31 @@ async fn call(m: Missions, name: &str, a: Value) -> Result<Value, Error> {
         "mission_edit" => {
             let id = required(&a, "mission")?;
             let current = m.store.mission_edit(id)?;
-            if let Some(rev) = a.get("rev").filter(|value| !value.is_null())
-                && rev.as_i64() != Some(current.mission.rev)
+            let change = a
+                .get("change")
+                .filter(|value| value.is_object())
+                .ok_or_else(|| bad("change must be an object"))?;
+            let request = patch::decode_request(change).map_err(bad)?;
+            if a.get("rev")
+                .is_some_and(|rev| !rev.is_null() && rev.as_i64() != Some(current.mission.rev))
+                || matches!(&request.changes, patch::Changes::Batch(_))
+                    && request.rev != Some(current.mission.rev)
             {
                 return Err(Error::new("conflict", "mission changed"));
             }
-            let change = a
-                .get("change")
-                .filter(|v| v.is_object())
-                .ok_or_else(|| bad("change must be an object"))?;
-            let patch = wire::patch::decode(change).map_err(bad)?;
             let before = document(current.mission.clone(), current.etag.clone())?;
-            let edited = m.store.patch(
-                id,
-                Precondition {
-                    rev: current.mission.rev,
-                    etag: current.etag,
-                },
-                patch,
-                "agent:ahjo",
-            )?;
+            let precondition = Precondition {
+                rev: current.mission.rev,
+                etag: current.etag,
+            };
+            let edited = match request.changes {
+                patch::Changes::Single(change) => {
+                    m.store.patch(id, precondition, *change, "agent:ahjo")
+                }
+                patch::Changes::Batch(changes) => {
+                    m.store.patch_batch(id, precondition, changes, "agent:ahjo")
+                }
+            }?;
             m.changed();
             let after = document(edited.mission, edited.etag)?;
             let mut answer = json!({"node":node,"mission":after});

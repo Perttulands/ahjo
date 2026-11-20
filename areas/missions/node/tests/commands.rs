@@ -1434,3 +1434,92 @@ async fn a_failed_sketch_leaves_no_mission() {
         .unwrap();
     node.stop().await;
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn mission_edit_batches_commit_once_or_leave_the_mission_and_layout_untouched() {
+    let node = Node::start(&[sessions::LISTING, ahjo_work::LISTING, LAB], "")
+        .await
+        .unwrap();
+    node.call("mission_new", json!({"slug":"batch","title":"Original"}))
+        .await
+        .unwrap();
+
+    let inspect = || node.call("mission_inspect", json!({"mission":"batch","full":true}));
+    let layout = || node.call("layout_show", json!({"mission":"batch"}));
+    let before = inspect().await.unwrap();
+    let before_layout = layout().await.unwrap();
+    let rev = before["mission"]["rev"].as_i64().unwrap();
+
+    for (second, code, message) in [
+        (
+            json!({"createEnd":{"outcome":"invalid"}}),
+            "invalid_end_outcome",
+            "outcome must be done or rejected",
+        ),
+        (
+            json!({"createEnd":{"unexpected":null}}),
+            "bad_request",
+            "createEnd: unknown field unexpected; accepted fields: title, outcome, x, y",
+        ),
+    ] {
+        let error = node
+            .call("mission_edit", json!({"mission":"batch","change":{
+                "rev":rev, "changes":[{"createFormation":{"title":"Work","x":10,"y":20}}, second, {"title":"New"}]
+            }}))
+            .await
+            .unwrap_err();
+        assert_eq!(error.code, code);
+        assert_eq!(error.message, format!("change at index 1: {message}"));
+        assert_eq!(inspect().await.unwrap(), before);
+        assert_eq!(layout().await.unwrap(), before_layout);
+    }
+
+    let change = json!({"rev":rev,"changes":[
+        {"createFormation":{"title":"Work","x":10,"y":20}},
+        {"createEnd":{"title":"Done","x":100,"y":200}},
+        {"title":"New"}
+    ]});
+    let args = [
+        "edit".into(),
+        "batch".into(),
+        "--change".into(),
+        change.to_string(),
+        "--node".into(),
+        format!("{}/", node.url()),
+        "--json".into(),
+    ];
+    let mut output = Vec::new();
+    assert_eq!(
+        ahjo_node_kit::cli::run("mission", &args, &mut output)
+            .await
+            .unwrap(),
+        0
+    );
+    let after: serde_json::Value = serde_json::from_slice(&output).unwrap();
+    assert_eq!(after["mission"]["rev"], rev + 1);
+    assert_eq!(after["mission"]["title"], "New");
+    assert_eq!(after["mission"]["formations"][0]["title"], "Work");
+    assert_eq!(after["mission"]["ends"][0]["title"], "Done");
+    assert_eq!(inspect().await.unwrap()["mission"], after["mission"]);
+
+    let after_layout = layout().await.unwrap();
+    assert_eq!(after_layout["layout"]["missionRev"], rev + 1);
+    let nodes = after_layout["layout"]["nodes"].as_array().unwrap();
+    for (id, x, y) in [
+        (&after["mission"]["formations"][0]["id"], 10, 20),
+        (&after["mission"]["ends"][0]["id"], 100, 200),
+    ] {
+        assert!(
+            nodes
+                .iter()
+                .any(|node| node["id"] == *id && node["x"] == x && node["y"] == y)
+        );
+    }
+    let stale = node
+        .call("mission_edit", json!({"mission":"batch","change":change}))
+        .await
+        .unwrap_err();
+    assert_eq!(stale.code, "conflict");
+    assert_eq!(layout().await.unwrap(), after_layout);
+    node.stop().await;
+}

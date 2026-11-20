@@ -1,6 +1,6 @@
 //! Formation titles, staffing and controller selection.
 use crate::Error;
-use ahjo_mission_model::{Mission, Patch};
+use ahjo_mission_model::{Mission, MissionChange};
 use toml_edit::{DocumentMut, Item, TableLike, Value, value};
 fn not_found() -> Error {
     Error::new("not_found", "formation or slot")
@@ -49,12 +49,27 @@ pub(crate) fn check_work(work: &str) -> Result<(), Error> {
         .map(|_| ())
         .map_err(|invalid| Error::new("invalid_bead_id", invalid.to_string()))
 }
-pub(crate) fn apply(doc: &mut DocumentMut, mission: &Mission, patch: Patch) -> Result<bool, Error> {
+pub(crate) fn apply(
+    doc: &mut DocumentMut,
+    mission: &Mission,
+    patch: MissionChange,
+) -> Result<bool, Error> {
     match patch {
-        Patch::SetBrief {
+        MissionChange::SetBrief {
             formation_id,
-            mut brief,
+            goal,
+            repository,
+            work,
+            files,
+            links,
         } => {
+            let mut brief = ahjo_mission_model::Brief {
+                goal,
+                repository,
+                work,
+                files,
+                links,
+            };
             crate::authoring_create::file_refs(&mut brief.files)?;
             check_work(&brief.work)?;
             let formation = mission.formation(&formation_id).ok_or_else(not_found)?;
@@ -66,14 +81,14 @@ pub(crate) fn apply(doc: &mut DocumentMut, mission: &Mission, patch: Patch) -> R
                 .into_table();
             formation_table(doc, &formation_id)?["brief"] = Item::Table(next);
         }
-        Patch::ClearBrief { formation_id } => {
+        MissionChange::ClearBrief { formation_id } => {
             let formation = mission.formation(&formation_id).ok_or_else(not_found)?;
             if formation.brief.is_none() {
                 return Err(not_found());
             }
             formation_table(doc, &formation_id)?.remove("brief");
         }
-        Patch::EditFormation {
+        MissionChange::EditFormation {
             id,
             title,
             mut brief,
@@ -97,7 +112,7 @@ pub(crate) fn apply(doc: &mut DocumentMut, mission: &Mission, patch: Patch) -> R
                 table.remove("brief");
             }
         }
-        Patch::UpdateFormation {
+        MissionChange::UpdateFormation {
             id,
             title,
             device,
@@ -132,7 +147,7 @@ pub(crate) fn apply(doc: &mut DocumentMut, mission: &Mission, patch: Patch) -> R
                 None => {}
             }
         }
-        Patch::NameAgent {
+        MissionChange::NameAgent {
             formation_id,
             slot_id,
             agent,
@@ -157,7 +172,7 @@ pub(crate) fn apply(doc: &mut DocumentMut, mission: &Mission, patch: Patch) -> R
             let item = table.get_mut("slot").ok_or_else(not_found)?;
             set(slot_table(item, &slot_id)?, "agent", agent);
         }
-        Patch::AssignSlot {
+        MissionChange::AssignSlot {
             formation_id,
             slot_id,
             agent_id,
@@ -210,7 +225,7 @@ pub(crate) fn apply(doc: &mut DocumentMut, mission: &Mission, patch: Patch) -> R
                 set(slot, key, val);
             }
         }
-        Patch::SwapSlots {
+        MissionChange::SwapSlots {
             from_formation,
             from_slot,
             to_formation,
@@ -248,7 +263,7 @@ pub(crate) fn apply(doc: &mut DocumentMut, mission: &Mission, patch: Patch) -> R
                 }
             }
         }
-        Patch::MakeController {
+        MissionChange::MakeController {
             formation_id,
             slot_id,
         } => {

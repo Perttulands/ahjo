@@ -84,7 +84,7 @@ fn reports_unsupported_capabilities_on_the_nodes_and_refuses_admission() {
 
 #[test]
 fn legacy_missions_can_be_repaired_without_allowing_unrelated_saves() {
-    use ahjo_mission_model::{InputCardUpdate, Patch, Precondition};
+    use ahjo_mission_model::{InputCardUpdate, MissionChange, Precondition};
     let root = ahjo_testkit::fresh_dir("unsupported-repair");
     let folder = root.join("missions");
     std::fs::create_dir_all(&folder).unwrap();
@@ -115,7 +115,12 @@ fn legacy_missions_can_be_repaired_without_allowing_unrelated_saves() {
         etag: edit.etag.clone(),
     };
     let denied = store
-        .patch("gated", pre(&current), Patch::Title("Unrelated".into()), "")
+        .patch(
+            "gated",
+            pre(&current),
+            MissionChange::Title("Unrelated".into()),
+            "",
+        )
         .unwrap_err();
     assert_eq!(denied.code, "unsupported_formation");
     assert_eq!(store.mission_edit("gated").unwrap().etag, current.etag);
@@ -125,7 +130,7 @@ fn legacy_missions_can_be_repaired_without_allowing_unrelated_saves() {
         .patch(
             "gated",
             pre(&current),
-            Patch::UpdateInputCard(InputCardUpdate {
+            MissionChange::UpdateInputCard(InputCardUpdate {
                 id: card,
                 human_channel: Some("notify".into()),
                 ..Default::default()
@@ -137,7 +142,7 @@ fn legacy_missions_can_be_repaired_without_allowing_unrelated_saves() {
         .patch(
             "gated",
             pre(&repaired),
-            Patch::SetFormationType {
+            MissionChange::SetFormationType {
                 id: formation,
                 kind: "solo".into(),
                 keep_slot_id: "".into(),
@@ -148,7 +153,12 @@ fn legacy_missions_can_be_repaired_without_allowing_unrelated_saves() {
         .unwrap();
     assert_eq!(repaired.mission.formations[0].kind, "solo");
     store
-        .patch("gated", pre(&repaired), Patch::Title("Repaired".into()), "")
+        .patch(
+            "gated",
+            pre(&repaired),
+            MissionChange::Title("Repaired".into()),
+            "",
+        )
         .unwrap();
     std::fs::remove_dir_all(root).unwrap();
 }

@@ -210,26 +210,17 @@ async fn edit(
 ) -> ResultResponse {
     let input = input.map_err(|e| bad(e.body_text()))?;
     let patch::UniquePatch(v) = serde_json::from_slice(&input).map_err(|e| bad(format!("{e}")))?;
-    let patch = patch::decode(&v).map_err(bad)?;
-    let nested = v.as_object().and_then(|body| {
-        body.iter()
-            .find(|(key, _)| key.as_str() != "expectedRev" && key.as_str() != "updatedBy")
-            .map(|(_, value)| value)
-    });
-    let p = Precondition {
-        rev: v["expectedRev"]
-            .as_i64()
-            .or_else(|| nested.and_then(|v| v["expectedRev"].as_i64()))
-            .unwrap_or_default(),
+    let request = patch::decode_request(&v).map_err(bad)?;
+    let precondition = Precondition {
+        rev: request.rev.unwrap_or_default(),
         etag: etag(&h).into(),
     };
     let before = m.store.mission_edit(&id)?;
-    let actor = if s(&v, "updatedBy").is_empty() {
-        nested.map(|n| s(n, "updatedBy")).unwrap_or("")
-    } else {
-        s(&v, "updatedBy")
-    };
-    let e = m.store.patch(&id, p, patch, actor)?;
+    let actor = &request.updated_by;
+    let e = match request.changes {
+        patch::Changes::Single(change) => m.store.patch(&id, precondition, *change, actor),
+        patch::Changes::Batch(changes) => m.store.patch_batch(&id, precondition, changes, actor),
+    }?;
     if e.etag != before.etag {
         m.changed();
     }

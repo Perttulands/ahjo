@@ -1,6 +1,6 @@
 //! Construct graph nodes with Archon's default shape.
 use crate::Error;
-use ahjo_mission_model::{End, Formation, Gate, InputCard, Mission, Patch, Port, Slot};
+use ahjo_mission_model::{End, Formation, Gate, InputCard, Mission, MissionChange, Port, Slot};
 use serde::Serialize;
 use toml_edit::{ArrayOfTables, DocumentMut, Item};
 
@@ -50,10 +50,10 @@ pub(crate) fn file_refs(files: &mut Vec<String>) -> Result<(), Error> {
 pub(crate) fn apply(
     doc: &mut DocumentMut,
     _mission: &Mission,
-    patch: Patch,
+    patch: MissionChange,
 ) -> Result<ahjo_mission_model::LayoutNode, Error> {
     match patch {
-        Patch::CreateInputCard {
+        MissionChange::CreateInputCard {
             title,
             goal,
             mut files,
@@ -87,7 +87,7 @@ pub(crate) fn apply(
             append(doc, "inputCard", &node)?;
             Ok(ahjo_mission_model::LayoutNode { id: node.id, x, y })
         }
-        Patch::CreateFormation {
+        MissionChange::CreateFormation {
             mut kind,
             mut title,
             x,
@@ -142,7 +142,7 @@ pub(crate) fn apply(
             append(doc, "formation", &node)?;
             Ok(ahjo_mission_model::LayoutNode { id: node.id, x, y })
         }
-        Patch::CreateGate {
+        MissionChange::CreateGate {
             title,
             mut kinds,
             criterion,
@@ -174,7 +174,7 @@ pub(crate) fn apply(
             append(doc, "gate", &node)?;
             Ok(ahjo_mission_model::LayoutNode { id: node.id, x, y })
         }
-        Patch::CreateEnd {
+        MissionChange::CreateEnd {
             mut title,
             mut outcome,
             x,
@@ -209,52 +209,4 @@ pub(crate) fn apply(
         }
         _ => unreachable!(),
     }
-}
-
-pub(crate) fn layout(
-    store: &crate::Store,
-    slug: &str,
-    mission: &Mission,
-    node: ahjo_mission_model::LayoutNode,
-) -> Result<(std::path::PathBuf, String), Error> {
-    let path = store
-        .root()
-        .join("layout")
-        .join(format!("{slug}.layout.toml"));
-    let mut doc = match crate::links::read_definition(&path) {
-        Ok(raw) => {
-            let previous = ahjo_mission_model::Layout::parse(&raw)?;
-            if previous.mission_id != mission.id {
-                return Err(Error::new("conflict", "layout belongs to another mission"));
-            }
-            raw.parse::<DocumentMut>()
-                .map_err(|e| Error::new("invalid_definition", e.to_string()))?
-        }
-        Err(error) if error.code == "not_found" => {
-            let mut doc = DocumentMut::new();
-            doc["schema"] = toml_edit::value(1);
-            doc
-        }
-        Err(err) => return Err(err),
-    };
-    crate::write::table_arrays(&mut doc, &["node"]);
-    crate::write::set(
-        doc.as_table_mut(),
-        "missionId",
-        toml_edit::value(mission.id.clone()),
-    );
-    crate::write::set(
-        doc.as_table_mut(),
-        "missionRev",
-        toml_edit::value(mission.rev),
-    );
-    crate::write::set(
-        doc.as_table_mut(),
-        "updatedAt",
-        toml_edit::value(mission.updated_at.clone()),
-    );
-    append(&mut doc, "node", &node)?;
-    let raw = doc.to_string();
-    ahjo_mission_model::Layout::parse(&raw)?;
-    Ok((path, raw))
 }

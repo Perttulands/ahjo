@@ -1,6 +1,6 @@
 //! End, Limit and gate field edits.
 use crate::Error;
-use ahjo_mission_model::{Gate, LayoutNode, Limit, Mission, Patch};
+use ahjo_mission_model::{Gate, LayoutNode, Limit, Mission, MissionChange};
 use toml_edit::{DocumentMut, Item, value};
 fn missing() -> Error {
     Error::new("not_found", "node")
@@ -54,10 +54,31 @@ fn check_limit(mission: &Mission, limit: &mut Limit) -> Result<(), Error> {
 pub(crate) fn create_limit(
     doc: &mut DocumentMut,
     mission: &Mission,
-    patch: Patch,
+    patch: MissionChange,
 ) -> Result<LayoutNode, Error> {
-    let Patch::CreateLimit { mut limit, x, y } = patch else {
+    let MissionChange::CreateLimit {
+        title,
+        target,
+        rounds,
+        seconds,
+        warn_seconds,
+        tokens,
+        when_spent,
+        x,
+        y,
+    } = patch
+    else {
         unreachable!()
+    };
+    let mut limit = Limit {
+        id: String::new(),
+        title,
+        target,
+        rounds,
+        seconds,
+        warn_seconds,
+        tokens,
+        when_spent,
     };
     check_limit(mission, &mut limit)?;
     limit.id = crate::authoring::id("lim")?;
@@ -107,10 +128,10 @@ pub(crate) fn check_gate(gate: &mut Gate) -> Result<(), Error> {
 pub(crate) fn update(
     doc: &mut DocumentMut,
     mission: &Mission,
-    patch: Patch,
+    patch: MissionChange,
 ) -> Result<bool, Error> {
     match patch {
-        Patch::UpdateEnd(u) => {
+        MissionChange::UpdateEnd(u) => {
             let old = mission.end(&u.id).ok_or_else(missing)?;
             let outcome = match u.outcome.as_deref().unwrap_or(&old.outcome).trim() {
                 "" | "done" => "done",
@@ -131,7 +152,7 @@ pub(crate) fn update(
                 crate::write::set(table, "outcome", value(outcome));
             }
         }
-        Patch::UpdateLimit(u) => {
+        MissionChange::UpdateLimit(u) => {
             let old = mission
                 .limits
                 .iter()
@@ -192,7 +213,7 @@ pub(crate) fn update(
                 }
             }
         }
-        Patch::UpdateGate(u) => {
+        MissionChange::UpdateGate(u) => {
             let old = mission.gate(&u.id).ok_or_else(missing)?;
             let sets_check =
                 u.check.is_some() || u.check_version.is_some() || u.check_value.is_some();
