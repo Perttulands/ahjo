@@ -48,7 +48,7 @@ pub struct RoutedInput {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub response: Option<Box<GateResponse>>,
     pub edge_id: String,
-    pub from_node_id: String,
+    pub from_card_id: String,
     pub from_port_id: String,
     pub to_port_id: String,
     pub r#ref: String,

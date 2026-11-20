@@ -76,7 +76,7 @@ fn render_for(request: &StepExecution, seat: &Seat, final_output: bool) -> Strin
         .bindings
         .bindings
         .iter()
-        .find(|binding| binding.node_id == request.step.id && binding.seat_id == seat.id)
+        .find(|binding| binding.step_id == request.step.id && binding.seat_id == seat.id)
         && let Some(instructions) = binding.instructions()
         && !instructions.is_empty()
     {

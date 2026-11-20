@@ -158,7 +158,7 @@ fn failed_capture_after_reattach_remains_redispatchable() {
     }
     let events = ahjo_mission_engine::Ledger::new(&path, &id).read().unwrap();
     assert_eq!(
-        events.last().unwrap().data["pending_output"]["node_id"],
+        events.last().unwrap().data["pending_output"]["step_id"],
         "fmn_work"
     );
     std::fs::write(file, "narrowed").unwrap();
@@ -348,7 +348,7 @@ fn restart_blocks_an_interrupted_copy_with_its_pending_output() {
     ledger
         .append(ahjo_mission_engine::RunEvent {
             kind: "output_capture_pending".into(),
-            node_id: "fmn_work".into(),
+            card_id: "fmn_work".into(),
             attempt: 1,
             timestamp: "2026-11-06T00:00:01Z".into(),
             data: json!({"status":"done","outputs":{"port_work_out":{"ref":"/source"}}})
@@ -369,7 +369,7 @@ fn restart_blocks_an_interrupted_copy_with_its_pending_output() {
     assert_eq!(run.block_code, "coordinator_shutdown");
     let events = ledger.read().unwrap();
     let block = events.last().unwrap();
-    assert_eq!(block.data["pending_output"]["node_id"], "fmn_work");
+    assert_eq!(block.data["pending_output"]["step_id"], "fmn_work");
     assert_eq!(block.data["pending_output"]["attempt"], 1);
 }
 
@@ -392,7 +392,7 @@ fn file_refs_must_be_absolute_existing_regular_files() {
         assert!(
             !run.events
                 .iter()
-                .any(|event| event.kind == "node_output" && event.node_id == "fmn_work")
+                .any(|event| event.kind == "card_output" && event.card_id == "fmn_work")
         );
     }
 }
@@ -499,18 +499,18 @@ fn interrupted_replacement_restores_the_original_source_before_recapture() {
     for e in original
         .iter()
         .skip(1)
-        .take_while(|e| !(e.kind == "node_started" && e.node_id == "fmn_work"))
+        .take_while(|e| !(e.kind == "card_started" && e.card_id == "fmn_work"))
     {
         ledger.append(e.clone()).unwrap();
     }
     let started = original
         .iter()
-        .find(|e| e.kind == "node_started" && e.node_id == "fmn_work")
+        .find(|e| e.kind == "card_started" && e.card_id == "fmn_work")
         .unwrap();
     ledger.append(started.clone()).unwrap();
     let event = |kind: &str, data: serde_json::Value| ahjo_mission_engine::RunEvent {
         kind: kind.into(),
-        node_id: "fmn_work".into(),
+        card_id: "fmn_work".into(),
         attempt: 1,
         timestamp: "2026-11-06T00:00:01Z".into(),
         data: data.as_object().unwrap().clone(),

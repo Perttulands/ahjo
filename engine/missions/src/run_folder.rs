@@ -1,7 +1,7 @@
 //! Folder copies for steps that a review can send back. The verdict stays
 //! pending until its chosen folder has been published.
 use crate::coordinator::Control;
-use crate::graph::{endpoint_node, endpoint_port, outgoing, outgoing_from_port};
+use crate::graph::{endpoint_card, endpoint_port, outgoing, outgoing_from_port};
 use crate::run_worker::{append_live, event};
 use crate::{Coordinator, RunEvent};
 use ahjo_mission_model::{GATE_FAIL, GATE_IN, Mission, PublicOrigin};
@@ -17,11 +17,11 @@ pub(crate) const CONFLICT: &str = "folder_workspace_conflict";
 
 fn review_gates<'a>(mission: &'a Mission, node: &'a str) -> impl Iterator<Item = &'a str> {
     outgoing(mission, node).filter_map(move |wire| {
-        let gate = endpoint_node(&wire.to);
+        let gate = endpoint_card(&wire.to);
         (endpoint_port(&wire.to) == GATE_IN
             && mission.gate(gate).is_some()
             && outgoing_from_port(mission, gate, GATE_FAIL)
-                .any(|wire| endpoint_node(&wire.to) == node))
+                .any(|wire| endpoint_card(&wire.to) == node))
         .then_some(gate)
     })
 }
@@ -61,7 +61,7 @@ pub(crate) fn prepare(
 ) -> io::Result<PathBuf> {
     let gates: Vec<_> = review_gates(mission, node).collect();
     let only_one = mission.limits.iter().any(|card| {
-        (card.target == node || mission.has_input_card(&card.target))
+        (card.scope == node || mission.has_input_card(&card.scope))
             && card.rounds == Some(1)
             && card.when_spent == ahjo_mission_model::WhenSpent::Fail
     });
@@ -108,7 +108,7 @@ pub(crate) fn attempt_path(
 ) -> Option<PathBuf> {
     events
         .iter()
-        .any(|e| e.kind == COPY && e.node_id == node && e.attempt == attempt)
+        .any(|e| e.kind == COPY && e.card_id == node && e.attempt == attempt)
         .then(|| attempt_dir(c, id, node, attempt).join("work"))
 }
 
@@ -118,7 +118,8 @@ pub(crate) fn last_selection(events: &[RunEvent], node: &str) -> u64 {
 
 fn latest_selection<'a>(events: &'a [RunEvent], node: &str) -> Option<&'a RunEvent> {
     events.iter().rev().find(|e| {
-        e.kind == "gate_verdict" && e.data.get("folder_node").and_then(Value::as_str) == Some(node)
+        e.kind == "gate_verdict"
+            && e.data.get("folder_step_id").and_then(Value::as_str) == Some(node)
     })
 }
 
@@ -134,18 +135,23 @@ pub(crate) fn record_verdict(
     if verdict.kind == "gate_verdict"
         && verdict.data.get("route_port").and_then(Value::as_str) == Some("pass")
     {
-        let reference = verdict.data.get("pick").or_else(|| {
-            verdict
-                .data
-                .get("input_ref")
-                .and_then(|input| input.get("origin"))
-        });
-        if let Some(reference) = reference
-            && let Some(node) = reference.get("node_id").and_then(Value::as_str)
+        let reference = verdict
+            .data
+            .get("pick")
+            .map(|pick| (pick, "step_id"))
+            .or_else(|| {
+                verdict
+                    .data
+                    .get("input_ref")
+                    .and_then(|input| input.get("origin"))
+                    .map(|origin| (origin, "card_id"))
+            });
+        if let Some((reference, identity)) = reference
+            && let Some(node) = reference.get(identity).and_then(Value::as_str)
             && let Some(attempt) = reference.get("attempt").and_then(Value::as_i64)
             && let Some(copy) = events.iter().rev().find(|e| {
                 e.kind == COPY
-                    && e.node_id == node
+                    && e.card_id == node
                     && e.attempt == attempt
                     && e.data
                         .get("gates")
@@ -164,7 +170,7 @@ pub(crate) fn record_verdict(
                 .insert("folder_attempt_seq".into(), copy.seq.into());
             verdict
                 .data
-                .insert("folder_node".into(), copy.node_id.clone().into());
+                .insert("folder_step_id".into(), copy.card_id.clone().into());
         }
     }
     append_live(c, id, control, verdict).map(|_| ())
@@ -213,7 +219,7 @@ pub(crate) fn settle(
     events: &[RunEvent],
     pending: &RunEvent,
 ) -> io::Result<()> {
-    if let Some(node) = pending.data.get("folder_node").and_then(Value::as_str) {
+    if let Some(node) = pending.data.get("folder_step_id").and_then(Value::as_str) {
         crate::run_left_seats::end(c, id, Some(node), "folder_selected")?;
     }
     let _workspace = c.inner.folder_workspace.lock().unwrap();
@@ -222,24 +228,24 @@ pub(crate) fn settle(
         return Ok(());
     }
     let (copy, source) = selection(events, pending)?;
-    let prior = latest_selection(events, &copy.node_id).filter(|prior| prior.seq > copy.seq);
+    let prior = latest_selection(events, &copy.card_id).filter(|prior| prior.seq > copy.seq);
     if prior.is_some_and(|prior| {
         prior.data.get("folder_attempt_seq") != pending.data.get("folder_attempt_seq")
     }) {
         return Err(io::Error::other(format!(
             "{CONFLICT}: another gate already selected a different attempt of {}",
-            copy.node_id
+            copy.card_id
         )));
     }
     if prior.is_none() && workspace.canonicalize().ok().as_ref() != Some(&source) {
         return Err(io::Error::other(format!(
             "{CONFLICT}: run folder {} changed location before publishing {}",
             workspace.display(),
-            copy.node_id,
+            copy.card_id,
         )));
     }
     if prior.is_none() {
-        let dir = attempt_dir(c, id, &copy.node_id, copy.attempt);
+        let dir = attempt_dir(c, id, &copy.card_id, copy.attempt);
         crate::folder_snapshot::publish(
             &source,
             &dir.join("work"),
@@ -254,7 +260,7 @@ pub(crate) fn settle(
             };
             io::Error::other(format!(
                 "{code}: publishing {} attempt {}: {error}",
-                copy.node_id, copy.attempt
+                copy.card_id, copy.attempt
             ))
         })?;
     }
@@ -267,12 +273,12 @@ pub(crate) fn settle(
     if prior.is_some() {
         // A second gate can pass the copy that already landed. Only the
         // first accepting verdict advances the step's snapshot boundary.
-        verdict.data.remove("folder_node");
+        verdict.data.remove("folder_step_id");
     }
     c.append(id, verdict)?;
     drop(done);
     if prior.is_none() {
-        discard_selected(c, id, &copy.node_id, events)?;
+        discard_selected(c, id, &copy.card_id, events)?;
     }
     Ok(())
 }
@@ -280,7 +286,7 @@ pub(crate) fn settle(
 fn discard_selected(c: &Coordinator, id: &str, node: &str, events: &[RunEvent]) -> io::Result<()> {
     for copy in events
         .iter()
-        .filter(|e| e.kind == COPY && e.node_id == node)
+        .filter(|e| e.kind == COPY && e.card_id == node)
     {
         crate::kept_copy::remove_tree(&attempt_dir(c, id, node, copy.attempt))?;
     }
@@ -290,7 +296,7 @@ fn discard_selected(c: &Coordinator, id: &str, node: &str, events: &[RunEvent]) 
 /// Replay cleanup if the verdict was recorded just before a shutdown.
 pub(crate) fn recover(c: &Coordinator, id: &str, events: &[RunEvent]) -> io::Result<()> {
     for verdict in events.iter().filter(|e| e.kind == "gate_verdict") {
-        if let Some(node) = verdict.data.get("folder_node").and_then(Value::as_str) {
+        if let Some(node) = verdict.data.get("folder_step_id").and_then(Value::as_str) {
             let index = events.partition_point(|e| e.seq < verdict.seq);
             discard_selected(c, id, node, &events[..index])?;
         }
@@ -305,7 +311,7 @@ pub(crate) fn discard_run(c: &Coordinator, id: &str) -> io::Result<()> {
         if let Some(verdict) = pending(&events) {
             let (copy, source) = selection(&events, verdict)?;
             let _workspace = c.inner.folder_workspace.lock().unwrap();
-            let dir = attempt_dir(c, id, &copy.node_id, copy.attempt);
+            let dir = attempt_dir(c, id, &copy.card_id, copy.attempt);
             crate::folder_snapshot::abandon(
                 &source,
                 &dir.join("base"),
@@ -325,7 +331,7 @@ pub(crate) fn reviewed_path(
     origin: Option<&PublicOrigin>,
 ) -> Option<PathBuf> {
     let origin = origin?;
-    let last = last_selection(events, &origin.node_id);
+    let last = last_selection(events, &origin.card_id);
     let boundary = events.partition_point(|e| e.seq <= last);
-    attempt_path(c, id, &events[boundary..], &origin.node_id, origin.attempt)
+    attempt_path(c, id, &events[boundary..], &origin.card_id, origin.attempt)
 }

@@ -361,7 +361,7 @@ impl Coordinator {
                     for event in &p.events {
                         if event.kind == "seat_created"
                             && !event.session_name.is_empty()
-                            && !event.node_id.is_empty()
+                            && !event.card_id.is_empty()
                         {
                             if !sessions
                                 .iter()
@@ -369,7 +369,7 @@ impl Coordinator {
                             {
                                 sessions.push(RunSessionSummary {
                                     session_name: event.session_name.clone(),
-                                    node_id: event.node_id.clone(),
+                                    step_id: event.card_id.clone(),
                                     seat_id: event.seat_id.clone(),
                                 });
                             }
@@ -521,20 +521,20 @@ impl Coordinator {
             .steps
             .iter()
             .filter(|f| !single || f.id == request.step_id)
-            .filter(|f| !f.device.is_empty() && f.device != self.inner.settings.environment)
+            .filter(|f| !f.environment.is_empty() && f.environment != self.inner.settings.environment)
             .filter(|f| {
-                let device = f.device.split('/').next().unwrap_or("");
-                request.known_devices.as_ref().is_some_and(|known| {
-                    !known.iter().any(|k| k == device)
+                let machine = f.environment.split('/').next().unwrap_or("");
+                request.known_machines.as_ref().is_some_and(|known| {
+                    !known.iter().any(|k| k == machine)
                 })
             })
             .map(|f| {
                 Finding::new(
-                    ahjo_mission_model::Code::UnknownDevice,
+                    ahjo_mission_model::Code::UnknownEnvironment,
                     &f.id,
                     format!(
-                        "step {:?} runs on {}, a device this node does not know; name one of the fleet's devices or clear it",
-                        f.id, f.device
+                        "step {:?} runs on {}, an environment on an unknown machine; use a fleet environment or clear it",
+                        f.id, f.environment
                     ),
                 )
             })
@@ -548,15 +548,15 @@ impl Coordinator {
             .steps
             .iter()
             .filter(|f| !single || f.id == request.step_id)
-            .filter(|f| !f.device.is_empty() && f.device != self.inner.settings.environment)
+            .filter(|f| !f.environment.is_empty() && f.environment != self.inner.settings.environment)
             .filter(|_| request.repository.is_empty())
             .map(|f| {
                 Finding::new(
                     ahjo_mission_model::Code::PlacementWithoutRepository,
                     &f.id,
                     format!(
-                        "step {:?} runs on {}, which reaches the run's work only through a repository; give the run a repository or clear the device",
-                        f.id, f.device
+                        "step {:?} runs on {}, which reaches the run's work only through a repository; give the run a repository or clear the environment",
+                        f.id, f.environment
                     ),
                 )
             })

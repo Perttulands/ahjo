@@ -50,19 +50,19 @@ fn admission_checks_inputs_and_frozen_staffing_across_the_mission() {
         report
             .errors
             .iter()
-            .any(|f| f.code.as_str() == "missing_input" && f.node_id == "inp_hello")
+            .any(|f| f.code.as_str() == "missing_input" && f.card_id == "inp_hello")
     );
     assert!(
         report
             .errors
             .iter()
-            .any(|f| f.code.as_str() == "invalid_seat_settings" && f.node_id == "unreachable")
+            .any(|f| f.code.as_str() == "invalid_seat_settings" && f.card_id == "unreachable")
     );
     assert!(
         report
             .errors
             .iter()
-            .any(|f| f.code.as_str() == "unstaffed_seat" && f.node_id == "unreachable_unstaffed")
+            .any(|f| f.code.as_str() == "unstaffed_seat" && f.card_id == "unreachable_unstaffed")
     );
 }
 
@@ -103,7 +103,7 @@ fn a_reached_step_with_an_input_nothing_feeds_is_refused_before_the_run() {
     let validation = validate(&mission, &agents, &Harnesses::default());
     let found = unfed(&validation);
     assert_eq!(found.len(), 1, "{validation:?}");
-    assert_eq!(found[0].node_id, "fmn_work");
+    assert_eq!(found[0].card_id, "fmn_work");
     assert!(
         found[0].message.contains("\"More\""),
         "{}",

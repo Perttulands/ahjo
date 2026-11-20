@@ -1,5 +1,5 @@
 # Parity fixture: End nodes, node ids and Limit cards.
-schema = 4
+schema = 5
 id = "msn_limits"
 slug = "limits"
 title = "Limits"
@@ -87,7 +87,7 @@ outcome = "done"
 [[limit]]
 id = "gate_human"
 title = "Limit"
-target = "fmn_a"
+scope = "fmn_a"
 rounds = 3
 
 [[limit]]
@@ -97,13 +97,13 @@ title = "Nothing"
 [[limit]]
 id = "lim_gate"
 title = "Gate cap"
-target = "gate_code"
+scope = "gate_code"
 rounds = 2
 
 [[limit]]
 id = "lim_second"
 title = "Second"
-target = "fmn_a"
+scope = "fmn_a"
 rounds = 0
 seconds = -5
 tokens = 0
@@ -111,21 +111,21 @@ tokens = 0
 [[limit]]
 id = "lim_warn_zero"
 title = "Warn zero"
-target = "fmn_b"
+scope = "fmn_b"
 seconds = 600
 warn_seconds = 0
 
 [[limit]]
 id = "lim_warn_notime"
 title = "Warn no time"
-target = "inp"
+scope = "inp"
 warn_seconds = 90
 when_spent = "best"
 
 [[limit]]
 id = "lim_warn_late"
 title = "Warn late"
-target = "fmn_c"
+scope = "fmn_c"
 seconds = 300
 warn_seconds = 5400
 when_spent = "maybe"
@@ -133,7 +133,7 @@ when_spent = "maybe"
 [[limit]]
 id = "lim_best_nogate"
 title = "Best"
-target = "fmn_b"
+scope = "fmn_b"
 tokens = 50000
 when_spent = "best"
 

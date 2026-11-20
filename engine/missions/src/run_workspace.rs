@@ -64,12 +64,12 @@ pub(crate) fn prepare_placed_turn(
     req: &RunStart,
     workspace: &Path,
     control: &Control,
-    (node, place): (&str, &str),
+    (node, environment): (&str, &str),
     attempt: i64,
 ) -> io::Result<crate::TurnWorkspace> {
     if req.repository.is_empty() {
         return Err(io::Error::other(format!(
-            "step {node} runs on {place}, which needs a repository run to share its workspace"
+            "step {node} runs on {environment}, which needs a repository run to share its workspace"
         )));
     }
     let _guard = control.workspace.lock().unwrap();
@@ -85,7 +85,7 @@ pub(crate) fn prepare_placed_turn(
             "workspace_started",
             node,
             attempt,
-            json!({"base":base,"place":place}),
+            json!({"base":base,"environment":environment}),
         ),
     )?;
     let branch = ahjo_mission_model::run_branch(id);
@@ -112,7 +112,7 @@ pub(crate) fn prepare_placed_turn(
     )?;
     Ok(crate::TurnWorkspace {
         run_id: id.into(),
-        node_id: node.into(),
+        step_id: node.into(),
         attempt,
         repository: req.repository.clone(),
         commit: base,
@@ -130,7 +130,7 @@ fn placed_commits(
 ) -> io::Result<Vec<String>> {
     let published = events
         .iter()
-        .find(|e| e.kind == "workspace_turn" && e.node_id == node && e.attempt == attempt)
+        .find(|e| e.kind == "workspace_turn" && e.card_id == node && e.attempt == attempt)
         .ok_or_else(|| {
             io::Error::other(format!(
                 "step {node} attempt {attempt} ran on another environment and did not publish its work"
@@ -185,7 +185,7 @@ pub(crate) fn publish_output(
         }
         return Err(io::Error::new(io::ErrorKind::Interrupted, "run canceled"));
     }
-    output.kind = "node_output_pending".into();
+    output.kind = "card_output_pending".into();
     if !append_live(c, id, control, output.clone())? {
         return Err(io::Error::new(io::ErrorKind::Interrupted, "run canceled"));
     }
@@ -195,10 +195,10 @@ pub(crate) fn publish_output(
         req,
         workspace,
         control,
-        &output.node_id,
+        &output.card_id,
         output.attempt,
     )?;
-    output.kind = "node_output".into();
+    output.kind = "card_output".into();
     if !append_live(c, id, control, output)? {
         return Err(io::Error::new(io::ErrorKind::Interrupted, "run canceled"));
     }
@@ -225,7 +225,7 @@ pub(crate) fn commit_turn(
     let turn = |kind: &str| {
         events
             .iter()
-            .find(|e| e.kind == kind && e.node_id == node && e.attempt == attempt)
+            .find(|e| e.kind == kind && e.card_id == node && e.attempt == attempt)
     };
     let path = turn_path(c, id, node, attempt);
     if turn("workspace_settled").is_some() {
@@ -318,7 +318,7 @@ pub(crate) fn commit_turn(
         for source in commits {
             let prior = events.iter().any(|e| {
                 e.kind == "workspace_commit"
-                    && e.node_id == node
+                    && e.card_id == node
                     && e.attempt == attempt
                     && e.data.get("source").and_then(|v| v.as_str()) == Some(&source)
             });

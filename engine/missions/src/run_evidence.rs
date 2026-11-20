@@ -41,16 +41,16 @@ impl Coordinator {
                 .data
                 .get("input_ref")
                 .and_then(|v| v.get("origin"))
-                .and_then(|v| v.get("node_id"))
+                .and_then(|v| v.get("card_id"))
                 .and_then(Value::as_str)
                 .unwrap_or("");
             let blocked = event
                 .data
-                .get("blocked_node_id")
+                .get("blocked_card_id")
                 .and_then(Value::as_str)
                 .unwrap_or("");
             let related = only.is_none_or(|step| {
-                event.node_id == step
+                event.card_id == step
                     || origin == step
                     || blocked == step
                     || event
@@ -59,7 +59,7 @@ impl Coordinator {
                         .and_then(Value::as_array)
                         .is_some_and(|ds| {
                             ds.iter()
-                                .any(|d| d.get("node_id").and_then(Value::as_str) == Some(step))
+                                .any(|d| d.get("step_id").and_then(Value::as_str) == Some(step))
                         })
             });
             if !related {
@@ -73,7 +73,7 @@ impl Coordinator {
                     .filter(|p| Path::new(p).is_absolute())
                 {
                     briefs.push(RunBrief {
-                        node_id: event.node_id.clone(),
+                        step_id: event.card_id.clone(),
                         seat_id: event.seat_id.clone(),
                         attempt: event.attempt,
                         dispatch_seq: event.seq,
@@ -94,10 +94,10 @@ impl Coordinator {
                 problems.push(RunProblem {
                     seq: event.seq,
                     kind: event.kind.clone(),
-                    node_id: if !origin.is_empty() {
+                    card_id: if !origin.is_empty() {
                         origin
-                    } else if !event.node_id.is_empty() {
-                        &event.node_id
+                    } else if !event.card_id.is_empty() {
+                        &event.card_id
                     } else {
                         blocked
                     }
@@ -271,7 +271,7 @@ fn walk(
         } else if metadata.is_file() {
             let path = entry.path().canonicalize()?;
             files.push(RunArtifact {
-                node_id: node.into(),
+                step_id: node.into(),
                 path: path.to_string_lossy().into_owned(),
                 size: metadata.len(),
             });

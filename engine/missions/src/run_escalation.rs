@@ -16,7 +16,7 @@ pub fn project_escalations(events: &[RunEvent]) -> Vec<Escalation> {
             Escalation {
                 run_id: e.run_id.clone(),
                 seq: e.seq,
-                node_id: e.node_id.clone(),
+                card_id: e.card_id.clone(),
                 gate_id: e.gate_id.clone(),
                 severity: text("severity"),
                 reason: text("reason"),
@@ -37,7 +37,7 @@ pub struct EscalationSentinel {
     pub run_id: String,
     pub severity: String,
     pub reason: String,
-    pub node_id: String,
+    pub card_id: String,
     pub gate_id: String,
     pub blocks: bool,
 }
@@ -60,11 +60,7 @@ pub fn parse_escalation(captured: &str, run_id: &str) -> Option<EscalationSentin
         return Some(EscalationSentinel {
             run_id: run_id.into(),
             reason: fields.get("reason").cloned().unwrap_or_default(),
-            node_id: fields
-                .get("node")
-                .or_else(|| fields.get("node_id"))
-                .cloned()
-                .unwrap_or_default(),
+            card_id: fields.get("card_id").cloned().unwrap_or_default(),
             gate_id: fields.get("gate_id").cloned().unwrap_or_default(),
             severity,
             blocks,
@@ -122,10 +118,10 @@ mod tests {
     use super::parse_escalation;
     #[test]
     fn finds_matching_run_and_quoted_reason() {
-        let captured = "<<<AHJO-ESCALATE run-id=other reason=ignored>>> <<<AHJO-ESCALATE run-id=run_1 severity=stop reason='needs å review' node_id=step>>>";
+        let captured = "<<<AHJO-ESCALATE run-id=other reason=ignored>>> <<<AHJO-ESCALATE run-id=run_1 severity=stop reason='needs å review' card_id=step>>>";
         let found = parse_escalation(captured, "run_1").unwrap();
         assert_eq!(found.reason, "needs å review");
-        assert_eq!(found.node_id, "step");
+        assert_eq!(found.card_id, "step");
         assert!(found.blocks);
         assert!(parse_escalation(captured, "run_2").is_none());
     }

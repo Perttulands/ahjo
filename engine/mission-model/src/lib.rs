@@ -8,13 +8,13 @@
 mod agent;
 mod authoring;
 mod branches;
+mod cards;
 mod examples;
 mod finding;
 pub mod flow;
 mod harness_choices;
 mod layout;
 mod mission;
-mod nodes;
 mod notes;
 mod run;
 mod run_attempts;
@@ -27,19 +27,19 @@ mod vocabulary;
 pub use agent::{AGENT_SCHEMA, Agent, AgentNote, AgentUsage, AgentUse, UnreadableAgent};
 pub use authoring::{
     DocumentChanges, Edit, EndUpdate, GateUpdate, InputCardUpdate, LayoutEdit, LayoutPatch,
-    LimitUpdate, MissionChange, MissionDeletion, NotePatch, NotesEdit, Precondition, RestoredNode,
+    LimitUpdate, MissionChange, MissionDeletion, NotePatch, NotesEdit, Precondition, RestoredCard,
 };
 pub use branches::{kept_branch, run_branch, run_tag};
-pub use examples::{EXAMPLES, Example, example};
-pub use finding::{Code, Finding, Report};
-pub use harness_choices::{EffortPolicy, HarnessChoices, HarnessModel};
-pub use layout::{LAYOUT_SCHEMA, Layout, LayoutEdge, LayoutNode};
-pub use mission::{MISSION_SCHEMA, Mission, MissionArchive, MissionListing};
-pub use nodes::{
+pub use cards::{
     Brief, Connection, END_IN, End, GATE_FAIL, GATE_IN, GATE_JUDGE, GATE_PASS, Gate,
     HARNESS_DEFAULT_MODEL, INPUT_CARD_OUT, InputCard, Limit, MissionInput, MissionOutput, Port,
     Seat, SeatSettings, Step,
 };
+pub use examples::{EXAMPLES, Example, example};
+pub use finding::{Code, Finding, Report};
+pub use harness_choices::{EffortPolicy, HarnessChoices, HarnessModel};
+pub use layout::{LAYOUT_SCHEMA, Layout, LayoutCard, LayoutEdge};
+pub use mission::{MISSION_SCHEMA, Mission, MissionArchive, MissionListing};
 pub use notes::{MISSION_THREAD, NOTES_SCHEMA, NoteEntry, Notes, valid_author};
 pub use run::{
     HumanPick, HumanVerdict, ResumeMode, ResumeRequest, RunInput, RunOutput, RunSessionSummary,

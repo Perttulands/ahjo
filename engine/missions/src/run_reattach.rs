@@ -13,7 +13,7 @@ fn request(
     control: Option<&Control>,
 ) -> Result<OpenDispatch, String> {
     let step = mission
-        .step(&dispatch.node_id)
+        .step(&dispatch.card_id)
         .cloned()
         .ok_or_else(|| "step missing from snapshot".to_owned())?;
     Ok(OpenDispatch {
@@ -24,19 +24,19 @@ fn request(
             .and_then(|v| v.as_str())
             .unwrap_or("")
             .into(),
-        node_id: dispatch.node_id.clone(),
+        step_id: dispatch.card_id.clone(),
         seat_id: dispatch.seat_id.clone(),
         attempt: dispatch.attempt,
         step,
         dispatch_data: dispatch.data.clone(),
-        artifact_dir: crate::run_capture::attempt_dir(c, id, &dispatch.node_id, dispatch.attempt)
+        artifact_dir: crate::run_capture::attempt_dir(c, id, &dispatch.card_id, dispatch.attempt)
             .map_err(|e| e.to_string())?,
         canceled: control.map(|control| control.canceled.clone()),
         stopping: control.map(|control| control.stopping.clone()),
         final_judge: mission.gates.iter().any(|gate| {
             crate::graph::judge_chain(mission, &gate.id)
                 .last()
-                .is_some_and(|judge| judge.id == dispatch.node_id)
+                .is_some_and(|judge| judge.id == dispatch.card_id)
         }),
         limits: Default::default(),
     })
@@ -115,7 +115,7 @@ fn keep(
         .map_err(io::Error::other)?
     {
         let already_recorded = prior.iter().any(|event| {
-            event.node_id == dispatch.node_id
+            event.card_id == dispatch.card_id
                 && event.attempt == dispatch.attempt
                 && event.kind == replay.kind
                 && event.data.get("dispatch_id") == replay.data.get("dispatch_id")
@@ -129,7 +129,7 @@ fn keep(
         }
         let mut record = crate::run_worker::event(
             &replay.kind,
-            &dispatch.node_id,
+            &dispatch.card_id,
             dispatch.attempt,
             serde_json::Value::Object(replay.data),
         );
@@ -138,7 +138,7 @@ fn keep(
     }
     let mut seat = crate::run_worker::event(
         "seat_result",
-        &dispatch.node_id,
+        &dispatch.card_id,
         dispatch.attempt,
         json!({"dispatch_id":dispatch_id,"status":"ok","sentinel":{"run_id":id,"status":"ok"}}),
     );
@@ -160,18 +160,18 @@ fn keep(
         .iter()
         .rev()
         .find(|e| {
-            e.kind == "node_started"
-                && e.node_id == dispatch.node_id
+            e.kind == "card_started"
+                && e.card_id == dispatch.card_id
                 && e.attempt == dispatch.attempt
         })
         .and_then(|e| e.data.get("reason"))
         .and_then(|v| v.as_str())
         .unwrap_or("");
     let mut output = crate::run_worker::event(
-        "node_output",
-        &dispatch.node_id,
+        "card_output",
+        &dispatch.card_id,
         dispatch.attempt,
-        json!({"status":result.status,"text":result.text,"outputs":result.outputs,"report_ref":format!("lab://{id}/{}/report.md",dispatch.node_id)}),
+        json!({"status":result.status,"text":result.text,"outputs":result.outputs,"report_ref":format!("lab://{id}/{}/report.md",dispatch.card_id)}),
     );
     if reason == "judge" {
         output.data.insert("reason".into(), "judge".into());
@@ -195,7 +195,7 @@ fn record_tokens(
     for (dispatch_id, tokens) in limits.counted_tokens() {
         let mut usage = crate::run_worker::event(
             "token_usage",
-            &dispatch.node_id,
+            &dispatch.card_id,
             dispatch.attempt,
             json!({"dispatch_id":dispatch_id,"tokens":tokens}),
         );
@@ -220,7 +220,7 @@ fn cut_off(
         id,
         mission,
         control,
-        &dispatch.node_id,
+        &dispatch.card_id,
         dispatch.attempt,
         limits,
     )?;
@@ -290,7 +290,7 @@ pub(crate) fn resolve(
                 .remove(&(id.to_owned(), dispatch_id.to_owned()));
             let mut abandoned = crate::run_worker::event(
                 "seat_result",
-                &dispatch.node_id,
+                &dispatch.card_id,
                 dispatch.attempt,
                 json!({"dispatch_id":dispatch_id,"seat_id":dispatch.seat_id,"status":"abandoned"}),
             );
@@ -314,7 +314,7 @@ pub(crate) fn resolve(
                 Some(result) => result,
                 None => {
                     let (held, _timer) =
-                        crate::run_job::attempt_limits(c, id, mission, control, &dispatch.node_id)
+                        crate::run_job::attempt_limits(c, id, mission, control, &dispatch.card_id)
                             .map_err(|e| e.to_string())?;
                     request.limits = held.clone();
                     limits = Some(held);
@@ -348,20 +348,22 @@ pub(crate) fn resolve(
             Err(reason) => {
                 let mut error = crate::run_worker::event(
                     "error",
-                    &dispatch.node_id,
+                    &dispatch.card_id,
                     dispatch.attempt,
                     json!({"code":"dispatch_reattach_failed","reason":reason,"dispatch_id":dispatch_id,"recoverable":true}),
                 );
                 error.seat_id = dispatch.seat_id.clone();
                 c.append(id, error)?;
-                reasons.push(format!("{}: {reason}", dispatch.node_id));
-                failed.push(dispatch.data.clone());
+                reasons.push(format!("{}: {reason}", dispatch.card_id));
+                let mut record = dispatch.data.clone();
+                record.insert("step_id".into(), dispatch.card_id.clone().into());
+                failed.push(record);
             }
         }
     }
     if !failed.is_empty() {
         let (code, reason) = block_reason(&reasons);
-        c.append(id, RunEvent { kind:"run_blocked".into(), timestamp:crate::run_storage::now(), data:json!({"code":code,"reason":reason,"resume_allowed":true,"resume_policy":"explicit","open_dispatches":failed}).as_object().unwrap().clone(), node_id: if failed.len() == 1 { failed[0]["node_id"].as_str().unwrap_or("").into() } else { String::new() }, ..Default::default() })?;
+        c.append(id, RunEvent { kind:"run_blocked".into(), timestamp:crate::run_storage::now(), data:json!({"code":code,"reason":reason,"resume_allowed":true,"resume_policy":"explicit","open_dispatches":failed}).as_object().unwrap().clone(), card_id: if failed.len() == 1 { failed[0]["step_id"].as_str().unwrap_or("").into() } else { String::new() }, ..Default::default() })?;
         return Ok(false);
     }
     Ok(true)

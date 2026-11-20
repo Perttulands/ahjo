@@ -180,7 +180,7 @@ fn create_nodes_with_default_shapes() {
     );
     let step_id = edit.mission.steps[0].id.clone();
     let layout = store.read_layout("work").unwrap().unwrap();
-    assert_eq!(layout.nodes.len(), 4);
+    assert_eq!(layout.cards.len(), 4);
     edit = store
         .patch(
             "work",
@@ -197,7 +197,7 @@ fn create_nodes_with_default_shapes() {
             .read_layout("work")
             .unwrap()
             .unwrap()
-            .nodes
+            .cards
             .iter()
             .any(|node| node.id == step_id)
     );
@@ -419,7 +419,7 @@ fn notes_are_author_owned_and_noops_keep_the_etag() {
 
 #[test]
 fn layout_changes_are_etag_checked_and_keep_other_layers() {
-    use ahjo_mission_model::{LayoutEdge, LayoutNode, LayoutPatch};
+    use ahjo_mission_model::{LayoutCard, LayoutEdge, LayoutPatch};
     let dir = Scratch::new();
     let store = Store::new(&dir.0);
     store.create_mission("work", "Work", "").unwrap();
@@ -433,7 +433,7 @@ fn layout_changes_are_etag_checked_and_keep_other_layers() {
     );
     assert_eq!(
         store
-            .patch_layout("work", "stale", LayoutPatch::Nodes(vec![]))
+            .patch_layout("work", "stale", LayoutPatch::Cards(vec![]))
             .unwrap_err()
             .code
             .as_str(),
@@ -451,7 +451,7 @@ fn layout_changes_are_etag_checked_and_keep_other_layers() {
         .patch_layout(
             "work",
             "*",
-            LayoutPatch::Nodes(vec![LayoutNode {
+            LayoutPatch::Cards(vec![LayoutCard {
                 id: "note:mission".into(),
                 x: 14,
                 y: 28,
@@ -468,11 +468,11 @@ fn layout_changes_are_etag_checked_and_keep_other_layers() {
             }]),
         )
         .unwrap();
-    assert_eq!(edges.layout.nodes[0].x, 14);
+    assert_eq!(edges.layout.cards[0].x, 14);
     assert_eq!(edges.layout.edges[0].lane, "top");
     assert_eq!(
         store
-            .patch_layout("work", &nodes.etag, LayoutPatch::Nodes(vec![]))
+            .patch_layout("work", &nodes.etag, LayoutPatch::Cards(vec![]))
             .unwrap_err()
             .code
             .as_str(),
@@ -602,7 +602,7 @@ fn arrange_follows_delivery_and_puts_the_judge_under_its_gate() {
     let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/parity");
     let mission = Store::new(path).read_mission("delivery").unwrap();
     let result = ahjo_mission_engine::arrange(&mission, &Default::default());
-    let node = |id: &str| result.nodes.iter().find(|node| node.id == id).unwrap();
+    let node = |id: &str| result.cards.iter().find(|node| node.id == id).unwrap();
     let ids = [
         "mis_delivery",
         "fmn_plan",
@@ -713,7 +713,7 @@ fn input_card_updates_validate_declarations_and_preserve_identity() {
 
 #[test]
 fn deleted_node_and_port_restore_their_identities_and_wires() {
-    use ahjo_mission_model::RestoredNode;
+    use ahjo_mission_model::RestoredCard;
     let dir = Scratch::new();
     let store = Store::new(&dir.0);
     let mut edit = store.create_mission("work", "Work", "").unwrap();
@@ -791,8 +791,8 @@ fn deleted_node_and_port_restore_their_identities_and_wires() {
         .patch(
             "work",
             pre(&edit),
-            MissionChange::RestoreNode {
-                node: RestoredNode::Step(first.clone()),
+            MissionChange::RestoreCard {
+                card: RestoredCard::Step(first.clone()),
                 connections: vec![wire.clone()],
                 index: Some(0),
                 x: 10,
@@ -901,7 +901,7 @@ fn judge_and_limit_edits_use_the_same_revision_path() {
             pre(&edit),
             MissionChange::CreateLimit {
                 title: String::new(),
-                target: judge,
+                scope: judge,
                 rounds: Some(3),
                 seconds: None,
                 warn_seconds: None,
@@ -1152,7 +1152,7 @@ fn rewire_join_undo_removes_only_its_extra_port_and_keeps_wire_id() {
 
 #[test]
 fn restored_node_allocates_new_wire_id_when_original_is_taken() {
-    use ahjo_mission_model::RestoredNode;
+    use ahjo_mission_model::RestoredCard;
     let dir = Scratch::new();
     let store = Store::new(&dir.0);
     let mut edit = store.create_mission("work", "Work", "").unwrap();
@@ -1224,8 +1224,8 @@ fn restored_node_allocates_new_wire_id_when_original_is_taken() {
         .patch(
             "work",
             pre(&edit),
-            MissionChange::RestoreNode {
-                node: RestoredNode::Step(b.clone()),
+            MissionChange::RestoreCard {
+                card: RestoredCard::Step(b.clone()),
                 connections: vec![original.clone()],
                 index: Some(1),
                 x: 0,
@@ -1247,7 +1247,7 @@ fn restored_node_allocates_new_wire_id_when_original_is_taken() {
 #[test]
 fn placement_has_no_ceiling_and_refuses_a_foreign_layout() {
     use ahjo_mission_engine::free_layout_position;
-    use ahjo_mission_model::{Layout, LayoutNode, Mission, Step};
+    use ahjo_mission_model::{Layout, LayoutCard, Mission, Step};
     let mut mission = Mission {
         id: "msn_work".into(),
         ..Default::default()
@@ -1266,7 +1266,7 @@ fn placement_has_no_ceiling_and_refuses_a_foreign_layout() {
             id: id.clone(),
             ..Default::default()
         });
-        layout.nodes.push(LayoutNode { id, x, y });
+        layout.cards.push(LayoutCard { id, x, y });
         x += 336;
         if x > 1900 {
             x = 112;
@@ -1287,7 +1287,7 @@ fn placement_has_no_ceiling_and_refuses_a_foreign_layout() {
 
 #[test]
 fn each_node_kind_round_trips_through_delete_and_restore() {
-    use ahjo_mission_model::RestoredNode;
+    use ahjo_mission_model::RestoredCard;
     let dir = Scratch::new();
     let store = Store::new(&dir.0);
     let mut edit = store.create_mission("work", "Work", "").unwrap();
@@ -1343,7 +1343,7 @@ fn each_node_kind_round_trips_through_delete_and_restore() {
             pre(&edit),
             MissionChange::CreateLimit {
                 title: "Cap".into(),
-                target: edit.mission.input_cards[0].id.clone(),
+                scope: edit.mission.input_cards[0].id.clone(),
                 rounds: Some(3),
                 seconds: None,
                 warn_seconds: None,
@@ -1356,18 +1356,18 @@ fn each_node_kind_round_trips_through_delete_and_restore() {
         )
         .unwrap();
     let nodes = [
-        RestoredNode::InputCard(edit.mission.input_cards[0].clone()),
-        RestoredNode::Gate(edit.mission.gates[0].clone()),
-        RestoredNode::End(edit.mission.ends[0].clone()),
-        RestoredNode::Limit(edit.mission.limits[0].clone()),
+        RestoredCard::InputCard(edit.mission.input_cards[0].clone()),
+        RestoredCard::Gate(edit.mission.gates[0].clone()),
+        RestoredCard::End(edit.mission.ends[0].clone()),
+        RestoredCard::Limit(edit.mission.limits[0].clone()),
     ];
     for node in nodes {
         let delete = match &node {
-            RestoredNode::InputCard(n) => MissionChange::DeleteInputCard { id: n.id.clone() },
-            RestoredNode::Gate(n) => MissionChange::DeleteGate { id: n.id.clone() },
-            RestoredNode::End(n) => MissionChange::DeleteEnd { id: n.id.clone() },
-            RestoredNode::Limit(n) => MissionChange::DeleteLimit { id: n.id.clone() },
-            RestoredNode::Step(_) => unreachable!(),
+            RestoredCard::InputCard(n) => MissionChange::DeleteInputCard { id: n.id.clone() },
+            RestoredCard::Gate(n) => MissionChange::DeleteGate { id: n.id.clone() },
+            RestoredCard::End(n) => MissionChange::DeleteEnd { id: n.id.clone() },
+            RestoredCard::Limit(n) => MissionChange::DeleteLimit { id: n.id.clone() },
+            RestoredCard::Step(_) => unreachable!(),
         };
         let before = edit.mission.clone();
         edit = store.patch("work", pre(&edit), delete, "").unwrap();
@@ -1375,8 +1375,8 @@ fn each_node_kind_round_trips_through_delete_and_restore() {
             .patch(
                 "work",
                 pre(&edit),
-                MissionChange::RestoreNode {
-                    node,
+                MissionChange::RestoreCard {
+                    card: node,
                     connections: vec![],
                     index: Some(0),
                     x: 0,
@@ -1394,7 +1394,7 @@ fn each_node_kind_round_trips_through_delete_and_restore() {
 
 #[test]
 fn invalid_restore_leaves_mission_and_layout_untouched() {
-    use ahjo_mission_model::{RestoredNode, Seat, Step};
+    use ahjo_mission_model::{RestoredCard, Seat, Step};
     let dir = Scratch::new();
     let store = Store::new(&dir.0);
     let edit = store.create_mission("work", "Work", "").unwrap();
@@ -1411,8 +1411,8 @@ fn invalid_restore_leaves_mission_and_layout_untouched() {
         .patch(
             "work",
             pre(&edit),
-            MissionChange::RestoreNode {
-                node: RestoredNode::Step(bad),
+            MissionChange::RestoreCard {
+                card: RestoredCard::Step(bad),
                 connections: vec![],
                 index: None,
                 x: 0,
@@ -1421,7 +1421,7 @@ fn invalid_restore_leaves_mission_and_layout_untouched() {
             "",
         )
         .unwrap_err();
-    assert_eq!(err.code.as_str(), "invalid_node_restore");
+    assert_eq!(err.code.as_str(), "invalid_card_restore");
     assert_eq!(store.mission_edit("work").unwrap().etag, edit.etag);
     assert!(store.read_layout("work").unwrap().is_none());
 }
@@ -1690,7 +1690,7 @@ fn restore_port_refusals_preserve_revision_and_etag() {
             .unwrap_err()
             .code
             .as_str(),
-        "invalid_node_restore"
+        "invalid_card_restore"
     );
     let invalid = MissionChange::RestorePort {
         step_id: step.id.clone(),

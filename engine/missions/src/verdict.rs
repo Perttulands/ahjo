@@ -42,7 +42,7 @@ impl Coordinator {
         let event = RunEvent {
             kind: "human_verdict_recorded".into(),
             gate_id: gate.into(),
-            node_id: gate.into(),
+            card_id: gate.into(),
             timestamp: now(),
             actor: actor.into(),
             data: json!({"requested_seq":request.requested_seq,"verdict":request.verdict,"reason":request.reason,"decided_by":actor,"relayed_by":request.relayed_by}).as_object().unwrap().clone(),

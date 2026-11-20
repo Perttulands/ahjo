@@ -34,7 +34,7 @@ fn str_of(value: Option<&Value>) -> String {
 fn origin(event: &RunEvent) -> Option<(String, i64)> {
     let origin = event.data.get("input_ref")?.get("origin")?;
     Some((
-        str_of(origin.get("node_id")),
+        str_of(origin.get("card_id")),
         origin.get("attempt").and_then(Value::as_i64).unwrap_or(0),
     ))
 }
@@ -79,10 +79,10 @@ impl Walk<'_> {
     }
 
     fn started(&mut self, event: &RunEvent) {
-        let Some(step) = self.mission.step(&event.node_id) else {
+        let Some(step) = self.mission.step(&event.card_id) else {
             return;
         };
-        if let Some(previous) = self.current(&event.node_id)
+        if let Some(previous) = self.current(&event.card_id)
             && previous.status == RUNNING
         {
             previous.status = STOPPED.into();
@@ -90,7 +90,7 @@ impl Walk<'_> {
                 previous.ended_at.clone_from(&event.timestamp);
             }
         }
-        if !self.index.contains_key(&event.node_id) {
+        if !self.index.contains_key(&event.card_id) {
             let judge_of = (self.mission.gates.iter())
                 .filter(|g| {
                     crate::graph::judge_chain(self.mission, &g.id)
@@ -99,9 +99,9 @@ impl Walk<'_> {
                 })
                 .map(|g| g.id.clone())
                 .collect();
-            self.index.insert(event.node_id.clone(), self.steps.len());
+            self.index.insert(event.card_id.clone(), self.steps.len());
             self.steps.push(StepAttempts {
-                node_id: step.id.clone(),
+                step_id: step.id.clone(),
                 title: step.title.clone(),
                 judge_of,
                 outputs: (step.outputs.iter())
@@ -114,10 +114,10 @@ impl Walk<'_> {
                 attempts: Vec::new(),
             });
         }
-        self.picking.remove(&event.node_id);
+        self.picking.remove(&event.card_id);
         let number = event.attempt.max(1);
         // A restart before dispatch records the same attempt again.
-        if let Some(last) = self.current(&event.node_id)
+        if let Some(last) = self.current(&event.card_id)
             && last.attempt == number
             && last.output_seq == 0
         {
@@ -126,7 +126,7 @@ impl Walk<'_> {
             last.stop_reason = None;
             return;
         }
-        let i = self.index[&event.node_id];
+        let i = self.index[&event.card_id];
         self.steps[i].attempts.push(StepAttempt {
             attempt: number,
             status: RUNNING.into(),
@@ -142,11 +142,11 @@ impl Walk<'_> {
     }
 
     fn output(&mut self, event: &RunEvent) {
-        let Some(&i) = self.index.get(&event.node_id) else {
+        let Some(&i) = self.index.get(&event.card_id) else {
             return;
         };
         let ports = self.steps[i].outputs.clone();
-        let Some(attempt) = self.find(&event.node_id, event.attempt.max(1)) else {
+        let Some(attempt) = self.find(&event.card_id, event.attempt.max(1)) else {
             return;
         };
         attempt.status = DONE.into();
@@ -230,7 +230,7 @@ impl Walk<'_> {
         if let Some(pick) = event.data.get("pick") {
             let gate_title = self.gate_title(&event.gate_id);
             let number = pick.get("attempt").and_then(Value::as_i64).unwrap_or(0);
-            if let Some(attempt) = self.find(&str_of(pick.get("node_id")), number)
+            if let Some(attempt) = self.find(&str_of(pick.get("step_id")), number)
                 && attempt.output_seq != 0
             {
                 attempt.picked = Some(AttemptPick {
@@ -292,12 +292,12 @@ impl Walk<'_> {
 
     /// The step's limit is spent: its working attempt stopped.
     fn pick_started(&mut self, event: &RunEvent) {
-        self.picking.insert(event.node_id.clone(), true);
+        self.picking.insert(event.card_id.clone(), true);
         let reason = (event.data.get("limit"))
             .and_then(|l| serde_json::from_value::<crate::LimitUse>(l.clone()).ok())
             .map(|l| crate::limits::reason(self.mission, &l))
             .unwrap_or_else(|| "picking the best attempt".into());
-        if let Some(attempt) = self.current(&event.node_id)
+        if let Some(attempt) = self.current(&event.card_id)
             && attempt.status == RUNNING
         {
             attempt.status = STOPPED.into();
@@ -309,18 +309,18 @@ impl Walk<'_> {
     /// A block, failure or cancel stops the running attempts of the steps it
     /// names, with its reason.
     fn stopped(&mut self, event: &RunEvent) {
-        let mut nodes = vec![event.node_id.clone(), event.gate_id.clone()];
-        for key in ["blocked_node_id", "blocked_gate_id", "node_id"] {
+        let mut nodes = vec![event.card_id.clone(), event.gate_id.clone()];
+        for key in ["blocked_card_id", "blocked_gate_id", "card_id"] {
             nodes.push(text(event, key));
         }
         if let Some(limit) = event.data.get("limit") {
-            nodes.push(str_of(limit.get("node_id")));
+            nodes.push(str_of(limit.get("card_id")));
         }
         for dispatch in (event.data.get("open_dispatches").and_then(Value::as_array))
             .into_iter()
             .flatten()
         {
-            nodes.push(str_of(dispatch.get("node_id")));
+            nodes.push(str_of(dispatch.get("step_id")));
         }
         let mut reason = text(event, "reason");
         if event.kind == "run_failed" && !text(event, "detail").is_empty() {
@@ -344,7 +344,7 @@ impl Walk<'_> {
             return;
         }
         for step in &mut self.steps {
-            if self.picking.contains_key(&step.node_id) {
+            if self.picking.contains_key(&step.step_id) {
                 continue;
             }
             if let Some(attempt) = step.attempts.last_mut()
@@ -378,8 +378,8 @@ pub fn project_attempts(
         };
         for event in events {
             match event.kind.as_str() {
-                "node_started" => walk.started(event),
-                "node_output" => walk.output(event),
+                "card_started" => walk.started(event),
+                "card_output" => walk.output(event),
                 "gate_evaluating" => walk.evaluating(event, status.r#final),
                 "human_input_requested" => {
                     if let Some((at, asked)) = walk.open.get_mut(&event.gate_id) {
@@ -407,7 +407,7 @@ pub fn project_attempts(
         }
         let mut steps = walk.steps;
         if let Some(only) = only {
-            steps.retain(|s| s.node_id == only);
+            steps.retain(|s| s.step_id == only);
         }
         spend_budget(&mut steps);
         Ok(RunAttempts {

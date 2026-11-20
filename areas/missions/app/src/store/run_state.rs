@@ -6,7 +6,7 @@ use ahjo_missions_contract::{PublicEvent as RunEvent, RunProjection as Run};
 use std::collections::{HashMap, HashSet};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum NodeState {
+pub enum CardState {
     Running,
     Done,
     Blocked,
@@ -19,14 +19,14 @@ pub enum NodeState {
 /// which nodes are gates.
 #[derive(Default, Debug)]
 pub struct Projection {
-    pub states: HashMap<String, NodeState>,
+    pub states: HashMap<String, CardState>,
     changed_at: HashMap<String, u64>,
     pub attempts: HashMap<String, i64>,
     gates: HashSet<String>,
 }
 
 impl Projection {
-    fn set(&mut self, node: &str, state: NodeState, seq: u64) {
+    fn set(&mut self, node: &str, state: CardState, seq: u64) {
         self.states.insert(node.to_string(), state);
         self.changed_at.insert(node.to_string(), seq);
     }
@@ -45,7 +45,7 @@ pub fn seat_note(events: &[RunEvent], node: &str) -> Option<String> {
     let last = sorted(events)
         .into_iter()
         .rev()
-        .find(|e| e.node_id == node)?;
+        .find(|e| e.card_id == node)?;
     match last.kind.as_str() {
         "seat_state" if last.state != "working" && !last.detail.is_empty() => {
             Some(last.detail.clone())
@@ -106,7 +106,7 @@ pub fn kept_branches(events: &[RunEvent]) -> Vec<String> {
 pub fn project(events: &[RunEvent]) -> Projection {
     let mut p = Projection::default();
     // A block holds the node only until the run resumes.
-    let mut before_block: Vec<(String, Option<NodeState>)> = vec![];
+    let mut before_block: Vec<(String, Option<CardState>)> = vec![];
     // A gate answered while blocked keeps waiting until the resume routes it.
     let mut blocked = false;
     let mut answered_blocked: Vec<String> = vec![];
@@ -124,7 +124,7 @@ pub fn project(events: &[RunEvent]) -> Projection {
                     }
                 }
                 for id in answered_blocked.drain(..) {
-                    p.set(&id, NodeState::Running, seq);
+                    p.set(&id, CardState::Running, seq);
                 }
                 blocked = false;
                 continue;
@@ -136,13 +136,13 @@ pub fn project(events: &[RunEvent]) -> Projection {
                     .filter(|(_, s)| {
                         matches!(
                             s,
-                            NodeState::Running | NodeState::Waiting | NodeState::Blocked
+                            CardState::Running | CardState::Waiting | CardState::Blocked
                         )
                     })
                     .map(|(id, _)| id.clone())
                     .collect();
                 for id in open {
-                    p.set(&id, NodeState::Canceled, seq);
+                    p.set(&id, CardState::Canceled, seq);
                 }
                 continue;
             }
@@ -154,13 +154,13 @@ pub fn project(events: &[RunEvent]) -> Projection {
             "run_succeeded" | "run_picked" | "run_failed"
         ) {
             for end in &e.end_ids {
-                p.set(end, NodeState::Done, seq);
+                p.set(end, CardState::Done, seq);
             }
         }
-        let node = if e.node_id.is_empty() {
+        let node = if e.card_id.is_empty() {
             e.gate_id.as_str()
         } else {
-            e.node_id.as_str()
+            e.card_id.as_str()
         };
         if node.is_empty() {
             // A block or failure naming no node stops whatever was in flight.
@@ -168,18 +168,18 @@ pub fn project(events: &[RunEvent]) -> Projection {
                 let running: Vec<String> = p
                     .states
                     .iter()
-                    .filter(|(_, s)| **s == NodeState::Running)
+                    .filter(|(_, s)| **s == CardState::Running)
                     .map(|(id, _)| id.clone())
                     .collect();
                 for id in running {
                     let block = e.kind == "run_blocked";
                     if block && !before_block.iter().any(|(b, _)| *b == id) {
-                        before_block.push((id.clone(), Some(NodeState::Running)));
+                        before_block.push((id.clone(), Some(CardState::Running)));
                     }
                     let to = if block {
-                        NodeState::Blocked
+                        CardState::Blocked
                     } else {
-                        NodeState::Failed
+                        CardState::Failed
                     };
                     p.set(&id, to, seq);
                 }
@@ -189,51 +189,51 @@ pub fn project(events: &[RunEvent]) -> Projection {
         if !e.gate_id.is_empty() {
             p.gates.insert(e.gate_id.clone());
         }
-        if e.attempt > 0 && (e.kind == "node_started" || e.kind == "seat_dispatch") {
+        if e.attempt > 0 && (e.kind == "card_started" || e.kind == "seat_dispatch") {
             p.attempts.insert(node.to_string(), e.attempt);
         }
         match e.kind.as_str() {
-            "node_started" | "seat_dispatch" | "gate_evaluating" => {
-                p.set(node, NodeState::Running, seq)
+            "card_started" | "seat_dispatch" | "gate_evaluating" => {
+                p.set(node, CardState::Running, seq)
             }
-            "human_input_requested" | "node_waiting" => p.set(node, NodeState::Waiting, seq),
+            "human_input_requested" | "card_waiting" => p.set(node, CardState::Waiting, seq),
             "human_verdict_recorded" => {
                 if blocked {
                     answered_blocked.push(node.to_string());
                 } else {
-                    p.set(node, NodeState::Running, seq);
+                    p.set(node, CardState::Running, seq);
                 }
             }
-            "node_output" => {
+            "card_output" => {
                 let s = if e.status == "blocked" {
-                    NodeState::Blocked
+                    CardState::Blocked
                 } else {
-                    NodeState::Done
+                    CardState::Done
                 };
                 p.set(node, s, seq);
             }
             "gate_verdict" => {
                 let s = if e.verdict == "fail" {
-                    NodeState::Failed
+                    CardState::Failed
                 } else {
-                    NodeState::Done
+                    CardState::Done
                 };
                 p.set(node, s, seq);
             }
             "pick_started" => {
-                p.set(node, NodeState::Done, seq);
+                p.set(node, CardState::Done, seq);
                 if !e.gate_id.is_empty() {
                     let g = e.gate_id.clone();
-                    p.set(&g, NodeState::Running, seq);
+                    p.set(&g, CardState::Running, seq);
                 }
             }
             "error" | "run_blocked" => {
                 if !before_block.iter().any(|(b, _)| b == node) {
                     before_block.push((node.to_string(), p.states.get(node).copied()));
                 }
-                p.set(node, NodeState::Blocked, seq);
+                p.set(node, CardState::Blocked, seq);
             }
-            "run_failed" => p.set(node, NodeState::Failed, seq),
+            "run_failed" => p.set(node, CardState::Failed, seq),
             _ => {}
         }
     }
@@ -246,7 +246,7 @@ pub fn open_human_gates(events: &[RunEvent]) -> Vec<String> {
     let mut open: Vec<String> = vec![];
     for e in sorted(events) {
         let gate = if e.gate_id.is_empty() {
-            &e.node_id
+            &e.card_id
         } else {
             &e.gate_id
         };
@@ -277,7 +277,7 @@ pub enum PointKind {
 pub struct Point {
     pub kind: PointKind,
     /// Blank when the ledger names no node.
-    pub node: String,
+    pub card: String,
     pub gate: bool,
     pub attempt: i64,
     /// The block's reason in plain words, for a block.
@@ -294,7 +294,7 @@ impl Point {
     fn new(kind: PointKind, node: &str, gate: bool) -> Self {
         Self {
             kind,
-            node: node.to_string(),
+            card: node.to_string(),
             gate,
             attempt: 0,
             reason: String::new(),
@@ -311,7 +311,7 @@ impl Point {
 pub fn points(run: &Run) -> Vec<Point> {
     let p = project(&run.events);
     let events = sorted(&run.events);
-    let latest = |state: NodeState| -> String {
+    let latest = |state: CardState| -> String {
         p.states
             .iter()
             .filter(|(_, s)| **s == state)
@@ -335,7 +335,7 @@ pub fn points(run: &Run) -> Vec<Point> {
     let mut picking = HashSet::new();
     for e in &events {
         let gate = if e.gate_id.is_empty() {
-            e.node_id.clone()
+            e.card_id.clone()
         } else {
             e.gate_id.clone()
         };
@@ -356,7 +356,7 @@ pub fn points(run: &Run) -> Vec<Point> {
     let mut running: Vec<(&String, u64)> = p
         .states
         .iter()
-        .filter(|(id, s)| **s == NodeState::Running && !waiting_ids.contains(id))
+        .filter(|(id, s)| **s == CardState::Running && !waiting_ids.contains(id))
         .map(|(id, _)| (id, p.changed_at.get(id).copied().unwrap_or(0)))
         .collect();
     running.sort_by_key(|(id, at)| (*at, (*id).clone()));
@@ -377,13 +377,13 @@ pub fn points(run: &Run) -> Vec<Point> {
             let node = block
                 .map(|b| {
                     if b.gate_id.is_empty() {
-                        b.node_id.clone()
+                        b.card_id.clone()
                     } else {
                         b.gate_id.clone()
                     }
                 })
                 .filter(|n| !n.is_empty())
-                .unwrap_or_else(|| latest(NodeState::Blocked));
+                .unwrap_or_else(|| latest(CardState::Blocked));
             let mut pt = Point::new(PointKind::Blocked, &node, p.gates.contains(&node));
             pt.reason = block
                 .map(|b| {
@@ -400,11 +400,11 @@ pub fn points(run: &Run) -> Vec<Point> {
                 pt.raw = b.detail.trim().to_owned();
             }
             std::iter::once(pt)
-                .chain(waiting.into_iter().filter(|w| w.node != node))
+                .chain(waiting.into_iter().filter(|w| w.card != node))
                 .collect()
         }
         "failed" => {
-            let node = latest(NodeState::Failed);
+            let node = latest(CardState::Failed);
             vec![Point::new(
                 PointKind::Failed,
                 &node,
@@ -421,7 +421,7 @@ pub fn points(run: &Run) -> Vec<Point> {
             let node = open_human_gates(&before)
                 .into_iter()
                 .next()
-                .unwrap_or_else(|| latest(NodeState::Canceled));
+                .unwrap_or_else(|| latest(CardState::Canceled));
             vec![Point::new(
                 PointKind::Canceled,
                 &node,
@@ -434,7 +434,7 @@ pub fn points(run: &Run) -> Vec<Point> {
 
 /// The run bar's words for a point; `title` names its node.
 pub fn phrase(point: &Point, title: &str) -> String {
-    let at = if title.is_empty() { &point.node } else { title };
+    let at = if title.is_empty() { &point.card } else { title };
     match point.kind {
         PointKind::Waiting => format!("waiting for you at {at}"),
         PointKind::Running if point.answered => format!("routing your answer at {at}"),
@@ -520,7 +520,7 @@ mod tests {
     }
 
     fn ev(seq: u64, kind: &str, node: &str) -> RunEvent {
-        serde_json::from_value(serde_json::json!({"seq":seq, "type":kind, "node_id":node})).unwrap()
+        serde_json::from_value(serde_json::json!({"seq":seq, "type":kind, "card_id":node})).unwrap()
     }
 
     fn gate(seq: u64, kind: &str, g: &str) -> RunEvent {
@@ -554,19 +554,19 @@ mod tests {
         let mut run = test_run("waiting_human");
         run.events = vec![
             ev(1, "run_started", ""),
-            ev(2, "node_started", "a"),
-            ev(3, "node_output", "a"),
-            ev(4, "node_started", "b"),
+            ev(2, "card_started", "a"),
+            ev(3, "card_output", "a"),
+            ev(4, "card_started", "b"),
             gate(5, "gate_evaluating", "g"),
             gate(6, "human_input_requested", "g"),
         ];
         let pts = points(&run);
         assert_eq!(pts[0].kind, PointKind::Waiting);
-        assert_eq!(pts[0].node, "g");
-        assert_eq!(pts[1].node, "b");
+        assert_eq!(pts[0].card, "g");
+        assert_eq!(pts[1].card, "b");
         let p = project(&run.events);
-        assert_eq!(p.states["a"], NodeState::Done);
-        assert_eq!(p.states["g"], NodeState::Waiting);
+        assert_eq!(p.states["a"], CardState::Done);
+        assert_eq!(p.states["g"], CardState::Waiting);
         assert_eq!(
             phrase(&pts[0], "Operator verdict"),
             "waiting for you at Operator verdict"
@@ -591,8 +591,8 @@ mod tests {
         blocked.code = "invalid_judge_result".into();
         let mut events = vec![
             ev(1, "run_started", ""),
-            ev(2, "node_started", "a"),
-            ev(3, "node_started", "b"),
+            ev(2, "card_started", "a"),
+            ev(3, "card_started", "b"),
             blocked,
         ];
         let mut run = test_run("blocked");
@@ -601,7 +601,7 @@ mod tests {
         assert_eq!(pts[0].kind, PointKind::Blocked);
         assert_eq!(phrase(&pts[0], "B"), "blocked at B: invalid judge result");
         events.push(ev(5, "run_resumed", ""));
-        assert_eq!(project(&events).states["b"], NodeState::Running);
+        assert_eq!(project(&events).states["b"], CardState::Running);
     }
 
     #[test]
@@ -613,12 +613,12 @@ mod tests {
         assert!(open_human_gates(&events).is_empty());
         let mut run = test_run("canceled");
         run.events = vec![
-            ev(1, "node_started", "a"),
+            ev(1, "card_started", "a"),
             gate(2, "human_input_requested", "g"),
             ev(3, "run_canceled", ""),
         ];
-        assert_eq!(points(&run)[0].node, "g");
-        assert_eq!(project(&run.events).states["a"], NodeState::Canceled);
+        assert_eq!(points(&run)[0].card, "g");
+        assert_eq!(project(&run.events).states["a"], CardState::Canceled);
     }
 
     #[test]
@@ -642,7 +642,7 @@ mod tests {
 
     #[test]
     fn earlier_outputs_offer_finished_runs_latest_first_by_kind() {
-        let output = |name: &str, kind: &str, value: &str| serde_json::json!({"name":name,"kind":kind,"value":value,"node_id":"s","port_id":"out","attempt":1});
+        let output = |name: &str, kind: &str, value: &str| serde_json::json!({"name":name,"kind":kind,"value":value,"card_id":"s","port_id":"out","attempt":1});
         let mut old = test_run("succeeded");
         old.r#final = true;
         old.updated_at = "2026-11-10T10:00:00Z".into();

@@ -209,7 +209,7 @@ mod tests {
             tx.send(old.clone()).unwrap();
             tx.send(old).unwrap();
         }
-        ledger.append(event("node_started")).unwrap();
+        ledger.append(event("card_started")).unwrap();
         let frame = channel.next().await;
         assert_eq!(frame[0], RUNS_SNAPSHOT);
         let snapshot: serde_json::Value = serde_json::from_slice(&frame[1..]).unwrap();

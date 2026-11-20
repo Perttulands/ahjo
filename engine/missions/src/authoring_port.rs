@@ -191,7 +191,7 @@ pub(crate) fn apply(
                     .any(|p| p.id == port.id)
             {
                 return Err(Error::new(
-                    "invalid_node_restore",
+                    "invalid_card_restore",
                     "invalid or duplicate port",
                 ));
             }
@@ -202,7 +202,7 @@ pub(crate) fn apply(
             for mut connection in connections {
                 if connection.from != endpoint && connection.to != endpoint {
                     return Err(Error::new(
-                        "invalid_node_restore",
+                        "invalid_card_restore",
                         "restored wire does not touch port",
                     ));
                 }
@@ -223,7 +223,7 @@ pub(crate) fn apply(
                 )
                 .map_err(|e| {
                     if ["not_found", "input_occupied"].contains(&e.code.as_str()) {
-                        Error::new("invalid_node_restore", e.to_string())
+                        Error::new("invalid_card_restore", e.to_string())
                     } else {
                         e
                     }

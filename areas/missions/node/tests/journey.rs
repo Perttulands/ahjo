@@ -214,10 +214,10 @@ async fn cli_authors_two_steps_answers_gate_and_finishes_with_fake_sessions() {
         assert!(shown.get(section).is_none(), "{shown}");
     }
     assert_eq!(request["criterion"], "Is this ready?");
-    assert_eq!(request["inputs"][0]["from_node_id"], steps[0].2);
-    assert_eq!(request["routes"][0]["targets"][0]["node_id"], steps[1].2);
+    assert_eq!(request["inputs"][0]["from_card_id"], steps[0].2);
+    assert_eq!(request["routes"][0]["targets"][0]["card_id"], steps[1].2);
     assert_eq!(request["routes"][0]["ends_run"], false);
-    assert_eq!(request["routes"][1]["targets"][0]["node_id"], rejected);
+    assert_eq!(request["routes"][1]["targets"][0]["card_id"], rejected);
     assert_eq!(request["routes"][1]["ends_run"], true);
     assert_eq!(request["ends_run"], true);
     assert_eq!(request["picks_best"], false);
@@ -396,7 +396,7 @@ async fn cli_authors_two_steps_answers_gate_and_finishes_with_fake_sessions() {
                 .as_array()
                 .unwrap()
                 .iter()
-                .any(|e| e["type"] == "node_output" && e["node_id"] == *id),
+                .any(|e| e["type"] == "card_output" && e["card_id"] == *id),
             "{status}"
         );
     }

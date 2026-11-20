@@ -115,13 +115,13 @@ fn show(m: &Missions, args: RunShow) -> Result<RunShown, Error> {
         run.events
             .into_iter()
             .map(|event| {
-                let step = [&event.node_id, &event.gate_id]
+                let step = [&event.card_id, &event.gate_id]
                     .into_iter()
                     .find(|id| !id.is_empty())
                     .and_then(|id| {
                         mission
                             .as_ref()
-                            .map(|mission| mission.node_name(id).to_owned())
+                            .map(|mission| mission.card_name(id).to_owned())
                     });
                 RunLogEvent { event, step }
             })
@@ -310,7 +310,7 @@ fn asks(run: &RunProjection) -> Vec<RunAsk> {
             RunAsk {
                 gate: None,
                 seq: None,
-                step: Some(event.node_id.clone()),
+                step: Some(event.card_id.clone()),
                 what: run.block_code.clone(),
                 why: Some(why),
                 commands: resume_commands(run),

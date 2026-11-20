@@ -95,14 +95,14 @@ impl Coordinator {
             .get("pending_output")
             .filter(|value| !value.is_null());
         let redispatch_node = pending
-            .and_then(|p| p.get("node_id"))
+            .and_then(|p| p.get("step_id"))
             .and_then(|v| v.as_str())
             .unwrap_or("");
         let redispatch_attempt = pending
             .and_then(|p| p.get("attempt"))
             .and_then(|v| v.as_i64())
             .unwrap_or(0);
-        let mut data = serde_json::json!({"judge_verdict":if request.take_fail {"fail"} else {""},"blocked_gate_id":blocked.gate_id,"resume_mode":if request.mode == ahjo_mission_model::ResumeMode::Redispatch {"redispatch"} else {"reattach"},"redispatch_node_id":if request.mode == ahjo_mission_model::ResumeMode::Redispatch {redispatch_node} else {""},"redispatch_attempt":if request.mode == ahjo_mission_model::ResumeMode::Redispatch {redispatch_attempt} else {0},"resumed_by":actor,"resumed_from_seq":blocked.seq}).as_object().unwrap().clone();
+        let mut data = serde_json::json!({"judge_verdict":if request.take_fail {"fail"} else {""},"blocked_gate_id":blocked.gate_id,"resume_mode":if request.mode == ahjo_mission_model::ResumeMode::Redispatch {"redispatch"} else {"reattach"},"redispatch_step_id":if request.mode == ahjo_mission_model::ResumeMode::Redispatch {redispatch_node} else {""},"redispatch_attempt":if request.mode == ahjo_mission_model::ResumeMode::Redispatch {redispatch_attempt} else {0},"resumed_by":actor,"resumed_from_seq":blocked.seq}).as_object().unwrap().clone();
         if let Some(grant) = grant {
             data.insert("grant".into(), grant);
         }

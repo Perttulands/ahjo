@@ -30,7 +30,7 @@ fn pre(edit: &ahjo_mission_model::Edit) -> Precondition {
 // touching either file.
 #[test]
 fn invalid_step_shapes_are_refused_by_both_restore_paths() {
-    use ahjo_mission_model::{RestoredNode, Seat, Step};
+    use ahjo_mission_model::{RestoredCard, Seat, Step};
     let dir = Scratch::new();
     let store = Store::new(&dir.0);
     let edit = store.create_mission("shape", "Shape", "").unwrap();
@@ -97,8 +97,8 @@ fn invalid_step_shapes_are_refused_by_both_restore_paths() {
             .patch(
                 "shape",
                 pre(&edit),
-                MissionChange::RestoreNode {
-                    node: RestoredNode::Step(Step {
+                MissionChange::RestoreCard {
+                    card: RestoredCard::Step(Step {
                         id: "fmn_bad".into(),
                         formation: kind.parse().unwrap(),
                         seats: seats.clone(),
@@ -114,7 +114,7 @@ fn invalid_step_shapes_are_refused_by_both_restore_paths() {
             .unwrap_err();
         assert_eq!(
             err.code.as_str(),
-            "invalid_node_restore",
+            "invalid_card_restore",
             "{kind}: {seats:?}"
         );
         assert_eq!(std::fs::read(&mission_path).unwrap(), mission_before);
@@ -255,7 +255,7 @@ fn restore_each_input_and_output_port_at_its_original_index() {
                 .unwrap_err()
                 .code
                 .as_str(),
-            "invalid_node_restore"
+            "invalid_card_restore"
         );
     }
 }
@@ -708,7 +708,7 @@ fn feedback_rewire_and_join_undo_preserve_pushback_exception() {
 // Ported from node_restore_test.go: failed undo does not publish either file.
 #[test]
 fn restore_refuses_missing_foreign_and_occupied_connections_and_bad_nodes() {
-    use ahjo_mission_model::{Connection, Gate, RestoredNode, Step};
+    use ahjo_mission_model::{Connection, Gate, RestoredCard, Step};
     let dir = Scratch::new();
     let store = Store::new(&dir.0);
     let mut edit = store.create_mission("restore", "Restore", "").unwrap();
@@ -766,27 +766,27 @@ fn restore_refuses_missing_foreign_and_occupied_connections_and_bad_nodes() {
     };
     let cases = vec![
         (
-            RestoredNode::Step(other.clone()),
+            RestoredCard::Step(other.clone()),
             vec![],
-            "invalid_node_restore",
+            "invalid_card_restore",
         ),
         (
-            RestoredNode::Step(build.clone()),
+            RestoredCard::Step(build.clone()),
             vec![connection(output(&build), "gate_missing:in".into())],
-            "invalid_node_restore",
+            "invalid_card_restore",
         ),
         (
-            RestoredNode::Step(build.clone()),
+            RestoredCard::Step(build.clone()),
             vec![connection(output(&other), input(&target))],
-            "invalid_node_restore",
+            "invalid_card_restore",
         ),
         (
-            RestoredNode::Step(build.clone()),
+            RestoredCard::Step(build.clone()),
             vec![connection(output(&build), input(&target))],
-            "invalid_node_restore",
+            "invalid_card_restore",
         ),
         (
-            RestoredNode::Step(Step {
+            RestoredCard::Step(Step {
                 id: "fmn_old".into(),
                 formation: ahjo_mission_model::Formation::Unset,
                 ..Default::default()
@@ -795,7 +795,7 @@ fn restore_refuses_missing_foreign_and_occupied_connections_and_bad_nodes() {
             "unsupported_step_formation",
         ),
         (
-            RestoredNode::Gate(Gate {
+            RestoredCard::Gate(Gate {
                 id: "gate_new".into(),
                 ..Default::default()
             }),
@@ -803,7 +803,7 @@ fn restore_refuses_missing_foreign_and_occupied_connections_and_bad_nodes() {
             "invalid_gate_kind",
         ),
         (
-            RestoredNode::Gate(Gate {
+            RestoredCard::Gate(Gate {
                 id: "gate_new".into(),
                 kinds: vec![ahjo_mission_model::GateKind::Human],
                 check_value: "PASS".into(),
@@ -813,17 +813,17 @@ fn restore_refuses_missing_foreign_and_occupied_connections_and_bad_nodes() {
             "invalid_code_gate_profile",
         ),
         (
-            RestoredNode::Step(Step {
+            RestoredCard::Step(Step {
                 id: "fmn_copy".into(),
                 formation: ahjo_mission_model::Formation::Solo,
                 seats: other.seats.clone(),
                 ..Default::default()
             }),
             vec![],
-            "invalid_node_restore",
+            "invalid_card_restore",
         ),
     ];
-    let error = serde_json::from_value::<RestoredNode>(serde_json::json!({
+    let error = serde_json::from_value::<RestoredCard>(serde_json::json!({
         "step": {"id": "fmn_old", "formation": "flow"}
     }))
     .unwrap_err()
@@ -839,8 +839,8 @@ fn restore_refuses_missing_foreign_and_occupied_connections_and_bad_nodes() {
             .patch(
                 "restore",
                 pre(&edit),
-                MissionChange::RestoreNode {
-                    node,
+                MissionChange::RestoreCard {
+                    card: node,
                     connections,
                     index: None,
                     x: 0,

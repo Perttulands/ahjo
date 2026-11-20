@@ -32,9 +32,9 @@ pub(crate) fn cleanup(
         .iter()
         .filter(|e| e.kind == "workspace_started" || e.kind == "workspace_settled")
     {
-        let same = |e: &&RunEvent| e.node_id == start.node_id && e.attempt == start.attempt;
+        let same = |e: &&RunEvent| e.card_id == start.card_id && e.attempt == start.attempt;
         let pending = events.iter().filter(same).any(|e| {
-            e.kind == "node_output_pending"
+            e.kind == "card_output_pending"
                 || (e.kind == "output_capture_pending"
                     && !crate::run_capture::discarded(&events, e))
         });
@@ -43,7 +43,7 @@ pub(crate) fn cleanup(
             .filter(same)
             .any(|e| e.kind == "workspace_settled");
         if !pending || settled || control.canceled.load(std::sync::atomic::Ordering::Acquire) {
-            let path = turn_path(c, id, &start.node_id, start.attempt);
+            let path = turn_path(c, id, &start.card_id, start.attempt);
             if !settled {
                 kept.extend(keep(c, id, mission, &events, start, &path)?);
             }
@@ -64,8 +64,8 @@ fn keep(
     start: &RunEvent,
     path: &Path,
 ) -> io::Result<Option<String>> {
-    let (node, attempt) = (&start.node_id, start.attempt);
-    let ours = |e: &&RunEvent| e.node_id == *node && e.attempt == attempt;
+    let (node, attempt) = (&start.card_id, start.attempt);
+    let ours = |e: &&RunEvent| e.card_id == *node && e.attempt == attempt;
     if !path.exists()
         || events
             .iter()
@@ -154,9 +154,9 @@ pub(crate) fn recover_pending(
     }
     cleanup(c, id, mission, req, workspace, control)?;
     let events = c.ledger(id)?.read().map_err(crate::error::to_io)?;
-    for pending in events.iter().filter(|e| e.kind == "node_output_pending") {
+    for pending in events.iter().filter(|e| e.kind == "card_output_pending") {
         if events.iter().any(|e| {
-            e.kind == "node_output" && e.node_id == pending.node_id && e.attempt == pending.attempt
+            e.kind == "card_output" && e.card_id == pending.card_id && e.attempt == pending.attempt
         }) {
             continue;
         }
@@ -166,11 +166,11 @@ pub(crate) fn recover_pending(
             req,
             workspace,
             control,
-            &pending.node_id,
+            &pending.card_id,
             pending.attempt,
         )?;
         let mut output = pending.clone();
-        output.kind = "node_output".into();
+        output.kind = "card_output".into();
         output.seq = 0;
         if !append_live(c, id, control, output)? {
             return Err(io::Error::new(io::ErrorKind::Interrupted, "run canceled"));

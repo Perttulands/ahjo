@@ -67,7 +67,7 @@ fn mission(best: bool) -> String {
     format!(
         "{work}\n[[step]]{judge}\n[[gate]]\nid = \"gate_review\"\ntitle = \"Review\"\nkinds = [\"step\"]\n[[connection]]\nid = \"edge_pass\"\nfrom = \"gate_review:pass\"\nto = \"end_done:in\"\n[[connection]]\nid = \"edge_fail\"\nfrom = \"gate_review:fail\"\nto = \"fmn_work:port_in\"\n[[connection]]\nid = \"edge_judge\"\nfrom = \"gate_review:judge\"\nto = \"fmn_judge:port_in\"\n[[connection]]\nid = \"edge_return\"\nfrom = \"fmn_judge:port_out\"\nto = \"gate_review:judge\"\n{}",
         if best {
-            "[[limit]]\nid = \"lim_cap\"\ntitle = \"Cap\"\ntarget = \"fmn_work\"\nrounds = 2\nwhen_spent = \"best\"\n"
+            "[[limit]]\nid = \"lim_cap\"\ntitle = \"Cap\"\nscope = \"fmn_work\"\nrounds = 2\nwhen_spent = \"best\"\n"
         } else {
             ""
         }
@@ -140,13 +140,13 @@ async fn cli_and_http_report_problems_briefs_files_and_picked_attempts() {
                 .as_array()
                 .unwrap()
                 .iter()
-                .any(|b| b["node_id"] == step
+                .any(|b| b["step_id"] == step
                     && std::path::Path::new(b["path"].as_str().unwrap()).is_absolute())
         );
     }
     assert!(evidence["files"].as_array().unwrap().iter().any(|f| {
         let path = std::path::Path::new(f["path"].as_str().unwrap());
-        f["node_id"] == "fmn_work"
+        f["step_id"] == "fmn_work"
             && path.is_absolute()
             && path.metadata().unwrap().len() == f["size"].as_u64().unwrap()
     }));
@@ -156,14 +156,14 @@ async fn cli_and_http_report_problems_briefs_files_and_picked_attempts() {
             .as_array()
             .unwrap()
             .iter()
-            .all(|b| b["node_id"] == "fmn_judge")
+            .all(|b| b["step_id"] == "fmn_judge")
     );
     assert!(
         filtered["evidence"]["files"]
             .as_array()
             .unwrap()
             .iter()
-            .all(|b| b["node_id"] == "fmn_judge")
+            .all(|b| b["step_id"] == "fmn_judge")
     );
     let client = ahjo_node_kit::NodeClient::new(Some(&format!("{}/", node.url()))).unwrap();
     let (http, _) = client
@@ -218,7 +218,7 @@ async fn show_puts_a_spent_limit_and_its_resume_command_first() {
         .await
         .unwrap();
     let draft = format!(
-        "{}\n[[limit]]\nid = \"lim_stop\"\ntitle = \"Try once\"\ntarget = \"fmn_work\"\nrounds = 1\n",
+        "{}\n[[limit]]\nid = \"lim_stop\"\ntitle = \"Try once\"\nscope = \"fmn_work\"\nrounds = 1\n",
         mission(false)
     );
     let id = start(&node, draft).await;

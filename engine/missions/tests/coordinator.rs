@@ -169,7 +169,7 @@ fn shutdown_block_with_completed_evidence_never_schedules_on_open() {
     assert!(
         !p.events
             .iter()
-            .any(|e| e.kind == "run_resumed" || e.kind == "node_output" && e.node_id == "fmn_work")
+            .any(|e| e.kind == "run_resumed" || e.kind == "card_output" && e.card_id == "fmn_work")
     );
     std::fs::remove_file(
         dir.0
@@ -329,7 +329,7 @@ fn failed_publication_at_startup_blocks_only_the_affected_run() {
     assert!(
         events
             .iter()
-            .any(|event| event.kind == "node_output_pending")
+            .any(|event| event.kind == "card_output_pending")
     );
 }
 
@@ -581,7 +581,7 @@ fn shutdown_fences_work_and_leaves_active_run_resumable() {
         .unwrap()
         .events
         .iter()
-        .any(|e| e.kind == "node_started" && e.node_id == "fmn_work")
+        .any(|e| e.kind == "card_started" && e.card_id == "fmn_work")
     {
         assert!(Instant::now() < deadline);
         std::thread::sleep(Duration::from_millis(5));
@@ -682,7 +682,7 @@ fn detached_seat_is_ended_before_a_new_attempt() {
     let cut = text
         .lines()
         .position(|line| {
-            serde_json::from_str::<serde_json::Value>(line).unwrap()["type"] == "node_started"
+            serde_json::from_str::<serde_json::Value>(line).unwrap()["type"] == "card_started"
                 && line.contains("fmn_work")
         })
         .unwrap();
@@ -706,7 +706,7 @@ fn detached_seat_is_ended_before_a_new_attempt() {
             .append(ahjo_mission_engine::RunEvent {
                 kind: kind.into(),
                 timestamp: "2026-01-01T00:00:00Z".into(),
-                node_id: "fmn_work".into(),
+                card_id: "fmn_work".into(),
                 seat_id: "seat_work".into(),
                 data: data.as_object().unwrap().clone(),
                 ..Default::default()
@@ -767,7 +767,7 @@ fn aborting_a_blocked_run_ends_the_detached_seat() {
     let cut = text
         .lines()
         .position(|line| {
-            serde_json::from_str::<serde_json::Value>(line).unwrap()["type"] == "node_started"
+            serde_json::from_str::<serde_json::Value>(line).unwrap()["type"] == "card_started"
                 && line.contains("fmn_work")
         })
         .unwrap();
@@ -791,14 +791,14 @@ fn aborting_a_blocked_run_ends_the_detached_seat() {
         // race the abort below to end the seat.
         (
             "run_blocked",
-            serde_json::json!({"code":"seat_gone","reason":"The step's terminal closed","blocked_node_id":"fmn_work","resume_allowed":true,"resume_policy":"explicit"}),
+            serde_json::json!({"code":"seat_gone","reason":"The step's terminal closed","blocked_card_id":"fmn_work","resume_allowed":true,"resume_policy":"explicit"}),
         ),
     ] {
         ledger
             .append(ahjo_mission_engine::RunEvent {
                 kind: kind.into(),
                 timestamp: "2026-01-01T00:00:00Z".into(),
-                node_id: "fmn_work".into(),
+                card_id: "fmn_work".into(),
                 seat_id: "seat_work".into(),
                 data: data.as_object().unwrap().clone(),
                 ..Default::default()
@@ -857,7 +857,7 @@ fn restart_at_each_ledger_cut_reaches_the_same_output() {
                     })
                     .collect()
             };
-            sink.emit(ahjo_mission_engine::ExecutionEvent { kind:"seat_dispatch".into(), seat_id:seat.id.clone(), data:serde_json::json!({"dispatch_id":dispatch,"node_id":req.step.id,"seat_id":seat.id}).as_object().unwrap().clone() }).map_err(|error| error.message)?;
+            sink.emit(ahjo_mission_engine::ExecutionEvent { kind:"seat_dispatch".into(), seat_id:seat.id.clone(), data:serde_json::json!({"dispatch_id":dispatch,"card_id":req.step.id,"seat_id":seat.id}).as_object().unwrap().clone() }).map_err(|error| error.message)?;
             self.0.lock().unwrap().push(snapshot()?);
             let result = StepResult {
                 status: "done".into(),
@@ -925,7 +925,7 @@ fn restart_at_each_ledger_cut_reaches_the_same_output() {
         .iter()
         .position(|line| {
             serde_json::from_str::<serde_json::Value>(line).is_ok_and(|event| {
-                event["type"] == "node_started" && event["node_id"] == "fmn_work"
+                event["type"] == "card_started" && event["card_id"] == "fmn_work"
             })
         })
         .unwrap();
@@ -989,10 +989,10 @@ fn restart_at_each_ledger_cut_reaches_the_same_output() {
             .unwrap();
         let outputs: Vec<_> = events
             .iter()
-            .filter(|event| event.kind == "node_output")
+            .filter(|event| event.kind == "card_output")
             .map(|event| {
                 (
-                    event.node_id.as_str(),
+                    event.card_id.as_str(),
                     event.data.get("status"),
                     event.data.get("text"),
                     event.data.get("outputs"),
@@ -1003,12 +1003,12 @@ fn restart_at_each_ledger_cut_reaches_the_same_output() {
             .iter()
             .filter_map(|line| {
                 let event: serde_json::Value = serde_json::from_str(line).unwrap();
-                (event["type"] == "node_output").then_some(event)
+                (event["type"] == "card_output").then_some(event)
             })
             .collect();
         assert_eq!(outputs.len(), baseline.len(), "cut {cut}");
         for (actual, expected) in outputs.iter().zip(&baseline) {
-            assert_eq!(actual.0, expected["node_id"].as_str().unwrap());
+            assert_eq!(actual.0, expected["card_id"].as_str().unwrap());
             assert_eq!(actual.1, expected["data"].get("status"));
             assert_eq!(actual.2, expected["data"].get("text"));
             assert_eq!(actual.3, expected["data"].get("outputs"));
@@ -1018,7 +1018,7 @@ fn restart_at_each_ledger_cut_reaches_the_same_output() {
             .filter(|event| event.kind == "seat_dispatch")
             .map(|event| {
                 (
-                    event.node_id.clone(),
+                    event.card_id.clone(),
                     event.seat_id.clone(),
                     event.attempt,
                     event.data["dispatch_id"].as_str().unwrap().to_owned(),
@@ -1061,7 +1061,7 @@ fn restart_between_steps_matches_archon_lab() {
         .lines()
         .position(|line| {
             serde_json::from_str::<serde_json::Value>(line)
-                .is_ok_and(|e| e["type"] == "node_output" && e["node_id"] == "inp_hello")
+                .is_ok_and(|e| e["type"] == "card_output" && e["card_id"] == "inp_hello")
         })
         .unwrap();
     std::fs::write(
@@ -1085,7 +1085,7 @@ fn restart_between_steps_matches_archon_lab() {
         .map(|line| {
             let event: serde_json::Value = serde_json::from_str(line).unwrap();
             let mut normalized = serde_json::Map::new();
-            for key in ["type", "node_id", "gate_id", "seat_id", "attempt"] {
+            for key in ["type", "card_id", "gate_id", "seat_id", "attempt"] {
                 if let Some(value) = event.get(key) {
                     normalized.insert(key.into(), value.clone());
                 }
@@ -1122,12 +1122,12 @@ fn lab_run_completes_with_archon_sequence_and_lock_excludes_other_owners() {
         p.events.iter().map(|e| e.kind.as_str()).collect::<Vec<_>>(),
         [
             "run_started",
-            "node_started",
-            "node_output",
-            "node_started",
+            "card_started",
+            "card_output",
+            "card_started",
             "seat_dispatch",
             "seat_result",
-            "node_output",
+            "card_output",
             "run_succeeded"
         ]
     );
@@ -1210,7 +1210,7 @@ fn lab_work_duration_can_be_aborted_without_a_result_event() {
             .unwrap()
             .events
             .iter()
-            .any(|e| e.kind == "node_started" && e.node_id == "fmn_work")
+            .any(|e| e.kind == "card_started" && e.card_id == "fmn_work")
         {
             break;
         }
@@ -1273,7 +1273,7 @@ fn a_step_placed_elsewhere_needs_a_repository_and_a_well_formed_place() {
     let place = |device: &str| {
         let text = source.replacen(
             "id = \"fmn_work\"",
-            &format!("id = \"fmn_work\"\ndevice = \"{device}\""),
+            &format!("id = \"fmn_work\"\nenvironment = \"{device}\""),
             1,
         );
         std::fs::write(&mission, text).unwrap();
@@ -1285,10 +1285,10 @@ fn a_step_placed_elsewhere_needs_a_repository_and_a_well_formed_place() {
     let c = Coordinator::open(&dir.0, settings, Box::new(LabExecutor)).unwrap();
     let refused = |code: ahjo_mission_model::Code| {
         matches!(c.start_mission(request()), Err(ahjo_mission_engine::AdmissionFailure::Findings(f))
-            if f.iter().any(|x| x.code == code && x.node_id == "fmn_work"))
+            if f.iter().any(|x| x.code == code && x.card_id == "fmn_work"))
     };
     place("elsewhere");
-    assert!(refused(ahjo_mission_model::Code::UnknownDevice));
+    assert!(refused(ahjo_mission_model::Code::UnknownEnvironment));
     place("elsewhere/windows");
     assert!(refused(
         ahjo_mission_model::Code::PlacementWithoutRepository
@@ -1297,11 +1297,11 @@ fn a_step_placed_elsewhere_needs_a_repository_and_a_well_formed_place() {
     // compare exactly, as placement finds the step's node.
     let with_devices = |devices: &[&str]| {
         let mut req = request();
-        req.known_devices = Some(devices.iter().map(|d| d.to_string()).collect());
+        req.known_machines = Some(devices.iter().map(|d| d.to_string()).collect());
         match c.start_mission(req) {
             Err(ahjo_mission_engine::AdmissionFailure::Findings(f)) => f
                 .iter()
-                .filter(|x| x.node_id == "fmn_work")
+                .filter(|x| x.card_id == "fmn_work")
                 .map(|x| x.code)
                 .collect::<Vec<_>>(),
             other => panic!("admitted: {other:?}"),
@@ -1309,11 +1309,11 @@ fn a_step_placed_elsewhere_needs_a_repository_and_a_well_formed_place() {
     };
     assert_eq!(
         with_devices(&["here", "Other"]),
-        [ahjo_mission_model::Code::UnknownDevice]
+        [ahjo_mission_model::Code::UnknownEnvironment]
     );
     assert_eq!(
         with_devices(&["here", "Elsewhere"]),
-        [ahjo_mission_model::Code::UnknownDevice]
+        [ahjo_mission_model::Code::UnknownEnvironment]
     );
     assert_eq!(
         with_devices(&["here", "elsewhere"]),
@@ -1337,7 +1337,7 @@ fn selected_step_runs_without_replaying_the_input_card() {
     wait_final(&c, &id);
     let p = c.run(&id).unwrap();
     assert_eq!(p.status, "succeeded");
-    assert!(!p.events.iter().any(|e| e.node_id == "inp_hello"));
+    assert!(!p.events.iter().any(|e| e.card_id == "inp_hello"));
 }
 
 #[test]
@@ -1360,7 +1360,7 @@ fn a_schema_two_frozen_mission_and_selected_step_run_replay_after_upgrade() {
     let snapshot = runs.join(format!("{id}.snapshot.toml"));
     let canonical = std::fs::read_to_string(&snapshot).unwrap();
     let old = canonical
-        .replace("schema = 4", "schema = 2")
+        .replace("schema = 5", "schema = 2")
         .replace("[[step.seat]]", "[[step.slot]]")
         .replace("\nagent = ", "\nagent_id = ")
         .replace("[[step", "[[formation")
@@ -1371,7 +1371,8 @@ fn a_schema_two_frozen_mission_and_selected_step_run_replay_after_upgrade() {
     let binding_path = runs.join(format!("{id}.bindings.toml"));
     let bindings = std::fs::read_to_string(&binding_path).unwrap();
     let old_bindings = bindings
-        .replace("schema = 5", "schema = 4")
+        .replace("schema = 6", "schema = 4")
+        .replace("step_id = ", "node_id = ")
         .replace("seat_id = ", "slot_id = ")
         .replace("agent = ", "agent_id = ");
     assert!(old_bindings.contains("slot_id = "));
@@ -1388,10 +1389,21 @@ fn a_schema_two_frozen_mission_and_selected_step_run_replay_after_upgrade() {
             assert_eq!(data.remove("step_id").unwrap(), "fmn_work");
             data.insert("formation_id".into(), "fmn_work".into());
             changed = true;
-        } else if event["type"] == "node_started" && event["data"]["node_kind"] == "step" {
+        } else if event["type"] == "card_started" && event["data"]["card_kind"] == "step" {
+            event["data"].as_object_mut().unwrap().remove("card_kind");
             event["data"]["node_kind"] = "formation".into();
         }
+        if let Some(kind) = match event["type"].as_str() {
+            Some("card_started") => Some("node_started"),
+            Some("card_output") => Some("node_output"),
+            _ => None,
+        } {
+            event["type"] = kind.into();
+        }
         let event_fields = event.as_object_mut().unwrap();
+        if let Some(card_id) = event_fields.remove("card_id") {
+            event_fields.insert("node_id".into(), card_id);
+        }
         if let Some(seat_id) = event_fields.remove("seat_id") {
             event_fields.insert("slot_id".into(), seat_id);
         }
@@ -1402,6 +1414,9 @@ fn a_schema_two_frozen_mission_and_selected_step_run_replay_after_upgrade() {
         } {
             event["type"] = kind.into();
             let data = event["data"].as_object_mut().unwrap();
+            if let Some(step_id) = data.remove("step_id") {
+                data.insert("node_id".into(), step_id);
+            }
             if let Some(seat_id) = data.remove("seat_id") {
                 data.insert("slot_id".into(), seat_id);
             }
@@ -1425,7 +1440,7 @@ fn a_schema_two_frozen_mission_and_selected_step_run_replay_after_upgrade() {
     let migrated_mission = c.frozen_mission(&id).unwrap();
     let frozen_bindings: ahjo_mission_engine::BindingsSnapshot =
         toml::from_str(&std::fs::read_to_string(binding_path).unwrap()).unwrap();
-    assert_eq!(frozen_bindings.schema, 5);
+    assert_eq!(frozen_bindings.schema, 6);
     let original = &mission.steps[0].seats[0];
     let migrated = &migrated_mission.steps[0].seats[0];
     let binding = frozen_bindings
@@ -1438,7 +1453,7 @@ fn a_schema_two_frozen_mission_and_selected_step_run_replay_after_upgrade() {
     assert!(
         std::fs::read_to_string(&snapshot)
             .unwrap()
-            .contains("schema = 4")
+            .contains("schema = 5")
     );
     let ledger = ahjo_mission_engine::Ledger::new(&ledger_path, &id)
         .read()
@@ -1802,8 +1817,8 @@ fn repository_runs_isolate_commit_and_land() {
             .filter(|e| e.kind == "workspace_commit")
             .collect();
         assert_eq!(commits.len(), 2);
-        assert_eq!(commits[0].node_id, "fmn_work");
-        assert_eq!(commits[1].node_id, "fmn_second");
+        assert_eq!(commits[0].card_id, "fmn_work");
+        assert_eq!(commits[1].card_id, "fmn_second");
         assert!(commits.iter().all(|e| e.attempt == 1));
         assert!(
             git(
@@ -1899,7 +1914,7 @@ fn recovery_publishes_an_output_recorded_before_its_commit() {
         .collect();
     let output = events
         .iter()
-        .position(|e| e["type"] == "node_output_pending" && e["node_id"] == "fmn_work")
+        .position(|e| e["type"] == "card_output_pending" && e["card_id"] == "fmn_work")
         .unwrap();
     std::fs::write(
         &path,
@@ -1944,14 +1959,14 @@ fn recovery_publishes_an_output_recorded_before_its_commit() {
     assert_eq!(
         p.events
             .iter()
-            .filter(|e| e.kind == "node_output" && e.node_id == "fmn_work")
+            .filter(|e| e.kind == "card_output" && e.card_id == "fmn_work")
             .count(),
         1
     );
     assert!(
         p.events
             .iter()
-            .any(|e| e.kind == "workspace_commit" && e.node_id == "fmn_work")
+            .any(|e| e.kind == "workspace_commit" && e.card_id == "fmn_work")
     );
 }
 
@@ -2099,4 +2114,41 @@ async fn wait_reports_a_human_gate_once_and_wakes_concurrent_drivers() {
         .outcome,
         "final"
     );
+}
+
+#[test]
+fn an_implicit_output_can_name_the_input_card() {
+    let dir = Scratch::new();
+    std::fs::write(
+        dir.0.join("missions/hello.mission.toml"),
+        r#"schema = 5
+id = "msn_hello"
+slug = "hello"
+title = "Hello"
+rev = 1
+
+[[input_card]]
+id = "inp_hello"
+title = "Hello"
+
+[[end]]
+id = "end_done"
+title = "Done"
+outcome = "done"
+
+[[connection]]
+id = "edge_direct"
+from = "inp_hello:out"
+to = "end_done:in"
+"#,
+    )
+    .unwrap();
+    let coordinator =
+        Coordinator::open(&dir.0, RunSettings::default(), Box::new(LabExecutor)).unwrap();
+    let id = coordinator.start_mission(request()).unwrap();
+    wait_final(&coordinator, &id);
+    let run = coordinator.run(&id).unwrap();
+    assert_eq!(run.status, "succeeded");
+    assert_eq!(run.outputs.len(), 1);
+    assert_eq!(run.outputs[0].card_id, "inp_hello");
 }

@@ -24,7 +24,7 @@ fn concurrent_appends_are_ordered_and_final_runs_refuse_changes() {
             let ledger = ledger.clone();
             std::thread::spawn(move || {
                 for _ in 0..5 {
-                    ledger.append(event("node_started")).unwrap();
+                    ledger.append(event("card_started")).unwrap();
                 }
             })
         })
@@ -36,7 +36,7 @@ fn concurrent_appends_are_ordered_and_final_runs_refuse_changes() {
     assert_eq!(events.len(), 41);
     validate_ledger(&events, "run_test").unwrap();
     ledger.append(event("run_succeeded")).unwrap();
-    assert!(ledger.append(event("node_started")).is_err());
+    assert!(ledger.append(event("card_started")).is_err());
     std::fs::remove_file(path).unwrap();
 }
 #[test]
@@ -53,7 +53,7 @@ fn a_truncated_or_wrong_identity_ledger_is_never_projected() {
         .write_all(b"{\"seq\":2")
         .unwrap();
     assert!(ledger.read().is_err());
-    assert!(ledger.append(event("node_started")).is_err());
+    assert!(ledger.append(event("card_started")).is_err());
     std::fs::remove_file(path).unwrap();
 }
 
@@ -92,10 +92,10 @@ fn blocked_epoch_accepts_only_resume_cancel_failure_and_cleanup() {
     let mut blocked = event("run_blocked");
     blocked.data.insert("resume_allowed".into(), true.into());
     ledger.append(blocked).unwrap();
-    assert!(ledger.append(event("node_started")).is_err());
+    assert!(ledger.append(event("card_started")).is_err());
     assert_eq!(ledger.append(event("run_resumed")).unwrap().epoch, 1);
     assert!(ledger.append(event("run_resumed")).is_err());
-    ledger.append(event("node_started")).unwrap();
+    ledger.append(event("card_started")).unwrap();
     std::fs::remove_file(path).unwrap();
 }
 
@@ -105,7 +105,7 @@ fn escalation_evidence_keeps_reason_out_of_the_public_event() {
     let ledger = Ledger::new(&path, "run_test");
     ledger.create(event("run_started")).unwrap();
     let mut escalation = event("escalation_raised");
-    escalation.node_id = "step".into();
+    escalation.card_id = "step".into();
     escalation
         .data
         .insert("reason".into(), "private reason".into());
@@ -165,7 +165,7 @@ fn oversized_events_are_rejected_without_damaging_the_ledger() {
     let path = scratch();
     let ledger = Ledger::new(&path, "run_test");
     ledger.create(event("run_started")).unwrap();
-    let mut oversized = event("node_started");
+    let mut oversized = event("card_started");
     oversized
         .data
         .insert("text".into(), "x".repeat(1 << 20).into());

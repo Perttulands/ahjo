@@ -108,7 +108,7 @@ pub fn input_findings(mission: &Mission, supplied: &BTreeMap<String, String>) ->
         ));
     }
     findings.sort_by(|a, b| {
-        (a.code.as_str(), &a.node_id, &a.message).cmp(&(b.code.as_str(), &b.node_id, &b.message))
+        (a.code.as_str(), &a.card_id, &a.message).cmp(&(b.code.as_str(), &b.card_id, &b.message))
     });
     findings
 }

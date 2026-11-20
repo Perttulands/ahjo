@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 pub enum Code {
     DanglingConnection,
     DuplicateInputProducer,
-    DuplicateNodeId,
+    DuplicateCardId,
     DuplicateSeatId,
     EmptyLimit,
     StepWithoutSeats,
@@ -38,14 +38,14 @@ pub enum Code {
     SeveralInputCards,
     UnavailablePersona,
     UnboundMissionOutput,
-    UnknownDevice,
+    UnknownEnvironment,
     UnknownInputReference,
     UnknownInput,
     UnsupportedStep,
     UnsupportedHumanChannel,
     InvalidInput,
     InputWithoutProducer,
-    UnreachableNode,
+    UnreachableCard,
     UnstaffedSeat,
 }
 
@@ -54,7 +54,7 @@ impl Code {
         match self {
             Code::DanglingConnection => "dangling_connection",
             Code::DuplicateInputProducer => "duplicate_input_producer",
-            Code::DuplicateNodeId => "duplicate_node_id",
+            Code::DuplicateCardId => "duplicate_card_id",
             Code::DuplicateSeatId => "duplicate_seat_id",
             Code::EmptyLimit => "empty_limit",
             Code::StepWithoutSeats => "step_without_seats",
@@ -83,14 +83,14 @@ impl Code {
             Code::SeveralInputCards => "several_input_cards",
             Code::UnavailablePersona => "unavailable_persona",
             Code::UnboundMissionOutput => "unbound_mission_output",
-            Code::UnknownDevice => "unknown_device",
+            Code::UnknownEnvironment => "unknown_environment",
             Code::UnknownInputReference => "unknown_input_reference",
             Code::UnknownInput => "unknown_input",
             Code::UnsupportedStep => "unsupported_step",
             Code::UnsupportedHumanChannel => "unsupported_human_channel",
             Code::InvalidInput => "invalid_input",
             Code::InputWithoutProducer => "input_without_producer",
-            Code::UnreachableNode => "unreachable_node",
+            Code::UnreachableCard => "unreachable_card",
             Code::UnstaffedSeat => "unstaffed_seat",
         }
     }
@@ -102,13 +102,13 @@ impl Serialize for Code {
     }
 }
 
-/// One problem, located on the node it is about: a node id, a connection id,
+/// One problem, located on the card it is about: a card id, a connection id,
 /// or "" for the mission itself.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub struct Finding {
     pub code: Code,
-    pub node_id: String,
+    pub card_id: String,
     pub message: String,
     /// The reference file a `missing_file` or `relative_file` finding names.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -116,10 +116,10 @@ pub struct Finding {
 }
 
 impl Finding {
-    pub fn new(code: Code, node_id: &str, message: String) -> Finding {
+    pub fn new(code: Code, card_id: &str, message: String) -> Finding {
         Finding {
             code,
-            node_id: node_id.to_owned(),
+            card_id: card_id.to_owned(),
             message,
             path: None,
         }
@@ -134,13 +134,13 @@ pub struct Report {
 }
 
 impl Report {
-    /// Orders findings by code, then node, then message, so reports compare.
+    /// Orders findings by code, then card, then message, so reports compare.
     pub fn sort(&mut self) {
         for findings in [&mut self.errors, &mut self.warnings] {
             findings.sort_by(|a, b| {
-                (a.code.as_str(), &a.node_id, &a.message).cmp(&(
+                (a.code.as_str(), &a.card_id, &a.message).cmp(&(
                     b.code.as_str(),
-                    &b.node_id,
+                    &b.card_id,
                     &b.message,
                 ))
             });

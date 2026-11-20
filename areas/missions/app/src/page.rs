@@ -194,7 +194,7 @@ impl MissionsPage {
             editor: None,
             title: cx.new(|cx| TextField::new(cx, "Step title")),
             goal: cx.new(|cx| TextField::new(cx, "Description").prose()),
-            extra: cx.new(|cx| TextField::new(cx, "Device or outcome")),
+            extra: cx.new(|cx| TextField::new(cx, "Environment or outcome")),
             repository: cx.new(|cx| TextField::new(cx, "Repository")),
             work: cx.new(|cx| TextField::new(cx, "Work reference")),
             files: cx.new(|cx| TextField::new(cx, "One file per line").prose()),
@@ -688,7 +688,7 @@ impl MissionsPage {
                 EditKind::Step,
                 f.title.clone(),
                 brief.goal.clone(),
-                f.device.clone(),
+                f.environment.clone(),
                 brief,
             )
         } else if let Some(c) = m.input_cards.iter().find(|c| c.id == id) {
@@ -908,14 +908,15 @@ impl MissionsPage {
             .state
             .layout
             .as_ref()
-            .map(|l| l.nodes.as_slice())
+            .map(|l| l.cards.as_slice())
             .unwrap_or(&[]);
         let reverse = undo::inverse_change(&mission, layout, &patch).unwrap_or_default();
         let submitted = self.editor.as_ref().map(|ed| self.editor_snapshot(ed, cx));
         let saved_fields = match &patch {
             MissionChange::StaffSeat { .. } => Some(10..14),
             MissionChange::UpdateStep {
-                device: Some(_), ..
+                environment: Some(_),
+                ..
             } => Some(2..3),
             MissionChange::AddPort { .. }
             | MissionChange::UpdatePort { .. }
@@ -1328,11 +1329,11 @@ impl MissionsPage {
             edits::step_formation_patch(&ed.id, kind, self.seat.as_deref().unwrap_or_default());
         self.write_board(patch, WriteMode::Edit, cx);
     }
-    fn set_device(&mut self, cx: &mut Context<Self>) {
+    fn set_environment(&mut self, cx: &mut Context<Self>) {
         let Some(ed) = &self.editor else {
             return;
         };
-        let patch = edits::device_patch(&ed.id, &self.extra.read(cx).text);
+        let patch = edits::environment_patch(&ed.id, &self.extra.read(cx).text);
         self.write_board(patch, WriteMode::Edit, cx);
     }
     pub(super) fn staff_seat(&mut self, cx: &mut Context<Self>) {
@@ -1904,8 +1905,8 @@ impl Render for MissionsPage {
                         .when(matches!(ed.kind, EditKind::Step) && !self.editor_more, |d| d.child(left(kit::button(&t, "step-more", "More…", Kind::Quiet).debug_selector(|| "step-more".into()).on_click(cx.listener(|p, _, _, cx| { p.editor_more = true; cx.notify(); })))))
                         .when(matches!(ed.kind, EditKind::Step) && self.editor_more, |d| d.child(kit::label(&t, "Team"))
                             .child({ let current = self.state.mission.as_ref().and_then(|m| m.steps.iter().find(|f| f.id == ed.id)).map(|f| f.formation); let pick = |id: &'static str, text: &'static str, ty: Formation| kit::button(&t, id, text, if current == Some(ty) { Kind::Plain } else { Kind::Quiet }).on_click(cx.listener(move |p, _, _, cx| p.set_formation(ty, cx))); div().flex().gap(px(TAB_GAP)).child(pick("formation-solo", "Solo", Formation::Solo)).child(pick("formation-peer", "Peer", Formation::Peer)).child(pick("formation-orchestrated", "Orchestrated", Formation::Orchestrated)) })
-                            .child(kit::label(&t, "Device")).child(div().flex().gap(px(TAB_GAP)).child(div().flex_1().child(self.extra.clone()))
-                            .child(left(kit::button(&t, "set-device", "Set device", Kind::Quiet).on_click(cx.listener(|p, _, _, cx| p.set_device(cx)))))))
+                            .child(kit::label(&t, "Environment")).child(div().flex().gap(px(TAB_GAP)).child(div().flex_1().child(self.extra.clone()))
+                            .child(left(kit::button(&t, "set-environment", "Set environment", Kind::Quiet).on_click(cx.listener(|p, _, _, cx| p.set_environment(cx)))))))
                         .when(matches!(ed.kind, EditKind::Step) && self.editor_more, |d| d.child(kit::label(&t, "Repository")).child(self.repository_picker(&t, &self.repository, "repository", cx))
                             .child(kit::label(&t, "Work")).child(div().child(self.work.clone()))
                             .child(kit::label(&t, "Files")).child(div().child(self.files.clone()))
@@ -1936,7 +1937,7 @@ impl Render for MissionsPage {
                         })
                         .when(matches!(ed.kind, EditKind::Input) || (matches!(ed.kind, EditKind::Step) && self.editor_more), |mut d| {
                             d = d.child(kit::label(&t, "Limits"));
-                            if let Some(mission) = &self.state.mission { for limit in mission.limits.iter().filter(|l| l.target == ed.id) {
+                            if let Some(mission) = &self.state.mission { for limit in mission.limits.iter().filter(|l| l.scope == ed.id) {
                                 let id = limit.id.clone(); let selected = id.clone();
                                 d = d.child(left(kit::button(&t, gpui::SharedString::from(format!("limit-{id}")), limit.title.clone(), Kind::Quiet).on_click(cx.listener(move |p, _, _, cx| p.select_limit(&selected, cx)))));
                             } }
@@ -1956,7 +1957,7 @@ impl Render for MissionsPage {
                         .when(matches!(ed.kind, EditKind::Gate), |d| d.child(kit::label(&t, "Check profile")).child(div().child(self.check.clone())).child(kit::label(&t, "Profile version")).child(div().child(self.check_version.clone())).child(kit::label(&t, "Check value")).child(div().child(self.check_value.clone())).child(kit::label(&t, "Files")).child(div().child(self.files.clone())))
                         .when_some(self.notes.as_ref().filter(|_| self.editor_more || !matches!(ed.kind, EditKind::Step)), |mut d, notes| {
                             d = d.child(kit::label(&t, "Notes"));
-                            if let Some(thread) = notes.elements.iter().find(|n| n.node_id == ed.id) {
+                            if let Some(thread) = notes.elements.iter().find(|n| n.card_id == ed.id) {
                                 for note in &thread.entries {
                                     let id = note.id.clone(); let selected = id.clone(); let text = note.text.clone();
                                     if note.author == "human:ui" {

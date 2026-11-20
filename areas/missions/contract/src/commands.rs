@@ -91,7 +91,7 @@ pub struct MissionNote {
     /// What the note says. It may span several lines.
     pub text: Option<String>,
     /// A card id or title, a wire as From->To, or the mission when omitted.
-    pub target: Option<String>,
+    pub on: Option<String>,
     /// Change the note with this id to --text.
     pub edit: Option<String>,
     /// Remove the note with this id.

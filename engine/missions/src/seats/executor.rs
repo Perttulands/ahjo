@@ -99,7 +99,7 @@ impl SeatExecutor {
                     }
                     // A seat whose node does not answer cannot be ended now;
                     // it stays as it is, as every session does.
-                    if let Some(why) = self.seats.away(&request.step.device) {
+                    if let Some(why) = self.seats.away(&request.step.environment) {
                         return Err(format!("canceled while {why}; its seat is left as it is"));
                     }
                     break Err("canceled".into());
@@ -118,7 +118,7 @@ impl SeatExecutor {
                     checked = Some(std::time::Instant::now());
                     for (worker, _, worker_seat, _) in workers {
                         if lost.contains(&worker.id) { continue; }
-                        if self.seats.away(&request.step.device).is_some() { break; }
+                        if self.seats.away(&request.step.environment).is_some() { break; }
                         if matches!(tokio::time::timeout(Duration::from_millis(250), self.seats.seat_alive(worker_seat)).await, Ok(Ok(false))) {
                             let text = format!("Worker {} (session {}) is gone. Continue without that worker.", worker.id, worker_seat.session_name);
                             let data = json!({"mode":"agentic-leader","observer":"ahjo-seat","phase":"work","outcome":"gone","anomaly":true,"seat_id":worker.id,"controller_seat":definition.id,"session_ref":format!("terminal:{}", worker_seat.session_name)});
@@ -184,7 +184,7 @@ impl SeatExecutor {
         let dispatch = Dispatch {
             id: id.clone(),
             run_id: request.run_id.clone(),
-            node_id: request.step.id.clone(),
+            step_id: request.step.id.clone(),
             seat_id: definition.id.clone(),
             name,
             keep,
@@ -194,7 +194,7 @@ impl SeatExecutor {
             cwd: request.cwd.clone(),
             brief: prompt.into(),
             reuse_dispatch: original.map(str::to_owned),
-            place: request.step.device.clone(),
+            environment: request.step.environment.clone(),
             turn: request.turn.clone(),
         };
         self.reach(request, &definition.id, sink, self.seats.dispatch(dispatch))
@@ -245,9 +245,9 @@ impl SeatExecutor {
         }
     }
 
-    /// Waits for a call to the step's place. While its node does not answer
+    /// Waits for a call to the step's environment. While its node does not answer
     /// the step says so, as a placed seat's own stream does
-    /// (`waiting_for_device`), and a stopped run stops waiting.
+    /// (`waiting_for_environment`), and a stopped run stops waiting.
     async fn reach<T>(
         &self,
         request: &StepExecution,
@@ -255,13 +255,13 @@ impl SeatExecutor {
         sink: &ExecutionSink,
         mut call: SeatFuture<'_, T>,
     ) -> Result<T, String> {
-        let place = &request.step.device;
+        let environment = &request.step.environment;
         let mut waiting = false;
         loop {
             tokio::select! {
                 answer = &mut call => {
                     if waiting && answer.is_ok() {
-                        place_state(sink, definition, "working", &format!("{place} answers again"))?;
+                        environment_state(sink, definition, "working", &format!("{environment} answers again"))?;
                     }
                     return answer.map_err(|error| error.message);
                 }
@@ -274,8 +274,8 @@ impl SeatExecutor {
                     "canceled".into()
                 });
             }
-            if !waiting && let Some(why) = self.seats.away(place) {
-                place_state(sink, definition, "waiting_for_device", &why)?;
+            if !waiting && let Some(why) = self.seats.away(environment) {
+                environment_state(sink, definition, "waiting_for_environment", &why)?;
                 waiting = true;
             }
         }
@@ -366,7 +366,7 @@ impl SeatExecutor {
             phase = format!("continue-{continuation}");
             let id = dispatch_key(
                 &request.run_id,
-                &request.node_id,
+                &request.step_id,
                 &request.seat_id,
                 request.attempt,
                 &phase,
@@ -579,7 +579,7 @@ impl SeatExecutor {
         let event = self.runtime.block_on(published_turn(
             &*self.seats,
             dispatch,
-            &request.step.device,
+            &request.step.environment,
             turn,
             &definition.id,
         ))?;
@@ -719,7 +719,7 @@ impl SeatExecutor {
             }
             Err(error) => {
                 if !request.stopping.load(Ordering::Acquire)
-                    && self.seats.away(&request.step.device).is_none()
+                    && self.seats.away(&request.step.environment).is_none()
                 {
                     let _ = self
                         .runtime
@@ -799,7 +799,7 @@ impl Executor for SeatExecutor {
             };
             let canceled = raised(&request.canceled)
                 && !raised(&request.stopping)
-                && self.seats.away(&request.step.device).is_none();
+                && self.seats.away(&request.step.environment).is_none();
             if request.limits.is_spent() || canceled {
                 // A live attempt the limit cut off or an abort stopped ends
                 // its seat the same way.
@@ -842,7 +842,7 @@ impl Executor for SeatExecutor {
             let follow = |replay: &mut Vec<ExecutionEvent>, id: String, label: String, events: Vec<ExecutionEvent>, seat: Option<(SeatId, String)>| -> Result<(), String> {
                 let (seat, path) = seat.ok_or("follow-up seat missing")?;
                 let brief = self.seats.dispatch_info(&id).map_err(|error| error.message)?.brief;
-                let data = dispatch_data(&id, &request.node_id, &definition, &seat, &path, &brief, &label, false);
+                let data = dispatch_data(&id, &request.step_id, &definition, &seat, &path, &brief, &label, false);
                 replay.push(ExecutionEvent { kind: "seat_dispatch".into(), seat_id: request.seat_id.clone(), data });
                 replay.extend(events);
                 Ok(())
@@ -853,7 +853,7 @@ impl Executor for SeatExecutor {
             {
                 continuation += 1;
                 let next = format!("continue-{continuation}");
-                let id = dispatch_key(&request.run_id, &request.node_id, &request.seat_id, request.attempt, &next);
+                let id = dispatch_key(&request.run_id, &request.step_id, &request.seat_id, request.attempt, &next);
                 if !matches!(self.seats.result(&id), Ok(Some(_))) {
                     break;
                 }
@@ -880,7 +880,7 @@ impl Executor for SeatExecutor {
                         cwd: original.cwd, turn: original.turn, artifact_dir: request.artifact_dir.clone(), context_paths: Vec::new(), work: String::new(), inputs: Vec::new(), input_text: String::new(), attempt: request.attempt, judge: true, pick_attempts: Vec::new(),
                         canceled: request.canceled.clone().unwrap_or_default(), stopping: request.stopping.clone().unwrap_or_default(), limits: Default::default(),
                     };
-                    self.judges.lock().map_err(|e| e.to_string())?.insert((request.run_id.clone(), request.node_id.clone(), request.attempt), HeldJudge { request: execution, definition, original: original.reuse_dispatch.unwrap_or_else(|| request.dispatch_id.clone()), seat, prompt: original.brief });
+                    self.judges.lock().map_err(|e| e.to_string())?.insert((request.run_id.clone(), request.step_id.clone(), request.attempt), HeldJudge { request: execution, definition, original: original.reuse_dispatch.unwrap_or_else(|| request.dispatch_id.clone()), seat, prompt: original.brief });
                     return Ok(replay);
                 }
                 let outcome = self.seats.end_seat(&seat, "run_final").await.map_err(|error| error.message)?;
@@ -894,7 +894,7 @@ impl Executor for SeatExecutor {
             // the coordinator restarted in between; publishing is idempotent.
             let original = self.seats.dispatch_info(&request.dispatch_id).map_err(|error| error.message)?;
             if let Some(turn) = &original.turn {
-                replay.push(published_turn(&*self.seats, &request.dispatch_id, &original.place, turn, &request.seat_id).await?);
+                replay.push(published_turn(&*self.seats, &request.dispatch_id, &original.environment, turn, &request.seat_id).await?);
             }
             Ok(replay)
         }).map_err(|message: String| crate::Error::new("executor_error", message))
@@ -959,14 +959,14 @@ impl Executor for SeatExecutor {
             };
             let mut request = request;
             if let Some(turn) = &request.turn {
-                let place = &request.step.device;
+                let environment = &request.step.environment;
                 let cwd = self.runtime.block_on(self.reach(
                     &request,
                     &definition.id,
                     &sink,
-                    self.seats.prepare_turn(place, turn),
+                    self.seats.prepare_turn(environment, turn),
                 ))?;
-                let data = json!({"place":place,"commit":turn.commit,"cwd":cwd});
+                let data = json!({"environment":environment,"commit":turn.commit,"cwd":cwd});
                 sink.emit(ExecutionEvent {
                     kind: "workspace_fetch".into(),
                     seat_id: definition.id.clone(),
@@ -1042,7 +1042,7 @@ impl Executor for SeatExecutor {
         (|| -> Result<Option<String>, String> {
         let held = self.judges.lock().map_err(|e| e.to_string())?.remove(&(
             correction.run_id,
-            correction.node_id,
+            correction.step_id,
             correction.attempt,
         ));
         let Some(held) = held else {
@@ -1083,8 +1083,8 @@ fn shell_word(value: &str) -> String {
         format!("'{}'", value.replace('\'', "'\\''"))
     }
 }
-/// A seat state the coordinator observes about the step's place.
-fn place_state(
+/// A seat state the coordinator observes about the step's environment.
+fn environment_state(
     sink: &ExecutionSink,
     definition: &str,
     state: &str,
@@ -1171,7 +1171,7 @@ fn owed_correction(
     let key = |phase| {
         dispatch_key(
             &request.run_id,
-            &request.node_id,
+            &request.step_id,
             &request.seat_id,
             request.attempt,
             phase,
@@ -1201,7 +1201,7 @@ fn dispatch_data(
     recorded_before_send: bool,
 ) -> Map<String, Value> {
     let prompt_sha = hex::encode(Sha256::digest(prompt.as_bytes()));
-    let data = json!({"dispatch_id":id,"node_id":node,"seat_id":definition.id,"agent":definition.agent,"harness":definition.harness,"session":seat.session_name,"session_ref":format!("terminal:{}",seat.session_name),"brief_path":path,"prompt_sha256":prompt_sha,"prompt_ref":"","phase":phase,"recorded_before_send":recorded_before_send,"native_ack":false});
+    let data = json!({"dispatch_id":id,"step_id":node,"seat_id":definition.id,"agent":definition.agent,"harness":definition.harness,"session":seat.session_name,"session_ref":format!("terminal:{}",seat.session_name),"brief_path":path,"prompt_sha256":prompt_sha,"prompt_ref":"","phase":phase,"recorded_before_send":recorded_before_send,"native_ack":false});
     data.as_object().cloned().unwrap_or_default()
 }
 fn dispatch_id(request: &StepExecution, definition: &Seat, phase: &str) -> String {
@@ -1223,15 +1223,15 @@ fn dispatch_key(run: &str, node: &str, definition: &str, attempt: i64, phase: &s
 async fn published_turn(
     seats: &dyn SeatSide,
     dispatch: &str,
-    place: &str,
+    environment: &str,
     turn: &crate::TurnWorkspace,
     definition: &str,
 ) -> Result<ExecutionEvent, String> {
     let published = seats
-        .publish_turn(place, turn)
+        .publish_turn(environment, turn)
         .await
         .map_err(|error| error.message)?;
-    let data = json!({"dispatch_id":dispatch,"place":place,"commit":published.commit,"reference":published.reference});
+    let data = json!({"dispatch_id":dispatch,"environment":environment,"commit":published.commit,"reference":published.reference});
     Ok(ExecutionEvent {
         kind: "workspace_turn".into(),
         seat_id: definition.into(),

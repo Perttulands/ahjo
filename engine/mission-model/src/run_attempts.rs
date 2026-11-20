@@ -48,7 +48,7 @@ pub struct RunAttempts {
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub struct StepAttempts {
-    pub node_id: String,
+    pub step_id: String,
     pub title: String,
     /// The gates this step judges for, when it is a judge.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]

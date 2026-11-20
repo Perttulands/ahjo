@@ -41,14 +41,14 @@ impl Coordinator {
             .into_iter()
             .find(|delivery| {
                 delivery.outcome == ahjo_mission_model::EndOutcome::Rejected
-                    && delivery.end_id == end.node_id
+                    && delivery.end_id == end.card_id
                     && delivery.gate_id == end.gate_id
             })
             .map_or_else(String::new, |delivery| delivery.findings);
         Ok(Some(RunSendBack {
-            end_id: end.node_id.clone(),
+            end_id: end.card_id.clone(),
             gate_id: end.gate_id.clone(),
-            gate_title: mission.node_name(&end.gate_id).to_owned(),
+            gate_title: mission.card_name(&end.gate_id).to_owned(),
             reason: end.detail.clone(),
             findings,
         }))
@@ -166,7 +166,7 @@ pub fn project_run(events: &[RunEvent], run_id: &str) -> Result<RunProjection, c
             result.events.push(PublicEvent {
                 seq: event.seq,
                 kind: event.kind.clone(),
-                node_id: event.node_id.clone(),
+                card_id: event.card_id.clone(),
                 seat_id: event.seat_id.clone(),
                 gate_id: event.gate_id.clone(),
                 attempt: event.attempt,
@@ -214,7 +214,7 @@ pub fn project_run(events: &[RunEvent], run_id: &str) -> Result<RunProjection, c
                     .flatten()
                     .map(|v| PublicInputRef {
                         edge_id: v["edge_id"].as_str().unwrap_or("").into(),
-                        from_node_id: v["from_node_id"].as_str().unwrap_or("").into(),
+                        from_card_id: v["from_card_id"].as_str().unwrap_or("").into(),
                         from_port_id: v["from_port_id"].as_str().unwrap_or("").into(),
                         to_port_id: v["to_port_id"].as_str().unwrap_or("").into(),
                         origin: serde_json::from_value(v["origin"].clone()).ok(),

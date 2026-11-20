@@ -73,17 +73,17 @@ async fn mission_routes_on_a_node_with_fake_sessions() {
         .request(Method::GET, "/api/missions/example/layout", None, None)
         .await
         .unwrap();
-    assert!(layout["layout"]["node"].is_array());
+    assert!(layout["layout"]["card"].is_array());
     let (changed_layout, changed_layout_etag) = client
         .request(
             Method::PATCH,
             "/api/missions/example/layout",
-            Some(json!({"nodes":[{"id":"a","x":10,"y":20}]})),
+            Some(json!({"cards":[{"id":"a","x":10,"y":20}]})),
             Some(&layout_etag),
         )
         .await
         .unwrap();
-    assert_eq!(changed_layout["layout"]["node"][0]["x"], 10);
+    assert_eq!(changed_layout["layout"]["card"][0]["x"], 10);
     let stored_layout =
         std::fs::read_to_string(node.dir().join("missions/layout/example.layout.toml")).unwrap();
     let stored_layout = Layout::parse(&stored_layout).unwrap();
@@ -257,7 +257,7 @@ async fn run_changes_arrive_on_the_socket_through_completion() {
         .replace("id = \"msn_hello\"", "id = \"msn_remote\"")
         .replace(
             "id = \"fmn_work\"",
-            "id = \"fmn_work\"\ndevice = \"remote/linux\"",
+            "id = \"fmn_work\"\nenvironment = \"remote/linux\"",
         );
     std::fs::write(folder.join("remote.mission.toml"), remote).unwrap();
     let error = client.request(Method::POST, "/api/runs", Some(json!({"mission":"remote","input_card_id":"inp_hello","expected_rev":1,"inputs":{"brief":"hello"}})), None).await.unwrap_err();
@@ -276,7 +276,7 @@ async fn run_changes_arrive_on_the_socket_through_completion() {
         .replace("id = \"msn_hello\"", "id = \"msn_local\"")
         .replace(
             "id = \"fmn_work\"",
-            &format!("id = \"fmn_work\"\ndevice = \"{place}\""),
+            &format!("id = \"fmn_work\"\nenvironment = \"{place}\""),
         );
     std::fs::write(folder.join("local.mission.toml"), local).unwrap();
     let (local_run, _) = client.request(Method::POST, "/api/runs", Some(json!({"mission":"local","input_card_id":"inp_hello","expected_rev":1,"inputs":{"brief":"hello"}})), None).await.unwrap();

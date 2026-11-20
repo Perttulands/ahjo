@@ -765,10 +765,10 @@ impl MissionsPage {
                                     .findings
                                     .iter()
                                     .map(|f| {
-                                        if f.node_id.is_empty() {
+                                        if f.card_id.is_empty() {
                                             f.message.clone()
                                         } else {
-                                            format!("{}: {}", name_of(&f.node_id), f.message)
+                                            format!("{}: {}", name_of(&f.card_id), f.message)
                                         }
                                     })
                                     .collect();
@@ -974,7 +974,7 @@ impl MissionsPage {
                         Ok(v) => {
                             if let Some(window) = &mut page.run.attempt_window
                                 && let Some(step) =
-                                    v.attempts.steps.iter().find(|s| s.node_id == window.step)
+                                    v.attempts.steps.iter().find(|s| s.step_id == window.step)
                             {
                                 window.read(step.clone(), None);
                                 window.read_at = at;
@@ -987,7 +987,7 @@ impl MissionsPage {
                                     .attempts
                                     .steps
                                     .iter()
-                                    .find(|s| s.node_id == step_id)
+                                    .find(|s| s.step_id == step_id)
                                     .cloned()
                             {
                                 let mut window = crate::store::attempts::AttemptsWindow::new(
@@ -1429,16 +1429,16 @@ impl MissionsPage {
                     .unwrap_or(&run.mission_slug)
             ));
         for point in run_state::points(run) {
-            if point.kind == run_state::PointKind::Running && !point.node.is_empty() {
+            if point.kind == run_state::PointKind::Running && !point.card.is_empty() {
                 let title = mission
-                    .map(|mission| mission.node_name(&point.node))
-                    .unwrap_or(&point.node);
+                    .map(|mission| mission.card_name(&point.card))
+                    .unwrap_or(&point.card);
                 body = body.child(format!("The agents working on {title} are interrupted."));
             }
         }
         for gate in &run.waiting_gates {
             let title = mission
-                .map(|mission| mission.node_name(&gate.gate_id))
+                .map(|mission| mission.card_name(&gate.gate_id))
                 .unwrap_or(&gate.gate_id);
             body = body.child(format!("{title} stops waiting for you."));
         }
@@ -1655,7 +1655,7 @@ impl MissionsPage {
                             self.run
                                 .frozen
                                 .as_ref()
-                                .map(|m| m.node_name(id).to_owned())
+                                .map(|m| m.card_name(id).to_owned())
                                 .unwrap_or_else(|| id.to_owned())
                         });
                         card =
@@ -1666,7 +1666,7 @@ impl MissionsPage {
                         .iter()
                         .filter_map(|gate| gate.pick.as_ref())
                         .filter(|pick| {
-                            pick.get("node_id").and_then(|v| v.as_str())
+                            pick.get("step_id").and_then(|v| v.as_str())
                                 == Some(window.step.as_str())
                         })
                         .filter_map(|pick| pick.get("recommendation"))
@@ -1750,7 +1750,7 @@ impl MissionsPage {
             panel = panel.child(columns);
             if let Some((gate, seq, candidates)) = run.waiting_gates.iter().find_map(|gate| {
                 let pick = gate.pick.as_ref()?;
-                (pick.get("node_id")?.as_str()? == window.step).then(|| {
+                (pick.get("step_id")?.as_str()? == window.step).then(|| {
                     (
                         gate.gate_id.clone(),
                         gate.requested_seq,
@@ -1840,23 +1840,23 @@ pub(super) fn target_words(targets: &[flow::Target]) -> String {
         .iter()
         .map(|target| match target {
             flow::Target::Step {
-                node,
+                card_id,
                 number,
                 title,
                 back,
             } => format!(
                 "{}{}{}",
                 number.map(|n| format!("{n}. ")).unwrap_or_default(),
-                if title.is_empty() { node } else { title },
+                if title.is_empty() { card_id } else { title },
                 if *back { " ↩" } else { "" }
             ),
             flow::Target::End {
-                node,
+                card_id,
                 title,
                 outcome,
             } => format!(
                 "{} ({})",
-                if title.is_empty() { node } else { title },
+                if title.is_empty() { card_id } else { title },
                 outcome
             ),
             flow::Target::Nowhere => "not connected".into(),

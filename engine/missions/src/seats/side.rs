@@ -20,12 +20,16 @@ pub trait SeatSide: Send + Sync + 'static {
     fn seats(&self, run_id: &str) -> Result<Vec<AgentSeat>, crate::Error>;
     /// Whether an owned seat still exists. An unavailable node is an error, not a lost seat.
     fn seat_alive(&self, seat: &SeatId) -> SeatFuture<'_, bool>;
-    /// The working directory of a turn placed on `place`, prepared there from
+    /// The working directory of a turn placed on `environment`, prepared there from
     /// the run branch at the turn's commit.
-    fn prepare_turn(&self, place: &str, turn: &TurnWorkspace) -> SeatFuture<'_, PathBuf>;
-    /// Commit and publish a prepared turn's work on `place`.
-    fn publish_turn(&self, place: &str, turn: &TurnWorkspace) -> SeatFuture<'_, PublishedTurn>;
-    /// Why the node of `place` does not answer, while calls to it wait for
+    fn prepare_turn(&self, environment: &str, turn: &TurnWorkspace) -> SeatFuture<'_, PathBuf>;
+    /// Commit and publish a prepared turn's work on `environment`.
+    fn publish_turn(
+        &self,
+        environment: &str,
+        turn: &TurnWorkspace,
+    ) -> SeatFuture<'_, PublishedTurn>;
+    /// Why the node of `environment` does not answer, while calls to it wait for
     /// it; `None` once it answers, and always for this node's own seats.
     fn away(&self, _place: &str) -> Option<String> {
         None

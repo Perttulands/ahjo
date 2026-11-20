@@ -99,7 +99,7 @@ pub struct StepResult {
 /// A correction is sent to the same live judge seat that supplied the reply.
 pub struct JudgeCorrection {
     pub run_id: String,
-    pub node_id: String,
+    pub step_id: String,
     pub attempt: i64,
     pub rejected: String,
     pub error: String,
@@ -110,7 +110,7 @@ pub struct JudgeCorrection {
 pub struct OpenDispatch {
     pub run_id: String,
     pub dispatch_id: String,
-    pub node_id: String,
+    pub step_id: String,
     pub seat_id: String,
     pub attempt: i64,
     pub step: Step,
@@ -128,7 +128,7 @@ pub struct OpenDispatch {
 #[derive(Clone, Debug)]
 pub struct LeftSeat {
     pub run_id: String,
-    pub node_id: String,
+    pub step_id: String,
     pub seat_id: String,
     pub identity: Map<String, Value>,
     pub cause: String,
@@ -290,7 +290,7 @@ impl Executor for LabExecutor {
                 }
             }
             if let Some(binding) = request.bindings.bindings.iter().find(|binding| {
-                binding.node_id == request.step.id && binding.seat_id == seat.id
+                binding.step_id == request.step.id && binding.seat_id == seat.id
             }) && let Some(instructions) = binding.instructions()
                 && !instructions.is_empty()
             {
@@ -323,7 +323,7 @@ impl Executor for LabExecutor {
             let digest = hex::encode(Sha256::digest(brief.as_bytes()));
             send(
                 "seat_dispatch",
-                json!({"dispatch_id":dispatch_id,"node_id":request.step.id,"seat_id":seat.id,"agent":seat.agent,"harness":seat.harness,"session":session,"session_ref":format!("lab:{session}"),"brief_path":brief_path,"prompt_sha256":digest,"prompt_ref":"","phase":"","recorded_before_send":true,"native_ack":false}),
+                json!({"dispatch_id":dispatch_id,"step_id":request.step.id,"seat_id":seat.id,"agent":seat.agent,"harness":seat.harness,"session":session,"session_ref":format!("lab:{session}"),"brief_path":brief_path,"prompt_sha256":digest,"prompt_ref":"","phase":"","recorded_before_send":true,"native_ack":false}),
             )?;
             let evidence = serde_json::to_vec(&result).map_err(|e| e.to_string())?;
             let path = request.artifact_dir.join("lab-completed.json");
@@ -340,7 +340,7 @@ impl Executor for LabExecutor {
                 .map_err(|e| e.to_string())?;
             send(
                 "seat_result",
-                json!({"dispatch_id":dispatch_id,"node_id":request.step.id,"seat_id":seat.id,"status":"ok","sentinel":{"run_id":request.run_id,"status":"ok","artifact":format!("lab-{}.md",seat.id)}}),
+                json!({"dispatch_id":dispatch_id,"step_id":request.step.id,"seat_id":seat.id,"status":"ok","sentinel":{"run_id":request.run_id,"status":"ok","artifact":format!("lab-{}.md",seat.id)}}),
             )?;
         }
         Ok(result)

@@ -44,7 +44,7 @@ pub fn normalized_ledger(root: &Scratch, id: &str) -> Vec<Value> {
         .map(|line| {
             let event: Value = serde_json::from_str(line).unwrap();
             let mut result = Map::new();
-            for key in ["type", "node_id", "gate_id", "seat_id", "attempt"] {
+            for key in ["type", "card_id", "gate_id", "seat_id", "attempt"] {
                 if let Some(value) = event.get(key) {
                     result.insert(key.into(), value.clone());
                 }
@@ -81,7 +81,7 @@ pub fn assert_concurrent_ledger(actual: &[Value], expected: &[Value]) {
     fn streams(events: &[Value]) -> std::collections::BTreeMap<String, Vec<Value>> {
         let mut result = std::collections::BTreeMap::<String, Vec<Value>>::new();
         for event in events {
-            let key = event["node_id"].as_str().unwrap_or("run").to_owned();
+            let key = event["card_id"].as_str().unwrap_or("run").to_owned();
             result.entry(key).or_default().push(event.clone());
         }
         result
@@ -126,7 +126,7 @@ fn payload_parity(root: &Scratch, id: &str, expected: &str, concurrent: bool) {
         .filter_map(|event| {
             let kind = event["type"].as_str().unwrap();
             if ![
-                "node_started",
+                "card_started",
                 "gate_evaluating",
                 "gate_kind_result",
                 "human_verdict_recorded",
@@ -138,7 +138,7 @@ fn payload_parity(root: &Scratch, id: &str, expected: &str, concurrent: bool) {
                 return None;
             }
             let mut result = Map::new();
-            for key in ["type", "node_id", "gate_id", "attempt"] {
+            for key in ["type", "card_id", "gate_id", "attempt"] {
                 if let Some(value) = event.get(key) {
                     result.insert(key.into(), value.clone());
                 }

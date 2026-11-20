@@ -69,7 +69,7 @@ async fn http_restores_a_deleted_step_and_fences_notes_and_layout() {
         &c,
         Method::PATCH,
         "/api/missions/demo",
-        json!({"expected_rev":3,"restore_node":{"step":step,"x":112,"y":112}}),
+        json!({"expected_rev":3,"restore_card":{"step":step,"x":112,"y":112}}),
         Some(&tag),
     )
     .await;
@@ -103,7 +103,7 @@ async fn http_restores_a_deleted_step_and_fences_notes_and_layout() {
         .request(Method::GET, "/api/missions/demo/layout", None, None)
         .await
         .unwrap();
-    let position = json!({"nodes":[{"id":id,"x":400,"y":500}]});
+    let position = json!({"cards":[{"id":id,"x":400,"y":500}]});
     send(
         &c,
         Method::PATCH,

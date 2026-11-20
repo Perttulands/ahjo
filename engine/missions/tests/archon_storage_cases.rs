@@ -52,20 +52,20 @@ fn create_mission_defaults_title_and_refuses_duplicate_without_clobber() {
 // Ported from store_test.go: wildcard can recreate only the missing layout.
 #[test]
 fn missing_layout_can_be_recreated_without_dirtying_the_mission() {
-    use ahjo_mission_model::{LayoutNode, LayoutPatch};
+    use ahjo_mission_model::{LayoutCard, LayoutPatch};
     let dir = Scratch::new();
     let store = Store::new(&dir.0);
     let edit = store.create_mission("layout", "Layout", "").unwrap();
     let path = dir.0.join("missions/layout.mission.toml");
     let before = std::fs::read(&path).unwrap();
-    let nodes = vec![LayoutNode {
+    let nodes = vec![LayoutCard {
         id: "fmn_example".into(),
         x: 7,
         y: -9,
     }];
     assert_eq!(
         store
-            .patch_layout("layout", "old", LayoutPatch::Nodes(nodes.clone()))
+            .patch_layout("layout", "old", LayoutPatch::Cards(nodes.clone()))
             .unwrap_err()
             .code
             .as_str(),
@@ -80,14 +80,14 @@ fn missing_layout_can_be_recreated_without_dirtying_the_mission() {
         "not_found"
     );
     let saved = store
-        .patch_layout("layout", "*", LayoutPatch::Nodes(nodes.clone()))
+        .patch_layout("layout", "*", LayoutPatch::Cards(nodes.clone()))
         .unwrap();
-    assert_eq!(saved.layout.nodes, nodes);
+    assert_eq!(saved.layout.cards, nodes);
     assert_eq!(saved.layout.mission_rev, edit.mission.rev);
     assert_eq!(std::fs::read(path).unwrap(), before);
     assert_eq!(
         store
-            .patch_layout("layout", "*", LayoutPatch::Nodes(nodes))
+            .patch_layout("layout", "*", LayoutPatch::Cards(nodes))
             .unwrap_err()
             .code
             .as_str(),
@@ -102,7 +102,7 @@ fn editing_decoded_multiline_toml_keeps_unrelated_values() {
     let dir = Scratch::new();
     std::fs::create_dir_all(dir.0.join("missions")).unwrap();
     let path = dir.0.join("missions/quoted.mission.toml");
-    let raw = r###"schema = 4
+    let raw = r###"schema = 5
 id = 'msn_quoted'
 slug = 'quoted'
 "ti\u0074le" = """
@@ -297,7 +297,7 @@ fn invalid_layout_blocks_every_paired_node_create_and_delete() {
     let layout_path = dir.0.join("layout/paired.layout.toml");
     let mission_before = std::fs::read(&path).unwrap();
     let invalid = format!(
-        "schema = 2\nmission_id = {:?}\n\"mission\\u005fid\" = 'duplicate'\nmission_rev = 1\n",
+        "schema = 3\nmission_id = {:?}\n\"mission\\u005fid\" = 'duplicate'\nmission_rev = 1\n",
         edit.mission.id
     );
     std::fs::write(&layout_path, &invalid).unwrap();
@@ -448,11 +448,11 @@ fn note_threads_allow_only_the_author_to_edit_or_delete() {
 
 #[test]
 fn partial_layout_patches_keep_other_nodes_and_edges() {
-    use ahjo_mission_model::{LayoutEdge, LayoutNode, LayoutPatch};
+    use ahjo_mission_model::{LayoutCard, LayoutEdge, LayoutPatch};
     let dir = Scratch::new();
     let store = Store::new(&dir.0);
     store.create_mission("canvas", "Canvas", "").unwrap();
-    let node = |id: &str, x, y| LayoutNode {
+    let node = |id: &str, x, y| LayoutCard {
         id: id.into(),
         x,
         y,
@@ -465,7 +465,7 @@ fn partial_layout_patches_keep_other_nodes_and_edges() {
         .patch_layout(
             "canvas",
             "*",
-            LayoutPatch::Nodes(vec![node("a", 1, 2), node("b", 3, 4)]),
+            LayoutPatch::Cards(vec![node("a", 1, 2), node("b", 3, 4)]),
         )
         .unwrap();
     let layout = store
@@ -479,11 +479,11 @@ fn partial_layout_patches_keep_other_nodes_and_edges() {
         .patch_layout(
             "canvas",
             &layout.etag,
-            LayoutPatch::Nodes(vec![node("a", 20, 30), node("c", 5, 6)]),
+            LayoutPatch::Cards(vec![node("a", 20, 30), node("c", 5, 6)]),
         )
         .unwrap();
     assert_eq!(
-        layout.layout.nodes,
+        layout.layout.cards,
         vec![node("a", 20, 30), node("b", 3, 4), node("c", 5, 6)]
     );
     assert_eq!(
@@ -505,7 +505,7 @@ fn partial_layout_patches_keep_other_nodes_and_edges() {
             edge("e3", "new")
         ]
     );
-    assert_eq!(layout.layout.nodes[1], node("b", 3, 4));
+    assert_eq!(layout.layout.cards[1], node("b", 3, 4));
 }
 
 #[test]
@@ -538,7 +538,7 @@ fn empty_and_populated_inline_node_arrays_are_editable() {
             MissionChange::UpdateStep {
                 id: step.clone(),
                 title: Some("Renamed".into()),
-                device: None,
+                environment: None,
                 fresh: None,
             },
             "",
@@ -596,7 +596,7 @@ fn populated_inline_steps_and_connections_can_be_updated_and_deleted() {
             MissionChange::UpdateStep {
                 id: "fmn_a".into(),
                 title: Some("Updated".into()),
-                device: None,
+                environment: None,
                 fresh: None,
             },
             "",
@@ -604,7 +604,7 @@ fn populated_inline_steps_and_connections_can_be_updated_and_deleted() {
         .unwrap();
     assert_eq!(edit.mission.steps[0].title, "Updated");
     // A step is placed on an environment and back on the coordinator (#124).
-    let place = |edit: &ahjo_mission_model::Edit, device: &str| {
+    let place = |edit: &ahjo_mission_model::Edit, environment: &str| {
         store
             .patch(
                 "inline",
@@ -612,7 +612,7 @@ fn populated_inline_steps_and_connections_can_be_updated_and_deleted() {
                 MissionChange::UpdateStep {
                     id: "fmn_a".into(),
                     title: None,
-                    device: Some(device.into()),
+                    environment: Some(environment.into()),
                     fresh: None,
                 },
                 "",
@@ -620,10 +620,14 @@ fn populated_inline_steps_and_connections_can_be_updated_and_deleted() {
             .unwrap()
     };
     let edit = place(&edit, " landmass/windows ");
-    assert_eq!(edit.mission.steps[0].device, "landmass/windows");
+    assert_eq!(edit.mission.steps[0].environment, "landmass/windows");
     let edit = place(&edit, "");
-    assert_eq!(edit.mission.steps[0].device, "");
-    assert!(!std::fs::read_to_string(&path).unwrap().contains("device"));
+    assert_eq!(edit.mission.steps[0].environment, "");
+    assert!(
+        !std::fs::read_to_string(&path)
+            .unwrap()
+            .contains("environment")
+    );
     let edit = store
         .patch(
             "inline",
@@ -675,26 +679,26 @@ fn inline_note_entries_can_be_edited_and_deleted() {
 
 #[test]
 fn inline_layout_nodes_and_edges_accept_partial_updates() {
-    use ahjo_mission_model::{LayoutEdge, LayoutNode, LayoutPatch};
+    use ahjo_mission_model::{LayoutCard, LayoutEdge, LayoutPatch};
     let dir = Scratch::new();
     let store = Store::new(&dir.0);
     let mission = store.create_mission("inline-layout", "Layout", "").unwrap();
     let layout_dir = dir.0.join("layout");
     std::fs::create_dir_all(&layout_dir).unwrap();
-    std::fs::write(layout_dir.join("inline-layout.layout.toml"), format!("schema = 2\nmission_id = {:?}\nmission_rev = 1\nnode = [{{ id = 'a', x = 1, y = 2 }}, {{ id = 'b', x = 3, y = 4 }}]\nedge = [{{ id = 'e1', lane = 'top' }}, {{ id = 'e2', lane = 'bottom' }}]\n", mission.mission.id)).unwrap();
+    std::fs::write(layout_dir.join("inline-layout.layout.toml"), format!("schema = 3\nmission_id = {:?}\nmission_rev = 1\ncard = [{{ id = 'a', x = 1, y = 2 }}, {{ id = 'b', x = 3, y = 4 }}]\nedge = [{{ id = 'e1', lane = 'top' }}, {{ id = 'e2', lane = 'bottom' }}]\n", mission.mission.id)).unwrap();
     let layout = store.layout_edit("inline-layout").unwrap();
     let layout = store
         .patch_layout(
             "inline-layout",
             &layout.etag,
-            LayoutPatch::Nodes(vec![LayoutNode {
+            LayoutPatch::Cards(vec![LayoutCard {
                 id: "a".into(),
                 x: 20,
                 y: 30,
             }]),
         )
         .unwrap();
-    assert_eq!(layout.layout.nodes[1].x, 3);
+    assert_eq!(layout.layout.cards[1].x, 3);
     let layout = store
         .patch_layout(
             "inline-layout",
@@ -706,5 +710,5 @@ fn inline_layout_nodes_and_edges_accept_partial_updates() {
         )
         .unwrap();
     assert_eq!(layout.layout.edges[1].lane, "bottom");
-    assert_eq!(layout.layout.nodes[0].x, 20);
+    assert_eq!(layout.layout.cards[0].x, 20);
 }

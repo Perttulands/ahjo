@@ -21,7 +21,7 @@ use std::{
 pub struct TurnWorkspace {
     pub run_id: String,
     /// The step (step) the turn belongs to.
-    pub node_id: String,
+    pub step_id: String,
     pub attempt: i64,
     /// The repository, as named in `missions.repositories`.
     pub repository: String,
@@ -47,7 +47,7 @@ impl TurnWorkspace {
         format!(
             "refs/ahjo/turns/{}/{}-{}",
             ahjo_mission_model::run_tag(&self.run_id),
-            &step_hash(&self.node_id)[..12],
+            &step_hash(&self.step_id)[..12],
             self.attempt
         )
     }
@@ -98,7 +98,7 @@ impl TurnWorktrees {
     fn path(&self, turn: &TurnWorkspace) -> PathBuf {
         self.root.join(&turn.run_id).join(format!(
             "turn-{}-{}",
-            &step_hash(&turn.node_id)[..12],
+            &step_hash(&turn.step_id)[..12],
             turn.attempt
         ))
     }
@@ -193,7 +193,7 @@ impl TurnWorktrees {
                         "-m",
                         &format!(
                             "Run {} step {} attempt {}",
-                            turn.run_id, turn.node_id, turn.attempt
+                            turn.run_id, turn.step_id, turn.attempt
                         ),
                     ],
                 )?;

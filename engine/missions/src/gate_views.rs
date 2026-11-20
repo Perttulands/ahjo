@@ -109,13 +109,13 @@ impl Coordinator {
             .map(|verdict| {
                 let mut targets = Vec::new();
                 for edge in crate::graph::outgoing_from_port(&mission, gate, verdict) {
-                    let node = crate::graph::endpoint_node(&edge.to);
+                    let node = crate::graph::endpoint_card(&edge.to);
                     let detail = if let Some(step) = mission.step(node) {
                         let limits = crate::limits::uses_for_step(&mission, &events, node, now)
                             .into_iter().map(DecisionLimit::from).collect();
                         let waits_for_inputs = step.inputs.iter().any(|port| {
                             !replay.ports.get(node).is_some_and(|ports| ports.contains_key(&port.id))
-                                && !crate::graph::outgoing_from_port(&mission, gate, verdict).any(|edge| crate::graph::endpoint_node(&edge.to) == node && crate::graph::endpoint_port(&edge.to) == port.id)
+                                && !crate::graph::outgoing_from_port(&mission, gate, verdict).any(|edge| crate::graph::endpoint_card(&edge.to) == node && crate::graph::endpoint_port(&edge.to) == port.id)
                         });
                         let spent = if waits_for_inputs { None } else {
                             crate::limits::spent_before(&mission, &events, node, now)
@@ -136,7 +136,7 @@ impl Coordinator {
                         mission.gate(node).map(|next| DecisionTargetKind::Gate { title: next.title.clone() })
                     };
                     targets.push(DecisionTarget {
-                        node_id: node.into(), port_id: crate::graph::endpoint_port(&edge.to).into(), detail,
+                        card_id: node.into(), port_id: crate::graph::endpoint_port(&edge.to).into(), detail,
                     });
                 }
                 // Only claim a final run when all destinations are ends and no
@@ -161,7 +161,7 @@ impl Coordinator {
             })
             .collect();
         let inputs = vec![DecisionInput {
-            from_node_id: request.input.from_node_id,
+            from_card_id: request.input.from_card_id,
             from_port_id: request.input.from_port_id,
             text: request.input.text,
             truncated: request.input.truncated,
@@ -187,7 +187,7 @@ impl From<crate::limits::LimitUse> for DecisionLimit {
         Self {
             kind: limit.kind,
             limit_id: limit.limit_id,
-            node_id: limit.node_id,
+            card_id: limit.card_id,
             used: limit.used,
             max: limit.max,
             left: (limit.max - limit.used).max(0),

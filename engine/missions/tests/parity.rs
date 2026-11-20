@@ -1,10 +1,10 @@
 //! Validation emits the finding codes Archon emits on the same files.
 //!
-//! `tests/parity` is a state directory: missions, a retired role card and a
+//! `tests/parity` is a state directory: missions, a retired agent and a
 //! Codex model cache. `archon-findings.json` holds what Archon's own
 //! `mission validate --json` reported on each mission, recorded by
 //! `archon-findings.sh`, with finding names updated to Ahjo's seat vocabulary.
-//! This test holds Ahjo to every code and node.
+//! This test holds Ahjo to every code and card.
 
 use std::collections::BTreeMap;
 use std::path::Path;
@@ -21,7 +21,7 @@ struct Expected {
 
 fn located(findings: &[Finding]) -> Vec<(String, String)> {
     let mut pairs: Vec<_> = (findings.iter())
-        .map(|finding| (finding.code.as_str().to_owned(), finding.node_id.clone()))
+        .map(|finding| (finding.code.as_str().to_owned(), finding.card_id.clone()))
         .collect();
     pairs.sort();
     pairs
@@ -160,11 +160,11 @@ fn findings_match_archons_on_every_parity_mission() {
             "limits" => vec![("invalid_limit", "lim_warn_late")],
             _ => vec![],
         };
-        for (code, node) in decoded {
+        for (code, card) in decoded {
             let index = sorted
                 .iter()
-                .position(|pair| pair.0 == code && pair.1 == node)
-                .unwrap_or_else(|| panic!("{slug}: missing recorded finding {code} on {node}"));
+                .position(|pair| pair.0 == code && pair.1 == card)
+                .unwrap_or_else(|| panic!("{slug}: missing recorded finding {code} on {card}"));
             sorted.remove(index);
         }
         sorted.sort();

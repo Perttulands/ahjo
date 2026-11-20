@@ -84,7 +84,7 @@ pub(crate) fn apply(
             if !output.from.is_empty() && crate::graph::split_endpoint(&output.from).is_none() {
                 return Err(Error::new(
                     "invalid_mission_output",
-                    "from must name a node and port",
+                    "from must name a card and port",
                 ));
             }
         }

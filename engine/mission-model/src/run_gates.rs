@@ -46,7 +46,7 @@ pub struct GateDecision {
 
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct DecisionInput {
-    pub from_node_id: String,
+    pub from_card_id: String,
     pub from_port_id: String,
     pub text: String,
     pub truncated: bool,
@@ -66,7 +66,7 @@ pub struct DecisionRoute {
 
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct DecisionTarget {
-    pub node_id: String,
+    pub card_id: String,
     pub port_id: String,
     #[serde(flatten, skip_serializing_if = "Option::is_none")]
     pub detail: Option<DecisionTargetKind>,
@@ -101,7 +101,7 @@ pub enum DecisionTargetKind {
 pub struct DecisionLimit {
     pub kind: String,
     pub limit_id: String,
-    pub node_id: String,
+    pub card_id: String,
     pub used: i64,
     pub max: i64,
     pub left: i64,

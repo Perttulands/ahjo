@@ -65,7 +65,7 @@ pub fn route(targets: &[Target], answer: &str, alone: bool) -> (String, String) 
 
 /// Names the card whose output the gate is considering.
 pub fn source(mission: &ahjo_missions_contract::Mission, id: &str) -> String {
-    let title = mission.node_title(id).trim();
+    let title = mission.card_title(id).trim();
     if title.is_empty() {
         "upstream step".into()
     } else {
@@ -144,7 +144,7 @@ mod tests {
     fn a_route_says_where_an_answer_leads() {
         use ahjo_missions_contract::EndOutcome;
         let end = |outcome| Target::End {
-            node: "e".into(),
+            card_id: "e".into(),
             title: "End".into(),
             outcome,
         };
@@ -161,7 +161,7 @@ mod tests {
             "Send back: this path ends (rejected), so the run is sent back once its other open work ends."
         );
         let back = Target::Step {
-            node: "b".into(),
+            card_id: "b".into(),
             number: Some(2),
             title: "Work".into(),
             back: true,

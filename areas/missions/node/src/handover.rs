@@ -64,7 +64,7 @@ pub fn handover(
                     let from = value
                         .from
                         .split_once(':')
-                        .map(|(step, _)| format!(" from {}", mission.node_name(step)))
+                        .map(|(step, _)| format!(" from {}", mission.card_name(step)))
                         .unwrap_or_else(|| " (not wired)".into());
                     format!("{}{from}", value.name)
                 })
@@ -104,7 +104,7 @@ pub fn handover(
                         step.parallel
                             .iter()
                             .filter(|other| **other != step.id)
-                            .map(|other| mission.node_name(other))
+                            .map(|other| mission.card_name(other))
                             .collect::<Vec<_>>()
                             .join(", ")
                     });
@@ -202,10 +202,10 @@ pub fn handover(
             }
             HandoverLimit {
                 id: limit.id.clone(),
-                on: if mission.has_input_card(&limit.target) {
+                on: if mission.has_input_card(&limit.scope) {
                     "the whole mission".into()
                 } else {
-                    step_words(&flow, mission, &limit.target)
+                    step_words(&flow, mission, &limit.scope)
                 },
                 caps: if caps.is_empty() {
                     "nothing yet".into()
@@ -290,7 +290,7 @@ pub fn handover(
                 "ahjo mission resolve {slug} <note-id> --text '<what you did about it>' --author <your-name>"
             ),
             format!(
-                "ahjo mission note {slug} --target <id-or-title> --text '<what you want the operator to see>' --author <your-name>"
+                "ahjo mission note {slug} --on <id-or-title> --text '<what you want the operator to see>' --author <your-name>"
             ),
             format!("ahjo mission show {slug} --full --json"),
         ],
@@ -425,8 +425,8 @@ fn or_nothing(words: Vec<String>) -> String {
 /// A step as the operator numbers it: `3 Draft`.
 fn step_words(flow: &flow::Flow, mission: &Mission, id: &str) -> String {
     match flow.numbers.get(id) {
-        Some(n) => format!("{n} {}", mission.node_name(id)),
-        None => mission.node_name(id).to_owned(),
+        Some(n) => format!("{n} {}", mission.card_name(id)),
+        None => mission.card_name(id).to_owned(),
     }
 }
 
@@ -434,7 +434,7 @@ fn step_words(flow: &flow::Flow, mission: &Mission, id: &str) -> String {
 /// matters (a gate's verdict).
 fn endpoint(mission: &Mission, endpoint: &str) -> String {
     let (node, port) = endpoint.split_once(':').unwrap_or((endpoint, ""));
-    let name = mission.node_name(node);
+    let name = mission.card_name(node);
     match port {
         "pass" | "fail" | "judge" => format!("{name}:{port}"),
         _ => name.to_owned(),

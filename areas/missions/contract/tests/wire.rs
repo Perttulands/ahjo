@@ -14,7 +14,7 @@ fn requests_and_responses_round_trip() {
     round::<EditNotes>(
         json!({"target":"mission","author":"human:test","text":"hi","entry_id":"n","action":"edit"}),
     );
-    round::<EditLayout>(json!({"nodes":[{"id":"a","x":1,"y":2}]}));
+    round::<EditLayout>(json!({"cards":[{"id":"a","x":1,"y":2}]}));
     round::<Abort>(json!({"requested_by":"human:test","reason":"stop"}));
     round::<Land>(json!({"force":true}));
     round::<RunId>(json!({"run_id":"r"}));
@@ -37,7 +37,7 @@ fn requests_and_responses_round_trip() {
 fn mission_layout_and_edit_responses_carry_the_stored_shapes() {
     let mission = Mission::parse(
         r#"
-schema = 4
+schema = 5
 id = "m"
 slug = "demo"
 rev = 2
@@ -52,10 +52,10 @@ label = "Writer"
     .unwrap();
     let layout = Layout::parse(
         r#"
-schema = 2
+schema = 3
 mission_id = "m"
 mission_rev = 2
-[[node]]
+[[card]]
 id = "f"
 x = 10
 y = 20
@@ -119,7 +119,7 @@ fn patch_and_frames_round_trip() {
 
 #[test]
 fn rejected_start_keeps_every_engine_finding() {
-    let value = json!({"error":{"code":"run_admission_failed","message":"run admission failed"},"findings":[{"code":"missing_input","node_id":"input","message":"required"},{"code":"missing_file","node_id":"step","message":"missing","path":"brief.md"}]});
+    let value = json!({"error":{"code":"run_admission_failed","message":"run admission failed"},"findings":[{"code":"missing_input","card_id":"input","message":"required"},{"code":"missing_file","card_id":"step","message":"missing","path":"brief.md"}]});
     round::<AdmissionRejection>(value);
 }
 
@@ -131,7 +131,7 @@ fn remaining_envelopes_and_queries_round_trip() {
     round::<EditLayout>(json!({"arrange":true}));
     round::<EditLayout>(json!({"edges":[{"id":"e","lane":"top"}]}));
     round::<LayoutResponse>(
-        json!({"layout":{"schema":2,"mission_id":"m","mission_rev":1,"node":[],"edge":[]},"etag":"e"}),
+        json!({"layout":{"schema":3,"mission_id":"m","mission_rev":1,"card":[],"edge":[]},"etag":"e"}),
     );
     round::<GateRequestResponse>(
         json!({"request":{"gate_id":"g","requested_seq":2,"criterion":"Ready?","input":{"text":"yes","truncated":false}}}),
@@ -156,6 +156,11 @@ fn notes_group_by_target_and_keep_order() {
     };
     let document = document::NotesDocument::from_notes(notes, "e".into());
     assert_eq!(document.mission[0].id, "2");
+    assert_eq!(document.elements[0].card_id, "f");
+    assert_eq!(
+        serde_json::to_value(&document.elements[0]).unwrap()["card_id"],
+        "f"
+    );
     assert_eq!(
         document.elements[0]
             .entries

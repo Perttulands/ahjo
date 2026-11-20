@@ -6,7 +6,7 @@ use std::path::PathBuf;
 use ahjo_mission_engine::{Error, Store};
 use ahjo_mission_model::Mission;
 
-const HELLO: &str = r#"schema = 4
+const HELLO: &str = r#"schema = 5
 id = "msn_hello"
 slug = "hello"
 title = "Hello"
@@ -21,7 +21,7 @@ goal = "Return the supplied input"
 id = "fmn_work"
 formation = "solo"
 title = "Work"
-device = "rig-wsl"
+environment = "rig/linux"
 [step.brief]
 goal = "Return a short result using the supplied output contract."
 [[step.input]]
@@ -87,11 +87,11 @@ fn code(result: Result<Mission, Error>) -> String {
 }
 
 #[test]
-fn the_contracts_minimal_mission_loads_with_a_device() {
+fn the_contracts_minimal_mission_loads_with_an_environment() {
     let mission = Mission::parse(HELLO).unwrap();
-    assert_eq!(mission.steps[0].device, "rig-wsl");
+    assert_eq!(mission.steps[0].environment, "rig/linux");
     assert_eq!(mission.steps[0].seats[0].agent, "builder");
-    assert_eq!(mission.node_name("fmn_work"), "Work");
+    assert_eq!(mission.card_name("fmn_work"), "Work");
 }
 
 #[test]
@@ -113,11 +113,11 @@ fn a_mission_is_read_only_as_strict_toml_of_current_schema() {
         "invalid_definition_source"
     );
     assert_eq!(
-        code(Mission::parse(&HELLO.replace("schema = 4", "schema = 99"))),
+        code(Mission::parse(&HELLO.replace("schema = 5", "schema = 99"))),
         "unsupported_schema"
     );
     assert_eq!(
-        code(Mission::parse(&HELLO.replace("schema = 4\n", ""))),
+        code(Mission::parse(&HELLO.replace("schema = 5\n", ""))),
         "unsupported_schema"
     );
 }
@@ -126,7 +126,7 @@ fn a_mission_is_read_only_as_strict_toml_of_current_schema() {
 fn one_unreadable_mission_never_hides_the_rest() {
     let scratch = Scratch::new("broken");
     scratch.write("missions/hello.mission.toml", HELLO);
-    scratch.write("missions/bad.mission.toml", "schema = 4\nschema = 4\n");
+    scratch.write("missions/bad.mission.toml", "schema = 5\nschema = 5\n");
     scratch.write("missions/README.md", "not a mission");
     #[cfg(unix)]
     std::os::unix::fs::symlink(
@@ -221,8 +221,8 @@ fn notes_and_layout_belong_to_their_mission() {
         &notes.replace("msn_hello", "msn_other"),
     );
     assert!(store.read_notes("hello").unwrap().entries.is_empty());
-    scratch.write("layout/hello.layout.toml", "schema = 2\nmission_id = \"msn_hello\"\nmission_rev = 1\n[[node]]\nid = \"fmn_work\"\nx = 10\ny = 20\n");
-    assert_eq!(store.read_layout("hello").unwrap().unwrap().nodes[0].x, 10);
+    scratch.write("layout/hello.layout.toml", "schema = 3\nmission_id = \"msn_hello\"\nmission_rev = 1\n[[card]]\nid = \"fmn_work\"\nx = 10\ny = 20\n");
+    assert_eq!(store.read_layout("hello").unwrap().unwrap().cards[0].x, 10);
 }
 
 #[test]

@@ -263,7 +263,7 @@ fn cli_authored_graph_and_layout_open_on_the_canvas(cx: &mut TestAppContext) {
             edit(u, json!({"wire_connection":{"from":from,"to":to}})).await;
         }
         cli(u, "mission", &["arrange", "cli-board"]).await;
-        let change = json!({"nodes":[{"id":steps[0].0,"x":123,"y":456}]});
+        let change = json!({"cards":[{"id":steps[0].0,"x":123,"y":456}]});
         cli(u, "layout", &["edit", "cli-board", &change.to_string()]).await;
         (input, steps, judge, human, end)
     });
@@ -314,7 +314,7 @@ fn cli_authored_graph_and_layout_open_on_the_canvas(cx: &mut TestAppContext) {
         .unwrap()
         .0;
     assert!(
-        layout["layout"]["node"]
+        layout["layout"]["card"]
             .as_array()
             .unwrap()
             .iter()
@@ -426,11 +426,11 @@ fn opens_a_mission_layout_notes_and_run_written_before_the_wire_upgrade(cx: &mut
     });
 
     for (path, schema, field) in [
-        ("missions/hello.mission.toml", 4, "input_card"),
-        ("layout/hello.layout.toml", 2, "mission_id"),
+        ("missions/hello.mission.toml", 5, "input_card"),
+        ("layout/hello.layout.toml", 3, "mission_id"),
         ("notes/hello.notes.toml", 3, "created_at"),
-        ("runs/run_legacy.snapshot.toml", 4, "input_card"),
-        ("runs/run_legacy.bindings.toml", 5, "seat_id"),
+        ("runs/run_legacy.snapshot.toml", 5, "input_card"),
+        ("runs/run_legacy.bindings.toml", 6, "seat_id"),
     ] {
         let text = std::fs::read_to_string(state.join(path)).unwrap();
         assert!(
@@ -440,7 +440,7 @@ fn opens_a_mission_layout_notes_and_run_written_before_the_wire_upgrade(cx: &mut
     }
     let replayed = std::fs::read_to_string(state.join("runs/run_legacy.ndjson")).unwrap();
     assert!(replayed.contains("\"run_id\":\"run_legacy\"") && !replayed.contains("runId"));
-    assert!(replayed.contains("\"userPort\"") && replayed.contains("\"node_id\":\"fmn_work\""));
+    assert!(replayed.contains("\"userPort\"") && replayed.contains("\"card_id\":\"fmn_work\""));
     drop(running);
     std::fs::remove_dir_all(root).unwrap();
 }

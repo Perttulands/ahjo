@@ -145,8 +145,11 @@ fn operations(
                     brief: Some(brief),
                 }));
             }
-            if compare!(2, "Where the step is placed", &f.device) {
-                ops.push(undo::Step::board(edits::device_patch(id, &draft.fields[2])));
+            if compare!(2, "Where the step is placed", &f.environment) {
+                ops.push(undo::Step::board(edits::environment_patch(
+                    id,
+                    &draft.fields[2],
+                )));
             }
             if let Some(seat) = seat.filter(|_| base.fields[10..14] != draft.fields[10..14]) {
                 let Some(current) = f.seats.iter().find(|s| s.id == seat) else {

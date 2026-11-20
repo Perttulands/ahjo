@@ -10,7 +10,7 @@ fn endpoint<'a>(mission: &Mission, endpoint: &'a str, output: bool) -> Option<&'
         crate::graph::Direction::Input
     };
     crate::graph::endpoint_allows(mission, endpoint, direction)
-        .then(|| crate::graph::endpoint_node(endpoint))
+        .then(|| crate::graph::endpoint_card(endpoint))
 }
 
 pub(crate) fn apply(
@@ -140,7 +140,7 @@ pub(crate) fn apply(
             let to_node = endpoint(mission, &to, false)
                 .ok_or_else(|| Error::new("not_found", "target port"))?;
             if from_node == to_node {
-                return Err(Error::new("self_wire", "a node cannot wire to itself"));
+                return Err(Error::new("self_wire", "a card cannot wire to itself"));
             }
             if mission
                 .connections

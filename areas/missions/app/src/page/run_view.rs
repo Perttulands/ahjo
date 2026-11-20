@@ -75,7 +75,7 @@ impl MissionsPage {
         let name_of = |id: &str| -> String {
             mission
                 .as_ref()
-                .map(|m| m.node_name(id).to_owned())
+                .map(|m| m.card_name(id).to_owned())
                 .filter(|name| !name.is_empty())
                 .unwrap_or_else(|| id.to_owned())
         };
@@ -284,7 +284,7 @@ impl MissionsPage {
                 .pb(px(size::HEAD_GAP))
                 .text_color(colour)
                 .children(run_state::points(run).iter().filter_map(|point| {
-                    let phrase = run_state::phrase(point, &name_of(&point.node));
+                    let phrase = run_state::phrase(point, &name_of(&point.card));
                     (!phrase.is_empty())
                         .then(|| div().debug_selector(move || format!("run-sentence-{phrase}")))
                 }))
@@ -293,7 +293,7 @@ impl MissionsPage {
         if let Some(note) = run_state::points(run)
             .iter()
             .find(|p| p.kind == run_state::PointKind::Running)
-            .and_then(|p| run_state::seat_note(&run.events, &p.node))
+            .and_then(|p| run_state::seat_note(&run.events, &p.card))
         {
             out = out.child(
                 div()
@@ -469,10 +469,10 @@ impl MissionsPage {
             &self.host,
             reference,
         );
-        let from = if output.node_id.is_empty() {
+        let from = if output.card_id.is_empty() {
             String::new()
         } else {
-            format!("from {}", name_of(&output.node_id))
+            format!("from {}", name_of(&output.card_id))
         };
         if matches!(output.kind.as_str(), "file" | "folder") {
             let (owner, path) = (node.to_owned(), output.value.clone());
@@ -577,7 +577,7 @@ impl MissionsPage {
                     .child({
                         let revealed = self.run.reveal_step.as_deref() == Some(step.id.as_str());
                         let marker = format!("run-reveal-{}", step.id);
-                        pane::cell(format!("{}  {}", step.number, mission.node_name(&step.id)))
+                        pane::cell(format!("{}  {}", step.number, mission.card_name(&step.id)))
                             .when(revealed, |d| {
                                 d.font_weight(FontWeight::SEMIBOLD)
                                     .debug_selector(move || marker.clone())
@@ -628,7 +628,7 @@ impl MissionsPage {
             if let Some(problem) = evidence
                 .into_iter()
                 .flat_map(|e| &e.problems)
-                .rfind(|p| p.node_id == step.id || p.gate_id == step.id)
+                .rfind(|p| p.card_id == step.id || p.gate_id == step.id)
             {
                 let reason = ahjo_missions_contract::plain_reason(&run_state::problem_now(
                     &run.events,
@@ -636,9 +636,9 @@ impl MissionsPage {
                     &problem.reason.text,
                 ));
                 // Under the step's own name the reason need not name it again.
-                let reason = without_name(&reason, mission.node_name(&step.id));
+                let reason = without_name(&reason, mission.card_name(&step.id));
                 let selector = format!("run-problem-{}-{}", problem.seq, problem.reason.text);
-                let colour = if status == Some(run_state::NodeState::Failed) {
+                let colour = if status == Some(run_state::CardState::Failed) {
                     t.error
                 } else {
                     t.dim
@@ -654,7 +654,7 @@ impl MissionsPage {
             let files: Vec<_> = evidence
                 .into_iter()
                 .flat_map(|e| e.files.iter().enumerate())
-                .filter(|(_, file)| file.node_id == step.id)
+                .filter(|(_, file)| file.step_id == step.id)
                 .collect();
             if !files.is_empty() {
                 let mut line = div().flex().flex_wrap().gap(px(size::HEAD_GAP));
@@ -687,7 +687,7 @@ impl MissionsPage {
             if let Some(brief) = evidence
                 .into_iter()
                 .flat_map(|e| &e.briefs)
-                .rfind(|brief| brief.node_id == step.id)
+                .rfind(|brief| brief.step_id == step.id)
             {
                 let selector = format!("run-brief-{}", brief.dispatch_seq);
                 let (path, owner) = (brief.path.clone(), node.to_owned());
@@ -804,7 +804,7 @@ fn standing(
     let points = run_state::points(run);
     let phrases: Vec<String> = points
         .iter()
-        .map(|point| run_state::phrase(point, &name_of(&point.node)))
+        .map(|point| run_state::phrase(point, &name_of(&point.card)))
         .filter(|p| !p.is_empty())
         .collect();
     let span = words::run_span(run, now);
@@ -898,7 +898,7 @@ impl MissionsPage {
             problem.seq,
             &problem.reason.text,
         ));
-        let name = name_of(&problem.node_id);
+        let name = name_of(&problem.card_id);
         let named = !name.is_empty() && reason.starts_with(&format!("{name} "));
         (!reason.is_empty()).then_some((reason, named))
     }
@@ -986,35 +986,35 @@ fn primary_output(run: &RunProjection) -> Option<String> {
         .filter(|v| !v.is_empty())
 }
 
-fn state_word(state: Option<run_state::NodeState>, asks_you: bool) -> &'static str {
-    use run_state::NodeState;
+fn state_word(state: Option<run_state::CardState>, asks_you: bool) -> &'static str {
+    use run_state::CardState;
     if asks_you {
         return "needs you";
     }
     match state {
-        Some(NodeState::Running) => "running",
-        Some(NodeState::Done) => "done",
-        Some(NodeState::Blocked) => "blocked",
-        Some(NodeState::Waiting) => "waiting",
-        Some(NodeState::Failed) => "failed",
-        Some(NodeState::Canceled) => "stopped",
+        Some(CardState::Running) => "running",
+        Some(CardState::Done) => "done",
+        Some(CardState::Blocked) => "blocked",
+        Some(CardState::Waiting) => "waiting",
+        Some(CardState::Failed) => "failed",
+        Some(CardState::Canceled) => "stopped",
         None => "not yet",
     }
 }
 
 /// Colour means state: running, failed, needs you. Done and not yet are
 /// quiet.
-fn state_colour(t: &Theme, state: Option<run_state::NodeState>, word: &str) -> gpui::Hsla {
-    use run_state::NodeState;
+fn state_colour(t: &Theme, state: Option<run_state::CardState>, word: &str) -> gpui::Hsla {
+    use run_state::CardState;
     if word == "needs you" {
         return t.needs;
     }
     match state {
-        Some(NodeState::Running) => t.running,
-        Some(NodeState::Failed) => t.error,
-        Some(NodeState::Blocked | NodeState::Waiting) => t.needs,
-        Some(NodeState::Done) => t.text2,
-        Some(NodeState::Canceled) | None => t.dim,
+        Some(CardState::Running) => t.running,
+        Some(CardState::Failed) => t.error,
+        Some(CardState::Blocked | CardState::Waiting) => t.needs,
+        Some(CardState::Done) => t.text2,
+        Some(CardState::Canceled) | None => t.dim,
     }
 }
 
@@ -1034,7 +1034,7 @@ impl MissionsPage {
             let gate_id = gate.gate_id.clone();
             let seq = gate.requested_seq;
             let gate_title = mission
-                .map(|m| m.node_title(&gate_id))
+                .map(|m| m.card_title(&gate_id))
                 .filter(|title| !title.trim().is_empty())
                 .unwrap_or("Review")
                 .to_owned();
@@ -1047,7 +1047,7 @@ impl MissionsPage {
                 }));
             if let Some((_, Ok(Some(request)))) = self.run.gates.get(&gate_id) {
                 let source = mission
-                    .map(|mission| crate::store::gate::source(mission, &request.input.from_node_id))
+                    .map(|mission| crate::store::gate::source(mission, &request.input.from_card_id))
                     .unwrap_or_else(|| "upstream step".into());
                 let quote = if request.input.text.trim().is_empty() {
                     "The upstream step sent no text.".to_owned()
@@ -1148,7 +1148,7 @@ impl MissionsPage {
                         id != &gate_id
                             && matches!(
                                 state,
-                                run_state::NodeState::Running | run_state::NodeState::Waiting
+                                run_state::CardState::Running | run_state::CardState::Waiting
                             )
                     });
                 let (approve_words, approve) = crate::store::gate::route(pass, "Approve", alone);
@@ -1169,7 +1169,7 @@ impl MissionsPage {
                         row = row.child(div().text_color(t.text2).child(line));
                     }
                 }
-                if let Some(step) = pick.get("node_id").and_then(|v| v.as_str()) {
+                if let Some(step) = pick.get("step_id").and_then(|v| v.as_str()) {
                     let step = step.to_owned();
                     actions = actions.child(
                         pane::act(

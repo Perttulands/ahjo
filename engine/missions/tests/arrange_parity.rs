@@ -3,7 +3,7 @@
 //! a full-size window, with one card's room for notes between cards rather
 //! than two.
 use ahjo_mission_engine::arrange;
-use ahjo_mission_model::{Layout, LayoutNode, Mission};
+use ahjo_mission_model::{Layout, LayoutCard, Mission};
 
 #[test]
 fn arrangements_match_the_goldens() {
@@ -43,9 +43,9 @@ fn arrangements_match_the_goldens() {
             }
         }
         let mission: Mission = serde_json::from_value(fixture["board"].clone()).unwrap();
-        let expected: Vec<LayoutNode> =
+        let expected: Vec<LayoutCard> =
             serde_json::from_value(fixture["positions"].clone()).unwrap();
         let result = arrange(&mission, &Layout::default());
-        assert_eq!(result.nodes, expected, "{name}");
+        assert_eq!(result.cards, expected, "{name}");
     }
 }

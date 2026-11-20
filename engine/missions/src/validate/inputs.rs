@@ -56,7 +56,7 @@ pub fn findings(mission: &Mission) -> Vec<Finding> {
                 &step.id,
                 format!(
                     "{} brief references {{{name}}}, but the mission has no input named {name}; its inputs are {}",
-                    possessive(mission.node_name(&step.id)),
+                    possessive(mission.card_name(&step.id)),
                     declared.join(", ")
                 ),
             ));

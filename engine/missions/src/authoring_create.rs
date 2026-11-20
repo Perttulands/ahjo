@@ -1,4 +1,4 @@
-//! Construct graph nodes with Archon's default shape.
+//! Construct graph cards with Archon's default shape.
 use crate::Error;
 use ahjo_mission_model::{
     End, EndOutcome, Formation, Gate, GateKind, HumanChannel, InputCard, Mission, MissionChange,
@@ -10,9 +10,9 @@ use toml_edit::{ArrayOfTables, DocumentMut, Item};
 pub(crate) fn append<T: Serialize>(
     doc: &mut DocumentMut,
     key: &str,
-    node: &T,
+    card: &T,
 ) -> Result<(), Error> {
-    let table = toml_edit::ser::to_document(node)
+    let table = toml_edit::ser::to_document(card)
         .map_err(|e| Error::new("invalid_definition", e.to_string()))?
         .into_table();
     crate::write::table_arrays(doc, &[key]);
@@ -54,7 +54,7 @@ pub(crate) fn apply(
     doc: &mut DocumentMut,
     _mission: &Mission,
     patch: MissionChange,
-) -> Result<ahjo_mission_model::LayoutNode, Error> {
+) -> Result<ahjo_mission_model::LayoutCard, Error> {
     match patch {
         MissionChange::CreateInputCard {
             title,
@@ -65,7 +65,7 @@ pub(crate) fn apply(
             y,
         } => {
             file_refs(&mut files)?;
-            let node = InputCard {
+            let card = InputCard {
                 id: crate::authoring::id("inp")?,
                 title: if title.is_empty() {
                     "Input".into()
@@ -81,8 +81,8 @@ pub(crate) fn apply(
                 },
                 ..InputCard::default()
             };
-            append(doc, "input_card", &node)?;
-            Ok(ahjo_mission_model::LayoutNode { id: node.id, x, y })
+            append(doc, "input_card", &card)?;
+            Ok(ahjo_mission_model::LayoutCard { id: card.id, x, y })
         }
         MissionChange::CreateStep {
             mut formation,
@@ -104,32 +104,32 @@ pub(crate) fn apply(
             if title.is_empty() {
                 title = default_title.into();
             }
-            let mut node = Step {
+            let mut card = Step {
                 id: crate::authoring::id("fmn")?,
                 formation,
                 title,
                 ..Step::default()
             };
-            node.inputs.push(Port {
+            card.inputs.push(Port {
                 id: crate::authoring::id("port")?,
                 label: "Input".into(),
                 ..Port::default()
             });
-            node.outputs.push(Port {
+            card.outputs.push(Port {
                 id: crate::authoring::id("port")?,
                 label: "Output".into(),
                 ..Port::default()
             });
             for (label, controller) in seats {
-                node.seats.push(Seat {
+                card.seats.push(Seat {
                     id: crate::authoring::id("seat")?,
                     label: (*label).into(),
                     controller: *controller,
                     ..Seat::default()
                 });
             }
-            append(doc, "step", &node)?;
-            Ok(ahjo_mission_model::LayoutNode { id: node.id, x, y })
+            append(doc, "step", &card)?;
+            Ok(ahjo_mission_model::LayoutCard { id: card.id, x, y })
         }
         MissionChange::CreateGate {
             title,
@@ -145,7 +145,7 @@ pub(crate) fn apply(
             if kinds.is_empty() {
                 kinds.push(GateKind::Step);
             }
-            let mut node = Gate {
+            let mut card = Gate {
                 id: crate::authoring::id("gate")?,
                 title: if title.is_empty() {
                     "Review gate".into()
@@ -159,9 +159,9 @@ pub(crate) fn apply(
                 check_value,
                 files,
             };
-            crate::authoring_controls::check_gate(&mut node)?;
-            append(doc, "gate", &node)?;
-            Ok(ahjo_mission_model::LayoutNode { id: node.id, x, y })
+            crate::authoring_controls::check_gate(&mut card)?;
+            append(doc, "gate", &card)?;
+            Ok(ahjo_mission_model::LayoutCard { id: card.id, x, y })
         }
         MissionChange::CreateEnd {
             mut title,
@@ -181,13 +181,13 @@ pub(crate) fn apply(
                 }
                 .into();
             }
-            let node = End {
+            let card = End {
                 id: crate::authoring::id("end")?,
                 title,
                 outcome,
             };
-            append(doc, "end", &node)?;
-            Ok(ahjo_mission_model::LayoutNode { id: node.id, x, y })
+            append(doc, "end", &card)?;
+            Ok(ahjo_mission_model::LayoutCard { id: card.id, x, y })
         }
         _ => unreachable!(),
     }

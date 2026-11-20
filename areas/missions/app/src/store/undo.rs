@@ -8,8 +8,8 @@
 
 use super::staffing::Staffing;
 use ahjo_missions_contract::{
-    EndUpdate, GateUpdate, InputCardUpdate, LayoutNode as Placed, LimitUpdate, Mission,
-    MissionChange, RestoredNode, Seat,
+    EndUpdate, GateUpdate, InputCardUpdate, LayoutCard as Placed, LimitUpdate, Mission,
+    MissionChange, RestoredCard, Seat,
 };
 
 #[derive(Clone, Debug, PartialEq)]
@@ -123,7 +123,7 @@ enum CardKind {
     Limit,
 }
 
-fn card(mission: &Mission, id: &str) -> Option<(RestoredNode, usize)> {
+fn card(mission: &Mission, id: &str) -> Option<(RestoredCard, usize)> {
     macro_rules! find {
         ($cards:ident, $kind:ident) => {
             mission
@@ -131,7 +131,7 @@ fn card(mission: &Mission, id: &str) -> Option<(RestoredNode, usize)> {
                 .iter()
                 .enumerate()
                 .find(|(_, card)| card.id == id)
-                .map(|(index, card)| (RestoredNode::$kind(card.clone()), index))
+                .map(|(index, card)| (RestoredCard::$kind(card.clone()), index))
         };
     }
     find!(input_cards, InputCard)
@@ -153,8 +153,8 @@ fn restore_step(mission: &Mission, id: &str, (x, y): (i64, i64)) -> Option<Step>
         })
         .cloned()
         .collect();
-    Some(Step::board(MissionChange::RestoreNode {
-        node,
+    Some(Step::board(MissionChange::RestoreCard {
+        card: node,
         connections,
         index: Some(index),
         x,
@@ -209,12 +209,12 @@ pub fn inverse_change(
                 .map(|step| vec![step])
                 .ok_or_else(|| "the card is already gone".to_owned());
         }
-        RestoreNode { node, .. } => match node {
-            RestoredNode::InputCard(card) => delete(CardKind::Input, &card.id),
-            RestoredNode::Step(card) => delete(CardKind::Step, &card.id),
-            RestoredNode::Gate(card) => delete(CardKind::Gate, &card.id),
-            RestoredNode::End(card) => delete(CardKind::End, &card.id),
-            RestoredNode::Limit(card) => delete(CardKind::Limit, &card.id),
+        RestoreCard { card, .. } => match card {
+            RestoredCard::InputCard(card) => delete(CardKind::Input, &card.id),
+            RestoredCard::Step(card) => delete(CardKind::Step, &card.id),
+            RestoredCard::Gate(card) => delete(CardKind::Gate, &card.id),
+            RestoredCard::End(card) => delete(CardKind::End, &card.id),
+            RestoredCard::Limit(card) => delete(CardKind::Limit, &card.id),
         },
         UpdatePort {
             step_id,
@@ -253,14 +253,14 @@ pub fn inverse_change(
         UpdateStep {
             id,
             title,
-            device,
+            environment,
             fresh,
         } => {
             let step = mission.step(id).ok_or(missing)?;
             UpdateStep {
                 id: id.clone(),
                 title: previous(title, &step.title),
-                device: previous(device, &step.device),
+                environment: previous(environment, &step.environment),
                 fresh: previous(fresh, &step.fresh),
             }
         }
@@ -302,7 +302,7 @@ pub fn inverse_change(
             UpdateLimit(LimitUpdate {
                 id: update.id.clone(),
                 title: previous(&update.title, &limit.title),
-                target: previous(&update.target, &limit.target),
+                scope: previous(&update.scope, &limit.scope),
                 rounds: update.rounds.map(|_| limit.rounds.unwrap_or_default()),
                 seconds: update.seconds.map(|_| limit.seconds.unwrap_or_default()),
                 warn_seconds: update
@@ -567,8 +567,8 @@ mod tests {
         let Step::Board(change) = &inv[0] else {
             panic!("expected restore")
         };
-        let RestoreNode {
-            node: RestoredNode::Step(card),
+        let RestoreCard {
+            card: RestoredCard::Step(card),
             connections,
             x,
             y,
@@ -619,7 +619,7 @@ mod tests {
             Step::board(UpdateStep {
                 id: "fmn_plan".into(),
                 title: None,
-                device: None,
+                environment: None,
                 fresh: Some(fresh),
             })
         };
@@ -798,7 +798,7 @@ mod tests {
             steps: vec![Step::board(UpdateStep {
                 id: "fmn_plan".into(),
                 title: Some("A".into()),
-                device: None,
+                environment: None,
                 fresh: None,
             })],
         };

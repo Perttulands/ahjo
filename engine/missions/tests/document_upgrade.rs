@@ -1,6 +1,6 @@
 //! Old mission files are upgraded in place, with the original kept until saved.
 use ahjo_mission_engine::Store;
-use ahjo_mission_model::{LayoutNode, LayoutPatch, MissionChange, NotePatch, Precondition};
+use ahjo_mission_model::{LayoutCard, LayoutPatch, MissionChange, NotePatch, Precondition};
 use std::path::Path;
 
 const MISSION: &str = r#"# A comment the author wrote
@@ -101,7 +101,7 @@ fn old_documents_keep_data_comments_and_backups_until_their_next_save() {
     let mission = store.mission_edit("old").unwrap();
     let layout = store.layout_edit("old").unwrap();
     let notes = store.notes_edit("old").unwrap();
-    assert_eq!(mission.mission.schema, 4);
+    assert_eq!(mission.mission.schema, 5);
     assert_eq!(
         mission.mission.input_cards[0].input_hint,
         "The inputCard text is a value"
@@ -116,8 +116,8 @@ fn old_documents_keep_data_comments_and_backups_until_their_next_save() {
         ]
     );
     assert_eq!(mission.mission.limits[0].warn_seconds, Some(10));
-    assert_eq!(layout.layout.schema, 2);
-    assert_eq!(layout.layout.nodes[0].x, 42);
+    assert_eq!(layout.layout.schema, 3);
+    assert_eq!(layout.layout.cards[0].x, 42);
     assert_eq!(notes.notes.schema, 3);
     assert_eq!(
         notes.notes.entries[0].text,
@@ -169,7 +169,7 @@ fn old_documents_keep_data_comments_and_backups_until_their_next_save() {
         .patch_layout(
             "old",
             &layout.etag,
-            LayoutPatch::Nodes(vec![LayoutNode {
+            LayoutPatch::Cards(vec![LayoutCard {
                 id: "fmn_work".into(),
                 x: 100,
                 y: 200,
@@ -216,7 +216,7 @@ connection = [{ id = "edge", from = "fmn_work:out", to = "end_done:in" }]
     std::fs::write(&marker, hex::encode(Sha256::digest(MISSION.as_bytes()))).unwrap();
 
     let mission = store.mission_edit("old").unwrap();
-    assert_eq!(mission.mission.schema, 4);
+    assert_eq!(mission.mission.schema, 5);
     assert_eq!(mission.mission.steps[0].id, "fmn_work");
     assert_eq!(
         mission.mission.steps[0].formation,
@@ -273,7 +273,7 @@ fn concurrent_readers_upgrade_once_and_keep_the_original_backup() {
         }
         for worker in workers {
             let mission = worker.join().unwrap();
-            assert_eq!(mission.schema, 4);
+            assert_eq!(mission.schema, 5);
             assert_eq!(mission.id, "msn_old");
         }
     });
@@ -281,7 +281,7 @@ fn concurrent_readers_upgrade_once_and_keep_the_original_backup() {
     assert!(
         std::fs::read_to_string(path)
             .unwrap()
-            .contains("schema = 4")
+            .contains("schema = 5")
     );
     std::fs::remove_dir_all(root).unwrap();
 }
@@ -483,5 +483,44 @@ effort = "high"
     assert!(!updated.contains("ultra"));
     assert_eq!(std::fs::read_to_string(backup(&path)).unwrap(), old);
     assert_eq!(store.read_mission("old").unwrap(), mission);
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn old_environment_and_limit_scope_keep_their_values() {
+    let (root, store) = fixture();
+    let path = root.join("missions/old.mission.toml");
+    let old = r#"schema = 4
+id = "msn_old"
+slug = "old"
+title = "Old"
+rev = 3
+
+[[step]]
+id = "fmn_work"
+title = "Work"
+formation = "solo"
+device = "builder/linux" # keep this comment
+brief = { goal = "Do not change the word device here." }
+
+[[limit]]
+id = "lim_rounds"
+target = "fmn_work"
+rounds = 3
+"#;
+    std::fs::write(&path, old).unwrap();
+
+    let mission = store.read_mission("old").unwrap();
+    assert_eq!(mission.schema, 5);
+    assert_eq!(mission.steps[0].environment, "builder/linux");
+    assert_eq!(mission.limits[0].scope, "fmn_work");
+    assert_eq!(
+        mission.steps[0].brief.as_ref().unwrap().goal,
+        "Do not change the word device here."
+    );
+    let updated = std::fs::read_to_string(&path).unwrap();
+    assert!(updated.contains("environment = \"builder/linux\" # keep this comment"));
+    assert!(updated.contains("scope = \"fmn_work\""));
+    assert_eq!(std::fs::read_to_string(backup(&path)).unwrap(), old);
     std::fs::remove_dir_all(root).unwrap();
 }

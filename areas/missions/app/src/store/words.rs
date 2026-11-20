@@ -415,7 +415,7 @@ mod tests {
             name: "report".into(),
             kind: kind.into(),
             value: value.into(),
-            node_id: String::new(),
+            card_id: String::new(),
             port_id: String::new(),
             attempt: 1,
             picks: vec![],

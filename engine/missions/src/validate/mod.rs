@@ -5,10 +5,10 @@
 //! runs its admission check over the whole mission). Each check lives in its
 //! own file; this one runs them and sorts the report.
 
+mod cards;
 mod files;
 pub(crate) mod inputs;
 mod limits;
-mod nodes;
 mod outputs;
 mod staffing;
 mod steps;
@@ -27,8 +27,8 @@ pub fn validate(mission: &Mission, agents: &AgentStore, harnesses: &Harnesses) -
     errors.extend(wiring::gate_findings(mission));
     errors.extend(steps::shape_findings(mission));
     errors.extend(steps::seat_id_findings(mission));
-    errors.extend(steps::device_findings(mission));
-    errors.extend(nodes::findings(mission));
+    errors.extend(steps::environment_findings(mission));
+    errors.extend(cards::findings(mission));
     let (limit_errors, limit_warnings) = limits::findings(mission);
     errors.extend(limit_errors);
     errors.extend(wiring::route_findings(mission));

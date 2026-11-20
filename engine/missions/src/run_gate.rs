@@ -375,7 +375,7 @@ pub(crate) fn settle_gate(
     }
     if kind == "human_input_requested" {
         data["choices"] = json!(["pass", "fail"]);
-        data["node_id"] = gate.id.clone().into();
+        data["card_id"] = gate.id.clone().into();
         data["gate_id"] = gate.id.clone().into();
         data["requested_by"] = gate.id.clone().into();
         data["prompt"] = crate::run_folder::reviewed_path(c, id, &events, input.origin.as_ref())

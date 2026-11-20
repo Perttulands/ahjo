@@ -97,7 +97,7 @@ impl MissionsPage {
                 .child(line);
             for finding in found {
                 let selector =
-                    format!("validation-message-{}-{}", finding.node_id, finding.message);
+                    format!("validation-message-{}-{}", finding.card_id, finding.message);
                 row = row.child(div().debug_selector(move || selector.clone()));
             }
             list = list.child(row);

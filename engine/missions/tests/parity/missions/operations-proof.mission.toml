@@ -1,6 +1,6 @@
 # Historical archon-2fb proving mission from 2026-09-06. Its briefs target that task.
 # For current Archon operation use docs/CONTRACT.md; adapt before running.
-schema = 4
+schema = 5
 id = "brd_operations_proof"
 slug = "operations-proof"
 title = "Standalone operations proof"

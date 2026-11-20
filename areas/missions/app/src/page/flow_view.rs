@@ -130,7 +130,7 @@ impl MissionsPage {
                     let from = value
                         .from
                         .split_once(':')
-                        .map(|(step, _)| format!(" from {}", mission.node_name(step)))
+                        .map(|(step, _)| format!(" from {}", mission.card_name(step)))
                         .unwrap_or_else(|| " (not wired yet)".into());
                     let kind = if value.kind.effective() == ahjo_missions_contract::PortKind::Text {
                         String::new()
@@ -179,7 +179,7 @@ impl MissionsPage {
                                 .items_center()
                                 .gap(px(size::HEAD_GAP))
                                 .child(pane::cell({
-                                    let name = mission.node_name(&end.id);
+                                    let name = mission.card_name(&end.id);
                                     if name.eq_ignore_ascii_case(end.outcome.as_str()) {
                                         name.to_owned()
                                     } else {
@@ -459,7 +459,7 @@ impl MissionsPage {
                     .gap(px(size::HEAD_GAP))
                     .min_h(px(size::ROW))
                     .child(
-                        pane::cell(format!("{}  {}", step.number, mission.node_name(&step.id)))
+                        pane::cell(format!("{}  {}", step.number, mission.card_name(&step.id)))
                             .font_weight(FontWeight::SEMIBOLD)
                             .id(SharedString::from(format!("flow-title-{title_id}")))
                             .debug_selector({
@@ -553,7 +553,7 @@ impl MissionsPage {
                     if let Some(step) = mission.steps.iter().find(|f| &f.id == judge) {
                         block = block.child(sub(format!(
                             "judged by {}: {}",
-                            mission.node_name(judge),
+                            mission.card_name(judge),
                             step.seats
                                 .iter()
                                 .map(|seat| crate::store::words::who(
@@ -583,7 +583,7 @@ impl MissionsPage {
                 step.parallel
                     .iter()
                     .filter(|other| **other != step.id)
-                    .map(|other| mission.node_name(other))
+                    .map(|other| mission.card_name(other))
                     .collect::<Vec<_>>()
                     .join(", ")
             )));
@@ -602,7 +602,7 @@ impl MissionsPage {
         cx: &mut Context<Self>,
     ) -> Vec<AnyElement> {
         let mut out = Vec::new();
-        for limit in mission.limits.iter().filter(|limit| limit.target == target) {
+        for limit in mission.limits.iter().filter(|limit| limit.scope == target) {
             out.push(
                 div()
                     .flex()

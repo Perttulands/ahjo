@@ -1,5 +1,5 @@
 //! Reference files on Input cards, briefs and gates that name no file this
-//! node can open. A file may still appear before a run reads it, so these
+//! card can open. A file may still appear before a run reads it, so these
 //! warn rather than block.
 
 use std::path::Path;
@@ -16,7 +16,7 @@ pub fn findings(mission: &Mission) -> Vec<Finding> {
         .filter_map(|step| step.brief.as_ref().map(|brief| (&step.id, &brief.files)));
     let gates = mission.gates.iter().map(|gate| (&gate.id, &gate.files));
     let mut findings = Vec::new();
-    for (node, files) in cards.chain(briefs).chain(gates) {
+    for (card, files) in cards.chain(briefs).chain(gates) {
         for file in files {
             let (code, problem) = if !Path::new(file).is_absolute() {
                 (Code::RelativeFile, "is relative: use an absolute path")
@@ -31,10 +31,10 @@ pub fn findings(mission: &Mission) -> Vec<Finding> {
                 path: Some(file.clone()),
                 ..Finding::new(
                     code,
-                    node,
+                    card,
                     format!(
                         "{} file {file} {problem}",
-                        possessive(mission.node_name(node))
+                        possessive(mission.card_name(card))
                     ),
                 )
             });

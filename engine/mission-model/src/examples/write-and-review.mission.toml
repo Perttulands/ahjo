@@ -1,4 +1,4 @@
-schema = 4
+schema = 5
 id = "msn_example"
 slug = "write-and-review"
 title = "Write and review"
@@ -58,7 +58,7 @@ criterion = "The draft does what the brief asks, correctly and clearly."
 [[limit]]
 id = "lim_rounds"
 title = "Three rounds"
-target = "fmn_write"
+scope = "fmn_write"
 rounds = 3
 when_spent = "fail"
 

@@ -17,7 +17,7 @@ fn dispatch_in(id: &str, name: &str, keep: bool, cwd: impl Into<std::path::PathB
     Dispatch {
         id: id.into(),
         run_id: "run_1".into(),
-        node_id: "fmn_write".into(),
+        step_id: "fmn_write".into(),
         seat_id: "seat_1".into(),
         name: name.into(),
         harness: "pi".into(),
@@ -27,7 +27,7 @@ fn dispatch_in(id: &str, name: &str, keep: bool, cwd: impl Into<std::path::PathB
         brief: "Write.".into(),
         reuse_dispatch: None,
         keep,
-        place: String::new(),
+        environment: String::new(),
         turn: None,
     }
 }

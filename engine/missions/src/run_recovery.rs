@@ -53,14 +53,14 @@ impl Coordinator {
                 pending.kind == "output_capture_pending"
                     && !crate::run_capture::discarded(&events, pending)
                     && !events.iter().any(|event| {
-                        (event.kind == "node_output" || event.kind == "node_output_pending")
-                            && event.node_id == pending.node_id
+                        (event.kind == "card_output" || event.kind == "card_output_pending")
+                            && event.card_id == pending.card_id
                             && event.attempt == pending.attempt
                     })
             }) {
                 self.append(id, crate::RunEvent {
-                    kind: "run_blocked".into(), node_id: pending.node_id.clone(), actor: "archond".into(), timestamp: crate::run_storage::now(),
-                    data: serde_json::json!({"code":"coordinator_shutdown","reason":"Ahjo stopped while keeping the step's outputs; resume to keep them","blocked_node_id":pending.node_id,"resume_allowed":true,"resume_policy":"explicit","pending_output":{"node_id":pending.node_id,"attempt":pending.attempt,"output":pending.data}}).as_object().unwrap().clone(),
+                    kind: "run_blocked".into(), card_id: pending.card_id.clone(), actor: "archond".into(), timestamp: crate::run_storage::now(),
+                    data: serde_json::json!({"code":"coordinator_shutdown","reason":"Ahjo stopped while keeping the step's outputs; resume to keep them","blocked_card_id":pending.card_id,"resume_allowed":true,"resume_policy":"explicit","pending_output":{"step_id":pending.card_id,"attempt":pending.attempt,"output":pending.data}}).as_object().unwrap().clone(),
                     ..Default::default()
                 })?;
                 interrupted.push(id.to_owned());
@@ -115,7 +115,7 @@ impl Coordinator {
                 && let [dispatch] = open.as_slice()
                 && !events.iter().any(|error| {
                     error.kind == "error"
-                        && error.node_id == dispatch.node_id
+                        && error.card_id == dispatch.card_id
                         && error.seq > dispatch.seq
                 })
                 && let Err(error) = crate::run_reattach::recover_completed(
@@ -201,7 +201,7 @@ pub(crate) fn publication_error_code(detail: &str) -> &'static str {
 }
 
 pub(crate) fn pending_capture(events: &[crate::RunEvent]) -> Option<serde_json::Value> {
-    events.iter().rev().find(|event| event.kind == "output_capture_pending" && !crate::run_capture::discarded(events, event) && !events.iter().any(|output| matches!(output.kind.as_str(), "node_output" | "node_output_pending") && output.node_id == event.node_id && output.attempt == event.attempt)).map(|event| serde_json::json!({"node_id":event.node_id,"attempt":event.attempt,"output":event.data}))
+    events.iter().rev().find(|event| event.kind == "output_capture_pending" && !crate::run_capture::discarded(events, event) && !events.iter().any(|output| matches!(output.kind.as_str(), "card_output" | "card_output_pending") && output.card_id == event.card_id && output.attempt == event.attempt)).map(|event| serde_json::json!({"step_id":event.card_id,"attempt":event.attempt,"output":event.data}))
 }
 
 pub(crate) fn only_waiting(

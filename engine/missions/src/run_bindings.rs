@@ -1,7 +1,7 @@
 //! Frozen settings and agent definitions for a run.
 use crate::AgentStore;
 
-pub(crate) const BINDINGS_SCHEMA: u8 = 5;
+pub(crate) const BINDINGS_SCHEMA: u8 = 6;
 use ahjo_mission_model::{Agent, Mission, Seat};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -27,7 +27,7 @@ pub struct BindingsSnapshot {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub struct RunBinding {
-    pub node_id: String,
+    pub step_id: String,
     pub seat_id: String,
     pub agent: String,
     pub harness: String,
@@ -96,7 +96,7 @@ impl BindingsSnapshot {
                     };
                     let settings = seat.settings(agent.as_ref());
                     bindings.push(RunBinding {
-                        node_id: step.id.clone(),
+                        step_id: step.id.clone(),
                         seat_id: seat.id.clone(),
                         agent: seat.agent.clone(),
                         harness: settings.harness.as_str().to_owned(),
@@ -173,7 +173,7 @@ impl BindingsSnapshot {
         mission: &Mission,
         run_id: &str,
         input_card_id: &str,
-        node_id: &str,
+        step_id: &str,
         seat: &Seat,
     ) -> Result<&RunBinding, crate::Error> {
         let invalid = || {
@@ -194,7 +194,7 @@ impl BindingsSnapshot {
         let mut matches = self
             .bindings
             .iter()
-            .filter(|binding| binding.node_id == node_id && binding.seat_id == seat.id);
+            .filter(|binding| binding.step_id == step_id && binding.seat_id == seat.id);
         let Some(binding) = matches.next() else {
             return Err(invalid());
         };

@@ -245,7 +245,7 @@
       {
         "id": "lim_01M4RTE239XPED59YESQ9299NJ",
         "title": "Safety net",
-        "target": "fmn_01M4RTE214TRV96XVXN0JXWDBQ",
+        "scope": "fmn_01M4RTE214TRV96XVXN0JXWDBQ",
         "rounds": 12
       }
     ],

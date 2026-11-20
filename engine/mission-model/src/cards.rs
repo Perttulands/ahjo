@@ -1,4 +1,4 @@
-//! The nodes of a mission graph and the wires between them.
+//! The cards of a mission graph and the wires between them.
 
 use serde::{Deserialize, Serialize};
 
@@ -6,7 +6,7 @@ use crate::{
     Agent, Effort, EndOutcome, Formation, GateKind, Harness, HumanChannel, PortKind, WhenSpent,
 };
 
-/// The mission's entry node (`[[input_card]]`), with its `out` port.
+/// The mission's entry card (`[[input_card]]`), with its `out` port.
 #[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq, schemars::JsonSchema)]
 #[serde(default, deny_unknown_fields, rename_all = "snake_case")]
 pub struct InputCard {
@@ -65,7 +65,7 @@ pub struct Step {
     pub title: String,
     /// The environment the step runs on; blank runs it on the coordinator.
     #[serde(skip_serializing_if = "String::is_empty")]
-    pub device: String,
+    pub environment: String,
     /// Each attempt starts its agents in sessions of their own, ended with
     /// the attempt, instead of using the agents' live sessions.
     #[serde(skip_serializing_if = "is_false")]
@@ -240,7 +240,7 @@ pub const END_IN: &str = "in";
 pub struct Limit {
     pub id: String,
     pub title: String,
-    pub target: String,
+    pub scope: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub rounds: Option<i64>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -254,7 +254,7 @@ pub struct Limit {
     pub when_spent: WhenSpent,
 }
 
-/// A directed wire between `node-id:port-id` endpoints.
+/// A directed wire between `card-id:port-id` endpoints.
 #[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq, schemars::JsonSchema)]
 #[serde(default, deny_unknown_fields)]
 pub struct Connection {

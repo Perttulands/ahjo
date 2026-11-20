@@ -191,7 +191,7 @@ impl ahjo_mission_engine::Executor for CorrectingLab {
         self.0
             .lock()
             .unwrap()
-            .push((request.node_id, request.attempt));
+            .push((request.step_id, request.attempt));
         assert!(request.error.contains("missing"));
         Ok(Some("```ahjo-verdict\n{\"verdict\":\"pass\",\"reason\":\"corrected\",\"evidence\":[]}\n```\n```ahjo-outputs\n{\"port_out\":{\"text\":\"corrected\"}}\n```".into()))
      }.map_err(|message: String| ahjo_mission_engine::Error::new("executor_error", message))
@@ -240,7 +240,7 @@ fn judge_gets_one_correction_on_its_existing_attempt() {
             assert_eq!(
                 p.events
                     .iter()
-                    .filter(|event| event.kind == "node_started" && event.node_id == "fmn_judge")
+                    .filter(|event| event.kind == "card_started" && event.card_id == "fmn_judge")
                     .count(),
                 1
             );
@@ -410,16 +410,16 @@ fn judge_fail_pushes_back_typed_feedback_before_a_later_pass() {
         let start = expected
             .iter()
             .position(|e| {
-                e["type"] == "node_started" && e["node_id"] == "fmn_work" && e["attempt"] == attempt
+                e["type"] == "card_started" && e["card_id"] == "fmn_work" && e["attempt"] == attempt
             })
             .unwrap();
-        expected.insert(start + 1, serde_json::json!({"type":"folder_attempt_started","node_id":"fmn_work","attempt":attempt}));
+        expected.insert(start + 1, serde_json::json!({"type":"folder_attempt_started","card_id":"fmn_work","attempt":attempt}));
     }
     let pass = expected
         .iter()
         .position(|e| e["type"] == "gate_verdict" && e["verdict"] == "pass")
         .unwrap();
-    expected.insert(pass, serde_json::json!({"type":"folder_verdict_pending","gate_id":"gate_review","node_id":"gate_review","attempt":2,"verdict":"pass"}));
+    expected.insert(pass, serde_json::json!({"type":"folder_verdict_pending","gate_id":"gate_review","card_id":"gate_review","attempt":2,"verdict":"pass"}));
     assert_eq!(normalized_ledger(&root, &id), expected);
     run_support::assert_payload_parity(
         &root,
@@ -585,7 +585,7 @@ fn concurrent_judge_and_step_publish_only_their_own_files() {
     for node in ["fmn_judge", "fmn_other"] {
         let commit = events
             .iter()
-            .find(|e| e.kind == "workspace_commit" && e.node_id == node)
+            .find(|e| e.kind == "workspace_commit" && e.card_id == node)
             .unwrap()
             .data["commit"]
             .as_str()

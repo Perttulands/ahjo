@@ -20,7 +20,7 @@ async fn a_message_is_not_pasted_into_a_pane_the_seat_no_longer_owns() {
     let dispatch = Dispatch {
         id: "dsp_notify".into(),
         run_id: "run_1".into(),
-        node_id: "step".into(),
+        step_id: "step".into(),
         seat_id: "worker".into(),
         name: String::new(),
         harness: "claude".into(),
@@ -30,7 +30,7 @@ async fn a_message_is_not_pasted_into_a_pane_the_seat_no_longer_owns() {
         brief: "brief".into(),
         reuse_dispatch: None,
         keep: false,
-        place: String::new(),
+        environment: String::new(),
         turn: None,
     };
     seats.records().create(&dispatch).unwrap();

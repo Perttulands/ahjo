@@ -1,7 +1,7 @@
 //! Mission canvas interaction, adapted from the original Missions page.
 use super::*;
 use ahjo_app_kit::widgets::boundary;
-use ahjo_missions_contract::{EndOutcome, GateKind, HumanChannel, LayoutNode, Mission, WhenSpent};
+use ahjo_missions_contract::{EndOutcome, GateKind, HumanChannel, LayoutCard, Mission, WhenSpent};
 use gpui::{
     AnyElement, Bounds, Hsla, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent,
     PathBuilder, Pixels, Point, ScrollEvent, SharedString, Stateful, canvas, point,
@@ -256,11 +256,11 @@ impl MissionsPage {
             .state
             .layout
             .as_ref()
-            .map(|l| l.nodes.clone())
+            .map(|l| l.cards.clone())
             .unwrap_or_default();
         if let Some(Drag::Card { id, now, .. }) = &self.canvas.drag {
             layout.retain(|p| p.id != *id);
-            layout.push(LayoutNode {
+            layout.push(LayoutCard {
                 id: id.clone(),
                 x: now.0.round() as i64,
                 y: now.1.round() as i64,
@@ -429,7 +429,7 @@ impl MissionsPage {
                     .text_size(px(CARD_SMALL * view.zoom))
                     .text_color(colour)
                     .whitespace_nowrap()
-                    .child(format!("↺ {}", mission.node_name(&w.to_node))),
+                    .child(format!("↺ {}", mission.card_name(&w.to_card))),
             );
         }
         for card in &board.cards {
@@ -486,7 +486,7 @@ impl MissionsPage {
         for edge in &mission.connections {
             let matching: Vec<_> = findings
                 .iter()
-                .filter(|(finding, _)| finding.node_id == edge.id)
+                .filter(|(finding, _)| finding.card_id == edge.id)
                 .collect();
             if matching.is_empty() {
                 continue;
@@ -617,7 +617,7 @@ impl MissionsPage {
                     .top_0()
                     .left_0()
                     .debug_selector(move || selector.clone())
-                    .child(format!("Card: {}", mission.node_name(id))),
+                    .child(format!("Card: {}", mission.card_name(id))),
             );
         }
         div()
@@ -640,7 +640,7 @@ impl MissionsPage {
     ) -> Option<AnyElement> {
         let issues: Vec<_> = findings
             .iter()
-            .filter(|(finding, _)| finding.node_id == card.id)
+            .filter(|(finding, _)| finding.card_id == card.id)
             .collect();
         if issues.is_empty() {
             return None;
@@ -696,7 +696,7 @@ impl MissionsPage {
         card: &board::Card,
         view: &View,
         running: bool,
-        state: Option<crate::store::run_state::NodeState>,
+        state: Option<crate::store::run_state::CardState>,
         attempts: Option<i64>,
         findings: &[(ahjo_missions_contract::Finding, bool)],
         cx: &mut Context<Self>,
@@ -716,17 +716,17 @@ impl MissionsPage {
         );
         let issues: Vec<_> = findings
             .iter()
-            .filter(|(finding, _)| finding.node_id == id)
+            .filter(|(finding, _)| finding.card_id == id)
             .collect();
         let issue_color = self.finding_color(t, issues.iter().any(|(_, error)| *error));
         let color = match state {
-            Some(crate::store::run_state::NodeState::Done) => t.done,
+            Some(crate::store::run_state::CardState::Done) => t.done,
             Some(
-                crate::store::run_state::NodeState::Failed
-                | crate::store::run_state::NodeState::Blocked,
+                crate::store::run_state::CardState::Failed
+                | crate::store::run_state::CardState::Blocked,
             ) => t.error,
-            Some(crate::store::run_state::NodeState::Running) => t.running,
-            Some(crate::store::run_state::NodeState::Waiting) => t.needs,
+            Some(crate::store::run_state::CardState::Running) => t.running,
+            Some(crate::store::run_state::CardState::Waiting) => t.needs,
             _ if card.kind == board::Kind::End => {
                 if mission
                     .ends
@@ -955,12 +955,12 @@ impl MissionsPage {
         }
     }
     fn canvas_move(&mut self, id: &str, from: (f32, f32), to: (f32, f32), cx: &mut Context<Self>) {
-        let before = LayoutNode {
+        let before = LayoutCard {
             id: id.into(),
             x: from.0.round() as i64,
             y: from.1.round() as i64,
         };
-        let after = LayoutNode {
+        let after = LayoutCard {
             id: id.into(),
             x: to.0.round() as i64,
             y: to.1.round() as i64,
@@ -969,8 +969,8 @@ impl MissionsPage {
     }
     fn canvas_layout(
         &mut self,
-        nodes: Vec<LayoutNode>,
-        reverse: Vec<LayoutNode>,
+        nodes: Vec<LayoutCard>,
+        reverse: Vec<LayoutCard>,
         cx: &mut Context<Self>,
     ) {
         if self.writing || self.editor.as_ref().is_some_and(|e| e.busy) {
@@ -992,7 +992,7 @@ impl MissionsPage {
         )
         .header("If-Match", etag);
         let body = EditLayout {
-            nodes: Some(nodes),
+            cards: Some(nodes),
             ..Default::default()
         };
         let request = match edits::with_json_body(request, &body) {
@@ -1104,7 +1104,7 @@ fn wires(
     let errors: std::collections::HashSet<_> = findings
         .iter()
         .filter(|(_, error)| *error)
-        .map(|(finding, _)| finding.node_id.clone())
+        .map(|(finding, _)| finding.card_id.clone())
         .collect();
     let accent = t.accent;
     let (work, pass, fail, quiet, error) = (t.wire, t.pass, t.fail, t.dim, t.error);
@@ -1261,7 +1261,7 @@ fn card_face(
     card: &board::Card,
     z: f32,
     running: bool,
-    state: Option<crate::store::run_state::NodeState>,
+    state: Option<crate::store::run_state::CardState>,
     catalog: Option<&ahjo_harness_contract::agents::ListedAgents>,
 ) -> Div {
     let label = |text: String, colour: Hsla| {
@@ -1286,9 +1286,9 @@ fn card_face(
                     .map(|c| {
                         let (id, port) = c.from.split_once(':').unwrap_or((&c.from, ""));
                         if matches!(port, "pass" | "fail" | "judge") {
-                            format!("{} ({port})", mission.node_name(id))
+                            format!("{} ({port})", mission.card_name(id))
                         } else {
-                            mission.node_name(id).into()
+                            mission.card_name(id).into()
                         }
                     })
                     .collect();
@@ -1449,12 +1449,12 @@ fn card_face(
             face = face.child(body);
             for p in &f.outputs {
                 let output = match state {
-                    Some(crate::store::run_state::NodeState::Done) => "output ready",
-                    Some(crate::store::run_state::NodeState::Running) => "running",
-                    Some(crate::store::run_state::NodeState::Waiting) => "needs you",
+                    Some(crate::store::run_state::CardState::Done) => "output ready",
+                    Some(crate::store::run_state::CardState::Running) => "running",
+                    Some(crate::store::run_state::CardState::Waiting) => "needs you",
                     Some(
-                        crate::store::run_state::NodeState::Blocked
-                        | crate::store::run_state::NodeState::Failed,
+                        crate::store::run_state::CardState::Blocked
+                        | crate::store::run_state::CardState::Failed,
                     ) => "blocked",
                     _ => "no output yet",
                 };
@@ -1691,16 +1691,16 @@ fn card_face(
 
 fn state_words(
     t: &ahjo_app_kit::theme::Theme,
-    state: Option<crate::store::run_state::NodeState>,
+    state: Option<crate::store::run_state::CardState>,
 ) -> (&'static str, Hsla) {
-    use crate::store::run_state::NodeState;
+    use crate::store::run_state::CardState;
     match state {
-        Some(NodeState::Done) => ("done", t.done),
-        Some(NodeState::Running) => ("running", t.running),
-        Some(NodeState::Waiting) => ("needs you", t.needs),
-        Some(NodeState::Blocked) => ("blocked", t.error),
-        Some(NodeState::Failed) => ("failed", t.error),
-        Some(NodeState::Canceled) => ("canceled", t.dim),
+        Some(CardState::Done) => ("done", t.done),
+        Some(CardState::Running) => ("running", t.running),
+        Some(CardState::Waiting) => ("needs you", t.needs),
+        Some(CardState::Blocked) => ("blocked", t.error),
+        Some(CardState::Failed) => ("failed", t.error),
+        Some(CardState::Canceled) => ("canceled", t.dim),
         None => ("not reached", t.dim),
     }
 }
@@ -1886,7 +1886,7 @@ impl MissionsPage {
             .state
             .layout
             .as_ref()
-            .map(|l| l.nodes.clone())
+            .map(|l| l.cards.clone())
             .unwrap_or_default();
         let b = board::board(&mission, &flow::build(&mission), &layout, false);
         let size = board::new_size(kind);
@@ -2180,7 +2180,7 @@ fn new_end(title: &str, outcome: EndOutcome, x: i64, y: i64) -> MissionChange {
 fn new_limit(target: &str, x: i64, y: i64) -> MissionChange {
     MissionChange::CreateLimit {
         title: "Limit".into(),
-        target: target.into(),
+        scope: target.into(),
         rounds: Some(3),
         seconds: None,
         warn_seconds: None,

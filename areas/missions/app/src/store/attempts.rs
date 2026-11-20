@@ -343,7 +343,7 @@ mod tests {
     }
     fn step(attempts: Vec<StepAttempt>) -> StepAttempts {
         StepAttempts {
-            node_id: "s".into(),
+            step_id: "s".into(),
             title: "Work".into(),
             judge_of: vec![],
             outputs: vec![],

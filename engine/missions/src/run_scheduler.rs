@@ -48,17 +48,17 @@ pub(crate) fn schedule(
         .read()
         .map_err(crate::error::to_io)?
         .iter()
-        .any(|e| e.kind == "node_output" && e.node_id == req.input_card_id)
+        .any(|e| e.kind == "card_output" && e.card_id == req.input_card_id)
     {
         append(
             c,
             id,
             control,
             event(
-                "node_started",
+                "card_started",
                 &req.input_card_id,
                 0,
-                json!({"node_kind":"input_card","input_refs":[],"reason":"initial"}),
+                json!({"card_kind":"input_card","input_refs":[],"reason":"initial"}),
             ),
         )?;
         append(
@@ -66,7 +66,7 @@ pub(crate) fn schedule(
             id,
             control,
             event(
-                "node_output",
+                "card_output",
                 &req.input_card_id,
                 0,
                 json!({"status":"done","text":input,"outputs":{"out":{"text":input}}}),
@@ -90,7 +90,7 @@ pub(crate) fn schedule(
             "error" => !events.iter().any(|pick| {
                 pick.kind == crate::run_pick::PICK_STARTED
                     && pick.seq > e.seq
-                    && pick.node_id == e.node_id
+                    && pick.card_id == e.card_id
             }),
             "escalation_raised" => e.data.get("blocks").and_then(|v| v.as_bool()) == Some(true),
             "judge_attempt_failed" => {
@@ -100,10 +100,10 @@ pub(crate) fn schedule(
         })
         .last();
     let mut stop = stop_event.map(|e| match e.kind.as_str() {
-        "escalation_raised" => Stop::Escalation(e.node_id.clone()),
+        "escalation_raised" => Stop::Escalation(e.card_id.clone()),
         "error" if let Some(use_) = crate::limits::LimitUse::recorded(e) => {
             Stop::Limit(crate::run_limit::LimitStop {
-                node: e.node_id.clone(),
+                step_id: e.card_id.clone(),
                 use_,
                 fail: false,
             })
@@ -136,14 +136,14 @@ pub(crate) fn schedule(
     if let Some(failure) = stop_event {
         let replay = crate::run_replay::Replay::read(mission, &events);
         for (gate, started) in replay.evaluating {
-            if started.seq < failure.seq && gate != failure.gate_id && gate != failure.node_id {
+            if started.seq < failure.seq && gate != failure.gate_id && gate != failure.card_id {
                 drain_gates.insert(gate);
             }
         }
         for (node, started) in replay.open {
             if started.seq < failure.seq
-                && node != failure.node_id
-                && failure.data.get("source_node_id").and_then(|v| v.as_str())
+                && node != failure.card_id
+                && failure.data.get("source_card_id").and_then(|v| v.as_str())
                     != Some(node.as_str())
             {
                 drain.insert(node);
@@ -216,16 +216,16 @@ pub(crate) fn schedule(
                         Ok(result) if !control.canceled.load(Ordering::Acquire) => {
                             let mut blocks = false;
                             if let Some(escalation) = crate::parse_escalation(&result.text, id) {
-                                let target = if escalation.node_id.is_empty() {
+                                let target = if escalation.card_id.is_empty() {
                                     node.clone()
                                 } else {
-                                    escalation.node_id
+                                    escalation.card_id
                                 };
                                 let mut raised = event(
                                     "escalation_raised",
                                     &target,
                                     attempt,
-                                    json!({"severity":escalation.severity,"reason":escalation.reason,"source":"agent","source_node_id":node,"trigger":"sentinel","blocks":escalation.blocks}),
+                                    json!({"severity":escalation.severity,"reason":escalation.reason,"source":"agent","source_card_id":node,"trigger":"sentinel","blocks":escalation.blocks}),
                                 );
                                 raised.gate_id = escalation.gate_id;
                                 append(c, id, control, raised)?;
@@ -238,7 +238,7 @@ pub(crate) fn schedule(
                             }
                             if !blocks {
                                 let output = event(
-                                    "node_output",
+                                    "card_output",
                                     &node,
                                     attempt,
                                     json!({"status":result.status,"text":result.text,"outputs":result.outputs,"report_ref":format!("lab://{id}/{node}/report.md")}),
@@ -299,7 +299,7 @@ pub(crate) fn schedule(
                 {
                     let node = pending
                         .data
-                        .get("folder_node")
+                        .get("folder_step_id")
                         .and_then(|node| node.as_str())
                         .unwrap_or_default();
                     record_error(c, id, control, node, &error)?;
@@ -520,7 +520,7 @@ fn record_error(
             "error",
             node,
             0,
-            json!({"code":code,"detail":detail,"message":detail,"reason":detail,"node_id":node,"recoverable":true}),
+            json!({"code":code,"detail":detail,"message":detail,"reason":detail,"card_id":node,"recoverable":true}),
         ),
     )
 }

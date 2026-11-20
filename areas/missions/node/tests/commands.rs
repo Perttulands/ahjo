@@ -42,6 +42,59 @@ const EXPECTED: &[&str] = &[
 ];
 
 #[tokio::test(flavor = "multi_thread")]
+async fn cli_updates_step_environment_and_home_clears_it() {
+    let node = Node::start(&[sessions::LISTING, ahjo_work::LISTING, LAB], "")
+        .await
+        .unwrap();
+    let folder = node.dir().join("missions/missions");
+    std::fs::create_dir_all(&folder).unwrap();
+    std::fs::write(
+        folder.join("hello.mission.toml"),
+        include_str!("fixtures/solo-lab.mission.toml"),
+    )
+    .unwrap();
+
+    for (environment, expected) in [("remote/linux", "remote/linux"), ("home", "")] {
+        let change = json!({"update_step":{"id":"fmn_work","environment":environment}});
+        let args = vec![
+            "edit".into(),
+            "hello".into(),
+            "--change".into(),
+            change.to_string(),
+            "--node".into(),
+            format!("{}/", node.url()),
+            "--json".into(),
+        ];
+        let mut output = Vec::new();
+        assert_eq!(
+            ahjo_node_kit::cli::run("mission", &args, &mut output)
+                .await
+                .unwrap(),
+            0
+        );
+        let response: serde_json::Value = serde_json::from_slice(&output).unwrap();
+        assert_eq!(
+            response["mission"]["step"][0]["environment"]
+                .as_str()
+                .unwrap_or(""),
+            expected
+        );
+    }
+    let error = node
+        .call(
+            "mission_edit",
+            json!({"mission":"hello","change":{
+                "update_step":{"id":"fmn_work","device":"remote/linux"}
+            }}),
+        )
+        .await
+        .unwrap_err();
+    assert_eq!(error.code, "invalid_argument");
+    assert!(error.message.contains("unknown field device"), "{error}");
+    node.stop().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn run_wait_and_show_explain_a_code_gate_send_back() {
     let node = Node::start(&[sessions::LISTING, ahjo_work::LISTING, LAB], "")
         .await
@@ -221,6 +274,9 @@ async fn mission_command_schemas_and_cli_help_match_the_document_surface() {
 
     let command_schema =
         |name| &tools.iter().find(|tool| tool["name"] == name).unwrap()["inputSchema"];
+    let note = &command_schema("mission_note")["properties"];
+    assert!(note.get("on").is_some());
+    assert!(note.get("target").is_none());
     let apply = &command_schema("mission_apply")["properties"]["document"];
     assert_eq!(apply["type"], "string");
     assert_eq!(apply["contentMediaType"], "application/toml");
@@ -483,16 +539,16 @@ async fn author_and_run_with_tools() {
     assert!(
         node.call("layout_show", json!({"mission":"demo"}))
             .await
-            .unwrap()["layout"]["node"]
+            .unwrap()["layout"]["card"]
             .is_array()
     );
     assert_eq!(
         node.call(
             "layout_edit",
-            json!({"mission":"demo","change":{"nodes":[{"id":id,"x":10,"y":20}]}})
+            json!({"mission":"demo","change":{"cards":[{"id":id,"x":10,"y":20}]}})
         )
         .await
-        .unwrap()["layout"]["node"][0]["x"],
+        .unwrap()["layout"]["card"][0]["x"],
         10
     );
     let folder = node.dir().join("missions/missions");
@@ -553,7 +609,7 @@ async fn author_and_run_with_tools() {
         .as_array()
         .unwrap()
         .iter()
-        .find(|e| e["node_id"] == "fmn_work")
+        .find(|e| e["card_id"] == "fmn_work")
         .expect("a step's event");
     assert!(
         !step_event["step"].as_str().unwrap_or("").is_empty(),
@@ -819,7 +875,7 @@ async fn a_mission_built_through_commands_stays_arranged() {
     let shown = call("mission_show", json!({"mission":"line","full":true})).await;
     let shown = &shown["mission"];
     let places = |layout: &serde_json::Value| {
-        let mut v: Vec<(String, i64, i64)> = layout["layout"]["node"]
+        let mut v: Vec<(String, i64, i64)> = layout["layout"]["card"]
             .as_array()
             .unwrap()
             .iter()
@@ -1013,7 +1069,7 @@ async fn an_agent_picks_up_a_mission_from_its_notes() {
     )
     .await
     .unwrap();
-    let note = |target: &str, text: &str| json!({"mission":"ship","target":target,"text":text,"author":"human:ui"});
+    let note = |target: &str, text: &str| json!({"mission":"ship","on":target,"text":text,"author":"human:ui"});
     let intent = node
         .call("mission_note", note("", "Ship it\nby Friday"))
         .await
@@ -1188,7 +1244,7 @@ async fn a_long_sketch_is_made_whole_and_arranged() {
         let last = read["steps"].as_array().unwrap().last().unwrap().clone();
         assert_eq!(last["next"], "end (done)", "{read}");
         let nodes = |layout: serde_json::Value| {
-            let mut v: Vec<(String, i64, i64)> = (layout["layout"]["node"].as_array())
+            let mut v: Vec<(String, i64, i64)> = (layout["layout"]["card"].as_array())
                 .unwrap()
                 .iter()
                 .map(|n| {
@@ -1331,7 +1387,7 @@ async fn mission_edit_batches_commit_once_or_leave_the_mission_and_layout_untouc
 
     let after_layout = layout().await.unwrap();
     assert_eq!(after_layout["layout"]["mission_rev"], rev + 1);
-    let nodes = after_layout["layout"]["node"].as_array().unwrap();
+    let nodes = after_layout["layout"]["card"].as_array().unwrap();
     for (id, x, y) in [
         (&after["mission"]["step"][0]["id"], 10, 20),
         (&after["mission"]["end"][0]["id"], 100, 200),

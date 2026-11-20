@@ -37,7 +37,7 @@ fn admission_reports_all_bad_values_and_keeps_text_verbatim() {
         findings.iter().map(|f| f.code.as_str()).collect::<Vec<_>>(),
         ["invalid_input", "missing_input", "unknown_input"]
     );
-    assert!(findings.iter().all(|f| f.node_id == "input"));
+    assert!(findings.iter().all(|f| f.card_id == "input"));
     let supplied = BTreeMap::from([("topic".into(), "  hello\nworld  ".into())]);
     let resolved = resolve_run_inputs(&mission, &supplied);
     assert_eq!(

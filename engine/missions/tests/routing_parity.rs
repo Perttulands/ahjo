@@ -59,13 +59,13 @@ impl ahjo_mission_engine::Executor for ControlledLab {
         sink.emit(ahjo_mission_engine::ExecutionEvent {
             kind: "seat_dispatch".into(),
             seat_id: seat.id.clone(),
-            data: serde_json::json!({"dispatch_id":dispatch,"node_id":node,"seat_id":seat.id})
+            data: serde_json::json!({"dispatch_id":dispatch,"card_id":node,"seat_id":seat.id})
                 .as_object()
                 .unwrap()
                 .clone(),
         })?;
         self.0.wait(node, true);
-        sink.emit(ahjo_mission_engine::ExecutionEvent { kind: "seat_result".into(), seat_id: seat.id.clone(), data: serde_json::json!({"dispatch_id":dispatch,"node_id":node,"seat_id":seat.id,"status":"ok","sentinel":{"run_id":request.run_id,"status":"ok"}}).as_object().unwrap().clone() })?;
+        sink.emit(ahjo_mission_engine::ExecutionEvent { kind: "seat_result".into(), seat_id: seat.id.clone(), data: serde_json::json!({"dispatch_id":dispatch,"card_id":node,"seat_id":seat.id,"status":"ok","sentinel":{"run_id":request.run_id,"status":"ok"}}).as_object().unwrap().clone() })?;
         let text = format!(
             "lab-fake output from {} using {} for {}\nseat: {}\ninput:{}{}",
             if seat.agent.is_empty() {
@@ -102,7 +102,7 @@ fn wait_for(c: &Coordinator, id: &str, kind: &str, node: &str, deadline: Instant
         if let Some(event) = projection
             .events
             .iter()
-            .find(|event| event.kind == kind && event.node_id == node)
+            .find(|event| event.kind == kind && event.card_id == node)
         {
             return event.seq;
         }
@@ -138,7 +138,7 @@ fn reattach_keeps_other_completed_dispatches_when_one_fails() {
             (|| -> Result<StepResult, String> {
             let seat = &req.step.seats[0];
             let dispatch = format!("dsp_{}_{}", req.step.id, req.attempt);
-            sink.emit(ExecutionEvent { kind:"seat_dispatch".into(), seat_id:seat.id.clone(), data:serde_json::json!({"dispatch_id":dispatch,"node_id":req.step.id,"seat_id":seat.id}).as_object().unwrap().clone() }).map_err(|error| error.message)?;
+            sink.emit(ExecutionEvent { kind:"seat_dispatch".into(), seat_id:seat.id.clone(), data:serde_json::json!({"dispatch_id":dispatch,"card_id":req.step.id,"seat_id":seat.id}).as_object().unwrap().clone() }).map_err(|error| error.message)?;
             while !self.release.load(Ordering::Acquire) {
                 std::thread::sleep(Duration::from_millis(5));
             }
@@ -157,7 +157,7 @@ fn reattach_keeps_other_completed_dispatches_when_one_fails() {
         }
         fn reattach(&self, req: OpenDispatch) -> Result<StepResult, ahjo_mission_engine::Error> {
             (|| -> Result<StepResult, String> {
-                if self.fail && req.node_id == "fmn_other" {
+                if self.fail && req.step_id == "fmn_other" {
                     return Err("capture unavailable".into());
                 }
                 Ok(StepResult {
@@ -256,7 +256,7 @@ fn reattach_keeps_other_completed_dispatches_when_one_fails() {
             assert!(
                 p.events
                     .iter()
-                    .any(|e| e.kind == "node_output" && e.node_id == "fmn_work")
+                    .any(|e| e.kind == "card_output" && e.card_id == "fmn_work")
             );
             break;
         }
@@ -273,7 +273,7 @@ fn reattach_keeps_other_completed_dispatches_when_one_fails() {
         .unwrap();
     let remaining = block.data["open_dispatches"].as_array().unwrap();
     assert_eq!(remaining.len(), 1);
-    assert_eq!(remaining[0]["node_id"], "fmn_other");
+    assert_eq!(remaining[0]["card_id"], "fmn_other");
     loop {
         match c.resume(
             &id,
@@ -383,8 +383,8 @@ fn restart_cuts_preserve_branch_and_human_gate_outcomes() {
     ) -> (String, Vec<String>, BTreeMap<String, usize>) {
         let mut counts = BTreeMap::new();
         for event in &p.events {
-            if event.kind == "node_output" {
-                *counts.entry(event.node_id.clone()).or_default() += 1;
+            if event.kind == "card_output" {
+                *counts.entry(event.card_id.clone()).or_default() += 1;
             }
         }
         (
@@ -467,7 +467,7 @@ fn restart_cuts_preserve_branch_and_human_gate_outcomes() {
             for line in &lines[..cut] {
                 let event: Value = serde_json::from_str(line).unwrap();
                 if event["type"] == "folder_attempt_started" {
-                    let node = event["node_id"].as_str().unwrap();
+                    let node = event["card_id"].as_str().unwrap();
                     let attempt = event["attempt"].as_i64().unwrap();
                     let copy = scratch
                         .0
@@ -556,16 +556,16 @@ fn fan_out_runs_concurrently_and_join_waits_for_both() {
             })
             .unwrap();
         let deadline = start + Duration::from_secs(10);
-        wait_for(&c, &id, "node_started", "fmn_a", deadline);
-        wait_for(&c, &id, "node_started", "fmn_b", deadline);
+        wait_for(&c, &id, "card_started", "fmn_a", deadline);
+        wait_for(&c, &id, "card_started", "fmn_b", deadline);
         let (first, second) = if b_first {
             ("fmn_b", "fmn_a")
         } else {
             ("fmn_a", "fmn_b")
         };
         control.release(first, true, true);
-        wait_for(&c, &id, "node_output", first, deadline);
-        wait_for(&c, &id, "node_waiting", "fmn_join", deadline);
+        wait_for(&c, &id, "card_output", first, deadline);
+        wait_for(&c, &id, "card_waiting", "fmn_join", deadline);
         control.release(second, true, true);
         let projection = loop {
             let p = c.run(&id).unwrap();
@@ -580,21 +580,21 @@ fn fan_out_runs_concurrently_and_join_waits_for_both() {
         let seq = |kind: &str, node: &str| {
             events
                 .iter()
-                .find(|e| e.kind == kind && e.node_id == node)
+                .find(|e| e.kind == kind && e.card_id == node)
                 .unwrap()
                 .seq
         };
-        assert!(seq("run_started", "") < seq("node_started", "inp_hello"));
-        assert!(seq("node_output", "inp_hello") < seq("node_started", "fmn_a"));
-        assert!(seq("node_output", "inp_hello") < seq("node_started", "fmn_b"));
-        assert!(seq("node_output", first) < seq("node_waiting", "fmn_join"));
-        assert!(seq("node_waiting", "fmn_join") < seq("node_output", second));
-        assert!(seq("node_output", "fmn_join") < seq("run_succeeded", ""));
-        assert!(seq("node_started", "fmn_a") < seq("node_output", "fmn_b"));
-        assert!(seq("node_started", "fmn_b") < seq("node_output", "fmn_a"));
+        assert!(seq("run_started", "") < seq("card_started", "inp_hello"));
+        assert!(seq("card_output", "inp_hello") < seq("card_started", "fmn_a"));
+        assert!(seq("card_output", "inp_hello") < seq("card_started", "fmn_b"));
+        assert!(seq("card_output", first) < seq("card_waiting", "fmn_join"));
+        assert!(seq("card_waiting", "fmn_join") < seq("card_output", second));
+        assert!(seq("card_output", "fmn_join") < seq("run_succeeded", ""));
+        assert!(seq("card_started", "fmn_a") < seq("card_output", "fmn_b"));
+        assert!(seq("card_started", "fmn_b") < seq("card_output", "fmn_a"));
         assert!(
-            seq("node_started", "fmn_join")
-                > seq("node_output", "fmn_a").max(seq("node_output", "fmn_b"))
+            seq("card_started", "fmn_join")
+                > seq("card_output", "fmn_a").max(seq("card_output", "fmn_b"))
         );
         let expected: Vec<Value> = include_str!("parity/runs/archon-ledgers/fan-out-join.ndjson")
             .lines()
@@ -713,7 +713,7 @@ fn human_answer_routes_while_another_branch_runs_and_rejection_waits() {
                 })
                 .unwrap();
             let deadline = Instant::now() + Duration::from_secs(20);
-            wait_for(&c, &id, "node_started", "fmn_other", deadline);
+            wait_for(&c, &id, "card_started", "fmn_other", deadline);
             let requested = wait_for(&c, &id, "human_input_requested", "gate_review", deadline);
             if dispatch_before {
                 control.release("fmn_other", true, false);
@@ -742,7 +742,7 @@ fn human_answer_routes_while_another_branch_runs_and_rejection_waits() {
             let dispatch = wait_for(&c, &id, "seat_dispatch", "fmn_other", deadline);
             assert_eq!(dispatch < decision, dispatch_before);
             control.release("fmn_other", false, true);
-            let output = wait_for(&c, &id, "node_output", "fmn_other", deadline);
+            let output = wait_for(&c, &id, "card_output", "fmn_other", deadline);
             assert!(decision < output);
             let terminal = wait_for(
                 &c,
@@ -760,13 +760,13 @@ fn human_answer_routes_while_another_branch_runs_and_rejection_waits() {
                 deadline,
             );
             assert!(output < terminal);
-            let input_start = wait_for(&c, &id, "node_started", "inp_hello", deadline);
-            let input_output = wait_for(&c, &id, "node_output", "inp_hello", deadline);
-            let work_start = wait_for(&c, &id, "node_started", "fmn_work", deadline);
-            let work_output = wait_for(&c, &id, "node_output", "fmn_work", deadline);
+            let input_start = wait_for(&c, &id, "card_started", "inp_hello", deadline);
+            let input_output = wait_for(&c, &id, "card_output", "inp_hello", deadline);
+            let work_start = wait_for(&c, &id, "card_started", "fmn_work", deadline);
+            let work_output = wait_for(&c, &id, "card_output", "fmn_work", deadline);
             let gate_start = wait_for(&c, &id, "gate_evaluating", "gate_review", deadline);
             assert!(input_start < input_output && input_output < work_start);
-            assert!(input_output < wait_for(&c, &id, "node_started", "fmn_other", deadline));
+            assert!(input_output < wait_for(&c, &id, "card_started", "fmn_other", deadline));
             assert!(work_output < gate_start && gate_start < requested && requested < decision);
             if verdict == "fail" {
                 let lines =
@@ -1159,7 +1159,7 @@ fn reopening_retries_an_open_attempt_on_its_original_inputs() {
         .collect();
     let start = events
         .iter()
-        .position(|event| event["type"] == "node_started" && event["node_id"] == "fmn_work")
+        .position(|event| event["type"] == "card_started" && event["card_id"] == "fmn_work")
         .unwrap();
     let kept = text.lines().take(start + 1).collect::<Vec<_>>().join("\n") + "\n";
     std::fs::write(&path, kept).unwrap();
@@ -1180,8 +1180,8 @@ fn reopening_retries_an_open_attempt_on_its_original_inputs() {
                 .events
                 .iter()
                 .find(|event| {
-                    event.kind == "node_started"
-                        && event.node_id == "fmn_work"
+                    event.kind == "card_started"
+                        && event.card_id == "fmn_work"
                         && event.attempt == 2
                 })
                 .unwrap();
@@ -1220,7 +1220,7 @@ fn replay_blocks_instead_of_succeeding_when_an_output_payload_is_missing() {
         .collect();
     let output = events
         .iter()
-        .position(|event| event["type"] == "node_output" && event["node_id"] == "fmn_work")
+        .position(|event| event["type"] == "card_output" && event["card_id"] == "fmn_work")
         .unwrap();
     events.truncate(output + 1);
     events[output]["data"]["outputs"] = serde_json::json!({});
@@ -1327,13 +1327,13 @@ fn a_step_error_is_recorded_while_other_work_finishes_and_resume_retries_it() {
     let failure = blocked
         .events
         .iter()
-        .find(|event| event.kind == "error" && event.node_id == "fmn_work")
+        .find(|event| event.kind == "error" && event.card_id == "fmn_work")
         .unwrap()
         .seq;
     let other = blocked
         .events
         .iter()
-        .find(|event| event.kind == "node_output" && event.node_id == "fmn_other")
+        .find(|event| event.kind == "card_output" && event.card_id == "fmn_other")
         .unwrap()
         .seq;
     assert!(failure < other);
@@ -1354,12 +1354,12 @@ fn a_step_error_is_recorded_while_other_work_finishes_and_resume_retries_it() {
             assert_eq!(
                 p.events
                     .iter()
-                    .filter(|event| event.kind == "node_started" && event.node_id == "fmn_other")
+                    .filter(|event| event.kind == "card_started" && event.card_id == "fmn_other")
                     .count(),
                 1
             );
-            assert!(p.events.iter().any(|event| event.kind == "node_started"
-                && event.node_id == "fmn_work"
+            assert!(p.events.iter().any(|event| event.kind == "card_started"
+                && event.card_id == "fmn_work"
                 && event.attempt == 2));
             break;
         }
@@ -1416,12 +1416,12 @@ fn recovery_drains_started_work_without_retrying_a_recorded_error() {
         .collect();
     let failure = events
         .iter()
-        .position(|e| e["type"] == "error" && e["node_id"] == "fmn_work")
+        .position(|e| e["type"] == "error" && e["card_id"] == "fmn_work")
         .unwrap();
     assert!(
         events[..failure]
             .iter()
-            .any(|e| e["type"] == "node_started" && e["node_id"] == "fmn_other")
+            .any(|e| e["type"] == "card_started" && e["card_id"] == "fmn_other")
     );
     std::fs::write(
         &path,
@@ -1447,19 +1447,19 @@ fn recovery_drains_started_work_without_retrying_a_recorded_error() {
             assert!(
                 p.events
                     .iter()
-                    .any(|e| e.kind == "node_output" && e.node_id == "fmn_other")
+                    .any(|e| e.kind == "card_output" && e.card_id == "fmn_other")
             );
             assert_eq!(
                 p.events
                     .iter()
-                    .filter(|e| e.kind == "node_started" && e.node_id == "fmn_work")
+                    .filter(|e| e.kind == "card_started" && e.card_id == "fmn_work")
                     .count(),
                 2,
                 "status {} events {:?}",
                 p.status,
                 p.events
                     .iter()
-                    .map(|e| (&e.kind, &e.node_id, e.attempt))
+                    .map(|e| (&e.kind, &e.card_id, e.attempt))
                     .collect::<Vec<_>>()
             );
             break;

@@ -140,7 +140,7 @@ fn canvas_note_pin_opens_thread_and_preserves_edits(cx: &mut TestAppContext) {
             .as_array()
             .into_iter()
             .flatten()
-            .find(|thread| thread["node_id"] == "fmn_work")
+            .find(|thread| thread["card_id"] == "fmn_work")
             .and_then(|thread| thread["entries"].as_array())
             .and_then(|entries| entries.first())
         {
@@ -201,7 +201,7 @@ fn canvas_note_pin_opens_thread_and_preserves_edits(cx: &mut TestAppContext) {
         .as_array()
         .unwrap()
         .iter()
-        .find(|thread| thread["node_id"] == "fmn_work")
+        .find(|thread| thread["card_id"] == "fmn_work")
         .unwrap()["entries"]
         .as_array()
         .unwrap();

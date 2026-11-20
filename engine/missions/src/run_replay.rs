@@ -1,5 +1,5 @@
 //! Rebuild pending deliveries and open work in ledger order.
-use crate::graph::{endpoint_node, endpoint_port, judge_chain, outgoing, outgoing_from_port};
+use crate::graph::{endpoint_card, endpoint_port, judge_chain, outgoing, outgoing_from_port};
 use crate::{GateFeedback, GateResponse, RoutedInput, RunEvent, merge_port_inputs};
 use ahjo_mission_model::{Mission, PublicOrigin};
 use std::collections::{BTreeMap, BTreeSet, HashSet, VecDeque};
@@ -39,26 +39,26 @@ impl Replay {
             .collect();
         for event in events {
             match event.kind.as_str() {
-                "node_started"
-                    if mission.step(&event.node_id).is_some()
-                        && !judges.contains(event.node_id.as_str()) =>
+                "card_started"
+                    if mission.step(&event.card_id).is_some()
+                        && !judges.contains(event.card_id.as_str()) =>
                 {
-                    state.attempts.insert(event.node_id.clone(), event.attempt);
-                    if !state.open.contains_key(&event.node_id)
-                        && let Some(ports) = state.ports.get_mut(&event.node_id)
+                    state.attempts.insert(event.card_id.clone(), event.attempt);
+                    if !state.open.contains_key(&event.card_id)
+                        && let Some(ports) = state.ports.get_mut(&event.card_id)
                     {
                         for (_, unread) in ports.values_mut() {
                             *unread = false;
                         }
                     }
-                    state.open.insert(event.node_id.clone(), event.clone());
+                    state.open.insert(event.card_id.clone(), event.clone());
                 }
-                "node_output" => {
-                    state.open.remove(&event.node_id);
-                    if judges.contains(event.node_id.as_str()) {
+                "card_output" => {
+                    state.open.remove(&event.card_id);
+                    if judges.contains(event.card_id.as_str()) {
                         continue;
                     }
-                    if let Some(step) = mission.step(&event.node_id) {
+                    if let Some(step) = mission.step(&event.card_id) {
                         let outputs = event
                             .data
                             .get("outputs")
@@ -66,12 +66,12 @@ impl Replay {
                         if step.outputs.iter().any(|port| {
                             !outputs.is_some_and(|outputs| outputs.contains_key(&port.id))
                         }) {
-                            state.unfinished.insert(event.node_id.clone());
+                            state.unfinished.insert(event.card_id.clone());
                         } else {
-                            state.unfinished.remove(&event.node_id);
+                            state.unfinished.remove(&event.card_id);
                         }
                     }
-                    for edge in outgoing(mission, &event.node_id) {
+                    for edge in outgoing(mission, &event.card_id) {
                         let port = endpoint_port(&edge.from);
                         let Some(payload) = event.data.get("outputs").and_then(|v| v.get(port))
                         else {
@@ -79,7 +79,7 @@ impl Replay {
                         };
                         let input = RoutedInput {
                             edge_id: edge.id.clone(),
-                            from_node_id: event.node_id.clone(),
+                            from_card_id: event.card_id.clone(),
                             from_port_id: port.into(),
                             to_port_id: endpoint_port(&edge.to).into(),
                             text: payload["text"].as_str().unwrap_or("").into(),
@@ -94,7 +94,7 @@ impl Replay {
                             artifact_ref: payload["artifact_ref"].as_str().unwrap_or("").into(),
                             kind: payload["kind"].as_str().unwrap_or("").into(),
                             origin: Some(PublicOrigin {
-                                node_id: event.node_id.clone(),
+                                card_id: event.card_id.clone(),
                                 port_id: port.into(),
                                 attempt: event.attempt,
                             }),
@@ -106,8 +106,8 @@ impl Replay {
                 // A pick settles the step's pending send-back, as its output
                 // would: the step runs no more on those inputs.
                 "pick_started" => {
-                    state.open.remove(&event.node_id);
-                    if let Some(ports) = state.ports.get_mut(&event.node_id) {
+                    state.open.remove(&event.card_id);
+                    if let Some(ports) = state.ports.get_mut(&event.card_id) {
                         for (_, unread) in ports.values_mut() {
                             *unread = false;
                         }
@@ -228,7 +228,7 @@ impl Replay {
                         }
                         if route == "fail" {
                             next.edge_id = edge.id.clone();
-                            next.from_node_id = event.gate_id.clone();
+                            next.from_card_id = event.gate_id.clone();
                             next.from_port_id = route.into();
                         }
                         next.to_port_id = endpoint_port(&edge.to).into();
@@ -249,7 +249,7 @@ impl Replay {
         reason: &str,
         event: &RunEvent,
     ) {
-        let node = endpoint_node(endpoint);
+        let node = endpoint_card(endpoint);
         if mission.gate(node).is_some() {
             self.queue.entry(node.into()).or_default().push_back(input);
         } else if let Some(end) = mission.end(node) {
@@ -333,7 +333,7 @@ pub(crate) fn note_waiting(
                 id,
                 control,
                 event(
-                    "node_waiting",
+                    "card_waiting",
                     node,
                     0,
                     json!({"needed_inputs":missing.len(),"ready_inputs":ports.len(),"total_inputs":step.inputs.len(),"waiting_for":missing}),
@@ -355,7 +355,7 @@ mod tests {
             seq,
             run_id: "run_test".into(),
             kind: kind.into(),
-            node_id: node.into(),
+            card_id: node.into(),
             data: data.as_object().unwrap().clone(),
             ..Default::default()
         }
@@ -381,14 +381,14 @@ mod tests {
         let output = |seq, text| {
             ev(
                 seq,
-                "node_output",
+                "card_output",
                 "input",
                 json!({"outputs":{"out":{"text":text}}}),
             )
         };
         let started = ev(
             2,
-            "node_started",
+            "card_started",
             "work",
             json!({"input_refs":[{"text":"first"}]}),
         );
@@ -398,7 +398,7 @@ mod tests {
                 output(1, "first"),
                 started,
                 output(3, "second"),
-                ev(4, "node_output", "work", json!({"outputs":{}})),
+                ev(4, "card_output", "work", json!({"outputs":{}})),
             ],
         );
         assert_eq!(replay.ports["work"]["in"].0.text, "second");

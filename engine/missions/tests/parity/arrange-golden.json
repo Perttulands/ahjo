@@ -68,7 +68,7 @@
       {
         "id": "limit",
         "title": "Rounds",
-        "target": "work",
+        "scope": "work",
         "rounds": 3
       }
     ],

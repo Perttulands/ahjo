@@ -1,4 +1,4 @@
-//! Node ids End nodes and Limit cards share with other nodes, and End
+//! Card ids End cards and Limit cards share with other cards, and End
 //! outcomes.
 
 use std::collections::HashMap;
@@ -17,12 +17,12 @@ pub fn findings(mission: &Mission) -> Vec<Finding> {
 
     let mut findings = Vec::new();
     for end in &mission.ends {
-        findings.extend(claim(&mut seen, &end.id, "End", "End node"));
+        findings.extend(claim(&mut seen, &end.id, "End", "End card"));
         if end.outcome == EndOutcome::Unset {
             findings.push(Finding::new(
                 Code::InvalidEnd,
                 &end.id,
-                format!("End node {} needs an outcome", mission.node_name(&end.id)),
+                format!("End card {} needs an outcome", mission.card_name(&end.id)),
             ));
         }
     }
@@ -32,7 +32,7 @@ pub fn findings(mission: &Mission) -> Vec<Finding> {
     findings
 }
 
-/// Claims a node id for an End node or Limit card, or says whose it is.
+/// Claims a card id for an End card or Limit card, or says whose it is.
 fn claim<'a>(
     seen: &mut HashMap<&'a str, &'static str>,
     id: &'a str,
@@ -44,9 +44,9 @@ fn claim<'a>(
     }
     if let Some(first) = seen.get(id) {
         return Some(Finding::new(
-            Code::DuplicateNodeId,
+            Code::DuplicateCardId,
             id,
-            format!("{noun} id {id:?} duplicates an existing {first} node id"),
+            format!("{noun} id {id:?} duplicates an existing {first} card id"),
         ));
     }
     seen.insert(id, kind);

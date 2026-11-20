@@ -123,7 +123,7 @@ pub fn execute(
                 kind: "run_failed".into(),
                 timestamp: now(),
                 actor,
-                node_id: end_id.clone(),
+                card_id: end_id.clone(),
                 gate_id: gate_id.clone(),
                 data: json!({"final":true,"end_id":end_id,"gate_id":gate_id,"reason":reason,"end_ids":end_ids,"code":"path_rejected"})
                     .as_object()
@@ -131,9 +131,9 @@ pub fn execute(
                     .clone(),
                 ..Default::default()
             },
-            Ok(Outcome::Escalated(node_id)) => RunEvent {
+            Ok(Outcome::Escalated(card_id)) => RunEvent {
                 kind: "run_blocked".into(),
-                node_id,
+                card_id,
                 timestamp: now(),
                 data: json!({"reason":"the agent asked for help","resume_allowed":true})
                     .as_object()
@@ -143,17 +143,17 @@ pub fn execute(
             },
             Ok(Outcome::Starved(nodes)) => {
                 let (node, _, missing) = &nodes[0];
-                let waiting: Vec<_> = nodes.iter().map(|(id, title, missing)| json!({"node_id":id,"title":title,"missing_inputs":missing})).collect();
-                RunEvent { kind: "run_blocked".into(), node_id: node.clone(), timestamp: now(), data: json!({"code":"reachable_node_starved","reason":if missing.len() == 1 { "it waits on an input no earlier step produces; wire one to it and start a new run".to_owned() } else { format!("it waits on {} inputs no earlier step produces; wire them and start a new run", missing.len()) },"blocked_node_id":node,"blocked_gate_id":"","boundary":"wiring","waiting_nodes":waiting,"recoverable":false,"resume_allowed":false,"resume_policy":"authoring","open_dispatches":[],"next_epoch":1}).as_object().unwrap().clone(), ..Default::default() }
+                let waiting: Vec<_> = nodes.iter().map(|(id, title, missing)| json!({"card_id":id,"title":title,"missing_inputs":missing})).collect();
+                RunEvent { kind: "run_blocked".into(), card_id: node.clone(), timestamp: now(), data: json!({"code":"reachable_card_starved","reason":if missing.len() == 1 { "it waits on an input no earlier step produces; wire one to it and start a new run".to_owned() } else { format!("it waits on {} inputs no earlier step produces; wire them and start a new run", missing.len()) },"blocked_card_id":node,"blocked_gate_id":"","boundary":"wiring","waiting_cards":waiting,"recoverable":false,"resume_allowed":false,"resume_policy":"authoring","open_dispatches":[],"next_epoch":1}).as_object().unwrap().clone(), ..Default::default() }
             },
             Ok(Outcome::Unfinished(nodes)) => {
                 let reason = "the run has unfinished work here; resume to continue it".to_owned();
-                if let Err(error) = c.append(&id, RunEvent { kind: "error".into(), node_id: nodes[0].clone(), timestamp: now(), data: json!({"code":"run_work_unfinished","message":reason,"reason":reason,"boundary":"engine","node_id":nodes[0],"recoverable":true}).as_object().unwrap().clone(), ..Default::default() }) { eprintln!("ahjo: cannot record run {id} unfinished work: {error}"); }
-                RunEvent { kind: "run_blocked".into(), node_id: nodes[0].clone(), timestamp: now(), data: json!({"code":"run_work_unfinished","reason":reason,"blocked_node_id":nodes[0],"resume_allowed":true,"resume_policy":"explicit"}).as_object().unwrap().clone(), ..Default::default() }
+                if let Err(error) = c.append(&id, RunEvent { kind: "error".into(), card_id: nodes[0].clone(), timestamp: now(), data: json!({"code":"run_work_unfinished","message":reason,"reason":reason,"boundary":"engine","card_id":nodes[0],"recoverable":true}).as_object().unwrap().clone(), ..Default::default() }) { eprintln!("ahjo: cannot record run {id} unfinished work: {error}"); }
+                RunEvent { kind: "run_blocked".into(), card_id: nodes[0].clone(), timestamp: now(), data: json!({"code":"run_work_unfinished","reason":reason,"blocked_card_id":nodes[0],"resume_allowed":true,"resume_policy":"explicit"}).as_object().unwrap().clone(), ..Default::default() }
             },
             Ok(Outcome::Limit(stop)) => match crate::run_limit::final_event(&c, &id, &mission, &stop) {
                 Ok(event) => event,
-                Err(error) => RunEvent { kind:"run_blocked".into(), node_id: stop.node.clone(), timestamp:now(), data:json!({"code":"executor_failed","reason":error.to_string(),"resume_allowed":true,"resume_policy":"explicit"}).as_object().unwrap().clone(), ..Default::default() },
+                Err(error) => RunEvent { kind:"run_blocked".into(), card_id: stop.step_id.clone(), timestamp:now(), data:json!({"code":"executor_failed","reason":error.to_string(),"resume_allowed":true,"resume_policy":"explicit"}).as_object().unwrap().clone(), ..Default::default() },
             },
             Ok(Outcome::Stopped) => unreachable!("stopped only during shutdown"),
             Err(e) => {
@@ -161,8 +161,8 @@ pub fn execute(
                 let code = error_code(&detail);
                 let gate_id = detail.strip_prefix("invalid_judge_result[").or_else(|| detail.strip_prefix("invalid_judge_pick[")).and_then(|s| s.split_once(']')).map(|(gate, _)| gate).unwrap_or("").to_owned();
                 let already_recorded = c.ledger(&id).and_then(|ledger| ledger.read().map_err(crate::error::to_io)).is_ok_and(|events| events.iter().rev().take_while(|event| event.kind != "run_resumed" && event.kind != "run_started").any(|event| event.kind == "error" && event.data.get("detail").and_then(|value| value.as_str()) == Some(&detail)));
-                let mut blocked_node = if gate_id.is_empty() { c.ledger(&id).and_then(|ledger| ledger.read().map_err(crate::error::to_io)).ok().and_then(|events| events.into_iter().rev().find(|event| event.kind == "error" && event.data.get("detail").and_then(|value| value.as_str()) == Some(&detail))).map(|event| event.node_id).unwrap_or_default() } else { gate_id.clone() };
-                if !already_recorded && !["invalid_judge_result", "invalid_judge_pick", "reachable_node_starved", "run_work_unfinished"].contains(&code) && let Err(error) = c.append(
+                let mut blocked_node = if gate_id.is_empty() { c.ledger(&id).and_then(|ledger| ledger.read().map_err(crate::error::to_io)).ok().and_then(|events| events.into_iter().rev().find(|event| event.kind == "error" && event.data.get("detail").and_then(|value| value.as_str()) == Some(&detail))).map(|event| event.card_id).unwrap_or_default() } else { gate_id.clone() };
+                if !already_recorded && !["invalid_judge_result", "invalid_judge_pick", "reachable_card_starved", "run_work_unfinished"].contains(&code) && let Err(error) = c.append(
                     &id,
                     RunEvent {
                         kind: "error".into(),
@@ -179,22 +179,22 @@ pub fn execute(
                 let pending = if ["output_not_kept", "invalid_output_ref", "unavailable_output_ref"].contains(&code) {
                     c.ledger(&id).and_then(|ledger| ledger.read().map_err(crate::error::to_io)).ok().and_then(|events| {
                         events.iter().rev().find(|event| event.kind == "output_capture_pending"
-                            && (blocked_node.is_empty() || event.node_id == blocked_node)
+                            && (blocked_node.is_empty() || event.card_id == blocked_node)
                             && !crate::run_capture::discarded(&events, event)
-                            && !events.iter().any(|e| (e.kind == "node_output" || e.kind == "node_output_pending") && e.node_id == event.node_id && e.attempt == event.attempt)).cloned()
+                            && !events.iter().any(|e| (e.kind == "card_output" || e.kind == "card_output_pending") && e.card_id == event.card_id && e.attempt == event.attempt)).cloned()
                     }).map(|event| {
-                        if blocked_node.is_empty() { blocked_node.clone_from(&event.node_id); }
-                        json!({"node_id":event.node_id,"attempt":event.attempt,"output":event.data})
+                        if blocked_node.is_empty() { blocked_node.clone_from(&event.card_id); }
+                        json!({"step_id":event.card_id,"attempt":event.attempt,"output":event.data})
                     })
                 } else { None };
-                let mut data = json!({"code":code,"reason":detail,"detail":e.to_string(),"blocked_node_id":blocked_node,"blocked_gate_id":gate_id,"resume_allowed":true,"resume_policy":"explicit"}).as_object().unwrap().clone();
+                let mut data = json!({"code":code,"reason":detail,"detail":e.to_string(),"blocked_card_id":blocked_node,"blocked_gate_id":gate_id,"resume_allowed":true,"resume_policy":"explicit"}).as_object().unwrap().clone();
                 if let Some(pending) = pending { data.insert("pending_output".into(), pending); }
-                let open: Vec<_> = c.ledger(&id).and_then(|ledger| ledger.read().map_err(crate::error::to_io)).ok().map(|events| crate::run_open_dispatch::unresolved(&events).into_iter().filter(|event| event.node_id == blocked_node && !crate::run_open_dispatch::failed_completion(&events, event)).map(|event| event.data).collect()).unwrap_or_default();
+                let open: Vec<_> = c.ledger(&id).and_then(|ledger| ledger.read().map_err(crate::error::to_io)).ok().map(|events| crate::run_open_dispatch::unresolved(&events).into_iter().filter(|event| event.card_id == blocked_node && !crate::run_open_dispatch::failed_completion(&events, event)).map(|event| event.data).collect()).unwrap_or_default();
                 data.insert("open_dispatches".into(), json!(open));
                 RunEvent {
                     kind: "run_blocked".into(),
                     gate_id: gate_id.clone(),
-                    node_id: blocked_node.clone(),
+                    card_id: blocked_node.clone(),
                     timestamp: now(),
                     data,
                     ..Default::default()
@@ -260,7 +260,7 @@ pub(crate) fn error_code(detail: &str) -> &'static str {
         "invalid_judge_result",
         "invalid_judge_pick",
         "gate_evaluator_error",
-        "reachable_node_starved",
+        "reachable_card_starved",
         "run_work_unfinished",
         "run_finalization_interrupted",
         crate::run_folder::CONFLICT,
@@ -285,7 +285,7 @@ fn agent_status(detail: &str) -> Option<&'static str> {
 pub(crate) fn event(kind: &str, node: &str, attempt: i64, data: serde_json::Value) -> RunEvent {
     RunEvent {
         kind: kind.into(),
-        node_id: node.into(),
+        card_id: node.into(),
         attempt,
         timestamp: now(),
         data: data.as_object().unwrap().clone(),
@@ -302,7 +302,7 @@ pub(crate) fn append_live(
 ) -> io::Result<bool> {
     let _guard = control.done.lock().unwrap();
     if control.canceled.load(Ordering::Acquire)
-        || (matches!(event.kind.as_str(), "node_started" | "seat_dispatch")
+        || (matches!(event.kind.as_str(), "card_started" | "seat_dispatch")
             && control.stopping.load(Ordering::Acquire))
     {
         return Ok(false);
@@ -331,9 +331,9 @@ fn execute_inner(
     if events
         .iter()
         .rev()
-        .find(|e| e.node_id == req.step_id && (e.kind == "node_output" || e.kind == "node_started"))
+        .find(|e| e.card_id == req.step_id && (e.kind == "card_output" || e.kind == "card_started"))
         .is_some_and(|e| {
-            e.kind == "node_output"
+            e.kind == "card_output"
                 && mission.step(&req.step_id).is_some_and(|step| {
                     step.outputs.iter().all(|port| {
                         e.data
@@ -354,7 +354,7 @@ fn execute_inner(
         .read()
         .map_err(crate::error::to_io)?
         .iter()
-        .filter(|event| event.kind == "node_started" && event.node_id == node)
+        .filter(|event| event.kind == "card_started" && event.card_id == node)
         .map(|event| event.attempt)
         .max()
         .unwrap_or(0)
@@ -381,21 +381,21 @@ fn execute_inner(
     )?;
     let text = result.text;
     if let Some(escalation) = crate::parse_escalation(&text, id) {
-        let node_id = if escalation.node_id.is_empty() {
+        let card_id = if escalation.card_id.is_empty() {
             node.clone()
         } else {
-            escalation.node_id
+            escalation.card_id
         };
         let mut raised = event(
             "escalation_raised",
-            &node_id,
+            &card_id,
             attempt,
             json!({"severity":escalation.severity,"reason":escalation.reason,"source":"agent","trigger":"sentinel","blocks":escalation.blocks}),
         );
         raised.gate_id = escalation.gate_id;
         append_live(c, id, control, raised)?;
         if escalation.blocks {
-            return Ok(Outcome::Escalated(node_id));
+            return Ok(Outcome::Escalated(card_id));
         }
     }
     crate::run_capture::publish(
@@ -406,7 +406,7 @@ fn execute_inner(
         &workspace,
         control,
         event(
-            "node_output",
+            "card_output",
             &node,
             attempt,
             json!({"status":result.status,"text":text,"outputs":result.outputs,"report_ref":format!("lab://{id}/{node}/report.md")}),

@@ -3,7 +3,7 @@
 //! them, gates inline with their deciders and routes, judges nested under
 //! their gate, and loops as references back to earlier steps. The walk
 //! goes breadth first along outputs, passes before fails, never enters a
-//! judge chain as a step, and numbers a node once, where it is first met.
+//! judge chain as a step, and numbers a card once, where it is first met.
 
 use crate::{Connection, EndOutcome, GateKind, Mission};
 use std::collections::{HashMap, VecDeque};
@@ -11,15 +11,15 @@ use std::collections::{HashMap, VecDeque};
 #[derive(Clone, Debug, PartialEq)]
 pub enum Target {
     Step {
-        node: String,
+        card_id: String,
         number: Option<usize>,
         title: String,
         /// The route leads back to an earlier step (a loop).
         back: bool,
     },
-    /// An End node: this path ends there, `done` or `rejected`.
+    /// An End card: this path ends there, `done` or `rejected`.
     End {
-        node: String,
+        card_id: String,
         title: String,
         outcome: EndOutcome,
     },
@@ -73,7 +73,7 @@ pub struct Flow {
     pub judge_of: HashMap<String, String>,
 }
 
-fn node_of(endpoint: &str) -> &str {
+fn card_of(endpoint: &str) -> &str {
     endpoint.split(':').next().unwrap_or("")
 }
 
@@ -91,7 +91,7 @@ pub fn judge_chain(m: &Mission, gate: &str) -> Vec<String> {
     };
     let is_step = |id: &str| m.steps.iter().any(|f| f.id == id);
     let mut chain: Vec<String> = vec![];
-    let mut current = node_of(&send.to).to_string();
+    let mut current = card_of(&send.to).to_string();
     while !current.is_empty() && !chain.contains(&current) {
         if !is_step(&current) {
             return vec![];
@@ -100,14 +100,14 @@ pub fn judge_chain(m: &Mission, gate: &str) -> Vec<String> {
         let out: Vec<&Connection> = m
             .connections
             .iter()
-            .filter(|c| node_of(&c.from) == current)
+            .filter(|c| card_of(&c.from) == current)
             .collect();
         if out.iter().any(|c| c.to == socket) {
             return chain;
         }
         current = out
             .iter()
-            .map(|c| node_of(&c.to))
+            .map(|c| card_of(&c.to))
             .find(|n| is_step(n))
             .unwrap_or("")
             .to_string();
@@ -141,7 +141,7 @@ pub fn build(m: &Mission) -> Flow {
         m.connections
             .iter()
             .filter(|c| {
-                node_of(&c.from) == id && port_of(&c.from) != "judge" && port_of(&c.to) != "judge"
+                card_of(&c.from) == id && port_of(&c.from) != "judge" && port_of(&c.to) != "judge"
             })
             .collect()
     };
@@ -152,10 +152,10 @@ pub fn build(m: &Mission) -> Flow {
     // One output dispatches its siblings together; they share a number.
     let mut by_output: Vec<(String, Vec<String>)> = vec![];
     for c in &m.connections {
-        if port_of(&c.from) == "judge" || port_of(&c.to) == "judge" || !is_step(node_of(&c.to)) {
+        if port_of(&c.from) == "judge" || port_of(&c.to) == "judge" || !is_step(card_of(&c.to)) {
             continue;
         }
-        let to = node_of(&c.to).to_string();
+        let to = card_of(&c.to).to_string();
         match by_output.iter_mut().find(|(f, _)| *f == c.from) {
             Some((_, list)) if !list.contains(&to) => list.push(to),
             Some(_) => {}
@@ -192,7 +192,7 @@ pub fn build(m: &Mission) -> Flow {
                 .filter(|r| port_of(&r.from) != "fail")
                 .chain(routes.iter().filter(|r| port_of(&r.from) == "fail"));
             for r in onward {
-                queue.push_back(node_of(&r.to).to_string());
+                queue.push_back(card_of(&r.to).to_string());
             }
         }
         reached
@@ -201,7 +201,7 @@ pub fn build(m: &Mission) -> Flow {
     for card in &m.input_cards {
         let starts = work_routes(&card.id)
             .iter()
-            .map(|r| node_of(&r.to).to_string())
+            .map(|r| card_of(&r.to).to_string())
             .collect();
         order.push(walk(starts, &mut numbers));
     }
@@ -217,19 +217,19 @@ pub fn build(m: &Mission) -> Flow {
         routes
             .into_iter()
             .map(|r| {
-                let node = node_of(&r.to).to_string();
-                if let Some(end) = m.ends.iter().find(|e| e.id == node) {
+                let card = card_of(&r.to).to_string();
+                if let Some(end) = m.ends.iter().find(|e| e.id == card) {
                     return Target::End {
-                        node,
+                        card_id: card,
                         title: end.title.clone(),
                         outcome: end.outcome,
                     };
                 }
-                let number = numbers.get(&node).copied();
+                let number = numbers.get(&card).copied();
                 Target::Step {
-                    title: title_of(&node),
+                    title: title_of(&card),
                     back: number.is_some_and(|n| n <= from),
-                    node,
+                    card_id: card,
                     number,
                 }
             })

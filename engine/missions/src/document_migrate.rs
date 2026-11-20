@@ -63,6 +63,14 @@ pub(crate) fn upgrade_text(
                 upgrade_seats(document.as_table_mut(), &mut agent)?;
                 4
             }
+            (DocumentKind::Mission, 4) => {
+                upgrade_environment_and_scope(document.as_table_mut())?;
+                5
+            }
+            (DocumentKind::Layout, 2) => {
+                rename_field(document.as_table_mut(), "node", "card")?;
+                3
+            }
             (DocumentKind::Notes, 2) => {
                 rename_keys(document.as_table_mut(), false)?;
                 3
@@ -178,6 +186,18 @@ fn upgrade_seats(
         }
         rename_field(step, "slot", "seat")
     })
+}
+
+fn upgrade_environment_and_scope(mission: &mut dyn TableLike) -> Result<(), Error> {
+    if let Some(steps) = mission.get_mut("step") {
+        for_table_array(steps, &mut |step| {
+            rename_field(step, "device", "environment")
+        })?;
+    }
+    if let Some(limits) = mission.get_mut("limit") {
+        for_table_array(limits, &mut |limit| rename_field(limit, "target", "scope"))?;
+    }
+    Ok(())
 }
 
 fn for_table_array(

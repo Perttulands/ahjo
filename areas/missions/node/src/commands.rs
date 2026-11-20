@@ -305,7 +305,7 @@ fn note(m: &Missions, args: MissionNote) -> Result<MissionNoteReceipt, Error> {
         (None, None) => {
             let mission = m.store.read_mission(id)?;
             NotePatch::Append {
-                target: note_target(&mission, args.target.as_deref().unwrap_or_default())?,
+                target: note_target(&mission, args.on.as_deref().unwrap_or_default())?,
                 author,
                 text,
             }
@@ -386,10 +386,10 @@ fn edit_layout(m: &Missions, args: LayoutEdit) -> Result<LayoutShown, Error> {
     if args.change.arrange == Some(true) {
         return arrange(m, id, args.etag.as_deref());
     }
-    let patch = match (args.change.nodes, args.change.edges) {
-        (Some(nodes), _) => LayoutPatch::Nodes(nodes),
+    let patch = match (args.change.cards, args.change.edges) {
+        (Some(nodes), _) => LayoutPatch::Cards(nodes),
         (None, Some(edges)) => LayoutPatch::Edges(edges),
-        (None, None) => return Err(bad("layout needs nodes, edges or arrange")),
+        (None, None) => return Err(bad("layout needs cards, edges or arrange")),
     };
     let current = m.store.layout_edit(id)?;
     patch_layout(m, id, args.etag.as_deref().unwrap_or(&current.etag), patch)
@@ -398,12 +398,12 @@ fn edit_layout(m: &Missions, args: LayoutEdit) -> Result<LayoutShown, Error> {
 fn arrange(m: &Missions, id: &str, etag: Option<&str>) -> Result<LayoutShown, Error> {
     let current = m.store.layout_edit(id)?;
     let mission = m.store.read_mission(id)?;
-    let nodes = ahjo_mission_engine::arrange(&mission, &current.layout).nodes;
+    let nodes = ahjo_mission_engine::arrange(&mission, &current.layout).cards;
     patch_layout(
         m,
         id,
         etag.unwrap_or(&current.etag),
-        LayoutPatch::Nodes(nodes),
+        LayoutPatch::Cards(nodes),
     )
 }
 
@@ -667,7 +667,7 @@ async fn start_run(m: Missions, args: MissionRun) -> Result<MissionStarted, Erro
         repository: args.repository.unwrap_or_default(),
         base: args.base.unwrap_or_default(),
         request_id: args.request_id.unwrap_or_default(),
-        known_devices: Some(vec![]),
+        known_machines: Some(vec![]),
         inputs: args.inputs,
         context_paths: args.context_paths,
         ..Default::default()

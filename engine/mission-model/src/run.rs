@@ -27,12 +27,10 @@ pub struct RunStart {
     /// already made a run answers with that run instead of making another,
     /// so a client that lost the answer can safely send it again.
     pub request_id: String,
-    /// Every device of the fleet, online or not, filled in by the node only
-    /// when it knows them all. A step placed on another device is refused;
-    /// with `None` it is admitted and waits for its device. Names compare
-    /// exactly, as placement finds the step's node.
+    /// Known machine names, including machines that are offline. A step on an
+    /// unknown machine is refused. An offline environment can still be selected.
     #[serde(skip)]
-    pub known_devices: Option<Vec<String>>,
+    pub known_machines: Option<Vec<String>>,
 }
 
 /// A resume. A field the node does not know is refused, not dropped, so a
@@ -89,7 +87,7 @@ pub struct RunSummary {
 #[serde(rename_all = "snake_case")]
 pub struct RunSessionSummary {
     pub session_name: String,
-    pub node_id: String,
+    pub step_id: String,
     pub seat_id: String,
 }
 
@@ -129,7 +127,7 @@ pub struct RunOutput {
     pub name: String,
     pub kind: String,
     pub value: String,
-    pub node_id: String,
+    pub card_id: String,
     pub port_id: String,
     pub attempt: i64,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]

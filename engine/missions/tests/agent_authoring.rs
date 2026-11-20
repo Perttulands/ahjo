@@ -128,7 +128,7 @@ fn usage_reports_known_seats_and_unreadable_missions() {
     std::fs::write(
         missions.join("work.mission.toml"),
         r#"
-schema = 4
+schema = 5
 id = "msn_work"
 slug = "work"
 title = "Work"

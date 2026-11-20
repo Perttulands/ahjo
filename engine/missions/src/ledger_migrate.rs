@@ -77,7 +77,7 @@ fn migrate_run(runs: &Path, id: &str, ledger: &Path) -> io::Result<()> {
                     .bindings
                     .iter()
                     .find(|binding| {
-                        binding.node_id == node && binding.seat_id == seat && binding.agent == agent
+                        binding.step_id == node && binding.seat_id == seat && binding.agent == agent
                     })?
                     .agent_definition()
                     .ok()
@@ -166,6 +166,17 @@ fn upgrade_bindings(text: &str) -> Result<Option<String>, crate::Error> {
                 document_migrate::rename_field(binding, "agent_id", "agent")?;
             }
         }
+    }
+    if matches!(schema, Some(3..=5)) {
+        crate::write::table_arrays(&mut document, &["binding"]);
+        if let Some(bindings) = document
+            .get_mut("binding")
+            .and_then(Item::as_array_of_tables_mut)
+        {
+            for binding in bindings.iter_mut() {
+                document_migrate::rename_field(binding, "node_id", "step_id")?;
+            }
+        }
         document["schema"] = value(i64::from(crate::run_bindings::BINDINGS_SCHEMA));
     }
     let updated = document.to_string();
@@ -199,10 +210,113 @@ fn upgrade_ledger(text: &str) -> io::Result<Option<String>> {
         }
         changed |= rename_step_event(&mut event)?;
         changed |= rename_seat_event(&mut event, "type")?;
+        changed |= rename_card_event(&mut event, "type")?;
         out.push_str(&serde_json::to_string(&event)?);
         out.push('\n');
     }
     Ok(changed.then_some(out))
+}
+
+/// Rewrite the recorded graph identities while keeping user-authored text,
+/// stable identifiers and named input and output ports intact.
+pub(crate) fn rename_card_event(event: &mut Value, kind_field: &str) -> io::Result<bool> {
+    let Some(event) = event.as_object_mut() else {
+        return Ok(false);
+    };
+    let mut changed = rename_json_field(event, "node_id", "card_id")?;
+    let kind = event.get(kind_field).and_then(Value::as_str).unwrap_or("");
+    let new_kind = match kind {
+        "node_started" => "card_started",
+        "node_output" => "card_output",
+        "node_output_pending" => "card_output_pending",
+        "node_waiting" => "card_waiting",
+        kind => kind,
+    };
+    let identity = match new_kind {
+        "seat_dispatch" | "seat_result" | "adapter_send" | "pick_started" => "step_id",
+        _ => "card_id",
+    };
+    if kind != new_kind {
+        let new_kind = new_kind.to_owned();
+        event.insert(kind_field.into(), Value::String(new_kind));
+        changed = true;
+    }
+    if let Some(data) = event.get_mut("data") {
+        changed |= rename_card_data(data, identity)?;
+    }
+    Ok(changed)
+}
+
+pub(crate) fn rename_dispatch_environment(dispatch: &mut Map<String, Value>) -> io::Result<bool> {
+    let mut changed = rename_json_field(dispatch, "node_id", "step_id")?;
+    changed |= rename_json_field(dispatch, "place", "environment")?;
+    if let Some(turn) = dispatch.get_mut("turn").and_then(Value::as_object_mut) {
+        changed |= rename_json_field(turn, "node_id", "step_id")?;
+    }
+    Ok(changed)
+}
+
+fn rename_card_data(value: &mut Value, identity: &str) -> io::Result<bool> {
+    let mut changed = false;
+    match value {
+        Value::Array(items) => {
+            for item in items {
+                changed |= rename_card_data(item, identity)?;
+            }
+        }
+        Value::Object(fields) => {
+            for (old, new) in [
+                ("node_id", identity),
+                ("node_kind", "card_kind"),
+                ("from_node_id", "from_card_id"),
+                ("blocked_node_id", "blocked_card_id"),
+                ("source_node_id", "source_card_id"),
+                ("redispatch_node_id", "redispatch_step_id"),
+                ("folder_node", "folder_step_id"),
+                ("waiting_nodes", "waiting_cards"),
+                ("place", "environment"),
+            ] {
+                changed |= rename_json_field(fields, old, new)?;
+            }
+            for (field, old, new) in [
+                ("state", "waiting_for_device", "waiting_for_environment"),
+                ("code", "reachable_node_starved", "reachable_card_starved"),
+            ] {
+                if let Some(value) = fields.get_mut(field)
+                    && *value == old
+                {
+                    *value = Value::String(new.into());
+                    changed = true;
+                }
+            }
+            for (field, nested) in fields {
+                // Named inputs and ports are dictionaries selected by the
+                // mission author. Neither their keys nor their payloads are
+                // graph identifiers.
+                if matches!(field.as_str(), "inputs" | "outputs") && nested.is_object() {
+                    continue;
+                }
+                let identity = match field.as_str() {
+                    "open_dispatches" | "pending_output" | "pick" | "picks" | "turn" => "step_id",
+                    _ => "card_id",
+                };
+                changed |= rename_card_data(nested, identity)?;
+            }
+        }
+        _ => {}
+    }
+    Ok(changed)
+}
+
+fn rename_json_field(fields: &mut Map<String, Value>, old: &str, new: &str) -> io::Result<bool> {
+    let Some(previous) = fields.remove(old) else {
+        return Ok(false);
+    };
+    if fields.contains_key(new) {
+        return Err(invalid(&format!("both {old} and {new} are present")));
+    }
+    fields.insert(new.into(), previous);
+    Ok(true)
 }
 
 pub(crate) fn rename_seat_event(event: &mut Value, kind: &str) -> io::Result<bool> {
@@ -512,7 +626,7 @@ mod tests {
         assert_eq!(events[0]["data"]["step_id"], "fmn_keep");
         assert_eq!(events[0]["data"]["inputs"]["formation_id"], "formation");
         assert_eq!(events[0]["data"]["reason"], "formation");
-        assert_eq!(events[1]["data"]["node_kind"], "step");
+        assert_eq!(events[1]["data"]["card_kind"], "step");
         assert_eq!(events[1]["data"]["brief"]["goal"], "formation");
         assert_eq!(events[2]["data"]["kind"], "step");
         assert_eq!(events[2]["data"]["evidence"][0]["kind"], "step");
@@ -528,6 +642,41 @@ mod tests {
             "formation"
         );
         assert!(upgrade_ledger(&updated).unwrap().is_none());
+    }
+
+    #[test]
+    fn card_upgrade_keeps_machine_placement_and_authored_port_keys() {
+        let original = concat!(
+            r#"{"type":"slot_dispatch","node_id":"fmn_work","data":{"node_id":"fmn_work","slot_id":"old-seat","agent_id":"builder"}}"#,
+            "\n",
+            r#"{"type":"run_blocked","node_id":"fmn_work","data":{"blocked_node_id":"fmn_work","open_dispatches":[{"node_id":"fmn_work","place":"box/linux"}],"limit":{"node_id":"inp_first"},"pending_output":{"node_id":"fmn_work","output":{"outputs":{"node_id":{"text":"node_id","place":"stage"}}}}}}"#,
+            "\n",
+        );
+        let migrated = upgrade_ledger(original).unwrap().unwrap();
+        let mut events = migrated
+            .lines()
+            .map(|line| serde_json::from_str::<Value>(line).unwrap());
+        let dispatch = events.next().unwrap();
+        assert_eq!(dispatch["type"], "seat_dispatch");
+        assert_eq!(dispatch["card_id"], "fmn_work");
+        assert_eq!(dispatch["data"]["step_id"], "fmn_work");
+        assert_eq!(dispatch["data"]["seat_id"], "old-seat");
+        assert_eq!(dispatch["data"]["agent"], "builder");
+        let blocked = events.next().unwrap();
+        assert_eq!(blocked["card_id"], "fmn_work");
+        assert_eq!(blocked["data"]["blocked_card_id"], "fmn_work");
+        assert_eq!(blocked["data"]["open_dispatches"][0]["step_id"], "fmn_work");
+        assert_eq!(
+            blocked["data"]["open_dispatches"][0]["environment"],
+            "box/linux"
+        );
+        assert_eq!(blocked["data"]["limit"]["card_id"], "inp_first");
+        assert_eq!(blocked["data"]["pending_output"]["step_id"], "fmn_work");
+        assert_eq!(
+            blocked["data"]["pending_output"]["output"]["outputs"]["node_id"]["place"],
+            "stage"
+        );
+        assert!(upgrade_ledger(&migrated).unwrap().is_none());
     }
 
     #[test]

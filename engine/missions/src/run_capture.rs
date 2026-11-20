@@ -38,7 +38,7 @@ pub(crate) fn publish(
     control: &Control,
     output: RunEvent,
 ) -> io::Result<()> {
-    let Some(step) = mission.step(&output.node_id) else {
+    let Some(step) = mission.step(&output.card_id) else {
         return crate::run_workspace::publish_output(c, id, req, workspace, control, output);
     };
     if !step
@@ -78,7 +78,7 @@ fn validate_refs(step: &ahjo_mission_model::Step, output: &RunEvent) -> io::Resu
         if !path.is_absolute() || value.contains("://") || value.contains('\0') {
             return Err(io::Error::other(format!(
                 "invalid_output_ref: {} output {} requires an absolute path",
-                output.node_id, port.id
+                output.card_id, port.id
             )));
         }
         let meta = fs::metadata(path)
@@ -113,10 +113,10 @@ fn accept(
     mut output: RunEvent,
 ) -> io::Result<()> {
     let step = mission
-        .step(&output.node_id)
+        .step(&output.card_id)
         .ok_or_else(|| io::Error::other("missing step"))?;
     validate_refs(step, &output)?;
-    let attempt = attempt_dir(c, id, &output.node_id, output.attempt)?;
+    let attempt = attempt_dir(c, id, &output.card_id, output.attempt)?;
     fs::create_dir_all(&attempt).map_err(|e| io::Error::other(format!("output_not_kept: {e}")))?;
     let target = attempt.join("outputs");
     if let Ok(meta) = fs::symlink_metadata(&target)
@@ -143,7 +143,7 @@ fn accept(
         remaining: crate::kept_copy::CAPTURE_BYTES.saturating_sub(used(
             c,
             id,
-            &output.node_id,
+            &output.card_id,
             output.attempt,
         )?),
     };
@@ -241,7 +241,7 @@ fn used(c: &Coordinator, id: &str, node: &str, attempt: i64) -> io::Result<u64> 
     let mut total = 0u64;
     for event in events
         .iter()
-        .filter(|e| e.kind == "node_output" && !(e.node_id == node && e.attempt == attempt))
+        .filter(|e| e.kind == "card_output" && !(e.card_id == node && e.attempt == attempt))
     {
         for payload in event
             .data
@@ -276,15 +276,15 @@ pub(crate) fn recover(
 ) -> io::Result<()> {
     let events = c.ledger(id)?.read().map_err(crate::error::to_io)?;
     for pending in events.iter().filter(|e| e.kind == "output_capture_pending") {
-        let attempt = attempt_dir(c, id, &pending.node_id, pending.attempt)?;
+        let attempt = attempt_dir(c, id, &pending.card_id, pending.attempt)?;
         let accepted = events.iter().any(|e| {
-            (e.kind == "node_output" || e.kind == "node_output_pending")
-                && e.node_id == pending.node_id
+            (e.kind == "card_output" || e.kind == "card_output_pending")
+                && e.card_id == pending.card_id
                 && e.attempt == pending.attempt
         });
         for prepared in events.iter().filter(|e| {
             e.kind == "output_capture_prepared"
-                && e.node_id == pending.node_id
+                && e.card_id == pending.card_id
                 && e.attempt == pending.attempt
                 && e.seq > pending.seq
         }) {
@@ -313,15 +313,15 @@ pub(crate) fn recover(
         }
         if discarded(&events, pending)
             || events.iter().any(|e| {
-                (e.kind == "node_output" || e.kind == "node_output_pending")
-                    && e.node_id == pending.node_id
+                (e.kind == "card_output" || e.kind == "card_output_pending")
+                    && e.card_id == pending.card_id
                     && e.attempt == pending.attempt
             })
         {
             continue;
         }
         let mut output = pending.clone();
-        output.kind = "node_output".into();
+        output.kind = "card_output".into();
         output.seq = 0;
         accept(c, id, mission, req, workspace, control, output)?;
     }
@@ -335,9 +335,9 @@ pub(crate) fn discarded(events: &[RunEvent], pending: &RunEvent) -> bool {
             && event.data.get("resume_mode").and_then(|v| v.as_str()) == Some("redispatch")
             && event
                 .data
-                .get("redispatch_node_id")
+                .get("redispatch_step_id")
                 .and_then(|v| v.as_str())
-                == Some(&pending.node_id)
+                == Some(&pending.card_id)
             && event
                 .data
                 .get("redispatch_attempt")

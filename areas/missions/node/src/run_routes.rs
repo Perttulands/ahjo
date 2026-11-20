@@ -194,7 +194,7 @@ async fn start(
         req.work = m.resolver.resolve(&req.work).await?.to_string();
     }
     // Only the local environment can receive seats here.
-    req.known_devices = Some(Vec::new());
+    req.known_machines = Some(Vec::new());
     let c = m.coordinator;
     if req.mission.is_empty()
         || (req.input_card_id.is_empty() == req.step_id.is_empty())

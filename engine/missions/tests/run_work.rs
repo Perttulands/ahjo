@@ -19,7 +19,7 @@ const ISSUE: &str = "gh:example/project#180";
 /// optionally its own; `inputs` declares the Input card's inputs.
 fn mission(inputs: &str, brief_work: &str) -> String {
     format!(
-        r#"schema = 4
+        r#"schema = 5
 id = "msn_work"
 slug = "work"
 title = "Work"

@@ -212,12 +212,12 @@ fn starved_join_blocks_without_allowing_resume() {
         let p = c.run(&id).unwrap();
         if p.r#final || p.status == "blocked" {
             assert_eq!(p.status, "blocked");
-            assert_eq!(p.block_code, "reachable_node_starved");
+            assert_eq!(p.block_code, "reachable_card_starved");
             assert!(!p.resume_allowed);
             assert!(
                 !p.events
                     .iter()
-                    .any(|e| e.kind == "node_started" && e.node_id == "fmn_join")
+                    .any(|e| e.kind == "card_started" && e.card_id == "fmn_join")
             );
             let expected: Vec<Value> =
                 include_str!("parity/runs/archon-ledgers/starved-join.ndjson")

@@ -1,5 +1,5 @@
 # Parity fixture: mission inputs, outputs and port kinds.
-schema = 4
+schema = 5
 id = "msn_inputs"
 slug = "inputs"
 title = "Inputs"

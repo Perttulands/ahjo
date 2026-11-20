@@ -1,21 +1,21 @@
-//! Restore a deleted node, its wires and its canvas position in one edit.
+//! Restore a deleted card, its wires and its canvas position in one edit.
 use crate::Error;
 use ahjo_mission_model::{
-    Connection, EndOutcome, Formation, LayoutNode, Mission, MissionChange, PortKind, RestoredNode,
+    Connection, EndOutcome, Formation, LayoutCard, Mission, MissionChange, PortKind, RestoredCard,
 };
 use serde::Serialize;
 use std::collections::HashSet;
 use toml_edit::{ArrayOfTables, DocumentMut, Item};
 fn invalid(message: &str) -> Error {
-    Error::new("invalid_node_restore", message)
+    Error::new("invalid_card_restore", message)
 }
 fn put<T: Serialize>(
     doc: &mut DocumentMut,
     key: &str,
-    node: &T,
+    card: &T,
     index: Option<usize>,
 ) -> Result<(), Error> {
-    let table = toml_edit::ser::to_document(node)
+    let table = toml_edit::ser::to_document(card)
         .map_err(|e| invalid(&e.to_string()))?
         .into_table();
     if !doc.contains_key(key) {
@@ -23,7 +23,7 @@ fn put<T: Serialize>(
     }
     let array = doc[key]
         .as_array_of_tables_mut()
-        .ok_or_else(|| invalid("node list"))?;
+        .ok_or_else(|| invalid("card list"))?;
     array.insert(index.unwrap_or(array.len()).min(array.len()), table);
     Ok(())
 }
@@ -37,18 +37,18 @@ pub(crate) fn valid_id(id: &str) -> bool {
 pub(crate) fn apply(
     doc: &mut DocumentMut,
     mission: &Mission,
-    mut node: RestoredNode,
+    mut card: RestoredCard,
     connections: Vec<Connection>,
     index: Option<usize>,
     x: i64,
     y: i64,
-) -> Result<LayoutNode, Error> {
-    let id = match &node {
-        RestoredNode::InputCard(n) => &n.id,
-        RestoredNode::Step(n) => &n.id,
-        RestoredNode::Gate(n) => &n.id,
-        RestoredNode::End(n) => &n.id,
-        RestoredNode::Limit(n) => &n.id,
+) -> Result<LayoutCard, Error> {
+    let id = match &card {
+        RestoredCard::InputCard(n) => &n.id,
+        RestoredCard::Step(n) => &n.id,
+        RestoredCard::Gate(n) => &n.id,
+        RestoredCard::End(n) => &n.id,
+        RestoredCard::Limit(n) => &n.id,
     }
     .clone();
     if !valid_id(&id)
@@ -58,10 +58,10 @@ pub(crate) fn apply(
         || mission.end(&id).is_some()
         || mission.limits.iter().any(|n| n.id == id)
     {
-        return Err(invalid("node id is invalid or already taken"));
+        return Err(invalid("card id is invalid or already taken"));
     }
-    match &mut node {
-        RestoredNode::InputCard(n) => {
+    match &mut card {
+        RestoredCard::InputCard(n) => {
             crate::authoring_create::file_refs(&mut n.files)?;
             put(doc, "input_card", n, index)?;
             let current = Mission::parse(&doc.to_string())?;
@@ -77,7 +77,7 @@ pub(crate) fn apply(
                 },
             )?;
         }
-        RestoredNode::Step(n) => {
+        RestoredCard::Step(n) => {
             if n.formation == Formation::Unset {
                 return Err(Error::new(
                     "unsupported_step_formation",
@@ -130,11 +130,11 @@ pub(crate) fn apply(
             }
             put(doc, "step", n, index)?;
         }
-        RestoredNode::Gate(n) => {
+        RestoredCard::Gate(n) => {
             crate::authoring_controls::check_gate(n)?;
             put(doc, "gate", n, index)?;
         }
-        RestoredNode::End(n) => {
+        RestoredCard::End(n) => {
             if n.outcome == EndOutcome::Unset {
                 n.outcome = EndOutcome::Done;
             }
@@ -148,7 +148,7 @@ pub(crate) fn apply(
             }
             put(doc, "end", n, index)?;
         }
-        RestoredNode::Limit(n) => {
+        RestoredCard::Limit(n) => {
             if n.title.trim().is_empty() {
                 n.title = "Limit".into();
             }
@@ -164,10 +164,10 @@ pub(crate) fn apply(
     }
     let mut current = Mission::parse(&doc.to_string())?;
     for mut wire in connections {
-        if crate::graph::endpoint_node(&wire.from) != id.as_str()
-            && crate::graph::endpoint_node(&wire.to) != id.as_str()
+        if crate::graph::endpoint_card(&wire.from) != id.as_str()
+            && crate::graph::endpoint_card(&wire.to) != id.as_str()
         {
-            return Err(invalid("connection does not touch restored node"));
+            return Err(invalid("connection does not touch restored card"));
         }
         if !valid_id(&wire.id) || current.connections.iter().any(|c| c.id == wire.id) {
             wire.id = crate::authoring::id("edge")?;
@@ -191,5 +191,5 @@ pub(crate) fn apply(
         })?;
         current = Mission::parse(&doc.to_string())?;
     }
-    Ok(LayoutNode { id, x, y })
+    Ok(LayoutCard { id, x, y })
 }

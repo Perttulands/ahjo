@@ -22,7 +22,7 @@ pub fn split_endpoint(endpoint: &str) -> Option<(&str, &str)> {
 }
 
 /// The node of an endpoint: everything before its first colon.
-pub fn endpoint_node(endpoint: &str) -> &str {
+pub fn endpoint_card(endpoint: &str) -> &str {
     endpoint.split_once(':').map_or(endpoint, |(node, _)| node)
 }
 
@@ -64,7 +64,7 @@ pub fn endpoint_allows(mission: &Mission, endpoint: &str, direction: Direction) 
 
 /// Every wire leaving a node, from any of its ports.
 pub fn outgoing<'a>(mission: &'a Mission, node: &'a str) -> impl Iterator<Item = &'a Connection> {
-    (mission.connections.iter()).filter(move |connection| endpoint_node(&connection.from) == node)
+    (mission.connections.iter()).filter(move |connection| endpoint_card(&connection.from) == node)
 }
 
 /// Every wire leaving one port of a node.
@@ -96,7 +96,7 @@ pub fn reachable(mission: &Mission, root: &str) -> HashSet<String> {
     let mut queue = VecDeque::from([root.to_owned()]);
     while let Some(node) = queue.pop_front() {
         for connection in outgoing(mission, &node) {
-            let next = endpoint_node(&connection.to);
+            let next = endpoint_card(&connection.to);
             if !next.is_empty() && reached.insert(next.to_owned()) {
                 queue.push_back(next.to_owned());
             }
@@ -114,7 +114,7 @@ pub fn judge_chain<'a>(mission: &'a Mission, gate: &str) -> Vec<&'a Step> {
     let Some(entry) = outgoing_from_port(mission, gate, GATE_JUDGE).next() else {
         return Vec::new();
     };
-    let mut current = endpoint_node(&entry.to);
+    let mut current = endpoint_card(&entry.to);
     let mut visited = HashSet::new();
     let mut chain = Vec::new();
     while !current.is_empty() && visited.insert(current) {
@@ -124,7 +124,7 @@ pub fn judge_chain<'a>(mission: &'a Mission, gate: &str) -> Vec<&'a Step> {
         chain.push(step);
         let mut next = "";
         for connection in outgoing(mission, current) {
-            let to = endpoint_node(&connection.to);
+            let to = endpoint_card(&connection.to);
             if to == gate && endpoint_port(&connection.to) == GATE_JUDGE {
                 return chain;
             }
@@ -144,11 +144,11 @@ pub fn selecting_gate<'a>(mission: &'a Mission, step: &str) -> Result<&'a Gate, 
     let found: Vec<_> = (mission.gates.iter())
         .filter(|gate| {
             let feeds = (mission.connections.iter()).filter(|connection| {
-                endpoint_node(&connection.to) == gate.id && endpoint_port(&connection.to) == GATE_IN
+                endpoint_card(&connection.to) == gate.id && endpoint_port(&connection.to) == GATE_IN
             });
             let (mut fed, mut other) = (false, false);
             for connection in feeds {
-                if endpoint_node(&connection.from) == step {
+                if endpoint_card(&connection.from) == step {
                     fed = true;
                 } else {
                     other = true;
@@ -156,7 +156,7 @@ pub fn selecting_gate<'a>(mission: &'a Mission, step: &str) -> Result<&'a Gate, 
             }
             fed && !other
                 && outgoing_from_port(mission, &gate.id, GATE_FAIL)
-                    .any(|connection| endpoint_node(&connection.to) == step)
+                    .any(|connection| endpoint_card(&connection.to) == step)
         })
         .collect();
     let gate = match found.as_slice() {
@@ -167,8 +167,8 @@ pub fn selecting_gate<'a>(mission: &'a Mission, step: &str) -> Result<&'a Gate, 
         [first, second, ..] => {
             return Err(format!(
                 "{} and {} both judge it and send it back, so neither can pick: keep one, or set it to stop or fail",
-                mission.node_name(&first.id),
-                mission.node_name(&second.id)
+                mission.card_name(&first.id),
+                mission.card_name(&second.id)
             ));
         }
     };
@@ -180,7 +180,7 @@ pub fn selecting_gate<'a>(mission: &'a Mission, step: &str) -> Result<&'a Gate, 
     }) {
         return Err(format!(
             "its gate {} checks with code only, which cannot compare attempts: give it a judge or a human, or set it to stop or fail",
-            mission.node_name(&gate.id)
+            mission.card_name(&gate.id)
         ));
     }
     Ok(gate)

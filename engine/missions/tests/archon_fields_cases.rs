@@ -101,7 +101,7 @@ fn input_and_step_titles_and_hint_can_be_set_and_cleared() {
                 MissionChange::UpdateStep {
                     id: step.clone(),
                     title: Some(title.into()),
-                    device: None,
+                    environment: None,
                     fresh: None,
                 },
                 "",
@@ -412,7 +412,7 @@ fn repeated_node_type_port_and_judge_edits_keep_bytes_and_check_etags() {
         MissionChange::UpdateStep {
             id: f.id.clone(),
             title: Some("Renamed".into()),
-            device: None,
+            environment: None,
             fresh: None,
         },
         MissionChange::SetStepFormation {

@@ -79,10 +79,10 @@ pub(crate) fn execute_step(
         id,
         control,
         event(
-            "node_started",
+            "card_started",
             &node,
             attempt,
-            json!({"node_kind":"step","reason":reason,"input_refs":refs,"brief":step.brief}),
+            json!({"card_kind":"step","reason":reason,"input_refs":refs,"brief":step.brief}),
         ),
     )? {
         return Err(io::Error::new(io::ErrorKind::Interrupted, "run canceled"));
@@ -92,7 +92,7 @@ pub(crate) fn execute_step(
         let _ = started.send(());
     }
     let (limits, _timer) = attempt_limits(c, id, mission, control, &node)?;
-    let placed = !step.device.is_empty() && step.device != c.inner.settings.environment;
+    let placed = !step.environment.is_empty() && step.environment != c.inner.settings.environment;
     let (turn_workspace, turn) = if placed {
         let turn = crate::run_workspace::prepare_placed_turn(
             c,
@@ -100,7 +100,7 @@ pub(crate) fn execute_step(
             req,
             workspace,
             control,
-            (node.as_str(), step.device.as_str()),
+            (node.as_str(), step.environment.as_str()),
             attempt,
         )?;
         (workspace.to_path_buf(), Some(turn))
@@ -458,7 +458,7 @@ pub(crate) fn start_ready(
             events
                 .iter()
                 .rev()
-                .find(|event| event.kind == "node_started" && event.node_id == step.id)
+                .find(|event| event.kind == "card_started" && event.card_id == step.id)
                 .and_then(|event| event.data.get("input_refs"))
                 .and_then(|value| value.as_array())
                 .cloned()

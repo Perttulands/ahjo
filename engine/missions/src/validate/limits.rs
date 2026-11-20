@@ -18,7 +18,7 @@ pub fn findings(mission: &Mission) -> (Vec<Finding>, Vec<Finding>) {
         let name = card_name(mission, &limit.id);
         let mut add =
             |message: String| errors.push(Finding::new(Code::InvalidLimit, &limit.id, message));
-        let target = limit.target.as_str();
+        let target = limit.scope.as_str();
         if target.trim().is_empty() {
             add(format!(
                 "{name} is wired to nothing: wire it to a step, or to the Input card for the whole mission"
@@ -30,9 +30,9 @@ pub fn findings(mission: &Mission) -> (Vec<Finding>, Vec<Finding>) {
         } else if let Some(first) = covered.get(target) {
             add(format!(
                 "{} has two Limit cards, {} and {}: keep one",
-                mission.node_name(target),
-                mission.node_name(first),
-                mission.node_name(&limit.id)
+                mission.card_name(target),
+                mission.card_name(first),
+                mission.card_name(&limit.id)
             ));
         } else {
             covered.insert(target, &limit.id);
@@ -94,7 +94,7 @@ fn covers_step_or_input_card(mission: &Mission, target: &str) -> bool {
 
 /// "Limit Beads cap", without repeating a default-titled card's kind.
 fn card_name(mission: &Mission, id: &str) -> String {
-    match mission.node_name(id) {
+    match mission.card_name(id) {
         DEFAULT_TITLE => DEFAULT_TITLE.to_owned(),
         name => format!("Limit {name}"),
     }
@@ -106,15 +106,15 @@ fn when_spent_problem(mission: &Mission, limit: &Limit, name: &str) -> Option<St
     if limit.when_spent != WhenSpent::Best {
         return None;
     }
-    if mission.has_input_card(&limit.target) {
+    if mission.has_input_card(&limit.scope) {
         return Some(format!(
             "{name} picks the best attempt when spent, but it covers the whole mission: only a step's card can pick; set it to stop or fail"
         ));
     }
-    mission.step(&limit.target)?;
-    let problem = graph::selecting_gate(mission, &limit.target).err()?;
+    mission.step(&limit.scope)?;
+    let problem = graph::selecting_gate(mission, &limit.scope).err()?;
     Some(format!(
         "{name} picks the best attempt of {} when spent, but {problem}",
-        mission.node_name(&limit.target)
+        mission.card_name(&limit.scope)
     ))
 }

@@ -77,7 +77,7 @@ fn a_placed_turn_is_published_once_and_landing_deletes_its_remote_refs() {
     );
     let turn = |attempt| TurnWorkspace {
         run_id: "run_handoff".into(),
-        node_id: "fmn_port".into(),
+        step_id: "fmn_port".into(),
         attempt,
         repository: "owner/repo".into(),
         commit: git(&tree.path, &["rev-parse", "HEAD"]),

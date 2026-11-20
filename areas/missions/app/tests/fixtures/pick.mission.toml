@@ -1,4 +1,4 @@
-schema = 4
+schema = 5
 id = "msn_gated"
 slug = "pick"
 title = "Gated"
@@ -56,6 +56,6 @@ to = "fmn_work:port_in"
 [[limit]]
 id = "lim_cap"
 title = "Cap"
-target = "fmn_work"
+scope = "fmn_work"
 rounds = 2
 when_spent = "best"

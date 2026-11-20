@@ -115,7 +115,7 @@ fn sketch(m: &Missions, id: &str, steps: &[String], note: &str, actor: &str) -> 
         let layout = m.store.layout_edit(id)?;
         let arranged = ahjo_mission_engine::arrange(&edited.mission, &layout.layout);
         m.store
-            .patch_layout(id, &layout.etag, LayoutPatch::Nodes(arranged.nodes))?;
+            .patch_layout(id, &layout.etag, LayoutPatch::Cards(arranged.cards))?;
     }
     if !note.trim().is_empty() {
         let current = m.store.notes_edit(id)?;

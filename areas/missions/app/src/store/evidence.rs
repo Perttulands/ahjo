@@ -45,7 +45,7 @@ impl Evidence {
                 name: w.path.strip_prefix(&base).unwrap_or(&w.path).to_owned(),
                 kind: "file".into(),
                 value: w.path.clone(),
-                node_id: String::new(),
+                card_id: String::new(),
                 port_id: String::new(),
                 attempt: 0,
                 picks: Vec::new(),
@@ -57,7 +57,7 @@ impl Evidence {
 #[serde(rename_all = "snake_case")]
 pub struct Problem {
     pub seq: u64,
-    pub node_id: String,
+    pub card_id: String,
     /// The gate whose verdict it was, when a gate's.
     #[serde(default)]
     pub gate_id: String,
@@ -70,14 +70,14 @@ pub struct Text {
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub struct Brief {
-    pub node_id: String,
+    pub step_id: String,
     pub dispatch_seq: u64,
     pub path: String,
 }
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub struct File {
-    pub node_id: String,
+    pub step_id: String,
     pub path: String,
     pub size: u64,
 }

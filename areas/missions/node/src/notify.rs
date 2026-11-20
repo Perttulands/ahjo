@@ -226,8 +226,8 @@ mod tests {
         ledger.append(evaluating).unwrap();
         let mut request = event("human_input_requested");
         request.gate_id = "review".into();
-        request.node_id = "review".into();
-        request.data = serde_json::json!({"input_ref":{"text":"work","from_node_id":"draft"}})
+        request.card_id = "review".into();
+        request.data = serde_json::json!({"input_ref":{"text":"work","from_card_id":"draft"}})
             .as_object()
             .unwrap()
             .clone();
@@ -235,7 +235,7 @@ mod tests {
         if final_run {
             ledger.append(event("run_canceled")).unwrap();
         }
-        std::fs::write(root.join("runs").join(format!("{id}.snapshot.toml")), "schema = 4\nid = 'msn_hello'\nslug = 'hello'\ntitle = 'Hello'\nrev = 1\n[[gate]]\nid = 'review'\ntitle = 'Review'\nkinds = ['human']\ncriterion = 'Approve this?'\n").unwrap();
+        std::fs::write(root.join("runs").join(format!("{id}.snapshot.toml")), "schema = 5\nid = 'msn_hello'\nslug = 'hello'\ntitle = 'Hello'\nrev = 1\n[[gate]]\nid = 'review'\ntitle = 'Review'\nkinds = ['human']\ncriterion = 'Approve this?'\n").unwrap();
     }
     fn dispatcher(
         root: &Path,

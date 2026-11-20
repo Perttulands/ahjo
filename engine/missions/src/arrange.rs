@@ -1,5 +1,5 @@
 //! Deterministic compact reading order for a mission canvas.
-use ahjo_mission_model::{Layout, LayoutNode, Mission};
+use ahjo_mission_model::{Layout, LayoutCard, Mission};
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
 #[derive(Clone)]
@@ -80,12 +80,9 @@ pub fn arrange(mission: &Mission, layout: &Layout) -> Layout {
         }
     }
     for n in &mission.limits {
-        if mission.step(&n.target).is_some() || mission.has_input_card(&n.target) {
-            owner.insert(n.id.clone(), n.target.clone());
-            below
-                .entry(n.target.clone())
-                .or_default()
-                .push(n.id.clone());
+        if mission.step(&n.scope).is_some() || mission.has_input_card(&n.scope) {
+            owner.insert(n.id.clone(), n.scope.clone());
+            below.entry(n.scope.clone()).or_default().push(n.id.clone());
         }
     }
     let mut forward = BTreeMap::<String, Vec<String>>::new();
@@ -208,7 +205,7 @@ pub fn arrange(mission: &Mission, layout: &Layout) -> Layout {
         })
         .collect();
     let per_row = per_row(&columns);
-    let mut nodes = Vec::new();
+    let mut cards = Vec::new();
     let (mut x, mut row_y, mut row_bottom) = (MARGIN, MARGIN, MARGIN);
     for (column, (stack, width, _)) in columns.into_iter().enumerate() {
         if column > 0 && column % per_row == 0 {
@@ -218,14 +215,14 @@ pub fn arrange(mission: &Mission, layout: &Layout) -> Layout {
         let mut y = row_y;
         for id in stack {
             let (_, h) = size(&items[&id]);
-            nodes.push(LayoutNode { id, x, y });
+            cards.push(LayoutCard { id, x, y });
             y = snap(y + h);
         }
         row_bottom = row_bottom.max(y);
         x = snap(x + width + GAP_X);
     }
     Layout {
-        nodes,
+        cards,
         ..layout.clone()
     }
 }

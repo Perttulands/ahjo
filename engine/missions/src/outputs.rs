@@ -1,5 +1,5 @@
 //! Resolve mission results by following accepted deliveries back from done Ends.
-use crate::graph::{endpoint_node, endpoint_port, outgoing, outgoing_from_port};
+use crate::graph::{endpoint_card, endpoint_port, outgoing, outgoing_from_port};
 use crate::{Ledger, RoutedInput, RunEvent};
 use ahjo_mission_model::{Mission, PublicOrigin, RunOutput};
 use std::{
@@ -53,24 +53,24 @@ fn resolve_events(events: &[RunEvent], mission: &Mission) -> Result<Resolved, Mi
     let mut queue = VecDeque::<Origin>::new();
     let done = |to: &str| {
         mission
-            .end(endpoint_node(to))
+            .end(endpoint_card(to))
             .is_some_and(|end| end.outcome != ahjo_mission_model::EndOutcome::Rejected)
     };
     let follow = |input: &RoutedInput, queue: &mut VecDeque<Origin>| {
-        if !(mission.gate(&input.from_node_id).is_some() && input.from_port_id == "fail")
+        if !(mission.gate(&input.from_card_id).is_some() && input.from_port_id == "fail")
             && let Some(PublicOrigin {
-                node_id,
+                card_id,
                 port_id,
                 attempt,
             }) = &input.origin
         {
-            queue.push_back((node_id.clone(), port_id.clone(), *attempt));
+            queue.push_back((card_id.clone(), port_id.clone(), *attempt));
         }
     };
     for event in events {
-        let key = (event.node_id.clone(), event.attempt);
+        let key = (event.card_id.clone(), event.attempt);
         match event.kind.as_str() {
-            "node_started" => {
+            "card_started" => {
                 inputs.insert(
                     key,
                     event
@@ -80,12 +80,12 @@ fn resolve_events(events: &[RunEvent], mission: &Mission) -> Result<Resolved, Mi
                         .unwrap_or_default(),
                 );
             }
-            "node_output" if !judges.contains(event.node_id.as_str()) => {
+            "card_output" if !judges.contains(event.card_id.as_str()) => {
                 if let Some(payloads) = event.data.get("outputs").and_then(|v| v.as_object()) {
-                    for edge in outgoing(mission, &event.node_id).filter(|edge| done(&edge.to)) {
+                    for edge in outgoing(mission, &event.card_id).filter(|edge| done(&edge.to)) {
                         let port = endpoint_port(&edge.from);
                         if payloads.contains_key(port) {
-                            queue.push_back((event.node_id.clone(), port.into(), event.attempt));
+                            queue.push_back((event.card_id.clone(), port.into(), event.attempt));
                         }
                     }
                     produced.insert(key, payloads.clone());
@@ -186,7 +186,7 @@ fn resolve_events(events: &[RunEvent], mission: &Mission) -> Result<Resolved, Mi
             name: output.name.clone(),
             kind: kind.into(),
             value: value.into(),
-            node_id: node.into(),
+            card_id: node.into(),
             port_id: port.into(),
             attempt: found.unwrap().0,
             picks: inherited_picks(
@@ -230,7 +230,7 @@ fn resolve_events(events: &[RunEvent], mission: &Mission) -> Result<Resolved, Mi
                 name,
                 kind: kind.into(),
                 value: value.into(),
-                node_id: node.clone(),
+                card_id: node.clone(),
                 port_id: port.clone(),
                 attempt: *attempt,
                 picks: inherited_picks((node, port, *attempt), &inputs, &picks, mission),
@@ -293,7 +293,7 @@ fn picked(events: &[RunEvent]) -> HashMap<Origin, serde_json::Value> {
         if !findings.is_empty() {
             detail["findings"] = serde_json::json!(findings);
         }
-        result.insert((origin.node_id, origin.port_id, origin.attempt), serde_json::json!({"node_id":pick.get("node_id").and_then(|v| v.as_str()).unwrap_or(""),"attempt":attempt,"gate_id":event.gate_id,"seq":event.seq,"decided_by":pick.get("decided_by").and_then(|v| v.as_str()).unwrap_or(""),"verdict":detail}));
+        result.insert((origin.card_id, origin.port_id, origin.attempt), serde_json::json!({"step_id":pick.get("step_id").and_then(|v| v.as_str()).unwrap_or(""),"attempt":attempt,"gate_id":event.gate_id,"seq":event.seq,"decided_by":pick.get("decided_by").and_then(|v| v.as_str()).unwrap_or(""),"verdict":detail}));
     }
     result
 }
@@ -318,11 +318,11 @@ fn inherited_picks(
             .into_iter()
             .flatten()
         {
-            if mission.gate(&input.from_node_id).is_some() && input.from_port_id == "fail" {
+            if mission.gate(&input.from_card_id).is_some() && input.from_port_id == "fail" {
                 continue;
             }
             if let Some(o) = &input.origin {
-                queue.push_back((o.node_id.clone(), o.port_id.clone(), o.attempt));
+                queue.push_back((o.card_id.clone(), o.port_id.clone(), o.attempt));
             }
         }
     }
@@ -340,7 +340,7 @@ mod tests {
     fn event(kind: &str, node: &str, attempt: i64, data: serde_json::Value) -> RunEvent {
         RunEvent {
             kind: kind.into(),
-            node_id: node.into(),
+            card_id: node.into(),
             attempt,
             data: data.as_object().unwrap().clone(),
             ..Default::default()
@@ -379,25 +379,25 @@ mod tests {
             "gate_verdict",
             "gate",
             1,
-            json!({"route_port":"pass","input_ref":{"origin":{"node_id":"work","port_id":"out","attempt":2}}}),
+            json!({"route_port":"pass","input_ref":{"origin":{"card_id":"work","port_id":"out","attempt":2}}}),
         );
         verdict.gate_id = "gate".into();
         let events = vec![
-            event("node_started", "work", 1, json!({"input_refs":[]})),
+            event("card_started", "work", 1, json!({"input_refs":[]})),
             event(
-                "node_output",
+                "card_output",
                 "work",
                 1,
                 json!({"outputs":{"out":{"text":"rejected"}}}),
             ),
             event(
-                "node_started",
+                "card_started",
                 "work",
                 2,
-                json!({"input_refs":[{"from_node_id":"gate","from_port_id":"fail","origin":{"node_id":"work","port_id":"out","attempt":1}}]}),
+                json!({"input_refs":[{"from_card_id":"gate","from_port_id":"fail","origin":{"card_id":"work","port_id":"out","attempt":1}}]}),
             ),
             event(
-                "node_output",
+                "card_output",
                 "work",
                 2,
                 json!({"outputs":{"out":{"text":"fixed"}}}),
@@ -429,7 +429,7 @@ mod tests {
             ..Default::default()
         };
         let events = vec![event(
-            "node_output",
+            "card_output",
             "write",
             1,
             json!({"outputs":{"out":{"text":"the plan"}}}),
@@ -472,19 +472,19 @@ mod tests {
         };
         let events = vec![
             event(
-                "node_output",
+                "card_output",
                 "work",
                 1,
                 json!({"outputs":{"out":{"text":"rejected"}}}),
             ),
             event(
-                "node_started",
+                "card_started",
                 "fix",
                 1,
-                json!({"input_refs":[{"from_node_id":"gate","from_port_id":"fail","origin":{"node_id":"work","port_id":"out","attempt":1}}]}),
+                json!({"input_refs":[{"from_card_id":"gate","from_port_id":"fail","origin":{"card_id":"work","port_id":"out","attempt":1}}]}),
             ),
             event(
-                "node_output",
+                "card_output",
                 "fix",
                 1,
                 json!({"outputs":{"out":{"text":"fixed"}}}),
@@ -543,7 +543,7 @@ mod tests {
             "gate_verdict",
             "gate",
             2,
-            json!({"pick":{"node_id":"work","attempt":1,"pick_seq":2,"decided_by":"operator"},"input_ref":{"origin":{"node_id":"work","port_id":"out","attempt":1}}}),
+            json!({"pick":{"step_id":"work","attempt":1,"pick_seq":2,"decided_by":"operator"},"input_ref":{"origin":{"card_id":"work","port_id":"out","attempt":1}}}),
         );
         picked.seq = 3;
         picked.gate_id = "gate".into();
@@ -552,13 +552,13 @@ mod tests {
             started,
             picked,
             event(
-                "node_started",
+                "card_started",
                 "fix",
                 1,
-                json!({"input_refs":[{"origin":{"node_id":"work","port_id":"out","attempt":1}}]}),
+                json!({"input_refs":[{"origin":{"card_id":"work","port_id":"out","attempt":1}}]}),
             ),
             event(
-                "node_output",
+                "card_output",
                 "fix",
                 1,
                 json!({"outputs":{"out":{"text":"fixed"}}}),
@@ -628,23 +628,23 @@ mod tests {
                 ..Default::default()
             };
             let mut events = vec![event(
-                "node_output",
+                "card_output",
                 "fmn_work",
                 1,
                 json!({"outputs":{"port_work_out":{"ref":work,"text":"work"}}}),
             )];
             if use_fix {
-                events.push(event("node_started", "fmn_fix", 1, json!({"input_refs":[{"from_node_id":"gate_lint","from_port_id":"fail","origin":{"node_id":"fmn_work","port_id":"port_work_out","attempt":1}}]})));
+                events.push(event("card_started", "fmn_fix", 1, json!({"input_refs":[{"from_card_id":"gate_lint","from_port_id":"fail","origin":{"card_id":"fmn_work","port_id":"port_work_out","attempt":1}}]})));
                 events.push(event(
-                    "node_output",
+                    "card_output",
                     "fmn_fix",
                     1,
                     json!({"outputs":{"port_fix_out":{"ref":fix,"text":"fixed"}}}),
                 ));
             } else {
-                events.push(event("node_started", "fmn_after", 1, json!({"input_refs":[{"from_node_id":"fmn_work","from_port_id":"port_work_out","origin":{"node_id":"fmn_work","port_id":"port_work_out","attempt":1}}]})));
+                events.push(event("card_started", "fmn_after", 1, json!({"input_refs":[{"from_card_id":"fmn_work","from_port_id":"port_work_out","origin":{"card_id":"fmn_work","port_id":"port_work_out","attempt":1}}]})));
                 events.push(event(
-                    "node_output",
+                    "card_output",
                     "fmn_after",
                     1,
                     json!({"outputs":{"out":{"text":"shipped"}}}),
@@ -703,20 +703,20 @@ mod tests {
             "gate_verdict",
             "gate",
             1,
-            json!({"route_port":"pass","pick":{"node_id":"work","attempt":1,"decided_by":"operator"},"input_ref":{"origin":{"node_id":"work","port_id":"out","attempt":1}}}),
+            json!({"route_port":"pass","pick":{"step_id":"work","attempt":1,"decided_by":"operator"},"input_ref":{"origin":{"card_id":"work","port_id":"out","attempt":1}}}),
         );
         verdict.seq = 3;
         verdict.gate_id = "gate".into();
         let events = vec![
             event(
-                "node_output",
+                "card_output",
                 "work",
                 1,
                 json!({"outputs":{"out":{"text":"picked"}}}),
             ),
             verdict,
             event(
-                "node_output",
+                "card_output",
                 "other",
                 1,
                 json!({"outputs":{"out":{"text":"unrelated"}}}),

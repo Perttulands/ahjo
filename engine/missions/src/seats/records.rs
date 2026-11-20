@@ -15,7 +15,7 @@ static NEXT_TEMP: AtomicU64 = AtomicU64::new(0);
 pub struct Dispatch {
     pub id: String,
     pub run_id: String,
-    pub node_id: String,
+    pub step_id: String,
     pub seat_id: String,
     /// The readable stem of the seat's session name; blank names it by ids.
     #[serde(default, skip_serializing_if = "String::is_empty")]
@@ -34,7 +34,7 @@ pub struct Dispatch {
     /// The environment the seat runs on, `<device>/<environment>`; blank is
     /// the coordinator's own.
     #[serde(default, skip_serializing_if = "String::is_empty")]
-    pub place: String,
+    pub environment: String,
     /// The turn worktree a placed seat works in, kept so a coordinator that
     /// restarts can still publish the turn once the seat has ended.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -489,10 +489,12 @@ fn read(path: &Path) -> io::Result<Record> {
         && crate::ledger_migrate::rename_json_keys(&mut value)?;
     if let Some(dispatch) = value.get_mut("dispatch").and_then(Value::as_object_mut) {
         migrated |= crate::ledger_migrate::rename_seat_fields(dispatch)?;
+        migrated |= crate::ledger_migrate::rename_dispatch_environment(dispatch)?;
     }
     if let Some(events) = value.get_mut("events").and_then(Value::as_array_mut) {
         for event in events {
             migrated |= crate::ledger_migrate::rename_seat_event(event, "kind")?;
+            migrated |= crate::ledger_migrate::rename_card_event(event, "kind")?;
             if event["key"] == "slot-result" {
                 event["key"] = Value::String("seat-result".into());
                 migrated = true;
@@ -569,7 +571,7 @@ mod tests {
         Dispatch {
             id: "dsp_test".into(),
             run_id: "run_1".into(),
-            node_id: "step".into(),
+            step_id: "step".into(),
             seat_id: "worker".into(),
             name: String::new(),
             harness: "pi".into(),
@@ -579,7 +581,7 @@ mod tests {
             brief: "private brief".into(),
             reuse_dispatch: None,
             keep: false,
-            place: String::new(),
+            environment: String::new(),
             turn: None,
         }
     }

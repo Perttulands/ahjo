@@ -371,13 +371,13 @@ async fn edit_layout(
     let p = if v["arrange"].as_bool() == Some(true) {
         let e = m.store.mission_edit(&id)?;
         let l = m.store.layout_edit(&id)?;
-        LayoutPatch::Nodes(ahjo_mission_engine::arrange(&e.mission, &l.layout).nodes)
-    } else if let Some(nodes) = v.get("nodes") {
-        LayoutPatch::Nodes(serde_json::from_value(nodes.clone()).map_err(|e| bad(e.to_string()))?)
+        LayoutPatch::Cards(ahjo_mission_engine::arrange(&e.mission, &l.layout).cards)
+    } else if let Some(nodes) = v.get("cards") {
+        LayoutPatch::Cards(serde_json::from_value(nodes.clone()).map_err(|e| bad(e.to_string()))?)
     } else if let Some(edges) = v.get("edges") {
         LayoutPatch::Edges(serde_json::from_value(edges.clone()).map_err(|e| bad(e.to_string()))?)
     } else {
-        return Err(bad("layout needs nodes, edges or arrange"));
+        return Err(bad("layout needs cards, edges or arrange"));
     };
     let e = m.store.patch_layout(&id, etag(&h), p)?;
     m.changed();

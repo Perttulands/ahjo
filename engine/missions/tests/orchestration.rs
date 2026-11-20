@@ -615,7 +615,7 @@ async fn cli_runs_orchestration_to_end_with_controller_and_worker_seats() {
     assert!(
         ledger
             .iter()
-            .any(|e| e.kind == "node_output" && e.node_id == "fmn_work")
+            .any(|e| e.kind == "card_output" && e.card_id == "fmn_work")
     );
     node.stop().await;
     *CLI_SEATS.lock().unwrap() = None;

@@ -1,4 +1,4 @@
-schema = 4
+schema = 5
 id = "msn_example"
 slug = "best-of-three"
 title = "Best of three"
@@ -59,7 +59,7 @@ criterion = "The attempt does the work the brief asks for, and does it well."
 [[limit]]
 id = "lim_three"
 title = "Three attempts"
-target = "fmn_attempt"
+scope = "fmn_attempt"
 rounds = 3
 when_spent = "best"
 

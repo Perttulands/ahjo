@@ -9,11 +9,11 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::nodes::{Connection, End, Gate, InputCard, Limit, Step};
+use crate::cards::{Connection, End, Gate, InputCard, Limit, Step};
 use ahjo_core::Error;
 
 /// The only mission file schema Ahjo reads.
-pub const MISSION_SCHEMA: i64 = 4;
+pub const MISSION_SCHEMA: i64 = 5;
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq, schemars::JsonSchema)]
 #[serde(default, deny_unknown_fields, rename_all = "snake_case")]
@@ -85,24 +85,24 @@ impl Mission {
         self.input_cards.iter().any(|card| card.id == id)
     }
 
-    /// The title of the node with this id, or "" when it has none.
-    pub fn node_title(&self, id: &str) -> &str {
+    /// The title of the card with this id, or "" when it has none.
+    pub fn card_title(&self, id: &str) -> &str {
         let titles = (self.steps.iter().map(|n| (&n.id, &n.title)))
             .chain(self.gates.iter().map(|n| (&n.id, &n.title)))
             .chain(self.input_cards.iter().map(|n| (&n.id, &n.title)))
             .chain(self.ends.iter().map(|n| (&n.id, &n.title)))
             .chain(self.limits.iter().map(|n| (&n.id, &n.title)));
-        for (node, title) in titles {
-            if node == id {
+        for (card, title) in titles {
+            if card == id {
                 return title;
             }
         }
         ""
     }
 
-    /// Names a node for the operator: its title, or its id when it has none.
-    pub fn node_name<'a>(&'a self, id: &'a str) -> &'a str {
-        match self.node_title(id).trim() {
+    /// Names a card for the operator: its title, or its id when it has none.
+    pub fn card_name<'a>(&'a self, id: &'a str) -> &'a str {
+        match self.card_title(id).trim() {
             "" => id,
             title => title,
         }

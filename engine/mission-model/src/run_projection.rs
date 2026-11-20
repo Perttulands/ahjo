@@ -15,7 +15,7 @@ pub struct PublicEvent {
     #[serde(rename = "type")]
     pub kind: String,
     #[serde(default, skip_serializing_if = "String::is_empty")]
-    pub node_id: String,
+    pub card_id: String,
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub seat_id: String,
     #[serde(default, skip_serializing_if = "String::is_empty")]
@@ -58,7 +58,7 @@ pub struct PublicEvent {
 #[serde(rename_all = "snake_case")]
 pub struct PublicInputRef {
     pub edge_id: String,
-    pub from_node_id: String,
+    pub from_card_id: String,
     pub from_port_id: String,
     pub to_port_id: String,
     pub origin: Option<PublicOrigin>,
@@ -67,7 +67,7 @@ pub struct PublicInputRef {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub struct PublicOrigin {
-    pub node_id: String,
+    pub card_id: String,
     pub port_id: String,
     pub attempt: i64,
 }
@@ -149,7 +149,7 @@ pub struct Escalation {
     pub run_id: String,
     pub seq: u64,
     #[serde(default, skip_serializing_if = "String::is_empty")]
-    pub node_id: String,
+    pub card_id: String,
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub gate_id: String,
     pub severity: String,
@@ -163,7 +163,7 @@ pub struct Escalation {
 #[serde(rename_all = "snake_case")]
 pub struct GateInput {
     #[serde(default, skip_serializing_if = "String::is_empty")]
-    pub from_node_id: String,
+    pub from_card_id: String,
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub from_port_id: String,
     pub text: String,

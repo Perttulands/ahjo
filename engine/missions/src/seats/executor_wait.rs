@@ -90,9 +90,9 @@ impl SeatSide for Away {
     fn publish_turn(&self, _: &str, _: &TurnWorkspace) -> SeatFuture<'_, PublishedTurn> {
         never()
     }
-    fn away(&self, place: &str) -> Option<String> {
+    fn away(&self, environment: &str) -> Option<String> {
         Some(format!(
-            "{place} does not answer: no node of {place} is known"
+            "{environment} does not answer: no node of {environment} is known"
         ))
     }
 }
@@ -105,7 +105,7 @@ fn execution(turn: Option<TurnWorkspace>, canceled: Arc<AtomicBool>) -> StepExec
         step: Step {
             id: "fmn_build".into(),
             formation: ahjo_mission_model::Formation::Solo,
-            device: "box/windows".into(),
+            environment: "box/windows".into(),
             seats: vec![Seat {
                 id: "seat_1".into(),
                 ..Default::default()

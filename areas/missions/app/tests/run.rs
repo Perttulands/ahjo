@@ -655,7 +655,7 @@ fn starts_a_run_sees_active_step_answers_gate_and_shows_admission_findings(
         let error = client.request(http::Method::POST, "/api/runs", Some(json!({"mission":"admission-findings", "input_card_id":"inp", "expected_rev":mission["mission"]["rev"], "inputs":{"topic":"A topic"}})), Some(&etag)).await.unwrap_err();
         // Each finding reads as a sentence, named by its step's title.
         let title = |id: &str| mission["mission"]["step"].as_array().unwrap().iter().find(|f| f["id"] == id).map_or(id.to_owned(), |f| f["title"].as_str().unwrap().to_owned());
-        error.downcast_ref::<ahjo_node_kit::NodeError>().unwrap().findings.as_ref().unwrap().as_array().unwrap().iter().map(|f| match f["node_id"].as_str().unwrap() { "" => f["message"].as_str().unwrap().to_owned(), id => format!("{}: {}", title(id), f["message"].as_str().unwrap()) }).collect::<Vec<_>>()
+        error.downcast_ref::<ahjo_node_kit::NodeError>().unwrap().findings.as_ref().unwrap().as_array().unwrap().iter().map(|f| match f["card_id"].as_str().unwrap() { "" => f["message"].as_str().unwrap().to_owned(), id => format!("{}: {}", title(id), f["message"].as_str().unwrap()) }).collect::<Vec<_>>()
     });
     assert!(expected.len() > 1);
     click(cx, "run-start");

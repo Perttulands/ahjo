@@ -16,7 +16,7 @@ use std::io;
 /// never a pick candidate.
 #[derive(Debug)]
 pub(crate) struct LimitReached {
-    pub node: String,
+    pub step_id: String,
     pub use_: LimitUse,
     pub cut_off: bool,
 }
@@ -25,15 +25,15 @@ impl std::fmt::Display for LimitReached {
         write!(
             f,
             "{LIMIT_REACHED}: {} {} {} of {}",
-            self.node, self.use_.kind, self.use_.used, self.use_.max
+            self.step_id, self.use_.kind, self.use_.used, self.use_.max
         )
     }
 }
 impl std::error::Error for LimitReached {}
 
-pub(crate) fn reached(node: &str, use_: LimitUse, cut_off: bool) -> io::Error {
+pub(crate) fn reached(step_id: &str, use_: LimitUse, cut_off: bool) -> io::Error {
     io::Error::other(LimitReached {
-        node: node.into(),
+        step_id: step_id.into(),
         use_,
         cut_off,
     })
@@ -45,12 +45,12 @@ pub(crate) fn of(error: &io::Error) -> Option<&LimitReached> {
 /// Why the run stops at a limit, kept until its in-flight work settles.
 #[derive(Debug)]
 pub(crate) struct LimitStop {
-    pub node: String,
+    pub step_id: String,
     pub use_: LimitUse,
     pub fail: bool,
 }
 
-/// Decide what a spent limit does to `node`: start a pick, or return the
+/// Decide what a spent limit does to `step_id`: start a pick, or return the
 /// stop the run leaves once nothing runs.
 pub(crate) fn pick_or_stop(
     c: &Coordinator,
@@ -60,7 +60,7 @@ pub(crate) fn pick_or_stop(
     reached: &LimitReached,
 ) -> io::Result<Option<LimitStop>> {
     let LimitReached {
-        node,
+        step_id,
         use_,
         cut_off,
     } = reached;
@@ -69,21 +69,21 @@ pub(crate) fn pick_or_stop(
         .map(|card| card.when_spent)
         .unwrap_or_default();
     if when_spent == ahjo_mission_model::WhenSpent::Best
-        && let Some(pick) = crate::run_pick::pick_for(mission, &events, node, use_)
-        && crate::run_pick::judged_since_last_pick(&events, node, &pick.candidates)
+        && let Some(pick) = crate::run_pick::pick_for(mission, &events, step_id, use_)
+        && crate::run_pick::judged_since_last_pick(&events, step_id, &pick.candidates)
     {
         if *cut_off {
-            append_limit_error(c, id, control, mission, node, use_)?;
+            append_limit_error(c, id, control, mission, step_id, use_)?;
         }
-        crate::run_pick::start(c, id, control, mission, node, &pick, use_, "when_spent")?;
+        crate::run_pick::start(c, id, control, mission, step_id, &pick, use_, "when_spent")?;
         return Ok(None);
     }
     let fail = when_spent == ahjo_mission_model::WhenSpent::Fail;
     if !fail {
-        append_limit_error(c, id, control, mission, node, use_)?;
+        append_limit_error(c, id, control, mission, step_id, use_)?;
     }
     Ok(Some(LimitStop {
-        node: node.clone(),
+        step_id: step_id.clone(),
         use_: use_.clone(),
         fail,
     }))
@@ -94,7 +94,7 @@ pub(crate) fn append_limit_error(
     id: &str,
     control: &Control,
     mission: &Mission,
-    node: &str,
+    step_id: &str,
     use_: &LimitUse,
 ) -> io::Result<()> {
     let reason = limits::reason(mission, use_);
@@ -104,9 +104,9 @@ pub(crate) fn append_limit_error(
         control,
         event(
             "error",
-            node,
+            step_id,
             0,
-            json!({"code":LIMIT_REACHED,"message":reason,"reason":reason,"boundary":"limits","node_id":node,"recoverable":true,"limit":use_}),
+            json!({"code":LIMIT_REACHED,"message":reason,"reason":reason,"boundary":"limits","card_id":step_id,"recoverable":true,"limit":use_}),
         ),
     )
     .map(|_| ())
@@ -118,19 +118,19 @@ pub(crate) fn abandon_cut_off(
     c: &Coordinator,
     id: &str,
     control: &Control,
-    node: &str,
+    step_id: &str,
     attempt: i64,
 ) -> io::Result<()> {
     let events = c.ledger(id)?.read().map_err(crate::error::to_io)?;
     for dispatch in crate::run_open_dispatch::unresolved(&events) {
-        if dispatch.node_id != node || dispatch.attempt != attempt {
+        if dispatch.card_id != step_id || dispatch.attempt != attempt {
             continue;
         }
         let mut result = event(
             "seat_result",
-            node,
+            step_id,
             attempt,
-            json!({"dispatch_id":dispatch.data.get("dispatch_id"),"node_id":node,"seat_id":dispatch.seat_id,"status":"abandoned","reason":format!("attempt {attempt} was cut short by its Limit card")}),
+            json!({"dispatch_id":dispatch.data.get("dispatch_id"),"step_id":step_id,"seat_id":dispatch.seat_id,"status":"abandoned","reason":format!("attempt {attempt} was cut short by its Limit card")}),
         );
         result.seat_id.clone_from(&dispatch.seat_id);
         crate::run_worker::append_live(c, id, control, result)?;
@@ -153,7 +153,7 @@ pub(crate) fn final_event(
         return Ok(RunEvent {
             kind: "run_failed".into(),
             actor: "archond".into(),
-            node_id: stop.node.clone(),
+            card_id: stop.step_id.clone(),
             timestamp: crate::run_storage::now(),
             data: json!({"code":LIMIT_REACHED,"reason":reason,"limit":stop.use_,"final":true})
                 .as_object()
@@ -163,16 +163,17 @@ pub(crate) fn final_event(
         });
     }
     let events = c.ledger(id)?.read().map_err(crate::error::to_io)?;
-    let policy = if crate::run_pick::pick_for(mission, &events, &stop.node, &stop.use_).is_some() {
+    let policy = if crate::run_pick::pick_for(mission, &events, &stop.step_id, &stop.use_).is_some()
+    {
         "grant_or_pick"
     } else {
         "grant"
     };
     Ok(RunEvent {
         kind: "run_blocked".into(),
-        node_id: stop.node.clone(),
+        card_id: stop.step_id.clone(),
         timestamp: crate::run_storage::now(),
-        data: json!({"code":LIMIT_REACHED,"reason":reason,"limit":stop.use_,"blocked_node_id":stop.node,"blocked_gate_id":"","resume_allowed":true,"resume_policy":policy,"open_dispatches":[],"next_epoch":1})
+        data: json!({"code":LIMIT_REACHED,"reason":reason,"limit":stop.use_,"blocked_card_id":stop.step_id,"blocked_gate_id":"","resume_allowed":true,"resume_policy":policy,"open_dispatches":[],"next_epoch":1})
             .as_object()
             .unwrap()
             .clone(),

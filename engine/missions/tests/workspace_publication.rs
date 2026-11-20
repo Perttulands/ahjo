@@ -447,7 +447,7 @@ fn recovery_discards_an_interrupted_attempt_before_retrying() {
         result
             .events
             .iter()
-            .any(|e| e.kind == "node_started" && e.node_id == "fmn_work" && e.attempt == 2)
+            .any(|e| e.kind == "card_started" && e.card_id == "fmn_work" && e.attempt == 2)
     );
     assert!(!turn.exists());
     assert!(turns(&root, &id).is_empty());

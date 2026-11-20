@@ -12,7 +12,7 @@ use ahjo_mission_model::{Code, Finding, Mission, MissionOutput, Port, PortKind};
 pub fn port_kind_findings(mission: &Mission) -> Vec<Finding> {
     let mut findings = Vec::new();
     for step in &mission.steps {
-        let owner = possessive(mission.node_name(&step.id));
+        let owner = possessive(mission.card_name(&step.id));
         for port in step
             .inputs
             .iter()
@@ -71,7 +71,7 @@ pub fn mission_output_findings(mission: &Mission) -> Vec<Finding> {
                     Code::MissionOutputKindMismatch,
                     format!(
                         "output {name} is {kind}, but {} output {} carries {}",
-                        possessive(mission.node_name(step)),
+                        possessive(mission.card_name(step)),
                         port.name(),
                         port.kind()
                     ),

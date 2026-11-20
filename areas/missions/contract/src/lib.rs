@@ -32,7 +32,7 @@ pub mod error {
     pub const INVALID_LIMIT: &str = "invalid_limit";
     pub const INVALID_MISSION_INPUT: &str = "invalid_mission_input";
     pub const INVALID_MISSION_OUTPUT: &str = "invalid_mission_output";
-    pub const INVALID_NODE_RESTORE: &str = "invalid_node_restore";
+    pub const INVALID_CARD_RESTORE: &str = "invalid_card_restore";
     pub const INVALID_NOTE_PATCH: &str = "invalid_note_patch";
     pub const INVALID_PORT: &str = "invalid_port";
     pub const INVALID_PORT_DIRECTION: &str = "invalid_port_direction";
@@ -106,7 +106,7 @@ pub struct EditLayout {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub arrange: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub nodes: Option<Vec<LayoutNode>>,
+    pub cards: Option<Vec<LayoutCard>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub edges: Option<Vec<LayoutEdge>>,
 }

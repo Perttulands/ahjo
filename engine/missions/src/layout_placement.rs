@@ -1,6 +1,6 @@
 //! Find an unoccupied grid position without moving saved cards.
 use crate::{Error, Store};
-use ahjo_mission_model::{Layout, LayoutNode, Mission};
+use ahjo_mission_model::{Layout, LayoutCard, Mission};
 use std::collections::HashMap;
 
 pub fn free_layout_position(
@@ -8,13 +8,13 @@ pub fn free_layout_position(
     layout: Option<&Layout>,
     desired_x: i64,
     desired_y: i64,
-) -> Result<LayoutNode, Error> {
+) -> Result<LayoutCard, Error> {
     if layout.is_some_and(|layout| layout.mission_id != mission.id) {
         return Err(Error::new("conflict", "layout belongs to another mission"));
     }
     let saved: HashMap<_, _> = layout
         .into_iter()
-        .flat_map(|l| &l.nodes)
+        .flat_map(|l| &l.cards)
         .map(|n| (n.id.as_str(), n))
         .collect();
     let ids = mission
@@ -47,7 +47,7 @@ pub fn free_layout_position(
             .iter()
             .all(|(ox, oy)| ox.abs_diff(x) >= 308 || oy.abs_diff(y) >= 280)
         {
-            return Ok(LayoutNode {
+            return Ok(LayoutCard {
                 id: String::new(),
                 x,
                 y,
@@ -74,7 +74,7 @@ impl Store {
         selector: &str,
         x: i64,
         y: i64,
-    ) -> Result<LayoutNode, Error> {
+    ) -> Result<LayoutCard, Error> {
         let scope = crate::write::locks(self.root(), "scope");
         let _reference_guard = scope.references.read().unwrap_or_else(|e| e.into_inner());
         let slug = self.resolve(selector)?;

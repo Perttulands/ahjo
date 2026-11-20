@@ -1,11 +1,11 @@
 //! End, Limit and gate field edits.
 use crate::Error;
 use ahjo_mission_model::{
-    EndOutcome, Gate, GateKind, LayoutNode, Limit, Mission, MissionChange, WhenSpent,
+    EndOutcome, Gate, GateKind, LayoutCard, Limit, Mission, MissionChange, WhenSpent,
 };
 use toml_edit::{DocumentMut, Item, value};
 fn missing() -> Error {
-    Error::new("not_found", "node")
+    Error::new("not_found", "card")
 }
 fn table<'a>(
     doc: &'a mut DocumentMut,
@@ -21,7 +21,7 @@ fn table<'a>(
         .ok_or_else(missing)
 }
 fn check_limit(mission: &Mission, limit: &mut Limit) -> Result<(), Error> {
-    limit.target = limit.target.trim().into();
+    limit.scope = limit.scope.trim().into();
     limit.title = limit.title.trim().into();
     if limit.title.is_empty() {
         limit.title = "Limit".into();
@@ -29,11 +29,11 @@ fn check_limit(mission: &Mission, limit: &mut Limit) -> Result<(), Error> {
     if limit.when_spent == WhenSpent::Stop {
         limit.when_spent = WhenSpent::Unset;
     }
-    if !limit.target.is_empty()
-        && !mission.has_input_card(&limit.target)
-        && mission.step(&limit.target).is_none()
+    if !limit.scope.is_empty()
+        && !mission.has_input_card(&limit.scope)
+        && mission.step(&limit.scope).is_none()
     {
-        return Err(Error::new("invalid_limit", "invalid target"));
+        return Err(Error::new("invalid_limit", "invalid scope"));
     }
     for knob in [
         &mut limit.rounds,
@@ -54,10 +54,10 @@ pub(crate) fn create_limit(
     doc: &mut DocumentMut,
     mission: &Mission,
     patch: MissionChange,
-) -> Result<LayoutNode, Error> {
+) -> Result<LayoutCard, Error> {
     let MissionChange::CreateLimit {
         title,
-        target,
+        scope,
         rounds,
         seconds,
         warn_seconds,
@@ -72,7 +72,7 @@ pub(crate) fn create_limit(
     let mut limit = Limit {
         id: String::new(),
         title,
-        target,
+        scope,
         rounds,
         seconds,
         warn_seconds,
@@ -82,7 +82,7 @@ pub(crate) fn create_limit(
     check_limit(mission, &mut limit)?;
     limit.id = crate::authoring::id("lim")?;
     crate::authoring_create::append(doc, "limit", &limit)?;
-    Ok(LayoutNode { id: limit.id, x, y })
+    Ok(LayoutCard { id: limit.id, x, y })
 }
 pub(crate) fn check_gate(gate: &mut Gate) -> Result<(), Error> {
     let mut seen = std::collections::HashSet::new();
@@ -146,8 +146,8 @@ pub(crate) fn update(
             if let Some(v) = u.title {
                 next.title = v;
             }
-            if let Some(v) = u.target {
-                next.target = v;
+            if let Some(v) = u.scope {
+                next.scope = v;
             }
             if let Some(v) = u.rounds {
                 next.rounds = Some(v);
@@ -171,7 +171,7 @@ pub(crate) fn update(
             let table = table(doc, "limit", &u.id)?;
             for (key, before, after) in [
                 ("title", old.title.as_str(), next.title.as_str()),
-                ("target", old.target.as_str(), next.target.as_str()),
+                ("scope", old.scope.as_str(), next.scope.as_str()),
                 (
                     "when_spent",
                     old.when_spent.as_str(),

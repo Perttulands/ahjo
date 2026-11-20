@@ -115,7 +115,7 @@ impl MissionsPage {
             .state
             .layout
             .as_ref()
-            .map(|layout| layout.nodes.as_slice())
+            .map(|layout| layout.cards.as_slice())
             .unwrap_or_default();
         let reverse = match undo::inverse(&mission, layout, &step) {
             Ok(reverse) => reverse,
@@ -160,7 +160,7 @@ impl MissionsPage {
                     )
                     .header("If-Match", etag),
                     &EditLayout {
-                        nodes: Some(nodes.clone()),
+                        cards: Some(nodes.clone()),
                         ..Default::default()
                     },
                 )
@@ -411,7 +411,8 @@ fn accept_editor_operation(
             accept(3..7);
         }
         MissionChange::UpdateStep {
-            device: Some(_), ..
+            environment: Some(_),
+            ..
         } => accept(2..3),
         MissionChange::StaffSeat { .. } => accept(10..14),
         MissionChange::UpdatePort { .. } => accept(14..16),
@@ -453,7 +454,7 @@ pub(super) fn session_patch(id: &str, fresh: bool) -> MissionChange {
     MissionChange::UpdateStep {
         id: id.into(),
         title: None,
-        device: None,
+        environment: None,
         fresh: Some(fresh),
     }
 }
@@ -490,7 +491,7 @@ pub(super) fn port_patch(
 pub(super) fn add_limit_patch(target: &str) -> MissionChange {
     MissionChange::CreateLimit {
         title: "Limit".into(),
-        target: target.into(),
+        scope: target.into(),
         rounds: Some(3),
         seconds: None,
         warn_seconds: None,
@@ -523,7 +524,7 @@ pub(super) fn update_limit_patch(
     Ok(MissionChange::UpdateLimit(LimitUpdate {
         id: id.into(),
         title: Some(title.into()),
-        target: None,
+        scope: None,
         rounds: Some(parse("rounds", rounds)?),
         seconds: Some(parse("seconds", seconds)?),
         warn_seconds: Some(parse("warn_seconds", warn_seconds)?),
@@ -541,11 +542,11 @@ pub(super) fn step_formation_patch(id: &str, kind: Formation, seat: &str) -> Mis
     }
 }
 
-pub(super) fn device_patch(id: &str, device: &str) -> MissionChange {
+pub(super) fn environment_patch(id: &str, environment: &str) -> MissionChange {
     MissionChange::UpdateStep {
         id: id.into(),
         title: None,
-        device: Some(device.into()),
+        environment: Some(environment.into()),
         fresh: None,
     }
 }
@@ -569,7 +570,7 @@ mod tests {
         for patch in [
             session_patch("step", true),
             step_formation_patch("step", Formation::Peer, "seat"),
-            device_patch("step", "node/environment"),
+            environment_patch("step", "node/environment"),
             crate::store::staffing::Staffing {
                 agent: "planner".into(),
                 harness: ahjo_missions_contract::Harness::ClaudeCode,

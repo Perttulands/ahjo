@@ -78,7 +78,7 @@ fn solo_lab_ledger_and_admission_findings_match_archon() {
         .map(|line| {
             let event: Value = serde_json::from_str(line).unwrap();
             let mut result = Map::new();
-            for key in ["type", "node_id", "gate_id", "seat_id", "attempt"] {
+            for key in ["type", "card_id", "gate_id", "seat_id", "attempt"] {
                 if let Some(value) = event.get(key) {
                     result.insert(key.into(), value.clone());
                 }
@@ -111,7 +111,7 @@ fn solo_lab_ledger_and_admission_findings_match_archon() {
     };
     assert!(findings.iter().any(|finding| finding.code
         == ahjo_mission_model::Code::UnsupportedStep
-        && finding.node_id == "staff"));
+        && finding.card_id == "staff"));
     let comparable: Vec<_> = findings
         .into_iter()
         .filter(|finding| finding.code != ahjo_mission_model::Code::UnsupportedStep)

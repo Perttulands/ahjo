@@ -19,7 +19,7 @@ pub fn connection_findings(mission: &Mission) -> Vec<Finding> {
                 Code::DanglingConnection,
                 &connection.id,
                 format!(
-                    "connection {:?} has a broken 'from' endpoint {:?}: it does not reference an existing node output",
+                    "connection {:?} has a broken 'from' endpoint {:?}: it does not reference an existing card output",
                     connection.id, connection.from
                 ),
             ));
@@ -29,7 +29,7 @@ pub fn connection_findings(mission: &Mission) -> Vec<Finding> {
                 Code::DanglingConnection,
                 &connection.id,
                 format!(
-                    "connection {:?} has a broken 'to' endpoint {:?}: it does not reference an existing node input",
+                    "connection {:?} has a broken 'to' endpoint {:?}: it does not reference an existing card input",
                     connection.id, connection.to
                 ),
             ));
@@ -133,13 +133,13 @@ pub fn route_findings(mission: &Mission) -> Vec<Finding> {
         .map(|c| c.from.as_str())
         .collect();
     let mut findings = Vec::new();
-    let mut add = |node: &str, route: String| {
+    let mut add = |card: &str, route: String| {
         findings.push(Finding::new(
             Code::RouteLeadsNowhere,
-            node,
+            card,
             format!(
-                "{} {route} leads nowhere: wire it to a step or an End node",
-                possessive(mission.node_name(node))
+                "{} {route} leads nowhere: wire it to a step or an End card",
+                possessive(mission.card_name(card))
             ),
         ));
     };
@@ -183,7 +183,7 @@ pub fn unfed_input_findings(mission: &Mission) -> Vec<Finding> {
                     format!(
                         "{} input {:?} ({}) has no wire into it, so a run that reaches the step \
                          waits there and stops; wire an earlier step's output to it or remove the input",
-                        possessive(mission.node_name(&step.id)),
+                        possessive(mission.card_name(&step.id)),
                         port.name(),
                         port.id
                     ),
@@ -254,7 +254,7 @@ pub fn not_runnable_findings(mission: &Mission) -> Vec<Finding> {
         .collect()
 }
 
-/// Every step, gate and End node no path from the Input card reaches. A
+/// Every step, gate and End card no path from the Input card reaches. A
 /// judge is reached through its gate's judge port.
 pub fn unreachable_findings(mission: &Mission) -> Vec<Finding> {
     if mission.input_cards.is_empty() {
@@ -263,18 +263,18 @@ pub fn unreachable_findings(mission: &Mission) -> Vec<Finding> {
     let reached: HashSet<String> = (mission.input_cards.iter())
         .flat_map(|card| graph::reachable(mission, &card.id))
         .collect();
-    let nodes = (mission.steps.iter().map(|n| (&n.id, "step")))
+    let cards = (mission.steps.iter().map(|n| (&n.id, "step")))
         .chain(mission.gates.iter().map(|n| (&n.id, "gate")))
-        .chain(mission.ends.iter().map(|n| (&n.id, "End node")));
-    nodes
+        .chain(mission.ends.iter().map(|n| (&n.id, "End card")));
+    cards
         .filter(|(id, _)| !reached.contains(id.as_str()))
         .map(|(id, kind)| {
             Finding::new(
-                Code::UnreachableNode,
+                Code::UnreachableCard,
                 id,
                 format!(
                     "No path from the Input card reaches {kind} {}, so no run will get there; wire a route into it or delete it",
-                    mission.node_name(id)
+                    mission.card_name(id)
                 ),
             )
         })

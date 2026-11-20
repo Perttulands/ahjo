@@ -64,7 +64,7 @@ impl SeatSide for Kept {
             return Ok(Dispatch {
                 id: id.into(),
                 run_id: "run_1".into(),
-                node_id: "fmn_answer".into(),
+                step_id: "fmn_answer".into(),
                 seat_id: "seat_1".into(),
                 name: "forget-1-answer".into(),
                 harness: "claude-code".into(),
@@ -74,7 +74,7 @@ impl SeatSide for Kept {
                 brief: "Answer.".into(),
                 reuse_dispatch: None,
                 keep: false,
-                place: String::new(),
+                environment: String::new(),
                 turn: None,
             });
         }
@@ -113,7 +113,7 @@ fn open() -> OpenDispatch {
     OpenDispatch {
         run_id: "run_1".into(),
         dispatch_id: "dsp_initial".into(),
-        node_id: "fmn_answer".into(),
+        step_id: "fmn_answer".into(),
         seat_id: "seat_1".into(),
         attempt: 1,
         step: Step {

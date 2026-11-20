@@ -52,8 +52,8 @@ pub(crate) fn run_judges(
         let previous = if replaying && !(invalidated && index + 1 == count) {
             events.iter().rev().find(|e| {
                 e.seq > anchor
-                    && e.kind == "node_output"
-                    && e.node_id == judge.id
+                    && e.kind == "card_output"
+                    && e.card_id == judge.id
                     && e.data.get("reason").and_then(|v| v.as_str()) == Some("judge")
             })
         } else {
@@ -89,7 +89,7 @@ pub(crate) fn run_judges(
         replaying = false;
         let attempt = events
             .iter()
-            .filter(|e| e.kind == "node_started" && e.node_id == judge.id)
+            .filter(|e| e.kind == "card_started" && e.card_id == judge.id)
             .map(|e| e.attempt)
             .max()
             .unwrap_or(0)
@@ -176,7 +176,7 @@ pub(crate) fn run_judges(
                 control,
                 crate::JudgeCorrection {
                     run_id: id.into(),
-                    node_id: final_node.clone(),
+                    step_id: final_node.clone(),
                     attempt: final_attempt,
                     rejected: final_text.clone(),
                     error: error.to_string(),
@@ -277,7 +277,7 @@ fn correct_judge(
 ) -> Result<Option<String>, String> {
     let (tx, rx) = std::sync::mpsc::channel();
     let executor = c.inner.executor.clone();
-    let node = correction.node_id.clone();
+    let node = correction.step_id.clone();
     let attempt = correction.attempt;
     let prior = c
         .ledger(id)
@@ -289,7 +289,7 @@ fn correct_judge(
     let mut failure = None;
     for pending in rx {
         let replayed = prior.iter().any(|old| {
-            old.node_id == node
+            old.card_id == node
                 && old.attempt == attempt
                 && old.kind == pending.event.kind
                 && old.data.get("dispatch_id") == pending.event.data.get("dispatch_id")
@@ -359,7 +359,7 @@ pub(crate) fn record_output(
         workspace,
         control,
         event(
-            "node_output",
+            "card_output",
             node,
             attempt,
             json!({"status":result.status,"text":result.text,"outputs":result.outputs,"reason":"judge","report_ref":format!("lab://{id}/{node}/report.md")}),

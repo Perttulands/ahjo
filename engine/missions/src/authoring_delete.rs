@@ -1,4 +1,4 @@
-//! Remove a node, its wires and dependent Limit cards as one edit.
+//! Remove a card, its wires and dependent Limit cards as one edit.
 use crate::Error;
 use ahjo_mission_model::{Mission, MissionChange};
 use std::collections::HashSet;
@@ -43,11 +43,11 @@ pub(crate) fn apply(
     };
     let mut ids = HashSet::from([id.clone()]);
     if !remove(doc, key, &ids) {
-        return Err(Error::new("not_found", format!("node {id:?}")));
+        return Err(Error::new("not_found", format!("card {id:?}")));
     }
     if remove_limits {
         for limit in &mission.limits {
-            if limit.target == id {
+            if limit.scope == id {
                 ids.insert(limit.id.clone());
             }
         }

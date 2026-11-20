@@ -8,18 +8,18 @@ use std::collections::HashMap;
 /// Write", "Connect Input to a first step". Findings without a plainer
 /// form keep the node's own words, with names for ids.
 pub fn todo_line(mission: &Mission, finding: &ahjo_missions_contract::Finding) -> String {
-    let name = mission.node_name(&finding.node_id);
-    let step = mission.steps.iter().any(|f| f.id == finding.node_id);
+    let name = mission.card_name(&finding.card_id);
+    let step = mission.steps.iter().any(|f| f.id == finding.card_id);
     match finding.code {
         Code::UnstaffedSeat | Code::StepWithoutSeats => format!("Choose who works {name}"),
         Code::InvalidSeatSettings if finding.message.contains("needs an effort") => {
             format!("Choose an effort for {name}")
         }
         Code::RouteLeadsNowhere if step => format!("Connect {name} to a next step or an End"),
-        Code::MissionNotRunnable if mission.has_input_card(&finding.node_id) => {
+        Code::MissionNotRunnable if mission.has_input_card(&finding.card_id) => {
             format!("Connect {name} to a first step")
         }
-        Code::UnreachableNode => format!("Connect {name} after the Input or an earlier step"),
+        Code::UnreachableCard => format!("Connect {name} after the Input or an earlier step"),
         _ => readable_message(
             mission,
             &ahjo_missions_contract::plain_reason(&finding.message),
@@ -195,7 +195,7 @@ impl Validation {
         if self.key.as_ref() != Some(key) {
             return false;
         }
-        matches!(&self.report, Some(Ok(report)) if report.errors.is_empty() && !report.warnings.iter().any(|finding| finding.code == Code::MissionNotRunnable && finding.node_id == input))
+        matches!(&self.report, Some(Ok(report)) if report.errors.is_empty() && !report.warnings.iter().any(|finding| finding.code == Code::MissionNotRunnable && finding.card_id == input))
     }
 }
 

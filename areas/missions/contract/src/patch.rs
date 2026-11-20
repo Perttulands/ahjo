@@ -429,9 +429,9 @@ mod tests {
     }
     #[test]
     fn restore_step_reads_the_stored_shape() {
-        let body = json!({"restore_node":{"gate":null,"step":{"id":"f","formation":"solo","title":"Work","input":[{"id":"in","label":"Input"}],"output":[],"seat":[{"id":"s","label":"Agent","controller":false}]}}});
-        let MissionChange::RestoreNode {
-            node: crate::RestoredNode::Step(step),
+        let body = json!({"restore_card":{"gate":null,"step":{"id":"f","formation":"solo","title":"Work","input":[{"id":"in","label":"Input"}],"output":[],"seat":[{"id":"s","label":"Agent","controller":false}]}}});
+        let MissionChange::RestoreCard {
+            card: crate::RestoredCard::Step(step),
             ..
         } = decode(&body).unwrap()
         else {
@@ -440,7 +440,7 @@ mod tests {
         assert_eq!(step.inputs[0].id, "in");
         assert_eq!(step.seats[0].id, "s");
         let mut invalid = body;
-        invalid["restore_node"]["gate"] = json!({"id":"g"});
+        invalid["restore_card"]["gate"] = json!({"id":"g"});
         assert!(decode(&invalid).is_err());
     }
 }

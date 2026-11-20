@@ -155,7 +155,7 @@ fn canvas_ports_drag_move_zoom_and_undo(cx: &mut TestAppContext) {
         let (layout, _) = rt
             .block_on(client.request(http::Method::GET, "/api/missions/hello/layout", None, None))
             .unwrap();
-        if layout["layout"]["node"]
+        if layout["layout"]["card"]
             .as_array()
             .is_some_and(|a| a.iter().any(|n| n["id"] == "fmn_work"))
         {

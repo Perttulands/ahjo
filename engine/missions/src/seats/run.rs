@@ -144,7 +144,7 @@ impl LocalSeats {
                 .map_err(|e| e.to_string())?;
         }
         let adapter_sent = events.iter().any(|event| event.key == "adapter-send");
-        let data = json!({"dispatch_id":id,"node_id":dispatch.node_id,"seat_id":dispatch.seat_id,"session_ref":format!("terminal:{}", seat.session_name),"adapter":"terminal","sent":true});
+        let data = json!({"dispatch_id":id,"step_id":dispatch.step_id,"seat_id":dispatch.seat_id,"session_ref":format!("terminal:{}", seat.session_name),"adapter":"terminal","sent":true});
         let event = records
             .append(
                 id,
@@ -190,7 +190,7 @@ impl LocalSeats {
             text: answer,
             status: sentinel.status.clone(),
         };
-        let data = json!({"dispatch_id":id,"node_id":dispatch.node_id,"seat_id":dispatch.seat_id,"status":sentinel.status,"sentinel":{"run_id":sentinel.run_id,"status":sentinel.status,"artifact":sentinel.artifact}});
+        let data = json!({"dispatch_id":id,"step_id":dispatch.step_id,"seat_id":dispatch.seat_id,"status":sentinel.status,"sentinel":{"run_id":sentinel.run_id,"status":sentinel.status,"artifact":sentinel.artifact}});
         let event = records
             .append(
                 id,

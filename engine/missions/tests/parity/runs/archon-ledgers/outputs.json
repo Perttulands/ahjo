@@ -8,7 +8,7 @@
         "attempt": 3,
         "kind": "file",
         "name": "report",
-        "node_id": "fmn_work",
+        "card_id": "fmn_work",
         "port_id": "port_work_out",
         "value": "<artifacts>/fmn_work/3/outputs/port_work_out/draft.md"
       }
@@ -24,7 +24,7 @@
         "attempt": 1,
         "kind": "folder",
         "name": "site",
-        "node_id": "fmn_work",
+        "card_id": "fmn_work",
         "port_id": "port_work_out",
         "value": "<artifacts>/fmn_work/1/outputs/port_work_out/site"
       }
@@ -43,7 +43,7 @@
         "attempt": 1,
         "kind": "folder",
         "name": "site",
-        "node_id": "fmn_work",
+        "card_id": "fmn_work",
         "port_id": "port_work_out",
         "value": "<artifacts>/fmn_work/1/outputs/port_work_out/site"
       }
@@ -57,7 +57,7 @@
         "attempt": 1,
         "kind": "folder",
         "name": "fixed",
-        "node_id": "fmn_fix",
+        "card_id": "fmn_fix",
         "port_id": "port_fix_out",
         "value": "<artifacts>/fmn_fix/1/outputs/port_fix_out/site"
       }

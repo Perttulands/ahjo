@@ -1,5 +1,5 @@
 //! Findings for the portion of a mission reached by a new run.
-use crate::graph::{endpoint_node, reachable};
+use crate::graph::{endpoint_card, reachable};
 use crate::{AgentStore, Harnesses, input_findings, validate};
 use ahjo_mission_model::{Code, Finding, Mission, Report};
 use std::collections::{BTreeMap, HashSet};
@@ -23,7 +23,7 @@ pub fn run_admission(
         .connections
         .iter()
         .filter(|c| {
-            selected.contains(endpoint_node(&c.from)) || selected.contains(endpoint_node(&c.to))
+            selected.contains(endpoint_card(&c.from)) || selected.contains(endpoint_card(&c.to))
         })
         .map(|c| c.id.as_str())
         .collect();
@@ -44,7 +44,7 @@ pub fn run_admission(
         // A single step's run is handed every input itself.
         Code::RouteLeadsNowhere | Code::InputWithoutProducer if step => false,
         _ => {
-            selected.contains(&finding.node_id) || connection_ids.contains(finding.node_id.as_str())
+            selected.contains(&finding.card_id) || connection_ids.contains(finding.card_id.as_str())
         }
     };
     let validation = validate(mission, agents, harnesses);
@@ -53,7 +53,7 @@ pub fn run_admission(
         .errors
         .extend(validation.errors.into_iter().filter(&in_scope));
     for finding in validation.warnings {
-        if finding.code == Code::MissionNotRunnable && finding.node_id == root && !step {
+        if finding.code == Code::MissionNotRunnable && finding.card_id == root && !step {
             report.errors.push(finding);
         } else if in_scope(&finding) {
             report.warnings.push(finding);

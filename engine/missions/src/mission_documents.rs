@@ -346,16 +346,16 @@ fn stage_layout(
         };
         (doc, layout)
     };
-    layout.nodes.retain(|node| !removed.contains(&node.id));
-    crate::write::table_arrays(&mut doc, &["node"]);
-    crate::authoring_delete::remove(&mut doc, "node", removed);
-    let mut placed: HashSet<_> = layout.nodes.iter().map(|node| node.id.clone()).collect();
+    layout.cards.retain(|card| !removed.contains(&card.id));
+    crate::write::table_arrays(&mut doc, &["card"]);
+    crate::authoring_delete::remove(&mut doc, "card", removed);
+    let mut placed: HashSet<_> = layout.cards.iter().map(|card| card.id.clone()).collect();
     for &id in added {
         if placed.insert(id.to_owned()) {
-            let mut node = crate::free_layout_position(mission, Some(&layout), 112, 112)?;
-            node.id = id.to_owned();
-            crate::authoring_create::append(&mut doc, "node", &node)?;
-            layout.nodes.push(node);
+            let mut card = crate::free_layout_position(mission, Some(&layout), 112, 112)?;
+            card.id = id.to_owned();
+            crate::authoring_create::append(&mut doc, "card", &card)?;
+            layout.cards.push(card);
         }
     }
     crate::write::set(doc.as_table_mut(), "mission_rev", value(mission.rev));

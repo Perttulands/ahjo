@@ -116,16 +116,19 @@ pub(crate) fn apply(
         MissionChange::UpdateStep {
             id,
             title,
-            device,
+            environment,
             fresh,
         } => {
             let step = mission.step(&id).ok_or_else(not_found)?;
             let title = title.filter(|t| *t != step.title);
-            let device = device
-                .map(|d| d.trim().to_string())
-                .filter(|d| *d != step.device);
+            let environment = environment
+                .map(|environment| match environment.trim() {
+                    "home" => String::new(),
+                    value => value.to_owned(),
+                })
+                .filter(|environment| *environment != step.environment);
             let fresh = fresh.filter(|f| *f != step.fresh);
-            if title.is_none() && device.is_none() && fresh.is_none() {
+            if title.is_none() && environment.is_none() && fresh.is_none() {
                 return Ok(false);
             }
             let table = step_table(doc, &id)?;
@@ -133,11 +136,11 @@ pub(crate) fn apply(
                 // An empty title is an explicit value, not an absent field.
                 crate::write::set(table, "title", value(title));
             }
-            match device.as_deref() {
+            match environment.as_deref() {
                 Some("") => {
-                    table.remove("device");
+                    table.remove("environment");
                 }
-                Some(d) => crate::write::set(table, "device", value(d)),
+                Some(d) => crate::write::set(table, "environment", value(d)),
                 None => {}
             }
             match fresh {

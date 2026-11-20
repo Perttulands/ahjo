@@ -93,7 +93,7 @@ pub(crate) fn candidates(events: &[RunEvent], step: &str, gate: &str) -> Vec<Can
     let mut judged = BTreeMap::new();
     for event in events {
         match event.kind.as_str() {
-            "node_output" if event.node_id == step => {
+            "card_output" if event.card_id == step => {
                 outputs.insert(event.attempt, event.seq);
             }
             "gate_verdict" if event.gate_id == gate && !is_pick(event) => {
@@ -107,7 +107,7 @@ pub(crate) fn candidates(events: &[RunEvent], step: &str, gate: &str) -> Vec<Can
                         serde_json::from_value::<ahjo_mission_model::PublicOrigin>(origin.clone())
                             .ok()
                     });
-                let Some(origin) = origin.filter(|origin| origin.node_id == step) else {
+                let Some(origin) = origin.filter(|origin| origin.card_id == step) else {
                     continue;
                 };
                 let Some(output_seq) = outputs.get(&origin.attempt) else {
@@ -138,7 +138,7 @@ pub(crate) fn pick_for<'a>(
     use_: &LimitUse,
 ) -> Option<StepPick<'a>> {
     let card = crate::limits::card(mission, &use_.limit_id)?;
-    if card.target != step || use_.node_id != step {
+    if card.scope != step || use_.card_id != step {
         return None;
     }
     let gate = crate::graph::selecting_gate(mission, step).ok()?;
@@ -159,7 +159,7 @@ pub(crate) fn judged_since_last_pick(
     candidates: &[Candidate],
 ) -> bool {
     let last = (events.iter())
-        .filter(|e| e.kind == PICK_STARTED && e.node_id == step)
+        .filter(|e| e.kind == PICK_STARTED && e.card_id == step)
         .map(|e| e.seq)
         .next_back()
         .unwrap_or(0);
@@ -199,7 +199,7 @@ pub(crate) fn start(
     use_: &LimitUse,
     trigger: &str,
 ) -> io::Result<()> {
-    let mut data = json!({"node_id":step,"gate_id":pick.gate.id,"trigger":trigger,"limit":use_,"candidates":pick.candidates});
+    let mut data = json!({"step_id":step,"gate_id":pick.gate.id,"trigger":trigger,"limit":use_,"candidates":pick.candidates});
     if pick
         .gate
         .kinds
@@ -228,14 +228,14 @@ pub(crate) fn on_resume(
     let Some(use_) = pending_resume_pick(&events) else {
         return Ok(None);
     };
-    let node = use_.node_id.clone();
+    let node = use_.card_id.clone();
     if let Some(pick) = pick_for(mission, &events, &node, &use_) {
         start(c, id, control, mission, &node, &pick, &use_, "resume")?;
         return Ok(None);
     }
     crate::run_limit::append_limit_error(c, id, control, mission, &node, &use_)?;
     Ok(Some(LimitStop {
-        node,
+        step_id: node,
         use_,
         fail: false,
     }))
@@ -289,7 +289,7 @@ fn details(
                 c,
                 id,
                 events,
-                &started.node_id,
+                &started.card_id,
                 candidate.attempt,
             ),
             verdict: text(&Value::Object(verdict.data.clone()), "verdict").into(),
@@ -319,8 +319,8 @@ fn pick_input(
 ) -> RoutedInput {
     let mut body = format!(
         "Pick the best attempt of {}. Its Limit card is spent, so it runs no more; the attempt picked goes on through {} as if it had passed.\n",
-        mission.node_name(&started.node_id),
-        mission.node_name(&gate.id)
+        mission.card_name(&started.card_id),
+        mission.card_name(&gate.id)
     );
     if !gate.criterion.trim().is_empty() {
         body += &format!("criterion: {}\n", gate.criterion.trim());
@@ -344,7 +344,7 @@ fn pick_input(
         }
     }
     RoutedInput {
-        from_node_id: started.node_id.clone(),
+        from_card_id: started.card_id.clone(),
         r#ref: format!("ledger://{id}/pick/{}", started.seq),
         text: body,
         ..Default::default()
@@ -477,7 +477,7 @@ fn resolve(
             ))
         })?;
     let attempts: Vec<_> = details.iter().map(|detail| detail.attempt).collect();
-    let mut pick = json!({"node_id":started.node_id,"attempt":choice.attempt,"pick_seq":started.seq,"candidates":attempts,"decided_by":choice.decided_by,"trigger":text(&Value::Object(started.data.clone()), "trigger")});
+    let mut pick = json!({"step_id":started.card_id,"attempt":choice.attempt,"pick_seq":started.seq,"candidates":attempts,"decided_by":choice.decided_by,"trigger":text(&Value::Object(started.data.clone()), "trigger")});
     let evidence: Vec<_> = (choice.evidence.iter())
         .map(|text| json!({"kind":"step","text":text}))
         .collect();
@@ -519,7 +519,7 @@ fn ask(
     attempts: &[i64],
     recommendation: Option<&Choice>,
 ) -> RunEvent {
-    let mut pick = json!({"node_id":started.node_id,"pick_seq":started.seq,"candidates":attempts});
+    let mut pick = json!({"step_id":started.card_id,"pick_seq":started.seq,"candidates":attempts});
     if let Some(recommendation) = recommendation {
         pick["recommendation"] = recommendation.data();
     }
@@ -528,7 +528,7 @@ fn ask(
         "human_input_requested",
         &gate.id,
         0,
-        json!({"gate_id":gate.id,"node_id":gate.id,"prompt":gate.criterion,"choices":choices,"requested_by":gate.id,"input_ref":input,"pick":pick}),
+        json!({"gate_id":gate.id,"card_id":gate.id,"prompt":gate.criterion,"choices":choices,"requested_by":gate.id,"input_ref":input,"pick":pick}),
     );
     request.gate_id = gate.id.clone();
     request
@@ -571,7 +571,7 @@ pub(crate) fn advance(
         if let [only] = details.as_slice() {
             let choice = Choice {
                 attempt: only.attempt,
-                reason: format!("the only attempt {} judged", mission.node_name(&gate.id)),
+                reason: format!("the only attempt {} judged", mission.card_name(&gate.id)),
                 evidence: Vec::new(),
                 decided_by: DECIDED_BY_AHJO.into(),
             };
@@ -684,8 +684,8 @@ impl Judging<'_> {
                 .then(|| {
                     events.iter().rev().find(|e| {
                         e.seq > started.seq
-                            && e.kind == "node_output"
-                            && e.node_id == judge.id
+                            && e.kind == "card_output"
+                            && e.card_id == judge.id
                             && e.data.get("reason").and_then(Value::as_str) == Some("judge")
                     })
                 })
@@ -702,7 +702,7 @@ impl Judging<'_> {
                 )
             } else {
                 let attempt = (events.iter())
-                    .filter(|e| e.kind == "node_started" && e.node_id == judge.id)
+                    .filter(|e| e.kind == "card_started" && e.card_id == judge.id)
                     .map(|e| e.attempt)
                     .max()
                     .unwrap_or(0)
@@ -894,14 +894,14 @@ impl Coordinator {
         } else {
             pick.actor.clone()
         };
-        let mut data = json!({"gate_id":gate,"node_id":gate,"verdict":"pass","reason":pick.reason,"requested_seq":pick.requested_seq,"decided_by":actor,"pick":{"attempt":pick.attempt}});
+        let mut data = json!({"gate_id":gate,"card_id":gate,"verdict":"pass","reason":pick.reason,"requested_seq":pick.requested_seq,"decided_by":actor,"pick":{"attempt":pick.attempt}});
         if !pick.relayed_by.is_empty() {
             data["relayed_by"] = pick.relayed_by.clone().into();
         }
         let event = RunEvent {
             kind: "human_verdict_recorded".into(),
             gate_id: gate.into(),
-            node_id: gate.into(),
+            card_id: gate.into(),
             timestamp: crate::run_storage::now(),
             actor: actor.clone(),
             data: data.as_object().unwrap().clone(),

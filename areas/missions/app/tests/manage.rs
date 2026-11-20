@@ -294,7 +294,7 @@ fn designs_a_multi_gate_mission_and_shows_findings_on_the_canvas(cx: &mut TestAp
             ))
             .unwrap()
             .0;
-        layout["layout"]["node"]
+        layout["layout"]["card"]
             .as_array()
             .unwrap()
             .iter()

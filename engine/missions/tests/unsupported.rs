@@ -26,14 +26,14 @@ fn reports_unsupported_capabilities_on_the_nodes_and_refuses_admission() {
     mission.input_cards[0].human_channel = ahjo_mission_model::HumanChannel::Session;
     let report = validate(&mission, &store.agents(), &Harnesses::default());
     assert!(report.errors.iter().any(|f| f.code == Code::UnsupportedStep
-        && f.node_id == mission.steps[0].id
+        && f.card_id == mission.steps[0].id
         && f.message.contains("not supported")));
     assert!(
         report
             .errors
             .iter()
             .any(|f| f.code == Code::UnsupportedHumanChannel
-                && f.node_id == mission.gates[0].id
+                && f.card_id == mission.gates[0].id
                 && f.message.contains("not supported"))
     );
     let admitted = run_admission(

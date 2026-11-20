@@ -1,4 +1,4 @@
-schema = 4
+schema = 5
 id = "msn_example"
 slug = "plan-build-check"
 title = "Plan, build, check"
@@ -76,7 +76,7 @@ criterion = "The checks the plan names and the project's tests all pass."
 [[limit]]
 id = "lim_hour"
 title = "One hour"
-target = "inp_task"
+scope = "inp_task"
 seconds = 3600
 warn_seconds = 600
 when_spent = "fail"

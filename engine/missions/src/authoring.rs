@@ -1,7 +1,7 @@
 //! Revision-checked edits of mission definitions.
 use crate::{Error, Store};
 use ahjo_mission_model::{
-    Edit, Layout, LayoutNode, Mission, MissionChange, MissionDeletion, Precondition,
+    Edit, Layout, LayoutCard, Mission, MissionChange, MissionDeletion, Precondition,
 };
 use sha2::{Digest, Sha256};
 use std::collections::HashSet;
@@ -71,7 +71,7 @@ fn editable_arrays(patch: &MissionChange) -> &'static [&'static str] {
         MissionChange::DeleteGate { .. } => &["gate", "connection"],
         MissionChange::DeleteEnd { .. } => &["end", "connection"],
         MissionChange::DeleteLimit { .. } => &["limit", "connection"],
-        MissionChange::RestoreNode { .. } => {
+        MissionChange::RestoreCard { .. } => {
             &["input_card", "step", "gate", "end", "limit", "connection"]
         }
     }
@@ -295,7 +295,7 @@ impl Store {
 enum ChangeEffect {
     Unchanged,
     Changed,
-    Place(LayoutNode),
+    Place(LayoutCard),
     Remove(HashSet<String>),
 }
 
@@ -350,8 +350,8 @@ fn apply_change(
             }
             ChangeEffect::Changed
         }
-        MissionChange::RestoreNode {
-            node,
+        MissionChange::RestoreCard {
+            card,
             connections,
             index,
             x,
@@ -359,7 +359,7 @@ fn apply_change(
         } => ChangeEffect::Place(crate::authoring_restore::apply(
             doc,
             mission,
-            node,
+            card,
             connections,
             index,
             x,
@@ -417,14 +417,14 @@ fn apply_change(
 }
 
 fn check_supported(before: &Mission, after: &Mission) -> Result<(), Error> {
-    // A legacy definition may be repaired one unsupported node at a time.
+    // A legacy definition may be repaired one unsupported card at a time.
     // Other edits cannot save a mission the runtime cannot execute.
     let old = crate::validate::unsupported(before);
     let unsupported = crate::validate::unsupported(after);
     let repairing = unsupported.len() < old.len()
         && unsupported.iter().all(|finding| {
             old.iter().any(|existing| {
-                existing.code == finding.code && existing.node_id == finding.node_id
+                existing.code == finding.code && existing.card_id == finding.card_id
             })
         });
     if !repairing && let Some(finding) = unsupported.first() {
@@ -455,19 +455,19 @@ fn stage_layout(
         };
     }
     match effect {
-        ChangeEffect::Place(node) => {
+        ChangeEffect::Place(card) => {
             let layout = layout.get_or_insert_with(|| {
                 let mut doc = DocumentMut::new();
                 doc["schema"] = value(ahjo_mission_model::LAYOUT_SCHEMA);
                 doc["mission_id"] = value(mission.id.clone());
                 doc
             });
-            crate::authoring_create::append(layout, "node", &node)?;
+            crate::authoring_create::append(layout, "card", &card)?;
         }
         ChangeEffect::Remove(ids) => {
             if let Some(layout) = layout {
-                crate::write::table_arrays(layout, &["node"]);
-                crate::authoring_delete::remove(layout, "node", &ids);
+                crate::write::table_arrays(layout, &["card"]);
+                crate::authoring_delete::remove(layout, "card", &ids);
             }
         }
         _ => unreachable!(),

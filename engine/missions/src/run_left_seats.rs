@@ -17,7 +17,7 @@ pub(crate) fn end(c: &Coordinator, id: &str, node: Option<&str>, cause: &str) ->
             continue;
         }
         let key = (
-            event.node_id.clone(),
+            event.card_id.clone(),
             event.seat_id.clone(),
             name.to_owned(),
         );
@@ -39,7 +39,7 @@ pub(crate) fn end(c: &Coordinator, id: &str, node: Option<&str>, cause: &str) ->
     let mut failures = Vec::new();
     for (_, seat) in left
         .into_iter()
-        .filter(|(_, seat)| node.is_none_or(|node| seat.node_id == node))
+        .filter(|(_, seat)| node.is_none_or(|node| seat.card_id == node))
     {
         let name = seat
             .data
@@ -59,7 +59,7 @@ pub(crate) fn end(c: &Coordinator, id: &str, node: Option<&str>, cause: &str) ->
         } else {
             c.inner.executor.end_left_seat(LeftSeat {
                 run_id: id.into(),
-                node_id: seat.node_id.clone(),
+                step_id: seat.card_id.clone(),
                 seat_id: seat.seat_id.clone(),
                 identity: seat.data.clone(),
                 cause: cause.into(),
@@ -71,7 +71,7 @@ pub(crate) fn end(c: &Coordinator, id: &str, node: Option<&str>, cause: &str) ->
         };
         let mut event = crate::run_worker::event(
             "seat_cleanup",
-            &seat.node_id,
+            &seat.card_id,
             seat.attempt,
             json!({"session_name":name,"outcome":outcome,"cause":cause,"detail":detail}),
         );

@@ -56,7 +56,7 @@ pub fn pending_request(
         requested_seq: request.seq,
         criterion: criterion.to_owned(),
         input: GateInput {
-            from_node_id: field("from_node_id"),
+            from_card_id: field("from_card_id"),
             from_port_id: field("from_port_id"),
             text,
             truncated,

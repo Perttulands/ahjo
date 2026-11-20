@@ -15,29 +15,30 @@ pub fn valid_seat_id(id: &str) -> bool {
         && chars.all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
 }
 
-/// Whether `device` names an environment, `<device>/<environment>`.
-pub fn valid_device(device: &str) -> bool {
-    device.split_once('/').is_some_and(|(name, environment)| {
-        !name.is_empty()
-            && !name.contains(char::is_whitespace)
-            && ["linux", "wsl", "windows"].contains(&environment)
-    })
+/// Whether `environment` has a machine name and environment kind.
+pub fn valid_environment(environment: &str) -> bool {
+    environment
+        .split_once('/')
+        .is_some_and(|(name, environment)| {
+            !name.is_empty()
+                && !name.contains(char::is_whitespace)
+                && ["linux", "wsl", "windows"].contains(&environment)
+        })
 }
 
-/// A step's `device` names an environment, `<device>/<environment>`; a
-/// device alone could mean either of a Windows machine's two.
-pub fn device_findings(mission: &Mission) -> Vec<Finding> {
+/// A step environment names its machine and the environment kind.
+pub fn environment_findings(mission: &Mission) -> Vec<Finding> {
     mission
         .steps
         .iter()
-        .filter(|step| !step.device.is_empty() && !valid_device(&step.device))
+        .filter(|step| !step.environment.is_empty() && !valid_environment(&step.environment))
         .map(|step| {
             Finding::new(
-                Code::UnknownDevice,
+                Code::UnknownEnvironment,
                 &step.id,
                 format!(
-                    "step {:?} runs on {:?}; name an environment as <device>/<linux|wsl|windows>, or clear it to run on the coordinator",
-                    step.id, step.device
+                    "step {:?} runs on {:?}; name an environment as <machine>/<linux|wsl|windows>, or clear it to run on the coordinator",
+                    step.id, step.environment
                 ),
             )
         })
@@ -123,23 +124,23 @@ pub fn seat_id_findings(mission: &Mission) -> Vec<Finding> {
     }
     let mut findings = Vec::new();
     for (seat, steps) in holders.iter().filter(|(_, steps)| steps.len() > 1) {
-        let mut nodes: Vec<&str> = Vec::new();
-        for node in steps {
-            if !nodes.contains(node) {
-                nodes.push(node);
+        let mut cards: Vec<&str> = Vec::new();
+        for card in steps {
+            if !cards.contains(card) {
+                cards.push(card);
             }
         }
-        let described = match nodes.as_slice() {
+        let described = match cards.as_slice() {
             [only] => format!("{} seats of step {only:?}", steps.len()),
             _ => {
-                let quoted: Vec<_> = nodes.iter().map(|node| format!("{node:?}")).collect();
+                let quoted: Vec<_> = cards.iter().map(|card| format!("{card:?}")).collect();
                 format!("steps {}", quoted.join(" and "))
             }
         };
-        for node in &nodes {
+        for card in &cards {
             findings.push(Finding::new(
                 Code::DuplicateSeatId,
-                node,
+                card,
                 format!("seat id {seat:?} is used by {described}; give every seat in the mission its own id"),
             ));
         }
@@ -151,7 +152,7 @@ pub fn seat_id_findings(mission: &Mission) -> Vec<Finding> {
                 &step.id,
                 format!(
                     "{} seat id {seat:?} is not a seat id Ahjo can use: {SEAT_ID_RULE}; rename it in the mission file",
-                    possessive(mission.node_name(&step.id))
+                    possessive(mission.card_name(&step.id))
                 ),
             ));
         }

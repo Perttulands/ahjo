@@ -112,7 +112,7 @@ fn thread<'a>(notes: &'a NotesDocument, target: &str) -> &'a [Note] {
         notes
             .elements
             .iter()
-            .find(|thread| thread.node_id == target)
+            .find(|thread| thread.card_id == target)
             .map(|thread| thread.entries.as_slice())
             .unwrap_or(&[])
     }
@@ -127,7 +127,7 @@ fn note_target(page: &MissionsPage, id: &str) -> String {
                     notes
                         .elements
                         .iter()
-                        .map(|t| (t.node_id.as_str(), &t.entries)),
+                        .map(|t| (t.card_id.as_str(), &t.entries)),
                 )
                 .find(|(_, entries)| entries.iter().any(|n| n.id == id))
                 .map(|(target, _)| target.to_owned())
@@ -245,8 +245,8 @@ impl MissionsPage {
             let to = wire.to.split(':').next().unwrap_or_default();
             let route = wire.from.split_once(':').map_or("", |(_, port)| port);
             let on = match route {
-                "pass" | "fail" => format!("On the {route} wire to {}", mission.node_name(to)),
-                _ => format!("On the wire to {}", mission.node_name(to)),
+                "pass" | "fail" => format!("On the {route} wire to {}", mission.card_name(to)),
+                _ => format!("On the wire to {}", mission.card_name(to)),
             };
             out.push(
                 div()
@@ -466,7 +466,7 @@ impl MissionsPage {
             out.push(self.canvas_sticky(
                 t,
                 &card.id,
-                mission.node_name(&card.id),
+                mission.card_name(&card.id),
                 entries,
                 at,
                 (!open).then_some(room),
@@ -495,8 +495,8 @@ impl MissionsPage {
             if open {
                 let name = format!(
                     "{} → {}",
-                    mission.node_name(&wire.from_node),
-                    mission.node_name(&wire.to_node)
+                    mission.card_name(&wire.from_card),
+                    mission.card_name(&wire.to_card)
                 );
                 out.push(self.canvas_sticky(
                     t,

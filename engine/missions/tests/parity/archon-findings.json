@@ -55,13 +55,13 @@
     ],
     "warnings": [
       ["mission_not_runnable", "inp"],
-      ["unreachable_node", "fmn_alone"],
-      ["unreachable_node", "fmn_empty"],
-      ["unreachable_node", "fmn_orch"],
-      ["unreachable_node", "fmn_peer"],
-      ["unreachable_node", "fmn_solo"],
-      ["unreachable_node", "fmn_staff"],
-      ["unreachable_node", "fmn_type"]
+      ["unreachable_card", "fmn_alone"],
+      ["unreachable_card", "fmn_empty"],
+      ["unreachable_card", "fmn_orch"],
+      ["unreachable_card", "fmn_peer"],
+      ["unreachable_card", "fmn_solo"],
+      ["unreachable_card", "fmn_staff"],
+      ["unreachable_card", "fmn_type"]
     ]
   },
   "inputs": {
@@ -85,13 +85,13 @@
       ["unknown_input_reference", "fmn_b"]
     ],
     "warnings": [
-      ["unreachable_node", "fmn_b"]
+      ["unreachable_card", "fmn_b"]
     ]
   },
   "limits": {
     "errors": [
-      ["duplicate_node_id", "fmn_a"],
-      ["duplicate_node_id", "gate_human"],
+      ["duplicate_card_id", "fmn_a"],
+      ["duplicate_card_id", "gate_human"],
       ["invalid_end", "end_blank"],
       ["invalid_end", "end_maybe"],
       ["invalid_limit", "lim_best_nogate"],
@@ -111,9 +111,9 @@
     "warnings": [
       ["empty_limit", "lim_nothing"],
       ["empty_limit", "lim_warn_notime"],
-      ["unreachable_node", "end_blank"],
-      ["unreachable_node", "end_maybe"],
-      ["unreachable_node", "end_spaces"]
+      ["unreachable_card", "end_blank"],
+      ["unreachable_card", "end_maybe"],
+      ["unreachable_card", "end_spaces"]
     ]
   },
   "operations-proof": {
@@ -148,13 +148,13 @@
       ["route_leads_nowhere", "gate_versiononly"]
     ],
     "warnings": [
-      ["unreachable_node", "end_lost"],
-      ["unreachable_node", "fmn_island"],
-      ["unreachable_node", "gate_check"],
-      ["unreachable_node", "gate_nokind"],
-      ["unreachable_node", "gate_novalue"],
-      ["unreachable_node", "gate_unknown"],
-      ["unreachable_node", "gate_versiononly"]
+      ["unreachable_card", "end_lost"],
+      ["unreachable_card", "fmn_island"],
+      ["unreachable_card", "gate_check"],
+      ["unreachable_card", "gate_nokind"],
+      ["unreachable_card", "gate_novalue"],
+      ["unreachable_card", "gate_unknown"],
+      ["unreachable_card", "gate_versiononly"]
     ]
   }
 }

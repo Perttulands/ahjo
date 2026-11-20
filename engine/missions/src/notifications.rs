@@ -74,7 +74,7 @@ impl Coordinator {
                 let reason = field(event, "reason");
                 let subject = format!(
                     "Ahjo needs you: {} escalated ({})",
-                    event.node_id, mission.title
+                    event.card_id, mission.title
                 );
                 let body = format!(
                     "Run {id} needs you: {reason}\n\nahjo run resume {id} --reason 'how it was resolved'\n"
@@ -163,7 +163,7 @@ fn message(
     subject: String,
     body: String,
 ) -> Value {
-    json!({"run_id":run.run_id,"mission_slug":run.mission_slug,"mission_title":mission,"seq":event.seq,"kind":kind,"run_status":run.status,"node_id":event.node_id,"gate_id":event.gate_id,"gate_title":gate_title,"ask":ask,"severity":severity,"blocks":blocks,"text":subject,"subject":subject,"body":body})
+    json!({"run_id":run.run_id,"mission_slug":run.mission_slug,"mission_title":mission,"seq":event.seq,"kind":kind,"run_status":run.status,"card_id":event.card_id,"gate_id":event.gate_id,"gate_title":gate_title,"ask":ask,"severity":severity,"blocks":blocks,"text":subject,"subject":subject,"body":body})
 }
 
 /// The commands that answer a pending gate at its current sequence.

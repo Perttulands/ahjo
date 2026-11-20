@@ -28,7 +28,7 @@ pub struct RunEvent {
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub work: String,
     #[serde(default, skip_serializing_if = "String::is_empty")]
-    pub node_id: String,
+    pub card_id: String,
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub seat_id: String,
     #[serde(default, skip_serializing_if = "String::is_empty")]

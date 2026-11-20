@@ -23,7 +23,7 @@ fn responses_read_back_with_their_empty_fields_left_out() {
         "mission_id": "msn_a", "mission_rev": 2, "input_card_id": "inp_a",
         "work": "", "cwd": "/work", "repository": "", "base": "",
         "context_paths": [], "inputs": [{"name": "brief", "kind": "text", "value": "hi"}],
-        "outputs": [{"name": "plan", "kind": "text", "value": "done", "node_id": "fmn_a",
+        "outputs": [{"name": "plan", "kind": "text", "value": "done", "card_id": "fmn_a",
                      "port_id": "out", "attempt": 1}],
         "event_count": 2, "started_by": "human:operator",
         "started_at": "2026-11-11T00:00:00Z", "updated_at": "2026-11-11T00:00:01Z",
@@ -32,7 +32,7 @@ fn responses_read_back_with_their_empty_fields_left_out() {
         "events": [
             {"seq": 1, "type": "run_started"},
             {"seq": 2, "type": "human_input_requested", "gate_id": "gte_a", "attempt": 1,
-             "input_refs": [{"edge_id": "edg_a", "from_node_id": "fmn_a", "from_port_id": "out",
+             "input_refs": [{"edge_id": "edg_a", "from_card_id": "fmn_a", "from_port_id": "out",
                             "to_port_id": "in", "origin": null}]}
         ]
     }));
@@ -45,10 +45,10 @@ fn responses_read_back_with_their_empty_fields_left_out() {
         "block_code": "limit_spent", "started_by": "human:operator",
         "started_at": "2026-11-11T00:00:00Z", "updated_at": "2026-11-11T00:00:01Z",
         "input_excerpt": "hi", "outputs": [],
-        "sessions": [{"session_name": "ahjo-a", "node_id": "fmn_a", "seat_id": "w1"}]
+        "sessions": [{"session_name": "ahjo-a", "step_id": "fmn_a", "seat_id": "w1"}]
     }]));
     reads_back::<RunAttempts>(json!({"run_id": "run_a", "steps": [{
-        "node_id": "fmn_a", "title": "Plan",
+        "step_id": "fmn_a", "title": "Plan",
         "outputs": [{"id": "out", "label": "Plan", "kind": "text"}],
         "attempts": [{
             "attempt": 1, "status": "done", "started_seq": 3,
@@ -73,8 +73,8 @@ fn responses_read_back_with_their_empty_fields_left_out() {
 fn findings_read_back_by_their_codes() {
     let report = reads_back::<Report>(json!({
         "errors": [
-            {"code": "missing_input", "node_id": "inp_a", "message": "brief is required"},
-            {"code": "missing_file", "node_id": "fmn_a", "message": "no such file",
+            {"code": "missing_input", "card_id": "inp_a", "message": "brief is required"},
+            {"code": "missing_file", "card_id": "fmn_a", "message": "no such file",
              "path": "/work/brief.md"}
         ],
         "warnings": []
@@ -90,7 +90,7 @@ fn requests_read_back_whole() {
         "base": "", "context_paths": [], "work": "", "actor": "human:operator",
         "inputs": {"brief": "hi"}, "request_id": "req_1"
     }));
-    assert_eq!(start.known_devices, None);
+    assert_eq!(start.known_machines, None);
     let resume = reads_back::<ResumeRequest>(json!({
         "mode": "redispatch", "take_fail": false, "grant": true, "pick_best": false,
         "reason": "one more round", "actor": "human:operator"

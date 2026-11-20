@@ -6,7 +6,7 @@ use serde::{Deserialize, Deserializer, Serialize};
 
 use crate::{
     Effort, End, EndOutcome, Formation, Gate, GateKind, Harness, HumanChannel, InputCard, Layout,
-    LayoutEdge, LayoutNode, Limit, Mission, MissionInput, MissionOutput, Notes, PortKind, Step,
+    LayoutCard, LayoutEdge, Limit, Mission, MissionInput, MissionOutput, Notes, PortKind, Step,
     WhenSpent,
 };
 
@@ -95,7 +95,7 @@ pub enum MissionChange {
         title: Option<String>,
         /// Where the step runs. Blank uses the coordinator.
         #[serde(skip_serializing_if = "Option::is_none")]
-        device: Option<String>,
+        environment: Option<String>,
         /// Whether each attempt starts fresh sessions.
         #[serde(skip_serializing_if = "Option::is_none")]
         fresh: Option<bool>,
@@ -271,10 +271,10 @@ pub enum MissionChange {
     },
     /// Connect two ports.
     WireConnection {
-        /// The source endpoint as `<node-id>:<port-id>`.
+        /// The source endpoint as `<card-id>:<port-id>`.
         #[serde(default, deserialize_with = "default_on_null")]
         from: String,
-        /// The destination endpoint as `<node-id>:<port-id>`.
+        /// The destination endpoint as `<card-id>:<port-id>`.
         #[serde(default, deserialize_with = "default_on_null")]
         to: String,
         /// The id of the card or wire.
@@ -286,22 +286,22 @@ pub enum MissionChange {
     },
     /// Disconnect two ports.
     UnwireConnection {
-        /// The source endpoint as `<node-id>:<port-id>`.
+        /// The source endpoint as `<card-id>:<port-id>`.
         #[serde(default, deserialize_with = "default_on_null")]
         from: String,
-        /// The destination endpoint as `<node-id>:<port-id>`.
+        /// The destination endpoint as `<card-id>:<port-id>`.
         #[serde(default, deserialize_with = "default_on_null")]
         to: String,
     },
     /// Move an existing wire to another input.
     RewireConnection {
-        /// The source endpoint as `<node-id>:<port-id>`.
+        /// The source endpoint as `<card-id>:<port-id>`.
         #[serde(default, deserialize_with = "default_on_null")]
         from: String,
-        /// The former destination endpoint as `<node-id>:<port-id>`.
+        /// The former destination endpoint as `<card-id>:<port-id>`.
         #[serde(default, deserialize_with = "default_on_null")]
         previous_to: String,
-        /// The destination endpoint as `<node-id>:<port-id>`.
+        /// The destination endpoint as `<card-id>:<port-id>`.
         #[serde(default, deserialize_with = "default_on_null")]
         to: String,
         /// Whether to join a wire to an occupied input.
@@ -394,7 +394,7 @@ pub enum MissionChange {
         title: String,
         /// The id of the step or Input card the limit covers.
         #[serde(default, deserialize_with = "default_on_null")]
-        target: String,
+        scope: String,
         /// The round cap.
         #[serde(skip_serializing_if = "Option::is_none")]
         rounds: Option<i64>,
@@ -417,7 +417,7 @@ pub enum MissionChange {
         #[serde(default, deserialize_with = "default_on_null")]
         y: i64,
     },
-    /// Change the target or caps of a Limit card.
+    /// Change the scope or caps of a Limit card.
     UpdateLimit(LimitUpdate),
     /// Remove a Limit card.
     DeleteLimit {
@@ -426,10 +426,10 @@ pub enum MissionChange {
         id: String,
     },
     /// Restore exactly one removed card and its wires.
-    RestoreNode {
+    RestoreCard {
         /// The card to restore.
         #[serde(flatten)]
-        node: RestoredNode,
+        card: RestoredCard,
         /// Wires to restore with the item.
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         connections: Vec<crate::Connection>,
@@ -512,7 +512,7 @@ pub struct LimitUpdate {
     pub title: Option<String>,
     /// The id of the step or Input card the limit covers.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub target: Option<String>,
+    pub scope: Option<String>,
     /// The round cap.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub rounds: Option<i64>,
@@ -590,7 +590,7 @@ pub struct InputCardUpdate {
 
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "snake_case", try_from = "RestoredCards")]
-pub enum RestoredNode {
+pub enum RestoredCard {
     InputCard(InputCard),
     Step(Step),
     Gate(Gate),
@@ -609,7 +609,7 @@ struct RestoredCards {
     limit: Option<Limit>,
 }
 
-impl TryFrom<RestoredCards> for RestoredNode {
+impl TryFrom<RestoredCards> for RestoredCard {
     type Error = &'static str;
 
     fn try_from(cards: RestoredCards) -> Result<Self, Self::Error> {
@@ -624,14 +624,14 @@ impl TryFrom<RestoredCards> for RestoredNode {
         .flatten();
         match (nodes.next(), nodes.next()) {
             (Some(node), None) => Ok(node),
-            _ => Err("restore_node requires exactly one node"),
+            _ => Err("restore_card requires exactly one card"),
         }
     }
 }
 
 #[derive(Clone, Debug)]
 pub enum LayoutPatch {
-    Nodes(Vec<LayoutNode>),
+    Cards(Vec<LayoutCard>),
     Edges(Vec<LayoutEdge>),
 }
 

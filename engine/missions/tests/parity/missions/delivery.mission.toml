@@ -1,5 +1,5 @@
 # Import the companion delivery.notes.toml into .archon/notes/.
-schema = 4
+schema = 5
 id = "brd_delivery"
 slug = "delivery"
 title = "Delivery"

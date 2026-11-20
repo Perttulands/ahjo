@@ -1,4 +1,4 @@
-//! Where a step runs (#124, #231): a step's `device` names an
+//! Where a step runs (#124, #231): a step's `environment` names an
 //! environment as `<device>/<environment>`, exactly as the node validates and
 //! places it, and blank runs it on the run's coordinator.
 
@@ -41,10 +41,10 @@ impl Place {
     }
 }
 
-/// Where a step with this `device` runs, for a run coordinated by `here`.
-pub fn resolve(device: &str, here: &str, fleet: &[Env]) -> Place {
-    let device = device.trim();
-    if device.is_empty() {
+/// Where a step with this `environment` runs, for a run coordinated by `here`.
+pub fn resolve(environment: &str, here: &str, fleet: &[Env]) -> Place {
+    let placement = environment.trim();
+    if placement.is_empty() {
         return match fleet.iter().find(|e| e.node == here) {
             Some(e) => Place::of(e, false),
             None => Place {
@@ -58,7 +58,7 @@ pub fn resolve(device: &str, here: &str, fleet: &[Env]) -> Place {
     }
     // The node's rule: exactly `<device>/<environment>`, as validation and
     // placement read it. Anything else is a place no node will take.
-    let (name, environment) = device.split_once('/').unwrap_or((device, ""));
+    let (name, environment) = placement.split_once('/').unwrap_or((placement, ""));
     match fleet
         .iter()
         .find(|e| e.device == name && e.environment == environment)

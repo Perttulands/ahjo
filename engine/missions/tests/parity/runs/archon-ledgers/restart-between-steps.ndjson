@@ -1,11 +1,11 @@
 {"type":"run_started"}
-{"type":"node_started","node_id":"inp_hello"}
-{"type":"node_output","node_id":"inp_hello","status":"done"}
+{"type":"card_started","card_id":"inp_hello"}
+{"type":"card_output","card_id":"inp_hello","status":"done"}
 {"type":"error","code":"coordinator_interrupted"}
 {"type":"run_blocked","code":"coordinator_interrupted"}
 {"type":"run_resumed"}
-{"type":"node_started","node_id":"fmn_work","attempt":1}
-{"type":"seat_dispatch","node_id":"fmn_work","seat_id":"seat_work","attempt":1}
-{"type":"seat_result","node_id":"fmn_work","seat_id":"seat_work","attempt":1,"status":"ok"}
-{"type":"node_output","node_id":"fmn_work","attempt":1,"status":"done"}
+{"type":"card_started","card_id":"fmn_work","attempt":1}
+{"type":"seat_dispatch","card_id":"fmn_work","seat_id":"seat_work","attempt":1}
+{"type":"seat_result","card_id":"fmn_work","seat_id":"seat_work","attempt":1,"status":"ok"}
+{"type":"card_output","card_id":"fmn_work","attempt":1,"status":"done"}
 {"type":"run_succeeded"}

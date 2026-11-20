@@ -79,7 +79,7 @@ async fn document_commands_keep_bytes_and_reject_a_missing_or_stale_revision() {
     assert_eq!(model.id, "msn_example");
     assert_eq!(model.steps[0].seats[0].id, "seat_write");
     let layout = stored_layout(&node, "post").await;
-    assert!(layout.nodes.iter().any(|n| n.id == "fmn_write"));
+    assert!(layout.cards.iter().any(|n| n.id == "fmn_write"));
 
     let exported = cli_mission(&node, &["export", "post"]).await;
     assert_eq!(exported, source.as_bytes());
@@ -124,7 +124,7 @@ async fn document_commands_keep_bytes_and_reject_a_missing_or_stale_revision() {
 #[tokio::test(flavor = "multi_thread")]
 async fn apply_reports_assigned_ids_and_draft_errors_and_previews_without_writes() {
     let node = Node::start(AREAS, "").await.unwrap();
-    let document = r#"schema = 4
+    let document = r#"schema = 5
 slug = "draft"
 title = "Sample draft"
 step = [
@@ -174,10 +174,10 @@ step = [
     assert_eq!(model.steps[0].id, "fmn_first_draft");
     assert_eq!(model.rev, 1);
     let placed = stored_layout(&node, "draft").await;
-    assert_eq!(placed.nodes.len(), 2);
+    assert_eq!(placed.cards.len(), 2);
     assert_ne!(
-        (placed.nodes[0].x, placed.nodes[0].y),
-        (placed.nodes[1].x, placed.nodes[1].y)
+        (placed.cards[0].x, placed.cards[0].y),
+        (placed.cards[1].x, placed.cards[1].y)
     );
     let add = format!("{original}\n[[end]]\ntitle = \"Unexpected end\"\n");
     let preview = node
@@ -192,15 +192,15 @@ step = [
         .await
         .unwrap();
     let layout = stored_layout(&node, "draft").await;
-    assert!(placed.nodes.iter().all(|old| layout.nodes.contains(old)));
-    assert!(layout.nodes.iter().any(|n| n.id == "end_unexpected_end"));
+    assert!(placed.cards.iter().all(|old| layout.cards.contains(old)));
+    assert!(layout.cards.iter().any(|n| n.id == "end_unexpected_end"));
     node.stop().await;
 }
 
 #[tokio::test(flavor = "multi_thread")]
 async fn apply_keeps_a_card_with_an_open_note_and_removes_its_position_after_resolution() {
     let node = Node::start(AREAS, "").await.unwrap();
-    let document = r#"schema = 4
+    let document = r#"schema = 5
 id = "mission_notes"
 slug = "noted"
 title = "Noted"
@@ -211,12 +211,18 @@ title = "Old card"
     node.call("mission_apply", json!({"document":document}))
         .await
         .unwrap();
-    let notes = node.call("mission_note", json!({
-        "mission":"noted","target":"end_old","author":"document-test","text":"Check this ending"
-    })).await.unwrap();
+    let notes = node
+        .call(
+            "mission_note",
+            json!({
+                "mission":"noted","on":"end_old","author":"document-test","text":"Check this ending"
+            }),
+        )
+        .await
+        .unwrap();
     let note = notes["note"].as_str().unwrap();
     let removal =
-        "schema = 4\nid = \"mission_notes\"\nslug = \"noted\"\nrev = 1\ntitle = \"Noted\"\n";
+        "schema = 5\nid = \"mission_notes\"\nslug = \"noted\"\nrev = 1\ntitle = \"Noted\"\n";
     let error = node
         .call("mission_apply", json!({"document":removal}))
         .await
@@ -227,7 +233,7 @@ title = "Old card"
     let saved = std::fs::read_to_string(&path).unwrap();
     assert_eq!(Mission::parse(&saved).unwrap().rev, 1);
     let layout = stored_layout(&node, "noted").await;
-    assert!(layout.nodes.iter().any(|n| n.id == "end_old"));
+    assert!(layout.cards.iter().any(|n| n.id == "end_old"));
 
     node.call(
         "mission_resolve",
@@ -246,7 +252,7 @@ title = "Old card"
     assert!(
         !stored_layout(&node, "noted")
             .await
-            .nodes
+            .cards
             .iter()
             .any(|n| n.id == "end_old")
     );
@@ -256,7 +262,7 @@ title = "Old card"
 #[tokio::test(flavor = "multi_thread")]
 async fn repeat_port_labels_can_be_wired_by_exact_id() {
     let node = Node::start(AREAS, "").await.unwrap();
-    let document = r#"schema = 4
+    let document = r#"schema = 5
 slug = "ports"
 input_card = [{ id = "start", title = "Start" }]
 step = [
@@ -288,7 +294,7 @@ step = [
 #[tokio::test(flavor = "multi_thread")]
 async fn apply_refuses_unknown_vocabulary_and_keeps_saved_ultra() {
     let node = Node::start(AREAS, "").await.unwrap();
-    let source = r#"schema = 4
+    let source = r#"schema = 5
 slug = "effort"
 rev = 0
 
@@ -321,7 +327,7 @@ effort = "ultra"
         .unwrap();
     assert_eq!(exported["document"], stored);
     let before = Mission::parse(&stored).unwrap();
-    assert_eq!(before.schema, 4);
+    assert_eq!(before.schema, 5);
     assert_eq!(
         before.steps[0].seats[0].effort,
         ahjo_missions_contract::Effort::Ultra

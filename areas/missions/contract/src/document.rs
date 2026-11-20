@@ -43,7 +43,7 @@ impl From<NoteEntry> for Note {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub struct NoteThread {
-    pub node_id: String,
+    pub card_id: String,
     pub entries: Vec<Note>,
 }
 
@@ -57,11 +57,11 @@ impl NotesDocument {
             let note = Note::from(entry);
             if target == crate::MISSION_THREAD {
                 mission.push(note);
-            } else if let Some(thread) = elements.iter_mut().find(|t| t.node_id == target) {
+            } else if let Some(thread) = elements.iter_mut().find(|t| t.card_id == target) {
                 thread.entries.push(note);
             } else {
                 elements.push(NoteThread {
-                    node_id: target,
+                    card_id: target,
                     entries: vec![note],
                 });
             }

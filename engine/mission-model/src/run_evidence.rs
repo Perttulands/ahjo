@@ -24,7 +24,7 @@ pub struct RunProblem {
     pub seq: u64,
     #[serde(rename = "type")]
     pub kind: String,
-    pub node_id: String,
+    pub card_id: String,
     pub gate_id: String,
     pub code: Option<String>,
     pub reason: EvidenceText,
@@ -33,7 +33,7 @@ pub struct RunProblem {
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub struct RunBrief {
-    pub node_id: String,
+    pub step_id: String,
     pub seat_id: String,
     pub attempt: i64,
     pub dispatch_seq: u64,
@@ -43,7 +43,7 @@ pub struct RunBrief {
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub struct RunArtifact {
-    pub node_id: String,
+    pub step_id: String,
     pub path: String,
     pub size: u64,
 }

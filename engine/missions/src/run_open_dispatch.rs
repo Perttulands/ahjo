@@ -40,8 +40,8 @@ pub(crate) fn unresolved(events: &[RunEvent]) -> Vec<RunEvent> {
         let retained = events.iter().any(|event| {
             matches!(
                 event.kind.as_str(),
-                "node_output" | "node_output_pending" | "output_capture_pending"
-            ) && event.node_id == dispatch.node_id
+                "card_output" | "card_output_pending" | "output_capture_pending"
+            ) && event.card_id == dispatch.card_id
                 && event.attempt == dispatch.attempt
         });
         if id.is_some()
@@ -67,11 +67,11 @@ pub(crate) fn failed_completion(events: &[RunEvent], dispatch: &RunEvent) -> boo
             && event.data.get("status").and_then(|v| v.as_str()) == Some("ok")
     }) && events.iter().any(|event| {
         event.kind == "error"
-            && event.node_id == dispatch.node_id
+            && event.card_id == dispatch.card_id
             && event.seq > dispatch.seq
             && !events.iter().any(|later| {
-                later.kind == "node_started"
-                    && later.node_id == dispatch.node_id
+                later.kind == "card_started"
+                    && later.card_id == dispatch.card_id
                     && later.seq > dispatch.seq
                     && later.seq < event.seq
             })

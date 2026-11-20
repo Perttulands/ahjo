@@ -89,21 +89,21 @@ impl Store {
         crate::write::table_arrays(
             &mut doc,
             match &patch {
-                LayoutPatch::Nodes(_) => &["node"],
+                LayoutPatch::Cards(_) => &["card"],
                 LayoutPatch::Edges(_) => &["edge"],
             },
         );
         match patch {
-            LayoutPatch::Nodes(nodes) => {
-                for node in nodes {
+            LayoutPatch::Cards(cards) => {
+                for node in cards {
                     if node.id.is_empty() {
                         continue;
                     }
-                    if let Some(table) = entry(&mut doc, "node", &node.id) {
+                    if let Some(table) = entry(&mut doc, "card", &node.id) {
                         crate::write::set(table, "x", value(node.x));
                         crate::write::set(table, "y", value(node.y));
                     } else {
-                        crate::authoring_create::append(&mut doc, "node", &node)?;
+                        crate::authoring_create::append(&mut doc, "card", &node)?;
                     }
                 }
             }
