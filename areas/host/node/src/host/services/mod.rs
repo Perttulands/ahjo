@@ -3,33 +3,18 @@
 //! catalog, group and partial-state rules; it reads only when asked, so it
 //! costs nothing while nobody looks.
 //!
-//! `GET /api/services` lists `{services:[{id,name,description,link,state,
-//! controllable,components:[{unit,state,sub,since,restarts}]}]}`, and
-//! `GET /api/services/{id}` reads one service's units alone (a client
-//! following its own action). `GET /api/services/{id}/log?lines=N` answers
-//! its units' last lines from the journal, merged oldest first, and why a
-//! unit's could not be read.
-//! `POST /api/services/{id}/{start|stop|restart}` answers `{service,
-//! errors, outcome}`: 200 `done` when every unit did as told, 502 `failed`
-//! with systemd's words, and 202 `unconfirmed` when a unit gave no answer
-//! in time, because the job systemd accepted may still finish and only a
-//! later read can say. Starting goes through the components in order,
-//! stopping in reverse, restarting is the stop then the start, all within
-//! [`ACTION`]; nothing is ever enabled or disabled.
+//! Starting goes through the components in order, stopping in reverse,
+//! and restarting stops them all before it starts them. An unconfirmed
+//! action may still finish in systemd and only a later read can say.
 
 mod catalog;
 mod systemd;
 
 use std::path::PathBuf;
-use std::sync::Arc;
 use std::time::Duration;
 
-use ahjo_host_contract::{Outcome, Service, ServiceLog};
-use axum::extract::{Path, Query, State};
-use axum::http::StatusCode;
-use axum::response::{IntoResponse, Response};
-use axum::routing::{get, post};
-use axum::{Json, Router};
+use ahjo_core::Error;
+use ahjo_host_contract::{BAD_REQUEST, NOT_FOUND, Outcome, Service, ServiceLog, UNAVAILABLE};
 use tokio::sync::Mutex;
 
 use catalog::Entry;
@@ -99,10 +84,10 @@ impl Services {
         }
     }
 
-    fn entries(&self) -> Result<Vec<Entry>, Refused> {
+    fn entries(&self) -> Result<Vec<Entry>, Error> {
         if !self.catalog.exists() {
-            return Err(Refused(
-                StatusCode::SERVICE_UNAVAILABLE,
+            return Err(Error::new(
+                UNAVAILABLE,
                 format!(
                     "{}write one at {}",
                     ahjo_host_contract::NO_CATALOG,
@@ -110,34 +95,29 @@ impl Services {
                 ),
             ));
         }
-        catalog::read(&self.catalog).map_err(|e| Refused(StatusCode::SERVICE_UNAVAILABLE, e))
+        catalog::read(&self.catalog).map_err(|e| Error::new(UNAVAILABLE, e))
     }
 
-    pub async fn list(&self) -> Result<Vec<Service>, Refused> {
+    pub async fn list(&self) -> Result<Vec<Service>, Error> {
         let entries = self.entries()?;
         Ok(futures_util::future::join_all(entries.iter().map(status)).await)
     }
 
-    fn entry(&self, id: &str) -> Result<Entry, Refused> {
+    fn entry(&self, id: &str) -> Result<Entry, Error> {
         self.entries()?
             .into_iter()
             .find(|e| e.id == id)
-            .ok_or_else(|| {
-                Refused(
-                    StatusCode::NOT_FOUND,
-                    format!("No service {id} in the catalog"),
-                )
-            })
+            .ok_or_else(|| Error::new(NOT_FOUND, format!("No service {id} in the catalog")))
     }
 
     /// One service as its units are now.
-    pub async fn one(&self, id: &str) -> Result<Service, Refused> {
+    pub async fn one(&self, id: &str) -> Result<Service, Error> {
         Ok(status(&self.entry(id)?).await)
     }
 
     /// The last `lines` lines a service's units logged, oldest first; a
     /// unit whose log does not read says why instead.
-    pub async fn log(&self, id: &str, lines: usize) -> Result<ServiceLog, Refused> {
+    pub async fn log(&self, id: &str, lines: usize) -> Result<ServiceLog, Error> {
         let entry = self.entry(id)?;
         let units = entry
             .components
@@ -165,8 +145,8 @@ impl Services {
         &self,
         id: &str,
         action: &str,
-    ) -> Result<(Service, Vec<String>, Outcome), Refused> {
-        let bad = |m: &str| Refused(StatusCode::BAD_REQUEST, m.to_string());
+    ) -> Result<(Service, Vec<String>, Outcome), Error> {
+        let bad = |message: &str| Error::new(BAD_REQUEST, message);
         let steps: &[&str] = match action {
             "start" => &["start"],
             "stop" => &["stop"],
@@ -245,100 +225,6 @@ fn max_outcome(a: Outcome, b: Outcome) -> Outcome {
     }
 }
 
-/// A refusal: its status and its sentence, answered as `{error}`.
-#[derive(Debug)]
-pub struct Refused(StatusCode, String);
-
-impl std::fmt::Display for Refused {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(&self.1)
-    }
-}
-
-impl Refused {
-    pub fn error(&self) -> ahjo_core::Error {
-        let code = match self.0 {
-            StatusCode::BAD_REQUEST => ahjo_host_contract::BAD_REQUEST,
-            StatusCode::NOT_FOUND => ahjo_host_contract::NOT_FOUND,
-            _ => ahjo_host_contract::UNAVAILABLE,
-        };
-        ahjo_core::Error::new(code, &self.1)
-    }
-}
-
-impl IntoResponse for Refused {
-    fn into_response(self) -> Response {
-        let error = self.error();
-        (self.0, Json(serde_json::json!({ "error": error }))).into_response()
-    }
-}
-
-/// The routes, for the server to merge with the other modules'.
-pub fn routes<S: Clone + Send + Sync + 'static>(services: Arc<Services>) -> Router<S> {
-    Router::new()
-        .route("/api/services", get(list))
-        .route("/api/services/{id}", get(one))
-        .route("/api/services/{id}/log", get(log))
-        .route("/api/services/{id}/{action}", post(act))
-        .with_state(services)
-}
-
-async fn list(State(s): State<Arc<Services>>) -> Response {
-    match s.list().await {
-        Ok(services) => Json(ahjo_host_contract::ServiceList { services }).into_response(),
-        Err(r) => r.into_response(),
-    }
-}
-
-async fn one(State(s): State<Arc<Services>>, Path(id): Path<String>) -> Response {
-    match s.one(&id).await {
-        Ok(service) => Json(ahjo_host_contract::ServiceOne { service }).into_response(),
-        Err(r) => r.into_response(),
-    }
-}
-
-#[derive(serde::Deserialize)]
-struct Lines {
-    lines: Option<usize>,
-}
-
-async fn log(
-    State(s): State<Arc<Services>>,
-    Path(id): Path<String>,
-    Query(q): Query<Lines>,
-) -> Response {
-    match s.log(&id, q.lines.unwrap_or(LOG_LINES)).await {
-        Ok(log) => Json(log).into_response(),
-        Err(r) => r.into_response(),
-    }
-}
-
-async fn act(
-    State(s): State<Arc<Services>>,
-    Path((id, action)): Path<(String, String)>,
-) -> Response {
-    match s.act(&id, &action).await {
-        Ok((service, errors, outcome)) => {
-            let code = match outcome {
-                Outcome::Done => StatusCode::OK,
-                Outcome::Failed => StatusCode::BAD_GATEWAY,
-                Outcome::Unconfirmed => StatusCode::ACCEPTED,
-            };
-            let error = (outcome == Outcome::Failed).then(|| {
-                ahjo_core::Error::new(ahjo_host_contract::SERVICE_FAILED, errors.join("; "))
-            });
-            let body = ahjo_host_contract::ServiceAction {
-                service,
-                errors,
-                outcome,
-                error,
-            };
-            (code, Json(body)).into_response()
-        }
-        Err(r) => r.into_response(),
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -380,19 +266,10 @@ mod tests {
         )
         .unwrap();
         let s = Services::new(file);
-        let code = |r: Result<_, Refused>| r.err().map(|r| r.0);
-        assert_eq!(
-            code(s.act("room", "reload").await),
-            Some(StatusCode::BAD_REQUEST)
-        );
-        assert_eq!(
-            code(s.act("nope", "start").await),
-            Some(StatusCode::NOT_FOUND)
-        );
-        assert_eq!(
-            code(s.act("room", "start").await),
-            Some(StatusCode::BAD_REQUEST)
-        );
+        let code = |r: Result<_, Error>| r.unwrap_err().code;
+        assert_eq!(code(s.act("room", "reload").await), BAD_REQUEST);
+        assert_eq!(code(s.act("nope", "start").await), NOT_FOUND);
+        assert_eq!(code(s.act("room", "start").await), BAD_REQUEST);
         let listed = s.list().await.unwrap();
         assert_eq!(listed[0].state, "running");
         responder.await.unwrap();
@@ -404,7 +281,7 @@ mod tests {
     async fn without_a_catalog_the_node_says_where_to_write_one() {
         let s = Services::new(PathBuf::from("/nonexistent/ahjo/services.json"));
         let r = s.list().await.unwrap_err();
-        assert_eq!(r.0, StatusCode::SERVICE_UNAVAILABLE);
-        assert!(r.1.contains("/nonexistent/ahjo/services.json"));
+        assert_eq!(r.code, UNAVAILABLE);
+        assert!(r.message.contains("/nonexistent/ahjo/services.json"));
     }
 }

@@ -41,6 +41,7 @@ use std::time::Duration;
 use tokio::sync::{Notify, broadcast, mpsc};
 use tokio::task::JoinHandle;
 
+use ahjo_host_contract::commands::HostShown;
 use facts::Facts;
 pub use history::History;
 
@@ -155,20 +156,27 @@ impl Host {
 /// The host now, as `ahjo host show` tells it: its facts, a reading taken
 /// over `window` (CPU, and what is heavy, measured across it), and the
 /// recent events.
-pub async fn now(window: Duration, log: &ahjo_node_kit::events::Log) -> serde_json::Value {
+pub(crate) async fn now(
+    window: Duration,
+    log: &ahjo_node_kit::events::Log,
+    node: String,
+    full: bool,
+) -> HostShown {
     let facts = facts::read();
     let mut probe = reading::Probe::new(disk::mounts(), facts.threads);
-    probe.read(true).await;
+    probe.read(full).await;
     tokio::time::sleep(window).await;
-    let reading = probe.read(true).await;
-    let (events, _) = log.listen();
-    let frame = channel::state(&facts, Vec::new(), Some(&reading), &events);
-    let mut state: serde_json::Value =
-        serde_json::from_slice(&frame[1..]).expect("the state frame is JSON");
-    if let Some(state) = state.as_object_mut() {
-        state.remove("minutes");
+    let mut latest = probe.read(full).await;
+    if !full {
+        latest.heavy = None;
     }
-    state
+    let events = full.then(|| log.listen().0.iter().map(channel::wire).collect());
+    HostShown {
+        facts,
+        latest,
+        events,
+        node,
+    }
 }
 
 impl Drop for Host {
@@ -386,7 +394,7 @@ mod tests {
             }
             tokio::time::sleep(Duration::from_millis(10)).await;
         };
-        assert!(first.heavy.is_empty());
+        assert!(first.heavy.as_deref().is_some_and(<[_]>::is_empty));
         let mut readings = host.shared.readings.subscribe();
         // Nothing more for as long as nobody looks.
         tokio::time::sleep(Duration::from_millis(300)).await;

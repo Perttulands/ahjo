@@ -1,5 +1,8 @@
 //! Host and service wire types shared by the node and app.
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+
+pub mod commands;
 
 pub const HOST: u8 = 0x30;
 pub const HOST_STATE: u8 = 0x31;
@@ -9,6 +12,7 @@ pub const BAD_REQUEST: &str = "bad_request";
 pub const NOT_FOUND: &str = "not_found";
 pub const UNAVAILABLE: &str = "unavailable";
 pub const SERVICE_FAILED: &str = "service_failed";
+pub const SERVICE_UNCONFIRMED: &str = "service_unconfirmed";
 /// How a node with no service catalog begins its refusal: where to write
 /// one follows the colon. A node set up without one is not a failure, so
 /// the app tells this refusal from the others by these words.
@@ -18,7 +22,7 @@ pub fn encode_on(on: bool) -> Vec<u8> {
     vec![HOST, u8::from(on)]
 }
 
-#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, JsonSchema)]
 pub struct Event {
     pub at: u64,
     pub kind: String,
@@ -26,7 +30,7 @@ pub struct Event {
     pub failure: bool,
     pub text: String,
 }
-#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq, JsonSchema)]
 pub struct Facts {
     pub os: Option<String>,
     pub kernel: Option<String>,
@@ -35,7 +39,7 @@ pub struct Facts {
     #[serde(default)]
     pub threads: usize,
 }
-#[derive(Clone, Copy, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, Serialize, Deserialize, PartialEq, Eq, JsonSchema)]
 pub struct Usage {
     pub used: u64,
     pub total: u64,
@@ -47,7 +51,7 @@ impl Usage {
 }
 /// A file system the operator can fill: the root, and on WSL each Windows
 /// drive it mounts (`C:` at `/mnt/c`).
-#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, JsonSchema)]
 pub struct Disk {
     /// What the operator calls it: `/`, `C:`.
     pub name: String,
@@ -64,7 +68,7 @@ impl Disk {
         }
     }
 }
-#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, JsonSchema)]
 pub struct Gpu {
     pub name: String,
     pub util: Option<f32>,
@@ -73,7 +77,7 @@ pub struct Gpu {
 }
 /// What is heavy now: the processes running one program in one folder,
 /// counted together (twelve `rustc` of one build are one line).
-#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, JsonSchema)]
 pub struct Heavy {
     /// The program, as the kernel names it.
     pub name: String,
@@ -87,7 +91,7 @@ pub struct Heavy {
     /// Resident memory, bytes.
     pub memory: u64,
 }
-#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, JsonSchema)]
 pub struct Reading {
     pub at: u64,
     pub cpu: Option<f32>,
@@ -104,8 +108,8 @@ pub struct Reading {
     pub gpus: Vec<Gpu>,
     pub uptime: Option<u64>,
     /// What is heaviest now: read only while someone looks at the host.
-    #[serde(default)]
-    pub heavy: Vec<Heavy>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub heavy: Option<Vec<Heavy>>,
 }
 /// One minute of the host: the busy figures (CPU, GPU) as the mean of its
 /// readings, the full ones (memory, GPU memory, swap, disks) as their
@@ -262,7 +266,7 @@ pub struct EventFrame {
     pub event: Event,
 }
 /// One unit or probe of a service, as systemd says it is.
-#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq, JsonSchema)]
 pub struct Component {
     /// The unit's name, or the probe's URL.
     pub unit: String,
@@ -280,7 +284,7 @@ pub struct Component {
     #[serde(default)]
     pub restarts: u32,
 }
-#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq, JsonSchema)]
 pub struct Service {
     pub id: String,
     pub name: String,
@@ -305,31 +309,15 @@ impl Service {
         self.components.iter().map(|c| c.restarts).sum()
     }
 }
-#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq, JsonSchema)]
 #[serde(rename_all = "lowercase")]
 pub enum Outcome {
     Done,
     Failed,
     Unconfirmed,
 }
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
-pub struct ServiceList {
-    pub services: Vec<Service>,
-}
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
-pub struct ServiceOne {
-    pub service: Service,
-}
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
-pub struct ServiceAction {
-    pub service: Service,
-    pub errors: Vec<String>,
-    pub outcome: Outcome,
-    #[serde(skip_serializing_if = "Option::is_none", default)]
-    pub error: Option<ahjo_core::Error>,
-}
 /// One line of a service's log.
-#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq, JsonSchema)]
 pub struct LogLine {
     /// Unix ms.
     pub at: u64,
@@ -340,7 +328,7 @@ pub struct LogLine {
 }
 /// A service's latest log lines, oldest first, and why some could not be
 /// read.
-#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq, JsonSchema)]
 pub struct ServiceLog {
     pub lines: Vec<LogLine>,
     #[serde(default)]

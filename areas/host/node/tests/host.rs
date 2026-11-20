@@ -1,10 +1,10 @@
-//! Host commands, services routes and subscriptions through a testkit node.
+//! Host commands and subscriptions through a testkit node.
 use std::time::Duration;
 
-use ahjo_host_contract::{self as contract, ReadingFrame, ServiceList, State};
+use ahjo_host_contract::{self as contract, ReadingFrame, State, commands::ServicesListed};
 use ahjo_node_kit::{NodeClient, cli};
 use ahjo_testkit::node::Node;
-use axum::http::Method;
+use axum::http::{Method, StatusCode};
 use futures_util::{SinkExt, StreamExt};
 use serde_json::{Value, json};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -18,12 +18,20 @@ async fn start() -> Node {
 async fn services_and_commands_use_the_same_catalog_and_coded_errors() {
     let node = start().await;
     let client = NodeClient::new(Some(&node.url())).unwrap();
-    let missing = client
-        .request(Method::GET, "/api/services", None, None)
-        .await
-        .unwrap_err();
+    let post = async |command: &str, input: Value| {
+        client
+            .request(
+                Method::POST,
+                &format!("/api/call/{command}"),
+                Some(input),
+                None,
+            )
+            .await
+    };
+    let missing = post("service_list", json!({})).await.unwrap_err();
     let missing = missing.downcast_ref::<ahjo_node_kit::NodeError>().unwrap();
     assert_eq!(missing.code, contract::UNAVAILABLE);
+    assert_eq!(missing.status, StatusCode::SERVICE_UNAVAILABLE);
     let missing = node.call("service_list", json!({})).await.unwrap_err();
     assert_eq!(missing.code, contract::UNAVAILABLE);
     assert!(missing.message.contains("No service catalog"));
@@ -54,21 +62,18 @@ async fn services_and_commands_use_the_same_catalog_and_coded_errors() {
     )
     .unwrap();
 
-    let (body, _) = client
-        .request(Method::GET, "/api/services", None, None)
-        .await
-        .unwrap();
-    let services: ServiceList = serde_json::from_value(body).unwrap();
+    let (body, _) = post("service_list", json!({})).await.unwrap();
+    let services: ServicesListed = serde_json::from_value(body.clone()).unwrap();
     assert_eq!(services.services[0].id, "fixture");
     assert_eq!(services.services[0].state, "running");
     assert!(!services.services[0].controllable);
-    let (one, _) = client
-        .request(Method::GET, "/api/services/fixture", None, None)
-        .await
-        .unwrap();
+    let args = ["list", "--node", &node.url(), "--json"].map(String::from);
+    let mut out = Vec::new();
+    assert_eq!(cli::run("service", &args, &mut out).await.unwrap(), 0);
+    assert_eq!(body, serde_json::from_slice::<Value>(&out).unwrap());
+    let (one, _) = post("service_show", json!({"id":"fixture"})).await.unwrap();
     assert_eq!(one["service"]["state"], "running");
-    let refused = client
-        .request(Method::POST, "/api/services/fixture/restart", None, None)
+    let refused = post("service_restart", json!({"id":"fixture"}))
         .await
         .unwrap_err();
     assert_eq!(
@@ -78,19 +83,13 @@ async fn services_and_commands_use_the_same_catalog_and_coded_errors() {
             .code,
         contract::BAD_REQUEST
     );
-    let failed = client
-        .request(Method::POST, "/api/services/failing/start", None, None)
+    let failed = post("service_start", json!({"id":"failing"}))
         .await
         .unwrap_err();
-    assert_eq!(
-        failed
-            .downcast_ref::<ahjo_node_kit::NodeError>()
-            .unwrap()
-            .code,
-        contract::SERVICE_FAILED
-    );
-    let not_found = client
-        .request(Method::GET, "/api/services/absent", None, None)
+    let failed = failed.downcast_ref::<ahjo_node_kit::NodeError>().unwrap();
+    assert_eq!(failed.code, contract::SERVICE_FAILED);
+    assert_eq!(failed.status, StatusCode::BAD_GATEWAY);
+    let not_found = post("service_show", json!({"id":"absent"}))
         .await
         .unwrap_err();
     assert_eq!(
@@ -128,6 +127,10 @@ async fn services_and_commands_use_the_same_catalog_and_coded_errors() {
     // the node in the URL (`?node=`), the command line with --node.
     for tool in tools {
         assert!(tool["inputSchema"]["properties"].get("node").is_none());
+        if names.contains(&tool["name"].as_str().unwrap()) {
+            assert_eq!(tool["inputSchema"]["additionalProperties"], false, "{tool}");
+            assert_eq!(tool["outputSchema"]["type"], "object", "{tool}");
+        }
     }
     let here = json!({"node": node.id()});
     assert!(node.call("service_list", here).await.is_ok());
@@ -158,7 +161,7 @@ async fn services_and_commands_use_the_same_catalog_and_coded_errors() {
             .await
             .unwrap_err()
             .code,
-        contract::BAD_REQUEST
+        "invalid_argument"
     );
     assert_eq!(
         node.call("service_start", json!({"id":"failing"}))
@@ -261,7 +264,13 @@ async fn socket_subscription_starts_with_state_streams_readings_and_stops() {
         assert_eq!(frame[0], contract::HOST_READING);
         let reading: ReadingFrame = serde_json::from_slice(&frame[1..]).unwrap();
         assert_eq!(reading.reading.at, reading.point.at);
-        if !reading.reading.heavy.is_empty() || cfg!(not(target_os = "linux")) {
+        if reading
+            .reading
+            .heavy
+            .as_ref()
+            .is_some_and(|heavy| !heavy.is_empty())
+            || cfg!(not(target_os = "linux"))
+        {
             looked = Some(reading);
             break;
         }
@@ -340,7 +349,12 @@ async fn disabled_host_has_no_routes_or_tools() {
     assert_eq!(health["off"], json!(["host"]));
     assert!(
         client
-            .request(Method::GET, "/api/services", None, None)
+            .request(
+                Method::POST,
+                "/api/call/service_list",
+                Some(json!({})),
+                None
+            )
             .await
             .is_err()
     );

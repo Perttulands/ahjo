@@ -18,6 +18,7 @@ const INVALID_PARAMS: i64 = -32602;
 /// Who is calling: their address and client, for the call log.
 pub(super) struct Caller {
     pub who: String,
+    pub transport: &'static str,
 }
 
 type Answer = Result<Value, (i64, String)>;
@@ -84,17 +85,8 @@ async fn call(mcp: &Mcp, reach: &Reach, caller: &Caller, params: &Value) -> Answ
         let elsewhere = mcp.elsewhere(reach, name);
         return Err((INVALID_PARAMS, format!("Unknown tool: {name}{elsewhere}")));
     };
-    let mut args = params.get("arguments").cloned().unwrap_or(json!({}));
-    let outcome = match super::target(&mcp.node, &mut args) {
-        Ok(()) => (command.call)(args).await,
-        Err(error) => Err(error),
-    };
-    call_log::record(
-        caller,
-        name,
-        mcp.node.as_str(),
-        if outcome.is_ok() { "ok" } else { "failed" },
-    );
+    let args = params.get("arguments").cloned().unwrap_or(json!({}));
+    let outcome = mcp.invoke(caller, command, args).await;
     Ok(content(outcome, command.output_schema.is_some()))
 }
 

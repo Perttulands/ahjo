@@ -12,18 +12,12 @@ use std::{
 use ahjo_app_kit::link::client::LinkState;
 use ahjo_host_contract::{
     self as wire, Component, Facts, Gpu, Heavy, LogLine, Point, Reading, ReadingFrame, Service,
-    ServiceList, ServiceLog, State, Usage,
+    State, Usage,
+    commands::{ServiceList, ServiceLog, ServiceLogged, ServiceRestart, ServicesListed},
 };
-use ahjo_node_kit::{Area, BoxFuture, Built, Channel, Client, Listing, Setup};
+use ahjo_node_kit::{Area, BoxFuture, Built, Channel, Client, Command, Effect, Listing, Setup};
 use ahjo_testkit::node::Node;
-use axum::{
-    Json, Router,
-    extract::Path,
-    http::StatusCode,
-    routing::{get, post},
-};
 use gpui::{Modifiers, TestAppContext, VisualTestContext};
-use serde_json::json;
 use tokio::sync::mpsc::{self as tokio_mpsc, UnboundedReceiver, UnboundedSender};
 
 #[derive(Default)]
@@ -41,25 +35,31 @@ static CONTROL: OnceLock<Arc<Control>> = OnceLock::new();
 const FAKE: Listing = Listing {
     name: "host",
     kinds: &[wire::HOST..=wire::HOST_EVENT],
-    commands: &[],
+    commands: &["service_list", "service_log", "service_restart"],
     build,
 };
-fn build(_: &Setup) -> anyhow::Result<Built> {
-    Built::now(FakeArea(CONTROL.get().unwrap().clone()))
+fn build(setup: &Setup) -> anyhow::Result<Built> {
+    Built::now(FakeArea(
+        CONTROL.get().unwrap().clone(),
+        setup.node.id.to_string(),
+    ))
 }
-struct FakeArea(Arc<Control>);
+struct FakeArea(Arc<Control>, String);
 impl Area for FakeArea {
-    fn routes(&self) -> Router {
-        let control = self.0.clone();
+    fn commands(&self) -> Vec<Command> {
         let reading = self.0.clone();
-        Router::new()
-            .route(
-                "/api/services",
-                get(move || async move {
+        let control = self.0.clone();
+        let list_node = self.1.clone();
+        let log_node = self.1.clone();
+        vec![
+            Command::typed("service_list", Effect::Reads, move |_: ServiceList| {
+                let reading = reading.clone();
+                let node = list_node.clone();
+                async move {
                     if reading.unread.load(Ordering::SeqCst) {
-                        return Err((
-                            StatusCode::SERVICE_UNAVAILABLE,
-                            Json(json!({"error":{"code":"unavailable","message":"The catalog is not JSON"}})),
+                        return Err(ahjo_core::Error::new(
+                            "unavailable",
+                            "The catalog is not JSON",
                         ));
                     }
                     let unit = |unit: &str, state: &str| Component {
@@ -67,7 +67,8 @@ impl Area for FakeArea {
                         state: state.into(),
                         ..Component::default()
                     };
-                    Ok(Json(ServiceList {
+                    Ok(ServicesListed {
+                        node,
                         services: vec![
                             Service {
                                 id: "fixture".into(),
@@ -94,35 +95,40 @@ impl Area for FakeArea {
                                 ..Service::default()
                             },
                         ],
-                    }))
-                }),
-            )
-            .route(
-                "/api/services/{id}/log",
-                get(|Path(id): Path<String>| async move {
-                    Json(ServiceLog {
-                        lines: vec![LogLine {
-                            at: now(),
-                            text: format!("{id} logged this"),
-                            error: id == "broken",
-                        }],
-                        errors: vec![],
                     })
-                }),
-            )
-            .route(
-                "/api/services/fixture/restart",
-                post(move || {
+                }
+            }),
+            Command::typed("service_log", Effect::Reads, move |args: ServiceLog| {
+                let node = log_node.clone();
+                async move {
+                    Ok(ServiceLogged {
+                        node,
+                        log: wire::ServiceLog {
+                            lines: vec![LogLine {
+                                at: now(),
+                                text: format!("{} logged this", args.id),
+                                error: args.id == "broken",
+                            }],
+                            errors: vec![],
+                        },
+                    })
+                }
+            }),
+            Command::typed(
+                "service_restart",
+                Effect::Writes,
+                move |_: ServiceRestart| {
                     let control = control.clone();
                     async move {
                         control.restarts.fetch_add(1, Ordering::SeqCst);
-                        (
-                            StatusCode::BAD_REQUEST,
-                            Json(json!({"error":{"code":"service_refused", "message":"Restart refused by fake manager"}})),
-                        )
+                        Err::<wire::commands::ServiceActed, _>(ahjo_core::Error::new(
+                            "service_refused",
+                            "Restart refused by fake manager",
+                        ))
                     }
-                }),
-            )
+                },
+            ),
+        ]
     }
     fn channel(&self, _: Client) -> Option<Box<dyn Channel>> {
         let receiver = self
@@ -182,13 +188,13 @@ fn sample(cpu: f32) -> ReadingFrame {
         swap: Some(Usage { used: 1, total: 4 }),
         swap_activity_bps: Some(2_000_000.),
         gpu_reason: Some("nvidia-smi failed".into()),
-        heavy: vec![Heavy {
+        heavy: Some(vec![Heavy {
             name: "rustc".into(),
             cwd: Some("/srv/fixture".into()),
             pids: vec![1, 2],
             cpu: Some(40.),
             memory: 1 << 30,
-        }],
+        }]),
         ..Reading::default()
     };
     ReadingFrame {

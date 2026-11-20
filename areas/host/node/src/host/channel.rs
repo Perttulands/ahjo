@@ -30,7 +30,7 @@ fn framed(kind: u8, body: &impl serde::Serialize) -> Vec<u8> {
     frame
 }
 
-fn wire(e: &Event) -> WireEvent {
+pub(super) fn wire(e: &Event) -> WireEvent {
     WireEvent {
         at: e.at,
         kind: e.kind.to_owned(),

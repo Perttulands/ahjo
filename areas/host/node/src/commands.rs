@@ -1,114 +1,117 @@
-//! The host and service commands shared by CLI and MCP.
+//! The host and service commands shared by the app, CLI and MCP.
+
 use std::{sync::Arc, time::Duration};
 
-use ahjo_core::Error;
-use ahjo_host_contract::{BAD_REQUEST, SERVICE_FAILED};
-use ahjo_node_kit::{
-    Command, Effect,
-    args::{object, text},
-    events::Log,
+use ahjo_core::{Error, TypedCommand};
+use ahjo_host_contract::{
+    Outcome, SERVICE_FAILED, SERVICE_UNCONFIRMED,
+    commands::{
+        HostShow, ServiceActed, ServiceList, ServiceLog, ServiceLogged, ServiceRestart,
+        ServiceShow, ServiceShown, ServiceStart, ServiceStop, ServicesListed,
+    },
 };
-use serde_json::{Value, json};
+use ahjo_node_kit::{Command, Effect, events::Log};
+use axum::http::StatusCode;
+use schemars::JsonSchema;
 
-use crate::host::{self, services::Services};
+use crate::host::{
+    self,
+    services::{LOG_LINES, Services},
+};
+
+struct Ctx {
+    services: Arc<Services>,
+    events: Arc<Log>,
+    node: String,
+}
+
+fn command<C, F, Fut>(ctx: &Arc<Ctx>, effect: Effect, handler: F) -> Command
+where
+    C: TypedCommand + JsonSchema,
+    C::Output: JsonSchema,
+    F: Fn(Arc<Ctx>, C) -> Fut + Send + Sync + 'static,
+    Fut: Future<Output = Result<C::Output, Error>> + Send + 'static,
+{
+    let ctx = ctx.clone();
+    Command::for_request(effect, move |args| handler(ctx.clone(), args))
+}
 
 pub(crate) fn commands(services: Arc<Services>, events: Arc<Log>, node: String) -> Vec<Command> {
-    [
-        (
-            "host_show",
-            Effect::Reads,
-            "This node's host facts and current reading (CPU, memory, swap, disks, GPUs). \
-             --full adds the heaviest processes and recent events.",
-        ),
-        ("service_list", Effect::Reads, "List this node's services and their state."),
-        (
-            "service_show",
-            Effect::Reads,
-            "Show one service and the state of its units.",
-        ),
-        ("service_start", Effect::Sets, "Start every unit of a service."),
-        ("service_stop", Effect::Sets, "Stop every unit of a service."),
-        (
-            "service_restart",
-            Effect::Writes,
-            "Stop every unit of a service, then start them.",
-        ),
-        (
-            "service_log",
-            Effect::Reads,
-            "The last lines a service's units logged, oldest first.",
-        ),
-    ]
-    .into_iter()
-    .map(|(name, effect, description)| {
-        let (services, events, node) = (services.clone(), events.clone(), node.clone());
-        let schema = move || {
-            if name == "host_show" {
-                object(
-                    json!({"full": {"type": "boolean", "description": "Add the heaviest processes and recent events."}}),
-                    &[],
-                )
-            } else if name == "service_list" {
-                object(json!({}), &[])
-            } else if name == "service_log" {
-                object(
-                    json!({
-                        "id": {"type": "string", "description": "The service id."},
-                        "lines": {"type": "integer", "description": "How many lines (40 if not said, at most 200)."}
-                    }),
-                    &["id"],
-                )
-            } else {
-                object(
-                    json!({"id": {"type": "string", "description": "The service id."}}),
-                    &["id"],
-                )
-            }
-        };
-        Command::new(name, effect, description, schema, move |args: Value| {
-            let (services, events, node) = (services.clone(), events.clone(), node.clone());
-            async move {
-                if name == "host_show" {
-                    let mut state = host::now(Duration::from_millis(500), &events).await;
-                    if !args["full"].as_bool().unwrap_or(false)
-                        && let Some(fields) = state.as_object_mut()
-                    {
-                        fields.remove("events");
-                        if let Some(latest) = fields.get_mut("latest").and_then(Value::as_object_mut) {
-                            latest.remove("heavy");
-                        }
-                    }
-                    state["node"] = json!(node);
-                    return Ok(state);
-                }
-                if name == "service_list" {
-                    let services = services.list().await.map_err(|e| e.error())?;
-                    return Ok(json!({"node": node, "services": services}));
-                }
-                let id = text(&args, "id").map_err(|e| Error::new(BAD_REQUEST, e.to_string()))?;
-                if name == "service_show" {
-                    let service = services.one(id).await.map_err(|e| e.error())?;
-                    return Ok(json!({"node": node, "service": service}));
-                }
-                if name == "service_log" {
-                    let lines = args["lines"]
-                        .as_u64()
-                        .map_or(host::services::LOG_LINES, |n| n as usize);
-                    let log = services.log(id, lines).await.map_err(|e| e.error())?;
-                    return Ok(json!({"node": node, "lines": log.lines, "errors": log.errors}));
-                }
-                let action = name.strip_prefix("service_").expect("service command");
-                let (service, errors, outcome) =
-                    services.act(id, action).await.map_err(|e| e.error())?;
-                if !errors.is_empty() {
-                    return Err(Error::new(
-                        SERVICE_FAILED,
-                        format!("{action} {outcome:?}: {}", errors.join("; ")),
-                    ));
-                }
-                Ok(json!({"node": node, "service": service, "errors": errors, "outcome": outcome}))
-            }
+    let ctx = Arc::new(Ctx {
+        services,
+        events,
+        node,
+    });
+    vec![
+        command(&ctx, Effect::Reads, |ctx, args: HostShow| async move {
+            Ok(host::now(
+                Duration::from_millis(500),
+                &ctx.events,
+                ctx.node.clone(),
+                args.full.unwrap_or_default(),
+            )
+            .await)
+        }),
+        command(&ctx, Effect::Reads, |ctx, _: ServiceList| async move {
+            let services = ctx.services.list().await?;
+            Ok(ServicesListed {
+                node: ctx.node.clone(),
+                services,
+            })
+        }),
+        command(&ctx, Effect::Reads, |ctx, args: ServiceShow| async move {
+            let service = ctx.services.one(&args.id).await?;
+            Ok(ServiceShown {
+                node: ctx.node.clone(),
+                service,
+            })
+        }),
+        command(&ctx, Effect::Sets, |ctx, args: ServiceStart| {
+            act(ctx, args.id, "start")
         })
-    })
-    .collect()
+        .with_error_status(action_status),
+        command(&ctx, Effect::Sets, |ctx, args: ServiceStop| {
+            act(ctx, args.id, "stop")
+        })
+        .with_error_status(action_status),
+        command(&ctx, Effect::Writes, |ctx, args: ServiceRestart| {
+            act(ctx, args.id, "restart")
+        })
+        .with_error_status(action_status),
+        command(&ctx, Effect::Reads, |ctx, args: ServiceLog| async move {
+            let log = ctx
+                .services
+                .log(&args.id, args.lines.unwrap_or(LOG_LINES))
+                .await?;
+            Ok(ServiceLogged {
+                node: ctx.node.clone(),
+                log,
+            })
+        }),
+    ]
+}
+
+async fn act(ctx: Arc<Ctx>, id: String, action: &'static str) -> Result<ServiceActed, Error> {
+    let (service, errors, outcome) = ctx.services.act(&id, action).await?;
+    let code = match outcome {
+        Outcome::Failed => SERVICE_FAILED,
+        Outcome::Unconfirmed => SERVICE_UNCONFIRMED,
+        Outcome::Done => {
+            return Ok(ServiceActed {
+                node: ctx.node.clone(),
+                service,
+                errors,
+                outcome,
+            });
+        }
+    };
+    Err(Error::new(code, errors.join("; ")))
+}
+
+fn action_status(error: &Error) -> Option<StatusCode> {
+    match error.code.as_str() {
+        SERVICE_FAILED => Some(StatusCode::BAD_GATEWAY),
+        SERVICE_UNCONFIRMED => Some(StatusCode::GATEWAY_TIMEOUT),
+        _ => None,
+    }
 }

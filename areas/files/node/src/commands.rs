@@ -184,6 +184,9 @@ pub fn commands(files: Arc<Files>) -> Vec<Command> {
             async move { transfer(&files, args.id) }
         }),
     ]
+    .into_iter()
+    .map(|command| command.with_error_status(crate::error::failure_status))
+    .collect()
 }
 
 fn on_path<T>(

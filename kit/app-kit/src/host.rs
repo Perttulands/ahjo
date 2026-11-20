@@ -12,7 +12,7 @@ use crate::link::socket::Tap;
 use crate::menu::{Menu, MenuRow};
 use crate::settings::Place;
 use ahjo_core::frame::{Kinds, owns};
-use ahjo_core::{Error, NodeId};
+use ahjo_core::{Error, NodeId, TypedCommand};
 use gpui::{
     AnyView, App, Context, Entity, FocusHandle, Pixels, Point, SystemNotification, Task, WeakEntity,
 };
@@ -279,6 +279,45 @@ impl Host {
                 Ok(Err(e)) => Err(Error::new("unreachable", e.message)),
                 Err(e) => Err(Error::new("unreachable", e.to_string())),
             }
+        })
+    }
+
+    /// Runs the node's typed command and reads its typed result.
+    pub fn call<C: TypedCommand>(
+        &self,
+        node: NodeId,
+        input: C,
+        cx: &mut App,
+    ) -> Task<Result<C::Output, Error>> {
+        let body = match serde_json::to_vec(&input) {
+            Ok(body) => body,
+            Err(error) => {
+                return Task::ready(Err(Error::new("invalid_argument", error.to_string())));
+            }
+        };
+        let mut request = Request::new("POST", node, format!("/api/call/{}", C::NAME));
+        request.body = Some(("application/json".into(), body));
+        if let Some(within) = C::TIMEOUT {
+            request = request.within(within);
+        }
+        let answer = self.request(request, cx);
+        cx.background_executor().spawn(async move {
+            let answer = answer.await?;
+            if answer.ok() {
+                return serde_json::from_slice(&answer.body).map_err(|error| {
+                    Error::new(
+                        "invalid_response",
+                        format!("The node's {} answer did not read: {error}", C::NAME),
+                    )
+                });
+            }
+            #[derive(serde::Deserialize)]
+            struct Failure {
+                error: Error,
+            }
+            Err(serde_json::from_slice::<Failure>(&answer.body)
+                .map(|failure| failure.error)
+                .unwrap_or_else(|_| Error::new("invalid_response", answer.error_text())))
         })
     }
 

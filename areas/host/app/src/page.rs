@@ -9,22 +9,19 @@
 //! Refresh, and after an action until it settles; nothing reads on a timer.
 
 use crate::host_store::Hosts;
-use crate::services_store::{self, Change, Ended, Group, NO_ANSWER, Service, Services, Step};
+use crate::services_store::{self, Change, Ended, Group, Service, Services, Step};
 use ahjo_app_kit::{
-    Ask, Host, Page,
-    ask::Answers,
-    host::{Request, Status},
-    hub::now_ms,
-    link::client::LinkState,
+    Ask, Host, Page, ask::Answers, host::Status, hub::now_ms, link::client::LinkState,
 };
-use ahjo_core::NodeId;
+use ahjo_core::{Error, NodeId, TypedCommand};
+use ahjo_host_contract::commands::{
+    ServiceActed, ServiceList, ServiceLog, ServiceRestart, ServiceShow, ServiceStart, ServiceStop,
+};
 use ahjo_host_contract::{HOST, HOST_EVENT, HOST_STATE};
 use ahjo_terminals_contract::SessionList;
 use gpui::{App, Context, Entity, FocusHandle, KeyDownEvent, ScrollHandle, Window};
 use std::collections::HashSet;
 use std::time::Duration;
-
-const ACTION_WAIT: Duration = Duration::from_secs(50);
 
 /// What the detail shows: a node's machine, or one of its services.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -114,22 +111,17 @@ impl HostPage {
         cx.notify();
     }
 
-    fn ask(
+    fn ask<C: TypedCommand>(
         &mut self,
-        request: Request,
-        done: impl FnOnce(&mut Self, u16, Vec<u8>, &mut Context<Self>) + 'static,
+        node: NodeId,
+        input: C,
+        done: impl FnOnce(&mut Self, Result<C::Output, Error>, &mut Context<Self>) + 'static,
         cx: &mut Context<Self>,
     ) {
-        let asked = self.host.request(request, cx);
+        let asked = self.host.call::<C>(node, input, cx);
         cx.spawn(async move |this, cx| {
-            let (status, body) = match asked.await {
-                Ok(a) => (a.status, a.body),
-                Err(e) if e.code == "unanswered" => {
-                    (0, format!("{NO_ANSWER}: {}", e.message).into_bytes())
-                }
-                Err(e) => (0, e.message.into_bytes()),
-            };
-            let _ = this.update(cx, |s, cx| done(s, status, body, cx));
+            let answer = asked.await;
+            let _ = this.update(cx, |s, cx| done(s, answer, cx));
         })
         .detach();
     }
@@ -147,18 +139,20 @@ impl HostPage {
     fn read(&mut self, node: &str, cx: &mut Context<Self>) {
         let state = self.services.nodes.entry(node.to_string()).or_default();
         if state.reading {
+            state.reread = true;
             return;
         }
         state.reading = true;
         let at = node.to_owned();
         self.ask(
-            Request::get(NodeId(at.clone()), "/api/services"),
-            move |s, status, body, cx| {
-                s.services
-                    .nodes
-                    .entry(at)
-                    .or_default()
-                    .listed(status, &body, now_ms());
+            NodeId(at.clone()),
+            ServiceList {},
+            move |s, answer, cx| {
+                let state = s.services.nodes.entry(at.clone()).or_default();
+                state.listed(answer, now_ms());
+                if std::mem::take(&mut state.reread) {
+                    s.read(&at, cx);
+                }
                 cx.notify();
             },
             cx,
@@ -175,11 +169,12 @@ impl HostPage {
         log.reading = true;
         let (node, id) = (node.to_owned(), id.to_owned());
         self.ask(
-            Request::get(
-                NodeId(node.clone()),
-                format!("/api/services/{id}/log?lines={}", crate::tokens::LOG_LINES),
-            ),
-            move |s, status, body, cx| {
+            NodeId(node.clone()),
+            ServiceLog {
+                id: id.clone(),
+                lines: Some(crate::tokens::LOG_LINES),
+            },
+            move |s, answer, cx| {
                 s.services
                     .nodes
                     .entry(node)
@@ -187,7 +182,7 @@ impl HostPage {
                     .logs
                     .entry(id)
                     .or_default()
-                    .read(status, &body);
+                    .read(answer);
                 cx.notify();
             },
             cx,
@@ -203,27 +198,40 @@ impl HostPage {
         n.failures.remove(id);
         n.unsettled.remove(id);
         let (at, row) = (node.to_owned(), id.to_owned());
-        let request = Request::new(
-            "POST",
-            NodeId(at.clone()),
-            format!("/api/services/{id}/{}", change.verb()),
-        )
-        .within(ACTION_WAIT);
-        self.ask(
-            request,
-            move |s, status, body, cx| {
+        let node_id = NodeId(at.clone());
+        let asked = match change {
+            Change::Start => {
+                self.host
+                    .call::<ServiceStart>(node_id, ServiceStart { id: row.clone() }, cx)
+            }
+            Change::Stop => {
+                self.host
+                    .call::<ServiceStop>(node_id, ServiceStop { id: row.clone() }, cx)
+            }
+            Change::Restart => {
+                self.host
+                    .call::<ServiceRestart>(node_id, ServiceRestart { id: row.clone() }, cx)
+            }
+        };
+        cx.spawn(async move |this, cx| {
+            let answer: Result<ServiceActed, Error> = asked.await;
+            let _ = this.update(cx, |s, cx| {
                 let n = s.services.nodes.entry(at.clone()).or_default();
-                match n.answered(&row, change, status, &body) {
-                    Ended::Failed(message) => s.host.report(Status::failure(message), cx),
+                match n.answered(&row, change, answer) {
+                    Ended::Failed(message) => {
+                        s.host.report(Status::failure(message), cx);
+                        // The failed command carries its reason. Refresh the final state.
+                        s.read(&at, cx);
+                    }
                     // The node's event says it on the status line.
                     Ended::Done | Ended::Elsewhere => {}
                     Ended::Follow => s.follow(at.clone(), row.clone(), 0, cx),
                 }
                 s.read_log(&at, &row, cx);
                 cx.notify();
-            },
-            cx,
-        );
+            });
+        })
+        .detach();
         cx.notify();
     }
 
@@ -235,18 +243,18 @@ impl HostPage {
                 .timer(Duration::from_millis(services_store::FOLLOW[read]))
                 .await;
             let _ = this.update(cx, |s, cx| {
-                let path = format!("/api/services/{id}");
                 let at = node.clone();
                 s.ask(
-                    Request::get(NodeId(node), path),
-                    move |s, status, body, cx| {
+                    NodeId(node),
+                    ServiceShow { id: id.clone() },
+                    move |s, answer, cx| {
                         let last = read + 1 == services_store::FOLLOW.len();
                         let clock = ahjo_app_kit::clock::hhmm(now_ms());
                         if s.services
                             .nodes
                             .entry(at.clone())
                             .or_default()
-                            .followed(&id, status, &body, last, &clock)
+                            .followed(&id, answer, last, &clock)
                         {
                             s.follow(at, id, read + 1, cx);
                         } else {

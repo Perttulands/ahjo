@@ -2,6 +2,7 @@
 //! every resource carries, and the frame envelope and hello of the node's
 //! socket.
 
+mod command;
 pub mod commands;
 mod error;
 pub mod frame;
@@ -9,6 +10,7 @@ mod hello;
 mod id;
 pub mod json;
 
+pub use command::TypedCommand;
 pub use error::Error;
 pub use frame::Frame;
 pub use hello::{Hello, PROTOCOL};

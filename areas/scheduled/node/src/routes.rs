@@ -7,8 +7,9 @@ use std::sync::Arc;
 
 use ahjo_core::Error as Coded;
 use ahjo_scheduled_contract::{
-    ActionRequest, BAD_REQUEST, CreateRequest, Envelope, FORBIDDEN, INTENT, INTENT_VALUE,
-    NOT_FOUND, PATH, PatchRequest, Target, TargetRequest, UNSUPPORTED_MEDIA_TYPE,
+    ActionRequest, BAD_REQUEST, CONFLICT, CreateRequest, Envelope, FORBIDDEN, INTENT, INTENT_VALUE,
+    INTERNAL, NOT_FOUND, PATH, PatchRequest, TARGET_NOT_FOUND, Target, TargetRequest,
+    UNSUPPORTED_MEDIA_TYPE,
 };
 use axum::Router;
 use axum::body::Bytes;
@@ -58,14 +59,19 @@ fn refuse(status: StatusCode, code: &str, message: impl Into<String>) -> Respons
 }
 
 pub(crate) fn failed(e: Error) -> Response {
-    let status = match &e {
-        Error::NotFound => StatusCode::NOT_FOUND,
-        Error::Invalid(_) | Error::TargetNotFound(_) => StatusCode::BAD_REQUEST,
-        Error::Conflict(_) | Error::Held(_) => StatusCode::CONFLICT,
-        Error::Internal(_) => StatusCode::INTERNAL_SERVER_ERROR,
-    };
-    let Coded { code, message } = e.into();
-    refuse(status, &code, message)
+    let coded: Coded = e.into();
+    let status = failure_status(&coded).unwrap_or(StatusCode::INTERNAL_SERVER_ERROR);
+    refuse(status, &coded.code, coded.message)
+}
+
+pub(crate) fn failure_status(error: &Coded) -> Option<StatusCode> {
+    Some(match error.code.as_str() {
+        NOT_FOUND => StatusCode::NOT_FOUND,
+        BAD_REQUEST | TARGET_NOT_FOUND => StatusCode::BAD_REQUEST,
+        CONFLICT => StatusCode::CONFLICT,
+        INTERNAL => StatusCode::INTERNAL_SERVER_ERROR,
+        _ => return None,
+    })
 }
 
 /// The mutation guard: the intent header, and JSON where a body matters.

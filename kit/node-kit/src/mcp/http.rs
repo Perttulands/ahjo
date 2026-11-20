@@ -1,4 +1,5 @@
-//! MCP's streamable HTTP transport, on the node's own port: one JSON-RPC
+//! Command transports on the node's own port. Apps post a typed argument
+//! object to `/api/call/{command}`. MCP takes one JSON-RPC
 //! message per POST to `/mcp` (every area) or `/mcp/<area>[,<area>...]`,
 //! answered with JSON. The server opens no streams of its own, so GET is
 //! refused, as the transport allows.
@@ -6,16 +7,19 @@
 use std::net::SocketAddr;
 use std::sync::Arc;
 
-use axum::Router;
+use ahjo_core::Error;
 use axum::body::Body;
 use axum::extract::{ConnectInfo, Path, Request, State};
+use axum::http::request::Parts;
 use axum::http::{HeaderMap, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use axum::routing::post;
+use axum::{Json, Router};
 use serde_json::Value;
 
 use super::rpc::{self, Caller};
-use super::{Mcp, Reach};
+use super::{Mcp, Reach, call_log};
+use crate::Failure;
 
 /// The path every area's tools answer on; one area's are under it.
 pub const PATH: &str = "/mcp";
@@ -33,6 +37,7 @@ pub(super) fn routes(mcp: Arc<Mcp>) -> Router {
             &format!("{PATH}/{{areas}}"),
             post(some).get(no_stream).delete(no_stream),
         )
+        .route("/api/call/{command}", post(call))
         .with_state(mcp)
 }
 
@@ -64,13 +69,7 @@ async fn message(mcp: &Mcp, reach: &Reach, request: Request) -> Response {
     let Ok(body) = axum::body::to_bytes(body, MAX_MESSAGE).await else {
         return (StatusCode::PAYLOAD_TOO_LARGE, "the message is too large").into_response();
     };
-    let peer = parts
-        .extensions
-        .get::<ConnectInfo<SocketAddr>>()
-        .map(|info| info.0);
-    let caller = Caller {
-        who: who(peer, &parts.headers),
-    };
+    let caller = caller(&parts, "mcp");
     let answer = match serde_json::from_slice::<Value>(&body) {
         Ok(message) => rpc::answer(mcp, reach, &caller, &message).await,
         Err(error) => Some(rpc::unreadable(&error)),
@@ -82,6 +81,84 @@ async fn message(mcp: &Mcp, reach: &Reach, request: Request) -> Response {
         )
             .into_response(),
         None => StatusCode::ACCEPTED.into_response(),
+    }
+}
+
+async fn call(
+    State(mcp): State<Arc<Mcp>>,
+    Path(name): Path<String>,
+    request: Request,
+) -> Result<Json<Value>, Failure> {
+    let (parts, body) = request.into_parts();
+    if parts.headers.contains_key(FUNNEL) {
+        return Err(Failure(
+            StatusCode::FORBIDDEN,
+            Error::new(
+                "forbidden",
+                "the node does not accept public command requests",
+            ),
+        ));
+    }
+    let caller = caller(&parts, "api");
+    let reach = mcp.everything();
+    let Some(command) = mcp
+        .command(&reach, &name)
+        .filter(|command| command.output_schema.is_some())
+    else {
+        call_log::record(&caller, "<unknown>", mcp.node.as_str(), "unknown");
+        return Err(Failure(
+            StatusCode::NOT_FOUND,
+            Error::new("unknown_command", format!("Unknown typed command: {name}")),
+        ));
+    };
+    let body = axum::body::to_bytes(body, MAX_MESSAGE).await.map_err(|_| {
+        Failure(
+            StatusCode::PAYLOAD_TOO_LARGE,
+            Error::new("too_large", "the command arguments are too large"),
+        )
+    })?;
+    let args = serde_json::from_slice(&body).map_err(|error| {
+        Failure(
+            StatusCode::BAD_REQUEST,
+            Error::new(
+                "invalid_argument",
+                format!("the command arguments are not JSON: {error}"),
+            ),
+        )
+    })?;
+    mcp.invoke(&caller, command, args)
+        .await
+        .map(Json)
+        .map_err(|error| {
+            let status = (command.error_status)(&error).unwrap_or_else(|| status(&error));
+            Failure(status, error)
+        })
+}
+
+/// Statuses for error codes shared by areas. A command can supply the status
+/// for its own codes.
+fn status(error: &Error) -> StatusCode {
+    match error.code.as_str() {
+        "bad_request" | "invalid_argument" => StatusCode::BAD_REQUEST,
+        "forbidden" | "permission_denied" => StatusCode::FORBIDDEN,
+        "not_found" | "unknown_section" | "no_page" => StatusCode::NOT_FOUND,
+        "conflict" | "already_exists" => StatusCode::CONFLICT,
+        "unknown_node" => StatusCode::MISDIRECTED_REQUEST,
+        "too_large" => StatusCode::PAYLOAD_TOO_LARGE,
+        "unavailable" | "no_app" => StatusCode::SERVICE_UNAVAILABLE,
+        "timeout" => StatusCode::GATEWAY_TIMEOUT,
+        _ => StatusCode::INTERNAL_SERVER_ERROR,
+    }
+}
+
+fn caller(parts: &Parts, transport: &'static str) -> Caller {
+    let peer = parts
+        .extensions
+        .get::<ConnectInfo<SocketAddr>>()
+        .map(|info| info.0);
+    Caller {
+        who: who(peer, &parts.headers),
+        transport,
     }
 }
 

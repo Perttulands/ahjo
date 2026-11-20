@@ -14,8 +14,8 @@ pub(super) fn relayed(through: &str, tool: &str, target: &str, outcome: &str) {
 
 fn line(caller: &Caller, tool: &str, target: &str, outcome: &str) -> String {
     format!(
-        "ahjo: mcp {:?} {tool} target={:?} {outcome}",
-        caller.who, target
+        "ahjo: {} {:?} {tool} target={:?} {outcome}",
+        caller.transport, caller.who, target
     )
 }
 
@@ -27,6 +27,7 @@ mod tests {
     fn logs_only_safe_fields() {
         let caller = Caller {
             who: "client".into(),
+            transport: "mcp",
         };
         assert_eq!(
             line(&caller, "session_send", "node-a", "failed"),

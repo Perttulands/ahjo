@@ -10,12 +10,14 @@
 
 use std::sync::{Arc, RwLock};
 
+use ahjo_core::Error;
 use axum::extract::{Request, State};
 use axum::http::{HeaderMap, StatusCode, header};
 use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
 
 use super::authority::{Authority, Host};
+use crate::Failure;
 use crate::identity::hostname;
 
 /// The names this node answers to, besides IP literals and `localhost`:
@@ -97,7 +99,9 @@ fn host_names(names: impl IntoIterator<Item = String>) -> Vec<String> {
 /// Middleware refusing every request [`Trust`] does not admit with 403.
 pub async fn guard(State(trust): State<Arc<Trust>>, request: Request, next: Next) -> Response {
     match trust.refusal(request.headers()) {
-        Some(reason) => (StatusCode::FORBIDDEN, reason).into_response(),
+        Some(reason) => {
+            Failure(StatusCode::FORBIDDEN, Error::new("forbidden", reason)).into_response()
+        }
         None => next.run(request).await,
     }
 }

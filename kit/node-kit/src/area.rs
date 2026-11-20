@@ -7,8 +7,9 @@ use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
 
-use ahjo_core::Error;
+use ahjo_core::{Error, TypedCommand};
 use axum::Router;
+use axum::http::StatusCode;
 use schemars::{JsonSchema, generate::SchemaSettings};
 use serde::{Serialize, de::DeserializeOwned};
 use serde_json::Value;
@@ -142,6 +143,7 @@ pub struct Command {
     pub schema: Arc<dyn Fn() -> Value + Send + Sync>,
     pub output_schema: Option<Arc<Value>>,
     pub call: Arc<Call>,
+    pub(crate) error_status: fn(&Error) -> Option<StatusCode>,
 }
 
 impl Command {
@@ -164,6 +166,7 @@ impl Command {
             schema: Arc::new(schema),
             output_schema: None,
             call: Arc::new(move |args| Box::pin(call(args))),
+            error_status: |_| None,
         }
     }
 
@@ -215,7 +218,25 @@ impl Command {
                     })
                 })
             }),
+            error_status: |_| None,
         }
+    }
+
+    /// Defines a command using the request shared with app callers.
+    pub fn for_request<C, F, Fut>(effect: Effect, handler: F) -> Self
+    where
+        C: TypedCommand + JsonSchema,
+        C::Output: JsonSchema,
+        F: Fn(C) -> Fut + Send + Sync + 'static,
+        Fut: Future<Output = Result<C::Output, Error>> + Send + 'static,
+    {
+        Self::typed(C::NAME, effect, handler)
+    }
+
+    /// Supplies the HTTP status for an area's own error codes.
+    pub fn with_error_status(mut self, status: fn(&Error) -> Option<StatusCode>) -> Self {
+        self.error_status = status;
+        self
     }
 
     /// Marks it as reaching beyond this machine.

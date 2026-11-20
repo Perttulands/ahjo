@@ -6,7 +6,7 @@
 use ahjo_node_kit::{Listing, NodeClient, cli};
 use ahjo_testkit::node::Node;
 use ahjo_testkit::sessions;
-use axum::http::Method;
+use axum::http::{Method, StatusCode};
 use serde_json::{Value, json};
 
 const AREAS: &[Listing] = &[sessions::LISTING, ahjo_scheduled::LISTING];
@@ -213,6 +213,19 @@ async fn a_run_is_delivered_to_the_session_a_task_names() {
         )
         .await;
     assert!(unknown.unwrap_err().message.contains("nobody"));
+    let client = NodeClient::new(Some(&node.url())).unwrap();
+    let error = client
+        .request(
+            Method::POST,
+            "/api/call/scheduled_create",
+            Some(json!({ "name": "x", "prompt": "y", "sessions": ["nobody/alpha"], "every": 5 })),
+            None,
+        )
+        .await
+        .unwrap_err();
+    let error = error.downcast_ref::<ahjo_node_kit::NodeError>().unwrap();
+    assert_eq!(error.status, StatusCode::BAD_REQUEST);
+    assert_eq!(error.code, ahjo_scheduled_contract::TARGET_NOT_FOUND);
     node.stop().await;
 }
 

@@ -41,6 +41,7 @@ where
 {
     let ctx = ctx.clone();
     Command::typed(name, effect, move |args| call(ctx.clone(), args))
+        .with_error_status(crate::routes::failure_status)
 }
 
 /// Every scheduled command.

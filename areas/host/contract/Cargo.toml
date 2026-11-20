@@ -9,6 +9,7 @@ publish = false
 workspace = true
 
 [dependencies]
+schemars.workspace = true
 ahjo-core = { path = "../../../kit/core" }
 serde = { version = "1", features = ["derive"] }
 

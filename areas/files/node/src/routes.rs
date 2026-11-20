@@ -287,19 +287,10 @@ fn content_type(path: &str) -> &'static str {
 
 impl IntoResponse for FilesError {
     fn into_response(self) -> Response {
-        let status = match &self {
-            FilesError::Outside | FilesError::Root | FilesError::Permission => {
-                StatusCode::FORBIDDEN
-            }
-            FilesError::NotFound => StatusCode::NOT_FOUND,
-            FilesError::OtherNode(_) => StatusCode::MISDIRECTED_REQUEST,
-            FilesError::Exists => StatusCode::CONFLICT,
-            FilesError::Changed => StatusCode::PRECONDITION_FAILED,
-            FilesError::NotFolder | FilesError::NotFile => StatusCode::BAD_REQUEST,
-            FilesError::TooLarge => StatusCode::PAYLOAD_TOO_LARGE,
-            FilesError::Io(_) => StatusCode::INTERNAL_SERVER_ERROR,
-        };
-        ahjo_node_kit::serve::Failure(status, ahjo_core::Error::from(self)).into_response()
+        let error = ahjo_core::Error::from(self);
+        let status =
+            super::error::failure_status(&error).unwrap_or(StatusCode::INTERNAL_SERVER_ERROR);
+        ahjo_node_kit::serve::Failure(status, error).into_response()
     }
 }
 

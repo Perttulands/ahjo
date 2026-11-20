@@ -533,7 +533,14 @@ pub fn reference(device: &str, environment: &str, s: &State, now: u64) -> String
     if let Some(up) = r.uptime {
         out.push_str(&format!(", up {}", uptime(up)));
     }
-    let heavy: Vec<String> = r.heavy.iter().take(3).map(heavy_words).collect();
+    let heavy: Vec<String> = r
+        .heavy
+        .as_deref()
+        .unwrap_or_default()
+        .iter()
+        .take(3)
+        .map(heavy_words)
+        .collect();
     if !heavy.is_empty() {
         out.push_str(&format!(". Heaviest: {}", heavy.join("; ")));
     }
@@ -563,6 +570,8 @@ const HEAVY_MEMORY: f32 = 10.;
 pub fn weighing(r: &Reading) -> Vec<Heavy> {
     let total = r.memory.map_or(0, |m| m.total);
     r.heavy
+        .as_deref()
+        .unwrap_or_default()
         .iter()
         .filter(|h| {
             h.cpu.is_some_and(|cpu| cpu >= HEAVY_CPU)
@@ -848,13 +857,13 @@ mod tests {
                 }),
                 disks: vec![disk("/", 100 * gib, 400 * gib)],
                 uptime: Some(3 * 86_400 + 4 * 3600),
-                heavy: vec![Heavy {
+                heavy: Some(vec![Heavy {
                     name: "rustc".into(),
                     cwd: Some("/srv/x".into()),
                     pids: vec![1, 2],
                     cpu: Some(40.),
                     memory: 2 * gib,
-                }],
+                }]),
                 ..Reading::default()
             }),
             ..State::default()
@@ -947,15 +956,17 @@ mod tests {
                 used: 8 << 30,
                 total: 32 << 30,
             }),
-            heavy: vec![
+            heavy: Some(vec![
                 program("idle", 0.4, 300 << 20),
                 program("shell", 0., 20 << 20),
-            ],
+            ]),
             ..Reading::default()
         };
         assert!(weighing(&r).is_empty(), "an idle machine names nothing");
-        r.heavy.push(program("rustc", 35., 1 << 30));
-        r.heavy.push(program("model", 1., 6 << 30));
+        r.heavy.as_mut().unwrap().extend([
+            program("rustc", 35., 1 << 30),
+            program("model", 1., 6 << 30),
+        ]);
         let names: Vec<String> = weighing(&r).into_iter().map(|h| h.name).collect();
         assert_eq!(names, ["rustc", "model"]);
     }

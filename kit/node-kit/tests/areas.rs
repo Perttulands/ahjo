@@ -575,12 +575,16 @@ fn shades(_: &Setup) -> anyhow::Result<Built> {
 /// One JSON-RPC message posted to `path`: the HTTP status and the answer,
 /// over a plain socket so a refused path's status and text are seen.
 async fn rpc(node: &Running, path: &str, message: Value) -> (u16, String) {
+    post(node, path, message, "").await
+}
+
+async fn post(node: &Running, path: &str, message: Value, headers: &str) -> (u16, String) {
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     let (address, body) = (node.address, message.to_string());
     let mut stream = tokio::net::TcpStream::connect(address).await.unwrap();
     let request = format!(
         "POST {path} HTTP/1.1\r\nHost: {address}\r\nContent-Type: application/json\r\n\
-         Content-Length: {}\r\nConnection: close\r\n\r\n{body}",
+         Content-Length: {}\r\nConnection: close\r\n{headers}\r\n{body}",
         body.len()
     );
     stream.write_all(request.as_bytes()).await.unwrap();
@@ -589,6 +593,121 @@ async fn rpc(node: &Running, path: &str, message: Value) -> (u16, String) {
     let (head, body) = response.split_once("\r\n\r\n").unwrap();
     let status = head.split(' ').nth(1).unwrap().parse().unwrap();
     (status, body.to_owned())
+}
+
+/// A node-local delete reaches the same handler and authority via both
+/// transports, with the counter proving which requests actually ran.
+#[tokio::test(flavor = "multi_thread")]
+async fn typed_calls_share_mcp_authority_arguments_and_execution() {
+    use schemars::JsonSchema;
+    use serde::{Deserialize, Serialize};
+
+    /// Delete one entry from the test vault.
+    #[derive(Deserialize, JsonSchema)]
+    #[serde(deny_unknown_fields)]
+    struct Delete {
+        entry: u32,
+    }
+
+    #[derive(Serialize, JsonSchema)]
+    struct Deleted {
+        entry: u32,
+        count: u32,
+    }
+
+    #[derive(Default)]
+    struct Vault(Arc<AtomicU32>);
+    impl Area for Vault {
+        fn commands(&self) -> Vec<Command> {
+            let counter = self.0.clone();
+            vec![Command::typed(
+                "vault_delete",
+                Effect::Destroys,
+                move |args: Delete| {
+                    let count = counter.fetch_add(1, Ordering::SeqCst) + 1;
+                    async move {
+                        Ok(Deleted {
+                            entry: args.entry,
+                            count,
+                        })
+                    }
+                },
+            )]
+        }
+    }
+    fn vault(_: &Setup) -> anyhow::Result<Built> {
+        Built::now(Vault::default())
+    }
+    let node = start(
+        &[
+            LIGHTS_LISTED,
+            listed("vault", &[], &["vault_delete"], vault),
+        ],
+        "",
+    )
+    .await
+    .unwrap();
+    let path = "/api/call/vault_delete";
+    let call = |arguments: Value| {
+        json!({
+            "jsonrpc": "2.0", "id": 1, "method": "tools/call",
+            "params": { "name": "vault_delete", "arguments": arguments }
+        })
+    };
+    let input = json!({"entry": 9});
+    for headers in [
+        "Origin: http://foreign.invalid\r\n",
+        "Tailscale-Funnel-Request: true\r\n",
+    ] {
+        let (api, body) = post(&node, path, input.clone(), headers).await;
+        let (mcp, _) = post(&node, "/mcp", call(input.clone()), headers).await;
+        assert_eq!((api, mcp), (403, 403), "{headers}");
+        assert_eq!(
+            serde_json::from_str::<Value>(&body).unwrap()["error"]["code"],
+            "forbidden"
+        );
+    }
+    let (status, body) = post(&node, path, json!({"extra": true}), "").await;
+    assert_eq!(status, 400, "{body}");
+    let refusal: Value = serde_json::from_str(&body).unwrap();
+    assert_eq!(refusal["error"]["code"], "invalid_argument");
+    let message = refusal["error"]["message"].as_str().unwrap();
+    assert!(
+        message.contains("extra") && message.contains("accepted fields: entry"),
+        "{message}"
+    );
+    for (path, args) in [
+        (format!("{path}?node=elsewhere"), input.clone()),
+        (path.into(), json!({"node":"elsewhere","entry":9})),
+    ] {
+        let (status, body) = post(&node, &path, args, "").await;
+        assert_eq!(status, 421, "{body}");
+        assert_eq!(
+            serde_json::from_str::<Value>(&body).unwrap()["error"]["code"],
+            "unknown_node"
+        );
+    }
+    for name in ["vault_absent", "lights_switch"] {
+        let (status, body) = post(&node, &format!("/api/call/{name}"), json!({}), "").await;
+        assert_eq!(status, 404, "{body}");
+        let refusal: Value = serde_json::from_str(&body).unwrap();
+        assert_eq!(refusal["error"]["code"], "unknown_command");
+        assert!(refusal["error"]["message"].as_str().unwrap().contains(name));
+    }
+    let (status, body) = post(&node, path, input.clone(), "").await;
+    assert_eq!(status, 200, "{body}");
+    assert_eq!(
+        serde_json::from_str::<Value>(&body).unwrap(),
+        json!({"entry":9,"count":1})
+    );
+    let (status, body) = rpc(&node, "/mcp", call(input)).await;
+    assert_eq!(status, 200, "{body}");
+    let body: Value = serde_json::from_str(&body).unwrap();
+    assert_eq!(
+        body["result"]["structuredContent"],
+        json!({"entry":9,"count":2})
+    );
+    node.stop().await.unwrap();
 }
 
 fn tool_names(answer: &str) -> Vec<String> {

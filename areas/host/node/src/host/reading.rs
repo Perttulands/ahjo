@@ -99,7 +99,7 @@ impl Probe {
             disks,
             gpus,
             uptime: os::uptime(),
-            heavy,
+            heavy: Some(heavy),
         }
     }
 }
@@ -157,7 +157,10 @@ mod tests {
         assert!(reading.swap.is_some_and(|s| s.used <= s.total));
         assert!(!reading.disks.is_empty());
         assert!(reading.uptime.is_some());
-        assert!(reading.heavy.is_empty(), "not asked for");
+        assert!(
+            reading.heavy.as_deref().is_some_and(<[_]>::is_empty),
+            "not asked for"
+        );
         let next = probe.read(true).await;
         assert!(
             next.cpu.is_none_or(|cpu| (0.0..=100.0).contains(&cpu)),
@@ -165,7 +168,10 @@ mod tests {
             next.cpu
         );
         if cfg!(target_os = "linux") {
-            assert!(!next.heavy.is_empty(), "this test is a process");
+            assert!(
+                next.heavy.is_some_and(|heavy| !heavy.is_empty()),
+                "this test is a process"
+            );
         }
     }
 }

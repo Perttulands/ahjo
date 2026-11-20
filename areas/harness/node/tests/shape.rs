@@ -1,6 +1,8 @@
 //! What shapes an agent, read from a scratch home and project the way each
 //! harness reads them, and changed through the node's commands.
+use ahjo_node_kit::{NodeClient, NodeError};
 use ahjo_testkit::{fresh_dir, node::Node, sessions};
+use axum::http::{Method, StatusCode};
 use serde_json::{Value, json};
 use std::path::{Path, PathBuf};
 
@@ -345,6 +347,19 @@ async fn edits_land_in_the_file_they_came_from() {
         .await
         .unwrap_err();
     assert_eq!(stale.code, "harness_stale");
+    let client = NodeClient::new(Some(&node.url())).unwrap();
+    let error = client
+        .request(
+            Method::POST,
+            "/api/call/harness_write",
+            Some(json!({"path": link, "text": "x", "etag": "nope"})),
+            None,
+        )
+        .await
+        .unwrap_err();
+    let error = error.downcast_ref::<NodeError>().unwrap();
+    assert_eq!(error.status, StatusCode::CONFLICT);
+    assert_eq!(error.code, stale.code);
     node.call(
         "harness_write",
         json!({"path": link, "text": "Changed.\n", "etag": read["etag"]}),

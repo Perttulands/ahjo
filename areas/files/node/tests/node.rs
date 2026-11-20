@@ -700,6 +700,35 @@ async fn files_work_as_the_files_view_does_under_the_roots() {
         )
         .await;
     assert!(stale.unwrap_err().message.contains("Changed"));
+    let client = NodeClient::new(Some(&node.url())).unwrap();
+    for (verb, args, status, code) in [
+        (
+            "file_write",
+            json!({"path": notes, "text": "lost\n", "base": version}),
+            StatusCode::PRECONDITION_FAILED,
+            ahjo_files_contract::FILE_CHANGED,
+        ),
+        (
+            "file_list",
+            json!({"path": notes}),
+            StatusCode::BAD_REQUEST,
+            ahjo_files_contract::NOT_FOLDER,
+        ),
+        (
+            "file_read",
+            json!({"path": other.join("secret")}),
+            StatusCode::FORBIDDEN,
+            ahjo_files_contract::OUTSIDE_ROOTS,
+        ),
+    ] {
+        let error = client
+            .request(Method::POST, &format!("/api/call/{verb}"), Some(args), None)
+            .await
+            .unwrap_err();
+        let error = error.downcast_ref::<ahjo_node_kit::NodeError>().unwrap();
+        assert_eq!((error.status, error.code.as_str()), (status, code));
+    }
+    assert_eq!(std::fs::read_to_string(&notes).unwrap(), "edited\n");
     let taken = node
         .call(
             "file_write",

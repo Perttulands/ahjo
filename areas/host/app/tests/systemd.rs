@@ -149,7 +149,12 @@ fn refused(url: &str, path: &str) -> String {
             .block_on(async move {
                 let client = NodeClient::new(Some(&url)).unwrap();
                 let answer = client
-                    .request(axum::http::Method::POST, &path, None, None)
+                    .request(
+                        axum::http::Method::POST,
+                        &path,
+                        Some(json!({"id":"missing"})),
+                        None,
+                    )
                     .await;
                 format!("{:#}", answer.expect_err("refused"))
             })
@@ -253,7 +258,7 @@ fn disposable_systemd_service_and_host_health_journey(cx: &mut TestAppContext) {
         .unwrap()
         .trim()
         .to_string();
-    let answer = refused(&node.url, "/api/services/missing/restart");
+    let answer = refused(&node.url, "/api/call/service_restart");
     assert!(answer.contains(&words), "{answer}");
     let host = command(&node.url, "host", &["show", "--full"]);
     assert!(

@@ -9,6 +9,7 @@ publish = false
 workspace = true
 
 [dependencies]
+schemars.workspace = true
 ahjo-core = { path = "../../../kit/core" }
 ahjo-node-kit = { path = "../../../kit/node-kit" }
 ahjo-host-contract = { path = "../contract" }

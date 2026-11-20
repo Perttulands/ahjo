@@ -1,6 +1,10 @@
 //! Host readings and service management.
 mod commands;
 pub mod host;
+use ahjo_core::TypedCommand;
+use ahjo_host_contract::commands::{
+    HostShow, ServiceList, ServiceLog, ServiceRestart, ServiceShow, ServiceStart, ServiceStop,
+};
 use ahjo_node_kit::{Area, BoxFuture, Built, Channel, Client, Command, Listing, Setup};
 use serde::Deserialize;
 use std::{path::PathBuf, sync::Arc};
@@ -10,13 +14,13 @@ pub const LISTING: Listing = Listing {
     name: "host",
     kinds: &[ahjo_host_contract::HOST..=ahjo_host_contract::HOST_EVENT],
     commands: &[
-        "host_show",
-        "service_list",
-        "service_show",
-        "service_start",
-        "service_stop",
-        "service_restart",
-        "service_log",
+        HostShow::NAME,
+        ServiceList::NAME,
+        ServiceShow::NAME,
+        ServiceStart::NAME,
+        ServiceStop::NAME,
+        ServiceRestart::NAME,
+        ServiceLog::NAME,
     ],
     build,
 };
@@ -52,9 +56,6 @@ pub fn build(setup: &Setup) -> anyhow::Result<Built> {
     })
 }
 impl Area for HostArea {
-    fn routes(&self) -> axum::Router {
-        host::services::routes(self.services.clone())
-    }
     fn channel(&self, _: Client) -> Option<Box<dyn Channel>> {
         let (tx, rx) = mpsc::channel(32);
         Some(Box::new(Stream {

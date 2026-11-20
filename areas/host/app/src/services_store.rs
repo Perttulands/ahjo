@@ -1,4 +1,4 @@
-//! Each node's services as its catalog lists them (`GET /api/services`),
+//! Each node's services as its catalog lists them,
 //! and CHROTE's rules for showing a change: a row says what was asked
 //! ("starting…") until the node answers, and a failure stays in systemd's
 //! words until the next action on that row.
@@ -9,25 +9,15 @@
 //! settles. One that has not settled by then says so and is left to
 //! Refresh. Nothing is read on a timer otherwise.
 
-use serde::Deserialize;
 use std::collections::{BTreeMap, HashMap};
 
+use ahjo_core::Error;
+use ahjo_host_contract::commands::{ServiceActed, ServiceLogged, ServiceShown, ServicesListed};
 pub use ahjo_host_contract::{LogLine, Service};
-use ahjo_host_contract::{ServiceList as List, ServiceLog, ServiceOne as One};
-
-#[derive(Deserialize)]
-struct Answer {
-    service: Option<Service>,
-    #[serde(default)]
-    errors: Vec<String>,
-    error: Option<ahjo_core::Error>,
-    #[serde(default)]
-    outcome: String,
-}
+use ahjo_host_contract::{Outcome, SERVICE_UNCONFIRMED};
 
 /// How long after an action, or the read before, each follow-up read waits;
 /// the row is left to Refresh after the last.
-pub const NO_ANSWER: &str = "The node did not answer";
 pub const FOLLOW: [u64; 5] = [1_000, 2_000, 4_000, 8_000, 16_000];
 
 /// What the app knows of how an action ended.
@@ -92,6 +82,8 @@ pub struct NodeServices {
     /// Why the last read failed, in the node's words.
     pub error: Option<String>,
     pub reading: bool,
+    /// Another read was requested while the current one was in flight.
+    pub reread: bool,
     /// When the last read landed, Unix ms.
     pub read_at: Option<u64>,
     /// Rows whose change runs, until a read after it lands.
@@ -115,14 +107,14 @@ pub struct Log {
 
 impl Log {
     /// A log read landed.
-    pub fn read(&mut self, status: u16, body: &[u8]) {
+    pub fn read(&mut self, answer: Result<ServiceLogged, Error>) {
         self.reading = false;
-        match serde_json::from_slice::<ServiceLog>(body) {
-            Ok(l) if status == 200 => {
-                self.lines = l.lines;
-                self.errors = l.errors;
+        match answer {
+            Ok(log) => {
+                self.lines = log.log.lines;
+                self.errors = log.log.errors;
             }
-            _ => self.errors = vec![words(status, body)],
+            Err(error) => self.errors = vec![error.message],
         }
     }
 }
@@ -330,11 +322,11 @@ pub fn reference(s: &Service, now: u64) -> String {
 }
 
 impl NodeServices {
-    /// A list read landed: the body, or the refusal's words.
-    pub fn listed(&mut self, status: u16, body: &[u8], now: u64) {
+    /// A list read landed, or the node refused it.
+    pub fn listed(&mut self, answer: Result<ServicesListed, Error>, now: u64) {
         self.reading = false;
-        match serde_json::from_slice::<List>(body) {
-            Ok(l) if status == 200 => {
+        match answer {
+            Ok(l) => {
                 self.unsettled.retain(|id, _| {
                     l.services
                         .iter()
@@ -344,8 +336,8 @@ impl NodeServices {
                 self.error = None;
                 self.read_at = Some(now);
             }
-            _ => {
-                let error = words(status, body);
+            Err(error) => {
+                let error = error.message;
                 // A node with no catalog has no services: none of those
                 // read before stays listed.
                 if error.starts_with(ahjo_host_contract::NO_CATALOG) {
@@ -382,15 +374,15 @@ impl NodeServices {
 
     /// An action answered: the row takes the node's read of it. A node
     /// that did not answer in time may still be acting.
-    pub fn answered(&mut self, id: &str, change: Change, status: u16, body: &[u8]) -> Ended {
+    pub fn answered(
+        &mut self,
+        id: &str,
+        change: Change,
+        answer: Result<ServiceActed, Error>,
+    ) -> Ended {
         self.changing.remove(id);
-        let silent = status == 0 && String::from_utf8_lossy(body).starts_with(NO_ANSWER);
-        let answer: Option<Answer> = serde_json::from_slice(body).ok();
-        if let Some(s) = answer.as_ref().and_then(|a| a.service.clone()) {
-            self.put(s);
-        }
         let ended = match answer {
-            _ if silent => {
+            Err(error) if error.code == "unanswered" => {
                 self.unsettled.insert(
                     id.into(),
                     format!(
@@ -400,18 +392,26 @@ impl NodeServices {
                 );
                 Ended::Follow
             }
-            Some(a) if a.outcome == "unconfirmed" => {
-                self.unsettled.insert(id.into(), a.errors.join("; "));
+            Err(error) if error.code == SERVICE_UNCONFIRMED => {
+                self.unsettled.insert(id.into(), error.message);
                 Ended::Follow
             }
-            Some(a) if !a.errors.is_empty() => Ended::Failed(a.errors.join("; ")),
-            Some(Answer { error: Some(e), .. }) => Ended::Failed(e.message),
-            Some(_) if status < 300 => match self.row(id) {
-                _ if self.moving(id) => Ended::Follow,
-                Some(s) if s.state == change.aim() => Ended::Done,
-                _ => Ended::Elsewhere,
-            },
-            _ => Ended::Failed(words(status, body)),
+            Err(error) => Ended::Failed(error.message),
+            Ok(answer) => {
+                self.put(answer.service);
+                if answer.outcome == Outcome::Unconfirmed {
+                    self.unsettled.insert(id.into(), answer.errors.join("; "));
+                    Ended::Follow
+                } else if !answer.errors.is_empty() {
+                    Ended::Failed(answer.errors.join("; "))
+                } else if self.moving(id) {
+                    Ended::Follow
+                } else if self.row(id).is_some_and(|s| s.state == change.aim()) {
+                    Ended::Done
+                } else {
+                    Ended::Elsewhere
+                }
+            }
         };
         match &ended {
             Ended::Failed(f) => {
@@ -427,27 +427,33 @@ impl NodeServices {
     /// A follow-up read of one service landed. Returns whether to read it
     /// again: it is still moving, or the read failed, and `last` is not set.
     /// After the last read the row says what it last knew, as of `at`.
-    pub fn followed(&mut self, id: &str, status: u16, body: &[u8], last: bool, at: &str) -> bool {
-        let read = serde_json::from_slice::<One>(body)
-            .ok()
-            .filter(|_| status == 200);
-        let got = read.is_some();
-        if let Some(one) = read {
-            self.put(one.service);
-        }
-        if got && !self.moving(id) {
-            self.unsettled.remove(id);
-            return false;
-        }
+    pub fn followed(
+        &mut self,
+        id: &str,
+        answer: Result<ServiceShown, Error>,
+        last: bool,
+        at: &str,
+    ) -> bool {
+        let error = match answer {
+            Ok(answer) => {
+                self.put(answer.service);
+                if !self.moving(id) {
+                    self.unsettled.remove(id);
+                    return false;
+                }
+                None
+            }
+            Err(error) => Some(error.message),
+        };
         if !last {
             return true;
         }
-        let note = match self.row(id) {
-            Some(s) if got => format!("Still {} at {at}; Refresh reads it again.", s.state),
-            _ => format!(
-                "Not read since the action ({}); Refresh reads it again.",
-                words(status, body)
+        let note = match error {
+            None => format!(
+                "Still {} at {at}; Refresh reads it again.",
+                self.row(id).map_or("moving", |s| s.state.as_str())
             ),
+            Some(error) => format!("Not read since the action ({error}); Refresh reads it again."),
         };
         self.unsettled.insert(id.into(), note);
         false
@@ -471,36 +477,50 @@ impl NodeServices {
     }
 }
 
-/// A refusal's words: `{error}` if it has one, else its text.
-pub fn words(status: u16, body: &[u8]) -> String {
-    #[derive(Deserialize)]
-    struct E {
-        error: ahjo_core::Error,
-    }
-    if let Ok(e) = serde_json::from_slice::<E>(body) {
-        return e.error.message;
-    }
-    let text = String::from_utf8_lossy(body).trim().to_string();
-    if text.is_empty() {
-        format!("The node answered {status}.")
-    } else {
-        text
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
+    fn fixture<T: serde::de::DeserializeOwned>(json: &str) -> T {
+        serde_json::from_str(json).unwrap()
+    }
+
     fn node() -> NodeServices {
         let mut n = NodeServices::default();
         n.listed(
-            200,
-            br#"{"services":[{"id":"example","name":"Example","description":"d","link":"http://h:8080/x","state":"stopped","controllable":true,"components":[{"unit":"example.service","state":"inactive","sub":"dead","since":1000}]},
-                {"id":"room","name":"Room","state":"running","controllable":false,"components":[{"unit":"room.service","state":"active"}]}]}"#,
+            Ok(fixture(r#"{"node":"n","services":[{"id":"example","name":"Example","description":"d","link":"http://h:8080/x","state":"stopped","controllable":true,"components":[{"unit":"example.service","state":"inactive","sub":"dead","since":1000}]},
+                {"id":"room","name":"Room","state":"running","controllable":false,"components":[{"unit":"room.service","state":"active"}]}]}"#)),
             1,
         );
         n
+    }
+
+    fn action(state: &str) -> ServiceActed {
+        ServiceActed {
+            node: "n".into(),
+            service: Service {
+                id: "example".into(),
+                name: "Example".into(),
+                state: state.into(),
+                controllable: true,
+                ..Service::default()
+            },
+            errors: Vec::new(),
+            outcome: Outcome::Done,
+        }
+    }
+
+    fn service(state: &str) -> ServiceShown {
+        ServiceShown {
+            node: "n".into(),
+            service: Service {
+                id: "example".into(),
+                name: "Example".into(),
+                state: state.into(),
+                controllable: true,
+                ..Service::default()
+            },
+        }
     }
 
     #[test]
@@ -544,12 +564,7 @@ mod tests {
         n.changing.insert("example".into(), Change::Start);
         let s = n.list.as_ref().unwrap()[0].clone();
         assert_eq!(n.shown(&s), "starting…");
-        let ended = n.answered(
-            "example",
-            Change::Start,
-            200,
-            br#"{"service":{"id":"example","name":"Example","state":"running","controllable":true},"errors":[],"outcome":"done"}"#,
-        );
+        let ended = n.answered("example", Change::Start, Ok(action("running")));
         assert_eq!(ended, Ended::Done);
         assert!(n.changing.is_empty());
         assert_eq!(n.list.as_ref().unwrap()[0].state, "running");
@@ -561,34 +576,30 @@ mod tests {
         let ended = n.answered(
             "example",
             Change::Start,
-            502,
-            br#"{"service":{"id":"example","name":"Example","state":"failed","controllable":true},"errors":["Job failed","See journal"],"outcome":"failed"}"#,
+            Err(Error::new("service_failed", "Job failed; See journal")),
         );
         assert_eq!(ended, Ended::Failed("Job failed; See journal".into()));
         n.listed(
-            200,
-            br#"{"services":[{"id":"example","name":"Example","state":"stopped","controllable":true}]}"#,
+            Ok(fixture(r#"{"node":"n","services":[{"id":"example","name":"Example","state":"stopped","controllable":true}]}"#)),
             2,
         );
         assert_eq!(
             n.failures["example"], "Job failed; See journal",
             "a read keeps it"
         );
-        n.answered(
-            "example",
-            Change::Start,
-            200,
-            br#"{"service":null,"errors":[]}"#,
-        );
+        n.answered("example", Change::Start, Ok(action("running")));
         assert!(!n.failures.contains_key("example"));
     }
 
     #[test]
     fn an_unknown_end_is_followed_until_it_settles_or_is_left_to_refresh() {
         let mut n = node();
-        let silent = format!("{} 50 s", NO_ANSWER);
         assert_eq!(
-            n.answered("example", Change::Restart, 0, silent.as_bytes()),
+            n.answered(
+                "example",
+                Change::Restart,
+                Err(Error::new("unanswered", "50 s"))
+            ),
             Ended::Follow,
             "the node may still be restarting it"
         );
@@ -597,26 +608,29 @@ mod tests {
             !n.failures.contains_key("example"),
             "not a failure: not known"
         );
-        let moving = br#"{"service":{"id":"example","name":"Example","state":"starting","controllable":true}}"#;
-        assert!(n.followed("example", 200, moving, false, "01:00"));
+        assert!(n.followed("example", Ok(service("starting")), false, "01:00"));
         assert!(
-            !n.followed("example", 200, moving, true, "01:00"),
+            !n.followed("example", Ok(service("starting")), true, "01:00"),
             "the last read stops"
         );
         assert!(n.unsettled["example"].starts_with("Still starting at"));
-        let settled = br#"{"service":{"id":"example","name":"Example","state":"running","controllable":true}}"#;
-        assert!(!n.followed("example", 200, settled, false, "01:01"));
+        assert!(!n.followed("example", Ok(service("running")), false, "01:01"));
         assert!(!n.unsettled.contains_key("example"));
 
-        let unconfirmed = br#"{"service":{"id":"example","name":"Example","state":"stopping","controllable":true},"errors":["systemctl stop gave no answer in 15 s; systemd may still finish it"],"outcome":"unconfirmed"}"#;
         assert_eq!(
-            n.answered("example", Change::Stop, 202, unconfirmed),
+            n.answered(
+                "example",
+                Change::Stop,
+                Err(Error::new(
+                    SERVICE_UNCONFIRMED,
+                    "systemctl stop gave no answer in 15 s; systemd may still finish it"
+                ))
+            ),
             Ended::Follow
         );
         assert!(n.unsettled["example"].contains("may still finish"));
         n.listed(
-            200,
-            br#"{"services":[{"id":"example","name":"Example","state":"stopped","controllable":true}]}"#,
+            Ok(fixture(r#"{"node":"n","services":[{"id":"example","name":"Example","state":"stopped","controllable":true}]}"#)),
             3,
         );
         assert!(
@@ -628,18 +642,12 @@ mod tests {
     #[test]
     fn does_not_claim_a_start_when_the_node_reports_it_failed() {
         let mut n = node();
-        let ended = n.answered(
-            "example",
-            Change::Start,
-            200,
-            br#"{"service":{"id":"example","name":"Example","state":"failed","controllable":true},"errors":[],"outcome":"done"}"#,
-        );
+        let ended = n.answered("example", Change::Start, Ok(action("failed")));
         assert_eq!(ended, Ended::Elsewhere);
         assert!(!n.failures.contains_key("example"), "its state says it");
         assert_eq!(n.list.as_ref().unwrap()[0].state, "failed");
-        let stopped = br#"{"service":{"id":"example","name":"Example","state":"stopped","controllable":true},"errors":[],"outcome":"done"}"#;
         assert_eq!(
-            n.answered("example", Change::Stop, 200, stopped),
+            n.answered("example", Change::Stop, Ok(action("stopped"))),
             Ended::Done
         );
     }
@@ -647,24 +655,28 @@ mod tests {
     #[test]
     fn a_plain_refusal_is_shown_as_its_text() {
         let mut n = NodeServices::default();
-        n.listed(503, b"Service controller is unavailable", 1);
+        n.listed(
+            Err(Error::new(
+                "unavailable",
+                "Service controller is unavailable",
+            )),
+            1,
+        );
         assert_eq!(
             n.error.as_deref(),
             Some("Service controller is unavailable")
         );
-        n.listed(
-            503,
-            br#"{"error":{"code":"unavailable","message":"No service catalog"}}"#,
-            1,
-        );
+        n.listed(Err(Error::new("unavailable", "No service catalog")), 1);
         assert_eq!(n.error.as_deref(), Some("No service catalog"));
         assert_eq!(n.unread(), Some("No service catalog"), "a failure");
         // A node that was never given a catalog has not failed, and has
         // no services, whatever was listed before.
         n.list = Some(vec![Service::default()]);
         n.listed(
-            503,
-            br#"{"error":{"code":"unavailable","message":"No service catalog on this node: write one at /x/services.json"}}"#,
+            Err(Error::new(
+                "unavailable",
+                "No service catalog on this node: write one at /x/services.json",
+            )),
             3,
         );
         assert_eq!(n.unread(), None);
@@ -678,8 +690,7 @@ mod tests {
         let ended = n.answered(
             "example",
             Change::Restart,
-            400,
-            br#"{"error":{"code":"bad_request","message":"This service is read-only"}}"#,
+            Err(Error::new("bad_request", "This service is read-only")),
         );
         assert_eq!(ended, Ended::Failed("This service is read-only".into()));
         assert_eq!(n.failures["example"], "This service is read-only");
@@ -788,16 +799,12 @@ mod tests {
             reading: true,
             ..Log::default()
         };
-        log.read(
-            200,
-            br#"{"lines":[{"at":1,"text":"listening","error":false}],"errors":[]}"#,
-        );
+        log.read(Ok(fixture(
+            r#"{"node":"n","lines":[{"at":1,"text":"listening","error":false}],"errors":[]}"#,
+        )));
         assert!(!log.reading);
         assert_eq!(log.lines[0].text, "listening");
-        log.read(
-            404,
-            br#"{"error":{"code":"not_found","message":"No such service"}}"#,
-        );
+        log.read(Err(Error::new("not_found", "No such service")));
         assert_eq!(log.errors, ["No such service"]);
     }
 }

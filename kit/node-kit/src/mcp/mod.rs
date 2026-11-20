@@ -158,6 +158,25 @@ impl Mcp {
         self.commands(reach).find(|command| command.name == name)
     }
 
+    async fn invoke(
+        &self,
+        caller: &rpc::Caller,
+        command: &Command,
+        mut args: Value,
+    ) -> Result<Value, Error> {
+        let outcome = match target(&self.node, &mut args) {
+            Ok(()) => (command.call)(args).await,
+            Err(error) => Err(error),
+        };
+        call_log::record(
+            caller,
+            command.name,
+            self.node.as_str(),
+            if outcome.is_ok() { "ok" } else { "failed" },
+        );
+        outcome
+    }
+
     /// Where else a tool is, for a client that asked a server without it.
     fn elsewhere(&self, reach: &Reach, tool: &str) -> String {
         let server = self

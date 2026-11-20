@@ -38,14 +38,19 @@ fn reply<T: serde::Serialize>(result: Result<T, Error>) -> Response {
     match result {
         Ok(v) => Json(json!(v)).into_response(),
         Err(e) => {
-            let status = match e.code.as_str() {
-                NOT_FOUND => StatusCode::NOT_FOUND,
-                STALE => StatusCode::CONFLICT,
-                _ => StatusCode::BAD_REQUEST,
-            };
+            let status = failure_status(&e).unwrap_or(StatusCode::BAD_REQUEST);
             (status, Json(json!({"error": e}))).into_response()
         }
     }
+}
+
+fn failure_status(error: &Error) -> Option<StatusCode> {
+    Some(match error.code.as_str() {
+        NOT_FOUND => StatusCode::NOT_FOUND,
+        STALE => StatusCode::CONFLICT,
+        INVALID | FAILED => StatusCode::BAD_REQUEST,
+        _ => return None,
+    })
 }
 
 fn arg(q: &HashMap<String, String>, key: &str) -> Result<String, Error> {
@@ -245,5 +250,6 @@ impl CommandContext {
                 Ok(AtNode { result, node })
             }
         })
+        .with_error_status(failure_status)
     }
 }
