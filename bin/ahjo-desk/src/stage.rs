@@ -145,7 +145,16 @@ impl DeskApp {
     /// and key: how a press marks, and Note, a word on the whole of what
     /// is shown. At the right, the surface alone in the window, or back.
     fn tools(&mut self, t: &Theme, item: &Item, cx: &mut Context<Self>) -> AnyElement {
+        // The tools give way in a narrow surface; the corner button stays.
         let bar = div()
+            .flex_1()
+            .min_w_0()
+            .h_full()
+            .flex()
+            .items_center()
+            .gap(px(2.))
+            .overflow_hidden();
+        let row = div()
             .h(px(tokens::TOOLS))
             .flex_none()
             .px(px(GAP_SMALL))
@@ -155,7 +164,6 @@ impl DeskApp {
             .bg(t.surface)
             .border_b_1()
             .border_color(t.divider)
-            .overflow_hidden()
             .text_size(px(META))
             .text_color(t.text2);
         let full = icon_button(
@@ -188,10 +196,7 @@ impl DeskApp {
                 .text_color(t.text2)
                 .child(words)
         });
-        let tail = |bar: gpui::Div| match name {
-            Some(n) => bar.child(n).child(full),
-            None => bar.child(div().flex_1()).child(full),
-        };
+        let tail = |bar: gpui::Div| row.child(bar.children(name)).child(full);
         if item.doc {
             return tail(
                 bar.child(

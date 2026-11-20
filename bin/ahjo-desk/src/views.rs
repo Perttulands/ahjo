@@ -737,6 +737,7 @@ impl DeskApp {
         let tab = |id: &'static str, words: &'static str, n: String, on: bool, hot: bool| {
             div()
                 .id(id)
+                .flex_none()
                 .h(px(tokens::CAP + 8.))
                 .px(px(GAP_SMALL + 2.))
                 .flex()
@@ -766,41 +767,52 @@ impl DeskApp {
             .border_b_1()
             .border_color(t.divider)
             .text_size(px(META))
+            // In a narrow list the tabs give way; the buttons stay.
             .child(
-                // A count nobody read is not a zero.
-                tab(
-                    "list-waiting",
-                    "Waiting",
-                    if known {
-                        waiting.to_string()
-                    } else {
-                        "–".into()
-                    },
-                    self.list == List::Waiting,
-                    known && waiting > 0,
-                )
-                .tooltip(kit::tip(format!(
-                    "{} · J and K step, Ctrl+PgDn from anywhere",
-                    self.config.order.label()
-                )))
-                .on_click(
-                    cx.listener(|app, _: &ClickEvent, _, cx| app.set_list(List::Waiting, cx)),
-                ),
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .flex()
+                    .items_center()
+                    .gap(px(2.))
+                    .overflow_hidden()
+                    .child(
+                        // A count nobody read is not a zero.
+                        tab(
+                            "list-waiting",
+                            "Waiting",
+                            if known {
+                                waiting.to_string()
+                            } else {
+                                "–".into()
+                            },
+                            self.list == List::Waiting,
+                            known && waiting > 0,
+                        )
+                        .tooltip(kit::tip(format!(
+                            "{} · J and K step, Ctrl+PgDn from anywhere",
+                            self.config.order.label()
+                        )))
+                        .on_click(
+                            cx.listener(|app, _: &ClickEvent, _, cx| {
+                                app.set_list(List::Waiting, cx)
+                            }),
+                        ),
+                    )
+                    .child(
+                        tab(
+                            "list-answered",
+                            "Answered",
+                            answered.to_string(),
+                            self.list == List::Answered,
+                            false,
+                        )
+                        .tooltip(kit::tip("What you sent, the last first, to read again"))
+                        .on_click(cx.listener(
+                            |app, _: &ClickEvent, _, cx| app.set_list(List::Answered, cx),
+                        )),
+                    ),
             )
-            .child(
-                tab(
-                    "list-answered",
-                    "Answered",
-                    answered.to_string(),
-                    self.list == List::Answered,
-                    false,
-                )
-                .tooltip(kit::tip("What you sent, the last first, to read again"))
-                .on_click(
-                    cx.listener(|app, _: &ClickEvent, _, cx| app.set_list(List::Answered, cx)),
-                ),
-            )
-            .child(div().flex_1())
             .child(self.menu_button(t, cx))
             .child(self.list_button(t, cx))
     }
