@@ -1,7 +1,20 @@
 //! Mission create and rename dialog, adapted from the original navigator.
 use super::*;
 use ahjo_app_kit::theme::Theme;
+use ahjo_missions_contract::commands::{MissionCreate, MissionDelete, MissionEdited};
 use gpui::{FontWeight, MouseButton, SharedString};
+
+enum Receipt {
+    Created {
+        node: String,
+        slug: String,
+    },
+    Renamed {
+        previous_title: String,
+        edit: Box<MissionEdited>,
+    },
+    Archived,
+}
 
 #[derive(Clone)]
 enum Doing {
@@ -264,30 +277,69 @@ impl MissionsPage {
                 return;
             }
         }
-        let request = match &doing {
-            Doing::Create { node } => Ok(Request::new("POST", NodeId(node.clone()), "/api/missions")
-                .json(&json!({"title":title, "example":example.map(|e| e.name).unwrap_or(""), "note":intent, "steps":steps, "updated_by":"human:operator"}))),
-            Doing::Rename { node, slug, rev, etag, .. } => edits::with_json_body(
-                Request::new("PATCH", NodeId(node.clone()), mission_path(slug))
-                    .header("If-Match", etag.clone()),
-                &edits::board_body(&rename_patch(&title), *rev),
-            ),
-            Doing::Archive { node, slug, rev, etag, .. } => Ok(Request::new("DELETE", NodeId(node.clone()), mission_path(slug))
-                .header("If-Match", etag.clone())
-                .json(&json!({"expected_rev":rev}))),
-        };
         let form = self.manage.form.as_mut().unwrap();
-        let request = match request {
-            Ok(request) => request,
-            Err(error) => {
-                form.problem = Some(error.to_string());
-                cx.notify();
-                return;
-            }
-        };
         form.busy = true;
         form.problem = None;
-        let asked = self.host.request(request, cx);
+        let asked = match doing {
+            Doing::Create { node } => {
+                let asked = self.host.call(
+                    NodeId(node.clone()),
+                    MissionCreate {
+                        slug: String::new(),
+                        title: Some(title),
+                        example: example.map(|e| e.name.to_owned()),
+                        note: Some(intent),
+                        steps: Some(steps),
+                        updated_by: Some("human:operator".into()),
+                    },
+                    cx,
+                );
+                cx.background_executor().spawn(async move {
+                    asked.await.map(|v| Receipt::Created {
+                        node,
+                        slug: v.created,
+                    })
+                })
+            }
+            Doing::Rename {
+                node,
+                slug,
+                title: previous_title,
+                rev,
+                etag,
+            } => {
+                let asked = self.host.call(
+                    NodeId(node),
+                    edits::board_edit(slug, rename_patch(&title), rev, etag),
+                    cx,
+                );
+                cx.background_executor().spawn(async move {
+                    asked.await.map(|edit| Receipt::Renamed {
+                        previous_title,
+                        edit: Box::new(edit),
+                    })
+                })
+            }
+            Doing::Archive {
+                node,
+                slug,
+                rev,
+                etag,
+                ..
+            } => {
+                let asked = self.host.call(
+                    NodeId(node),
+                    MissionDelete {
+                        mission: slug,
+                        rev: Some(rev),
+                        etag: Some(etag),
+                    },
+                    cx,
+                );
+                cx.background_executor()
+                    .spawn(async move { asked.await.map(|_| Receipt::Archived) })
+            }
+        };
         let generation = self.generation;
         cx.spawn(async move |this, cx| {
             let result = asked.await;
@@ -296,38 +348,40 @@ impl MissionsPage {
                 let Some(form) = page.manage.form.as_mut() else { return; };
                 form.busy = false;
                 match result {
-                    Ok(answer) if answer.ok() => match &doing {
-                        Doing::Create { node } => match serde_json::from_slice::<MissionResponse>(&answer.body) {
-                            Ok(result) => { let slug = result.mission.slug; page.manage.form = None; page.open(node.clone(), slug, cx); },
-                            Err(error) => form.problem = Some(format!("The mission may have been created, but the answer could not be read: {error}. Check the list before retrying.")),
-                        },
-                        Doing::Archive { .. } => {
-                            page.manage.form = None;
-                            page.state.selected = None;
-                            page.state.mission = None;
-                            page.state.mission_etag = None;
-                            page.state.layout = None;
-                            page.state.layout_etag = None;
-                            page.notes = None;
-                            page.editor = None;
-                            page.history = undo::History::default();
-                            page.run = run::RunUi::new(cx);
-                        }
-                        Doing::Rename { title: old_title, .. } => match serde_json::from_slice::<EditResponse>(&answer.body) {
-                            Ok(result) => {
-                                page.history.wrote(undo::Version { rev:result.mission.rev, layout:Some(result.layout_etag.clone()) });
-                                page.history.record(undo::Entry { label:"mission name".into(), steps:vec![undo::Step::board(rename_patch(old_title))] });
-                                page.state.mission_etag = Some(result.mission_etag);
-                                page.state.mission = Some(result.mission);
-                                page.state.layout_etag = Some(result.layout_etag);
-                                page.state.layout = Some(result.layout);
-                                page.manage.form = None;
-                            }
-                            Err(error) => form.problem = Some(format!("The rename may have succeeded, but the answer could not be read: {error}. Check the mission before retrying.")),
-                        },
-                    },
-                    Ok(answer) => form.problem = Some(answer.error_text()),
-                    Err(error) if error.code == "unanswered" => form.problem = Some(format!("{}. The write may have succeeded; check the mission list before retrying.", error.message)),
+                    Ok(Receipt::Created { node, slug }) => {
+                        page.manage.form = None;
+                        page.open(node, slug, cx);
+                    }
+                    Ok(Receipt::Archived) => {
+                        page.manage.form = None;
+                        page.state.selected = None;
+                        page.state.mission = None;
+                        page.state.mission_etag = None;
+                        page.state.layout = None;
+                        page.state.layout_etag = None;
+                        page.notes = None;
+                        page.editor = None;
+                        page.history = undo::History::default();
+                        page.run = run::RunUi::new(cx);
+                    }
+                    Ok(Receipt::Renamed { previous_title, edit }) => {
+                        page.history.wrote(undo::Version {
+                            rev: edit.definition.mission.rev,
+                            layout: Some(edit.layout_etag.clone()),
+                        });
+                        page.history.record(undo::Entry {
+                            label: "mission name".into(),
+                            steps: vec![undo::Step::board(rename_patch(&previous_title))],
+                        });
+                        page.state.mission_etag = Some(edit.definition.etag);
+                        page.state.mission = Some(edit.definition.mission);
+                        page.state.layout_etag = Some(edit.layout_etag);
+                        page.state.layout = Some(edit.layout);
+                        page.manage.form = None;
+                    }
+                    Err(error) if matches!(error.code.as_str(), "unanswered" | "invalid_response") => {
+                        form.problem = Some(format!("{}. The write may have succeeded; check the mission list before retrying.", error.message));
+                    }
                     Err(error) => form.problem = Some(error.message),
                 }
                 cx.notify();
@@ -525,7 +579,7 @@ mod patch_tests {
 
     #[test]
     fn rename_and_its_undo_decode() {
-        assert_patch_decodes(&edits::board_body(&rename_patch("New mission title"), 7));
+        edits::assert_board_edit_decodes(rename_patch("New mission title"));
         assert_patch_decodes(&rename_patch("Previous title"));
     }
 }

@@ -238,7 +238,7 @@ pub(crate) mod flow_tests {
     /// Archon's delivery mission, as the node serves it.
     pub fn delivery() -> Mission {
         let json = include_str!("testdata/delivery.json");
-        serde_json::from_str::<ahjo_missions_contract::MissionResponse>(json)
+        serde_json::from_str::<ahjo_missions_contract::commands::MissionDefinition>(json)
             .unwrap()
             .mission
     }

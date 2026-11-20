@@ -1,94 +1,38 @@
 //! Evidence paths and problems for a run, fetched independently of its live projection.
-use serde::Deserialize;
+use ahjo_missions_contract::{RunEvidence, RunOutput};
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
-#[derive(Clone, Debug, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub struct Evidence {
-    pub problems: Vec<Problem>,
-    pub briefs: Vec<Brief>,
-    pub files: Vec<File>,
-    /// Files the run's agents wrote into its folder.
-    #[serde(default)]
-    pub written: Vec<Written>,
-    #[serde(default)]
-    pub truncated: bool,
-}
-#[derive(Clone, Debug, Deserialize)]
-pub struct Written {
-    pub path: String,
-    pub size: u64,
-}
-
-impl Evidence {
-    /// The files the run wrote that are not already among `outputs`, each
-    /// as an output named by its path in the run's folder `cwd`.
-    pub fn written_outputs(
-        &self,
-        cwd: &str,
-        outputs: &[ahjo_missions_contract::RunOutput],
-    ) -> Vec<ahjo_missions_contract::RunOutput> {
-        let base = format!("{}/", cwd.trim_end_matches('/'));
-        self.written
-            .iter()
-            // An output already names the file, even when the run copied it
-            // into its own store under the same name.
-            .filter(|w| {
-                !outputs.iter().any(|o| {
-                    o.value == w.path
-                        || (matches!(o.kind.as_str(), "file" | "folder")
-                            && file_name(&o.value) == file_name(&w.path))
-                })
+/// Files the run wrote which are not already among its outputs.
+pub fn written_outputs(evidence: &RunEvidence, cwd: &str, outputs: &[RunOutput]) -> Vec<RunOutput> {
+    let base = format!("{}/", cwd.trim_end_matches('/'));
+    evidence
+        .written
+        .iter()
+        // An output already names the file, even when the run copied it
+        // into its own store under the same name.
+        .filter(|w| {
+            !outputs.iter().any(|o| {
+                o.value == w.path
+                    || (matches!(o.kind.as_str(), "file" | "folder")
+                        && file_name(&o.value) == file_name(&w.path))
             })
-            .map(|w| ahjo_missions_contract::RunOutput {
-                name: w.path.strip_prefix(&base).unwrap_or(&w.path).to_owned(),
-                kind: "file".into(),
-                value: w.path.clone(),
-                card_id: String::new(),
-                port_id: String::new(),
-                attempt: 0,
-                picks: Vec::new(),
-            })
-            .collect()
-    }
-}
-#[derive(Clone, Debug, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub struct Problem {
-    pub seq: u64,
-    pub card_id: String,
-    /// The gate whose verdict it was, when a gate's.
-    #[serde(default)]
-    pub gate_id: String,
-    pub reason: Text,
-}
-#[derive(Clone, Debug, Deserialize)]
-pub struct Text {
-    pub text: String,
-}
-#[derive(Clone, Debug, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub struct Brief {
-    pub step_id: String,
-    pub dispatch_seq: u64,
-    pub path: String,
-}
-#[derive(Clone, Debug, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub struct File {
-    pub step_id: String,
-    pub path: String,
-    pub size: u64,
-}
-#[derive(Deserialize)]
-pub struct Response {
-    pub evidence: Evidence,
+        })
+        .map(|w| RunOutput {
+            name: w.path.strip_prefix(&base).unwrap_or(&w.path).to_owned(),
+            kind: "file".into(),
+            value: w.path.clone(),
+            card_id: String::new(),
+            port_id: String::new(),
+            attempt: 0,
+            picks: Vec::new(),
+        })
+        .collect()
 }
 
 #[derive(Default)]
 pub struct Store {
-    pub evidence: Option<Evidence>,
+    pub evidence: Option<RunEvidence>,
     pub read_at: Option<usize>,
     pub error: Option<String>,
     pub images: BTreeMap<String, Image>,

@@ -1,6 +1,7 @@
 #![cfg(unix)]
 //! The board beside Flow: laid out for its pane, readable, and tied to
 //! Flow both ways.
+mod common;
 use ahjo_app_kit::link::client::LinkState;
 use ahjo_node_kit::{Listing, NodeClient};
 use ahjo_testkit::{node::Node, sessions};
@@ -40,16 +41,14 @@ fn start() -> Running {
                 let node = Node::start(AREAS, "").await.unwrap();
                 let client = NodeClient::new(Some(&format!("{}/", node.url()))).unwrap();
                 let steps: Vec<String> = (1..=10).map(|n| format!("Step {n}")).collect();
-                let (doc, _) = client
-                    .request(
-                        http::Method::POST,
-                        "/api/missions",
-                        Some(json!({"title": "Long", "steps": steps.join("\n")})),
-                        None,
-                    )
-                    .await
-                    .unwrap();
-                let ids = doc["mission"]["step"]
+                let doc = common::call(
+                    &client,
+                    "mission_create",
+                    json!({"slug":"long", "title":"Long", "steps":steps.join("\n")}),
+                )
+                .await
+                .unwrap();
+                let ids = doc["steps"]
                     .as_array()
                     .unwrap()
                     .iter()

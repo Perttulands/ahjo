@@ -1,4 +1,5 @@
 #![cfg(unix)]
+mod common;
 use ahjo_app_kit::{Ask, Host};
 use ahjo_core::NodeId;
 use ahjo_node_kit::{Built, Listing, NodeClient, Setup};
@@ -88,19 +89,19 @@ fn comparing_and_picking_attempt_records_the_reason(cx: &mut TestAppContext) {
     let rt = tokio::runtime::Runtime::new().unwrap();
     let client = NodeClient::new(Some(&format!("{}/", running.url))).unwrap();
     let run_id = rt.block_on(async {
-        let (started, _) = client.request(http::Method::POST, "/api/runs", Some(json!({"mission":"pick","input_card_id":"inp_start","expected_rev":1,"inputs":{"brief":"hello"}})), None).await.unwrap();
+        let started = common::call(&client, "mission_run", json!({"mission":"pick","input":"inp_start","expected_rev":1,"inputs":{"brief":"hello"}})).await.unwrap();
         let id = started["run_id"].as_str().unwrap().to_owned();
         let deadline = Instant::now() + Duration::from_secs(20);
         let mut last_seq = 0;
         let mut verdicts = 0;
         loop {
-            let (run, _) = client.request(http::Method::GET, &format!("/api/runs/{id}"), None, None).await.unwrap();
+            let run = common::call(&client, "run_show", json!({"run":id})).await.unwrap();
             assert!(Instant::now() < deadline, "waiting for pick gate: {run}");
-            if let Some(gate) = run["waiting_gates"].as_array().and_then(|g| g.first()) {
+            if let Some(gate) = run["asks"].as_array().and_then(|g| g.first()).and_then(|a| a.get("request")) {
                 if !gate["pick"].is_null() { break; }
                 let seq = gate["requested_seq"].as_u64().unwrap();
                 if seq != last_seq {
-                    client.request(http::Method::POST, &format!("/api/runs/{id}/gates/gate_review/verdict"), Some(json!({"requested_seq":seq,"verdict":"fail","reason":"try again"})), None).await.unwrap();
+                    common::call(&client, "run_reject", json!({"run":id,"gate":"gate_review","seq":seq,"reason":"try again"})).await.unwrap();
                     last_seq = seq; verdicts += 1;
                 }
             }
@@ -192,13 +193,7 @@ fn comparing_and_picking_attempt_records_the_reason(cx: &mut TestAppContext) {
     loop {
         cx.run_until_parked();
         let picked = rt.block_on(async {
-            let (doc, _) = client
-                .request(
-                    http::Method::GET,
-                    &format!("/api/runs/{run_id}/evidence/attempts"),
-                    None,
-                    None,
-                )
+            let doc = common::call(&client, "run_show", json!({"run":run_id,"attempts":true}))
                 .await
                 .unwrap();
             doc["attempts"]["steps"]
@@ -219,16 +214,10 @@ fn comparing_and_picking_attempt_records_the_reason(cx: &mut TestAppContext) {
     }
     loop {
         let run = rt.block_on(async {
-            client
-                .request(
-                    http::Method::GET,
-                    &format!("/api/runs/{run_id}"),
-                    None,
-                    None,
-                )
+            common::call(&client, "run_show", json!({"run":run_id}))
                 .await
-                .unwrap()
-                .0
+                .unwrap()["state"]
+                .clone()
         });
         if run["final"] == true {
             assert_eq!(run["status"], "picked", "{run}");

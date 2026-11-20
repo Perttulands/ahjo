@@ -1,5 +1,5 @@
 //! Validation answers are usable only for the exact definition they describe.
-use ahjo_missions_contract::{Code, Mission, ValidationResponse};
+use ahjo_missions_contract::{Code, Mission, commands::MissionValidated};
 use std::collections::HashMap;
 
 /// Render validation prose using known titles and labels while retaining the
@@ -142,7 +142,7 @@ pub struct Key {
 #[derive(Default)]
 pub struct Validation {
     key: Option<Key>,
-    report: Option<Result<ValidationResponse, String>>,
+    report: Option<Result<MissionValidated, String>>,
     generation: u64,
 }
 impl Validation {
@@ -161,12 +161,7 @@ impl Validation {
         self.key = None;
         self.report = None;
     }
-    pub fn finish(
-        &mut self,
-        key: &Key,
-        generation: u64,
-        report: Result<ValidationResponse, String>,
-    ) {
+    pub fn finish(&mut self, key: &Key, generation: u64, report: Result<MissionValidated, String>) {
         if self.key.as_ref() != Some(key) || self.generation != generation {
             return;
         }
@@ -185,7 +180,7 @@ impl Validation {
         self.key.as_ref() == Some(key) && matches!(self.report, Some(Err(_)))
     }
     /// The report is available only for the exact selected definition.
-    pub fn report(&self, key: &Key) -> Option<&ValidationResponse> {
+    pub fn report(&self, key: &Key) -> Option<&MissionValidated> {
         if self.key.as_ref() != Some(key) {
             return None;
         }
@@ -264,8 +259,12 @@ mod tests {
             etag: format!("v{rev}"),
         }
     }
-    fn report(rev: i64) -> ValidationResponse {
-        ValidationResponse {
+    fn report(rev: i64) -> MissionValidated {
+        MissionValidated {
+            node: "n".into(),
+            valid: true,
+            summary: "valid".into(),
+            next: String::new(),
             mission_rev: rev,
             mission_etag: format!("v{rev}"),
             errors: vec![],

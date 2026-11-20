@@ -1,4 +1,5 @@
 #![cfg(unix)]
+mod common;
 use ahjo_app_kit::{Ask, Host, Mounted, Page, link::client::LinkState, mount};
 use ahjo_core::NodeId;
 use ahjo_mission_engine::{ExecutionSink, Executor, LabExecutor, StepExecution, StepResult};
@@ -32,23 +33,31 @@ impl ahjo_node_kit::Channel for ObservedChannel {
 }
 impl ahjo_node_kit::Area for ObservedArea {
     fn routes(&self) -> axum::Router {
-        self.0.routes().layer(axum::middleware::from_fn(
-            |request: axum::extract::Request, next: axum::middleware::Next| async move {
-                if request.uri().path().contains("/gates/")
-                    && request.uri().path().ends_with("/request")
-                    && FAIL_GATE_READ.load(std::sync::atomic::Ordering::SeqCst)
-                {
-                    return axum::response::IntoResponse::into_response((
-                        http::StatusCode::SERVICE_UNAVAILABLE,
-                        "test gate read failure",
-                    ));
-                }
-                next.run(request).await
-            },
-        ))
+        self.0.routes()
     }
     fn commands(&self) -> Vec<ahjo_node_kit::Command> {
-        self.0.commands()
+        self.0
+            .commands()
+            .into_iter()
+            .map(|mut command| {
+                if command.name == "run_show" {
+                    let original = command.call.clone();
+                    command.call = Arc::new(move |args| {
+                        if FAIL_GATE_READ.load(std::sync::atomic::Ordering::SeqCst) {
+                            Box::pin(async {
+                                Err(ahjo_core::Error::new(
+                                    "test_gate_read",
+                                    "test gate read failure",
+                                ))
+                            })
+                        } else {
+                            original(args)
+                        }
+                    });
+                }
+                command
+            })
+            .collect()
     }
     fn channel(&self, client: ahjo_node_kit::Client) -> Option<Box<dyn ahjo_node_kit::Channel>> {
         self.0
@@ -325,10 +334,13 @@ fn starts_a_run_sees_active_step_answers_gate_and_shows_admission_findings(
     let client_runtime = tokio::runtime::Runtime::new().unwrap();
     client_runtime.block_on(async {
         let client = NodeClient::new(Some(&format!("{}/", running.url))).unwrap();
-        let (mission, _) = client
-            .request(http::Method::GET, "/api/missions/gated", None, None)
-            .await
-            .unwrap();
+        let mission = common::call(
+            &client,
+            "mission_show",
+            serde_json::json!({"mission":"gated","full":true}),
+        )
+        .await
+        .unwrap();
         assert_eq!(
             mission["mission"]["step"][0]["brief"]["goal"],
             "Deliver reviewed work"
@@ -402,11 +414,8 @@ fn starts_a_run_sees_active_step_answers_gate_and_shows_admission_findings(
     });
     let run_id = client_runtime.block_on(async {
         let client = NodeClient::new(Some(&format!("{}/", running.url))).unwrap();
-        let (runs, _) = client
-            .request(http::Method::GET, "/api/runs", None, None)
-            .await
-            .unwrap();
-        runs[0]["run_id"].as_str().unwrap().to_owned()
+        let runs = common::call(&client, "run_list", json!({})).await.unwrap();
+        runs["runs"][0]["run_id"].as_str().unwrap().to_owned()
     });
     shell.update(cx, |s, cx| {
         let host = Host::new(s.hub()).for_page("test", &[]);
@@ -651,11 +660,12 @@ fn starts_a_run_sees_active_step_answers_gate_and_shows_admission_findings(
     cx.simulate_input("A topic");
     let expected = tokio::runtime::Runtime::new().unwrap().block_on(async {
         let client = NodeClient::new(Some(&format!("{}/", running.url))).unwrap();
-        let (mission, etag) = client.request(http::Method::GET, "/api/missions/admission-findings", None, None).await.unwrap();
-        let error = client.request(http::Method::POST, "/api/runs", Some(json!({"mission":"admission-findings", "input_card_id":"inp", "expected_rev":mission["mission"]["rev"], "inputs":{"topic":"A topic"}})), Some(&etag)).await.unwrap_err();
-        // Each finding reads as a sentence, named by its step's title.
+        let mission = common::call(&client, "mission_show", serde_json::json!({"mission":"admission-findings","full":true})).await.unwrap();
+        let error = common::call(&client, "mission_run", json!({"mission":"admission-findings", "input":"inp", "expected_rev":mission["mission"]["rev"], "expected_etag":mission["etag"], "inputs":{"topic":"A topic"}})).await.unwrap_err();
+        assert_eq!(error.code, "run_admission_failed");
+        let findings: serde_json::Value = serde_json::from_str(error.message.strip_prefix("run admission failed: ").unwrap()).unwrap();
         let title = |id: &str| mission["mission"]["step"].as_array().unwrap().iter().find(|f| f["id"] == id).map_or(id.to_owned(), |f| f["title"].as_str().unwrap().to_owned());
-        error.downcast_ref::<ahjo_node_kit::NodeError>().unwrap().findings.as_ref().unwrap().as_array().unwrap().iter().map(|f| match f["card_id"].as_str().unwrap() { "" => f["message"].as_str().unwrap().to_owned(), id => format!("{}: {}", title(id), f["message"].as_str().unwrap()) }).collect::<Vec<_>>()
+        findings.as_array().unwrap().iter().map(|f| match f["card_id"].as_str().unwrap() { "" => f["message"].as_str().unwrap().to_owned(), id => format!("{}: {}", title(id), f["message"].as_str().unwrap()) }).collect::<Vec<_>>()
     });
     assert!(expected.len() > 1);
     click(cx, "run-start");

@@ -614,6 +614,7 @@ dependencies = [
  "ahjo-app-shell",
  "ahjo-core",
  "ahjo-files",
+ "ahjo-files-contract",
  "ahjo-harness-contract",
  "ahjo-issue",
  "ahjo-mission-engine",

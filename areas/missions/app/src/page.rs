@@ -12,7 +12,6 @@ mod validation;
 use crate::store::{Frame, Store, canvas as board, undo};
 use ahjo_app_kit::{
     Host, Page,
-    host::Request,
     theme::{size, theme},
     widgets::{
         field::{FieldEvent, TextField},
@@ -20,17 +19,16 @@ use ahjo_app_kit::{
         pane,
     },
 };
-use ahjo_core::NodeId;
-use ahjo_missions_contract::flow;
-use ahjo_missions_contract::{
-    EditLayout, EditResponse, ErrorResponse, Formation, LayoutResponse, MissionChange,
-    MissionResponse, WATCH, WATCH_RUNS,
+use ahjo_core::{Error, NodeId};
+use ahjo_missions_contract::commands::{
+    LayoutEdit, LayoutShow, MissionDefinition, MissionNote, MissionShow, MissionShown,
 };
+use ahjo_missions_contract::flow;
+use ahjo_missions_contract::{EditLayout, Formation, MissionChange, WATCH, WATCH_RUNS};
 use gpui::{
     AppContext, Context, Div, Entity, FocusHandle, FontWeight, IntoElement, KeyDownEvent,
     MouseButton, Render, SystemNotification, Window, div, prelude::*, px,
 };
-use serde_json::json;
 
 const PAD: f32 = 12.;
 const START_FORM_MAX: f32 = 680.;
@@ -579,64 +577,48 @@ impl MissionsPage {
         self.note_paper = notes::NotesUi::default();
         self.note.update(cx, |field, cx| field.set("", false, cx));
         self.state.error = None;
-        // Encode a path segment, including non-ASCII bytes.
-        let encoded: String = slug
-            .bytes()
-            .map(|b| {
-                if b.is_ascii_alphanumeric() || b"-_.~".contains(&b) {
-                    (b as char).to_string()
-                } else {
-                    format!("%{b:02X}")
-                }
-            })
-            .collect();
         self.load_canvas_notes(node.clone(), slug.clone(), cx);
-        for layout in [false, true] {
-            let path = format!(
-                "/api/missions/{encoded}{}",
-                if layout { "/layout" } else { "" }
-            );
-            let asked = self
-                .host
-                .request(Request::get(NodeId(node.clone()), path), cx);
-            let key = (node.clone(), slug.clone());
-            cx.spawn(async move |this, cx| {
-                let answer = asked.await;
-                let _ = this.update(cx, |page, cx| {
-                    if page.generation != generation || page.state.selected.as_ref() != Some(&key) {
-                        return;
-                    }
-                    match answer {
-                        Ok(answer) if answer.ok() => {
-                            if layout {
-                                match serde_json::from_slice::<LayoutResponse>(&answer.body) {
-                                    Ok(v) => {
-                                        page.state.layout_etag = Some(v.etag);
-                                        page.state.layout = Some(v.layout);
-                                    }
-                                    Err(e) => page.state.error = Some(e.to_string()),
-                                }
-                            } else {
-                                match serde_json::from_slice::<MissionResponse>(&answer.body) {
-                                    Ok(v) => {
-                                        page.state.mission_etag = v.etag;
-                                        page.state.mission = Some(v.mission);
-                                        if let Some((value, folder)) = page.carry.take() {
-                                            page.start_with(&value, &folder, cx);
-                                        }
-                                    }
-                                    Err(e) => page.state.error = Some(e.to_string()),
-                                }
-                            }
+        let mission = read_definition(&self.host, NodeId(node.clone()), slug.clone(), cx);
+        let layout = self
+            .host
+            .call(NodeId(node), LayoutShow { mission: slug }, cx);
+        cx.spawn(async move |this, cx| {
+            let mission = mission.await;
+            let _ = this.update(cx, |page, cx| {
+                if page.generation != generation {
+                    return;
+                }
+                match mission {
+                    Ok(v) => {
+                        page.state.mission_etag = Some(v.etag);
+                        page.state.mission = Some(v.mission);
+                        if let Some((value, folder)) = page.carry.take() {
+                            page.start_with(&value, &folder, cx);
                         }
-                        Ok(answer) => page.state.error = Some(answer.error_text()),
-                        Err(e) => page.state.error = Some(e.message),
                     }
-                    cx.notify();
-                });
-            })
-            .detach();
-        }
+                    Err(error) => page.state.error = Some(error.message),
+                }
+                cx.notify();
+            });
+        })
+        .detach();
+        cx.spawn(async move |this, cx| {
+            let layout = layout.await;
+            let _ = this.update(cx, |page, cx| {
+                if page.generation != generation {
+                    return;
+                }
+                match layout {
+                    Ok(v) => {
+                        page.state.layout_etag = Some(v.etag);
+                        page.state.layout = Some(v.layout);
+                    }
+                    Err(error) => page.state.error = Some(error.message),
+                }
+                cx.notify();
+            });
+        })
+        .detach();
         cx.notify();
     }
     fn refresh_selected_if_newer(&mut self, cx: &mut Context<Self>) {
@@ -931,19 +913,9 @@ impl MissionsPage {
             | MissionChange::DeleteEnd { id } => Some(id.clone()),
             _ => None,
         };
-        let request =
-            Request::new("PATCH", NodeId(node), mission_path(&slug)).header("If-Match", etag);
-        let request = match edits::with_json_body(request, &edits::board_body(&patch, mission.rev))
-        {
-            Ok(request) => request,
-            Err(error) => {
-                self.state.error = Some(error.to_string());
-                cx.notify();
-                return;
-            }
-        };
         self.writing = true;
-        let asked = self.host.request(request, cx);
+        let request = edits::board_edit(slug, patch.clone(), mission.rev, etag);
+        let asked = self.host.call(NodeId(node), request, cx);
         let generation = self.generation;
         cx.spawn(async move |this, cx| {
             let result = asked.await;
@@ -953,60 +925,50 @@ impl MissionsPage {
                 }
                 page.writing = false;
                 match result {
-                    Ok(answer) if answer.ok() => {
-                        match serde_json::from_slice::<EditResponse>(&answer.body) {
-                            Ok(v) => {
-                                let steps = if reverse.is_empty() {
-                                    undo::answered(&patch, &mission, &v.mission)
-                                } else {
-                                    reverse
-                                };
-                                if steps.is_empty() {
-                                    page.history = undo::History::default();
-                                }
-                                let entry = undo::Entry {
-                                    label: "edit".into(),
-                                    steps,
-                                };
-                                page.history.wrote(undo::Version {
-                                    rev: v.mission.rev,
-                                    layout: Some(v.layout_etag.clone()),
-                                });
-                                match mode {
-                                    WriteMode::Edit => page.history.record(entry),
-                                }
-                                if page.editor.as_ref().is_some_and(|ed| {
-                                    deleted_card.as_deref() == Some(ed.id.as_str())
-                                }) {
-                                    page.editor = None;
-                                } else if let Some(ed) = &mut page.editor {
-                                    if let (Some(base), Some(sent), Some(range)) =
-                                        (&mut ed.baseline, &submitted, &saved_fields)
-                                    {
-                                        base.accept_fields(sent, range.clone());
-                                    }
-                                    ed.rev = v.mission.rev;
-                                    ed.etag.clone_from(&v.mission_etag);
-                                }
-                                page.state.mission_etag = Some(v.mission_etag);
-                                page.state.mission = Some(v.mission);
-                                page.state.layout_etag = Some(v.layout_etag);
-                                page.state.layout = Some(v.layout);
-                                page.state.error = None;
-                                page.created_step(&mission, cx);
-                                if std::mem::take(&mut page.staff_pending) {
-                                    page.staff_seat(cx);
-                                }
-                            }
-                            Err(e) => page.state.error = Some(e.to_string()),
+                    Ok(v) => {
+                        let steps = if reverse.is_empty() {
+                            undo::answered(&patch, &mission, &v.definition.mission)
+                        } else {
+                            reverse
+                        };
+                        if steps.is_empty() {
+                            page.history = undo::History::default();
                         }
-                    }
-                    Ok(a) => {
-                        page.state.error = Some(
-                            serde_json::from_slice::<ErrorResponse>(&a.body)
-                                .map(|e| format!("{}: {}", e.error.code, e.error.message))
-                                .unwrap_or_else(|_| a.error_text()),
-                        )
+                        let entry = undo::Entry {
+                            label: "edit".into(),
+                            steps,
+                        };
+                        page.history.wrote(undo::Version {
+                            rev: v.definition.mission.rev,
+                            layout: Some(v.layout_etag.clone()),
+                        });
+                        match mode {
+                            WriteMode::Edit => page.history.record(entry),
+                        }
+                        if page
+                            .editor
+                            .as_ref()
+                            .is_some_and(|ed| deleted_card.as_deref() == Some(ed.id.as_str()))
+                        {
+                            page.editor = None;
+                        } else if let Some(ed) = &mut page.editor {
+                            if let (Some(base), Some(sent), Some(range)) =
+                                (&mut ed.baseline, &submitted, &saved_fields)
+                            {
+                                base.accept_fields(sent, range.clone());
+                            }
+                            ed.rev = v.definition.mission.rev;
+                            ed.etag.clone_from(&v.definition.etag);
+                        }
+                        page.state.mission_etag = Some(v.definition.etag);
+                        page.state.mission = Some(v.definition.mission);
+                        page.state.layout_etag = Some(v.layout_etag);
+                        page.state.layout = Some(v.layout);
+                        page.state.error = None;
+                        page.created_step(&mission, cx);
+                        if std::mem::take(&mut page.staff_pending) {
+                            page.staff_seat(cx);
+                        }
                     }
                     Err(e) => page.state.error = Some(format!("{}: {}", e.code, e.message)),
                 }
@@ -1086,15 +1048,17 @@ impl MissionsPage {
             .unwrap_or("mission");
         let sent_text = text.clone();
         let sent_id = self.note_id.clone();
-        let request = Request::new(
-            "PATCH",
-            NodeId(node),
-            format!("{}/notes", mission_path(&slug)),
-        )
-        .header("If-Match", self.note_etag.clone().unwrap_or_else(|| notes.etag.clone()))
-        .json(&json!({"target":target, "text":text,"author":"human:ui", "action":if delete {"delete"} else if self.note_id.is_some() {"edit"} else {"append"}, "entry_id":self.note_id}));
+        let request = MissionNote {
+            mission: slug,
+            text: (!delete).then_some(text),
+            on: self.note_id.is_none().then(|| target.to_owned()),
+            edit: (!delete).then(|| self.note_id.clone()).flatten(),
+            delete: delete.then(|| self.note_id.clone()).flatten(),
+            author: Some("human:ui".into()),
+            etag: Some(self.note_etag.clone().unwrap_or_else(|| notes.etag.clone())),
+        };
         self.note_saving = true;
-        let asked = self.host.request(request, cx);
+        let asked = self.host.call(NodeId(node), request, cx);
         let generation = self.generation;
         cx.spawn(async move |this, cx| {
             let result = asked.await;
@@ -1104,43 +1068,30 @@ impl MissionsPage {
                 }
                 page.note_saving = false;
                 match result {
-                    Ok(a) if a.ok() => match serde_json::from_slice::<
-                        ahjo_missions_contract::NotesResponse,
-                    >(&a.body)
-                    {
-                        Ok(n) => {
-                            let next_etag = n.notes.etag.clone();
-                            page.notes = Some(n.notes);
-                            if page.note.read(cx).text == sent_text {
-                                page.note_id = None;
-                                page.note_base.clear();
-                                page.note_etag = None;
-                                page.note.update(cx, |f, cx| f.set("", false, cx));
-                                // In Flow a note kept is read in place;
-                                // the field goes. The canvas keeps its
-                                // thread open.
-                                if !page.mission_canvas_mode {
-                                    page.note_paper.open = None;
-                                }
-                            } else if sent_id.is_some() && !delete {
-                                page.note_id = sent_id;
-                                page.note_base = sent_text;
-                                page.note_etag = Some(next_etag.clone());
-                            } else {
-                                page.note_id = None;
-                                page.note_base.clear();
-                                page.note_etag = Some(next_etag);
+                    Ok(n) => {
+                        let next_etag = n.document.etag.clone();
+                        page.notes = Some(n.document);
+                        if page.note.read(cx).text == sent_text {
+                            page.note_id = None;
+                            page.note_base.clear();
+                            page.note_etag = None;
+                            page.note.update(cx, |f, cx| f.set("", false, cx));
+                            // In Flow a note kept is read in place;
+                            // the field goes. The canvas keeps its
+                            // thread open.
+                            if !page.mission_canvas_mode {
+                                page.note_paper.open = None;
                             }
-                            page.resolve_wanted(cx);
+                        } else if sent_id.is_some() && !delete {
+                            page.note_id = sent_id;
+                            page.note_base = sent_text;
+                            page.note_etag = Some(next_etag.clone());
+                        } else {
+                            page.note_id = None;
+                            page.note_base.clear();
+                            page.note_etag = Some(next_etag);
                         }
-                        Err(e) => page.state.error = Some(e.to_string()),
-                    },
-                    Ok(a) => {
-                        page.state.error = Some(
-                            serde_json::from_slice::<ErrorResponse>(&a.body)
-                                .map(|e| format!("{}: {}", e.error.code, e.error.message))
-                                .unwrap_or_else(|_| a.error_text()),
-                        )
+                        page.resolve_wanted(cx);
                     }
                     Err(e) => page.state.error = Some(format!("{}: {}", e.code, e.message)),
                 }
@@ -1352,22 +1303,16 @@ impl MissionsPage {
         else {
             return;
         };
-        let path = format!("{}/layout", mission_path(&slug));
-        let request = Request::new("PATCH", NodeId(node), path).header("If-Match", etag);
-        let body = EditLayout {
-            arrange: Some(true),
-            ..Default::default()
-        };
-        let request = match edits::with_json_body(request, &body) {
-            Ok(request) => request,
-            Err(error) => {
-                self.state.error = Some(error.to_string());
-                cx.notify();
-                return;
-            }
+        let command = LayoutEdit {
+            mission: slug,
+            etag: Some(etag),
+            change: EditLayout {
+                arrange: Some(true),
+                ..Default::default()
+            },
         };
         self.writing = true;
-        let asked = self.host.request(request, cx);
+        let asked = self.host.call(NodeId(node), command, cx);
         let generation = self.generation;
         cx.spawn(async move |this, cx| {
             let result = asked.await;
@@ -1377,19 +1322,9 @@ impl MissionsPage {
                 }
                 page.writing = false;
                 match result {
-                    Ok(a) if a.ok() => match serde_json::from_slice::<LayoutResponse>(&a.body) {
-                        Ok(v) => {
-                            page.state.layout_etag = Some(v.etag);
-                            page.state.layout = Some(v.layout);
-                        }
-                        Err(e) => page.state.error = Some(e.to_string()),
-                    },
-                    Ok(a) => {
-                        page.state.error = Some(
-                            serde_json::from_slice::<ErrorResponse>(&a.body)
-                                .map(|e| format!("{}: {}", e.error.code, e.error.message))
-                                .unwrap_or_else(|_| a.error_text()),
-                        )
+                    Ok(v) => {
+                        page.state.layout_etag = Some(v.etag);
+                        page.state.layout = Some(v.layout);
                     }
                     Err(e) => page.state.error = Some(format!("{}: {}", e.code, e.message)),
                 }
@@ -1421,18 +1356,29 @@ impl MissionsPage {
 fn host_guard(host: &Host, cx: &mut Context<MissionsPage>) {
     host.guard_close(&cx.entity(), |page: &MissionsPage, cx| page.unsaved(cx), cx);
 }
-fn mission_path(slug: &str) -> String {
-    let encoded: String = slug
-        .bytes()
-        .map(|b| {
-            if b.is_ascii_alphanumeric() || b"-_.~".contains(&b) {
-                (b as char).to_string()
-            } else {
-                format!("%{b:02X}")
-            }
-        })
-        .collect();
-    format!("/api/missions/{encoded}")
+fn read_definition(
+    host: &Host,
+    node: NodeId,
+    mission: String,
+    cx: &mut gpui::App,
+) -> gpui::Task<Result<MissionDefinition, Error>> {
+    let reading = host.call(
+        node,
+        MissionShow {
+            mission,
+            full: true,
+        },
+        cx,
+    );
+    cx.background_executor().spawn(async move {
+        match reading.await? {
+            MissionShown::Full(definition) => Ok(*definition),
+            MissionShown::Summary(_) => Err(Error::new(
+                "invalid_response",
+                "Expected a mission definition.",
+            )),
+        }
+    })
 }
 impl Page for MissionsPage {
     const ID: &'static str = "missions";
@@ -1905,7 +1851,7 @@ impl Render for MissionsPage {
                         .when(matches!(ed.kind, EditKind::Step) && !self.editor_more, |d| d.child(left(kit::button(&t, "step-more", "More…", Kind::Quiet).debug_selector(|| "step-more".into()).on_click(cx.listener(|p, _, _, cx| { p.editor_more = true; cx.notify(); })))))
                         .when(matches!(ed.kind, EditKind::Step) && self.editor_more, |d| d.child(kit::label(&t, "Team"))
                             .child({ let current = self.state.mission.as_ref().and_then(|m| m.steps.iter().find(|f| f.id == ed.id)).map(|f| f.formation); let pick = |id: &'static str, text: &'static str, ty: Formation| kit::button(&t, id, text, if current == Some(ty) { Kind::Plain } else { Kind::Quiet }).on_click(cx.listener(move |p, _, _, cx| p.set_formation(ty, cx))); div().flex().gap(px(TAB_GAP)).child(pick("formation-solo", "Solo", Formation::Solo)).child(pick("formation-peer", "Peer", Formation::Peer)).child(pick("formation-orchestrated", "Orchestrated", Formation::Orchestrated)) })
-                            .child(kit::label(&t, "Environment")).child(div().flex().gap(px(TAB_GAP)).child(div().flex_1().child(self.extra.clone()))
+                            .child(kit::label(&t, "Environment")).child(div().flex().gap(px(TAB_GAP)).child(div().flex_1().debug_selector(|| "step-environment".into()).child(self.extra.clone()))
                             .child(left(kit::button(&t, "set-environment", "Set environment", Kind::Quiet).on_click(cx.listener(|p, _, _, cx| p.set_environment(cx)))))))
                         .when(matches!(ed.kind, EditKind::Step) && self.editor_more, |d| d.child(kit::label(&t, "Repository")).child(self.repository_picker(&t, &self.repository, "repository", cx))
                             .child(kit::label(&t, "Issue")).child(div().child(self.issue.clone()))
@@ -2018,13 +1964,5 @@ mod tests {
         assert_eq!(baseline.fields[11], "saved harness");
         assert_ne!(baseline.fields[11], now.fields[11]);
         assert_ne!(baseline.fields[1], now.fields[1]);
-    }
-    #[test]
-    fn a_mission_path_encodes_its_slug() {
-        assert_eq!(super::mission_path("daily"), "/api/missions/daily");
-        assert_eq!(
-            super::mission_path("my plan #2?"),
-            "/api/missions/my%20plan%20%232%3F"
-        );
     }
 }

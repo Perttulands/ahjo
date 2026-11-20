@@ -1,4 +1,5 @@
 #![cfg(unix)]
+mod common;
 use ahjo_app_kit::{Ask, Host};
 use ahjo_core::NodeId;
 use ahjo_node_kit::{Listing, NodeClient};
@@ -137,21 +138,54 @@ fn saving_merges_untouched_concurrent_fields_and_refuses_a_same_field_change(
     cx.simulate_click(point, Modifiers::none());
     cx.simulate_keystrokes("ctrl-a");
     cx.simulate_input("My goal");
+    let point = cx.debug_bounds("step-more").unwrap().center();
+    cx.simulate_click(point, Modifiers::none());
+    until(cx, "environment field", |cx| {
+        cx.debug_bounds("step-environment").is_some()
+    });
+    let point = cx.debug_bounds("step-environment").unwrap().center();
+    cx.simulate_click(point, Modifiers::none());
+    cx.simulate_input("studio/linux");
     let rt = tokio::runtime::Runtime::new().unwrap();
     let client = NodeClient::new(Some(&format!("{}/", running.url))).unwrap();
-    rt.block_on(async {let(doc,etag)=client.request(http::Method::GET,"/api/missions/hello",None,None).await.unwrap();client.request(http::Method::PATCH,"/api/missions/hello",Some(json!({"expected_rev":doc["mission"]["rev"],"update_step":{"id":"fmn_work","title":"Renamed elsewhere"}})),Some(&etag)).await.unwrap();});
+    let renamed_rev = rt.block_on(async {
+        let doc = common::call(
+            &client,
+            "mission_show",
+            json!({"mission":"hello","full":true}),
+        )
+        .await
+        .unwrap();
+        let edited = common::call(
+            &client,
+            "mission_edit",
+            json!({
+                "mission":"hello", "rev":doc["mission"]["rev"],
+                "change":{"update_step":{"id":"fmn_work","title":"Renamed elsewhere"}}
+            }),
+        )
+        .await
+        .unwrap();
+        edited["mission"]["rev"].as_i64().unwrap()
+    });
     let point = cx.debug_bounds("step-save").unwrap().center();
     cx.simulate_click(point, Modifiers::none());
     until(cx, "merged save", |cx| {
         cx.debug_bounds("step-goal").is_none()
     });
     rt.block_on(async {
-        let (doc, _) = client
-            .request(http::Method::GET, "/api/missions/hello", None, None)
-            .await
-            .unwrap();
+        let doc = common::call(
+            &client,
+            "mission_show",
+            serde_json::json!({"mission":"hello","full":true}),
+        )
+        .await
+        .unwrap();
         assert_eq!(doc["mission"]["step"][0]["title"], "Renamed elsewhere");
         assert_eq!(doc["mission"]["step"][0]["brief"]["goal"], "My goal");
+        assert_eq!(doc["mission"]["step"][0]["environment"], "studio/linux");
+        assert_eq!(doc["mission"]["rev"], renamed_rev + 1);
+        assert_eq!(doc["mission"]["updated_by"], "human:operator");
     });
     until(cx, "step again", |cx| {
         cx.debug_bounds("mission-card-fmn_work").is_some()
@@ -165,7 +199,7 @@ fn saving_merges_untouched_concurrent_fields_and_refuses_a_same_field_change(
     cx.simulate_click(point, Modifiers::none());
     cx.simulate_keystrokes("ctrl-a");
     cx.simulate_input("My second goal");
-    rt.block_on(async {let(doc,etag)=client.request(http::Method::GET,"/api/missions/hello",None,None).await.unwrap();let f=&doc["mission"]["step"][0];let mut brief=f["brief"].clone();brief["goal"]=json!("Other goal");client.request(http::Method::PATCH,"/api/missions/hello",Some(json!({"expected_rev":doc["mission"]["rev"],"edit_step":{"id":"fmn_work","title":f["title"],"brief":brief}})),Some(&etag)).await.unwrap();});
+    rt.block_on(async {let doc =common::call(&client, "mission_show", serde_json::json!({"mission":"hello","full":true})).await.unwrap();let f=&doc["mission"]["step"][0];let mut brief=f["brief"].clone();brief["goal"]=json!("Other goal");common::call(&client, "mission_edit", serde_json::json!({"mission":"hello", "change":json!({"expected_rev":doc["mission"]["rev"],"edit_step":{"id":"fmn_work","title":f["title"],"brief":brief}})})).await.unwrap();});
     let point = cx.debug_bounds("step-save").unwrap().center();
     cx.simulate_click(point, Modifiers::none());
     until(cx, "same field conflict", |cx| {

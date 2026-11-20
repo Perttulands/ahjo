@@ -1,4 +1,5 @@
 #![cfg(unix)]
+mod common;
 use ahjo_app_kit::link::client::LinkState;
 use ahjo_node_kit::{Listing, NodeClient};
 use ahjo_testkit::{node::Node, sessions};
@@ -152,8 +153,12 @@ fn canvas_ports_drag_move_zoom_and_undo(cx: &mut TestAppContext) {
     let client = NodeClient::new(Some(&format!("{}/", running.url))).unwrap();
     let deadline = Instant::now() + Duration::from_secs(10);
     loop {
-        let (layout, _) = rt
-            .block_on(client.request(http::Method::GET, "/api/missions/hello/layout", None, None))
+        let layout = rt
+            .block_on(common::call(
+                &client,
+                "layout_show",
+                serde_json::json!({"mission":"hello"}),
+            ))
             .unwrap();
         if layout["layout"]["card"]
             .as_array()
@@ -209,8 +214,12 @@ fn canvas_ports_drag_move_zoom_and_undo(cx: &mut TestAppContext) {
     );
     let deadline = Instant::now() + Duration::from_secs(10);
     loop {
-        let (doc, _) = rt
-            .block_on(client.request(http::Method::GET, "/api/missions/hello", None, None))
+        let doc = rt
+            .block_on(common::call(
+                &client,
+                "mission_show",
+                serde_json::json!({"mission":"hello","full":true}),
+            ))
             .unwrap();
         if !doc["mission"]["connection"]
             .as_array()
@@ -245,8 +254,12 @@ fn canvas_ports_drag_move_zoom_and_undo(cx: &mut TestAppContext) {
     cx.simulate_mouse_up(to, MouseButton::Left, Modifiers::none());
     let deadline = Instant::now() + Duration::from_secs(10);
     loop {
-        let (doc, _) = rt
-            .block_on(client.request(http::Method::GET, "/api/missions/hello", None, None))
+        let doc = rt
+            .block_on(common::call(
+                &client,
+                "mission_show",
+                serde_json::json!({"mission":"hello","full":true}),
+            ))
             .unwrap();
         if doc["mission"]["connection"]
             .as_array()
@@ -289,8 +302,12 @@ fn canvas_ports_drag_move_zoom_and_undo(cx: &mut TestAppContext) {
     click(cx, "canvas-new-gate");
     let deadline = Instant::now() + Duration::from_secs(10);
     loop {
-        let (doc, _) = rt
-            .block_on(client.request(http::Method::GET, "/api/missions/hello", None, None))
+        let doc = rt
+            .block_on(common::call(
+                &client,
+                "mission_show",
+                serde_json::json!({"mission":"hello","full":true}),
+            ))
             .unwrap();
         if !doc["mission"]["gate"].as_array().unwrap().is_empty() {
             break;

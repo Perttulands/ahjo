@@ -1,7 +1,7 @@
 //! Keep Run's emphasis tied to a current node-side validation result.
 use super::*;
 use crate::store::validation::Key;
-use ahjo_missions_contract::{Mission, ValidationResponse};
+use ahjo_missions_contract::{Mission, commands::MissionValidate};
 
 impl MissionsPage {
     fn validation_key(&self) -> Option<Key> {
@@ -182,10 +182,13 @@ impl MissionsPage {
         let Some(request_generation) = self.validation.begin(key.clone()) else {
             return;
         };
-        let path = format!("{}/validation", mission_path(&key.slug));
-        let asked = self
-            .host
-            .request(Request::get(NodeId(key.node.clone()), path), cx);
+        let asked = self.host.call(
+            NodeId(key.node.clone()),
+            MissionValidate {
+                mission: key.slug.clone(),
+            },
+            cx,
+        );
         let generation = self.generation;
         cx.spawn(async move |this, cx| {
             let answer = asked.await;
@@ -193,15 +196,11 @@ impl MissionsPage {
                 if page.generation != generation || page.validation_key().as_ref() != Some(&key) {
                     return;
                 }
-                let report = match answer {
-                    Ok(answer) if answer.ok() => {
-                        serde_json::from_slice::<ValidationResponse>(&answer.body)
-                            .map_err(|e| e.to_string())
-                    }
-                    Ok(answer) => Err(answer.error_text()),
-                    Err(error) => Err(error.message),
-                };
-                page.validation.finish(&key, request_generation, report);
+                page.validation.finish(
+                    &key,
+                    request_generation,
+                    answer.map_err(|error| error.message),
+                );
                 cx.notify();
             });
         })

@@ -1,4 +1,4 @@
-//! Mission authoring commands use the same store as the HTTP routes.
+//! Typed mission authoring commands.
 
 use ahjo_core::{Error, TypedCommand};
 pub(crate) use ahjo_mission_engine::shell_word;
@@ -59,6 +59,12 @@ pub fn commands(m: &Missions) -> Vec<Command> {
                 missions: m.store.list_missions()?,
             })
         }),
+        command(m, Reads, |m, _: MissionRepositories| {
+            Ok(MissionRepositoriesListed {
+                node: m.node.clone(),
+                repositories: m.coordinator.repositories(),
+            })
+        }),
         command(m, Reads, |m, _: MissionArchives| {
             Ok(MissionArchivesListed {
                 node: m.node.clone(),
@@ -102,10 +108,26 @@ pub fn commands(m: &Missions) -> Vec<Command> {
         }),
         command(m, Destroys, note),
         command(m, Writes, |m, args: MissionReply| {
-            reply(m, args.mission, args.note, args.text, args.author, false)
+            reply(
+                m,
+                args.mission,
+                args.note,
+                args.text,
+                args.author,
+                args.etag,
+                false,
+            )
         }),
         command(m, Sets, |m, args: MissionResolve| {
-            reply(m, args.mission, args.note, args.text, args.author, true)
+            reply(
+                m,
+                args.mission,
+                args.note,
+                args.text,
+                args.author,
+                args.etag,
+                true,
+            )
         }),
         command(m, Reads, |m, args: LayoutShow| {
             let layout = m.store.layout_edit(required(&args.mission, "mission")?)?;
@@ -116,45 +138,82 @@ pub fn commands(m: &Missions) -> Vec<Command> {
             })
         }),
         command(m, Sets, edit_layout),
-        Command::for_request(Writes, move |args: MissionRun| {
-            start_run(start.clone(), args)
-        }),
         command(m, Sets, |m, args: MissionArrange| {
             arrange(m, required(&args.mission, "mission")?, None)
         }),
         command(m, Destroys, delete),
+        Command::for_request(Writes, move |args: MissionRun| {
+            start_run(start.clone(), args)
+        }),
     ];
     commands.extend(run_commands::commands(m));
     commands
 }
 
 fn create(m: &Missions, args: MissionCreate) -> Result<MissionCreated, Error> {
-    let slug = required(&args.slug, "slug")?;
+    let given_slug = args.slug.trim();
+    let requested_title = args.title.as_deref().unwrap_or_default().trim();
+    let unnamed = given_slug.is_empty() && requested_title.is_empty();
+    let title = if unnamed {
+        "Untitled mission"
+    } else if requested_title.is_empty() && args.example.is_none() {
+        given_slug
+    } else {
+        requested_title
+    };
+    let slug = if given_slug.is_empty() {
+        slug_from_title(title)
+    } else {
+        given_slug.to_owned()
+    };
+    if slug.is_empty() {
+        return Err(bad("Mission name must contain a letter or number"));
+    }
     let steps = sketch::steps(args.steps.as_deref().unwrap_or_default());
     if !steps.is_empty() && args.example.is_some() {
         return Err(bad("--steps sketches a new mission; leave out --example"));
     }
-    let created = match args.example {
-        Some(example) => m.store.create_example(
-            slug,
-            args.title.as_deref().unwrap_or_default(),
-            &example,
-            "agent:ahjo",
-        )?,
-        None => {
-            m.store
-                .create_mission(slug, args.title.as_deref().unwrap_or(slug), "agent:ahjo")?
+    let actor = args
+        .updated_by
+        .as_deref()
+        .filter(|a| !a.is_empty())
+        .unwrap_or("agent:ahjo");
+    let mut created = None;
+    for suffix in 1..=100 {
+        let name = if suffix == 1 {
+            slug.clone()
+        } else {
+            format!("{slug}-{suffix}")
+        };
+        let display = if suffix == 1 {
+            title.to_owned()
+        } else {
+            format!("{title} {suffix}")
+        };
+        let result = match &args.example {
+            Some(example) => m.store.create_example(&name, &display, example, actor),
+            None => m.store.create_mission(&name, &display, actor),
+        };
+        match result {
+            Ok(edit) => {
+                created = Some(edit);
+                break;
+            }
+            Err(e) if e.code == "already_exists" && unnamed && suffix < 100 => continue,
+            Err(e) => return Err(e),
         }
-    };
+    }
+    let created = created.ok_or_else(|| bad("no untitled mission name available"))?;
     sketch::fill(
         m,
         &created.mission.id,
         &created.mission.slug,
         &steps,
         args.note.as_deref().unwrap_or_default(),
-        "agent:ahjo",
+        actor,
     )?;
-    let mission = m.store.read_mission(&created.mission.slug)?;
+    let saved = m.store.mission_edit(&created.mission.slug)?;
+    let mission = saved.mission;
     m.changed();
     let slug = shell_word(&mission.slug);
     Ok(MissionCreated {
@@ -176,6 +235,24 @@ fn create(m: &Missions, args: MissionCreate) -> Result<MissionCreated, Error> {
             format!("ahjo mission validate {slug}"),
         ],
     })
+}
+
+fn slug_from_title(title: &str) -> String {
+    let mut slug = String::new();
+    let mut separator = false;
+    for c in title.trim().to_lowercase().chars() {
+        if c.is_alphanumeric() {
+            slug.push(c);
+            separator = false;
+        } else if !slug.is_empty() && !separator {
+            slug.push('-');
+            separator = true;
+        }
+        if slug.len() >= 64 {
+            break;
+        }
+    }
+    slug.trim_matches('-').to_owned()
 }
 
 fn show(m: &Missions, args: MissionShow) -> Result<MissionShown, Error> {
@@ -235,13 +312,14 @@ fn edit(m: &Missions, args: MissionEdit) -> Result<MissionEdited, Error> {
     let id = required(&args.mission, "mission")?;
     let current = m.store.mission_edit(id)?;
     let before = current.mission;
+    let before_etag = current.etag.clone();
     let rev_mismatch = |rev: Option<i64>| rev.is_some_and(|rev| rev != before.rev);
     if rev_mismatch(args.rev) || rev_mismatch(args.change.rev) {
         return Err(Error::new("conflict", "mission changed"));
     }
     let precondition = Precondition {
         rev: before.rev,
-        etag: current.etag,
+        etag: args.etag.unwrap_or(current.etag),
     };
     let actor = if args.change.updated_by.is_empty() {
         "agent:ahjo"
@@ -259,8 +337,13 @@ fn edit(m: &Missions, args: MissionEdit) -> Result<MissionEdited, Error> {
             (m.store.patch_batch(id, precondition, changes, actor)?, None)
         }
     };
-    m.changed();
+    if edited.etag != before_etag {
+        m.changed();
+    }
+    let layout = m.store.layout_edit(id)?;
     Ok(MissionEdited {
+        layout: layout.layout,
+        layout_etag: layout.etag,
         definition: MissionDefinition {
             node: m.node.clone(),
             mission: edited.mission,
@@ -311,7 +394,9 @@ fn note(m: &Missions, args: MissionNote) -> Result<MissionNoteReceipt, Error> {
             }
         }
     };
-    let edited = m.store.patch_notes(id, &current.etag, patch)?;
+    let edited = m
+        .store
+        .patch_notes(id, args.etag.as_deref().unwrap_or(&current.etag), patch)?;
     m.changed();
     Ok(note_receipt(&m.node, edited, &current.notes))
 }
@@ -322,6 +407,7 @@ fn reply(
     note: String,
     text: String,
     author: Option<String>,
+    etag: Option<String>,
     resolves: bool,
 ) -> Result<MissionNoteReceipt, Error> {
     let id = required(&mission, "mission")?;
@@ -334,7 +420,9 @@ fn reply(
         text,
         resolves,
     };
-    let edited = m.store.patch_notes(id, &current.etag, patch)?;
+    let edited = m
+        .store
+        .patch_notes(id, etag.as_deref().unwrap_or(&current.etag), patch)?;
     m.changed();
     Ok(note_receipt(&m.node, edited, &current.notes))
 }
@@ -377,6 +465,7 @@ fn note_receipt(node: &str, edited: wire::NotesEdit, before: &wire::Notes) -> Mi
     };
     MissionNoteReceipt {
         node: node.into(),
+        document: NotesDocument::from_notes(edited.notes, edited.etag),
         change,
     }
 }
@@ -428,8 +517,8 @@ fn delete(m: &Missions, args: MissionDelete) -> Result<MissionDeleted, Error> {
     let deletion = m.store.delete_mission(
         id,
         Precondition {
-            rev: current.mission.rev,
-            etag: current.etag,
+            rev: args.rev.unwrap_or(current.mission.rev),
+            etag: args.etag.unwrap_or(current.etag),
         },
     )?;
     m.changed();
@@ -618,6 +707,14 @@ async fn start_run(m: Missions, args: MissionRun) -> Result<MissionStarted, Erro
     }
     let edit = m.store.mission_edit(selector)?;
     let mission = edit.mission;
+    let stale = args.expected_rev.is_some_and(|rev| rev != mission.rev)
+        || args
+            .expected_etag
+            .as_ref()
+            .is_some_and(|etag| !etag.is_empty() && etag != &edit.etag);
+    if stale && args.request_id.as_deref().is_none_or(str::is_empty) {
+        return Err(Error::new("conflict", "mission changed"));
+    }
     // A wrong name is answered with the names there are; --input is the
     // easiest to mistake for an input value.
     let inputs: Vec<String> = mission
@@ -660,8 +757,8 @@ async fn start_run(m: Missions, args: MissionRun) -> Result<MissionStarted, Erro
 
     let mut request = RunStart {
         mission: selector.into(),
-        expected_rev: mission.rev,
-        expected_etag: edit.etag,
+        expected_rev: args.expected_rev.unwrap_or(mission.rev),
+        expected_etag: args.expected_etag.unwrap_or(edit.etag),
         actor: args.actor.unwrap_or_else(|| "agent:ahjo".into()),
         cwd: args.cwd.unwrap_or_default(),
         repository: args.repository.unwrap_or_default(),
@@ -677,25 +774,33 @@ async fn start_run(m: Missions, args: MissionRun) -> Result<MissionStarted, Erro
     }
     let from_step = args.from.is_some();
     if from_step {
-        request.step_id = pick(
-            "step",
-            mission
-                .steps
-                .iter()
-                .map(|f| (f.id.as_str(), f.title.as_str()))
-                .collect(),
-            args.from.as_deref(),
-        )?;
+        request.step_id = if stale && !request.request_id.is_empty() {
+            args.from.clone().unwrap_or_default()
+        } else {
+            pick(
+                "step",
+                mission
+                    .steps
+                    .iter()
+                    .map(|f| (f.id.as_str(), f.title.as_str()))
+                    .collect(),
+                args.from.as_deref(),
+            )?
+        };
     } else {
-        request.input_card_id = pick(
-            "Input card",
-            mission
-                .input_cards
-                .iter()
-                .map(|c| (c.id.as_str(), c.title.as_str()))
-                .collect(),
-            args.input.as_deref(),
-        )?;
+        request.input_card_id = if stale && !request.request_id.is_empty() && args.input.is_some() {
+            args.input.clone().unwrap_or_default()
+        } else {
+            pick(
+                "Input card",
+                mission
+                    .input_cards
+                    .iter()
+                    .map(|c| (c.id.as_str(), c.title.as_str()))
+                    .collect(),
+                args.input.as_deref(),
+            )?
+        };
     }
     let coordinator = m.coordinator.clone();
     let run_id = blocking(move || {

@@ -1,4 +1,4 @@
-//! Evidence and attempts through the same CLI and HTTP node as an operator.
+//! Evidence and attempts through the same CLI and typed node commands as an operator.
 use ahjo_mission_engine::{ExecutionSink, Executor, LabExecutor, StepExecution, StepResult};
 use ahjo_node_kit::{Built, Listing, Setup};
 use ahjo_testkit::{node::Node, sessions};
@@ -120,7 +120,7 @@ async fn run(node: &Node, best: bool) -> String {
     id
 }
 #[tokio::test(flavor = "multi_thread")]
-async fn cli_and_http_report_problems_briefs_files_and_picked_attempts() {
+async fn cli_and_commands_report_problems_briefs_files_and_picked_attempts() {
     let node = Node::start(&[sessions::LISTING, ahjo_issue::LISTING, LAB], "")
         .await
         .unwrap();
@@ -165,17 +165,14 @@ async fn cli_and_http_report_problems_briefs_files_and_picked_attempts() {
             .iter()
             .all(|b| b["step_id"] == "fmn_judge")
     );
-    let client = ahjo_node_kit::NodeClient::new(Some(&format!("{}/", node.url()))).unwrap();
-    let (http, _) = client
-        .request(
-            axum::http::Method::GET,
-            &format!("/api/runs/{id}/evidence?step=fmn_judge"),
-            None,
-            None,
+    let command = node
+        .call(
+            "run_show",
+            json!({"run":id,"evidence":true,"step":"fmn_judge"}),
         )
         .await
         .unwrap();
-    assert_eq!(http["evidence"], filtered["evidence"]);
+    assert_eq!(command["evidence"], filtered["evidence"]);
     let missing = node
         .call("run_show", json!({"run":"run_missing","evidence":true}))
         .await

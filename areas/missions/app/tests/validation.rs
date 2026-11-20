@@ -1,4 +1,5 @@
 #![cfg(unix)]
+mod common;
 use ahjo_app_kit::link::client::LinkState;
 use ahjo_node_kit::{Listing, NodeClient};
 use ahjo_testkit::{node::Node, sessions};
@@ -103,12 +104,11 @@ fn run_is_only_emphasized_for_a_current_runnable_mission(cx: &mut TestAppContext
     });
     let rt = tokio::runtime::Runtime::new().unwrap();
     let client = NodeClient::new(Some(&format!("{}/", running.url))).unwrap();
-    let (report, _) = rt
-        .block_on(client.request(
-            http::Method::GET,
-            "/api/missions/hello/validation",
-            None,
-            None,
+    let report = rt
+        .block_on(common::call(
+            &client,
+            "mission_validate",
+            serde_json::json!({"mission":"hello"}),
         ))
         .unwrap();
     assert!(
@@ -138,9 +138,9 @@ fn run_is_only_emphasized_for_a_current_runnable_mission(cx: &mut TestAppContext
         cx.debug_bounds("canvas-findings").is_some()
     });
     rt.block_on(async {
-        let (doc, etag) = client.request(http::Method::GET, "/api/missions/hello", None, None).await.unwrap();
-        client.request(http::Method::PATCH, "/api/missions/hello", Some(json!({"expected_rev":doc["mission"]["rev"], "wire_connection":{"from":"inp_hello:out","to":"fmn_work:port_in"}})), Some(&etag)).await.unwrap();
-        let (valid, _) = client.request(http::Method::GET, "/api/missions/hello/validation", None, None).await.unwrap();
+        let doc = common::call(&client, "mission_show", serde_json::json!({"mission":"hello","full":true})).await.unwrap();
+        common::call(&client, "mission_edit", serde_json::json!({"mission":"hello", "change":json!({"expected_rev":doc["mission"]["rev"], "wire_connection":{"from":"inp_hello:out","to":"fmn_work:port_in"}})})).await.unwrap();
+        let valid = common::call(&client, "mission_validate", serde_json::json!({"mission":"hello"})).await.unwrap();
         assert_eq!(valid["errors"].as_array().unwrap().len(), 0, "{valid}");
         assert!(!valid["warnings"].as_array().unwrap().iter().any(|w| w["code"] == "mission_not_runnable"));
     });

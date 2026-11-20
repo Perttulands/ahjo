@@ -345,9 +345,7 @@ impl MissionsPage {
             editor.error = None;
         }
         self.writing = true;
-        let asked = self
-            .host
-            .request(Request::get(NodeId(node.clone()), mission_path(&slug)), cx);
+        let asked = read_definition(&self.host, NodeId(node.clone()), slug.clone(), cx);
         let generation = self.generation;
         cx.spawn(async move |this, cx| {
             let answer = asked.await;
@@ -356,20 +354,12 @@ impl MissionsPage {
                     return;
                 }
                 let response = match answer {
-                    Ok(answer) if answer.ok() => {
-                        serde_json::from_slice::<MissionResponse>(&answer.body)
-                            .map_err(|e| e.to_string())
-                    }
-                    Ok(answer) => Err(answer.error_text()),
-                    Err(error) => Err(format!("{}: {}", error.code, error.message)),
-                };
-                let response = match response {
                     Ok(response) => response,
                     Err(error) => {
                         page.writing = false;
                         if let Some(editor) = &mut page.editor {
                             editor.busy = false;
-                            editor.error = Some(error);
+                            editor.error = Some(format!("{}: {}", error.code, error.message));
                         }
                         cx.notify();
                         return;
@@ -385,7 +375,7 @@ impl MissionsPage {
                     &draft,
                     &response.mission,
                 );
-                page.state.mission_etag = response.etag;
+                page.state.mission_etag = Some(response.etag);
                 page.state.mission = Some(response.mission);
                 match ops {
                     Err(problems) => {

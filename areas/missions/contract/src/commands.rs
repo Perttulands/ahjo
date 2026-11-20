@@ -17,6 +17,11 @@ use crate::{
 #[serde(deny_unknown_fields)]
 pub struct MissionList {}
 
+/// List configured repositories for mission runs.
+#[derive(Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct MissionRepositories {}
+
 /// List mission archives, including partially removed archives.
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -42,6 +47,7 @@ pub struct MissionCreate {
     pub steps: Option<String>,
     /// What the mission is for, kept as a note.
     pub note: Option<String>,
+    pub updated_by: Option<String>,
 }
 
 /// List the examples a new mission can start from.
@@ -74,6 +80,7 @@ pub struct MissionEdit {
     pub change: EditRequest,
     /// The mission revision as last read. A mission changed since is refused.
     pub rev: Option<i64>,
+    pub etag: Option<String>,
 }
 
 /// Read every note thread, grouped by what it is on.
@@ -98,6 +105,7 @@ pub struct MissionNote {
     pub delete: Option<String>,
     /// Your name, e.g. claude-7 (agent:claude-7).
     pub author: Option<String>,
+    pub etag: Option<String>,
 }
 
 /// Answer a note in its thread.
@@ -108,6 +116,7 @@ pub struct MissionReply {
     pub note: String,
     pub text: String,
     pub author: Option<String>,
+    pub etag: Option<String>,
 }
 
 /// Close a note's thread with what you did about it. A later note reopens it.
@@ -118,6 +127,7 @@ pub struct MissionResolve {
     pub note: String,
     pub text: String,
     pub author: Option<String>,
+    pub etag: Option<String>,
 }
 
 /// Read a mission's canvas layout.
@@ -149,10 +159,12 @@ pub struct MissionArrange {
 #[serde(deny_unknown_fields)]
 pub struct MissionDelete {
     pub mission: String,
+    pub rev: Option<i64>,
+    pub etag: Option<String>,
 }
 
 /// Start a mission at an Input card or at a particular step.
-#[derive(Debug, Deserialize, Serialize, JsonSchema)]
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct MissionRun {
     pub mission: String,
@@ -175,12 +187,20 @@ pub struct MissionRun {
     pub actor: Option<String>,
     /// Return the existing run when retrying this start with the same key.
     pub request_id: Option<String>,
+    pub expected_rev: Option<i64>,
+    pub expected_etag: Option<String>,
 }
 
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
 pub struct MissionsListed {
     pub node: String,
     pub missions: Vec<MissionListing>,
+}
+
+#[derive(Debug, Deserialize, Serialize, JsonSchema)]
+pub struct MissionRepositoriesListed {
+    pub node: String,
+    pub repositories: Vec<String>,
 }
 
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
@@ -393,6 +413,8 @@ pub struct MissionValidated {
 
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
 pub struct MissionEdited {
+    pub layout: Layout,
+    pub layout_etag: String,
     #[serde(flatten)]
     pub definition: MissionDefinition,
     #[serde(flatten, skip_serializing_if = "Option::is_none")]
@@ -418,6 +440,7 @@ pub struct MissionNotesListed {
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
 pub struct MissionNoteReceipt {
     pub node: String,
+    pub document: NotesDocument,
     #[serde(flatten)]
     pub change: NoteChange,
 }
@@ -473,12 +496,13 @@ macro_rules! commands {
             type Output = $output;
         })*
 
-        pub const NAMES: &[&str] = &[$($request::NAME),*];
+        pub const NAMES: &[&str] = &[$($request::NAME,)* MissionRun::NAME];
     };
 }
 
 commands! {
     MissionList => "mission_list", MissionsListed;
+    MissionRepositories => "mission_repositories", MissionRepositoriesListed;
     MissionArchives => "mission_archives", MissionArchivesListed;
     MissionPurge => "mission_purge", MissionPurged;
     MissionShow => "mission_show", MissionShown;
@@ -494,7 +518,12 @@ commands! {
     MissionResolve => "mission_resolve", MissionNoteReceipt;
     LayoutShow => "layout_show", LayoutShown;
     LayoutEdit => "layout_edit", LayoutShown;
-    MissionRun => "mission_run", MissionStarted;
     MissionArrange => "mission_arrange", LayoutShown;
     MissionDelete => "mission_delete", MissionDeleted;
+}
+
+impl TypedCommand for MissionRun {
+    const NAME: &'static str = "mission_run";
+    const TIMEOUT: Option<std::time::Duration> = Some(std::time::Duration::from_secs(60));
+    type Output = MissionStarted;
 }

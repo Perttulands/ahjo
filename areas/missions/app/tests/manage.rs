@@ -1,4 +1,5 @@
 #![cfg(unix)]
+mod common;
 use ahjo_node_kit::{Listing, NodeClient};
 use ahjo_testkit::{node::Node, sessions};
 use gpui::{Modifiers, TestAppContext, VisualTestContext};
@@ -131,31 +132,25 @@ fn creates_and_renames_a_mission_with_cancel_and_conflict_guard(cx: &mut TestApp
     let read = || {
         runtime.block_on(async {
             let client = NodeClient::new(Some(&format!("{}/", running.url))).unwrap();
-            client
-                .request(http::Method::GET, "/api/missions/release", None, None)
-                .await
-                .unwrap()
+            common::call(
+                &client,
+                "mission_show",
+                serde_json::json!({"mission":"release","full":true}),
+            )
+            .await
+            .unwrap()
         })
     };
-    assert_eq!(read().0["mission"]["title"], "Renamed");
+    assert_eq!(read()["mission"]["title"], "Renamed");
     menu(cx, "Rename…");
     until(cx, "rename again", |cx| has(cx, "mission-form-name"));
     cx.simulate_input("Draft name");
     runtime.block_on(async {
         let client = NodeClient::new(Some(&format!("{}/", running.url))).unwrap();
-        let (doc, etag) = client
-            .request(http::Method::GET, "/api/missions/release", None, None)
-            .await
-            .unwrap();
-        client
-            .request(
-                http::Method::PATCH,
-                "/api/missions/release",
-                Some(json!({"title":"External", "expected_rev":doc["mission"]["rev"]})),
-                Some(&etag),
-            )
-            .await
-            .unwrap();
+        let doc = common::call(&client, "mission_show", serde_json::json!({"mission":"release","full":true})).await.unwrap();
+        common::call(&client, "mission_edit", serde_json::json!({"mission":"release", "change":json!({"title":"External", "expected_rev":doc["mission"]["rev"]})}))
+        .await
+        .unwrap();
     });
     click(cx, "mission-form-submit");
     until(cx, "stale rename refused", |cx| {
@@ -169,7 +164,7 @@ fn creates_and_renames_a_mission_with_cancel_and_conflict_guard(cx: &mut TestApp
             .as_deref(),
         Some("Draft name")
     );
-    assert_eq!(read().0["mission"]["title"], "External");
+    assert_eq!(read()["mission"]["title"], "External");
     click(cx, "mission-form-cancel");
     until(cx, "stale form canceled", |cx| !has(cx, "mission-form"));
     click(cx, "new-mission");
@@ -196,10 +191,13 @@ fn creates_and_renames_a_mission_with_cancel_and_conflict_guard(cx: &mut TestApp
     runtime.block_on(async {
         let client = NodeClient::new(Some(&format!("{}/", running.url))).unwrap();
         assert!(
-            client
-                .request(http::Method::GET, "/api/missions/scratch", None, None)
-                .await
-                .is_err()
+            common::call(
+                &client,
+                "mission_show",
+                serde_json::json!({"mission":"scratch","full":true})
+            )
+            .await
+            .is_err()
         );
     });
 }
@@ -239,14 +237,12 @@ fn designs_a_multi_gate_mission_and_shows_findings_on_the_canvas(cx: &mut TestAp
     let rt = tokio::runtime::Runtime::new().unwrap();
     let client = NodeClient::new(Some(&format!("{}/", running.url))).unwrap();
     let read = || {
-        rt.block_on(client.request(
-            http::Method::GET,
-            "/api/missions/design-journey",
-            None,
-            None,
+        rt.block_on(common::call(
+            &client,
+            "mission_show",
+            serde_json::json!({"mission":"design-journey","full":true}),
         ))
-        .unwrap()
-        .0["mission"]
+        .unwrap()["mission"]
             .clone()
     };
     until(cx, "input saved", |_| {
@@ -286,14 +282,12 @@ fn designs_a_multi_gate_mission_and_shows_findings_on_the_canvas(cx: &mut TestAp
     click(cx, "arrange");
     until(cx, "arranged layout saved", |_| {
         let layout = rt
-            .block_on(client.request(
-                http::Method::GET,
-                "/api/missions/design-journey/layout",
-                None,
-                None,
+            .block_on(common::call(
+                &client,
+                "layout_show",
+                serde_json::json!({"mission":"design-journey"}),
             ))
-            .unwrap()
-            .0;
+            .unwrap();
         layout["layout"]["card"]
             .as_array()
             .unwrap()

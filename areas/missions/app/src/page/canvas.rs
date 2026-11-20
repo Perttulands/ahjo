@@ -985,26 +985,19 @@ impl MissionsPage {
         };
         let rev = mission.rev;
         let generation = self.generation;
-        let request = Request::new(
-            "PATCH",
-            NodeId(node),
-            format!("{}/layout", mission_path(&slug)),
-        )
-        .header("If-Match", etag);
-        let body = EditLayout {
-            cards: Some(nodes),
-            ..Default::default()
-        };
-        let request = match edits::with_json_body(request, &body) {
-            Ok(request) => request,
-            Err(error) => {
-                self.state.error = Some(error.to_string());
-                cx.notify();
-                return;
-            }
-        };
         self.writing = true;
-        let asked = self.host.request(request, cx);
+        let asked = self.host.call(
+            NodeId(node),
+            LayoutEdit {
+                mission: slug,
+                etag: Some(etag),
+                change: EditLayout {
+                    cards: Some(nodes),
+                    ..Default::default()
+                },
+            },
+            cx,
+        );
         cx.spawn(async move |this, cx| {
             let result = asked.await;
             let _ = this.update(cx, |p, cx| {
@@ -1013,29 +1006,19 @@ impl MissionsPage {
                 }
                 p.writing = false;
                 match result {
-                    Ok(answer) if answer.ok() => {
-                        match serde_json::from_slice::<LayoutResponse>(&answer.body) {
-                            Ok(v) => {
-                                let etag = v.etag;
-                                p.state.layout = Some(v.layout);
-                                p.state.layout_etag = Some(etag.clone());
-                                let entry = undo::Entry {
-                                    label: "move".into(),
-                                    steps: vec![undo::Step::Layout(reverse)],
-                                };
-                                p.history.wrote(undo::Version {
-                                    rev,
-                                    layout: Some(etag),
-                                });
-                                p.history.record(entry);
-                            }
-                            Err(e) => {
-                                p.state.error = Some(e.to_string());
-                            }
-                        }
-                    }
-                    Ok(answer) => {
-                        p.state.error = Some(answer.error_text());
+                    Ok(v) => {
+                        let etag = v.etag;
+                        p.state.layout = Some(v.layout);
+                        p.state.layout_etag = Some(etag.clone());
+                        let entry = undo::Entry {
+                            label: "move".into(),
+                            steps: vec![undo::Step::Layout(reverse)],
+                        };
+                        p.history.wrote(undo::Version {
+                            rev,
+                            layout: Some(etag),
+                        });
+                        p.history.record(entry);
                     }
                     Err(error) => {
                         p.state.error = Some(error.message);
@@ -2222,7 +2205,7 @@ mod tests {
 
     #[test]
     fn a_new_step_follows_the_edited_card_else_the_open_end_of_the_flow() {
-        let mission: Mission = serde_json::from_value(json!({
+        let mission: Mission = serde_json::from_value(serde_json::json!({
             "input_card": [{"id": "inp"}],
             "step": [
                 {"id": "a", "input": [{"id": "in"}], "output": [{"id": "out"}]},
@@ -2239,7 +2222,7 @@ mod tests {
         assert_eq!(step_after(&mission, Some("end")).as_deref(), Some("b"));
         assert_eq!(step_after(&mission, None).as_deref(), Some("b"));
         let fresh: Mission =
-            serde_json::from_value(json!({"input_card": [{"id": "inp"}]})).unwrap();
+            serde_json::from_value(serde_json::json!({"input_card": [{"id": "inp"}]})).unwrap();
         assert_eq!(step_after(&fresh, None).as_deref(), Some("inp"));
     }
 }

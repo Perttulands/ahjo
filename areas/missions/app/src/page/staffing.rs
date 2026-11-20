@@ -214,19 +214,17 @@ impl MissionsPage {
 
     /// Read the repositories the node's config names.
     pub(super) fn read_repositories(&mut self, node: String, cx: &mut Context<Self>) {
-        let listed = self
-            .host
-            .request(Request::get(NodeId(node), "/api/repositories"), cx);
+        let listed = self.host.call(
+            NodeId(node),
+            ahjo_missions_contract::commands::MissionRepositories {},
+            cx,
+        );
         let generation = self.generation;
         cx.spawn(async move |this, cx| {
             let listed = listed.await;
             let _ = this.update(cx, |page, cx| {
                 if page.generation == generation {
-                    page.repositories = listed
-                        .ok()
-                        .filter(|a| a.ok())
-                        .and_then(|a| serde_json::from_slice::<serde_json::Value>(&a.body).ok())
-                        .and_then(|v| serde_json::from_value(v["repositories"].clone()).ok());
+                    page.repositories = listed.ok().map(|listed| listed.repositories);
                     cx.notify();
                 }
             });

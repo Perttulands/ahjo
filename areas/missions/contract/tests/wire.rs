@@ -1,4 +1,5 @@
 use ahjo_missions_contract::*;
+use ahjo_missions_contract::{commands::*, run_commands::*};
 use serde::{Serialize, de::DeserializeOwned};
 use serde_json::{Value, json};
 
@@ -9,27 +10,25 @@ fn round<T: Serialize + DeserializeOwned>(v: Value) {
 
 #[test]
 fn requests_and_responses_round_trip() {
-    round::<CreateMission>(json!({"title":"Demo","slug":"demo","updated_by":"human:test"}));
-    round::<DeleteMission>(json!({"expected_rev":2}));
-    round::<EditNotes>(
-        json!({"target":"mission","author":"human:test","text":"hi","entry_id":"n","action":"edit"}),
+    round::<MissionCreate>(
+        json!({"title":"Demo","slug":"demo","updated_by":"human:test","example":null,"steps":null,"note":null}),
+    );
+    round::<MissionDelete>(json!({"mission":"demo","rev":2,"etag":"e"}));
+    round::<MissionNote>(
+        json!({"mission":"demo","on":"mission","author":"human:test","text":"hi","edit":"n","delete":null,"etag":"e"}),
     );
     round::<EditLayout>(json!({"cards":[{"id":"a","x":1,"y":2}]}));
-    round::<Abort>(json!({"requested_by":"human:test","reason":"stop"}));
-    round::<Land>(json!({"force":true}));
-    round::<RunId>(json!({"run_id":"r"}));
-    round::<Landed>(json!({"landed":true,"notes":["done"]}));
-    round::<DeletionResponse>(
-        json!({"deletion":{"id":"m","slug":"demo","title":"Demo","archive_id":"a"}}),
-    );
+    round::<RunAbort>(json!({"run":"r","actor":"human:test","reason":"stop"}));
+    round::<RunLand>(json!({"run":"r","force":true}));
+    round::<RunLanded>(json!({"node":"local","landed":true,"notes":["done"]}));
     round::<Vec<AgentSeat>>(
         json!([{"dispatch_id":"d","seat_id":"s","node":"local","session":"s","session_id":"$1","pane":2,"outcome":"","available":true,"waiting":{"state":"waiting","detail":"detail","since":"now","seq":1}}]),
     );
-    round::<ValidationResponse>(
-        json!({"mission_rev":1,"mission_etag":"e","errors":[],"warnings":[]}),
+    round::<MissionValidated>(
+        json!({"node":"local","valid":true,"summary":"valid","mission_rev":1,"mission_etag":"e","errors":[],"warnings":[],"next":"run"}),
     );
-    round::<NotesResponse>(
-        json!({"notes":{"schema":3,"mission_id":"m","rev":1,"updated_at":"2026-01-01T00:00:00Z","mission":[{"id":"n","author":"human:test","created_at":"2026-01-01T00:00:00Z","text":"hello"}],"elements":[],"etag":"e"}}),
+    round::<MissionNotesListed>(
+        json!({"node":"local","notes":{"schema":3,"mission_id":"m","rev":1,"updated_at":"2026-01-01T00:00:00Z","mission":[{"id":"n","author":"human:test","created_at":"2026-01-01T00:00:00Z","text":"hello"}],"elements":[],"etag":"e"}}),
     );
 }
 
@@ -64,33 +63,44 @@ y = 20
     .unwrap();
     let mission_value = serde_json::to_value(&mission).unwrap();
     let layout_value = serde_json::to_value(&layout).unwrap();
-    let response = serde_json::to_value(MissionResponse {
+    let response = serde_json::to_value(MissionDefinition {
+        node: "local".into(),
         mission: mission.clone(),
-        etag: Some("m2".into()),
+        etag: "m2".into(),
     })
     .unwrap();
-    assert_eq!(response, json!({"mission":mission_value,"etag":"m2"}));
-    round::<MissionResponse>(response);
-    let response = serde_json::to_value(LayoutResponse {
+    assert_eq!(
+        response,
+        json!({"node":"local","mission":mission_value,"etag":"m2"})
+    );
+    round::<MissionDefinition>(response);
+    let response = serde_json::to_value(LayoutShown {
+        node: "local".into(),
         layout: layout.clone(),
         etag: "l2".into(),
     })
     .unwrap();
-    assert_eq!(response, json!({"layout":layout_value,"etag":"l2"}));
-    round::<LayoutResponse>(response);
-    let edit = EditResponse {
-        mission,
-        mission_etag: "m2".into(),
+    assert_eq!(
+        response,
+        json!({"node":"local","layout":layout_value,"etag":"l2"})
+    );
+    round::<LayoutShown>(response);
+    let edit = MissionEdited {
+        definition: MissionDefinition {
+            node: "local".into(),
+            mission,
+            etag: "m2".into(),
+        },
         layout,
         layout_etag: "l2".into(),
-        changed: [("gate_id".into(), json!("g"))].into(),
+        added: None,
     };
     let response = serde_json::to_value(edit).unwrap();
     assert_eq!(
         response,
-        json!({"mission":mission_value,"mission_etag":"m2","layout":layout_value,"layout_etag":"l2","gate_id":"g"}),
+        json!({"node":"local","mission":mission_value,"etag":"m2","layout":layout_value,"layout_etag":"l2"})
     );
-    round::<EditResponse>(response);
+    round::<MissionEdited>(response);
 }
 
 #[test]
@@ -119,24 +129,40 @@ fn patch_and_frames_round_trip() {
 
 #[test]
 fn rejected_start_keeps_every_engine_finding() {
-    let value = json!({"error":{"code":"run_admission_failed","message":"run admission failed"},"findings":[{"code":"missing_input","card_id":"input","message":"required"},{"code":"missing_file","card_id":"step","message":"missing","path":"brief.md"}]});
-    round::<AdmissionRejection>(value);
+    let findings = json!([{"code":"missing_input","card_id":"input","message":"required"},{"code":"missing_file","card_id":"step","message":"missing","path":"brief.md"}]);
+    let error = ahjo_core::Error::new(
+        error::RUN_ADMISSION_FAILED,
+        format!("run admission failed: {findings}"),
+    );
+    assert_eq!(
+        serde_json::to_value(admission_findings(&error).unwrap()).unwrap(),
+        findings
+    );
+    assert!(admission_findings(&ahjo_core::Error::new("not_found", "missing")).is_none());
 }
 
 #[test]
 fn remaining_envelopes_and_queries_round_trip() {
-    round::<RunsQuery>(json!({"mission":"demo","needs":"you"}));
-    round::<AttemptsQuery>(json!({"step":"f"}));
-    round::<ErrorResponse>(json!({"error":{"code":"not_found","message":"missing"}}));
+    round::<RunList>(json!({"mission":"demo"}));
+    let show = RunShow {
+        run: "r".into(),
+        step: Some("f".into()),
+        attempts: true,
+        mission: true,
+        ..Default::default()
+    };
+    let show_value = serde_json::to_value(show).unwrap();
+    assert_eq!(show_value["attempts"], true);
+    assert_eq!(show_value["mission"], true);
+    assert_eq!(show_value["step"], "f");
+    round::<RunShow>(show_value);
+    round::<MissionRepositories>(json!({}));
+    round::<MissionRepositoriesListed>(json!({"node":"local","repositories":["main"]}));
     round::<EditLayout>(json!({"arrange":true}));
     round::<EditLayout>(json!({"edges":[{"id":"e","lane":"top"}]}));
-    round::<LayoutResponse>(
-        json!({"layout":{"schema":3,"mission_id":"m","mission_rev":1,"card":[],"edge":[]},"etag":"e"}),
+    round::<LayoutShown>(
+        json!({"node":"local","layout":{"schema":3,"mission_id":"m","mission_rev":1,"card":[],"edge":[]},"etag":"e"}),
     );
-    round::<GateRequestResponse>(
-        json!({"request":{"gate_id":"g","requested_seq":2,"criterion":"Ready?","input":{"text":"yes","truncated":false}}}),
-    );
-    round::<AttemptsResponse>(json!({"attempts":{"run_id":"r","steps":[]}}));
 }
 
 #[test]

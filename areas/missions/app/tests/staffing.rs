@@ -1,8 +1,9 @@
 #![cfg(unix)]
+mod common;
 use ahjo_app_kit::{Ask, Host};
 use ahjo_core::{NodeId, TypedCommand};
 use ahjo_harness_contract::agents::{ListAgents, ListedAgents};
-use ahjo_missions_contract::MissionResponse;
+use ahjo_missions_contract::commands::MissionDefinition;
 use ahjo_node_kit::{Area, Built, Listing, NodeClient, Setup};
 use ahjo_testkit::{node::Node, sessions};
 use gpui::{Modifiers, TestAppContext, VisualTestContext, point, px};
@@ -244,10 +245,14 @@ fn catalog_pickers_offer_sorted_agents_and_model_efforts_and_save_the_choice(
     let rt = tokio::runtime::Runtime::new().unwrap();
     let client = NodeClient::new(Some(&format!("{}/", running.url))).unwrap();
     let read = || {
-        let (body, _) = rt
-            .block_on(client.request(http::Method::GET, "/api/missions/hello", None, None))
+        let body = rt
+            .block_on(common::call(
+                &client,
+                "mission_show",
+                serde_json::json!({"mission":"hello","full":true}),
+            ))
             .unwrap();
-        let response: MissionResponse = serde_json::from_value(body).unwrap();
+        let response: MissionDefinition = serde_json::from_value(body).unwrap();
         let mission = response.mission;
         (mission.rev, mission.steps[0].seats[0].clone())
     };

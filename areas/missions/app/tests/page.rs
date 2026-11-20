@@ -1,4 +1,5 @@
 #![cfg(unix)]
+mod common;
 use ahjo_app_kit::link::client::LinkState;
 use ahjo_node_kit::{Listing, NodeClient};
 use ahjo_testkit::{node::Node, sessions};
@@ -119,10 +120,13 @@ fn opens_a_fixture_mission_on_the_canvas(cx: &mut TestAppContext) {
     let rt = tokio::runtime::Runtime::new().unwrap();
     rt.block_on(async {
         let client = NodeClient::new(Some(&format!("{}/", running.url))).unwrap();
-        let (doc, _) = client
-            .request(http::Method::GET, "/api/missions/hello", None, None)
-            .await
-            .unwrap();
+        let doc = common::call(
+            &client,
+            "mission_show",
+            serde_json::json!({"mission":"hello","full":true}),
+        )
+        .await
+        .unwrap();
         assert_eq!(
             doc["mission"]["step"][0]["brief"]["goal"],
             "Deliver the result"
@@ -145,19 +149,10 @@ fn opens_a_fixture_mission_on_the_canvas(cx: &mut TestAppContext) {
     cx.simulate_input("Keep this draft");
     rt.block_on(async {
         let client = NodeClient::new(Some(&format!("{}/", running.url))).unwrap();
-        let (doc, etag) = client
-            .request(http::Method::GET, "/api/missions/hello", None, None)
-            .await
-            .unwrap();
-        client
-            .request(
-                http::Method::PATCH,
-                "/api/missions/hello",
-                Some(json!({"expected_rev": doc["mission"]["rev"], "title":"Changed elsewhere"})),
-                Some(&etag),
-            )
-            .await
-            .unwrap();
+        let doc = common::call(&client, "mission_show", serde_json::json!({"mission":"hello","full":true})).await.unwrap();
+        common::call(&client, "mission_edit", serde_json::json!({"mission":"hello", "change":json!({"expected_rev":doc["mission"]["rev"], "title":"Changed elsewhere"})}))
+        .await
+        .unwrap();
     });
     let save = cx.debug_bounds("step-save").unwrap().center();
     cx.simulate_click(save, Modifiers::none());
@@ -166,10 +161,13 @@ fn opens_a_fixture_mission_on_the_canvas(cx: &mut TestAppContext) {
     });
     rt.block_on(async {
         let client = NodeClient::new(Some(&format!("{}/", running.url))).unwrap();
-        let (doc, _) = client
-            .request(http::Method::GET, "/api/missions/hello", None, None)
-            .await
-            .unwrap();
+        let doc = common::call(
+            &client,
+            "mission_show",
+            serde_json::json!({"mission":"hello","full":true}),
+        )
+        .await
+        .unwrap();
         assert_eq!(doc["mission"]["title"], "Changed elsewhere");
         let step = doc["mission"]["step"]
             .as_array()
@@ -305,14 +303,12 @@ fn cli_authored_graph_and_layout_open_on_the_canvas(cx: &mut TestAppContext) {
     }
     let client = NodeClient::new(Some(&format!("{}/", running.url))).unwrap();
     let layout = rt
-        .block_on(client.request(
-            http::Method::GET,
-            "/api/missions/cli-board/layout",
-            None,
-            None,
+        .block_on(common::call(
+            &client,
+            "layout_show",
+            serde_json::json!({"mission":"cli-board"}),
         ))
-        .unwrap()
-        .0;
+        .unwrap();
     assert!(
         layout["layout"]["card"]
             .as_array()

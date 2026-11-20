@@ -1,4 +1,5 @@
 #![cfg(unix)]
+mod common;
 use ahjo_node_kit::{Listing, NodeClient};
 use ahjo_testkit::{node::Node, sessions};
 use gpui::{Modifiers, TestAppContext, VisualTestContext};
@@ -126,11 +127,13 @@ fn canvas_note_pin_opens_thread_and_preserves_edits(cx: &mut TestAppContext) {
     let read = || {
         runtime.block_on(async {
             let client = NodeClient::new(Some(&format!("{}/", running.url))).unwrap();
-            client
-                .request(http::Method::GET, "/api/missions/hello/notes", None, None)
-                .await
-                .unwrap()
-                .0
+            common::call(
+                &client,
+                "mission_notes",
+                serde_json::json!({"mission":"hello"}),
+            )
+            .await
+            .unwrap()
         })
     };
     let mut id = String::new();
@@ -183,8 +186,7 @@ fn canvas_note_pin_opens_thread_and_preserves_edits(cx: &mut TestAppContext) {
     cx.simulate_input("Preserve this draft");
     runtime.block_on(async {
         let client = NodeClient::new(Some(&format!("{}/", running.url))).unwrap();
-        let (_, etag) = client.request(http::Method::GET, "/api/missions/hello/notes", None, None).await.unwrap();
-        client.request(http::Method::PATCH, "/api/missions/hello/notes", Some(serde_json::json!({"target":"fmn_work", "text":"Concurrent note", "author":"agent:reviewer", "action":"append"})), Some(&etag)).await.unwrap();
+        common::call(&client, "mission_note", serde_json::json!({"mission":"hello", "on":"fmn_work", "text":"Concurrent note", "author":"reviewer"})).await.unwrap();
     });
     click(cx, "canvas-note-save-fmn_work");
     until(cx, "stale note rejected", |cx| has(cx, "canvas-note-error"));
@@ -246,11 +248,13 @@ fn a_note_is_written_in_flow_beside_its_step(cx: &mut TestAppContext) {
     let runtime = tokio::runtime::Runtime::new().unwrap();
     let doc = runtime.block_on(async {
         let client = NodeClient::new(Some(&format!("{}/", running.url))).unwrap();
-        client
-            .request(http::Method::GET, "/api/missions/hello/notes", None, None)
-            .await
-            .unwrap()
-            .0
+        common::call(
+            &client,
+            "mission_notes",
+            serde_json::json!({"mission":"hello"}),
+        )
+        .await
+        .unwrap()
     });
     assert_eq!(
         doc["notes"]["elements"][0]["entries"][0]["text"],
@@ -264,17 +268,12 @@ fn a_note_on_a_wire_shows_under_its_step_and_on_the_board(cx: &mut TestAppContex
     let runtime = tokio::runtime::Runtime::new().unwrap();
     let client = NodeClient::new(Some(&format!("{}/", running.url))).unwrap();
     // As an agent leaves it: on the wire from the step to its end.
-    let (_, etag) = runtime
-        .block_on(client.request(http::Method::GET, "/api/missions/hello/notes", None, None))
-        .unwrap();
-    let wrote = runtime.block_on(client.request(
-        http::Method::PATCH,
-        "/api/missions/hello/notes",
-        Some(serde_json::json!({
-            "target": "edge_done", "text": "Only when it passed", "author": "agent:test",
-            "action": "append"
-        })),
-        Some(&etag),
+    let wrote = runtime.block_on(common::call(
+        &client,
+        "mission_note",
+        serde_json::json!({
+            "mission":"hello", "on":"edge_done", "text":"Only when it passed", "author":"test"
+        }),
     ));
     assert!(wrote.is_ok(), "{wrote:?}");
     let settings = std::env::temp_dir()

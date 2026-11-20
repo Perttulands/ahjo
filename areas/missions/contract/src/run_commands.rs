@@ -5,8 +5,8 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    AgentSeat, GateDecision, PublicEvent, ResumeMode, RunAttempts, RunEvidence, RunGate, RunInput,
-    RunOutput, RunSendBack, RunSummary,
+    AgentSeat, GateDecision, Mission, PublicEvent, ResumeMode, RunAttempts, RunEvidence, RunGate,
+    RunInput, RunOutput, RunSendBack, RunSummary,
 };
 
 /// List runs, optionally for one mission.
@@ -17,7 +17,7 @@ pub struct RunList {
 }
 
 /// Read why a run is waiting or stopped, the next command, its state and outputs.
-#[derive(Debug, Deserialize, Serialize, JsonSchema)]
+#[derive(Debug, Default, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct RunShow {
     pub run: String,
@@ -29,6 +29,8 @@ pub struct RunShow {
     pub attempts: bool,
     #[serde(default)]
     pub evidence: bool,
+    #[serde(default)]
+    pub mission: bool,
     /// Limit attempts and evidence to a step id.
     pub step: Option<String>,
 }
@@ -90,7 +92,7 @@ pub struct RunAbort {
 }
 
 /// Resume a blocked run.
-#[derive(Debug, Deserialize, Serialize, JsonSchema)]
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct RunResume {
     pub run: String,
@@ -130,6 +132,8 @@ pub struct RunsListed {
 
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
 pub struct RunShown {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub mission: Option<Mission>,
     pub why: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub sent_back: Option<RunSendBack>,

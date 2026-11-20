@@ -1,4 +1,5 @@
 #![cfg(unix)]
+mod common;
 use ahjo_app_kit::link::client::LinkState;
 use ahjo_node_kit::{Listing, NodeClient};
 use ahjo_testkit::{node::Node, sessions};
@@ -184,9 +185,12 @@ fn five_step_canvas_can_pan_zoom_and_connect_visible_ports(cx: &mut TestAppConte
     let rt = tokio::runtime::Runtime::new().unwrap();
     let client = NodeClient::new(Some(&format!("{}/", running.url))).unwrap();
     until(cx, "new step connection", |_| {
-        rt.block_on(client.request(http::Method::GET, "/api/missions/hello", None, None))
-            .unwrap()
-            .0["mission"]["connection"]
+        rt.block_on(common::call(
+            &client,
+            "mission_show",
+            serde_json::json!({"mission":"hello","full":true}),
+        ))
+        .unwrap()["mission"]["connection"]
             .as_array()
             .unwrap()
             .iter()

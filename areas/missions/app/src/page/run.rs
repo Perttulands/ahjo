@@ -1,9 +1,12 @@
 //! Run controls and views; the channel projection remains in the store.
 use super::*;
 use crate::store::run_state;
+use ahjo_app_kit::host::Request;
 use ahjo_app_kit::{ask::Ask, theme::Theme};
 use ahjo_missions_contract::{
-    AdmissionRejection, AttemptsResponse, Mission, RunId, RunProjection, RunStart,
+    Mission, RunAttempts, RunProjection,
+    commands::{MissionRun, MissionStarted},
+    run_commands::{RunAbort, RunApprove, RunPick, RunReject, RunShow},
 };
 use gpui::{FocusHandle, KeyDownEvent, SharedString, Subscription};
 use std::collections::BTreeMap;
@@ -19,7 +22,7 @@ pub(super) struct RunUi {
     pub(super) start_card: Option<String>,
     pub(super) start_definition: Option<(Mission, String)>,
     pub(super) request_id: String,
-    pub(super) uncertain: Option<(serde_json::Value, String)>,
+    pub(super) uncertain: Option<MissionRun>,
     pub(super) cwd: Entity<TextField>,
     pub(super) repository: Entity<TextField>,
     pub(super) base: Entity<TextField>,
@@ -39,7 +42,7 @@ pub(super) struct RunUi {
     pub(super) responses: BTreeMap<String, Entity<TextField>>,
     pub(super) error: Option<String>,
     pub(super) findings: Vec<String>,
-    pub(super) attempts: Option<AttemptsResponse>,
+    pub(super) attempts: Option<RunAttempts>,
     pub(super) attempt_window: Option<crate::store::attempts::AttemptsWindow>,
     pub(super) attempts_focus: FocusHandle,
     pub(super) attempt_reason: Entity<TextField>,
@@ -50,7 +53,7 @@ pub(super) struct RunUi {
         String,
         (
             u64,
-            Result<Option<ahjo_missions_contract::GateRequest>, String>,
+            Result<Option<ahjo_missions_contract::GateDecision>, String>,
         ),
     >,
 }
@@ -173,8 +176,15 @@ impl MissionsPage {
         self.run.gates.clear();
         self.run.responses.clear();
         self.run.error = None;
-        let req = Request::get(NodeId(node), format!("/api/runs/{}/mission", segment(&run)));
-        let asked = self.host.request(req, cx);
+        let asked = self.host.call(
+            NodeId(node),
+            RunShow {
+                run: run.clone(),
+                mission: true,
+                ..Default::default()
+            },
+            cx,
+        );
         cx.spawn(async move |this, cx| {
             let result = asked.await;
             let _ = this.update(cx, |page, cx| {
@@ -182,12 +192,10 @@ impl MissionsPage {
                     return;
                 }
                 match result {
-                    Ok(a) if a.ok() => match serde_json::from_slice::<MissionResponse>(&a.body) {
-                        Ok(m) => page.run.frozen = Some(m.mission),
-                        Err(e) => page.run.error = Some(e.to_string()),
-                    },
-                    Ok(a) => page.run.error = Some(a.error_text()),
-                    Err(e) => page.run.error = Some(format!("{}: {}", e.code, e.message)),
+                    Ok(answer) => page.run.frozen = answer.mission,
+                    Err(error) => {
+                        page.run.error = Some(format!("{}: {}", error.code, error.message))
+                    }
                 }
                 cx.notify();
             });
@@ -236,69 +244,59 @@ impl MissionsPage {
         if self.run.attempts_at.is_some_and(|at| at < run.event_count) {
             self.attempts(cx);
         }
+        let mut pending = Vec::new();
         for gate in run.waiting_gates {
-            if self
-                .run
-                .gates
-                .get(&gate.gate_id)
-                .is_some_and(|(seq, _)| *seq == gate.requested_seq)
-            {
-                continue;
+            if !self.run.gates.contains_key(&gate.gate_id) {
+                self.run
+                    .gates
+                    .insert(gate.gate_id.clone(), (gate.requested_seq, Ok(None)));
+                pending.push((gate.gate_id, gate.requested_seq));
             }
-            let id = gate.gate_id.clone();
-            let seq = gate.requested_seq;
-            self.run.gates.insert(id.clone(), (seq, Ok(None)));
-            let path = format!(
-                "/api/runs/{}/gates/{}/request",
-                segment(&run_id),
-                segment(&id)
-            );
-            let asked = self
-                .host
-                .request(Request::get(NodeId(node.clone()), path), cx);
-            let selected = run_id.clone();
-            cx.spawn(async move |this, cx| {
-                let result = asked.await;
-                let _ = this.update(cx, |page, cx| {
-                    if page.run.selected.as_deref() != Some(&selected)
-                        || page
-                            .run
-                            .gates
-                            .get(&id)
-                            .is_none_or(|(current, _)| *current != seq)
-                    {
-                        return;
-                    }
-                    match result {
-                        Ok(a) if a.ok() => match serde_json::from_slice::<
-                            ahjo_missions_contract::GateRequestResponse,
-                        >(&a.body)
-                        {
-                            Ok(v) if v.request.requested_seq == seq => {
-                                page.run.gates.insert(id, (seq, Ok(Some(v.request))));
-                            }
-                            Ok(_) => {
-                                page.run.gates.insert(
-                                    id,
-                                    (seq, Err("Gate request changed. Try again.".into())),
-                                );
-                            }
-                            Err(e) => {
-                                page.run.gates.insert(id, (seq, Err(e.to_string())));
-                            }
-                        },
-                        Ok(a) => {
-                            page.run.gates.insert(id, (seq, Err(a.error_text())));
-                        }
-                        Err(e) => {
-                            page.run.gates.insert(id, (seq, Err(e.message)));
-                        }
-                    }
-                    cx.notify();
-                });
-            })
-            .detach();
         }
+        if pending.is_empty() {
+            return;
+        }
+        let asked = self.host.call(
+            NodeId(node.clone()),
+            RunShow {
+                run: run_id.clone(),
+                ..Default::default()
+            },
+            cx,
+        );
+        let generation = self.generation;
+        cx.spawn(async move |this, cx| {
+            let result = asked.await;
+            let _ = this.update(cx, |page, cx| {
+                if page.generation != generation || page.run.selected.as_deref() != Some(&run_id) {
+                    return;
+                }
+                for (id, seq) in pending {
+                    if page
+                        .run
+                        .gates
+                        .get(&id)
+                        .is_none_or(|(current, _)| *current != seq)
+                    {
+                        continue;
+                    }
+                    let request = match &result {
+                        Ok(answer) => answer
+                            .asks
+                            .iter()
+                            .find(|ask| ask.gate.as_deref() == Some(&id) && ask.seq == Some(seq))
+                            .and_then(|ask| ask.request.as_ref())
+                            .filter(|request| request.requested_seq == seq)
+                            .cloned()
+                            .ok_or_else(|| "Gate request changed. Try again.".to_owned()),
+                        Err(error) => Err(error.message.clone()),
+                    };
+                    page.run.gates.insert(id, (seq, request.map(Some)));
+                }
+                cx.notify();
+            });
+        })
+        .detach();
     }
     fn clear_start_context(&mut self, cx: &mut Context<Self>) {
         for field in [
@@ -693,18 +691,19 @@ impl MissionsPage {
                 ))
             })
             .collect();
-        let start = RunStart {
+        let start = MissionRun {
             mission: slug,
-            input_card_id,
-            step_id: target.unwrap_or_default(),
-            expected_rev: m.rev,
+            input: (!input_card_id.is_empty()).then_some(input_card_id),
+            from: target,
+            expected_rev: Some(m.rev),
+            expected_etag: Some(etag),
             inputs: values,
-            actor: "human:operator".into(),
-            request_id: self.run.request_id.clone(),
-            cwd: self.run.cwd.read(cx).text.clone(),
-            repository: self.run.repository.read(cx).text.clone(),
-            base: self.run.base.read(cx).text.clone(),
-            issue: self.run.issue.read(cx).text.clone(),
+            actor: Some("human:operator".into()),
+            request_id: Some(self.run.request_id.clone()),
+            cwd: Some(self.run.cwd.read(cx).text.clone()),
+            repository: Some(self.run.repository.read(cx).text.clone()),
+            base: Some(self.run.base.read(cx).text.clone()),
+            issue: Some(self.run.issue.read(cx).text.clone()),
             context_paths: self
                 .run
                 .paths
@@ -715,22 +714,13 @@ impl MissionsPage {
                 .filter(|p| !p.is_empty())
                 .map(str::to_owned)
                 .collect(),
-            ..Default::default()
         };
-        let (body, etag) = self
-            .run
-            .uncertain
-            .clone()
-            .unwrap_or_else(|| (serde_json::to_value(start).expect("start serializes"), etag));
-        self.run.uncertain = Some((body.clone(), etag.clone()));
-        let req = Request::new("POST", NodeId(node), "/api/runs")
-            .header("If-Match", etag)
-            .within(std::time::Duration::from_secs(60))
-            .json(&body);
+        let start = self.run.uncertain.clone().unwrap_or(start);
+        self.run.uncertain = Some(start.clone());
         self.run.busy = true;
         self.run.error = None;
         self.run.findings.clear();
-        let asked = self.host.request(req, cx);
+        let asked = self.host.call(NodeId(node), start, cx);
         let generation = self.generation;
         cx.spawn(async move |this, cx| {
             let result = asked.await;
@@ -745,35 +735,32 @@ impl MissionsPage {
                         page.run.starting = false;
                         page.show_run(id, cx);
                     }
-                    StartAnswer::Refused(a) => {
+                    StartAnswer::Refused(error) => {
                         page.run.uncertain = None;
-                        match serde_json::from_slice::<AdmissionRejection>(&a.body) {
-                            Ok(rejection) => {
-                                page.run.error = Some(if rejection.findings.is_empty() {
-                                    format!("The run could not start: {}", rejection.error.message)
-                                } else {
-                                    "The run could not start:".into()
-                                });
-                                let name_of = |id: &str| {
-                                    page.state
-                                        .mission
-                                        .as_ref()
-                                        .and_then(|m| m.steps.iter().find(|f| f.id == id))
-                                        .map_or(id.to_owned(), |f| f.title.clone())
-                                };
-                                page.run.findings = rejection
-                                    .findings
-                                    .iter()
-                                    .map(|f| {
-                                        if f.card_id.is_empty() {
-                                            f.message.clone()
-                                        } else {
-                                            format!("{}: {}", name_of(&f.card_id), f.message)
-                                        }
-                                    })
-                                    .collect();
-                            }
-                            Err(_) => page.run.error = Some(a.error_text()),
+                        if let Some(findings) = ahjo_missions_contract::admission_findings(&error) {
+                            page.run.error = Some(if findings.is_empty() {
+                                format!("The run could not start: {}", error.message)
+                            } else {
+                                "The run could not start:".into()
+                            });
+                            page.run.findings = findings
+                                .iter()
+                                .map(|finding| {
+                                    if finding.card_id.is_empty() {
+                                        finding.message.clone()
+                                    } else {
+                                        let name = page
+                                            .state
+                                            .mission
+                                            .as_ref()
+                                            .map(|m| m.card_name(&finding.card_id))
+                                            .unwrap_or(&finding.card_id);
+                                        format!("{name}: {}", finding.message)
+                                    }
+                                })
+                                .collect();
+                        } else {
+                            page.run.error = Some(error.message);
                         }
                     }
                     StartAnswer::Unknown(reason) => {
@@ -788,10 +775,9 @@ impl MissionsPage {
         .detach();
         cx.notify();
     }
-    pub(super) fn run_post(
+    pub(super) fn run_command<C: ahjo_core::TypedCommand>(
         &mut self,
-        suffix: String,
-        body: serde_json::Value,
+        command: impl FnOnce(String) -> C,
         cx: &mut Context<Self>,
     ) {
         if self.run.busy {
@@ -801,26 +787,25 @@ impl MissionsPage {
         else {
             return;
         };
-        let req = Request::new(
-            "POST",
-            NodeId(node),
-            format!("/api/runs/{}{}", segment(&run), suffix),
-        )
-        .json(&body);
+        let node = NodeId(node);
         self.run.busy = true;
         self.run.error = None;
-        let asked = self.host.request(req, cx);
+        let asked = self.host.call(node.clone(), command(run.clone()), cx);
         cx.spawn(async move |this, cx| {
             let result = asked.await;
             let _ = this.update(cx, |page, cx| {
-                if page.run.selected.as_deref() != Some(&run) {
+                if page.run.selected.as_deref() != Some(&run)
+                    || page
+                        .state
+                        .selected
+                        .as_ref()
+                        .is_none_or(|(n, _)| n != node.as_str())
+                {
                     return;
                 }
                 page.run.busy = false;
-                match result {
-                    Ok(a) if a.ok() => {}
-                    Ok(a) => page.run.error = Some(a.error_text()),
-                    Err(e) => page.run.error = Some(format!("{}: {}", e.code, e.message)),
+                if let Err(error) = result {
+                    page.run.error = Some(format!("{}: {}", error.code, error.message));
                 }
                 cx.notify();
             });
@@ -829,12 +814,65 @@ impl MissionsPage {
         cx.notify();
     }
     pub(super) fn verdict(&mut self, gate: &str, seq: u64, verdict: &str, cx: &mut Context<Self>) {
-        let body = json!({"requested_seq":seq, "verdict":verdict, "reason":self.run.responses.get(gate).map(|f| f.read(cx).text.clone()).unwrap_or_default(), "actor":"human:operator"});
-        self.run_post(format!("/gates/{}/verdict", segment(gate)), body, cx);
+        let reason = self
+            .run
+            .responses
+            .get(gate)
+            .map(|f| f.read(cx).text.clone());
+        if verdict == "pass" {
+            self.run_command(
+                |run| RunApprove {
+                    run,
+                    gate: gate.into(),
+                    seq,
+                    reason,
+                    actor: Some("human:operator".into()),
+                    relayed_by: None,
+                },
+                cx,
+            );
+        } else {
+            self.run_command(
+                |run| RunReject {
+                    run,
+                    gate: gate.into(),
+                    seq,
+                    reason,
+                    actor: Some("human:operator".into()),
+                    relayed_by: None,
+                },
+                cx,
+            );
+        }
     }
     pub(super) fn pick(&mut self, gate: &str, seq: u64, attempt: i64, cx: &mut Context<Self>) {
-        let body = json!({"requested_seq":seq, "attempt":attempt, "reason":self.run.responses.get(gate).map(|f| f.read(cx).text.clone()).unwrap_or_default(), "actor":"human:operator"});
-        self.run_post(format!("/gates/{}/pick", segment(gate)), body, cx);
+        let reason = self
+            .run
+            .responses
+            .get(gate)
+            .map(|f| f.read(cx).text.clone());
+        self.pick_with_reason(gate, seq, attempt, reason, cx);
+    }
+    fn pick_with_reason(
+        &mut self,
+        gate: &str,
+        seq: u64,
+        attempt: i64,
+        reason: Option<String>,
+        cx: &mut Context<Self>,
+    ) {
+        self.run_command(
+            |run| RunPick {
+                run,
+                gate: gate.into(),
+                seq,
+                attempt,
+                reason,
+                actor: Some("human:operator".into()),
+                relayed_by: None,
+            },
+            cx,
+        );
     }
     pub(super) fn read_evidence(
         &mut self,
@@ -846,11 +884,13 @@ impl MissionsPage {
         self.run.evidence.read_at = Some(at);
         let node = node.to_owned();
         let run = run.to_owned();
-        let asked = self.host.request(
-            Request::get(
-                NodeId(node.clone()),
-                format!("/api/runs/{}/evidence", segment(&run)),
-            ),
+        let asked = self.host.call(
+            NodeId(node.clone()),
+            RunShow {
+                run: run.clone(),
+                evidence: true,
+                ..Default::default()
+            },
             cx,
         );
         cx.spawn(async move |this, cx| {
@@ -863,17 +903,13 @@ impl MissionsPage {
                     return;
                 }
                 match result {
-                    Ok(answer) if answer.ok() => match serde_json::from_slice::<
-                        crate::store::evidence::Response,
-                    >(&answer.body)
-                    {
-                        Ok(response) => {
-                            page.run.evidence.evidence = Some(response.evidence);
+                    Ok(answer) => match answer.evidence {
+                        Some(evidence) => {
+                            page.run.evidence.evidence = Some(evidence);
                             page.run.evidence.error = None;
                         }
-                        Err(error) => page.run.evidence.error = Some(error.to_string()),
+                        None => page.run.evidence.error = Some("The node sent no evidence.".into()),
                     },
-                    Ok(answer) => page.run.evidence.error = Some(answer.error_text()),
                     Err(error) => page.run.evidence.error = Some(error.message),
                 }
                 cx.notify();
@@ -907,7 +943,11 @@ impl MissionsPage {
             let asked = self.host.request(
                 Request::get(
                     NodeId(node.clone()),
-                    format!("/api/files/file?path={}", segment(&path)),
+                    format!(
+                        "{}?path={}",
+                        ahjo_files_contract::FILE_BYTES_PATH,
+                        segment(&path)
+                    ),
                 ),
                 cx,
             );
@@ -956,39 +996,40 @@ impl MissionsPage {
             .map(|r| r.event_count)
             .unwrap_or_default();
         self.run.attempts_at = Some(at);
-        let asked = self.host.request(
-            Request::get(
-                NodeId(node),
-                format!("/api/runs/{}/evidence/attempts", segment(&run)),
-            ),
+        let asked = self.host.call(
+            NodeId(node.clone()),
+            RunShow {
+                run: run.clone(),
+                attempts: true,
+                ..Default::default()
+            },
             cx,
         );
         cx.spawn(async move |this, cx| {
             let result = asked.await;
             let _ = this.update(cx, |page, cx| {
-                if page.run.selected.as_deref() != Some(&run) || page.run.attempts_at != Some(at) {
+                if page.run.selected.as_deref() != Some(&run)
+                    || page.state.selected.as_ref().is_none_or(|(n, _)| n != &node)
+                    || page.run.attempts_at != Some(at)
+                {
                     return;
                 }
                 match result {
-                    Ok(a) if a.ok() => match serde_json::from_slice::<AttemptsResponse>(&a.body) {
-                        Ok(v) => {
+                    Ok(answer) => match answer.attempts {
+                        Some(attempts) => {
                             if let Some(window) = &mut page.run.attempt_window
                                 && let Some(step) =
-                                    v.attempts.steps.iter().find(|s| s.step_id == window.step)
+                                    attempts.steps.iter().find(|s| s.step_id == window.step)
                             {
                                 window.read(step.clone(), None);
                                 window.read_at = at;
                             }
-                            page.run.attempts = Some(v);
+                            page.run.attempts = Some(attempts);
                             if let Some((step_id, compare)) = page.run.pending_attempt.take()
                                 && let (Some(data), Some((node, _))) =
                                     (&page.run.attempts, &page.state.selected)
-                                && let Some(step) = data
-                                    .attempts
-                                    .steps
-                                    .iter()
-                                    .find(|s| s.step_id == step_id)
-                                    .cloned()
+                                && let Some(step) =
+                                    data.steps.iter().find(|s| s.step_id == step_id).cloned()
                             {
                                 let mut window = crate::store::attempts::AttemptsWindow::new(
                                     node,
@@ -1005,9 +1046,8 @@ impl MissionsPage {
                             }
                             page.load_attempt_images(cx);
                         }
-                        Err(e) => page.run.error = Some(format!("{e}")),
+                        None => page.run.error = Some("The node sent no attempts.".into()),
                     },
-                    Ok(a) => page.run.error = Some(a.error_text()),
                     Err(e) => page.run.error = Some(e.message),
                 }
                 cx.notify();
@@ -1466,9 +1506,12 @@ impl MissionsPage {
                     .on_click(cx.listener(|page, _, _, cx| {
                         let reason = page.run.stop_reason.read(cx).text.trim().to_owned();
                         page.run.abort_armed = false;
-                        page.run_post(
-                            "/abort".into(),
-                            json!({"requested_by":"human:operator", "reason":reason}),
+                        page.run_command(
+                            |run| RunAbort {
+                                run,
+                                reason: Some(reason),
+                                actor: Some("human:operator".into()),
+                            },
                             cx,
                         );
                     })),
@@ -1764,13 +1807,25 @@ impl MissionsPage {
                 .chosen()
                 .filter(|number| candidates.iter().any(|c| c.as_i64() == Some(*number)))
             {
-                panel = panel.child(div().debug_selector(|| "attempt-pick-reason".into()).child(self.run.attempt_reason.clone()))
-                        .child(kit::button(t, "attempts-pick-go", format!("Pick attempt {chosen}"), Kind::Primary)
+                panel = panel
+                    .child(
+                        div()
+                            .debug_selector(|| "attempt-pick-reason".into())
+                            .child(self.run.attempt_reason.clone()),
+                    )
+                    .child(
+                        kit::button(
+                            t,
+                            "attempts-pick-go",
+                            format!("Pick attempt {chosen}"),
+                            Kind::Primary,
+                        )
                         .debug_selector(|| "attempts-pick-go".into())
                         .on_click(cx.listener(move |page, _, _, cx| {
                             let reason = page.run.attempt_reason.read(cx).text.trim().to_owned();
-                            page.run_post(format!("/gates/{}/pick", segment(&gate)), json!({"requested_seq":seq,"attempt":chosen,"reason":reason,"actor":"human:operator"}), cx);
-                        })));
+                            page.pick_with_reason(&gate, seq, chosen, Some(reason), cx);
+                        })),
+                    );
             }
             return Some(
                 div()
@@ -1867,17 +1922,22 @@ pub(super) fn target_words(targets: &[flow::Target]) -> String {
 
 enum StartAnswer {
     Started(String),
-    Refused(ahjo_app_kit::host::Answer),
+    Refused(ahjo_core::Error),
     Unknown(String),
 }
-fn start_answer(result: Result<ahjo_app_kit::host::Answer, ahjo_core::Error>) -> StartAnswer {
+fn start_answer(result: Result<MissionStarted, ahjo_core::Error>) -> StartAnswer {
     match result {
-        Ok(answer) if answer.ok() => match serde_json::from_slice::<RunId>(&answer.body) {
-            Ok(run) if !run.run_id.is_empty() => StartAnswer::Started(run.run_id),
-            _ => StartAnswer::Unknown("the node did not name the run".into()),
-        },
-        Ok(answer) => StartAnswer::Refused(answer),
-        Err(error) => StartAnswer::Unknown(error.message),
+        Ok(answer) if !answer.run_id.is_empty() => StartAnswer::Started(answer.run_id),
+        Ok(_) => StartAnswer::Unknown("the node did not name the run".into()),
+        Err(error)
+            if matches!(
+                error.code.as_str(),
+                "unreachable" | "unanswered" | "invalid_response"
+            ) =>
+        {
+            StartAnswer::Unknown(error.message)
+        }
+        Err(error) => StartAnswer::Refused(error),
     }
 }
 /// A run in the folder Ahjo made for it, named after the run.
@@ -1887,28 +1947,24 @@ fn made_for(run: &RunProjection) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ahjo_app_kit::host::Answer;
     #[test]
     fn a_start_without_an_answer_stays_unknown_until_the_node_answers() {
         assert!(matches!(
-            start_answer(Err(ahjo_core::Error::new("offline", "lost"))),
+            start_answer(Err(ahjo_core::Error::new("unanswered", "lost"))),
             StartAnswer::Unknown(_)
         ));
         assert!(matches!(
-            start_answer(Ok(Answer {
-                status: 200,
-                body: b"{}".to_vec()
-            })),
+            start_answer(Err(ahjo_core::Error::new(
+                "invalid_response",
+                "bad response"
+            ))),
             StartAnswer::Unknown(_)
         ));
         assert!(
-            matches!(start_answer(Ok(Answer { status:202, body:br#"{"run_id":"run_1"}"#.to_vec() })), StartAnswer::Started(id) if id == "run_1")
+            matches!(start_answer(Ok(MissionStarted { node: "n".into(), run_id: "run_1".into() })), StartAnswer::Started(id) if id == "run_1")
         );
         assert!(matches!(
-            start_answer(Ok(Answer {
-                status: 409,
-                body: vec![]
-            })),
+            start_answer(Err(ahjo_core::Error::new("conflict", "changed"))),
             StartAnswer::Refused(_)
         ));
     }

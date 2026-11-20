@@ -11,6 +11,7 @@ const LAB: Listing = Listing {
 };
 const EXPECTED: &[&str] = &[
     "mission_list",
+    "mission_repositories",
     "mission_archives",
     "mission_purge",
     "mission_show",
@@ -26,9 +27,9 @@ const EXPECTED: &[&str] = &[
     "mission_resolve",
     "layout_show",
     "layout_edit",
-    "mission_run",
     "mission_arrange",
     "mission_delete",
+    "mission_run",
     "run_list",
     "run_show",
     "run_wait",
@@ -205,7 +206,7 @@ async fn command_list_and_coded_failures() {
         .unwrap();
     for &command in EXPECTED {
         let args = match command {
-            "mission_list" | "mission_archives" | "mission_examples" => {
+            "mission_list" | "mission_repositories" | "mission_archives" | "mission_examples" => {
                 json!({"unexpected":true})
             }
             "run_list" => json!({"mission":9}),
@@ -402,7 +403,7 @@ async fn mission_edit_rejects_an_unknown_agent_and_uses_work_in_both_brief_opera
     assert_eq!(error.code, "invalid_argument");
     assert_eq!(
         error.message,
-        "staff_seat: unknown field role; accepted fields: step_id, seat_id, agent, harness, model, effort; accepted fields: mission, change, rev",
+        "staff_seat: unknown field role; accepted fields: step_id, seat_id, agent, harness, model, effort; accepted fields: mission, change, rev, etag",
     );
     let args = vec![
         "edit".into(),
@@ -1348,7 +1349,7 @@ async fn mission_edit_batches_commit_once_or_leave_the_mission_and_layout_untouc
         if code == "invalid_argument" {
             assert_eq!(
                 error.message,
-                format!("{message}; accepted fields: mission, change, rev")
+                format!("{message}; accepted fields: mission, change, rev, etag")
             );
         } else {
             assert_eq!(error.message, message);

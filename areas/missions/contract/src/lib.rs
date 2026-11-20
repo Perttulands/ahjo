@@ -49,12 +49,13 @@ pub mod error {
     pub const INVALID_DEFINITION_SOURCE: &str = "invalid_definition_source";
 }
 
-/// The node maps an admission failure to a core error and, for a rejected
-/// admission, includes every engine finding alongside it.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub struct AdmissionRejection {
-    pub error: ahjo_core::Error,
-    pub findings: Vec<Finding>,
+/// Recover the structured findings carried in a rejected run's core error.
+pub fn admission_findings(error: &ahjo_core::Error) -> Option<Vec<Finding>> {
+    if error.code != error::RUN_ADMISSION_FAILED {
+        return None;
+    }
+    let json = error.message.strip_prefix("run admission failed: ")?;
+    serde_json::from_str(json).ok()
 }
 
 /// A watch frame carries exactly one byte; zero turns the subscription off.
@@ -79,27 +80,6 @@ pub struct MissionSnapshot {
 /// Both the initial snapshot and incremental updates use this payload.
 pub type RunsSnapshot = Vec<RunProjection>;
 
-#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
-#[serde(default, rename_all = "snake_case")]
-pub struct CreateMission {
-    pub title: String,
-    pub slug: String,
-    pub updated_by: String,
-}
-#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
-#[serde(default, rename_all = "snake_case")]
-pub struct DeleteMission {
-    pub expected_rev: i64,
-}
-#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
-#[serde(default, rename_all = "snake_case")]
-pub struct EditNotes {
-    pub target: String,
-    pub author: String,
-    pub text: String,
-    pub entry_id: String,
-    pub action: String,
-}
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(default, deny_unknown_fields)]
 pub struct EditLayout {
@@ -109,27 +89,6 @@ pub struct EditLayout {
     pub cards: Option<Vec<LayoutCard>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub edges: Option<Vec<LayoutEdge>>,
-}
-#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
-#[serde(default, rename_all = "snake_case")]
-pub struct Abort {
-    pub requested_by: String,
-    pub reason: String,
-}
-#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
-#[serde(default)]
-pub struct Land {
-    pub force: bool,
-}
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub struct RunId {
-    pub run_id: String,
-}
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub struct Landed {
-    pub landed: bool,
-    pub notes: Vec<String>,
 }
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
@@ -160,74 +119,3 @@ pub mod commands;
 pub mod document;
 pub mod document_commands;
 pub mod run_commands;
-
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub struct MissionResponse {
-    pub mission: Mission,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub etag: Option<String>,
-}
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub struct LayoutResponse {
-    pub layout: Layout,
-    pub etag: String,
-}
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub struct NotesResponse {
-    pub notes: document::NotesDocument,
-}
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub struct ValidationResponse {
-    pub mission_rev: i64,
-    pub mission_etag: String,
-    pub errors: Vec<Finding>,
-    pub warnings: Vec<Finding>,
-}
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub struct Deletion {
-    pub id: String,
-    pub slug: String,
-    pub title: String,
-    pub archive_id: String,
-}
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub struct DeletionResponse {
-    pub deletion: Deletion,
-}
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct AttemptsResponse {
-    pub attempts: RunAttempts,
-}
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct GateRequestResponse {
-    pub request: GateRequest,
-}
-/// Additional fields name the node created or deleted by this particular edit.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub struct EditResponse {
-    pub mission: Mission,
-    pub mission_etag: String,
-    pub layout: Layout,
-    pub layout_etag: String,
-    #[serde(flatten)]
-    pub changed: std::collections::BTreeMap<String, serde_json::Value>,
-}
-
-#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
-pub struct RunsQuery {
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub mission: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub needs: Option<String>,
-}
-#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
-pub struct AttemptsQuery {
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub step: Option<String>,
-}
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ErrorResponse {
-    pub error: ahjo_core::Error,
-}

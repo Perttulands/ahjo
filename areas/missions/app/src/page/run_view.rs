@@ -9,6 +9,10 @@ use ahjo_app_kit::theme::Theme;
 use ahjo_app_kit::widgets::pane::{self, Col};
 use ahjo_app_kit::{Host, ask::Ask};
 use ahjo_missions_contract::{Mission, RunOutput, RunProjection};
+use ahjo_missions_contract::{
+    ResumeMode,
+    run_commands::{RunLand, RunResume},
+};
 use gpui::{ClickEvent, SharedString, rgb};
 
 const STATE_W: f32 = 72.;
@@ -227,7 +231,7 @@ impl MissionsPage {
                     .debug_selector(|| "run-land".into())
                     .tooltip(kit::tip("Merge the run's branch into its repository"))
                     .on_click(cx.listener(|p, _, _, cx| {
-                        p.run_post("/land".into(), json!({"force":false}), cx)
+                        p.run_command(|run| RunLand { run, force: false }, cx)
                     })),
             );
         }
@@ -399,7 +403,7 @@ impl MissionsPage {
             .filter(|event| event.kind == "run_blocked" || event.kind == "error")
             .find(|event| !event.detail.is_empty())
             .map_or(reported, |event| event.detail.as_str());
-        for (i, (id, label, body)) in resume_offers(&run.resume_policy, &run.block_code, reason)
+        for (i, (id, label, command)) in resume_offers(&run.resume_policy, &run.block_code, reason)
             .into_iter()
             .enumerate()
         {
@@ -408,9 +412,19 @@ impl MissionsPage {
             } else {
                 pane::act(t, id, label)
             };
-            row = row.child(control.debug_selector(move || id.into()).on_click(
-                cx.listener(move |p, _, _, cx| p.run_post("/resume".into(), body.clone(), cx)),
-            ));
+            row = row.child(
+                control
+                    .debug_selector(move || id.into())
+                    .on_click(cx.listener(move |p, _, _, cx| {
+                        p.run_command(
+                            |run| RunResume {
+                                run,
+                                ..command.clone()
+                            },
+                            cx,
+                        )
+                    })),
+            );
         }
         row
     }
@@ -431,7 +445,7 @@ impl MissionsPage {
             .evidence
             .evidence
             .as_ref()
-            .map(|e| e.written_outputs(&run.cwd, &run.outputs))
+            .map(|e| crate::store::evidence::written_outputs(e, &run.cwd, &run.outputs))
             .unwrap_or_default();
         if run.outputs.is_empty() && written.is_empty() {
             return None;
@@ -722,7 +736,7 @@ impl MissionsPage {
         &self,
         t: &Theme,
         index: usize,
-        file: &crate::store::evidence::File,
+        file: &ahjo_missions_contract::RunArtifact,
         node: &str,
         cx: &mut Context<Self>,
     ) -> gpui::Stateful<Div> {
@@ -911,11 +925,23 @@ fn resume_offers(
     policy: &str,
     code: &str,
     reason: &str,
-) -> Vec<(&'static str, &'static str, serde_json::Value)> {
+) -> Vec<(&'static str, &'static str, RunResume)> {
+    let resume = |mode| RunResume {
+        run: String::new(),
+        mode,
+        take_fail: false,
+        grant: false,
+        pick_best: false,
+        reason: None,
+        actor: Some("human:operator".into()),
+    };
     let grant = (
         "run-grant",
         "Allow more",
-        json!({"mode":"reattach", "grant":true, "actor":"human:operator"}),
+        RunResume {
+            grant: true,
+            ..resume(ResumeMode::Reattach)
+        },
     );
     match policy {
         "grant" => vec![grant],
@@ -924,33 +950,35 @@ fn resume_offers(
             (
                 "run-pick-best",
                 "Pick the best attempt",
-                json!({"mode":"reattach", "pick_best":true, "actor":"human:operator"}),
+                RunResume {
+                    pick_best: true,
+                    ..resume(ResumeMode::Reattach)
+                },
             ),
         ],
         // The agent's session is gone: there is nothing to go on in.
         _ if code == "seat_gone" || reason.contains("session ended") => vec![(
             "run-redispatch",
             "Run the step again",
-            json!({"mode":"redispatch", "actor":"human:operator"}),
+            resume(ResumeMode::Redispatch),
         )],
         _ => {
             let mut offers = vec![
-                (
-                    "run-resume",
-                    "Resume",
-                    json!({"mode":"reattach", "actor":"human:operator"}),
-                ),
+                ("run-resume", "Resume", resume(ResumeMode::Reattach)),
                 (
                     "run-redispatch",
                     "Run the step again",
-                    json!({"mode":"redispatch", "actor":"human:operator"}),
+                    resume(ResumeMode::Redispatch),
                 ),
             ];
             if code == "invalid_judge_result" {
                 offers.push((
                     "run-take-fail",
                     "Take the fail route",
-                    json!({"mode":"reattach", "take_fail":true, "actor":"human:operator"}),
+                    RunResume {
+                        take_fail: true,
+                        ..resume(ResumeMode::Reattach)
+                    },
                 ));
             }
             offers
@@ -1046,14 +1074,19 @@ impl MissionsPage {
                     move || format!("gate-title-{title}")
                 }));
             if let Some((_, Ok(Some(request)))) = self.run.gates.get(&gate_id) {
+                let input = request.inputs.first();
                 let source = mission
-                    .map(|mission| crate::store::gate::source(mission, &request.input.from_card_id))
+                    .zip(input)
+                    .map(|(mission, input)| {
+                        crate::store::gate::source(mission, &input.from_card_id)
+                    })
                     .unwrap_or_else(|| "upstream step".into());
-                let quote = if request.input.text.trim().is_empty() {
-                    "The upstream step sent no text.".to_owned()
-                } else {
-                    request.input.text.clone()
-                };
+                let quote = input
+                    .filter(|input| !input.text.trim().is_empty())
+                    .map_or_else(
+                        || "The upstream step sent no text.".to_owned(),
+                        |input| input.text.clone(),
+                    );
                 let question = if request.criterion.trim().is_empty() {
                     "Review the result and decide whether to approve it.".to_owned()
                 } else {
@@ -1087,7 +1120,7 @@ impl MissionsPage {
                             .text_color(t.text2)
                             .child(quote),
                     );
-                if request.input.truncated {
+                if input.is_some_and(|input| input.truncated) {
                     row = row.child(pane::meta(t, "Showing the start of a long input.", None));
                 }
             } else if let Some((_, Err(error))) = self.run.gates.get(&gate_id) {

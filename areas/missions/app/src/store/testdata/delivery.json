@@ -1,4 +1,5 @@
 {
+ "node": "scratch",
  "mission": {
   "schema": 6,
   "id": "brd_delivery",

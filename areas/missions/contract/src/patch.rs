@@ -5,16 +5,6 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use serde_json::{Map, Value};
 use std::sync::OnceLock;
 
-/// A single change sent by the app, carrying the revision it was read at.
-#[derive(Serialize)]
-#[serde(rename_all = "snake_case")]
-pub struct SingleEdit<'a> {
-    pub expected_rev: i64,
-    pub updated_by: &'a str,
-    #[serde(flatten)]
-    pub change: &'a MissionChange,
-}
-
 pub struct EditRequest {
     pub rev: Option<i64>,
     pub updated_by: String,
@@ -59,11 +49,18 @@ impl Serialize for EditRequest {
                 struct Batch<'a> {
                     rev: i64,
                     changes: &'a [MissionChange],
+                    #[serde(skip_serializing_if = "str::is_empty")]
+                    updated_by: &'a str,
                 }
                 let rev = self.rev.ok_or_else(|| {
                     serde::ser::Error::custom("a batch needs the mission revision")
                 })?;
-                Batch { rev, changes }.serialize(serializer)
+                Batch {
+                    rev,
+                    changes,
+                    updated_by: &self.updated_by,
+                }
+                .serialize(serializer)
             }
         }
     }
@@ -90,6 +87,7 @@ impl JsonSchema for EditRequest {
                     "additionalProperties": false,
                     "properties": {
                         "rev": generator.subschema_for::<i64>(),
+                        "updated_by": {"type": "string"},
                         "changes": {"type": "array", "minItems": 1, "items": operation}
                     }
                 }
@@ -107,9 +105,14 @@ pub fn decode_request(body: &Value) -> Result<EditRequest, String> {
         struct Batch {
             rev: i64,
             changes: Vec<Value>,
+            #[serde(default)]
+            updated_by: String,
         }
-        let Batch { rev, changes } =
-            serde_json::from_value(body.clone()).map_err(|error| error.to_string())?;
+        let Batch {
+            rev,
+            changes,
+            updated_by,
+        } = serde_json::from_value(body.clone()).map_err(|error| error.to_string())?;
         if changes.is_empty() {
             return Err("changes must contain at least one operation".into());
         }
@@ -123,7 +126,7 @@ pub fn decode_request(body: &Value) -> Result<EditRequest, String> {
             .collect::<Result<_, _>>()?;
         return Ok(EditRequest {
             rev: Some(rev),
-            updated_by: String::new(),
+            updated_by,
             changes: Changes::Batch(changes),
         });
     }

@@ -1,4 +1,5 @@
 #![cfg(unix)]
+mod common;
 use ahjo_app_kit::{Ask, Host};
 use ahjo_core::NodeId;
 use ahjo_node_kit::{Listing, NodeClient};
@@ -158,9 +159,12 @@ fn undo_and_redo_replay_both_wires_of_a_removed_shared_input(cx: &mut TestAppCon
     let rt = tokio::runtime::Runtime::new().unwrap();
     let client = NodeClient::new(Some(&format!("{}/", running.url))).unwrap();
     let read = || {
-        rt.block_on(client.request(http::Method::GET, "/api/missions/hello", None, None))
-            .unwrap()
-            .0
+        rt.block_on(common::call(
+            &client,
+            "mission_show",
+            serde_json::json!({"mission":"hello","full":true}),
+        ))
+        .unwrap()
     };
     let targets = |doc: &serde_json::Value| {
         doc["mission"]["connection"]

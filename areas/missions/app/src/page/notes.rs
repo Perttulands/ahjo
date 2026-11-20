@@ -317,11 +317,11 @@ impl MissionsPage {
         self.note_paper.loading = true;
         self.note_paper.error = None;
         let generation = self.generation;
-        let asked = self.host.request(
-            Request::get(
-                NodeId(node.clone()),
-                format!("{}/notes", mission_path(&slug)),
-            ),
+        let asked = self.host.call(
+            NodeId(node.clone()),
+            ahjo_missions_contract::commands::MissionNotes {
+                mission: slug.clone(),
+            },
             cx,
         );
         cx.spawn(async move |this, cx| {
@@ -334,17 +334,10 @@ impl MissionsPage {
                 }
                 page.note_paper.loading = false;
                 match result {
-                    Ok(answer) if answer.ok() => match serde_json::from_slice::<
-                        ahjo_missions_contract::NotesResponse,
-                    >(&answer.body)
-                    {
-                        Ok(notes) => {
-                            page.notes = Some(notes.notes);
-                            page.note_paper.error = None;
-                        }
-                        Err(error) => page.note_paper.error = Some(error.to_string()),
-                    },
-                    Ok(answer) => page.note_paper.error = Some(answer.error_text()),
+                    Ok(notes) => {
+                        page.notes = Some(notes.notes);
+                        page.note_paper.error = None;
+                    }
                     Err(error) => {
                         page.note_paper.error = Some(format!("{}: {}", error.code, error.message))
                     }

@@ -11,6 +11,7 @@ workspace = true
 [dependencies]
 ahjo-app-kit = { path = "../../../kit/app-kit" }
 ahjo-core = { path = "../../../kit/core" }
+ahjo-files-contract = { path = "../../files/contract" }
 ahjo-missions-contract = { path = "../contract" }
 ahjo-harness-contract = { path = "../../harness/contract" }
 gpui = { package = "gpui-pre", version = "=0.3.12" }

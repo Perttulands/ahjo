@@ -2,7 +2,11 @@
 //! version left by the previous one, and a partial write keeps both the
 //! completed reverse and the unwritten remainder in the history.
 use super::*;
-use ahjo_missions_contract::{EditLayout, LimitUpdate, patch::SingleEdit};
+use ahjo_missions_contract::{
+    LimitUpdate,
+    commands::{LayoutShown, MissionEdit, MissionEdited},
+    patch::{Changes, EditRequest},
+};
 use std::collections::VecDeque;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -10,6 +14,11 @@ enum Mode {
     Edit,
     Undo,
     Redo,
+}
+
+enum Receipt {
+    Board(Box<MissionEdited>),
+    Layout(LayoutShown),
 }
 
 struct Pending {
@@ -124,8 +133,9 @@ impl MissionsPage {
                 return;
             }
         };
-        let path = mission_path(&pending.slug);
-        let request = match &step {
+        let node = NodeId(pending.node.clone());
+        let mut patches = Vec::new();
+        let asked = match &step {
             undo::Step::Board(patch) => {
                 let Some(etag) = self.state.mission_etag.clone() else {
                     self.history_finished(
@@ -136,11 +146,43 @@ impl MissionsPage {
                     );
                     return;
                 };
-                with_json_body(
-                    Request::new("PATCH", NodeId(pending.node.clone()), path)
-                        .header("If-Match", etag),
-                    &board_body(patch, mission.rev),
-                )
+                patches.push((patch.clone(), reverse.clone()));
+                if pending.submitted.is_some() {
+                    // One drawer save produces independent field edits. Their
+                    // reverses all read the same definition before the batch.
+                    for step in pending.left.iter().skip(1) {
+                        let undo::Step::Board(patch) = step else {
+                            break;
+                        };
+                        match undo::inverse(&mission, layout, step) {
+                            Ok(reverse) => patches.push((patch.clone(), reverse)),
+                            Err(error) => {
+                                self.history_finished(pending, Some(error), false, cx);
+                                return;
+                            }
+                        }
+                    }
+                }
+                let edit = if patches.len() == 1 {
+                    board_edit(pending.slug.clone(), *patch.clone(), mission.rev, etag)
+                } else {
+                    MissionEdit {
+                        mission: pending.slug.clone(),
+                        change: EditRequest {
+                            rev: Some(mission.rev),
+                            updated_by: "human:operator".into(),
+                            changes: Changes::Batch(
+                                patches.iter().map(|(patch, _)| (**patch).clone()).collect(),
+                            ),
+                        },
+                        rev: None,
+                        etag: Some(etag),
+                    }
+                };
+                let asked = self.host.call(node, edit, cx);
+                cx.background_executor().spawn(async move {
+                    asked.await.map(|receipt| Receipt::Board(Box::new(receipt)))
+                })
             }
             undo::Step::Layout(nodes) => {
                 let Some(etag) = self.state.layout_etag.clone() else {
@@ -152,42 +194,63 @@ impl MissionsPage {
                     );
                     return;
                 };
-                with_json_body(
-                    Request::new(
-                        "PATCH",
-                        NodeId(pending.node.clone()),
-                        format!("{path}/layout"),
-                    )
-                    .header("If-Match", etag),
-                    &EditLayout {
-                        cards: Some(nodes.clone()),
-                        ..Default::default()
+                let asked = self.host.call(
+                    node,
+                    LayoutEdit {
+                        mission: pending.slug.clone(),
+                        etag: Some(etag),
+                        change: EditLayout {
+                            cards: Some(nodes.clone()),
+                            ..Default::default()
+                        },
                     },
-                )
+                    cx,
+                );
+                cx.background_executor()
+                    .spawn(async move { asked.await.map(Receipt::Layout) })
             }
         };
-        let request = match request {
-            Ok(request) => request,
-            Err(error) => {
-                self.history_finished(pending, Some(error.to_string()), false, cx);
-                return;
-            }
-        };
-        let asked = self.host.request(request, cx);
         cx.spawn(async move |this, cx| {
             let answer = asked.await;
             let _ = this.update(cx, |page, cx| {
                 if pending.generation != page.generation {
                     return;
                 }
-                let answer = match answer {
-                    Ok(answer) if answer.ok() => answer,
-                    Ok(answer) => {
-                        let error = serde_json::from_slice::<ErrorResponse>(&answer.body)
-                            .map(|e| format!("{}: {}", e.error.code, e.error.message))
-                            .unwrap_or_else(|_| answer.error_text());
-                        page.history_finished(pending, Some(error), true, cx);
-                        return;
+                match answer {
+                    Ok(Receipt::Board(response)) => {
+                        for (patch, reverse) in patches {
+                            let reverse = if reverse.is_empty() {
+                                undo::answered(&patch, &mission, &response.definition.mission)
+                            } else {
+                                reverse
+                            };
+                            pending.reverses.extend(reverse);
+                            if let (Some(submitted), Some(editor)) =
+                                (&pending.submitted, &mut page.editor)
+                                && let Some(base) = &mut editor.baseline
+                            {
+                                accept_editor_operation(base, submitted, &patch);
+                            }
+                            pending.left.pop_front();
+                        }
+                        pending.wrote = Some(undo::Version {
+                            rev: response.definition.mission.rev,
+                            layout: Some(response.layout_etag.clone()),
+                        });
+                        page.state.mission_etag = Some(response.definition.etag);
+                        page.state.mission = Some(response.definition.mission);
+                        page.state.layout_etag = Some(response.layout_etag);
+                        page.state.layout = Some(response.layout);
+                    }
+                    Ok(Receipt::Layout(response)) => {
+                        pending.reverses.extend(reverse);
+                        pending.left.pop_front();
+                        pending.wrote = Some(undo::Version {
+                            rev: mission.rev,
+                            layout: Some(response.etag.clone()),
+                        });
+                        page.state.layout_etag = Some(response.etag);
+                        page.state.layout = Some(response.layout);
                     }
                     Err(error) => {
                         page.history_finished(
@@ -198,57 +261,7 @@ impl MissionsPage {
                         );
                         return;
                     }
-                };
-                match &step {
-                    undo::Step::Board(patch) => {
-                        match serde_json::from_slice::<EditResponse>(&answer.body) {
-                            Ok(response) => {
-                                let reverse = if reverse.is_empty() {
-                                    undo::answered(patch, &mission, &response.mission)
-                                } else {
-                                    reverse
-                                };
-                                pending.reverses.extend(reverse);
-                                if let (Some(submitted), Some(editor)) =
-                                    (&pending.submitted, &mut page.editor)
-                                    && let Some(base) = &mut editor.baseline
-                                {
-                                    accept_editor_operation(base, submitted, patch);
-                                }
-                                pending.wrote = Some(undo::Version {
-                                    rev: response.mission.rev,
-                                    layout: Some(response.layout_etag.clone()),
-                                });
-                                page.state.mission_etag = Some(response.mission_etag);
-                                page.state.mission = Some(response.mission);
-                                page.state.layout_etag = Some(response.layout_etag);
-                                page.state.layout = Some(response.layout);
-                            }
-                            Err(error) => {
-                                page.history_finished(pending, Some(error.to_string()), true, cx);
-                                return;
-                            }
-                        }
-                    }
-                    undo::Step::Layout(_) => {
-                        match serde_json::from_slice::<LayoutResponse>(&answer.body) {
-                            Ok(response) => {
-                                pending.reverses.extend(reverse);
-                                pending.wrote = Some(undo::Version {
-                                    rev: mission.rev,
-                                    layout: Some(response.etag.clone()),
-                                });
-                                page.state.layout_etag = Some(response.etag);
-                                page.state.layout = Some(response.layout);
-                            }
-                            Err(error) => {
-                                page.history_finished(pending, Some(error.to_string()), true, cx);
-                                return;
-                            }
-                        }
-                    }
                 }
-                pending.left.pop_front();
                 page.history_next(pending, cx);
             });
         })
@@ -329,28 +342,23 @@ impl MissionsPage {
         generation: u64,
         cx: &mut Context<Self>,
     ) {
-        let path = mission_path(&slug);
-        let mission = self
-            .host
-            .request(Request::get(NodeId(node.clone()), &path), cx);
+        let mission = read_definition(&self.host, NodeId(node.clone()), slug.clone(), cx);
         let layout = self
             .host
-            .request(Request::get(NodeId(node), format!("{path}/layout")), cx);
+            .call(NodeId(node), LayoutShow { mission: slug }, cx);
         cx.spawn(async move |this, cx| {
             let (mission, layout) = (mission.await, layout.await);
             let _ = this.update(cx, |page, cx| {
                 if page.generation != generation {
                     return;
                 }
-                let mission = mission.ok().filter(|answer| answer.ok()).and_then(|answer| serde_json::from_slice::<MissionResponse>(&answer.body).ok());
-                let layout = layout.ok().filter(|answer| answer.ok()).and_then(|answer| serde_json::from_slice::<LayoutResponse>(&answer.body).ok());
                 match mission {
-                    Some(response) => { page.state.mission_etag = response.etag; page.state.mission = Some(response.mission); }
-                    None => { page.state.mission_etag = None; page.state.mission = None; }
+                    Ok(response) => { page.state.mission_etag = Some(response.etag); page.state.mission = Some(response.mission); }
+                    Err(_) => { page.state.mission_etag = None; page.state.mission = None; }
                 }
                 match layout {
-                    Some(response) => { page.state.layout_etag = Some(response.etag); page.state.layout = Some(response.layout); }
-                    None => { page.state.layout_etag = None; page.state.layout = None; }
+                    Ok(response) => { page.state.layout_etag = Some(response.etag); page.state.layout = Some(response.layout); }
+                    Err(_) => { page.state.layout_etag = None; page.state.layout = None; }
                 }
                 if page.state.mission.is_none() || page.state.layout.is_none() {
                     page.state.error = Some("Could not reload the mission and layout after the failed edit. Reopen the mission before editing.".into());
@@ -434,20 +442,37 @@ fn accept_editor_operation(
     }
 }
 
-pub(super) fn with_json_body(
-    mut request: Request,
-    body: &impl serde::Serialize,
-) -> serde_json::Result<Request> {
-    request.body = Some(("application/json".into(), serde_json::to_vec(body)?));
-    Ok(request)
+pub(super) fn board_edit(
+    mission: String,
+    patch: MissionChange,
+    rev: i64,
+    etag: String,
+) -> MissionEdit {
+    MissionEdit {
+        mission,
+        change: EditRequest {
+            rev: None,
+            updated_by: "human:operator".into(),
+            changes: Changes::Single(Box::new(patch)),
+        },
+        rev: Some(rev),
+        etag: Some(etag),
+    }
 }
 
-pub(super) fn board_body(patch: &MissionChange, rev: i64) -> SingleEdit<'_> {
-    SingleEdit {
-        expected_rev: rev,
-        updated_by: "human:operator",
-        change: patch,
-    }
+#[cfg(test)]
+pub(super) fn assert_board_edit_decodes(patch: MissionChange) {
+    let expected = serde_json::to_value(&patch).unwrap();
+    let encoded =
+        serde_json::to_vec(&board_edit("draft".into(), patch, 7, "version".into())).unwrap();
+    let decoded: MissionEdit = serde_json::from_slice(&encoded).unwrap();
+    assert_eq!(decoded.rev, Some(7));
+    assert_eq!(decoded.etag.as_deref(), Some("version"));
+    assert_eq!(decoded.change.updated_by, "human:operator");
+    let Changes::Single(received) = decoded.change.changes else {
+        panic!("expected one edit");
+    };
+    assert_eq!(serde_json::to_value(received).unwrap(), expected);
 }
 
 pub(super) fn session_patch(id: &str, fresh: bool) -> MissionChange {
@@ -582,7 +607,7 @@ mod tests {
             delete_limit_patch("limit"),
             update_limit_patch("limit", "Cap", "stop", ["3", "90", "", "200"]).unwrap(),
         ] {
-            assert_patch_decodes(&board_body(&patch, 7));
+            assert_board_edit_decodes(patch);
         }
         for op in ["input", "output", "update", "remove"] {
             assert_patch_decodes(

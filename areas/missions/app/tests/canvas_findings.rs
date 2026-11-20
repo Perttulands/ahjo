@@ -1,4 +1,5 @@
 #![cfg(unix)]
+mod common;
 use ahjo_app_kit::link::client::LinkState;
 use ahjo_node_kit::{Listing, NodeClient};
 use ahjo_testkit::{node::Node, sessions};
@@ -147,12 +148,11 @@ fn canvas_shows_exact_findings_on_cards_and_edges_and_clears_them(cx: &mut TestA
     );
     let rt = tokio::runtime::Runtime::new().unwrap();
     let client = NodeClient::new(Some(&format!("{}/", running.url))).unwrap();
-    let (report, _) = rt
-        .block_on(client.request(
-            http::Method::GET,
-            "/api/missions/findings/validation",
-            None,
-            None,
+    let report = rt
+        .block_on(common::call(
+            &client,
+            "mission_validate",
+            serde_json::json!({"mission":"findings"}),
         ))
         .unwrap();
     let mission = ahjo_missions_contract::Mission::parse(include_str!(
@@ -212,12 +212,11 @@ fn canvas_shows_exact_findings_on_cards_and_edges_and_clears_them(cx: &mut TestA
         cx.debug_bounds("mission-validation-complete").is_some()
             && cx.debug_bounds("mission-card-step_work").is_some()
     });
-    let (report, _) = rt
-        .block_on(client.request(
-            http::Method::GET,
-            "/api/missions/clean/validation",
-            None,
-            None,
+    let report = rt
+        .block_on(common::call(
+            &client,
+            "mission_validate",
+            serde_json::json!({"mission":"clean"}),
         ))
         .unwrap();
     assert!(report["errors"].as_array().unwrap().is_empty());

@@ -13,7 +13,6 @@ use ahjo_node_kit::{Command, Effect};
 use crate::{
     Missions,
     commands::{bad, command, required},
-    run_routes::seat_wire,
 };
 
 pub use ahjo_missions_contract::run_commands::NAMES;
@@ -143,7 +142,12 @@ fn show(m: &Missions, args: RunShow) -> Result<RunShown, Error> {
         .evidence
         .then(|| m.coordinator.evidence(id, args.step.as_deref()))
         .transpose()?;
+    let mission = args
+        .mission
+        .then(|| m.coordinator.frozen_mission(id))
+        .transpose()?;
     Ok(RunShown {
+        mission,
         why,
         sent_back,
         next,
@@ -405,4 +409,23 @@ fn abort(m: &Missions, args: RunAbort) -> Result<RunChanged, Error> {
         node: m.node.clone(),
         run: state(&run),
     })
+}
+
+pub(super) fn seat_wire(seat: ahjo_mission_engine::AgentSeat) -> ahjo_missions_contract::AgentSeat {
+    ahjo_missions_contract::AgentSeat {
+        dispatch_id: seat.dispatch_id,
+        seat_id: seat.seat_id,
+        node: seat.node,
+        session: seat.session_name,
+        session_id: seat.session,
+        pane: seat.pane,
+        outcome: seat.outcome,
+        available: seat.available,
+        waiting: seat.waiting.map(|wait| ahjo_missions_contract::SeatWait {
+            state: wait.state,
+            detail: wait.detail,
+            since: wait.since,
+            seq: wait.seq,
+        }),
+    }
 }

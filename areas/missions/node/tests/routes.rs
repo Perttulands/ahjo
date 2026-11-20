@@ -1,5 +1,5 @@
 use ahjo_missions_contract::{Layout, Mission};
-use ahjo_node_kit::{Listing, NodeClient, NodeError};
+use ahjo_node_kit::{Listing, NodeClient};
 use ahjo_testkit::{node::Node, sessions};
 use axum::http::Method;
 use serde_json::json;
@@ -11,200 +11,163 @@ const AREAS: &[Listing] = &[
 ];
 
 #[tokio::test(flavor = "multi_thread")]
-async fn mission_routes_on_a_node_with_fake_sessions() {
+async fn mission_commands_on_a_node_with_fake_sessions() {
     let node = Node::start(AREAS, "").await.unwrap();
-    let client = NodeClient::new(Some(&format!("{}/", node.url()))).unwrap();
-    let (created, etag) = client
-        .request(
-            Method::POST,
-            "/api/missions",
-            Some(json!({"title":"Example"})),
-            None,
-        )
+    let created = node
+        .call("mission_create", json!({"slug":"", "title":"Example"}))
         .await
         .unwrap();
-    assert_eq!(created["mission"]["title"], "Example");
-    let (listed, _) = client
-        .request(Method::GET, "/api/missions", None, None)
+    assert_eq!(created["title"], "Example");
+    assert_eq!(created["created"], "example");
+    let initial = node
+        .call("mission_show", json!({"mission":"example", "full":true}))
         .await
         .unwrap();
+    assert_eq!(initial["mission"]["title"], "Example");
+    let listed = node.call("mission_list", json!({})).await.unwrap();
     assert_eq!(listed["missions"][0]["slug"], "example");
-    let (edited, _) = client
-        .request(
-            Method::PATCH,
-            "/api/missions/example",
-            Some(json!({"expected_rev":1,"title":"Renamed"})),
-            Some(&etag),
-        )
-        .await
-        .unwrap();
+    let edited = node.call("mission_edit", json!({"mission":"example", "change":{"title":"Renamed"}, "rev":1, "etag":initial["etag"]})).await.unwrap();
     assert_eq!(edited["mission"]["title"], "Renamed");
-    let (wire, mission_etag) = client
-        .request(Method::GET, "/api/missions/example", None, None)
+    let wire = node
+        .call("mission_show", json!({"mission":"example", "full":true}))
         .await
         .unwrap();
-    let stored_mission =
+    let stored =
         std::fs::read_to_string(node.dir().join("missions/missions/example.mission.toml")).unwrap();
-    let stored_mission = Mission::parse(&stored_mission).unwrap();
-    assert_eq!(wire, json!({"mission":stored_mission,"etag":mission_etag}));
+    let stored = Mission::parse(&stored).unwrap();
+    assert_eq!(wire["mission"], json!(stored));
     assert_eq!(edited["mission"], wire["mission"]);
-    assert_eq!(edited["mission_etag"], mission_etag);
-    let (notes, notes_etag) = client
-        .request(Method::GET, "/api/missions/example/notes", None, None)
+    assert_eq!(edited["etag"], wire["etag"]);
+    let notes = node
+        .call("mission_notes", json!({"mission":"example"}))
         .await
         .unwrap();
     assert!(notes["notes"]["mission"].is_array());
-    let (updated_notes, _) = client
-        .request(
-            Method::PATCH,
-            "/api/missions/example/notes",
-            Some(json!({"target":"mission","text":"intent","author":"human:test"})),
-            Some(&notes_etag),
-        )
-        .await
-        .unwrap();
-    assert_eq!(updated_notes["notes"]["mission"][0]["text"], "intent");
-    let (validation, _) = client
-        .request(Method::GET, "/api/missions/example/validation", None, None)
+    let note = node.call("mission_note", json!({"mission":"example", "text":"intent", "author":"human:test", "etag":notes["notes"]["etag"]})).await.unwrap();
+    assert_eq!(note["thread"][0]["text"], "intent");
+    let validation = node
+        .call("mission_validate", json!({"mission":"example"}))
         .await
         .unwrap();
     assert!(validation["errors"].is_array());
-    let (layout, layout_etag) = client
-        .request(Method::GET, "/api/missions/example/layout", None, None)
+    let layout = node
+        .call("layout_show", json!({"mission":"example"}))
         .await
         .unwrap();
     assert!(layout["layout"]["card"].is_array());
-    let (changed_layout, changed_layout_etag) = client
-        .request(
-            Method::PATCH,
-            "/api/missions/example/layout",
-            Some(json!({"cards":[{"id":"a","x":10,"y":20}]})),
-            Some(&layout_etag),
-        )
-        .await
-        .unwrap();
-    assert_eq!(changed_layout["layout"]["card"][0]["x"], 10);
-    let stored_layout =
+    let changed = node.call("layout_edit", json!({"mission":"example", "change":{"cards":[{"id":"a","x":10,"y":20}]}, "etag":layout["etag"]})).await.unwrap();
+    assert_eq!(changed["layout"]["card"][0]["x"], 10);
+    let stored =
         std::fs::read_to_string(node.dir().join("missions/layout/example.layout.toml")).unwrap();
-    let stored_layout = Layout::parse(&stored_layout).unwrap();
-    assert_eq!(
-        changed_layout,
-        json!({"layout":stored_layout,"etag":changed_layout_etag})
-    );
-    let (read_layout, read_layout_etag) = client
-        .request(Method::GET, "/api/missions/example/layout", None, None)
+    assert_eq!(changed["layout"], json!(Layout::parse(&stored).unwrap()));
+    let read_layout = node
+        .call("layout_show", json!({"mission":"example"}))
         .await
         .unwrap();
-    assert_eq!(
-        (read_layout, read_layout_etag),
-        (changed_layout, changed_layout_etag)
-    );
-    for (method, path, body) in [
-        (Method::POST, "/api/runs/run_missing/resume", json!({})),
+    assert_eq!(read_layout["layout"], changed["layout"]);
+    assert_eq!(read_layout["etag"], changed["etag"]);
+    for (command, body) in [
+        ("run_resume", json!({"run":"run_missing"})),
+        ("run_abort", json!({"run":"run_missing", "reason":"stop"})),
+        ("run_land", json!({"run":"run_missing", "force":false})),
         (
-            Method::POST,
-            "/api/runs/run_missing/abort",
-            json!({"reason":"stop"}),
+            "run_approve",
+            json!({"run":"run_missing", "gate":"g", "seq":1}),
         ),
         (
-            Method::POST,
-            "/api/runs/run_missing/land",
-            json!({"force":false}),
-        ),
-        (
-            Method::POST,
-            "/api/runs/run_missing/gates/g/verdict",
-            json!({"requested_seq":1,"verdict":"pass"}),
-        ),
-        (
-            Method::POST,
-            "/api/runs/run_missing/gates/g/pick",
-            json!({"requested_seq":1,"attempt":1}),
+            "run_pick",
+            json!({"run":"run_missing", "gate":"g", "seq":1, "attempt":1}),
         ),
     ] {
-        let error = client
-            .request(method, path, Some(body), None)
-            .await
-            .unwrap_err();
-        assert!(
-            format!("{error:#}").contains("not_found"),
-            "{path}: {error:#}"
-        );
+        let error = node.call(command, body).await.unwrap_err();
+        assert_eq!(error.code, "not_found", "{command}: {error}");
+        let error = node.call(command, json!("wrong type")).await.unwrap_err();
+        assert_eq!(error.code, "invalid_argument", "{command}");
     }
-    let invalid = client
-        .request(
-            Method::POST,
-            "/api/runs",
-            Some(json!({"expected_rev":"wrong"})),
-            None,
-        )
-        .await
-        .unwrap_err();
-    assert!(format!("{invalid:#}").contains("bad_request"));
-    for path in [
-        "/api/runs/run_missing/resume",
-        "/api/runs/run_missing/abort",
-        "/api/runs/run_missing/land",
-        "/api/runs/run_missing/gates/g/verdict",
-        "/api/runs/run_missing/gates/g/pick",
-    ] {
-        let error = client
-            .request(Method::POST, path, Some(json!("wrong type")), None)
-            .await
-            .unwrap_err();
-        assert_eq!(
-            error.downcast_ref::<NodeError>().unwrap().code,
-            "bad_request",
-            "{path}"
-        );
-    }
-    let error = client
-        .request(Method::GET, "/api/runs?mission=a&mission=b", None, None)
-        .await
-        .unwrap_err();
     assert_eq!(
-        error.downcast_ref::<NodeError>().unwrap().code,
-        "bad_request"
-    );
-    let missing_issue = client
-        .request(
-            Method::POST,
-            "/api/runs",
-            Some(json!({"issue":"missing-1"})),
-            None,
+        node.call(
+            "mission_run",
+            json!({"mission":"example", "expected_rev":"wrong"})
         )
         .await
-        .unwrap_err();
-    assert!(format!("{missing_issue:#}").contains("bad_request"));
-    let (read, mission_etag) = client
-        .request(Method::GET, "/api/missions/example", None, None)
-        .await
-        .unwrap();
-    let rev = read["mission"]["rev"].as_i64().unwrap();
-    let (deleted, _) = client
-        .request(
-            Method::DELETE,
-            "/api/missions/example",
-            Some(json!({"expected_rev":rev})),
-            Some(&mission_etag),
+        .unwrap_err()
+        .code,
+        "invalid_argument"
+    );
+    assert_eq!(
+        node.call("run_list", json!({"mission":["a","b"]}))
+            .await
+            .unwrap_err()
+            .code,
+        "invalid_argument"
+    );
+    assert_eq!(
+        node.call("mission_run", json!({"issue":"missing-1"}))
+            .await
+            .unwrap_err()
+            .code,
+        "invalid_argument"
+    );
+    let rev = wire["mission"]["rev"].as_i64().unwrap();
+    let deleted = node
+        .call(
+            "mission_delete",
+            json!({"mission":"example", "rev":rev, "etag":wire["etag"]}),
         )
         .await
         .unwrap();
     assert_eq!(deleted["deletion"]["slug"], "example");
-    // The operator's Delete is for good: nothing of it is left behind.
+    let archive = deleted["deletion"]["archive_id"].as_str().unwrap();
+    assert_eq!(
+        node.call("mission_show", json!({"mission":"example"}))
+            .await
+            .unwrap_err()
+            .code,
+        "not_found"
+    );
+    let archives = node.call("mission_archives", json!({})).await.unwrap();
+    let entry = archives["archives"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|entry| entry["archive_id"] == archive)
+        .unwrap();
+    assert_eq!(entry["slug"], "example");
+    assert_eq!(entry["mission"], true);
+    let removed = node
+        .call(
+            "mission_purge",
+            json!({"slug":"example", "archive_id":archive}),
+        )
+        .await
+        .unwrap();
+    assert_eq!(removed["removed"]["archive_id"], archive);
+    assert!(
+        node.call("mission_archives", json!({})).await.unwrap()["archives"]
+            .as_array()
+            .unwrap()
+            .is_empty()
+    );
     let left: Vec<_> = std::fs::read_dir(node.dir().join("missions/missions"))
         .unwrap()
         .map(|entry| entry.unwrap().file_name())
         .collect();
     assert!(left.is_empty(), "{left:?}");
-    let error = client
-        .request(Method::GET, "/api/missions/missing", None, None)
-        .await
-        .unwrap_err();
-    assert!(format!("{error:#}").contains("not_found"));
+    assert_eq!(
+        node.call("mission_show", json!({"mission":"missing"}))
+            .await
+            .unwrap_err()
+            .code,
+        "not_found"
+    );
     let other = NodeClient::new(Some(&format!("{}/?node=elsewhere", node.url()))).unwrap();
     let error = other
-        .request(Method::GET, "/api/missions", None, None)
+        .request(
+            Method::POST,
+            "/api/call/mission_list",
+            Some(json!({})),
+            None,
+        )
         .await
         .unwrap_err();
     assert!(format!("{error:#}").contains("unknown_node"));
@@ -238,20 +201,21 @@ async fn run_changes_arrive_on_the_socket_through_completion() {
         include_str!("fixtures/admission-findings.mission.toml"),
     )
     .unwrap();
-    let rejected = client
-        .request(
-            Method::POST,
-            "/api/runs",
-            Some(json!({"mission":"admission-findings","input_card_id":"inp","expected_rev":1})),
-            None,
+    let rejected = node
+        .call(
+            "mission_run",
+            json!({"mission":"admission-findings", "input":"inp", "expected_rev":1}),
         )
         .await
         .unwrap_err();
-    let rejected = rejected.downcast_ref::<NodeError>().unwrap();
     assert_eq!(rejected.code, "run_admission_failed");
-    let findings = rejected.findings.as_ref().unwrap().as_array().unwrap();
-    assert!(findings.iter().any(|f| f["code"] == "missing_input"));
-    assert!(findings.iter().any(|f| f["code"] == "step_without_seats"));
+    let findings = ahjo_missions_contract::admission_findings(&rejected).unwrap();
+    assert!(findings.iter().any(|f| f.code.as_str() == "missing_input"));
+    assert!(
+        findings
+            .iter()
+            .any(|f| f.code.as_str() == "step_without_seats")
+    );
     let remote = include_str!("fixtures/solo-lab.mission.toml")
         .replace("slug = \"hello\"", "slug = \"remote\"")
         .replace("id = \"msn_hello\"", "id = \"msn_remote\"")
@@ -260,8 +224,8 @@ async fn run_changes_arrive_on_the_socket_through_completion() {
             "id = \"fmn_work\"\nenvironment = \"remote/linux\"",
         );
     std::fs::write(folder.join("remote.mission.toml"), remote).unwrap();
-    let error = client.request(Method::POST, "/api/runs", Some(json!({"mission":"remote","input_card_id":"inp_hello","expected_rev":1,"inputs":{"brief":"hello"}})), None).await.unwrap_err();
-    assert!(format!("{error:#}").contains("run_admission_failed"));
+    let error = node.call("mission_run", json!({"mission":"remote", "input":"inp_hello", "expected_rev":1, "inputs":{"brief":"hello"}})).await.unwrap_err();
+    assert_eq!(error.code, "run_admission_failed");
     let (health, _) = client
         .request(Method::GET, "/api/health", None, None)
         .await
@@ -279,7 +243,7 @@ async fn run_changes_arrive_on_the_socket_through_completion() {
             &format!("id = \"fmn_work\"\nenvironment = \"{place}\""),
         );
     std::fs::write(folder.join("local.mission.toml"), local).unwrap();
-    let (local_run, _) = client.request(Method::POST, "/api/runs", Some(json!({"mission":"local","input_card_id":"inp_hello","expected_rev":1,"inputs":{"brief":"hello"}})), None).await.unwrap();
+    let local_run = node.call("mission_run", json!({"mission":"local", "input":"inp_hello", "expected_rev":1, "inputs":{"brief":"hello"}})).await.unwrap();
     assert!(local_run["run_id"].is_string());
     let (mut socket, _) = connect_async(node.ws()).await.unwrap();
     socket
@@ -296,16 +260,10 @@ async fn run_changes_arrive_on_the_socket_through_completion() {
             break;
         }
     }
-    let legacy = client.request(
-        Method::POST,
-        "/api/runs",
-        Some(json!({"mission":"hello","input_card_id":"inp_hello","expected_rev":1,"inputs":{"brief":"hello"},"work":"gh:example/project#1"})),
-        None,
-    ).await.unwrap_err();
-    let legacy = legacy.downcast_ref::<NodeError>().unwrap();
-    assert_eq!(legacy.code, "bad_request");
-    assert!(legacy.message.contains("unknown field `work`"));
-    let (started, _) = client.request(Method::POST, "/api/runs", Some(json!({"mission":"hello","input_card_id":"inp_hello","expected_rev":1,"inputs":{"brief":"hello"},"issue":"gh:example/project#1"})), None).await.unwrap();
+    let legacy = node.call("mission_run", json!({"mission":"hello", "input":"inp_hello", "expected_rev":1, "inputs":{"brief":"hello"}, "work":"gh:example/project#1"})).await.unwrap_err();
+    assert_eq!(legacy.code, "invalid_argument");
+    assert!(legacy.message.contains("work"));
+    let started = node.call("mission_run", json!({"mission":"hello", "input":"inp_hello", "expected_rev":1, "inputs":{"brief":"hello"}, "issue":"gh:example/project#1"})).await.unwrap();
     let id = started["run_id"].as_str().unwrap();
     let mut answered = false;
     let final_run = tokio::time::timeout(std::time::Duration::from_secs(10), async {
@@ -320,20 +278,18 @@ async fn run_changes_arrive_on_the_socket_through_completion() {
                 serde_json::from_slice(&frame[1..]).unwrap();
             for run in runs.into_iter().filter(|r| r.run_id == id) {
                 if let Some(gate) = run.waiting_gates.first() && !answered {
-                    let path = format!("/api/runs/{id}/gates/{}/request", gate.gate_id);
-                    let (request, _) = client.request(Method::GET, &path, None, None).await.unwrap();
+                    let shown = node.call("run_show", json!({"run":id})).await.unwrap();
+                    let request = shown["asks"].as_array().unwrap().iter().find(|ask| ask["gate"] == gate.gate_id).unwrap();
                     assert_eq!(request["request"]["requested_seq"], gate.requested_seq);
-                    let path = format!("/api/runs/{id}/gates/{}/verdict", gate.gate_id);
-                    for (body, status) in [
-                        (json!({"requested_seq":gate.requested_seq,"verdict":"pass","relayed_by":"-invalid"}), axum::http::StatusCode::BAD_REQUEST),
-                        (json!({"requested_seq":1,"verdict":"pass"}), axum::http::StatusCode::CONFLICT),
+                    for (body, code) in [
+                        (json!({"run":id,"gate":gate.gate_id,"seq":gate.requested_seq,"relayed_by":"-invalid"}), "invalid_input"),
+                        (json!({"run":id,"gate":gate.gate_id,"seq":1}), "conflict"),
                     ] {
-                        let error = client.request(Method::POST, &path, Some(body), None).await.unwrap_err();
-                        assert_eq!(error.downcast_ref::<NodeError>().unwrap().status, status);
+                        assert_eq!(node.call("run_approve", body).await.unwrap_err().code, code);
                     }
-                    client.request(Method::POST, &path, Some(json!({"requested_seq":gate.requested_seq,"verdict":"pass","reason":"  accepted\n","actor":"agent:http"})), None).await.unwrap();
-                    let duplicate = client.request(Method::POST, &path, Some(json!({"requested_seq":gate.requested_seq,"verdict":"pass"})), None).await.unwrap_err();
-                    assert_eq!(duplicate.downcast_ref::<NodeError>().unwrap().status, axum::http::StatusCode::CONFLICT);
+                    node.call("run_approve", json!({"run":id,"gate":gate.gate_id,"seq":gate.requested_seq,"reason":"  accepted\n","actor":"agent:http"})).await.unwrap();
+                    let duplicate = node.call("run_approve", json!({"run":id,"gate":gate.gate_id,"seq":gate.requested_seq})).await.unwrap_err();
+                    assert_eq!(duplicate.code, "conflict");
                     answered = true;
                 }
                 if run.r#final { break 'stream run; }
@@ -357,31 +313,24 @@ async fn run_changes_arrive_on_the_socket_through_completion() {
                 && event.actor == "agent:http"
                 && event.data["decided_by"] == "agent:http")
     );
-    let unknown = client
-        .request(
-            Method::POST,
-            &format!("/api/runs/{id}/resume"),
-            Some(json!({"grant":true,"completed_dispatch_id":"dsp_1"})),
-            None,
+    let unknown = node
+        .call(
+            "run_resume",
+            json!({"run":id,"grant":true,"completed_dispatch_id":"dsp_1"}),
         )
         .await
         .unwrap_err();
-    assert_eq!(
-        unknown.downcast_ref::<NodeError>().unwrap().status,
-        axum::http::StatusCode::BAD_REQUEST
-    );
+    assert_eq!(unknown.code, "invalid_argument");
     assert_eq!(final_run.issue, "gh:example/project#1");
-    let (listed, _) = client
-        .request(Method::GET, "/api/runs", None, None)
-        .await
-        .unwrap();
-    let _: Vec<ahjo_missions_contract::RunSummary> = serde_json::from_value(listed).unwrap();
-    for suffix in ["", "/events", "/mission", "/seats", "/evidence/attempts"] {
-        client
-            .request(Method::GET, &format!("/api/runs/{id}{suffix}"), None, None)
-            .await
-            .unwrap();
-    }
+    let listed = node.call("run_list", json!({})).await.unwrap();
+    let _: Vec<ahjo_missions_contract::RunSummary> =
+        serde_json::from_value(listed["runs"].clone()).unwrap();
+    let shown = node.call("run_show", json!({"run":id,"events":true,"mission":true,"seats":true,"attempts":true,"evidence":true})).await.unwrap();
+    assert!(shown["events"].is_array());
+    assert!(shown["mission"].is_object());
+    assert!(shown["seats"].is_array());
+    assert!(shown["attempts"].is_object());
+    assert!(shown["evidence"].is_object());
     drop(socket);
     node.stop().await;
 }
@@ -397,7 +346,6 @@ async fn default_agent_store_is_shared_and_isolated() {
     let node = Node::start(areas, "").await.unwrap();
     let other = Node::start(areas, "").await.unwrap();
     let root = ahjo_mission_engine::Store::root_in(node.dir());
-    let client = NodeClient::new(Some(&format!("{}/", node.url()))).unwrap();
     node.call(
         "agent_create",
         json!({"id":"fixture-writer","name":"Reviewer","instructions":"Write a review.","harness":"claude-code","effort":"medium"}),
@@ -406,8 +354,8 @@ async fn default_agent_store_is_shared_and_isolated() {
     let mission = include_str!("fixtures/solo-lab.mission.toml")
         .replace("agent = \"builder\"", "agent = \"fixture-writer\"");
     std::fs::write(root.join("missions/hello.mission.toml"), mission).unwrap();
-    let (report, _) = client
-        .request(Method::GET, "/api/missions/hello/validation", None, None)
+    let report = node
+        .call("mission_validate", json!({"mission":"hello"}))
         .await
         .unwrap();
     assert!(
@@ -418,9 +366,8 @@ async fn default_agent_store_is_shared_and_isolated() {
             .any(|f| f["code"] == "unavailable_persona"),
         "{report}"
     );
-    let (started, _) = client.request(Method::POST, "/api/runs", Some(json!({"mission":"hello","input_card_id":"inp_hello","expected_rev":1,"inputs":{"brief":"hello"}})), None).await.unwrap();
+    let started = node.call("mission_run", json!({"mission":"hello", "input":"inp_hello", "expected_rev":1, "inputs":{"brief":"hello"}})).await.unwrap();
     assert!(started["run_id"].is_string());
-    let other_client = NodeClient::new(Some(&format!("{}/", other.url()))).unwrap();
     assert_eq!(
         other
             .call("agent_show", json!({"agent":"fixture-writer"}))
@@ -430,8 +377,8 @@ async fn default_agent_store_is_shared_and_isolated() {
         "not_found"
     );
     assert!(
-        other_client
-            .request(Method::GET, "/api/missions/hello", None, None)
+        other
+            .call("mission_show", json!({"mission":"hello"}))
             .await
             .is_err()
     );
@@ -444,10 +391,7 @@ async fn lists_the_repositories_a_step_may_name() {
     let node = Node::start(AREAS, "[missions]\nrepositories = { app = \"/tmp\" }\n")
         .await
         .unwrap();
-    let client = NodeClient::new(Some(&format!("{}/", node.url()))).unwrap();
-    let (listed, _) = client
-        .request(Method::GET, "/api/repositories", None, None)
-        .await
-        .unwrap();
+    let listed = node.call("mission_repositories", json!({})).await.unwrap();
     assert_eq!(listed["repositories"], json!(["app"]));
+    node.stop().await;
 }

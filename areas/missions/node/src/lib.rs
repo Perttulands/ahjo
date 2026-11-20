@@ -5,9 +5,7 @@ mod created_card;
 pub use commands::DOCUMENT_FILE_ARGUMENTS;
 mod handover;
 mod notify;
-mod routes;
 mod run_commands;
-mod run_routes;
 mod sketch;
 
 use ahjo_mission_engine::{
@@ -16,7 +14,6 @@ use ahjo_mission_engine::{
 use ahjo_node_kit::{Area, BoxFuture, Built, Channel, Client, Listing, Setup};
 use ahjo_term::Sessions;
 use anyhow::{Context, Result};
-use axum::Router;
 use serde::Deserialize;
 use std::{
     collections::BTreeMap,
@@ -133,9 +130,6 @@ pub fn build_with_executor(
     })
 }
 impl Area for Missions {
-    fn routes(&self) -> Router {
-        routes::routes(self.clone()).merge(run_routes::routes(self.clone()))
-    }
     fn commands(&self) -> Vec<ahjo_node_kit::Command> {
         commands::commands(self)
     }
