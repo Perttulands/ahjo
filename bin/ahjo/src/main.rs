@@ -26,7 +26,8 @@ usage:
   ahjo hook <url> [--then command...] [payload]        (run by a program's own hook)
   ahjo --version                                       this build's version
 
-ahjo <command> --help says more. A <required> argument may also be given as --name value.
+ahjo <command> --help says more. A <required> argument may also be given as --name value;
+after -- every word is a value, as is the word after a flag that takes one (--text=--json too).
 With --json the answer is JSON on stdout, and an error is {\"error\":{\"code\",\"message\"}} on stderr.
 Exit codes: 0 done, 1 the command failed, 2 the command line was wrong, 3 no node answers.";
 
@@ -101,8 +102,15 @@ fn usage(why: impl std::fmt::Display, usage: &str) -> anyhow::Error {
     cli::Usage(format!("{why}\n{usage}")).into()
 }
 
+/// Whether `flag` stands among the flags of `args`, before any `--`.
+fn flagged(args: &[String], flag: &[&str]) -> bool {
+    args.iter()
+        .take_while(|a| *a != "--")
+        .any(|a| flag.contains(&a.as_str()))
+}
+
 fn asks_help(args: &[String]) -> bool {
-    args.iter().any(|a| a == "--help" || a == "-h")
+    flagged(args, &["--help", "-h"])
 }
 
 #[tokio::main]
@@ -110,7 +118,7 @@ async fn main() {
     let mut args = std::env::args().skip(1);
     let command = args.next().unwrap_or_default();
     let args: Vec<String> = args.collect();
-    let json = args.iter().any(|a| a == "--json");
+    let json = flagged(&args, &["--json"]);
     let code = match run(&command, &args).await {
         Ok(code) => code,
         Err(error) => failed(&error, json),

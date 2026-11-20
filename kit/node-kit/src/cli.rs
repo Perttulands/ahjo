@@ -29,90 +29,87 @@ fn usage_error(message: String) -> anyhow::Error {
     Usage(message).into()
 }
 
-/// Runs one command, writing its answer to `out`. The exit code is 1 when
-/// the tool failed. `node`, when given, is the node to talk to; else the
-/// one this machine runs, or `--node` among `args`.
-pub async fn run(noun: &str, args: &[String], out: &mut impl Write) -> Result<i32> {
-    let (node, args) = take_node(args)?;
-    let named = node.clone();
+/// The node a command line names and what the command line says of it.
+struct Reached {
+    client: NodeClient,
+    tools: Vec<Value>,
+    /// The `--node` given, as given.
+    named: Option<String>,
+    /// The node the tool runs on, when `--node` named an id.
+    on: Option<String>,
+}
+
+/// The node's commands, from the node `node` names (or this machine's).
+async fn reach(node: Option<String>) -> Result<Reached> {
     // An address is the node the command talks to; an id is the node the
     // tool runs on, reached through the one it talks to.
-    let (url, on) = match node {
-        Some(node) if crate::client::is_address(&node) => (Some(node), None),
-        on => (None, on),
+    let (url, on) = match &node {
+        Some(node) if crate::client::is_address(node) => (Some(node.clone()), None),
+        on => (None, on.clone()),
     };
     let client = NodeClient::new(url.as_deref())?;
     let tools = list(&client).await?;
-    let ours: Vec<&Value> = tools
-        .iter()
-        .filter(|t| {
-            name(t)
-                .strip_prefix(noun)
-                .is_some_and(|v| v.starts_with('_'))
-        })
-        .collect();
-    if ours.is_empty() {
-        // An area the node turned off has no commands; say which are off.
-        let off = match client.request(Method::GET, "/api/health", None, None).await {
-            Ok((health, _)) => health["off"]
-                .as_array()
-                .map(|off| {
-                    off.iter()
-                        .filter_map(Value::as_str)
-                        .collect::<Vec<_>>()
-                        .join(", ")
-                })
-                .unwrap_or_default(),
-            Err(_) => String::new(),
-        };
-        let off = match off.as_str() {
-            "" => String::new(),
-            off => format!("; turned off on this node: {off}"),
-        };
-        let known = nouns(&tools);
-        let nearest = match nearest(noun, known.iter().map(String::as_str)) {
-            Some(near) => format!(" (did you mean {near}?)"),
-            None => String::new(),
-        };
-        return Err(usage_error(aimed(
-            &format!(
-                "no command {noun}{nearest}; this node's commands are {}{off}",
-                known.join(", ")
-            ),
-            named.as_deref(),
-            &tools,
-        )));
-    }
-    let Some(verb) = args.first().filter(|v| !v.starts_with('-')) else {
-        writeln!(out, "{}", verbs(noun, &ours))?;
-        return Ok(0);
+    Ok(Reached {
+        client,
+        tools,
+        named: node,
+        on,
+    })
+}
+
+/// Runs one command, writing its answer to `out`. The exit code is 1 when
+/// the tool failed. The node is the one `--node` among `args` names, else
+/// the one this machine runs.
+pub async fn run(noun: &str, args: &[String], out: &mut impl Write) -> Result<i32> {
+    let (lead, args) = leading_node(args)?;
+    let verb = args
+        .first()
+        .filter(|v| !v.starts_with('-'))
+        .map(String::as_str);
+    let rest = match verb {
+        Some(_) => &args[1..],
+        None => &[][..],
     };
-    let tool_name = format!("{noun}_{}", verb.replace('-', "_"));
-    let Some(tool) = ours.iter().find(|t| name(t) == tool_name) else {
-        let names: Vec<String> = ours.iter().map(|t| verb_of(noun, t)).collect();
-        let nearest = match nearest(verb, names.iter().map(String::as_str)) {
-            Some(near) => format!(" (did you mean ahjo {noun} {near}?)"),
-            None => String::new(),
+    // Which flags take a value is known only from the node's commands, and
+    // which node to ask is a flag: ask the node `--node` seems to name, then
+    // read the command line once with each flag's arity, and ask again in
+    // the rare case that reading names another.
+    let mut node = guess_node(rest).or_else(|| lead.clone());
+    let mut again = false;
+    let (reached, tool, line, verb) = loop {
+        let reached = reach(node.clone()).await?;
+        let (Some(tool), Some(verb)) = (find(noun, verb, &reached, out).await?, verb) else {
+            return Ok(0);
         };
-        return Err(usage_error(aimed(
-            &format!("no command {noun} {verb}{nearest}; ahjo {noun} lists its verbs"),
-            named.as_deref(),
-            &tools,
-        )));
+        let line = read(&tool["inputSchema"], rest).map_err(|error| {
+            usage_error(format!("{error:#}\nusage: {}", usage(noun, verb, &tool)))
+        })?;
+        let named = line.node.clone().or_else(|| lead.clone());
+        if named == node {
+            break (reached, tool, line, verb);
+        }
+        if again {
+            return Err(usage_error(
+                "the command line names its node in a way that reads two ways; \
+                 give it as --node=<id|url>"
+                    .into(),
+            ));
+        }
+        (node, again) = (named, true);
     };
-    let rest = &args[1..];
-    if rest.iter().any(|a| a == "--help" || a == "-h") {
-        writeln!(out, "{}", help(noun, verb, tool))?;
+    let Reached {
+        client,
+        tools,
+        named,
+        on,
+    } = reached;
+    if line.help {
+        writeln!(out, "{}", help(noun, verb, &tool))?;
         return Ok(0);
     }
-    let json_out = rest.iter().any(|a| a == "--json" || a == "--json=true");
-    let rest: Vec<String> = rest
-        .iter()
-        .filter(|a| *a != "--json" && *a != "--json=true")
-        .cloned()
-        .collect();
-    let mut arguments = parse(&tool["inputSchema"], &rest)
-        .map_err(|error| usage_error(format!("{error:#}\nusage: {}", usage(noun, verb, tool))))?;
+    let json_out = line.json;
+    let mut arguments = line.arguments;
+    let tool_name = name(&tool).to_owned();
     if let Some(on) = &on {
         arguments["node"] = Value::String(on.clone());
     }
@@ -153,6 +150,81 @@ pub async fn run(noun: &str, args: &[String], out: &mut impl Write) -> Result<i3
         write!(out, "{}", render(&value))?;
     }
     Ok(0)
+}
+
+/// The tool `ahjo <noun> <verb>` names on the node reached. Without a verb
+/// it writes the noun's verbs to `out` and answers `None`; a noun or verb
+/// the node does not have is a usage error saying what it has.
+async fn find(
+    noun: &str,
+    verb: Option<&str>,
+    reached: &Reached,
+    out: &mut impl Write,
+) -> Result<Option<Value>> {
+    let Reached {
+        client,
+        tools,
+        named,
+        ..
+    } = reached;
+    let ours: Vec<&Value> = tools
+        .iter()
+        .filter(|t| {
+            name(t)
+                .strip_prefix(noun)
+                .is_some_and(|v| v.starts_with('_'))
+        })
+        .collect();
+    if ours.is_empty() {
+        // An area the node turned off has no commands; say which are off.
+        let off = match client.request(Method::GET, "/api/health", None, None).await {
+            Ok((health, _)) => health["off"]
+                .as_array()
+                .map(|off| {
+                    off.iter()
+                        .filter_map(Value::as_str)
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                })
+                .unwrap_or_default(),
+            Err(_) => String::new(),
+        };
+        let off = match off.as_str() {
+            "" => String::new(),
+            off => format!("; turned off on this node: {off}"),
+        };
+        let known = nouns(tools);
+        let nearest = match nearest(noun, known.iter().map(String::as_str)) {
+            Some(near) => format!(" (did you mean {near}?)"),
+            None => String::new(),
+        };
+        return Err(usage_error(aimed(
+            &format!(
+                "no command {noun}{nearest}; this node's commands are {}{off}",
+                known.join(", ")
+            ),
+            named.as_deref(),
+            tools,
+        )));
+    }
+    let Some(verb) = verb else {
+        writeln!(out, "{}", verbs(noun, &ours))?;
+        return Ok(None);
+    };
+    let tool_name = format!("{noun}_{}", verb.replace('-', "_"));
+    let Some(tool) = ours.iter().find(|t| name(t) == tool_name) else {
+        let names: Vec<String> = ours.iter().map(|t| verb_of(noun, t)).collect();
+        let nearest = match nearest(verb, names.iter().map(String::as_str)) {
+            Some(near) => format!(" (did you mean ahjo {noun} {near}?)"),
+            None => String::new(),
+        };
+        return Err(usage_error(aimed(
+            &format!("no command {noun} {verb}{nearest}; ahjo {noun} lists its verbs"),
+            named.as_deref(),
+            tools,
+        )));
+    };
+    Ok(Some((*tool).clone()))
 }
 
 /// The commands, one line each, for `ahjo help --all`.
@@ -279,20 +351,47 @@ fn aimed(text: &str, node: Option<&str>, tools: &[Value]) -> String {
     out
 }
 
-fn take_node(args: &[String]) -> Result<(Option<String>, Vec<String>)> {
+/// `--node` given before the verb, as `ahjo session --node lab list`, and
+/// the words from the verb on.
+fn leading_node(args: &[String]) -> Result<(Option<String>, &[String])> {
     let mut node = None;
-    let mut rest = Vec::new();
-    let mut it = args.iter();
-    while let Some(a) = it.next() {
+    let mut at = 0;
+    while let Some(a) = args.get(at) {
         if a == "--node" {
-            node = Some(it.next().context("--node needs a node id or URL")?.clone());
+            let value = args
+                .get(at + 1)
+                .ok_or_else(|| usage_error("--node needs a node id or URL".into()))?;
+            node = Some(value.clone());
+            at += 2;
         } else if let Some(v) = a.strip_prefix("--node=") {
             node = Some(v.to_owned());
+            at += 1;
         } else {
-            rest.push(a.clone());
+            break;
         }
     }
-    Ok((node, rest))
+    Ok((node, &args[at..]))
+}
+
+/// The node `--node` seems to name before the command's flags are known: a
+/// `--node` followed by a word that is not itself a flag. Only which node to
+/// ask for the commands; `read` decides.
+fn guess_node(args: &[String]) -> Option<String> {
+    let mut node = None;
+    let mut it = args.iter().peekable();
+    while let Some(a) = it.next() {
+        if a == "--" {
+            break;
+        }
+        if a == "--node" {
+            if let Some(value) = it.next_if(|v| !v.starts_with('-')) {
+                node = Some(value.clone());
+            }
+        } else if let Some(v) = a.strip_prefix("--node=") {
+            node = Some(v.to_owned());
+        }
+    }
+    node
 }
 
 async fn rpc(client: &NodeClient, method: &str, params: Value) -> Result<Value> {
@@ -513,14 +612,51 @@ fn required(schema: &Value) -> Vec<&str> {
         .unwrap_or_default()
 }
 
-/// The tool's arguments from the command line, typed by its schema.
-fn parse(schema: &Value, args: &[String]) -> Result<Value> {
+/// What a command line says after its verb.
+#[derive(Debug, Default)]
+struct Line {
+    /// The tool's arguments, typed by its schema.
+    arguments: Value,
+    /// `--node`: the node to ask.
+    node: Option<String>,
+    /// `--json`: the answer as JSON.
+    json: bool,
+    /// `--help` or `-h` where a flag stands: the command's help, not a call.
+    help: bool,
+}
+
+/// The command line after the verb, read once, left to right, with each
+/// flag's arity from the tool's schema and the command line's own flags
+/// (`--node <node>`, `--json`, `--help`). A flag that takes a value takes the
+/// next word whatever it looks like, so `--text --json --new` is the text
+/// `--json` and the flag `--new`; `--text=--json` says the same. After `--`
+/// every word is a value. Help asked for where a flag stands is answered
+/// even when the rest is wrong.
+fn read(schema: &Value, args: &[String]) -> Result<Line> {
     let props = properties(schema);
     let spec = |key: &str| props.iter().find(|(k, _)| k == key).map(|(_, v)| v.clone());
+    let mut line = Line::default();
     let mut out = Map::new();
     let mut positional = Vec::new();
+    // The first thing wrong, kept while the rest is read for `--help`.
+    let mut wrong: Option<anyhow::Error> = None;
+    // A word taken for a flag that is none, and how many values came before it.
+    let mut stray: Option<(String, usize)> = None;
+    let mut options = true;
     let mut it = args.iter();
     while let Some(a) = it.next() {
+        if !options {
+            positional.push(a.clone());
+            continue;
+        }
+        if a == "--" {
+            options = false;
+            continue;
+        }
+        if a == "-h" {
+            line.help = true;
+            continue;
+        }
         let Some(flag) = a.strip_prefix("--") else {
             positional.push(a.clone());
             continue;
@@ -530,31 +666,82 @@ fn parse(schema: &Value, args: &[String]) -> Result<Value> {
             None => (flag.to_owned(), None),
         };
         let key = key.replace('-', "_");
-        if let Some(negated) = key.strip_prefix("no_")
-            && spec(negated).is_some_and(|s| s["type"] == "boolean")
-            && inline.is_none()
-        {
-            out.insert(negated.to_owned(), Value::Bool(false));
-            continue;
-        }
-        let s = spec(&key).with_context(|| format!("unknown flag --{key}"))?;
-        let raw = match (inline, s["type"].as_str()) {
-            (Some(v), _) => v,
-            (None, Some("boolean")) => "true".into(),
-            (None, _) => it
-                .next()
-                .with_context(|| format!("--{key} needs a value"))?
-                .clone(),
+        let mut value_of = |key: &str| -> Result<String> {
+            match &inline {
+                Some(v) => Ok(v.clone()),
+                None => it
+                    .next()
+                    .cloned()
+                    .with_context(|| format!("--{key} needs a value")),
+            }
         };
-        let value = typed(&key, &s, &raw)?;
-        match (s["type"].as_str(), out.get_mut(&key)) {
-            (Some("array"), Some(Value::Array(items))) => {
-                items.extend(value.as_array().cloned().unwrap_or_default())
+        let step = match key.as_str() {
+            "help" if inline.is_none() => {
+                line.help = true;
+                Ok(())
             }
+            "json" => match &inline {
+                None => {
+                    line.json = true;
+                    Ok(())
+                }
+                Some(raw) => typed("json", &json!({"type": "boolean"}), raw)
+                    .map(|v| line.json = v == Value::Bool(true)),
+            },
+            "node" => value_of("node").and_then(|node| match node.is_empty() {
+                true => bail!("--node needs a node id or URL"),
+                false => {
+                    line.node = Some(node);
+                    Ok(())
+                }
+            }),
             _ => {
-                out.insert(key, value);
+                if let Some(negated) = key.strip_prefix("no_")
+                    && spec(negated).is_some_and(|s| s["type"] == "boolean")
+                    && inline.is_none()
+                {
+                    out.insert(negated.to_owned(), Value::Bool(false));
+                    continue;
+                }
+                let Some(s) = spec(&key) else {
+                    stray.get_or_insert((a.clone(), positional.len()));
+                    continue;
+                };
+                let raw = match s["type"].as_str() {
+                    Some("boolean") if inline.is_none() => Ok("true".to_owned()),
+                    _ => value_of(&key),
+                };
+                raw.and_then(|raw| typed(&key, &s, &raw)).map(|value| {
+                    match (s["type"].as_str(), out.get_mut(&key)) {
+                        (Some("array"), Some(Value::Array(items))) => {
+                            items.extend(value.as_array().cloned().unwrap_or_default())
+                        }
+                        _ => {
+                            out.insert(key, value);
+                        }
+                    }
+                })
             }
+        };
+        if let Err(error) = step {
+            wrong.get_or_insert(error);
         }
+    }
+    if line.help {
+        return Ok(line);
+    }
+    if let Some((word, before)) = stray {
+        // The value it might have been is the next one given without a flag.
+        let slot = required(schema)
+            .into_iter()
+            .map(str::to_owned)
+            .chain(lone(schema))
+            .filter(|r| !out.contains_key(r))
+            .nth(before);
+        bail!("{}", unknown_flag(&word, &props, slot.as_deref()));
+    }
+    if let Some(wrong) = wrong {
+        return Err(wrong);
     }
     let needed = required(schema).len();
     let mut waiting = required(schema)
@@ -586,7 +773,49 @@ fn parse(schema: &Value, args: &[String]) -> Result<Value> {
     if let Some(missing) = waiting.next().filter(|_| needed > 0) {
         bail!("missing <{missing}>");
     }
-    Ok(Value::Object(out))
+    line.arguments = Value::Object(out);
+    Ok(line)
+}
+
+/// Why `word`, read where a flag stands, is not one: the flag it was likely
+/// meant as, or, when it reads as a value (front matter, a dash, text), how
+/// to give it as the value `slot` it would have been.
+fn unknown_flag(word: &str, props: &[(String, Value)], slot: Option<&str>) -> String {
+    let flag_like = word[2..].split('=').next().is_some_and(|k| {
+        k.starts_with(|c: char| c.is_ascii_alphanumeric())
+            && k.bytes()
+                .all(|b| b.is_ascii_alphanumeric() || b"-_".contains(&b))
+    });
+    let shown: String = match word.lines().next().unwrap_or("") {
+        first if first.chars().count() > 30 || first.len() < word.len() => {
+            format!("{}…", first.chars().take(30).collect::<String>())
+        }
+        first => first.to_owned(),
+    };
+    let as_value = slot.map(|slot| {
+        format!(
+            "a value that starts with - goes after -- or as --{}=<value>",
+            slot.replace('_', "-")
+        )
+    });
+    if flag_like {
+        let key = word[2..].split('=').next().unwrap_or("").replace('-', "_");
+        let flags: Vec<&str> = props.iter().map(|(k, _)| k.as_str()).collect();
+        if let Some(near) = nearest(&key, flags.iter().copied()) {
+            return format!(
+                "unknown flag {shown} (did you mean --{}?)",
+                near.replace('_', "-")
+            );
+        }
+        return match as_value {
+            Some(hint) => format!("unknown flag {shown}; {hint}"),
+            None => format!("unknown flag {shown}"),
+        };
+    }
+    match as_value {
+        Some(hint) => format!("{shown:?} reads as a flag; {hint}"),
+        None => format!("{shown:?} reads as a flag; a value that starts with - goes after --"),
+    }
 }
 
 fn typed(key: &str, spec: &Value, raw: &str) -> Result<Value> {
@@ -771,6 +1000,10 @@ fn render_text(text: &str, indent: usize, out: &mut String) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn parse(schema: &Value, args: &[String]) -> Result<Value> {
+        read(schema, args).map(|line| line.arguments)
+    }
 
     #[test]
     fn help_lists_each_nouns_commands_together() {
@@ -986,6 +1219,94 @@ mod tests {
         assert_eq!(v, json!({"session": "main", "keys": ["echo hi", "Enter"]}));
         let v = parse(&keys, &args(&["--keys", "C-c", "main"])).unwrap();
         assert_eq!(v, json!({"session": "main", "keys": ["C-c"]}));
+    }
+
+    fn write_schema() -> Value {
+        json!({
+            "type": "object",
+            "properties": {
+                "path": {"type": "string"},
+                "text": {"type": "string"},
+                "new": {"type": "boolean", "default": false},
+            },
+            "required": ["path", "text"],
+        })
+    }
+
+    #[test]
+    fn a_value_that_looks_like_the_command_lines_own_flag_stays_a_value() {
+        // `--json` and `--node` were once taken out before the flags were
+        // read, so `--new` became the text and the file was written over.
+        for own in ["--json", "--node", "--help", "-h", "--"] {
+            let line = read(&write_schema(), &args(&["p", "--text", own, "--new"])).unwrap();
+            assert_eq!(
+                line.arguments,
+                json!({"path": "p", "text": own, "new": true}),
+                "{own}"
+            );
+            assert!(!line.json && !line.help && line.node.is_none(), "{own}");
+        }
+        let line = read(
+            &write_schema(),
+            &args(&["p", "--text=--help", "--node", "lab", "--json", "--new"]),
+        )
+        .unwrap();
+        assert_eq!(
+            line.arguments,
+            json!({"path": "p", "text": "--help", "new": true})
+        );
+        assert_eq!(line.node.as_deref(), Some("lab"));
+        assert!(line.json && !line.help);
+        let line = read(
+            &write_schema(),
+            &args(&["--node=http://h:1", "--json=false"]),
+        )
+        .unwrap_err();
+        assert!(line.to_string().contains("missing <path>"), "{line}");
+    }
+
+    #[test]
+    fn help_where_a_flag_stands_wins_even_over_a_wrong_line() {
+        for asked in [
+            &["--help"][..],
+            &["-h"],
+            &["p", "--colour", "red", "--help"],
+            &["--text", "x", "--help"],
+        ] {
+            assert!(
+                read(&write_schema(), &args(asked)).unwrap().help,
+                "{asked:?}"
+            );
+        }
+        assert!(
+            !read(&write_schema(), &args(&["p", "--", "--help"]))
+                .unwrap()
+                .help
+        );
+    }
+
+    #[test]
+    fn after_a_double_dash_every_word_is_a_value() {
+        let line = read(
+            &write_schema(),
+            &args(&["--new", "--", "notes.md", "---\ntitle: x\n---\n"]),
+        )
+        .unwrap();
+        assert_eq!(
+            line.arguments,
+            json!({"path": "notes.md", "text": "---\ntitle: x\n---\n", "new": true})
+        );
+        // Without it, the error says how to give such a value.
+        let error = read(&write_schema(), &args(&["notes.md", "---\ntitle: x"]))
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("after --"), "{error}");
+        assert!(error.contains("--text=<value>"), "{error}");
+        assert!(!error.contains('\n'), "one line: {error}");
+        let error = read(&write_schema(), &args(&["p", "t", "--neww"]))
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("did you mean --new?"), "{error}");
     }
 
     #[test]
