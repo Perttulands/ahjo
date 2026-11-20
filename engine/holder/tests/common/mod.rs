@@ -10,6 +10,17 @@ use ahjo_holder::{Connection, Endpoint, connect, connect_or_start};
 
 pub mod process;
 
+/// Fail at the start of tests that need PowerShell 7 when it is unavailable.
+pub fn require_pwsh() {
+    assert!(
+        std::process::Command::new("where.exe")
+            .arg("pwsh.exe")
+            .output()
+            .is_ok_and(|output| output.status.success()),
+        "PowerShell 7 (pwsh.exe) is required for this test"
+    );
+}
+
 /// A holder of the test's own on a scratch pipe. Dropping it ends the holder
 /// and its sessions.
 pub struct Scratch {

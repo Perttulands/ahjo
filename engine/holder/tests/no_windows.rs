@@ -124,6 +124,7 @@ impl Watch {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn the_holder_shows_no_windows() {
+    common::require_pwsh();
     let watch = Watch::start();
     let holder = Scratch::start().await;
     let mut c = holder.connect().await;

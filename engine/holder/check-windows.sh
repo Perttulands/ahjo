@@ -1,20 +1,29 @@
 #!/usr/bin/env bash
-# Checks the holder on Windows from WSL: copies the crate and the workspace's
-# Cargo.lock to a scratch directory under %TEMP%, where the Windows toolchain
-# builds it, then runs fmt, clippy and the tests there. Arguments go to
-# `cargo test` (for example `-- --nocapture`).
-#
-# AHJO_HOLDER_SCRATCH names the scratch directory (default ahjo-holder), so
-# agents working at once don't share one.
+# Checks the holder on Windows from WSL in a private workspace under %TEMP%.
+# Arguments go to `cargo test` (for example `-- --nocapture`).
+# AHJO_HOLDER_SCRATCH supplies the scratch directory's prefix.
 set -euo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
 root=$(cd "$here/../.." && pwd)
 cmd=/mnt/c/Windows/System32/cmd.exe
-temp=$(wslpath "$(cd /mnt/c && "$cmd" /c 'echo %TEMP%' | tr -d '\r')")
+temp=$(wslpath "$(cd /mnt/c && "$cmd" /d /c 'echo %TEMP%' | tr -d '\r')")
 [[ "$temp" == /mnt/* ]] || { echo "no Windows %TEMP% found through $cmd" >&2; exit 1; }
-dir="$temp/${AHJO_HOLDER_SCRATCH:-ahjo-holder}"
-mkdir -p "$dir"
-rsync -a --delete --exclude target --exclude Cargo.lock "$here/" "$dir/"
-cp "$root/Cargo.lock" "$dir/Cargo.lock"
+prefix=${AHJO_HOLDER_SCRATCH:-ahjo-holder}
+case "$prefix" in
+    ''|.|..|*/*|*\\*) echo "AHJO_HOLDER_SCRATCH must be a single directory name" >&2; exit 1 ;;
+esac
+dir=$(mktemp -d "$temp/$prefix.XXXXXXXX")
+trap 'rm -rf "$dir"' EXIT
+# Cargo needs every workspace member's manifest and the local crate patches.
+# Copy tracked files only, including local edits, and omit editor symlinks.
+git -C "$root" ls-files -z -- . ':!.agents' ':!.claude' |
+    rsync -r --from0 --files-from=- "$root/" "$dir/"
+mkdir -p "$dir/temp"
+cargo=$(wslpath "$(cd /mnt/c && "$cmd" /d /c 'where cargo.exe' | tr -d '\r' | sed -n '1p')")
 cd "$dir"
-"$cmd" /c "cd /d $(wslpath -w "$dir") && cargo fmt --check && cargo clippy --all-targets -- -D warnings && cargo test $*"
+# Windows tests and rustc must use this invocation's own scratch directory.
+export TEMP="$dir/temp" TMP="$dir/temp"
+export WSLENV="${WSLENV:+$WSLENV:}TEMP/p:TMP/p"
+"$cargo" fmt -p ahjo-holder --check
+"$cargo" clippy -p ahjo-holder --all-targets -- -D warnings
+"$cargo" test -p ahjo-holder "$@"

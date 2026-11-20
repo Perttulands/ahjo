@@ -22,6 +22,7 @@ async fn powershell_5_survives_killing_the_attached_client() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn powershell_7_survives_killing_the_attached_client() {
+    common::require_pwsh();
     survives("pwsh.exe -NoLogo -NoProfile", 7).await;
 }
 

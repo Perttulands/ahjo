@@ -14,6 +14,7 @@ const CMD_SESSIONS: usize = 10;
 
 #[tokio::test(flavor = "multi_thread")]
 async fn memory_per_idle_session() {
+    common::require_pwsh();
     let holder = Scratch::start().await;
     let mut c = holder.connect().await;
     tokio::time::sleep(Duration::from_secs(1)).await;
