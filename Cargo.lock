@@ -152,12 +152,16 @@ name = "ahjo-app-brain"
 version = "0.0.1"
 dependencies = [
  "ahjo-app-kit",
+ "ahjo-brain",
+ "ahjo-brain-contract",
+ "ahjo-testkit",
  "embed-resource",
  "gpui-pre",
  "gpui-pre-platform",
  "serde",
  "serde_json",
  "time",
+ "tokio",
 ]
 
 [[package]]
@@ -285,6 +289,7 @@ dependencies = [
 name = "ahjo-brain-contract"
 version = "0.0.1"
 dependencies = [
+ "ahjo-core",
  "schemars",
  "serde",
 ]
@@ -354,6 +359,7 @@ dependencies = [
 name = "ahjo-files-contract"
 version = "0.0.1"
 dependencies = [
+ "ahjo-core",
  "schemars",
  "serde",
 ]

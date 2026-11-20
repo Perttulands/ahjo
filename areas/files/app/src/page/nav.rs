@@ -971,20 +971,30 @@ impl FilesPage {
 
     fn read_status(&mut self, folder: String, cx: &mut Context<Self>) {
         let node = self.tree.node.clone();
-        self.request(
-            Request::get(NodeId(node.clone()), route("status", &folder)),
-            move |p, s, b, cx| {
+        self.call(
+            NodeId(node.clone()),
+            FileStatus {
+                path: folder.clone(),
+            },
+            move |p, answer, cx| {
                 p.status_asked.remove(&folder);
-                if p.tree.node == node && matches!(s, 403 | 404) {
+                if p.tree.node != node {
+                    return;
+                }
+                if answer.as_ref().is_err_and(|error| {
+                    matches!(
+                        error.code.as_str(),
+                        "forbidden"
+                            | "unknown_command"
+                            | ahjo_files_contract::OUTSIDE_ROOTS
+                            | ahjo_files_contract::NOT_FOUND
+                    )
+                }) {
                     // Gone, or outside what the node shows: no repository
                     // to ask about again.
                     p.no_repo.insert(folder.clone());
                 }
-                if p.tree.node != node || s != 200 {
-                    return;
-                }
-                let Ok(status) = serde_json::from_slice::<ahjo_files_contract::RepoStatus>(&b)
-                else {
+                let Ok(status) = answer else {
                     return;
                 };
                 if status.repository.is_empty() {

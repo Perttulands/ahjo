@@ -24,8 +24,11 @@ use crate::Failure;
 /// The path every area's tools answer on; one area's are under it.
 pub const PATH: &str = "/mcp";
 
-/// The largest message taken: a 64 KiB text with room for JSON's escapes.
+/// The largest MCP message taken: a 64 KiB text with room for JSON's escapes.
 const MAX_MESSAGE: usize = 1024 * 1024;
+
+/// Typed HTTP arguments have the same 2 MiB budget as Axum JSON routes.
+const MAX_COMMAND_ARGS: usize = 2 * 1024 * 1024;
 
 /// Set by Tailscale Funnel on requests from the public internet.
 const FUNNEL: &str = "tailscale-funnel-request";
@@ -111,12 +114,14 @@ async fn call(
             Error::new("unknown_command", format!("Unknown typed command: {name}")),
         ));
     };
-    let body = axum::body::to_bytes(body, MAX_MESSAGE).await.map_err(|_| {
-        Failure(
-            StatusCode::PAYLOAD_TOO_LARGE,
-            Error::new("too_large", "the command arguments are too large"),
-        )
-    })?;
+    let body = axum::body::to_bytes(body, MAX_COMMAND_ARGS)
+        .await
+        .map_err(|_| {
+            Failure(
+                StatusCode::PAYLOAD_TOO_LARGE,
+                Error::new("too_large", "the command arguments are too large"),
+            )
+        })?;
     let args = serde_json::from_slice(&body).map_err(|error| {
         Failure(
             StatusCode::BAD_REQUEST,

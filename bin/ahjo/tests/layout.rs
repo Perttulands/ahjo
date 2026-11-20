@@ -151,13 +151,21 @@ fn dependencies_point_one_way() {
     }
 }
 
-/// Ahjo Brain and Ahjo Desk share the app kit with Swarm and nothing else of
-/// it, so either could leave this repository without taking Swarm along.
+/// Standalone apps share the app kit and may use an area's wire types.
 #[test]
-fn a_standalone_app_uses_only_the_app_kit() {
+fn a_standalone_app_uses_the_app_kit_and_contracts() {
     for app in ["bin/ahjo-brain", "bin/ahjo-desk"] {
         let used = uses(&root().join(app));
-        assert_eq!(used, ["kit/app-kit"], "{app} uses {used:?}");
+        assert!(
+            used.iter().any(|dep| dep == "kit/app-kit"),
+            "{app} uses {used:?}"
+        );
+        for dep in used {
+            assert!(
+                dep == "kit/app-kit" || dep.starts_with("areas/") && dep.ends_with("/contract"),
+                "{app} uses {dep}"
+            );
+        }
     }
 }
 

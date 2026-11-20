@@ -2,16 +2,16 @@ use crate::brain::{Brain, Refusal, refusal_code};
 use ahjo_brain_contract::{
     BAD_REQUEST, BRAIN_ERROR, NOT_FOUND, UNAVAILABLE,
     commands::{
-        BrainChange, BrainChanges, BrainChangesResult, BrainCollections, BrainCollectionsResult,
-        BrainPage, BrainRead, BrainSave, BrainSaved, BrainSearch, BrainSearchResults, BrainSend,
-        BrainSent,
+        BrainChange, BrainChanges, BrainChangesResult, BrainCollection, BrainCollectionResult,
+        BrainCollections, BrainCollectionsResult, BrainFiles, BrainFilesResult, BrainPage,
+        BrainRead, BrainSave, BrainSaved, BrainSearch, BrainSearchResults, BrainSend, BrainSent,
+        BrainTexts, BrainTextsResult,
     },
 };
-use ahjo_core::Error;
+use ahjo_core::{Error, TypedCommand};
 use ahjo_node_kit::{Command, Effect};
 use ahjo_term::Sessions;
 use schemars::JsonSchema;
-use serde::{Serialize, de::DeserializeOwned};
 use std::sync::Arc;
 
 struct Ctx {
@@ -20,20 +20,15 @@ struct Ctx {
     sessions: Option<Arc<dyn Sessions>>,
 }
 
-fn command<Input, Output, F, Fut>(
-    ctx: &Arc<Ctx>,
-    name: &'static str,
-    effect: Effect,
-    handler: F,
-) -> Command
+fn command<Input, F, Fut>(ctx: &Arc<Ctx>, effect: Effect, handler: F) -> Command
 where
-    Input: DeserializeOwned + JsonSchema,
-    Output: Serialize + JsonSchema,
+    Input: TypedCommand + JsonSchema,
+    Input::Output: JsonSchema,
     F: Fn(Arc<Ctx>, Input) -> Fut + Send + Sync + 'static,
-    Fut: Future<Output = Result<Output, Error>> + Send + 'static,
+    Fut: Future<Output = Result<Input::Output, Error>> + Send + 'static,
 {
     let ctx = ctx.clone();
-    Command::typed(name, effect, move |args| handler(ctx.clone(), args))
+    Command::for_request(effect, move |args| handler(ctx.clone(), args))
 }
 
 fn refused(error: Refusal) -> Error {
@@ -51,45 +46,57 @@ pub fn commands(
         sessions,
     });
     vec![
+        command(&ctx, Effect::Reads, |ctx, args: BrainSearch| async move {
+            let results = ctx.brain.search(&args.query).await.map_err(refused)?;
+            Ok(BrainSearchResults {
+                node: ctx.node.clone(),
+                results,
+            })
+        })
+        .with_error_status(|error| {
+            (error.code == BRAIN_ERROR).then_some(axum::http::StatusCode::BAD_GATEWAY)
+        }),
+        command(&ctx, Effect::Reads, |ctx, args: BrainRead| async move {
+            let page = ctx.brain.page(&args.path).await.map_err(refused)?;
+            Ok(BrainPage {
+                node: ctx.node.clone(),
+                page,
+            })
+        }),
+        command(&ctx, Effect::Writes, save),
+        command(&ctx, Effect::Reads, |ctx, _: BrainCollections| async move {
+            let collections = ctx.brain.collections().await.map_err(refused)?;
+            Ok(BrainCollectionsResult {
+                node: ctx.node.clone(),
+                collections,
+            })
+        }),
+        command(&ctx, Effect::Reads, changes),
+        command(&ctx, Effect::Reads, |ctx, _: BrainFiles| async move {
+            Ok(BrainFilesResult {
+                node: ctx.node.clone(),
+                files: ctx.brain.files().await.map_err(refused)?,
+            })
+        }),
+        command(&ctx, Effect::Reads, |ctx, args: BrainTexts| async move {
+            Ok(BrainTextsResult {
+                node: ctx.node.clone(),
+                texts: ctx.brain.texts(args.paths).await.map_err(refused)?,
+            })
+        }),
         command(
             &ctx,
-            "brain_search",
             Effect::Reads,
-            |ctx, args: BrainSearch| async move {
-                let results = ctx.brain.search(&args.query).await.map_err(refused)?;
-                Ok(BrainSearchResults {
+            |ctx, args: BrainCollection| async move {
+                let read = ctx.brain.collection(&args.name).await.map_err(refused)?;
+                Ok(BrainCollectionResult {
                     node: ctx.node.clone(),
-                    results,
+                    pages: read.found,
+                    error: read.error,
                 })
             },
         ),
-        command(
-            &ctx,
-            "brain_read",
-            Effect::Reads,
-            |ctx, args: BrainRead| async move {
-                let page = ctx.brain.page(&args.path).await.map_err(refused)?;
-                Ok(BrainPage {
-                    node: ctx.node.clone(),
-                    page,
-                })
-            },
-        ),
-        command(&ctx, "brain_save", Effect::Writes, save),
-        command(
-            &ctx,
-            "brain_collections",
-            Effect::Reads,
-            |ctx, _: BrainCollections| async move {
-                let collections = ctx.brain.collections().await.map_err(refused)?;
-                Ok(BrainCollectionsResult {
-                    node: ctx.node.clone(),
-                    collections,
-                })
-            },
-        ),
-        command(&ctx, "brain_changes", Effect::Reads, changes),
-        command(&ctx, "brain_send", Effect::Writes, send),
+        command(&ctx, Effect::Writes, send),
     ]
 }
 

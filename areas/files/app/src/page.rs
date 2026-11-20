@@ -15,8 +15,14 @@ use ahjo_app_kit::{
         syntax,
     },
 };
-use ahjo_core::NodeId;
-use ahjo_files_contract::{Changed, Listing, Matches, NodeRoots};
+use ahjo_core::{Error, NodeId, TypedCommand};
+use ahjo_files_contract::{
+    Changed, FILE_BYTES_PATH, Matches,
+    commands::{
+        FileDelete, FileDiff, FileList, FileLocate, FileMkdir, FileMove, FileRecent, FileSearch,
+        FileStat, FileStatus, FileWrite, ListContent,
+    },
+};
 use gpui::{
     App, AppContext, Context, Entity, FocusHandle, KeyDownEvent, UniformListScrollHandle,
     WeakEntity, Window,
@@ -287,8 +293,8 @@ fn enc(s: &str) -> String {
         })
         .collect()
 }
-pub(crate) fn route(kind: &str, path: &str) -> String {
-    format!("/api/files/{kind}?path={}", enc(path))
+pub(crate) fn bytes_uri(path: &str) -> String {
+    format!("{FILE_BYTES_PATH}?path={}", enc(path))
 }
 fn upload_copy_name(name: &str, ordinal: usize) -> String {
     match name.rsplit_once('.') {
@@ -939,6 +945,20 @@ impl FilesPage {
         })
         .detach();
     }
+    fn call<C: TypedCommand>(
+        &self,
+        node: NodeId,
+        input: C,
+        done: impl FnOnce(&mut Self, Result<C::Output, Error>, &mut Context<Self>) + 'static,
+        cx: &mut Context<Self>,
+    ) {
+        let task = self.host.call(node, input, cx);
+        cx.spawn(async move |this, cx| {
+            let answer = task.await;
+            let _ = this.update(cx, |p, cx| done(p, answer, cx));
+        })
+        .detach();
+    }
     fn node(&self) -> NodeId {
         NodeId(self.tree.node.clone())
     }
@@ -962,28 +982,33 @@ impl FilesPage {
     }
     fn roots(&mut self, cx: &mut Context<Self>) {
         let node = self.tree.node.clone();
-        self.request(
-            Request::get(NodeId(node.clone()), "/api/files/roots"),
-            move |p, s, b, cx| {
+        self.call(
+            NodeId(node.clone()),
+            FileList { path: None },
+            move |p, answer, cx| {
                 if p.tree.node != node {
                     return;
                 }
-                if s != 200 {
-                    p.tree.away = true;
-                    p.fail(message(s, &b), cx);
-                    cx.notify();
-                    return;
-                }
-                match serde_json::from_slice::<NodeRoots>(&b) {
-                    Ok(r) => {
-                        p.tree.rooted(r.roots);
+                match answer.map(|answer| answer.content) {
+                    Ok(ListContent::Roots { roots }) => {
+                        p.tree.rooted(roots);
                         if let Some(path) = p.reveal_pending.take() {
                             p.tree.reveal(&path);
                             p.scroll_pending = true;
                         }
                         p.read_unread(cx);
                     }
-                    Err(e) => p.fail(e.to_string(), cx),
+                    Ok(ListContent::Folder(_)) => {
+                        p.fail("The node answered with a folder.".into(), cx)
+                    }
+                    Err(error) => {
+                        p.tree.away = true;
+                        if error.code == "unknown_command" {
+                            p.fail("This node does not serve files.".into(), cx);
+                        } else {
+                            p.fail(error.message, cx);
+                        }
+                    }
                 }
                 cx.notify()
             },
@@ -1009,9 +1034,10 @@ impl FilesPage {
         self.recent_asked = true;
         self.recent_at = Some(std::time::Instant::now());
         let node = self.tree.node.clone();
-        self.request(
-            Request::get(NodeId(node.clone()), "/api/files/recent"),
-            move |p, s, b, cx| {
+        self.call(
+            NodeId(node.clone()),
+            FileRecent { path: None },
+            move |p, answer, cx| {
                 p.recent_asked = false;
                 if p.tree.node != node {
                     return;
@@ -1019,13 +1045,7 @@ impl FilesPage {
                 // The first Recent lands above the tree: a row picked in
                 // the tree stays in view.
                 let first = p.recent.is_none();
-                p.recent = Some(if s == 200 {
-                    serde_json::from_slice::<ahjo_files_contract::Recent>(&b)
-                        .map(|r| r.files)
-                        .map_err(|e| e.to_string())
-                } else {
-                    Err(message(s, &b))
-                });
+                p.recent = Some(answer.map(|r| r.files).map_err(|error| error.message));
                 if first && matches!(p.pick, Some(Pick::Node(_))) {
                     p.scroll_to_pick();
                 }
@@ -1046,22 +1066,19 @@ impl FilesPage {
     /// Reads the files changed under a Recent folder line.
     fn read_recent_inside(&mut self, folder: String, cx: &mut Context<Self>) {
         let node = self.tree.node.clone();
-        self.request(
-            Request::get(NodeId(node.clone()), route("recent", &folder)),
-            move |p, s, b, cx| {
+        self.call(
+            NodeId(node.clone()),
+            FileRecent {
+                path: Some(folder.clone()),
+            },
+            move |p, answer, cx| {
                 let Some((open, found)) = p.recent_inside.as_mut() else {
                     return;
                 };
                 if p.tree.node != node || *open != folder {
                     return;
                 }
-                *found = Some(if s == 200 {
-                    serde_json::from_slice::<ahjo_files_contract::Recent>(&b)
-                        .map(|r| r.files)
-                        .map_err(|e| e.to_string())
-                } else {
-                    Err(message(s, &b))
-                });
+                *found = Some(answer.map(|r| r.files).map_err(|error| error.message));
                 cx.notify();
             },
             cx,
@@ -1095,22 +1112,22 @@ impl FilesPage {
     /// A path asked for from elsewhere: a folder opens in the tree, a file
     /// opens.
     fn reveal(&mut self, path: String, window: &mut Window, cx: &mut Context<Self>) {
-        let task = self
-            .host
-            .request(Request::get(self.node(), route("folder", &path)), cx);
+        let task = self.host.call(
+            self.node(),
+            FileList {
+                path: Some(path.clone()),
+            },
+            cx,
+        );
         cx.spawn_in(window, async move |this, cx| {
             let answer = task.await;
             let _ = this.update_in(cx, |page, window, cx| {
                 match answer {
-                    Ok(answer) if answer.status == 200 => page.show_folder(path, cx),
-                    Ok(answer)
-                        if code_of(&answer.body).as_deref()
-                            == Some(ahjo_files_contract::NOT_FOLDER) =>
-                    {
+                    Ok(_) => page.show_folder(path, cx),
+                    Err(error) if error.code == ahjo_files_contract::NOT_FOLDER => {
                         page.show_in_tree(&path, cx);
                         page.open(path, window, cx);
                     }
-                    Ok(answer) => page.fail(message(answer.status, &answer.body), cx),
                     Err(error) => page.fail(error.message, cx),
                 }
                 cx.notify();
@@ -1161,40 +1178,55 @@ impl FilesPage {
     pub fn list(&mut self, path: String, cx: &mut Context<Self>) {
         let node = self.tree.node.clone();
         self.listing.insert(path.clone());
-        self.request(
-            Request::get(NodeId(node.clone()), route("folder", &path)),
-            move |p, s, b, cx| {
+        self.call(
+            NodeId(node.clone()),
+            FileList {
+                path: Some(path.clone()),
+            },
+            move |p, answer, cx| {
                 p.listing.remove(&path);
                 let step_due = p.step_due.take_if(|due| *due == path).is_some();
                 if p.tree.node != node {
                     return;
                 }
-                if s == 200 {
-                    match serde_json::from_slice::<Listing>(&b) {
-                        Ok(l) => {
-                            p.tree.listed(path.clone(), l.entries);
-                            p.ask_status(&path, cx);
+                match answer.map(|answer| answer.content) {
+                    Ok(ListContent::Folder(l)) => {
+                        p.tree.listed(path.clone(), l.entries);
+                        p.ask_status(&path, cx);
+                        // Folders kept or asked open inside it show now: read them.
+                        p.read_unread(cx);
+                        if step_due && p.pick == Some(Pick::Node(path.clone())) {
+                            p.step(1, cx);
                         }
-                        Err(e) => p.tree.failed(path.clone(), e.to_string()),
+                        // Listings landing above the pick move it: follow it
+                        // until every folder asked for has answered.
+                        if p.scroll_pending && p.scroll_to_pick() && p.listing.is_empty() {
+                            p.scroll_pending = false;
+                        }
                     }
-                    // Folders kept or asked open inside it show now: read them.
-                    p.read_unread(cx);
-                    if step_due && p.pick == Some(Pick::Node(path.clone())) {
-                        p.step(1, cx);
+                    Ok(ListContent::Roots { .. }) => {
+                        p.tree
+                            .failed(path.clone(), "The node answered with its roots.".into());
                     }
-                    // Listings landing above the pick move it: follow it
-                    // until every folder asked for has answered.
-                    if p.scroll_pending && p.scroll_to_pick() && p.listing.is_empty() {
-                        p.scroll_pending = false;
+                    Err(error)
+                        if matches!(
+                            error.code.as_str(),
+                            "unreachable"
+                                | "unanswered"
+                                | "unknown_node"
+                                | "unavailable"
+                                | "no_app"
+                        ) =>
+                    {
+                        p.tree.away = true;
                     }
-                } else if s == 0 || s == 421 || s == 502 || s == 503 {
-                    p.tree.away = true;
-                } else {
-                    if code_of(&b).as_deref() == Some(ahjo_files_contract::NOT_FOUND) {
-                        p.tree.open.remove(&path);
-                        p.tree.listings.remove(&path);
+                    Err(error) => {
+                        if error.code == ahjo_files_contract::NOT_FOUND {
+                            p.tree.open.remove(&path);
+                            p.tree.listings.remove(&path);
+                        }
+                        p.tree.failed(path.clone(), error.message);
                     }
-                    p.tree.failed(path.clone(), message(s, &b));
                 }
                 cx.notify()
             },
@@ -1235,15 +1267,33 @@ impl FilesPage {
             cx.background_executor().timer(TYPED).await;
             let _ = this.update(cx, |page, cx| {
                 if page.find_revision == revision {
-                    let uri = format!("/api/files/find?q={}&near={}", enc(&query), enc(&near));
+                    let near = (!near.is_empty()).then_some(near);
                     // What is beside you is asked for alone as well: it
                     // answers at once, the find under every root after.
-                    if !near.is_empty() {
-                        let beside =
-                            Request::get(NodeId(node.clone()), format!("{uri}&beside=true"));
+                    if let Some(near) = near.clone() {
+                        let beside = page.host.call(
+                            NodeId(node.clone()),
+                            FileLocate {
+                                query: query.clone(),
+                                near: Some(near),
+                                beside: Some(true),
+                                under: None,
+                            },
+                            cx,
+                        );
                         page.ask_find(beside, revision, Part::Beside, cx);
                     }
-                    page.ask_find(Request::get(NodeId(node), uri), revision, Part::Names, cx);
+                    let names = page.host.call(
+                        NodeId(node),
+                        FileLocate {
+                            query,
+                            near,
+                            beside: None,
+                            under: None,
+                        },
+                        cx,
+                    );
+                    page.ask_find(names, revision, Part::Names, cx);
                     // Ctrl+Shift+F looks inside the files as you type.
                     if page.search_inside {
                         page.find_in_text(cx);
@@ -1253,15 +1303,16 @@ impl FilesPage {
         })
         .detach();
     }
-    fn ask_find(&mut self, request: Request, revision: u64, part: Part, cx: &mut Context<Self>) {
-        self.request(
-            request,
-            move |p, s, b, cx| {
-                let found = if s == 200 {
-                    serde_json::from_slice::<Matches>(&b).map_err(|e| e.to_string())
-                } else {
-                    Err(message(s, &b))
-                };
+    fn ask_find(
+        &mut self,
+        task: impl Future<Output = Result<Matches, Error>> + 'static,
+        revision: u64,
+        part: Part,
+        cx: &mut Context<Self>,
+    ) {
+        cx.spawn(async move |this, cx| {
+            let found = task.await.map_err(|error| error.message);
+            let _ = this.update(cx, |p, cx| {
                 if let Some(find) = p.find.as_mut() {
                     match part {
                         Part::Beside => find.answer_beside(revision, found),
@@ -1270,9 +1321,9 @@ impl FilesPage {
                     }
                 }
                 cx.notify()
-            },
-            cx,
-        );
+            });
+        })
+        .detach();
     }
     /// The folder a find looks in first, and whose files' text it
     /// searches: a folder picked in the tree; else the workspace of the
@@ -1314,8 +1365,20 @@ impl FilesPage {
         let (query, revision) = (find.query.clone(), find.revision);
         let first = find.matches().len();
         self.pick = Some(Pick::Hit(first));
-        let uri = format!("{}&q={}", route("search", &folder), enc(&query));
-        self.ask_find(Request::get(self.node(), uri), revision, Part::Inside, cx);
+        let task = self.host.call(
+            self.node(),
+            FileSearch {
+                path: folder,
+                query,
+            },
+            cx,
+        );
+        self.ask_find(
+            async move { task.await.map(|answer| answer.results) },
+            revision,
+            Part::Inside,
+            cx,
+        );
         cx.notify();
     }
     fn clear_find(&mut self, cx: &mut Context<Self>) {
@@ -1552,7 +1615,7 @@ impl FilesPage {
     fn read(&mut self, node: String, path: String, again: bool, cx: &mut Context<Self>) {
         let name = paths::base_name(&path).to_string();
         self.request(
-            Request::get(NodeId(node.clone()), route("file", &path)),
+            Request::get(NodeId(node.clone()), bytes_uri(&path)),
             move |p, s, b, cx| {
                 if !p
                     .opened
@@ -1701,12 +1764,13 @@ impl FilesPage {
         };
         let node = o.node.clone();
         let path = o.path.clone();
-        self.request(
-            Request::get(
-                NodeId(node.clone()),
-                format!("{}&whole=true", route("diff", &path)),
-            ),
-            move |page, status, body, cx| {
+        self.call(
+            NodeId(node.clone()),
+            FileDiff {
+                path: path.clone(),
+                whole: Some(true),
+            },
+            move |page, answer, cx| {
                 let Some(o) = page
                     .opened
                     .as_mut()
@@ -1714,9 +1778,8 @@ impl FilesPage {
                 else {
                     return;
                 };
-                o.diff = (status == 200)
-                    .then(|| serde_json::from_slice::<ahjo_files_contract::Diff>(&body).ok())
-                    .flatten()
+                o.diff = answer
+                    .ok()
                     .filter(|d| d.error.is_none() && !d.diff.trim().is_empty());
                 o.changes = o.diff.as_ref().map(|d| store::marks::of_diff(&d.diff));
                 o.sides = o
@@ -1861,11 +1924,11 @@ impl FilesPage {
         let (method, uri, success) = match mode {
             open::Write::Save => (
                 "PUT",
-                format!("{}&base={}", route("file", &target), enc(&base)),
+                format!("{}&base={}", bytes_uri(&target), enc(&base)),
                 204,
             ),
-            open::Write::Overwrite => ("PUT", route("file", &target), 204),
-            open::Write::Copy => ("POST", route("file", &target), 201),
+            open::Write::Overwrite => ("PUT", bytes_uri(&target), 204),
+            open::Write::Copy => ("POST", bytes_uri(&target), 201),
         };
         let mut request = Request::new(method, NodeId(node.clone()), uri);
         request.body = Some(("application/octet-stream".into(), sent.as_bytes().to_vec()));
@@ -2209,38 +2272,53 @@ impl FilesPage {
             return;
         }
         let node = self.tree.node.clone();
-        let (folder, uri, made, moved) = match &naming {
-            Naming::File(folder) => {
-                let to = paths::join(folder, &name);
-                (folder.clone(), route("file", &to), to, None)
-            }
-            Naming::Folder(folder) => {
-                let to = paths::join(folder, &name);
-                (folder.clone(), route("folder", &to), to, None)
-            }
-            Naming::Rename(from) => {
-                let folder = paths::parent(from);
-                let to = paths::join(&folder, &name);
-                let uri = format!("{}&to={}", route("rename", from), enc(&to));
-                (folder, uri, to.clone(), Some((from.clone(), to)))
-            }
+        let folder = match &naming {
+            Naming::File(folder) | Naming::Folder(folder) => folder.clone(),
+            Naming::Rename(from) => paths::parent(from),
         };
+        let made = paths::join(&folder, &name);
         let file = matches!(naming, Naming::File(_));
-        let task = self
-            .host
-            .request(Request::new("POST", NodeId(node.clone()), uri), cx);
-        cx.spawn_in(window, async move |this, cx| {
-            let (s, b) = match task.await {
-                Ok(a) => (a.status, a.body),
-                Err(e) => (0, e.message.into_bytes()),
+        let target = NodeId(node.clone());
+        let task = if file {
+            let answer = self.host.call(
+                target,
+                FileWrite {
+                    path: made.clone(),
+                    text: String::new(),
+                    base: None,
+                    new: Some(true),
+                    base64: false,
+                    replace: false,
+                },
+                cx,
+            );
+            cx.background_executor()
+                .spawn(async move { answer.await.map(drop) })
+        } else {
+            let answer = match &naming {
+                Naming::Rename(from) => self.host.call(
+                    target,
+                    FileMove {
+                        path: from.clone(),
+                        to: made.clone(),
+                    },
+                    cx,
+                ),
+                _ => self.host.call(target, FileMkdir { path: made.clone() }, cx),
             };
+            cx.background_executor()
+                .spawn(async move { answer.await.map(drop) })
+        };
+        cx.spawn_in(window, async move |this, cx| {
+            let answer = task.await;
             let _ = this.update_in(cx, |p, window, cx| {
-                if !(200..300).contains(&s) {
-                    p.fail(message(s, &b), cx);
+                if let Err(error) = answer {
+                    p.fail(error.message, cx);
                     cx.notify();
                     return;
                 }
-                if let Some((from, to)) = &moved {
+                if let Naming::Rename(from) = &naming {
+                    let to = &made;
                     store::drafts::move_drafts(&mut p.drafts, &node, from, to);
                     // Tabs follow what they show.
                     let under: Vec<store::tabs::Key> = p
@@ -2290,11 +2368,12 @@ impl FilesPage {
             return;
         }
         let node = self.tree.node.clone();
-        self.request(
-            Request::new("DELETE", NodeId(node.clone()), route("file", &path)),
-            move |p, s, b, cx| {
-                if !(200..300).contains(&s) {
-                    p.fail(message(s, &b), cx);
+        self.call(
+            NodeId(node.clone()),
+            FileDelete { path: path.clone() },
+            move |p, answer, cx| {
+                if let Err(error) = answer {
+                    p.fail(error.message, cx);
                 } else {
                     let gone: Vec<store::tabs::Key> = p
                         .tabs
@@ -2420,7 +2499,7 @@ impl FilesPage {
         let mut request = Request::new(
             if replace { "PUT" } else { "POST" },
             upload.node.clone(),
-            route("file", &path),
+            bytes_uri(&path),
         );
         request.body = Some(("application/octet-stream".into(), bytes.clone()));
         self.request(
@@ -2623,7 +2702,7 @@ impl FilesPage {
         };
         let destination = folder.join(paths::base_name(&path));
         self.request(
-            Request::get(node, route("file", &path)),
+            Request::get(node, bytes_uri(&path)),
             move |p, status, body, cx| {
                 if status != 200 {
                     p.fail(message(status, &body), cx);
@@ -2666,7 +2745,7 @@ impl FilesPage {
         let path = opened.path.clone();
         let name = opened.name.clone();
         self.request(
-            Request::get(NodeId(node.clone()), route("file", &path)),
+            Request::get(NodeId(node.clone()), bytes_uri(&path)),
             move |p, s, b, cx| {
                 if s != 200 {
                     p.fail(message(s, &b), cx)
@@ -2837,18 +2916,20 @@ impl FilesPage {
             return;
         }
         let node = self.tree.node.clone();
-        let body = serde_json::json!({ "paths": asked });
-        self.request(
-            Request::new("POST", NodeId(node.clone()), "/api/files/stat").json(&body),
-            move |p, s, b, cx| {
-                if s != 200 || p.tree.node != node {
+        self.call(
+            NodeId(node.clone()),
+            FileStat {
+                paths: asked.clone(),
+            },
+            move |p, answer, cx| {
+                if p.tree.node != node {
                     return;
                 }
-                let Ok(times) = serde_json::from_slice::<Vec<Option<u64>>>(&b) else {
+                let Ok(answer) = answer else {
                     return;
                 };
                 let mut any = false;
-                for (path, time) in asked.into_iter().zip(times) {
+                for (path, time) in asked.into_iter().zip(answer.times) {
                     // The first answer is checked too: the file may have
                     // changed between its read and this look.
                     if p.seen.insert(path.clone(), time) == Some(time) {
@@ -3029,7 +3110,7 @@ impl FilesPage {
         self.palette = false;
         let readme = paths::join(&folder, "README.md");
         self.request(
-            Request::get(self.node(), route("file", &readme)),
+            Request::get(self.node(), bytes_uri(&readme)),
             move |p, s, b, cx| {
                 if s == 200 && p.place.as_deref() == Some(paths::parent(&readme).as_str()) {
                     let text = String::from_utf8_lossy(&b);
@@ -3043,19 +3124,16 @@ impl FilesPage {
             self.list(folder.clone(), cx);
         }
         let node = self.tree.node.clone();
-        self.request(
-            Request::get(NodeId(node.clone()), route("recent", &folder)),
-            move |p, s, b, cx| {
+        self.call(
+            NodeId(node.clone()),
+            FileRecent {
+                path: Some(folder.clone()),
+            },
+            move |p, answer, cx| {
                 if p.tree.node != node || p.place.as_deref() != Some(folder.as_str()) {
                     return;
                 }
-                p.place_recent = Some(if s == 200 {
-                    serde_json::from_slice::<ahjo_files_contract::Recent>(&b)
-                        .map(|r| r.files)
-                        .map_err(|e| e.to_string())
-                } else {
-                    Err(message(s, &b))
-                });
+                p.place_recent = Some(answer.map(|r| r.files).map_err(|error| error.message));
                 cx.notify();
             },
             cx,

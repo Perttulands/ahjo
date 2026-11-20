@@ -6,11 +6,11 @@ use ahjo_app_kit::widgets::select::Selectable;
 use ahjo_app_kit::{
     Host, Page,
     chords::Chord,
-    host::Request,
     link::client::LinkState,
     widgets::field::{self, FieldEvent, TextField},
 };
-use ahjo_core::NodeId;
+use ahjo_brain_contract::commands::{BrainChanges, BrainRead, BrainSearch};
+use ahjo_core::{Error, NodeId, TypedCommand};
 use gpui::{
     App, AppContext, Context, Entity, FocusHandle, IntoElement, Render, ScrollHandle, WeakEntity,
     Window, div,
@@ -174,30 +174,26 @@ impl Panel {
     /// Reads what arrived lately, which the list shows before anything is
     /// typed: each time the panel opens.
     pub(crate) fn read_arrivals(&mut self, cx: &mut Context<Self>) {
-        self.request(
-            "/api/brain/changes",
-            |panel, status, body, _| panel.state.changes_read(status, &body),
+        self.call(
+            BrainChanges { limit: None },
+            |panel, result, _| {
+                panel.state.changes_read(result);
+            },
             cx,
         );
     }
 
-    /// A GET on the serving node; `done` hears its status and body.
-    fn request(
+    fn call<C: TypedCommand>(
         &mut self,
-        path: &str,
-        done: impl FnOnce(&mut Self, u16, Vec<u8>, &mut Context<Self>) + 'static,
+        input: C,
+        done: impl FnOnce(&mut Self, Result<C::Output, Error>, &mut Context<Self>) + 'static,
         cx: &mut Context<Self>,
     ) {
-        let task = self
-            .host
-            .request(Request::get(NodeId(String::new()), path), cx);
+        let task = self.host.call::<C>(NodeId(String::new()), input, cx);
         cx.spawn(async move |this, cx| {
-            let (status, body) = match task.await {
-                Ok(answer) => (answer.status, answer.body),
-                Err(error) => (0, error.message.into_bytes()),
-            };
+            let result = task.await;
             let _ = this.update(cx, |panel, cx| {
-                done(panel, status, body, cx);
+                done(panel, result, cx);
                 cx.notify();
             });
         })
@@ -222,11 +218,12 @@ impl Panel {
                 if panel.state.asked != asked {
                     return;
                 }
-                let path = format!("/api/brain/search?q={}", state::encode(&panel.state.query));
-                panel.request(
-                    &path,
-                    move |panel, status, body, _| {
-                        if panel.state.found(asked, status, &body) {
+                panel.call(
+                    BrainSearch {
+                        query: panel.state.query.clone(),
+                    },
+                    move |panel, result, _| {
+                        if panel.state.found(asked, result) {
                             panel.reveal = true;
                         }
                     },
@@ -282,11 +279,13 @@ impl Panel {
         cx: &mut Context<Self>,
     ) {
         let reading = self.state.open(fresh);
-        let path = format!("/api/brain/page?path={}", state::encode(path));
-        self.request(
-            &path,
-            move |panel, status, body, _| {
-                if panel.state.read(reading, status, &body) && status == 200 {
+        self.call(
+            BrainRead {
+                path: path.to_owned(),
+            },
+            move |panel, result, _| {
+                let success = result.is_ok();
+                if panel.state.read(reading, result) && success {
                     panel
                         .scroll
                         .set_offset(gpui::point(gpui::px(0.), gpui::px(0.)));

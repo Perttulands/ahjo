@@ -64,7 +64,7 @@ impl FilesPage {
         let task = self.host.request(
             ahjo_app_kit::host::Request::get(
                 ahjo_core::NodeId(node.to_string()),
-                crate::page::route("file", &path),
+                crate::page::bytes_uri(&path),
             ),
             cx,
         );

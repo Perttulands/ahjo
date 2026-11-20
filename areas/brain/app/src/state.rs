@@ -9,7 +9,8 @@ pub const LIMIT: usize = 50;
 
 pub use ahjo_brain_contract::{Found as Hit, Link, Listed, Page, PageRef};
 
-use ahjo_brain_contract::{Changes, Results};
+use ahjo_brain_contract::commands::{BrainChangesResult, BrainPage, BrainSearchResults};
+use ahjo_core::Error;
 
 /// What the Brain panel keeps between app runs, in the `brain` section.
 #[derive(Clone, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -64,17 +65,17 @@ impl Brain {
     }
 
     /// A search answered. False if it was not the latest.
-    pub fn found(&mut self, asked: u32, status: u16, body: &[u8]) -> bool {
+    pub fn found(&mut self, asked: u32, result: Result<BrainSearchResults, Error>) -> bool {
         if asked != self.asked {
             return false;
         }
         self.searching = false;
-        match serde_json::from_slice::<Results>(body) {
-            Ok(r) if status == 200 => {
+        match result {
+            Ok(r) => {
                 self.results = r.results;
                 self.selected = 0;
             }
-            _ => self.search_error = Some(words(status, body)),
+            Err(error) => self.search_error = Some(error.message),
         }
         true
     }
@@ -109,10 +110,10 @@ impl Brain {
     }
 
     /// The recent changes answered: each page once, at its newest change.
-    pub fn changes_read(&mut self, status: u16, body: &[u8]) {
+    pub fn changes_read(&mut self, result: Result<BrainChangesResult, Error>) {
         self.arrivals_read = true;
-        match serde_json::from_slice::<Changes>(body) {
-            Ok(c) if status == 200 => {
+        match result {
+            Ok(c) => {
                 let mut arrivals: Vec<Listed> = vec![];
                 for change in c.changes {
                     for p in change.pages {
@@ -128,7 +129,7 @@ impl Brain {
                 self.arrivals = arrivals;
                 self.git_error = c.error;
             }
-            _ => self.git_error = Some(words(status, body)),
+            Err(error) => self.git_error = Some(error.message),
         }
     }
 
@@ -143,12 +144,13 @@ impl Brain {
     /// A page answered. False if another page was asked for since. A page
     /// from the list starts the trail; one reached by a link joins it, or
     /// the trail goes back to it.
-    pub fn read(&mut self, reading: u32, status: u16, body: &[u8]) -> bool {
+    pub fn read(&mut self, reading: u32, result: Result<BrainPage, Error>) -> bool {
         if reading != self.reading {
             return false;
         }
-        match serde_json::from_slice::<Page>(body) {
-            Ok(p) if status == 200 => {
+        match result {
+            Ok(answer) => {
+                let p = answer.page;
                 if self.fresh {
                     self.trail.clear();
                 }
@@ -159,7 +161,7 @@ impl Brain {
                 self.page = Some(p);
                 self.page_error = None;
             }
-            _ => self.page_error = Some(words(status, body)),
+            Err(error) => self.page_error = Some(error.message),
         }
         true
     }
@@ -212,20 +214,6 @@ pub fn when(iso: &str, now: jiff::Timestamp) -> String {
         s if s < YEAR => say(s / MONTH, "month"),
         s => say(s / YEAR, "year"),
     }
-}
-
-/// A query parameter's value, percent-encoded.
-pub fn encode(value: &str) -> String {
-    let mut out = String::new();
-    for b in value.bytes() {
-        match b {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' | b'/' => {
-                out.push(b as char)
-            }
-            _ => out.push_str(&format!("%{b:02X}")),
-        }
-    }
-    out
 }
 
 /// A snippet's parts: (text, marked) with `»…«` marking the match.
@@ -345,28 +333,70 @@ pub fn snippet_parts(snippet: &str) -> Vec<(String, bool)> {
     parts
 }
 
-fn words(status: u16, body: &[u8]) -> String {
-    if status == 0 {
-        return String::from_utf8_lossy(body).into_owned();
-    }
-    ahjo_app_kit::link::http::error_text(status, body)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    use ahjo_brain_contract::{Commit, commands::BrainChange};
+
+    fn results(paths: &[&str]) -> BrainSearchResults {
+        BrainSearchResults {
+            node: "n".into(),
+            results: paths
+                .iter()
+                .map(|path| Hit {
+                    path: (*path).into(),
+                    title: (*path).into(),
+                    ..Hit::default()
+                })
+                .collect(),
+        }
+    }
+
+    fn page(path: &str, file: &str) -> BrainPage {
+        BrainPage {
+            node: "n".into(),
+            page: Page {
+                path: path.into(),
+                title: path.into(),
+                file: file.into(),
+                ..Page::default()
+            },
+        }
+    }
+
+    fn changes(entries: &[(&str, &[&str])]) -> BrainChangesResult {
+        BrainChangesResult {
+            node: "n".into(),
+            changes: entries
+                .iter()
+                .map(|(time, paths)| BrainChange {
+                    commit: Commit {
+                        time: (*time).into(),
+                        ..Commit::default()
+                    },
+                    paths: paths.join(", "),
+                    pages: paths
+                        .iter()
+                        .map(|path| PageRef {
+                            path: (*path).into(),
+                            title: (*path).into(),
+                            ..PageRef::default()
+                        })
+                        .collect(),
+                })
+                .collect(),
+            error: None,
+        }
+    }
 
     #[test]
     fn an_empty_query_clears_at_once_and_a_stale_answer_is_dropped() {
         let mut b = Brain::default();
         let first = b.typed("pa").unwrap();
         let second = b.typed("pace").unwrap();
-        assert!(!b.found(first, 200, br#"{"results":[{"path":"a.md","title":"A"}]}"#));
-        assert!(b.found(
-            second,
-            200,
-            br#"{"results":[{"path":"pace.md","title":"Pace"}]}"#
-        ));
+        assert!(!b.found(first, Ok(results(&["a.md"]))));
+        assert!(b.found(second, Ok(results(&["pace.md"]))));
         assert_eq!(b.results[0].path, "pace.md");
         assert_eq!(b.typed("  "), None);
         assert!(b.results.is_empty());
@@ -376,11 +406,7 @@ mod tests {
     fn up_and_down_move_the_mark_held_to_the_list() {
         let mut b = Brain::default();
         let n = b.typed("x").unwrap();
-        b.found(
-            n,
-            200,
-            br#"{"results":[{"path":"a","title":"A"},{"path":"b","title":"B"}]}"#,
-        );
+        b.found(n, Ok(results(&["a", "b"])));
         assert_eq!(b.marked().as_deref(), Some("a"), "the first until moved");
         b.step(1);
         b.step(1);
@@ -388,7 +414,7 @@ mod tests {
         b.step(-5);
         assert_eq!(b.marked().as_deref(), Some("a"));
         let n = b.typed("y").unwrap();
-        b.found(n, 200, br#"{"results":[]}"#);
+        b.found(n, Ok(results(&[])));
         b.step(1);
         assert_eq!(b.marked(), None, "nothing to mark");
     }
@@ -396,11 +422,7 @@ mod tests {
     #[test]
     fn with_nothing_typed_the_keys_walk_the_arrivals() {
         let mut b = Brain::default();
-        b.changes_read(
-            200,
-            br#"{"changes":[{"hash":"1","time":"t","author":"L","message":"m",
-                "pages":[{"path":"a","title":"A"},{"path":"b","title":"B"},{"path":"c","title":"C"}]}],"error":null}"#,
-        );
+        b.changes_read(Ok(changes(&[("t", &["a", "b", "c"])])));
         assert_eq!(b.marked().as_deref(), Some("a"));
         b.step(2);
         assert_eq!(b.marked().as_deref(), Some("c"));
@@ -423,31 +445,22 @@ mod tests {
             ("b", false),
         ] {
             let r = b.open(fresh);
-            b.read(
-                r,
-                200,
-                format!(r#"{{"path":"{p}","title":"{p}"}}"#).as_bytes(),
-            );
+            b.read(r, Ok(page(p, "")));
         }
         let paths: Vec<&str> = b.trail.iter().map(|(p, _)| p.as_str()).collect();
         assert_eq!(paths, vec!["a", "b"]);
         let r = b.open(false);
-        assert!(!b.read(r - 1, 200, br#"{"path":"c","title":"C"}"#));
-        assert!(b.read(
-            r,
-            404,
-            br#"{"error":{"code":"not_found","message":"No such page"}}"#
-        ));
+        assert!(!b.read(r - 1, Ok(page("c", ""))));
+        assert!(b.read(r, Err(Error::new("not_found", "No such page"))));
         assert_eq!(b.page_error.as_deref(), Some("No such page"));
         assert_eq!(
             b.page.as_ref().unwrap().path,
             "b",
             "a failed read keeps the page"
         );
-        assert_eq!(encode("self/pace & me"), "self/pace%20%26%20me");
         let r = b.open(true);
-        b.read(r, 200, br#"{"path":"d","title":"D"}"#);
-        assert_eq!(b.trail, vec![("d".to_string(), "D".to_string())]);
+        b.read(r, Ok(page("d", "")));
+        assert_eq!(b.trail, vec![("d".to_string(), "d".to_string())]);
     }
 
     #[test]
@@ -456,19 +469,11 @@ mod tests {
         assert_eq!(b.reference(), None, "nothing read, nothing to send");
         let pending = b.open(true);
         b.close();
-        assert!(!b.read(
-            pending,
-            200,
-            br#"{"path":"preferences/tools.md","title":"Tools"}"#
-        ));
+        assert!(!b.read(pending, Ok(page("preferences/tools.md", ""))));
         assert!(b.page.is_none());
         assert!(b.trail.is_empty());
-        let page = b.open(true);
-        b.read(
-            page,
-            200,
-            br#"{"path":"a/b.md","file":"/srv/corpus/a/b.md","title":"B"}"#,
-        );
+        let selected = b.open(true);
+        b.read(selected, Ok(page("a/b.md", "/srv/corpus/a/b.md")));
         assert_eq!(
             b.reference().as_deref(),
             Some("brain page /srv/corpus/a/b.md"),
@@ -481,14 +486,9 @@ mod tests {
         let mut b = Brain::default();
         let n = b.typed("x").unwrap();
         assert_eq!(b.count().as_deref(), Some("Searching…"));
-        let many: Vec<String> = (0..50)
-            .map(|i| format!(r#"{{"path":"{i}","title":"{i}"}}"#))
-            .collect();
-        b.found(
-            n,
-            200,
-            format!(r#"{{"results":[{}]}}"#, many.join(",")).as_bytes(),
-        );
+        let paths: Vec<String> = (0..50).map(|i| i.to_string()).collect();
+        let paths: Vec<&str> = paths.iter().map(String::as_str).collect();
+        b.found(n, Ok(results(&paths)));
         assert_eq!(b.count().as_deref(), Some("50 pages, best first"));
     }
 
@@ -496,14 +496,10 @@ mod tests {
     fn each_arrival_shows_once_at_its_newest_change() {
         let mut b = Brain::default();
         assert!(!b.arrivals_read);
-        b.changes_read(
-            200,
-            br#"{"changes":[
-                {"hash":"2","time":"2026-11-02T00:00:00Z","author":"L","message":"m",
-                 "pages":[{"path":"self/a.md","title":"A"},{"path":"knowledge/b.md","title":"B"}]},
-                {"hash":"1","time":"2026-11-01T00:00:00Z","author":"L","message":"m",
-                 "pages":[{"path":"self/a.md","title":"A"}]}],"error":null}"#,
-        );
+        b.changes_read(Ok(changes(&[
+            ("2026-11-02T00:00:00Z", &["self/a.md", "knowledge/b.md"]),
+            ("2026-11-01T00:00:00Z", &["self/a.md"]),
+        ])));
         assert!(b.arrivals_read);
         assert_eq!(b.arrivals.len(), 2, "each page once");
         assert_eq!(

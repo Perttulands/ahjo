@@ -3,7 +3,7 @@
 
 use std::sync::Arc;
 
-use ahjo_files_contract::{At, DiffAt, DropAt, Dropped, Job, Move, NodeRoots, SaveAt, Search};
+use ahjo_files_contract::{At, DropAt, Dropped, FILE_BYTES_PATH, Job, SaveAt};
 use axum::body::Bytes;
 use axum::extract::{DefaultBodyLimit, Query, State};
 use axum::http::StatusCode;
@@ -13,7 +13,7 @@ use axum::routing::{get, post};
 use axum::{Json, Router};
 
 use super::Files;
-use super::disk::{self, Listing};
+use super::disk;
 use super::drops::Drops;
 use super::error::FilesError;
 
@@ -22,21 +22,9 @@ pub const MAX_BYTES: u64 = 64 << 20;
 
 pub fn routes(files: Arc<Files>, drops: Arc<Drops>) -> Router {
     Router::new()
-        .route("/api/files/roots", get(roots))
-        .route("/api/files/recent", get(recent))
-        .route("/api/files/stat", post(stat))
-        .route("/api/files/find", get(find))
-        .route("/api/files/diff", get(diff))
-        .route("/api/files/status", get(status))
-        .route("/api/files/search", get(search))
         .route("/api/files/bridge/start", post(bridge_start))
         .route("/api/files/bridge/events", get(bridge_events))
-        .route("/api/files/folder", get(list).post(create_folder))
-        .route(
-            "/api/files/file",
-            get(read).put(save).post(create_file).delete(delete),
-        )
-        .route("/api/files/rename", post(rename))
+        .route(FILE_BYTES_PATH, get(read).put(save).post(create_file))
         .layer(DefaultBodyLimit::max(MAX_BYTES as usize))
         .with_state(files)
         .merge(drop_routes(drops))
@@ -44,46 +32,6 @@ pub fn routes(files: Arc<Files>, drops: Arc<Drops>) -> Router {
 }
 
 type Shared = State<Arc<Files>>;
-
-/// This node's id and roots: where a browser starts.
-async fn roots(State(files): Shared) -> Json<NodeRoots> {
-    Json(NodeRoots {
-        node: files.node.clone(),
-        roots: files.roots.list(),
-    })
-}
-
-#[derive(serde::Deserialize)]
-struct NodeQuery {
-    #[serde(default)]
-    node: String,
-}
-
-/// What changed under the roots, or with `path` under that folder.
-#[derive(serde::Deserialize)]
-struct RecentQuery {
-    #[serde(default)]
-    node: String,
-    path: Option<String>,
-}
-
-async fn recent(
-    State(files): Shared,
-    Query(at): Query<RecentQuery>,
-) -> Result<Json<ahjo_files_contract::Recent>, FilesError> {
-    let result = blocking(&files, &at.node, move |f| f.recent(at.path.as_deref())).await?;
-    Ok(Json(result))
-}
-
-async fn stat(
-    State(files): Shared,
-    Query(at): Query<NodeQuery>,
-    Json(asked): Json<ahjo_files_contract::Stat>,
-) -> Result<Json<Vec<Option<u64>>>, FilesError> {
-    Ok(Json(
-        blocking(&files, &at.node, move |f| Ok(f.stat(&asked.paths))).await?,
-    ))
-}
 
 async fn bridge_start(
     State(files): Shared,
@@ -127,60 +75,6 @@ async fn bridge_events(
         axum::body::Body::from_stream(stream),
     )
         .into_response())
-}
-
-async fn diff(
-    State(files): Shared,
-    Query(at): Query<DiffAt>,
-) -> Result<Json<super::diff::Diff>, FilesError> {
-    let result = blocking(&files, &at.node, move |f| {
-        super::diff::read(&f.roots, &at.path, at.whole)
-    })
-    .await?;
-    Ok(Json(result))
-}
-
-async fn status(
-    State(files): Shared,
-    Query(at): Query<At>,
-) -> Result<Json<super::status::RepoStatus>, FilesError> {
-    let result = blocking(&files, &at.node, move |f| {
-        super::status::read(&f.roots, &at.path)
-    })
-    .await?;
-    Ok(Json(result))
-}
-
-async fn find(
-    State(files): Shared,
-    Query(at): Query<Search>,
-) -> Result<Json<super::find::Matches>, FilesError> {
-    let result = blocking(&files, &at.node, move |f| {
-        if at.path.is_empty() {
-            let near = (!at.near.is_empty()).then_some(at.near.as_str());
-            Ok(f.locate(&at.q, near, at.beside))
-        } else {
-            f.find(&at.path, &at.q, false)
-        }
-    })
-    .await?;
-    Ok(Json(result))
-}
-
-async fn search(
-    State(files): Shared,
-    Query(at): Query<Search>,
-) -> Result<Json<super::find::Matches>, FilesError> {
-    let result = blocking(&files, &at.node, move |f| {
-        super::find::search(&f.roots, &at.path, &at.q, true)
-    })
-    .await?;
-    Ok(Json(result))
-}
-
-async fn list(State(files): Shared, Query(at): Query<At>) -> Result<Json<Listing>, FilesError> {
-    let listing = blocking(&files, &at.node, move |f| disk::list(&f.roots, &at.path)).await?;
-    Ok(Json(listing))
 }
 
 /// A file's bytes. Served so a page can show a picture, and never run one:
@@ -227,30 +121,6 @@ async fn create_file(
     })
     .await?;
     Ok(StatusCode::CREATED)
-}
-
-async fn create_folder(
-    State(files): Shared,
-    Query(at): Query<At>,
-) -> Result<StatusCode, FilesError> {
-    blocking(&files, &at.node, move |f| {
-        disk::create_folder(&f.roots, &at.path)
-    })
-    .await?;
-    Ok(StatusCode::CREATED)
-}
-
-async fn delete(State(files): Shared, Query(at): Query<At>) -> Result<StatusCode, FilesError> {
-    blocking(&files, &at.node, move |f| disk::delete(&f.roots, &at.path)).await?;
-    Ok(StatusCode::NO_CONTENT)
-}
-
-async fn rename(State(files): Shared, Query(at): Query<Move>) -> Result<StatusCode, FilesError> {
-    blocking(&files, &at.node, move |f| {
-        disk::rename(&f.roots, &at.path, &at.to)
-    })
-    .await?;
-    Ok(StatusCode::NO_CONTENT)
 }
 
 /// Runs a disk operation off the async threads, once the request is known to

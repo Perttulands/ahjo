@@ -3,10 +3,13 @@
 use std::path::{Path, PathBuf};
 
 use ahjo_files::{Files, MAX_BYTES};
+use ahjo_node_kit::{NodeClient, NodeError};
+use ahjo_testkit::node::Node;
 use axum::Router;
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use http_body_util::BodyExt;
+use serde_json::{Value, json};
 use tower::ServiceExt;
 
 const NODE: &str = "test-node";
@@ -76,6 +79,41 @@ async fn call(
     (status, body, headers)
 }
 
+/// Run a typed command on a node with this test's roots.
+async fn command(
+    root: &Path,
+    name: &str,
+    arguments: Value,
+) -> (StatusCode, Vec<u8>, axum::http::HeaderMap) {
+    let config = format!(
+        "[files]\nroots = [{}]\n",
+        serde_json::to_string(root.to_str().unwrap()).unwrap()
+    );
+    let node = Node::start(&[ahjo_files::LISTING], &config).await.unwrap();
+    let client = NodeClient::new(Some(&node.url())).unwrap();
+    let result = client
+        .request(
+            axum::http::Method::POST,
+            &format!("/api/call/{name}"),
+            Some(arguments),
+            None,
+        )
+        .await;
+    let answer = match result {
+        Ok((value, _)) => (StatusCode::OK, serde_json::to_vec(&value).unwrap()),
+        Err(error) => {
+            let error = error.downcast_ref::<NodeError>().unwrap();
+            (
+                error.status,
+                serde_json::to_vec(&json!({"error":{"code":error.code,"message":error.message}}))
+                    .unwrap(),
+            )
+        }
+    };
+    node.stop().await;
+    (answer.0, answer.1, axum::http::HeaderMap::new())
+}
+
 /// The `base` an editor sends: the SHA-256 of what it read, in hex.
 fn version(bytes: &[u8]) -> String {
     use sha2::Digest;
@@ -89,23 +127,21 @@ fn text(bytes: &[u8]) -> String {
 #[tokio::test]
 async fn roots_name_the_node_and_its_roots() {
     let scratch = Scratch::new("roots");
-    let (status, body, _) = call(&app(&scratch.0), "GET", "/api/files/roots", Body::empty()).await;
+    let (status, body, _) = command(&scratch.0, "file_list", json!({})).await;
     assert_eq!(status, StatusCode::OK);
     let path = scratch.0.to_str().unwrap();
     // The name drops Windows' verbatim prefix; the path keeps it.
     let name = path.strip_prefix(r"\\?\").unwrap_or(path);
-    let expected = serde_json::json!({"node": NODE, "roots": [{"name": name, "path": path}]});
-    assert_eq!(
-        serde_json::from_slice::<serde_json::Value>(&body).unwrap(),
-        expected
-    );
+    let answer: Value = serde_json::from_slice(&body).unwrap();
+    assert!(!answer["node"].as_str().unwrap().is_empty());
+    assert_eq!(answer["roots"], json!([{"name": name, "path": path}]));
 }
 
 #[tokio::test]
 async fn a_request_for_another_node_is_not_answered_here() {
     let scratch = Scratch::new("other");
     let uri = format!(
-        "/api/files/folder?node=elsewhere&path={}",
+        "/api/files/file?node=elsewhere&path={}",
         encode(scratch.0.to_str().unwrap())
     );
     let (status, body, _) = call(&app(&scratch.0), "GET", &uri, Body::empty()).await;
@@ -121,10 +157,10 @@ async fn create_save_list_read_rename_delete() {
     let file = folder.join("notes.md");
 
     assert_eq!(
-        call(&app, "POST", &at("folder", &folder), Body::empty())
+        command(&scratch.0, "file_mkdir", json!({"path":folder}))
             .await
             .0,
-        StatusCode::CREATED
+        StatusCode::OK
     );
     assert_eq!(
         call(&app, "POST", &at("file", &file), Body::empty())
@@ -140,7 +176,7 @@ async fn create_save_list_read_rename_delete() {
         call(&app, "PUT", &at("file", &file), "# kuvio").await.0,
         StatusCode::NO_CONTENT
     );
-    let (status, body, _) = call(&app, "GET", &at("folder", &folder), Body::empty()).await;
+    let (status, body, _) = command(&scratch.0, "file_list", json!({"path":folder})).await;
     assert_eq!(status, StatusCode::OK);
     let listing = text(&body);
     assert!(
@@ -156,22 +192,19 @@ async fn create_save_list_read_rename_delete() {
     assert_eq!(headers["content-security-policy"], "sandbox");
 
     let moved = folder.join("README.md");
-    let uri = format!(
-        "{}&to={}",
-        at("rename", &file),
-        encode(moved.to_str().unwrap())
-    );
     assert_eq!(
-        call(&app, "POST", &uri, Body::empty()).await.0,
-        StatusCode::NO_CONTENT
+        command(&scratch.0, "file_move", json!({"path":file,"to":moved}))
+            .await
+            .0,
+        StatusCode::OK
     );
     assert_eq!(std::fs::read(&moved).unwrap(), b"# kuvio");
 
     assert_eq!(
-        call(&app, "DELETE", &at("file", &folder), Body::empty())
+        command(&scratch.0, "file_delete", json!({"path":folder}))
             .await
             .0,
-        StatusCode::NO_CONTENT
+        StatusCode::OK
     );
     assert!(!folder.exists());
 }
@@ -236,9 +269,7 @@ async fn refusals_carry_their_status() {
         StatusCode::FORBIDDEN
     );
     assert_eq!(
-        call(&app, "DELETE", &at("file", &root), Body::empty())
-            .await
-            .0,
+        command(&root, "file_delete", json!({"path":root})).await.0,
         StatusCode::FORBIDDEN
     );
     assert_eq!(
@@ -248,23 +279,19 @@ async fn refusals_carry_their_status() {
         StatusCode::NOT_FOUND
     );
     assert_eq!(
-        call(
-            &app,
-            "GET",
-            &at("folder", &root.join("a.txt")),
-            Body::empty()
+        command(&root, "file_list", json!({"path":root.join("a.txt")}))
+            .await
+            .0,
+        StatusCode::BAD_REQUEST
+    );
+    assert_eq!(
+        command(
+            &root,
+            "file_move",
+            json!({"path":root.join("a.txt"), "to":root.join("b.txt")})
         )
         .await
         .0,
-        StatusCode::BAD_REQUEST
-    );
-    let uri = format!(
-        "{}&to={}",
-        at("rename", &root.join("a.txt")),
-        encode(root.join("b.txt").to_str().unwrap())
-    );
-    assert_eq!(
-        call(&app, "POST", &uri, Body::empty()).await.0,
         StatusCode::CONFLICT
     );
     assert_eq!(std::fs::read(root.join("b.txt")).unwrap(), b"b");
@@ -319,13 +346,14 @@ async fn find_and_content_search_report_an_unreadable_chosen_folder() {
     let locked = scratch.0.join("locked");
     std::fs::create_dir(&locked).unwrap();
     std::fs::write(locked.join("note.txt"), "needle").unwrap();
-    let app = app(&scratch.0);
     std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o000)).unwrap();
 
     let mut responses = Vec::new();
-    for route in ["find", "search"] {
-        let uri = format!("{}&q=needle", at(route, &locked));
-        responses.push(call(&app, "GET", &uri, Body::empty()).await);
+    for (name, arguments) in [
+        ("file_locate", json!({"under":locked,"query":"needle"})),
+        ("file_search", json!({"path":locked,"query":"needle"})),
+    ] {
+        responses.push(command(&scratch.0, name, arguments).await);
     }
     std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o700)).unwrap();
     for (status, body, _) in responses {
@@ -353,9 +381,7 @@ async fn diff_reports_head_changes_no_repository_and_git_errors() {
     git(&["init", "-q"]);
     let file = repo.join("[notes].txt");
     std::fs::write(&file, "old\n").unwrap();
-    let app = app(&scratch.0);
-    let get = |path: &Path| at("diff", path);
-    let (_, body, _) = call(&app, "GET", &get(&file), Body::empty()).await;
+    let (_, body, _) = command(&scratch.0, "file_diff", json!({"path":file})).await;
     let result: serde_json::Value = serde_json::from_slice(&body).unwrap();
     assert!(result["error"].as_str().unwrap().contains("HEAD"));
     git(&["add", "."]);
@@ -369,31 +395,37 @@ async fn diff_reports_head_changes_no_repository_and_git_errors() {
         "initial",
     ]);
     std::fs::write(&file, "new\n").unwrap();
-    let (status, body, _) = call(&app, "GET", &get(&file), Body::empty()).await;
+    let (status, body, _) = command(&scratch.0, "file_diff", json!({"path":file})).await;
     assert_eq!(status, StatusCode::OK);
     let result: serde_json::Value = serde_json::from_slice(&body).unwrap();
     assert_eq!(result["repository"], repo.to_str().unwrap());
     assert!(result["diff"].as_str().unwrap().contains("-old\n+new"));
     assert_eq!(result["truncated"], false);
     std::fs::write(&file, format!("{}\n", "x".repeat(1_100_000))).unwrap();
-    let (_, body, _) = call(&app, "GET", &get(&file), Body::empty()).await;
+    let (_, body, _) = command(&scratch.0, "file_diff", json!({"path":file})).await;
     let result: serde_json::Value = serde_json::from_slice(&body).unwrap();
     assert_eq!(result["truncated"], true);
     assert!(result["diff"].as_str().unwrap().len() <= 1 << 20);
     let plain = scratch.0.join("plain");
     std::fs::write(&plain, "plain").unwrap();
-    let (_, body, _) = call(&app, "GET", &get(&plain), Body::empty()).await;
+    let (_, body, _) = command(&scratch.0, "file_diff", json!({"path":plain})).await;
     let result: serde_json::Value = serde_json::from_slice(&body).unwrap();
     assert_eq!(result["repository"], "");
     assert_eq!(result["diff"], "");
     assert_eq!(
-        call(&app, "GET", &get(&scratch.0), Body::empty()).await.0,
+        command(&scratch.0, "file_diff", json!({"path":scratch.0}))
+            .await
+            .0,
         StatusCode::FORBIDDEN
     );
     assert_eq!(
-        call(&app, "GET", &get(&scratch.0.join("missing")), Body::empty())
-            .await
-            .0,
+        command(
+            &scratch.0,
+            "file_diff",
+            json!({"path":scratch.0.join("missing")})
+        )
+        .await
+        .0,
         StatusCode::NOT_FOUND
     );
 }
@@ -438,14 +470,8 @@ async fn status_names_every_file_that_differs_from_head_and_a_whole_diff_has_eve
     std::fs::write(repo.join("docs/new.md"), "new\n").unwrap();
     git(&["config", "status.renames", "false"]);
     git(&["mv", "docs/old name.md", "renamed.md"]);
-    let app = app(&scratch.0);
-    let (status, body, _) = call(
-        &app,
-        "GET",
-        &at("status", &repo.join("docs")),
-        Body::empty(),
-    )
-    .await;
+    let (status, body, _) =
+        command(&scratch.0, "file_status", json!({"path":repo.join("docs")})).await;
     assert_eq!(status, StatusCode::OK);
     let result: ahjo_files_contract::RepoStatus = serde_json::from_slice(&body).unwrap();
     assert_eq!(result.repository, repo.to_str().unwrap());
@@ -484,11 +510,10 @@ async fn status_names_every_file_that_differs_from_head_and_a_whole_diff_has_eve
             .filter(|file| file.state != 'R')
             .all(|file| file.renamed_from.is_none())
     );
-    let (status, body, _) = call(
-        &app,
-        "GET",
-        &at("status", &repo.join("missing/parent")),
-        Body::empty(),
+    let (status, body, _) = command(
+        &scratch.0,
+        "file_status",
+        json!({"path":repo.join("missing/parent")}),
     )
     .await;
     assert_eq!(status, StatusCode::OK);
@@ -497,11 +522,10 @@ async fn status_names_every_file_that_differs_from_head_and_a_whole_diff_has_eve
         result
     );
     let file = repo.join("kept.txt");
-    let (_, body, _) = call(&app, "GET", &at("diff", &file), Body::empty()).await;
+    let (_, body, _) = command(&scratch.0, "file_diff", json!({"path":file})).await;
     let some: serde_json::Value = serde_json::from_slice(&body).unwrap();
     assert!(!some["diff"].as_str().unwrap().contains("line 1\n"));
-    let whole = format!("{}&whole=true", at("diff", &file));
-    let (_, body, _) = call(&app, "GET", &whole, Body::empty()).await;
+    let (_, body, _) = command(&scratch.0, "file_diff", json!({"path":file,"whole":true})).await;
     let all: serde_json::Value = serde_json::from_slice(&body).unwrap();
     let diff = all["diff"].as_str().unwrap();
     assert!(diff.contains(" line 1\n") && diff.contains(" line 20\n"));
@@ -509,26 +533,26 @@ async fn status_names_every_file_that_differs_from_head_and_a_whole_diff_has_eve
     // A file deleted since the commit still shows what went, also when its
     // folder went with it; a path that never was is not found, and one
     // that climbs out of the roots is refused.
-    let gone = at("diff", &repo.join("docs/gone.md"));
-    let (status, body, _) = call(&app, "GET", &gone, Body::empty()).await;
+    let gone = repo.join("docs/gone.md");
+    let (status, body, _) = command(&scratch.0, "file_diff", json!({"path":gone})).await;
     assert_eq!(status, StatusCode::OK);
     let deleted: serde_json::Value = serde_json::from_slice(&body).unwrap();
     assert!(deleted["diff"].as_str().unwrap().contains("\n-gone\n"));
     std::fs::remove_file(repo.join("docs/new.md")).unwrap();
     std::fs::remove_dir(repo.join("docs")).unwrap();
-    let (status, body, _) = call(&app, "GET", &gone, Body::empty()).await;
+    let (status, body, _) = command(&scratch.0, "file_diff", json!({"path":gone})).await;
     assert_eq!(status, StatusCode::OK);
     let deleted: serde_json::Value = serde_json::from_slice(&body).unwrap();
     assert!(deleted["diff"].as_str().unwrap().contains("\n-gone\n"));
     let plain = scratch.0.join("plain");
     std::fs::create_dir(&plain).unwrap();
-    let never = at("diff", &plain.join("never/was.txt"));
-    let (status, _, _) = call(&app, "GET", &never, Body::empty()).await;
+    let never = plain.join("never/was.txt");
+    let (status, _, _) = command(&scratch.0, "file_diff", json!({"path":never})).await;
     assert_eq!(status, StatusCode::NOT_FOUND);
-    let climbing = at("diff", &scratch.0.join("gone/../../../etc/passwd"));
-    let (status, _, _) = call(&app, "GET", &climbing, Body::empty()).await;
+    let climbing = scratch.0.join("gone/../../../etc/passwd");
+    let (status, _, _) = command(&scratch.0, "file_diff", json!({"path":climbing})).await;
     assert_eq!(status, StatusCode::FORBIDDEN);
-    let (_, body, _) = call(&app, "GET", &at("status", &plain), Body::empty()).await;
+    let (_, body, _) = command(&scratch.0, "file_status", json!({"path":plain})).await;
     let none: ahjo_files_contract::RepoStatus = serde_json::from_slice(&body).unwrap();
     assert_eq!(none, Default::default());
 }

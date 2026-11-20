@@ -183,6 +183,7 @@ pub const LISTING: AreaListing = AreaListing {
         "file_copy",
         "file_resume",
         "file_transfer",
+        "file_stat",
     ],
     build,
 };

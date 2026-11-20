@@ -1,9 +1,10 @@
 //! File command arguments and their answers.
 
+use ahjo_core::TypedCommand;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use crate::{Listing, Matches, Progress, Root};
+use crate::{Diff, Listing, Matches, Progress, Recent, RepoStatus, Root};
 
 /// List the roots or the entries in one folder.
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
@@ -215,4 +216,53 @@ pub struct FileTransferResult {
     pub id: String,
     pub to_node: String,
     pub transfer: Progress,
+}
+
+/// Read the modification time of each path under the roots.
+#[derive(Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct FileStat {
+    /// Paths to check, in the order to report their times.
+    pub paths: Vec<String>,
+}
+
+#[derive(Debug, Deserialize, Serialize, JsonSchema)]
+pub struct FileStated {
+    /// Unix milliseconds for each path, or null when it is missing or outside the roots.
+    pub times: Vec<Option<u64>>,
+}
+
+macro_rules! command {
+    ($input:ty, $name:literal, $output:ty) => {
+        impl TypedCommand for $input {
+            const NAME: &'static str = $name;
+            type Output = $output;
+        }
+    };
+}
+
+command!(FileList, "file_list", FileListed);
+command!(FileRead, "file_read", FileReadResult);
+command!(FileDiff, "file_diff", Diff);
+command!(FileStatus, "file_status", RepoStatus);
+command!(FileRecent, "file_recent", Recent);
+command!(FileWrite, "file_write", FileWritten);
+command!(FileMkdir, "file_mkdir", FilePath);
+command!(FileMove, "file_move", FilePath);
+command!(FileDelete, "file_delete", FileDeleted);
+command!(FileLocate, "file_locate", Matches);
+command!(FileSearch, "file_search", FileSearched);
+command!(FileTransfer, "file_transfer", FileTransferResult);
+command!(FileStat, "file_stat", FileStated);
+
+impl TypedCommand for FileCopy {
+    const NAME: &'static str = "file_copy";
+    const TIMEOUT: Option<std::time::Duration> = Some(std::time::Duration::from_secs(70));
+    type Output = FileTransferResult;
+}
+
+impl TypedCommand for FileResume {
+    const NAME: &'static str = "file_resume";
+    const TIMEOUT: Option<std::time::Duration> = Some(std::time::Duration::from_secs(70));
+    type Output = FileTransferResult;
 }

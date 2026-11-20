@@ -61,8 +61,8 @@ an area: the shell's Settings page lists what pages declare.
 ## Rules the compiler holds
 
 1. **One contract per area.** Both sides of an area use the same `contract`
-   crate, so a changed field fails the build on the other side. There is no
-   second declaration and no document keeping two in step.
+   crate. Standalone apps that use an area's data share that contract, so a
+   changed field fails the build for every caller.
 2. **Areas register themselves.** A node area hands `node-kit` its routes, its
    client actions and its commands; one command definition yields the CLI verb
    and the MCP tool. An app area hands `app-kit` its page, which declares its
@@ -78,9 +78,10 @@ an area: the shell's Settings page lists what pages declare.
    and which depends only on `core`, serde's data formats and their schemas. `node` depends on
    its `contract` and `node-kit`; `app` on its `contract` and `app-kit`. An
    area that needs another uses that area's `contract` or an interface it
-   provides, never its `node` or `app` crate (tests may). `kit/` and `engine/`
-   use no area. Node crates never depend on the GUI toolkit, and app crates
-   never depend on the web server. `bin/ahjo/tests/layout.rs` holds this.
+   provides, never its `node` or `app` crate (tests may). Standalone apps
+   under `bin/` can use `app-kit` and area contracts. `kit/` and `engine/` use
+   no area. Node crates never depend on the GUI toolkit, and app crates never
+   depend on the web server. `bin/ahjo/tests/layout.rs` holds this.
 
 ## Node areas
 
@@ -257,19 +258,19 @@ reserves, or whose `everywhere` chords share a key, naming both;
 
 ## One repository
 
-Swarm, Brain and Desk live in one repository. Brain and Desk each depend on
-exactly one crate here, the app kit (theme, fonts, art, widgets), and that kit
-is still changing fast: it changed in 9 of the 29 commits before this section was written, and 4 commits
-in one week changed the kit and a standalone app together. In separate
+Swarm, Brain and Desk live in one repository. They share the app kit (theme,
+fonts, art, widgets), which changed in 9 of the 29 commits before this section
+was written. Four commits in one week changed the kit and a standalone app
+together. In separate
 repositories each of those would be a release, a pin bump and three CI runs.
 One repository gives the three one theme, one check, one install procedure and
 one Windows build checkout.
 
-The boundary that matters is held by the build: a standalone app depends on
-the app kit and nothing else of Swarm (`bin/ahjo/tests/layout.rs`), so either
-can leave without taking Swarm along. Revisit this when a product gets users
-outside this machine with its own release rhythm, or when the kit has been
-stable long enough to version.
+The app kit and area contracts give standalone apps their shared UI and wire
+types. For example, Brain uses the Brain contract to read a remote node's
+corpus. The build holds this boundary (`bin/ahjo/tests/layout.rs`). Revisit
+this when a product gets users outside this machine with its own release
+rhythm, or when the kit has been stable long enough to version.
 
 ## The app's zoom
 

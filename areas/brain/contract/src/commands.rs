@@ -3,7 +3,8 @@
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use crate::{Collection, Commit, Found, Page, PageRef};
+use crate::{Collection, Commit, File, Found, Listed, Page, PageRef, Text};
+use ahjo_core::TypedCommand;
 
 /// Search the brain for pages.
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
@@ -106,4 +107,65 @@ pub struct BrainSent {
     pub session: String,
     pub reference: String,
     pub sent: bool,
+}
+
+/// List the page files of this node's brain.
+#[derive(Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct BrainFiles {}
+
+/// Read the full text of selected page files.
+#[derive(Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct BrainTexts {
+    /// Corpus-relative page paths.
+    pub paths: Vec<String>,
+}
+
+/// List the pages in one collection and their latest changes.
+#[derive(Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct BrainCollection {
+    /// Collection name.
+    pub name: String,
+}
+
+#[derive(Debug, Deserialize, Serialize, JsonSchema)]
+pub struct BrainFilesResult {
+    pub node: String,
+    pub files: Vec<File>,
+}
+
+#[derive(Debug, Deserialize, Serialize, JsonSchema)]
+pub struct BrainTextsResult {
+    pub node: String,
+    pub texts: Vec<Text>,
+}
+
+#[derive(Debug, Deserialize, Serialize, JsonSchema)]
+pub struct BrainCollectionResult {
+    pub node: String,
+    pub pages: Vec<Listed>,
+    pub error: Option<String>,
+}
+
+macro_rules! typed_commands {
+    ($($input:ty => ($name:literal, $output:ty)),* $(,)?) => {
+        $(impl TypedCommand for $input {
+            const NAME: &'static str = $name;
+            type Output = $output;
+        })*
+    };
+}
+
+typed_commands! {
+    BrainSearch => ("brain_search", BrainSearchResults),
+    BrainRead => ("brain_read", BrainPage),
+    BrainSave => ("brain_save", BrainSaved),
+    BrainCollections => ("brain_collections", BrainCollectionsResult),
+    BrainChanges => ("brain_changes", BrainChangesResult),
+    BrainSend => ("brain_send", BrainSent),
+    BrainFiles => ("brain_files", BrainFilesResult),
+    BrainTexts => ("brain_texts", BrainTextsResult),
+    BrainCollection => ("brain_collection", BrainCollectionResult),
 }

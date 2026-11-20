@@ -4,19 +4,7 @@
 //! written back, each a commit. Either half may be left unconfigured, and
 //! then says so.
 //!
-//! Routes, each answering JSON or the shared coded error:
-//! - `GET /api/brain/search?q=` — Citadel's ranked results, best first.
-//! - `GET /api/brain/page?path=` — one page by corpus-relative path.
-//! - `PUT /api/brain/page` — `{ path, content, summary, base? }`: the page's new
-//!   text, committed alone; answers the commit.
-//! - `GET /api/brain/collections` — the top-level folders and their counts.
-//! - `GET /api/brain/collection?name=` — one collection's pages, each with
-//!   when it last changed.
-//! - `GET /api/brain/changes?limit=` — the newest commits and the pages
-//!   each touched.
-//! - `GET /api/brain/files` — every page file with its size and when it
-//!   changed, and `POST /api/brain/texts` — `{ paths }`: those pages' whole
-//!   texts. Ahjo Brain on another machine keeps a copy of the corpus by them.
+//! Commands expose search, page reads and writes, and remote corpus copies.
 
 mod citadel;
 mod corpus;
@@ -24,7 +12,6 @@ mod history;
 mod links;
 mod page;
 mod refusal;
-mod routes;
 
 use std::path::Path;
 use std::sync::Arc;
@@ -37,7 +24,6 @@ pub use ahjo_brain_contract::{
 };
 
 pub use refusal::{Refusal, code as refusal_code};
-pub use routes::routes;
 
 /// How many commits the changes read when not asked, and at most.
 const CHANGES_DEFAULT: usize = 30;

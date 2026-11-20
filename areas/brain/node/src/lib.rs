@@ -4,7 +4,6 @@ mod commands;
 
 use ahjo_node_kit::{Area, Built, Command, Listing, Setup};
 use anyhow::Result;
-use axum::Router;
 use serde::Deserialize;
 use std::{path::PathBuf, sync::Arc};
 
@@ -17,6 +16,9 @@ pub const LISTING: Listing = Listing {
         "brain_save",
         "brain_collections",
         "brain_changes",
+        "brain_files",
+        "brain_texts",
+        "brain_collection",
         "brain_send",
     ],
     build,
@@ -50,9 +52,6 @@ struct BrainArea {
     sessions: Option<Arc<dyn ahjo_term::Sessions>>,
 }
 impl Area for BrainArea {
-    fn routes(&self) -> Router {
-        brain::routes(self.brain.clone())
-    }
     fn commands(&self) -> Vec<Command> {
         commands::commands(self.brain.clone(), self.node.clone(), self.sessions.clone())
     }

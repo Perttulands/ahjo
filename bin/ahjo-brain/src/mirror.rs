@@ -1,15 +1,15 @@
 //! Another machine's brain, read through its Ahjo node and kept in this
-//! machine's cache: the node lists its page files (`GET /api/brain/files`)
-//! and hands the texts of those that changed (`POST /api/brain/texts`), and
-//! the copy is read as any brain is, read only. Ranked search asks the node
-//! (`GET /api/brain/search`), which asks Citadel on its own machine.
+//! machine's cache, using the node's typed file, text, and search commands.
+//! The copy is read as a brain, read only.
 //!
 //! The copy is the node's corpus as it last answered; a page the node no
 //! longer lists is removed from it. Each file keeps the time it changed on
 //! its own machine, so what changed lately reads as it does there.
 
 use crate::citadel::{self, Hit};
-use serde::{Deserialize, Serialize};
+use ahjo_brain_contract::commands::{BrainFiles, BrainSearch, BrainTexts};
+use ahjo_brain_contract::{File, TypedCommand};
+use serde::Deserialize;
 use std::collections::BTreeMap;
 use std::path::{Component, Path, PathBuf};
 use std::time::{Duration, UNIX_EPOCH};
@@ -52,29 +52,6 @@ pub fn pages(home: &Path) -> PathBuf {
     home.join("pages")
 }
 
-#[derive(Deserialize)]
-struct Files {
-    files: Vec<File>,
-}
-
-#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
-struct File {
-    path: String,
-    size: u64,
-    modified: u64,
-}
-
-#[derive(Deserialize)]
-struct Texts {
-    texts: Vec<Text>,
-}
-
-#[derive(Deserialize)]
-struct Text {
-    path: String,
-    text: String,
-}
-
 /// What a copy took.
 #[derive(Debug, Default, PartialEq)]
 pub struct Synced {
@@ -91,8 +68,7 @@ impl Synced {
 /// Brings the copy in `home` up to the node at `url`. Blocking: run it off
 /// the UI.
 pub fn sync(url: &str, home: &Path) -> Result<Synced, String> {
-    let raw = citadel::ask(WHO, "GET", url, "/api/brain/files", None, WAIT, ANSWER)?;
-    let listed: Files = parse(&raw)?;
+    let listed = call(url, BrainFiles {})?;
     let root = pages(home);
     std::fs::create_dir_all(&root).map_err(|e| format!("{}: {e}", root.display()))?;
     let mut kept = read_manifest(home);
@@ -119,18 +95,12 @@ pub fn sync(url: &str, home: &Path) -> Result<Synced, String> {
         .copied()
         .collect();
     for batch in batches(&stale) {
-        let body =
-            serde_json::json!({ "paths": batch.iter().map(|f| &f.path).collect::<Vec<_>>() });
-        let raw = citadel::ask(
-            WHO,
-            "POST",
+        let read = call(
             url,
-            "/api/brain/texts",
-            Some(&body),
-            WAIT,
-            ANSWER,
+            BrainTexts {
+                paths: batch.iter().map(|f| f.path.clone()).collect(),
+            },
         )?;
-        let read: Texts = parse(&raw)?;
         for text in read.texts {
             let Some(file) = wanted.get(text.path.as_str()) else {
                 continue;
@@ -150,13 +120,23 @@ pub fn sync(url: &str, home: &Path) -> Result<Synced, String> {
 /// The pages matching `query` on the node at `url`, best first, as its
 /// Citadel ranks them.
 pub fn search(url: &str, query: &str) -> Result<Vec<Hit>, String> {
-    #[derive(Deserialize)]
-    struct Answer {
-        results: Vec<Hit>,
-    }
-    let path = format!("/api/brain/search?q={}", encode(query));
-    let raw = citadel::ask(WHO, "GET", url, &path, None, WAIT, ANSWER)?;
-    parse::<Answer>(&raw).map(|a| a.results)
+    let answer = call(
+        url,
+        BrainSearch {
+            query: query.to_owned(),
+        },
+    )?;
+    Ok(answer
+        .results
+        .into_iter()
+        .map(|hit| Hit {
+            path: hit.path,
+            title: hit.title,
+            kind: hit.kind,
+            summary: hit.summary,
+            snippet: hit.snippet,
+        })
+        .collect())
 }
 
 /// The stale files in batches the node takes and answers within `ANSWER`.
@@ -245,16 +225,19 @@ fn parse<T: serde::de::DeserializeOwned>(raw: &[u8]) -> Result<T, String> {
     }
 }
 
-/// `text` for a query string.
-fn encode(text: &str) -> String {
-    text.bytes()
-        .map(|b| match b {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'.' | b'_' | b'~' => {
-                (b as char).to_string()
-            }
-            _ => format!("%{b:02X}"),
-        })
-        .collect()
+/// Call one typed command on the other node.
+fn call<C: TypedCommand>(url: &str, input: C) -> Result<C::Output, String> {
+    let body = serde_json::to_value(input).map_err(|error| error.to_string())?;
+    let raw = citadel::ask(
+        WHO,
+        "POST",
+        url,
+        &format!("/api/call/{}", C::NAME),
+        Some(&body),
+        WAIT,
+        ANSWER,
+    )?;
+    parse(&raw)
 }
 
 #[cfg(test)]
@@ -289,13 +272,13 @@ mod tests {
                 let mut body = vec![0; length];
                 reader.read_exact(&mut body).unwrap();
                 let pages = pages.lock().unwrap().clone();
-                let answer = if line.starts_with("GET /api/brain/files") {
+                let answer = if line.starts_with("POST /api/call/brain_files") {
                     let files: Vec<_> = pages
                         .iter()
                         .map(|(p, t, m)| serde_json::json!({"path": p, "size": t.len(), "modified": m}))
                         .collect();
-                    serde_json::json!({ "files": files })
-                } else if line.starts_with("POST /api/brain/texts") {
+                    serde_json::json!({ "node":"n", "files": files })
+                } else if line.starts_with("POST /api/call/brain_texts") {
                     let asked_for: serde_json::Value = serde_json::from_slice(&body).unwrap();
                     let paths = asked_for["paths"].as_array().unwrap();
                     *asked.lock().unwrap() += paths.len();
@@ -304,13 +287,12 @@ mod tests {
                         .filter(|(p, _, _)| paths.iter().any(|a| a == p))
                         .map(|(p, t, _)| serde_json::json!({"path": p, "text": t}))
                         .collect();
-                    serde_json::json!({ "texts": texts })
+                    serde_json::json!({ "node":"n", "texts": texts })
                 } else {
-                    assert!(
-                        line.starts_with("GET /api/brain/search?q=tide%20wheel "),
-                        "{line}"
-                    );
-                    serde_json::json!({ "results": [{"path": "knowledge/a.md", "title": "A", "collection": "knowledge", "snippet": "»tide«"}] })
+                    assert!(line.starts_with("POST /api/call/brain_search "), "{line}");
+                    let query: serde_json::Value = serde_json::from_slice(&body).unwrap();
+                    assert_eq!(query["query"], "tide & wheel");
+                    serde_json::json!({ "node":"n", "results": [{"path": "knowledge/a.md", "title": "A", "collection": "knowledge", "snippet": "»tide«"}] })
                 };
                 let body = answer.to_string();
                 let _ = write!(
@@ -324,6 +306,69 @@ mod tests {
     }
 
     #[test]
+    fn a_real_node_shares_its_brain_through_typed_commands() {
+        let root = ahjo_testkit::fresh_dir("brain-mirror-real-corpus");
+        let cache = ahjo_testkit::fresh_dir("brain-mirror-real-cache");
+        std::fs::create_dir_all(root.join("knowledge")).unwrap();
+        let page = root.join("knowledge/a & b.md");
+        std::fs::write(&page, "# First\n").unwrap();
+        let (ready, address) = std::sync::mpsc::channel();
+        let (stop, stopped) = std::sync::mpsc::channel();
+        let corpus = root.clone();
+        let server = std::thread::spawn(move || {
+            tokio::runtime::Runtime::new()
+                .unwrap()
+                .block_on(async move {
+                    let config = format!("[brain]\ncorpus = {:?}\n", corpus.to_str().unwrap());
+                    let node = ahjo_testkit::node::Node::start(&[ahjo_brain::LISTING], &config)
+                        .await
+                        .unwrap();
+                    ready.send(node.url()).unwrap();
+                    while stopped.try_recv().is_err() {
+                        tokio::time::sleep(Duration::from_millis(20)).await;
+                    }
+                    node.stop().await;
+                });
+        });
+        let url = address.recv().unwrap();
+        assert_eq!(
+            sync(&url, &cache).unwrap(),
+            Synced {
+                fetched: 1,
+                removed: 0
+            }
+        );
+        let local = pages(&cache).join("knowledge/a & b.md");
+        assert_eq!(std::fs::read_to_string(&local).unwrap(), "# First\n");
+        assert_eq!(sync(&url, &cache).unwrap(), Synced::default());
+        std::fs::write(&page, "# Second, longer\n").unwrap();
+        assert_eq!(
+            sync(&url, &cache).unwrap(),
+            Synced {
+                fetched: 1,
+                removed: 0
+            }
+        );
+        assert_eq!(
+            std::fs::read_to_string(&local).unwrap(),
+            "# Second, longer\n"
+        );
+        std::fs::remove_file(page).unwrap();
+        assert_eq!(
+            sync(&url, &cache).unwrap(),
+            Synced {
+                fetched: 0,
+                removed: 1
+            }
+        );
+        assert!(!local.exists());
+        stop.send(()).unwrap();
+        server.join().unwrap();
+        std::fs::remove_dir_all(root).unwrap();
+        std::fs::remove_dir_all(cache).unwrap();
+    }
+
+    #[test]
     fn a_copy_takes_only_what_changed_and_drops_what_went() {
         let home = std::env::temp_dir().join(format!("ahjo-brain-mirror-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&home);
@@ -334,7 +379,7 @@ mod tests {
                 1_700_000_000_000_000_000,
             ),
             (
-                "knowledge/b.md".to_string(),
+                "knowledge/b & c.md".to_string(),
                 "# B\n".to_string(),
                 1_700_000_000_000_000_000,
             ),
@@ -388,9 +433,9 @@ mod tests {
             }
         );
         assert_eq!(std::fs::read_to_string(&a).unwrap(), "# A again\n");
-        assert!(!pages_file(&home, "knowledge/b.md").exists());
+        assert!(!pages_file(&home, "knowledge/b & c.md").exists());
 
-        let hits = search(&url, "tide wheel").unwrap();
+        let hits = search(&url, "tide & wheel").unwrap();
         assert_eq!(
             (hits[0].path.as_str(), hits[0].snippet.as_str()),
             ("knowledge/a.md", "»tide«")

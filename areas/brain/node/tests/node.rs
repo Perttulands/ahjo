@@ -61,47 +61,54 @@ async fn node_serves_brain_routes_commands_and_coded_errors() {
     );
     let node = Node::start(&[ahjo_brain::LISTING], &config).await.unwrap();
     let client = NodeClient::new(Some(&format!("{}/", node.url()))).unwrap();
-    async fn get(client: &NodeClient, path: &str) -> Value {
+    async fn call(client: &NodeClient, name: &str, input: Value) -> Value {
         client
-            .request(Method::GET, path, None, None)
+            .request(
+                Method::POST,
+                &format!("/api/call/{name}"),
+                Some(input),
+                None,
+            )
             .await
             .unwrap()
             .0
     }
-    let search = get(&client, "/api/brain/search?q=first").await;
+    let search = call(&client, "brain_search", json!({"query":"first"})).await;
     assert_eq!(search["results"][0]["path"], "notes/first.md");
-    let page = get(&client, "/api/brain/page?path=notes%2Ffirst.md").await;
+    let page = call(&client, "brain_read", json!({"path":"notes/first.md"})).await;
     assert_eq!(page["links"][0]["page"]["path"], "notes/second.md");
     assert_eq!(
-        get(&client, "/api/brain/collections").await["collections"][0]["name"],
+        call(&client, "brain_collections", json!({})).await["collections"][0]["name"],
         "notes"
     );
     assert_eq!(
-        get(&client, "/api/brain/collection?name=notes").await["pages"]
+        call(&client, "brain_collection", json!({"name":"notes"})).await["pages"]
             .as_array()
             .unwrap()
             .len(),
         2
     );
     assert_eq!(
-        get(&client, "/api/brain/changes?limit=1").await["changes"][0]["message"],
+        call(&client, "brain_changes", json!({"limit":1})).await["changes"][0]["message"],
         "Initial pages"
     );
-    let save = json!({"path":"notes/first.md", "content":"# First\n\nUpdated.\n", "summary":"Update first"});
-    let saved = client
-        .request(Method::PUT, "/api/brain/page", Some(save), None)
-        .await
-        .unwrap()
-        .0;
-    assert_eq!(saved["message"], "Update first");
+    let save =
+        json!({"path":"notes/first.md", "text":"# First\n\nUpdated.\n", "summary":"Update first"});
+    let saved = call(&client, "brain_save", save).await;
+    assert_eq!(saved["commit"]["message"], "Update first");
     assert!(
-        get(&client, "/api/brain/page?path=notes%2Ffirst.md").await["body"]
+        call(&client, "brain_read", json!({"path":"notes/first.md"})).await["body"]
             .as_str()
             .unwrap()
             .contains("Updated.")
     );
     let error = client
-        .request(Method::GET, "/api/brain/page?path=missing.md", None, None)
+        .request(
+            Method::POST,
+            "/api/call/brain_read",
+            Some(json!({"path":"missing.md"})),
+            None,
+        )
         .await
         .unwrap_err();
     let error = error.downcast_ref::<NodeError>().unwrap();
@@ -109,9 +116,9 @@ async fn node_serves_brain_routes_commands_and_coded_errors() {
     assert_eq!(error.message, "No such page");
     let remote = client
         .request(
-            Method::GET,
-            "/api/brain/page?path=notes%2Ffirst.md&node=another-node",
-            None,
+            Method::POST,
+            "/api/call/brain_read?node=another-node",
+            Some(json!({"path":"notes/first.md"})),
             None,
         )
         .await
@@ -141,6 +148,9 @@ async fn node_serves_brain_routes_commands_and_coded_errors() {
             "brain_save",
             "brain_collections",
             "brain_changes",
+            "brain_files",
+            "brain_texts",
+            "brain_collection",
             "brain_send"
         ]
     );
@@ -184,7 +194,12 @@ async fn disabled_brain_has_no_routes_or_tools() {
         .0;
     assert_eq!(health["off"], json!(["brain"]));
     let missing = client
-        .request(Method::GET, "/api/brain/search?q=first", None, None)
+        .request(
+            Method::POST,
+            "/api/call/brain_search",
+            Some(json!({"query":"first"})),
+            None,
+        )
         .await
         .unwrap_err();
     assert_eq!(

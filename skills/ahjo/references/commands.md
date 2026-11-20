@@ -4,7 +4,7 @@ These are the commands advertised by the enabled areas. Run `ahjo <noun> <verb> 
 
 ## brain
 
-`ahjo brain changes`, `ahjo brain collections`, `ahjo brain read`, `ahjo brain save`, `ahjo brain search`, `ahjo brain send`.
+`ahjo brain changes`, `ahjo brain collection`, `ahjo brain collections`, `ahjo brain files`, `ahjo brain read`, `ahjo brain save`, `ahjo brain search`, `ahjo brain send`, `ahjo brain texts`.
 
 ## config
 
@@ -16,7 +16,7 @@ These are the commands advertised by the enabled areas. Run `ahjo <noun> <verb> 
 
 ## file
 
-`ahjo file copy`, `ahjo file delete`, `ahjo file diff`, `ahjo file list`, `ahjo file locate`, `ahjo file mkdir`, `ahjo file move`, `ahjo file read`, `ahjo file recent`, `ahjo file resume`, `ahjo file search`, `ahjo file status`, `ahjo file transfer`, `ahjo file write`.
+`ahjo file copy`, `ahjo file delete`, `ahjo file diff`, `ahjo file list`, `ahjo file locate`, `ahjo file mkdir`, `ahjo file move`, `ahjo file read`, `ahjo file recent`, `ahjo file resume`, `ahjo file search`, `ahjo file stat`, `ahjo file status`, `ahjo file transfer`, `ahjo file write`.
 
 ## formation
 

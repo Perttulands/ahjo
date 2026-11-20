@@ -1,3 +1,4 @@
+pub use ahjo_core::TypedCommand;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -101,7 +102,7 @@ pub struct Change {
 }
 
 /// A collection's page and its last change.
-#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, JsonSchema)]
 #[serde(default)]
 pub struct Listed {
     #[serde(flatten)]
@@ -116,46 +117,9 @@ impl Page {
     }
 }
 
-/// Search results in Citadel's ranking order.
-#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
-pub struct Results {
-    pub results: Vec<Found>,
-}
-
-/// The corpus's collections.
-#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
-pub struct Collections {
-    pub collections: Vec<Collection>,
-}
-
-/// A collection's pages and any history error.
-#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
-pub struct Listing {
-    pub pages: Vec<Listed>,
-    #[serde(default)]
-    pub error: Option<String>,
-}
-
-/// Recent changes and any history error.
-#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
-pub struct Changes {
-    pub changes: Vec<Change>,
-    #[serde(default)]
-    pub error: Option<String>,
-}
-
-/// Body of a page save.
-#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
-pub struct Save {
-    pub path: String,
-    pub content: String,
-    #[serde(default)]
-    pub summary: String,
-}
-
 /// A page file of the corpus as it stands: what an app reading the brain
 /// from another machine lists before it asks for the texts that changed.
-#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, JsonSchema)]
 pub struct File {
     pub path: String,
     pub size: u64,
@@ -163,19 +127,7 @@ pub struct File {
     pub modified: u64,
 }
 
-/// Every page file of the corpus, by path.
-#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
-pub struct Files {
-    pub files: Vec<File>,
-}
-
-/// Pages' whole texts, asked for by path (`POST /api/brain/texts`).
-#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
-pub struct Texts {
-    pub texts: Vec<Text>,
-}
-
-#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, JsonSchema)]
 pub struct Text {
     pub path: String,
     pub text: String,

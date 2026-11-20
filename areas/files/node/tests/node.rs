@@ -70,20 +70,13 @@ async fn node_routes_and_local_copy_stream() {
         serde_json::to_string(root.to_str().unwrap()).unwrap()
     );
     let node = Node::start(&[ahjo_files::LISTING], &conf).await.unwrap();
-    let (status, bytes) = request(&node, "GET", "/api/files/roots", Body::empty(), false).await;
-    assert_eq!(status, StatusCode::OK);
-    let roots: Value = serde_json::from_slice(&bytes).unwrap();
+    let roots = node.call("file_list", json!({})).await.unwrap();
     assert_eq!(roots["node"], node.id());
     let folder = root.join("folder");
     let dest = root.join("dest");
     let file = folder.join("note.txt");
     for dir in [&folder, &dest] {
-        assert_eq!(
-            request(&node, "POST", &at("folder", dir), Body::empty(), false)
-                .await
-                .0,
-            StatusCode::CREATED
-        );
+        node.call("file_mkdir", json!({"path":dir})).await.unwrap();
     }
     assert_eq!(
         request(&node, "POST", &at("file", &file), "hello", false)
@@ -103,26 +96,13 @@ async fn node_routes_and_local_copy_stream() {
             .0,
         StatusCode::NO_CONTENT
     );
-    for route in ["folder", "find", "search", "diff"] {
-        let path = if route == "diff" { &file } else { &folder };
-        let q = if route == "find" || route == "search" {
-            "&q=hello"
-        } else {
-            ""
-        };
-        assert_eq!(
-            request(
-                &node,
-                "GET",
-                &format!("{}{q}", at(route, path)),
-                Body::empty(),
-                false
-            )
-            .await
-            .0,
-            StatusCode::OK,
-            "{route}"
-        );
+    for (command, arguments) in [
+        ("file_list", json!({"path": folder})),
+        ("file_locate", json!({"under": folder, "query": "hello"})),
+        ("file_search", json!({"path": folder, "query": "hello"})),
+        ("file_diff", json!({"path": file})),
+    ] {
+        node.call(command, arguments).await.unwrap();
     }
     let id = "0123456789abcdef0123456789abcdef";
     let start = json!({"node":node.id(),"path":file,"target_node":node.id(),"folder":dest,"id":id});
@@ -153,28 +133,12 @@ async fn node_routes_and_local_copy_stream() {
         b"hello again"
     );
     let moved = folder.join("renamed.txt");
-    assert_eq!(
-        request(
-            &node,
-            "POST",
-            &format!(
-                "{}&to={}",
-                at("rename", &file),
-                enc(moved.to_str().unwrap())
-            ),
-            Body::empty(),
-            false
-        )
+    node.call("file_move", json!({"path": file, "to": moved}))
         .await
-        .0,
-        StatusCode::NO_CONTENT
-    );
-    assert_eq!(
-        request(&node, "DELETE", &at("file", &moved), Body::empty(), false)
-            .await
-            .0,
-        StatusCode::NO_CONTENT
-    );
+        .unwrap();
+    node.call("file_delete", json!({"path": moved}))
+        .await
+        .unwrap();
     let (status, body) = request(&node, "POST", "/api/drops?name=note.txt", "drop", false).await;
     assert_eq!(status, StatusCode::CREATED);
     let drop: Value = serde_json::from_slice(&body).unwrap();
@@ -185,7 +149,7 @@ async fn node_routes_and_local_copy_stream() {
     let (status, body) = request(
         &node,
         "GET",
-        "/api/files/folder?node=elsewhere&path=%2F",
+        "/api/files/file?node=elsewhere&path=%2F",
         Body::empty(),
         false,
     )
@@ -193,7 +157,7 @@ async fn node_routes_and_local_copy_stream() {
     assert_eq!(status, StatusCode::MISDIRECTED_REQUEST);
     let error: Value = serde_json::from_slice(&body).unwrap();
     assert_eq!(error["error"]["code"], "unknown_node");
-    let (status, body) = request(&node, "GET", "/api/files/folder", Body::empty(), false).await;
+    let (status, body) = request(&node, "GET", "/api/files/file", Body::empty(), false).await;
     assert_eq!(status, StatusCode::BAD_REQUEST);
     let error: Value = serde_json::from_slice(&body).unwrap();
     assert_eq!(error["error"]["code"], "bad_request");
@@ -252,6 +216,7 @@ async fn exact_commands_are_exposed_to_mcp_and_cli_and_operate_on_files() {
         "file_copy",
         "file_resume",
         "file_transfer",
+        "file_stat",
     ];
     expected.sort();
     assert_eq!(actual, expected);
@@ -259,7 +224,7 @@ async fn exact_commands_are_exposed_to_mcp_and_cli_and_operate_on_files() {
     let args = vec!["--node".into(), node.url()];
     cli::run("file", &args, &mut out).await.unwrap();
     let verbs = String::from_utf8(out).unwrap();
-    assert_eq!(verbs.matches("ahjo file ").count(), 14, "{verbs}");
+    assert_eq!(verbs.matches("ahjo file ").count(), 15, "{verbs}");
     for removed in ["find", "download", "upload"] {
         let error = cli::run(
             "file",
@@ -292,6 +257,22 @@ async fn exact_commands_are_exposed_to_mcp_and_cli_and_operate_on_files() {
         .unwrap();
     let read = node.call("file_read", json!({"path":file})).await.unwrap();
     assert_eq!(read["text"], "hello");
+    let absent = root.join("absent");
+    let outside = root.parent().unwrap().join("outside-file-stat");
+    let input = json!({"paths": [file, absent, outside]});
+    let (stats, _) = client
+        .request(
+            Method::POST,
+            "/api/call/file_stat",
+            Some(input.clone()),
+            None,
+        )
+        .await
+        .unwrap();
+    assert!(stats["times"][0].as_u64().is_some(), "{stats}");
+    assert_eq!(stats["times"][1], Value::Null);
+    assert_eq!(stats["times"][2], Value::Null);
+    assert_eq!(node.call("file_stat", input).await.unwrap(), stats);
     let found = node
         .call("file_locate", json!({"under":root,"query":"note"}))
         .await
@@ -315,7 +296,7 @@ async fn exact_commands_are_exposed_to_mcp_and_cli_and_operate_on_files() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn file_diff_command_matches_the_route_and_prints_unified_lines() {
+async fn file_diff_command_matches_cli_and_prints_unified_lines() {
     let root = ahjo_testkit::fresh_dir("files-diff-command");
     let repo = root.join("repo");
     std::fs::create_dir(&repo).unwrap();
@@ -352,9 +333,7 @@ async fn file_diff_command_matches_the_route_and_prints_unified_lines() {
         serde_json::to_string(root.to_str().unwrap()).unwrap()
     );
     let node = Node::start(&[ahjo_files::LISTING], &config).await.unwrap();
-    let (status, body) = request(&node, "GET", &at("diff", &file), Body::empty(), false).await;
-    assert_eq!(status, StatusCode::OK);
-    let route: Value = serde_json::from_slice(&body).unwrap();
+    let route = node.call("file_diff", json!({"path": file})).await.unwrap();
     let mut out = Vec::new();
     let args = vec![
         "diff".into(),
@@ -375,18 +354,21 @@ async fn file_diff_command_matches_the_route_and_prints_unified_lines() {
         node.call("file_diff", json!({"path": file})).await.unwrap(),
         route
     );
-    // --whole and the tree's marks answer as their routes do.
-    for (command, args, route) in [
-        (
-            "file_diff",
-            json!({"path": file, "whole": true}),
-            format!("{}&whole=true", at("diff", &file)),
-        ),
-        ("file_status", json!({"path": repo}), at("status", &repo)),
+    // The HTTP command and the MCP command carry the same results.
+    let client = NodeClient::new(Some(&node.url())).unwrap();
+    for (command, args) in [
+        ("file_diff", json!({"path": file, "whole": true})),
+        ("file_status", json!({"path": repo})),
     ] {
-        let (status, body) = request(&node, "GET", &route, Body::empty(), false).await;
-        assert_eq!(status, StatusCode::OK, "{route}");
-        let routed: Value = serde_json::from_slice(&body).unwrap();
+        let (routed, _) = client
+            .request(
+                Method::POST,
+                &format!("/api/call/{command}"),
+                Some(args.clone()),
+                None,
+            )
+            .await
+            .unwrap();
         assert_eq!(node.call(command, args).await.unwrap(), routed, "{command}");
     }
     let marks = node
@@ -395,9 +377,15 @@ async fn file_diff_command_matches_the_route_and_prints_unified_lines() {
         .unwrap();
     assert!(marks.to_string().contains("note.txt"), "{marks}");
 
-    let (status, body) = request(&node, "GET", &at("diff", &plain), Body::empty(), false).await;
-    assert_eq!(status, StatusCode::OK);
-    let no_repo: Value = serde_json::from_slice(&body).unwrap();
+    let (no_repo, _) = client
+        .request(
+            Method::POST,
+            "/api/call/file_diff",
+            Some(json!({"path":plain})),
+            None,
+        )
+        .await
+        .unwrap();
     assert_eq!(no_repo["repository"], "");
     assert_eq!(no_repo["diff"], "");
     assert_eq!(
@@ -407,15 +395,23 @@ async fn file_diff_command_matches_the_route_and_prints_unified_lines() {
         no_repo
     );
     let missing = root.join("missing");
-    let (status, body) = request(&node, "GET", &at("diff", &missing), Body::empty(), false).await;
-    assert_eq!(status, StatusCode::NOT_FOUND);
-    let error: Value = serde_json::from_slice(&body).unwrap();
+    let error = client
+        .request(
+            Method::POST,
+            "/api/call/file_diff",
+            Some(json!({"path":missing})),
+            None,
+        )
+        .await
+        .unwrap_err();
+    let error = error.downcast_ref::<ahjo_node_kit::NodeError>().unwrap();
+    assert_eq!(error.status, StatusCode::NOT_FOUND);
     assert_eq!(
         node.call("file_diff", json!({"path": missing}))
             .await
             .unwrap_err()
             .code,
-        error["error"]["code"].as_str().unwrap()
+        error.code
     );
     node.stop().await;
     std::fs::remove_dir_all(root).unwrap();

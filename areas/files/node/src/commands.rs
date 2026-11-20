@@ -1,20 +1,19 @@
 //! File commands, used by both the CLI and MCP.
 
 use crate::{Files, FilesError};
-use ahjo_core::Error;
+use ahjo_core::{Error, TypedCommand};
 use ahjo_files_contract::{
     Diff, IO_ERROR, Matches, NOT_FOUND, RepoStatus,
     commands::{
         FileCopy, FileDelete, FileDeleted, FileDiff, FileList, FileListed, FileLocate, FileMkdir,
         FileMove, FilePath, FileRead, FileReadResult, FileRecent, FileResume, FileSearch,
-        FileSearched, FileStatus, FileTransfer, FileTransferResult, FileWrite, FileWritten,
-        ListContent, ReadContent,
+        FileSearched, FileStat, FileStated, FileStatus, FileTransfer, FileTransferResult,
+        FileWrite, FileWritten, ListContent, ReadContent,
     },
 };
 use ahjo_node_kit::{Command, Effect};
 use base64::{Engine as _, engine::general_purpose::STANDARD};
 use schemars::JsonSchema;
-use serde::{Serialize, de::DeserializeOwned};
 use std::{path::Path, sync::Arc, time::Duration};
 
 fn bad(message: impl Into<String>) -> Error {
@@ -36,19 +35,14 @@ fn path(files: &Files, raw: &str) -> Result<String, Error> {
     }
 }
 
-fn blocking<Input, Output, F>(
-    files: &Arc<Files>,
-    name: &'static str,
-    effect: Effect,
-    work: F,
-) -> Command
+fn blocking<Input, F>(files: &Arc<Files>, effect: Effect, work: F) -> Command
 where
-    Input: DeserializeOwned + JsonSchema + Send + 'static,
-    Output: Serialize + JsonSchema + Send + 'static,
-    F: Fn(&Files, Input) -> Result<Output, Error> + Copy + Send + Sync + 'static,
+    Input: TypedCommand + JsonSchema + Send,
+    Input::Output: JsonSchema,
+    F: Fn(&Files, Input) -> Result<Input::Output, Error> + Copy + Send + Sync + 'static,
 {
     let files = files.clone();
-    Command::typed(name, effect, move |args| {
+    Command::for_request(effect, move |args| {
         let files = files.clone();
         async move {
             tokio::task::spawn_blocking(move || work(&files, args))
@@ -63,101 +57,71 @@ pub fn commands(files: Arc<Files>) -> Vec<Command> {
     let resuming = files.clone();
     let tracking = files.clone();
     vec![
-        blocking(&files, "file_list", Effect::Reads, list),
-        blocking(&files, "file_read", Effect::Reads, read),
-        blocking(
-            &files,
-            "file_diff",
-            Effect::Reads,
-            |files, args: FileDiff| {
-                on_path(files, &args.path, |at| {
-                    Ok::<Diff, Error>(files.diff(at, args.whole.unwrap_or_default())?)
+        blocking(&files, Effect::Reads, list),
+        blocking(&files, Effect::Reads, read),
+        blocking(&files, Effect::Reads, |files, args: FileDiff| {
+            on_path(files, &args.path, |at| {
+                Ok::<Diff, Error>(files.diff(at, args.whole.unwrap_or_default())?)
+            })
+        }),
+        blocking(&files, Effect::Reads, |files, args: FileStatus| {
+            on_path(files, &args.path, |at| {
+                Ok::<RepoStatus, Error>(files.status(at)?)
+            })
+        }),
+        blocking(&files, Effect::Reads, |files, args: FileRecent| {
+            let under = args
+                .path
+                .as_deref()
+                .map(|raw| path(files, raw))
+                .transpose()?;
+            Ok(files.recent(under.as_deref())?)
+        }),
+        blocking(&files, Effect::Destroys, write),
+        blocking(&files, Effect::Sets, |files, args: FileMkdir| {
+            on_path(files, &args.path, |at| {
+                files.create_folder(at)?;
+                Ok(FilePath {
+                    node: files.node.clone(),
+                    path: at.into(),
                 })
-            },
-        ),
-        blocking(
-            &files,
-            "file_status",
-            Effect::Reads,
-            |files, args: FileStatus| {
-                on_path(files, &args.path, |at| {
-                    Ok::<RepoStatus, Error>(files.status(at)?)
+            })
+        }),
+        blocking(&files, Effect::Writes, |files, args: FileMove| {
+            on_path(files, &args.path, |at| {
+                let to = path(files, &args.to)?;
+                files.rename(at, &to)?;
+                Ok(FilePath {
+                    node: files.node.clone(),
+                    path: to,
                 })
-            },
-        ),
-        blocking(
-            &files,
-            "file_recent",
-            Effect::Reads,
-            |files, args: FileRecent| {
-                let under = args
-                    .path
-                    .as_deref()
-                    .map(|raw| path(files, raw))
-                    .transpose()?;
-                Ok(files.recent(under.as_deref())?)
-            },
-        ),
-        blocking(&files, "file_write", Effect::Destroys, write),
-        blocking(
-            &files,
-            "file_mkdir",
-            Effect::Sets,
-            |files, args: FileMkdir| {
-                on_path(files, &args.path, |at| {
-                    files.create_folder(at)?;
-                    Ok(FilePath {
-                        node: files.node.clone(),
-                        path: at.into(),
-                    })
+            })
+        }),
+        blocking(&files, Effect::Destroys, |files, args: FileDelete| {
+            on_path(files, &args.path, |at| {
+                files.delete(at)?;
+                Ok(FileDeleted {
+                    node: files.node.clone(),
+                    path: at.into(),
+                    deleted: true,
                 })
-            },
-        ),
-        blocking(
-            &files,
-            "file_move",
-            Effect::Writes,
-            |files, args: FileMove| {
-                on_path(files, &args.path, |at| {
-                    let to = path(files, &args.to)?;
-                    files.rename(at, &to)?;
-                    Ok(FilePath {
-                        node: files.node.clone(),
-                        path: to,
-                    })
+            })
+        }),
+        blocking(&files, Effect::Reads, locate),
+        blocking(&files, Effect::Reads, |files, args: FileSearch| {
+            on_path(files, &args.path, |at| {
+                Ok(FileSearched {
+                    node: files.node.clone(),
+                    results: files.find(at, &args.query, true)?,
                 })
-            },
-        ),
-        blocking(
-            &files,
-            "file_delete",
-            Effect::Destroys,
-            |files, args: FileDelete| {
-                on_path(files, &args.path, |at| {
-                    files.delete(at)?;
-                    Ok(FileDeleted {
-                        node: files.node.clone(),
-                        path: at.into(),
-                        deleted: true,
-                    })
-                })
-            },
-        ),
-        blocking(&files, "file_locate", Effect::Reads, locate),
-        blocking(
-            &files,
-            "file_search",
-            Effect::Reads,
-            |files, args: FileSearch| {
-                on_path(files, &args.path, |at| {
-                    Ok(FileSearched {
-                        node: files.node.clone(),
-                        results: files.find(at, &args.query, true)?,
-                    })
-                })
-            },
-        ),
-        Command::typed("file_copy", Effect::Writes, move |args: FileCopy| {
+            })
+        }),
+        blocking(&files, Effect::Reads, |files, args: FileStat| {
+            Ok(FileStated {
+                times: files.stat(&args.paths),
+            })
+        }),
+        Command::for_request(Effect::Writes, move |args: FileCopy| {
             let files = copying.clone();
             async move {
                 let from = path(&files, &args.path)?;
@@ -167,7 +131,7 @@ pub fn commands(files: Arc<Files>) -> Vec<Command> {
                 wait(&files, id).await
             }
         }),
-        Command::typed("file_resume", Effect::Writes, move |args: FileResume| {
+        Command::for_request(Effect::Writes, move |args: FileResume| {
             let files = resuming.clone();
             async move {
                 files.resume(&args.id).map_err(|error| match error {
@@ -179,7 +143,7 @@ pub fn commands(files: Arc<Files>) -> Vec<Command> {
                 wait(&files, args.id).await
             }
         }),
-        Command::typed("file_transfer", Effect::Reads, move |args: FileTransfer| {
+        Command::for_request(Effect::Reads, move |args: FileTransfer| {
             let files = tracking.clone();
             async move { transfer(&files, args.id) }
         }),

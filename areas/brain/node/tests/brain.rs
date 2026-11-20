@@ -6,7 +6,7 @@ use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
-use ahjo_brain::brain::{self, Brain};
+use ahjo_brain::brain::Brain;
 use axum::Json;
 use axum::extract::State;
 use axum::routing::post;
@@ -46,27 +46,70 @@ async fn serve(router: axum::Router) -> SocketAddr {
 }
 
 async fn serve_brain(corpus: Option<&Path>, citadel: Option<&str>) -> SocketAddr {
-    serve(brain::routes(std::sync::Arc::new(
-        Brain::new(corpus, citadel).unwrap(),
-    )))
-    .await
+    serve_brain_as(corpus, citadel, None).await
 }
 
-/// GETs `path` and returns the status and the JSON body.
-async fn get(addr: SocketAddr, path: &str) -> (u16, Value) {
-    request(addr, "GET", path, None).await
+async fn serve_brain_as(
+    corpus: Option<&Path>,
+    citadel: Option<&str>,
+    author: Option<&str>,
+) -> SocketAddr {
+    let mut config = String::from("[brain]\n");
+    if let Some(path) = corpus {
+        config.push_str(&format!("corpus = {:?}\n", path.to_str().unwrap()));
+    }
+    if let Some(url) = citadel {
+        config.push_str(&format!("citadel = {url:?}\n"));
+    }
+    if let Some(author) = author {
+        config.push_str(&format!("author = {author:?}\n"));
+    }
+    let node = ahjo_testkit::node::Node::start(&[ahjo_brain::LISTING], &config)
+        .await
+        .unwrap();
+    let address = node.address();
+    tokio::spawn(async move {
+        std::future::pending::<()>().await;
+        node.stop().await;
+    });
+    address
 }
 
-/// PUTs `body` as JSON at `path`.
-async fn put(addr: SocketAddr, path: &str, body: Value) -> (u16, Value) {
-    request(addr, "PUT", path, Some(body)).await
+/// Call a read command, with its single argument in the test's compact notation.
+async fn get(addr: SocketAddr, command: &str) -> (u16, Value) {
+    let (name, argument) = command.split_once('?').unwrap_or((command, ""));
+    let input = if argument.is_empty() {
+        json!({})
+    } else {
+        let (key, value) = argument.split_once('=').unwrap();
+        let value = value.replace("%20", " ").replace("%2F", "/");
+        if key == "limit" {
+            json!({"limit":value.parse::<u64>().unwrap()})
+        } else {
+            json!({key:value})
+        }
+    };
+    request(addr, name, input).await
 }
 
-async fn request(addr: SocketAddr, method: &str, path: &str, body: Option<Value>) -> (u16, Value) {
+/// Call brain_save and present its commit for the save assertions.
+async fn put(addr: SocketAddr, name: &str, mut body: Value) -> (u16, Value) {
+    if let Some(content) = body.as_object_mut().unwrap().remove("content") {
+        body["text"] = content;
+    }
+    let (status, answer) = request(addr, name, body).await;
+    if status == 200 {
+        (status, answer["commit"].clone())
+    } else {
+        (status, answer)
+    }
+}
+
+async fn request(addr: SocketAddr, name: &str, body: Value) -> (u16, Value) {
     let mut stream = tokio::net::TcpStream::connect(addr).await.unwrap();
-    let body = body.map(|b| b.to_string()).unwrap_or_default();
+    let body = body.to_string();
     let request = format!(
-        "{method} {path} HTTP/1.1\r\nHost: {addr}\r\nConnection: close\r\n\
+        "POST /api/call/{name} HTTP/1.1\r\nHost: {addr}\r\nConnection: close\r\n\
          Content-Type: application/json\r\nContent-Length: {}\r\n\r\n{body}",
         body.len()
     );
@@ -95,7 +138,7 @@ async fn lists_the_page_files_and_reads_their_texts_for_another_machine() {
     corpus.write(".git/stray.md", "# Stray\n");
     let addr = serve_brain(Some(&corpus.0), None).await;
 
-    let (status, listed) = get(addr, "/api/brain/files").await;
+    let (status, listed) = get(addr, "brain_files").await;
     assert_eq!(status, 200);
     assert_eq!(
         paths(&listed["files"]),
@@ -105,7 +148,7 @@ async fn lists_the_page_files_and_reads_their_texts_for_another_machine() {
     assert!(listed["files"][0]["modified"].as_u64().unwrap() > 0);
 
     let asked = serde_json::json!({"paths": ["knowledge/b.md", "knowledge/gone.md"]});
-    let (status, read) = request(addr, "POST", "/api/brain/texts", Some(asked)).await;
+    let (status, read) = request(addr, "brain_texts", asked).await;
     assert_eq!(status, 200);
     assert_eq!(
         read["texts"],
@@ -113,7 +156,7 @@ async fn lists_the_page_files_and_reads_their_texts_for_another_machine() {
     );
 
     let outside = serde_json::json!({"paths": ["../secret.md"]});
-    let (status, _) = request(addr, "POST", "/api/brain/texts", Some(outside)).await;
+    let (status, _) = request(addr, "brain_texts", outside).await;
     assert_eq!(status, 403, "a path out of the corpus is refused");
 }
 
@@ -143,11 +186,7 @@ async fn reads_a_page_with_its_links_and_backlinks() {
     corpus.write(".git/stray.md", "# Stray\n\n[[upscaling]]\n");
     let addr = serve_brain(Some(&corpus.0), None).await;
 
-    let (status, page) = get(
-        addr,
-        "/api/brain/page?path=knowledge/upscaling/upscaling.md",
-    )
-    .await;
+    let (status, page) = get(addr, "brain_read?path=knowledge/upscaling/upscaling.md").await;
     assert_eq!(status, 200, "{page}");
     assert_eq!(page["title"], "Tiled upscaling");
     assert_eq!(page["kind"], "topic");
@@ -184,7 +223,7 @@ async fn reads_a_page_with_its_links_and_backlinks() {
     );
 
     // Following a link reads the page it names.
-    let (status, seams) = get(addr, "/api/brain/page?path=knowledge/upscaling/seams.md").await;
+    let (status, seams) = get(addr, "brain_read?path=knowledge/upscaling/seams.md").await;
     assert_eq!(status, 200);
     assert_eq!(seams["title"], "Seam blending");
     assert_eq!(
@@ -204,11 +243,11 @@ async fn save_route_rejects_a_stale_page_revision() {
     git(&corpus.0, &["commit", "-qm", "Initial"]);
     let base = git(&corpus.0, &["rev-parse", "HEAD"]);
     let addr = serve_brain(Some(&corpus.0), None).await;
-    let (status, _) = put(addr, "/api/brain/page", json!({"path":"notes/a.md", "content":"# Changed\n", "summary":"Changed", "base":base.trim()})).await;
+    let (status, _) = put(addr, "brain_save", json!({"path":"notes/a.md", "content":"# Changed\n", "summary":"Changed", "base":base.trim()})).await;
     assert_eq!(status, 200);
     let (status, body) = put(
         addr,
-        "/api/brain/page",
+        "brain_save",
         json!({"path":"notes/a.md", "content":"# Stale\n", "summary":"Stale", "base":base.trim()}),
     )
     .await;
@@ -237,12 +276,12 @@ async fn related_pages_include_links_and_selective_shared_tags() {
         corpus.write(&format!("notes/filler{i}.md"), "# Filler\n");
     }
     let addr = serve_brain(Some(&corpus.0), None).await;
-    let (_, page) = get(addr, "/api/brain/page?path=notes/a.md").await;
+    let (_, page) = get(addr, "brain_read?path=notes/a.md").await;
     assert_eq!(
         paths(&page["related"]),
         ["notes/b.md", "notes/c.md", "notes/d.md"]
     );
-    let (_, unrelated) = get(addr, "/api/brain/page?path=notes/b.md").await;
+    let (_, unrelated) = get(addr, "brain_read?path=notes/b.md").await;
     assert_eq!(paths(&unrelated["related"]), ["notes/a.md"]);
 }
 
@@ -275,7 +314,7 @@ async fn refuses_paths_outside_the_corpus() {
         ("knowledge/link.md", 403),
     ];
     for (path, expected) in cases {
-        let (status, body) = get(addr, &format!("/api/brain/page?path={path}")).await;
+        let (status, body) = get(addr, &format!("brain_read?path={path}")).await;
         assert_eq!(status, expected, "{path}: {body}");
         if expected != 200 {
             assert!(body["error"]["message"].is_string(), "{path}: {body}");
@@ -311,7 +350,7 @@ async fn searches_through_citadel_keeping_its_ranking() {
     let url = format!("http://{}", citadel(asked.clone()).await);
     let addr = serve_brain(None, Some(&url)).await;
 
-    let (status, answer) = get(addr, "/api/brain/search?q=tiles%20overlap").await;
+    let (status, answer) = get(addr, "brain_search?query=tiles%20overlap").await;
     assert_eq!(status, 200, "{answer}");
     assert_eq!(
         paths(&answer["results"]),
@@ -325,15 +364,16 @@ async fn searches_through_citadel_keeping_its_ranking() {
     );
 
     // An empty search asks nothing.
-    let (status, answer) = get(addr, "/api/brain/search?q=%20").await;
-    assert_eq!((status, answer), (200, json!({ "results": [] })));
+    let (status, answer) = get(addr, "brain_search?query=%20").await;
+    assert_eq!(status, 200);
+    assert_eq!(answer["results"], json!([]));
     assert_eq!(asked.lock().unwrap().len(), 1);
 }
 
 #[tokio::test]
 async fn says_what_is_missing() {
     let unconfigured = serve_brain(None, None).await;
-    let (status, body) = get(unconfigured, "/api/brain/search?q=x").await;
+    let (status, body) = get(unconfigured, "brain_search?query=x").await;
     assert_eq!(status, 503);
     assert!(
         body["error"]["message"]
@@ -341,7 +381,7 @@ async fn says_what_is_missing() {
             .unwrap()
             .contains("[brain].citadel")
     );
-    let (status, body) = get(unconfigured, "/api/brain/page?path=a.md").await;
+    let (status, body) = get(unconfigured, "brain_read?path=a.md").await;
     assert_eq!(status, 503);
     assert!(
         body["error"]["message"]
@@ -355,7 +395,7 @@ async fn says_what_is_missing() {
     let url = format!("http://{}", gone.local_addr().unwrap());
     drop(gone);
     let addr = serve_brain(None, Some(&url)).await;
-    let (status, body) = get(addr, "/api/brain/search?q=x").await;
+    let (status, body) = get(addr, "brain_search?query=x").await;
     assert_eq!(status, 502);
     assert!(
         body["error"]["message"]
@@ -417,7 +457,7 @@ async fn lists_collections_arrivals_and_a_pages_history() {
     corpus.write("evidence/.keep", "");
     let addr = serve_brain(Some(&corpus.0), None).await;
 
-    let (status, body) = get(addr, "/api/brain/collections").await;
+    let (status, body) = get(addr, "brain_collections").await;
     assert_eq!(status, 200, "{body}");
     assert_eq!(
         body["collections"],
@@ -429,7 +469,7 @@ async fn lists_collections_arrivals_and_a_pages_history() {
     );
 
     // Newest first, each with the pages it touched, by title.
-    let (status, body) = get(addr, "/api/brain/changes").await;
+    let (status, body) = get(addr, "brain_changes").await;
     assert_eq!(status, 200, "{body}");
     let changes = body["changes"].as_array().unwrap();
     assert_eq!(changes.len(), 2);
@@ -446,12 +486,12 @@ async fn lists_collections_arrivals_and_a_pages_history() {
         ["knowledge/upscaling.md", "self/pace.md"]
     );
     assert!(body["error"].is_null());
-    let (_, one) = get(addr, "/api/brain/changes?limit=1").await;
+    let (_, one) = get(addr, "brain_changes?limit=1").await;
     assert_eq!(one["changes"].as_array().unwrap().len(), 1);
-    let (status, _) = get(addr, "/api/brain/changes?limit=0").await;
+    let (status, _) = get(addr, "brain_changes?limit=0").await;
     assert_eq!(status, 400);
 
-    let (status, body) = get(addr, "/api/brain/collection?name=knowledge").await;
+    let (status, body) = get(addr, "brain_collection?name=knowledge").await;
     assert_eq!(status, 200, "{body}");
     assert_eq!(
         paths(&body["pages"]),
@@ -467,11 +507,11 @@ async fn lists_collections_arrivals_and_a_pages_history() {
             .starts_with("20")
     );
     for (name, status) in [("missing", 404), (".hidden", 403), ("../x", 403), ("", 403)] {
-        let (got, body) = get(addr, &format!("/api/brain/collection?name={name}")).await;
+        let (got, body) = get(addr, &format!("brain_collection?name={name}")).await;
         assert_eq!(got, status, "{name}: {body}");
     }
 
-    let (status, page) = get(addr, "/api/brain/page?path=knowledge/upscaling.md").await;
+    let (status, page) = get(addr, "brain_read?path=knowledge/upscaling.md").await;
     assert_eq!(status, 200, "{page}");
     let messages: Vec<&str> = page["history"]
         .as_array()
@@ -489,18 +529,19 @@ async fn lists_collections_arrivals_and_a_pages_history() {
 #[tokio::test]
 async fn an_edit_is_one_commit_signed_as_the_operator() {
     let corpus = shelved("save");
-    let brain = Brain::new(Some(&corpus.0), None)
-        .unwrap()
-        .with_author(Some("Ada Operator <ada@example.org>"))
-        .unwrap();
-    let addr = serve(brain::routes(Arc::new(brain))).await;
+    let addr = serve_brain_as(
+        Some(&corpus.0),
+        None,
+        Some("Ada Operator <ada@example.org>"),
+    )
+    .await;
     // Somebody else's change elsewhere stays theirs.
     corpus.write("self/pace.md", "# Pace\n\nFast now.\n");
 
     let text = "---\nkind: topic\n---\n# Tiled upscaling\n\nTiles overlap by 64 px.\n";
     let save =
         json!({ "path": "knowledge/upscaling.md", "content": text, "summary": "Say the overlap" });
-    let (status, commit) = put(addr, "/api/brain/page", save.clone()).await;
+    let (status, commit) = put(addr, "brain_save", save.clone()).await;
     assert_eq!(status, 200, "{commit}");
     assert_eq!(commit["message"], "Say the overlap");
     assert_eq!(commit["author"], "Ada Operator");
@@ -512,7 +553,7 @@ async fn an_edit_is_one_commit_signed_as_the_operator() {
         log.trim(),
         "Ada Operator <ada@example.org>|Say the overlap\n\nknowledge/upscaling.md"
     );
-    let (_, page) = get(addr, "/api/brain/page?path=knowledge/upscaling.md").await;
+    let (_, page) = get(addr, "brain_read?path=knowledge/upscaling.md").await;
     assert_eq!(
         page["body"],
         "# Tiled upscaling\n\nTiles overlap by 64 px.\n"
@@ -526,16 +567,16 @@ async fn an_edit_is_one_commit_signed_as_the_operator() {
     );
 
     // The same text again commits nothing and answers the last commit.
-    let (status, again) = put(addr, "/api/brain/page", save).await;
+    let (status, again) = put(addr, "brain_save", save).await;
     assert_eq!((status, &again["hash"]), (200, &commit["hash"]));
     // No summary: Edit and the path.
     let plain = json!({ "path": "knowledge/seams.md", "content": "# Seam blending\n\nFeather.\n" });
-    let (_, commit) = put(addr, "/api/brain/page", plain).await;
+    let (_, commit) = put(addr, "brain_save", plain).await;
     assert_eq!(commit["message"], "Edit knowledge/seams.md");
 
     // A page already changed in the corpus is refused, and left as it is.
     let dirty = json!({ "path": "self/pace.md", "content": "# Pace\n" });
-    let (status, body) = put(addr, "/api/brain/page", dirty).await;
+    let (status, body) = put(addr, "brain_save", dirty).await;
     assert_eq!(status, 409, "{body}");
     assert!(
         body["error"]["message"]
@@ -551,16 +592,41 @@ async fn an_edit_is_one_commit_signed_as_the_operator() {
         ("knowledge/new.md", 404),
         (".git/config", 403),
     ] {
-        let (status, body) = put(
-            addr,
-            "/api/brain/page",
-            json!({ "path": path, "content": "x" }),
-        )
-        .await;
+        let (status, body) = put(addr, "brain_save", json!({ "path": path, "content": "x" })).await;
         assert_eq!(status, expected, "{path}: {body}");
     }
-    let (status, _) = put(addr, "/api/brain/page", json!({ "content": "x" })).await;
+    let (status, _) = put(addr, "brain_save", json!({ "content": "x" })).await;
     assert_eq!(status, 400);
+}
+
+#[tokio::test]
+async fn typed_save_accepts_a_page_at_the_size_limit_and_refuses_more() {
+    let corpus = shelved("save-limit");
+    let addr = serve_brain(Some(&corpus.0), None).await;
+    let text = "x".repeat(1 << 20);
+    let input = json!({"path":"self/pace.md", "text":text, "summary":"At the limit"});
+    assert!(input.to_string().len() > 1 << 20);
+    let (status, saved) = request(addr, "brain_save", input).await;
+    assert_eq!(status, 200, "{saved}");
+    assert_eq!(saved["commit"]["message"], "At the limit");
+    assert_eq!(
+        std::fs::read_to_string(corpus.0.join("self/pace.md")).unwrap(),
+        text
+    );
+
+    let too_large = "x".repeat((1 << 20) + 1);
+    let (status, refusal) = request(
+        addr,
+        "brain_save",
+        json!({"path":"self/pace.md", "text":too_large}),
+    )
+    .await;
+    assert_eq!(status, 413, "{refusal}");
+    assert_eq!(refusal["error"]["code"], "too_large");
+    assert_eq!(
+        std::fs::read_to_string(corpus.0.join("self/pace.md")).unwrap(),
+        text
+    );
 }
 
 #[tokio::test]
@@ -583,7 +649,7 @@ async fn a_commit_git_refuses_puts_the_page_back() {
     let before = std::fs::read_to_string(corpus.0.join("self/pace.md")).unwrap();
 
     let save = json!({ "path": "self/pace.md", "content": "# Pace\n\nChanged.\n" });
-    let (status, body) = put(addr, "/api/brain/page", save).await;
+    let (status, body) = put(addr, "brain_save", save).await;
     assert_eq!(status, 500, "{body}");
     assert!(
         body["error"]["message"]
@@ -599,7 +665,7 @@ async fn a_commit_git_refuses_puts_the_page_back() {
 
     git(&corpus.0, &["config", "--unset", "core.hooksPath"]);
     let save = json!({ "path": "self/pace.md", "content": "# Pace\n\nChanged.\n" });
-    let (status, commit) = put(addr, "/api/brain/page", save).await;
+    let (status, commit) = put(addr, "brain_save", save).await;
     assert_eq!(
         (status, commit["author"].as_str()),
         (200, Some("Corpus Owner"))
@@ -609,10 +675,6 @@ async fn a_commit_git_refuses_puts_the_page_back() {
 #[cfg(unix)]
 #[tokio::test]
 async fn a_disconnected_editor_does_not_cancel_a_commit_halfway() {
-    use axum::body::Body;
-    use axum::http::Request;
-    use tower::ServiceExt;
-
     let corpus = shelved("disconnected");
     git(&corpus.0, &["config", "user.name", "Corpus Owner"]);
     git(&corpus.0, &["config", "user.email", "owner@example.org"]);
@@ -622,18 +684,10 @@ async fn a_disconnected_editor_does_not_cancel_a_commit_halfway() {
         "#!/bin/sh\ntouch ready\nwhile [ ! -e release ]; do sleep 0.05; done\n",
     );
     git(&corpus.0, &["config", "core.hooksPath", "hooks"]);
-    let app = brain::routes::<()>(Arc::new(Brain::new(Some(&corpus.0), None).unwrap()));
+    let addr = serve_brain(Some(&corpus.0), None).await;
     let content = "# Pace\n\nSaved despite the disconnect.\n";
-    let body = json!({"path":"self/pace.md", "content":content, "summary":"Keep pace"}).to_string();
-    let request = |body: String| {
-        Request::builder()
-            .method("PUT")
-            .uri("/api/brain/page")
-            .header("content-type", "application/json")
-            .body(Body::from(body))
-            .unwrap()
-    };
-    let first = tokio::spawn(app.clone().oneshot(request(body.clone())));
+    let body = json!({"path":"self/pace.md", "content":content, "summary":"Keep pace"});
+    let first = tokio::spawn(put(addr, "brain_save", body.clone()));
     tokio::time::timeout(std::time::Duration::from_secs(10), async {
         while !corpus.0.join("ready").exists() {
             tokio::time::sleep(std::time::Duration::from_millis(20)).await;
@@ -647,12 +701,11 @@ async fn a_disconnected_editor_does_not_cancel_a_commit_halfway() {
     // A second save waits for the first lock, then sees the committed text.
     let response = tokio::time::timeout(
         std::time::Duration::from_secs(10),
-        app.oneshot(request(body)),
+        put(addr, "brain_save", body),
     )
     .await
-    .expect("save did not finish")
-    .unwrap();
-    assert_eq!(response.status(), axum::http::StatusCode::OK);
+    .expect("save did not finish");
+    assert_eq!(response.0, 200);
     assert_eq!(
         std::fs::read_to_string(corpus.0.join("self/pace.md")).unwrap(),
         content
@@ -673,20 +726,20 @@ async fn a_corpus_git_will_not_read_says_why() {
     let corpus = Corpus::new("nogit");
     corpus.write("knowledge/a.md", "# A\n");
     let addr = serve_brain(Some(&corpus.0), None).await;
-    let (status, page) = get(addr, "/api/brain/page?path=knowledge/a.md").await;
+    let (status, page) = get(addr, "brain_read?path=knowledge/a.md").await;
     assert_eq!(status, 200);
     assert_eq!(page["history"], json!([]));
     assert!(
         page["history_error"].as_str().unwrap().contains("git"),
         "{page}"
     );
-    let (status, body) = get(addr, "/api/brain/changes").await;
+    let (status, body) = get(addr, "brain_changes").await;
     assert_eq!(status, 200);
     assert_eq!(body["changes"], json!([]));
     assert!(body["error"].is_string());
     let (status, _) = put(
         addr,
-        "/api/brain/page",
+        "brain_save",
         json!({ "path": "knowledge/a.md", "content": "# B\n" }),
     )
     .await;

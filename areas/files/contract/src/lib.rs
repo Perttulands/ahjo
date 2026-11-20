@@ -4,6 +4,9 @@ use schemars::JsonSchema;
 
 pub mod commands;
 
+/// HTTP route serving the bytes of a file.
+pub const FILE_BYTES_PATH: &str = "/api/files/file";
+
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq, JsonSchema)]
 pub struct Entry {
     pub name: String,
@@ -52,17 +55,6 @@ pub struct Diff {
     pub error: Option<String>,
 }
 
-/// What a diff is asked for: a file, and whether to see all of it around
-/// its changes (as a side-by-side view needs) or only some lines.
-#[derive(Clone, Debug, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
-pub struct DiffAt {
-    #[serde(default)]
-    pub node: String,
-    pub path: String,
-    #[serde(default)]
-    pub whole: bool,
-}
-
 /// How a file stands against its repository's HEAD: changed (`M`), new to
 /// it (`A`, or `?` when not even staged), taken out (`D`), renamed in
 /// (`R`) or in a merge conflict (`C`).
@@ -89,13 +81,6 @@ pub struct RepoStatus {
     pub error: Option<String>,
 }
 
-/// Roots exposed by a node.
-#[derive(Clone, Debug, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
-pub struct NodeRoots {
-    pub node: String,
-    pub roots: Vec<Root>,
-}
-
 /// A file and when it last changed, in milliseconds since the Unix epoch;
 /// or, with `files`, a folder in which that many files changed together
 /// (a checkout, a batch of renders), `modified` the newest of them.
@@ -111,14 +96,6 @@ pub struct Changed {
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize, PartialEq, Eq, JsonSchema)]
 pub struct Recent {
     pub files: Vec<Changed>,
-}
-
-/// When each of some paths last changed: what a view that shows them asks
-/// to learn whether to read them again. A path that is gone (or outside
-/// the roots) has none.
-#[derive(Clone, Debug, Default, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
-pub struct Stat {
-    pub paths: Vec<String>,
 }
 
 /// A copy started on this node.
@@ -156,32 +133,6 @@ pub struct SaveAt {
     pub node: String,
     pub path: String,
     pub base: Option<String>,
-}
-
-#[derive(Clone, Debug, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
-pub struct Search {
-    #[serde(default)]
-    pub node: String,
-    /// The folder searched; a name find without one looks under every root.
-    #[serde(default)]
-    pub path: String,
-    /// For a find under every root, the folder the asker stands in: its
-    /// files come first, and it is covered even where the roots' walk
-    /// leaves it out.
-    #[serde(default)]
-    pub near: String,
-    /// Answer only the files under `near`, at once.
-    #[serde(default)]
-    pub beside: bool,
-    pub q: String,
-}
-
-#[derive(Clone, Debug, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
-pub struct Move {
-    #[serde(default)]
-    pub node: String,
-    pub path: String,
-    pub to: String,
 }
 
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize, PartialEq, Eq)]

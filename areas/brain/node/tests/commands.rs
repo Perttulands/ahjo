@@ -37,6 +37,9 @@ async fn brain_commands_save_and_read_changes() {
             "brain_save",
             "brain_collections",
             "brain_changes",
+            "brain_files",
+            "brain_texts",
+            "brain_collection",
             "brain_send"
         ]
     );
@@ -79,7 +82,7 @@ async fn brain_commands_save_and_read_changes() {
         .await
         .unwrap();
     let tools = answer["result"]["tools"].as_array().unwrap();
-    assert_eq!(tools.len(), 6);
+    assert_eq!(tools.len(), 9);
     for (name, output_field) in [
         ("brain_search", "results"),
         ("brain_read", "body"),
@@ -87,6 +90,9 @@ async fn brain_commands_save_and_read_changes() {
         ("brain_collections", "collections"),
         ("brain_changes", "changes"),
         ("brain_send", "sent"),
+        ("brain_files", "files"),
+        ("brain_texts", "texts"),
+        ("brain_collection", "pages"),
     ] {
         let tool = tools.iter().find(|tool| tool["name"] == name).unwrap();
         assert_eq!(tool["inputSchema"]["additionalProperties"], false, "{name}");
