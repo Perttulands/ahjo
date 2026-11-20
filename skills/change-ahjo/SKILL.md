@@ -84,20 +84,44 @@ a scratch folder `$S`:
 The node is the systemd user unit `ahjo`, listening on `127.0.0.1:7310`
 (Windows Tailscale serves tailnet port 7300 to it, and the ChatGPT tunnel
 `ahjo-tunnel` reaches its `/mcp` there). Upgrade only to what is on main,
-built in the deploy worktree, which holds nothing but main:
+built in the deploy worktree, which holds nothing but main, together with
+the Windows apps of the same commit, which the node hands to other machines
+(the laptop installs and updates from it):
 
 ```sh
 cd /home/perttu/.cache/ahjo-dev/deploy
 git fetch origin && git checkout --detach origin/main
+C=$(git rev-parse HEAD)
 heavy run --memory 8 -- env PKG_CONFIG=/usr/bin/pkg-config cargo build --release -p ahjo -p ahjo-app-swarm
-target/release/ahjo upgrade --app target/release/ahjo-swarm
+git -C /mnt/c/Users/pertt/ahjo-build fetch origin && git -C /mnt/c/Users/pertt/ahjo-build merge --ff-only $C
+(cd /mnt/c/Users/pertt/ahjo-build && heavy run --memory 8 -- /mnt/c/Users/pertt/.cargo/bin/cargo.exe build --release -p ahjo-app-swarm -p ahjo-app-brain -p ahjo-app-desk)
+target/release/ahjo upgrade --app target/release/ahjo-swarm --windows-apps /mnt/c/Users/pertt/ahjo-build/target/release
 ahjo version
 ```
 
 The upgrade restarts the node and only the node, so every tmux session lives
 on; `ahjo-tunnel` restarts with it. A build that is not healthy in time is
 put back and the upgrade fails with `upgrade_failed`. `ahjo version` names
-the build both the CLI and the node run.
+the build both the CLI and the node run. `--windows-apps` refuses builds
+of another commit (`apps_mismatch`) before anything changes; the apps go
+in `~/.local/share/ahjo/apps/windows/<version>/` and the upgrade checks the
+new node hands them out. Run from the installed build (`ahjo upgrade
+--windows-apps <dir>`) it puts them beside the running node and restarts
+nothing, for when the Windows build came later.
+
+The laptop installs once, in PowerShell, and then updates itself from each
+window's Update, which shows when the node runs another build:
+
+```powershell
+irm http://landmass.tail1f2f3b.ts.net:7300/install.ps1 | iex
+```
+
+`[node] desk` in `~/.config/ahjo/config.toml` is the desk the installed
+Desk opens on, as the laptop reaches it
+(`http://landmass.tail1f2f3b.ts.net:18782`). Never run the install script
+on this machine: it would put the Start-menu entries over the operator's.
+Try it with `AHJO_INSTALL_DIR`, `AHJO_CONFIG_DIR` and `AHJO_START_MENU`
+set to a scratch folder, against a node of your own.
 
 Where the install lives:
 

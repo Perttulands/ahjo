@@ -13,7 +13,10 @@ fn git(args: &[&str]) -> Option<String> {
 
 fn main() {
     let version = std::env::var("CARGO_PKG_VERSION").unwrap();
-    let commit = git(&["rev-parse", "--short=7", "HEAD"]);
+    // Seven characters whatever the checkout holds: `--short` lengthens a
+    // name that is ambiguous among its own objects, and the Windows apps are
+    // built in another checkout from the same commit.
+    let commit = git(&["rev-parse", "HEAD"]).map(|c| c[..7.min(c.len())].to_owned());
     println!(
         "cargo:rustc-env=AHJO_VERSION={}",
         match &commit {

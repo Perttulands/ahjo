@@ -10,6 +10,7 @@
 //! Sessions survive both: tmux holds them, and the unit's
 //! `KillMode=process` lets a restart signal only the node.
 
+mod apps;
 mod unit;
 
 use std::path::{Path, PathBuf};
@@ -26,8 +27,8 @@ pub use unit::Unit;
 
 pub const INSTALL_USAGE: &str = "usage: ahjo install [--from file] [--app file] [--root dir] \
 [--unit name] [--unit-dir dir] [--listen addr:port] [--config file] [--timeout seconds] [--json]";
-pub const UPGRADE_USAGE: &str = "usage: ahjo upgrade [--from file] [--app file] [--unit name] \
-[--unit-dir dir] [--timeout seconds] [--json]";
+pub const UPGRADE_USAGE: &str = "usage: ahjo upgrade [--from file] [--app file] \
+[--windows-apps dir] [--unit name] [--unit-dir dir] [--timeout seconds] [--json]";
 
 pub const UNINSTALL_USAGE: &str = "usage: ahjo uninstall [--unit name] [--unit-dir dir] [--json]";
 
@@ -50,16 +51,24 @@ upgrade replaces a running node. The unit starts with this command's PATH
   --timeout   seconds to wait for the node to answer (default 30)
   --json      the answer as JSON";
 
-pub const UPGRADE_HELP: &str = "usage: ahjo upgrade [--from file] [--app file] [--unit name] \
-[--unit-dir dir] [--timeout seconds] [--json]
+pub const UPGRADE_HELP: &str = "usage: ahjo upgrade [--from file] [--app file] \
+[--windows-apps dir] [--unit name] [--unit-dir dir] [--timeout seconds] [--json]
 Replace the installed build with this one and restart the node; run it from
 the new build. Terminal sessions live on. A new build that does not answer in
 time is taken out again and the previous one started, and the upgrade fails
 with upgrade_failed. Where the node listens and what it reads stay as the
 unit says: ahjo install changes those.
 
+The node hands its Windows apps to other machines (irm <node>/install.ps1 |
+iex), and they update from it: --windows-apps gives the builds of the same
+commit, which go in <root>/apps/windows/<version>. Run from the installed
+build, it puts them beside that build and restarts nothing.
+
   --from      file: the ahjo to put in (default: the one running this)
   --app       file: an ahjo-swarm to put beside it
+  --windows-apps
+              dir: holding ahjo-swarm.exe, ahjo-brain.exe and ahjo-desk.exe
+              built from this build's commit
   --unit      name: the unit is <name>.service (default ahjo)
   --unit-dir  dir: where units live (default ~/.config/systemd/user)
   --timeout   seconds to wait for the node to answer (default 30)
@@ -78,6 +87,7 @@ in place. Terminal sessions live on in tmux, and the node's config and state
 struct Flags {
     from: Option<PathBuf>,
     app: Option<PathBuf>,
+    windows_apps: Option<PathBuf>,
     root: Option<PathBuf>,
     unit: String,
     unit_dir: Option<PathBuf>,
@@ -127,6 +137,7 @@ fn parse(verb: &str, args: &[String]) -> Result<Flags, Error> {
     let mut flags = Flags {
         from: None,
         app: None,
+        windows_apps: None,
         root: None,
         unit: "ahjo".into(),
         unit_dir: None,
@@ -140,6 +151,9 @@ fn parse(verb: &str, args: &[String]) -> Result<Flags, Error> {
         if flag == "--json" {
             flags.json = true;
             continue;
+        }
+        if flag == "--windows-apps" && verb != "upgrade" {
+            return Err(bad(format!("{flag}: ahjo upgrade puts the apps in place")));
         }
         let only_install = matches!(flag.as_str(), "--root" | "--listen" | "--config");
         if only_install && verb != "install" {
@@ -159,6 +173,7 @@ fn parse(verb: &str, args: &[String]) -> Result<Flags, Error> {
         match flag.as_str() {
             "--from" => flags.from = Some(value.into()),
             "--app" => flags.app = Some(value.into()),
+            "--windows-apps" => flags.windows_apps = Some(value.into()),
             "--root" => flags.root = Some(value.into()),
             "--unit" => flags.unit = value.clone(),
             "--unit-dir" => flags.unit_dir = Some(value.into()),
@@ -371,6 +386,26 @@ async fn healthy(
     }
 }
 
+/// Checks that the node on `listen` hands out `version`'s Windows apps, as
+/// another machine asks for them.
+async fn served(listen: &str, version: &str) -> Result<(), Error> {
+    let not = |why: String| {
+        Error::new(
+            "apps_not_served",
+            format!("the node on {listen} does not hand out the Windows apps: {why}"),
+        )
+    };
+    let client = NodeClient::new(Some(&health_url(listen))).map_err(|e| not(format!("{e:#}")))?;
+    let (manifest, _) = client
+        .request(Method::GET, "/apps/windows", None, None)
+        .await
+        .map_err(|e| not(format!("{e:#}")))?;
+    match manifest["version"].as_str() {
+        Some(v) if v == version => Ok(()),
+        other => Err(not(format!("it answers {}", other.unwrap_or("no version")))),
+    }
+}
+
 /// The app's place beside the installed `ahjo`.
 fn app_path(binary: &Path) -> PathBuf {
     binary.with_file_name("ahjo-swarm")
@@ -514,19 +549,42 @@ async fn upgrade(flags: &Flags) -> Result<Value, Error> {
     let unit = Unit::parse(&text, &unit_file)?;
     let binary = unit.binary.clone();
     let from = source(flags)?;
+    let apps_dir = ahjo_node_kit::serve::apps::beside(&binary)
+        .ok_or_else(|| Error::new("io", format!("{} has no root folder", binary.display())))?;
     if std::fs::canonicalize(&binary).is_ok_and(|installed| installed == from) {
-        return Err(Error::new(
-            "upgrade_same_binary",
-            format!(
-                "{} is the installed binary; run the new build's ahjo upgrade, or give --from",
-                from.display()
+        // Only the apps, beside the build the node runs.
+        let Some(windows) = &flags.windows_apps else {
+            return Err(Error::new(
+                "upgrade_same_binary",
+                format!(
+                    "{} is the installed binary; run the new build's ahjo upgrade, or give --from",
+                    from.display()
+                ),
+            ));
+        };
+        let version = version_of(&from)?;
+        let put = apps::put(windows, &apps_dir, &version)?;
+        apps::prune(&apps_dir, &version)?;
+        served(&unit.listen, &version).await?;
+        return Ok(json!({
+            "summary": format!(
+                "Put the Windows apps of {version} in {}; the node hands them out.",
+                put.display()
             ),
-        ));
+            "version": version,
+            "unit": service,
+            "listen": unit.listen,
+            "windows_apps": put,
+        }));
     }
     let version = version_of(&from)?;
     // The build it replaces, which a failed upgrade puts back. It need not
     // run: then a put-back node is healthy at any version.
     let old_version = version_of(&binary).ok();
+    let windows_apps = match &flags.windows_apps {
+        Some(windows) => Some(apps::put(windows, &apps_dir, &version)?),
+        None => None,
+    };
     let mut copies = vec![(from.clone(), binary.clone())];
     if let Some(app) = &flags.app {
         copies.push((app.clone(), app_path(&binary)));
@@ -554,18 +612,33 @@ async fn upgrade(flags: &Flags) -> Result<Value, Error> {
         for to in &kept {
             std::fs::remove_file(previous(to)).map_err(|e| io("removing", &previous(to), e))?;
         }
+        let mut summary = format!(
+            "Upgraded {service} from {from_version} to {version}; it serves on {}.",
+            unit.listen
+        );
+        if let Some(put) = &windows_apps {
+            apps::prune(&apps_dir, &version)?;
+            served(&unit.listen, &version)
+                .await
+                .map_err(|e| Error::new(e.code, format!("{summary} But {}", e.message)))?;
+            summary.push_str(&format!(
+                "\nIt hands out the Windows apps of {version} from {}.",
+                put.display()
+            ));
+        }
         return Ok(json!({
-            "summary": format!(
-                "Upgraded {service} from {from_version} to {version}; it serves on {}.",
-                unit.listen
-            ),
+            "summary": summary,
             "version": version,
             "previous": old_version,
             "unit": service,
             "listen": unit.listen,
             "binary": binary,
+            "windows_apps": windows_apps,
         }));
     };
+    if windows_apps.is_some() {
+        apps::remove(&apps_dir, &version);
+    }
     // Put the previous build back and start it again.
     let mut put_back = Ok(());
     for to in &kept {
@@ -653,6 +726,13 @@ fn uninstall(flags: &Flags) -> Result<Value, Error> {
                 Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
                 Err(e) => return Err(io("removing", &path, e)),
             }
+        }
+        // The apps it handed out, which an upgrade put beside it.
+        if let Some(apps) = ahjo_node_kit::serve::apps::beside(&unit.binary)
+            && apps.is_dir()
+        {
+            std::fs::remove_dir_all(&apps).map_err(|e| io("removing", &apps, e))?;
+            removed.push(apps);
         }
         // The folder too, when the install was all it held.
         if let Some(dir) = unit.binary.parent() {

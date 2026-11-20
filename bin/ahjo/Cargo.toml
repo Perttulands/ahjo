@@ -13,7 +13,9 @@ ahjo-node-kit = { path = "../../kit/node-kit" }
 ahjo-core = { path = "../../kit/core" }
 anyhow = "1"
 axum = { version = "0.8", default-features = false }
+memchr = "2"
 serde_json = "1"
+sha2 = "0.10"
 tokio = { version = "1", features = ["full"] }
 # The areas, one line each, as in AREAS.
 ahjo-agents = { path = "../../areas/agents/node" }

@@ -432,3 +432,140 @@ async fn uninstall_takes_the_unit_and_the_build_away_and_keeps_sessions_and_conf
     let error: Value = serde_json::from_slice(&wrong.stderr).unwrap();
     assert_eq!(error["error"]["code"], "bad_arguments", "{error}");
 }
+
+/// One GET to the node on `listen`: its status and body.
+fn get(listen: &str, path: &str) -> (u16, Vec<u8>) {
+    use std::io::{Read, Write};
+    let mut s = std::net::TcpStream::connect(listen).unwrap();
+    write!(
+        s,
+        "GET {path} HTTP/1.1\r\nHost: {listen}\r\nConnection: close\r\n\r\n"
+    )
+    .unwrap();
+    let mut all = Vec::new();
+    s.read_to_end(&mut all).unwrap();
+    let end = all.windows(4).position(|w| w == b"\r\n\r\n").unwrap();
+    let head = String::from_utf8_lossy(&all[..end]).into_owned();
+    assert!(
+        !head
+            .to_ascii_lowercase()
+            .contains("transfer-encoding: chunked"),
+        "{head}"
+    );
+    let status = head.split_whitespace().nth(1).unwrap().parse().unwrap();
+    (status, all[end + 4..].to_vec())
+}
+
+/// Three Windows apps as cargo leaves them, each carrying `version`.
+fn windows_build(dir: &Path, version: &str) -> PathBuf {
+    std::fs::create_dir_all(dir).unwrap();
+    for name in ["ahjo-swarm.exe", "ahjo-brain.exe", "ahjo-desk.exe"] {
+        let bytes = format!("MZ {name} ... {version} ...");
+        std::fs::write(dir.join(name), bytes).unwrap();
+    }
+    dir.to_owned()
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn an_upgrade_puts_the_windows_apps_beside_the_node_which_hands_them_out() {
+    let Some(tmux) = Server::start_in("ahjo-apps") else {
+        return;
+    };
+    let machine = Machine::new(&tmux);
+    let first = machine.build("first");
+    succeeded(&machine.install(&first));
+    let listen = machine.listen();
+    // The node keeps none yet, and says how they come.
+    let (status, body) = get(&listen, "/apps/windows");
+    assert_eq!(status, 404);
+    let error: Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(error["error"]["code"], "no_apps", "{error}");
+    let apps = machine.dir.join("root/apps/windows");
+    let stale = apps.join("0.0.0+0000000");
+    std::fs::create_dir_all(&stale).unwrap();
+
+    // Builds of another commit are refused before anything changes.
+    let wrong = windows_build(&machine.dir.join("win-wrong"), "0.0.0+0000000");
+    let pid = machine.node_pid();
+    let second = machine.build("second");
+    let out = machine.ahjo(
+        &second,
+        "upgrade",
+        &["--windows-apps", wrong.to_str().unwrap()],
+    );
+    assert_eq!(out.status.code(), Some(1), "{out:?}");
+    let error: Value = serde_json::from_slice(&out.stderr).unwrap();
+    assert_eq!(error["error"]["code"], "apps_mismatch", "{error}");
+    assert_eq!(
+        machine.node_pid(),
+        pid,
+        "a refused upgrade restarted the node"
+    );
+    assert!(std::fs::read(machine.installed()).unwrap() == std::fs::read(&first).unwrap());
+
+    let version = ahjo_node_kit::VERSION;
+    let windows = windows_build(&machine.dir.join("win"), version);
+    let upgraded = succeeded(&machine.ahjo(
+        &second,
+        "upgrade",
+        &["--windows-apps", windows.to_str().unwrap()],
+    ));
+    assert_eq!(
+        upgraded["windows_apps"].as_str().map(PathBuf::from),
+        Some(apps.join(version)),
+        "{upgraded}"
+    );
+    assert!(!stale.exists(), "another version's apps were left");
+
+    let (status, body) = get(&listen, "/apps/windows");
+    assert_eq!(status, 200);
+    let manifest: Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(manifest["version"], version);
+    let files = manifest["files"].as_array().unwrap();
+    assert_eq!(files.len(), 3, "{manifest}");
+    for file in files {
+        let name = file["name"].as_str().unwrap();
+        let (status, bytes) = get(&listen, &format!("/apps/windows/{name}"));
+        assert_eq!(status, 200, "{name}");
+        assert_eq!(bytes, std::fs::read(windows.join(name)).unwrap());
+        assert_eq!(file["size"], bytes.len());
+        use sha2::Digest;
+        let sum: String = sha2::Sha256::digest(&bytes)
+            .iter()
+            .map(|b| format!("{b:02x}"))
+            .collect();
+        assert_eq!(file["sha256"], sum);
+    }
+    // Only what the manifest names.
+    assert_eq!(get(&listen, "/apps/windows/manifest.json").0, 404);
+    assert_eq!(get(&listen, "/apps/windows/..%2Fmanifest.json").0, 404);
+
+    // The script installs from this node, as the request named it.
+    let (status, script) = get(&listen, "/install.ps1");
+    assert_eq!(status, 200);
+    let script = String::from_utf8(script).unwrap();
+    assert!(
+        script.contains(&format!("$node = 'http://{listen}'")),
+        "{script}"
+    );
+    assert!(script.is_ascii(), "Windows PowerShell reads it as ANSI");
+
+    // From the installed build, the apps alone: nothing restarts.
+    let pid = machine.node_pid();
+    let again = succeeded(&machine.ahjo(
+        &machine.installed(),
+        "upgrade",
+        &["--windows-apps", windows.to_str().unwrap()],
+    ));
+    assert_eq!(again["version"], version, "{again}");
+    assert_eq!(
+        machine.node_pid(),
+        pid,
+        "placing the apps restarted the node"
+    );
+    assert_eq!(get(&listen, "/apps/windows").0, 200);
+
+    // Uninstall takes them away with the build.
+    succeeded(&machine.ahjo(&machine.installed(), "uninstall", &[]));
+    assert!(!machine.dir.join("root/apps").exists());
+}

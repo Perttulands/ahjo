@@ -38,6 +38,12 @@ pub struct NodeSection {
     pub names: Vec<String>,
     /// Each environment's port: `windows = 7310`.
     pub ports: BTreeMap<String, u16>,
+    /// The folder of the apps this node hands out (`serve::apps`); `apps`
+    /// beside the folder holding the binary if absent.
+    pub apps: Option<PathBuf>,
+    /// The decision desk the apps it hands out open on, as another machine
+    /// reaches it: `http://rig.tail1.ts.net:18782`.
+    pub desk: Option<String>,
 }
 
 impl NodeSection {

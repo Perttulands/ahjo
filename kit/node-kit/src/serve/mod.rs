@@ -1,13 +1,14 @@
 //! Serving a node: its areas, built from the config, behind the trust check
 //! and the refusal of requests for other nodes, with the node's own
-//! `/api/health`, `/api/version`, `/api/config`, `/ws` and `/mcp`, and its own
-//! commands ([`crate::own`]).
+//! `/api/health`, `/api/version`, `/api/config`, `/ws` and `/mcp`, the apps
+//! it hands out ([`apps`]), and its own commands ([`crate::own`]).
 //! Areas are checked before anything is served: two that share a name, a
 //! frame kind or a command refuse to start, naming both
 //! ([`crate::listing::check`]), as does one whose commands are not those it
 //! lists.
 
 mod addressed;
+pub mod apps;
 mod authority;
 mod hello;
 mod socket;
@@ -169,6 +170,12 @@ pub async fn start_with(
         areas: built,
         views: own.views.clone(),
     });
+    let apps_dir = match &section.apps {
+        Some(dir) => Some(setup.config.path(dir)),
+        None => std::env::current_exe()
+            .ok()
+            .and_then(|exe| apps::beside(&exe)),
+    };
     let trust = Arc::new(Trust::local(section.names));
     let mut app = Router::new()
         .route("/ws", get(upgrade))
@@ -176,6 +183,7 @@ pub async fn start_with(
         .route("/api/version", get(version))
         .with_state(shared.clone())
         .merge(own::routes(own))
+        .merge(apps::routes(apps_dir, section.desk.clone()))
         .merge(Mcp::new(node.id.clone(), groups, shared.off.clone(), sets).routes());
     for (_, area) in &shared.areas {
         app = app.merge(area.routes());
