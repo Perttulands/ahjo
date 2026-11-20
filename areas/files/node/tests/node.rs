@@ -219,13 +219,23 @@ async fn exact_commands_are_exposed_to_mcp_and_cli_and_operate_on_files() {
         )
         .await
         .unwrap();
-    let mut actual: Vec<_> = answer["result"]["tools"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .map(|v| v["name"].as_str().unwrap())
-        .filter(|name| !ahjo_node_kit::own::COMMANDS.contains(name))
-        .collect();
+    let mut actual = Vec::new();
+    for tool in answer["result"]["tools"].as_array().unwrap() {
+        let name = tool["name"].as_str().unwrap();
+        if !name.starts_with("file_") {
+            assert!(ahjo_node_kit::own::COMMANDS.contains(&name), "{name}");
+            continue;
+        }
+        assert_eq!(tool["inputSchema"]["additionalProperties"], false, "{name}");
+        assert_eq!(tool["outputSchema"]["type"], "object", "{name}: {tool}");
+        let error = node
+            .call(name, json!({"unknown_input": "unused"}))
+            .await
+            .unwrap_err();
+        assert_eq!(error.code, "invalid_argument", "{name}");
+        assert!(error.message.contains("unknown_input"), "{name}: {error}");
+        actual.push(name);
+    }
     actual.sort();
     let mut expected = vec![
         "file_list",
@@ -233,13 +243,10 @@ async fn exact_commands_are_exposed_to_mcp_and_cli_and_operate_on_files() {
         "file_diff",
         "file_status",
         "file_recent",
-        "file_download",
-        "file_upload",
         "file_write",
         "file_mkdir",
         "file_move",
         "file_delete",
-        "file_find",
         "file_locate",
         "file_search",
         "file_copy",
@@ -252,6 +259,22 @@ async fn exact_commands_are_exposed_to_mcp_and_cli_and_operate_on_files() {
     let args = vec!["--node".into(), node.url()];
     cli::run("file", &args, &mut out).await.unwrap();
     let verbs = String::from_utf8(out).unwrap();
+    assert_eq!(verbs.matches("ahjo file ").count(), 14, "{verbs}");
+    for removed in ["find", "download", "upload"] {
+        let error = cli::run(
+            "file",
+            &[removed.into(), "--node".into(), node.url()],
+            &mut Vec::new(),
+        )
+        .await
+        .unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains(&format!("no command file {removed}")),
+            "{error}"
+        );
+    }
     for name in &expected {
         assert!(
             verbs.contains(&format!(
@@ -270,7 +293,7 @@ async fn exact_commands_are_exposed_to_mcp_and_cli_and_operate_on_files() {
     let read = node.call("file_read", json!({"path":file})).await.unwrap();
     assert_eq!(read["text"], "hello");
     let found = node
-        .call("file_find", json!({"path":root,"query":"note"}))
+        .call("file_locate", json!({"under":root,"query":"note"}))
         .await
         .unwrap();
     assert_eq!(found["matches"][0]["name"], "note.txt");
@@ -435,7 +458,7 @@ async fn files_cli_browses_finds_edits_and_deletes() {
         "note.txt"
     );
     assert_eq!(
-        run(&node, &["find", root_text, "note"]).await["matches"][0]["name"],
+        run(&node, &["locate", "note", "--under", root_text]).await["matches"][0]["name"],
         "note.txt"
     );
     assert_eq!(
@@ -513,14 +536,41 @@ async fn files_cli_finds_recent_changes_and_names_and_round_trips_binary() {
     );
     let found: Value = serde_json::from_slice(&out).unwrap();
     assert_eq!(found["matches"][0]["name"], "README.md", "{found}");
+    std::fs::write(root.join("read-outside.md"), "outside").unwrap();
+    out.clear();
+    assert_eq!(
+        cli::run(
+            "file",
+            &[
+                "locate".into(),
+                "read".into(),
+                "--under".into(),
+                project.to_str().unwrap().into(),
+                "--json".into(),
+                "--node".into(),
+                node.url(),
+            ],
+            &mut out,
+        )
+        .await
+        .unwrap(),
+        0
+    );
+    let found: Value = serde_json::from_slice(&out).unwrap();
+    assert_eq!(found["matches"].as_array().unwrap().len(), 1, "{found}");
+    assert_eq!(
+        found["matches"][0]["path"],
+        json!(project.join("README.md"))
+    );
     out.clear();
     let dest = project.join("data.bin");
     let bytes = [0, 0xff, 0x80, 42];
     let data = STANDARD.encode(bytes);
     let args = vec![
-        "upload".into(),
+        "write".into(),
         dest.to_string_lossy().into_owned(),
         data.clone(),
+        "--base64".into(),
         "--node".into(),
         node.url(),
     ];
@@ -528,19 +578,41 @@ async fn files_cli_finds_recent_changes_and_names_and_round_trips_binary() {
     assert_eq!(cli::run("file", &args, &mut out).await.unwrap(), 0);
     assert_eq!(std::fs::read(&dest).unwrap(), bytes);
     assert_eq!(
-        node.call("file_upload", json!({"path":dest,"data":data}))
+        node.call("file_write", json!({"path":dest,"text":data,"base64":true}))
             .await
             .unwrap_err()
             .code,
         "already_exists"
     );
+    let replaced = [42, 0xfe, 0xff, 0];
     out.clear();
     assert_eq!(
         cli::run(
             "file",
             &[
-                "download".into(),
+                "write".into(),
+                dest.to_str().unwrap().into(),
+                STANDARD.encode(replaced),
+                "--base64".into(),
+                "--replace".into(),
+                "--node".into(),
+                node.url(),
+            ],
+            &mut out,
+        )
+        .await
+        .unwrap(),
+        0
+    );
+    assert_eq!(std::fs::read(&dest).unwrap(), replaced);
+    out.clear();
+    assert_eq!(
+        cli::run(
+            "file",
+            &[
+                "read".into(),
                 dest.to_string_lossy().into_owned(),
+                "--base64".into(),
                 "--json".into(),
                 "--node".into(),
                 node.url()
@@ -551,19 +623,20 @@ async fn files_cli_finds_recent_changes_and_names_and_round_trips_binary() {
         .unwrap(),
         0
     );
-    let downloaded: Value = serde_json::from_slice(&out).unwrap();
+    let read: Value = serde_json::from_slice(&out).unwrap();
     assert_eq!(
-        STANDARD
-            .decode(downloaded["data"].as_str().unwrap())
-            .unwrap(),
-        bytes
+        STANDARD.decode(read["data"].as_str().unwrap()).unwrap(),
+        replaced
     );
     let outside = root.parent().unwrap().join("outside-ahjo-file");
     assert_eq!(
-        node.call("file_upload", json!({"path":outside,"data":data}))
-            .await
-            .unwrap_err()
-            .code,
+        node.call(
+            "file_write",
+            json!({"path":outside,"text":data,"base64":true})
+        )
+        .await
+        .unwrap_err()
+        .code,
         "outside_roots"
     );
     node.stop().await;
@@ -647,7 +720,7 @@ async fn files_work_as_the_files_view_does_under_the_roots() {
     assert!(!notes.exists() && folder.join("made/notes.md").exists());
 
     let found = node
-        .call("file_find", json!({ "path": folder, "query": "NOTES" }))
+        .call("file_locate", json!({ "under": folder, "query": "NOTES" }))
         .await
         .unwrap();
     assert_eq!(found["matches"][0]["name"], "notes.md", "{found}");

@@ -306,6 +306,7 @@ dependencies = [
  "http-body-util",
  "hyper",
  "hyper-util",
+ "schemars",
  "serde",
  "serde_json",
  "tokio",
@@ -336,6 +337,7 @@ dependencies = [
 name = "ahjo-brain-contract"
 version = "0.0.1"
 dependencies = [
+ "schemars",
  "serde",
 ]
 
@@ -366,6 +368,7 @@ dependencies = [
  "hyper-util",
  "jiff",
  "libc",
+ "schemars",
  "serde",
  "serde_json",
  "sha2 0.11.1",
@@ -402,6 +405,7 @@ dependencies = [
 name = "ahjo-files-contract"
 version = "0.0.1"
 dependencies = [
+ "schemars",
  "serde",
 ]
 

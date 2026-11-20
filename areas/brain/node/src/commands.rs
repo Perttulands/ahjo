@@ -1,233 +1,196 @@
-use crate::brain::Brain;
-use ahjo_brain_contract::{BAD_REQUEST, BRAIN_ERROR, NOT_FOUND, UNAVAILABLE};
-use ahjo_core::Error;
-use ahjo_node_kit::{
-    Command, Effect,
-    args::{maybe_text, object, text},
+use crate::brain::{Brain, Refusal, refusal_code};
+use ahjo_brain_contract::{
+    BAD_REQUEST, BRAIN_ERROR, NOT_FOUND, UNAVAILABLE,
+    commands::{
+        BrainChange, BrainChanges, BrainChangesResult, BrainCollections, BrainCollectionsResult,
+        BrainPage, BrainRead, BrainSave, BrainSaved, BrainSearch, BrainSearchResults, BrainSend,
+        BrainSent,
+    },
 };
-use serde_json::json;
+use ahjo_core::Error;
+use ahjo_node_kit::{Command, Effect};
+use ahjo_term::Sessions;
+use schemars::JsonSchema;
+use serde::{Serialize, de::DeserializeOwned};
 use std::sync::Arc;
+
+struct Ctx {
+    brain: Arc<Brain>,
+    node: String,
+    sessions: Option<Arc<dyn Sessions>>,
+}
+
+fn command<Input, Output, F, Fut>(
+    ctx: &Arc<Ctx>,
+    name: &'static str,
+    effect: Effect,
+    handler: F,
+) -> Command
+where
+    Input: DeserializeOwned + JsonSchema,
+    Output: Serialize + JsonSchema,
+    F: Fn(Arc<Ctx>, Input) -> Fut + Send + Sync + 'static,
+    Fut: Future<Output = Result<Output, Error>> + Send + 'static,
+{
+    let ctx = ctx.clone();
+    Command::typed(name, effect, move |args| handler(ctx.clone(), args))
+}
+
+fn refused(error: Refusal) -> Error {
+    Error::new(refusal_code(error.status), error.message)
+}
 
 pub fn commands(
     brain: Arc<Brain>,
     node: String,
-    sessions: Option<Arc<dyn ahjo_term::Sessions>>,
+    sessions: Option<Arc<dyn Sessions>>,
 ) -> Vec<Command> {
-    let search = brain.clone();
-    let search_node = node.clone();
-    let read = brain.clone();
-    let read_node = node.clone();
-    let save = brain.clone();
-    let save_node = node.clone();
-    let collections = brain.clone();
-    let collections_node = node.clone();
-    let sending = brain.clone();
-    let sending_node = node.clone();
+    let ctx = Arc::new(Ctx {
+        brain,
+        node,
+        sessions,
+    });
     vec![
-        Command::new(
+        command(
+            &ctx,
             "brain_search",
             Effect::Reads,
-            "Search the brain for pages.",
-            || object(json!({"query": {"type":"string"}}), &["query"]),
-            move |args| {
-                let brain = search.clone();
-                let node = search_node.clone();
-                async move {
-                    let query =
-                        text(&args, "query").map_err(|e| Error::new(BAD_REQUEST, e.to_string()))?;
-                    let results = brain
-                        .search(query)
-                        .await
-                        .map_err(|e| Error::new(crate::brain::refusal_code(e.status), e.message))?;
-                    Ok(json!({"node": node, "results": results}))
-                }
+            |ctx, args: BrainSearch| async move {
+                let results = ctx.brain.search(&args.query).await.map_err(refused)?;
+                Ok(BrainSearchResults {
+                    node: ctx.node.clone(),
+                    results,
+                })
             },
         ),
-        Command::new(
+        command(
+            &ctx,
             "brain_read",
             Effect::Reads,
-            "Read a brain page.",
-            || object(json!({"path": {"type":"string"}}), &["path"]),
-            move |args| {
-                let brain = read.clone();
-                let node = read_node.clone();
-                async move {
-                    let path =
-                        text(&args, "path").map_err(|e| Error::new(BAD_REQUEST, e.to_string()))?;
-                    let page = brain
-                        .page(path)
-                        .await
-                        .map_err(|e| Error::new(crate::brain::refusal_code(e.status), e.message))?;
-                    let mut value = serde_json::to_value(page)
-                        .map_err(|e| Error::new(BRAIN_ERROR, e.to_string()))?;
-                    value["node"] = json!(node);
-                    Ok(value)
-                }
+            |ctx, args: BrainRead| async move {
+                let page = ctx.brain.page(&args.path).await.map_err(refused)?;
+                Ok(BrainPage {
+                    node: ctx.node.clone(),
+                    page,
+                })
             },
         ),
-        Command::new(
-            "brain_save",
-            Effect::Writes,
-            "Save a page as a commit; base is the page's last commit hash from brain read. Omit base to save the current clean page.",
-            || {
-                object(
-                    json!({
-                        "path": {"type":"string"},
-                        "text": {"type":"string"},
-                        "summary": {"type":"string"},
-                        "base": {"type":"string", "description":"Last commit hash from brain read; empty for an uncommitted page."}
-                    }),
-                    &["path", "text"],
-                )
-            },
-            move |args| {
-                let brain = save.clone();
-                let node = save_node.clone();
-                async move {
-                    let bad = |e: anyhow::Error| Error::new(BAD_REQUEST, e.to_string());
-                    let path = text(&args, "path").map_err(bad)?.to_string();
-                    let content = text(&args, "text").map_err(bad)?.to_string();
-                    let summary = maybe_text(&args, "summary")
-                        .map_err(bad)?
-                        .unwrap_or("")
-                        .to_string();
-                    let base = maybe_text(&args, "base").map_err(bad)?.map(str::to_owned);
-                    let task = tokio::spawn(async move {
-                        brain.save(&path, &content, &summary, base.as_deref()).await
-                    });
-                    let commit = task
-                        .await
-                        .map_err(|e| Error::new(BRAIN_ERROR, format!("Save stopped: {e}")))?
-                        .map_err(|e| Error::new(crate::brain::refusal_code(e.status), e.message))?;
-                    Ok(json!({"node": node, "commit": commit}))
-                }
-            },
-        ),
-        Command::new(
+        command(&ctx, "brain_save", Effect::Writes, save),
+        command(
+            &ctx,
             "brain_collections",
             Effect::Reads,
-            "List the brain's collections and page counts.",
-            || object(json!({}), &[]),
-            move |_| {
-                let brain = collections.clone();
-                let node = collections_node.clone();
-                async move {
-                    let collections = brain
-                        .collections()
-                        .await
-                        .map_err(|e| Error::new(crate::brain::refusal_code(e.status), e.message))?;
-                    Ok(json!({"node": node, "collections": collections}))
-                }
+            |ctx, _: BrainCollections| async move {
+                let collections = ctx.brain.collections().await.map_err(refused)?;
+                Ok(BrainCollectionsResult {
+                    node: ctx.node.clone(),
+                    collections,
+                })
             },
         ),
-        Command::new(
-            "brain_changes",
-            Effect::Reads,
-            "List recent commits, newest first, with their pages.",
-            || {
-                object(
-                    json!({"limit": {"type":"integer", "minimum":1, "description":"Maximum commits (default 30, maximum 200)."}}),
-                    &[],
-                )
-            },
-            move |args| {
-                let brain = brain.clone();
-                let node = node.clone();
-                async move {
-                    let limit = match args.get("limit") {
-                        None | Some(serde_json::Value::Null) => None,
-                        Some(value) => Some(
-                            value
-                                .as_u64()
-                                .filter(|n| *n > 0)
-                                .and_then(|n| usize::try_from(n).ok())
-                                .ok_or_else(|| {
-                                    Error::new(BAD_REQUEST, "limit must be a positive whole number")
-                                })?,
-                        ),
-                    };
-                    let read = brain
-                        .changes(limit)
-                        .await
-                        .map_err(|e| Error::new(crate::brain::refusal_code(e.status), e.message))?;
-                    let changes: Vec<_> = read.found.iter().map(|change| json!({
-                        "hash": change.commit.hash, "time": change.commit.time, "author": change.commit.author,
-                        "message": change.commit.message,
-                        "paths": change.pages.iter().map(|page| page.path.as_str()).collect::<Vec<_>>().join(", "),
-                        "pages": change.pages,
-                    })).collect();
-                    Ok(json!({"node": node, "changes": changes, "error": read.error}))
-                }
-            },
-        ),
-        Command::new(
-            "brain_send",
-            Effect::Writes,
-            "Send a page reference to a session; use user/name if the name is ambiguous.",
-            || {
-                object(
-                    json!({"path": {"type":"string"}, "session": {"type":"string"}}),
-                    &["path", "session"],
-                )
-            },
-            move |args| {
-                let brain = sending.clone();
-                let node = sending_node.clone();
-                let sessions = sessions.clone();
-                async move {
-                    let path =
-                        text(&args, "path").map_err(|e| Error::new(BAD_REQUEST, e.to_string()))?;
-                    let target = text(&args, "session")
-                        .map_err(|e| Error::new(BAD_REQUEST, e.to_string()))?;
-                    let page = brain
-                        .page(path)
-                        .await
-                        .map_err(|e| Error::new(crate::brain::refusal_code(e.status), e.message))?;
-                    let sessions = sessions.ok_or_else(|| {
-                        Error::new(
-                            UNAVAILABLE,
-                            "No terminal sessions are available on this node",
-                        )
-                    })?;
-                    let found: Vec<_> = sessions
-                        .listed()
-                        .await
-                        .map_err(|e| Error::new(UNAVAILABLE, format!("{e:#}")))?
-                        .into_iter()
-                        .filter(|s| {
-                            s.id == target
-                                || (s.user.is_none() && s.name == target)
-                                || s.user
-                                    .as_ref()
-                                    .is_some_and(|user| format!("{user}/{}", s.name) == target)
-                        })
-                        .collect();
-                    let session = match found.as_slice() {
-                        [session] => session,
-                        [] => return Err(Error::new(NOT_FOUND, format!("No session {target}"))),
-                        _ => {
-                            return Err(Error::new(
-                                BAD_REQUEST,
-                                format!("Session {target} is ambiguous"),
-                            ));
-                        }
-                    };
-                    let pane = sessions
-                        .active_pane(&session.id)
-                        .await
-                        .map_err(|e| Error::new(BRAIN_ERROR, e.to_string()))?;
-                    let reference = format!("brain page {}", page.file);
-                    sessions
-                        .deliver(pane, reference.clone(), true)
-                        .await
-                        .map_err(|e| Error::new(BRAIN_ERROR, e.to_string()))?
-                        .await
-                        .map_err(|e| Error::new(BRAIN_ERROR, e.to_string()))?;
-                    Ok(
-                        json!({"node": node, "session": session.id, "reference": reference, "sent": true}),
-                    )
-                }
-            },
-        ),
+        command(&ctx, "brain_changes", Effect::Reads, changes),
+        command(&ctx, "brain_send", Effect::Writes, send),
     ]
+}
+
+async fn save(ctx: Arc<Ctx>, args: BrainSave) -> Result<BrainSaved, Error> {
+    // Finish the page save and commit even if the caller stops waiting.
+    let brain = ctx.brain.clone();
+    let task = tokio::spawn(async move {
+        brain
+            .save(
+                &args.path,
+                &args.text,
+                args.summary.as_deref().unwrap_or(""),
+                args.base.as_deref(),
+            )
+            .await
+    });
+    let commit = task
+        .await
+        .map_err(|error| Error::new(BRAIN_ERROR, format!("Save stopped: {error}")))?
+        .map_err(refused)?;
+    Ok(BrainSaved {
+        node: ctx.node.clone(),
+        commit,
+    })
+}
+
+async fn changes(ctx: Arc<Ctx>, args: BrainChanges) -> Result<BrainChangesResult, Error> {
+    if args.limit == Some(0) {
+        return Err(Error::new(
+            BAD_REQUEST,
+            "limit must be a positive whole number",
+        ));
+    }
+    let read = ctx.brain.changes(args.limit).await.map_err(refused)?;
+    let changes = read
+        .found
+        .into_iter()
+        .map(|change| BrainChange {
+            commit: change.commit,
+            paths: change
+                .pages
+                .iter()
+                .map(|page| page.path.as_str())
+                .collect::<Vec<_>>()
+                .join(", "),
+            pages: change.pages,
+        })
+        .collect();
+    Ok(BrainChangesResult {
+        node: ctx.node.clone(),
+        changes,
+        error: read.error,
+    })
+}
+
+async fn send(ctx: Arc<Ctx>, args: BrainSend) -> Result<BrainSent, Error> {
+    let page = ctx.brain.page(&args.path).await.map_err(refused)?;
+    let sessions = ctx.sessions.as_ref().ok_or_else(|| {
+        Error::new(
+            UNAVAILABLE,
+            "No terminal sessions are available on this node",
+        )
+    })?;
+    let target = args.session;
+    let found: Vec<_> = sessions
+        .listed()
+        .await
+        .map_err(|error| Error::new(UNAVAILABLE, format!("{error:#}")))?
+        .into_iter()
+        .filter(|session| {
+            session.id == target
+                || (session.user.is_none() && session.name == target)
+                || session
+                    .user
+                    .as_ref()
+                    .is_some_and(|user| format!("{user}/{}", session.name) == target)
+        })
+        .collect();
+    let session = match found.as_slice() {
+        [session] => session,
+        [] => return Err(Error::new(NOT_FOUND, format!("No session {target}"))),
+        _ => {
+            return Err(Error::new(
+                BAD_REQUEST,
+                format!("Session {target} is ambiguous"),
+            ));
+        }
+    };
+    let error = |error: anyhow::Error| Error::new(BRAIN_ERROR, error.to_string());
+    let pane = sessions.active_pane(&session.id).await.map_err(error)?;
+    let reference = format!("brain page {}", page.file);
+    sessions
+        .deliver(pane, reference.clone(), true)
+        .await
+        .map_err(error)?
+        .await
+        .map_err(error)?;
+    Ok(BrainSent {
+        node: ctx.node.clone(),
+        session: session.id.clone(),
+        reference,
+        sent: true,
+    })
 }

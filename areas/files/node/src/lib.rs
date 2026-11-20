@@ -174,13 +174,10 @@ pub const LISTING: AreaListing = AreaListing {
         "file_diff",
         "file_status",
         "file_recent",
-        "file_download",
-        "file_upload",
         "file_write",
         "file_mkdir",
         "file_move",
         "file_delete",
-        "file_find",
         "file_locate",
         "file_search",
         "file_copy",
@@ -200,7 +197,6 @@ struct Section {
 struct FilesArea {
     files: Arc<Files>,
     drops: Arc<drops::Drops>,
-    home: Option<PathBuf>,
 }
 
 pub fn build(setup: &Setup) -> anyhow::Result<Built> {
@@ -215,7 +211,6 @@ pub fn build(setup: &Setup) -> anyhow::Result<Built> {
         .drops
         .map(|p| setup.config.path(&p))
         .unwrap_or_else(|| setup.dir.join("drops"));
-    let home = setup.home.clone();
     Built::then(move |provided| {
         let users = provided
             .get::<dyn ahjo_term::Sessions>()
@@ -224,7 +219,6 @@ pub fn build(setup: &Setup) -> anyhow::Result<Built> {
         Ok(Arc::new(FilesArea {
             files: Arc::new(files),
             drops: Arc::new(drops::Drops::new(dir, users)),
-            home,
         }) as Arc<dyn Area>)
     })
 }
@@ -234,6 +228,6 @@ impl Area for FilesArea {
         routes::routes(self.files.clone(), self.drops.clone())
     }
     fn commands(&self) -> Vec<ahjo_node_kit::Command> {
-        commands::commands(self.files.clone(), self.home.clone())
+        commands::commands(self.files.clone())
     }
 }

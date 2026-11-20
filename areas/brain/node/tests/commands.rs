@@ -1,5 +1,6 @@
-use ahjo_node_kit::cli;
+use ahjo_node_kit::{NodeClient, cli};
 use ahjo_testkit::{fresh_dir, node::Node};
+use axum::http::Method;
 use serde_json::json;
 use std::path::Path;
 
@@ -67,6 +68,42 @@ async fn brain_commands_save_and_read_changes() {
     )
     .await
     .unwrap();
+    let client = NodeClient::new(Some(&node.url())).unwrap();
+    let (answer, _) = client
+        .request(
+            Method::POST,
+            "/mcp/brain",
+            Some(json!({"jsonrpc":"2.0","id":1,"method":"tools/list"})),
+            None,
+        )
+        .await
+        .unwrap();
+    let tools = answer["result"]["tools"].as_array().unwrap();
+    assert_eq!(tools.len(), 6);
+    for (name, output_field) in [
+        ("brain_search", "results"),
+        ("brain_read", "body"),
+        ("brain_save", "commit"),
+        ("brain_collections", "collections"),
+        ("brain_changes", "changes"),
+        ("brain_send", "sent"),
+    ] {
+        let tool = tools.iter().find(|tool| tool["name"] == name).unwrap();
+        assert_eq!(tool["inputSchema"]["additionalProperties"], false, "{name}");
+        assert_eq!(tool["outputSchema"]["type"], "object", "{name}");
+        assert!(
+            tool["outputSchema"]["properties"]
+                .get(output_field)
+                .is_some(),
+            "{tool}"
+        );
+        let error = node
+            .call(name, json!({"unknown_input":"unused"}))
+            .await
+            .unwrap_err();
+        assert_eq!(error.code, "invalid_argument", "{name}");
+        assert!(error.message.contains("unknown_input"), "{name}: {error}");
+    }
     let (_, help) = run(&node, &[]).await;
     for verb in ["search", "read", "save", "collections", "changes", "send"] {
         assert!(help.contains(&format!("ahjo brain {verb}")), "{help}");

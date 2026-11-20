@@ -1,358 +1,338 @@
-//! The same definitions provide the CLI verbs and MCP tools.
+//! File commands, used by both the CLI and MCP.
+
 use crate::{Files, FilesError};
 use ahjo_core::Error;
-use ahjo_node_kit::{
-    Command, Effect,
-    args::{flag, maybe_text, object, text},
+use ahjo_files_contract::{
+    Diff, IO_ERROR, Matches, NOT_FOUND, RepoStatus,
+    commands::{
+        FileCopy, FileDelete, FileDeleted, FileDiff, FileList, FileListed, FileLocate, FileMkdir,
+        FileMove, FilePath, FileRead, FileReadResult, FileRecent, FileResume, FileSearch,
+        FileSearched, FileStatus, FileTransfer, FileTransferResult, FileWrite, FileWritten,
+        ListContent, ReadContent,
+    },
 };
+use ahjo_node_kit::{Command, Effect};
 use base64::{Engine as _, engine::general_purpose::STANDARD};
-use serde_json::{Value, json};
-use std::{
-    path::{Path, PathBuf},
-    sync::Arc,
-};
+use schemars::JsonSchema;
+use serde::{Serialize, de::DeserializeOwned};
+use std::{path::Path, sync::Arc, time::Duration};
 
-fn bad(e: impl std::fmt::Display) -> Error {
-    Error::new("bad_request", e.to_string())
-}
-fn path(args: &Value, key: &str, home: Option<&Path>) -> Result<String, Error> {
-    let raw = text(args, key).map_err(bad)?;
-    let p = Path::new(raw);
-    let expanded = if let Ok(rest) = p.strip_prefix("~") {
-        home.ok_or_else(|| bad("home is unavailable"))?.join(rest)
-    } else {
-        p.to_path_buf()
-    };
-    expanded
-        .to_str()
-        .map(str::to_owned)
-        .ok_or_else(|| bad("path is not UTF-8"))
+fn bad(message: impl Into<String>) -> Error {
+    Error::new("bad_request", message)
 }
 
-pub fn commands(files: Arc<Files>, home: Option<PathBuf>) -> Vec<Command> {
-    let defs: &[(&str, &str, &[&str], &[&str])] = &[
-        ("file_list", "List roots or a folder.", &["path"], &[]),
-        (
-            "file_read",
-            "Read a text file and its version.",
-            &["path"],
-            &["path"],
-        ),
-        (
+fn path(files: &Files, raw: &str) -> Result<String, Error> {
+    let path = Path::new(raw);
+    match path.strip_prefix("~") {
+        Ok(rest) => files
+            .home
+            .as_ref()
+            .ok_or_else(|| bad("home is unavailable"))?
+            .join(rest)
+            .into_os_string()
+            .into_string()
+            .map_err(|_| bad("path is not UTF-8")),
+        Err(_) => Ok(raw.to_owned()),
+    }
+}
+
+fn blocking<Input, Output, F>(
+    files: &Arc<Files>,
+    name: &'static str,
+    effect: Effect,
+    work: F,
+) -> Command
+where
+    Input: DeserializeOwned + JsonSchema + Send + 'static,
+    Output: Serialize + JsonSchema + Send + 'static,
+    F: Fn(&Files, Input) -> Result<Output, Error> + Copy + Send + Sync + 'static,
+{
+    let files = files.clone();
+    Command::typed(name, effect, move |args| {
+        let files = files.clone();
+        async move {
+            tokio::task::spawn_blocking(move || work(&files, args))
+                .await
+                .map_err(|error| Error::new(IO_ERROR, error.to_string()))?
+        }
+    })
+}
+
+pub fn commands(files: Arc<Files>) -> Vec<Command> {
+    let copying = files.clone();
+    let resuming = files.clone();
+    let tracking = files.clone();
+    vec![
+        blocking(&files, "file_list", Effect::Reads, list),
+        blocking(&files, "file_read", Effect::Reads, read),
+        blocking(
+            &files,
             "file_diff",
-            "Show a file's diff against HEAD: its changed parts, or with --whole the whole file with the changes in it.",
-            &["path", "whole"],
-            &["path"],
+            Effect::Reads,
+            |files, args: FileDiff| {
+                on_path(files, &args.path, |at| {
+                    Ok::<Diff, Error>(files.diff(at, args.whole.unwrap_or_default())?)
+                })
+            },
         ),
-        (
+        blocking(
+            &files,
             "file_status",
-            "List the files that differ from HEAD in the repository a folder is in, each with how: what the Files tree marks.",
-            &["path"],
-            &["path"],
+            Effect::Reads,
+            |files, args: FileStatus| {
+                on_path(files, &args.path, |at| {
+                    Ok::<RepoStatus, Error>(files.status(at)?)
+                })
+            },
         ),
-        (
+        blocking(
+            &files,
             "file_recent",
-            "List what changed most recently under the roots (many files of one folder as one line), or each file changed under --path.",
-            &["path"],
-            &[],
+            Effect::Reads,
+            |files, args: FileRecent| {
+                let under = args
+                    .path
+                    .as_deref()
+                    .map(|raw| path(files, raw))
+                    .transpose()?;
+                Ok(files.recent(under.as_deref())?)
+            },
         ),
-        (
-            "file_download",
-            "Read a file as base64 bytes.",
-            &["path"],
-            &["path"],
+        blocking(&files, "file_write", Effect::Destroys, write),
+        blocking(
+            &files,
+            "file_mkdir",
+            Effect::Sets,
+            |files, args: FileMkdir| {
+                on_path(files, &args.path, |at| {
+                    files.create_folder(at)?;
+                    Ok(FilePath {
+                        node: files.node.clone(),
+                        path: at.into(),
+                    })
+                })
+            },
         ),
-        (
-            "file_upload",
-            "Create a file from base64 bytes; --replace overwrites it.",
-            &["path", "data", "replace"],
-            &["path", "data"],
-        ),
-        (
-            "file_write",
-            "Create or save a text file.",
-            &["path", "text", "base", "new"],
-            &["path", "text"],
-        ),
-        ("file_mkdir", "Create a folder.", &["path"], &["path"]),
-        (
+        blocking(
+            &files,
             "file_move",
-            "Move or rename a file or folder.",
-            &["path", "to"],
-            &["path", "to"],
+            Effect::Writes,
+            |files, args: FileMove| {
+                on_path(files, &args.path, |at| {
+                    let to = path(files, &args.to)?;
+                    files.rename(at, &to)?;
+                    Ok(FilePath {
+                        node: files.node.clone(),
+                        path: to,
+                    })
+                })
+            },
         ),
-        (
+        blocking(
+            &files,
             "file_delete",
-            "Delete a file or folder.",
-            &["path"],
-            &["path"],
+            Effect::Destroys,
+            |files, args: FileDelete| {
+                on_path(files, &args.path, |at| {
+                    files.delete(at)?;
+                    Ok(FileDeleted {
+                        node: files.node.clone(),
+                        path: at.into(),
+                        deleted: true,
+                    })
+                })
+            },
         ),
-        (
-            "file_find",
-            "Find names under a folder.",
-            &["path", "query"],
-            &["path", "query"],
-        ),
-        (
-            "file_locate",
-            "Find files under every root by words in their path, names first; a query that is a path names its file. --near is the folder you stand in: its files come first, also when it is hidden, and --beside answers only them, at once.",
-            &["query", "near", "beside"],
-            &["query"],
-        ),
-        (
+        blocking(&files, "file_locate", Effect::Reads, locate),
+        blocking(
+            &files,
             "file_search",
-            "Find text under a folder.",
-            &["path", "query"],
-            &["path", "query"],
+            Effect::Reads,
+            |files, args: FileSearch| {
+                on_path(files, &args.path, |at| {
+                    Ok(FileSearched {
+                        node: files.node.clone(),
+                        results: files.find(at, &args.query, true)?,
+                    })
+                })
+            },
         ),
-        (
-            "file_copy",
-            "Copy to another folder on this node.",
-            &["path", "to", "to_node"],
-            &["path", "to"],
-        ),
-        (
-            "file_resume",
-            "Resume a failed local copy.",
-            &["id"],
-            &["id"],
-        ),
-        (
-            "file_transfer",
-            "Read local copy progress.",
-            &["id"],
-            &["id"],
-        ),
-    ];
-    defs.iter()
-        .map(|&(name, description, props, required)| {
-            let props = props.to_vec();
-            let required = required.to_vec();
-            let files = files.clone();
-            let home = home.clone();
-            Command::new(
-                name,
-                effect(name),
-                description,
-                move || {
-                    let mut fields = serde_json::Map::new();
-                    for key in &props {
-                        fields.insert(
-                            (*key).into(),
-                            if matches!(*key, "new" | "replace" | "beside" | "whole") {
-                                json!({"type":"boolean", "default":false})
-                            } else {
-                                json!({"type":"string"})
-                            },
-                        );
+        Command::typed("file_copy", Effect::Writes, move |args: FileCopy| {
+            let files = copying.clone();
+            async move {
+                let from = path(&files, &args.path)?;
+                let to = path(&files, &args.to)?;
+                let target = args.to_node.as_deref().unwrap_or(&files.node);
+                let id = files.copy(&from, target, &to)?;
+                wait(&files, id).await
+            }
+        }),
+        Command::typed("file_resume", Effect::Writes, move |args: FileResume| {
+            let files = resuming.clone();
+            async move {
+                files.resume(&args.id).map_err(|error| match error {
+                    FilesError::NotFound => {
+                        Error::new(NOT_FOUND, format!("no transfer {} on this node", args.id))
                     }
-                    object(Value::Object(fields), &required)
-                },
-                move |args| {
-                    let files = files.clone();
-                    let home = home.clone();
-                    async move { run(name, files, home, args).await }
-                },
-            )
-        })
-        .collect()
+                    other => Error::from(other),
+                })?;
+                wait(&files, args.id).await
+            }
+        }),
+        Command::typed("file_transfer", Effect::Reads, move |args: FileTransfer| {
+            let files = tracking.clone();
+            async move { transfer(&files, args.id) }
+        }),
+    ]
 }
 
-/// What each file command does.
-fn effect(name: &str) -> Effect {
-    match name {
-        "file_list" | "file_read" | "file_diff" | "file_status" | "file_recent"
-        | "file_download" | "file_find" | "file_locate" | "file_search" | "file_transfer" => {
-            Effect::Reads
-        }
-        "file_move" | "file_copy" | "file_resume" => Effect::Writes,
-        "file_mkdir" => Effect::Sets,
-        "file_upload" | "file_write" | "file_delete" => Effect::Destroys,
-        _ => unreachable!("{name} has no effect declared"),
-    }
-}
-
-async fn run(
-    name: &str,
-    files: Arc<Files>,
-    home: Option<PathBuf>,
-    args: Value,
-) -> Result<Value, Error> {
-    if name == "file_copy" || name == "file_resume" || name == "file_transfer" {
-        let id = if name == "file_copy" {
-            let from = path(&args, "path", home.as_deref())?;
-            let to = path(&args, "to", home.as_deref())?;
-            let target = maybe_text(&args, "to_node")
-                .map_err(bad)?
-                .unwrap_or(&files.node);
-            files.copy(&from, target, &to).map_err(Error::from)?
-        } else {
-            text(&args, "id").map_err(bad)?.to_owned()
-        };
-        if name == "file_resume" {
-            files.resume(&id).map_err(|e| match e {
-                FilesError::NotFound => {
-                    Error::new("not_found", format!("no transfer {id} on this node"))
-                }
-                other => Error::from(other),
-            })?;
-        }
-        if name != "file_transfer" {
-            let mut watch = crate::bridge::watch(&files, &id)
-                .ok_or_else(|| Error::from(FilesError::NotFound))?;
-            let _ = tokio::time::timeout(std::time::Duration::from_secs(60), async {
-                while watch.borrow_and_update().state == "running" {
-                    if watch.changed().await.is_err() {
-                        break;
-                    }
-                }
-            })
-            .await;
-        }
-        let progress = files
-            .transfer(&id)
-            .ok_or_else(|| Error::from(FilesError::NotFound))?;
-        if name != "file_transfer"
-            && let Some(error) = &progress.error
-        {
-            return Err(Error::new(
-                "copy_failed",
-                format!("{error} (transfer {id}: file resume {id} goes on from here)"),
-            ));
-        }
-        return Ok(json!({"node":files.node,"id":id,"to_node":files.node,"transfer":progress}));
-    }
-    let name = name.to_owned();
-    tokio::task::spawn_blocking(move || work(&name, &files, home.as_deref(), &args))
-        .await
-        .map_err(|e| Error::new("io_error", e.to_string()))?
-}
-
-fn work(name: &str, files: &Files, home: Option<&Path>, args: &Value) -> Result<Value, Error> {
-    let node = &files.node;
-    if name == "file_list" && maybe_text(args, "path").map_err(bad)?.is_none() {
-        return Ok(json!({"node":node,"roots":files.roots()}));
-    }
-    if name == "file_recent" {
-        let under = match maybe_text(args, "path").map_err(bad)? {
-            Some(_) => Some(path(args, "path", home)?),
-            None => None,
-        };
-        return serde_json::to_value(files.recent(under.as_deref())?).map_err(bad);
-    }
-    if name == "file_locate" {
-        let query = text(args, "query").map_err(bad)?;
-        let near = match maybe_text(args, "near").map_err(bad)? {
-            Some(_) => Some(path(args, "near", home)?),
-            None => None,
-        };
-        let beside = flag(args, "beside", false).map_err(bad)?;
-        return serde_json::to_value(files.locate(query, near.as_deref(), beside)).map_err(bad);
-    }
-    let at = path(args, "path", home)?;
-    on_path(name, files, home, args, &at).map_err(|error| {
+fn on_path<T>(
+    files: &Files,
+    raw: &str,
+    operation: impl FnOnce(&str) -> Result<T, Error>,
+) -> Result<T, Error> {
+    let at = path(files, raw)?;
+    operation(&at).map_err(|error| {
         let at = Path::new(&at);
-        match error.code.as_str() {
-            ahjo_files_contract::NOT_FOUND if !at.exists() => Error::new(
+        if error.code == NOT_FOUND && !at.exists() {
+            Error::new(
                 error.code,
                 format!(
                     "nothing at {}; ahjo file list {} lists what is there",
                     at.display(),
                     at.parent().unwrap_or(at).display()
                 ),
-            ),
-            _ => error,
+            )
+        } else {
+            error
         }
     })
 }
 
-/// A command on the file or folder at `at`.
-fn on_path(
-    name: &str,
-    files: &Files,
-    home: Option<&Path>,
-    args: &Value,
-    at: &str,
-) -> Result<Value, Error> {
-    let node = &files.node;
-    let at = at.to_owned();
-    match name {
-        "file_list" => {
-            let l = files.list(&at)?;
-            Ok(json!({"node":node,"path":l.path,"entries":l.entries}))
-        }
-        "file_read" => {
-            let (bytes, version) = files.read(&at, crate::routes::MAX_BYTES)?;
+fn list(files: &Files, args: FileList) -> Result<FileListed, Error> {
+    let content = match args.path {
+        Some(raw) => on_path(files, &raw, |at| Ok(ListContent::Folder(files.list(at)?)))?,
+        None => ListContent::Roots {
+            roots: files.roots(),
+        },
+    };
+    Ok(FileListed {
+        node: files.node.clone(),
+        content,
+    })
+}
+
+fn read(files: &Files, args: FileRead) -> Result<FileReadResult, Error> {
+    on_path(files, &args.path, |at| {
+        let (bytes, version) = files.read(at, crate::routes::MAX_BYTES)?;
+        let content = if args.base64 {
+            ReadContent::Base64 {
+                data: STANDARD.encode(&bytes),
+            }
+        } else {
             let shown = &bytes[..bytes.len().min(256 * 1024)];
-            let content = match std::str::from_utf8(shown) {
-                Ok(s) => s,
-                Err(e) if e.error_len().is_none() => {
-                    std::str::from_utf8(&shown[..e.valid_up_to()]).unwrap()
+            let text = match std::str::from_utf8(shown) {
+                Ok(text) => text,
+                Err(error) if error.error_len().is_none() => {
+                    std::str::from_utf8(&shown[..error.valid_up_to()]).unwrap()
                 }
-                Err(_) => return Err(bad("file is not text")),
+                Err(_) => return Err(bad("file is not text; add --base64 to read its bytes")),
             };
-            Ok(
-                json!({"node":node,"path":at,"size":bytes.len(),"version":version,"truncated":shown.len()<bytes.len(),"text":content}),
-            )
-        }
-        "file_diff" => {
-            let whole = flag(args, "whole", false).map_err(bad)?;
-            serde_json::to_value(files.diff(&at, whole)?).map_err(bad)
-        }
-        "file_status" => serde_json::to_value(files.status(&at)?).map_err(bad),
-        "file_download" => {
-            let (bytes, version) = files.read(&at, crate::routes::MAX_BYTES)?;
-            Ok(
-                json!({"node":node,"path":at,"size":bytes.len(),"version":version,"data":STANDARD.encode(bytes)}),
-            )
-        }
-        "file_upload" => {
+            ReadContent::Text {
+                text: text.into(),
+                truncated: shown.len() < bytes.len(),
+            }
+        };
+        Ok(FileReadResult {
+            node: files.node.clone(),
+            path: at.into(),
+            size: bytes.len(),
+            version,
+            content,
+        })
+    })
+}
+
+fn write(files: &Files, args: FileWrite) -> Result<FileWritten, Error> {
+    let new = args.new.unwrap_or_default();
+    if args.replace && !args.base64 {
+        return Err(bad("--replace requires --base64"));
+    }
+    if args.base64 && (new || args.base.is_some()) {
+        return Err(bad("--new and --base are for text writes"));
+    }
+    on_path(files, &args.path, |at| {
+        let (bytes, create) = if args.base64 {
             let bytes = STANDARD
-                .decode(text(args, "data").map_err(bad)?)
-                .map_err(bad)?;
+                .decode(&args.text)
+                .map_err(|error| bad(error.to_string()))?;
             if bytes.len() > crate::routes::MAX_BYTES as usize {
                 return Err(FilesError::TooLarge.into());
             }
-            if flag(args, "replace", false).map_err(bad)? {
-                files.save(&at, &bytes, None)?;
-            } else {
-                files.create(&at, &bytes)?;
-            }
-            Ok(json!({"node":node,"path":at,"size":bytes.len(),"version":crate::version(&bytes)}))
+            (bytes, !args.replace)
+        } else {
+            (args.text.into_bytes(), new)
+        };
+        if create {
+            files.create(at, &bytes)?;
+        } else {
+            files.save(at, &bytes, args.base.as_deref())?;
         }
-        "file_write" => {
-            let data = text(args, "text").map_err(bad)?.as_bytes();
-            let base = maybe_text(args, "base").map_err(bad)?;
-            if flag(args, "new", false).map_err(bad)? {
-                files.create(&at, data)?;
-            } else {
-                files.save(&at, data, base)?;
-            }
-            Ok(json!({"node":node,"path":at,"version":crate::version(data)}))
+        Ok(FileWritten {
+            node: files.node.clone(),
+            path: at.into(),
+            version: crate::version(&bytes),
+            size: args.base64.then_some(bytes.len()),
+        })
+    })
+}
+
+fn locate(files: &Files, args: FileLocate) -> Result<Matches, Error> {
+    let beside = args.beside.unwrap_or_default();
+    if let Some(under) = args.under {
+        if args.near.is_some() || beside {
+            return Err(bad("--under cannot be combined with --near or --beside"));
         }
-        "file_mkdir" => {
-            files.create_folder(&at)?;
-            Ok(json!({"node":node,"path":at}))
-        }
-        "file_move" => {
-            let to = path(args, "to", home)?;
-            files.rename(&at, &to)?;
-            Ok(json!({"node":node,"path":to}))
-        }
-        "file_delete" => {
-            files.delete(&at)?;
-            Ok(json!({"node":node,"path":at,"deleted":true}))
-        }
-        "file_find" | "file_search" => {
-            let found = files.find(
-                &at,
-                text(args, "query").map_err(bad)?,
-                name == "file_search",
-            )?;
-            let mut v = serde_json::to_value(found).map_err(bad)?;
-            v["node"] = json!(node);
-            Ok(v)
-        }
-        _ => Err(bad("unknown command")),
+        return on_path(files, &under, |at| {
+            Ok(files.find(at, &args.query, false)?)
+        });
     }
+    let near = args
+        .near
+        .as_deref()
+        .map(|raw| path(files, raw))
+        .transpose()?;
+    Ok(files.locate(&args.query, near.as_deref(), beside))
+}
+
+/// Copy and resume wait for progress to settle and report a failure with its id.
+async fn wait(files: &Files, id: String) -> Result<FileTransferResult, Error> {
+    let mut watch = crate::bridge::watch(files, &id).ok_or(FilesError::NotFound)?;
+    let _ = tokio::time::timeout(Duration::from_secs(60), async {
+        while watch.borrow_and_update().state == "running" {
+            if watch.changed().await.is_err() {
+                break;
+            }
+        }
+    })
+    .await;
+    let result = transfer(files, id)?;
+    if let Some(error) = &result.transfer.error {
+        let id = &result.id;
+        return Err(Error::new(
+            "copy_failed",
+            format!("{error} (transfer {id}: file resume {id} goes on from here)"),
+        ));
+    }
+    Ok(result)
+}
+
+fn transfer(files: &Files, id: String) -> Result<FileTransferResult, Error> {
+    let progress = files.transfer(&id).ok_or(FilesError::NotFound)?;
+    Ok(FileTransferResult {
+        node: files.node.clone(),
+        id,
+        to_node: files.node.clone(),
+        transfer: progress,
+    })
 }

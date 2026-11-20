@@ -1,6 +1,10 @@
 //! Wire types for the Files area.
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
+use schemars::JsonSchema;
+
+pub mod commands;
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq, JsonSchema)]
 pub struct Entry {
     pub name: String,
     pub folder: bool,
@@ -9,20 +13,20 @@ pub struct Entry {
     pub modified: u64,
 }
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq, JsonSchema)]
 pub struct Listing {
     /// The folder's own path, links resolved.
     pub path: String,
     pub entries: Vec<Entry>,
 }
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq, JsonSchema)]
 pub struct Root {
     pub name: String,
     pub path: String,
 }
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq, JsonSchema)]
 pub struct Match {
     pub path: String,
     pub name: String,
@@ -32,13 +36,13 @@ pub struct Match {
     pub text: Option<String>,
 }
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq, JsonSchema)]
 pub struct Matches {
     pub matches: Vec<Match>,
     pub truncated: bool,
 }
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq, JsonSchema)]
 pub struct Diff {
     pub path: String,
     pub repository: String,
@@ -62,7 +66,7 @@ pub struct DiffAt {
 /// How a file stands against its repository's HEAD: changed (`M`), new to
 /// it (`A`, or `?` when not even staged), taken out (`D`), renamed in
 /// (`R`) or in a merge conflict (`C`).
-#[derive(Clone, Debug, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize, PartialEq, Eq, JsonSchema)]
 pub struct FileState {
     pub path: String,
     pub state: char,
@@ -73,7 +77,9 @@ pub struct FileState {
 
 /// Every file of a folder's repository that differs from its HEAD. A
 /// folder outside a repository has none, and `repository` is empty.
-#[derive(Clone, Debug, Default, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
+#[derive(
+    Clone, Debug, Default, serde::Serialize, serde::Deserialize, PartialEq, Eq, JsonSchema,
+)]
 pub struct RepoStatus {
     pub repository: String,
     pub files: Vec<FileState>,
@@ -93,7 +99,7 @@ pub struct NodeRoots {
 /// A file and when it last changed, in milliseconds since the Unix epoch;
 /// or, with `files`, a folder in which that many files changed together
 /// (a checkout, a batch of renders), `modified` the newest of them.
-#[derive(Clone, Debug, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize, PartialEq, Eq, JsonSchema)]
 pub struct Changed {
     pub path: String,
     pub modified: u64,
@@ -102,7 +108,7 @@ pub struct Changed {
 }
 
 /// The files changed most recently under the roots, newest first.
-#[derive(Clone, Debug, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize, PartialEq, Eq, JsonSchema)]
 pub struct Recent {
     pub files: Vec<Changed>,
 }
@@ -127,7 +133,7 @@ pub struct TransferRequest {
 }
 
 /// Progress of a copy started on this node.
-#[derive(Clone, Debug, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize, PartialEq, Eq, JsonSchema)]
 pub struct Progress {
     pub state: String,
     pub bytes: u64,

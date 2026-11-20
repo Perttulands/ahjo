@@ -9,4 +9,5 @@ publish = false
 workspace = true
 
 [dependencies]
+schemars.workspace = true
 serde = { version = "1", features = ["derive"] }

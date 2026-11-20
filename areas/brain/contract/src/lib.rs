@@ -1,4 +1,7 @@
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+
+pub mod commands;
 
 /// Stable error codes returned by Brain.
 pub const BAD_REQUEST: &str = "bad_request";
@@ -11,7 +14,7 @@ pub const BRAIN_ERROR: &str = "brain_error";
 
 /// One hit, in Citadel's order: best first. The snippet marks matched words
 /// between `»` and `«`.
-#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, JsonSchema)]
 pub struct Found {
     pub path: String,
     pub title: String,
@@ -26,7 +29,7 @@ pub struct Found {
 }
 
 /// One page as the reader shows it.
-#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, JsonSchema)]
 #[serde(default)]
 pub struct Page {
     pub path: String,
@@ -57,20 +60,20 @@ pub struct Page {
 }
 
 /// A top-level folder of the corpus and how many pages it holds.
-#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, JsonSchema)]
 pub struct Collection {
     pub name: String,
     pub pages: usize,
 }
 
 /// A link target as written, and the page it names when there is one.
-#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, JsonSchema)]
 pub struct Link {
     pub target: String,
     pub page: Option<PageRef>,
 }
 
-#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, JsonSchema)]
 #[serde(default)]
 pub struct PageRef {
     pub path: String,
@@ -79,7 +82,7 @@ pub struct PageRef {
 }
 
 /// One commit of a page's history.
-#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct Commit {
     pub hash: String,
     /// When it was committed, ISO 8601.
