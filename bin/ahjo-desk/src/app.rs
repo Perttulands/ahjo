@@ -177,6 +177,7 @@ pub struct Drag {
 /// What a row of the settings menu does.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum MenuAct {
+    Panel(crate::views::Panel),
     Order(desk::Order),
     Fold,
     Refresh,
@@ -222,6 +223,10 @@ pub struct DeskApp {
     /// The settings menu, open where it was asked for, and its row under
     /// the keyboard.
     pub menu: Option<(Point<Pixels>, usize)>,
+    /// Prototype: how the question and his answer read.
+    pub panel: crate::views::Panel,
+    /// The answer column's width last drawn.
+    pub talk_now: f32,
     /// The surface alone in the window, to look and mark at its largest.
     pub full: bool,
     /// A column's edge being dragged.
@@ -397,6 +402,8 @@ impl DeskApp {
             config_kept,
             settings_open: false,
             menu: None,
+            panel: crate::views::Panel::from_env(),
+            talk_now: 0.,
             full: false,
             drag: None,
             node_field,
@@ -2100,6 +2107,7 @@ impl DeskApp {
             .into_iter()
             .map(MenuAct::Order)
             .chain([MenuAct::Fold, MenuAct::Refresh, MenuAct::Settings])
+            .chain(crate::views::Panel::ALL.into_iter().map(MenuAct::Panel))
             .collect()
     }
 
@@ -2125,6 +2133,10 @@ impl DeskApp {
             MenuAct::Fold => self.toggle_fold(cx),
             MenuAct::Refresh => self.refresh_all(cx),
             MenuAct::Settings => return self.toggle_settings(window, cx),
+            MenuAct::Panel(p) => {
+                self.panel = p;
+                cx.notify();
+            }
         }
         self.aim(Aim::Words, cx);
     }

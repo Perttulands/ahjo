@@ -51,6 +51,9 @@ pub const GRIP_HIT: f32 = 10.;
 pub const WINDOW_MIN: (f32, f32) = (880., 560.);
 /// Under this width a list row drops its picture: its words need the room.
 pub const LIST_THUMBS: f32 = 280.;
+/// Prototype B: the least width an option's column has beside another.
+pub const PROTO_COLUMN: f32 = 200.;
+
 /// The settings menu.
 pub const MENU_W: f32 = 300.;
 /// A mark's words written over the surface, with it alone in the window.

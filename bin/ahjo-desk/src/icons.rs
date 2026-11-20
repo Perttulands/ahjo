@@ -20,10 +20,11 @@ pub enum Icon {
     External,
     Refresh,
     Compare,
+    Send,
 }
 
 impl Icon {
-    pub const ALL: [Icon; 13] = [
+    pub const ALL: [Icon; 14] = [
         Icon::Look,
         Icon::Pin,
         Icon::Box,
@@ -37,6 +38,7 @@ impl Icon {
         Icon::External,
         Icon::Refresh,
         Icon::Compare,
+        Icon::Send,
     ];
 
     pub fn path(self) -> &'static str {
@@ -54,6 +56,7 @@ impl Icon {
             Icon::External => "icons/external.svg",
             Icon::Refresh => "icons/refresh.svg",
             Icon::Compare => "icons/compare.svg",
+            Icon::Send => "icons/send.svg",
         }
     }
 
@@ -72,6 +75,7 @@ impl Icon {
             Icon::External => include_bytes!("../assets/icons/external.svg"),
             Icon::Refresh => include_bytes!("../assets/icons/refresh.svg"),
             Icon::Compare => include_bytes!("../assets/icons/compare.svg"),
+            Icon::Send => include_bytes!("../assets/icons/send.svg"),
         }
     }
 

@@ -32,6 +32,7 @@ impl Render for DeskApp {
         let t = theme(cx).clone();
         let wide = f32::from(window.viewport_size().width);
         let (list_w, talk_w) = self.columns(wide);
+        self.talk_now = talk_w;
         let lines = tokens::words_lines(f32::from(window.viewport_size().height), t.ty.read);
         self.words.update(cx, |f, _| f.set_max_lines(lines));
         let shown = self.current_ask().cloned();
@@ -237,9 +238,13 @@ impl DeskApp {
                 MenuAct::Fold => ("Put the list away".to_string(), Some("Ctrl B"), false),
                 MenuAct::Refresh => ("Read the desks again".to_string(), Some("R"), false),
                 MenuAct::Settings => ("Settings".to_string(), Some("Ctrl ,"), false),
+                MenuAct::Panel(p) => (p.label().to_string(), None, self.panel == p),
             };
             if act == MenuAct::Fold {
                 card = card.child(rule());
+            }
+            if act == MenuAct::Panel(Panel::Now) {
+                card = card.child(rule()).child(label("Answer panel · prototype"));
             }
             let row = div()
                 .id(("menu-row", i))
@@ -996,13 +1001,51 @@ impl DeskApp {
                 }
             }
             _ => {
-                if !round.options.is_empty() {
+                if !round.options.is_empty() && self.panel == Panel::Now {
                     turn = turn.child(self.options(t, round, now, cx));
+                } else if !round.options.is_empty() && self.panel != Panel::Chat {
+                    turn = turn.child(self.proto_options(t, round, now, cx));
                 }
                 if !round.recommend.trim().is_empty() && round.recommended().is_none() {
                     turn = turn.child(recommend_box(t, "The agent recommends", &round.recommend));
                 }
             }
+        }
+        if self.panel == Panel::Chat {
+            let who = by.chars().next().unwrap_or('A').to_ascii_uppercase();
+            let replies = (!round.options.is_empty() && round.form() != Form::Grill)
+                .then(|| self.proto_options(t, round, now, cx));
+            return div()
+                .flex()
+                .gap(px(GAP_SMALL + 2.))
+                .child(
+                    div()
+                        .flex_none()
+                        .size(px(28.))
+                        .rounded_full()
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .bg(t.identity_of(by))
+                        .text_color(t.term_bg)
+                        .font_weight(FontWeight::BOLD)
+                        .child(who.to_string()),
+                )
+                .child(
+                    div()
+                        .flex_1()
+                        .min_w_0()
+                        .flex()
+                        .flex_col()
+                        .gap(px(GAP_SMALL + 2.))
+                        .child(
+                            turn.p(px(GAP))
+                                .rounded(px(14.))
+                                .rounded_tl(px(4.))
+                                .bg(t.raised),
+                        )
+                        .children(replies),
+                );
         }
         turn
     }
@@ -1289,6 +1332,9 @@ impl DeskApp {
         _: &mut Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
+        if self.panel != Panel::Now && ask.form() == Form::Open {
+            return self.proto_composer(t, ask, cx);
+        }
         let draft = self.draft();
         let form = ask.form();
         let mut top = div().flex().flex_wrap().items_center().gap(px(GAP_SMALL));
@@ -2127,4 +2173,487 @@ fn age(at: &str) -> String {
         m if m < 60 * 48 => format!("{} h ago", m / 60),
         m => format!("{} d ago", m / (60 * 24)),
     }
+}
+
+// ---- Prototype: other ways the question and his answer could read ----
+
+/// How the question and his answer read: the Desk as it is, or one of
+/// the prototypes. AHJO_DESK_PANEL picks one at start (now, brief,
+/// compare, chat); the menu goes between them.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Panel {
+    Now,
+    Brief,
+    Compare,
+    Chat,
+}
+
+impl Panel {
+    pub const ALL: [Panel; 4] = [Panel::Now, Panel::Brief, Panel::Compare, Panel::Chat];
+
+    pub fn from_env() -> Panel {
+        match std::env::var("AHJO_DESK_PANEL").as_deref() {
+            Ok("brief" | "a") => Panel::Brief,
+            Ok("compare" | "b") => Panel::Compare,
+            Ok("chat" | "c") => Panel::Chat,
+            _ => Panel::Now,
+        }
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Panel::Now => "As it is",
+            Panel::Brief => "A · Brief",
+            Panel::Compare => "B · Side by side",
+            Panel::Chat => "C · Conversation",
+        }
+    }
+}
+
+impl DeskApp {
+    /// The options for the prototype in use.
+    fn proto_options(&mut self, t: &Theme, ask: &Ask, now: bool, cx: &mut Context<Self>) -> Div {
+        let rec = ask.recommended();
+        let picked = if now { self.draft().pick } else { None };
+        let answered: Vec<String> = ask
+            .answer
+            .as_ref()
+            .map(|a| a.options.clone())
+            .unwrap_or_default();
+        let panel = self.panel;
+        let narrow = self.talk_now < 2. * tokens::PROTO_COLUMN + 2. * GAP;
+        let mut list = match panel {
+            Panel::Compare if !narrow => div().flex().items_start().gap(px(GAP_SMALL + 2.)),
+            Panel::Chat => div().flex().flex_wrap().gap(px(GAP_SMALL)),
+            _ => div().flex().flex_col().gap(px(GAP_SMALL)),
+        };
+        for (i, o) in ask.options.iter().enumerate() {
+            let on = picked == Some(i) || (!now && answered.contains(&o.name));
+            let letter = model::letter(&ask.options, i);
+            let label = model::label(&ask.options, i);
+            let why_rec = rest_of(&ask.recommend, &o.name);
+            let is_rec = rec == Some(i);
+            let card = match panel {
+                Panel::Compare => compare_card(t, &letter, &label, o, is_rec, on, &why_rec, narrow),
+                Panel::Chat => reply_pill(t, &letter, &label, is_rec, on),
+                _ => brief_card(t, &letter, &label, o, is_rec, on, &why_rec),
+            };
+            let card = card.id(("option", i));
+            list = list.child(if now {
+                card.cursor_pointer()
+                    .on_click(cx.listener(move |app, _: &ClickEvent, _, cx| app.pick(i, cx)))
+                    .into_any_element()
+            } else {
+                card.into_any_element()
+            });
+        }
+        // C: accepting it as it is, one more quick reply.
+        if panel == Panel::Chat && now {
+            list = list.child(
+                reply_pill(t, "✓", "Looks good", false, false)
+                    .id("good")
+                    .cursor_pointer()
+                    .tooltip(kit::tip(
+                        "Accept it as it is; your words, if any, go with it",
+                    ))
+                    .on_click(cx.listener(|app, _: &ClickEvent, window, cx| {
+                        app.send(Verdict::LooksGood, window, cx)
+                    })),
+            );
+        }
+        list
+    }
+
+    /// The prototype's answer: his words, the lean shown once, Send.
+    fn proto_composer(&mut self, t: &Theme, ask: &Ask, cx: &mut Context<Self>) -> AnyElement {
+        let draft = self.draft();
+        let lean = draft.pick.filter(|i| *i < ask.options.len()).map(|i| {
+            (
+                model::letter(&ask.options, i),
+                model::label(&ask.options, i),
+            )
+        });
+        let key = if self.config.enter_sends {
+            "Enter"
+        } else {
+            "Ctrl Enter"
+        };
+        let send_word = match &lean {
+            Some((l, name)) => format!("Send · {l} {}", clip_words(name, tokens::LEAN_WORDS)),
+            None => "Send".to_string(),
+        };
+        let send = || {
+            action(t, "send", &send_word, key, Kind::Primary)
+                .when(self.sending, |d| d.opacity(0.5))
+                .on_click(cx.listener(|app, _: &ClickEvent, window, cx| {
+                    app.send(Verdict::Send, window, cx)
+                }))
+        };
+        let good = || {
+            button(t, "good", "Looks good", Kind::Plain)
+                .tooltip(kit::tip(
+                    "Accept it as it is; your words, if any, go with it",
+                ))
+                .on_click(cx.listener(|app, _: &ClickEvent, window, cx| {
+                    app.send(Verdict::LooksGood, window, cx)
+                }))
+        };
+        let elsewhere = || {
+            button(t, "elsewhere", "Answered elsewhere", Kind::Quiet)
+                .flex_none()
+                .tooltip(kit::tip(
+                    "You told the agent in its session or by voice: this closes the ask with your words as a note",
+                ))
+                .on_click(cx.listener(|app, _: &ClickEvent, window, cx| {
+                    app.send(Verdict::Elsewhere, window, cx)
+                }))
+        };
+        let lean_tag = |d: Div| {
+            d.when_some(lean.clone(), |d, (l, name)| {
+                d.child(
+                    div()
+                        .id("lean-tag")
+                        .flex()
+                        .items_center()
+                        .gap(px(6.))
+                        .h(px(tokens::CAP + 4.))
+                        .px(px(GAP_SMALL + 2.))
+                        .rounded_full()
+                        .bg(t.accent_light())
+                        .text_color(t.accent)
+                        .text_size(px(META))
+                        .cursor_pointer()
+                        .tooltip(kit::tip("Your lean · click to let go of it"))
+                        .child(format!(
+                            "Leaning {l} · {}",
+                            clip_words(&name, tokens::LEAN_WORDS)
+                        ))
+                        .child(div().text_color(t.dim).child("×"))
+                        .on_click(cx.listener(|app, _: &ClickEvent, _, cx| {
+                            if let Some(i) = app.draft().pick {
+                                app.pick(i, cx)
+                            }
+                        })),
+                )
+            })
+        };
+        match self.panel {
+            // A: the answer is a card of its own under the question, his
+            // lean named once at its head, Send at its foot's right.
+            Panel::Brief => div()
+                .flex_none()
+                .mx(px(GAP))
+                .mt(px(GAP_SMALL))
+                .mb(px(GAP))
+                .p(px(GAP))
+                .flex()
+                .flex_col()
+                .gap(px(GAP_SMALL + 2.))
+                .rounded(px(tokens::RADIUS + 4.))
+                .border_1()
+                .border_color(t.divider)
+                .bg(t.surface)
+                .child(
+                    div()
+                        .flex()
+                        .items_center()
+                        .gap(px(GAP_SMALL))
+                        .child(
+                            div()
+                                .font_family(t.ty.reading)
+                                .text_size(px(t.ty.read))
+                                .font_weight(FontWeight::SEMIBOLD)
+                                .child("Your answer"),
+                        )
+                        .child(div().flex_1())
+                        .map(lean_tag),
+                )
+                .child(self.words.clone())
+                .child(
+                    div()
+                        .flex()
+                        .items_center()
+                        .gap(px(GAP_SMALL))
+                        .child(elsewhere())
+                        .child(div().flex_1())
+                        .child(good())
+                        .child(send()),
+                )
+                .into_any_element(),
+            // B: one wide Send under the words: the call, made.
+            Panel::Compare => div()
+                .flex_none()
+                .p(px(GAP))
+                .flex()
+                .flex_col()
+                .gap(px(GAP_SMALL + 2.))
+                .child(self.words.clone())
+                .child(
+                    div()
+                        .flex()
+                        .gap(px(GAP_SMALL))
+                        .child(send().flex_1().justify_center().h(px(tokens::CAP + 16.)))
+                        .child(good().h(px(tokens::CAP + 16.))),
+                )
+                .child(div().flex().justify_end().child(elsewhere()))
+                .into_any_element(),
+            // C: his reply, as in a chat: the lean above, the words and a
+            // round Send beside them.
+            Panel::Chat => div()
+                .flex_none()
+                .px(px(GAP))
+                .pt(px(GAP))
+                .pb(px(GAP))
+                .flex()
+                .flex_col()
+                .gap(px(GAP_SMALL))
+                .when(lean.is_some(), |d| d.child(div().flex().map(lean_tag)))
+                .child(
+                    div()
+                        .flex()
+                        .items_end()
+                        .gap(px(GAP_SMALL))
+                        .child(div().flex_1().min_w_0().child(self.words.clone()))
+                        .child(
+                            div()
+                                .id("send")
+                                .flex_none()
+                                .mb(px(4.))
+                                .size(px(tokens::ICON_BUTTON + 8.))
+                                .rounded_full()
+                                .flex()
+                                .items_center()
+                                .justify_center()
+                                .bg(t.accent)
+                                .cursor_pointer()
+                                .when(self.sending, |d| d.opacity(0.5))
+                                .tooltip(kit::tip(format!("{send_word} · {key}")))
+                                .child(Icon::Send.draw(tokens::ICON + 2., t.on_accent()))
+                                .on_click(cx.listener(|app, _: &ClickEvent, window, cx| {
+                                    app.send(Verdict::Send, window, cx)
+                                })),
+                        ),
+                )
+                .child(div().flex().justify_end().child(elsewhere()))
+                .into_any_element(),
+            Panel::Now => div().into_any_element(),
+        }
+    }
+}
+
+/// A: an option as a card to choose: a ring that fills when he leans to
+/// it, the agent's pick named on its top right, its why to read.
+fn brief_card(
+    t: &Theme,
+    letter: &str,
+    label: &str,
+    o: &Choice,
+    rec: bool,
+    on: bool,
+    why_rec: &str,
+) -> Stateful<Div> {
+    div()
+        .id("card")
+        .flex()
+        .gap(px(GAP))
+        .p(px(GAP))
+        .rounded(px(tokens::RADIUS + 4.))
+        .border_1()
+        .border_color(if on { t.accent } else { t.divider })
+        .bg(if on { t.accent_light() } else { t.surface })
+        .when(!on, |d| d.hover(|d| d.border_color(alpha(t.accent, 0.5))))
+        .child(
+            div()
+                .flex_none()
+                .mt(px(3.))
+                .size(px(18.))
+                .rounded_full()
+                .border_2()
+                .border_color(if on { t.accent } else { t.text2 })
+                .flex()
+                .items_center()
+                .justify_center()
+                .when(on, |d| {
+                    d.child(div().size(px(8.)).rounded_full().bg(t.accent))
+                }),
+        )
+        .child(
+            div()
+                .flex_1()
+                .min_w_0()
+                .flex()
+                .flex_col()
+                .gap(px(4.))
+                .child(
+                    div()
+                        .flex()
+                        .items_center()
+                        .gap(px(GAP_SMALL))
+                        .child(
+                            div()
+                                .flex_none()
+                                .font_weight(FontWeight::BOLD)
+                                .text_color(if on { t.accent } else { t.dim })
+                                .child(letter.to_string()),
+                        )
+                        .child(
+                            div()
+                                .flex_1()
+                                .min_w_0()
+                                .font_family(t.ty.reading)
+                                .text_size(px(t.ty.read + 1.))
+                                .font_weight(FontWeight::SEMIBOLD)
+                                .child(label.to_string()),
+                        )
+                        .when(rec, |d| {
+                            d.child(
+                                div()
+                                    .flex_none()
+                                    .px(px(GAP_SMALL))
+                                    .py(px(1.))
+                                    .rounded_full()
+                                    .bg(t.accent_soft())
+                                    .text_color(t.accent)
+                                    .text_size(px(CAP_TEXT))
+                                    .child("Agent's pick"),
+                            )
+                        }),
+                )
+                .when(!o.why.trim().is_empty(), |d| {
+                    d.child(prose(t, &o.why, true))
+                })
+                .when(
+                    rec && !why_rec.trim().is_empty() && why_rec.trim() != o.why.trim(),
+                    |d| {
+                        d.child(
+                            div()
+                                .flex()
+                                .gap(px(GAP_SMALL))
+                                .child(div().w(px(2.)).flex_none().rounded_full().bg(t.accent))
+                                .child(prose(t, why_rec, false)),
+                        )
+                    },
+                ),
+        )
+}
+
+/// B: an option as a column beside the others: a big letter, its name,
+/// its why; the agent's pick under an accent rule, his lean outlined.
+#[allow(clippy::too_many_arguments)]
+fn compare_card(
+    t: &Theme,
+    letter: &str,
+    label: &str,
+    o: &Choice,
+    rec: bool,
+    on: bool,
+    why_rec: &str,
+    narrow: bool,
+) -> Stateful<Div> {
+    div()
+        .id("card")
+        .when(!narrow, |d| d.flex_1().min_w_0())
+        .flex()
+        .flex_col()
+        .rounded(px(tokens::RADIUS + 4.))
+        .overflow_hidden()
+        .border_1()
+        .border_color(if on { t.accent } else { t.divider })
+        .when(on, |d| d.bg(t.accent_light()))
+        .when(!on, |d| d.bg(t.surface).hover(|d| d.bg(t.raised)))
+        .child(div().h(px(3.)).bg(if rec { t.accent } else { t.divider }))
+        .child(
+            div()
+                .p(px(GAP))
+                .flex()
+                .flex_col()
+                .gap(px(GAP_SMALL))
+                .child(
+                    div()
+                        .flex()
+                        .items_center()
+                        .gap(px(GAP_SMALL))
+                        .child(
+                            div()
+                                .flex_none()
+                                .size(px(34.))
+                                .rounded(px(tokens::RADIUS + 2.))
+                                .flex()
+                                .items_center()
+                                .justify_center()
+                                .bg(if on { t.accent } else { t.raised })
+                                .text_color(if on { t.on_accent() } else { t.text })
+                                .text_size(px(18.))
+                                .font_weight(FontWeight::BOLD)
+                                .child(letter.to_string()),
+                        )
+                        .child(div().flex_1())
+                        .when(rec, |d| {
+                            d.child(
+                                div()
+                                    .text_size(px(CAP_TEXT))
+                                    .text_color(t.accent)
+                                    .child(t.label_case("Recommended")),
+                            )
+                        })
+                        .when(on, |d| {
+                            d.child(
+                                div()
+                                    .text_size(px(CAP_TEXT))
+                                    .text_color(t.accent)
+                                    .child(t.label_case("Your lean")),
+                            )
+                        }),
+                )
+                .child(
+                    div()
+                        .font_family(t.ty.reading)
+                        .text_size(px(t.ty.read + 2.))
+                        .font_weight(FontWeight::SEMIBOLD)
+                        .line_height(relative(1.25))
+                        .child(label.to_string()),
+                )
+                .when(!o.why.trim().is_empty(), |d| {
+                    d.child(prose(t, &o.why, true))
+                })
+                .when(
+                    rec && !why_rec.trim().is_empty() && why_rec.trim() != o.why.trim(),
+                    |d| d.child(prose(t, why_rec, false)),
+                ),
+        )
+}
+
+/// C: an option as a quick reply under the agent's message.
+fn reply_pill(t: &Theme, letter: &str, label: &str, rec: bool, on: bool) -> Stateful<Div> {
+    div()
+        .id("pill")
+        .max_w_full()
+        .flex()
+        .items_center()
+        .gap(px(6.))
+        .min_h(px(tokens::CAP + 12.))
+        .px(px(GAP))
+        .py(px(4.))
+        .rounded_full()
+        .border_1()
+        .border_color(if on || rec { t.accent } else { t.divider })
+        .when(on, |d| d.bg(t.accent).text_color(t.on_accent()))
+        .when(!on, |d| d.hover(|d| d.bg(t.accent_soft())))
+        .font_family(t.ty.reading)
+        .text_size(px(t.ty.read))
+        .child(
+            div()
+                .font_weight(FontWeight::BOLD)
+                .text_color(if on { t.on_accent() } else { t.accent })
+                .child(letter.to_string()),
+        )
+        .child(div().min_w_0().child(label.to_string()))
+        .when(rec && !on, |d| {
+            d.child(
+                div()
+                    .text_size(px(CAP_TEXT))
+                    .text_color(t.accent)
+                    .child("· recommended"),
+            )
+        })
 }
