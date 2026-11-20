@@ -533,9 +533,9 @@ pub(super) mod tests {
             let fake = Fake { dir };
             fake.touch("one");
             for (name, log, answer) in [("gh", "$4 $6", gh), ("bd", "$*", bd)] {
-                crate::test_support::write_script(
+                ahjo_testkit::tmux::write_script(
                     &fake.dir.join(name),
-                    &format!(
+                    format!(
                         "#!/bin/sh\necho \"{log}\" >> '{}/{name}.runs'\n{answer}\n",
                         fake.dir.display()
                     ),

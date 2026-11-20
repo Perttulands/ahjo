@@ -102,12 +102,13 @@ mod tests {
     #[cfg(unix)]
     #[tokio::test]
     async fn failed_fetch_disables_terminal_prompts_and_reports_git_error() {
-        use std::os::unix::fs::PermissionsExt;
         let dir = std::env::temp_dir().join(format!("ahjo-fetch-command-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let git = dir.join("git");
-        std::fs::write(&git, "#!/bin/sh\nprintf '%s' \"$GIT_TERMINAL_PROMPT\" > \"$HOME/prompt-state\"\necho \"fatal: could not read Username for 'https://private:token@example.invalid/repo': terminal prompts disabled\" >&2\nexit 1\n").unwrap();
-        std::fs::set_permissions(&git, std::fs::Permissions::from_mode(0o755)).unwrap();
+        ahjo_testkit::tmux::write_script(
+            &git,
+            "#!/bin/sh\nprintf '%s' \"$GIT_TERMINAL_PROMPT\" > \"$HOME/prompt-state\"\necho \"fatal: could not read Username for 'https://private:token@example.invalid/repo': terminal prompts disabled\" >&2\nexit 1\n",
+        );
         let home = Home {
             dir: dir.clone(),
             path: vec![dir.clone()],

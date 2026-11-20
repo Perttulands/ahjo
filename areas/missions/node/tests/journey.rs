@@ -81,20 +81,17 @@ async fn cli(node: &Node, noun: &str, args: &[&str]) -> Value {
 }
 #[tokio::test(flavor = "multi_thread")]
 async fn cli_authors_two_steps_answers_gate_and_finishes_with_fake_sessions() {
-    use std::os::unix::fs::PermissionsExt;
     let scratch = ahjo_testkit::fresh_dir("mission-notify-cli");
     let output = scratch.join("sent.jsonl");
     let command = scratch.join("notify");
-    std::fs::write(
+    ahjo_testkit::tmux::write_script(
         &command,
         format!(
             "#!/bin/sh\ncat >> '{}'\nprintf '\\n' >> '{}'\n",
             output.display(),
             output.display()
         ),
-    )
-    .unwrap();
-    std::fs::set_permissions(&command, std::fs::Permissions::from_mode(0o700)).unwrap();
+    );
     let config = format!("[missions]\nnotify_command = '{}'\n", command.display());
     let node = Node::start(&[sessions::LISTING, ahjo_work::LISTING, MISSIONS], &config)
         .await

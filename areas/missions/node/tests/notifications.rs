@@ -3,7 +3,6 @@ use ahjo_node_kit::{Built, Config, Listing, Options, Running, Setup};
 use ahjo_testkit::sessions;
 use serde_json::Value;
 use std::{
-    os::unix::fs::PermissionsExt,
     path::Path,
     sync::{Arc, Mutex},
     time::Duration,
@@ -88,16 +87,14 @@ async fn node_restart_does_not_resend_and_old_final_runs_are_ignored() {
     first.stop().await.unwrap();
     let command = root.join("notify");
     let output = root.join("sent.jsonl");
-    std::fs::write(
+    ahjo_testkit::tmux::write_script(
         &command,
         format!(
             "#!/bin/sh\ncat >> '{}'\nprintf '\\n' >> '{}'\n",
             output.display(),
             output.display()
         ),
-    )
-    .unwrap();
-    std::fs::set_permissions(&command, std::fs::Permissions::from_mode(0o700)).unwrap();
+    );
     let config = format!("[missions]\nnotify_command = '{}'\n", command.display());
     let second = start(&root, &config).await;
     let started = cli(

@@ -58,13 +58,10 @@ fn reports_file_to_beads_and_github_with_context_and_escape_discards(cx: &mut Te
     std::fs::create_dir(dir.join(".beads")).unwrap();
     std::fs::write(dir.join(".beads/prefix"), "reporttest").unwrap();
     let bd = dir.join("fake-bd");
-    std::fs::write(
+    ahjo_testkit::tmux::write_script(
         &bd,
         include_str!("../../node/tests/fixtures/work/fake-bd.sh"),
-    )
-    .unwrap();
-    use std::os::unix::fs::PermissionsExt;
-    std::fs::set_permissions(&bd, std::fs::Permissions::from_mode(0o755)).unwrap();
+    );
     BD.set(bd.display().to_string()).unwrap();
     let gh = dir.join("fake-gh");
     let args = dir.join("gh-args");
@@ -72,8 +69,15 @@ fn reports_file_to_beads_and_github_with_context_and_escape_discards(cx: &mut Te
         .join("../node/tests/fixtures/work/ahjo.json");
     let item = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../node/tests/fixtures/work/item.json");
-    std::fs::write(&gh, format!("#!/bin/sh\nif [ \"$1\" = issue ]; then printf '%s\\n' \"$@\" > '{}'; echo https://github.com/o/r/issues/51; else case \"$*\" in *number=51*) cat '{}';; *) cat '{}';; esac; fi\n", args.display(), item.display(), fixture.display())).unwrap();
-    std::fs::set_permissions(&gh, std::fs::Permissions::from_mode(0o755)).unwrap();
+    ahjo_testkit::tmux::write_script(
+        &gh,
+        format!(
+            "#!/bin/sh\nif [ \"$1\" = issue ]; then printf '%s\\n' \"$@\" > '{}'; echo https://github.com/o/r/issues/51; else case \"$*\" in *number=51*) cat '{}';; *) cat '{}';; esac; fi\n",
+            args.display(),
+            item.display(),
+            fixture.display()
+        ),
+    );
     GH.set(gh.display().to_string()).unwrap();
     let (ready, wait) = mpsc::channel();
     let (stop, stopped) = mpsc::channel();

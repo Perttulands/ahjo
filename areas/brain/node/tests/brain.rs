@@ -567,16 +567,14 @@ async fn an_edit_is_one_commit_signed_as_the_operator() {
 async fn a_commit_git_refuses_puts_the_page_back() {
     let corpus = shelved("refused");
     // A hook that refuses every commit, set locally so no global hook path wins.
-    corpus.write(
-        "hooks/pre-commit",
-        "#!/bin/sh\necho 'refused by the hook' >&2\nexit 1\n",
-    );
+    let script = "#!/bin/sh\necho 'refused by the hook' >&2\nexit 1\n";
     #[cfg(unix)]
     {
-        use std::os::unix::fs::PermissionsExt;
-        let hook = corpus.0.join("hooks/pre-commit");
-        std::fs::set_permissions(&hook, std::fs::Permissions::from_mode(0o755)).unwrap();
+        std::fs::create_dir_all(corpus.0.join("hooks")).unwrap();
+        ahjo_testkit::tmux::write_script(&corpus.0.join("hooks/pre-commit"), script);
     }
+    #[cfg(not(unix))]
+    corpus.write("hooks/pre-commit", script);
     git(&corpus.0, &["config", "core.hooksPath", "hooks"]);
     // No author is configured: the checkout's own identity signs.
     git(&corpus.0, &["config", "user.name", "Corpus Owner"]);
@@ -613,21 +611,16 @@ async fn a_commit_git_refuses_puts_the_page_back() {
 async fn a_disconnected_editor_does_not_cancel_a_commit_halfway() {
     use axum::body::Body;
     use axum::http::Request;
-    use std::os::unix::fs::PermissionsExt;
     use tower::ServiceExt;
 
     let corpus = shelved("disconnected");
     git(&corpus.0, &["config", "user.name", "Corpus Owner"]);
     git(&corpus.0, &["config", "user.email", "owner@example.org"]);
-    corpus.write(
-        "hooks/pre-commit",
+    std::fs::create_dir_all(corpus.0.join("hooks")).unwrap();
+    ahjo_testkit::tmux::write_script(
+        &corpus.0.join("hooks/pre-commit"),
         "#!/bin/sh\ntouch ready\nwhile [ ! -e release ]; do sleep 0.05; done\n",
     );
-    std::fs::set_permissions(
-        corpus.0.join("hooks/pre-commit"),
-        std::fs::Permissions::from_mode(0o755),
-    )
-    .unwrap();
     git(&corpus.0, &["config", "core.hooksPath", "hooks"]);
     let app = brain::routes::<()>(Arc::new(Brain::new(Some(&corpus.0), None).unwrap()));
     let content = "# Pace\n\nSaved despite the disconnect.\n";

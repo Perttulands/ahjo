@@ -204,9 +204,9 @@ mod tests {
         std::fs::write(dir.join("first"), first.to_string()).unwrap();
         std::fs::write(dir.join("second"), second.to_string()).unwrap();
         let script = dir.join("gh");
-        crate::test_support::write_script(
+        ahjo_testkit::tmux::write_script(
             &script,
-            &format!(
+            format!(
                 "#!/bin/sh\ncase \"$*\" in *ci=next*) cat '{}';; *) cat '{}';; esac\n",
                 dir.join("second").display(),
                 dir.join("first").display()

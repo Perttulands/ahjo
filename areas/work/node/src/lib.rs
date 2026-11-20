@@ -1,7 +1,5 @@
 //! Work's tracker readers, commands and watched snapshot channel, and
 //! reference resolution for other areas ([`ahjo_work_contract::Resolver`]).
-#[cfg(test)]
-mod test_support;
 mod work;
 
 use ahjo_core::{Error, NodeId};

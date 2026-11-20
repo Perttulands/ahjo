@@ -209,7 +209,6 @@ async fn send(path: &Path, ask: &Value) -> std::io::Result<()> {
 mod tests {
     use super::*;
     use ahjo_mission_engine::{LabExecutor, Ledger, RunEvent, RunSettings};
-    use std::os::unix::fs::PermissionsExt;
 
     fn fixture(root: &Path, id: &str, final_run: bool) {
         let ledger = Ledger::new(root.join("runs").join(format!("{id}.ndjson")), id);
@@ -264,8 +263,16 @@ mod tests {
         let command = root.join("notify");
         let marker = root.join("failed-once");
         let output = root.join("messages");
-        std::fs::write(&command, format!("#!/bin/sh\nif [ ! -f '{}' ]; then touch '{}'; exit 1; fi\ncat >> '{}'\nprintf '\\n' >> '{}'\n", marker.display(), marker.display(), output.display(), output.display())).unwrap();
-        std::fs::set_permissions(&command, std::fs::Permissions::from_mode(0o700)).unwrap();
+        ahjo_testkit::tmux::write_script(
+            &command,
+            format!(
+                "#!/bin/sh\nif [ ! -f '{}' ]; then touch '{}'; exit 1; fi\ncat >> '{}'\nprintf '\\n' >> '{}'\n",
+                marker.display(),
+                marker.display(),
+                output.display(),
+                output.display()
+            ),
+        );
         let log = Arc::new(Log::default());
         let mut d = dispatcher(
             &root,

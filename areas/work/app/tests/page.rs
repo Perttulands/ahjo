@@ -83,20 +83,17 @@ fn start() -> Option<Running> {
             let dir = ahjo_testkit::fresh_dir("work-page-store");
             std::fs::create_dir_all(dir.join(".beads")).unwrap();
             let script = dir.join("fixture-bd");
-            std::fs::write(&script, "#!/bin/sh\nif [ \"$2\" = config ]; then echo '{\"value\":\"fixture\"}'; exit 0; fi\nif [ -f slow ]; then sleep 6; fi\nif [ -f fail ]; then echo 'tracker unavailable' >&2; exit 1; fi\ncat fixture.json\n").unwrap();
+            ahjo_testkit::tmux::write_script(&script, "#!/bin/sh\nif [ \"$2\" = config ]; then echo '{\"value\":\"fixture\"}'; exit 0; fi\nif [ -f slow ]; then sleep 6; fi\nif [ -f fail ]; then echo 'tracker unavailable' >&2; exit 1; fi\ncat fixture.json\n");
             std::fs::write(dir.join("fixture.json"), r#"[
               {"id":"fixture-1","title":"Read the fixture","description":"Its words travel apart from the snapshot.","status":"open","created_at":"2026-11-01T00:00:00Z","updated_at":"2026-11-01T00:00:00Z","parent":"fixture-0","dependencies":[{"type":"blocks","depends_on_id":"fixture-3"}]},
               {"id":"fixture-0","title":"Parent title","status":"open","created_at":"2026-11-01T00:00:00Z","updated_at":"2026-11-01T00:00:00Z"},
               {"id":"fixture-2","title":"Child title","status":"open","created_at":"2026-11-01T00:00:00Z","updated_at":"2026-11-01T00:00:00Z","parent":"fixture-1"},
               {"id":"fixture-3","title":"Blocker title","status":"closed","created_at":"2026-11-01T00:00:00Z","updated_at":"2026-11-01T00:00:00Z"}
             ]"#).unwrap();
-            use std::os::unix::fs::PermissionsExt;
-            std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
             BD.set(script.to_string_lossy().into_owned()).unwrap();
             let gh = dir.join("fixture-gh");
             let base = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../node/tests/fixtures/work");
-            std::fs::write(&gh, format!("#!/bin/sh\ncase \"$*\" in *number=51*) cat '{}';; *) cat '{}';; esac\n", base.join("item.json").display(), base.join("ahjo.json").display())).unwrap();
-            std::fs::set_permissions(&gh, std::fs::Permissions::from_mode(0o755)).unwrap();
+            ahjo_testkit::tmux::write_script(&gh, format!("#!/bin/sh\ncase \"$*\" in *number=51*) cat '{}';; *) cat '{}';; esac\n", base.join("item.json").display(), base.join("ahjo.json").display()));
             GH.set(gh.to_string_lossy().into_owned()).unwrap();
             let launch = dir.join("launch.conf");
             std::fs::write(&launch, format!("folder {}\n", dir.display())).unwrap();

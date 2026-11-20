@@ -273,7 +273,6 @@ fn failed_publication_at_startup_blocks_only_the_affected_run() {
 #[cfg(unix)]
 #[test]
 fn shutdown_deadline_covers_a_stalled_git_publication() {
-    use std::os::unix::fs::PermissionsExt;
     if let Some(dir) = std::env::var_os("AHJO_101_STALLED_GIT") {
         let dir = PathBuf::from(dir);
         let marker = dir.join("started");
@@ -343,8 +342,10 @@ fn shutdown_deadline_covers_a_stalled_git_publication() {
     ));
     std::fs::create_dir(&dir).unwrap();
     let script = dir.join("git");
-    std::fs::write(&script, "#!/bin/sh\nif [ \"$1\" = rev-list ]; then touch \"$AHJO_101_STALLED_GIT/started\"; while [ ! -e \"$AHJO_101_STALLED_GIT/release\" ]; do sleep 0.02; done; fi\nexec /usr/bin/git \"$@\"\n").unwrap();
-    std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+    ahjo_testkit::tmux::write_script(
+        &script,
+        "#!/bin/sh\nif [ \"$1\" = rev-list ]; then touch \"$AHJO_101_STALLED_GIT/started\"; while [ ! -e \"$AHJO_101_STALLED_GIT/release\" ]; do sleep 0.02; done; fi\nexec /usr/bin/git \"$@\"\n",
+    );
     let path = std::env::join_paths(
         std::iter::once(dir.clone())
             .chain(std::env::split_paths(&std::env::var_os("PATH").unwrap())),

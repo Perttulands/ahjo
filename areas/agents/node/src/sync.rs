@@ -134,20 +134,19 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn sync_is_noninteractive_and_runs_setup_only_after_a_successful_fast_forward() {
-        use std::os::unix::fs::PermissionsExt;
         use std::process::Command;
         let dir = std::env::temp_dir().join(format!("ahjo-sync-command-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let git = dir.join("git");
         let setup = dir.join("install.sh");
-        std::fs::write(&git, "#!/bin/sh\nprintf '%s' \"$GIT_TERMINAL_PROMPT\" > git-prompt\nprintf '%s' \"$*\" > git-args\nif [ -f fail ]; then echo 'fatal: credentials unavailable' >&2; exit 1; fi\n").unwrap();
-        std::fs::set_permissions(&git, std::fs::Permissions::from_mode(0o755)).unwrap();
-        std::fs::write(
+        ahjo_testkit::tmux::write_script(
+            &git,
+            "#!/bin/sh\nprintf '%s' \"$GIT_TERMINAL_PROMPT\" > git-prompt\nprintf '%s' \"$*\" > git-args\nif [ -f fail ]; then echo 'fatal: credentials unavailable' >&2; exit 1; fi\n",
+        );
+        ahjo_testkit::tmux::write_script(
             &setup,
             "#!/bin/sh\nprintf '%s' \"$GIT_TERMINAL_PROMPT\" > setup-prompt\n",
-        )
-        .unwrap();
-        std::fs::set_permissions(&setup, std::fs::Permissions::from_mode(0o755)).unwrap();
+        );
         let invoke = || {
             Command::new("/bin/sh")
                 .arg("-c")

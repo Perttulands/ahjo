@@ -76,9 +76,7 @@ async fn cli_lists_shows_and_creates_a_work_item() {
     std::fs::create_dir(dir.join(".beads")).unwrap();
     std::fs::write(dir.join(".beads/prefix"), "pwc").unwrap();
     let program = dir.join("fake-bd");
-    std::fs::write(&program, include_str!("fixtures/work/fake-bd.sh")).unwrap();
-    use std::os::unix::fs::PermissionsExt;
-    std::fs::set_permissions(&program, std::fs::Permissions::from_mode(0o755)).unwrap();
+    ahjo_testkit::tmux::write_script(&program, include_str!("fixtures/work/fake-bd.sh"));
     BD.set(program.display().to_string()).unwrap();
     let config = format!("[work]\nprojects = [\"beads {}\"]\n", dir.display());
     let node = Node::start(&[WORK], &config).await.unwrap();

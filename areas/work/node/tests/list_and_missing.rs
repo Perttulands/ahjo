@@ -4,7 +4,6 @@ use ahjo_node_kit::{Built, Listing, Setup};
 use ahjo_testkit::node::Node;
 use futures_util::{SinkExt, StreamExt};
 use serde_json::{Value, json};
-use std::os::unix::fs::PermissionsExt;
 use std::sync::OnceLock;
 use tokio_tungstenite::tungstenite::Message;
 
@@ -31,8 +30,10 @@ async fn list_filters_closed_without_changing_the_page_and_missing_is_not_found(
     )
     .unwrap();
     let program = dir.join("fake-bd");
-    std::fs::write(&program, "#!/bin/sh\ncase \"$2\" in config) printf '{\"value\":\"tst\"}';; list) cat .beads/list.json;; *) exit 1;; esac\n").unwrap();
-    std::fs::set_permissions(&program, std::fs::Permissions::from_mode(0o755)).unwrap();
+    ahjo_testkit::tmux::write_script(
+        &program,
+        "#!/bin/sh\ncase \"$2\" in config) printf '{\"value\":\"tst\"}';; list) cat .beads/list.json;; *) exit 1;; esac\n",
+    );
     BD.set(program.display().to_string()).unwrap();
     let node = Node::start(
         &[WORK],

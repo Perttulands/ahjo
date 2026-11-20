@@ -6,7 +6,7 @@ use ahjo_node_kit::{Built, Listing, Setup};
 use ahjo_testkit::node::Node;
 use futures_util::{SinkExt, StreamExt};
 use serde_json::{Value, json};
-use std::{os::unix::fs::PermissionsExt, sync::OnceLock, time::Duration};
+use std::{sync::OnceLock, time::Duration};
 use tokio_tungstenite::tungstenite::Message;
 
 static BD: OnceLock<String> = OnceLock::new();
@@ -58,8 +58,7 @@ async fn cli_list_and_page_refresh_read_the_changed_store() {
     let items = dir.join("items.json");
     status_file(&items, "open");
     let script = dir.join("fake-bd");
-    std::fs::write(&script, "#!/bin/sh\ncat items.json\n").unwrap();
-    std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+    ahjo_testkit::tmux::write_script(&script, "#!/bin/sh\ncat items.json\n");
     BD.set(script.display().to_string()).unwrap();
     let config = format!(
         "[work]\nprojects = [{:?}]\n",

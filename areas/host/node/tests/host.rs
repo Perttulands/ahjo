@@ -362,7 +362,6 @@ async fn disabled_host_has_no_routes_or_tools() {
 #[cfg(unix)]
 #[test]
 fn host_cli_json_reports_gpu_failure() {
-    use std::os::unix::fs::PermissionsExt;
     const CHILD: &str = "AHJO_GPU_REASON_CHILD";
     if std::env::var_os(CHILD).is_some() {
         tokio::runtime::Runtime::new().unwrap().block_on(async {
@@ -382,12 +381,10 @@ fn host_cli_json_reports_gpu_failure() {
     }
     let dir = ahjo_testkit::fresh_dir("host-cli-gpu");
     let executable = dir.join("nvidia-smi");
-    std::fs::write(
+    ahjo_testkit::tmux::write_script(
         &executable,
         "#!/bin/sh\necho 'NVIDIA-SMI has failed' >&2\nexit 9\n",
-    )
-    .unwrap();
-    std::fs::set_permissions(&executable, std::fs::Permissions::from_mode(0o755)).unwrap();
+    );
     let status = std::process::Command::new(std::env::current_exe().unwrap())
         .args([
             "--exact",

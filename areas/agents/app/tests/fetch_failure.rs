@@ -1,10 +1,10 @@
 //! A failed checkout fetch must not make installed harnesses look broken.
 #![cfg(unix)]
 use ahjo_app_kit::link::client::LinkState;
-use ahjo_testkit::{fresh_dir, node::Node, sessions};
+use ahjo_testkit::{fresh_dir, node::Node, sessions, tmux::write_script};
 use gpui::{Modifiers, TestAppContext, VisualTestContext};
-use std::os::unix::fs::{PermissionsExt, symlink};
-use std::path::{Path, PathBuf};
+use std::os::unix::fs::symlink;
+use std::path::PathBuf;
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
@@ -23,10 +23,6 @@ impl Drop for Running {
         }
         let _ = std::fs::remove_dir_all(&self.home);
     }
-}
-fn executable(path: &Path, script: &str) {
-    std::fs::write(path, script).unwrap();
-    std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o755)).unwrap();
 }
 fn start() -> Running {
     let home = fresh_dir("ahjo-agents-fetch-page");
@@ -47,9 +43,9 @@ fn start() -> Running {
         symlink(&skill, links.join(format!("{name}-skill"))).unwrap();
     }
     for name in ["claude", "codex", "pi"] {
-        executable(&bin.join(name), "#!/bin/sh\necho '1.2.3'\n");
+        write_script(&bin.join(name), "#!/bin/sh\necho '1.2.3'\n");
     }
-    executable(
+    write_script(
         &bin.join("git"),
         "#!/bin/sh\nfor arg in \"$@\"; do\n  if [ \"$arg\" = status ]; then printf '%s\\n' \"$*\" >> \"$HOME/status.log\"; fi\n  if [ \"$arg\" = fetch ]; then\n    printf '%s\\n' \"$*\" >> \"$HOME/fetch.log\"\n    if [ \"$GIT_TERMINAL_PROMPT\" != 0 ]; then echo 'unexpected credential prompt' >&2; exit 2; fi\n    echo 'fatal: could not read Username: terminal prompts disabled' >&2\n    exit 1\n  fi\ndone\nexit 0\n",
     );

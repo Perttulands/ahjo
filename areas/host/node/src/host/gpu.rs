@@ -109,7 +109,6 @@ mod tests {
     #[cfg(unix)]
     #[tokio::test]
     async fn missing_and_failed_commands_explain_why() {
-        use std::os::unix::fs::PermissionsExt;
         let dir = ahjo_testkit::fresh_dir("gpu-failure");
         let missing = locate_in(Some(dir.clone().into_os_string()), &[]);
         assert_eq!(
@@ -117,12 +116,10 @@ mod tests {
             "nvidia-smi not found"
         );
         let path = dir.join("nvidia-smi");
-        std::fs::write(
+        ahjo_testkit::tmux::write_script(
             &path,
             "#!/bin/sh\necho 'NVIDIA-SMI has failed' >&2\necho ignored >&2\nexit 9\n",
-        )
-        .unwrap();
-        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+        );
         let reason = query(&path).await.unwrap_err();
         assert!(reason.contains("9") && reason.contains("NVIDIA-SMI has failed"));
         assert!(!reason.contains("ignored"));

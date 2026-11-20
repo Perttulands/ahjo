@@ -18,12 +18,6 @@ use serde_json::Value;
 const AHJO: &str = env!("CARGO_BIN_EXE_ahjo");
 const UNIT: &str = "ahjo-install-test";
 
-/// Held by each test for its whole run. A test here writes a program and
-/// then runs it; were another test to start a process in between, that
-/// process would briefly hold the written file open and running it would
-/// fail as "text file busy".
-static ONE_AT_A_TIME: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
-
 /// `systemctl --user` for one scratch folder: calls go to `calls`, a
 /// started unit's process id to `<unit>.pid`, its output to `<unit>.log`.
 const FAKE_SYSTEMCTL: &str = r#"#!/bin/sh
@@ -97,7 +91,10 @@ impl Machine {
         let dir = self.dir.join("builds").join(name);
         std::fs::create_dir(&dir).unwrap();
         let path = dir.join("ahjo");
-        std::fs::copy(AHJO, &path).unwrap();
+        // Only the child holds the executable open for writing. Another
+        // test's fork cannot inherit that handle and keep the build busy.
+        let copied = Command::new("cp").arg(AHJO).arg(&path).status().unwrap();
+        assert!(copied.success(), "copying {}", path.display());
         path
     }
 
@@ -239,7 +236,6 @@ async fn shows(machine: &Machine, session: &str, line: &str) {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn an_upgrade_keeps_every_session_and_the_new_node_serves_it() {
-    let _alone = ONE_AT_A_TIME.lock().await;
     let Some(tmux) = Server::start_in("ahjo-upgrade") else {
         return;
     };
@@ -275,7 +271,6 @@ async fn an_upgrade_keeps_every_session_and_the_new_node_serves_it() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn a_build_that_fails_its_health_check_is_rolled_back() {
-    let _alone = ONE_AT_A_TIME.lock().await;
     let Some(tmux) = Server::start_in("ahjo-rollback") else {
         return;
     };
@@ -317,7 +312,6 @@ async fn a_build_that_fails_its_health_check_is_rolled_back() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn install_is_idempotent_and_writes_the_expected_unit() {
-    let _alone = ONE_AT_A_TIME.lock().await;
     let Some(tmux) = Server::start_in("ahjo-install") else {
         return;
     };
@@ -380,15 +374,13 @@ async fn install_is_idempotent_and_writes_the_expected_unit() {
     );
 
     // A different build is an upgrade's job, not install's.
-    let other = machine.dir.join("builds/other");
-    std::fs::create_dir(&other).unwrap();
-    let other = other.join("ahjo");
-    std::fs::copy(AHJO, &other).unwrap();
-    std::fs::OpenOptions::new()
-        .append(true)
-        .open(&other)
-        .and_then(|mut file| std::io::Write::write_all(&mut file, b"\0"))
+    let other = machine.build("other");
+    let changed = Command::new("sh")
+        .args(["-c", r#"printf '\0' >> "$1""#, "sh"])
+        .arg(&other)
+        .status()
         .unwrap();
+    assert!(changed.success(), "changing {}", other.display());
     let refused = machine.install(&other);
     assert_eq!(refused.status.code(), Some(1));
     let error: Value = serde_json::from_slice(&refused.stderr).unwrap();
@@ -398,7 +390,6 @@ async fn install_is_idempotent_and_writes_the_expected_unit() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn uninstall_takes_the_unit_and_the_build_away_and_keeps_sessions_and_config() {
-    let _alone = ONE_AT_A_TIME.lock().await;
     let Some(tmux) = Server::start_in("ahjo-uninstall") else {
         return;
     };

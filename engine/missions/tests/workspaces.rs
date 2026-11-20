@@ -33,12 +33,11 @@ impl Scratch {
     }
     fn failing_hook(&self) {
         let hook = self.repo().join(".git/hooks/post-checkout");
-        std::fs::write(&hook, "#!/bin/sh\nexit 1\n").unwrap();
+        let script = "#!/bin/sh\nexit 1\n";
         #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            std::fs::set_permissions(&hook, std::fs::Permissions::from_mode(0o755)).unwrap();
-        }
+        ahjo_testkit::tmux::write_script(&hook, script);
+        #[cfg(not(unix))]
+        std::fs::write(&hook, script).unwrap();
     }
 }
 impl Drop for Scratch {
