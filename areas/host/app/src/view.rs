@@ -224,6 +224,9 @@ impl HostPage {
         let id = node.id.as_str();
         let state = self.hosts.nodes.get(id).map(|n| &n.state);
         let (verdict, colour) = match state {
+            _ if self.hosts.frame_errors(id).next().is_some() => {
+                ("unreadable".to_string(), Some(t.error))
+            }
             Some(s) if s.latest.is_some() => match self.trouble_count(id, s) {
                 0 => ("all right".to_string(), None),
                 n => (format!("{n} to look at"), Some(t.error)),

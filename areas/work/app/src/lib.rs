@@ -124,6 +124,7 @@ pub struct Work {
     snapshots: BTreeMap<String, Arc<Snapshot>>,
     /// A node's snapshot that arrived while another was being read.
     pending: BTreeMap<String, Vec<u8>>,
+    frame_errors: BTreeMap<String, String>,
     reading: bool,
     /// Nodes whose link closed while their snapshot was being read: the
     /// read is dropped when it lands.
@@ -261,6 +262,7 @@ impl Page for Work {
         if state.is_none() {
             self.snapshots.remove(node.as_str());
             self.pending.remove(node.as_str());
+            self.frame_errors.remove(node.as_str());
             self.refreshing.remove(node.as_str());
             self.gone.insert(node.as_str().into());
             self.rebuild(cx);
@@ -374,6 +376,7 @@ impl Work {
             report: None,
             snapshots: BTreeMap::new(),
             pending: BTreeMap::new(),
+            frame_errors: BTreeMap::new(),
             reading: false,
             gone: Default::default(),
             refreshing: BTreeMap::new(),
@@ -448,27 +451,35 @@ impl Work {
             .filter(|(n, _)| **n != node)
             .map(|(n, s)| (n.clone(), s.clone()))
             .collect();
+        let snapshot_node = node.clone();
         let read = cx.background_spawn(async move {
-            let snapshot = Arc::new(serde_json::from_slice::<Snapshot>(&body).ok()?);
+            let snapshot = Arc::new(serde_json::from_slice::<Snapshot>(&body)?);
             let mut all: BTreeMap<String, Arc<Snapshot>> = others.into_iter().collect();
-            all.insert(node.clone(), snapshot.clone());
-            Some((node, snapshot, Board::from_snapshot(&combined(&all))))
+            all.insert(snapshot_node, snapshot.clone());
+            Ok::<_, serde_json::Error>((snapshot, Board::from_snapshot(&combined(&all))))
         });
         cx.spawn(async move |this, cx| {
             let read = read.await;
             let _ = this.update(cx, |w, cx| {
                 w.reading = false;
-                if let Some((node, snapshot, board)) = read {
-                    // A node gone meanwhile stays gone.
-                    if !w.gone.contains(&node) {
-                        if w.refreshing
-                            .get(&node)
-                            .is_some_and(|&at| snapshot.refreshed > at)
-                        {
-                            w.refreshing.remove(&node);
+                // A node gone meanwhile stays gone.
+                if !w.gone.contains(&node) {
+                    match read {
+                        Ok((snapshot, board)) => {
+                            if w.refreshing.get(&node).is_some_and(|&at| snapshot.refreshed > at) {
+                                w.refreshing.remove(&node);
+                            }
+                            w.frame_errors.remove(&node);
+                            w.snapshots.insert(node, snapshot);
+                            w.set_board(board, cx);
                         }
-                        w.snapshots.insert(node, snapshot);
-                        w.set_board(board, cx);
+                        Err(error) => {
+                            log::warn!("Work snapshot from {node} did not read: {error}");
+                            w.frame_errors.insert(node, format!(
+                                "The node sent work data this app cannot read: {error}. Update the app."
+                            ));
+                            cx.notify();
+                        }
                     }
                 }
                 w.read_pending(cx);

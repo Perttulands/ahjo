@@ -445,6 +445,7 @@ pub enum Synced {
 pub struct Agents {
     /// Each node's last report; it stays as last known when the node goes.
     pub reports: BTreeMap<String, Report>,
+    pub frame_errors: BTreeMap<(String, u8), String>,
     pub chosen: Chosen,
     /// Asked syncs and links by id: (node, checkout path, SYNC or LINK).
     syncs: HashMap<u32, (String, String, u8)>,
@@ -455,6 +456,7 @@ impl Default for Agents {
     fn default() -> Self {
         Self {
             reports: BTreeMap::new(),
+            frame_errors: BTreeMap::new(),
             chosen: Chosen::Overview,
             syncs: HashMap::new(),
             next: 1,
@@ -465,19 +467,47 @@ impl Default for Agents {
 impl Agents {
     /// A frame of the channel from `node`. Returns a sync's outcome to say.
     pub fn frame(&mut self, node: &str, kind: u8, body: &[u8]) -> Option<Option<Synced>> {
-        match kind {
-            REPORT => {
-                let r = serde_json::from_slice::<Report>(body).ok()?;
-                self.reports.insert(node.to_string(), r);
+        let key = (node.to_owned(), kind);
+        match self.read_frame(node, kind, body) {
+            Ok(result) => {
+                if result.is_some() {
+                    self.frame_errors.remove(&key);
+                }
+                result
+            }
+            Err(error) => {
+                log::warn!("Agents frame {kind:#04x} from {node} did not read: {error}");
+                self.frame_errors.insert(
+                    key,
+                    format!(
+                        "The node sent agents data this app cannot read: {error}. Update the app."
+                    ),
+                );
                 Some(None)
             }
+        }
+    }
+
+    fn read_frame(
+        &mut self,
+        node: &str,
+        kind: u8,
+        body: &[u8],
+    ) -> serde_json::Result<Option<Option<Synced>>> {
+        match kind {
+            REPORT => {
+                let r = serde_json::from_slice::<Report>(body)?;
+                self.reports.insert(node.to_string(), r);
+                Ok(Some(None))
+            }
             SYNCED | LINKED if body.len() >= 5 => {
-                let id = u32::from_le_bytes(body[..4].try_into().ok()?);
+                let id = u32::from_le_bytes(body[..4].try_into().expect("four bytes"));
                 let ok = body[4] == 1;
-                let text = String::from_utf8_lossy(&body[5..]).to_string();
-                let (_, checkout, _) = self.syncs.remove(&id)?;
-                Some(Some(if ok && kind == LINKED {
-                    let made = serde_json::from_str::<Vec<serde_json::Value>>(&text).ok()?;
+                let Some((_, checkout, _)) = self.syncs.remove(&id) else {
+                    return Ok(None);
+                };
+                Ok(Some(Some(if ok && kind == LINKED {
+                    let made = serde_json::from_slice::<Vec<serde_json::Value>>(&body[5..])?;
                     Synced::Linked {
                         checkout,
                         links: made.len(),
@@ -485,18 +515,18 @@ impl Agents {
                 } else if ok {
                     Synced::Started {
                         checkout,
-                        session: text,
+                        session: String::from_utf8_lossy(&body[5..]).into_owned(),
                     }
                 } else {
-                    let error = serde_json::from_str::<ahjo_core::Error>(&text).ok()?;
+                    let error = serde_json::from_slice::<ahjo_core::Error>(&body[5..])?;
                     Synced::Refused {
                         checkout,
                         code: error.code,
                         why: error.message,
                     }
-                }))
+                })))
             }
-            _ => None,
+            _ => Ok(None),
         }
     }
 
@@ -748,5 +778,30 @@ mod tests {
         a.sync("n1", "~/x");
         assert_eq!(a.dropped("n1"), vec!["~/x".to_string()]);
         assert!(!a.asked(SYNC, "n1", "~/x"));
+    }
+
+    #[test]
+    fn unreadable_report_and_action_frames_set_errors() {
+        let mut agents = Agents::default();
+        agents.frame("node", REPORT, b"{");
+        for (kind, request, ok) in [
+            (SYNCED, agents.sync("node", "~/kit"), 0),
+            (LINKED, agents.link("node", "~/kit"), 1),
+        ] {
+            let mut body = request[1..5].to_vec();
+            body.extend_from_slice(&[ok, b'{']);
+            agents.frame("node", kind, &body);
+            assert!(!agents.asked(request[0], "node", "~/kit"));
+        }
+        assert_eq!(agents.frame_errors.len(), 3);
+        assert!(
+            agents
+                .frame_errors
+                .values()
+                .all(|error| error.starts_with("The node sent agents data this app cannot read:"))
+        );
+        agents.frame("node", REPORT, &serde_json::to_vec(&report()).unwrap());
+        assert!(!agents.frame_errors.contains_key(&("node".into(), REPORT)));
+        assert_eq!(agents.frame_errors.len(), 2);
     }
 }

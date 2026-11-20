@@ -70,10 +70,21 @@ impl HostPage {
         let state = self.hosts.nodes.get(id).map(|n| &n.state);
         let head = pane::head(t).px(px(size::PAD));
         let Some(s) = state.filter(|s| s.latest.is_some()) else {
-            return frame(
-                head.child(pane::title(t, title(node))),
-                pane::empty(t, "Waiting for the first reading…", None).p_0(),
-            );
+            let mut errors = self.hosts.frame_errors(id).peekable();
+            let body = if errors.peek().is_some() {
+                div()
+                    .flex()
+                    .flex_col()
+                    .gap(px(size::LABEL_BOTTOM))
+                    .children(
+                        errors
+                            .cloned()
+                            .map(|error| pane::meta(t, error, Some(t.error))),
+                    )
+            } else {
+                pane::empty(t, "Waiting for the first reading…", None).p_0()
+            };
+            return frame(head.child(pane::title(t, title(node))), body);
         };
         let now = now_ms();
         let reference = store::reference(&node.device, &node.environment, s, now);
@@ -119,7 +130,8 @@ impl HostPage {
         let unread = self
             .unread(id)
             .map(|e| format!("Services could not be read: {e}"));
-        let n = troubles.len() + failed.len() + usize::from(unread.is_some());
+        let unread_host = self.hosts.frame_errors(id).count();
+        let n = troubles.len() + failed.len() + usize::from(unread.is_some()) + unread_host;
         let mut facts = vec![];
         if let Some(up) = r.uptime {
             facts.push(format!("Up {}", store::uptime(up)));
@@ -139,6 +151,9 @@ impl HostPage {
             .collect();
         if unread.is_some() {
             names.push("the services".into());
+        }
+        if unread_host > 0 {
+            names.push("the host readings".into());
         }
         names.extend(failed.iter().map(|s| s.name.clone()));
         names.dedup();
@@ -168,7 +183,10 @@ impl HostPage {
                     .child(trouble.text.clone()),
             );
         }
-        if let Some(text) = unread {
+        for text in unread
+            .into_iter()
+            .chain(self.hosts.frame_errors(id).cloned())
+        {
             let selector = format!("host-trouble-{text}");
             out = out.child(
                 // The reason names a path and a parse error: it wraps.

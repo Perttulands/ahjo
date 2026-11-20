@@ -16,6 +16,7 @@ ahjo-app-kit = { path = "../../../kit/app-kit" }
 gpui = { package = "gpui-pre", version = "=0.3.12" }
 serde = "1"
 serde_json = "1"
+log = "0.4"
 
 [dev-dependencies]
 ahjo-app-shell = { path = "../../../kit/app-shell" }

@@ -9,7 +9,7 @@ mod run;
 mod run_view;
 mod staffing;
 mod validation;
-use crate::store::{Store, canvas as board, undo};
+use crate::store::{Frame, Store, canvas as board, undo};
 use ahjo_app_kit::{
     Host, Page,
     host::Request,
@@ -289,14 +289,10 @@ impl MissionsPage {
     fn report_new_asks(
         &mut self,
         node: &NodeId,
-        body: &[u8],
+        runs: &[ahjo_missions_contract::RunProjection],
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let Ok(runs) = serde_json::from_slice::<Vec<ahjo_missions_contract::RunProjection>>(body)
-        else {
-            return;
-        };
         let initial = self.seen_run_snapshots.insert(node.to_string());
         if initial {
             return;
@@ -356,7 +352,7 @@ impl MissionsPage {
             };
             if run.status == "blocked"
                 && previous.is_none_or(|old| {
-                    old.status != "blocked" || blocked_seq(old) != blocked_seq(&run)
+                    old.status != "blocked" || blocked_seq(old) != blocked_seq(run)
                 })
                 && !window.is_window_active()
             {
@@ -1597,10 +1593,14 @@ impl Page for MissionsPage {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if kind == ahjo_missions_contract::RUNS_SNAPSHOT {
-            self.report_new_asks(node, body, window, cx);
+        let Some(frame) = self.state.read_frame(node.as_str(), kind, body) else {
+            cx.notify();
+            return;
+        };
+        if let Frame::Runs(runs) = &frame {
+            self.report_new_asks(node, runs, window, cx);
         }
-        self.state.frame(node.as_str(), kind, body);
+        self.state.apply_frame(node.as_str(), frame);
         self.resolve_wanted(cx);
         if kind == ahjo_missions_contract::RUNS_SNAPSHOT {
             self.sync_gate(cx);
@@ -1643,14 +1643,23 @@ impl Render for MissionsPage {
         }
         let mut board = false;
         let list = self.render_navigator(&t, cx);
-        let error = self.state.error.clone().map(|e| {
+        let mut errors = self
+            .state
+            .frame_errors()
+            .chain(self.state.error.iter())
+            .peekable();
+        let error = errors.peek().is_some().then(|| {
             div()
                 .debug_selector(|| "missions-error".into())
+                .flex()
+                .flex_col()
                 .text_color(t.error)
-                .child(crate::store::validation::plain_error(
-                    self.state.mission.as_ref(),
-                    &e,
-                ))
+                .children(errors.map(|error| {
+                    div().child(crate::store::validation::plain_error(
+                        self.state.mission.as_ref(),
+                        error,
+                    ))
+                }))
         });
         let detail: Div = if let Some((head, body)) = self.run_detail(&t, cx) {
             match self

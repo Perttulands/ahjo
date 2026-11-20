@@ -52,6 +52,25 @@ impl AgentsPage {
                 .debug_selector(|| "skill-find".into())
                 .child(self.inputs.find.clone()),
         );
+        let mut errors: Vec<_> = self
+            .state
+            .frame_errors
+            .iter()
+            .map(|((node, _), error)| {
+                div()
+                    .debug_selector(|| "agents-frame-error".into())
+                    .pb(px(size::HEAD_GAP))
+                    .text_color(t.error)
+                    .child(format!("{}: {error}", self.place_name(node)))
+            })
+            .collect();
+        if !reports.is_empty() {
+            rows = rows.children(
+                std::mem::take(&mut errors)
+                    .into_iter()
+                    .map(|error| error.px(px(size::ROW_PAD))),
+            );
+        }
         if !reports.is_empty() {
             let (meta, colour) = if off.is_empty() {
                 ("ready".to_string(), None)
@@ -138,7 +157,14 @@ impl AgentsPage {
         rows = rows.child(self.catalog_rows(&t, cx));
         let list = pane::list(&t, "agents-list", list_head, rows);
 
-        let detail = if reports.is_empty() {
+        let detail = if !errors.is_empty() {
+            pane::detail(
+                &t,
+                "agents-detail",
+                pane::head(&t),
+                div().flex().flex_col().children(errors),
+            )
+        } else if reports.is_empty() {
             let places: Vec<String> = self.places.keys().map(|n| self.place_name(n)).collect();
             let words = if places.is_empty() {
                 "No device answers yet.".to_string()

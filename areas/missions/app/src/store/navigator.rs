@@ -134,6 +134,7 @@ mod tests {
                     .map(|run| (run.run_id.clone(), run))
                     .collect(),
                 runs_read: true,
+                ..Default::default()
             },
         );
         let groups = groups(&store);

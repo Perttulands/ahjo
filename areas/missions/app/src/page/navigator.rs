@@ -234,7 +234,9 @@ impl MissionsPage {
             .values()
             .all(|feed| feed.missions.is_none());
         if reading {
-            rows = rows.child(pane::label(t, "Reading missions…"));
+            if self.state.frame_errors().next().is_none() {
+                rows = rows.child(pane::label(t, "Reading missions…"));
+            }
             return pane::list(t, "missions-list", head, rows)
                 .debug_selector(|| "missions-rail".into());
         }

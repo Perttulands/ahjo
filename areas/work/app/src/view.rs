@@ -59,6 +59,9 @@ impl Render for Work {
         // the page says how one is added, across its whole width.
         let unconfigured = !self.snapshots.is_empty() && self.board.projects.is_empty();
         let page = match self.layout {
+            _ if self.snapshots.is_empty() && !self.frame_errors.is_empty() => {
+                div().size_full().bg(t.bg)
+            }
             _ if unconfigured => {
                 div()
                     .size_full()
@@ -69,7 +72,21 @@ impl Render for Work {
             Layout::Strip => self.strip_page(&t, list, detail, cx),
             Layout::Time => self.time_page(&t, list, detail, cx),
         };
-        page.id("work")
+        div()
+            .size_full()
+            .flex()
+            .flex_col()
+            .children(self.frame_errors.values().map(|error| {
+                div()
+                    .debug_selector(|| "work-frame-error".into())
+                    .flex_none()
+                    .px(px(size::ROW_PAD))
+                    .py(px(size::HEAD_GAP))
+                    .text_color(t.error)
+                    .child(error.clone())
+            }))
+            .child(div().flex_1().min_h_0().child(page))
+            .id("work")
             .key_context("Work")
             .track_focus(&self.focus)
             .font_family(FAMILY)

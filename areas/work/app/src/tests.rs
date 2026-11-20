@@ -379,6 +379,30 @@ fn a_snapshot_frame_is_read_off_the_window_and_lists_when_it_lands(cx: &mut Test
 }
 
 #[gpui::test]
+fn an_unreadable_snapshot_sets_the_error_until_the_next_valid_snapshot(cx: &mut TestAppContext) {
+    let (work, cx) = page(cx);
+    let mut send = |body: &[u8]| {
+        cx.update(|window, cx| {
+            work.update(cx, |w, cx| {
+                ahjo_app_kit::Page::frame(
+                    w,
+                    &ahjo_core::NodeId("node".into()),
+                    ahjo_work_contract::SNAPSHOT,
+                    body,
+                    window,
+                    cx,
+                )
+            })
+        });
+        cx.run_until_parked();
+        work.read_with(cx, |w, _| w.frame_errors.get("node").cloned())
+    };
+    let error = send(b"{").expect("a visible snapshot error");
+    assert!(error.starts_with("The node sent work data this app cannot read:"));
+    assert_eq!(send(&serde_json::to_vec(&snapshot()).unwrap()), None);
+}
+
+#[gpui::test]
 fn the_item_menu_copies_its_id(cx: &mut TestAppContext) {
     let (work, cx) = page(cx);
     cx.update(|window, cx| {

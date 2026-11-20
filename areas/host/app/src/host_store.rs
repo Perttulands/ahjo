@@ -7,7 +7,7 @@ use ahjo_host_contract::{
     EventFrame, HOST_EVENT as EVENT, HOST_READING as READING, HOST_STATE as STATE, MINUTE, Minute,
     ReadingFrame,
 };
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 
 /// Events the app keeps per node: the node keeps more.
 pub const EVENTS_KEPT: usize = 50;
@@ -29,47 +29,72 @@ pub struct NodeHost {
 #[derive(Default)]
 pub struct Hosts {
     pub nodes: HashMap<String, NodeHost>,
+    errors: HashMap<String, BTreeMap<u8, String>>,
 }
 
 impl Hosts {
     /// Takes a host frame from `node`, giving back a new event, which the
     /// status line tells. `None` if the frame was not Host's.
     pub fn take(&mut self, node: &str, kind: u8, body: &[u8]) -> Option<Option<Event>> {
+        if !matches!(kind, EVENT | STATE | READING) {
+            return None;
+        }
+        match self.read(node, kind, body) {
+            Ok(event) => {
+                if let Some(errors) = self.errors.get_mut(node) {
+                    errors.remove(&kind);
+                }
+                Some(event)
+            }
+            Err(error) => {
+                log::warn!("Host frame {kind:#04x} from {node} did not read: {error}");
+                self.errors.entry(node.into()).or_default().insert(
+                    kind,
+                    format!(
+                        "The node sent host data this app cannot read: {error}. Update the app."
+                    ),
+                );
+                Some(None)
+            }
+        }
+    }
+
+    pub fn frame_errors(&self, node: &str) -> impl Iterator<Item = &String> {
+        self.errors.get(node).into_iter().flat_map(BTreeMap::values)
+    }
+
+    fn read(&mut self, node: &str, kind: u8, body: &[u8]) -> serde_json::Result<Option<Event>> {
         match kind {
             EVENT => {
-                let e = serde_json::from_slice::<EventFrame>(body)
-                    .ok()
-                    .map(|f| f.event);
-                if let (Some(e), Some(n)) = (&e, self.nodes.get_mut(node)) {
+                let e = serde_json::from_slice::<EventFrame>(body)?.event;
+                if let Some(n) = self.nodes.get_mut(node) {
                     n.state.events.push(e.clone());
                     let over = n.state.events.len().saturating_sub(EVENTS_KEPT);
                     n.state.events.drain(..over);
                 }
-                Some(e)
+                Ok(Some(e))
             }
             STATE => {
-                if let Ok(mut s) = serde_json::from_slice::<State>(body) {
-                    let over = s.events.len().saturating_sub(EVENTS_KEPT);
-                    s.events.drain(..over);
-                    self.nodes.insert(
-                        node.to_string(),
-                        NodeHost {
-                            state: s,
-                            open: None,
-                        },
-                    );
-                }
-                Some(None)
+                let mut s = serde_json::from_slice::<State>(body)?;
+                let over = s.events.len().saturating_sub(EVENTS_KEPT);
+                s.events.drain(..over);
+                self.nodes.insert(
+                    node.to_string(),
+                    NodeHost {
+                        state: s,
+                        open: None,
+                    },
+                );
+                Ok(None)
             }
             READING => {
-                if let Ok(r) = serde_json::from_slice::<ReadingFrame>(body)
-                    && let Some(n) = self.nodes.get_mut(node)
-                {
+                let r = serde_json::from_slice::<ReadingFrame>(body)?;
+                if let Some(n) = self.nodes.get_mut(node) {
                     n.add(r);
                 }
-                Some(None)
+                Ok(None)
             }
-            _ => None,
+            _ => unreachable!("only Host frame kinds reach this store"),
         }
     }
 }
@@ -655,6 +680,24 @@ mod tests {
             reading,
         })
         .unwrap()
+    }
+
+    #[test]
+    fn unreadable_frames_set_errors_until_the_same_feed_recovers() {
+        let mut hosts = Hosts::default();
+        for kind in [STATE, READING, EVENT] {
+            assert_eq!(hosts.take("node", kind, b"{"), Some(None));
+            assert!(
+                hosts.errors["node"][&kind]
+                    .starts_with("The node sent host data this app cannot read:")
+            );
+        }
+        let state = serde_json::to_vec(&State::default()).unwrap();
+        hosts.take("other", STATE, &state);
+        assert_eq!(hosts.frame_errors("node").count(), 3);
+        hosts.take("node", STATE, &state);
+        assert_eq!(hosts.frame_errors("node").count(), 2);
+        assert!(!hosts.errors["node"].contains_key(&STATE));
     }
 
     #[test]

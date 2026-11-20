@@ -24,6 +24,12 @@ pub struct Feed {
     /// The node has sent its runs at least once, so an empty `runs` means
     /// none rather than not yet read.
     pub runs_read: bool,
+    errors: BTreeMap<u8, String>,
+}
+
+pub(crate) enum Frame {
+    Missions(MissionSnapshot),
+    Runs(Vec<RunProjection>),
 }
 #[derive(Default)]
 pub struct Store {
@@ -70,29 +76,51 @@ impl Store {
             }
         })
     }
-    pub fn frame(&mut self, node: &str, kind: u8, body: &[u8]) {
+    pub(crate) fn read_frame(&mut self, node: &str, kind: u8, body: &[u8]) -> Option<Frame> {
+        let read = match kind {
+            SNAPSHOT => serde_json::from_slice(body).map(Frame::Missions),
+            RUNS_SNAPSHOT => serde_json::from_slice(body).map(Frame::Runs),
+            _ => return None,
+        };
         let feed = self.nodes.entry(node.to_owned()).or_default();
-        match kind {
-            SNAPSHOT => {
-                if let Ok(snapshot) = serde_json::from_slice::<MissionSnapshot>(body) {
-                    feed.missions = Some(snapshot.missions);
-                }
+        match read {
+            Ok(frame) => {
+                feed.errors.remove(&kind);
+                Some(frame)
             }
-            RUNS_SNAPSHOT => {
-                if let Ok(runs) = serde_json::from_slice::<Vec<RunProjection>>(body) {
-                    feed.runs_read = true;
-                    for run in runs {
-                        if feed
-                            .runs
-                            .get(&run.run_id)
-                            .is_none_or(|old| run.event_count >= old.event_count)
-                        {
-                            feed.runs.insert(run.run_id.clone(), run);
-                        }
+            Err(error) => {
+                log::warn!("Missions frame {kind:#04x} from {node} did not read: {error}");
+                feed.errors.insert(
+                    kind,
+                    format!(
+                        "The node sent missions data this app cannot read: {error}. Update the app."
+                    ),
+                );
+                None
+            }
+        }
+    }
+
+    pub(crate) fn frame_errors(&self) -> impl Iterator<Item = &String> {
+        self.nodes.values().flat_map(|feed| feed.errors.values())
+    }
+
+    pub(crate) fn apply_frame(&mut self, node: &str, frame: Frame) {
+        let feed = self.nodes.entry(node.to_owned()).or_default();
+        match frame {
+            Frame::Missions(snapshot) => feed.missions = Some(snapshot.missions),
+            Frame::Runs(runs) => {
+                feed.runs_read = true;
+                for run in runs {
+                    if feed
+                        .runs
+                        .get(&run.run_id)
+                        .is_none_or(|old| run.event_count >= old.event_count)
+                    {
+                        feed.runs.insert(run.run_id.clone(), run);
                     }
                 }
             }
-            _ => {}
         }
     }
 }
@@ -101,6 +129,23 @@ impl Store {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn unreadable_frames_set_errors_until_the_same_feed_recovers() {
+        let mut store = Store::default();
+        for kind in [SNAPSHOT, RUNS_SNAPSHOT] {
+            assert!(store.read_frame("node", kind, b"{").is_none());
+            assert!(
+                store.nodes["node"].errors[&kind]
+                    .starts_with("The node sent missions data this app cannot read:")
+            );
+        }
+        assert!(store.read_frame("other", RUNS_SNAPSHOT, b"[]").is_some());
+        assert_eq!(store.frame_errors().count(), 2);
+        assert!(store.read_frame("node", RUNS_SNAPSHOT, b"[]").is_some());
+        assert_eq!(store.frame_errors().count(), 1);
+        assert!(store.nodes["node"].errors.contains_key(&SNAPSHOT));
+    }
 
     #[test]
     fn reveals_use_named_node_or_serving_node_first() {
@@ -160,18 +205,24 @@ mod tests {
           "inputCardId":"i", "work":"", "cwd":"", "repository":"", "base":"",
           "requestId":"", "contextPaths":[], "inputs":[], "outputs":[], "eventCount":9,
           "startedBy":"", "startedAt":"", "updatedAt":"", "endedBy":"", "waitingGates":[], "events":[]});
-        store.frame(
-            "node",
-            RUNS_SNAPSHOT,
-            &serde_json::to_vec(&vec![&run]).unwrap(),
-        );
+        let frame = store
+            .read_frame(
+                "node",
+                RUNS_SNAPSHOT,
+                &serde_json::to_vec(&vec![&run]).unwrap(),
+            )
+            .unwrap();
+        store.apply_frame("node", frame);
         run["eventCount"] = json!(3);
         run["status"] = json!("blocked");
-        store.frame(
-            "node",
-            RUNS_SNAPSHOT,
-            &serde_json::to_vec(&vec![&run]).unwrap(),
-        );
+        let frame = store
+            .read_frame(
+                "node",
+                RUNS_SNAPSHOT,
+                &serde_json::to_vec(&vec![&run]).unwrap(),
+            )
+            .unwrap();
+        store.apply_frame("node", frame);
         assert_eq!(store.nodes["node"].runs["r"].status, "running");
     }
 }
