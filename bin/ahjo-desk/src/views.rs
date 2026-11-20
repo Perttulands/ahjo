@@ -298,7 +298,10 @@ impl DeskApp {
     /// The button that opens the settings menu where it is.
     fn menu_button(&self, t: &Theme, cx: &mut Context<Self>) -> Stateful<Div> {
         icon_button(t, "menu-open", Icon::Settings, self.menu.is_some())
-            .tooltip(kit::tip("Desks, order and settings"))
+            // Not over the menu it opened.
+            .when(self.menu.is_none(), |d| {
+                d.tooltip(kit::tip("Desks, order and settings"))
+            })
             .on_click(cx.listener(|app, e: &ClickEvent, _, cx| {
                 let at = if app.menu.is_some() {
                     None

@@ -1237,7 +1237,7 @@ fn paint_ink(
         } else {
             tokens::MARK_LINE
         };
-        // A note on the whole: its number inside the top left corner, and,
+        // A note on the whole: its number inside the top right corner, and,
         // selected, a frame around all of it.
         if kind == "whole" {
             if on {
@@ -1253,8 +1253,9 @@ fn paint_ink(
                 }
             }
             if let Some(n) = n {
+                // Top right: a caption may stand over the top left.
                 let inside = point(
-                    to.origin.x + px(GAP - tokens::PIN),
+                    to.origin.x + to.size.width - px(GAP + tokens::BADGE + tokens::PIN),
                     to.origin.y + px(tokens::BADGE + tokens::PIN / 2. + GAP),
                 );
                 badge(n, inside, color, badge_text, edge, window, cx);
