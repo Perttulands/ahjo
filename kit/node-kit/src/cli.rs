@@ -576,6 +576,19 @@ fn help(noun: &str, verb: &str, tool: &Value) -> String {
         if let Some(d) = spec.get("default") {
             line.push_str(&format!(" (default {d})"));
         }
+        // An object's keys, each under it, as the tool's schema names them.
+        if let Some(keys) = spec["properties"].as_object() {
+            let width = keys.keys().map(String::len).max().unwrap_or(0);
+            for (key, inner) in keys {
+                line.push_str(&format!(
+                    "\n      {key:width$}  {}",
+                    inner["type"].as_str().unwrap_or("value")
+                ));
+                if let Some(d) = inner["description"].as_str() {
+                    line.push_str(&format!(": {d}"));
+                }
+            }
+        }
         text.push_str(&line);
     }
     text
@@ -1105,6 +1118,21 @@ mod tests {
         let mut answer = json!({"next": ["ahjo session list"], "valid": true});
         aim(&mut answer, Some("lab"), &tools);
         assert_eq!(answer["next"][0], "ahjo session list --node lab");
+    }
+
+    #[test]
+    fn an_objects_keys_are_listed_under_it() {
+        let tool = json!({"name": "role_edit", "inputSchema": {"type": "object",
+            "properties": {"change": {"type": "object", "properties": {
+                "summary": {"type": "string"},
+                "retire": {"type": "boolean", "description": "Retire it."}}}}}});
+        assert!(
+            help("role", "edit", &tool).ends_with(
+                "  --change  object\n      summary  string\n      retire   boolean: Retire it."
+            ),
+            "{}",
+            help("role", "edit", &tool)
+        );
     }
 
     #[test]

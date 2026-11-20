@@ -386,7 +386,20 @@ pub fn commands(s: Arc<Service>, node: String) -> Vec<Command> {
                 "role_list" => (json!({"capable":{"type":"string"},"assignable":{"type":"boolean"},"full":{"type":"boolean"}}), vec![]),
                 "role_characters" => (json!({}), vec![]),
                 "role_new" => (json!({"role":{"type":"string"},"display_name":{"type":"string"},"kind":{"type":"string"},"summary":{"type":"string"},"capabilities":{"type":"array","items":{"type":"string"}},"personality":{"type":"string"}}), vec!["role"]),
-                "role_edit" => (json!({"role":{"type":"string"},"change":{"type":"object"},"etag":{"type":"string"}}), vec!["role", "change"]),
+                "role_edit" => (json!({"role":{"type":"string"},"change":{"type":"object",
+                    "description":"Any of these, e.g. {\"summary\": \"Reviews diffs\", \"addCapability\": \"review\"}; a field left out stays as it is. retire: true retires the role and false restores it, and then nothing else changes.",
+                    "properties":{
+                        "displayName":{"type":"string"},
+                        "kind":{"type":"string"},
+                        "summary":{"type":"string"},
+                        "capabilities":{"type":"array","items":{"type":"string"},"description":"Replaces the role's capabilities; its key:value tags, such as personality:, stay."},
+                        "addCapability":{"type":"string"},
+                        "removeCapability":{"type":"string"},
+                        "note":{"type":"string","description":"Why it changed, kept in the role's notes."},
+                        "updatedBy":{"type":"string","description":"Who changed it, for the note."},
+                        "retire":{"type":"boolean"}},
+                    "additionalProperties":false},
+                "etag":{"type":"string","description":"The etag role inspect gave; a role changed since is refused."}}), vec!["role", "change"]),
                 _ => (json!({"role":{"type":"string"},"etag":{"type":"string"}}), vec!["role"]),
             }; object(props, &required)
         }, move |args| {

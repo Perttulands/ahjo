@@ -217,6 +217,25 @@ fn description(name: &str) -> &'static str {
         _ => unreachable!(),
     }
 }
+/// What `mission edit`'s change holds: one operation and its fields.
+fn edit_change() -> String {
+    let operations: Vec<String> = wire::patch::OPERATIONS
+        .iter()
+        .map(|(name, fields)| match fields.starts_with('"') {
+            true => format!("{name}: {fields}"),
+            false => format!("{name} {{{fields}}}"),
+        })
+        .collect();
+    format!(
+        "One operation, as {{\"<operation>\": {{<fields>}}}}, e.g. \
+         {{\"createEnd\": {{\"title\": \"Done\", \"outcome\": \"done\"}}}}. \
+         Ids are those mission inspect --full shows; a wire end is <node-id>:<port-id>. \
+         The named commands (formation create, mission wire, gate update...) do the common edits; \
+         this is for the rest. Operations and their fields: {}.",
+        operations.join("; ")
+    )
+}
+
 fn schema(name: &str) -> Value {
     let s = json!({"type":"string"});
     let i = json!({"type":"integer"});
@@ -235,7 +254,8 @@ fn schema(name: &str) -> Value {
         ),
         "mission_examples" => object(json!({}), &[]),
         "mission_edit" => object(
-            json!({"mission":s,"change":obj,"rev":i}),
+            json!({"mission":s,"change":{"type":"object","description":edit_change()},
+                "rev":{"type":"integer","description":"The mission's rev as last read; a mission changed since is refused."}}),
             &["mission", "change"],
         ),
         "mission_note" => object(

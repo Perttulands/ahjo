@@ -88,6 +88,90 @@ fn fields_are_typed(v: &Value) -> Result<(), String> {
     Ok(())
 }
 
+/// Every operation `decode` takes, each with the fields it reads; a field
+/// left out keeps its default or, in an update, what was there. A node is
+/// named by its id, a wire's end as `<node-id>:<port-id>`. `mission edit`
+/// shows this list.
+pub const OPERATIONS: &[(&str, &str)] = &[
+    ("title", "\"<the mission's new title>\", a string"),
+    ("prefix", "\"<the run branches' prefix>\", a string"),
+    (
+        "createInputCard",
+        "title, goal, files[], humanChannel (notify|session), x, y",
+    ),
+    (
+        "updateInputCard",
+        "id, title, goal, files[], inputHint, humanChannel, inputs[], outputs[]",
+    ),
+    ("deleteInputCard", "id"),
+    (
+        "createFormation",
+        "type (solo|peer|orchestrated), title, x, y",
+    ),
+    ("updateFormation", "id, title, device, fresh"),
+    (
+        "editFormation",
+        "id, title, brief{goal, repository, beadId, files[], links[]}",
+    ),
+    ("setFormationType", "id, type, keepSlotId, slots[]"),
+    ("deleteFormation", "id"),
+    (
+        "assignSlot",
+        "formationId, slotId, agentId, harness, model, effort",
+    ),
+    ("nameAgent", "formationId, slotId, agent"),
+    ("swapSlots", "fromFormation, fromSlot, toFormation, toSlot"),
+    ("makeController", "formationId, slotId"),
+    (
+        "setBrief",
+        "formationId, goal, repository, beadId, files[], links[]",
+    ),
+    ("clearBrief", "formationId"),
+    (
+        "addPort",
+        "formationId, direction (input|output), label, kind (text|file|folder)",
+    ),
+    ("updatePort", "formationId, portId, label, kind"),
+    ("removePort", "formationId, portId"),
+    (
+        "restorePort",
+        "formationId, direction, port{}, index, connections[]",
+    ),
+    ("wireConnection", "from, to, id, joinIfOccupied"),
+    ("unwireConnection", "from, to"),
+    (
+        "rewireConnection",
+        "from, previousTo, to, joinIfOccupied, removePreviousInput",
+    ),
+    (
+        "createGate",
+        "title, kinds[] (code|formation|human, default human), criterion, check, checkVersion, checkValue, files[], x, y",
+    ),
+    (
+        "updateGate",
+        "id, title, kinds[], criterion, check, checkVersion, checkValue, files[]",
+    ),
+    ("setGateJudge", "gateId, chain[] (step ids)"),
+    ("detachGateJudge", "gateId"),
+    ("deleteGate", "id"),
+    ("createEnd", "title, outcome (done|rejected), x, y"),
+    ("updateEnd", "id, title, outcome"),
+    ("deleteEnd", "id"),
+    (
+        "createLimit",
+        "title, target, rounds, seconds, warnSeconds, tokens, whenSpent, x, y",
+    ),
+    (
+        "updateLimit",
+        "id, title, target, rounds, seconds, warnSeconds, tokens, whenSpent",
+    ),
+    ("deleteLimit", "id"),
+    (
+        "restoreNode",
+        "inputCard{} or formation{} or gate{} or end{} or limit{}, connections[], index, x, y",
+    ),
+];
+
 pub fn decode(body: &Value) -> Result<Patch, String> {
     let map = body.as_object().ok_or("expected an object")?;
     let ops: Vec<_> = map
@@ -371,7 +455,13 @@ pub fn decode(body: &Value) -> Result<Patch, String> {
                 y,
             }
         }
-        _ => return Err(format!("unknown operation {op}")),
+        _ => {
+            let known: Vec<&str> = OPERATIONS.iter().map(|(name, _)| *name).collect();
+            return Err(format!(
+                "unknown operation {op}; the operations are {}",
+                known.join(", ")
+            ));
+        }
     })
 }
 fn strings_or<T: DeserializeOwned>(v: &Value, k: &str) -> Result<Vec<T>, String> {
@@ -420,6 +510,23 @@ impl<'de> serde::Deserialize<'de> for UniquePatch {
 mod tests {
     use super::*;
     use serde_json::json;
+    #[test]
+    fn every_operation_described_is_one_decode_takes() {
+        for (op, _) in OPERATIONS {
+            let value = match *op {
+                "title" | "prefix" => json!("x"),
+                _ => json!({}),
+            };
+            if let Err(error) = decode(&json!({ *op: value })) {
+                assert!(!error.contains("unknown operation"), "{op}: {error}");
+            }
+        }
+        let error = decode(&json!({"addFormation": {}})).unwrap_err();
+        assert!(
+            error.contains("createFormation, updateFormation"),
+            "{error}"
+        );
+    }
     #[test]
     fn malformed_operation_fields_are_not_silently_dropped() {
         assert!(decode(&json!({"createEnd":{"outcome":42}})).is_err());
