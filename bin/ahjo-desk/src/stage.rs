@@ -372,7 +372,16 @@ impl DeskApp {
                                         })),
                                 ),
                         )
-                        .child(self.mark_note.clone()),
+                        .child(
+                            div()
+                                .px(px(8.))
+                                .py(px(6.))
+                                .bg(t.bg)
+                                .border_1()
+                                .border_color(t.divider)
+                                .rounded(px(tokens::RADIUS))
+                                .child(self.mark_note.clone()),
+                        ),
                 )
                 .into_any_element(),
         )

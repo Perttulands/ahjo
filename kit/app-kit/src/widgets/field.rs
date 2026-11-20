@@ -129,6 +129,9 @@ pub struct TextField {
     goal_x: Option<Pixels>,
     selecting: bool,
     was_focused: bool,
+    /// Drawn without its own box: what holds it draws the edge and the
+    /// focus, as a composer card does.
+    bare: bool,
 }
 
 impl EventEmitter<FieldEvent> for TextField {}
@@ -165,7 +168,15 @@ impl TextField {
             goal_x: None,
             selecting: false,
             was_focused: false,
+            bare: false,
         }
+    }
+
+    /// Without its own border, ground and padding: the card it stands in
+    /// draws them, and shows its focus.
+    pub fn bare(mut self) -> Self {
+        self.bare = true;
+        self
     }
 
     pub fn attachments(mut self) -> Self {
@@ -1137,15 +1148,17 @@ impl Render for TextField {
                 d.on_scroll(cx.listener(Self::wheel))
             })
             .w_full()
-            .px(px(8.))
-            .py(px(if self.multiline { 6. } else { 3. }))
             .when(self.min_lines > 1, |d| {
                 d.min_h(line_height(self.text_size) * self.min_lines as f32 + px(14.))
             })
-            .bg(t.bg)
-            .border_1()
-            .border_color(if focused { t.accent } else { t.divider })
-            .rounded(px(size::RADIUS))
+            .when(!self.bare, |d| {
+                d.px(px(8.))
+                    .py(px(if self.multiline { 6. } else { 3. }))
+                    .bg(t.bg)
+                    .border_1()
+                    .border_color(if focused { t.accent } else { t.divider })
+                    .rounded(px(size::RADIUS))
+            })
             .text_size(px(self.text_size))
             .child(TextElement { field: cx.entity() })
     }

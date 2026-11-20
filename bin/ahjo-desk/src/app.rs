@@ -312,7 +312,8 @@ impl DeskApp {
         .detach();
         let read = ahjo_app_kit::theme::theme(cx).ty.read;
         let mark_note = cx.new(|cx| {
-            TextField::new(cx, "What about it?")
+            TextField::new(cx, "")
+                .bare()
                 .multiline()
                 .reading()
                 .text_size(read)
@@ -605,19 +606,15 @@ impl DeskApp {
         let (text, hint) = match (ask, draft.at) {
             (Some(a), Some(i)) if a.form() == Form::Grill && i < a.questions.len() => {
                 let q = &a.questions[i];
-                (
-                    draft.said(q).words,
-                    format!("Your thoughts on {}", q.title.trim()),
-                )
+                (draft.said(q).words, String::new())
             }
-            (Some(a), _) if a.form() == Form::Grill => {
-                (draft.words, "Your thoughts on the whole round".into())
-            }
+            (Some(a), _) if a.form() == Form::Grill => (draft.words, "On the whole round".into()),
             (Some(a), _) if a.form() == Form::Hands => (
                 draft.words,
                 "What stops the job, or a note on how it went".into(),
             ),
-            _ => (draft.words, "Your thoughts, in your words".into()),
+            // The card and its Send say what the field is for.
+            _ => (draft.words, String::new()),
         };
         self.words.update(cx, |f, cx| {
             f.set_placeholder(&hint);
@@ -1398,6 +1395,7 @@ impl DeskApp {
         let read = ahjo_app_kit::theme::theme(cx).ty.read;
         let words = cx.new(|cx| {
             let f = TextField::new(cx, "Your thoughts, in your words")
+                .bare()
                 .reading()
                 .text_size(read)
                 .max_lines(tokens::WORDS_LINES)

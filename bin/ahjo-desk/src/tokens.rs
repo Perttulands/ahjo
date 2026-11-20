@@ -86,11 +86,40 @@ pub const TRACK_H: f32 = 6.;
 pub const TICK_W: f32 = 3.;
 /// A key cap's height; a chip stands a little taller, so a pointer finds it.
 pub const CAP: f32 = 22.;
-/// The most of an option's name a "Lean to" chip shows: the chips wrap,
-/// so a name reads whole unless it is a sentence.
-pub const LEAN_WORDS: usize = 72;
-/// The accent rule beside a recommendation.
-pub const RULE_W: f32 = 3.;
+/// The answer panel's measures. Its column stands in by `COLUMN_PAD`;
+/// the question breathes before its options (`BEFORE_OPTIONS`) and his
+/// answer after them (`BEFORE_ANSWER`).
+pub const COLUMN_PAD: f32 = 24.;
+pub const COLUMN_TOP: f32 = 20.;
+pub const BETWEEN_TURNS: f32 = 28.;
+pub const META_TO_TITLE: f32 = 6.;
+pub const TITLE_LEADING: f32 = 1.3;
+pub const TITLE_TO_QUESTION: f32 = 6.;
+pub const BEFORE_OPTIONS: f32 = 20.;
+pub const BETWEEN_QUESTIONS: f32 = 36.;
+pub const BEFORE_ANSWER: f32 = 20.;
+/// An option's card: its corner, its padding, the space between cards
+/// and between its lines, and the gutter its letter hangs in.
+pub const CARD_RADIUS: f32 = 8.;
+pub const CARD_PAD_X: f32 = 16.;
+pub const CARD_PAD_Y: f32 = 12.;
+pub const CARD_GAP: f32 = 8.;
+pub const CARD_LINES: f32 = 2.;
+pub const HANG: f32 = 24.;
+/// The agent's reason stands a little apart from the option's own why.
+pub const BEFORE_REASON: f32 = 6.;
+/// A chosen card's edge (`AHJO_DESK_CHOSEN=edge`), and how far the others
+/// step back (`recede`).
+pub const EDGE_W: f32 = 3.;
+pub const EDGE_INSET: f32 = 6.;
+pub const RECEDE: f32 = 0.45;
+/// His answer's card: the room around his words, its foot, and Send.
+pub const FIELD_PAD_Y: f32 = 8.;
+pub const FOOT_PAD: f32 = 8.;
+pub const SEND_H: f32 = 34.;
+/// A mark's row at the head of his answer.
+pub const MARK_GAP: f32 = 10.;
+pub const MARK_PAD_Y: f32 = 4.;
 /// How far a picture fits up: never past twice its size, so a small one
 /// is big enough to judge and still reads as itself.
 pub const FIT_MAX: f32 = 2.;
