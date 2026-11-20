@@ -2,7 +2,7 @@
 //! session so the operator can watch it and read what it said. Git is kept
 //! non-interactive even though the session has a terminal.
 
-use anyhow::{Context, Result};
+use anyhow::Result;
 
 use super::checkout::SETUP;
 use super::report::checkout_paths;
@@ -51,10 +51,22 @@ pub(crate) async fn sync_fetched(
 }
 
 pub(crate) fn checkout(home: &Home, shown: &str) -> Result<std::path::PathBuf> {
-    checkout_paths(&skills::scan(home))
-        .into_iter()
-        .find(|path| home.show(path) == shown)
-        .with_context(|| format!("{shown} is not a checkout the skills come from"))
+    let paths = checkout_paths(&skills::scan(home));
+    if let Some(path) = paths.iter().find(|path| home.show(path) == shown) {
+        return Ok(path.clone());
+    }
+    let known: Vec<String> = paths.iter().map(|path| home.show(path)).collect();
+    match known.is_empty() {
+        true => anyhow::bail!(
+            "{shown} is not a checkout the skills come from, and no skills here come from one \
+             (ahjo agents show lists what there is)"
+        ),
+        false => anyhow::bail!(
+            "{shown} is not a checkout the skills come from; they come from {} \
+             (ahjo agents show lists them)",
+            known.join(", ")
+        ),
+    }
 }
 
 /// What the session types after a successful fetch: fast-forward, then setup.

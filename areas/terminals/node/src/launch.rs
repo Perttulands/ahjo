@@ -307,7 +307,17 @@ pub async fn launch(
         .harnesses
         .iter()
         .find(|h| h.id == launch.harness)
-        .with_context(|| format!("no harness {:?}", launch.harness))?;
+        .with_context(|| {
+            let known: Vec<&str> = config.harnesses.iter().map(|h| h.id.as_str()).collect();
+            match known.is_empty() {
+                true => format!("no harness {:?}; this node has none", launch.harness),
+                false => format!(
+                    "no harness {:?}; this node's harnesses are {} (ahjo session launch --help)",
+                    launch.harness,
+                    known.join(", ")
+                ),
+            }
+        })?;
     check_name(&launch.name)?;
     check_flags(&launch.flags)?;
     let own = launch.user.is_empty();

@@ -94,6 +94,12 @@ async fn commands_and_channel_work_over_the_node() {
         .unwrap_err();
     assert_eq!(error.code, FAILED);
     assert!(error.message.contains("not a checkout"));
+    // It says where to find the ones there are.
+    assert!(
+        error.message.contains("ahjo agents show"),
+        "{}",
+        error.message
+    );
     let error = node
         .call("agents_link", json!({"checkout":"~/not-a-checkout"}))
         .await

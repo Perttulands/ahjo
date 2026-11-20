@@ -670,7 +670,10 @@ async fn launches_an_agent_in_any_folder() {
             json!({ "harness": "nope", "folder": node.folder, "name": "bad" }),
         )
         .await;
-    assert!(unknown.unwrap_err().contains("no harness"));
+    let unknown = unknown.unwrap_err();
+    assert!(unknown.contains("no harness"), "{unknown}");
+    // It names the ones there are.
+    assert!(unknown.contains("ahjo session launch --help"), "{unknown}");
     let names = node.tmux.run(&["list-sessions", "-F", "#{session_name}"]);
     assert!(!names.contains("bad"), "{names}");
     node.stop().await;

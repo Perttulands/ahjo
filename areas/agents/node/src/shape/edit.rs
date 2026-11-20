@@ -281,7 +281,7 @@ pub fn hook_edit(roots: &Roots, edit: &HookEdit) -> Result<Value, Error> {
     match edit.harness.as_str() {
         "claude" => claude_hook(roots, edit),
         "codex" => codex::hook_edit(roots, edit),
-        other => Err(invalid(format!("no harness {other:?}"))),
+        other => Err(invalid(format!("no harness {other:?}: claude or codex"))),
     }
 }
 
@@ -396,7 +396,7 @@ pub fn setting_edit(roots: &Roots, edit: &SettingEdit) -> Result<Value, Error> {
             save_json(&file, &v)?;
         }
         "codex" => codex::setting_edit(&file, &keys, &edit.value)?,
-        other => return Err(invalid(format!("no harness {other:?}"))),
+        other => return Err(invalid(format!("no harness {other:?}: claude or codex"))),
     }
     Ok(json!({"file": edit.file, "key": edit.key}))
 }
