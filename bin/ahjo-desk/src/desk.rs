@@ -57,8 +57,14 @@ pub struct Config {
     /// Tell the asking agent's session when an answer is sent, through
     /// Ahjo Swarm's node.
     pub tell_session: bool,
-    /// The waiting list folded to a strip of ids, for the picture's room.
+    /// The list of asks put away, for the answer's and the picture's room.
     pub fold_list: bool,
+    /// The list's and the answer's widths as he dragged their edges; none,
+    /// a share of the window.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub list_w: Option<f32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub talk_w: Option<f32>,
     /// The node that reaches the sessions; empty, the one Ahjo Swarm
     /// talks to.
     #[serde(skip_serializing_if = "String::is_empty")]
@@ -76,6 +82,8 @@ impl Default for Config {
             enter_sends: false,
             tell_session: true,
             fold_list: false,
+            list_w: None,
+            talk_w: None,
             node: String::new(),
             rest: Default::default(),
         }

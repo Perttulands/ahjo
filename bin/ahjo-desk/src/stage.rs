@@ -9,10 +9,11 @@
 //! selecting words marks the passage.
 
 use crate::app::{DeskApp, Drawing, Item, Pic, fit_scale};
+use crate::icons::Icon;
 use crate::marks::{self, Tool};
 use crate::model::{Ask, Mark, MediaKind};
 use crate::tokens::{self, CAP_TEXT, GAP, GAP_SMALL, META};
-use crate::views::button;
+use crate::views::{button, icon_button};
 use ahjo_app_kit::theme::{FAMILY, Theme, alpha, rgb, theme};
 use ahjo_app_kit::widgets::kit::{self, Kind};
 use ahjo_app_kit::widgets::{markdown, select};
@@ -113,116 +114,263 @@ impl DeskApp {
             self.pictures_surface(&t, &ask, key.0, &items, at, rec, window, cx)
         };
         let video = shown_item.kind() == Some(MediaKind::Video);
+        // Alone in the window the answer is not beside it: a mark's words
+        // are written over the surface, under the mark.
+        let card = if self.full {
+            self.note_card(&t, &shown_item, cx)
+        } else {
+            None
+        };
         div()
             .size_full()
             .flex()
             .flex_col()
             .bg(t.term_bg)
             .child(self.tools(&t, &shown_item, cx))
-            .child(div().flex_1().min_h_0().w_full().child(body))
+            .child(
+                div()
+                    .flex_1()
+                    .min_h_0()
+                    .w_full()
+                    .relative()
+                    .child(body)
+                    .children(card),
+            )
             .when(video, |d| d.child(self.transport(&t, &shown_item, cx)))
             .child(self.film(&t, &ask, key.0, &items, &slots, rec, zoom, cx))
             .into_any_element()
     }
 
-    /// The tools over the surface: how a press marks, for what can be
-    /// marked here.
+    /// The tools over the surface, as icons whose tooltips say their name
+    /// and key: how a press marks, and Note, a word on the whole of what
+    /// is shown. At the right, the surface alone in the window, or back.
     fn tools(&mut self, t: &Theme, item: &Item, cx: &mut Context<Self>) -> AnyElement {
         let bar = div()
             .h(px(tokens::TOOLS))
             .flex_none()
-            .px(px(GAP))
+            .px(px(GAP_SMALL))
             .flex()
             .items_center()
-            .gap(px(GAP_SMALL))
+            .gap(px(2.))
             .bg(t.surface)
             .border_b_1()
             .border_color(t.divider)
             .overflow_hidden()
             .text_size(px(META))
             .text_color(t.text2);
+        let full = icon_button(
+            t,
+            "full",
+            if self.full {
+                Icon::Shrink
+            } else {
+                Icon::Expand
+            },
+            false,
+        )
+        .tooltip(kit::tip(if self.full {
+            "Back beside the answer · F11 or Esc"
+        } else {
+            "The picture alone, full window · F11"
+        }))
+        .on_click(cx.listener(|app, _: &ClickEvent, _, cx| app.toggle_full(cx)));
+        // Alone in the window, the ask says what it is at the top.
+        let name = self.full.then(|| {
+            let ask = self.current_ask();
+            let words = ask
+                .map(|a| format!("{} · {}", a.id, a.title))
+                .unwrap_or_default();
+            div()
+                .flex_1()
+                .min_w_0()
+                .px(px(GAP))
+                .truncate()
+                .text_color(t.text2)
+                .child(words)
+        });
+        let tail = |bar: gpui::Div| match name {
+            Some(n) => bar.child(n).child(full),
+            None => bar.child(div().flex_1()).child(full),
+        };
         if item.doc {
-            return bar
-                .child(div().min_w_0().truncate().child(format!(
-                    "{} · select words to comment on them",
-                    item.media.path
-                )))
-                .into_any_element();
+            return tail(
+                bar.child(
+                    div()
+                        .px(px(GAP_SMALL))
+                        .min_w_0()
+                        .truncate()
+                        .child(item.media.path.clone()),
+                ),
+            )
+            .into_any_element();
         }
+        let read_only = self.read_only();
         if item.kind() == Some(MediaKind::Page) {
             let comment = self.page_comment;
             let inside = crate::page::INSIDE;
-            return bar
-                .when(inside, |d| {
-                    d.child(segment(t, "browse", "Browse", "V", !comment).on_click(
-                        cx.listener(|app, _: &ClickEvent, _, cx| app.set_tool(Tool::Look, cx)),
-                    ))
-                    .child(segment(t, "comment", "Comment", "P", comment).on_click(
-                        cx.listener(|app, _: &ClickEvent, _, cx| app.set_tool(Tool::Pin, cx)),
-                    ))
-                    .child(div().pl(px(GAP_SMALL)).child(if comment {
-                        "Click an element to comment on it"
-                    } else {
-                        "The page works as it would in a browser"
-                    }))
+            let bar = bar
+                .when(inside && !read_only, |d| {
+                    d.child(
+                        icon_button(t, "browse", Icon::Look, !comment)
+                            .tooltip(kit::tip("Browse · V: the page works as in a browser"))
+                            .on_click(cx.listener(|app, _: &ClickEvent, _, cx| {
+                                app.set_tool(Tool::Look, cx)
+                            })),
+                    )
+                    .child(
+                        icon_button(t, "comment", Icon::Pin, comment)
+                            .tooltip(kit::tip("Comment · P: click an element to mark it"))
+                            .on_click(cx.listener(|app, _: &ClickEvent, _, cx| {
+                                app.set_tool(Tool::Pin, cx)
+                            })),
+                    )
+                    .child(self.note_button(t, cx))
                 })
-                .child(div().flex_1())
+                .child(div().w(px(GAP_SMALL)))
                 .child(
                     button(t, "open-page", "Open in browser", Kind::Quiet)
                         .on_click(cx.listener(|app, _: &ClickEvent, _, cx| app.open_media(cx))),
-                )
-                .into_any_element();
+                );
+            return tail(bar).into_any_element();
         }
         let markable = matches!(item.kind(), Some(MediaKind::Image | MediaKind::Video));
-        if self.read_only() {
+        if read_only {
             let n = self.marks().len();
-            return bar
-                .child(match n {
-                    0 => "Answered · sent without marks".to_string(),
-                    1 => "Answered · your mark as you sent it".to_string(),
-                    n => format!("Answered · your {n} marks as you sent them"),
-                })
-                .into_any_element();
+            return tail(bar.child(div().px(px(GAP_SMALL)).child(match n {
+                0 => "Answered · sent without marks".to_string(),
+                1 => "Answered · your mark as you sent it".to_string(),
+                n => format!("Answered · your {n} marks as you sent them"),
+            })))
+            .into_any_element();
         }
         if !markable {
-            return bar
-                .child(item.media.file_name().to_string())
-                .into_any_element();
-        }
-        let mut bar = bar.child(
-            segment(
-                t,
-                "tool-look",
-                Tool::Look.name(),
-                Tool::Look.key(),
-                self.tool == Tool::Look,
+            return tail(
+                bar.child(
+                    div()
+                        .px(px(GAP_SMALL))
+                        .child(item.media.file_name().to_string()),
+                ),
             )
-            .on_click(cx.listener(|app, _: &ClickEvent, _, cx| app.set_tool(Tool::Look, cx))),
-        );
-        for tool in Tool::DRAW {
+            .into_any_element();
+        }
+        let mut bar = bar;
+        for tool in [Tool::Look].into_iter().chain(Tool::DRAW) {
             bar = bar.child(
-                segment(
+                icon_button(
                     t,
                     SharedString::from(format!("tool-{}", tool.name())),
-                    tool.name(),
-                    tool.key(),
+                    tool_icon(tool),
                     self.tool == tool,
                 )
+                .tooltip(kit::tip(format!("{} · {}", tool.name(), tool.key())))
                 .on_click(cx.listener(move |app, _: &ClickEvent, _, cx| app.set_tool(tool, cx))),
             );
         }
-        let hint = match (self.tool, item.kind()) {
-            (Tool::Look, Some(MediaKind::Video)) => "Pause anywhere and mark that frame",
-            (Tool::Look, _) => "Pick a tool to mark what you see",
-            (Tool::Pin, _) => "Click to pin a comment",
-            (Tool::Box, _) => "Drag a box around it",
-            (Tool::Arrow, _) => "Drag from the comment to the thing",
-            (Tool::Pen, _) => "Draw",
-        };
-        // A narrow stage cuts the hint with an ellipsis, never under the
-        // column beside it.
-        bar.child(div().pl(px(GAP_SMALL)).min_w_0().truncate().child(hint))
-            .into_any_element()
+        tail(
+            bar.child(div().mx(px(GAP_SMALL)).w(px(1.)).h(px(18.)).bg(t.divider))
+                .child(self.note_button(t, cx)),
+        )
+        .into_any_element()
+    }
+
+    /// Note: a word on the whole of what is shown, not on a point of it.
+    fn note_button(&self, t: &Theme, cx: &mut Context<Self>) -> gpui::Stateful<gpui::Div> {
+        let item = self.shown_item();
+        let at = self.clip_at().map(|a| a.1);
+        let on = self.selected.as_ref().is_some_and(|id| {
+            self.marks().iter().any(|m| {
+                &m.id == id
+                    && marks::is_whole(m)
+                    && item
+                        .as_ref()
+                        .is_some_and(|i| m.media.as_deref() == Some(i.media.id.as_str()))
+                    && (m.frame.is_none() || m.frame == at)
+            })
+        });
+        icon_button(t, "tool-note", Icon::Note, on)
+            .tooltip(kit::tip("Note on the whole of it · N"))
+            .on_click(cx.listener(|app, _: &ClickEvent, _, cx| app.note(cx)))
+    }
+
+    /// The selected mark's words, over the foot of the surface: how a
+    /// note is written with the surface alone in the window.
+    fn note_card(&mut self, t: &Theme, item: &Item, cx: &mut Context<Self>) -> Option<AnyElement> {
+        if self.read_only() {
+            return None;
+        }
+        let id = self.selected.clone()?;
+        let (n, m) = self.numbered().into_iter().find(|(_, m)| m.id == id)?;
+        if m.media.as_deref() != Some(item.media.id.as_str()) {
+            return None;
+        }
+        let ink = rgb(tokens::ink(m.color.as_deref()));
+        let gone = m.id.clone();
+        Some(
+            div()
+                .absolute()
+                .left_0()
+                .right_0()
+                .bottom(px(GAP))
+                .flex()
+                .justify_center()
+                .px(px(GAP))
+                .child(
+                    div()
+                        .id("note-card")
+                        .occlude()
+                        .w_full()
+                        .max_w(px(tokens::NOTE_CARD))
+                        .flex()
+                        .flex_col()
+                        .gap(px(GAP_SMALL))
+                        .p(px(GAP))
+                        .rounded(px(tokens::RADIUS + 2.))
+                        .border_1()
+                        .border_color(t.divider)
+                        .bg(alpha(t.surface, 0.97))
+                        .shadow_lg()
+                        .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                        .child(
+                            div()
+                                .flex()
+                                .items_center()
+                                .gap(px(GAP_SMALL))
+                                .text_size(px(META))
+                                .text_color(t.text2)
+                                .child(
+                                    div()
+                                        .size(px(tokens::BADGE))
+                                        .flex_none()
+                                        .rounded_full()
+                                        .flex()
+                                        .items_center()
+                                        .justify_center()
+                                        .bg(ink)
+                                        .text_color(t.term_bg)
+                                        .text_size(px(tokens::BADGE_TEXT))
+                                        .font_weight(FontWeight::BOLD)
+                                        .child(n.to_string()),
+                                )
+                                .child(marks::what(&m, None))
+                                .child(div().flex_1())
+                                .child(button(t, "note-remove", "Remove", Kind::Quiet).on_click(
+                                    cx.listener(move |app, _: &ClickEvent, _, cx| {
+                                        app.delete_mark(&gone, cx)
+                                    }),
+                                ))
+                                .child(
+                                    button(t, "note-done", "Done", Kind::Plain)
+                                        .tooltip(kit::tip("Enter"))
+                                        .on_click(cx.listener(|app, _: &ClickEvent, _, cx| {
+                                            app.select_mark(None, false, cx);
+                                            app.aim(crate::app::Aim::Surface, cx);
+                                        })),
+                                ),
+                        )
+                        .child(self.mark_note.clone()),
+                )
+                .into_any_element(),
+        )
     }
 
     /// The room the pictures had last frame (all their panels together),
@@ -234,16 +382,8 @@ impl DeskApp {
             _ => {
                 let v = window.viewport_size();
                 let (w, h) = (f32::from(v.width), f32::from(v.height));
-                let (rail, column) = tokens::columns(w);
-                let rail = if self.config.fold_list {
-                    tokens::LIST_STRIP
-                } else {
-                    rail
-                };
-                (
-                    w - rail - column,
-                    h - tokens::BAR - tokens::TOOLS - tokens::STRIP_H,
-                )
+                let (list, talk) = if self.full { (0., 0.) } else { self.columns(w) };
+                (w - list - talk, h - tokens::TOOLS - tokens::STRIP_H)
             }
         }
     }
@@ -411,17 +551,17 @@ impl DeskApp {
                         cx.notify();
                         return;
                     }
-                    if app.view.fit {
-                        // A drag from fit moves the picture at the size it is.
-                        app.view.scale = app.scale_now(natural, window);
-                        app.view.fit = false;
-                        app.view.pan = (0., 0.);
-                    }
                     app.held = Some((e.position, app.view.pan));
-                    cx.notify();
                 }),
             )
-            .on_mouse_move(cx.listener(|app, e: &MouseMoveEvent, _, cx| {
+            // The middle button moves the picture whatever the tool.
+            .on_mouse_down(
+                MouseButton::Middle,
+                cx.listener(move |app, e: &MouseDownEvent, _, _| {
+                    app.held = Some((e.position, app.view.pan));
+                }),
+            )
+            .on_mouse_move(cx.listener(move |app, e: &MouseMoveEvent, window, cx| {
                 if app.drawing.is_some() {
                     if e.pressed_button != Some(MouseButton::Left) {
                         return app.draw_end(cx);
@@ -432,15 +572,22 @@ impl DeskApp {
                     return;
                 }
                 let Some((from, pan)) = app.held else { return };
-                if e.pressed_button != Some(MouseButton::Left) {
+                if e.pressed_button.is_none() {
                     app.held = None;
                     cx.notify();
                     return;
                 }
-                app.view.pan = (
+                if app.view.fit {
+                    // A drag from fit moves the picture at the size it is;
+                    // a click alone leaves it fitted to its room.
+                    app.view.scale = app.scale_now(natural, window);
+                    app.view.fit = false;
+                }
+                let want = (
                     pan.0 + f32::from(e.position.x - from.x),
                     pan.1 + f32::from(e.position.y - from.y),
                 );
+                app.view.pan = app.kept_in_view(want);
                 cx.notify();
             }))
             .on_mouse_up(
@@ -452,8 +599,29 @@ impl DeskApp {
                     app.held = None;
                     cx.notify();
                 }),
+            )
+            .on_mouse_up(
+                MouseButton::Middle,
+                cx.listener(|app, _, _, cx| {
+                    app.held = None;
+                    cx.notify();
+                }),
             );
         (stage.into_any_element(), zoom, slots)
+    }
+
+    /// A pan that keeps some of the picture in the room: however far it is
+    /// dragged, it never slips out of sight.
+    fn kept_in_view(&self, want: (f32, f32)) -> (f32, f32) {
+        let (Some(room), Some(Some(drawn))) = (
+            self.rooms.borrow().first().copied(),
+            self.drawn_at.borrow().first().copied(),
+        ) else {
+            return want;
+        };
+        let (rw, rh) = (f32::from(room.size.width), f32::from(room.size.height));
+        let (w, h) = (f32::from(drawn.size.width), f32::from(drawn.size.height));
+        (tokens::kept(want.0, w, rw), tokens::kept(want.1, h, rh))
     }
 
     /// Where `p` falls on the first panel's picture, 0 to 1 across it;
@@ -963,14 +1131,19 @@ impl DeskApp {
                     .items_center()
                     .gap(px(GAP))
                     .children(zoom.map(|z| {
-                        div()
-                            .id("zoom")
-                            .text_size(px(META))
-                            .text_color(t.text2)
-                            .tooltip(kit::tip(
-                                "Wheel zooms at the pointer · drag moves · Z fits · 0 is 1:1 · double click goes between",
-                            ))
-                            .child(z)
+                        let fit = self.view.fit;
+                        button(t, "zoom", z, Kind::Quiet)
+                            .tooltip(kit::tip(if fit {
+                                "Click for 1:1 · wheel zooms at the pointer · drag or the middle button moves · Z fits · 0 is 1:1"
+                            } else {
+                                "Click to fit · wheel zooms at the pointer · drag or the middle button moves · Z fits · 0 is 1:1"
+                            }))
+                            .on_click(cx.listener(move |app, _: &ClickEvent, _, cx| {
+                                app.view.fit = !fit;
+                                app.view.scale = 1.;
+                                app.view.pan = (0., 0.);
+                                cx.notify();
+                            }))
                     }))
                     .when(comparable, |d| {
                         d.child(
@@ -994,27 +1167,15 @@ impl DeskApp {
     }
 }
 
-/// A tool's button: on, or not; its key beside its name.
-fn segment(
-    t: &Theme,
-    id: impl Into<gpui::ElementId>,
-    name: &str,
-    key: &str,
-    on: bool,
-) -> gpui::Stateful<gpui::Div> {
-    button(
-        t,
-        id,
-        name.to_string(),
-        if on { Kind::Primary } else { Kind::Quiet },
-    )
-    .gap(px(GAP_SMALL))
-    .child(
-        div()
-            .text_size(px(CAP_TEXT))
-            .text_color(if on { alpha(t.on_accent(), 0.7) } else { t.dim })
-            .child(key.to_string()),
-    )
+/// A tool's icon.
+fn tool_icon(tool: Tool) -> Icon {
+    match tool {
+        Tool::Look => Icon::Look,
+        Tool::Pin => Icon::Pin,
+        Tool::Box => Icon::Box,
+        Tool::Arrow => Icon::Arrow,
+        Tool::Pen => Icon::Pen,
+    }
 }
 
 /// A mark as drawn: its kind, its points on the window, its ink, whether
@@ -1043,7 +1204,11 @@ fn paint_ink(
         .iter()
         .map(|(n, m, on)| {
             (
-                m.kind.clone(),
+                if marks::is_whole(m) {
+                    "whole".into()
+                } else {
+                    m.kind.clone()
+                },
                 m.points.iter().map(|p| at(*p)).collect(),
                 rgb(tokens::ink(m.color.as_deref())),
                 *on,
@@ -1072,6 +1237,30 @@ fn paint_ink(
         } else {
             tokens::MARK_LINE
         };
+        // A note on the whole: its number inside the top left corner, and,
+        // selected, a frame around all of it.
+        if kind == "whole" {
+            if on {
+                for (width, c) in [(w + tokens::MARK_EDGE, edge), (w, color)] {
+                    window.paint_quad(quad(
+                        to,
+                        px(2.),
+                        transparent_black(),
+                        px(width),
+                        c,
+                        BorderStyle::Solid,
+                    ));
+                }
+            }
+            if let Some(n) = n {
+                let inside = point(
+                    to.origin.x + px(GAP - tokens::PIN),
+                    to.origin.y + px(tokens::BADGE + tokens::PIN / 2. + GAP),
+                );
+                badge(n, inside, color, badge_text, edge, window, cx);
+            }
+            continue;
+        }
         for (width, c) in [(w + tokens::MARK_EDGE, edge), (w, color)] {
             match (kind.as_str(), points.as_slice()) {
                 ("box" | "region", [a, b, ..]) => {

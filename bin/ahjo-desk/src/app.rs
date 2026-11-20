@@ -158,6 +158,31 @@ pub struct Drawing {
     pub at: Option<(f64, u64)>,
 }
 
+/// A column edge he drags: the list's or the answer's.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Grip {
+    List,
+    Talk,
+}
+
+/// An edge being dragged: which, where the pointer took it, and the
+/// column's width then.
+#[derive(Clone, Copy, Debug)]
+pub struct Drag {
+    pub grip: Grip,
+    pub from: f32,
+    pub width: f32,
+}
+
+/// What a row of the settings menu does.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum MenuAct {
+    Order(desk::Order),
+    Fold,
+    Refresh,
+    Settings,
+}
+
 /// Where the keyboard goes once the window is drawn next.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Aim {
@@ -192,6 +217,13 @@ pub struct DeskApp {
     config_kept: bool,
     /// The Settings view is in front of the asks.
     pub settings_open: bool,
+    /// The settings menu, open where it was asked for, and its row under
+    /// the keyboard.
+    pub menu: Option<(Point<Pixels>, usize)>,
+    /// The surface alone in the window, to look and mark at its largest.
+    pub full: bool,
+    /// A column's edge being dragged.
+    pub drag: Option<Drag>,
     /// Settings' field for the node that reaches sessions.
     pub node_field: Entity<TextField>,
     /// What the node said when last checked from Settings.
@@ -349,6 +381,9 @@ impl DeskApp {
             config,
             config_kept,
             settings_open: false,
+            menu: None,
+            full: false,
+            drag: None,
             node_field,
             node_check: None,
             pasting: 0,
@@ -538,6 +573,8 @@ impl DeskApp {
     /// draws.
     pub fn take_aim(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         match self.aim.take() {
+            // Alone in the window, the surface has no words beside it.
+            Some(Aim::Words) if self.full => window.focus(&self.focus, cx),
             Some(Aim::Words) => field::focus(&self.words, window, cx),
             Some(Aim::MarkNote) => field::focus(&self.mark_note, window, cx),
             Some(Aim::Surface) => window.focus(&self.focus, cx),
@@ -842,6 +879,43 @@ impl DeskApp {
         };
         if let Some(mark) = marks::drawn(String::new(), d.tool, &d.media, &d.points, d.at) {
             self.add_mark(mark, cx);
+        }
+    }
+
+    /// A note on the whole of what is shown, its words taking the
+    /// keyboard: one to a picture or page, one to a clip's frame; asked
+    /// again, the one there opens.
+    pub fn note(&mut self, cx: &mut Context<Self>) {
+        if self.read_only() {
+            return;
+        }
+        let Some(item) = self.shown_item() else {
+            return;
+        };
+        if item.doc {
+            // The document is marked by its words; a word on all of it is
+            // his answer.
+            return self.aim(Aim::Words, cx);
+        }
+        if let Some((_, p)) = self.player.as_mut()
+            && p.playing
+        {
+            p.pause();
+        }
+        let at = (item.kind() == Some(MediaKind::Video))
+            .then(|| self.clip_at())
+            .flatten();
+        let there = self.marks().into_iter().find(|m| {
+            marks::is_whole(m)
+                && m.media.as_deref() == Some(item.media.id.as_str())
+                && m.frame == at.map(|a| a.1)
+        });
+        match there {
+            Some(m) => {
+                self.select_mark(Some(m.id), false, cx);
+                self.aim(Aim::MarkNote, cx);
+            }
+            None => self.add_mark(marks::whole(String::new(), &item.media.id, at), cx),
         }
     }
 
@@ -1365,7 +1439,12 @@ impl DeskApp {
                 }
                 cx.notify();
             }
-            // Enter: the mark is said; back to his words.
+            // Enter: the mark is said; back to his words, or, the surface
+            // alone, back to it.
+            FieldEvent::Submit if self.full => {
+                self.select_mark(None, false, cx);
+                self.aim(Aim::Surface, cx);
+            }
             FieldEvent::Submit => self.aim(Aim::Words, cx),
             FieldEvent::SubmitAlt => self.send(Verdict::Send, window, cx),
             _ => {}
@@ -1896,9 +1975,88 @@ impl DeskApp {
         cx.notify();
     }
 
-    /// Folds the waiting list to a strip of ids, or opens it; kept.
+    /// Puts the list of asks away, or brings it back; kept.
     pub fn toggle_fold(&mut self, cx: &mut Context<Self>) {
         self.config.fold_list = !self.config.fold_list;
+        self.keep_config(cx);
+        cx.notify();
+    }
+
+    /// The surface alone in the window, or back beside the list and the
+    /// answer.
+    pub fn toggle_full(&mut self, cx: &mut Context<Self>) {
+        self.full = !self.full && self.current.is_some();
+        self.menu = None;
+        cx.notify();
+    }
+
+    /// The list's and the answer's widths in a window `wide`.
+    pub fn columns(&self, wide: f32) -> (f32, f32) {
+        tokens::columns(
+            wide,
+            !self.config.fold_list,
+            self.config.list_w,
+            self.config.talk_w,
+        )
+    }
+
+    /// Starts dragging a column's edge from `x`.
+    pub fn grab(&mut self, grip: Grip, x: f32, wide: f32, cx: &mut Context<Self>) {
+        let (list, talk) = self.columns(wide);
+        let width = match grip {
+            Grip::List => list,
+            Grip::Talk => talk,
+        };
+        self.drag = Some(Drag {
+            grip,
+            from: x,
+            width,
+        });
+        cx.notify();
+    }
+
+    /// The dragged edge follows the pointer to `x`.
+    pub fn drag_to(&mut self, x: f32, wide: f32, cx: &mut Context<Self>) {
+        let Some(d) = self.drag else { return };
+        let (list, talk) = self.columns(wide);
+        let want = d.width + x - d.from;
+        match d.grip {
+            Grip::List => {
+                self.config.list_w = Some(tokens::dragged(
+                    want,
+                    tokens::LIST_MIN,
+                    tokens::LIST_MAX,
+                    wide,
+                    talk,
+                ))
+            }
+            Grip::Talk => {
+                self.config.talk_w = Some(tokens::dragged(
+                    want,
+                    tokens::TALK_MIN,
+                    tokens::TALK_MAX,
+                    wide,
+                    list,
+                ))
+            }
+        }
+        cx.notify();
+    }
+
+    /// The edge is let go: its width is kept.
+    pub fn let_go(&mut self, cx: &mut Context<Self>) {
+        if self.drag.take().is_some() {
+            self.keep_config(cx);
+            cx.notify();
+        }
+    }
+
+    /// A column back at the width it takes before he drags it.
+    pub fn reset_width(&mut self, grip: Grip, cx: &mut Context<Self>) {
+        match grip {
+            Grip::List => self.config.list_w = None,
+            Grip::Talk => self.config.talk_w = None,
+        }
         self.keep_config(cx);
         cx.notify();
     }
@@ -1918,6 +2076,56 @@ impl DeskApp {
         self._words = subs;
         self.point_words(cx);
         self.keep_config(cx);
+        cx.notify();
+    }
+
+    /// The settings menu's rows that act, in order.
+    pub fn menu_acts(&self) -> Vec<MenuAct> {
+        desk::Order::ALL
+            .into_iter()
+            .map(MenuAct::Order)
+            .chain([MenuAct::Fold, MenuAct::Refresh, MenuAct::Settings])
+            .collect()
+    }
+
+    /// Opens the settings menu at `at` (none: shuts it).
+    pub fn open_menu(&mut self, at: Option<Point<Pixels>>, cx: &mut Context<Self>) {
+        self.menu = at.map(|p| (p, 0));
+        // Its keys come to the window, not to his words.
+        self.aim(
+            if self.menu.is_some() {
+                Aim::Surface
+            } else {
+                Aim::Words
+            },
+            cx,
+        );
+        cx.notify();
+    }
+
+    pub fn run_menu(&mut self, act: MenuAct, window: &mut Window, cx: &mut Context<Self>) {
+        self.menu = None;
+        match act {
+            MenuAct::Order(o) => self.set_order(o, cx),
+            MenuAct::Fold => self.toggle_fold(cx),
+            MenuAct::Refresh => self.refresh_all(cx),
+            MenuAct::Settings => return self.toggle_settings(window, cx),
+        }
+        self.aim(Aim::Words, cx);
+    }
+
+    /// The menu's keys: Up and Down move, Enter acts, Escape shuts it.
+    fn menu_key(&mut self, key: &str, window: &mut Window, cx: &mut Context<Self>) {
+        let Some((at, i)) = self.menu else { return };
+        let acts = self.menu_acts();
+        let n = acts.len();
+        match key {
+            "down" | "tab" => self.menu = Some((at, (i + 1) % n)),
+            "up" => self.menu = Some((at, (i + n - 1) % n)),
+            "enter" | "space" => return self.run_menu(acts[i.min(n - 1)], window, cx),
+            "escape" => return self.open_menu(None, cx),
+            _ => {}
+        }
         cx.notify();
     }
 
@@ -2009,6 +2217,10 @@ impl DeskApp {
         }
         let key = e.keystroke.key.as_str();
         let m = &e.keystroke.modifiers;
+        if self.menu.is_some() {
+            cx.stop_propagation();
+            return self.menu_key(key, window, cx);
+        }
         if m.control && !m.alt && key == "," {
             return self.toggle_settings(window, cx);
         }
@@ -2051,6 +2263,9 @@ impl DeskApp {
                 _ => {}
             }
         }
+        if key == "f11" {
+            return self.toggle_full(cx);
+        }
         if self.typing(window, cx) {
             if key == "escape" {
                 self.aim(Aim::Surface, cx);
@@ -2066,7 +2281,7 @@ impl DeskApp {
         if self.read_only()
             && matches!(
                 key,
-                "p" | "b" | "a" | "d" | "delete" | "backspace" | "enter" | "tab"
+                "p" | "b" | "a" | "d" | "n" | "delete" | "backspace" | "enter" | "tab"
             )
         {
             return;
@@ -2080,6 +2295,7 @@ impl DeskApp {
             "b" => self.set_tool(Tool::Box, cx),
             "a" => self.set_tool(Tool::Arrow, cx),
             "d" => self.set_tool(Tool::Pen, cx),
+            "n" => self.note(cx),
             "r" => self.refresh_all(cx),
             "o" => self.open_on_web(cx),
             "c" => {
@@ -2136,14 +2352,16 @@ impl DeskApp {
                     self.set_tool(Tool::Look, cx);
                 } else if self.view.side {
                     self.view.side = false;
-                } else {
+                } else if self.selected.is_some() {
                     self.select_mark(None, false, cx);
+                } else if self.full {
+                    self.full = false;
                 }
                 cx.notify();
             }
             // Anything else is him starting to write.
             "enter" | "tab" => self.aim(Aim::Words, cx),
-            _ if writes => {}
+            _ if writes || self.full => {}
             _ => {
                 if let Some(ch) = e.keystroke.key_char.clone() {
                     self.words.update(cx, |f, cx| {

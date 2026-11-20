@@ -1,22 +1,27 @@
-//! How the window is laid out: the queue on the left, the surface (what
-//! the agent published, where he marks) in the middle, and the
-//! conversation on the right: each round as a turn of the agent's, his
-//! answer to it as his turn, their comments between, and at its foot his
-//! words, always there, with his marks above them. Options and the
-//! agent's recommendation stand in the agent's turn as an aid: he can lean
-//! to one, but his words are the answer.
+//! How the window is laid out: the list of asks at the left (put away
+//! with Ctrl+B), the conversation beside it, and the surface (what the
+//! agent published, where he marks) taking the rest; each edge between
+//! them dragged where he wants it, and kept. No bar runs over the three:
+//! every row of the window is for the ask or his answer, and what is done
+//! to the whole Desk sits behind one menu. The conversation is each round
+//! as a turn of the agent's, his answer to it as his turn, their comments
+//! between, and right under it his words, with his marks above them.
+//! Options and the agent's recommendation stand in the agent's turn as an
+//! aid: he can lean to one, but his words are the answer.
 
 use crate::answer::{Said, Verdict};
-use crate::app::{Aim, DeskApp, List, Reach, Reached};
+use crate::app::{Aim, DeskApp, Grip, List, MenuAct, Reach, Reached};
+use crate::icons::Icon;
 use crate::marks;
 use crate::model::{self, Ask, Choice, Form, MediaKind, Question};
-use crate::tokens::{self, BODY, CAP_TEXT, GAP, GAP_SMALL, META, PAD};
+use crate::tokens::{self, CAP_TEXT, GAP, GAP_SMALL, META};
 use ahjo_app_kit::theme::{FAMILY, Theme, alpha, rgb, theme, ty};
 use ahjo_app_kit::widgets::kit::{self, Kind};
 use ahjo_app_kit::widgets::pane;
 use gpui::{
-    AnyElement, ClickEvent, Context, Div, FontWeight, Hsla, IntoElement, ObjectFit, Render,
-    SharedString, Stateful, StyledImage, Window, div, img, prelude::*, px, relative,
+    AnyElement, ClickEvent, Context, Div, FontWeight, Hsla, IntoElement, MouseButton,
+    MouseDownEvent, MouseMoveEvent, ObjectFit, Render, SharedString, Stateful, StyledImage, Window,
+    anchored, deferred, div, img, point, prelude::*, px, relative,
 };
 
 impl Render for DeskApp {
@@ -26,17 +31,31 @@ impl Render for DeskApp {
         self.keep_drafts(cx);
         let t = theme(cx).clone();
         let wide = f32::from(window.viewport_size().width);
-        let (rail_w, column_w) = tokens::columns(wide);
+        let (list_w, talk_w) = self.columns(wide);
         let lines = tokens::words_lines(f32::from(window.viewport_size().height), t.ty.read);
         self.words.update(cx, |f, _| f.set_max_lines(lines));
+        let shown = self.current_ask().cloned();
+        let looked = shown.is_some() && !self.items().is_empty();
+        let full = self.full && looked && !self.settings_open;
+        // Where a notice stands: over the answer, which nothing covers (a
+        // page shown inside the window lies over the surface).
+        let notice_over = if full || self.settings_open {
+            (0., wide)
+        } else if looked {
+            (list_w, talk_w)
+        } else {
+            (list_w, wide - list_w)
+        };
         let body = if self.settings_open {
             self.settings_view(&t, window, cx)
         } else if self.desks.is_empty() {
             no_desks(&t)
+        } else if full {
+            self.stage(window, cx)
         } else {
-            let main = match self.current_ask().cloned() {
+            let main = match shown {
                 None => self.all_clear(&t, cx),
-                Some(ask) if self.items().is_empty() => div()
+                Some(ask) if !looked => div()
                     .size_full()
                     .flex()
                     .justify_center()
@@ -55,29 +74,31 @@ impl Render for DeskApp {
                     .flex()
                     .child(
                         div()
+                            .w(px(talk_w))
+                            .flex_none()
+                            .h_full()
+                            .child(self.conversation(&t, &ask, window, cx)),
+                    )
+                    .child(self.grip(&t, Grip::Talk, wide, cx))
+                    .child(
+                        div()
                             .flex_1()
                             .min_w_0()
                             .h_full()
                             .child(self.stage(window, cx)),
-                    )
-                    .child(
-                        div()
-                            .w(px(column_w))
-                            .flex_none()
-                            .h_full()
-                            .border_l_1()
-                            .border_color(t.divider)
-                            .child(self.conversation(&t, &ask, window, cx)),
                     )
                     .into_any_element(),
             };
             div()
                 .size_full()
                 .flex()
-                .child(if self.config.fold_list {
-                    self.strip(&t, cx)
-                } else {
-                    self.rail(&t, rail_w, cx)
+                .when(list_w > 0., |d| {
+                    d.child(self.side_panel(&t, list_w, cx)).child(self.grip(
+                        &t,
+                        Grip::List,
+                        wide,
+                        cx,
+                    ))
                 })
                 .child(div().flex_1().min_w_0().h_full().child(main))
                 .into_any_element()
@@ -87,15 +108,15 @@ impl Render for DeskApp {
             .track_focus(&self.focus)
             .on_key_down(cx.listener(|app, e, window, cx| app.on_key(e, window, cx)))
             .size_full()
-            .flex()
-            .flex_col()
             .bg(t.bg)
             .text_color(t.text)
             .font_family(FAMILY)
             .text_size(px(META))
             .relative()
-            .child(self.header(&t, cx))
-            .child(div().flex_1().min_h_0().child(body))
+            .child(body)
+            .children(self.toast_view(&t, notice_over))
+            .children(self.menu_view(&t, cx))
+            .children(self.drag_cover(cx))
             // Ctrl+wheel a picture did not take sizes the whole app.
             .child(ahjo_app_kit::zoom::app_catch(self.app_wheel_handle(), {
                 let me = cx.entity().downgrade();
@@ -111,117 +132,269 @@ impl Render for DeskApp {
 }
 
 impl DeskApp {
-    // ---- The header ----
+    // ---- The frame: notices, the menu, the column edges ----
 
-    fn header(&mut self, t: &Theme, cx: &mut Context<Self>) -> Div {
-        let waiting = self.queue().len();
-        let known = self.reached() == Reached::Some;
-        let mut desks = div().flex().items_center().gap(px(GAP));
+    /// A notice, a moment over the column given (its left and width).
+    fn toast_view(&self, t: &Theme, (left, width): (f32, f32)) -> Option<AnyElement> {
+        let (words, error) = self.toast.clone()?;
+        Some(
+            div()
+                .absolute()
+                .top(px(tokens::TOOLS + GAP_SMALL))
+                .left(px(left))
+                .w(px(width))
+                .px(px(GAP))
+                .flex()
+                .justify_center()
+                .child(
+                    div()
+                        .id("toast")
+                        .max_w_full()
+                        .truncate()
+                        .px(px(GAP))
+                        .py(px(GAP_SMALL))
+                        .rounded(px(tokens::RADIUS + 2.))
+                        .border_1()
+                        .border_color(if error {
+                            alpha(t.error, 0.5)
+                        } else {
+                            t.divider
+                        })
+                        .bg(if error {
+                            t.surface.blend(alpha(t.error, 0.18))
+                        } else {
+                            t.raised
+                        })
+                        .shadow_md()
+                        .text_color(if error { t.error } else { t.text })
+                        .child(words),
+                )
+                .into_any_element(),
+        )
+    }
+
+    /// The settings menu: the desks and how they stand, the list's order,
+    /// and the few things done to the whole Desk. Up, Down and Enter work
+    /// it; Escape or a click beside it shuts it.
+    fn menu_view(&mut self, t: &Theme, cx: &mut Context<Self>) -> Option<AnyElement> {
+        let (at, sel) = self.menu?;
+        let acts = self.menu_acts();
+        let label = |words: &str| {
+            div()
+                .px(px(GAP))
+                .pt(px(GAP_SMALL + 2.))
+                .pb(px(2.))
+                .text_size(px(CAP_TEXT))
+                .text_color(t.dim)
+                .child(t.label_case(words))
+        };
+        let rule = || div().my(px(4.)).h(px(1.)).bg(t.divider);
+        let mut card = div()
+            .id("menu")
+            .occlude()
+            .w(px(tokens::MENU_W))
+            .py(px(4.))
+            .flex()
+            .flex_col()
+            .rounded(px(tokens::RADIUS + 2.))
+            .border_1()
+            .border_color(t.divider)
+            .bg(t.raised)
+            .shadow_lg()
+            .text_size(px(META))
+            .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+            .child(label("Desks"));
         for d in &self.desks {
             let n = d.asks.iter().filter(|a| a.is_open()).count();
-            let (dot, why) = match &d.reach {
-                Reach::Ok => (t.text2, format!("{} · {}", d.name(), d.place.url)),
-                Reach::Loading => (t.dim, format!("{} · reaching {}", d.name(), d.place.url)),
-                Reach::Failed(e) => (t.error, format!("{} · {e}", d.name())),
+            let (dot, state, ink) = match &d.reach {
+                Reach::Ok if n == 0 => (t.done, "nothing waiting".to_string(), t.dim),
+                Reach::Ok => (t.needs, format!("{n} waiting"), t.text2),
+                Reach::Loading => (t.dim, "reaching…".to_string(), t.dim),
+                Reach::Failed(e) => (t.error, e.clone(), t.error),
             };
-            desks = desks.child(
+            card = card.child(
                 div()
-                    .id(SharedString::from(format!("desk-{}", d.place.url)))
+                    .id(SharedString::from(format!("menu-desk-{}", d.place.url)))
+                    .h(px(tokens::CAP + 8.))
+                    .px(px(GAP))
                     .flex()
                     .items_center()
                     .gap(px(GAP_SMALL))
-                    .tooltip(kit::tip(why))
-                    .child(div().size(px(7.)).rounded_full().bg(dot))
-                    .child(div().text_color(t.text2).child(d.name()))
-                    .when(n > 0, |d| {
-                        d.child(div().text_color(t.dim).child(n.to_string()))
-                    }),
+                    .tooltip(kit::tip(d.place.url.clone()))
+                    .child(div().size(px(tokens::DOT)).rounded_full().bg(dot))
+                    .child(div().flex_none().child(d.name()))
+                    .child(div().flex_1())
+                    .child(div().min_w_0().truncate().text_color(ink).child(state)),
             );
         }
-        // The notice lives in the bar: a page view lies over the surface
-        // and would hide anything drawn there.
-        let toast = self.toast.as_ref().map(|(words, error)| {
-            div()
-                .min_w_0()
-                .truncate()
-                .px(px(GAP))
-                .py(px(2.))
+        card = card.child(rule()).child(label("Waiting list"));
+        for (i, act) in acts.iter().copied().enumerate() {
+            let (words, key, checked) = match act {
+                MenuAct::Order(o) => (o.label().to_string(), None, self.config.order == o),
+                MenuAct::Fold if self.config.fold_list => {
+                    ("Show the list".to_string(), Some("Ctrl B"), false)
+                }
+                MenuAct::Fold => ("Put the list away".to_string(), Some("Ctrl B"), false),
+                MenuAct::Refresh => ("Read the desks again".to_string(), Some("R"), false),
+                MenuAct::Settings => ("Settings".to_string(), Some("Ctrl ,"), false),
+            };
+            if act == MenuAct::Fold {
+                card = card.child(rule());
+            }
+            let row = div()
+                .id(("menu-row", i))
+                .mx(px(4.))
+                .h(px(tokens::CAP + 10.))
+                .px(px(GAP - 4.))
+                .flex()
+                .items_center()
+                .gap(px(GAP_SMALL))
                 .rounded(px(tokens::RADIUS))
-                .bg(if *error {
-                    alpha(t.error, 0.15)
-                } else {
-                    t.raised
-                })
-                .text_color(if *error { t.error } else { t.text })
-                .child(words.clone())
-        });
-        div()
-            .h(px(tokens::BAR))
-            .flex_none()
-            .px(px(GAP))
-            .flex()
-            .items_center()
-            .gap(px(PAD))
-            .border_b_1()
-            .border_color(t.divider)
-            .child(
+                .cursor_pointer()
+                .when(i == sel, |d| d.bg(t.accent_light()))
+                .hover(|d| d.bg(t.accent_soft()))
+                .child(
+                    div()
+                        .w(px(14.))
+                        .flex_none()
+                        .text_color(t.accent)
+                        .child(if checked { "✓" } else { "" }),
+                )
+                .child(div().flex_1().min_w_0().truncate().child(words))
+                .children(key.map(|k| {
+                    div()
+                        .flex_none()
+                        .text_size(px(CAP_TEXT))
+                        .text_color(t.dim)
+                        .child(k)
+                }))
+                .on_click(cx.listener(move |app, _: &ClickEvent, window, cx| {
+                    app.run_menu(act, window, cx)
+                }));
+            card = card.child(row);
+        }
+        Some(
+            deferred(
                 div()
-                    .flex()
-                    .items_baseline()
-                    .gap(px(GAP))
-                    .child(
-                        div()
-                            .font_family(t.ty.display)
-                            .font_weight(t.ty.display_weight)
-                            .text_size(px(BODY))
-                            .child(t.label_case("Desk")),
+                    .id("menu-shade")
+                    .absolute()
+                    .inset_0()
+                    .on_mouse_down(
+                        MouseButton::Left,
+                        cx.listener(|app, _, _, cx| app.open_menu(None, cx)),
                     )
                     .child(
-                        div()
-                            .flex()
-                            .items_baseline()
-                            .gap(px(GAP_SMALL))
-                            .child(
-                                div()
-                                    .text_size(px(tokens::COUNT))
-                                    .font_weight(FontWeight::SEMIBOLD)
-                                    .text_color(match (waiting, known) {
-                                        (_, false) => t.dim,
-                                        (0, true) => t.done,
-                                        _ => t.needs,
-                                    })
-                                    // A count nobody read is not a zero.
-                                    .child(if known {
-                                        waiting.to_string()
-                                    } else {
-                                        "–".to_string()
-                                    }),
-                            )
-                            .child(div().text_color(t.text2).child("waiting")),
+                        anchored()
+                            .position(point(at.x, at.y + px(GAP_SMALL)))
+                            .snap_to_window_with_margin(px(GAP))
+                            .child(card),
                     ),
             )
+            .with_priority(2)
+            .into_any_element(),
+        )
+    }
+
+    /// The button that opens the settings menu where it is.
+    fn menu_button(&self, t: &Theme, cx: &mut Context<Self>) -> Stateful<Div> {
+        icon_button(t, "menu-open", Icon::Settings, self.menu.is_some())
+            .tooltip(kit::tip("Desks, order and settings"))
+            .on_click(cx.listener(|app, e: &ClickEvent, _, cx| {
+                let at = if app.menu.is_some() {
+                    None
+                } else {
+                    Some(e.position())
+                };
+                app.open_menu(at, cx)
+            }))
+    }
+
+    /// The button that puts the list away or brings it back.
+    fn list_button(&self, t: &Theme, cx: &mut Context<Self>) -> Stateful<Div> {
+        let open = !self.config.fold_list;
+        icon_button(t, "list-toggle", Icon::Sidebar, false)
+            .tooltip(kit::tip(if open {
+                "Put the list away · Ctrl+B"
+            } else {
+                "Show the list · Ctrl+B"
+            }))
+            .on_click(cx.listener(|app, _: &ClickEvent, _, cx| app.toggle_fold(cx)))
+    }
+
+    /// A column's edge: a line, caught a little either side of it, that
+    /// drags the column wider or narrower; a double click puts it back.
+    fn grip(&self, t: &Theme, grip: Grip, wide: f32, cx: &mut Context<Self>) -> Div {
+        let name = match grip {
+            Grip::List => "grip-list",
+            Grip::Talk => "grip-talk",
+        };
+        let on = self.drag.is_some_and(|d| d.grip == grip);
+        let lit = t.accent_soft();
+        let hit = div()
+            .id(name)
+            .debug_selector(move || name.into())
+            .group(name)
+            .absolute()
+            .top_0()
+            .bottom_0()
+            .left(px(-tokens::GRIP_HIT / 2.))
+            .w(px(tokens::GRIP_HIT))
+            .flex()
+            .justify_center()
+            .cursor_col_resize()
             .child(
                 div()
-                    .flex_1()
-                    .min_w_0()
-                    .flex()
-                    .justify_center()
-                    .children(toast),
+                    .w(px(3.))
+                    .h_full()
+                    .when(on, |d| d.bg(lit))
+                    .group_hover(name, |d| d.bg(lit)),
             )
-            .child(desks)
-            .child(
-                button(t, "settings", "Settings", Kind::Quiet)
-                    .when(self.settings_open, |b| b.text_color(t.accent))
-                    .tooltip(kit::tip("Ctrl ,"))
-                    .on_click(cx.listener(|app, _: &ClickEvent, window, cx| {
-                        app.toggle_settings(window, cx)
-                    })),
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(move |app, e: &MouseDownEvent, _, cx| {
+                    cx.stop_propagation();
+                    if e.click_count == 2 {
+                        app.reset_width(grip, cx);
+                    } else {
+                        app.grab(grip, f32::from(e.position.x), wide, cx);
+                    }
+                }),
+            );
+        div()
+            .w(px(1.))
+            .h_full()
+            .flex_none()
+            .bg(t.divider)
+            .relative()
+            .child(deferred(hit))
+    }
+
+    /// While an edge is dragged, the whole window follows the pointer, so
+    /// it never slips off the thin edge.
+    fn drag_cover(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        self.drag?;
+        Some(
+            deferred(
+                div()
+                    .id("drag-cover")
+                    .absolute()
+                    .inset_0()
+                    .cursor_col_resize()
+                    .on_mouse_move(cx.listener(|app, e: &MouseMoveEvent, window, cx| {
+                        if e.pressed_button != Some(MouseButton::Left) {
+                            return app.let_go(cx);
+                        }
+                        let wide = f32::from(window.viewport_size().width);
+                        app.drag_to(f32::from(e.position.x), wide, cx)
+                    }))
+                    .on_mouse_up(
+                        MouseButton::Left,
+                        cx.listener(|app, _, _, cx| app.let_go(cx)),
+                    ),
             )
-            .child(
-                button(t, "refresh", "Refresh", Kind::Quiet)
-                    .tooltip(kit::tip("R"))
-                    .on_click(cx.listener(|app, _: &ClickEvent, _, cx| app.refresh_all(cx))),
-            )
+            .with_priority(3)
+            .into_any_element(),
+        )
     }
 
     /// Nothing to answer: every desk read and none waiting, the desks
@@ -246,7 +419,7 @@ impl DeskApp {
                 .gap(px(GAP_SMALL))
                 .text_center()
         };
-        match self.reached() {
+        let body = match self.reached() {
             Reached::Some => pane::vacant(
                 t,
                 "All clear. Nobody is waiting on you; a new ask shows here as an agent posts it.",
@@ -269,12 +442,33 @@ impl DeskApp {
                 ),
             )
             .into_any_element(),
-        }
+        };
+        // With the list away, its way back and the menu stand at the top.
+        div()
+            .size_full()
+            .relative()
+            .child(body)
+            .when(self.config.fold_list, |d| {
+                d.child(
+                    div()
+                        .absolute()
+                        .top(px(GAP_SMALL))
+                        .left(px(GAP_SMALL))
+                        .flex()
+                        .gap(px(2.))
+                        .child(self.list_button(t, cx))
+                        .child(self.menu_button(t, cx)),
+                )
+            })
+            .into_any_element()
     }
 
-    // ---- The queue ----
+    // ---- The list of asks ----
 
-    fn rail(&mut self, t: &Theme, width: f32, cx: &mut Context<Self>) -> AnyElement {
+    /// The list at the window's left, as the web desk has it: each ask by
+    /// its kind, its title in words to read, where it comes from and how
+    /// long it has waited, its picture beside. Put away with Ctrl+B.
+    fn side_panel(&mut self, t: &Theme, width: f32, cx: &mut Context<Self>) -> AnyElement {
         let queue = self.listed();
         let answered_list = self.list == List::Answered;
         let mut rows = Vec::new();
@@ -298,7 +492,7 @@ impl DeskApp {
                 _ => None,
             });
             let desk = self.desks[k.0].name();
-            let mut meta = vec![kind_word(&ask).to_string()];
+            let mut meta = vec![format!("{desk} {}", ask.id)];
             if ask.round() > 1 {
                 meta.push(format!("round {}", ask.round()));
             }
@@ -322,136 +516,142 @@ impl DeskApp {
             {
                 meta.push("clip".into());
             }
-            match &ask.answer {
-                Some(a) if answered_list => {
-                    meta = vec![verdict_words(a, &ask), age(&a.at)];
-                }
-                _ => meta.push(age(&ask.created_at)),
-            }
+            let (kind, when) = match &ask.answer {
+                Some(a) if answered_list => (verdict_words(a, &ask), age(&a.at)),
+                _ => (kind_word(&ask).to_string(), age(&ask.created_at)),
+            };
             let key = k.clone();
             let url = &self.desks[k.0].place.url;
             let started = self
                 .drafts
                 .iter()
                 .any(|((d, id, _), draft)| d == url && *id == k.1 && draft.touched());
-            let thumb = thumb.filter(|_| width >= tokens::RAIL_THUMBS);
+            let thumb = thumb.filter(|_| width >= tokens::LIST_THUMBS);
             rows.push(
                 div()
                     .id(("row", i))
                     .flex()
-                    .flex_col()
-                    .gap(px(2.))
-                    .px(px(GAP))
-                    .py(px(GAP_SMALL + 2.))
-                    .border_l_2()
-                    .border_color(if on {
-                        t.accent
-                    } else {
-                        gpui::transparent_black()
+                    .gap(px(GAP))
+                    .pl(px(GAP + 2.))
+                    .pr(px(GAP))
+                    .py(px(GAP - 2.))
+                    .relative()
+                    .border_b_1()
+                    .border_color(t.divider)
+                    .when(on, |d| {
+                        d.bg(t.accent_light()).child(
+                            div()
+                                .absolute()
+                                .left_0()
+                                .top_0()
+                                .bottom_0()
+                                .w(px(2.))
+                                .bg(t.accent),
+                        )
                     })
-                    .when(on, |d| d.bg(t.accent_light()))
                     .hover(|d| d.bg(t.accent_soft()))
                     .cursor_pointer()
                     .child(
                         div()
+                            .flex_1()
+                            .min_w_0()
                             .flex()
-                            .gap(px(GAP))
+                            .flex_col()
+                            .gap(px(3.))
                             .child(
                                 div()
-                                    .flex_1()
-                                    .min_w_0()
                                     .flex()
-                                    .flex_col()
-                                    .gap(px(2.))
+                                    .items_center()
+                                    .gap(px(GAP_SMALL))
+                                    .text_size(px(CAP_TEXT))
                                     .child(
                                         div()
-                                            .flex()
-                                            .items_center()
-                                            .gap(px(GAP_SMALL))
-                                            .text_size(px(META))
-                                            .child(
-                                                div()
-                                                    .flex_none()
-                                                    .size(px(8.))
-                                                    .rounded(px(2.))
-                                                    .bg(t.identity_of(&desk)),
-                                            )
-                                            .child(
-                                                div()
-                                                    .flex_none()
-                                                    .text_color(t.text2)
-                                                    .child(format!("{desk} {}", ask.id)),
-                                            )
-                                            .when(started, |d| {
-                                                d.child(
-                                                    div()
-                                                        .min_w_0()
-                                                        .truncate()
-                                                        .text_color(t.accent)
-                                                        .child("· your draft"),
-                                                )
-                                            }),
+                                            .flex_none()
+                                            .font_weight(FontWeight::SEMIBOLD)
+                                            .text_color(if on { t.accent } else { t.text2 })
+                                            .child(t.label_case(&kind)),
                                     )
+                                    .when(started, |d| {
+                                        d.child(
+                                            div()
+                                                .min_w_0()
+                                                .truncate()
+                                                .text_color(t.accent)
+                                                .child("· your draft"),
+                                        )
+                                    })
+                                    .child(div().flex_1())
+                                    .child(div().flex_none().text_color(t.dim).child(when)),
+                            )
+                            .child(
+                                div()
+                                    .line_clamp(3)
+                                    .text_ellipsis()
+                                    .font_family(t.ty.reading)
+                                    .text_size(px(t.ty.read))
+                                    .line_height(relative(1.3))
+                                    .font_weight(if on {
+                                        FontWeight::SEMIBOLD
+                                    } else {
+                                        FontWeight::MEDIUM
+                                    })
+                                    .child(ask.title.clone()),
+                            )
+                            .child(
+                                div()
+                                    .flex()
+                                    .items_center()
+                                    .gap(px(GAP_SMALL))
+                                    .text_size(px(CAP_TEXT))
+                                    .text_color(t.dim)
                                     .child(
                                         div()
-                                            .line_clamp(2)
-                                            .text_ellipsis()
-                                            .font_family(t.ty.reading)
-                                            .text_size(px(t.ty.read))
-                                            .line_height(relative(1.3))
-                                            .font_weight(if on {
-                                                FontWeight::SEMIBOLD
-                                            } else {
-                                                FontWeight::NORMAL
-                                            })
-                                            .child(ask.title.clone()),
-                                    ),
-                            )
-                            .when_some(thumb, |d, (image, (w, h))| {
-                                d.child(
-                                    div()
-                                        .flex_none()
-                                        .w(px(tokens::ROW_THUMB_W))
-                                        .h(px(tokens::ROW_THUMB_H))
-                                        .flex()
-                                        .items_center()
-                                        .justify_center()
-                                        .rounded(px(tokens::RADIUS))
-                                        .overflow_hidden()
-                                        .bg(t.raised)
-                                        // The whole picture at its own shape, sized
-                                        // here: a portrait showed only its top half.
-                                        .child(
-                                            img(image)
-                                                .w(px(w))
-                                                .h(px(h))
-                                                .object_fit(ObjectFit::Fill),
-                                        ),
-                                )
-                            }),
+                                            .flex_none()
+                                            .size(px(7.))
+                                            .rounded(px(2.))
+                                            .bg(t.identity_of(&desk)),
+                                    )
+                                    .child(div().min_w_0().truncate().child(meta.join(" · "))),
+                            ),
                     )
-                    // Under the title and its picture, so the picture never
-                    // cuts what the ask is and how long it has waited.
-                    .child(
-                        div()
-                            .text_size(px(META))
-                            .text_color(t.dim)
-                            .truncate()
-                            .child(meta.join(" · ")),
-                    )
+                    .when_some(thumb, |d, (image, (w, h))| {
+                        d.child(
+                            div()
+                                .flex_none()
+                                .mt(px(2.))
+                                .w(px(tokens::ROW_THUMB_W))
+                                .h(px(tokens::ROW_THUMB_H))
+                                .flex()
+                                .items_center()
+                                .justify_center()
+                                .rounded(px(tokens::RADIUS))
+                                .overflow_hidden()
+                                .bg(t.raised)
+                                // The whole picture at its own shape, sized
+                                // here: a portrait showed only its top half.
+                                .child(img(image).w(px(w)).h(px(h)).object_fit(ObjectFit::Fill)),
+                        )
+                    })
                     .on_click(cx.listener(move |app, _: &ClickEvent, _, cx| {
                         app.open(Some(key.clone()), cx)
                     })),
             );
         }
+        let failed: Vec<(String, String)> = self
+            .desks
+            .iter()
+            .filter_map(|d| match &d.reach {
+                Reach::Failed(e) => Some((d.name(), e.clone())),
+                _ => None,
+            })
+            .collect();
         div()
+            .id("list")
             .w(px(width))
             .flex_none()
             .h_full()
             .flex()
             .flex_col()
-            .border_r_1()
-            .border_color(t.divider)
             .bg(t.surface)
             .child(self.lists(t, cx))
             .child(
@@ -461,54 +661,91 @@ impl DeskApp {
                     .min_h_0()
                     .overflow_y_scroll()
                     .children(rows)
-                    .when(answered_list && queue.is_empty(), |d| {
-                        d.child(
-                            div()
-                                .p(px(GAP))
-                                .text_color(t.dim)
-                                .child("Nothing answered here yet."),
-                        )
+                    .when(queue.is_empty(), |d| {
+                        d.child(div().p(px(GAP)).text_color(t.dim).child(if answered_list {
+                            "Nothing answered here yet."
+                        } else {
+                            "Nothing waiting."
+                        }))
                     }),
             )
+            // A desk that does not answer says so where its asks would be.
+            .children((!failed.is_empty()).then(|| {
+                div()
+                    .flex_none()
+                    .p(px(GAP))
+                    .flex()
+                    .flex_col()
+                    .gap(px(4.))
+                    .border_t_1()
+                    .border_color(t.divider)
+                    .text_size(px(CAP_TEXT))
+                    .children(failed.into_iter().map(|(name, e)| {
+                        div()
+                            .flex()
+                            .gap(px(GAP_SMALL))
+                            .child(div().flex_none().text_color(t.error).child(name))
+                            .child(div().min_w_0().truncate().text_color(t.text2).child(e))
+                    }))
+            }))
             .into_any_element()
     }
 
-    /// The two lists: what waits on him, quickest first, and what he
-    /// answered, the last first.
+    /// The list's head: what waits on him and what he answered, the
+    /// menu, and the way to put the list away.
     fn lists(&mut self, t: &Theme, cx: &mut Context<Self>) -> Div {
         let waiting = self.queue().len();
         let answered = self.answered().len();
-        let tab = |id: &'static str, words: String, on: bool| {
+        let known = self.reached() == Reached::Some;
+        let tab = |id: &'static str, words: &'static str, n: String, on: bool, hot: bool| {
             div()
                 .id(id)
-                .h(px(tokens::CAP + 4.))
+                .h(px(tokens::CAP + 8.))
                 .px(px(GAP_SMALL + 2.))
                 .flex()
                 .items_center()
+                .gap(px(GAP_SMALL))
                 .rounded(px(tokens::RADIUS))
                 .cursor_pointer()
                 .when(on, |d| d.bg(t.accent_light()).text_color(t.text))
-                .when(!on, |d| d.text_color(t.dim).hover(|d| d.text_color(t.text)))
+                .when(!on, |d| {
+                    d.text_color(t.text2).hover(|d| d.text_color(t.text))
+                })
                 .child(words)
+                .child(
+                    div()
+                        .font_weight(FontWeight::SEMIBOLD)
+                        .text_color(if hot { t.needs } else { t.dim })
+                        .child(n),
+                )
         };
         div()
+            .flex_none()
+            .h(px(tokens::TOOLS))
             .px(px(GAP_SMALL))
-            .py(px(GAP_SMALL))
             .flex()
             .items_center()
-            .gap(px(4.))
+            .gap(px(2.))
             .border_b_1()
             .border_color(t.divider)
             .text_size(px(META))
             .child(
+                // A count nobody read is not a zero.
                 tab(
                     "list-waiting",
-                    format!("Waiting {waiting}"),
+                    "Waiting",
+                    if known {
+                        waiting.to_string()
+                    } else {
+                        "–".into()
+                    },
                     self.list == List::Waiting,
+                    known && waiting > 0,
                 )
-                .tooltip(kit::tip(
-                    "Quickest first · J and K step, Ctrl+PgDn from anywhere",
-                ))
+                .tooltip(kit::tip(format!(
+                    "{} · J and K step, Ctrl+PgDn from anywhere",
+                    self.config.order.label()
+                )))
                 .on_click(
                     cx.listener(|app, _: &ClickEvent, _, cx| app.set_list(List::Waiting, cx)),
                 ),
@@ -516,8 +753,10 @@ impl DeskApp {
             .child(
                 tab(
                     "list-answered",
-                    format!("Answered {answered}"),
+                    "Answered",
+                    answered.to_string(),
                     self.list == List::Answered,
+                    false,
                 )
                 .tooltip(kit::tip("What you sent, the last first, to read again"))
                 .on_click(
@@ -525,87 +764,8 @@ impl DeskApp {
                 ),
             )
             .child(div().flex_1())
-            .child(
-                tab("fold-list", "‹".into(), false)
-                    .tooltip(kit::tip("Fold the list to give the picture room · Ctrl+B"))
-                    .on_click(cx.listener(|app, _: &ClickEvent, _, cx| app.toggle_fold(cx))),
-            )
-    }
-
-    /// The list folded to a strip: each ask by its id, the one in front
-    /// lit, its title on hover; a click opens one.
-    fn strip(&mut self, t: &Theme, cx: &mut Context<Self>) -> AnyElement {
-        let listed = self.listed();
-        let mut col = div()
-            .id("strip")
-            .flex_1()
-            .min_h_0()
-            .overflow_y_scroll()
-            .flex()
-            .flex_col()
-            .items_center()
-            .gap(px(GAP_SMALL))
-            .py(px(GAP_SMALL));
-        for key in listed {
-            let Some(a) = self.ask(&key) else { continue };
-            let on = self.current.as_ref() == Some(&key);
-            let name = self.desks[key.0].name();
-            let id = a.id.clone();
-            let open = key.clone();
-            col = col.child(
-                div()
-                    .id(SharedString::from(format!("strip-{}-{id}", key.0)))
-                    .w(px(tokens::LIST_STRIP - 12.))
-                    .py(px(6.))
-                    .flex()
-                    .flex_col()
-                    .items_center()
-                    .gap(px(3.))
-                    .rounded(px(tokens::RADIUS))
-                    .cursor_pointer()
-                    .when(on, |d| d.bg(t.accent_light()).text_color(t.text))
-                    .when(!on, |d| {
-                        d.text_color(t.text2).hover(|d| d.bg(t.accent_soft()))
-                    })
-                    .tooltip(kit::tip(format!("{name} {id} · {}", a.title)))
-                    .child(div().size(px(8.)).rounded(px(2.)).bg(t.identity_of(&name)))
-                    .child(div().text_size(px(META)).child(id))
-                    .on_click(cx.listener(move |app, _: &ClickEvent, _, cx| {
-                        app.open(Some(open.clone()), cx)
-                    })),
-            );
-        }
-        let n = self.listed().len();
-        div()
-            .w(px(tokens::LIST_STRIP))
-            .flex_none()
-            .h_full()
-            .flex()
-            .flex_col()
-            .border_r_1()
-            .border_color(t.divider)
-            .bg(t.surface)
-            .child(
-                div()
-                    .id("unfold-list")
-                    .h(px(tokens::CAP + 4.))
-                    .m(px(GAP_SMALL))
-                    .flex()
-                    .items_center()
-                    .justify_center()
-                    .gap(px(4.))
-                    .rounded(px(tokens::RADIUS))
-                    .cursor_pointer()
-                    .text_size(px(META))
-                    .bg(t.accent_light())
-                    .hover(|d| d.bg(t.accent_soft()))
-                    .tooltip(kit::tip("Open the list · Ctrl+B"))
-                    .child(n.to_string())
-                    .child(div().text_color(t.dim).child("›"))
-                    .on_click(cx.listener(|app, _: &ClickEvent, _, cx| app.toggle_fold(cx))),
-            )
-            .child(col)
-            .into_any_element()
+            .child(self.menu_button(t, cx))
+            .child(self.list_button(t, cx))
     }
 
     // ---- The conversation ----
@@ -637,10 +797,12 @@ impl DeskApp {
             .child(self.agent_turn(t, ask, open, cx))
             .children(ask.comments.iter().map(|c| comment(t, c)))
             .children((!open).then(|| his_turn(t, ask, pics)));
+        let folded = self.config.fold_list;
         let head = div()
             .flex_none()
             .h(px(tokens::TOOLS))
-            .px(px(GAP))
+            .pl(px(if folded { GAP_SMALL } else { GAP }))
+            .pr(px(GAP_SMALL))
             .flex()
             .items_center()
             .gap(px(GAP_SMALL))
@@ -649,6 +811,12 @@ impl DeskApp {
             .border_color(t.divider)
             .text_size(px(META))
             .text_color(t.text2)
+            // With the list away, its way back and the menu stand here.
+            .when(folded, |d| {
+                d.child(self.list_button(t, cx))
+                    .child(self.menu_button(t, cx))
+                    .child(div().w(px(GAP_SMALL)))
+            })
             .child(
                 div()
                     .flex_none()
@@ -664,9 +832,8 @@ impl DeskApp {
                 ask.bead
             )))
             .child(
-                button(t, "web", "Open on web", Kind::Quiet)
-                    .flex_none()
-                    .tooltip(kit::tip("O · the web desk, on this ask"))
+                icon_button(t, "web", Icon::External, false)
+                    .tooltip(kit::tip("Open on the web desk · O"))
                     .on_click(cx.listener(|app, _: &ClickEvent, _, cx| app.open_on_web(cx))),
             );
         div()
@@ -676,9 +843,11 @@ impl DeskApp {
             .bg(t.bg)
             .child(head)
             .child(
+                // The answer follows the question rather than waiting at
+                // the window's foot; a long conversation scrolls above it.
                 div()
                     .id("turns")
-                    .flex_1()
+                    .flex_initial()
                     .min_h_0()
                     .overflow_y_scroll()
                     .child(turns),
@@ -689,6 +858,7 @@ impl DeskApp {
             } else {
                 sent_note(t, ask)
             })
+            .child(div().flex_1())
             .into_any_element()
     }
 
@@ -1776,6 +1946,35 @@ fn key_letter(t: &Theme, letter: &str, on: bool) -> Div {
         .font_weight(FontWeight::BOLD)
         .text_size(px(META))
         .child(letter.to_string())
+}
+
+/// A square button holding an icon: lit when `on`; its name and key go
+/// in its tooltip.
+pub fn icon_button(
+    t: &Theme,
+    id: impl Into<gpui::ElementId>,
+    icon: Icon,
+    on: bool,
+) -> Stateful<Div> {
+    let (ink, hover) = (t.text2, t.text);
+    div()
+        .id(id)
+        .flex_none()
+        .size(px(tokens::ICON_BUTTON))
+        .flex()
+        .items_center()
+        .justify_center()
+        .rounded(px(tokens::RADIUS + 1.))
+        .cursor_pointer()
+        .when(on, |d| {
+            d.bg(t.accent).child(icon.draw(tokens::ICON, t.on_accent()))
+        })
+        .when(!on, |d| {
+            d.hover(|d| d.bg(t.accent_soft())).group("icon").child(
+                icon.draw(tokens::ICON, ink)
+                    .group_hover("icon", |d| d.text_color(hover)),
+            )
+        })
 }
 
 /// The kit's button, its words at the Desk's size.

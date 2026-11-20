@@ -19,31 +19,42 @@ pub const META: f32 = ty::TITLE;
 /// item's letter. The chrome's text size, never under it.
 pub const CAP_TEXT: f32 = size::TEXT;
 
-/// Type: the ask's title, and the Desk's own name in its bar. Words to
-/// read are the theme's reading size (`Theme::ty.read`).
+/// Type: the ask's title. Words to read are the theme's reading size
+/// (`Theme::ty.read`).
 pub const TITLE: f32 = 18.;
 pub const BODY: f32 = 14.;
-/// A number worth reading at a glance (the waiting count).
-pub const COUNT: f32 = 20.;
 
-/// The header bar, as high as Ahjo Swarm's tab bar, and the surface's tool bar.
-pub const BAR: f32 = size::TAB_BAR;
-pub const TOOLS: f32 = 40.;
+/// The row atop each column: the list's tabs, the ask's name, the
+/// surface's tools. One height, so the three read as one line.
+pub const TOOLS: f32 = 44.;
 pub const GAP: f32 = 12.;
 pub const GAP_SMALL: f32 = 6.;
-/// The conversation beside the surface, and the queue rail.
-pub const COLUMN: f32 = 460.;
-pub const RAIL: f32 = 360.;
-/// In a narrow window both give way so the surface keeps the most room:
-/// never narrower than these, and the window never narrower than
-/// [`WINDOW_MIN`].
-pub const COLUMN_MIN: f32 = 320.;
-pub const RAIL_MIN: f32 = 216.;
-pub const RAIL_SHARE: f32 = 0.21;
-pub const COLUMN_SHARE: f32 = 0.32;
+/// An icon, and the square button around it.
+pub const ICON: f32 = 18.;
+pub const ICON_BUTTON: f32 = 32.;
+
+/// The three columns: the list of asks, the answer, and the surface,
+/// in that order. The list and the answer stand at these until he drags
+/// their edges; then at what he dragged them to.
+pub const LIST: f32 = 340.;
+pub const LIST_SHARE: f32 = 0.18;
+pub const LIST_MIN: f32 = 240.;
+pub const LIST_MAX: f32 = 560.;
+pub const TALK: f32 = 680.;
+pub const TALK_SHARE: f32 = 0.34;
+pub const TALK_MIN: f32 = 400.;
+pub const TALK_MAX: f32 = 1100.;
+/// The least the surface keeps: the answer gives way first, then the list.
+pub const STAGE_MIN: f32 = 360.;
+/// A column's edge is caught this wide, either side of its line.
+pub const GRIP_HIT: f32 = 10.;
 pub const WINDOW_MIN: (f32, f32) = (880., 560.);
-/// Under this width a queue row drops its picture: its words need the room.
-pub const RAIL_THUMBS: f32 = 260.;
+/// Under this width a list row drops its picture: its words need the room.
+pub const LIST_THUMBS: f32 = 280.;
+/// The settings menu.
+pub const MENU_W: f32 = 300.;
+/// A mark's words written over the surface, with it alone in the window.
+pub const NOTE_CARD: f32 = 640.;
 /// How wide the conversation stands when there is nothing to look at, and
 /// how wide the document reads.
 pub const READING: f32 = 820.;
@@ -62,9 +73,9 @@ pub const SETTINGS_FIELD: f32 = 320.;
 pub const THEME_CARD: f32 = 160.;
 /// The list of his marks before it scrolls.
 pub const MARKS_MAX_H: f32 = 220.;
-/// A queue row's picture.
-pub const ROW_THUMB_W: f32 = 64.;
-pub const ROW_THUMB_H: f32 = 44.;
+/// A list row's picture.
+pub const ROW_THUMB_W: f32 = 72.;
+pub const ROW_THUMB_H: f32 = 54.;
 /// The film strip's pictures under the surface.
 pub const STRIP_H: f32 = 64.;
 pub const STRIP_THUMB_W: f32 = 96.;
@@ -87,6 +98,17 @@ pub const FIT_MAX: f32 = 2.;
 pub const ZOOM_MIN: f32 = 0.05;
 pub const ZOOM_MAX: f32 = 32.;
 pub const ZOOM_STEP: f32 = 1.25;
+/// How much of a picture stays in sight however far it is moved.
+pub const KEEP_SEEN: f32 = 96.;
+
+/// A picture `size` long, moved `pan` from the middle of a room `room`
+/// long, kept so at least [`KEEP_SEEN`] of it (or all of it, when it is
+/// smaller) stays in the room.
+pub fn kept(pan: f32, size: f32, room: f32) -> f32 {
+    let most = ((size + room) / 2. - KEEP_SEEN.min(size)).max(0.);
+    pan.clamp(-most, most)
+}
+
 /// Room around the surface's pictures.
 pub const STAGE_PAD: f32 = 16.;
 /// How long a notice stays.
@@ -115,12 +137,8 @@ pub const VIDEO_BEHIND: usize = 90;
 /// Pictures kept decoded, in bytes.
 pub const PICTURE_CACHE: usize = 900 << 20;
 
-/// The queue rail's and the conversation's widths in a window `wide`.
 /// The least a clip's track narrows to, so it can still be sought.
 pub const TRACK_MIN: f32 = 96.;
-
-/// The waiting list folded: a strip of ids.
-pub const LIST_STRIP: f32 = 64.;
 
 /// The share of the window's height his words may take before they
 /// scroll: a short window keeps the question in sight above them.
@@ -132,11 +150,35 @@ pub fn words_lines(tall: f32, read: f32) -> usize {
     ((tall * WORDS_SHARE / (read * 1.5)).floor() as usize).clamp(3, WORDS_LINES)
 }
 
-pub fn columns(wide: f32) -> (f32, f32) {
-    (
-        (wide * RAIL_SHARE).clamp(RAIL_MIN, RAIL),
-        (wide * COLUMN_SHARE).clamp(COLUMN_MIN, COLUMN),
-    )
+/// The list's and the answer's widths in a window `wide`: as he dragged
+/// them (`list`, `talk`), else a share of the window; the list none when
+/// it is put away. However they were dragged, the surface keeps
+/// [`STAGE_MIN`]: the answer gives way first, then the list.
+pub fn columns(wide: f32, open: bool, list: Option<f32>, talk: Option<f32>) -> (f32, f32) {
+    let list = if open {
+        list.unwrap_or((wide * LIST_SHARE).clamp(LIST_MIN, LIST))
+            .clamp(LIST_MIN, LIST_MAX)
+    } else {
+        0.
+    };
+    let talk = talk
+        .unwrap_or((wide * TALK_SHARE).clamp(TALK_MIN, TALK))
+        .clamp(TALK_MIN, TALK_MAX);
+    let over = (list + talk + STAGE_MIN - wide).max(0.);
+    let talk = (talk - over).max(TALK_MIN);
+    let over = (list + talk + STAGE_MIN - wide).max(0.);
+    let list = if open {
+        (list - over).max(LIST_MIN)
+    } else {
+        0.
+    };
+    (list, talk)
+}
+
+/// A column's width as its edge is dragged to `want`: within its own
+/// bounds, and leaving the surface [`STAGE_MIN`] beside `others`.
+pub fn dragged(want: f32, least: f32, most: f32, wide: f32, others: f32) -> f32 {
+    want.min(most).min(wide - others - STAGE_MIN).max(least)
 }
 
 /// A mark's ink as the store keeps it (`#rrggbb`), else [`MARK_INK`].
@@ -192,13 +234,48 @@ mod tests {
     use super::*;
 
     #[test]
-    fn the_surface_keeps_room_in_a_narrow_window() {
-        // Full screen: both stand at their full measure.
-        assert_eq!(columns(1920.), (RAIL, COLUMN));
-        // At the narrowest window the surface still has a third of it.
-        let (rail, column) = columns(WINDOW_MIN.0);
-        assert!(rail >= RAIL_MIN && column >= COLUMN_MIN);
-        assert!(WINDOW_MIN.0 - rail - column >= WINDOW_MIN.0 / 3.);
+    fn the_surface_keeps_room_however_the_columns_were_dragged() {
+        // Full HD, never dragged: the list at its measure, the answer a
+        // third, the picture the rest and the most.
+        let (list, talk) = columns(1920., true, None, None);
+        assert_eq!(list, LIST);
+        assert!(1920. - list - talk > talk);
+        // A laptop: the picture still has more than a third.
+        let (list, talk) = columns(1366., true, None, None);
+        assert!(1366. - list - talk > 1366. / 3.);
+        // Dragged wide on a big screen, then the window made small: the
+        // answer gives way first, and the picture keeps its least.
+        let (list, talk) = columns(1366., true, Some(500.), Some(1000.));
+        assert_eq!(list, 500.);
+        assert_eq!(1366. - list - talk, STAGE_MIN);
+        // The list put away gives its room to the others.
+        assert_eq!(columns(1366., false, Some(500.), None).0, 0.);
+        // The narrowest window still lays out, each at its least.
+        let (list, talk) = columns(WINDOW_MIN.0, true, Some(LIST_MAX), Some(TALK_MAX));
+        assert_eq!((list, talk), (LIST_MIN, TALK_MIN));
+    }
+
+    #[test]
+    fn a_moved_picture_never_leaves_the_room() {
+        // A big picture in a small room: up to all but a strip of it out.
+        assert_eq!(kept(10_000., 4000., 1000.), 2500. - KEEP_SEEN);
+        assert_eq!(kept(-10_000., 4000., 1000.), -(2500. - KEEP_SEEN));
+        // Within that, it goes where it is put.
+        assert_eq!(kept(300., 4000., 1000.), 300.);
+        // A small one stays wholly seen at the room's edge.
+        assert_eq!(kept(10_000., 50., 1000.), 475.);
+    }
+
+    #[test]
+    fn a_dragged_edge_stays_in_bounds() {
+        assert_eq!(dragged(100., LIST_MIN, LIST_MAX, 1920., 600.), LIST_MIN);
+        assert_eq!(dragged(900., LIST_MIN, LIST_MAX, 1920., 600.), LIST_MAX);
+        // Never over the surface's least.
+        assert_eq!(dragged(1500., TALK_MIN, TALK_MAX, 1920., 340.), TALK_MAX);
+        assert_eq!(
+            dragged(1500., TALK_MIN, TALK_MAX, 1366., 340.),
+            1366. - 340. - STAGE_MIN
+        );
     }
 
     #[test]
@@ -215,9 +292,9 @@ mod tests {
 
     #[test]
     fn compared_pictures_use_the_height() {
-        // Full screen, the stage between the list and the conversation.
-        let (rail, column) = columns(1920.);
-        let room = (1920. - rail - column, 1080. - BAR - TOOLS - STRIP_H);
+        // Full HD, the stage beside the list and the answer.
+        let (list, talk) = columns(1920., true, None, None);
+        let room = (1920. - list - talk, 1080. - TOOLS - STRIP_H);
         // Three wide pictures stack, each still readable, rather than leave
         // a hole in a square.
         let (cols, least) = grid(3, room, 16. / 9., 2.);

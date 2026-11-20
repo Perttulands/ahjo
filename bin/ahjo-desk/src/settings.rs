@@ -135,8 +135,8 @@ impl DeskApp {
             ))
             .child(row(
                 t,
-                "Fold the waiting list",
-                "A strip of ids beside the picture, which gets the room. Ctrl+B anywhere.",
+                "Put the list away",
+                "The answer and the picture take its room. Ctrl+B anywhere.",
                 kit::toggle(t, "fold-list-setting", self.config.fold_list)
                     .on_click(cx.listener(|app, _: &ClickEvent, _, cx| app.toggle_fold(cx))),
             ))
