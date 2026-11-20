@@ -44,6 +44,7 @@ pub enum Code {
     UnsupportedFormation,
     UnsupportedHumanChannel,
     InvalidInput,
+    InputWithoutProducer,
     UnreachableNode,
     UnstaffedSlot,
 }
@@ -88,6 +89,7 @@ impl Code {
             Code::UnsupportedFormation => "unsupported_formation",
             Code::UnsupportedHumanChannel => "unsupported_human_channel",
             Code::InvalidInput => "invalid_input",
+            Code::InputWithoutProducer => "input_without_producer",
             Code::UnreachableNode => "unreachable_node",
             Code::UnstaffedSlot => "unstaffed_slot",
         }

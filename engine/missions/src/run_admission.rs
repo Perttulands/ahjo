@@ -41,7 +41,8 @@ pub fn run_admission(
         | Code::InvalidSlotSettings
         | Code::UnavailablePersona
         | Code::RetiredPersona => true,
-        Code::RouteLeadsNowhere if formation => false,
+        // A single step's run is handed every input itself.
+        Code::RouteLeadsNowhere | Code::InputWithoutProducer if formation => false,
         _ => {
             selected.contains(&finding.node_id) || connection_ids.contains(finding.node_id.as_str())
         }

@@ -1,5 +1,5 @@
-use ahjo_mission_engine::{Harnesses, RoleStore, run_admission};
-use ahjo_mission_model::{Formation, Mission, Slot};
+use ahjo_mission_engine::{Harnesses, RoleStore, run_admission, validate};
+use ahjo_mission_model::{Formation, Mission, Port, Slot};
 use std::collections::BTreeMap;
 
 #[test]
@@ -52,5 +52,58 @@ fn admission_checks_inputs_and_frozen_staffing_across_the_mission() {
             .errors
             .iter()
             .any(|f| f.code.as_str() == "unstaffed_slot" && f.node_id == "unreachable_unstaffed")
+    );
+}
+
+/// A step a run reaches runs once each of its inputs holds work, so an input
+/// no wire feeds would stop the run there: validation says so before a run
+/// starts, and admission refuses it, but a single step's run, which is handed
+/// its inputs, still starts.
+#[test]
+fn a_reached_step_with_an_input_nothing_feeds_is_refused_before_the_run() {
+    let mut mission =
+        Mission::parse(include_str!("parity/runs/missions/solo-lab.mission.toml")).unwrap();
+    let roles = RoleStore::new(std::env::temp_dir().join("ahjo-99-no-such-roles"));
+    let inputs = BTreeMap::from([("brief".to_owned(), "hello".to_owned())]);
+    let admit = |mission: &Mission, root: &str, single: bool| {
+        run_admission(
+            mission,
+            &roles,
+            &Harnesses::default(),
+            root,
+            single,
+            &inputs,
+        )
+    };
+    let unfed = |report: &ahjo_mission_model::Report| {
+        report
+            .errors
+            .iter()
+            .filter(|f| f.code.as_str() == "input_without_producer")
+            .cloned()
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(unfed(&admit(&mission, "inp_hello", false)), vec![]);
+    mission.formations[0].inputs.push(Port {
+        id: "port_more".into(),
+        label: "More".into(),
+        ..Default::default()
+    });
+    let validation = validate(&mission, &roles, &Harnesses::default());
+    let found = unfed(&validation);
+    assert_eq!(found.len(), 1, "{validation:?}");
+    assert_eq!(found[0].node_id, "fmn_work");
+    assert!(
+        found[0].message.contains("\"More\""),
+        "{}",
+        found[0].message
+    );
+    assert_eq!(unfed(&admit(&mission, "inp_hello", false)), found);
+    assert_eq!(unfed(&admit(&mission, "fmn_work", true)), vec![]);
+    // A step no run reaches is only warned of as unreachable.
+    mission.connections.retain(|c| c.id != "edge_start");
+    assert_eq!(
+        unfed(&validate(&mission, &roles, &Harnesses::default())),
+        vec![]
     );
 }

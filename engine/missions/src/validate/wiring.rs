@@ -167,6 +167,39 @@ pub fn route_findings(mission: &Mission) -> Vec<Finding> {
     findings
 }
 
+/// Every input of a step a run reaches that no wire feeds. A step runs once
+/// each of its inputs holds work, so a run that reaches it would wait there
+/// and stop. A step no run reaches is warned of as unreachable instead.
+pub fn unfed_input_findings(mission: &Mission) -> Vec<Finding> {
+    let fed: HashSet<&str> = mission.connections.iter().map(|c| c.to.as_str()).collect();
+    let reached: HashSet<String> = (mission.input_cards.iter())
+        .flat_map(|card| graph::reachable(mission, &card.id))
+        .collect();
+    let mut findings = Vec::new();
+    for formation in mission
+        .formations
+        .iter()
+        .filter(|f| reached.contains(&f.id))
+    {
+        for port in &formation.inputs {
+            if !fed.contains(format!("{}:{}", formation.id, port.id).as_str()) {
+                findings.push(Finding::new(
+                    Code::InputWithoutProducer,
+                    &formation.id,
+                    format!(
+                        "{} input {:?} ({}) has no wire into it, so a run that reaches the step \
+                         waits there and stops; wire an earlier step's output to it or remove the input",
+                        possessive(mission.node_name(&formation.id)),
+                        port.name(),
+                        port.id
+                    ),
+                ));
+            }
+        }
+    }
+    findings
+}
+
 /// One Input card per mission, on a channel the operator can be reached by.
 pub fn input_card_findings(mission: &Mission) -> Vec<Finding> {
     let mut findings = Vec::new();

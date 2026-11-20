@@ -32,6 +32,7 @@ pub fn validate(mission: &Mission, roles: &RoleStore, harnesses: &Harnesses) -> 
     let (limit_errors, limit_warnings) = limits::findings(mission);
     errors.extend(limit_errors);
     errors.extend(wiring::route_findings(mission));
+    errors.extend(wiring::unfed_input_findings(mission));
     errors.extend(inputs::findings(mission));
     errors.extend(outputs::port_kind_findings(mission));
     errors.extend(outputs::mission_output_findings(mission));
