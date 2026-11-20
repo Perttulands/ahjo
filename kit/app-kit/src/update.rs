@@ -71,10 +71,14 @@ impl Install {
     }
 
     /// The node's name, as the tooltip says it: `rig` for
-    /// `http://rig.tail1.ts.net:7300`.
+    /// `http://rig.tail1.ts.net:7300`, an address whole.
     pub fn node_name(&self) -> &str {
         let host = self.from.trim_start_matches("http://");
-        host.split([':', '.', '/']).next().unwrap_or(host)
+        let host = host.split([':', '/']).next().unwrap_or(host);
+        if host.parse::<std::net::IpAddr>().is_ok() {
+            return host;
+        }
+        host.split('.').next().unwrap_or(host)
     }
 }
 
@@ -474,6 +478,11 @@ mod tests {
         let install = Install::at(&d).unwrap();
         assert_eq!(install.from, "http://rig.tail1.ts.net:7300");
         assert_eq!(install.node_name(), "rig");
+        let local = Install {
+            from: "http://127.0.0.1:7310".into(),
+            ..install
+        };
+        assert_eq!(local.node_name(), "127.0.0.1");
     }
 
     #[test]
