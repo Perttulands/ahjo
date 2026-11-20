@@ -9,12 +9,14 @@ use ahjo_app_kit::link::client::LinkState;
 use ahjo_app_kit::widgets::field::{self, FieldEvent, TextField};
 use ahjo_app_kit::{Host, Page};
 use ahjo_core::NodeId;
-use ahjo_scheduled_contract::{CHANGED, INTENT, INTENT_VALUE, PATH, Target, Task, WATCH};
+use ahjo_scheduled_contract::{
+    ActionRequest, CHANGED, INTENT, INTENT_VALUE, PATH, Target, Task, WATCH,
+};
 use ahjo_terminals_contract::SessionList;
 use gpui::{
     App, AppContext, Context, Entity, FocusHandle, Focusable, KeyDownEvent, ScrollHandle, Window,
 };
-use serde_json::{Value, json};
+use serde_json::Value;
 
 use crate::ACTOR;
 use crate::form::{Mode, TaskForm};
@@ -574,7 +576,11 @@ impl ScheduledPage {
         self.state.error = None;
         let path = format!("{PATH}/{}/{action}", task.id);
         let (at, targets) = (node.to_string(), task.targets.len());
-        let request = Self::write(node, "POST", &path, Some(json!({ "updatedBy": ACTOR })));
+        let action_request = serde_json::to_value(ActionRequest {
+            updated_by: ACTOR.into(),
+        })
+        .expect("scheduled action fields are JSON");
+        let request = Self::write(node, "POST", &path, Some(action_request));
         self.ask(
             request,
             move |page, status, body, cx| {

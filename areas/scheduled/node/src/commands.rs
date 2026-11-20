@@ -6,11 +6,15 @@
 use std::sync::Arc;
 
 use ahjo_core::{Error, NodeId};
-use ahjo_node_kit::args::{flag, maybe_text, object, text};
 use ahjo_node_kit::{Command, Effect};
+use ahjo_scheduled_contract::commands::{
+    ScheduledCopy, ScheduledCreate, ScheduledDelete, ScheduledDeleted, ScheduledEdit,
+    ScheduledList, ScheduledListed, ScheduledPause, ScheduledRan, ScheduledResume, ScheduledRun,
+    ScheduledShow, ScheduledSummary, ScheduledTask,
+};
 use ahjo_scheduled_contract::{BAD_REQUEST, NOT_FOUND, Schedule, Target};
-use anyhow::{Context, Result, bail};
-use serde_json::{Value, json};
+use schemars::JsonSchema;
+use serde::{Serialize, de::DeserializeOwned};
 
 use crate::service::{Create, Patch, Scheduled};
 
@@ -23,52 +27,20 @@ pub(crate) struct Ctx {
     pub scheduled: Arc<Scheduled>,
 }
 
-fn id_property() -> Value {
-    json!({
-        "type": "string",
-        "description": "The task's id, or its name where no other task has it.",
-    })
-}
-
-fn id_schema() -> Value {
-    object(json!({ "id": id_property() }), &["id"])
-}
-
-fn task_properties() -> Value {
-    json!({
-        "name": { "type": "string" },
-        "prompt": { "type": "string", "description": "Pasted into each session, then Enter." },
-        "sessions": {
-            "type": "array",
-            "items": { "type": "string" },
-            "description": "Session names, user/name for another Unix user's. On the command \
-                line each is a word of its own: after the prompt for create, as one \
-                --sessions each for edit.",
-        },
-        "every": { "type": "integer", "minimum": 1, "description": "Fire every this many minutes." },
-        "cron": { "type": "string", "description": "Five cron fields, instead of every." },
-        "timezone": { "type": "string", "description": "IANA zone for cron; the node's if absent." },
-    })
-}
-
-/// A command over `ctx`, whose failure is the error's own or a bad
-/// argument.
-fn command<F, Fut>(
+fn command<Input, Output, F, Fut>(
     ctx: &Arc<Ctx>,
     name: &'static str,
     effect: Effect,
-    description: &'static str,
-    schema: fn() -> Value,
     call: F,
 ) -> Command
 where
-    F: Fn(Arc<Ctx>, Value) -> Fut + Send + Sync + 'static,
-    Fut: Future<Output = Result<Value, Error>> + Send + 'static,
+    Input: DeserializeOwned + JsonSchema,
+    Output: Serialize + JsonSchema,
+    F: Fn(Arc<Ctx>, Input) -> Fut + Send + Sync + 'static,
+    Fut: Future<Output = Result<Output, Error>> + Send + 'static,
 {
     let ctx = ctx.clone();
-    Command::new(name, effect, description, schema, move |args| {
-        call(ctx.clone(), args)
-    })
+    Command::typed(name, effect, move |args| call(ctx.clone(), args))
 }
 
 /// Every scheduled command.
@@ -78,122 +50,107 @@ pub(crate) fn commands(ctx: &Arc<Ctx>) -> Vec<Command> {
             ctx,
             "scheduled_list",
             Effect::Reads,
-            "List the scheduled prompts: id, name, sessions, schedule, next run, \
-        last status, and whether paused or held.",
-            || object(json!({}), &[]),
-            |ctx, _| async move { list(&ctx) },
+            |ctx, _: ScheduledList| async move { list(&ctx) },
         ),
         command(
             ctx,
             "scheduled_show",
             Effect::Reads,
-            "One scheduled prompt in full, with its recent runs and audit.",
-            id_schema,
-            |ctx, args| async move { show(&ctx, &args) },
-        ),
-        command(
-            ctx,
-            "scheduled_create",
-            Effect::Writes,
-            "Schedule a prompt into sessions, every N minutes or on a cron. Example: \
-             ahjo scheduled create nudge 'Check the build' ops build --every 60",
-            || {
-                let mut properties = task_properties();
-                properties["paused"] = json!({ "type": "boolean", "default": false });
-                object(properties, &["name", "prompt", "sessions"])
+            |ctx, args: ScheduledShow| async move {
+                let task = ctx.scheduled.get(&task_id(&ctx, &args.id)?)?;
+                Ok(ScheduledTask {
+                    node: ctx.node.clone(),
+                    task,
+                })
             },
-            |ctx, args| async move { create(&ctx, &args).await },
         ),
-        command(
-            ctx,
-            "scheduled_edit",
-            Effect::Sets,
-            "Change a scheduled prompt; what is not given stays.",
-            || {
-                let mut properties = task_properties();
-                properties["id"] = id_property();
-                object(properties, &["id"])
-            },
-            |ctx, args| async move { edit(&ctx, &args).await },
-        ),
-        command(
-            ctx,
-            "scheduled_copy",
-            Effect::Writes,
-            "Duplicate a scheduled prompt, paused, as the view's Duplicate does.",
-            || {
-                object(
-                    json!({ "id": id_property(), "name": { "type": "string" } }),
-                    &["id"],
-                )
-            },
-            |ctx, args| async move { copy(&ctx, &args).await },
-        ),
+        command(ctx, "scheduled_create", Effect::Writes, create),
+        command(ctx, "scheduled_edit", Effect::Sets, edit),
+        command(ctx, "scheduled_copy", Effect::Writes, copy),
         command(
             ctx,
             "scheduled_pause",
             Effect::Sets,
-            "Pause a scheduled prompt.",
-            id_schema,
-            |ctx, args| async move { act(&ctx, &args, "pause").await },
+            |ctx, args: ScheduledPause| async move {
+                let task = ctx.scheduled.pause(&task_id(&ctx, &args.id)?, ACTOR)?;
+                Ok(ScheduledTask {
+                    node: ctx.node.clone(),
+                    task,
+                })
+            },
         ),
         command(
             ctx,
             "scheduled_resume",
             Effect::Sets,
-            "Resume a paused or held scheduled prompt.",
-            id_schema,
-            |ctx, args| async move { act(&ctx, &args, "resume").await },
+            |ctx, args: ScheduledResume| async move {
+                let task = ctx
+                    .scheduled
+                    .resume(&task_id(&ctx, &args.id)?, ACTOR)
+                    .await?;
+                Ok(ScheduledTask {
+                    node: ctx.node.clone(),
+                    task,
+                })
+            },
         ),
         command(
             ctx,
             "scheduled_run",
             Effect::Writes,
-            "Send a scheduled prompt now, whatever its schedule.",
-            id_schema,
-            |ctx, args| async move { act(&ctx, &args, "run").await },
+            |ctx, args: ScheduledRun| async move {
+                let (task, run) = ctx
+                    .scheduled
+                    .run_now(&task_id(&ctx, &args.id)?, ACTOR)
+                    .await?;
+                Ok(ScheduledRan {
+                    task,
+                    run,
+                    node: ctx.node.clone(),
+                })
+            },
         ),
         command(
             ctx,
             "scheduled_delete",
             Effect::Destroys,
-            "Delete a scheduled prompt.",
-            id_schema,
-            |ctx, args| async move { act(&ctx, &args, "delete").await },
+            |ctx, args: ScheduledDelete| async move {
+                let deleted = task_id(&ctx, &args.id)?;
+                ctx.scheduled.delete(&deleted)?;
+                Ok(ScheduledDeleted {
+                    deleted,
+                    node: ctx.node.clone(),
+                })
+            },
         ),
     ]
 }
 
-/// An argument that cannot be read.
-fn bad(error: anyhow::Error) -> Error {
-    Error::new(BAD_REQUEST, format!("{error:#}"))
-}
-
-fn list(ctx: &Ctx) -> Result<Value, Error> {
-    let tasks: Vec<Value> = ctx
+fn list(ctx: &Ctx) -> Result<ScheduledListed, Error> {
+    let tasks = ctx
         .scheduled
         .list()?
         .into_iter()
-        .map(|task| {
-            json!({
-                "id": task.id,
-                "name": task.name,
-                "sessions": task.targets.iter().map(Target::label).collect::<Vec<_>>(),
-                "schedule": task.schedule,
-                "paused": task.paused,
-                "held": task.held,
-                "next_run": task.next_run,
-                "last_status": task.last_status,
-            })
+        .map(|task| ScheduledSummary {
+            id: task.id,
+            name: task.name,
+            sessions: task.targets.iter().map(Target::label).collect(),
+            schedule: task.schedule,
+            paused: task.paused,
+            held: task.held,
+            next_run: task.next_run,
+            last_status: task.last_status,
         })
         .collect();
-    Ok(json!({ "node": ctx.node, "tasks": tasks }))
+    Ok(ScheduledListed {
+        node: ctx.node.clone(),
+        tasks,
+    })
 }
 
 /// The id of the task an argument names: its id, or the name only one
 /// task has.
-fn task_id(ctx: &Ctx, args: &Value) -> Result<String, Error> {
-    let given = text(args, "id").map_err(bad)?;
+fn task_id(ctx: &Ctx, given: &str) -> Result<String, Error> {
     let tasks = ctx.scheduled.list()?;
     if tasks.iter().any(|t| t.id == given) {
         return Ok(given.to_owned());
@@ -222,53 +179,46 @@ fn task_id(ctx: &Ctx, args: &Value) -> Result<String, Error> {
     }
 }
 
-fn show(ctx: &Ctx, args: &Value) -> Result<Value, Error> {
-    let task = ctx.scheduled.get(&task_id(ctx, args)?)?;
-    Ok(json!({ "node": ctx.node, "task": task }))
-}
-
-async fn create(ctx: &Ctx, args: &Value) -> Result<Value, Error> {
-    let create = (|| {
-        Ok::<_, anyhow::Error>(Create {
-            name: text(args, "name")?.to_owned(),
-            prompt: text(args, "prompt")?.to_owned(),
-            targets: targets(args)?.context("sessions is required")?,
-            schedule: schedule(args)?.context("every or cron is required")?,
-            enabled: Some(true),
-            paused: flag(args, "paused", false)?,
-            created_by: ACTOR.into(),
-            updated_by: ACTOR.into(),
-        })
-    })()
-    .map_err(bad)?;
-    let task = ctx.scheduled.create(create).await?;
-    Ok(json!({ "node": ctx.node, "task": task }))
-}
-
-async fn edit(ctx: &Ctx, args: &Value) -> Result<Value, Error> {
-    let id = task_id(ctx, args)?;
-    let patch = (|| {
-        Ok::<_, anyhow::Error>(Patch {
-            name: maybe_text(args, "name")?.map(str::to_owned),
-            prompt: maybe_text(args, "prompt")?.map(str::to_owned),
-            targets: targets(args)?,
-            schedule: schedule(args)?,
-            updated_by: ACTOR.into(),
-            ..Default::default()
-        })
-    })()
-    .map_err(bad)?;
-    let task = ctx.scheduled.patch(&id, patch).await?;
-    Ok(json!({ "node": ctx.node, "task": task }))
-}
-
-async fn copy(ctx: &Ctx, args: &Value) -> Result<Value, Error> {
-    let from = ctx.scheduled.get(&task_id(ctx, args)?)?;
+async fn create(ctx: Arc<Ctx>, args: ScheduledCreate) -> Result<ScheduledTask, Error> {
     let create = Create {
-        name: match maybe_text(args, "name").map_err(bad)? {
-            Some(name) => name.to_owned(),
-            None => format!("{} (copy)", from.name),
-        },
+        name: args.name,
+        prompt: args.prompt,
+        targets: targets(args.sessions),
+        schedule: schedule(args.every, args.cron, args.timezone)?
+            .ok_or_else(|| Error::new(BAD_REQUEST, "every or cron is required"))?,
+        enabled: Some(true),
+        paused: args.paused.unwrap_or_default(),
+        created_by: ACTOR.into(),
+        updated_by: ACTOR.into(),
+    };
+    let task = ctx.scheduled.create(create).await?;
+    Ok(ScheduledTask {
+        node: ctx.node.clone(),
+        task,
+    })
+}
+
+async fn edit(ctx: Arc<Ctx>, args: ScheduledEdit) -> Result<ScheduledTask, Error> {
+    let id = task_id(&ctx, &args.id)?;
+    let patch = Patch {
+        name: args.name,
+        prompt: args.prompt,
+        targets: args.sessions.map(targets),
+        schedule: schedule(args.every, args.cron, args.timezone)?,
+        updated_by: ACTOR.into(),
+        ..Default::default()
+    };
+    let task = ctx.scheduled.patch(&id, patch).await?;
+    Ok(ScheduledTask {
+        node: ctx.node.clone(),
+        task,
+    })
+}
+
+async fn copy(ctx: Arc<Ctx>, args: ScheduledCopy) -> Result<ScheduledTask, Error> {
+    let from = ctx.scheduled.get(&task_id(&ctx, &args.id)?)?;
+    let create = Create {
+        name: args.name.unwrap_or_else(|| format!("{} (copy)", from.name)),
         prompt: from.prompt,
         targets: from.targets,
         schedule: from.schedule,
@@ -278,63 +228,42 @@ async fn copy(ctx: &Ctx, args: &Value) -> Result<Value, Error> {
         updated_by: ACTOR.into(),
     };
     let task = ctx.scheduled.create(create).await?;
-    Ok(json!({ "node": ctx.node, "task": task }))
+    Ok(ScheduledTask {
+        node: ctx.node.clone(),
+        task,
+    })
 }
 
-async fn act(ctx: &Ctx, args: &Value, action: &str) -> Result<Value, Error> {
-    let scheduled = &ctx.scheduled;
-    let id = &task_id(ctx, args)?;
-    let mut answer = match action {
-        "pause" => json!({ "task": scheduled.pause(id, ACTOR)? }),
-        "resume" => json!({ "task": scheduled.resume(id, ACTOR).await? }),
-        "run" => {
-            let (task, run) = scheduled.run_now(id, ACTOR).await?;
-            json!({ "task": task, "run": run })
-        }
-        "delete" => {
-            scheduled.delete(id)?;
-            json!({ "deleted": id })
-        }
-        _ => unreachable!("{action} is not a scheduled action"),
-    };
-    answer["node"] = json!(ctx.node);
-    Ok(answer)
-}
-
-fn targets(args: &Value) -> Result<Option<Vec<Target>>> {
-    let Some(sessions) = args.get("sessions").filter(|s| !s.is_null()) else {
-        return Ok(None);
-    };
-    let sessions = sessions.as_array().context("sessions is a list")?;
-    let targets = sessions
-        .iter()
+fn targets(sessions: Vec<String>) -> Vec<Target> {
+    sessions
+        .into_iter()
         .map(|s| {
-            let s = s.as_str().context("each session is a name")?;
-            let (unix_user, session_name) = s.split_once('/').unwrap_or(("", s));
-            Ok(Target {
-                session_name: session_name.to_owned(),
-                unix_user: unix_user.to_owned(),
-            })
+            let (unix_user, session_name) = s.split_once('/').unwrap_or(("", &s));
+            Target {
+                session_name: session_name.into(),
+                unix_user: unix_user.into(),
+            }
         })
-        .collect::<Result<_>>()?;
-    Ok(Some(targets))
+        .collect()
 }
 
-fn schedule(args: &Value) -> Result<Option<Schedule>> {
-    let every = args.get("every").filter(|v| !v.is_null());
-    let cron = maybe_text(args, "cron")?;
-    let timezone = maybe_text(args, "timezone")?.unwrap_or_default().to_owned();
+fn schedule(
+    every: Option<i64>,
+    cron: Option<String>,
+    timezone: Option<String>,
+) -> Result<Option<Schedule>, Error> {
+    let timezone = timezone.unwrap_or_default();
     Ok(match (every, cron) {
-        (Some(_), Some(_)) => bail!("give every or cron, not both"),
-        (Some(every), None) => Some(Schedule {
+        (Some(_), Some(_)) => return Err(Error::new(BAD_REQUEST, "give every or cron, not both")),
+        (Some(every_minutes), None) => Some(Schedule {
             kind: "interval".into(),
-            every_minutes: every.as_i64().context("every is a number of minutes")?,
+            every_minutes,
             timezone,
             ..Default::default()
         }),
-        (None, Some(cron)) => Some(Schedule {
+        (None, Some(expression)) => Some(Schedule {
             kind: "cron".into(),
-            expression: cron.to_owned(),
+            expression,
             timezone,
             ..Default::default()
         }),

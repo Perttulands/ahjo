@@ -534,7 +534,7 @@ fn usage(noun: &str, verb: &str, tool: &Value) -> String {
             continue;
         }
         let flag = key.replace('_', "-");
-        match spec["type"].as_str() {
+        match schema_type(&spec) {
             Some("boolean") => line.push_str(&format!(" [--{flag}|--no-{flag}]")),
             _ => line.push_str(&format!(" [--{flag} {key}]")),
         }
@@ -546,7 +546,10 @@ fn help(noun: &str, verb: &str, tool: &Value) -> String {
     let mut text = format!(
         "usage: {}\n{}\n",
         usage(noun, verb, tool),
-        tool["description"].as_str().unwrap_or("")
+        tool["inputSchema"]["description"]
+            .as_str()
+            .or_else(|| tool["description"].as_str())
+            .unwrap_or("")
     );
     // The required arguments first, in the order they are given without
     // their flags, then the rest.
@@ -564,14 +567,20 @@ fn help(noun: &str, verb: &str, tool: &Value) -> String {
         let mut line = format!(
             "\n  {:width$}  {}",
             label(&key),
-            spec["type"].as_str().unwrap_or("value")
+            schema_type(&spec).unwrap_or("value")
         );
         if let Some(d) = spec["description"].as_str() {
             line.push_str(&format!(": {d}"));
         }
-        if let Some(values) = spec["enum"].as_array().filter(|v| !v.is_empty()) {
-            let values: Vec<String> = values.iter().map(|v| v.to_string()).collect();
-            line.push_str(&format!(" (one of {})", values.join(", ")));
+        if let Some(values) = spec["enum"].as_array() {
+            let choices: Vec<_> = values
+                .iter()
+                .filter(|value| !value.is_null())
+                .map(Value::to_string)
+                .collect();
+            if !choices.is_empty() {
+                line.push_str(&format!(" (one of {})", choices.join(", ")));
+            }
         }
         if let Some(d) = spec.get("default") {
             line.push_str(&format!(" (default {d})"));
@@ -582,7 +591,7 @@ fn help(noun: &str, verb: &str, tool: &Value) -> String {
             for (key, inner) in keys {
                 line.push_str(&format!(
                     "\n      {key:width$}  {}",
-                    inner["type"].as_str().unwrap_or("value")
+                    schema_type(inner).unwrap_or("value")
                 ));
                 if let Some(d) = inner["description"].as_str() {
                     line.push_str(&format!(": {d}"));
@@ -611,7 +620,7 @@ fn properties(schema: &Value) -> Vec<(String, Value)> {
 /// flag too, as `ahjo file list <path>`, since nothing else could be meant.
 fn lone(schema: &Value) -> Option<String> {
     match properties(schema).as_slice() {
-        [(key, spec)] if required(schema).is_empty() && spec["type"] == "string" => {
+        [(key, spec)] if required(schema).is_empty() && schema_type(spec) == Some("string") => {
             Some(key.clone())
         }
         _ => None,
@@ -653,8 +662,8 @@ fn read(schema: &Value, args: &[String]) -> Result<Line> {
     let mut positional = Vec::new();
     // The first thing wrong, kept while the rest is read for `--help`.
     let mut wrong: Option<anyhow::Error> = None;
-    // A word taken for a flag that is none, and how many values came before it.
-    let mut stray: Option<(String, usize)> = None;
+    // Words taken for unknown flags, with the number of values before each.
+    let mut stray = Vec::new();
     let mut options = true;
     let mut it = args.iter();
     while let Some(a) = it.next() {
@@ -710,22 +719,22 @@ fn read(schema: &Value, args: &[String]) -> Result<Line> {
             }),
             _ => {
                 if let Some(negated) = key.strip_prefix("no_")
-                    && spec(negated).is_some_and(|s| s["type"] == "boolean")
+                    && spec(negated).is_some_and(|s| schema_type(&s) == Some("boolean"))
                     && inline.is_none()
                 {
                     out.insert(negated.to_owned(), Value::Bool(false));
                     continue;
                 }
                 let Some(s) = spec(&key) else {
-                    stray.get_or_insert((a.clone(), positional.len()));
+                    stray.push((a, positional.len()));
                     continue;
                 };
-                let raw = match s["type"].as_str() {
+                let raw = match schema_type(&s) {
                     Some("boolean") if inline.is_none() => Ok("true".to_owned()),
                     _ => value_of(&key),
                 };
                 raw.and_then(|raw| typed(&key, &s, &raw)).map(|value| {
-                    match (s["type"].as_str(), out.get_mut(&key)) {
+                    match (schema_type(&s), out.get_mut(&key)) {
                         (Some("array"), Some(Value::Array(items))) => {
                             items.extend(value.as_array().cloned().unwrap_or_default())
                         }
@@ -743,15 +752,30 @@ fn read(schema: &Value, args: &[String]) -> Result<Line> {
     if line.help {
         return Ok(line);
     }
-    if let Some((word, before)) = stray {
-        // The value it might have been is the next one given without a flag.
-        let slot = required(schema)
+    if !stray.is_empty() {
+        let unfixed = required(schema)
             .into_iter()
             .map(str::to_owned)
             .chain(lone(schema))
             .filter(|r| !out.contains_key(r))
-            .nth(before);
-        bail!("{}", unknown_flag(&word, &props, slot.as_deref()));
+            .collect::<Vec<_>>();
+        let hints = stray
+            .into_iter()
+            .map(|(word, before)| {
+                unknown_flag(word, &props, unfixed.get(before).map(String::as_str))
+            })
+            .collect::<Vec<_>>()
+            .join("; ");
+        let flags = props
+            .iter()
+            .map(|(key, _)| format!("--{}", key.replace('_', "-")))
+            .collect::<Vec<_>>();
+        let accepted = if flags.is_empty() {
+            "none".into()
+        } else {
+            flags.join(", ")
+        };
+        bail!("{hints}; accepted fields: {accepted}");
     }
     if let Some(wrong) = wrong {
         return Err(wrong);
@@ -770,7 +794,8 @@ fn read(schema: &Value, args: &[String]) -> Result<Line> {
     for p in positional {
         if let Some(key) = &list {
             if let Some(Value::Array(items)) = out.get_mut(key) {
-                items.push(Value::String(p));
+                let element = spec(key).unwrap_or(Value::Null);
+                items.push(typed(key, &element["items"], &p)?);
             }
             continue;
         }
@@ -778,7 +803,7 @@ fn read(schema: &Value, args: &[String]) -> Result<Line> {
             .next()
             .with_context(|| format!("unexpected argument {p:?}"))?;
         let s = spec(&key).unwrap_or(Value::Null);
-        if s["type"] == "array" && waiting.peek().is_none() {
+        if schema_type(&s) == Some("array") && waiting.peek().is_none() {
             list = Some(key.clone());
         }
         out.insert(key.clone(), typed(&key, &s, &p)?);
@@ -813,8 +838,7 @@ fn unknown_flag(word: &str, props: &[(String, Value)], slot: Option<&str>) -> St
     });
     if flag_like {
         let key = word[2..].split('=').next().unwrap_or("").replace('-', "_");
-        let flags: Vec<&str> = props.iter().map(|(k, _)| k.as_str()).collect();
-        if let Some(near) = nearest(&key, flags.iter().copied()) {
+        if let Some(near) = nearest(&key, props.iter().map(|(key, _)| key.as_str())) {
             return format!(
                 "unknown flag {shown} (did you mean --{}?)",
                 near.replace('_', "-")
@@ -831,8 +855,22 @@ fn unknown_flag(word: &str, props: &[(String, Value)], slot: Option<&str>) -> St
     }
 }
 
+/// The CLI supplies one non-null value at a time. Derived schemas may
+/// include null alongside the type to represent an optional field.
+fn schema_type(spec: &Value) -> Option<&str> {
+    let kind = &spec["type"];
+    if let Some(alternatives) = kind.as_array() {
+        let mut non_null = alternatives
+            .iter()
+            .filter_map(Value::as_str)
+            .filter(|kind| *kind != "null");
+        return non_null.next().filter(|_| non_null.next().is_none());
+    }
+    kind.as_str()
+}
+
 fn typed(key: &str, spec: &Value, raw: &str) -> Result<Value> {
-    Ok(match spec["type"].as_str() {
+    Ok(match schema_type(spec) {
         Some("boolean") => Value::Bool(match raw {
             "true" | "yes" | "1" => true,
             "false" | "no" | "0" => false,
@@ -846,7 +884,7 @@ fn typed(key: &str, spec: &Value, raw: &str) -> Result<Value> {
             raw.parse::<f64>()
                 .with_context(|| format!("--{key} is a number"))?
         ),
-        Some("array") => json!([raw]),
+        Some("array") => json!([typed(key, &spec["items"], raw)?]),
         Some("object") => serde_json::from_str(raw).with_context(|| format!("--{key} is JSON"))?,
         _ => Value::String(raw.to_owned()),
     })
@@ -1172,6 +1210,59 @@ mod tests {
         );
         let v = parse(&schema(), &args(&["--text=hi", "main", "--enter"])).unwrap();
         assert_eq!(v, json!({"session": "main", "text": "hi", "enter": true}));
+    }
+
+    #[tokio::test]
+    async fn derived_optional_and_enum_fields_project_to_cli_arguments() {
+        use crate::{Command, Effect};
+        use schemars::JsonSchema;
+        use serde::{Deserialize, Serialize};
+
+        #[derive(Debug, Deserialize, Serialize, JsonSchema)]
+        #[serde(rename_all = "snake_case")]
+        enum Mode {
+            First,
+            Second,
+        }
+
+        /// Project typed fields.
+        #[derive(Debug, Deserialize, Serialize, JsonSchema)]
+        #[serde(deny_unknown_fields)]
+        struct Arguments {
+            mode: Option<Mode>,
+            weight: Option<f64>,
+            enabled: Option<bool>,
+            counts: Option<Vec<i64>>,
+        }
+
+        let command = Command::typed(
+            "test_project",
+            Effect::Reads,
+            |args: Arguments| async move { Ok(args) },
+        );
+        let schema = (command.schema)();
+        assert_eq!(
+            schema["properties"]["mode"]["enum"],
+            json!(["first", "second", null])
+        );
+        let line = read(
+            &schema,
+            &args(&[
+                "--mode",
+                "second",
+                "--weight",
+                "2.5",
+                "--no-enabled",
+                "--counts",
+                "2",
+                "--counts",
+                "7",
+            ]),
+        )
+        .unwrap();
+        let expected = json!({"mode":"second", "weight":2.5, "enabled":false, "counts":[2,7]});
+        assert_eq!(line.arguments, expected);
+        assert_eq!((command.call)(line.arguments).await.unwrap(), expected);
     }
 
     #[test]

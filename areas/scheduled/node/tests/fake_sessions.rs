@@ -3,12 +3,181 @@
 //! session, follows a rename, says why a session refused, and finds the
 //! sessions wherever they are listed.
 
-use ahjo_node_kit::Listing;
+use ahjo_node_kit::{Listing, NodeClient, cli};
 use ahjo_testkit::node::Node;
 use ahjo_testkit::sessions;
-use serde_json::json;
+use axum::http::Method;
+use serde_json::{Value, json};
 
 const AREAS: &[Listing] = &[sessions::LISTING, ahjo_scheduled::LISTING];
+
+#[tokio::test]
+async fn mcp_lists_derived_scheduled_schemas_and_returns_the_structured_result() {
+    let node = Node::start(AREAS, "").await.unwrap();
+    let client = NodeClient::new(Some(&node.url())).unwrap();
+    let rpc = |method, params| {
+        client.request(
+            Method::POST,
+            "/mcp/scheduled",
+            Some(json!({"jsonrpc":"2.0", "id":1, "method":method, "params":params})),
+            None,
+        )
+    };
+    let (answer, _) = rpc("tools/list", json!({})).await.unwrap();
+    let tools = answer["result"]["tools"].as_array().unwrap();
+    let expected = [
+        ("list", "tasks"),
+        ("show", "task"),
+        ("create", "task"),
+        ("edit", "task"),
+        ("copy", "task"),
+        ("pause", "task"),
+        ("resume", "task"),
+        ("run", "run"),
+        ("delete", "deleted"),
+    ];
+    assert_eq!(tools.len(), expected.len());
+    for (verb, output_field) in expected {
+        let name = format!("scheduled_{verb}");
+        let tool = tools.iter().find(|tool| tool["name"] == name).unwrap();
+        assert!(!tool["description"].as_str().unwrap().is_empty());
+        let input = &tool["inputSchema"];
+        assert_eq!(input["type"], "object");
+        assert_eq!(input["additionalProperties"], false);
+        assert!(!input["description"].as_str().unwrap().is_empty());
+        for property in input["properties"]
+            .as_object()
+            .into_iter()
+            .flat_map(|p| p.values())
+        {
+            assert!(!property["description"].as_str().unwrap().is_empty());
+        }
+        let output = &tool["outputSchema"];
+        assert_eq!(output["type"], "object");
+        assert!(output["properties"].get(output_field).is_some(), "{output}");
+        for schema in [input, output] {
+            let schema = schema.to_string();
+            assert!(!schema.contains(r#""$ref""#), "{schema}");
+            assert!(!schema.contains(r#""$defs""#), "{schema}");
+        }
+    }
+
+    let (answer, _) = rpc("tools/call", json!({"name":"scheduled_list"}))
+        .await
+        .unwrap();
+    let result = &answer["result"];
+    assert_eq!(result["isError"], false);
+    assert_eq!(result["structuredContent"]["tasks"], json!([]));
+    let text: Value = serde_json::from_str(result["content"][0]["text"].as_str().unwrap()).unwrap();
+    assert_eq!(result["structuredContent"], text);
+    node.stop().await;
+}
+
+#[tokio::test]
+async fn scheduled_create_help_and_argument_validation_come_from_the_request_type() {
+    let node = Node::start(AREAS, "").await.unwrap();
+    let url = node.url();
+    let line = |words: &[&str]| {
+        words
+            .iter()
+            .copied()
+            .chain(["--node", &url])
+            .map(str::to_owned)
+            .collect::<Vec<_>>()
+    };
+
+    let mut out = vec![];
+    let error = cli::run(
+        "scheduled",
+        &line(&["create", "--session", "x", "--bogus", "1"]),
+        &mut out,
+    )
+    .await
+    .unwrap_err()
+    .to_string();
+    assert!(error.contains("unknown flag --bogus"), "{error}");
+    let (_, accepted) = error.split_once("accepted fields: ").unwrap();
+    let accepted = accepted.lines().next().unwrap();
+    for field in [
+        "name", "prompt", "sessions", "every", "cron", "timezone", "paused",
+    ] {
+        assert!(
+            accepted
+                .split(", ")
+                .any(|flag| flag == format!("--{field}")),
+            "{error}"
+        );
+    }
+    node.fake_sessions().add("ops");
+    let error = node
+        .call(
+            "scheduled_create",
+            json!({
+                "name": "nudge", "prompt": "wake up", "sessions": ["ops"], "every": 60, "bogus": 1
+            }),
+        )
+        .await
+        .unwrap_err();
+    assert_eq!(error.code, "invalid_argument");
+    assert!(
+        error.message.contains("unknown arguments: bogus"),
+        "{error}"
+    );
+    assert!(error.message.contains("accepted fields:"), "{error}");
+    assert_eq!(
+        node.call("scheduled_list", json!({})).await.unwrap()["tasks"],
+        json!([])
+    );
+
+    assert_eq!(
+        cli::run("scheduled", &line(&["create", "--help"]), &mut out)
+            .await
+            .unwrap(),
+        0
+    );
+    let help = String::from_utf8(out).unwrap();
+    for (field, description) in [
+        ("<name>", "The name of the scheduled prompt."),
+        ("<prompt>", "Pasted into each session"),
+        ("<sessions>", "Session names"),
+        ("--every", "Fire every this many minutes."),
+        ("--cron", "Five cron fields"),
+        ("--timezone", "IANA zone for cron."),
+        ("--paused", "Start paused."),
+    ] {
+        assert!(
+            help.lines()
+                .any(|line| line.trim_start().starts_with(field) && line.contains(description)),
+            "{help}"
+        );
+    }
+    assert!(help.contains("Example: ahjo scheduled create"), "{help}");
+
+    let fake = node.fake_sessions();
+    fake.add("alpha");
+    fake.add("beta");
+    let mut out = vec![];
+    assert_eq!(
+        cli::run(
+            "scheduled",
+            &line(&[
+                "create", "nudge", "wake up", "alpha", "beta", "--every", "60", "--paused",
+                "--json",
+            ]),
+            &mut out
+        )
+        .await
+        .unwrap(),
+        0
+    );
+    let made: Value = serde_json::from_slice(&out).unwrap();
+    let task = &made["task"];
+    assert_eq!(task["targets"][0]["session_name"], "alpha");
+    assert_eq!(task["targets"][1]["session_name"], "beta");
+    assert_eq!(task["schedule"]["every_minutes"], 60);
+    assert_eq!(task["paused"], true);
+    node.stop().await;
+}
 
 #[tokio::test(flavor = "multi_thread")]
 async fn a_run_is_delivered_to_the_session_a_task_names() {
@@ -82,7 +251,7 @@ async fn a_renamed_session_keeps_its_tasks_and_a_refusal_is_reported() {
         .await
         .unwrap();
     assert!(
-        task["task"]["recentRuns"].to_string().contains("refused"),
+        task["task"]["recent_runs"].to_string().contains("refused"),
         "{task}"
     );
     node.stop().await;

@@ -1,7 +1,7 @@
 //! The Scheduled page opens in the app against a real node (terminals and
 //! scheduled over a scratch tmux, started through the testkit) and lists a
-//! task made through the CLI, and offers the sessions the Sessions page
-//! publishes. Linux and macOS only; skips without tmux
+//! task made through the CLI and a task migrated from disk. It offers the
+//! sessions the Sessions page publishes. Linux and macOS only; skips without tmux
 //! unless `AHJO_REQUIRE_TMUX=1`.
 #![cfg(unix)]
 
@@ -49,7 +49,21 @@ fn start() -> Option<Running> {
             };
             tmux.new_session("alpha", 100, 30);
             tmux.new_session("beta", 100, 30);
-            let config = format!("[terminals]\nsocket = {:?}\n", tmux.socket_path());
+            let tasks = tmux.dir().join("scheduled-tasks");
+            std::fs::create_dir(&tasks).unwrap();
+            std::fs::write(
+                tasks.join("tsk_existing.json"),
+                r#"{"id":"tsk_existing","name":"Existing prompt","prompt":"echo old",
+                    "targets":[{"sessionName":"alpha"}],
+                    "schedule":{"type":"interval","everyMinutes":10,"timezone":"UTC"},
+                    "enabled":true,"paused":true,"createdAt":"2026-06-27T14:00:00Z",
+                    "updatedAt":"2026-06-27T14:00:00Z"}"#,
+            )
+            .unwrap();
+            let config = format!(
+                "[terminals]\nsocket = {:?}\n[scheduled]\ndir = {tasks:?}\n",
+                tmux.socket_path()
+            );
             let node = Node::start(AREAS, &config).await.expect("a node");
             let sessions = node.sessions();
             eventually("alpha's pane read", || {
@@ -78,7 +92,12 @@ fn start() -> Option<Running> {
                 .expect("the CLI ran");
             assert_eq!(code, 0, "the CLI made the task");
             let listed = node.call("scheduled_list", json!({})).await.expect("list");
-            let id = listed["tasks"][0]["id"]
+            let id = listed["tasks"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|task| task["name"] == "nudge")
+                .expect("the CLI scheduled a prompt")["id"]
                 .as_str()
                 .expect("its id")
                 .to_owned();
@@ -174,6 +193,11 @@ fn the_page_lists_a_task_made_through_the_cli(cx: &mut TestAppContext) {
     until(cx, "the task to be listed", |cx| {
         cx.debug_bounds(Box::leak(selector.clone().into_boxed_str()))
             .is_some()
+    });
+
+    let existing: &'static str = Box::leak(format!("task-{node}-tsk_existing").into_boxed_str());
+    until(cx, "the migrated task to be listed", |cx| {
+        cx.debug_bounds(existing).is_some()
     });
 
     // Its row selects the task, and the detail names it.
@@ -288,8 +312,8 @@ fn the_page_lists_a_task_made_through_the_cli(cx: &mut TestAppContext) {
     assert_eq!(created["schedule"]["type"], "interval");
     let targets = created["targets"].as_array().unwrap();
     assert_eq!(targets.len(), 2);
-    assert!(targets.iter().any(|t| t["sessionName"] == "alpha"));
-    assert!(targets.iter().any(|t| t["sessionName"] == "beta"));
+    assert!(targets.iter().any(|t| t["session_name"] == "alpha"));
+    assert!(targets.iter().any(|t| t["session_name"] == "beta"));
     let click = |cx: &mut VisualTestContext, id: &'static str| {
         let at = cx.debug_bounds(id).expect(id).center();
         cx.simulate_click(at, Modifiers::none());

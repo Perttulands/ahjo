@@ -200,7 +200,7 @@ mod tests {
             Some("invalid scheduled task: prompt is required")
         );
         let mut n = NodeTasks::default();
-        n.listed(200, br#"{"success":true,"data":{"tasks":[{"id":"tsk_1","name":"a","prompt":"p","targets":[{"sessionName":"ops"}],"schedule":{"type":"interval","everyMinutes":5,"timezone":"UTC"},"enabled":true,"paused":false,"nextRun":"2026-06-27T14:05:00Z","createdAt":"2026-06-27T14:00:00Z","updatedAt":"2026-06-27T14:00:00Z"}]},"timestamp":"x"}"#);
+        n.listed(200, br#"{"success":true,"data":{"tasks":[{"id":"tsk_1","name":"a","prompt":"p","targets":[{"session_name":"ops"}],"schedule":{"type":"interval","every_minutes":5,"timezone":"UTC"},"enabled":true,"paused":false,"next_run":"2026-06-27T14:05:00Z","created_at":"2026-06-27T14:00:00Z","updated_at":"2026-06-27T14:00:00Z"}]},"timestamp":"x"}"#);
         assert_eq!(n.list.as_ref().unwrap()[0].targets[0].session_name, "ops");
     }
 }

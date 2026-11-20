@@ -13,7 +13,7 @@ fn answer(name: &str) -> Value {
             json!({"item": {"id": "work-1", "title": "Fix it", "children": [{"id": "work-2", "status": "open"}]}, "warning": null})
         }
         "scheduled_list" => {
-            json!({"tasks": [{"id": "task-1", "next_run": "2026-11-12T12:00:00Z", "targets": [{"sessionName": "worker"}], "schedule": {"kind": "interval", "everyMinutes": 15}, "paused": false}]})
+            json!({"tasks": [{"id": "task-1", "next_run": "2026-11-12T12:00:00Z", "sessions": ["worker"], "schedule": {"type": "interval", "every_minutes": 15}, "paused": false}]})
         }
         "session_launch" => {
             json!({"node": "n1", "session": "worker", "warning": null, "pane": 3})

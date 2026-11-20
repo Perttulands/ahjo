@@ -2,12 +2,15 @@
 //! its routes, the frames it owns on the socket, and its commands, each of
 //! which is both an MCP tool and an `ahjo <noun> <verb>`.
 
+use std::borrow::Cow;
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
 
 use ahjo_core::Error;
 use axum::Router;
+use schemars::{JsonSchema, generate::SchemaSettings};
+use serde::{Serialize, de::DeserializeOwned};
 use serde_json::Value;
 
 use crate::{Provided, Setup};
@@ -133,10 +136,11 @@ pub struct Command {
     /// It reaches beyond this machine (GitHub, a remote), not only the
     /// node and its files.
     pub open_world: bool,
-    pub description: &'static str,
+    pub description: Cow<'static, str>,
     /// The arguments' JSON Schema, asked for each time the tools are listed,
     /// so it may offer what the node has now.
     pub schema: Arc<dyn Fn() -> Value + Send + Sync>,
+    pub output_schema: Option<Arc<Value>>,
     pub call: Arc<Call>,
 }
 
@@ -156,9 +160,61 @@ impl Command {
             name,
             effect,
             open_world: false,
-            description,
+            description: Cow::Borrowed(description),
             schema: Arc::new(schema),
+            output_schema: None,
             call: Arc::new(move |args| Box::pin(call(args))),
+        }
+    }
+
+    /// Derives the tool schemas from its request and response types. The
+    /// request is an object, with its first doc line naming what it does.
+    pub fn typed<Input, Output, F, Fut>(name: &'static str, effect: Effect, handler: F) -> Self
+    where
+        Input: DeserializeOwned + JsonSchema,
+        Output: Serialize + JsonSchema,
+        F: Fn(Input) -> Fut + Send + Sync + 'static,
+        Fut: Future<Output = Result<Output, Error>> + Send + 'static,
+    {
+        let settings = SchemaSettings::draft2020_12().with(|settings| {
+            settings.inline_subschemas = true;
+            settings.meta_schema = None;
+        });
+        let input = Value::from(
+            settings
+                .clone()
+                .into_generator()
+                .into_root_schema_for::<Input>(),
+        );
+        let output = settings
+            .for_serialize()
+            .into_generator()
+            .into_root_schema_for::<Output>();
+        let description = input["description"]
+            .as_str()
+            .and_then(|doc| doc.lines().next())
+            .unwrap_or_default()
+            .to_owned();
+        let fields: Vec<String> = input["properties"]
+            .as_object()
+            .into_iter()
+            .flat_map(|properties| properties.keys().cloned())
+            .collect();
+        Self {
+            name,
+            effect,
+            open_world: false,
+            description: Cow::Owned(description),
+            schema: Arc::new(move || input.clone()),
+            output_schema: Some(Arc::new(output.into())),
+            call: Arc::new(move |args| {
+                let pending = typed_arguments(args, &fields).map(&handler);
+                Box::pin(async move {
+                    serde_json::to_value(pending?.await?).map_err(|error| {
+                        Error::new("internal", format!("cannot encode {name} output: {error}"))
+                    })
+                })
+            }),
         }
     }
 
@@ -177,4 +233,38 @@ impl Command {
         }
         words
     }
+}
+
+/// Check the keys before deserializing so an unknown key is always named,
+/// even when a required argument is missing too.
+fn typed_arguments<Input: DeserializeOwned>(
+    args: Value,
+    fields: &[String],
+) -> Result<Input, Error> {
+    let invalid = |why: String| {
+        let accepted = if fields.is_empty() {
+            "none".to_owned()
+        } else {
+            fields.join(", ")
+        };
+        Error::new(
+            "invalid_argument",
+            format!("{why}; accepted fields: {accepted}"),
+        )
+    };
+    let object = args
+        .as_object()
+        .ok_or_else(|| invalid("arguments must be an object".into()))?;
+    let unknown: Vec<_> = object
+        .keys()
+        .filter(|key| !fields.contains(key))
+        .cloned()
+        .collect();
+    if !unknown.is_empty() {
+        return Err(invalid(format!(
+            "unknown arguments: {}",
+            unknown.join(", ")
+        )));
+    }
+    serde_json::from_value(args).map_err(|error| invalid(error.to_string()))
 }

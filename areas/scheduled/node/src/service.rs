@@ -1,8 +1,7 @@
 //! Scheduled prompts (#189): tasks that paste a prompt into named sessions
 //! on a schedule, CHROTE's scheduler ported (`src/internal/scheduled/`,
-//! `docs/scheduled-tasks.md`). The API is CHROTE's, envelope, headers and
-//! all, so the `scheduled-tasks` skill works against a node by changing only
-//! its base URL.
+//! `docs/scheduled-tasks.md`). The node and app share Ahjo's task document
+//! and keep CHROTE's HTTP envelope and intent header.
 //!
 //! What differs: CHROTE re-reads every task every 30 seconds. Here the node
 //! keeps when each task is next due, and its one timer sleeps until the
@@ -768,11 +767,11 @@ impl Scheduled {
         for t in &task.targets {
             if !safe_session(&t.session_name) {
                 return invalid(
-                    "target sessionName is required and must contain only letters, numbers, dashes, and underscores",
+                    "target session_name is required and must contain only letters, numbers, dashes, and underscores",
                 );
             }
             if !t.unix_user.is_empty() && !safe_user(&t.unix_user) {
-                return invalid("target unixUser contains invalid characters");
+                return invalid("target unix_user contains invalid characters");
             }
         }
         task.schedule = schedule::normalize(task.schedule.clone()).map_err(Invalid::from)?;

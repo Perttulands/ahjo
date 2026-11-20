@@ -2,12 +2,14 @@
 //! interval and cron, the editor Every, Daily, Weekly and Cron; and the plain
 //! words a task is described in.
 
-use ahjo_scheduled_contract::{Schedule, Target, Task, schedule};
+use ahjo_scheduled_contract::{
+    CreateRequest, PatchRequest, Schedule, Target, TargetRequest, Task, schedule,
+};
 use jiff::Timestamp;
 
 use crate::ACTOR;
 
-/// An interval's length in minutes, from `everyMinutes` or `duration`, as
+/// An interval's length in minutes, from `every_minutes` or `duration`, as
 /// the node reads it.
 pub fn interval_minutes(s: &Schedule) -> Option<f64> {
     schedule::interval(s).ok().map(|d| d.as_secs_f64() / 60.)
@@ -561,16 +563,40 @@ impl TaskForm {
                 .collect(),
             n => n.to_string(),
         };
-        serde_json::json!({
-            "name": name,
-            "prompt": self.prompt,
-            "targets": self.targets,
-            "schedule": self.schedule_to_save(),
-            "enabled": self.enabled,
-            "paused": self.paused,
-            "createdBy": ACTOR,
-            "updatedBy": ACTOR,
-        })
+        let targets = self
+            .targets
+            .iter()
+            .map(|target| TargetRequest {
+                session_name: target.session_name.clone(),
+                unix_user: target.unix_user.clone(),
+                ..Default::default()
+            })
+            .collect();
+        let body = if self.id.is_some() {
+            serde_json::to_value(PatchRequest {
+                name: Some(name),
+                prompt: Some(self.prompt.clone()),
+                targets: Some(targets),
+                schedule: Some(self.schedule_to_save()),
+                enabled: Some(self.enabled),
+                paused: Some(self.paused),
+                updated_by: ACTOR.into(),
+                ..Default::default()
+            })
+        } else {
+            serde_json::to_value(CreateRequest {
+                name,
+                prompt: self.prompt.clone(),
+                targets,
+                schedule: self.schedule_to_save(),
+                enabled: Some(self.enabled),
+                paused: self.paused,
+                created_by: ACTOR.into(),
+                updated_by: ACTOR.into(),
+                ..Default::default()
+            })
+        };
+        body.expect("scheduled form fields are JSON")
     }
 }
 
@@ -661,9 +687,9 @@ mod tests {
     #[test]
     fn an_unedited_cadence_is_saved_as_it_was() {
         let task: Task = serde_json::from_str(
-            r#"{"id":"tsk_1","name":"daily","prompt":"p","targets":[{"sessionName":"ops"}],
+            r#"{"id":"tsk_1","name":"daily","prompt":"p","targets":[{"session_name":"ops"}],
             "schedule":{"type":"interval","duration":"24h","timezone":"Local"},
-            "enabled":true,"paused":false,"nextRun":null,"lastRun":null}"#,
+            "enabled":true,"paused":false,"created_at":"2026-06-27T14:00:00Z","updated_at":"2026-06-27T14:00:00Z"}"#,
         )
         .unwrap();
         assert_eq!(describe(&task.schedule), "Every 24 hours");
@@ -684,7 +710,7 @@ mod tests {
         form.schedule.every_value = "12".into();
         assert_eq!(
             form.body()["schedule"],
-            serde_json::json!({"type":"interval","everyMinutes":720,"timezone":form.schedule.timezone})
+            serde_json::json!({"type":"interval","every_minutes":720,"timezone":form.schedule.timezone})
         );
         let odd = Schedule {
             kind: "interval".into(),
@@ -699,9 +725,9 @@ mod tests {
     #[test]
     fn an_edit_keeps_a_disabled_task_disabled() {
         let task: Task = serde_json::from_str(
-            r#"{"id":"tsk_1","name":"off","prompt":"p","targets":[{"sessionName":"ops"}],
-            "schedule":{"type":"interval","everyMinutes":5,"timezone":"UTC"},
-            "enabled":false,"paused":false,"nextRun":null,"lastRun":null}"#,
+            r#"{"id":"tsk_1","name":"off","prompt":"p","targets":[{"session_name":"ops"}],
+            "schedule":{"type":"interval","every_minutes":5,"timezone":"UTC"},
+            "enabled":false,"paused":false,"created_at":"2026-06-27T14:00:00Z","updated_at":"2026-06-27T14:00:00Z"}"#,
         )
         .unwrap();
         let mut form = TaskForm::edit("n", &task);

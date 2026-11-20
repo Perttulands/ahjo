@@ -1,18 +1,14 @@
-//! The scheduled area's wire: tasks that paste a prompt into named sessions
-//! on a schedule (#189), CHROTE's scheduler ported. The API is CHROTE's,
-//! envelope, headers and task document all, so the `scheduled-tasks` skill
-//! works against a node by changing only its base URL. The node and the app
-//! both use these types, so a changed field fails the build on the other
-//! side.
-//!
-//! Errors are the one shape `ahjo_core::Error` defines, with the codes
-//! below; over HTTP they come in CHROTE's envelope (see [`Envelope`]).
+//! The scheduled area's commands, events and HTTP types. The node and the
+//! app share the same task document and request types. HTTP carries
+//! [`Envelope`], with errors in the one shape `ahjo_core::Error` defines.
 
 use std::collections::BTreeMap;
 
+pub mod commands;
 pub mod schedule;
 
 use jiff::Timestamp;
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 /// Watch task changes while the Scheduled page is shown.
@@ -68,11 +64,10 @@ pub const PARTIAL: &str = "partial";
 /// the prompt.
 pub const SUBMIT_KEY_DISPATCHED: &str =
     "pasted; submit key dispatched (application acceptance unconfirmed)";
-const LEGACY_SUBMITTED: &str = "pasted and submitted";
 
 /// A session by its Unix user and name; sockets are the node's business.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct Target {
     pub session_name: String,
     #[serde(default, skip_serializing_if = "String::is_empty")]
@@ -90,8 +85,8 @@ impl Target {
 }
 
 /// An interval or cron trigger, CHROTE's schema.
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct Schedule {
     #[serde(rename = "type")]
     pub kind: String,
@@ -102,7 +97,7 @@ pub struct Schedule {
     #[serde(default, skip_serializing_if = "is_zero")]
     pub every_minutes: i64,
     /// An interval as a Go duration (`24h`, `1h30m`), as CHROTE's files
-    /// may have it instead of `everyMinutes`.
+    /// may have it instead of `every_minutes`.
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub duration: String,
 }
@@ -112,8 +107,8 @@ fn is_zero(n: &i64) -> bool {
 }
 
 /// One target's part of a run.
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", from = "TargetRunDoc")]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct TargetRun {
     pub session_name: String,
     #[serde(default, skip_serializing_if = "String::is_empty")]
@@ -127,45 +122,8 @@ pub struct TargetRun {
     pub message: String,
 }
 
-/// What older CHROTE builds wrote: `submitted`, which claimed too much, is
-/// read as the transport receipt it was.
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct TargetRunDoc {
-    session_name: String,
-    #[serde(default)]
-    unix_user: String,
-    #[serde(default)]
-    status: String,
-    #[serde(default)]
-    pane: String,
-    #[serde(default)]
-    submit_key_dispatched: bool,
-    #[serde(default)]
-    submitted: bool,
-    #[serde(default)]
-    message: String,
-}
-
-impl From<TargetRunDoc> for TargetRun {
-    fn from(d: TargetRunDoc) -> TargetRun {
-        TargetRun {
-            session_name: d.session_name,
-            unix_user: d.unix_user,
-            status: d.status,
-            pane: d.pane,
-            submit_key_dispatched: d.submit_key_dispatched || d.submitted,
-            message: if d.message == LEGACY_SUBMITTED {
-                SUBMIT_KEY_DISPATCHED.into()
-            } else {
-                d.message
-            },
-        }
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct RunEntry {
     pub id: String,
     pub trigger: String,
@@ -178,8 +136,8 @@ pub struct RunEntry {
     pub targets: Vec<TargetRun>,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct AuditEntry {
     pub at: Timestamp,
     #[serde(default, skip_serializing_if = "String::is_empty")]
@@ -189,10 +147,9 @@ pub struct AuditEntry {
     pub message: String,
 }
 
-/// The persisted task document, CHROTE's schema field for field, so the
-/// `scheduled-tasks` skill and CHROTE's own task files work unchanged.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", from = "TaskDoc")]
+/// The persisted task document, also returned by the node.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct Task {
     pub id: String,
     pub name: String,
@@ -249,87 +206,12 @@ impl Task {
 }
 
 /// A run in progress, as written ahead of its delivery.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct Attempt {
     pub run_id: String,
     pub trigger: String,
     pub started_at: Timestamp,
-}
-
-/// A task file as CHROTE wrote it over time: the retired single `target`
-/// folds into `targets`.
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct TaskDoc {
-    id: String,
-    #[serde(default)]
-    name: String,
-    #[serde(default)]
-    prompt: String,
-    #[serde(default)]
-    targets: Vec<Target>,
-    #[serde(default)]
-    target: Option<Target>,
-    #[serde(default)]
-    session_ids: BTreeMap<String, String>,
-    #[serde(default)]
-    schedule: Schedule,
-    #[serde(default)]
-    enabled: bool,
-    #[serde(default)]
-    paused: bool,
-    next_run: Option<Timestamp>,
-    last_run: Option<Timestamp>,
-    #[serde(default)]
-    last_status: String,
-    #[serde(default)]
-    created_by: String,
-    #[serde(default)]
-    updated_by: String,
-    #[serde(default = "epoch")]
-    created_at: Timestamp,
-    #[serde(default = "epoch")]
-    updated_at: Timestamp,
-    #[serde(default)]
-    recent_runs: Vec<RunEntry>,
-    #[serde(default)]
-    audit: Vec<AuditEntry>,
-    #[serde(default)]
-    attempt: Option<Attempt>,
-    /// As the API says it, for the app; never in a file.
-    #[serde(default)]
-    held: String,
-}
-
-fn epoch() -> Timestamp {
-    Timestamp::UNIX_EPOCH
-}
-
-impl From<TaskDoc> for Task {
-    fn from(d: TaskDoc) -> Task {
-        Task {
-            id: d.id,
-            name: d.name,
-            prompt: d.prompt,
-            targets: normalize_targets(d.targets.into_iter().chain(d.target)),
-            session_ids: d.session_ids,
-            schedule: d.schedule,
-            enabled: d.enabled,
-            paused: d.paused,
-            next_run: d.next_run,
-            last_run: d.last_run,
-            last_status: d.last_status,
-            created_by: d.created_by,
-            updated_by: d.updated_by,
-            created_at: d.created_at,
-            updated_at: d.updated_at,
-            recent_runs: d.recent_runs,
-            audit: d.audit,
-            held: d.held,
-            attempt: d.attempt,
-        }
-    }
 }
 
 /// The session id of a [`Task::session_ids`] entry, without its server.
@@ -355,7 +237,7 @@ pub fn normalize_targets(targets: impl IntoIterator<Item = Target>) -> Vec<Targe
 /// A target as a request names it. `socket` is refused: the node resolves
 /// sockets itself.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(deny_unknown_fields)]
 pub struct TargetRequest {
     #[serde(default)]
     pub session_name: String,
@@ -367,7 +249,7 @@ pub struct TargetRequest {
 
 /// `POST /api/scheduled-tasks`.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(deny_unknown_fields)]
 pub struct CreateRequest {
     #[serde(default)]
     pub name: String,
@@ -392,7 +274,7 @@ pub struct CreateRequest {
 
 /// `PATCH /api/scheduled-tasks/{id}`: what is absent stays.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(deny_unknown_fields)]
 pub struct PatchRequest {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
@@ -413,56 +295,28 @@ pub struct PatchRequest {
     pub updated_by: String,
 }
 
+/// Attribution for a pause, resume or immediate run.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ActionRequest {
+    #[serde(default)]
+    pub updated_by: String,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    /// CHROTE's TestTargetRunJSONMigratesLegacySubmissionClaim.
-    #[test]
-    fn target_run_json_migrates_legacy_submission_claim() {
-        let run: TargetRun = serde_json::from_str(
-            r#"{"sessionName":"ops","status":"success","submitted":true,"message":"pasted and submitted"}"#,
-        )
-        .unwrap();
-        assert!(run.submit_key_dispatched);
-        assert_eq!(run.message, SUBMIT_KEY_DISPATCHED);
-        let back = serde_json::to_string(&run).unwrap();
-        assert!(!back.contains("\"submitted\""), "{back}");
-        assert!(back.contains("\"submitKeyDispatched\":true"));
-    }
 
     /// What the API says of a task reaches the app: why it is held, and
     /// which session each target was chosen as.
     #[test]
     fn a_held_task_reads_back_as_held_with_its_sessions() {
-        let said = r#"{"id":"tsk_1","name":"n","prompt":"p","targets":[{"sessionName":"ops"}],
-            "sessionIds":{"ops":"$3"},"schedule":{"type":"interval","everyMinutes":5},
-            "enabled":true,"paused":false,"createdAt":"2026-06-27T14:00:00Z",
-            "updatedAt":"2026-06-27T14:00:00Z","held":"session ops is another session now"}"#;
+        let said = r#"{"id":"tsk_1","name":"n","prompt":"p","targets":[{"session_name":"ops"}],
+            "session_ids":{"ops":"$3"},"schedule":{"type":"interval","every_minutes":5},
+            "enabled":true,"paused":false,"created_at":"2026-06-27T14:00:00Z",
+            "updated_at":"2026-06-27T14:00:00Z","held":"session ops is another session now"}"#;
         let task: Task = serde_json::from_str(said).unwrap();
         assert_eq!(task.held, "session ops is another session now");
         assert_eq!(task.session_ids["ops"], "$3");
-    }
-
-    /// CHROTE's TestStoreReadsLegacySingleTargetDocument and
-    /// TestTaskJSONWritesCurrentTargetsSchema.
-    #[test]
-    fn reads_a_legacy_single_target_and_writes_targets() {
-        let task: Task = serde_json::from_str(
-            r#"{"id":"tsk_legacy","name":"n","prompt":"p","target":{"sessionName":" ops ","unixUser":"alice"},
-                "schedule":{"type":"interval","everyMinutes":5,"timezone":"UTC"},"enabled":true,"paused":false,
-                "createdAt":"2026-06-27T14:00:00Z","updatedAt":"2026-06-27T14:00:00.123456789Z"}"#,
-        )
-        .unwrap();
-        assert_eq!(
-            task.targets,
-            [Target {
-                session_name: "ops".into(),
-                unix_user: "alice".into()
-            }]
-        );
-        let back = serde_json::to_string(&task).unwrap();
-        assert!(back.contains("\"targets\":[{\"sessionName\":\"ops\",\"unixUser\":\"alice\"}]"));
-        assert!(!back.contains("\"target\":"), "{back}");
     }
 }

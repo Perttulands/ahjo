@@ -579,6 +579,7 @@ dependencies = [
  "hyper-util",
  "jiff",
  "libc",
+ "schemars",
  "serde",
  "serde_json",
  "tokio",
@@ -601,6 +602,7 @@ dependencies = [
  "futures-util",
  "jiff",
  "libc",
+ "schemars",
  "serde",
  "serde_json",
  "tokio",
@@ -634,6 +636,7 @@ version = "0.0.1"
 dependencies = [
  "ahjo-core",
  "jiff",
+ "schemars",
  "serde",
  "serde_json",
 ]
@@ -6564,6 +6567,7 @@ checksum = "ab508826f74a77ca9d5aba6ff19b522583ee3eaf28a19384ff3d0e5835fadf6e"
 dependencies = [
  "dyn-clone",
  "indexmap",
+ "jiff",
  "ref-cast",
  "schemars_derive",
  "serde",

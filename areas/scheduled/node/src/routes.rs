@@ -7,8 +7,8 @@ use std::sync::Arc;
 
 use ahjo_core::Error as Coded;
 use ahjo_scheduled_contract::{
-    BAD_REQUEST, CreateRequest, Envelope, FORBIDDEN, INTENT, INTENT_VALUE, NOT_FOUND, PATH,
-    PatchRequest, Target, TargetRequest, UNSUPPORTED_MEDIA_TYPE,
+    ActionRequest, BAD_REQUEST, CreateRequest, Envelope, FORBIDDEN, INTENT, INTENT_VALUE,
+    NOT_FOUND, PATH, PatchRequest, Target, TargetRequest, UNSUPPORTED_MEDIA_TYPE,
 };
 use axum::Router;
 use axum::body::Bytes;
@@ -16,7 +16,6 @@ use axum::extract::{Path, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
-use serde::Deserialize;
 use serde_json::{Value, json};
 
 use crate::service::{Create, Error, Patch, Scheduled};
@@ -117,20 +116,6 @@ fn parse<T: serde::de::DeserializeOwned>(body: &[u8]) -> Result<T, String> {
 
 fn bad(message: String) -> Response {
     refuse(StatusCode::BAD_REQUEST, BAD_REQUEST, message)
-}
-
-fn actor(body: &[u8]) -> String {
-    #[derive(Deserialize, Default)]
-    #[serde(rename_all = "camelCase")]
-    struct Actor {
-        #[serde(default)]
-        updated_by: String,
-    }
-    serde_json::from_slice::<Actor>(body)
-        .unwrap_or_default()
-        .updated_by
-        .trim()
-        .to_string()
 }
 
 async fn list(State(s): State<Arc<Scheduled>>) -> Response {
@@ -236,15 +221,20 @@ async fn act(
     if let Some(no) = guarded(&headers, false) {
         return no;
     }
-    let who = actor(&body);
+    let actor = if body.is_empty() {
+        ActionRequest::default()
+    } else {
+        match parse::<ActionRequest>(&body) {
+            Ok(actor) => actor,
+            Err(message) => return bad(message),
+        }
+    };
+    let who = actor.updated_by.trim();
     let done = match action.as_str() {
-        "pause" => s.pause(&id, &who).map(|task| json!({ "task": task })),
-        "resume" => s
-            .resume(&id, &who)
-            .await
-            .map(|task| json!({ "task": task })),
+        "pause" => s.pause(&id, who).map(|task| json!({ "task": task })),
+        "resume" => s.resume(&id, who).await.map(|task| json!({ "task": task })),
         "run-now" => s
-            .run_now(&id, &who)
+            .run_now(&id, who)
             .await
             .map(|(task, run)| json!({ "task": task, "run": run })),
         _ => return refuse(StatusCode::NOT_FOUND, NOT_FOUND, "no such action"),

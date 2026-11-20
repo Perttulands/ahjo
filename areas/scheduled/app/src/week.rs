@@ -1,8 +1,8 @@
 //! The week across the top of the chosen task: every task's runs over the
 //! last day and the next seven, one lane each, now as a line; under it, in
 //! words, where two tasks reach one session within a few minutes of each
-//! other. Past runs are the node's (`recentRuns`); coming ones are read from
-//! each task's schedule as the node reads it, from its `nextRun`.
+//! other. Past runs are the node's (`recent_runs`); coming ones are read from
+//! each task's schedule as the node reads it, from its `next_run`.
 //!
 //! The week is worked out when the tasks or the minute change, not on every
 //! draw: an every-minute task alone is ten thousand runs.
@@ -723,8 +723,9 @@ mod tests {
             "targets": [],
             "schedule": {"type": "cron", "expression": cron, "timezone": "UTC"},
             "enabled": true,
-            "createdAt": "2026-06-01T00:00:00Z",
-            "updatedAt": "2026-06-01T00:00:00Z",
+            "paused": false,
+            "created_at": "2026-06-01T00:00:00Z",
+            "updated_at": "2026-06-01T00:00:00Z",
         }))
         .unwrap();
         t.targets = sessions

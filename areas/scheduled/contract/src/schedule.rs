@@ -68,7 +68,7 @@ pub fn next_run(s: &Schedule, after: Timestamp) -> Result<Timestamp, Invalid> {
 }
 
 /// Every firing in `[from, until)`, the first at `first` where it is known
-/// (a task's `nextRun`, which may differ from the schedule's own reading
+/// (a task's `next_run`, which may differ from the schedule's own reading
 /// after a missed run); at most `most`, which also says when it stopped
 /// short. A schedule that does not read fires never.
 pub fn runs_between(
@@ -118,14 +118,14 @@ pub fn runs_between(
 /// An interval schedule's length.
 pub fn interval(s: &Schedule) -> Result<SignedDuration, Invalid> {
     if s.every_minutes < 0 {
-        return Err(Invalid::new("interval everyMinutes must be positive"));
+        return Err(Invalid::new("interval every_minutes must be positive"));
     }
     if s.every_minutes > 0 {
         return Ok(SignedDuration::from_mins(s.every_minutes));
     }
     if s.duration.is_empty() {
         return Err(Invalid::new(
-            "interval everyMinutes or duration is required",
+            "interval every_minutes or duration is required",
         ));
     }
     match go_duration(&s.duration) {

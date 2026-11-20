@@ -724,9 +724,9 @@ async fn api_envelope_and_lifecycle() {
             "POST",
             "/api/scheduled-tasks",
             r#"{"name":"Standup nudge","prompt":"hello; rm -rf / $(whoami)",
-                "targets":[{"sessionName":"ops","unixUser":"alice"}],
-                "schedule":{"type":"interval","everyMinutes":15,"timezone":"UTC"},
-                "createdBy":"agent:test"}"#,
+                "targets":[{"session_name":"ops","unix_user":"alice"}],
+                "schedule":{"type":"interval","every_minutes":15,"timezone":"UTC"},
+                "created_by":"agent:test"}"#,
         )
         .await;
     let task = &created["task"];
@@ -734,9 +734,9 @@ async fn api_envelope_and_lifecycle() {
     assert!(id.starts_with("tsk_"));
     assert_eq!(task["enabled"], true);
     assert_eq!(task["paused"], false);
-    assert_eq!(task["nextRun"], "2026-06-27T14:15:00Z");
+    assert_eq!(task["next_run"], "2026-06-27T14:15:00Z");
     assert_eq!(
-        (task["createdBy"].as_str(), task["updatedBy"].as_str()),
+        (task["created_by"].as_str(), task["updated_by"].as_str()),
         (Some("agent:test"), Some("agent:test"))
     );
 
@@ -750,30 +750,30 @@ async fn api_envelope_and_lifecycle() {
             "PATCH",
             &format!("/api/scheduled-tasks/{id}"),
             r#"{"name":"Renamed nudge","prompt":"patched literal prompt",
-                "schedule":{"type":"interval","everyMinutes":30,"timezone":"UTC"},"updatedBy":"agent:patch"}"#,
+                "schedule":{"type":"interval","every_minutes":30,"timezone":"UTC"},"updated_by":"agent:patch"}"#,
         )
         .await;
     assert_eq!(patched["task"]["name"], "Renamed nudge");
-    assert_eq!(patched["task"]["schedule"]["everyMinutes"], 30);
-    assert_eq!(patched["task"]["updatedBy"], "agent:patch");
+    assert_eq!(patched["task"]["schedule"]["every_minutes"], 30);
+    assert_eq!(patched["task"]["updated_by"], "agent:patch");
 
     let paused = a
         .ok("POST", &format!("/api/scheduled-tasks/{id}/pause"), "{}")
         .await;
     assert_eq!(paused["task"]["paused"], true);
-    assert!(paused["task"].get("nextRun").is_none());
+    assert!(paused["task"].get("next_run").is_none());
     let resumed = a
         .ok("POST", &format!("/api/scheduled-tasks/{id}/resume"), "{}")
         .await;
     assert_eq!(resumed["task"]["paused"], false);
-    assert!(resumed["task"]["nextRun"].is_string());
+    assert!(resumed["task"]["next_run"].is_string());
 
     let ran = a
         .ok("POST", &format!("/api/scheduled-tasks/{id}/run-now"), "{}")
         .await;
     assert!(ran["run"].is_object());
-    assert_eq!(ran["task"]["lastStatus"], "success");
-    assert_eq!(ran["task"]["recentRuns"].as_array().unwrap().len(), 1);
+    assert_eq!(ran["task"]["last_status"], "success");
+    assert_eq!(ran["task"]["recent_runs"].as_array().unwrap().len(), 1);
     assert_eq!(a.fake.sent.lock().unwrap()[0].1, "patched literal prompt");
 
     let deleted = a
@@ -802,7 +802,7 @@ async fn api_fans_one_task_out_to_many_sessions() {
             "POST",
             "/api/scheduled-tasks",
             r#"{"name":"Continue work","prompt":"Continue if work is clear",
-                "targets":[{"sessionName":"worker-1","unixUser":"alice"},{"sessionName":"worker-2","unixUser":"alice"},{"sessionName":"worker-3","unixUser":"alice"}],
+                "targets":[{"session_name":"worker-1","unix_user":"alice"},{"session_name":"worker-2","unix_user":"alice"},{"session_name":"worker-3","unix_user":"alice"}],
                 "schedule":{"type":"cron","expression":"0 16 * * *","timezone":"Europe/Helsinki"}}"#,
         )
         .await;
@@ -811,10 +811,10 @@ async fn api_fans_one_task_out_to_many_sessions() {
     let ran = a
         .ok("POST", &format!("/api/scheduled-tasks/{id}/run-now"), "{}")
         .await;
-    assert_eq!(ran["task"]["lastStatus"], "success");
+    assert_eq!(ran["task"]["last_status"], "success");
     assert_eq!(a.fake.sends(), 3);
     assert_eq!(
-        ran["task"]["recentRuns"][0]["targets"]
+        ran["task"]["recent_runs"][0]["targets"]
             .as_array()
             .unwrap()
             .len(),
@@ -824,12 +824,12 @@ async fn api_fans_one_task_out_to_many_sessions() {
         .ok(
             "PATCH",
             &format!("/api/scheduled-tasks/{id}"),
-            r#"{"targets":[{"sessionName":"worker-2","unixUser":"alice"}],"updatedBy":"agent:patch"}"#,
+            r#"{"targets":[{"session_name":"worker-2","unix_user":"alice"}],"updated_by":"agent:patch"}"#,
         )
         .await;
     assert_eq!(
         patched["task"]["targets"],
-        serde_json::json!([{"sessionName":"worker-2","unixUser":"alice"}])
+        serde_json::json!([{"session_name":"worker-2","unix_user":"alice"}])
     );
     std::fs::remove_dir_all(&a.dir).unwrap();
 }
@@ -838,7 +838,7 @@ async fn api_fans_one_task_out_to_many_sessions() {
 #[tokio::test]
 async fn api_requires_mutation_intent_and_json() {
     let a = api("api-intent", &["ops"]);
-    let body = r#"{"name":"csrf","prompt":"hello","targets":[{"sessionName":"ops","unixUser":"alice"}],"schedule":{"type":"interval","everyMinutes":15,"timezone":"UTC"}}"#;
+    let body = r#"{"name":"csrf","prompt":"hello","targets":[{"session_name":"ops","unix_user":"alice"}],"schedule":{"type":"interval","every_minutes":15,"timezone":"UTC"}}"#;
     let (status, v) = a
         .call("POST", "/api/scheduled-tasks", body, false, true)
         .await;
@@ -856,8 +856,8 @@ async fn api_requires_mutation_intent_and_json() {
 /// TestScheduledTasksAPIValidationRejectsUnsafeOrInvalidRequests.
 #[tokio::test]
 async fn api_validation_rejects_unsafe_or_invalid_requests() {
-    let ops = r#""targets":[{"sessionName":"ops","unixUser":"alice"}]"#;
-    let every = r#""schedule":{"type":"interval","everyMinutes":15,"timezone":"UTC"}"#;
+    let ops = r#""targets":[{"session_name":"ops","unix_user":"alice"}]"#;
+    let every = r#""schedule":{"type":"interval","every_minutes":15,"timezone":"UTC"}"#;
     for (body, mention) in [
         (
             format!(r#"{{"name":"bad","prompt":"   ",{ops},{every}}}"#),
@@ -869,7 +869,7 @@ async fn api_validation_rejects_unsafe_or_invalid_requests() {
         ),
         (
             format!(
-                r#"{{"name":"bad","prompt":"hello",{ops},"schedule":{{"type":"interval","everyMinutes":0,"timezone":"UTC"}}}}"#
+                r#"{{"name":"bad","prompt":"hello",{ops},"schedule":{{"type":"interval","every_minutes":0,"timezone":"UTC"}}}}"#
             ),
             "",
         ),
@@ -881,25 +881,25 @@ async fn api_validation_rejects_unsafe_or_invalid_requests() {
         ),
         (
             format!(
-                r#"{{"name":"bad","prompt":"hello","targets":[{{"sessionName":"ops","unixUser":"alice","socket":"/tmp/evil.sock"}}],{every}}}"#
+                r#"{{"name":"bad","prompt":"hello","targets":[{{"session_name":"ops","unix_user":"alice","socket":"/tmp/evil.sock"}}],{every}}}"#
             ),
             "socket",
         ),
         (
             format!(
-                r#"{{"name":"bad","prompt":"hello","targets":[{{"sessionName":"missing","unixUser":"alice"}}],{every}}}"#
+                r#"{{"name":"bad","prompt":"hello","targets":[{{"session_name":"missing","unix_user":"alice"}}],{every}}}"#
             ),
             "target",
         ),
         (
             format!(
-                r#"{{"name":"bad","prompt":"hello","targets":[{{"sessionName":"ops","unixUser":"intruder"}}],{every}}}"#
+                r#"{{"name":"bad","prompt":"hello","targets":[{{"session_name":"ops","unix_user":"intruder"}}],{every}}}"#
             ),
             "not allowed",
         ),
         (
             format!(
-                r#"{{"name":"bad","prompt":"hello","target":{{"sessionName":"ops"}},{every}}}"#
+                r#"{{"name":"bad","prompt":"hello","target":{{"session_name":"ops"}},{every}}}"#
             ),
             "retired",
         ),

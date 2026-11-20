@@ -7,8 +7,8 @@ use serde_json::{Value, json};
 use super::{Mcp, Reach, call_log};
 use ahjo_core::Error;
 
-/// The protocol versions this server speaks, newest first. Tools here use
-/// only what all of them share.
+/// The protocol versions this server speaks, newest first. Typed tools include
+/// their structured results alongside text for older clients.
 const VERSIONS: &[&str] = &["2025-11-25", "2025-06-18", "2025-03-26", "2024-11-05"];
 
 const INVALID_REQUEST: i64 = -32600;
@@ -95,18 +95,22 @@ async fn call(mcp: &Mcp, reach: &Reach, caller: &Caller, params: &Value) -> Answ
         mcp.node.as_str(),
         if outcome.is_ok() { "ok" } else { "failed" },
     );
-    Ok(content(outcome))
+    Ok(content(outcome, command.output_schema.is_some()))
 }
 
-/// A tool's outcome as MCP carries it: one JSON value as text, or its
-/// error, `{"code","message"}`, as text.
-fn content(outcome: Result<Value, Error>) -> Value {
-    let (text, failed) = match outcome {
+/// A tool's outcome as JSON text, plus the matching structured value when
+/// the tool advertised an output schema.
+fn content(outcome: Result<Value, Error>, structured: bool) -> Value {
+    let (text, failed) = match &outcome {
         Ok(value) => (value.to_string(), false),
         Err(error) => (
-            serde_json::to_string(&error).expect("an error is JSON"),
+            serde_json::to_string(error).expect("an error is JSON"),
             true,
         ),
     };
-    json!({ "content": [{ "type": "text", "text": text }], "isError": failed })
+    let mut result = json!({ "content": [{ "type": "text", "text": text }], "isError": failed });
+    if structured && let Ok(value) = outcome {
+        result["structuredContent"] = value;
+    }
+    result
 }
