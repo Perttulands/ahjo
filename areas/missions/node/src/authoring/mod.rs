@@ -138,7 +138,7 @@ fn endpoint(m: &Mission, endpoint: &str, side: Side) -> Result<String> {
                         "{title:?} has several {key}; name one as {title}:<port>, one of {}",
                         ports
                             .iter()
-                            .map(|p| p.label.as_str())
+                            .map(|p| format!("{id}:{}", p.id))
                             .collect::<Vec<_>>()
                             .join(", ")
                     ),
@@ -153,15 +153,22 @@ fn endpoint(m: &Mission, endpoint: &str, side: Side) -> Result<String> {
         }
     };
     if let Endpoint::Formation(formation) = kind {
-        let mut matching = formation
-            .inputs
-            .iter()
-            .chain(&formation.outputs)
-            .filter(|p| p.id == port || p.label == port);
-        return match (matching.next(), matching.next()) {
-            (Some(port), None) => Ok(format!("{id}:{}", port.id)),
-            (None, _) => bail!("port {port:?} not found"),
-            _ => bail!("port {port:?} is ambiguous"),
+        let all = || formation.inputs.iter().chain(&formation.outputs);
+        let matching: Vec<_> = all().filter(|p| p.id == port || p.label == port).collect();
+        let names = |ports: Vec<&wire::Port>| {
+            ports
+                .iter()
+                .map(|p| format!("{id}:{}", p.id))
+                .collect::<Vec<_>>()
+                .join(", ")
+        };
+        return match matching.as_slice() {
+            [port] => Ok(format!("{id}:{}", port.id)),
+            [] => bail!(
+                "port {port:?} not found on {id}; available ports: {}",
+                names(all().collect())
+            ),
+            _ => bail!("port {port:?} is ambiguous; choose {}", names(matching)),
         };
     }
     Ok(format!("{id}:{port}"))

@@ -20,8 +20,8 @@ mod run_projection;
 mod sessions;
 
 pub use authoring::{
-    Edit, EndUpdate, GateUpdate, InputCardUpdate, LayoutEdit, LayoutPatch, LimitUpdate,
-    MissionChange, MissionDeletion, NotePatch, NotesEdit, Precondition, RestoredNode,
+    DocumentChanges, Edit, EndUpdate, GateUpdate, InputCardUpdate, LayoutEdit, LayoutPatch,
+    LimitUpdate, MissionChange, MissionDeletion, NotePatch, NotesEdit, Precondition, RestoredNode,
 };
 pub use branches::{kept_branch, run_branch, run_tag};
 pub use examples::{EXAMPLES, Example, example};

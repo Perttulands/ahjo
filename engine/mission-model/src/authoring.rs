@@ -21,6 +21,13 @@ pub struct Edit {
     pub etag: String,
 }
 
+#[derive(Clone, Debug, Default, PartialEq, Deserialize, Serialize, JsonSchema)]
+pub struct DocumentChanges {
+    pub added: Vec<String>,
+    pub removed: Vec<String>,
+    pub changed: Vec<String>,
+}
+
 /// A single board mutation, shared by the engine and the missions contract.
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize, JsonSchema)]
 #[serde(

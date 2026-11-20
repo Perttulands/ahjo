@@ -187,7 +187,15 @@ async fn run(command: &str, args: &[String]) -> Result<i32> {
             format!("unknown flag {flag}"),
             "ahjo --help lists the commands",
         )),
-        noun => cli::run(noun, args, &mut std::io::stdout()).await,
+        noun => {
+            cli::run_with_files(
+                noun,
+                args,
+                &mut std::io::stdout(),
+                ahjo_missions::DOCUMENT_FILE_ARGUMENTS,
+            )
+            .await
+        }
     }
 }
 

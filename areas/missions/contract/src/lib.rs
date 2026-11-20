@@ -157,6 +157,7 @@ pub struct SeatWait {
 }
 
 pub mod document;
+pub mod document_commands;
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct MissionResponse {

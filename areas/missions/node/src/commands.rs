@@ -2,13 +2,19 @@
 use crate::Missions;
 use ahjo_core::Error;
 use ahjo_mission_engine::{AdmissionFailure, Harnesses, validate};
-use ahjo_missions_contract::{self as wire, LayoutPatch, NotePatch, Precondition, RunStart, patch};
+use ahjo_missions_contract::{
+    self as wire, LayoutPatch, NotePatch, Precondition, RunStart,
+    document_commands::{AppliedMission, ApplyMission, ExportMission, ExportedMission},
+    patch,
+};
 use ahjo_node_kit::{
     Command, Effect,
     args::{flag, maybe_text, object, text},
 };
 use serde_json::{Value, json};
 use std::time::Duration;
+
+pub const DOCUMENT_FILE_ARGUMENTS: &[(&str, &str)] = &[("mission_apply", "document")];
 
 pub const NAMES: &[&str] = &[
     "mission_list",
@@ -18,6 +24,8 @@ pub const NAMES: &[&str] = &[
     "mission_validate",
     "mission_new",
     "mission_examples",
+    "mission_export",
+    "mission_apply",
     "mission_edit",
     "mission_notes",
     "mission_note",
@@ -88,6 +96,21 @@ pub fn commands(missions: &Missions) -> Vec<Command> {
         .iter()
         .map(|&name| {
             let m = missions.clone();
+            match name {
+                "mission_export" => {
+                    return Command::typed(name, Effect::Reads, move |input: ExportMission| {
+                        let m = m.clone();
+                        async move { blocking(move || export_document(&m, input)).await }
+                    });
+                }
+                "mission_apply" => {
+                    return Command::typed(name, Effect::Destroys, move |input: ApplyMission| {
+                        let m = m.clone();
+                        async move { blocking(move || apply_document(&m, input)).await }
+                    });
+                }
+                _ => (),
+            }
             Command::new(
                 name,
                 effect(name),
@@ -101,6 +124,47 @@ pub fn commands(missions: &Missions) -> Vec<Command> {
         })
         .collect()
 }
+fn export_document(m: &Missions, input: ExportMission) -> Result<ExportedMission, Error> {
+    let document = match (input.mission, input.example) {
+        (Some(mission), None) => m.store.export_mission(&mission)?,
+        (None, Some(name)) => wire::example(&name)
+            .ok_or_else(|| Error::new("not_found", format!("no mission example {name:?}")))?
+            .definition
+            .into(),
+        _ => return Err(bad("give one mission or --example")),
+    };
+    Ok(ExportedMission { document })
+}
+
+fn apply_document(m: &Missions, input: ApplyMission) -> Result<AppliedMission, Error> {
+    let applied = m.store.apply_document(&input.document, input.dry_run)?;
+    if applied.wrote {
+        m.changed();
+    }
+    let validation = validate(&applied.mission, &m.store.roles(), &Harnesses::from_host());
+    let slug = shell_word(&applied.mission.slug);
+    let next = if input.dry_run {
+        "ahjo mission apply -".to_owned()
+    } else if !validation.errors.is_empty()
+        || validation
+            .warnings
+            .iter()
+            .any(|finding| finding.code == wire::Code::MissionNotRunnable)
+    {
+        format!("ahjo mission export {slug}")
+    } else {
+        run_command(&slug, &applied.mission)
+    };
+    Ok(AppliedMission {
+        mission: applied.mission.slug,
+        rev: applied.mission.rev,
+        assigned_ids: applied.assigned_ids,
+        changed: applied.changed,
+        validation,
+        next,
+    })
+}
+
 /// What each mission command does.
 fn effect(name: &str) -> Effect {
     match name {

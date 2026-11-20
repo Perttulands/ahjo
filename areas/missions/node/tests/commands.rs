@@ -17,6 +17,8 @@ const EXPECTED: &[&str] = &[
     "mission_validate",
     "mission_new",
     "mission_examples",
+    "mission_export",
+    "mission_apply",
     "mission_edit",
     "mission_notes",
     "mission_note",
@@ -117,7 +119,12 @@ async fn command_list_and_coded_failures() {
             _ => json!({}),
         };
         let error = node.call(command, args).await.unwrap_err();
-        assert_eq!(error.code, "bad_request", "{command}: {error}");
+        if command == "mission_apply" {
+            assert_eq!(error.code, "invalid_argument", "{error}");
+            assert!(error.message.contains("accepted fields: document, dry_run"));
+        } else {
+            assert_eq!(error.code, "bad_request", "{command}: {error}");
+        }
     }
     node.stop().await;
 }

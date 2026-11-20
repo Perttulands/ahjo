@@ -14,9 +14,24 @@ Answer the notes where they are, so the operator sees on the board what you did:
 
 ## Author
 
+Export the mission you will edit, or start from an example.
+
+```sh
+ahjo mission export post > post.toml
+ahjo mission export --example write-and-review > new-post.toml
+ahjo mission apply post.toml --dry-run
+ahjo mission apply post.toml
+```
+
+Give a new mission its own `slug` and `id`, or omit its `id` to assign one. Keep the exported `rev` when editing an existing mission. If apply reports a conflict, export again and merge your edits into that copy. Apply saves drafts and reports validation. Fix the errors before using its run command. Reply to open notes before removing their cards. Over MCP, give `mission_apply` the TOML text in `document`.
+
+The file uses `[[inputCard]]`, `[[formation]]`, `[[gate]]`, `[[end]]`, `[[limit]]`, and `[[connection]]`. A formation nests `input`, `output`, and `slot` tables. Use saved ids in `from` and `to` as `node:port`, and give every card you connect an id. `ahjo mission export --json` uses the same keys.
+
+### Individual changes
+
 Read `ahjo mission inspect <mission>` and `ahjo role list` before changing an existing graph, and preserve the draft and notes. Take IDs and port IDs from the returned JSON (`inspect --full --json` or an edit's answer), not guesses. Selectors can also be unique titles; endpoints are `node:port`.
 
-`ahjo mission examples` lists whole missions to start from (best of three with a judge, write and review, plan build check); `ahjo mission new <slug> --example <name>` copies one, staffed and wired, under a new id. Otherwise create an empty mission with `ahjo mission new <slug> --title '<title>'`, then its Input card with `ahjo mission create <slug> --goal '<goal>'`. Add a step with `ahjo formation create <slug> --type solo --title '<title>' --json`; its returned `formation` has `id`, `inputs`, `outputs`, and `slots`. Staff it explicitly with `ahjo formation assign <slug> <step-id> --harness claude --model haiku --effort low` (name the seat with `--slot <slot-id>` when the step has several); choose harness, model and effort for the work. A model the harness does not offer on this node is refused, and the refusal lists the ones it does. Edits answer with what changed, under `changed`, `removed` and the created item. `ahjo role characters` lists saved staffing, and `--role` adds reusable role text. Put task-specific instructions in `ahjo formation set-brief <slug> <step-id> --goal '<instructions>'`, not in a role.
+`ahjo mission examples` lists whole missions to start from (best of three with a judge, write and review, plan build check); `ahjo mission new <slug> --example <name>` copies one, staffed and wired, under a new id. Otherwise create an empty mission with `ahjo mission new <slug> --title '<title>'`, then its Input card with `ahjo mission create <slug> --goal '<goal>'`. Add a step with `ahjo formation create <slug> --type solo --title '<title>' --json`; its returned `formation` has `id`, `input`, `output`, and `slot`. Staff it explicitly with `ahjo formation assign <slug> <step-id> --harness claude --model haiku --effort low` (name the seat with `--slot <slot-id>` when the step has several); choose harness, model and effort for the work. A model the harness does not offer on this node is refused, and the refusal lists the ones it does. Edits answer with what changed, under `changed`, `removed` and the created item. `ahjo role characters` lists saved staffing, and `--role` adds reusable role text. Put task-specific instructions in `ahjo formation set-brief <slug> <step-id> --goal '<instructions>'`, not in a role.
 
 Connect the Input card with `ahjo mission wire <slug> --to '<step-id>'`. Connect later ports with `ahjo formation wire <slug> '<from-id>' '<to-id>'`; a bare id takes a step's only port, an Input's `out` and an End's or gate's `in`, and a gate leaving needs `:pass` or `:fail`. Name the port as `id:port` when there are several. Output ports can fan out; a step waits for all inputs. `--join` adds an input to an occupied step input. Route every step output and both gate verdicts to a step, gate or End. Add Ends with `ahjo end create <slug> --outcome done` or `--outcome rejected` and wire to `<end-id>:in`. `ahjo mission validate <slug> --json` must have no errors before admission; resolve warnings about unintended unreachable nodes too. Edit nodes in place to preserve edges. `ahjo mission edit` accepts one JSON authoring operation when needed; prefer named commands and their help.
 

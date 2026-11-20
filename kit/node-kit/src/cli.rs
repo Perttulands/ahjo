@@ -8,7 +8,7 @@ use ahjo_core::Error;
 use anyhow::{Context, Result, bail};
 use axum::http::Method;
 use serde_json::{Map, Value, json};
-use std::io::Write;
+use std::io::{Read, Write};
 
 use crate::client::NodeClient;
 
@@ -61,6 +61,16 @@ async fn reach(node: Option<String>) -> Result<Reached> {
 /// the tool failed. The node is the one `--node` among `args` names, else
 /// the one this machine runs.
 pub async fn run(noun: &str, args: &[String], out: &mut impl Write) -> Result<i32> {
+    run_with_files(noun, args, out, &[]).await
+}
+
+/// The local binary supplies the command and field pairs that may read local files.
+pub async fn run_with_files(
+    noun: &str,
+    args: &[String],
+    out: &mut impl Write,
+    local_files: &[(&str, &str)],
+) -> Result<i32> {
     let (lead, args) = leading_node(args)?;
     let verb = args
         .first()
@@ -110,6 +120,13 @@ pub async fn run(noun: &str, args: &[String], out: &mut impl Write) -> Result<i3
     let json_out = line.json;
     let mut arguments = line.arguments;
     let tool_name = name(&tool).to_owned();
+    let allowed = |field: &str| local_files.contains(&(tool_name.as_str(), field));
+    read_file_arguments(
+        &tool["inputSchema"],
+        &mut arguments,
+        &mut std::io::stdin(),
+        allowed,
+    )?;
     if let Some(on) = &on {
         arguments["node"] = Value::String(on.clone());
     }
@@ -133,6 +150,13 @@ pub async fn run(noun: &str, args: &[String], out: &mut impl Write) -> Result<i3
     }
     let mut value: Value =
         serde_json::from_str(text).unwrap_or_else(|_| Value::String(text.into()));
+    if let Some(field) = toml_output_field(&tool["outputSchema"]) {
+        let document = value[field]
+            .as_str()
+            .with_context(|| format!("command returned no TOML document in {field:?}"))?;
+        write_toml_document(document, json_out, out)?;
+        return Ok(0);
+    }
     aim(&mut value, named.as_deref(), &tools);
     if json_out {
         writeln!(out, "{}", serde_json::to_string_pretty(&value)?)?;
@@ -150,6 +174,55 @@ pub async fn run(noun: &str, args: &[String], out: &mut impl Write) -> Result<i3
         write!(out, "{}", render(&value))?;
     }
     Ok(0)
+}
+
+/// Read CLI file arguments only after parsing has selected a node and ruled out help.
+fn read_file_arguments(
+    schema: &Value,
+    arguments: &mut Value,
+    stdin: &mut impl Read,
+    allowed: impl Fn(&str) -> bool,
+) -> Result<()> {
+    for (key, spec) in properties(schema) {
+        if spec["x-ahjo-cli-file"] != true || !allowed(&key) {
+            continue;
+        }
+        let Some(value) = arguments.get_mut(&key) else {
+            continue;
+        };
+        let path = value
+            .as_str()
+            .with_context(|| format!("{key} must name a file"))?;
+        let document = if path == "-" {
+            let mut document = String::new();
+            stdin
+                .read_to_string(&mut document)
+                .context("reading standard input")?;
+            document
+        } else {
+            std::fs::read_to_string(path).with_context(|| format!("reading {path:?}"))?
+        };
+        *value = Value::String(document);
+    }
+    Ok(())
+}
+
+fn write_toml_document(document: &str, json_out: bool, out: &mut impl Write) -> Result<()> {
+    if json_out {
+        let parsed: toml::Value =
+            toml::from_str(document).context("command returned invalid TOML")?;
+        writeln!(out, "{}", serde_json::to_string_pretty(&parsed)?)?;
+    } else {
+        out.write_all(document.as_bytes())?;
+    }
+    Ok(())
+}
+
+fn toml_output_field(schema: &Value) -> Option<&str> {
+    schema["properties"]
+        .as_object()?
+        .iter()
+        .find_map(|(name, spec)| (spec["x-ahjo-cli-toml"] == true).then_some(name.as_str()))
 }
 
 /// The tool `ahjo <noun> <verb>` names on the node reached. Without a verb
@@ -619,7 +692,13 @@ fn properties(schema: &Value) -> Vec<(String, Value)> {
 /// A command's one argument, when it is optional text: given without its
 /// flag too, as `ahjo file list <path>`, since nothing else could be meant.
 fn lone(schema: &Value) -> Option<String> {
-    match properties(schema).as_slice() {
+    let properties = properties(schema);
+    if let Some((key, _)) = properties.iter().find(|(key, spec)| {
+        spec["x-ahjo-cli-positional"] == true && !required(schema).contains(&key.as_str())
+    }) {
+        return Some(key.clone());
+    }
+    match properties.as_slice() {
         [(key, spec)] if required(schema).is_empty() && schema_type(spec) == Some("string") => {
             Some(key.clone())
         }
@@ -780,7 +859,6 @@ fn read(schema: &Value, args: &[String]) -> Result<Line> {
     if let Some(wrong) = wrong {
         return Err(wrong);
     }
-    let needed = required(schema).len();
     let mut waiting = required(schema)
         .into_iter()
         .map(str::to_owned)
@@ -808,7 +886,10 @@ fn read(schema: &Value, args: &[String]) -> Result<Line> {
         }
         out.insert(key.clone(), typed(&key, &s, &p)?);
     }
-    if let Some(missing) = waiting.next().filter(|_| needed > 0) {
+    if let Some(missing) = required(schema)
+        .into_iter()
+        .find(|key| !out.contains_key(*key))
+    {
         bail!("missing <{missing}>");
     }
     line.arguments = Value::Object(out);
@@ -1195,6 +1276,86 @@ mod tests {
 
     fn args(a: &[&str]) -> Vec<String> {
         a.iter().map(|s| s.to_string()).collect()
+    }
+
+    #[test]
+    fn explicit_optional_positional_works_with_other_flags_and_required_arguments() {
+        let export = json!({"type":"object","properties":{
+            "mission":{"type":["string","null"],"x-ahjo-cli-positional":true},
+            "example":{"type":["string","null"]}
+        }});
+        assert_eq!(
+            parse(&export, &args(&["post"])).unwrap(),
+            json!({"mission":"post"})
+        );
+        assert_eq!(
+            parse(&export, &args(&["--example", "write-and-review"])).unwrap(),
+            json!({"example":"write-and-review"})
+        );
+        assert!(
+            usage("mission", "export", &json!({"inputSchema":export}))
+                .contains("[<mission>] [--example example]")
+        );
+        let mixed = json!({"type":"object","properties":{
+            "document":{"type":"string"},
+            "note":{"type":"string","x-ahjo-cli-positional":true}
+        },"required":["document"]});
+        assert_eq!(
+            parse(&mixed, &args(&["file"])).unwrap(),
+            json!({"document":"file"})
+        );
+        assert_eq!(
+            parse(&mixed, &args(&["file", "note"])).unwrap(),
+            json!({"document":"file","note":"note"})
+        );
+        assert!(
+            parse(&mixed, &[])
+                .unwrap_err()
+                .to_string()
+                .contains("missing <document>")
+        );
+    }
+
+    #[test]
+    fn file_arguments_read_the_local_file_or_standard_input() {
+        let schema = json!({"type":"object","properties":{
+            "document":{"type":"string","x-ahjo-cli-file":true},
+            "other":{"type":"string"}
+        }});
+        let path = std::env::temp_dir().join(format!("ahjo-cli-document-{}", std::process::id()));
+        let source = "slug = \"one\"\n# keep this comment\n";
+        std::fs::write(&path, source).unwrap();
+        let mut arguments = json!({"document":path.to_str().unwrap(),"other":"unchanged"});
+        read_file_arguments(&schema, &mut arguments, &mut std::io::empty(), |_| true).unwrap();
+        assert_eq!(arguments, json!({"document":source,"other":"unchanged"}));
+        std::fs::remove_file(path).unwrap();
+        let mut arguments = json!({"document":"-"});
+        read_file_arguments(&schema, &mut arguments, &mut source.as_bytes(), |_| true).unwrap();
+        assert_eq!(arguments["document"], source);
+        let mut missing = json!({"document":"/nonexistent/ahjo-cli-document"});
+        assert!(
+            read_file_arguments(&schema, &mut missing, &mut std::io::empty(), |_| true).is_err()
+        );
+        let untouched = missing.clone();
+        read_file_arguments(&schema, &mut missing, &mut std::io::empty(), |_| false).unwrap();
+        assert_eq!(missing, untouched);
+    }
+
+    #[test]
+    fn toml_output_writes_exact_bytes_and_json_preserves_keys() {
+        let schema = json!({"properties":{"document":{"type":"string","x-ahjo-cli-toml":true}}});
+        assert_eq!(toml_output_field(&schema), Some("document"));
+        let document = "# Header\nslug = \"demo\"\n[inputCard]\nid = \"i\"";
+        let mut output = Vec::new();
+        write_toml_document(document, false, &mut output).unwrap();
+        assert_eq!(output, document.as_bytes());
+        output.clear();
+        write_toml_document(document, true, &mut output).unwrap();
+        assert_eq!(
+            serde_json::from_slice::<Value>(&output).unwrap(),
+            json!({"slug":"demo","inputCard":{"id":"i"}})
+        );
+        assert!(write_toml_document("bad = [", true, &mut Vec::new()).is_err());
     }
 
     #[test]

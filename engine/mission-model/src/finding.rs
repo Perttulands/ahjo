@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 
 /// Stable codes for validation findings. Most follow Archon; unsupported
 /// capabilities use Ahjo-specific codes.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum Code {
     DanglingConnection,
@@ -104,7 +104,7 @@ impl Serialize for Code {
 
 /// One problem, located on the node it is about: a node id, a connection id,
 /// or "" for the mission itself.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct Finding {
     pub code: Code,
@@ -127,7 +127,7 @@ impl Finding {
 }
 
 /// Every problem that would stop a run, and advice that would not.
-#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct Report {
     pub errors: Vec<Finding>,
     pub warnings: Vec<Finding>,

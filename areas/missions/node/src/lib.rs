@@ -2,6 +2,7 @@
 mod authoring;
 mod channel;
 mod commands;
+pub use commands::DOCUMENT_FILE_ARGUMENTS;
 mod handover;
 mod notify;
 mod routes;
