@@ -143,7 +143,7 @@ impl Coordinator {
                 // other active work or pending gate remains.
                 let rejected = targets.iter().any(|target| {
                     matches!(&target.detail, Some(DecisionTargetKind::End {outcome, ..}) if outcome == "rejected")
-                }) || replay.ended.iter().any(|(_, outcome, _, _, _)| outcome == "rejected");
+                }) || replay.ended.iter().any(|delivery| delivery.outcome == "rejected");
                 let starved = mission.steps.iter().any(|step| replay.ports.get(&step.id).is_some_and(|ports| ports.values().any(|(_, unread)| *unread) && step.inputs.iter().any(|port| !ports.contains_key(&port.id))));
                 let ready = mission.steps.iter().any(|step| replay.ports.get(&step.id).is_some_and(|ports| ports.values().any(|(_, unread)| *unread) && step.inputs.iter().all(|port| ports.contains_key(&port.id))));
                 let ends_run = !ready && (rejected || !starved) && !targets.is_empty()

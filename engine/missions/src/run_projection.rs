@@ -1,6 +1,6 @@
 //! Public, sanitized views of a validated run ledger.
-use crate::{RunEvent, validate_ledger};
-use ahjo_mission_model::{PublicEvent, PublicInputRef, RunProjection, WaitingGate};
+use crate::{Coordinator, RunEvent, run_replay::Replay, validate_ledger};
+use ahjo_mission_model::{PublicEvent, PublicInputRef, RunProjection, RunSendBack, WaitingGate};
 use std::io;
 
 fn string(event: &RunEvent, name: &str) -> String {
@@ -21,6 +21,40 @@ fn strings(event: &RunEvent, name: &str) -> Vec<String> {
         .filter_map(|v| v.as_str().map(str::to_owned))
         .collect()
 }
+
+impl Coordinator {
+    /// The End's original delivery, reconstructed against the frozen graph
+    /// so the findings come from the path that actually ended the run.
+    pub fn send_back(&self, run: &RunProjection) -> Result<Option<RunSendBack>, crate::Error> {
+        let Some(end) = run
+            .events
+            .iter()
+            .rfind(|event| event.kind == "run_failed" && event.code == "path_rejected")
+            .filter(|_| run.r#final && run.status == "sent_back")
+        else {
+            return Ok(None);
+        };
+        let mission = self.frozen_mission(&run.run_id)?;
+        let events = self.ledger(&run.run_id).map_err(crate::error::io)?.read()?;
+        let findings = Replay::read(&mission, &events)
+            .ended
+            .into_iter()
+            .find(|delivery| {
+                delivery.outcome == "rejected"
+                    && delivery.end_id == end.node_id
+                    && delivery.gate_id == end.gate_id
+            })
+            .map_or_else(String::new, |delivery| delivery.findings);
+        Ok(Some(RunSendBack {
+            end_id: end.node_id.clone(),
+            gate_id: end.gate_id.clone(),
+            gate_title: mission.node_name(&end.gate_id).to_owned(),
+            reason: end.detail.clone(),
+            findings,
+        }))
+    }
+}
+
 /// The run's public projection from its validated ledger.
 pub fn project_run(events: &[RunEvent], run_id: &str) -> Result<RunProjection, crate::Error> {
     (|| -> io::Result<RunProjection> {
@@ -61,6 +95,8 @@ pub fn project_run(events: &[RunEvent], run_id: &str) -> Result<RunProjection, c
         for event in events {
             result.updated_at.clone_from(&event.timestamp);
             result.epoch = event.epoch;
+            let code = string(event, "code");
+            let sent_back = event.kind == "run_failed" && code == "path_rejected";
             match event.kind.as_str() {
                 "run_started" | "run_resumed" => {
                     result.status = "running".into();
@@ -71,7 +107,7 @@ pub fn project_run(events: &[RunEvent], run_id: &str) -> Result<RunProjection, c
                 }
                 "run_blocked" => {
                     result.status = "blocked".into();
-                    result.block_code = string(event, "code");
+                    result.block_code.clone_from(&code);
                     result.resume_policy = string(event, "resume_policy");
                     result.resume_allowed = event
                         .data
@@ -85,12 +121,16 @@ pub fn project_run(events: &[RunEvent], run_id: &str) -> Result<RunProjection, c
                         .get("outputs")
                         .and_then(|v| serde_json::from_value(v.clone()).ok())
                         .unwrap_or_default();
-                    result.status = event.kind.trim_start_matches("run_").into();
+                    result.status = if sent_back {
+                        "sent_back".into()
+                    } else {
+                        event.kind.trim_start_matches("run_").into()
+                    };
                     result.r#final = true;
                     result.resume_allowed = false;
                     result.block_code.clear();
                     result.resume_policy.clear();
-                    if result.status == "failed" || result.status == "canceled" {
+                    if matches!(result.status.as_str(), "failed" | "canceled" | "sent_back") {
                         result.ended_by.clone_from(&event.actor);
                     }
                 }
@@ -139,7 +179,7 @@ pub fn project_run(events: &[RunEvent], run_id: &str) -> Result<RunProjection, c
                 commit: string(event, "commit"),
                 verdict: string(event, "verdict"),
                 outcome: string(event, "outcome"),
-                code: string(event, "code"),
+                code,
                 session_name: string(event, "session_name"),
                 seat_node: if event.kind == "seat_created" {
                     string(event, "node")
@@ -152,10 +192,11 @@ pub fn project_run(events: &[RunEvent], run_id: &str) -> Result<RunProjection, c
                     String::new()
                 },
                 state: string(event, "state"),
-                detail: if matches!(
-                    event.kind.as_str(),
-                    "human_verdict_recorded" | "run_canceled"
-                ) {
+                detail: if sent_back
+                    || matches!(
+                        event.kind.as_str(),
+                        "human_verdict_recorded" | "run_canceled"
+                    ) {
                     string(event, "reason")
                 } else if event.kind == "run_blocked" && string(event, "detail").is_empty() {
                     // A block says why in its reason when it has no detail.

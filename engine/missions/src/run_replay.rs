@@ -11,12 +11,21 @@ pub(crate) struct Replay {
     pub attempts: BTreeMap<String, i64>,
     pub open: BTreeMap<String, RunEvent>,
     pub evaluating: BTreeMap<String, RunEvent>,
-    pub ended: Vec<(String, String, String, String, String)>,
+    pub ended: Vec<EndDelivery>,
     pub waiting: BTreeMap<u64, Vec<String>>,
     pub unfinished: BTreeSet<String>,
     /// Gates picking a step's best attempt: they take no new input until
     /// the pick ends.
     pub picking: BTreeSet<String>,
+}
+
+pub(crate) struct EndDelivery {
+    pub end_id: String,
+    pub outcome: String,
+    pub gate_id: String,
+    pub reason: String,
+    pub actor: String,
+    pub findings: String,
 }
 
 impl Replay {
@@ -244,17 +253,18 @@ impl Replay {
         if mission.gate(node).is_some() {
             self.queue.entry(node.into()).or_default().push_back(input);
         } else if let Some(end) = mission.end(node) {
-            self.ended.push((
-                end.id.clone(),
-                end.outcome.clone(),
-                gate.into(),
-                if gate.is_empty() {
+            self.ended.push(EndDelivery {
+                end_id: end.id.clone(),
+                outcome: end.outcome.clone(),
+                gate_id: gate.into(),
+                reason: if gate.is_empty() {
                     format!("the path ended at {} (rejected)", end.title)
                 } else {
                     reason.into()
                 },
-                event.actor.clone(),
-            ));
+                actor: event.actor.clone(),
+                findings: input.text,
+            });
         } else if mission.step(node).is_some() {
             let port = endpoint_port(endpoint).to_owned();
             let ports = self.ports.entry(node.into()).or_default();
@@ -465,7 +475,7 @@ mod tests {
         );
         verdict.gate_id = "gate".into();
         let replay = Replay::read(&mission, &[verdict]);
-        assert_eq!(replay.ended[0].3, "");
+        assert_eq!(replay.ended[0].reason, "");
     }
     #[test]
     fn routed_human_response_keeps_the_recorded_actor() {

@@ -129,6 +129,20 @@ pub struct RunProjection {
     pub events: Vec<PublicEvent>,
 }
 
+/// The finding delivered to the rejected End, and the decision that routed it.
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
+pub struct RunSendBack {
+    pub end_id: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub gate_id: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub gate_title: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub reason: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub findings: String,
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub struct Escalation {

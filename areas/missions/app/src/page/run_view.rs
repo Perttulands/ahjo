@@ -809,6 +809,19 @@ fn standing(
             ),
             t.text,
         ),
+        "sent_back" => {
+            let gate = run
+                .events
+                .iter()
+                .rfind(|event| event.kind == "run_failed" && event.code == "path_rejected")
+                .filter(|event| !event.gate_id.is_empty())
+                .map(|event| name_of(&event.gate_id));
+            let words = gate.map_or_else(
+                || "Sent back".into(),
+                |title| format!("Sent back by {title}"),
+            );
+            (words, t.text2)
+        }
         "failed" | "canceled" => {
             let lead = phrases.first().cloned().unwrap_or_else(|| {
                 if run.status == "failed" {

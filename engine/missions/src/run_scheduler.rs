@@ -399,21 +399,21 @@ pub(crate) fn schedule(
             }
             if projection.waiting_gates.is_empty() {
                 let mut end_ids = Vec::new();
-                for (end, _, _, _, _) in &replay.ended {
-                    if !end_ids.contains(end) {
-                        end_ids.push(end.clone());
+                for delivery in &replay.ended {
+                    if !end_ids.contains(&delivery.end_id) {
+                        end_ids.push(delivery.end_id.clone());
                     }
                 }
-                if let Some((end, _, gate, reason, actor)) = replay
+                if let Some(delivery) = replay
                     .ended
                     .iter()
-                    .find(|(_, outcome, _, _, _)| outcome == "rejected")
+                    .find(|delivery| delivery.outcome == "rejected")
                 {
                     return Ok(Outcome::Rejected {
-                        end_id: end.clone(),
-                        gate_id: gate.clone(),
-                        reason: reason.clone(),
-                        actor: actor.clone(),
+                        end_id: delivery.end_id.clone(),
+                        gate_id: delivery.gate_id.clone(),
+                        reason: delivery.reason.clone(),
+                        actor: delivery.actor.clone(),
                         end_ids,
                     });
                 }

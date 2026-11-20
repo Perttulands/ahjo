@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     AgentSeat, GateDecision, PublicEvent, ResumeMode, RunAttempts, RunEvidence, RunGate, RunInput,
-    RunOutput, RunSummary,
+    RunOutput, RunSendBack, RunSummary,
 };
 
 /// List runs, optionally for one mission.
@@ -131,6 +131,8 @@ pub struct RunsListed {
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
 pub struct RunShown {
     pub why: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sent_back: Option<RunSendBack>,
     pub next: Vec<String>,
     pub state: RunState,
     pub outputs: Vec<RunOutput>,
@@ -191,6 +193,10 @@ pub struct RunLogEvent {
 pub struct RunWaited {
     pub outcome: String,
     pub status: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub why: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sent_back: Option<RunSendBack>,
     pub cursor: u64,
     pub asks: Vec<RunAsk>,
     pub next: Vec<String>,

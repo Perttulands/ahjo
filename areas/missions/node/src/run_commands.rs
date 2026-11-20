@@ -5,7 +5,8 @@ use std::time::Duration;
 use ahjo_core::Error;
 use ahjo_mission_engine::{WaitUntil, gate_commands, resume_commands};
 use ahjo_missions_contract::{
-    HumanPick, HumanVerdict, ResumeRequest, RunProjection, plain_reason, run_commands::*,
+    HumanPick, HumanVerdict, ResumeRequest, RunProjection, RunSendBack, plain_reason,
+    run_commands::*,
 };
 use ahjo_node_kit::{Command, Effect};
 
@@ -103,11 +104,9 @@ fn show(m: &Missions, args: RunShow) -> Result<RunShown, Error> {
             }
         }
     }
-    let why = match asks.first() {
-        Some(ask) => ask.why.as_deref().unwrap_or(&ask.what).to_owned(),
-        None => ended_reason(&run)
-            .unwrap_or_else(|| format!("Run is {}.", run.status.replace('_', " "))),
-    };
+    let sent_back = m.coordinator.send_back(&run)?;
+    let why = why(&run, &asks, sent_back.as_ref())
+        .unwrap_or_else(|| format!("Run is {}.", run.status.replace('_', " ")));
     let next = next(&asks);
     let gates = m.coordinator.gates(id)?;
     let state = state(&run);
@@ -146,6 +145,7 @@ fn show(m: &Missions, args: RunShow) -> Result<RunShown, Error> {
         .transpose()?;
     Ok(RunShown {
         why,
+        sent_back,
         next,
         state,
         outputs: run.outputs,
@@ -157,6 +157,30 @@ fn show(m: &Missions, args: RunShow) -> Result<RunShown, Error> {
         evidence,
         node: m.node.clone(),
     })
+}
+
+fn why(run: &RunProjection, asks: &[RunAsk], sent_back: Option<&RunSendBack>) -> Option<String> {
+    if let Some(send_back) = sent_back {
+        let label = if send_back.gate_id.is_empty() {
+            "Sent back".to_owned()
+        } else if send_back.gate_title == send_back.gate_id {
+            format!("Sent back by {}", send_back.gate_id)
+        } else {
+            format!(
+                "Sent back by {} ({})",
+                send_back.gate_title, send_back.gate_id,
+            )
+        };
+        let reason = plain_reason(&send_back.reason);
+        return Some(if reason.is_empty() {
+            format!("{label}.")
+        } else {
+            format!("{label}. {reason}")
+        });
+    }
+    asks.first()
+        .map(|ask| ask.why.as_deref().unwrap_or(&ask.what).to_owned())
+        .or_else(|| ended_reason(run))
 }
 
 fn ended_reason(run: &RunProjection) -> Option<String> {
@@ -221,8 +245,11 @@ async fn wait(m: Missions, args: RunWait) -> Result<RunWaited, Error> {
         )
         .await?;
     let asks = asks(&answer.run);
+    let sent_back = m.coordinator.send_back(&answer.run)?;
     Ok(RunWaited {
         outcome: answer.outcome.into(),
+        why: why(&answer.run, &asks, sent_back.as_ref()),
+        sent_back,
         status: answer.run.status,
         cursor: answer.cursor,
         next: next(&asks),

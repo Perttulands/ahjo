@@ -107,7 +107,7 @@ fn lab_judge_routes_a_synthetic_verdict() {
     loop {
         let p = c.run(&id).unwrap();
         if p.r#final || p.status == "blocked" {
-            assert_eq!(p.status, "failed");
+            assert_eq!(p.status, "sent_back");
             assert_eq!(p.events.last().unwrap().code, "path_rejected");
             break;
         }

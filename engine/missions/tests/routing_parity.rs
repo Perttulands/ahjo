@@ -1053,7 +1053,7 @@ fn a_blocked_run_accepts_another_gates_verdict_and_routes_it_on_resume() {
     loop {
         let p = c.run(&id).unwrap();
         if p.r#final || p.status == "blocked" {
-            assert_eq!(p.status, "failed");
+            assert_eq!(p.status, "sent_back");
             assert!(p.events.iter().any(|event| event.kind == "gate_verdict"
                 && event.gate_id == "gate_human"
                 && event.verdict == "pass"));
@@ -1124,7 +1124,7 @@ fn a_blocked_run_accepts_another_gates_verdict_and_routes_it_on_resume() {
     loop {
         let p = c.run(&id).unwrap();
         if p.r#final {
-            assert_eq!(p.status, "failed");
+            assert_eq!(p.status, "sent_back");
             break;
         }
         assert!(Instant::now() < deadline);

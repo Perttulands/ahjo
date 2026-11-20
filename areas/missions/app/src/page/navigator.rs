@@ -124,6 +124,7 @@ impl MissionsPage {
             "waiting_human" => ("your answer".to_owned(), Some(t.needs)),
             "blocked" => ("blocked".to_owned(), Some(t.needs)),
             "failed" => ("failed".to_owned(), Some(t.error)),
+            "sent_back" => ("sent back".to_owned(), Some(t.text2)),
             "canceled" => ("stopped".to_owned(), None),
             _ if !row.run.r#final => (words::run_span(&row.run, now), Some(t.running)),
             _ => (words::short_time(&row.run.updated_at, now), None),

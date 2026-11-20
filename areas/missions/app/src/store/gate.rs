@@ -34,15 +34,17 @@ pub fn route(targets: &[Target], answer: &str, alone: bool) -> (String, String) 
         let fails = ends.contains(&"rejected");
         return match (alone, fails) {
             (true, true) => (
-                format!("{answer}: {ended}, and with nothing else to run, the run fails."),
-                format!("{answer} and fail the run"),
+                format!("{answer}: {ended}, and with nothing else to run, the run is sent back."),
+                format!("{answer} and end the run"),
             ),
             (true, false) => (
                 format!("{answer}: {ended}, and with nothing else to run, the run succeeds."),
                 format!("{answer} and end the run"),
             ),
             (false, true) => (
-                format!("{answer}: {ended}, so the run fails once its other open work ends."),
+                format!(
+                    "{answer}: {ended}, so the run is sent back once its other open work ends."
+                ),
                 answer.into(),
             ),
             (false, false) => (
@@ -151,11 +153,11 @@ mod tests {
         );
         assert_eq!(
             route(&[end("rejected")], "Send back", true).1,
-            "Send back and fail the run"
+            "Send back and end the run"
         );
         assert_eq!(
             route(&[end("rejected")], "Send back", false).0,
-            "Send back: this path ends (rejected), so the run fails once its other open work ends."
+            "Send back: this path ends (rejected), so the run is sent back once its other open work ends."
         );
         let back = Target::Step {
             node: "b".into(),

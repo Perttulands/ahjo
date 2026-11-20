@@ -42,6 +42,93 @@ const EXPECTED: &[&str] = &[
 ];
 
 #[tokio::test(flavor = "multi_thread")]
+async fn run_wait_and_show_explain_a_code_gate_send_back() {
+    let node = Node::start(&[sessions::LISTING, ahjo_work::LISTING, LAB], "")
+        .await
+        .unwrap();
+    let mission = include_str!("fixtures/solo-lab.mission.toml")
+        .replace("to = \"end_done:in\"", "to = \"gate_review:in\"")
+        + r#"
+[[gate]]
+id = "gate_review"
+title = "Noise check"
+kinds = ["code"]
+check = "output_contains"
+check_version = "1"
+check_value = "UI-CHECK: CLEAN"
+
+[[end]]
+id = "end_rejected"
+title = "Sent back"
+outcome = "rejected"
+
+[[connection]]
+id = "edge_pass"
+from = "gate_review:pass"
+to = "end_done:in"
+
+[[connection]]
+id = "edge_fail"
+from = "gate_review:fail"
+to = "end_rejected:in"
+"#;
+    let folder = node.dir().join("missions/missions");
+    std::fs::create_dir_all(&folder).unwrap();
+    std::fs::write(folder.join("hello.mission.toml"), mission).unwrap();
+    let finding = "Remove the duplicate heading.\nKeep the Save action.";
+    let started = node
+        .call(
+            "mission_run",
+            json!({"mission":"hello","inputs":{"brief":finding}}),
+        )
+        .await
+        .unwrap();
+    let run = started["run_id"].as_str().unwrap();
+    let waited = node
+        .call("run_wait", json!({"run":run,"until":"final","timeout":5}))
+        .await
+        .unwrap();
+    let shown = node.call("run_show", json!({"run":run})).await.unwrap();
+    assert_eq!(waited["outcome"], "final");
+    assert_eq!(waited["status"], "sent_back");
+    assert_eq!(shown["state"]["status"], "sent_back");
+    assert_eq!(shown["state"]["final"], true);
+    assert_eq!(shown["sent_back"], waited["sent_back"]);
+    assert_eq!(shown["why"], waited["why"]);
+    let sent_back = &shown["sent_back"];
+    assert_eq!(sent_back["gate_id"], "gate_review");
+    assert_eq!(sent_back["gate_title"], "Noise check");
+    assert_eq!(sent_back["end_id"], "end_rejected");
+    assert!(
+        sent_back["reason"]
+            .as_str()
+            .unwrap()
+            .contains("does not contain")
+    );
+    assert!(
+        sent_back["findings"].as_str().unwrap().contains(finding),
+        "{sent_back}"
+    );
+    for verb in ["wait", "show"] {
+        let args = [verb.to_owned(), run.to_owned(), "--node".into(), node.url()];
+        let mut output = Vec::new();
+        let exit = ahjo_node_kit::cli::run("run", &args, &mut output)
+            .await
+            .unwrap();
+        assert_eq!(exit, 0);
+        let output = String::from_utf8(output).unwrap();
+        assert!(
+            output.contains("Sent back by Noise check (gate_review)"),
+            "{output}"
+        );
+        for line in finding.lines() {
+            assert!(output.contains(line), "{output}");
+        }
+    }
+    node.stop().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn command_list_and_coded_failures() {
     assert_eq!(ahjo_missions::LISTING.commands, EXPECTED);
     let role_commands: Vec<_> = ahjo_harness::LISTING
