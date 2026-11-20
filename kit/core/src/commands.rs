@@ -46,7 +46,7 @@ pub struct AppView {
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ViewOpen {
-    /// sessions, files, harness, issue, missions, scheduled, host or settings.
+    /// sessions, files, harness, agents, issue, missions, scheduled, host or settings.
     pub page: String,
     /// A file path to reveal.
     pub path: Option<String>,
@@ -62,7 +62,7 @@ pub struct ViewOpen {
     pub setting: Option<String>,
     /// A service to reveal.
     pub service: Option<String>,
-    /// A folder to reveal on the Harness page.
+    /// An agent ID on Agents, or a folder on Harness.
     pub agent: Option<String>,
     /// A run's step, or the harness for an agent.
     pub step: Option<String>,

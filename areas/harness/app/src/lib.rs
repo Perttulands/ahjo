@@ -1,11 +1,13 @@
 //! Harness: whether the harnesses can run with their skills current, and
 //! what to do where they cannot, across nodes.
+mod agents_page;
 mod request;
 pub mod shape_state;
 mod shape_view;
 mod skills_view;
 pub mod state;
 mod view;
+pub use agents_page::build as build_agents;
 mod tokens {
     /// The most an off line's fix takes; its words wrap within it.
     pub const FIX_W: f32 = 220.;

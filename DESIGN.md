@@ -42,6 +42,8 @@ A page is judged by three questions, in this order:
   instructions and where each comes from, skills, hooks as "this event does
   that", settings and tools. Skills has its own page for managing them and
   for what is out of sync.
+- **Agents.** Read and edit reusable mission agents, see which seats use each
+  one, and read its notes newest first.
 - **Work.** See the open work across projects and how it moves over time.
   The strip comes first: a chart of what opened and finished each day over
   the open line (folded away to one line when the operator wants the
