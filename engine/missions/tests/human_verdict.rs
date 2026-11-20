@@ -56,7 +56,7 @@ fn verdicts_are_atomic_and_preserve_response() {
     let events = ledger.read().unwrap();
     assert_eq!(events.len(), 4);
     assert_eq!(events[3].data["reason"], "  yes\n");
-    assert_eq!(events[3].data["relayedBy"], "seat-1");
+    assert_eq!(events[3].data["relayed_by"], "seat-1");
     let error = coordinator
         .record_verdict(
             "run_test",

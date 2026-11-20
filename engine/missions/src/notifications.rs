@@ -32,7 +32,7 @@ impl Coordinator {
                     let criterion = definition.map(|g| g.criterion.as_str()).unwrap_or("");
                     let input = event
                         .data
-                        .get("inputRef")
+                        .get("input_ref")
                         .and_then(|v| v.get("text"))
                         .and_then(Value::as_str)
                         .unwrap_or("");
@@ -163,7 +163,7 @@ fn message(
     subject: String,
     body: String,
 ) -> Value {
-    json!({"runId":run.run_id,"missionSlug":run.mission_slug,"missionTitle":mission,"seq":event.seq,"kind":kind,"runStatus":run.status,"nodeId":event.node_id,"gateId":event.gate_id,"gateTitle":gate_title,"ask":ask,"severity":severity,"blocks":blocks,"text":subject,"subject":subject,"body":body})
+    json!({"run_id":run.run_id,"mission_slug":run.mission_slug,"mission_title":mission,"seq":event.seq,"kind":kind,"run_status":run.status,"node_id":event.node_id,"gate_id":event.gate_id,"gate_title":gate_title,"ask":ask,"severity":severity,"blocks":blocks,"text":subject,"subject":subject,"body":body})
 }
 
 /// The commands that answer a pending gate at its current sequence.

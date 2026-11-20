@@ -9,6 +9,7 @@ static NEXT_TEMP: AtomicU64 = AtomicU64::new(0);
 type Registry<T> = Mutex<HashMap<PathBuf, Weak<T>>>;
 static REFERENCES: OnceLock<Registry<RwLock<()>>> = OnceLock::new();
 static DOCUMENTS: OnceLock<Registry<Mutex<()>>> = OnceLock::new();
+static FILES: OnceLock<Registry<Mutex<()>>> = OnceLock::new();
 
 /// A mission's three files share one lock; role deletion excludes mission writers.
 pub(crate) struct Locks {
@@ -99,13 +100,182 @@ pub(crate) fn table_arrays(doc: &mut toml_edit::DocumentMut, keys: &[&str]) {
     }
 }
 
+/// Serializes migration with publication, including through a symlink.
+pub(crate) fn file_lock(path: &Path) -> Arc<Mutex<()>> {
+    get(FILES.get_or_init(Default::default), canonical_root(path))
+}
+
+fn backup_path(path: &Path) -> io::Result<PathBuf> {
+    let target = std::fs::canonicalize(path)?;
+    let mut name = target.as_os_str().to_os_string();
+    name.push(".bak");
+    Ok(PathBuf::from(name))
+}
+
+fn marker_path(backup: &Path) -> PathBuf {
+    let mut name = backup.as_os_str().to_os_string();
+    name.push(".ahjo-migration");
+    name.into()
+}
+
+fn digest(bytes: &[u8]) -> String {
+    use sha2::{Digest, Sha256};
+    hex::encode(Sha256::digest(bytes))
+}
+
+/// Keep the exact old bytes before replacing a document with its upgraded form.
+/// A stale backup is never overwritten.
+pub(crate) fn publish_upgrade(path: &Path, original: &[u8], upgraded: &[u8]) -> io::Result<()> {
+    let backup = backup_path(path)?;
+    let marker = marker_path(&backup);
+    let fingerprint = digest(original);
+    let marker_exists = match std::fs::symlink_metadata(&marker) {
+        Ok(metadata) if metadata.file_type().is_file() => {
+            if std::fs::read_to_string(&marker)? != fingerprint {
+                return Err(io::Error::new(
+                    io::ErrorKind::AlreadyExists,
+                    format!(
+                        "{} is an existing, different migration marker",
+                        marker.display()
+                    ),
+                ));
+            }
+            true
+        }
+        Ok(_) => {
+            return Err(io::Error::new(
+                io::ErrorKind::AlreadyExists,
+                format!("{} is not a regular migration marker", marker.display()),
+            ));
+        }
+        Err(error) if error.kind() == io::ErrorKind::NotFound => false,
+        Err(error) => return Err(error),
+    };
+    match std::fs::symlink_metadata(&backup) {
+        Ok(metadata) if marker_exists && metadata.file_type().is_file() => {
+            if std::fs::read(&backup)? != original {
+                return Err(io::Error::new(
+                    io::ErrorKind::AlreadyExists,
+                    format!(
+                        "{} is an existing, different migration backup",
+                        backup.display()
+                    ),
+                ));
+            }
+        }
+        Ok(_) => {
+            return Err(io::Error::new(
+                io::ErrorKind::AlreadyExists,
+                format!("{} is an existing, unowned backup", backup.display()),
+            ));
+        }
+        Err(error) if error.kind() == io::ErrorKind::NotFound => (),
+        Err(error) => return Err(error),
+    }
+    if !marker_exists {
+        let staged = prepare(&marker, fingerprint.as_bytes())?;
+        std::fs::hard_link(&staged.temp, &marker)?;
+    }
+    if !backup.exists() {
+        let staged = prepare(&backup, original)?;
+        std::fs::hard_link(&staged.temp, &backup)?;
+    }
+    // The backup links must be durable before the replacement can become durable.
+    #[cfg(unix)]
+    sync_parent(&backup)?;
+    prepare(path, upgraded)?.publish()?;
+    #[cfg(unix)]
+    sync_parent(&backup)?;
+    Ok(())
+}
+
+#[cfg(unix)]
+fn sync_parent(path: &Path) -> io::Result<()> {
+    std::fs::File::open(path.parent().unwrap_or(Path::new(".")))?.sync_all()
+}
+
+fn remove_backup(path: &Path) -> io::Result<()> {
+    let backup = backup_path(path)?;
+    let marker = marker_path(&backup);
+    let marker_type = match std::fs::symlink_metadata(&marker) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(()),
+        Err(error) => return Err(error),
+    };
+    if !marker_type.file_type().is_file() {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "migration marker is not a regular file",
+        ));
+    }
+    let expected = std::fs::read_to_string(&marker)?;
+    match std::fs::symlink_metadata(&backup) {
+        Ok(metadata) if metadata.file_type().is_file() => {
+            if digest(&std::fs::read(&backup)?) != expected {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    format!(
+                        "{} no longer matches its migration marker",
+                        backup.display()
+                    ),
+                ));
+            }
+            std::fs::remove_file(&backup)?;
+        }
+        Ok(_) => {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "migration backup is not a regular file",
+            ));
+        }
+        Err(error) if error.kind() == io::ErrorKind::NotFound => (),
+        Err(error) => return Err(error),
+    }
+    std::fs::remove_file(marker)
+}
+
+fn cleanup_backup(path: &Path) {
+    if let Err(error) = remove_backup(path) {
+        // Publication succeeded. A backup cleanup error must not report
+        // that the edit failed and cause a retry of the already saved edit.
+        eprintln!(
+            "ahjo: saved {}, but could not remove its migration backup: {error}",
+            path.display()
+        );
+    }
+}
+
 /// Replace an existing target without replacing a symlink at the definition.
 pub(crate) fn atomic(path: &Path, bytes: &[u8]) -> io::Result<()> {
-    prepare(path, bytes)?.publish()
+    let lock = file_lock(path);
+    let _guard = lock.lock().unwrap_or_else(|error| error.into_inner());
+    prepare(path, bytes)?.publish()?;
+    cleanup_backup(path);
+    Ok(())
 }
 /// Stage both files before publishing either, under the caller's mission lock.
 pub(crate) fn pair(first: (&Path, &[u8]), second: (&Path, &[u8])) -> io::Result<()> {
-    pair_with(first, second, Staged::publish)
+    let first_lock = file_lock(first.0);
+    let second_lock = file_lock(second.0);
+    let first_key = canonical_root(first.0);
+    let second_key = canonical_root(second.0);
+    if first_key == second_key {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "two documents share a path",
+        ));
+    }
+    let (earlier, later) = if first_key < second_key {
+        (&first_lock, &second_lock)
+    } else {
+        (&second_lock, &first_lock)
+    };
+    let _earlier_guard = earlier.lock().unwrap_or_else(|error| error.into_inner());
+    let _later_guard = later.lock().unwrap_or_else(|error| error.into_inner());
+    pair_with(first, second, Staged::publish)?;
+    cleanup_backup(first.0);
+    cleanup_backup(second.0);
+    Ok(())
 }
 
 fn pair_with(

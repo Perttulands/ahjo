@@ -91,7 +91,7 @@ pub fn execute(
                 .as_deref()
                 .map(crate::run_open_dispatch::unresolved)
                 .unwrap_or_default();
-            if let Err(e) = c.append(&id, RunEvent { kind:"run_blocked".into(), timestamp:now(), data:json!({"code":"coordinator_shutdown","reason":"Ahjo shut down while the run was going; resume to continue","resumeAllowed":true,"resumePolicy":"explicit","openDispatches":open.iter().map(|e| &e.data).collect::<Vec<_>>()}).as_object().unwrap().clone(), ..Default::default() }) { eprintln!("ahjo: cannot record shutdown of run {id}: {e}"); }
+            if let Err(e) = c.append(&id, RunEvent { kind:"run_blocked".into(), timestamp:now(), data:json!({"code":"coordinator_shutdown","reason":"Ahjo shut down while the run was going; resume to continue","resume_allowed":true,"resume_policy":"explicit","open_dispatches":open.iter().map(|e| &e.data).collect::<Vec<_>>()}).as_object().unwrap().clone(), ..Default::default() }) { eprintln!("ahjo: cannot record shutdown of run {id}: {e}"); }
         }
         *done = true;
         control.finished.notify_all();
@@ -116,8 +116,8 @@ pub fn execute(
                 c.ledger(&id).map_err(crate::outputs::MissingOutput::Ledger).and_then(|ledger| crate::outputs::resolve_with_picks(&ledger, &mission))
             } else { Ok(crate::outputs::Resolved { outputs: Vec::new(), picks: Vec::new() }) } {
                 Ok(resolved) => success_event(end_ids, resolved),
-                Err(crate::outputs::MissingOutput::Missing(reason)) => RunEvent { kind: "run_failed".into(), actor: "archond".into(), timestamp: now(), data: json!({"final":true,"endIds":end_ids,"code":"missing_output","reason":reason}).as_object().unwrap().clone(), ..Default::default() },
-                Err(crate::outputs::MissingOutput::Ledger(error)) => { eprintln!("ahjo: cannot resolve run {id} outputs: {error}"); RunEvent { kind:"run_blocked".into(), timestamp:now(), data:json!({"code":"executor_failed","reason":error.to_string(),"resumeAllowed":true}).as_object().unwrap().clone(), ..Default::default() } }
+                Err(crate::outputs::MissingOutput::Missing(reason)) => RunEvent { kind: "run_failed".into(), actor: "archond".into(), timestamp: now(), data: json!({"final":true,"end_ids":end_ids,"code":"missing_output","reason":reason}).as_object().unwrap().clone(), ..Default::default() },
+                Err(crate::outputs::MissingOutput::Ledger(error)) => { eprintln!("ahjo: cannot resolve run {id} outputs: {error}"); RunEvent { kind:"run_blocked".into(), timestamp:now(), data:json!({"code":"executor_failed","reason":error.to_string(),"resume_allowed":true}).as_object().unwrap().clone(), ..Default::default() } }
             },
             Ok(Outcome::Rejected { end_id, gate_id, reason, actor, end_ids }) => RunEvent {
                 kind: "run_failed".into(),
@@ -125,7 +125,7 @@ pub fn execute(
                 actor,
                 node_id: end_id.clone(),
                 gate_id: gate_id.clone(),
-                data: json!({"final":true,"endId":end_id,"gateId":gate_id,"reason":reason,"endIds":end_ids,"code":"path_rejected"})
+                data: json!({"final":true,"end_id":end_id,"gate_id":gate_id,"reason":reason,"end_ids":end_ids,"code":"path_rejected"})
                     .as_object()
                     .unwrap()
                     .clone(),
@@ -135,7 +135,7 @@ pub fn execute(
                 kind: "run_blocked".into(),
                 node_id,
                 timestamp: now(),
-                data: json!({"reason":"the agent asked for help","resumeAllowed":true})
+                data: json!({"reason":"the agent asked for help","resume_allowed":true})
                     .as_object()
                     .unwrap()
                     .clone(),
@@ -143,17 +143,17 @@ pub fn execute(
             },
             Ok(Outcome::Starved(nodes)) => {
                 let (node, _, missing) = &nodes[0];
-                let waiting: Vec<_> = nodes.iter().map(|(id, title, missing)| json!({"nodeId":id,"title":title,"missingInputs":missing})).collect();
-                RunEvent { kind: "run_blocked".into(), node_id: node.clone(), timestamp: now(), data: json!({"code":"reachable_node_starved","reason":if missing.len() == 1 { "it waits on an input no earlier step produces; wire one to it and start a new run".to_owned() } else { format!("it waits on {} inputs no earlier step produces; wire them and start a new run", missing.len()) },"blockedNodeId":node,"blockedGateId":"","boundary":"wiring","waitingNodes":waiting,"recoverable":false,"resumeAllowed":false,"resumePolicy":"authoring","openDispatches":[],"nextEpoch":1}).as_object().unwrap().clone(), ..Default::default() }
+                let waiting: Vec<_> = nodes.iter().map(|(id, title, missing)| json!({"node_id":id,"title":title,"missing_inputs":missing})).collect();
+                RunEvent { kind: "run_blocked".into(), node_id: node.clone(), timestamp: now(), data: json!({"code":"reachable_node_starved","reason":if missing.len() == 1 { "it waits on an input no earlier step produces; wire one to it and start a new run".to_owned() } else { format!("it waits on {} inputs no earlier step produces; wire them and start a new run", missing.len()) },"blocked_node_id":node,"blocked_gate_id":"","boundary":"wiring","waiting_nodes":waiting,"recoverable":false,"resume_allowed":false,"resume_policy":"authoring","open_dispatches":[],"next_epoch":1}).as_object().unwrap().clone(), ..Default::default() }
             },
             Ok(Outcome::Unfinished(nodes)) => {
                 let reason = "the run has unfinished work here; resume to continue it".to_owned();
-                if let Err(error) = c.append(&id, RunEvent { kind: "error".into(), node_id: nodes[0].clone(), timestamp: now(), data: json!({"code":"run_work_unfinished","message":reason,"reason":reason,"boundary":"engine","nodeId":nodes[0],"recoverable":true}).as_object().unwrap().clone(), ..Default::default() }) { eprintln!("ahjo: cannot record run {id} unfinished work: {error}"); }
-                RunEvent { kind: "run_blocked".into(), node_id: nodes[0].clone(), timestamp: now(), data: json!({"code":"run_work_unfinished","reason":reason,"blockedNodeId":nodes[0],"resumeAllowed":true,"resumePolicy":"explicit"}).as_object().unwrap().clone(), ..Default::default() }
+                if let Err(error) = c.append(&id, RunEvent { kind: "error".into(), node_id: nodes[0].clone(), timestamp: now(), data: json!({"code":"run_work_unfinished","message":reason,"reason":reason,"boundary":"engine","node_id":nodes[0],"recoverable":true}).as_object().unwrap().clone(), ..Default::default() }) { eprintln!("ahjo: cannot record run {id} unfinished work: {error}"); }
+                RunEvent { kind: "run_blocked".into(), node_id: nodes[0].clone(), timestamp: now(), data: json!({"code":"run_work_unfinished","reason":reason,"blocked_node_id":nodes[0],"resume_allowed":true,"resume_policy":"explicit"}).as_object().unwrap().clone(), ..Default::default() }
             },
             Ok(Outcome::Limit(stop)) => match crate::run_limit::final_event(&c, &id, &mission, &stop) {
                 Ok(event) => event,
-                Err(error) => RunEvent { kind:"run_blocked".into(), node_id: stop.node.clone(), timestamp:now(), data:json!({"code":"executor_failed","reason":error.to_string(),"resumeAllowed":true,"resumePolicy":"explicit"}).as_object().unwrap().clone(), ..Default::default() },
+                Err(error) => RunEvent { kind:"run_blocked".into(), node_id: stop.node.clone(), timestamp:now(), data:json!({"code":"executor_failed","reason":error.to_string(),"resume_allowed":true,"resume_policy":"explicit"}).as_object().unwrap().clone(), ..Default::default() },
             },
             Ok(Outcome::Stopped) => unreachable!("stopped only during shutdown"),
             Err(e) => {
@@ -184,13 +184,13 @@ pub fn execute(
                             && !events.iter().any(|e| (e.kind == "node_output" || e.kind == "node_output_pending") && e.node_id == event.node_id && e.attempt == event.attempt)).cloned()
                     }).map(|event| {
                         if blocked_node.is_empty() { blocked_node.clone_from(&event.node_id); }
-                        json!({"nodeId":event.node_id,"attempt":event.attempt,"output":event.data})
+                        json!({"node_id":event.node_id,"attempt":event.attempt,"output":event.data})
                     })
                 } else { None };
-                let mut data = json!({"code":code,"reason":detail,"detail":e.to_string(),"blockedNodeId":blocked_node,"blockedGateId":gate_id,"resumeAllowed":true,"resumePolicy":"explicit"}).as_object().unwrap().clone();
-                if let Some(pending) = pending { data.insert("pendingOutput".into(), pending); }
+                let mut data = json!({"code":code,"reason":detail,"detail":e.to_string(),"blocked_node_id":blocked_node,"blocked_gate_id":gate_id,"resume_allowed":true,"resume_policy":"explicit"}).as_object().unwrap().clone();
+                if let Some(pending) = pending { data.insert("pending_output".into(), pending); }
                 let open: Vec<_> = c.ledger(&id).and_then(|ledger| ledger.read().map_err(crate::error::to_io)).ok().map(|events| crate::run_open_dispatch::unresolved(&events).into_iter().filter(|event| event.node_id == blocked_node && !crate::run_open_dispatch::failed_completion(&events, event)).map(|event| event.data).collect()).unwrap_or_default();
-                data.insert("openDispatches".into(), json!(open));
+                data.insert("open_dispatches".into(), json!(open));
                 RunEvent {
                     kind: "run_blocked".into(),
                     gate_id: gate_id.clone(),
@@ -236,7 +236,7 @@ fn success_event(end_ids: Vec<String>, resolved: crate::outputs::Resolved) -> Ru
         .into(),
         timestamp: now(),
         data:
-            json!({"final":true,"endIds":end_ids,"outputs":resolved.outputs,"picks":resolved.picks})
+            json!({"final":true,"end_ids":end_ids,"outputs":resolved.outputs,"picks":resolved.picks})
                 .as_object()
                 .unwrap()
                 .clone(),
@@ -413,7 +413,7 @@ fn execute_inner(
             "node_output",
             &node,
             attempt,
-            json!({"status":result.status,"text":text,"outputs":result.outputs,"reportRef":format!("lab://{id}/{node}/report.md")}),
+            json!({"status":result.status,"text":text,"outputs":result.outputs,"report_ref":format!("lab://{id}/{node}/report.md")}),
         ),
     )?;
     Ok(Outcome::Succeeded(Vec::new()))

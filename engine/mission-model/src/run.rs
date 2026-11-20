@@ -7,7 +7,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
-#[serde(default, rename_all = "camelCase")]
+#[serde(default, rename_all = "snake_case")]
 pub struct RunStart {
     pub mission: String,
     pub input_card_id: String,
@@ -38,7 +38,7 @@ pub struct RunStart {
 /// A resume. A field the node does not know is refused, not dropped, so a
 /// client never believes it asked for something the node ignored.
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
-#[serde(default, deny_unknown_fields, rename_all = "camelCase")]
+#[serde(default, deny_unknown_fields, rename_all = "snake_case")]
 pub struct ResumeRequest {
     pub mode: ResumeMode,
     pub take_fail: bool,
@@ -60,7 +60,7 @@ pub enum ResumeMode {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "snake_case")]
 pub struct RunSummary {
     pub run_id: String,
     pub number: usize,
@@ -86,7 +86,7 @@ pub struct RunSummary {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "snake_case")]
 pub struct RunSessionSummary {
     pub session_name: String,
     pub node_id: String,
@@ -94,7 +94,7 @@ pub struct RunSessionSummary {
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
-#[serde(default, deny_unknown_fields, rename_all = "camelCase")]
+#[serde(default, deny_unknown_fields, rename_all = "snake_case")]
 pub struct HumanVerdict {
     pub requested_seq: u64,
     pub verdict: String,
@@ -105,7 +105,7 @@ pub struct HumanVerdict {
 
 /// The operator's pick on a gate's pending pick.
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
-#[serde(default, deny_unknown_fields, rename_all = "camelCase")]
+#[serde(default, deny_unknown_fields, rename_all = "snake_case")]
 pub struct HumanPick {
     /// The exact pending request picked on.
     pub requested_seq: u64,
@@ -124,7 +124,7 @@ pub struct RunInput {
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "snake_case")]
 pub struct RunOutput {
     pub name: String,
     pub kind: String,

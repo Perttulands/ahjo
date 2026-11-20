@@ -67,7 +67,7 @@ fn projection_sanitizes_private_data_and_tracks_human_requests() {
     ledger.create(start).unwrap();
     let mut request = event("human_input_requested");
     request.gate_id = "gate_review".into();
-    request.data.insert("briefPath".into(), "/private".into());
+    request.data.insert("brief_path".into(), "/private".into());
     ledger.append(request).unwrap();
     let projected = ahjo_mission_engine::project_run(&ledger.read().unwrap(), "run_test").unwrap();
     assert_eq!(projected.status, "waiting_human");
@@ -90,7 +90,7 @@ fn blocked_epoch_accepts_only_resume_cancel_failure_and_cleanup() {
     let ledger = Ledger::new(&path, "run_test");
     ledger.create(event("run_started")).unwrap();
     let mut blocked = event("run_blocked");
-    blocked.data.insert("resumeAllowed".into(), true.into());
+    blocked.data.insert("resume_allowed".into(), true.into());
     ledger.append(blocked).unwrap();
     assert!(ledger.append(event("node_started")).is_err());
     assert_eq!(ledger.append(event("run_resumed")).unwrap().epoch, 1);
@@ -136,7 +136,7 @@ fn a_verdict_for_an_old_request_does_not_close_the_new_one() {
     let latest = ledger.append(request).unwrap();
     let mut stale = event("human_verdict_recorded");
     stale.gate_id = "review".into();
-    stale.data.insert("requestedSeq".into(), 2.into());
+    stale.data.insert("requested_seq".into(), 2.into());
     ledger.append(stale).unwrap();
     let projection = ahjo_mission_engine::project_run(&ledger.read().unwrap(), "run_test").unwrap();
     assert_eq!(projection.waiting_gates[0].requested_seq, latest.seq);

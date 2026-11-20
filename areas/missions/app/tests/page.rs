@@ -153,7 +153,7 @@ fn opens_a_fixture_mission_on_the_canvas(cx: &mut TestAppContext) {
             .request(
                 http::Method::PATCH,
                 "/api/missions/hello",
-                Some(json!({"expectedRev": doc["mission"]["rev"], "title":"Changed elsewhere"})),
+                Some(json!({"expected_rev": doc["mission"]["rev"], "title":"Changed elsewhere"})),
                 Some(&etag),
             )
             .await
@@ -218,13 +218,14 @@ fn cli_authored_graph_and_layout_open_on_the_canvas(cx: &mut TestAppContext) {
             &["create", "cli-board", "--title", "CLI Board"],
         )
         .await;
-        let input = edit(u, json!({"createInputCard":{"title":"Start"}})).await["input_card"]["id"]
-            .as_str()
-            .unwrap()
-            .to_owned();
+        let input =
+            edit(u, json!({"create_input_card":{"title":"Start"}})).await["input_card"]["id"]
+                .as_str()
+                .unwrap()
+                .to_owned();
         let mut steps = Vec::new();
         for title in ["Draft", "Polish", "Judge"] {
-            let step = edit(u, json!({"createFormation":{"type":"solo","title":title}})).await;
+            let step = edit(u, json!({"create_formation":{"type":"solo","title":title}})).await;
             let step = &step["formation"];
             let id = step["id"].as_str().unwrap().to_owned();
             let input = format!("{id}:{}", step["input"][0]["id"].as_str().unwrap());
@@ -233,7 +234,7 @@ fn cli_authored_graph_and_layout_open_on_the_canvas(cx: &mut TestAppContext) {
         }
         let judge = edit(
             u,
-            json!({"createGate":{"title":"Judge gate","kinds":["formation"]}}),
+            json!({"create_gate":{"title":"Judge gate","kinds":["formation"]}}),
         )
         .await["gate"]["id"]
             .as_str()
@@ -241,14 +242,14 @@ fn cli_authored_graph_and_layout_open_on_the_canvas(cx: &mut TestAppContext) {
             .to_owned();
         edit(
             u,
-            json!({"setGateJudge":{"gateId":judge,"chain":[steps[2].0]}}),
+            json!({"set_gate_judge":{"gate_id":judge,"chain":[steps[2].0]}}),
         )
         .await;
-        let human = edit(u, json!({"createGate":{"title":"Human gate"}})).await["gate"]["id"]
+        let human = edit(u, json!({"create_gate":{"title":"Human gate"}})).await["gate"]["id"]
             .as_str()
             .unwrap()
             .to_owned();
-        let end = edit(u, json!({"createEnd":{"outcome":"done"}})).await["end"]["id"]
+        let end = edit(u, json!({"create_end":{"outcome":"done"}})).await["end"]["id"]
             .as_str()
             .unwrap()
             .to_owned();
@@ -259,7 +260,7 @@ fn cli_authored_graph_and_layout_open_on_the_canvas(cx: &mut TestAppContext) {
             (steps[1].2.clone(), format!("{human}:in")),
             (format!("{human}:pass"), format!("{end}:in")),
         ] {
-            edit(u, json!({"wireConnection":{"from":from,"to":to}})).await;
+            edit(u, json!({"wire_connection":{"from":from,"to":to}})).await;
         }
         cli(u, "mission", &["arrange", "cli-board"]).await;
         let change = json!({"nodes":[{"id":steps[0].0,"x":123,"y":456}]});
@@ -319,4 +320,127 @@ fn cli_authored_graph_and_layout_open_on_the_canvas(cx: &mut TestAppContext) {
             .iter()
             .any(|node| node["id"] == steps[0].0 && node["x"] == 123 && node["y"] == 456)
     );
+}
+
+#[gpui::test]
+fn opens_a_mission_layout_notes_and_run_written_before_the_wire_upgrade(cx: &mut TestAppContext) {
+    const MISSION: &str = include_str!("fixtures/wire-v1/hello.mission.toml");
+    let root = ahjo_testkit::fresh_dir("ahjo-legacy-mission-app");
+    let state = root.join("missions");
+    for (path, contents) in [
+        ("missions/hello.mission.toml", MISSION),
+        (
+            "layout/hello.layout.toml",
+            include_str!("fixtures/wire-v1/hello.layout.toml"),
+        ),
+        (
+            "notes/hello.notes.toml",
+            include_str!("fixtures/wire-v1/hello.notes.toml"),
+        ),
+        ("runs/run_legacy.snapshot.toml", MISSION),
+        (
+            "runs/run_legacy.ndjson",
+            include_str!("fixtures/wire-v1/run_legacy.ndjson"),
+        ),
+        (
+            "runs/run_legacy.bindings.toml",
+            include_str!("fixtures/wire-v1/run_legacy.bindings.toml"),
+        ),
+    ] {
+        let path = state.join(path);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path, contents).unwrap();
+    }
+
+    let (ready, wait) = mpsc::channel();
+    let (stop, stopped) = mpsc::channel();
+    let dir = root.clone();
+    let thread = std::thread::spawn(move || {
+        tokio::runtime::Runtime::new()
+            .unwrap()
+            .block_on(async move {
+                let config = ahjo_node_kit::Config::parse("", dir.clone()).unwrap();
+                let node = ahjo_node_kit::start(
+                    ahjo_node_kit::Options {
+                        dir,
+                        config,
+                        listen: Some("127.0.0.1:0".into()),
+                    },
+                    AREAS,
+                )
+                .await
+                .unwrap();
+                ready
+                    .send((format!("http://{}", node.address), node.node.id.to_string()))
+                    .unwrap();
+                while stopped.try_recv().is_err() {
+                    tokio::time::sleep(Duration::from_millis(20)).await;
+                }
+                node.stop().await.unwrap();
+            });
+    });
+    let (url, id) = wait.recv().unwrap();
+    let running = Running {
+        url,
+        id,
+        stop,
+        thread: Some(thread),
+    };
+
+    cx.executor().allow_parking();
+    cx.update(ahjo_app_shell::prepare);
+    let url = running.url.clone();
+    let settings = root.join("app.json");
+    let (_, cx) = cx.add_window_view(move |window, cx| {
+        ahjo_app_shell::start(
+            &[ahjo_missions_app::build],
+            Some(url),
+            Some(settings),
+            window,
+            cx,
+        )
+    });
+    let selector = Box::leak(format!("mission-{}-hello", running.id).into_boxed_str());
+    until(cx, "migrated mission listing", |cx| {
+        cx.debug_bounds(selector).is_some()
+    });
+    let mission = cx.debug_bounds(selector).unwrap().center();
+    cx.simulate_click(mission, Modifiers::none());
+    until(cx, "migrated mission flow", |cx| {
+        cx.debug_bounds("flow-step-fmn_work").is_some()
+    });
+    let canvas = cx.debug_bounds("mission-mode-canvas").unwrap().center();
+    cx.simulate_click(canvas, Modifiers::none());
+    until(cx, "migrated canvas card", |cx| {
+        cx.debug_bounds("mission-card-fmn_work").is_some()
+    });
+    let flow = cx.debug_bounds("mission-mode-flow").unwrap().center();
+    cx.simulate_click(flow, Modifiers::none());
+    until(cx, "recorded run", |cx| {
+        cx.debug_bounds("mission-run-run_legacy").is_some()
+    });
+    let run = cx.debug_bounds("mission-run-run_legacy").unwrap().center();
+    cx.simulate_click(run, Modifiers::none());
+    until(cx, "migrated run details", |cx| {
+        cx.debug_bounds("run-detail-run_legacy").is_some()
+    });
+
+    for (path, schema, field) in [
+        ("missions/hello.mission.toml", 2, "input_card"),
+        ("layout/hello.layout.toml", 2, "mission_id"),
+        ("notes/hello.notes.toml", 3, "created_at"),
+        ("runs/run_legacy.snapshot.toml", 2, "input_card"),
+        ("runs/run_legacy.bindings.toml", 3, "slot_id"),
+    ] {
+        let text = std::fs::read_to_string(state.join(path)).unwrap();
+        assert!(
+            text.contains(&format!("schema = {schema}")) && text.contains(field),
+            "{path}: {text}"
+        );
+    }
+    let replayed = std::fs::read_to_string(state.join("runs/run_legacy.ndjson")).unwrap();
+    assert!(replayed.contains("\"run_id\":\"run_legacy\"") && !replayed.contains("runId"));
+    assert!(replayed.contains("\"userPort\"") && replayed.contains("\"node_id\":\"fmn_work\""));
+    drop(running);
+    std::fs::remove_dir_all(root).unwrap();
 }

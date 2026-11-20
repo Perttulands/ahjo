@@ -904,7 +904,7 @@ fn resume_offers(
             (
                 "run-pick-best",
                 "Pick the best attempt",
-                json!({"mode":"reattach", "pickBest":true, "actor":"human:operator"}),
+                json!({"mode":"reattach", "pick_best":true, "actor":"human:operator"}),
             ),
         ],
         // The agent's session is gone: there is nothing to go on in.
@@ -930,7 +930,7 @@ fn resume_offers(
                 offers.push((
                     "run-take-fail",
                     "Take the fail route",
-                    json!({"mode":"reattach", "takeFail":true, "actor":"human:operator"}),
+                    json!({"mode":"reattach", "take_fail":true, "actor":"human:operator"}),
                 ));
             }
             offers
@@ -1149,7 +1149,7 @@ impl MissionsPage {
                         row = row.child(div().text_color(t.text2).child(line));
                     }
                 }
-                if let Some(step) = pick.get("nodeId").and_then(|v| v.as_str()) {
+                if let Some(step) = pick.get("node_id").and_then(|v| v.as_str()) {
                     let step = step.to_owned();
                     actions = actions.child(
                         pane::act(

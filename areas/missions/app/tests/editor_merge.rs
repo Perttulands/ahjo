@@ -139,7 +139,7 @@ fn saving_merges_untouched_concurrent_fields_and_refuses_a_same_field_change(
     cx.simulate_input("My goal");
     let rt = tokio::runtime::Runtime::new().unwrap();
     let client = NodeClient::new(Some(&format!("{}/", running.url))).unwrap();
-    rt.block_on(async {let(doc,etag)=client.request(http::Method::GET,"/api/missions/hello",None,None).await.unwrap();client.request(http::Method::PATCH,"/api/missions/hello",Some(json!({"expectedRev":doc["mission"]["rev"],"updateFormation":{"id":"fmn_work","title":"Renamed elsewhere"}})),Some(&etag)).await.unwrap();});
+    rt.block_on(async {let(doc,etag)=client.request(http::Method::GET,"/api/missions/hello",None,None).await.unwrap();client.request(http::Method::PATCH,"/api/missions/hello",Some(json!({"expected_rev":doc["mission"]["rev"],"update_formation":{"id":"fmn_work","title":"Renamed elsewhere"}})),Some(&etag)).await.unwrap();});
     let point = cx.debug_bounds("step-save").unwrap().center();
     cx.simulate_click(point, Modifiers::none());
     until(cx, "merged save", |cx| {
@@ -165,7 +165,7 @@ fn saving_merges_untouched_concurrent_fields_and_refuses_a_same_field_change(
     cx.simulate_click(point, Modifiers::none());
     cx.simulate_keystrokes("ctrl-a");
     cx.simulate_input("My second goal");
-    rt.block_on(async {let(doc,etag)=client.request(http::Method::GET,"/api/missions/hello",None,None).await.unwrap();let f=&doc["mission"]["formation"][0];let mut brief=f["brief"].clone();brief["goal"]=json!("Other goal");client.request(http::Method::PATCH,"/api/missions/hello",Some(json!({"expectedRev":doc["mission"]["rev"],"editFormation":{"id":"fmn_work","title":f["title"],"brief":brief}})),Some(&etag)).await.unwrap();});
+    rt.block_on(async {let(doc,etag)=client.request(http::Method::GET,"/api/missions/hello",None,None).await.unwrap();let f=&doc["mission"]["formation"][0];let mut brief=f["brief"].clone();brief["goal"]=json!("Other goal");client.request(http::Method::PATCH,"/api/missions/hello",Some(json!({"expected_rev":doc["mission"]["rev"],"edit_formation":{"id":"fmn_work","title":f["title"],"brief":brief}})),Some(&etag)).await.unwrap();});
     let point = cx.debug_bounds("step-save").unwrap().center();
     cx.simulate_click(point, Modifiers::none());
     until(cx, "same field conflict", |cx| {

@@ -31,11 +31,12 @@ impl Coordinator {
                     let block = events.iter().rev().find(|e| e.kind == "run_blocked");
                     if let [dispatch] = open.as_slice()
                         && block
-                            .and_then(|b| b.data.get("openDispatches"))
+                            .and_then(|b| b.data.get("open_dispatches"))
                             .and_then(|v| v.as_array())
                             .is_some_and(|refs| {
                                 refs.len() == 1
-                                    && refs[0].get("dispatchId") == dispatch.data.get("dispatchId")
+                                    && refs[0].get("dispatch_id")
+                                        == dispatch.data.get("dispatch_id")
                             })
                     {
                         let mission = ahjo_mission_model::Mission::parse(&std::fs::read_to_string(
@@ -59,7 +60,7 @@ impl Coordinator {
             }) {
                 self.append(id, crate::RunEvent {
                     kind: "run_blocked".into(), node_id: pending.node_id.clone(), actor: "archond".into(), timestamp: crate::run_storage::now(),
-                    data: serde_json::json!({"code":"coordinator_shutdown","reason":"Ahjo stopped while keeping the step's outputs; resume to keep them","blockedNodeId":pending.node_id,"resumeAllowed":true,"resumePolicy":"explicit","pendingOutput":{"nodeId":pending.node_id,"attempt":pending.attempt,"output":pending.data}}).as_object().unwrap().clone(),
+                    data: serde_json::json!({"code":"coordinator_shutdown","reason":"Ahjo stopped while keeping the step's outputs; resume to keep them","blocked_node_id":pending.node_id,"resume_allowed":true,"resume_policy":"explicit","pending_output":{"node_id":pending.node_id,"attempt":pending.attempt,"output":pending.data}}).as_object().unwrap().clone(),
                     ..Default::default()
                 })?;
                 interrupted.push(id.to_owned());
@@ -76,7 +77,7 @@ impl Coordinator {
             let events = self.ledger(id)?.read().map_err(crate::error::to_io)?;
             let formation_id = events[0]
                 .data
-                .get("formationId")
+                .get("formation_id")
                 .and_then(|v| v.as_str())
                 .unwrap_or("")
                 .to_owned();
@@ -142,12 +143,12 @@ impl Coordinator {
                     "coordinator_interrupted"
                 };
                 if !finalizing {
-                    self.append(id, crate::RunEvent { kind:"error".into(), timestamp:crate::run_storage::now(), data:serde_json::json!({"code":"coordinator_interrupted","message":if open.is_empty() {"coordinator restarted between steps"} else {"coordinator restarted with open dispatches"},"openDispatches":open.iter().map(|e| &e.data).collect::<Vec<_>>()}).as_object().unwrap().clone(), ..Default::default() })?;
+                    self.append(id, crate::RunEvent { kind:"error".into(), timestamp:crate::run_storage::now(), data:serde_json::json!({"code":"coordinator_interrupted","message":if open.is_empty() {"coordinator restarted between steps"} else {"coordinator restarted with open dispatches"},"open_dispatches":open.iter().map(|e| &e.data).collect::<Vec<_>>()}).as_object().unwrap().clone(), ..Default::default() })?;
                 }
                 self.append(id, crate::RunEvent {
                     kind: "run_blocked".into(),
                     timestamp: crate::run_storage::now(),
-                    data: serde_json::json!({"code":code,"reason":recovery_error.unwrap_or_else(|| if open.is_empty() {"Ahjo restarted between steps; resume to continue".into()} else {"Ahjo restarted while a step was working; resume to pick it up".into()}),"resumeAllowed":true,"resumePolicy":"explicit","openDispatches":open.iter().map(|e| &e.data).collect::<Vec<_>>(),"pendingOutput":pending}).as_object().unwrap().clone(),
+                    data: serde_json::json!({"code":code,"reason":recovery_error.unwrap_or_else(|| if open.is_empty() {"Ahjo restarted between steps; resume to continue".into()} else {"Ahjo restarted while a step was working; resume to pick it up".into()}),"resume_allowed":true,"resume_policy":"explicit","open_dispatches":open.iter().map(|e| &e.data).collect::<Vec<_>>(),"pending_output":pending}).as_object().unwrap().clone(),
                     ..Default::default()
                 })?;
                 if restarted {
@@ -200,7 +201,7 @@ pub(crate) fn publication_error_code(detail: &str) -> &'static str {
 }
 
 pub(crate) fn pending_capture(events: &[crate::RunEvent]) -> Option<serde_json::Value> {
-    events.iter().rev().find(|event| event.kind == "output_capture_pending" && !crate::run_capture::discarded(events, event) && !events.iter().any(|output| matches!(output.kind.as_str(), "node_output" | "node_output_pending") && output.node_id == event.node_id && output.attempt == event.attempt)).map(|event| serde_json::json!({"nodeId":event.node_id,"attempt":event.attempt,"output":event.data}))
+    events.iter().rev().find(|event| event.kind == "output_capture_pending" && !crate::run_capture::discarded(events, event) && !events.iter().any(|output| matches!(output.kind.as_str(), "node_output" | "node_output_pending") && output.node_id == event.node_id && output.attempt == event.attempt)).map(|event| serde_json::json!({"node_id":event.node_id,"attempt":event.attempt,"output":event.data}))
 }
 
 pub(crate) fn only_waiting(
@@ -214,7 +215,7 @@ pub(crate) fn only_waiting(
             && !events.iter().any(|routed| {
                 routed.kind == "gate_verdict"
                     && routed.gate_id == decision.gate_id
-                    && routed.data.get("requestedSeq") == decision.data.get("requestedSeq")
+                    && routed.data.get("requested_seq") == decision.data.get("requested_seq")
             })
     });
     let ready = replay.ports.iter().any(|(node, ports)| {

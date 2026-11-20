@@ -1,10 +1,10 @@
-schema = 1
+schema = 2
 id = "msn_example"
 slug = "best-of-three"
 title = "Best of three"
 rev = 1
 
-[[inputCard]]
+[[input_card]]
 id = "inp_task"
 title = "Task"
 goal = "Three fresh attempts at one piece of work; a judge passes the first that meets the bar, and when none does the best of the three goes on."
@@ -63,7 +63,7 @@ id = "lim_three"
 title = "Three attempts"
 target = "fmn_attempt"
 rounds = 3
-whenSpent = "best"
+when_spent = "best"
 
 [[end]]
 id = "end_done"

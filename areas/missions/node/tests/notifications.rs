@@ -115,9 +115,9 @@ async fn node_restart_does_not_resend_and_old_final_runs_are_ignored() {
         .map(|line| serde_json::from_str(line).unwrap())
         .collect();
     assert_eq!(messages.len(), 1);
-    assert_eq!(messages[0]["runId"], id);
-    assert_eq!(messages[0]["missionSlug"], "review");
-    assert_eq!(messages[0]["gateId"], "gate_review");
+    assert_eq!(messages[0]["run_id"], id);
+    assert_eq!(messages[0]["mission_slug"], "review");
+    assert_eq!(messages[0]["gate_id"], "gate_review");
     assert_eq!(messages[0]["ask"], "Ready?");
     // Wait for the durable receipt, not merely the child writing its output.
     until(|| {

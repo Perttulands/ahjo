@@ -61,7 +61,7 @@ pub(crate) fn apply(
     match &mut node {
         RestoredNode::InputCard(n) => {
             crate::authoring_create::file_refs(&mut n.files)?;
-            put(doc, "inputCard", n, index)?;
+            put(doc, "input_card", n, index)?;
             let current = Mission::parse(&doc.to_string())?;
             crate::authoring_input::apply(
                 doc,

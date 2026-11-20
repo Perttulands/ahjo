@@ -59,13 +59,13 @@ impl ahjo_mission_engine::Executor for ControlledLab {
         sink.emit(ahjo_mission_engine::ExecutionEvent {
             kind: "slot_dispatch".into(),
             slot_id: slot.id.clone(),
-            data: serde_json::json!({"dispatchId":dispatch,"nodeId":node,"slotId":slot.id})
+            data: serde_json::json!({"dispatch_id":dispatch,"node_id":node,"slot_id":slot.id})
                 .as_object()
                 .unwrap()
                 .clone(),
         })?;
         self.0.wait(node, true);
-        sink.emit(ahjo_mission_engine::ExecutionEvent { kind: "slot_result".into(), slot_id: slot.id.clone(), data: serde_json::json!({"dispatchId":dispatch,"nodeId":node,"slotId":slot.id,"status":"ok","sentinel":{"runId":request.run_id,"status":"ok"}}).as_object().unwrap().clone() })?;
+        sink.emit(ahjo_mission_engine::ExecutionEvent { kind: "slot_result".into(), slot_id: slot.id.clone(), data: serde_json::json!({"dispatch_id":dispatch,"node_id":node,"slot_id":slot.id,"status":"ok","sentinel":{"run_id":request.run_id,"status":"ok"}}).as_object().unwrap().clone() })?;
         let text = format!(
             "lab-fake output from {} using {} for {}\nslot: {}\ninput:{}{}",
             if slot.agent_id.is_empty() {
@@ -138,11 +138,11 @@ fn reattach_keeps_other_completed_dispatches_when_one_fails() {
             (|| -> Result<FormationResult, String> {
             let slot = &req.formation.slots[0];
             let dispatch = format!("dsp_{}_{}", req.formation.id, req.attempt);
-            sink.emit(ExecutionEvent { kind:"slot_dispatch".into(), slot_id:slot.id.clone(), data:serde_json::json!({"dispatchId":dispatch,"nodeId":req.formation.id,"slotId":slot.id}).as_object().unwrap().clone() }).map_err(|error| error.message)?;
+            sink.emit(ExecutionEvent { kind:"slot_dispatch".into(), slot_id:slot.id.clone(), data:serde_json::json!({"dispatch_id":dispatch,"node_id":req.formation.id,"slot_id":slot.id}).as_object().unwrap().clone() }).map_err(|error| error.message)?;
             while !self.release.load(Ordering::Acquire) {
                 std::thread::sleep(Duration::from_millis(5));
             }
-            sink.emit(ExecutionEvent { kind:"slot_result".into(), slot_id:slot.id.clone(), data:serde_json::json!({"dispatchId":dispatch,"status":"ok","sentinel":{"runId":req.run_id}}).as_object().unwrap().clone() }).map_err(|error| error.message)?;
+            sink.emit(ExecutionEvent { kind:"slot_result".into(), slot_id:slot.id.clone(), data:serde_json::json!({"dispatch_id":dispatch,"status":"ok","sentinel":{"run_id":req.run_id}}).as_object().unwrap().clone() }).map_err(|error| error.message)?;
             Ok(FormationResult {
                 status: "done".into(),
                 text: "done".into(),
@@ -274,9 +274,9 @@ fn reattach_keeps_other_completed_dispatches_when_one_fails() {
         .rev()
         .find(|e| e.kind == "run_blocked")
         .unwrap();
-    let remaining = block.data["openDispatches"].as_array().unwrap();
+    let remaining = block.data["open_dispatches"].as_array().unwrap();
     assert_eq!(remaining.len(), 1);
-    assert_eq!(remaining[0]["nodeId"], "fmn_other");
+    assert_eq!(remaining[0]["node_id"], "fmn_other");
     loop {
         match c.resume(
             &id,
@@ -470,7 +470,7 @@ fn restart_cuts_preserve_branch_and_human_gate_outcomes() {
             for line in &lines[..cut] {
                 let event: Value = serde_json::from_str(line).unwrap();
                 if event["type"] == "folder_attempt_started" {
-                    let node = event["nodeId"].as_str().unwrap();
+                    let node = event["node_id"].as_str().unwrap();
                     let attempt = event["attempt"].as_i64().unwrap();
                     let copy = scratch
                         .0
@@ -780,7 +780,7 @@ fn human_answer_routes_while_another_branch_runs_and_rejection_waits() {
                 assert_eq!(last["data"]["code"], "path_rejected");
                 assert_eq!(last["data"]["reason"], "needs work");
                 assert_eq!(last["actor"], "human:operator");
-                let end_ids = last["data"]["endIds"].as_array().unwrap();
+                let end_ids = last["data"]["end_ids"].as_array().unwrap();
                 assert!(end_ids.contains(&"end_done".into()));
                 assert!(end_ids.contains(&"end_rejected".into()));
             }
@@ -833,7 +833,7 @@ fn a_newer_human_request_makes_the_old_sequence_stale() {
         "archon-lab-work:50ms Return a short result",
     );
     let mission = format!(
-        "{base}\n[[formation]]{other}\n[[gate]]\nid = \"gate_check\"\ntitle = \"Check\"\nkinds = [\"code\"]\ncheck = \"output_contains\"\ncheckVersion = \"1\"\ncheckValue = \"never present\"\n[[connection]]\nid = \"edge_other\"\nfrom = \"inp_hello:out\"\nto = \"fmn_other:port_in\"\n[[connection]]\nid = \"edge_check\"\nfrom = \"fmn_other:port_out\"\nto = \"gate_check:in\"\n[[connection]]\nid = \"edge_check_pass\"\nfrom = \"gate_check:pass\"\nto = \"end_done:in\"\n[[connection]]\nid = \"edge_check_fail\"\nfrom = \"gate_check:fail\"\nto = \"gate_review:in\"\n"
+        "{base}\n[[formation]]{other}\n[[gate]]\nid = \"gate_check\"\ntitle = \"Check\"\nkinds = [\"code\"]\ncheck = \"output_contains\"\ncheck_version = \"1\"\ncheck_value = \"never present\"\n[[connection]]\nid = \"edge_other\"\nfrom = \"inp_hello:out\"\nto = \"fmn_other:port_in\"\n[[connection]]\nid = \"edge_check\"\nfrom = \"fmn_other:port_out\"\nto = \"gate_check:in\"\n[[connection]]\nid = \"edge_check_pass\"\nfrom = \"gate_check:pass\"\nto = \"end_done:in\"\n[[connection]]\nid = \"edge_check_fail\"\nfrom = \"gate_check:fail\"\nto = \"gate_review:in\"\n"
     );
     std::fs::write(root.0.join("missions/hello.mission.toml"), mission).unwrap();
     let c = Coordinator::open(&root.0, RunSettings::default(), Box::new(LabExecutor)).unwrap();
@@ -1163,7 +1163,7 @@ fn reopening_retries_an_open_attempt_on_its_original_inputs() {
         .collect();
     let start = events
         .iter()
-        .position(|event| event["type"] == "node_started" && event["nodeId"] == "fmn_work")
+        .position(|event| event["type"] == "node_started" && event["node_id"] == "fmn_work")
         .unwrap();
     let kept = text.lines().take(start + 1).collect::<Vec<_>>().join("\n") + "\n";
     std::fs::write(&path, kept).unwrap();
@@ -1224,7 +1224,7 @@ fn replay_blocks_instead_of_succeeding_when_an_output_payload_is_missing() {
         .collect();
     let output = events
         .iter()
-        .position(|event| event["type"] == "node_output" && event["nodeId"] == "fmn_work")
+        .position(|event| event["type"] == "node_output" && event["node_id"] == "fmn_work")
         .unwrap();
     events.truncate(output + 1);
     events[output]["data"]["outputs"] = serde_json::json!({});
@@ -1421,12 +1421,12 @@ fn recovery_drains_started_work_without_retrying_a_recorded_error() {
         .collect();
     let failure = events
         .iter()
-        .position(|e| e["type"] == "error" && e["nodeId"] == "fmn_work")
+        .position(|e| e["type"] == "error" && e["node_id"] == "fmn_work")
         .unwrap();
     assert!(
         events[..failure]
             .iter()
-            .any(|e| e["type"] == "node_started" && e["nodeId"] == "fmn_other")
+            .any(|e| e["type"] == "node_started" && e["node_id"] == "fmn_other")
     );
     std::fs::write(
         &path,

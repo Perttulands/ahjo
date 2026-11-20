@@ -38,7 +38,7 @@ impl EvidenceText {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, JsonSchema)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "snake_case")]
 pub struct RunAttempts {
     pub run_id: String,
     pub steps: Vec<StepAttempts>,
@@ -46,7 +46,7 @@ pub struct RunAttempts {
 
 /// One step and its attempts, oldest first.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, JsonSchema)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "snake_case")]
 pub struct StepAttempts {
     pub node_id: String,
     pub title: String,
@@ -65,7 +65,7 @@ pub struct StepPort {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, JsonSchema)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "snake_case")]
 pub struct StepAttempt {
     pub attempt: i64,
     /// `running`, `done` or `stopped`.
@@ -92,7 +92,7 @@ fn is_zero(n: &u64) -> bool {
 /// One output port's accepted payload; `path` is a file or folder output's
 /// absolute path.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, JsonSchema)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "snake_case")]
 pub struct AttemptOutput {
     pub port_id: String,
     #[serde(default, skip_serializing_if = "String::is_empty")]
@@ -107,7 +107,7 @@ pub struct AttemptOutput {
 /// or `pending` while it waits. `superseded` marks a human request a later
 /// evaluation replaced before anyone answered it.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, JsonSchema)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "snake_case")]
 pub struct AttemptVerdict {
     pub gate_id: String,
     #[serde(default, skip_serializing_if = "String::is_empty")]
@@ -135,9 +135,9 @@ pub struct EvidenceItem {
 }
 
 /// The pick that took an attempt: its gate, the verdict's seq, why and who,
-/// the attempts it chose from and what started it (`whenSpent` or `resume`).
+/// the attempts it chose from and what started it (`when_spent` or `resume`).
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, JsonSchema)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "snake_case")]
 pub struct AttemptPick {
     pub gate_id: String,
     #[serde(default, skip_serializing_if = "String::is_empty")]

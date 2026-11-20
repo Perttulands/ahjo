@@ -92,7 +92,7 @@ fn legacy_missions_can_be_repaired_without_allowing_unrelated_saves() {
         .replace("type = \"solo\"", "type = \"peer\"")
         .replace(
             "id = \"inp_start\"",
-            "id = \"inp_start\"\nhumanChannel = \"session\"",
+            "id = \"inp_start\"\nhuman_channel = \"session\"",
         );
     std::fs::write(folder.join("gated.mission.toml"), source).unwrap();
     let store = Store::new(&root);
@@ -187,11 +187,11 @@ async fn cli_refuses_to_save_unsupported_formation_and_channel() {
     let before = std::fs::read(folder.join("gated.mission.toml")).unwrap();
     for (operation, code) in [
         (
-            json!({"createFormation":{"type":"peer"}}),
+            json!({"create_formation":{"type":"peer"}}),
             "unsupported_formation",
         ),
         (
-            json!({"updateInputCard":{"id":"inp_start","humanChannel":"session"}}),
+            json!({"update_input_card":{"id":"inp_start","human_channel":"session"}}),
             "unsupported_human_channel",
         ),
     ] {

@@ -266,7 +266,7 @@ impl MissionsPage {
         }
         let request = match &doing {
             Doing::Create { node } => Ok(Request::new("POST", NodeId(node.clone()), "/api/missions")
-                .json(&json!({"title":title, "example":example.map(|e| e.name).unwrap_or(""), "note":intent, "steps":steps, "updatedBy":"human:operator"}))),
+                .json(&json!({"title":title, "example":example.map(|e| e.name).unwrap_or(""), "note":intent, "steps":steps, "updated_by":"human:operator"}))),
             Doing::Rename { node, slug, rev, etag, .. } => edits::with_json_body(
                 Request::new("PATCH", NodeId(node.clone()), mission_path(slug))
                     .header("If-Match", etag.clone()),
@@ -274,7 +274,7 @@ impl MissionsPage {
             ),
             Doing::Archive { node, slug, rev, etag, .. } => Ok(Request::new("DELETE", NodeId(node.clone()), mission_path(slug))
                 .header("If-Match", etag.clone())
-                .json(&json!({"expectedRev":rev}))),
+                .json(&json!({"expected_rev":rev}))),
         };
         let form = self.manage.form.as_mut().unwrap();
         let request = match request {

@@ -38,7 +38,7 @@ pub fn pending_request(
             "the human gate request is no longer pending",
         ));
     }
-    let input = request.data.get("inputRef");
+    let input = request.data.get("input_ref");
     let field = |name: &str| {
         input
             .and_then(|i| i.get(name))
@@ -56,8 +56,8 @@ pub fn pending_request(
         requested_seq: request.seq,
         criterion: criterion.to_owned(),
         input: GateInput {
-            from_node_id: field("fromNodeId"),
-            from_port_id: field("fromPortId"),
+            from_node_id: field("from_node_id"),
+            from_port_id: field("from_port_id"),
             text,
             truncated,
         },

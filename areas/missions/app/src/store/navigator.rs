@@ -112,7 +112,7 @@ mod tests {
     use crate::store::Feed;
     use serde_json::json;
     fn run(id: &str, when: &str, status: &str, final_: bool) -> RunProjection {
-        serde_json::from_value(json!({"runId":id,"status":status,"final":final_,"resumeAllowed":false,"epoch":1,"missionSlug":"demo","missionId":"m","missionRev":1,"inputCardId":"i","work":"","cwd":"","repository":"","base":"","contextPaths":[],"inputs":[],"outputs":[],"eventCount":1,"startedBy":"","startedAt":when,"updatedAt":when,"waitingGates":[],"events":[]})).unwrap()
+        serde_json::from_value(json!({"run_id":id,"status":status,"final":final_,"resume_allowed":false,"epoch":1,"mission_slug":"demo","mission_id":"m","mission_rev":1,"input_card_id":"i","work":"","cwd":"","repository":"","base":"","context_paths":[],"inputs":[],"outputs":[],"event_count":1,"started_by":"","started_at":when,"updated_at":when,"waiting_gates":[],"events":[]})).unwrap()
     }
     #[test]
     fn groups_keep_run_numbers_in_time_order_but_put_attention_first() {

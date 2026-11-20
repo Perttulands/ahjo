@@ -12,7 +12,7 @@ fn hash(value: &str) -> String {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "snake_case")]
 pub struct CodeGateBinding {
     pub gate_binding_id: String,
     pub gate_id: String,
@@ -42,6 +42,8 @@ impl CodeGateBinding {
         if gate.check_value.trim().is_empty() {
             return Err("code gate requires a nonempty check value".into());
         }
+        // These v1 manifests are hashed into existing run records. Keep
+        // their canonical bytes even when the persisted fields are renamed.
         let manifest = format!(
             "code-gate-profile-v1\nid={profile}\nversion={version}\nparameter=value:string:nonempty\nexecution=in_process\neffects=none\ndeterministic=true\ncertifiedTotal=true\nmaxInputBytes=262144\nmaxResultBytes=8192\nmaxOperations=524288\nresultEncoding={ENCODING}\nevaluatorImplementationSha256={IMPLEMENTATION}\noperation={operation}"
         );
@@ -94,10 +96,10 @@ impl CodeGateBinding {
         }];
         let canonical = serde_json::json!({"evidence":evidence,"reason":result.reason,"verdict":result.verdict}).to_string();
         if canonical.len() > self.max_result_bytes {
-            return Err("code gate exhausted maxResultBytes".into());
+            return Err("code gate exhausted max_result_bytes".into());
         }
         Ok(
-            serde_json::json!({"kind":"code","verdict":result.verdict,"reason":result.reason,"evidence":evidence,"resultEncoding":self.result_encoding,"resultSha256":hash(&canonical),"gateBindingId":self.gate_binding_id,"inputSha256":hash(input),"profileId":self.profile_id,"profileVersion":self.profile_version,"profileSha256":self.profile_sha256,"evaluatorBundleSha256":self.evaluator_bundle_sha256,"parametersSha256":self.parameters_sha256,"policySha256":self.policy_sha256,"determinismPolicySha256":self.determinism_policy_sha256,"maxInputBytes":self.max_input_bytes,"maxResultBytes":self.max_result_bytes,"maxOperations":self.max_operations}),
+            serde_json::json!({"kind":"code","verdict":result.verdict,"reason":result.reason,"evidence":evidence,"result_encoding":self.result_encoding,"result_sha256":hash(&canonical),"gate_binding_id":self.gate_binding_id,"input_sha256":hash(input),"profile_id":self.profile_id,"profile_version":self.profile_version,"profile_sha256":self.profile_sha256,"evaluator_bundle_sha256":self.evaluator_bundle_sha256,"parameters_sha256":self.parameters_sha256,"policy_sha256":self.policy_sha256,"determinism_policy_sha256":self.determinism_policy_sha256,"max_input_bytes":self.max_input_bytes,"max_result_bytes":self.max_result_bytes,"max_operations":self.max_operations}),
         )
     }
 }
@@ -129,11 +131,11 @@ pub(crate) fn validate_results(
                     && prior.gate_id == event.gate_id
             })
             .ok_or_else(|| "code result has no evaluation".to_string())?;
-        if evaluation.data.get("inputRef") != event.data.get("inputRef") {
+        if evaluation.data.get("input_ref") != event.data.get("input_ref") {
             return Err("code result input differs from its evaluation".into());
         }
         let input: crate::RoutedInput =
-            serde_json::from_value(event.data.get("inputRef").cloned().unwrap_or_default())
+            serde_json::from_value(event.data.get("input_ref").cloned().unwrap_or_default())
                 .map_err(|e| e.to_string())?;
         let result =
             crate::evaluate_code_check(gate, &input.text).map_err(|error| error.message)?;
@@ -156,7 +158,7 @@ pub(crate) fn validate_results(
         }
         let through = aggregate
             .data
-            .get("requestedSeq")
+            .get("requested_seq")
             .and_then(|v| v.as_u64())
             .filter(|seq| *seq > 0)
             .unwrap_or(aggregate.seq);
@@ -177,10 +179,10 @@ pub(crate) fn validate_results(
                     && event.data.get("kind").and_then(|v| v.as_str()) == Some("code")
             })
             .ok_or_else(|| "aggregate is missing its code result".to_string())?;
-        if aggregate.data.get("inputRef") != code.data.get("inputRef")
+        if aggregate.data.get("input_ref") != code.data.get("input_ref")
             || aggregate
                 .data
-                .get("kindResultSeqs")
+                .get("kind_result_seqs")
                 .and_then(|v| v.get("code"))
                 .and_then(|v| v.as_u64())
                 != Some(code.seq)
@@ -188,11 +190,11 @@ pub(crate) fn validate_results(
             return Err("aggregate code result identity mismatch".into());
         }
         for (source, target) in [
-            ("verdict", "codeVerdict"),
-            ("reason", "codeReason"),
-            ("resultEncoding", "resultEncoding"),
-            ("resultSha256", "resultSha256"),
-            ("gateBindingId", "gateBindingId"),
+            ("verdict", "code_verdict"),
+            ("reason", "code_reason"),
+            ("result_encoding", "result_encoding"),
+            ("result_sha256", "result_sha256"),
+            ("gate_binding_id", "gate_binding_id"),
         ] {
             if code.data.get(source) != aggregate.data.get(target) {
                 return Err(format!("aggregate {target} mismatch"));
@@ -206,7 +208,7 @@ pub(crate) fn validate_results(
                 .unwrap_or("");
             if aggregate
                 .data
-                .get("perKind")
+                .get("per_kind")
                 .and_then(|v| v.get("code"))
                 .and_then(|v| v.as_str())
                 != Some(code_verdict)
@@ -298,7 +300,7 @@ mod tests {
         );
         let result = crate::evaluate_code_check(&gate, "hello").unwrap();
         assert_eq!(
-            binding.result_data("hello", &result).unwrap()["resultSha256"],
+            binding.result_data("hello", &result).unwrap()["result_sha256"],
             "d55a83d3b0dbd57234e432fe0c73d0b44aad0bbe8d0678e93c4289c5443a126c"
         );
         let mut tampered = binding.clone();

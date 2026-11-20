@@ -219,7 +219,7 @@ mod tests {
             ..Default::default()
         };
         let mut start = event("run_started");
-        start.data.insert("missionSlug".into(), "hello".into());
+        start.data.insert("mission_slug".into(), "hello".into());
         ledger.create(start).unwrap();
         let mut evaluating = event("gate_evaluating");
         evaluating.gate_id = "review".into();
@@ -227,7 +227,7 @@ mod tests {
         let mut request = event("human_input_requested");
         request.gate_id = "review".into();
         request.node_id = "review".into();
-        request.data = serde_json::json!({"inputRef":{"text":"work","fromNodeId":"draft"}})
+        request.data = serde_json::json!({"input_ref":{"text":"work","from_node_id":"draft"}})
             .as_object()
             .unwrap()
             .clone();
@@ -235,7 +235,7 @@ mod tests {
         if final_run {
             ledger.append(event("run_canceled")).unwrap();
         }
-        std::fs::write(root.join("runs").join(format!("{id}.snapshot.toml")), "schema = 1\nid = 'msn_hello'\nslug = 'hello'\ntitle = 'Hello'\nrev = 1\n[[gate]]\nid = 'review'\ntitle = 'Review'\nkinds = ['human']\ncriterion = 'Approve this?'\n").unwrap();
+        std::fs::write(root.join("runs").join(format!("{id}.snapshot.toml")), "schema = 2\nid = 'msn_hello'\nslug = 'hello'\ntitle = 'Hello'\nrev = 1\n[[gate]]\nid = 'review'\ntitle = 'Review'\nkinds = ['human']\ncriterion = 'Approve this?'\n").unwrap();
     }
     fn dispatcher(
         root: &Path,
@@ -293,9 +293,9 @@ mod tests {
         d.deliver(&coordinator, "run_live", now + RETRY).await;
         let messages = std::fs::read_to_string(&output).unwrap();
         let payload: Value = serde_json::from_str(messages.trim()).unwrap();
-        assert_eq!(payload["runId"], "run_live");
-        assert_eq!(payload["missionSlug"], "hello");
-        assert_eq!(payload["gateId"], "review");
+        assert_eq!(payload["run_id"], "run_live");
+        assert_eq!(payload["mission_slug"], "hello");
+        assert_eq!(payload["gate_id"], "review");
         assert_eq!(payload["ask"], "Approve this?");
         assert_eq!(payload["kind"], "human_gate");
         assert!(

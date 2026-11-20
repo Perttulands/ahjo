@@ -17,7 +17,7 @@ fn arrangements_match_the_goldens() {
         board.remove("etag");
         board.remove("tools");
         for (from, to) in [
-            ("inputCards", "inputCard"),
+            ("input_cards", "input_card"),
             ("formations", "formation"),
             ("gates", "gate"),
             ("ends", "end"),

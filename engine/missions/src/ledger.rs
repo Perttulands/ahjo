@@ -10,7 +10,7 @@ const RUN_EVENT_MAX_BYTES: usize = 1 << 20;
 
 /// One durable event. Event data is private until explicitly projected.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "snake_case")]
 pub struct RunEvent {
     #[serde(rename = "ts")]
     pub timestamp: String,
@@ -155,7 +155,7 @@ impl Ledger {
                 if event.kind == "run_resumed" {
                     if !last_lifecycle
                         .data
-                        .get("resumeAllowed")
+                        .get("resume_allowed")
                         .and_then(|v| v.as_bool())
                         .unwrap_or(false)
                     {

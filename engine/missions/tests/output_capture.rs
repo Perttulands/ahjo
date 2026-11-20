@@ -72,10 +72,10 @@ impl Executor for Output {
             self.count.fetch_add(1, Ordering::SeqCst);
             let slot = req.formation.slots[0].id.clone();
             for (kind, data) in [
-                ("slot_dispatch", json!({"dispatchId":"test"})),
+                ("slot_dispatch", json!({"dispatch_id":"test"})),
                 (
                     "slot_result",
-                    json!({"dispatchId":"test","sentinel":{"runId":req.run_id,"status":"ok"}}),
+                    json!({"dispatch_id":"test","sentinel":{"run_id":req.run_id,"status":"ok"}}),
                 ),
             ] {
                 sink.emit(ExecutionEvent {
@@ -159,7 +159,7 @@ fn failed_capture_after_reattach_remains_redispatchable() {
     }
     let events = ahjo_mission_engine::Ledger::new(&path, &id).read().unwrap();
     assert_eq!(
-        events.last().unwrap().data["pendingOutput"]["nodeId"],
+        events.last().unwrap().data["pending_output"]["node_id"],
         "fmn_work"
     );
     std::fs::write(file, "narrowed").unwrap();
@@ -236,7 +236,7 @@ fn file_output_is_kept_independently_and_projected() {
         serde_json::from_str(include_str!("parity/runs/archon-ledgers/outputs.json")).unwrap();
     assert_eq!(
         std::fs::read_to_string(copy).unwrap(),
-        baseline["file-output-kept"]["firstCopy"].as_str().unwrap()
+        baseline["file-output-kept"]["first_copy"].as_str().unwrap()
     );
     assert_eq!(c.list(None, false).unwrap()[0].outputs, run.outputs);
 }
@@ -254,7 +254,7 @@ fn over_budget_blocks_then_resume_keeps_without_dispatching_again() {
     let baseline: serde_json::Value =
         serde_json::from_str(include_str!("parity/runs/archon-ledgers/outputs.json")).unwrap();
     let expected = &baseline["folder-over-budget"];
-    assert_eq!(run.block_code, expected["blockedCode"].as_str().unwrap());
+    assert_eq!(run.block_code, expected["blocked_code"].as_str().unwrap());
     std::fs::write(file, "narrowed").unwrap();
     let until = Instant::now() + Duration::from_secs(5);
     loop {
@@ -307,7 +307,7 @@ fn redispatch_runs_a_new_attempt_instead_of_keeping_the_pending_one() {
         .iter()
         .find(|event| event.kind == "run_blocked")
         .unwrap();
-    assert_eq!(block.data["pendingOutput"]["attempt"], 1);
+    assert_eq!(block.data["pending_output"]["attempt"], 1);
     std::fs::write(file, "narrowed").unwrap();
     let until = Instant::now() + Duration::from_secs(5);
     loop {
@@ -370,8 +370,8 @@ fn restart_blocks_an_interrupted_copy_with_its_pending_output() {
     assert_eq!(run.block_code, "coordinator_shutdown");
     let events = ledger.read().unwrap();
     let block = events.last().unwrap();
-    assert_eq!(block.data["pendingOutput"]["nodeId"], "fmn_work");
-    assert_eq!(block.data["pendingOutput"]["attempt"], 1);
+    assert_eq!(block.data["pending_output"]["node_id"], "fmn_work");
+    assert_eq!(block.data["pending_output"]["attempt"], 1);
 }
 
 #[test]

@@ -1,10 +1,10 @@
-schema = 1
+schema = 2
 id = "msn_example"
 slug = "write-and-review"
 title = "Write and review"
 rev = 1
 
-[[inputCard]]
+[[input_card]]
 id = "inp_task"
 title = "Task"
 goal = "A writer does the work in its own session and a reviewer sends it back until it is right, at most three times."
@@ -62,7 +62,7 @@ id = "lim_rounds"
 title = "Three rounds"
 target = "fmn_write"
 rounds = 3
-whenSpent = "fail"
+when_spent = "fail"
 
 [[end]]
 id = "end_done"

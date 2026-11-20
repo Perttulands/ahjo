@@ -1,20 +1,20 @@
 # Parity fixture: several Input cards, human channels and reference files.
-schema = 1
+schema = 2
 id = "msn_cards"
 slug = "cards"
 title = "Cards"
 rev = 1
 
-[[inputCard]]
+[[input_card]]
 id = "inp_one"
 title = "One"
 files = ["/", "notes.md", "/nonexistent/ahjo-64/rubric.md"]
-humanChannel = "pager"
+human_channel = "pager"
 
-[[inputCard]]
+[[input_card]]
 id = "inp_two"
 title = "Two"
-humanChannel = "session"
+human_channel = "session"
 
 [[formation]]
 id = "fmn_a"

@@ -1,7 +1,7 @@
 //! A run's attempts (Archon's run attempts evidence, `run_evidence_attempts.go`):
 //! for each step, every attempt in order with when it ran, what it output,
 //! the gate verdicts that judged that output and the pick that took it. Each
-//! gate evaluation names the output it judges (its inputRef's origin), so a
+//! gate evaluation names the output it judges (its input_ref's origin), so a
 //! verdict joins the attempt it judged whichever route brought it there.
 //!
 //! Trimmed from Archon until the rest of the run evidence lands (#111): an
@@ -32,9 +32,9 @@ fn str_of(value: Option<&Value>) -> String {
     value.and_then(Value::as_str).unwrap_or("").to_owned()
 }
 fn origin(event: &RunEvent) -> Option<(String, i64)> {
-    let origin = event.data.get("inputRef")?.get("origin")?;
+    let origin = event.data.get("input_ref")?.get("origin")?;
     Some((
-        str_of(origin.get("nodeId")),
+        str_of(origin.get("node_id")),
         origin.get("attempt").and_then(Value::as_i64).unwrap_or(0),
     ))
 }
@@ -211,7 +211,7 @@ impl Walk<'_> {
     }
 
     fn human_answer(&mut self, event: &RunEvent) {
-        let requested = event.data.get("requestedSeq").and_then(Value::as_u64);
+        let requested = event.data.get("requested_seq").and_then(Value::as_u64);
         let Some(at) = requested.and_then(|seq| self.asked.get(&seq)).cloned() else {
             return;
         };
@@ -219,7 +219,7 @@ impl Walk<'_> {
             decided.verdict = text(event, "verdict");
             decided.pending = false;
             decided.reason = EvidenceText::of(&text(event, "reason"));
-            decided.decided_by = text(event, "decidedBy");
+            decided.decided_by = text(event, "decided_by");
         }
         if self.open.get(&event.gate_id).is_some_and(|(o, _)| *o == at) {
             self.open.remove(&event.gate_id);
@@ -230,7 +230,7 @@ impl Walk<'_> {
         if let Some(pick) = event.data.get("pick") {
             let gate_title = self.gate_title(&event.gate_id);
             let number = pick.get("attempt").and_then(Value::as_i64).unwrap_or(0);
-            if let Some(attempt) = self.find(&str_of(pick.get("nodeId")), number)
+            if let Some(attempt) = self.find(&str_of(pick.get("node_id")), number)
                 && attempt.output_seq != 0
             {
                 attempt.picked = Some(AttemptPick {
@@ -238,7 +238,7 @@ impl Walk<'_> {
                     gate_title,
                     seq: event.seq,
                     reason: EvidenceText::of(&text(event, "reason")),
-                    decided_by: str_of(pick.get("decidedBy")),
+                    decided_by: str_of(pick.get("decided_by")),
                     candidates: (pick.get("candidates").and_then(Value::as_array))
                         .into_iter()
                         .flatten()
@@ -250,7 +250,7 @@ impl Walk<'_> {
             return;
         }
         let waiting = self.open.get(&event.gate_id).map(|(at, _)| at.clone());
-        let at = match event.data.get("requestedSeq").and_then(Value::as_u64) {
+        let at = match event.data.get("requested_seq").and_then(Value::as_u64) {
             Some(seq) if seq > 0 => self.asked.get(&seq).cloned(),
             _ => waiting.clone(),
         };
@@ -284,7 +284,7 @@ impl Walk<'_> {
                 _ => None,
             })
             .collect();
-        let by = text(event, "decidedBy");
+        let by = text(event, "decided_by");
         if !by.is_empty() {
             decided.decided_by = by;
         }
@@ -310,17 +310,17 @@ impl Walk<'_> {
     /// names, with its reason.
     fn stopped(&mut self, event: &RunEvent) {
         let mut nodes = vec![event.node_id.clone(), event.gate_id.clone()];
-        for key in ["blockedNodeId", "blockedGateId", "nodeId"] {
+        for key in ["blocked_node_id", "blocked_gate_id", "node_id"] {
             nodes.push(text(event, key));
         }
         if let Some(limit) = event.data.get("limit") {
-            nodes.push(str_of(limit.get("nodeId")));
+            nodes.push(str_of(limit.get("node_id")));
         }
-        for dispatch in (event.data.get("openDispatches").and_then(Value::as_array))
+        for dispatch in (event.data.get("open_dispatches").and_then(Value::as_array))
             .into_iter()
             .flatten()
         {
-            nodes.push(str_of(dispatch.get("nodeId")));
+            nodes.push(str_of(dispatch.get("node_id")));
         }
         let mut reason = text(event, "reason");
         if event.kind == "run_failed" && !text(event, "detail").is_empty() {
@@ -340,7 +340,7 @@ impl Walk<'_> {
     /// A resume carries on the attempts a block stopped before they output,
     /// except where a pick settled the step; a redispatch runs them again.
     fn resumed(&mut self, event: &RunEvent) {
-        if text(event, "resumeMode") == "redispatch" {
+        if text(event, "resume_mode") == "redispatch" {
             return;
         }
         for step in &mut self.steps {

@@ -1,7 +1,7 @@
 //! Notes: operator intent on a mission, as threads of entries. Notes are
 //! read and translated into briefs, staffing and wires; they never run.
 //!
-//! `<slug>.notes.toml` is schema 2: `missionId`, `rev`, and one `[[entry]]`
+//! `<slug>.notes.toml` is schema 2: `mission_id`, `rev`, and one `[[entry]]`
 //! per entry with its `target`: `mission` for the mission's own thread, a
 //! node id, or a connection id for a note on a wire. An entry that
 //! `resolves` its thread says what was done about it; the thread is
@@ -12,14 +12,14 @@ use serde::{Deserialize, Deserializer, Serialize};
 
 use ahjo_core::Error;
 
-pub const NOTES_SCHEMA: i64 = 2;
+pub const NOTES_SCHEMA: i64 = 3;
 /// The target of the mission's own thread.
 pub const MISSION_THREAD: &str = "mission";
 const MAX_ENTRY_BYTES: usize = 64 * 1024;
 const MAX_NOTES_BYTES: usize = 512 * 1024;
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq)]
-#[serde(default, deny_unknown_fields, rename_all = "camelCase")]
+#[serde(default, deny_unknown_fields, rename_all = "snake_case")]
 pub struct Notes {
     pub schema: i64,
     pub mission_id: String,
@@ -34,7 +34,7 @@ pub struct Notes {
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq)]
-#[serde(default, deny_unknown_fields, rename_all = "camelCase")]
+#[serde(default, deny_unknown_fields, rename_all = "snake_case")]
 pub struct NoteEntry {
     pub id: String,
     pub target: String,
@@ -95,7 +95,7 @@ impl Notes {
             }
             if entry.created_at.is_empty() {
                 return Err(invalid(format!(
-                    "note entry {:?} has no createdAt",
+                    "note entry {:?} has no created_at",
                     entry.id
                 )));
             }
@@ -174,24 +174,24 @@ fn optional_timestamp<'de, D: Deserializer<'de>>(
 mod tests {
     use super::*;
 
-    const NOTES: &str = r#"schema = 2
-missionId = "msn_a"
+    const NOTES: &str = r#"schema = 3
+mission_id = "msn_a"
 rev = 1
-updatedAt = "2026-09-09T00:00:00Z"
+updated_at = "2026-09-09T00:00:00Z"
 
 [[entry]]
 id = "nte_1"
 target = "mission"
 author = "agent:archon"
-createdAt = "2026-09-09T00:00:00Z"
+created_at = "2026-09-09T00:00:00Z"
 text = "The whole mission"
 
 [[entry]]
 id = "nte_2"
 target = "fmn_plan"
 author = "human:ui"
-createdAt = 2026-09-10T08:00:00+03:00
-editedAt = 2026-09-10T09:00:00Z
+created_at = 2026-09-10T08:00:00+03:00
+edited_at = 2026-09-10T09:00:00Z
 text = "This step"
 "#;
 
@@ -209,10 +209,10 @@ text = "This step"
             ("author = \"human:ui\"", "author = \"operator\""),
             ("id = \"nte_2\"", "id = \"nte_1\""),
             (
-                "createdAt = 2026-09-10T08:00:00+03:00",
-                "createdAt = \"yesterday\"",
+                "created_at = 2026-09-10T08:00:00+03:00",
+                "created_at = \"yesterday\"",
             ),
-            ("schema = 2", "schema = 1"),
+            ("schema = 3", "schema = 1"),
             (
                 "text = \"This step\"",
                 "text = \"This step\"\ncolour = \"red\"",

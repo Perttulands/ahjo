@@ -24,7 +24,7 @@ impl Coordinator {
         {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
-                "requestedSeq, pass or fail verdict and valid relayedBy required",
+                "requested_seq, pass or fail verdict and valid relayed_by required",
             ));
         }
         let control = self.inner.controls.lock().unwrap().get(run).cloned();
@@ -45,7 +45,7 @@ impl Coordinator {
             node_id: gate.into(),
             timestamp: now(),
             actor: actor.into(),
-            data: json!({"requestedSeq":request.requested_seq,"verdict":request.verdict,"reason":request.reason,"decidedBy":actor,"relayedBy":request.relayed_by}).as_object().unwrap().clone(),
+            data: json!({"requested_seq":request.requested_seq,"verdict":request.verdict,"reason":request.reason,"decided_by":actor,"relayed_by":request.relayed_by}).as_object().unwrap().clone(),
             ..Default::default()
         };
         let appended = self.ledger(run)?.append_checked(event, |events| {

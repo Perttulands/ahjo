@@ -516,11 +516,11 @@ mod tests {
     use super::*;
 
     fn test_run(status: &str) -> Run {
-        serde_json::from_value(serde_json::json!({"runId":"r", "status":status, "final":false, "resumeAllowed":false, "epoch":1, "missionSlug":"m", "missionId":"m", "missionRev":1, "inputCardId":"i", "work":"", "cwd":"", "repository":"", "base":"", "contextPaths":[], "inputs":[], "outputs":[], "eventCount":0, "startedBy":"", "startedAt":"", "updatedAt":"", "endedBy":"", "waitingGates":[], "events":[]})).unwrap()
+        serde_json::from_value(serde_json::json!({"run_id":"r", "status":status, "final":false, "resume_allowed":false, "epoch":1, "mission_slug":"m", "mission_id":"m", "mission_rev":1, "input_card_id":"i", "work":"", "cwd":"", "repository":"", "base":"", "context_paths":[], "inputs":[], "outputs":[], "event_count":0, "started_by":"", "started_at":"", "updated_at":"", "ended_by":"", "waiting_gates":[], "events":[]})).unwrap()
     }
 
     fn ev(seq: u64, kind: &str, node: &str) -> RunEvent {
-        serde_json::from_value(serde_json::json!({"seq":seq, "type":kind, "nodeId":node})).unwrap()
+        serde_json::from_value(serde_json::json!({"seq":seq, "type":kind, "node_id":node})).unwrap()
     }
 
     fn gate(seq: u64, kind: &str, g: &str) -> RunEvent {
@@ -642,7 +642,7 @@ mod tests {
 
     #[test]
     fn earlier_outputs_offer_finished_runs_latest_first_by_kind() {
-        let output = |name: &str, kind: &str, value: &str| serde_json::json!({"name":name,"kind":kind,"value":value,"nodeId":"s","portId":"out","attempt":1});
+        let output = |name: &str, kind: &str, value: &str| serde_json::json!({"name":name,"kind":kind,"value":value,"node_id":"s","port_id":"out","attempt":1});
         let mut old = test_run("succeeded");
         old.r#final = true;
         old.updated_at = "2026-11-10T10:00:00Z".into();

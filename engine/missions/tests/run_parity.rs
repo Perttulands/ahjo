@@ -66,7 +66,7 @@ fn solo_lab_ledger_and_admission_findings_match_archon() {
         .map(|line| {
             let event: Value = serde_json::from_str(line).unwrap();
             let mut result = Map::new();
-            for key in ["type", "nodeId", "gateId", "slotId", "attempt"] {
+            for key in ["type", "node_id", "gate_id", "slot_id", "attempt"] {
                 if let Some(value) = event.get(key) {
                     result.insert(key.into(), value.clone());
                 }

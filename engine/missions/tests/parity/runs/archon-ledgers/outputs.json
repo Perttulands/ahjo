@@ -2,21 +2,21 @@
   "file-output-kept": {
     "attempts": 3,
     "code": null,
-    "firstCopy": "draft 1",
+    "first_copy": "draft 1",
     "outputs": [
       {
         "attempt": 3,
         "kind": "file",
         "name": "report",
-        "nodeId": "fmn_work",
-        "portId": "port_work_out",
+        "node_id": "fmn_work",
+        "port_id": "port_work_out",
         "value": "<artifacts>/fmn_work/3/outputs/port_work_out/draft.md"
       }
     ],
     "status": "succeeded"
   },
   "folder-over-budget": {
-    "blockedCode": "output_not_kept",
+    "blocked_code": "output_not_kept",
     "code": null,
     "dispatches": 1,
     "outputs": [
@@ -24,8 +24,8 @@
         "attempt": 1,
         "kind": "folder",
         "name": "site",
-        "nodeId": "fmn_work",
-        "portId": "port_work_out",
+        "node_id": "fmn_work",
+        "port_id": "port_work_out",
         "value": "<artifacts>/fmn_work/1/outputs/port_work_out/site"
       }
     ],
@@ -43,8 +43,8 @@
         "attempt": 1,
         "kind": "folder",
         "name": "site",
-        "nodeId": "fmn_work",
-        "portId": "port_work_out",
+        "node_id": "fmn_work",
+        "port_id": "port_work_out",
         "value": "<artifacts>/fmn_work/1/outputs/port_work_out/site"
       }
     ],
@@ -57,8 +57,8 @@
         "attempt": 1,
         "kind": "folder",
         "name": "fixed",
-        "nodeId": "fmn_fix",
-        "portId": "port_fix_out",
+        "node_id": "fmn_fix",
+        "port_id": "port_fix_out",
         "value": "<artifacts>/fmn_fix/1/outputs/port_fix_out/site"
       }
     ],

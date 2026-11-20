@@ -86,7 +86,7 @@ mod tests {
     use serde_json::json;
     #[test]
     fn lifecycle_keeps_each_seat_identity_and_reports_cleanup() {
-        let run: RunProjection = serde_json::from_value(json!({"runId":"run_1","status":"working","final":false,"resumeAllowed":false,"epoch":1,"missionSlug":"m","missionId":"m","missionRev":1,"inputCardId":"i","work":"","cwd":"","repository":"","base":"","contextPaths":[],"inputs":[],"outputs":[],"eventCount":3,"startedBy":"","startedAt":"","updatedAt":"","waitingGates":[],"events":[{"seq":1,"type":"seat_created","nodeId":"work","slotId":"a","seatNode":"n1","sessionId":"$1","sessionName":"same"},{"seq":2,"type":"seat_created","nodeId":"work","slotId":"b","seatNode":"n2","sessionId":"$2","sessionName":"same"},{"seq":3,"type":"seat_cleanup","nodeId":"work","slotId":"a","sessionName":"same","outcome":"ended"}]})).unwrap();
+        let run: RunProjection = serde_json::from_value(json!({"run_id":"run_1","status":"working","final":false,"resume_allowed":false,"epoch":1,"mission_slug":"m","mission_id":"m","mission_rev":1,"input_card_id":"i","work":"","cwd":"","repository":"","base":"","context_paths":[],"inputs":[],"outputs":[],"event_count":3,"started_by":"","started_at":"","updated_at":"","waiting_gates":[],"events":[{"seq":1,"type":"seat_created","node_id":"work","slot_id":"a","seat_node":"n1","session_id":"$1","session_name":"same"},{"seq":2,"type":"seat_created","node_id":"work","slot_id":"b","seat_node":"n2","session_id":"$2","session_name":"same"},{"seq":3,"type":"seat_cleanup","node_id":"work","slot_id":"a","session_name":"same","outcome":"ended"}]})).unwrap();
         let seats = seats(&run);
         assert_eq!(seats.len(), 2);
         assert_eq!(
@@ -100,7 +100,7 @@ mod tests {
     }
     #[test]
     fn a_seat_left_running_by_a_coordinator_shutdown_can_still_be_opened() {
-        let run: RunProjection = serde_json::from_value(json!({"runId":"run_1","status":"blocked","final":false,"resumeAllowed":true,"epoch":1,"missionSlug":"m","missionId":"m","missionRev":1,"inputCardId":"i","work":"","cwd":"","repository":"","base":"","contextPaths":[],"inputs":[],"outputs":[],"eventCount":2,"startedBy":"","startedAt":"","updatedAt":"","waitingGates":[],"events":[{"seq":1,"type":"seat_created","nodeId":"work","slotId":"a","seatNode":"n1","sessionId":"$1","sessionName":"seat"},{"seq":2,"type":"seat_cleanup","nodeId":"work","slotId":"a","sessionName":"seat","outcome":"left_shutdown"}]})).unwrap();
+        let run: RunProjection = serde_json::from_value(json!({"run_id":"run_1","status":"blocked","final":false,"resume_allowed":true,"epoch":1,"mission_slug":"m","mission_id":"m","mission_rev":1,"input_card_id":"i","work":"","cwd":"","repository":"","base":"","context_paths":[],"inputs":[],"outputs":[],"event_count":2,"started_by":"","started_at":"","updated_at":"","waiting_gates":[],"events":[{"seq":1,"type":"seat_created","node_id":"work","slot_id":"a","seat_node":"n1","session_id":"$1","session_name":"seat"},{"seq":2,"type":"seat_cleanup","node_id":"work","slot_id":"a","session_name":"seat","outcome":"left_shutdown"}]})).unwrap();
         assert_eq!(seats(&run)[0].state, State::Live);
     }
 }

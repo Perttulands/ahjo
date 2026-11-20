@@ -232,7 +232,7 @@ impl Executor for LabExecutor {
                         let _ = events.emit(ExecutionEvent {
                             kind: "limit_warning".into(),
                             slot_id: slot.id.clone(),
-                            data: json!({"limitId":warning.limit_id,"mission":warning.mission,"text":warning.text})
+                            data: json!({"limit_id":warning.limit_id,"mission":warning.mission,"text":warning.text})
                                 .as_object()
                                 .unwrap()
                                 .clone(),
@@ -326,7 +326,7 @@ impl Executor for LabExecutor {
             let digest = hex::encode(Sha256::digest(brief.as_bytes()));
             send(
                 "slot_dispatch",
-                json!({"dispatchId":dispatch_id,"nodeId":request.formation.id,"slotId":slot.id,"agentId":slot.agent_id,"harness":slot.harness,"session":session,"session_ref":format!("lab:{session}"),"briefPath":brief_path,"promptSha256":digest,"promptRef":"","phase":"","recordedBeforeSend":true,"nativeAck":false}),
+                json!({"dispatch_id":dispatch_id,"node_id":request.formation.id,"slot_id":slot.id,"agent_id":slot.agent_id,"harness":slot.harness,"session":session,"session_ref":format!("lab:{session}"),"brief_path":brief_path,"prompt_sha256":digest,"prompt_ref":"","phase":"","recorded_before_send":true,"native_ack":false}),
             )?;
             let evidence = serde_json::to_vec(&result).map_err(|e| e.to_string())?;
             let path = request.artifact_dir.join("lab-completed.json");
@@ -343,7 +343,7 @@ impl Executor for LabExecutor {
                 .map_err(|e| e.to_string())?;
             send(
                 "slot_result",
-                json!({"dispatchId":dispatch_id,"nodeId":request.formation.id,"slotId":slot.id,"status":"ok","sentinel":{"runId":request.run_id,"status":"ok","artifact":format!("lab-{}.md",slot.id)}}),
+                json!({"dispatch_id":dispatch_id,"node_id":request.formation.id,"slot_id":slot.id,"status":"ok","sentinel":{"run_id":request.run_id,"status":"ok","artifact":format!("lab-{}.md",slot.id)}}),
             )?;
         }
         Ok(result)
@@ -401,7 +401,7 @@ fn spend_lab_tokens(request: &FormationExecution, events: &ExecutionSink) -> Res
     events.emit(ExecutionEvent {
         kind: "token_usage".into(),
         slot_id: slot,
-        data: json!({"tokens":tokens,"usage":{"input":tokens,"cacheWrite":0,"cacheRead":0,"output":0}})
+        data: json!({"tokens":tokens,"usage":{"input":tokens,"cache_write":0,"cache_read":0,"output":0}})
             .as_object()
             .unwrap()
             .clone(),

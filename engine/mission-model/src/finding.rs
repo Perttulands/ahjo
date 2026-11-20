@@ -105,7 +105,7 @@ impl Serialize for Code {
 /// One problem, located on the node it is about: a node id, a connection id,
 /// or "" for the mission itself.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "snake_case")]
 pub struct Finding {
     pub code: Code,
     pub node_id: String,

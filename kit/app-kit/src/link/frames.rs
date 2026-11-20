@@ -41,7 +41,7 @@ mod tests {
 
     #[test]
     fn reads_a_peer_list() {
-        let list = nodes(br#"[{"node":"b","device":"lap","environment":"windows","version":"1","protocol":16,"state":"online"}]"#).unwrap();
+        let list = nodes(br#"[{"node":"b","device":"lap","environment":"windows","version":"1","protocol":17,"state":"online"}]"#).unwrap();
         assert_eq!((list[0].node.as_str(), list[0].address.as_str()), ("b", ""));
     }
 

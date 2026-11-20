@@ -2203,7 +2203,7 @@ mod tests {
     #[test]
     fn a_new_step_follows_the_edited_card_else_the_open_end_of_the_flow() {
         let mission: Mission = serde_json::from_value(json!({
-            "inputCard": [{"id": "inp"}],
+            "input_card": [{"id": "inp"}],
             "formation": [
                 {"id": "a", "input": [{"id": "in"}], "output": [{"id": "out"}]},
                 {"id": "b", "input": [{"id": "in"}], "output": [{"id": "out"}]}
@@ -2218,7 +2218,8 @@ mod tests {
         assert_eq!(step_after(&mission, Some("a")).as_deref(), Some("a"));
         assert_eq!(step_after(&mission, Some("end")).as_deref(), Some("b"));
         assert_eq!(step_after(&mission, None).as_deref(), Some("b"));
-        let fresh: Mission = serde_json::from_value(json!({"inputCard": [{"id": "inp"}]})).unwrap();
+        let fresh: Mission =
+            serde_json::from_value(json!({"input_card": [{"id": "inp"}]})).unwrap();
         assert_eq!(step_after(&fresh, None).as_deref(), Some("inp"));
     }
 }

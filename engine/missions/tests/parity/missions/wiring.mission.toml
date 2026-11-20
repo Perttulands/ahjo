@@ -1,11 +1,11 @@
 # Parity fixture: wires, gates and routes.
-schema = 1
+schema = 2
 id = "msn_wiring"
 slug = "wiring"
 title = "Wiring"
 rev = 1
 
-[[inputCard]]
+[[input_card]]
 id = "inp"
 title = "Start"
 goal = "Exercise wiring findings"
@@ -75,18 +75,18 @@ check = "output_contains"
 id = "gate_unknown"
 kinds = ["code"]
 check = "output_matches"
-checkVersion = "2"
+check_version = "2"
 
 [[gate]]
 id = "gate_novalue"
 kinds = ["code", "human"]
 check = "output_absent"
-checkVersion = "1"
+check_version = "1"
 
 [[gate]]
 id = "gate_versiononly"
 kinds = ["code"]
-checkVersion = "1"
+check_version = "1"
 
 [[end]]
 id = "end_done"

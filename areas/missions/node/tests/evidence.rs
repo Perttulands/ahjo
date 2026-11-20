@@ -69,7 +69,7 @@ fn mission(best: bool) -> String {
     format!(
         "{work}\n[[formation]]{judge}\n[[gate]]\nid = \"gate_review\"\ntitle = \"Review\"\nkinds = [\"formation\"]\n[[connection]]\nid = \"edge_pass\"\nfrom = \"gate_review:pass\"\nto = \"end_done:in\"\n[[connection]]\nid = \"edge_fail\"\nfrom = \"gate_review:fail\"\nto = \"fmn_work:port_in\"\n[[connection]]\nid = \"edge_judge\"\nfrom = \"gate_review:judge\"\nto = \"fmn_judge:port_in\"\n[[connection]]\nid = \"edge_return\"\nfrom = \"fmn_judge:port_out\"\nto = \"gate_review:judge\"\n{}",
         if best {
-            "[[limit]]\nid = \"lim_cap\"\ntitle = \"Cap\"\ntarget = \"fmn_work\"\nrounds = 2\nwhenSpent = \"best\"\n"
+            "[[limit]]\nid = \"lim_cap\"\ntitle = \"Cap\"\ntarget = \"fmn_work\"\nrounds = 2\nwhen_spent = \"best\"\n"
         } else {
             ""
         }
@@ -142,13 +142,13 @@ async fn cli_and_http_report_problems_briefs_files_and_picked_attempts() {
                 .as_array()
                 .unwrap()
                 .iter()
-                .any(|b| b["nodeId"] == step
+                .any(|b| b["node_id"] == step
                     && std::path::Path::new(b["path"].as_str().unwrap()).is_absolute())
         );
     }
     assert!(evidence["files"].as_array().unwrap().iter().any(|f| {
         let path = std::path::Path::new(f["path"].as_str().unwrap());
-        f["nodeId"] == "fmn_work"
+        f["node_id"] == "fmn_work"
             && path.is_absolute()
             && path.metadata().unwrap().len() == f["size"].as_u64().unwrap()
     }));
@@ -158,14 +158,14 @@ async fn cli_and_http_report_problems_briefs_files_and_picked_attempts() {
             .as_array()
             .unwrap()
             .iter()
-            .all(|b| b["nodeId"] == "fmn_judge")
+            .all(|b| b["node_id"] == "fmn_judge")
     );
     assert!(
         filtered["evidence"]["files"]
             .as_array()
             .unwrap()
             .iter()
-            .all(|b| b["nodeId"] == "fmn_judge")
+            .all(|b| b["node_id"] == "fmn_judge")
     );
     let client = ahjo_node_kit::NodeClient::new(Some(&format!("{}/", node.url()))).unwrap();
     let (http, _) = client
@@ -210,7 +210,7 @@ async fn cli_and_http_report_problems_briefs_files_and_picked_attempts() {
             .all(|a| a["verdicts"][0]["verdict"] == "fail")
     );
     assert!(attempts[0]["picked"].is_null());
-    assert_eq!(attempts[1]["picked"]["trigger"], "whenSpent");
+    assert_eq!(attempts[1]["picked"]["trigger"], "when_spent");
     node.stop().await;
 }
 

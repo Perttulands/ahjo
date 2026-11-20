@@ -419,7 +419,7 @@ async fn serve(mut stream: tokio::net::TcpStream, heard: Arc<Mutex<Vec<Vec<u8>>>
     };
     let hello = serde_json::json!({
         "node": "toy-node", "device": "rig", "environment": "test",
-        "version": "0.0.1", "protocol": 16, "off": ["dark"],
+        "version": "0.0.1", "protocol": 17, "off": ["dark"],
     });
     let mut frame = vec![0x00];
     frame.extend_from_slice(hello.to_string().as_bytes());

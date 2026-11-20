@@ -1,9 +1,9 @@
-schema = 1
+schema = 2
 id = "msn_clean"
 slug = "clean"
 title = "Clean delivery"
 rev = 1
-[[inputCard]]
+[[input_card]]
 id = "inp_start"
 title = "Brief"
 goal = "Describe the task"
@@ -22,7 +22,7 @@ label = "Result"
 [[formation.slot]]
 id = "slot_work"
 label = "Worker"
-agentId = "builder"
+agent_id = "builder"
 harness = "openai-codex"
 effort = "medium"
 [[gate]]

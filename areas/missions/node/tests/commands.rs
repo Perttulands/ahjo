@@ -202,8 +202,8 @@ async fn mission_edit_rejects_an_unknown_role_and_uses_work_in_both_brief_operat
     let before = inspect().await.unwrap();
     let step = &before["mission"]["formation"][0];
     let id = &step["id"];
-    let change = json!({"assignSlot":{
-        "formationId": id, "slotId": step["slot"][0]["id"],
+    let change = json!({"assign_slot":{
+        "formation_id": id, "slot_id": step["slot"][0]["id"],
         "role": "planner", "harness": "claude-code", "effort": "high"
     }});
     let error = node
@@ -213,7 +213,7 @@ async fn mission_edit_rejects_an_unknown_role_and_uses_work_in_both_brief_operat
     assert_eq!(error.code, "invalid_argument");
     assert_eq!(
         error.message,
-        "assignSlot: unknown field role; accepted fields: formationId, slotId, agentId, harness, model, effort; accepted fields: mission, change, rev",
+        "assign_slot: unknown field role; accepted fields: formation_id, slot_id, agent_id, harness, model, effort; accepted fields: mission, change, rev",
     );
     let args = vec![
         "edit".into(),
@@ -234,11 +234,11 @@ async fn mission_edit_rejects_an_unknown_role_and_uses_work_in_both_brief_operat
 
     for (change, work) in [
         (
-            json!({"setBrief":{"formationId":id,"work":"ahjo-2"}}),
+            json!({"set_brief":{"formation_id":id,"work":"ahjo-2"}}),
             "ahjo-2",
         ),
         (
-            json!({"editFormation":{"id":id,"title":step["title"],"brief":{"work":"ahjo-3"}}}),
+            json!({"edit_formation":{"id":id,"title":step["title"],"brief":{"work":"ahjo-3"}}}),
             "ahjo-3",
         ),
     ] {
@@ -251,8 +251,8 @@ async fn mission_edit_rejects_an_unknown_role_and_uses_work_in_both_brief_operat
         );
     }
     for change in [
-        json!({"setBrief":{"formationId":id,"beadId":"ahjo-2"}}),
-        json!({"editFormation":{"id":id,"title":step["title"],"brief":{"beadId":"ahjo-2"}}}),
+        json!({"set_brief":{"formation_id":id,"bead_id":"ahjo-2"}}),
+        json!({"edit_formation":{"id":id,"title":step["title"],"brief":{"bead_id":"ahjo-2"}}}),
     ] {
         let error = node
             .call("mission_edit", json!({"mission":"pair","change":change}))
@@ -260,7 +260,7 @@ async fn mission_edit_rejects_an_unknown_role_and_uses_work_in_both_brief_operat
             .unwrap_err();
         assert_eq!(error.code, "invalid_argument");
         assert!(
-            error.message.contains("beadId") && error.message.contains("work"),
+            error.message.contains("bead_id") && error.message.contains("work"),
             "{error}"
         );
     }
@@ -279,10 +279,12 @@ async fn mission_edit_rejects_an_unknown_role_and_uses_work_in_both_brief_operat
     );
     let help = String::from_utf8(help).unwrap();
     assert!(
-        help.contains("editFormation {id, title, brief{goal, repository, work, files[], links[]}}")
+        help.contains(
+            "edit_formation {id, title, brief{goal, repository, work, files[], links[]}}"
+        )
     );
-    assert!(help.contains("setBrief {formationId, goal, repository, work, files[], links[]}"));
-    assert!(!help.contains("beadId"));
+    assert!(help.contains("set_brief {formation_id, goal, repository, work, files[], links[]}"));
+    assert!(!help.contains("bead_id"));
 
     node.stop().await;
 }
@@ -322,7 +324,7 @@ async fn author_and_run_with_tools() {
     let edited = node
         .call(
             "mission_edit",
-            json!({"mission":"demo","change":{"createInputCard":{"title":"Start","goal":"Work"}}}),
+            json!({"mission":"demo","change":{"create_input_card":{"title":"Start","goal":"Work"}}}),
         )
         .await
         .unwrap();
@@ -409,7 +411,7 @@ async fn author_and_run_with_tools() {
         .as_array()
         .unwrap()
         .iter()
-        .find(|e| e["nodeId"] == "fmn_work")
+        .find(|e| e["node_id"] == "fmn_work")
         .expect("a step's event");
     assert!(
         !step_event["step"].as_str().unwrap_or("").is_empty(),
@@ -448,7 +450,7 @@ async fn author_and_run_with_tools() {
     let blocked = ahjo_mission_engine::RunEvent {
         kind: "run_blocked".into(),
         timestamp: "2026-01-01T00:00:00Z".into(),
-        data: json!({"code":"coordinator_shutdown","resumeAllowed":true})
+        data: json!({"code":"coordinator_shutdown","resume_allowed":true})
             .as_object()
             .unwrap()
             .clone(),
@@ -565,7 +567,7 @@ async fn gate_and_abort_commands_act_on_pending_runs() {
             .find(|e| e.kind == "human_verdict_recorded")
             .unwrap();
         assert_eq!(decision.actor, expected, "{verb}");
-        assert_eq!(decision.data["decidedBy"], expected, "{verb}");
+        assert_eq!(decision.data["decided_by"], expected, "{verb}");
         if !pick {
             assert_eq!(
                 decision.data["verdict"],
@@ -700,7 +702,7 @@ async fn a_mission_built_through_commands_stays_arranged() {
     // Read left to right: Start, Write, Review, Done.
     let x = |id: &str| built.iter().find(|p| p.0 == id).unwrap().1;
     let ids = [
-        shown["inputCard"][0]["id"].as_str().unwrap(),
+        shown["input_card"][0]["id"].as_str().unwrap(),
         made["steps"][0]["id"].as_str().unwrap(),
         made["steps"][1]["id"].as_str().unwrap(),
         shown["end"][0]["id"].as_str().unwrap(),
@@ -753,7 +755,7 @@ async fn cli_lists_and_removes_deleted_mission_archives() {
     .unwrap();
     node.call(
         "mission_edit",
-        json!({"mission":"archived","change":{"createInputCard":{"title":"Start","goal":"Work"}}}),
+        json!({"mission":"archived","change":{"create_input_card":{"title":"Start","goal":"Work"}}}),
     )
     .await
     .unwrap();
@@ -1127,19 +1129,19 @@ async fn mission_edit_batches_commit_once_or_leave_the_mission_and_layout_untouc
 
     for (second, code, message) in [
         (
-            json!({"createEnd":{"outcome":"invalid"}}),
+            json!({"create_end":{"outcome":"invalid"}}),
             "invalid_end_outcome",
             "outcome must be done or rejected",
         ),
         (
-            json!({"createEnd":{"unexpected":null}}),
+            json!({"create_end":{"unexpected":null}}),
             "invalid_argument",
-            "createEnd: unknown field unexpected; accepted fields: title, outcome, x, y",
+            "create_end: unknown field unexpected; accepted fields: title, outcome, x, y",
         ),
     ] {
         let error = node
             .call("mission_edit", json!({"mission":"batch","change":{
-                "rev":rev, "changes":[{"createFormation":{"title":"Work","x":10,"y":20}}, second, {"title":"New"}]
+                "rev":rev, "changes":[{"create_formation":{"title":"Work","x":10,"y":20}}, second, {"title":"New"}]
             }}))
             .await
             .unwrap_err();
@@ -1158,8 +1160,8 @@ async fn mission_edit_batches_commit_once_or_leave_the_mission_and_layout_untouc
     }
 
     let change = json!({"rev":rev,"changes":[
-        {"createFormation":{"title":"Work","x":10,"y":20}},
-        {"createEnd":{"title":"Done","x":100,"y":200}},
+        {"create_formation":{"title":"Work","x":10,"y":20}},
+        {"create_end":{"title":"Done","x":100,"y":200}},
         {"title":"New"}
     ]});
     let args = [
@@ -1186,7 +1188,7 @@ async fn mission_edit_batches_commit_once_or_leave_the_mission_and_layout_untouc
     assert_eq!(inspect().await.unwrap()["mission"], after["mission"]);
 
     let after_layout = layout().await.unwrap();
-    assert_eq!(after_layout["layout"]["missionRev"], rev + 1);
+    assert_eq!(after_layout["layout"]["mission_rev"], rev + 1);
     let nodes = after_layout["layout"]["node"].as_array().unwrap();
     for (id, x, y) in [
         (&after["mission"]["formation"][0]["id"], 10, 20),

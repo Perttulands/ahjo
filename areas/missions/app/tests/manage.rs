@@ -151,7 +151,7 @@ fn creates_and_renames_a_mission_with_cancel_and_conflict_guard(cx: &mut TestApp
             .request(
                 http::Method::PATCH,
                 "/api/missions/release",
-                Some(json!({"title":"External", "expectedRev":doc["mission"]["rev"]})),
+                Some(json!({"title":"External", "expected_rev":doc["mission"]["rev"]})),
                 Some(&etag),
             )
             .await
@@ -250,11 +250,11 @@ fn designs_a_multi_gate_mission_and_shows_findings_on_the_canvas(cx: &mut TestAp
             .clone()
     };
     until(cx, "input saved", |_| {
-        read()["inputCard"].as_array().unwrap().len() == 1
+        read()["input_card"].as_array().unwrap().len() == 1
     });
     // The + beside the Input adds the next step, wired from it and open
     // for editing.
-    let input = read()["inputCard"][0]["id"].as_str().unwrap().to_owned();
+    let input = read()["input_card"][0]["id"].as_str().unwrap().to_owned();
     let next = format!("canvas-next-{input}");
     until(cx, "next-step button", |cx| has(cx, &next));
     click(cx, &next);

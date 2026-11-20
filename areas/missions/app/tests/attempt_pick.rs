@@ -88,19 +88,19 @@ fn comparing_and_picking_attempt_records_the_reason(cx: &mut TestAppContext) {
     let rt = tokio::runtime::Runtime::new().unwrap();
     let client = NodeClient::new(Some(&format!("{}/", running.url))).unwrap();
     let run_id = rt.block_on(async {
-        let (started, _) = client.request(http::Method::POST, "/api/runs", Some(json!({"mission":"pick","inputCardId":"inp_start","expectedRev":1,"inputs":{"brief":"hello"}})), None).await.unwrap();
-        let id = started["runId"].as_str().unwrap().to_owned();
+        let (started, _) = client.request(http::Method::POST, "/api/runs", Some(json!({"mission":"pick","input_card_id":"inp_start","expected_rev":1,"inputs":{"brief":"hello"}})), None).await.unwrap();
+        let id = started["run_id"].as_str().unwrap().to_owned();
         let deadline = Instant::now() + Duration::from_secs(20);
         let mut last_seq = 0;
         let mut verdicts = 0;
         loop {
             let (run, _) = client.request(http::Method::GET, &format!("/api/runs/{id}"), None, None).await.unwrap();
             assert!(Instant::now() < deadline, "waiting for pick gate: {run}");
-            if let Some(gate) = run["waitingGates"].as_array().and_then(|g| g.first()) {
+            if let Some(gate) = run["waiting_gates"].as_array().and_then(|g| g.first()) {
                 if !gate["pick"].is_null() { break; }
-                let seq = gate["requestedSeq"].as_u64().unwrap();
+                let seq = gate["requested_seq"].as_u64().unwrap();
                 if seq != last_seq {
-                    client.request(http::Method::POST, &format!("/api/runs/{id}/gates/gate_review/verdict"), Some(json!({"requestedSeq":seq,"verdict":"fail","reason":"try again"})), None).await.unwrap();
+                    client.request(http::Method::POST, &format!("/api/runs/{id}/gates/gate_review/verdict"), Some(json!({"requested_seq":seq,"verdict":"fail","reason":"try again"})), None).await.unwrap();
                     last_seq = seq; verdicts += 1;
                 }
             }

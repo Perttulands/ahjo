@@ -217,7 +217,7 @@ pub(crate) fn apply(
             let item = table.get_mut("slot").ok_or_else(not_found)?;
             let slot = slot_table(item, &slot_id)?;
             for (key, val) in [
-                ("agentId", agent_id),
+                ("agent_id", agent_id),
                 ("harness", harness),
                 ("model", model),
                 ("effort", effort),
@@ -258,7 +258,10 @@ pub(crate) fn apply(
             ] {
                 let table = formation_table(doc, formation)?;
                 let slot = slot_table(table.get_mut("slot").ok_or_else(not_found)?, id)?;
-                for (key, value) in ["agentId", "harness", "model", "effort"].iter().zip(values) {
+                for (key, value) in ["agent_id", "harness", "model", "effort"]
+                    .iter()
+                    .zip(values)
+                {
                     set(slot, key, value);
                 }
             }

@@ -86,29 +86,29 @@ impl Coordinator {
             };
             let use_ = crate::limits::LimitUse::recorded(blocked).ok_or_else(refused)?;
             let amount = crate::limits::grant_amount(&mission, &use_).ok_or_else(refused)?;
-            Some(serde_json::json!({"limitId":use_.limit_id,"kind":use_.kind,"amount":amount}))
+            Some(serde_json::json!({"limit_id":use_.limit_id,"kind":use_.kind,"amount":amount}))
         } else {
             None
         };
         let pending = blocked
             .data
-            .get("pendingOutput")
+            .get("pending_output")
             .filter(|value| !value.is_null());
         let redispatch_node = pending
-            .and_then(|p| p.get("nodeId"))
+            .and_then(|p| p.get("node_id"))
             .and_then(|v| v.as_str())
             .unwrap_or("");
         let redispatch_attempt = pending
             .and_then(|p| p.get("attempt"))
             .and_then(|v| v.as_i64())
             .unwrap_or(0);
-        let mut data = serde_json::json!({"judgeVerdict":if request.take_fail {"fail"} else {""},"blockedGateId":blocked.gate_id,"resumeMode":if request.mode == ahjo_mission_model::ResumeMode::Redispatch {"redispatch"} else {"reattach"},"redispatchNodeId":if request.mode == ahjo_mission_model::ResumeMode::Redispatch {redispatch_node} else {""},"redispatchAttempt":if request.mode == ahjo_mission_model::ResumeMode::Redispatch {redispatch_attempt} else {0},"resumedBy":actor,"resumedFromSeq":blocked.seq}).as_object().unwrap().clone();
+        let mut data = serde_json::json!({"judge_verdict":if request.take_fail {"fail"} else {""},"blocked_gate_id":blocked.gate_id,"resume_mode":if request.mode == ahjo_mission_model::ResumeMode::Redispatch {"redispatch"} else {"reattach"},"redispatch_node_id":if request.mode == ahjo_mission_model::ResumeMode::Redispatch {redispatch_node} else {""},"redispatch_attempt":if request.mode == ahjo_mission_model::ResumeMode::Redispatch {redispatch_attempt} else {0},"resumed_by":actor,"resumed_from_seq":blocked.seq}).as_object().unwrap().clone();
         if let Some(grant) = grant {
             data.insert("grant".into(), grant);
         }
         if request.pick_best {
             // The resumed run picks before anything else (run_pick::on_resume).
-            data.insert("pickBest".into(), true.into());
+            data.insert("pick_best".into(), true.into());
         }
         if !request.reason.trim().is_empty() {
             data.insert("reason".into(), request.reason.trim().into());
@@ -128,7 +128,7 @@ impl Coordinator {
             input_card_id: projection.input_card_id,
             formation_id: events[0]
                 .data
-                .get("formationId")
+                .get("formation_id")
                 .and_then(|v| v.as_str())
                 .unwrap_or("")
                 .into(),
@@ -186,7 +186,7 @@ impl Coordinator {
                 let open = crate::run_open_dispatch::unresolved(&events);
                 let pending = crate::run_recovery::pending_capture(&events);
                 let code = crate::run_recovery::publication_error_code(&error.to_string());
-                let _ = owner.append(&run_id, RunEvent { kind:"run_blocked".into(), timestamp:crate::run_storage::now(), data:serde_json::json!({"code":code,"reason":error.to_string(),"resumeAllowed":true,"resumePolicy":"explicit","openDispatches":open.iter().map(|e| &e.data).collect::<Vec<_>>(),"pendingOutput":pending}).as_object().unwrap().clone(), ..Default::default() });
+                let _ = owner.append(&run_id, RunEvent { kind:"run_blocked".into(), timestamp:crate::run_storage::now(), data:serde_json::json!({"code":code,"reason":error.to_string(),"resume_allowed":true,"resume_policy":"explicit","open_dispatches":open.iter().map(|e| &e.data).collect::<Vec<_>>(),"pending_output":pending}).as_object().unwrap().clone(), ..Default::default() });
             }
             let mut done = control.done.lock().unwrap();
             *done = true;

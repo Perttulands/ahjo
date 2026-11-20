@@ -17,7 +17,7 @@ use std::{
 
 /// The turn a coordinator asks another node to prepare or publish.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "snake_case")]
 pub struct TurnWorkspace {
     pub run_id: String,
     /// The step (formation) the turn belongs to.
@@ -31,7 +31,7 @@ pub struct TurnWorkspace {
 
 /// A published turn: its last commit, and the remote ref that holds it.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "snake_case")]
 pub struct PublishedTurn {
     pub commit: String,
     pub reference: String,

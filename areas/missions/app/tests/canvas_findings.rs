@@ -163,7 +163,7 @@ fn canvas_shows_exact_findings_on_cards_and_edges_and_clears_them(cx: &mut TestA
         .unwrap()
         .iter()
         .find(|finding| {
-            finding["nodeId"] == "step_work"
+            finding["node_id"] == "step_work"
                 && finding["message"].as_str().unwrap().contains("step_work")
         })
         .unwrap();
@@ -182,7 +182,7 @@ fn canvas_shows_exact_findings_on_cards_and_edges_and_clears_them(cx: &mut TestA
             .as_array()
             .unwrap()
             .iter()
-            .find(|f| f["nodeId"] == id)
+            .find(|f| f["node_id"] == id)
             .unwrap();
         let selector = Box::leak(
             format!(

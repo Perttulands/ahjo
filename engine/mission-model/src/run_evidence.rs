@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 use crate::EvidenceText;
 
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "snake_case")]
 pub struct RunEvidence {
     pub run_id: String,
     pub problems: Vec<RunProblem>,
@@ -19,7 +19,7 @@ pub struct RunEvidence {
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "snake_case")]
 pub struct RunProblem {
     pub seq: u64,
     #[serde(rename = "type")]
@@ -31,7 +31,7 @@ pub struct RunProblem {
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "snake_case")]
 pub struct RunBrief {
     pub node_id: String,
     pub slot_id: String,
@@ -41,7 +41,7 @@ pub struct RunBrief {
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "snake_case")]
 pub struct RunArtifact {
     pub node_id: String,
     pub path: String,

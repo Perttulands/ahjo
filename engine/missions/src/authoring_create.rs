@@ -84,7 +84,7 @@ pub(crate) fn apply(
                 },
                 ..InputCard::default()
             };
-            append(doc, "inputCard", &node)?;
+            append(doc, "input_card", &node)?;
             Ok(ahjo_mission_model::LayoutNode { id: node.id, x, y })
         }
         MissionChange::CreateFormation {

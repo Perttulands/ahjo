@@ -39,14 +39,14 @@ impl Coordinator {
         for event in &events {
             let origin = event
                 .data
-                .get("inputRef")
+                .get("input_ref")
                 .and_then(|v| v.get("origin"))
-                .and_then(|v| v.get("nodeId"))
+                .and_then(|v| v.get("node_id"))
                 .and_then(Value::as_str)
                 .unwrap_or("");
             let blocked = event
                 .data
-                .get("blockedNodeId")
+                .get("blocked_node_id")
                 .and_then(Value::as_str)
                 .unwrap_or("");
             let related = only.is_none_or(|step| {
@@ -55,11 +55,11 @@ impl Coordinator {
                     || blocked == step
                     || event
                         .data
-                        .get("openDispatches")
+                        .get("open_dispatches")
                         .and_then(Value::as_array)
                         .is_some_and(|ds| {
                             ds.iter()
-                                .any(|d| d.get("nodeId").and_then(Value::as_str) == Some(step))
+                                .any(|d| d.get("node_id").and_then(Value::as_str) == Some(step))
                         })
             });
             if !related {
@@ -68,7 +68,7 @@ impl Coordinator {
             if event.kind == "slot_dispatch" {
                 if let Some(path) = event
                     .data
-                    .get("briefPath")
+                    .get("brief_path")
                     .and_then(Value::as_str)
                     .filter(|p| Path::new(p).is_absolute())
                 {

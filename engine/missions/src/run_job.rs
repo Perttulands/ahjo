@@ -79,7 +79,7 @@ pub(crate) fn execute_formation(
             "node_started",
             &node,
             attempt,
-            json!({"nodeKind":"formation","reason":reason,"inputRefs":refs,"brief":formation.brief}),
+            json!({"node_kind":"formation","reason":reason,"input_refs":refs,"brief":formation.brief}),
         ),
     )? {
         return Err(io::Error::new(io::ErrorKind::Interrupted, "run canceled"));
@@ -158,7 +158,7 @@ pub(crate) fn execute_formation(
         if !control.canceled.load(Ordering::Acquire) && write_error.is_none() {
             let dispatch_id = evt
                 .data
-                .get("dispatchId")
+                .get("dispatch_id")
                 .and_then(|v| v.as_str())
                 .unwrap_or("")
                 .to_owned();
@@ -179,7 +179,7 @@ pub(crate) fn execute_formation(
                     } else if evt
                         .data
                         .get("sentinel")
-                        .and_then(|v| v.get("runId"))
+                        .and_then(|v| v.get("run_id"))
                         .and_then(|v| v.as_str())
                         != Some(id)
                     {
@@ -444,7 +444,7 @@ pub(crate) fn start_ready(
         }
         let refs: Vec<_> = if let Some(open) = replay.open.get(&formation.id) {
             open.data
-                .get("inputRefs")
+                .get("input_refs")
                 .and_then(|v| v.as_array())
                 .cloned()
                 .unwrap_or_default()
@@ -455,7 +455,7 @@ pub(crate) fn start_ready(
                 .iter()
                 .rev()
                 .find(|event| event.kind == "node_started" && event.node_id == formation.id)
-                .and_then(|event| event.data.get("inputRefs"))
+                .and_then(|event| event.data.get("input_refs"))
                 .and_then(|value| value.as_array())
                 .cloned()
                 .unwrap_or_default()

@@ -10,6 +10,37 @@ use crate::Error;
 /// Reads a definition file through any symlink. Only a regular file is read,
 /// since a FIFO or a device would block or never end.
 pub fn read_definition(path: &Path) -> Result<String, Error> {
+    let lock = crate::write::file_lock(path);
+    let _guard = lock.lock().unwrap_or_else(|error| error.into_inner());
+    let text = read_raw(path)?;
+    let kind = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .and_then(|name| {
+            if name.ends_with(".mission.toml") {
+                Some(crate::document_migrate::DocumentKind::Mission)
+            } else if name.ends_with(".layout.toml") {
+                Some(crate::document_migrate::DocumentKind::Layout)
+            } else if name.ends_with(".notes.toml") {
+                Some(crate::document_migrate::DocumentKind::Notes)
+            } else {
+                None
+            }
+        });
+    match kind
+        .map(|kind| crate::document_migrate::upgrade_text(&text, kind))
+        .transpose()?
+    {
+        Some(Some(upgraded)) => {
+            crate::write::publish_upgrade(path, text.as_bytes(), upgraded.as_bytes())
+                .map_err(crate::error::io)?;
+            Ok(upgraded)
+        }
+        _ => Ok(text),
+    }
+}
+
+fn read_raw(path: &Path) -> Result<String, Error> {
     let shown = path.display();
     let link = match std::fs::symlink_metadata(path) {
         Err(err) if err.kind() == ErrorKind::NotFound => {

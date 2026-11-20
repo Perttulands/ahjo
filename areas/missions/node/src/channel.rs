@@ -213,14 +213,14 @@ mod tests {
         let frame = channel.next().await;
         assert_eq!(frame[0], RUNS_SNAPSHOT);
         let snapshot: serde_json::Value = serde_json::from_slice(&frame[1..]).unwrap();
-        assert_eq!(snapshot[0]["eventCount"], 2);
+        assert_eq!(snapshot[0]["event_count"], 2);
         ledger.append(event("run_succeeded")).unwrap();
         tx.send(projection()).unwrap();
         let frame = tokio::time::timeout(std::time::Duration::from_secs(1), channel.next())
             .await
             .unwrap();
         let update: serde_json::Value = serde_json::from_slice(&frame[1..]).unwrap();
-        assert_eq!(update[0]["eventCount"], 3);
+        assert_eq!(update[0]["event_count"], 3);
         assert_eq!(update[0]["status"], "succeeded");
         drop(channel);
         std::fs::remove_dir_all(root).unwrap();

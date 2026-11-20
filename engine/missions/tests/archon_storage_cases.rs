@@ -102,7 +102,7 @@ fn editing_decoded_multiline_toml_keeps_unrelated_values() {
     let dir = Scratch::new();
     std::fs::create_dir_all(dir.0.join("missions")).unwrap();
     let path = dir.0.join("missions/quoted.mission.toml");
-    let raw = r###"schema = 1
+    let raw = r###"schema = 2
 id = 'msn_quoted'
 slug = 'quoted'
 "ti\u0074le" = """
@@ -111,7 +111,7 @@ continued
 """ # keep title comment
 rev = 1
 
-[[inputCard]]
+[[input_card]]
 id = 'inp_main'
 title = 'Frame #1'
 goal = """
@@ -297,7 +297,7 @@ fn invalid_layout_blocks_every_paired_node_create_and_delete() {
     let layout_path = dir.0.join("layout/paired.layout.toml");
     let mission_before = std::fs::read(&path).unwrap();
     let invalid = format!(
-        "schema = 1\nmissionId = {:?}\n\"mission\\u0049d\" = 'duplicate'\nmissionRev = 1\n",
+        "schema = 2\nmission_id = {:?}\n\"mission\\u005fid\" = 'duplicate'\nmission_rev = 1\n",
         edit.mission.id
     );
     std::fs::write(&layout_path, &invalid).unwrap();
@@ -644,7 +644,7 @@ fn inline_note_entries_can_be_edited_and_deleted() {
     let mission = store.create_mission("inline-notes", "Notes", "").unwrap();
     let notes_dir = dir.0.join("notes");
     std::fs::create_dir_all(&notes_dir).unwrap();
-    std::fs::write(notes_dir.join("inline-notes.notes.toml"), format!("schema = 2\nmissionId = {:?}\nrev = 1\nupdatedAt = '2026-01-01T00:00:00Z'\nentry = [{{ id = 'nte_a', target = 'mission', author = 'human:ui', createdAt = '2026-01-01T00:00:00Z', text = 'Before' }}]\n", mission.mission.id)).unwrap();
+    std::fs::write(notes_dir.join("inline-notes.notes.toml"), format!("schema = 3\nmission_id = {:?}\nrev = 1\nupdated_at = '2026-01-01T00:00:00Z'\nentry = [{{ id = 'nte_a', target = 'mission', author = 'human:ui', created_at = '2026-01-01T00:00:00Z', text = 'Before' }}]\n", mission.mission.id)).unwrap();
     let notes = store.notes_edit("inline-notes").unwrap();
     let notes = store
         .patch_notes(
@@ -681,7 +681,7 @@ fn inline_layout_nodes_and_edges_accept_partial_updates() {
     let mission = store.create_mission("inline-layout", "Layout", "").unwrap();
     let layout_dir = dir.0.join("layout");
     std::fs::create_dir_all(&layout_dir).unwrap();
-    std::fs::write(layout_dir.join("inline-layout.layout.toml"), format!("schema = 1\nmissionId = {:?}\nmissionRev = 1\nnode = [{{ id = 'a', x = 1, y = 2 }}, {{ id = 'b', x = 3, y = 4 }}]\nedge = [{{ id = 'e1', lane = 'top' }}, {{ id = 'e2', lane = 'bottom' }}]\n", mission.mission.id)).unwrap();
+    std::fs::write(layout_dir.join("inline-layout.layout.toml"), format!("schema = 2\nmission_id = {:?}\nmission_rev = 1\nnode = [{{ id = 'a', x = 1, y = 2 }}, {{ id = 'b', x = 3, y = 4 }}]\nedge = [{{ id = 'e1', lane = 'top' }}, {{ id = 'e2', lane = 'bottom' }}]\n", mission.mission.id)).unwrap();
     let layout = store.layout_edit("inline-layout").unwrap();
     let layout = store
         .patch_layout(

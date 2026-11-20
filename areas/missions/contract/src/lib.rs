@@ -82,19 +82,19 @@ pub struct MissionSnapshot {
 pub type RunsSnapshot = Vec<RunProjection>;
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
-#[serde(default, rename_all = "camelCase")]
+#[serde(default, rename_all = "snake_case")]
 pub struct CreateMission {
     pub title: String,
     pub slug: String,
     pub updated_by: String,
 }
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
-#[serde(default, rename_all = "camelCase")]
+#[serde(default, rename_all = "snake_case")]
 pub struct DeleteMission {
     pub expected_rev: i64,
 }
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
-#[serde(default, rename_all = "camelCase")]
+#[serde(default, rename_all = "snake_case")]
 pub struct EditNotes {
     pub target: String,
     pub author: String,
@@ -113,7 +113,7 @@ pub struct EditLayout {
     pub edges: Option<Vec<LayoutEdge>>,
 }
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
-#[serde(default, rename_all = "camelCase")]
+#[serde(default, rename_all = "snake_case")]
 pub struct Abort {
     pub requested_by: String,
     pub reason: String,
@@ -124,7 +124,7 @@ pub struct Land {
     pub force: bool,
 }
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "snake_case")]
 pub struct RunId {
     pub run_id: String,
 }
@@ -134,7 +134,7 @@ pub struct Landed {
     pub notes: Vec<String>,
 }
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "snake_case")]
 pub struct AgentSeat {
     pub dispatch_id: String,
     pub slot_id: String,
@@ -177,7 +177,7 @@ pub struct NotesResponse {
     pub notes: document::NotesDocument,
 }
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "snake_case")]
 pub struct ValidationResponse {
     pub mission_rev: i64,
     pub mission_etag: String,
@@ -185,7 +185,7 @@ pub struct ValidationResponse {
     pub warnings: Vec<Finding>,
 }
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "snake_case")]
 pub struct Deletion {
     pub id: String,
     pub slug: String,

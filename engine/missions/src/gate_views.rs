@@ -31,13 +31,13 @@ impl Coordinator {
                 } else if let Some(answer) = answer {
                     let answer = answer
                         .data
-                        .get("requestedSeq")
+                        .get("requested_seq")
                         .and_then(Value::as_u64)
                         .and_then(|seq| {
                             events.iter().rev().find(|e| {
                                 e.kind == "human_verdict_recorded"
                                     && e.gate_id == gate.id
-                                    && e.data.get("requestedSeq").and_then(Value::as_u64)
+                                    && e.data.get("requested_seq").and_then(Value::as_u64)
                                         == Some(seq)
                             })
                         })
@@ -55,14 +55,14 @@ impl Coordinator {
                             .into(),
                         by: answer
                             .data
-                            .get("decidedBy")
+                            .get("decided_by")
                             .and_then(Value::as_str)
                             .filter(|s| !s.is_empty())
                             .unwrap_or(&answer.actor)
                             .into(),
                         relayed_by: answer
                             .data
-                            .get("relayedBy")
+                            .get("relayed_by")
                             .and_then(Value::as_str)
                             .filter(|s| !s.is_empty())
                             .map(str::to_owned),
@@ -99,7 +99,7 @@ impl Coordinator {
             .iter()
             .find(|e| e.seq == request.requested_seq)
             .expect("pending request exists");
-        let input = raw.data.get("inputRef").cloned().unwrap_or_default();
+        let input = raw.data.get("input_ref").cloned().unwrap_or_default();
         let replay = crate::run_replay::Replay::read(&mission, &events);
         let projection = crate::project_run(&events, id)?;
         let now = OffsetDateTime::now_utc();
@@ -166,8 +166,8 @@ impl Coordinator {
             text: request.input.text,
             truncated: request.input.truncated,
             reference: input["ref"].clone(),
-            report_ref: input["reportRef"].clone(),
-            artifact_ref: input["artifactRef"].clone(),
+            report_ref: input["report_ref"].clone(),
+            artifact_ref: input["artifact_ref"].clone(),
         }];
         Ok(GateDecision {
             gate: gate.into(),

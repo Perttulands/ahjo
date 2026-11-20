@@ -13,10 +13,10 @@ use crate::nodes::{Connection, End, Formation, Gate, InputCard, Limit};
 use ahjo_core::Error;
 
 /// The only mission file schema Ahjo reads.
-pub const MISSION_SCHEMA: i64 = 1;
+pub const MISSION_SCHEMA: i64 = 2;
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq, schemars::JsonSchema)]
-#[serde(default, deny_unknown_fields, rename_all = "camelCase")]
+#[serde(default, deny_unknown_fields, rename_all = "snake_case")]
 pub struct Mission {
     pub schema: i64,
     pub id: String,
@@ -33,7 +33,7 @@ pub struct Mission {
     pub updated_at: String,
     /// A mission has one Input card; a file holding several still loads, and
     /// validation names it (`several_input_cards`).
-    #[serde(rename = "inputCard")]
+    #[serde(rename = "input_card")]
     pub input_cards: Vec<InputCard>,
     #[serde(rename = "formation")]
     pub formations: Vec<Formation>,
@@ -140,6 +140,6 @@ pub struct MissionArchive {
     pub mission: bool,
     pub layout: bool,
     pub notes: bool,
-    /// Notes retained by an older delete, associated only by missionId.
+    /// Notes retained by an older delete, associated only by mission_id.
     pub retained_notes: bool,
 }

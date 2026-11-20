@@ -105,7 +105,7 @@ pub(crate) fn apply(
     if old == &next {
         return Ok(false);
     }
-    let table = doc["inputCard"]
+    let table = doc["input_card"]
         .as_array_of_tables_mut()
         .and_then(|a| {
             a.iter_mut()
@@ -115,9 +115,9 @@ pub(crate) fn apply(
     for (key, before, after, optional) in [
         ("title", &old.title, &next.title, false),
         ("goal", &old.goal, &next.goal, false),
-        ("inputHint", &old.input_hint, &next.input_hint, true),
+        ("input_hint", &old.input_hint, &next.input_hint, true),
         (
-            "humanChannel",
+            "human_channel",
             &old.human_channel,
             &next.human_channel,
             true,

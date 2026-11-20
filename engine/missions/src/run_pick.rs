@@ -1,5 +1,5 @@
 //! Best of N (Archon `run_pick.go`). A step whose own Limit card is spent
-//! has attempts its gate already judged. A card whose whenSpent is best, or a
+//! has attempts its gate already judged. A card whose when_spent is best, or a
 //! resume with `--pick-best`, picks the best of them instead of stopping: the
 //! gate's judge chain compares them side by side, or the operator picks, and
 //! the picked attempt goes on through the gate's pass route with its output,
@@ -29,11 +29,11 @@ pub(crate) const INVALID_JUDGE_PICK: &str = "invalid_judge_pick";
 /// Who decides a pick with only one candidate (Archon says `archon`).
 const DECIDED_BY_AHJO: &str = "ahjo";
 
-/// An attempt a pick may take: the step's output was accepted (`outputSeq`)
-/// and its selecting gate judged it (`verdictSeq`). An attempt a limit cut
+/// An attempt a pick may take: the step's output was accepted (`output_seq`)
+/// and its selecting gate judged it (`verdict_seq`). An attempt a limit cut
 /// off, or a crash ended, has no output and is never one.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "snake_case")]
 pub(crate) struct Candidate {
     pub attempt: i64,
     pub output_seq: u64,
@@ -60,7 +60,7 @@ impl Choice {
         let evidence: Vec<_> = (self.evidence.iter())
             .map(|text| json!({"kind":"formation","text":text}))
             .collect();
-        json!({"attempt":self.attempt,"reason":self.reason,"evidence":evidence,"decidedBy":self.decided_by})
+        json!({"attempt":self.attempt,"reason":self.reason,"evidence":evidence,"decided_by":self.decided_by})
     }
 }
 
@@ -79,14 +79,14 @@ pub(crate) fn is_pick(event: &RunEvent) -> bool {
 /// The `pick_started` a pick's verdict or request answers.
 pub(crate) fn pick_seq(event: &RunEvent) -> u64 {
     (event.data.get("pick"))
-        .and_then(|pick| pick.get("pickSeq"))
+        .and_then(|pick| pick.get("pick_seq"))
         .and_then(Value::as_u64)
         .unwrap_or(0)
 }
 
 /// The step's attempts whose output the gate judged with a verdict of its
 /// own, by attempt; a pick's verdict judges nothing. Each verdict names the
-/// output it judged (its inputRef's origin). An attempt's latest verdict
+/// output it judged (its input_ref's origin). An attempt's latest verdict
 /// counts.
 pub(crate) fn candidates(events: &[RunEvent], step: &str, gate: &str) -> Vec<Candidate> {
     let mut outputs = BTreeMap::new();
@@ -97,11 +97,11 @@ pub(crate) fn candidates(events: &[RunEvent], step: &str, gate: &str) -> Vec<Can
                 outputs.insert(event.attempt, event.seq);
             }
             "gate_verdict" if event.gate_id == gate && !is_pick(event) => {
-                let port = data(event).get("routePort").and_then(Value::as_str);
+                let port = data(event).get("route_port").and_then(Value::as_str);
                 if port != Some("pass") && port != Some("fail") {
                     continue;
                 }
-                let origin = (data(event).get("inputRef"))
+                let origin = (data(event).get("input_ref"))
                     .and_then(|input| input.get("origin"))
                     .and_then(|origin| {
                         serde_json::from_value::<ahjo_mission_model::PublicOrigin>(origin.clone())
@@ -173,10 +173,10 @@ fn pending_resume_pick(events: &[RunEvent]) -> Option<LimitUse> {
         match event.kind.as_str() {
             PICK_STARTED => return None,
             "run_resumed" => {
-                if event.data.get("pickBest").and_then(Value::as_bool) != Some(true) {
+                if event.data.get("pick_best").and_then(Value::as_bool) != Some(true) {
                     return None;
                 }
-                let from = event.data.get("resumedFromSeq").and_then(Value::as_u64)?;
+                let from = event.data.get("resumed_from_seq").and_then(Value::as_u64)?;
                 let block = events.iter().find(|e| e.seq == from)?;
                 return LimitUse::recorded(block);
             }
@@ -199,12 +199,12 @@ pub(crate) fn start(
     use_: &LimitUse,
     trigger: &str,
 ) -> io::Result<()> {
-    let mut data = json!({"nodeId":step,"gateId":pick.gate.id,"trigger":trigger,"limit":use_,"candidates":pick.candidates});
+    let mut data = json!({"node_id":step,"gate_id":pick.gate.id,"trigger":trigger,"limit":use_,"candidates":pick.candidates});
     if pick.gate.kinds.iter().any(|kind| kind == "formation") {
         let chain: Vec<_> = (crate::graph::judge_chain(mission, &pick.gate.id).into_iter())
             .map(|judge| judge.id.clone())
             .collect();
-        data["judgeChain"] = json!(chain);
+        data["judge_chain"] = json!(chain);
     }
     let mut started = event(PICK_STARTED, step, 0, data);
     started.gate_id = pick.gate.id.clone();
@@ -212,7 +212,7 @@ pub(crate) fn start(
 }
 
 /// Start the pick a resume with `--pick-best` asked for, whatever the card's
-/// whenSpent; where the step can no longer pick, the run stops at the limit
+/// when_spent; where the step can no longer pick, the run stops at the limit
 /// again.
 pub(crate) fn on_resume(
     c: &Coordinator,
@@ -290,7 +290,7 @@ fn details(
             ),
             verdict: text(&Value::Object(verdict.data.clone()), "verdict").into(),
             reason: text(&Value::Object(verdict.data.clone()), "reason").into(),
-            input: verdict.data.get("inputRef").cloned().unwrap_or_default(),
+            input: verdict.data.get("input_ref").cloned().unwrap_or_default(),
         });
     }
     if details.is_empty() {
@@ -473,17 +473,17 @@ fn resolve(
             ))
         })?;
     let attempts: Vec<_> = details.iter().map(|detail| detail.attempt).collect();
-    let mut pick = json!({"nodeId":started.node_id,"attempt":choice.attempt,"pickSeq":started.seq,"candidates":attempts,"decidedBy":choice.decided_by,"trigger":text(&Value::Object(started.data.clone()), "trigger")});
+    let mut pick = json!({"node_id":started.node_id,"attempt":choice.attempt,"pick_seq":started.seq,"candidates":attempts,"decided_by":choice.decided_by,"trigger":text(&Value::Object(started.data.clone()), "trigger")});
     let evidence: Vec<_> = (choice.evidence.iter())
         .map(|text| json!({"kind":"formation","text":text}))
         .collect();
     let routes: Vec<_> = crate::graph::outgoing_from_port(mission, &started.gate_id, "pass")
         .map(|edge| edge.id.clone())
         .collect();
-    let mut data = json!({"verdict":"pass","routePort":"pass","routedEdges":routes,"reason":choice.reason,"evidence":evidence,"inputRef":picked.input});
+    let mut data = json!({"verdict":"pass","route_port":"pass","routed_edges":routes,"reason":choice.reason,"evidence":evidence,"input_ref":picked.input});
     let mut actor = String::new();
     if let Some((request, recorded)) = answer {
-        data["requestedSeq"] = request.seq.into();
+        data["requested_seq"] = request.seq.into();
         if let Some(recommendation) = request
             .data
             .get("pick")
@@ -515,7 +515,7 @@ fn ask(
     attempts: &[i64],
     recommendation: Option<&Choice>,
 ) -> RunEvent {
-    let mut pick = json!({"nodeId":started.node_id,"pickSeq":started.seq,"candidates":attempts});
+    let mut pick = json!({"node_id":started.node_id,"pick_seq":started.seq,"candidates":attempts});
     if let Some(recommendation) = recommendation {
         pick["recommendation"] = recommendation.data();
     }
@@ -524,7 +524,7 @@ fn ask(
         "human_input_requested",
         &gate.id,
         0,
-        json!({"gateId":gate.id,"nodeId":gate.id,"prompt":gate.criterion,"choices":choices,"requestedBy":gate.id,"inputRef":input,"pick":pick}),
+        json!({"gate_id":gate.id,"node_id":gate.id,"prompt":gate.criterion,"choices":choices,"requested_by":gate.id,"input_ref":input,"pick":pick}),
     );
     request.gate_id = gate.id.clone();
     request
@@ -824,7 +824,7 @@ pub(crate) fn route_human(
             .unwrap_or(0),
         reason: text(&Value::Object(recorded.data.clone()), "reason").into(),
         evidence: Vec::new(),
-        decided_by: text(&Value::Object(recorded.data.clone()), "decidedBy").into(),
+        decided_by: text(&Value::Object(recorded.data.clone()), "decided_by").into(),
     };
     resolve(
         c,
@@ -871,7 +871,7 @@ impl Coordinator {
         {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
-                "requestedSeq, an attempt and valid relayedBy required",
+                "requested_seq, an attempt and valid relayed_by required",
             ));
         }
         let control = self.inner.controls.lock().unwrap().get(run).cloned();
@@ -890,9 +890,9 @@ impl Coordinator {
         } else {
             pick.actor.clone()
         };
-        let mut data = json!({"gateId":gate,"nodeId":gate,"verdict":"pass","reason":pick.reason,"requestedSeq":pick.requested_seq,"decidedBy":actor,"pick":{"attempt":pick.attempt}});
+        let mut data = json!({"gate_id":gate,"node_id":gate,"verdict":"pass","reason":pick.reason,"requested_seq":pick.requested_seq,"decided_by":actor,"pick":{"attempt":pick.attempt}});
         if !pick.relayed_by.is_empty() {
-            data["relayedBy"] = pick.relayed_by.clone().into();
+            data["relayed_by"] = pick.relayed_by.clone().into();
         }
         let event = RunEvent {
             kind: "human_verdict_recorded".into(),

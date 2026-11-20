@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 
 /// Notes are grouped by target on the wire, rather than the flat file form.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "snake_case")]
 pub struct NotesDocument {
     pub schema: i64,
     pub mission_id: String,
@@ -17,7 +17,7 @@ pub struct NotesDocument {
     pub etag: String,
 }
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "snake_case")]
 pub struct Note {
     pub id: String,
     pub author: String,
@@ -41,7 +41,7 @@ impl From<NoteEntry> for Note {
     }
 }
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "snake_case")]
 pub struct NoteThread {
     pub node_id: String,
     pub entries: Vec<Note>,

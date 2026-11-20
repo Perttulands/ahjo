@@ -112,10 +112,10 @@ impl Store {
         let path = self.root().join("notes").join(format!("{slug}.notes.toml"));
         let mut doc = if current.etag == "*" {
             let mut doc = DocumentMut::new();
-            doc["schema"] = value(2);
+            doc["schema"] = value(ahjo_mission_model::NOTES_SCHEMA);
             crate::write::set(
                 doc.as_table_mut(),
-                "missionId",
+                "mission_id",
                 toml_edit::value(mission.id.clone()),
             );
             doc
@@ -162,7 +162,7 @@ impl Store {
                     return Ok(current);
                 }
                 entry["text"] = value(text.as_str());
-                entry["editedAt"] = value(now.clone());
+                entry["edited_at"] = value(now.clone());
             }
             NotePatch::Delete { id, .. } => {
                 let entries = doc
@@ -195,8 +195,8 @@ impl Store {
             "rev",
             toml_edit::value(current.notes.rev + 1),
         );
-        crate::write::set(doc.as_table_mut(), "updatedAt", toml_edit::value(now));
-        crate::write::set(doc.as_table_mut(), "updatedBy", toml_edit::value(author));
+        crate::write::set(doc.as_table_mut(), "updated_at", toml_edit::value(now));
+        crate::write::set(doc.as_table_mut(), "updated_by", toml_edit::value(author));
         let raw = doc.to_string();
         let notes = Notes::parse(&raw)?;
         if current.etag == "*" && std::fs::symlink_metadata(&path).is_ok() {

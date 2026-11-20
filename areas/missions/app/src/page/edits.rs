@@ -526,7 +526,7 @@ pub(super) fn update_limit_patch(
         target: None,
         rounds: Some(parse("rounds", rounds)?),
         seconds: Some(parse("seconds", seconds)?),
-        warn_seconds: Some(parse("warnSeconds", warn_seconds)?),
+        warn_seconds: Some(parse("warn_seconds", warn_seconds)?),
         tokens: Some(parse("tokens", tokens)?),
         when_spent: Some(when_spent.into()),
     }))

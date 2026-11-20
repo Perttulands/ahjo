@@ -1,13 +1,13 @@
-schema = 1
+schema = 2
 id = "msn_gated"
 slug = "gated"
 title = "Gated"
 rev = 1
-[[inputCard]]
+[[input_card]]
 id = "inp_start"
 title = "Input"
 goal = "Deliver the brief"
-[[inputCard.outputs]]
+[[input_card.outputs]]
 name = "result"
 kind = "text"
 from = "fmn_work:port_out"

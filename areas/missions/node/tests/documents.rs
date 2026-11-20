@@ -87,7 +87,7 @@ async fn document_commands_keep_bytes_and_reject_a_missing_or_stale_revision() {
         serde_json::from_slice(&cli_mission(&node, &["export", "post", "--json"]).await).unwrap();
     assert_eq!(json_export["rev"], 1);
     assert_eq!(json_export["formation"][0]["slot"][0]["id"], "slot_write");
-    assert!(json_export.get("inputCard").is_some());
+    assert!(json_export.get("input_card").is_some());
     assert!(json_export.get("document").is_none());
     std::fs::write(&file, &exported).unwrap();
     let unchanged: Value = serde_json::from_slice(
@@ -124,7 +124,7 @@ async fn document_commands_keep_bytes_and_reject_a_missing_or_stale_revision() {
 #[tokio::test(flavor = "multi_thread")]
 async fn apply_reports_assigned_ids_and_draft_errors_and_previews_without_writes() {
     let node = Node::start(AREAS, "").await.unwrap();
-    let document = r#"schema = 1
+    let document = r#"schema = 2
 slug = "draft"
 title = "Sample draft"
 formation = [
@@ -200,7 +200,7 @@ formation = [
 #[tokio::test(flavor = "multi_thread")]
 async fn apply_keeps_a_card_with_an_open_note_and_removes_its_position_after_resolution() {
     let node = Node::start(AREAS, "").await.unwrap();
-    let document = r#"schema = 1
+    let document = r#"schema = 2
 id = "mission_notes"
 slug = "noted"
 title = "Noted"
@@ -216,7 +216,7 @@ title = "Old card"
     })).await.unwrap();
     let note = notes["note"].as_str().unwrap();
     let removal =
-        "schema = 1\nid = \"mission_notes\"\nslug = \"noted\"\nrev = 1\ntitle = \"Noted\"\n";
+        "schema = 2\nid = \"mission_notes\"\nslug = \"noted\"\nrev = 1\ntitle = \"Noted\"\n";
     let error = node
         .call("mission_apply", json!({"document":removal}))
         .await
@@ -256,9 +256,9 @@ title = "Old card"
 #[tokio::test(flavor = "multi_thread")]
 async fn repeat_port_labels_can_be_wired_by_exact_id() {
     let node = Node::start(AREAS, "").await.unwrap();
-    let document = r#"schema = 1
+    let document = r#"schema = 2
 slug = "ports"
-inputCard = [{ id = "start", title = "Start" }]
+input_card = [{ id = "start", title = "Start" }]
 formation = [
     { id = "merge", title = "Merge", type = "solo", input = [
         { id = "first", label = "Input" },
@@ -279,7 +279,7 @@ formation = [
     assert_eq!(inputs[1]["id"], "second");
     let edit = node.call(
         "mission_edit",
-        json!({"mission":"ports","change":{"wireConnection":{"from":"start:out","to":"merge:second"}}}),
+        json!({"mission":"ports","change":{"wire_connection":{"from":"start:out","to":"merge:second"}}}),
     ).await.unwrap();
     assert_eq!(edit["mission"]["connection"][0]["to"], "merge:second");
     node.stop().await;

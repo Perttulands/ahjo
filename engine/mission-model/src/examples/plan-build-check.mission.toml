@@ -1,10 +1,10 @@
-schema = 1
+schema = 2
 id = "msn_example"
 slug = "plan-build-check"
 title = "Plan, build, check"
 rev = 1
 
-[[inputCard]]
+[[input_card]]
 id = "inp_task"
 title = "Change"
 goal = "A planner writes the plan, a builder carries it out, and a checker runs the checks: a failed check goes back to the builder. The run stops after an hour."
@@ -81,8 +81,8 @@ id = "lim_hour"
 title = "One hour"
 target = "inp_task"
 seconds = 3600
-warnSeconds = 600
-whenSpent = "fail"
+warn_seconds = 600
+when_spent = "fail"
 
 [[end]]
 id = "end_done"

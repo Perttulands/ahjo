@@ -162,7 +162,7 @@ fn folder_run(conflict: bool, pass_retry: bool) -> (Run, FolderExecutor, PathBuf
     let card = if pass_retry {
         work_card("rounds = 3")
     } else {
-        work_card("rounds = 2\nwhenSpent = \"best\"")
+        work_card("rounds = 2\nwhen_spent = \"best\"")
     };
     let mission = pick_mission("[\"formation\"]", "Draft.", &card);
     std::fs::write(root.0.join("missions/hello.mission.toml"), mission).unwrap();
@@ -304,7 +304,7 @@ fn folder_retry_that_passes_publishes_that_attempt() {
 
 fn formation(id: &str, title: &str, goal: &str) -> String {
     format!(
-        "[[formation]]\nid = \"{id}\"\ntype = \"solo\"\ntitle = \"{title}\"\n[formation.brief]\ngoal = \"{goal}\"\n[[formation.input]]\nid = \"port_in\"\nlabel = \"Input\"\n[[formation.output]]\nid = \"port_out\"\nlabel = \"Result\"\n[[formation.slot]]\nid = \"slot_{id}\"\nlabel = \"Seat\"\nagentId = \"builder\"\nharness = \"openai-codex\"\nmodel = \"\"\neffort = \"medium\"\n\n"
+        "[[formation]]\nid = \"{id}\"\ntype = \"solo\"\ntitle = \"{title}\"\n[formation.brief]\ngoal = \"{goal}\"\n[[formation.input]]\nid = \"port_in\"\nlabel = \"Input\"\n[[formation.output]]\nid = \"port_out\"\nlabel = \"Result\"\n[[formation.slot]]\nid = \"slot_{id}\"\nlabel = \"Seat\"\nagent_id = \"builder\"\nharness = \"openai-codex\"\nmodel = \"\"\neffort = \"medium\"\n\n"
     )
 }
 
@@ -317,7 +317,7 @@ fn connection(id: &str, from: &str, to: &str) -> String {
 /// with the given Limit cards.
 fn pick_mission(kinds: &str, work_goal: &str, cards: &str) -> String {
     let mut mission = String::from(
-        "schema = 1\nid = \"msn_pick\"\nslug = \"hello\"\ntitle = \"Pick\"\nrev = 1\n\n[[inputCard]]\nid = \"inp_hello\"\ntitle = \"Hello\"\ngoal = \"Return the supplied input\"\n\n",
+        "schema = 2\nid = \"msn_pick\"\nslug = \"hello\"\ntitle = \"Pick\"\nrev = 1\n\n[[input_card]]\nid = \"inp_hello\"\ntitle = \"Hello\"\ngoal = \"Return the supplied input\"\n\n",
     );
     mission += &formation("fmn_work", "Work", work_goal);
     mission += &formation("fmn_ship", "Ship", "Ship it.");
@@ -590,10 +590,10 @@ fn a_step_limit_stops_at_its_rounds_and_a_grant_gives_one_more() {
         ("blocked", "limit_reached", "grant_or_pick")
     );
     let block = run.of_type("run_blocked").pop().unwrap();
-    assert_eq!(block["nodeId"], "fmn_work");
+    assert_eq!(block["node_id"], "fmn_work");
     assert_eq!(
         block["data"]["limit"],
-        json!({"kind":"rounds","limitId":"lim_cap","nodeId":"fmn_work","used":2,"max":2})
+        json!({"kind":"rounds","limit_id":"lim_cap","node_id":"fmn_work","used":2,"max":2})
     );
     assert_eq!(block["data"]["reason"], "Work ran out of rounds (2)");
     let error = run.of_type("error").pop().unwrap();
@@ -617,7 +617,7 @@ fn a_step_limit_stops_at_its_rounds_and_a_grant_gives_one_more() {
     let resumed = run.of_type("run_resumed").pop().unwrap();
     assert_eq!(
         resumed["data"]["grant"],
-        json!({"limitId":"lim_cap","kind":"rounds","amount":1})
+        json!({"limit_id":"lim_cap","kind":"rounds","amount":1})
     );
     let block = run.of_type("run_blocked").pop().unwrap();
     assert_eq!(block["data"]["limit"]["max"], 3);
@@ -647,7 +647,7 @@ fn a_mission_limit_stops_the_whole_run_at_its_rounds() {
         ["fmn_work#1", "fmn_j1#1", "fmn_j2#1", "fmn_work#2"]
     );
     let block = run.of_type("run_blocked").pop().unwrap();
-    assert_eq!(block["nodeId"], "fmn_j1");
+    assert_eq!(block["node_id"], "fmn_j1");
     assert_eq!(block["data"]["reason"], "The mission ran out of rounds (4)");
     // A mission card never picks.
     refused(run.resume(resume_with(false, true)), "nothing to pick");
@@ -677,7 +677,7 @@ fn a_fail_limit_keeps_the_judged_attempts_without_blocking() {
         &pick_mission(
             "[\"formation\"]",
             "Draft.",
-            &work_card("rounds = 2\nwhenSpent = \"fail\""),
+            &work_card("rounds = 2\nwhen_spent = \"fail\""),
         ),
         lab.clone(),
     );
@@ -696,7 +696,7 @@ fn a_fail_limit_keeps_the_judged_attempts_without_blocking() {
     let outputs = run
         .of_type("node_output")
         .into_iter()
-        .filter(|e| e["nodeId"] == "fmn_work")
+        .filter(|e| e["node_id"] == "fmn_work")
         .count();
     assert_eq!(outputs, 2, "the attempts stay as evidence");
 }
@@ -707,7 +707,7 @@ fn a_fail_token_limit_cuts_off_the_working_attempt() {
         &pick_mission(
             "[\"formation\"]",
             "Draft. archon-lab-tokens: 150",
-            &work_card("tokens = 100\nwhenSpent = \"fail\""),
+            &work_card("tokens = 100\nwhen_spent = \"fail\""),
         ),
         Scripted::default(),
     );
@@ -716,7 +716,7 @@ fn a_fail_token_limit_cuts_off_the_working_attempt() {
     let failed = run.of_type("run_failed").pop().unwrap();
     assert_eq!(
         failed["data"]["limit"],
-        json!({"kind":"tokens","limitId":"lim_cap","nodeId":"fmn_work","used":150,"max":100})
+        json!({"kind":"tokens","limit_id":"lim_cap","node_id":"fmn_work","used":150,"max":100})
     );
     assert_eq!(
         failed["data"]["reason"],
@@ -730,7 +730,7 @@ fn a_fail_token_limit_cuts_off_the_working_attempt() {
     assert!(
         run.of_type("node_output")
             .iter()
-            .all(|e| e["nodeId"] != "fmn_work")
+            .all(|e| e["node_id"] != "fmn_work")
     );
 }
 
@@ -740,7 +740,7 @@ fn a_fail_time_limit_warns_then_cuts_off_the_working_attempt() {
         &pick_mission(
             "[\"formation\"]",
             "Draft. archon-lab-work: 6s",
-            &work_card("seconds = 2\nwarnSeconds = 1\nwhenSpent = \"fail\""),
+            &work_card("seconds = 2\nwarn_seconds = 1\nwhen_spent = \"fail\""),
         ),
         Scripted::default(),
     );
@@ -751,7 +751,7 @@ fn a_fail_time_limit_warns_then_cuts_off_the_working_attempt() {
     assert_eq!(failed["data"]["reason"], "Work ran out of time (2 s)");
     let warnings = run.of_type("limit_warning");
     assert_eq!(warnings.len(), 1, "{}", run.ledger_text());
-    assert_eq!(warnings[0]["slotId"], "slot_fmn_work");
+    assert_eq!(warnings[0]["slot_id"], "slot_fmn_work");
     assert!(warnings[0]["data"]["text"].as_str().unwrap().starts_with("Ahjo: 1 s left of this step's working time (Limit card Cap). When it runs out the step stops and the run fails"));
 }
 
@@ -766,7 +766,7 @@ fn a_best_card_picks_the_best_judged_attempt_and_goes_on() {
         &pick_mission(
             "[\"formation\"]",
             "Draft.",
-            &work_card("rounds = 3\nwhenSpent = \"best\""),
+            &work_card("rounds = 3\nwhen_spent = \"best\""),
         ),
         lab.clone(),
     );
@@ -834,21 +834,21 @@ fn a_best_card_picks_the_best_judged_attempt_and_goes_on() {
     assert_eq!(started.len(), 1);
     let started = &started[0];
     assert_eq!(
-        (started["nodeId"].as_str(), started["gateId"].as_str()),
+        (started["node_id"].as_str(), started["gate_id"].as_str()),
         (Some("fmn_work"), Some("gate_review"))
     );
-    assert_eq!(started["data"]["trigger"], "whenSpent");
-    assert_eq!(started["data"]["judgeChain"], json!(["fmn_j1", "fmn_j2"]));
+    assert_eq!(started["data"]["trigger"], "when_spent");
+    assert_eq!(started["data"]["judge_chain"], json!(["fmn_j1", "fmn_j2"]));
     assert_eq!(
         started["data"]["limit"],
-        json!({"kind":"rounds","limitId":"lim_cap","nodeId":"fmn_work","used":3,"max":3})
+        json!({"kind":"rounds","limit_id":"lim_cap","node_id":"fmn_work","used":3,"max":3})
     );
     assert_eq!(started["data"]["candidates"].as_array().unwrap().len(), 3);
     let verdicts = run.pick_verdicts();
     assert_eq!(verdicts.len(), 1);
     let (verdict, pick) = (&verdicts[0]["data"], &verdicts[0]["data"]["pick"]);
     assert_eq!(
-        (verdict["verdict"].as_str(), verdict["routePort"].as_str()),
+        (verdict["verdict"].as_str(), verdict["route_port"].as_str()),
         (Some("pass"), Some("pass"))
     );
     assert_eq!(verdict["reason"], "the only draft whose tests pass");
@@ -857,11 +857,11 @@ fn a_best_card_picks_the_best_judged_attempt_and_goes_on() {
         json!([{"kind":"formation","text":"draft two: retry covered"}])
     );
     assert_eq!(
-        (pick["attempt"].as_i64(), pick["decidedBy"].as_str()),
+        (pick["attempt"].as_i64(), pick["decided_by"].as_str()),
         (Some(2), Some("fmn_j2"))
     );
     assert_eq!(pick["candidates"], json!([1, 2, 3]));
-    assert_eq!(pick["pickSeq"], started["seq"]);
+    assert_eq!(pick["pick_seq"], started["seq"]);
     // Ship runs on the picked draft, with nothing marking it as picked.
     let ship = &lab.calls_of("fmn_ship")[0];
     assert_eq!(ship.input, "draft two");
@@ -898,7 +898,7 @@ fn a_best_card_picks_the_best_judged_attempt_and_goes_on() {
     );
     assert_eq!(
         (pick.candidates.as_slice(), pick.trigger.as_str()),
-        (&[1, 2, 3][..], "whenSpent")
+        (&[1, 2, 3][..], "when_spent")
     );
     assert!(work.attempts[0].picked.is_none() && work.attempts[2].picked.is_none());
     let judge = (attempts.steps.iter())
@@ -924,7 +924,7 @@ fn a_human_gate_quotes_its_input_and_the_attempts_keep_each_answer() {
         &pick_mission(
             "[\"human\"]",
             "Draft.",
-            &work_card("rounds = 2\nwhenSpent = \"best\""),
+            &work_card("rounds = 2\nwhen_spent = \"best\""),
         ),
         lab,
     );
@@ -1070,7 +1070,7 @@ fn pick_best_resumes_a_spent_limit_block() {
         ]
     );
     assert_eq!(lab.calls_of("fmn_ship")[0].input, "draft one");
-    assert_eq!(run.of_type("run_resumed")[0]["data"]["pickBest"], true);
+    assert_eq!(run.of_type("run_resumed")[0]["data"]["pick_best"], true);
     let pick = &run.pick_verdicts()[0]["data"]["pick"];
     assert_eq!(
         (pick["trigger"].as_str(), pick["attempt"].as_i64()),
@@ -1086,7 +1086,7 @@ fn the_only_judged_attempt_is_taken_without_a_picker() {
         &pick_mission(
             "[\"formation\"]",
             "Draft.",
-            &work_card("rounds = 1\nwhenSpent = \"best\""),
+            &work_card("rounds = 1\nwhen_spent = \"best\""),
         ),
         lab.clone(),
     );
@@ -1097,7 +1097,7 @@ fn the_only_judged_attempt_is_taken_without_a_picker() {
     );
     let verdict = &run.pick_verdicts()[0]["data"];
     assert_eq!(verdict["reason"], "the only attempt Review judged");
-    assert_eq!(verdict["pick"]["decidedBy"], "ahjo");
+    assert_eq!(verdict["pick"]["decided_by"], "ahjo");
 }
 
 #[test]
@@ -1119,7 +1119,7 @@ fn an_attempt_the_limit_cut_is_never_a_candidate() {
         &pick_mission(
             "[\"formation\"]",
             "Draft.",
-            &work_card("seconds = 2\nwhenSpent = \"best\""),
+            &work_card("seconds = 2\nwhen_spent = \"best\""),
         ),
         lab.clone(),
     );
@@ -1129,7 +1129,7 @@ fn an_attempt_the_limit_cut_is_never_a_candidate() {
     let error = run.of_type("error").pop().unwrap();
     assert_eq!(
         (
-            error["nodeId"].as_str(),
+            error["node_id"].as_str(),
             error["data"]["limit"]["kind"].as_str()
         ),
         (Some("fmn_work"), Some("time"))
@@ -1145,7 +1145,7 @@ fn an_operator_picks_at_a_human_gate() {
         &pick_mission(
             "[\"human\"]",
             "Draft.",
-            &work_card("rounds = 2\nwhenSpent = \"best\""),
+            &work_card("rounds = 2\nwhen_spent = \"best\""),
         ),
         lab.clone(),
     );
@@ -1217,8 +1217,8 @@ fn an_operator_picks_at_a_human_gate() {
         .unwrap();
     assert_eq!(run.settle().status, "picked", "{}", run.ledger_text());
     let verdict = &run.pick_verdicts()[0];
-    assert_eq!(verdict["data"]["requestedSeq"].as_u64(), Some(seq));
-    assert_eq!(verdict["data"]["pick"]["decidedBy"], "human:operator");
+    assert_eq!(verdict["data"]["requested_seq"].as_u64(), Some(seq));
+    assert_eq!(verdict["data"]["pick"]["decided_by"], "human:operator");
     assert_eq!(verdict["data"]["reason"], "the first reads better");
     assert_eq!(lab.calls_of("fmn_ship")[0].input, "draft one");
 }
@@ -1235,7 +1235,7 @@ fn a_malformed_judge_pick_blocks_and_a_resume_asks_again() {
         &pick_mission(
             "[\"formation\"]",
             "Draft.",
-            &work_card("rounds = 3\nwhenSpent = \"best\""),
+            &work_card("rounds = 3\nwhen_spent = \"best\""),
         ),
         lab.clone(),
     );
@@ -1259,16 +1259,16 @@ fn a_malformed_judge_pick_blocks_and_a_resume_asks_again() {
 #[test]
 fn a_resume_field_the_node_does_not_know_is_refused() {
     let known: Result<ResumeRequest, _> = serde_json::from_str(
-        r#"{"grant":true,"pickBest":false,"reason":"one more","actor":"human:operator","mode":"reattach","takeFail":false}"#,
+        r#"{"grant":true,"pick_best":false,"reason":"one more","actor":"human:operator","mode":"reattach","take_fail":false}"#,
     );
     assert!(known.is_ok());
     let unknown: Result<ResumeRequest, _> =
-        serde_json::from_str(r#"{"grant":true,"completedDispatchId":"x"}"#);
+        serde_json::from_str(r#"{"grant":true,"completed_dispatch_id":"x"}"#);
     assert!(
         unknown
             .unwrap_err()
             .to_string()
-            .contains("unknown field `completedDispatchId`")
+            .contains("unknown field `completed_dispatch_id`")
     );
 }
 
@@ -1298,7 +1298,7 @@ impl Executor for Lost {
                 .emit(ExecutionEvent {
                     kind: "slot_dispatch".into(),
                     slot_id: slot.clone(),
-                    data: json!({"dispatchId":"dsp_lost","nodeId":"fmn_work","slotId":slot})
+                    data: json!({"dispatch_id":"dsp_lost","node_id":"fmn_work","slot_id":slot})
                         .as_object()
                         .unwrap()
                         .clone(),
@@ -1361,7 +1361,7 @@ fn restarted_at_dispatch(mission: &str, lost: Lost, worked: Duration) -> Run {
     lines.truncate(dispatch + 1);
     let started = (lines.iter())
         .rposition(|line| {
-            event(line)["type"] == "node_started" && event(line)["nodeId"] == "fmn_work"
+            event(line)["type"] == "node_started" && event(line)["node_id"] == "fmn_work"
         })
         .unwrap();
     let ts = event(&lines[started])["ts"].as_str().unwrap().to_owned();
@@ -1383,7 +1383,7 @@ fn restarted_at_dispatch(mission: &str, lost: Lost, worked: Duration) -> Run {
 impl Run {
     fn abandoned(&self, dispatch: &str) -> bool {
         (self.of_type("slot_result").iter())
-            .any(|e| e["data"]["dispatchId"] == dispatch && e["data"]["status"] == "abandoned")
+            .any(|e| e["data"]["dispatch_id"] == dispatch && e["data"]["status"] == "abandoned")
     }
 }
 
@@ -1394,7 +1394,7 @@ fn a_seat_reattached_after_a_restart_is_cut_off_by_the_time_it_worked_before() {
         &pick_mission(
             "[\"formation\"]",
             "Draft.",
-            &work_card("seconds = 5\nwhenSpent = \"fail\""),
+            &work_card("seconds = 5\nwhen_spent = \"fail\""),
         ),
         lost.clone(),
         Duration::from_secs(10),
@@ -1419,7 +1419,7 @@ fn a_seat_reattached_after_a_restart_is_cut_off_by_the_time_it_worked_before() {
     assert!(
         run.of_type("node_output")
             .iter()
-            .all(|e| e["nodeId"] != "fmn_work")
+            .all(|e| e["node_id"] != "fmn_work")
     );
 }
 
@@ -1444,7 +1444,7 @@ fn a_seat_reattached_after_a_restart_is_cut_off_at_its_tokens() {
     assert_eq!(usage.len(), 1, "{}", run.ledger_text());
     assert_eq!(
         (
-            usage[0]["data"]["dispatchId"].as_str(),
+            usage[0]["data"]["dispatch_id"].as_str(),
             usage[0]["data"]["tokens"].as_i64()
         ),
         (Some("dsp_lost"), Some(150))
@@ -1454,7 +1454,7 @@ fn a_seat_reattached_after_a_restart_is_cut_off_at_its_tokens() {
         .unwrap();
     assert_eq!(
         error["data"]["limit"],
-        json!({"kind":"tokens","limitId":"lim_cap","nodeId":"fmn_work","used":150,"max":100})
+        json!({"kind":"tokens","limit_id":"lim_cap","node_id":"fmn_work","used":150,"max":100})
     );
     assert!(run.abandoned("dsp_lost"), "{}", run.ledger_text());
 }

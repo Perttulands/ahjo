@@ -56,7 +56,7 @@ impl Executor for SeatLab {
             kind: "seat_created".into(),
             slot_id: slot.clone(),
             data:
-                json!({"node":node,"sessionName":name,"sessionId":session,"dispatchId":"lab-seat"})
+                json!({"node":node,"session_name":name,"session_id":session,"dispatch_id":"lab-seat"})
                     .as_object()
                     .unwrap()
                     .clone(),
@@ -69,7 +69,7 @@ impl Executor for SeatLab {
         sink.emit(ExecutionEvent {
             kind: "seat_cleanup".into(),
             slot_id: slot,
-            data: json!({"sessionName":name,"outcome":"ended","cause":"run_final"})
+            data: json!({"session_name":name,"outcome":"ended","cause":"run_final"})
                 .as_object()
                 .unwrap()
                 .clone(),
@@ -124,7 +124,7 @@ fn start() -> Running {
         let (seq, session) = loop {
             let status = node.call("run_show", json!({"run":run,"events":true})).await.unwrap();
             if let Some(event) = status["events"].as_array().unwrap().iter().find(|event| event["type"] == "seat_created") {
-                break (event["seq"].as_u64().unwrap(), event["sessionId"].as_str().unwrap().to_owned());
+                break (event["seq"].as_u64().unwrap(), event["session_id"].as_str().unwrap().to_owned());
             }
             assert!(Instant::now() < deadline, "seat not recorded: {status}");
             tokio::time::sleep(Duration::from_millis(10)).await;

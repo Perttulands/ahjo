@@ -25,7 +25,11 @@ fn archived_mission_id(store: &Store, slug: &str, archive_id: &str) -> Option<St
         .root()
         .join("missions")
         .join(format!("{slug}.mission.toml.deleted-{archive_id}"));
-    Mission::parse(&crate::links::read_definition(&path).ok()?)
+    let raw = crate::links::read_definition(&path).ok()?;
+    let upgraded =
+        crate::document_migrate::upgrade_text(&raw, crate::document_migrate::DocumentKind::Mission)
+            .ok()?;
+    Mission::parse(upgraded.as_deref().unwrap_or(&raw))
         .ok()
         .map(|mission| mission.id)
 }

@@ -1,0 +1,8 @@
+schema = 1
+missionId = "msn_hello"
+missionRev = 1
+
+[[node]]
+id = "fmn_work"
+x = 320
+y = 240

@@ -326,7 +326,7 @@ mod tests {
 
 /// A slot that refers to a role.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "snake_case")]
 pub struct RoleUse {
     pub mission_id: String,
     pub mission_slug: String,

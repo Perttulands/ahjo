@@ -1123,7 +1123,7 @@ impl MissionsPage {
             format!("{}/notes", mission_path(&slug)),
         )
         .header("If-Match", self.note_etag.clone().unwrap_or_else(|| notes.etag.clone()))
-        .json(&json!({"target":target, "text":text,"author":"human:ui", "action":if delete {"delete"} else if self.note_id.is_some() {"edit"} else {"append"}, "entryId":self.note_id}));
+        .json(&json!({"target":target, "text":text,"author":"human:ui", "action":if delete {"delete"} else if self.note_id.is_some() {"edit"} else {"append"}, "entry_id":self.note_id}));
         self.note_saving = true;
         let asked = self.host.request(request, cx);
         let generation = self.generation;

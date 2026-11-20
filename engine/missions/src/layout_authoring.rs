@@ -34,7 +34,7 @@ impl Store {
             }
             Err(error) if error.code == "not_found" => Ok(LayoutEdit {
                 layout: Layout {
-                    schema: 1,
+                    schema: ahjo_mission_model::LAYOUT_SCHEMA,
                     mission_id: mission.id,
                     mission_rev: mission.rev,
                     ..Layout::default()
@@ -79,7 +79,7 @@ impl Store {
         let mut doc: DocumentMut =
             if expected_etag == "*" {
                 let mut doc = DocumentMut::new();
-                doc["schema"] = value(1);
+                doc["schema"] = value(ahjo_mission_model::LAYOUT_SCHEMA);
                 doc
             } else {
                 crate::links::read_definition(&path)?.parse().map_err(
@@ -122,17 +122,17 @@ impl Store {
         }
         crate::write::set(
             doc.as_table_mut(),
-            "missionId",
+            "mission_id",
             toml_edit::value(mission.id),
         );
         crate::write::set(
             doc.as_table_mut(),
-            "missionRev",
+            "mission_rev",
             toml_edit::value(mission.rev),
         );
         crate::write::set(
             doc.as_table_mut(),
-            "updatedAt",
+            "updated_at",
             toml_edit::value(crate::authoring::now()?),
         );
         let raw = doc.to_string();

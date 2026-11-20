@@ -824,11 +824,11 @@ impl MissionsPage {
         cx.notify();
     }
     pub(super) fn verdict(&mut self, gate: &str, seq: u64, verdict: &str, cx: &mut Context<Self>) {
-        let body = json!({"requestedSeq":seq, "verdict":verdict, "reason":self.run.responses.get(gate).map(|f| f.read(cx).text.clone()).unwrap_or_default(), "actor":"human:operator"});
+        let body = json!({"requested_seq":seq, "verdict":verdict, "reason":self.run.responses.get(gate).map(|f| f.read(cx).text.clone()).unwrap_or_default(), "actor":"human:operator"});
         self.run_post(format!("/gates/{}/verdict", segment(gate)), body, cx);
     }
     pub(super) fn pick(&mut self, gate: &str, seq: u64, attempt: i64, cx: &mut Context<Self>) {
-        let body = json!({"requestedSeq":seq, "attempt":attempt, "reason":self.run.responses.get(gate).map(|f| f.read(cx).text.clone()).unwrap_or_default(), "actor":"human:operator"});
+        let body = json!({"requested_seq":seq, "attempt":attempt, "reason":self.run.responses.get(gate).map(|f| f.read(cx).text.clone()).unwrap_or_default(), "actor":"human:operator"});
         self.run_post(format!("/gates/{}/pick", segment(gate)), body, cx);
     }
     pub(super) fn read_evidence(
@@ -1463,7 +1463,7 @@ impl MissionsPage {
                         page.run.abort_armed = false;
                         page.run_post(
                             "/abort".into(),
-                            json!({"requestedBy":"human:operator", "reason":reason}),
+                            json!({"requested_by":"human:operator", "reason":reason}),
                             cx,
                         );
                     })),
@@ -1661,7 +1661,7 @@ impl MissionsPage {
                         .iter()
                         .filter_map(|gate| gate.pick.as_ref())
                         .filter(|pick| {
-                            pick.get("nodeId").and_then(|v| v.as_str())
+                            pick.get("node_id").and_then(|v| v.as_str())
                                 == Some(window.step.as_str())
                         })
                         .filter_map(|pick| pick.get("recommendation"))
@@ -1745,7 +1745,7 @@ impl MissionsPage {
             panel = panel.child(columns);
             if let Some((gate, seq, candidates)) = run.waiting_gates.iter().find_map(|gate| {
                 let pick = gate.pick.as_ref()?;
-                (pick.get("nodeId")?.as_str()? == window.step).then(|| {
+                (pick.get("node_id")?.as_str()? == window.step).then(|| {
                     (
                         gate.gate_id.clone(),
                         gate.requested_seq,
@@ -1764,7 +1764,7 @@ impl MissionsPage {
                         .debug_selector(|| "attempts-pick-go".into())
                         .on_click(cx.listener(move |page, _, _, cx| {
                             let reason = page.run.attempt_reason.read(cx).text.trim().to_owned();
-                            page.run_post(format!("/gates/{}/pick", segment(&gate)), json!({"requestedSeq":seq,"attempt":chosen,"reason":reason,"actor":"human:operator"}), cx);
+                            page.run_post(format!("/gates/{}/pick", segment(&gate)), json!({"requested_seq":seq,"attempt":chosen,"reason":reason,"actor":"human:operator"}), cx);
                         })));
             }
             return Some(
@@ -1897,7 +1897,7 @@ mod tests {
             StartAnswer::Unknown(_)
         ));
         assert!(
-            matches!(start_answer(Ok(Answer { status:202, body:br#"{"runId":"run_1"}"#.to_vec() })), StartAnswer::Started(id) if id == "run_1")
+            matches!(start_answer(Ok(Answer { status:202, body:br#"{"run_id":"run_1"}"#.to_vec() })), StartAnswer::Started(id) if id == "run_1")
         );
         assert!(matches!(
             start_answer(Ok(Answer {

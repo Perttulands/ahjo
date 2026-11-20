@@ -13,7 +13,7 @@ use std::{
 fn code_check_contains_matches_archon_ledger() {
     let root = Scratch::new();
     let mission = gated_mission(
-        "kinds = [\"code\"]\ncheck = \"output_contains\"\ncheckVersion = \"1\"\ncheckValue = \"hello\"",
+        "kinds = [\"code\"]\ncheck = \"output_contains\"\ncheck_version = \"1\"\ncheck_value = \"hello\"",
     );
     std::fs::write(root.0.join("missions/hello.mission.toml"), mission).unwrap();
     let c = Coordinator::open(&root.0, RunSettings::default(), Box::new(LabExecutor)).unwrap();
@@ -53,7 +53,7 @@ fn code_check_contains_matches_archon_ledger() {
 fn a_tampered_code_result_cannot_accept_a_human_verdict() {
     let root = Scratch::new();
     let mission = gated_mission(
-        "kinds = [\"code\", \"human\"]\ncheck = \"output_contains\"\ncheckVersion = \"1\"\ncheckValue = \"hello\"",
+        "kinds = [\"code\", \"human\"]\ncheck = \"output_contains\"\ncheck_version = \"1\"\ncheck_value = \"hello\"",
     );
     std::fs::write(root.0.join("missions/hello.mission.toml"), mission).unwrap();
     let c = Coordinator::open(&root.0, RunSettings::default(), Box::new(LabExecutor)).unwrap();
@@ -113,7 +113,7 @@ fn a_tampered_code_result_cannot_accept_a_human_verdict() {
 fn mixed_code_and_human_gate_preserves_its_durable_code_result() {
     let root = Scratch::new();
     let mission = gated_mission(
-        "kinds = [\"code\", \"human\"]\ncheck = \"output_contains\"\ncheckVersion = \"1\"\ncheckValue = \"hello\"",
+        "kinds = [\"code\", \"human\"]\ncheck = \"output_contains\"\ncheck_version = \"1\"\ncheck_value = \"hello\"",
     );
     std::fs::write(root.0.join("missions/hello.mission.toml"), mission).unwrap();
     let c = Coordinator::open(&root.0, RunSettings::default(), Box::new(LabExecutor)).unwrap();
@@ -169,9 +169,9 @@ fn mixed_code_and_human_gate_preserves_its_durable_code_result() {
         .iter()
         .find(|event| event["type"] == "gate_verdict")
         .unwrap();
-    assert_eq!(verdict["data"]["kindResultSeqs"]["code"], code["seq"]);
-    assert_eq!(verdict["data"]["codeVerdict"], "pass");
-    assert_eq!(verdict["data"]["perKind"]["human"], "pass");
+    assert_eq!(verdict["data"]["kind_result_seqs"]["code"], code["seq"]);
+    assert_eq!(verdict["data"]["code_verdict"], "pass");
+    assert_eq!(verdict["data"]["per_kind"]["human"], "pass");
     assert_eq!(verdict["data"]["evidence"], code["data"]["evidence"]);
 }
 
@@ -192,7 +192,7 @@ fn starved_join_blocks_without_allowing_resume() {
             "[[formation.output]]",
             "[[formation.input]]\nid = \"port_second\"\nlabel = \"Second\"\n[[formation.output]]",
         );
-    let mission = gated_mission("kinds = [\"code\"]\ncheck = \"output_contains\"\ncheckVersion = \"1\"\ncheckValue = \"hello\"").replace("to = \"end_rejected:in\"", "to = \"fmn_join:port_second\"");
+    let mission = gated_mission("kinds = [\"code\"]\ncheck = \"output_contains\"\ncheck_version = \"1\"\ncheck_value = \"hello\"").replace("to = \"end_rejected:in\"", "to = \"fmn_join:port_second\"");
     let mission = format!(
         "{mission}\n[[formation]]{join}\n[[connection]]\nid = \"edge_join_input\"\nfrom = \"fmn_work:port_out\"\nto = \"fmn_join:port_in\"\n[[connection]]\nid = \"edge_join_done\"\nfrom = \"fmn_join:port_out\"\nto = \"end_done:in\"\n"
     );

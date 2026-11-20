@@ -4,7 +4,7 @@
 pub struct CodeCheck {
     pub id: &'static str,
     pub version: &'static str,
-    /// What the check's one parameter, `checkValue`, holds.
+    /// What the check's one parameter, `check_value`, holds.
     pub parameter: &'static str,
 }
 

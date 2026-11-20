@@ -81,8 +81,8 @@ impl Replay {
                                 .unwrap_or_else(|| {
                                     format!("ledger://{}/{}", event.run_id, edge.id)
                                 }),
-                            report_ref: payload["reportRef"].as_str().unwrap_or("").into(),
-                            artifact_ref: payload["artifactRef"].as_str().unwrap_or("").into(),
+                            report_ref: payload["report_ref"].as_str().unwrap_or("").into(),
+                            artifact_ref: payload["artifact_ref"].as_str().unwrap_or("").into(),
                             kind: payload["kind"].as_str().unwrap_or("").into(),
                             origin: Some(PublicOrigin {
                                 node_id: event.node_id.clone(),
@@ -123,7 +123,7 @@ impl Replay {
                         state.picking.remove(&event.gate_id);
                     } else if event
                         .data
-                        .get("requestedSeq")
+                        .get("requested_seq")
                         .and_then(|value| value.as_u64())
                         .unwrap_or(0)
                         == 0
@@ -132,14 +132,14 @@ impl Replay {
                     }
                     let route = event
                         .data
-                        .get("routePort")
+                        .get("route_port")
                         .and_then(|v| v.as_str())
                         .unwrap_or("");
                     if route != "pass" && route != "fail" {
                         continue;
                     }
                     let Ok(input) = serde_json::from_value::<RoutedInput>(
-                        event.data.get("inputRef").cloned().unwrap_or_default(),
+                        event.data.get("input_ref").cloned().unwrap_or_default(),
                     ) else {
                         continue;
                     };
@@ -150,7 +150,7 @@ impl Replay {
                         .unwrap_or("");
                     let routed: HashSet<&str> = event
                         .data
-                        .get("routedEdges")
+                        .get("routed_edges")
                         .and_then(|v| v.as_array())
                         .into_iter()
                         .flatten()
@@ -182,13 +182,13 @@ impl Replay {
                         } else if !pick
                             && let Some(seq) = event
                                 .data
-                                .get("requestedSeq")
+                                .get("requested_seq")
                                 .and_then(|v| v.as_u64())
                                 .filter(|n| *n > 0)
                             && let Some(decision) = events.iter().find(|e| {
                                 e.kind == "human_verdict_recorded"
                                     && e.gate_id == event.gate_id
-                                    && e.data.get("requestedSeq").and_then(|v| v.as_u64())
+                                    && e.data.get("requested_seq").and_then(|v| v.as_u64())
                                         == Some(seq)
                             })
                         {
@@ -204,7 +204,7 @@ impl Replay {
                                     requested_seq: seq,
                                     decided_by: decision
                                         .data
-                                        .get("decidedBy")
+                                        .get("decided_by")
                                         .and_then(|v| v.as_str())
                                         .filter(|s| !s.is_empty())
                                         .unwrap_or(&decision.actor)
@@ -326,7 +326,7 @@ pub(crate) fn note_waiting(
                     "node_waiting",
                     node,
                     0,
-                    json!({"neededInputs":missing.len(),"readyInputs":ports.len(),"totalInputs":formation.inputs.len(),"waitingFor":missing}),
+                    json!({"needed_inputs":missing.len(),"ready_inputs":ports.len(),"total_inputs":formation.inputs.len(),"waiting_for":missing}),
                 ),
             )?;
             noted_waiting = true;
@@ -380,7 +380,7 @@ mod tests {
             2,
             "node_started",
             "work",
-            json!({"inputRefs":[{"text":"first"}]}),
+            json!({"input_refs":[{"text":"first"}]}),
         );
         let replay = Replay::read(
             &mission,
@@ -431,7 +431,7 @@ mod tests {
             1,
             "gate_verdict",
             "gate",
-            json!({"routePort":"pass","routedEdges":["edge_b"],"inputRef":{"text":"work"}}),
+            json!({"route_port":"pass","routed_edges":["edge_b"],"input_ref":{"text":"work"}}),
         );
         verdict.gate_id = "gate".into();
         let replay = Replay::read(&mission, &[verdict]);
@@ -461,7 +461,7 @@ mod tests {
             1,
             "gate_verdict",
             "gate",
-            json!({"routePort":"fail","reason":"","inputRef":{"text":"work"}}),
+            json!({"route_port":"fail","reason":"","input_ref":{"text":"work"}}),
         );
         verdict.gate_id = "gate".into();
         let replay = Replay::read(&mission, &[verdict]);
@@ -493,7 +493,7 @@ mod tests {
             2,
             "human_verdict_recorded",
             "gate",
-            json!({"requestedSeq":1,"reason":"approved","decidedBy":"agent:alice"}),
+            json!({"requested_seq":1,"reason":"approved","decided_by":"agent:alice"}),
         );
         decision.gate_id = "gate".into();
         decision.actor = "agent:alice".into();
@@ -501,7 +501,7 @@ mod tests {
             3,
             "gate_verdict",
             "gate",
-            json!({"requestedSeq":1,"routePort":"pass","routedEdges":["edge"],"inputRef":{"text":"work"}}),
+            json!({"requested_seq":1,"route_port":"pass","routed_edges":["edge"],"input_ref":{"text":"work"}}),
         );
         verdict.gate_id = "gate".into();
         let replay = Replay::read(&mission, &[decision, verdict]);
@@ -524,22 +524,22 @@ mod tests {
             event
         };
         let events = vec![
-            gate_event(1, "gate_evaluating", json!({"inputRef":{"text":"first"}})),
+            gate_event(1, "gate_evaluating", json!({"input_ref":{"text":"first"}})),
             gate_event(
                 2,
                 "human_input_requested",
-                json!({"inputRef":{"text":"first"}}),
+                json!({"input_ref":{"text":"first"}}),
             ),
             gate_event(
                 3,
                 "human_verdict_recorded",
-                json!({"requestedSeq":2,"verdict":"pass","reason":"ok"}),
+                json!({"requested_seq":2,"verdict":"pass","reason":"ok"}),
             ),
-            gate_event(4, "gate_evaluating", json!({"inputRef":{"text":"new"}})),
+            gate_event(4, "gate_evaluating", json!({"input_ref":{"text":"new"}})),
             gate_event(
                 5,
                 "gate_verdict",
-                json!({"requestedSeq":2,"verdict":"pass","reason":"ok","routePort":"pass","inputRef":{"text":"first"}}),
+                json!({"requested_seq":2,"verdict":"pass","reason":"ok","route_port":"pass","input_ref":{"text":"first"}}),
             ),
         ];
         assert_eq!(Replay::read(&mission, &events).evaluating["gate"].seq, 4);

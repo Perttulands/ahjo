@@ -7,9 +7,9 @@ pub const KIND_TEXT: &str = "text";
 pub const KIND_FILE: &str = "file";
 pub const KIND_FOLDER: &str = "folder";
 
-/// The mission's entry node (`[[inputCard]]`), with its `out` port.
+/// The mission's entry node (`[[input_card]]`), with its `out` port.
 #[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq, schemars::JsonSchema)]
-#[serde(default, deny_unknown_fields, rename_all = "camelCase")]
+#[serde(default, deny_unknown_fields, rename_all = "snake_case")]
 pub struct InputCard {
     pub id: String,
     pub title: String,
@@ -87,7 +87,7 @@ pub const PEER: &str = "peer";
 pub const ORCHESTRATED: &str = "orchestrated";
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq, schemars::JsonSchema)]
-#[serde(default, deny_unknown_fields, rename_all = "camelCase")]
+#[serde(default, deny_unknown_fields, rename_all = "snake_case")]
 pub struct Brief {
     pub goal: String,
     #[serde(skip_serializing_if = "String::is_empty")]
@@ -133,7 +133,7 @@ impl Port {
 
 /// A position in a formation, owning what its seat runs.
 #[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq, schemars::JsonSchema)]
-#[serde(default, deny_unknown_fields, rename_all = "camelCase")]
+#[serde(default, deny_unknown_fields, rename_all = "snake_case")]
 pub struct Slot {
     pub id: String,
     pub label: String,
@@ -175,7 +175,7 @@ impl Slot {
 /// A criterion with one or more kinds. Its ports are `in`, `pass`, `fail`
 /// and `judge`.
 #[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq, schemars::JsonSchema)]
-#[serde(default, deny_unknown_fields, rename_all = "camelCase")]
+#[serde(default, deny_unknown_fields, rename_all = "snake_case")]
 pub struct Gate {
     pub id: String,
     pub title: String,
@@ -216,7 +216,7 @@ pub const REJECTED: &str = "rejected";
 /// Caps the rounds, time and tokens of one step, or of the whole mission when
 /// it covers the Input card. A knob is `None` when the card does not set it.
 #[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq, schemars::JsonSchema)]
-#[serde(default, deny_unknown_fields, rename_all = "camelCase")]
+#[serde(default, deny_unknown_fields, rename_all = "snake_case")]
 pub struct Limit {
     pub id: String,
     pub title: String,

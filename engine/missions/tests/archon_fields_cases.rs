@@ -127,7 +127,7 @@ fn input_and_formation_titles_and_hint_can_be_set_and_cleared() {
     assert!(
         !std::fs::read_to_string(dir.0.join("missions/updates.mission.toml"))
             .unwrap()
-            .contains("inputHint")
+            .contains("input_hint")
     );
     assert_eq!(std::fs::read(layout_path).unwrap(), layout);
 }
@@ -240,8 +240,8 @@ fn gate_rejects_bad_kinds_and_checks_without_mutation() {
         ("", "", "", "", "")
     );
     let raw = std::fs::read_to_string(path).unwrap();
-    assert!(!raw.contains("checkVersion"));
-    assert!(!raw.contains("checkValue"));
+    assert!(!raw.contains("check_version"));
+    assert!(!raw.contains("check_value"));
 }
 
 // Ported from slot_settings_test.go: a role is text; the slot states all

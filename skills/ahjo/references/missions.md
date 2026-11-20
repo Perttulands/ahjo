@@ -25,7 +25,7 @@ ahjo mission apply post.toml
 
 Give a new mission its own `slug` and `id`, or omit its `id` to assign one. Keep the exported `rev` when editing an existing mission. If apply reports a conflict, export again and merge your edits into that copy. Apply saves drafts and reports validation. Fix the errors before using its run command. Reply to open notes before removing their cards. Over MCP, give `mission_apply` the TOML text in `document`.
 
-The file uses `[[inputCard]]`, `[[formation]]`, `[[gate]]`, `[[end]]`, `[[limit]]`, and `[[connection]]`. A formation nests `input`, `output`, and `slot` tables. Use saved ids in `from` and `to` as `node:port`, and give every card you connect an id. `ahjo mission export --json` uses the same keys.
+Mission and layout files use schema 2. Existing mission files are upgraded when the node loads them. The mission file uses `[[input_card]]`, `[[formation]]`, `[[gate]]`, `[[end]]`, `[[limit]]`, and `[[connection]]`. A formation nests `input`, `output`, and `slot` tables. Use saved ids in `from` and `to` as `node:port`, and give every card you connect an id. `ahjo mission export --json` uses the same keys.
 
 ### Individual changes
 
@@ -49,7 +49,7 @@ The runtime supplies each seat its output contract; a judge also returns a fence
 
 ## Limits
 
-Runs have no automatic limits. Add a Limit card targeting a step id or the Input card id for the whole mission. Set a cap in rounds, seconds or tokens. Exhaustion blocks by default. With `whenSpent = "fail"` the run fails. With `whenSpent = "best"` a suitable send-back gate selects among judged attempts. A human pick or a grant needs the operator's authority.
+Runs have no automatic limits. Add a Limit card targeting a step id or the Input card id for the whole mission. Set a cap in rounds, seconds or tokens. Exhaustion blocks by default. With `when_spent = "fail"` the run fails. With `when_spent = "best"` a suitable send-back gate selects among judged attempts. A human pick or a grant needs the operator's authority.
 
 ## Run and watch
 

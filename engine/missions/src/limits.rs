@@ -26,7 +26,7 @@ pub(crate) const WHEN_SPENT_FAIL: &str = "fail";
 /// A Limit card's knob as the run used it: `used` of `max`, `max` counting
 /// the card's own value and every grant. Time is in whole seconds.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "snake_case")]
 pub struct LimitUse {
     pub kind: String,
     pub limit_id: String,
@@ -92,7 +92,7 @@ pub(crate) fn granted(events: &[RunEvent], limit_id: &str, kind: &str) -> i64 {
     (events.iter())
         .filter(|event| event.kind == "run_resumed")
         .filter_map(|event| event.data.get("grant"))
-        .filter(|grant| grant["limitId"] == limit_id && grant["kind"] == kind)
+        .filter(|grant| grant["limit_id"] == limit_id && grant["kind"] == kind)
         .map(|grant| number(grant.get("amount")))
         .sum()
 }
@@ -147,7 +147,7 @@ fn rounds_use(mission: &Mission, events: &[RunEvent], limit: &Limit) -> Option<L
     let used = (events.iter().enumerate())
         .filter(|(_, event)| {
             event.kind == "node_started"
-                && text(event, "nodeKind") == "formation"
+                && text(event, "node_kind") == "formation"
                 && (whole || event.node_id == limit.target)
         })
         .filter(|(index, _)| !cut_short_by_restart(events, *index))
@@ -193,7 +193,7 @@ fn time_used(mission: &Mission, events: &[RunEvent], limit: &Limit, now: OffsetD
         match event.kind.as_str() {
             "node_started"
                 if (whole || event.node_id == limit.target)
-                    && text(event, "nodeKind") == "formation" =>
+                    && text(event, "node_kind") == "formation" =>
             {
                 open.insert(event.node_id.clone());
             }
@@ -326,14 +326,15 @@ pub(crate) fn mission_tokens(mission: &Mission, events: &[RunEvent]) -> Option<L
 }
 
 fn warned(events: &[RunEvent], limit_id: &str) -> bool {
-    (events.iter()).any(|event| event.kind == "limit_warning" && text(event, "limitId") == limit_id)
+    (events.iter())
+        .any(|event| event.kind == "limit_warning" && text(event, "limit_id") == limit_id)
 }
 
 /// Whether the ledger refuses a seat's warning: each seat of an attempt gets
 /// a card's warning once, and the mission's card warns only the attempts that
 /// were working when it first fired.
 pub(crate) fn warning_refused(events: &[RunEvent], warning: &RunEvent) -> bool {
-    let limit = text(warning, "limitId");
+    let limit = text(warning, "limit_id");
     let started = (events.iter())
         .filter(|e| {
             e.kind == "node_started" && e.node_id == warning.node_id && e.attempt == warning.attempt
@@ -343,7 +344,7 @@ pub(crate) fn warning_refused(events: &[RunEvent], warning: &RunEvent) -> bool {
         .unwrap_or(0);
     let mut first = 0;
     for event in events {
-        if event.kind != "limit_warning" || text(event, "limitId") != limit {
+        if event.kind != "limit_warning" || text(event, "limit_id") != limit {
             continue;
         }
         if first == 0 {
@@ -462,7 +463,7 @@ mod tests {
 
     fn mission(cards: &str) -> Mission {
         Mission::parse(&format!(
-            "schema = 1\nid = \"m\"\nslug = \"m\"\ntitle = \"M\"\nrev = 1\n[[inputCard]]\nid = \"inp\"\ntitle = \"In\"\n[[formation]]\nid = \"work\"\ntype = \"solo\"\ntitle = \"Review\"\n{cards}"
+            "schema = 2\nid = \"m\"\nslug = \"m\"\ntitle = \"M\"\nrev = 1\n[[input_card]]\nid = \"inp\"\ntitle = \"In\"\n[[formation]]\nid = \"work\"\ntype = \"solo\"\ntitle = \"Review\"\n{cards}"
         ))
         .unwrap()
     }
@@ -521,7 +522,7 @@ mod tests {
         let m =
             mission("[[limit]]\nid = \"lim\"\ntitle = \"Cap\"\ntarget = \"work\"\nrounds = 2\n");
         let t = "2026-01-01T00:00:00Z";
-        let started = json!({"nodeKind":"formation"});
+        let started = json!({"node_kind":"formation"});
         let mut events = vec![
             event(1, t, "node_started", "work", started.clone()),
             event(2, t, "error", "", json!({"code":"coordinator_interrupted"})),
@@ -538,7 +539,7 @@ mod tests {
             t,
             "run_resumed",
             "",
-            json!({"grant":{"limitId":"lim","kind":"rounds","amount":1}}),
+            json!({"grant":{"limit_id":"lim","kind":"rounds","amount":1}}),
         ));
         assert_eq!(spent_before(&m, &events, "work", now), None);
     }
@@ -546,7 +547,7 @@ mod tests {
     #[test]
     fn time_counts_only_while_the_step_runs_and_the_run_is_not_blocked() {
         let m = mission(
-            "[[limit]]\nid = \"lim\"\ntitle = \"Clock\"\ntarget = \"work\"\nseconds = 60\nwarnSeconds = 10\n",
+            "[[limit]]\nid = \"lim\"\ntitle = \"Clock\"\ntarget = \"work\"\nseconds = 60\nwarn_seconds = 10\n",
         );
         let events = vec![
             event(
@@ -554,7 +555,7 @@ mod tests {
                 "2026-01-01T00:00:00Z",
                 "node_started",
                 "work",
-                json!({"nodeKind":"formation"}),
+                json!({"node_kind":"formation"}),
             ),
             event(2, "2026-01-01T00:00:20Z", "node_output", "work", json!({})),
             event(
@@ -562,7 +563,7 @@ mod tests {
                 "2026-01-01T00:05:00Z",
                 "node_started",
                 "work",
-                json!({"nodeKind":"formation"}),
+                json!({"node_kind":"formation"}),
             ),
             event(4, "2026-01-01T00:05:10Z", "run_blocked", "", json!({})),
             event(5, "2026-01-01T00:09:00Z", "run_resumed", "", json!({})),
@@ -614,7 +615,7 @@ mod tests {
                 "",
                 "limit_warning",
                 node,
-                json!({"limitId":"lim","mission":true}),
+                json!({"limit_id":"lim","mission":true}),
             );
             e.attempt = 1;
             e.slot_id = slot.into();

@@ -6,13 +6,13 @@ use std::path::PathBuf;
 use ahjo_mission_engine::{Error, Store};
 use ahjo_mission_model::Mission;
 
-const HELLO: &str = r#"schema = 1
+const HELLO: &str = r#"schema = 2
 id = "msn_hello"
 slug = "hello"
 title = "Hello"
 rev = 1
 
-[[inputCard]]
+[[input_card]]
 id = "inp_hello"
 title = "Hello"
 goal = "Return the supplied input"
@@ -33,7 +33,7 @@ label = "Result"
 [[formation.slot]]
 id = "slot_work"
 label = "Worker"
-agentId = "builder"
+agent_id = "builder"
 harness = "openai-codex"
 model = "" # harness default
 effort = "medium"
@@ -100,7 +100,7 @@ fn a_mission_is_read_only_as_strict_toml_of_schema_one() {
     assert_eq!(code(Mission::parse(&repeated)), "invalid_definition_source");
     let typo = HELLO.replace("effort = \"medium\"", "efort = \"medium\"");
     assert_eq!(code(Mission::parse(&typo)), "invalid_definition_source");
-    let legacy_brief = HELLO.replace("goal = \"Return a short result using the supplied output contract.\"", "goal = \"Return a short result using the supplied output contract.\"\nbeadId = \"example-1\"");
+    let legacy_brief = HELLO.replace("goal = \"Return a short result using the supplied output contract.\"", "goal = \"Return a short result using the supplied output contract.\"\nbead_id = \"example-1\"");
     assert_eq!(
         code(Mission::parse(&legacy_brief)),
         "invalid_definition_source"
@@ -113,11 +113,11 @@ fn a_mission_is_read_only_as_strict_toml_of_schema_one() {
         "invalid_definition_source"
     );
     assert_eq!(
-        code(Mission::parse(&HELLO.replace("schema = 1", "schema = 2"))),
+        code(Mission::parse(&HELLO.replace("schema = 2", "schema = 99"))),
         "unsupported_schema"
     );
     assert_eq!(
-        code(Mission::parse(&HELLO.replace("schema = 1\n", ""))),
+        code(Mission::parse(&HELLO.replace("schema = 2\n", ""))),
         "unsupported_schema"
     );
 }
@@ -126,7 +126,7 @@ fn a_mission_is_read_only_as_strict_toml_of_schema_one() {
 fn one_unreadable_mission_never_hides_the_rest() {
     let scratch = Scratch::new("broken");
     scratch.write("missions/hello.mission.toml", HELLO);
-    scratch.write("missions/bad.mission.toml", "schema = 1\nschema = 1\n");
+    scratch.write("missions/bad.mission.toml", "schema = 2\nschema = 2\n");
     scratch.write("missions/README.md", "not a mission");
     #[cfg(unix)]
     std::os::unix::fs::symlink(
@@ -210,7 +210,7 @@ fn notes_and_layout_belong_to_their_mission() {
     let store = scratch.store();
     assert!(store.read_notes("hello").unwrap().entries.is_empty());
     assert_eq!(store.read_layout("hello").unwrap(), None);
-    let notes = "schema = 2\nmissionId = \"msn_hello\"\nrev = 1\nupdatedAt = \"2026-11-05T00:00:00Z\"\n\n[[entry]]\nid = \"nte_1\"\ntarget = \"mission\"\nauthor = \"human:ui\"\ncreatedAt = \"2026-11-05T00:00:00Z\"\ntext = \"Keep it short.\"\n";
+    let notes = "schema = 3\nmission_id = \"msn_hello\"\nrev = 1\nupdated_at = \"2026-11-05T00:00:00Z\"\n\n[[entry]]\nid = \"nte_1\"\ntarget = \"mission\"\nauthor = \"human:ui\"\ncreated_at = \"2026-11-05T00:00:00Z\"\ntext = \"Keep it short.\"\n";
     scratch.write("notes/hello.notes.toml", notes);
     assert_eq!(
         store.read_notes("hello").unwrap().thread("mission").count(),
@@ -221,7 +221,7 @@ fn notes_and_layout_belong_to_their_mission() {
         &notes.replace("msn_hello", "msn_other"),
     );
     assert!(store.read_notes("hello").unwrap().entries.is_empty());
-    scratch.write("layout/hello.layout.toml", "schema = 1\nmissionId = \"msn_hello\"\nmissionRev = 1\n[[node]]\nid = \"fmn_work\"\nx = 10\ny = 20\n");
+    scratch.write("layout/hello.layout.toml", "schema = 2\nmission_id = \"msn_hello\"\nmission_rev = 1\n[[node]]\nid = \"fmn_work\"\nx = 10\ny = 20\n");
     assert_eq!(store.read_layout("hello").unwrap().unwrap().nodes[0].x, 10);
 }
 

@@ -254,7 +254,7 @@ mod tests {
         );
     }
     fn toml_fixture() -> Mission {
-        serde_json::from_value(serde_json::json!({"inputCard":[{"id":"inp_1","title":"Start"}],"formation":[{"id":"fmn_10","title":"Build","input":[{"id":"port_1","label":"Input"}],"slot":[{"id":"slot_1","label":"Worker"}]}],"connection":[{"id":"edge_1","from":"inp_1:out","to":"fmn_10:port_1"}]})).unwrap()
+        serde_json::from_value(serde_json::json!({"input_card":[{"id":"inp_1","title":"Start"}],"formation":[{"id":"fmn_10","title":"Build","input":[{"id":"port_1","label":"Input"}],"slot":[{"id":"slot_1","label":"Worker"}]}],"connection":[{"id":"edge_1","from":"inp_1:out","to":"fmn_10:port_1"}]})).unwrap()
     }
     fn key(rev: i64) -> Key {
         Key {

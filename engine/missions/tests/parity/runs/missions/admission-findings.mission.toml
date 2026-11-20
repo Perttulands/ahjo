@@ -1,10 +1,10 @@
-schema = 1
+schema = 2
 id = "msn_bad"
 slug = "admission-findings"
 title = "Admission findings"
 rev = 1
 
-[[inputCard]]
+[[input_card]]
 id = "inp"
 title = "Start"
 inputs = [{ name = "topic", kind = "text", required = true }, { name = "sketch", kind = "file" }]
@@ -36,12 +36,12 @@ effort = "low"
 id = "unavailable"
 harness = "claude-code"
 effort = "low"
-agentId = "unknown"
+agent_id = "unknown"
 [[formation.slot]]
 id = "retired"
 harness = "claude-code"
 effort = "low"
-agentId = "critic"
+agent_id = "critic"
 
 [[formation]]
 id = "orchestration"

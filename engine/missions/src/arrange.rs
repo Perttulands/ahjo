@@ -18,7 +18,7 @@ pub fn arrange(mission: &Mission, layout: &Layout) -> Layout {
         items.insert(
             n.id.clone(),
             Item {
-                kind: "inputCard".into(),
+                kind: "input_card".into(),
                 files: !n.files.is_empty(),
             },
         );
@@ -276,7 +276,7 @@ fn stacked(id: &str, below: &BTreeMap<String, Vec<String>>, out: &mut Vec<String
 }
 fn size(item: &Item) -> (i64, i64) {
     let (width, height) = match item.kind.as_str() {
-        "inputCard" => (260, 168),
+        "input_card" => (260, 168),
         "gate" => (332, 132),
         "end" => (200, 64),
         "limit" => (220, 72),

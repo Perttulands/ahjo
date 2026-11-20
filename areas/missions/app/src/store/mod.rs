@@ -174,7 +174,7 @@ mod tests {
                 ..Default::default()
             },
         );
-        let run: RunProjection = serde_json::from_value(json!({"runId":"r", "status":"running", "final":false, "resumeAllowed":false,"epoch":1,"missionSlug":"same","missionId":"m","missionRev":1,"inputCardId":"i","work":"","cwd":"","repository":"","base":"","contextPaths":[],"inputs":[],"outputs":[],"eventCount":1,"startedBy":"","startedAt":"","updatedAt":"","waitingGates":[],"events":[]})).unwrap();
+        let run: RunProjection = serde_json::from_value(json!({"run_id":"r", "status":"running", "final":false, "resume_allowed":false,"epoch":1,"mission_slug":"same","mission_id":"m","mission_rev":1,"input_card_id":"i","work":"","cwd":"","repository":"","base":"","context_paths":[],"inputs":[],"outputs":[],"event_count":1,"started_by":"","started_at":"","updated_at":"","waiting_gates":[],"events":[]})).unwrap();
         s.nodes
             .get_mut("remote")
             .unwrap()
@@ -200,11 +200,11 @@ mod tests {
     #[test]
     fn an_older_projection_never_replaces_a_newer_one() {
         let mut store = Store::default();
-        let mut run = json!({"runId":"r", "status":"running", "final":false, "resumeAllowed":false,
-          "epoch":1, "missionSlug":"hello", "missionId":"m", "missionRev":1,
-          "inputCardId":"i", "work":"", "cwd":"", "repository":"", "base":"",
-          "requestId":"", "contextPaths":[], "inputs":[], "outputs":[], "eventCount":9,
-          "startedBy":"", "startedAt":"", "updatedAt":"", "endedBy":"", "waitingGates":[], "events":[]});
+        let mut run = json!({"run_id":"r", "status":"running", "final":false, "resume_allowed":false,
+          "epoch":1, "mission_slug":"hello", "mission_id":"m", "mission_rev":1,
+          "input_card_id":"i", "work":"", "cwd":"", "repository":"", "base":"",
+          "request_id":"", "context_paths":[], "inputs":[], "outputs":[], "event_count":9,
+          "started_by":"", "started_at":"", "updated_at":"", "ended_by":"", "waiting_gates":[], "events":[]});
         let frame = store
             .read_frame(
                 "node",
@@ -213,7 +213,7 @@ mod tests {
             )
             .unwrap();
         store.apply_frame("node", frame);
-        run["eventCount"] = json!(3);
+        run["event_count"] = json!(3);
         run["status"] = json!("blocked");
         let frame = store
             .read_frame(

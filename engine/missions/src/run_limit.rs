@@ -1,5 +1,5 @@
 //! What a spent Limit card does to a run (Archon `run_stop.go`
-//! `stopAtLimit`, `run_scheduler.go` `pickOrStop`): `fail` ends the run,
+//! `stop_at_limit`, `run_scheduler.go` `pick_or_stop`): `fail` ends the run,
 //! keeping its attempts as evidence; `best` picks the best judged attempt
 //! when the step's gate judged one since its last pick; anything else
 //! records the limit and blocks the run there for a grant.
@@ -75,7 +75,7 @@ pub(crate) fn pick_or_stop(
         if *cut_off {
             append_limit_error(c, id, control, mission, node, use_)?;
         }
-        crate::run_pick::start(c, id, control, mission, node, &pick, use_, "whenSpent")?;
+        crate::run_pick::start(c, id, control, mission, node, &pick, use_, "when_spent")?;
         return Ok(None);
     }
     let fail = when_spent == WHEN_SPENT_FAIL;
@@ -106,7 +106,7 @@ pub(crate) fn append_limit_error(
             "error",
             node,
             0,
-            json!({"code":LIMIT_REACHED,"message":reason,"reason":reason,"boundary":"limits","nodeId":node,"recoverable":true,"limit":use_}),
+            json!({"code":LIMIT_REACHED,"message":reason,"reason":reason,"boundary":"limits","node_id":node,"recoverable":true,"limit":use_}),
         ),
     )
     .map(|_| ())
@@ -130,7 +130,7 @@ pub(crate) fn abandon_cut_off(
             "slot_result",
             node,
             attempt,
-            json!({"dispatchId":dispatch.data.get("dispatchId"),"nodeId":node,"slotId":dispatch.slot_id,"status":"abandoned","reason":format!("attempt {attempt} was cut short by its Limit card")}),
+            json!({"dispatch_id":dispatch.data.get("dispatch_id"),"node_id":node,"slot_id":dispatch.slot_id,"status":"abandoned","reason":format!("attempt {attempt} was cut short by its Limit card")}),
         );
         result.slot_id.clone_from(&dispatch.slot_id);
         crate::run_worker::append_live(c, id, control, result)?;
@@ -139,7 +139,7 @@ pub(crate) fn abandon_cut_off(
 }
 
 /// The event a run stopped at a limit ends its epoch with: a failure for a
-/// card whose whenSpent is fail, otherwise a block a grant, or where the
+/// card whose when_spent is fail, otherwise a block a grant, or where the
 /// step can pick, a grant or a pick, resumes.
 pub(crate) fn final_event(
     c: &Coordinator,
@@ -172,7 +172,7 @@ pub(crate) fn final_event(
         kind: "run_blocked".into(),
         node_id: stop.node.clone(),
         timestamp: crate::run_storage::now(),
-        data: json!({"code":LIMIT_REACHED,"reason":reason,"limit":stop.use_,"blockedNodeId":stop.node,"blockedGateId":"","resumeAllowed":true,"resumePolicy":policy,"openDispatches":[],"nextEpoch":1})
+        data: json!({"code":LIMIT_REACHED,"reason":reason,"limit":stop.use_,"blocked_node_id":stop.node,"blocked_gate_id":"","resume_allowed":true,"resume_policy":policy,"open_dispatches":[],"next_epoch":1})
             .as_object()
             .unwrap()
             .clone(),

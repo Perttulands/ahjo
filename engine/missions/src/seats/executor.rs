@@ -112,7 +112,7 @@ impl SeatExecutor {
                         if self.seats.away(&request.formation.device).is_some() { break; }
                         if matches!(tokio::time::timeout(Duration::from_millis(250), self.seats.seat_alive(worker_seat)).await, Ok(Ok(false))) {
                             let text = format!("Worker {} (session {}) is gone. Continue without that worker.", worker.id, worker_seat.session_name);
-                            let data = json!({"mode":"agentic-leader","observer":"ahjo-seat","phase":"work","outcome":"gone","anomaly":true,"slotId":worker.id,"controllerSlot":slot.id,"session_ref":format!("terminal:{}", worker_seat.session_name)});
+                            let data = json!({"mode":"agentic-leader","observer":"ahjo-seat","phase":"work","outcome":"gone","anomaly":true,"slot_id":worker.id,"controller_slot":slot.id,"session_ref":format!("terminal:{}", worker_seat.session_name)});
                             sink.emit(ExecutionEvent { kind: "worker_observation".into(), slot_id: worker.id.clone(), data: data.as_object().unwrap().clone() }).map_err(|e| format!("seat_ledger_unavailable: {e}"))?;
                             self.seats.notify(&id, &text).await.map_err(|e| e.message)?;
                             lost.insert(worker.id.clone());
@@ -140,7 +140,7 @@ impl SeatExecutor {
             if request.limits.counts_tokens()
                 && let Some(tokens) = self.seats.tokens(&id).map_err(|error| error.message)?.or((counted > 0).then_some(counted))
             {
-                sink.emit(ExecutionEvent { kind: "token_usage".into(), slot_id: slot.id.clone(), data: json!({"dispatchId":id,"tokens":tokens}).as_object().cloned().unwrap_or_default() })
+                sink.emit(ExecutionEvent { kind: "token_usage".into(), slot_id: slot.id.clone(), data: json!({"dispatch_id":id,"tokens":tokens}).as_object().cloned().unwrap_or_default() })
                     .map_err(|e| format!("seat_ledger_unavailable: {e}"))?;
             }
             Ok::<_, String>((seat, result))
@@ -219,7 +219,7 @@ impl SeatExecutor {
                 .map_err(|e| e.to_string())?;
                 let path = event
                     .data
-                    .get("briefPath")
+                    .get("brief_path")
                     .and_then(Value::as_str)
                     .ok_or("brief path missing")?
                     .to_owned();
@@ -284,7 +284,7 @@ impl SeatExecutor {
                 continue;
             }
             *sent = true;
-            let data = json!({"dispatchId":id,"limitId":warning.limit_id,"mission":warning.mission,"text":warning.text});
+            let data = json!({"dispatch_id":id,"limit_id":warning.limit_id,"mission":warning.mission,"text":warning.text});
             let claimed = sink.emit(ExecutionEvent {
                 kind: "limit_warning".into(),
                 slot_id: slot.into(),
@@ -470,7 +470,7 @@ impl SeatExecutor {
                 .map_err(|e| e.to_string())?;
                 let path = event
                     .data
-                    .get("briefPath")
+                    .get("brief_path")
                     .and_then(Value::as_str)
                     .ok_or("brief path missing")?
                     .to_owned();
@@ -487,7 +487,7 @@ impl SeatExecutor {
                     | "seat_idle_recovery"
             ) {
                 let mut data = event.data;
-                data.insert("seatEventSeq".into(), json!(event.seq));
+                data.insert("seat_event_seq".into(), json!(event.seq));
                 replay.push(ExecutionEvent {
                     kind: event.kind,
                     slot_id: request.slot_id.clone(),
@@ -630,8 +630,8 @@ impl SeatExecutor {
                 return Err(error);
             }
         };
-        let identity = |slot: &Slot, seat: &SeatId| json!({"slotId":slot.id,"label":slot.label,"agentId":slot.agent_id,"harness":slot.harness,"session_ref":format!("terminal:{}", seat.session_name)});
-        let data = json!({"mode":"agentic-leader","cwd":request.cwd,"controllerSlot":controller.id,"controller":identity(controller, &controller_seat),"workers":workers.iter().map(|(slot, _, seat, _)| identity(slot, seat)).collect::<Vec<_>>()});
+        let identity = |slot: &Slot, seat: &SeatId| json!({"slot_id":slot.id,"label":slot.label,"agent_id":slot.agent_id,"harness":slot.harness,"session_ref":format!("terminal:{}", seat.session_name)});
+        let data = json!({"mode":"agentic-leader","cwd":request.cwd,"controller_slot":controller.id,"controller":identity(controller, &controller_seat),"workers":workers.iter().map(|(slot, _, seat, _)| identity(slot, seat)).collect::<Vec<_>>()});
         let team = sink.emit(ExecutionEvent {
             kind: "orchestration_team".into(),
             slot_id: controller.id.clone(),
@@ -648,7 +648,7 @@ impl SeatExecutor {
             return Err(format!("seat_ledger_unavailable: {error}"));
         }
         for (slot, _, seat, _) in &workers {
-            let data = json!({"mode":"agentic-leader","observer":"ahjo-seat","phase":"bind","outcome":"bound","anomaly":false,"slotId":slot.id,"controllerSlot":controller.id,"session_ref":format!("terminal:{}", seat.session_name)});
+            let data = json!({"mode":"agentic-leader","observer":"ahjo-seat","phase":"bind","outcome":"bound","anomaly":false,"slot_id":slot.id,"controller_slot":controller.id,"session_ref":format!("terminal:{}", seat.session_name)});
             if let Err(error) = sink.emit(ExecutionEvent {
                 kind: "worker_observation".into(),
                 slot_id: slot.id.clone(),
@@ -866,7 +866,7 @@ impl Executor for SeatExecutor {
                 if !["ended", "gone", "kept"].contains(&outcome.as_str()) {
                     return Err(format!("seat_cleanup: {outcome}"));
                 }
-                let data = json!({"dispatchId":request.dispatch_id,"sessionName":seat.session_name,"outcome":outcome,"cause":"run_final"});
+                let data = json!({"dispatch_id":request.dispatch_id,"session_name":seat.session_name,"outcome":outcome,"cause":"run_final"});
                 replay.push(ExecutionEvent { kind: "seat_cleanup".into(), slot_id: request.slot_id.clone(), data: data.as_object().cloned().unwrap_or_default() });
             }
             // A placed turn is published once its seat has ended, also when
@@ -888,12 +888,12 @@ impl Executor for SeatExecutor {
             };
             let seat = SeatId {
                 node: serde_json::from_value(get("node")?).map_err(|e| e.to_string())?,
-                session_name: serde_json::from_value(get("sessionName")?)
+                session_name: serde_json::from_value(get("session_name")?)
                     .map_err(|e| e.to_string())?,
                 session: ahjo_term::SessionRef {
-                    session_id: serde_json::from_value(get("sessionId")?)
+                    session_id: serde_json::from_value(get("session_id")?)
                         .map_err(|e| e.to_string())?,
-                    pane_id: serde_json::from_value(get("paneId")?).map_err(|e| e.to_string())?,
+                    pane_id: serde_json::from_value(get("pane_id")?).map_err(|e| e.to_string())?,
                     generation: serde_json::from_value(get("generation")?)
                         .map_err(|e| e.to_string())?,
                 },
@@ -1074,7 +1074,7 @@ fn place_state(sink: &ExecutionSink, slot: &str, state: &str, detail: &str) -> R
 }
 fn report_event(sink: &ExecutionSink, slot: &str, event: SeatEvent) -> Result<(), String> {
     let mut data = event.data;
-    data.insert("seatEventSeq".into(), json!(event.seq));
+    data.insert("seat_event_seq".into(), json!(event.seq));
     sink.emit(ExecutionEvent {
         kind: event.kind,
         slot_id: slot.into(),
@@ -1178,7 +1178,7 @@ fn dispatch_data(
     recorded_before_send: bool,
 ) -> Map<String, Value> {
     let prompt_sha = hex::encode(Sha256::digest(prompt.as_bytes()));
-    let data = json!({"dispatchId":id,"nodeId":node,"slotId":slot.id,"agentId":slot.agent_id,"harness":slot.harness,"session":seat.session_name,"session_ref":format!("terminal:{}",seat.session_name),"briefPath":path,"promptSha256":prompt_sha,"promptRef":"","phase":phase,"recordedBeforeSend":recorded_before_send,"nativeAck":false});
+    let data = json!({"dispatch_id":id,"node_id":node,"slot_id":slot.id,"agent_id":slot.agent_id,"harness":slot.harness,"session":seat.session_name,"session_ref":format!("terminal:{}",seat.session_name),"brief_path":path,"prompt_sha256":prompt_sha,"prompt_ref":"","phase":phase,"recorded_before_send":recorded_before_send,"native_ack":false});
     data.as_object().cloned().unwrap_or_default()
 }
 fn dispatch_id(request: &FormationExecution, slot: &Slot, phase: &str) -> String {
@@ -1207,7 +1207,7 @@ async fn published_turn(
         .publish_turn(place, turn)
         .await
         .map_err(|error| error.message)?;
-    let data = json!({"dispatchId":dispatch,"place":place,"commit":published.commit,"reference":published.reference});
+    let data = json!({"dispatch_id":dispatch,"place":place,"commit":published.commit,"reference":published.reference});
     Ok(ExecutionEvent {
         kind: "workspace_turn".into(),
         slot_id: slot.into(),

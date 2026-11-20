@@ -39,7 +39,7 @@ pub fn normalized_ledger(root: &Scratch, id: &str) -> Vec<Value> {
         .map(|line| {
             let event: Value = serde_json::from_str(line).unwrap();
             let mut result = Map::new();
-            for key in ["type", "nodeId", "gateId", "slotId", "attempt"] {
+            for key in ["type", "node_id", "gate_id", "slot_id", "attempt"] {
                 if let Some(value) = event.get(key) {
                     result.insert(key.into(), value.clone());
                 }
@@ -76,7 +76,7 @@ pub fn assert_concurrent_ledger(actual: &[Value], expected: &[Value]) {
     fn streams(events: &[Value]) -> std::collections::BTreeMap<String, Vec<Value>> {
         let mut result = std::collections::BTreeMap::<String, Vec<Value>>::new();
         for event in events {
-            let key = event["nodeId"].as_str().unwrap_or("run").to_owned();
+            let key = event["node_id"].as_str().unwrap_or("run").to_owned();
             result.entry(key).or_default().push(event.clone());
         }
         result
@@ -95,7 +95,7 @@ fn payload_parity(root: &Scratch, id: &str, expected: &str, concurrent: bool) {
             }
             Value::Array(values) => values.iter_mut().for_each(|v| stable(v, id)),
             Value::Object(values) => {
-                for key in ["artifactRef", "reportRef", "kind"] {
+                for key in ["artifact_ref", "report_ref", "kind"] {
                     if values.get(key).and_then(Value::as_str) == Some("") {
                         values.remove(key);
                     }
@@ -133,23 +133,23 @@ fn payload_parity(root: &Scratch, id: &str, expected: &str, concurrent: bool) {
                 return None;
             }
             let mut result = Map::new();
-            for key in ["type", "nodeId", "gateId", "attempt"] {
+            for key in ["type", "node_id", "gate_id", "attempt"] {
                 if let Some(value) = event.get(key) {
                     result.insert(key.into(), value.clone());
                 }
             }
             for key in [
-                "inputRefs",
-                "inputRef",
+                "input_refs",
+                "input_ref",
                 "reason",
-                "requestedSeq",
-                "routedEdges",
+                "requested_seq",
+                "routed_edges",
                 "verdict",
                 "evidence",
             ] {
                 if let Some(value) = event["data"].get(key) {
                     let mut value = value.clone();
-                    if concurrent && key == "requestedSeq" {
+                    if concurrent && key == "requested_seq" {
                         assert_eq!(
                             value.as_u64(),
                             request_seq,
@@ -170,7 +170,7 @@ fn payload_parity(root: &Scratch, id: &str, expected: &str, concurrent: bool) {
         .collect();
     if concurrent {
         for event in &mut expected {
-            if let Some(value) = event.get_mut("requestedSeq") {
+            if let Some(value) = event.get_mut("requested_seq") {
                 *value = Value::String("<request>".into());
             }
         }

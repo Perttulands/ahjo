@@ -389,7 +389,7 @@ mod tests {
 
     #[test]
     fn a_run_and_its_gate_are_handed_over_by_what_answers_them() {
-        let run: Run = serde_json::from_value(serde_json::json!({"runId":"r-7","status":"waiting_human","final":false,"resumeAllowed":false,"epoch":1,"missionSlug":"daily","missionId":"m","missionRev":1,"inputCardId":"i","work":"","cwd":"","repository":"","base":"","contextPaths":[],"inputs":[],"outputs":[],"eventCount":1,"startedBy":"","startedAt":"","updatedAt":"","waitingGates":[],"events":[]})).unwrap();
+        let run: Run = serde_json::from_value(serde_json::json!({"run_id":"r-7","status":"waiting_human","final":false,"resume_allowed":false,"epoch":1,"mission_slug":"daily","mission_id":"m","mission_rev":1,"input_card_id":"i","work":"","cwd":"","repository":"","base":"","context_paths":[],"inputs":[],"outputs":[],"event_count":1,"started_by":"","started_at":"","updated_at":"","waiting_gates":[],"events":[]})).unwrap();
         let gate = ahjo_missions_contract::WaitingGate {
             gate_id: "gate_review".into(),
             requested_seq: 12,

@@ -1,11 +1,11 @@
 # Import the companion delivery.notes.toml into .archon/notes/.
-schema = 1
+schema = 2
 id = "brd_delivery"
 slug = "delivery"
 title = "Delivery"
 rev = 1
 
-[[inputCard]]
+[[input_card]]
 id = "mis_delivery"
 title = "Deliver a change"
 goal = "Deliver a reviewed change to a repository. A run supplies the change as its input, the target repository as its cwd and the owning Bead as its Bead. Plan the change, draft Beads in that repository, review them with pushback, execute with a Claude controller and three Codex workers, then produce an independent Astra review report. The plan and report live in the run artifact directory."
@@ -28,7 +28,7 @@ label = "Plan"
 [[formation.slot]]
 id = "plan"
 label = "Plan"
-agentId = "planner"
+agent_id = "planner"
 harness = "claude-code"
 controller = true
 effort = "xhigh"
@@ -67,7 +67,7 @@ label = "Verdict"
 [[formation.slot]]
 id = "beads_reviewer"
 label = "Beads reviewer"
-agentId = "judge"
+agent_id = "judge"
 harness = "claude-code"
 controller = true
 effort = "xhigh"
@@ -87,28 +87,28 @@ label = "Delivery"
 [[formation.slot]]
 id = "execution"
 label = "Controller"
-agentId = "orchestrator"
+agent_id = "orchestrator"
 harness = "claude-code"
 controller = true
 effort = "xhigh"
 [[formation.slot]]
 id = "worker_1"
 label = "Worker 1"
-agentId = "builder"
+agent_id = "builder"
 harness = "openai-codex"
 controller = false
 effort = "medium"
 [[formation.slot]]
 id = "worker_2"
 label = "Worker 2"
-agentId = "builder"
+agent_id = "builder"
 harness = "openai-codex"
 controller = false
 effort = "medium"
 [[formation.slot]]
 id = "worker_3"
 label = "Worker 3"
-agentId = "builder"
+agent_id = "builder"
 harness = "openai-codex"
 controller = false
 effort = "medium"
@@ -128,7 +128,7 @@ label = "Report"
 [[formation.slot]]
 id = "final_review"
 label = "Final review"
-agentId = "reviewer"
+agent_id = "reviewer"
 harness = "openai-codex"
 controller = true
 model = "gpt-6-astra"

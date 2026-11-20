@@ -118,7 +118,7 @@ pub(crate) fn last_selection(events: &[RunEvent], node: &str) -> u64 {
 
 fn latest_selection<'a>(events: &'a [RunEvent], node: &str) -> Option<&'a RunEvent> {
     events.iter().rev().find(|e| {
-        e.kind == "gate_verdict" && e.data.get("folderNode").and_then(Value::as_str) == Some(node)
+        e.kind == "gate_verdict" && e.data.get("folder_node").and_then(Value::as_str) == Some(node)
     })
 }
 
@@ -132,16 +132,16 @@ pub(crate) fn record_verdict(
     mut verdict: RunEvent,
 ) -> io::Result<()> {
     if verdict.kind == "gate_verdict"
-        && verdict.data.get("routePort").and_then(Value::as_str) == Some("pass")
+        && verdict.data.get("route_port").and_then(Value::as_str) == Some("pass")
     {
         let reference = verdict.data.get("pick").or_else(|| {
             verdict
                 .data
-                .get("inputRef")
+                .get("input_ref")
                 .and_then(|input| input.get("origin"))
         });
         if let Some(reference) = reference
-            && let Some(node) = reference.get("nodeId").and_then(Value::as_str)
+            && let Some(node) = reference.get("node_id").and_then(Value::as_str)
             && let Some(attempt) = reference.get("attempt").and_then(Value::as_i64)
             && let Some(copy) = events.iter().rev().find(|e| {
                 e.kind == COPY
@@ -161,10 +161,10 @@ pub(crate) fn record_verdict(
             verdict.kind = PENDING.into();
             verdict
                 .data
-                .insert("folderAttemptSeq".into(), copy.seq.into());
+                .insert("folder_attempt_seq".into(), copy.seq.into());
             verdict
                 .data
-                .insert("folderNode".into(), copy.node_id.clone().into());
+                .insert("folder_node".into(), copy.node_id.clone().into());
         }
     }
     append_live(c, id, control, verdict).map(|_| ())
@@ -175,7 +175,7 @@ pub(crate) fn pending(events: &[RunEvent]) -> Option<&RunEvent> {
         e.kind == PENDING
             && !events.iter().any(|f| {
                 f.kind == "gate_verdict"
-                    && f.data.get("folderVerdictSeq").and_then(Value::as_u64) == Some(e.seq)
+                    && f.data.get("folder_verdict_seq").and_then(Value::as_u64) == Some(e.seq)
             })
     })
 }
@@ -188,7 +188,11 @@ fn selection<'a>(
         .iter()
         .find(|e| {
             e.kind == COPY
-                && Some(e.seq) == verdict.data.get("folderAttemptSeq").and_then(Value::as_u64)
+                && Some(e.seq)
+                    == verdict
+                        .data
+                        .get("folder_attempt_seq")
+                        .and_then(Value::as_u64)
         })
         .ok_or_else(|| io::Error::other("the selected attempt's folder record is missing"))?;
     let source = copy
@@ -209,7 +213,7 @@ pub(crate) fn settle(
     events: &[RunEvent],
     pending: &RunEvent,
 ) -> io::Result<()> {
-    if let Some(node) = pending.data.get("folderNode").and_then(Value::as_str) {
+    if let Some(node) = pending.data.get("folder_node").and_then(Value::as_str) {
         crate::run_left_seats::end(c, id, Some(node), "folder_selected")?;
     }
     let _workspace = c.inner.folder_workspace.lock().unwrap();
@@ -220,7 +224,7 @@ pub(crate) fn settle(
     let (copy, source) = selection(events, pending)?;
     let prior = latest_selection(events, &copy.node_id).filter(|prior| prior.seq > copy.seq);
     if prior.is_some_and(|prior| {
-        prior.data.get("folderAttemptSeq") != pending.data.get("folderAttemptSeq")
+        prior.data.get("folder_attempt_seq") != pending.data.get("folder_attempt_seq")
     }) {
         return Err(io::Error::other(format!(
             "{CONFLICT}: another gate already selected a different attempt of {}",
@@ -259,11 +263,11 @@ pub(crate) fn settle(
     verdict.kind = "gate_verdict".into();
     verdict
         .data
-        .insert("folderVerdictSeq".into(), pending.seq.into());
+        .insert("folder_verdict_seq".into(), pending.seq.into());
     if prior.is_some() {
         // A second gate can pass the copy that already landed. Only the
         // first accepting verdict advances the step's snapshot boundary.
-        verdict.data.remove("folderNode");
+        verdict.data.remove("folder_node");
     }
     c.append(id, verdict)?;
     drop(done);
@@ -286,7 +290,7 @@ fn discard_selected(c: &Coordinator, id: &str, node: &str, events: &[RunEvent]) 
 /// Replay cleanup if the verdict was recorded just before a shutdown.
 pub(crate) fn recover(c: &Coordinator, id: &str, events: &[RunEvent]) -> io::Result<()> {
     for verdict in events.iter().filter(|e| e.kind == "gate_verdict") {
-        if let Some(node) = verdict.data.get("folderNode").and_then(Value::as_str) {
+        if let Some(node) = verdict.data.get("folder_node").and_then(Value::as_str) {
             let index = events.partition_point(|e| e.seq < verdict.seq);
             discard_selected(c, id, node, &events[..index])?;
         }

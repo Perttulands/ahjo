@@ -34,7 +34,7 @@ pub(crate) fn apply(
     patch: MissionChange,
 ) -> Result<HashSet<String>, Error> {
     let (key, id, remove_limits) = match patch {
-        MissionChange::DeleteInputCard { id } => ("inputCard", id, false),
+        MissionChange::DeleteInputCard { id } => ("input_card", id, false),
         MissionChange::DeleteFormation { id } => ("formation", id, true),
         MissionChange::DeleteGate { id } => ("gate", id, false),
         MissionChange::DeleteEnd { id } => ("end", id, false),

@@ -302,9 +302,9 @@ fn evidence_links_and_attempt_images(cx: &mut TestAppContext) {
     let briefs = e["briefs"].as_array().unwrap();
     let brief = briefs
         .iter()
-        .rfind(|b| b["nodeId"] == briefs[0]["nodeId"])
+        .rfind(|b| b["node_id"] == briefs[0]["node_id"])
         .unwrap();
-    let brief_selector = format!("run-brief-{}", brief["dispatchSeq"].as_u64().unwrap());
+    let brief_selector = format!("run-brief-{}", brief["dispatch_seq"].as_u64().unwrap());
     click(cx, &brief_selector);
     until(cx, "brief ask", |_| OPENED.lock().unwrap().len() >= 2);
     assert_eq!(

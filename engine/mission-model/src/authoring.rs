@@ -31,8 +31,8 @@ pub struct DocumentChanges {
 /// A single board mutation, shared by the engine and the missions contract.
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize, JsonSchema)]
 #[serde(
-    rename_all = "camelCase",
-    rename_all_fields = "camelCase",
+    rename_all = "snake_case",
+    rename_all_fields = "snake_case",
     deny_unknown_fields
 )]
 pub enum MissionChange {
@@ -501,7 +501,7 @@ pub struct MissionDeletion {
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Deserialize, Serialize, JsonSchema)]
-#[serde(default, rename_all = "camelCase", deny_unknown_fields)]
+#[serde(default, rename_all = "snake_case", deny_unknown_fields)]
 pub struct EndUpdate {
     /// The card’s id.
     #[serde(deserialize_with = "default_on_null")]
@@ -515,7 +515,7 @@ pub struct EndUpdate {
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Deserialize, Serialize, JsonSchema)]
-#[serde(default, rename_all = "camelCase", deny_unknown_fields)]
+#[serde(default, rename_all = "snake_case", deny_unknown_fields)]
 pub struct LimitUpdate {
     /// The card’s id.
     #[serde(deserialize_with = "default_on_null")]
@@ -544,7 +544,7 @@ pub struct LimitUpdate {
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Deserialize, Serialize, JsonSchema)]
-#[serde(default, rename_all = "camelCase", deny_unknown_fields)]
+#[serde(default, rename_all = "snake_case", deny_unknown_fields)]
 pub struct GateUpdate {
     /// The card’s id.
     #[serde(deserialize_with = "default_on_null")]
@@ -573,7 +573,7 @@ pub struct GateUpdate {
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Deserialize, Serialize, JsonSchema)]
-#[serde(default, rename_all = "camelCase", deny_unknown_fields)]
+#[serde(default, rename_all = "snake_case", deny_unknown_fields)]
 pub struct InputCardUpdate {
     /// The card’s id.
     #[serde(deserialize_with = "default_on_null")]
@@ -602,7 +602,7 @@ pub struct InputCardUpdate {
 }
 
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize, JsonSchema)]
-#[serde(rename_all = "camelCase", try_from = "RestoredCards")]
+#[serde(rename_all = "snake_case", try_from = "RestoredCards")]
 pub enum RestoredNode {
     InputCard(InputCard),
     Formation(Formation),
@@ -613,7 +613,7 @@ pub enum RestoredNode {
 
 // The legacy restore operation allows null placeholders for the other card kinds.
 #[derive(Deserialize, JsonSchema)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "snake_case")]
 struct RestoredCards {
     input_card: Option<InputCard>,
     formation: Option<Formation>,
@@ -637,7 +637,7 @@ impl TryFrom<RestoredCards> for RestoredNode {
         .flatten();
         match (nodes.next(), nodes.next()) {
             (Some(node), None) => Ok(node),
-            _ => Err("restoreNode requires exactly one node"),
+            _ => Err("restore_node requires exactly one node"),
         }
     }
 }

@@ -1,10 +1,10 @@
-schema = 1
+schema = 2
 id = "msn_hello"
 slug = "hello"
 title = "Hello"
 rev = 1
 
-[[inputCard]]
+[[input_card]]
 id = "inp_hello"
 title = "Hello"
 goal = "Return the supplied input"
@@ -24,7 +24,7 @@ label = "Result"
 [[formation.slot]]
 id = "slot_work"
 label = "Worker"
-agentId = "builder"
+agent_id = "builder"
 harness = "openai-codex"
 model = "" # harness default
 effort = "medium"

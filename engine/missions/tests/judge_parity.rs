@@ -410,16 +410,16 @@ fn judge_fail_pushes_back_typed_feedback_before_a_later_pass() {
         let start = expected
             .iter()
             .position(|e| {
-                e["type"] == "node_started" && e["nodeId"] == "fmn_work" && e["attempt"] == attempt
+                e["type"] == "node_started" && e["node_id"] == "fmn_work" && e["attempt"] == attempt
             })
             .unwrap();
-        expected.insert(start + 1, serde_json::json!({"type":"folder_attempt_started","nodeId":"fmn_work","attempt":attempt}));
+        expected.insert(start + 1, serde_json::json!({"type":"folder_attempt_started","node_id":"fmn_work","attempt":attempt}));
     }
     let pass = expected
         .iter()
         .position(|e| e["type"] == "gate_verdict" && e["verdict"] == "pass")
         .unwrap();
-    expected.insert(pass, serde_json::json!({"type":"folder_verdict_pending","gateId":"gate_review","nodeId":"gate_review","attempt":2,"verdict":"pass"}));
+    expected.insert(pass, serde_json::json!({"type":"folder_verdict_pending","gate_id":"gate_review","node_id":"gate_review","attempt":2,"verdict":"pass"}));
     assert_eq!(normalized_ledger(&root, &id), expected);
     run_support::assert_payload_parity(
         &root,

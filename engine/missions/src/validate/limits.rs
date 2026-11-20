@@ -56,7 +56,7 @@ pub fn findings(mission: &Mission) -> (Vec<Finding>, Vec<Finding>) {
         match (limit.warn_seconds, limit.seconds) {
             (None, _) => {}
             (Some(warn), _) if warn <= 0 => add(format!(
-                "{name} holds warnSeconds = {warn}: the warning must be a positive whole number of seconds"
+                "{name} holds warn_seconds = {warn}: the warning must be a positive whole number of seconds"
             )),
             (Some(warn), None) => add(format!(
                 "{name} warns with {} left but sets no time: give it time, or clear the warning",
@@ -100,7 +100,7 @@ fn card_name(mission: &Mission, id: &str) -> String {
     }
 }
 
-/// Why a card cannot do what its whenSpent asks: best needs a step whose
+/// Why a card cannot do what its when_spent asks: best needs a step whose
 /// selecting gate a judge or a human decides, so someone can pick.
 fn when_spent_problem(mission: &Mission, limit: &Limit, name: &str) -> Option<String> {
     match limit.when_spent.trim() {
@@ -108,7 +108,7 @@ fn when_spent_problem(mission: &Mission, limit: &Limit, name: &str) -> Option<St
         "best" => {}
         _ => {
             return Some(format!(
-                "{name} holds whenSpent = {:?}: set it to stop, best or fail",
+                "{name} holds when_spent = {:?}: set it to stop, best or fail",
                 limit.when_spent
             ));
         }

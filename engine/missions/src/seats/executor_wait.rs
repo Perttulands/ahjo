@@ -53,7 +53,7 @@ impl SeatSide for Away {
             },
             cwd: None,
         };
-        let prepared = json!({"seat":seat,"briefPath":"brief.md"});
+        let prepared = json!({"seat":seat,"brief_path":"brief.md"});
         sender
             .try_send(Ok(SeatEvent {
                 key: "seat-prepared".into(),

@@ -34,7 +34,7 @@ pub fn project_run(events: &[RunEvent], run_id: &str) -> Result<RunProjection, c
             epoch: 0,
             resume_policy: String::new(),
             block_code: String::new(),
-            mission_slug: string(first, "missionSlug"),
+            mission_slug: string(first, "mission_slug"),
             mission_id: first.mission_id.clone(),
             mission_rev: first.mission_rev,
             input_card_id: first.input_card_id.clone(),
@@ -42,8 +42,8 @@ pub fn project_run(events: &[RunEvent], run_id: &str) -> Result<RunProjection, c
             cwd: string(first, "cwd"),
             repository: string(first, "repository"),
             base: string(first, "base"),
-            request_id: string(first, "requestId"),
-            context_paths: strings(first, "contextPaths"),
+            request_id: string(first, "request_id"),
+            context_paths: strings(first, "context_paths"),
             inputs: first
                 .data
                 .get("inputs")
@@ -72,10 +72,10 @@ pub fn project_run(events: &[RunEvent], run_id: &str) -> Result<RunProjection, c
                 "run_blocked" => {
                     result.status = "blocked".into();
                     result.block_code = string(event, "code");
-                    result.resume_policy = string(event, "resumePolicy");
+                    result.resume_policy = string(event, "resume_policy");
                     result.resume_allowed = event
                         .data
-                        .get("resumeAllowed")
+                        .get("resume_allowed")
                         .and_then(|v| v.as_bool())
                         .unwrap_or(false);
                 }
@@ -113,7 +113,7 @@ pub fn project_run(events: &[RunEvent], run_id: &str) -> Result<RunProjection, c
                 "human_verdict_recorded" => {
                     let requested = event
                         .data
-                        .get("requestedSeq")
+                        .get("requested_seq")
                         .and_then(|v| v.as_u64())
                         .unwrap_or(0);
                     result.waiting_gates.retain(|gate| {
@@ -132,7 +132,7 @@ pub fn project_run(events: &[RunEvent], run_id: &str) -> Result<RunProjection, c
                 attempt: event.attempt,
                 requested_seq: event
                     .data
-                    .get("requestedSeq")
+                    .get("requested_seq")
                     .and_then(|v| v.as_u64())
                     .unwrap_or(0),
                 status: string(event, "status"),
@@ -140,14 +140,14 @@ pub fn project_run(events: &[RunEvent], run_id: &str) -> Result<RunProjection, c
                 verdict: string(event, "verdict"),
                 outcome: string(event, "outcome"),
                 code: string(event, "code"),
-                session_name: string(event, "sessionName"),
+                session_name: string(event, "session_name"),
                 seat_node: if event.kind == "seat_created" {
                     string(event, "node")
                 } else {
                     String::new()
                 },
                 session_id: if event.kind == "seat_created" {
-                    string(event, "sessionId")
+                    string(event, "session_id")
                 } else {
                     String::new()
                 },
@@ -164,18 +164,18 @@ pub fn project_run(events: &[RunEvent], run_id: &str) -> Result<RunProjection, c
                     string(event, "detail")
                 },
                 since: string(event, "since"),
-                end_ids: strings(event, "endIds"),
+                end_ids: strings(event, "end_ids"),
                 input_refs: event
                     .data
-                    .get("inputRefs")
+                    .get("input_refs")
                     .and_then(|v| v.as_array())
                     .into_iter()
                     .flatten()
                     .map(|v| PublicInputRef {
-                        edge_id: v["edgeId"].as_str().unwrap_or("").into(),
-                        from_node_id: v["fromNodeId"].as_str().unwrap_or("").into(),
-                        from_port_id: v["fromPortId"].as_str().unwrap_or("").into(),
-                        to_port_id: v["toPortId"].as_str().unwrap_or("").into(),
+                        edge_id: v["edge_id"].as_str().unwrap_or("").into(),
+                        from_node_id: v["from_node_id"].as_str().unwrap_or("").into(),
+                        from_port_id: v["from_port_id"].as_str().unwrap_or("").into(),
+                        to_port_id: v["to_port_id"].as_str().unwrap_or("").into(),
                         origin: serde_json::from_value(v["origin"].clone()).ok(),
                     })
                     .collect(),

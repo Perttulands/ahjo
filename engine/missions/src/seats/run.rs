@@ -83,10 +83,10 @@ impl LocalSeats {
                 .map(Into::into);
             pointer.session_id = event
                 .data
-                .get("nativeSessionId")
+                .get("native_session_id")
                 .and_then(|v| v.as_str())
                 .map(Into::into);
-            if let Some(value) = event.data.get("knownThreads") {
+            if let Some(value) = event.data.get("known_threads") {
                 pointer.known_threads =
                     serde_json::from_value(value.clone()).map_err(|e| e.to_string())?;
             }
@@ -126,7 +126,7 @@ impl LocalSeats {
                         "state-{}",
                         records.events(id, 0).map_err(|e| e.to_string())?.len() + 1
                     );
-                    let data = json!({"dispatchId":id,"state":state,"detail":detail,"since":since});
+                    let data = json!({"dispatch_id":id,"state":state,"detail":detail,"since":since});
                     let event = records
                         .append(
                             id,
@@ -144,7 +144,7 @@ impl LocalSeats {
                 .map_err(|e| e.to_string())?;
         }
         let adapter_sent = events.iter().any(|event| event.key == "adapter-send");
-        let data = json!({"dispatchId":id,"nodeId":dispatch.node_id,"slotId":dispatch.slot_id,"session_ref":format!("terminal:{}", seat.session_name),"adapter":"terminal","sent":true});
+        let data = json!({"dispatch_id":id,"node_id":dispatch.node_id,"slot_id":dispatch.slot_id,"session_ref":format!("terminal:{}", seat.session_name),"adapter":"terminal","sent":true});
         let event = records
             .append(
                 id,
@@ -171,12 +171,12 @@ impl LocalSeats {
         };
         let report = std::sync::Mutex::new(&mut report);
         let answer = watch.wait(&mut pointer, |selected, turn| {
-            let data = json!({"dispatchId":id,"sessionName":seat.session_name,"nativeSessionId":turn.session_id,"transcript":selected.transcript,"knownThreads":selected.known_threads});
+            let data = json!({"dispatch_id":id,"session_name":seat.session_name,"native_session_id":turn.session_id,"transcript":selected.transcript,"known_threads":selected.known_threads});
             let event = records.append(id, "prompt-consumed", "seat_prompt_consumed", data.as_object().cloned().unwrap_or_default()).map_err(|e| e.to_string())?;
             if consumed_reported { Ok(()) } else { report.lock().map_err(|e| e.to_string())?(&event) }
         }, |state, detail, since| {
             let key = format!("state-{}", records.events(id, 0).map_err(|e| e.to_string())?.len() + 1);
-            let data = json!({"dispatchId":id,"state":state,"detail":detail,"since":since});
+            let data = json!({"dispatch_id":id,"state":state,"detail":detail,"since":since});
             let kind = if state == "seat_idle_recovery" { "seat_idle_recovery" } else { "seat_state" };
             let event = records.append(id, &key, kind, data.as_object().cloned().unwrap_or_default()).map_err(|e| e.to_string())?;
             report.lock().map_err(|e| e.to_string())?(&event)
@@ -190,7 +190,7 @@ impl LocalSeats {
             text: answer,
             status: sentinel.status.clone(),
         };
-        let data = json!({"dispatchId":id,"nodeId":dispatch.node_id,"slotId":dispatch.slot_id,"status":sentinel.status,"sentinel":{"runId":sentinel.run_id,"status":sentinel.status,"artifact":sentinel.artifact}});
+        let data = json!({"dispatch_id":id,"node_id":dispatch.node_id,"slot_id":dispatch.slot_id,"status":sentinel.status,"sentinel":{"run_id":sentinel.run_id,"status":sentinel.status,"artifact":sentinel.artifact}});
         let event = records
             .append(
                 id,

@@ -30,7 +30,7 @@ impl SeatSide for LocalSeats {
                     .records()
                     .brief_path(&dispatch.id)
                     .map_err(|e| e.to_string())?;
-                let data = json!({"seat":seat,"briefPath":path});
+                let data = json!({"seat":seat,"brief_path":path});
                 self.records()
                     .append(
                         &dispatch.id,
@@ -125,7 +125,7 @@ impl SeatSide for LocalSeats {
                         .map_err(|error| format!("seat worker failed: {error}"))
                         .and_then(|result| result.map_err(|error| error.message));
                     if let Err(error) = result {
-                        let data = json!({"dispatchId":id,"detail":error});
+                        let data = json!({"dispatch_id":id,"detail":error});
                         let _ = owner.records().append(
                             &id,
                             "seat-failed",
@@ -167,7 +167,7 @@ impl SeatSide for LocalSeats {
                 text: super::run::brief_pointer(&path),
                 cwd: dispatch.cwd.clone(),
                 transcript: Some(transcript.into()),
-                session_id: (consumed.data.get("nativeSessionId"))
+                session_id: (consumed.data.get("native_session_id"))
                     .and_then(|v| v.as_str())
                     .map(Into::into),
                 ..Default::default()

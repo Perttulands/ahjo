@@ -110,7 +110,7 @@ async fn cli_authors_two_steps_answers_gate_and_finishes_with_fake_sessions() {
     cli(&node, "mission", &["create", "relay", "--title", "Relay"]).await;
     let started = edit(
         &node,
-        json!({"createInputCard": {"title":"Start","goal":"Relay the brief"}}),
+        json!({"create_input_card": {"title":"Start","goal":"Relay the brief"}}),
     )
     .await;
     let card = started["input_card"]["id"].as_str().unwrap();
@@ -118,7 +118,7 @@ async fn cli_authors_two_steps_answers_gate_and_finishes_with_fake_sessions() {
     for title in ["Draft", "Polish", "Judge"] {
         let result = edit(
             &node,
-            json!({"createFormation":{"type":"solo","title":title}}),
+            json!({"create_formation":{"type":"solo","title":title}}),
         )
         .await;
         let step = &result["formation"];
@@ -126,12 +126,12 @@ async fn cli_authors_two_steps_answers_gate_and_finishes_with_fake_sessions() {
         let slot = step["slot"][0]["id"].as_str().unwrap();
         edit(
             &node,
-            json!({"assignSlot":{
-                "formationId":id, "slotId":slot, "harness":"openai-codex", "effort":"medium"
+            json!({"assign_slot":{
+                "formation_id":id, "slot_id":slot, "harness":"openai-codex", "effort":"medium"
             }}),
         )
         .await;
-        edit(&node, json!({"setBrief":{"formationId":id,"goal":title}})).await;
+        edit(&node, json!({"set_brief":{"formation_id":id,"goal":title}})).await;
         steps.push((
             format!("{id}:{}", step["input"][0]["id"].as_str().unwrap()),
             format!("{id}:{}", step["output"][0]["id"].as_str().unwrap()),
@@ -140,7 +140,7 @@ async fn cli_authors_two_steps_answers_gate_and_finishes_with_fake_sessions() {
     }
     let judge_gate = edit(
         &node,
-        json!({"createGate":{"title":"Judge review","kinds":["formation"]}}),
+        json!({"create_gate":{"title":"Judge review","kinds":["formation"]}}),
     )
     .await["gate"]["id"]
         .as_str()
@@ -148,22 +148,22 @@ async fn cli_authors_two_steps_answers_gate_and_finishes_with_fake_sessions() {
         .to_owned();
     edit(
         &node,
-        json!({"setGateJudge":{"gateId":judge_gate,"chain":[steps[2].2]}}),
+        json!({"set_gate_judge":{"gate_id":judge_gate,"chain":[steps[2].2]}}),
     )
     .await;
     let gate = edit(
         &node,
-        json!({"createGate":{"title":"Review","criterion":"Is this ready?"}}),
+        json!({"create_gate":{"title":"Review","criterion":"Is this ready?"}}),
     )
     .await["gate"]["id"]
         .as_str()
         .unwrap()
         .to_owned();
-    let done = edit(&node, json!({"createEnd":{"outcome":"done"}})).await["end"]["id"]
+    let done = edit(&node, json!({"create_end":{"outcome":"done"}})).await["end"]["id"]
         .as_str()
         .unwrap()
         .to_owned();
-    let rejected = edit(&node, json!({"createEnd":{"outcome":"rejected"}})).await["end"]["id"]
+    let rejected = edit(&node, json!({"create_end":{"outcome":"rejected"}})).await["end"]["id"]
         .as_str()
         .unwrap()
         .to_owned();
@@ -176,7 +176,7 @@ async fn cli_authors_two_steps_answers_gate_and_finishes_with_fake_sessions() {
         (format!("{gate}:fail"), format!("{rejected}:in")),
         (steps[1].1.clone(), format!("{done}:in")),
     ] {
-        edit(&node, json!({"wireConnection":{"from":from,"to":to}})).await;
+        edit(&node, json!({"wire_connection":{"from":from,"to":to}})).await;
     }
     let started = cli(
         &node,
@@ -236,9 +236,9 @@ async fn cli_authors_two_steps_answers_gate_and_finishes_with_fake_sessions() {
     })
     .await
     .expect("notification delivered");
-    assert_eq!(message["runId"], run);
-    assert_eq!(message["missionSlug"], "relay");
-    assert_eq!(message["gateId"], gate);
+    assert_eq!(message["run_id"], run);
+    assert_eq!(message["mission_slug"], "relay");
+    assert_eq!(message["gate_id"], gate);
     assert_eq!(message["ask"], "Is this ready?");
     assert_eq!(std::fs::read_to_string(&output).unwrap().lines().count(), 1);
     assert!(
@@ -398,7 +398,7 @@ async fn cli_authors_two_steps_answers_gate_and_finishes_with_fake_sessions() {
                 .as_array()
                 .unwrap()
                 .iter()
-                .any(|e| e["type"] == "node_output" && e["nodeId"] == *id),
+                .any(|e| e["type"] == "node_output" && e["node_id"] == *id),
             "{status}"
         );
     }

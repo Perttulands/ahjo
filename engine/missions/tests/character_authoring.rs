@@ -116,7 +116,7 @@ title = "Step"
 [[formation.slot]]
 id = "slot_work"
 label = "Worker"
-agentId = "builder"
+agent_id = "builder"
 controller = false
 "#,
     )
@@ -151,7 +151,7 @@ title = "Step"
 [[formation.slot]]
 id = "slot_work"
 label = "Worker"
-agentId = "critic"
+agent_id = "critic"
 controller = false
 "#,
     )
@@ -228,7 +228,7 @@ fn editing_role_capabilities_preserves_unknown_text_fields() {
     let roles_dir = dir.0.join("roles");
     std::fs::create_dir_all(&roles_dir).unwrap();
     let path = roles_dir.join("susie.toml");
-    std::fs::write(&path, "schema = 1\n\n[card]\nid = \"susie\"\ndisplay_name = \"Susie\"\nkind = \"specialist\"\ntags = [\"design\", \"taste:visual\"]\nreviewerNotes = \"prefers tight grids\"\n").unwrap();
+    std::fs::write(&path, "schema = 1\n\n[card]\nid = \"susie\"\ndisplay_name = \"Susie\"\nkind = \"specialist\"\ntags = [\"design\", \"taste:visual\"]\nreviewer_notes = \"prefers tight grids\"\n").unwrap();
     let roles = ahjo_mission_engine::Store::new(&dir.0).roles();
     let mut current = roles.role_edit("susie").unwrap();
     current.card.tags.push("tailwind".into());
@@ -238,7 +238,7 @@ fn editing_role_capabilities_preserves_unknown_text_fields() {
     assert!(
         std::fs::read_to_string(path)
             .unwrap()
-            .contains("reviewerNotes = \"prefers tight grids\"")
+            .contains("reviewer_notes = \"prefers tight grids\"")
     );
     let unchanged = roles
         .edit("susie", &updated.etag, updated.card.clone())
@@ -433,7 +433,7 @@ fn restoring_builtin_fields_preserves_extra_card_text() {
     let custom = roles.edit("builder", &original.etag, custom).unwrap();
     let path = dir.0.join("roles/builder.toml");
     let raw = std::fs::read_to_string(&path).unwrap();
-    std::fs::write(&path, format!("{raw}reviewerNotes = \"keep this\"\n")).unwrap();
+    std::fs::write(&path, format!("{raw}reviewer_notes = \"keep this\"\n")).unwrap();
     let current = roles.role_edit("builder").unwrap();
     assert_ne!(current.etag, custom.etag);
     let restored = roles
@@ -443,7 +443,7 @@ fn restoring_builtin_fields_preserves_extra_card_text() {
     assert!(
         std::fs::read_to_string(path)
             .unwrap()
-            .contains("reviewerNotes = \"keep this\"")
+            .contains("reviewer_notes = \"keep this\"")
     );
 }
 

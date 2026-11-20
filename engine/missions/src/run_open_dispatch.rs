@@ -6,7 +6,7 @@ pub(crate) fn open(events: &[RunEvent]) -> Vec<RunEvent> {
     for event in events {
         let id = event
             .data
-            .get("dispatchId")
+            .get("dispatch_id")
             .and_then(|v| v.as_str())
             .unwrap_or("");
         if id.is_empty() {
@@ -14,9 +14,8 @@ pub(crate) fn open(events: &[RunEvent]) -> Vec<RunEvent> {
         }
         match event.kind.as_str() {
             "slot_dispatch" => dispatches.push(event.clone()),
-            "slot_result" => {
-                dispatches.retain(|d| d.data.get("dispatchId").and_then(|v| v.as_str()) != Some(id))
-            }
+            "slot_result" => dispatches
+                .retain(|d| d.data.get("dispatch_id").and_then(|v| v.as_str()) != Some(id)),
             _ => {}
         }
     }
@@ -27,15 +26,15 @@ pub(crate) fn open(events: &[RunEvent]) -> Vec<RunEvent> {
 pub(crate) fn unresolved(events: &[RunEvent]) -> Vec<RunEvent> {
     let mut dispatches = open(events);
     for dispatch in events.iter().filter(|event| event.kind == "slot_dispatch") {
-        let id = dispatch.data.get("dispatchId").and_then(|v| v.as_str());
+        let id = dispatch.data.get("dispatch_id").and_then(|v| v.as_str());
         let completed = events.iter().any(|event| {
             event.kind == "slot_result"
-                && event.data.get("dispatchId").and_then(|v| v.as_str()) == id
+                && event.data.get("dispatch_id").and_then(|v| v.as_str()) == id
                 && event.data.get("status").and_then(|v| v.as_str()) == Some("ok")
         });
         let abandoned = events.iter().any(|event| {
             event.kind == "slot_result"
-                && event.data.get("dispatchId").and_then(|v| v.as_str()) == id
+                && event.data.get("dispatch_id").and_then(|v| v.as_str()) == id
                 && event.data.get("status").and_then(|v| v.as_str()) == Some("abandoned")
         });
         let retained = events.iter().any(|event| {
@@ -61,10 +60,10 @@ pub(crate) fn unresolved(events: &[RunEvent]) -> Vec<RunEvent> {
 /// A completed slot followed by a recorded step error is not evidence of a
 /// successful formation. Its dispatch must be abandoned before a retry.
 pub(crate) fn failed_completion(events: &[RunEvent], dispatch: &RunEvent) -> bool {
-    let id = dispatch.data.get("dispatchId").and_then(|v| v.as_str());
+    let id = dispatch.data.get("dispatch_id").and_then(|v| v.as_str());
     events.iter().any(|event| {
         event.kind == "slot_result"
-            && event.data.get("dispatchId").and_then(|v| v.as_str()) == id
+            && event.data.get("dispatch_id").and_then(|v| v.as_str()) == id
             && event.data.get("status").and_then(|v| v.as_str()) == Some("ok")
     }) && events.iter().any(|event| {
         event.kind == "error"

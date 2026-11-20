@@ -456,18 +456,18 @@ mod tests {
                     (21, "stop"),
                 ][..],
                 &[
-                    "editFormation",
-                    "updateFormation",
-                    "assignSlot",
-                    "updatePort",
-                    "updateLimit",
+                    "edit_formation",
+                    "update_formation",
+                    "assign_slot",
+                    "update_port",
+                    "update_limit",
                 ][..],
             ),
             (
                 EditKind::Input,
                 "input",
                 &[(0, "Request"), (1, "Build"), (2, "notify")],
-                &["updateInputCard"],
+                &["update_input_card"],
             ),
             (
                 EditKind::Gate,
@@ -481,13 +481,13 @@ mod tests {
                     (8, "1"),
                     (9, "passing"),
                 ],
-                &["updateGate"],
+                &["update_gate"],
             ),
             (
                 EditKind::End,
                 "end",
                 &[(0, "Done"), (2, "done")],
-                &["updateEnd"],
+                &["update_end"],
             ),
         ] {
             let mut draft = base.clone();
@@ -520,14 +520,14 @@ mod tests {
                     panic!("expected board edit")
                 };
                 let is_operation = match patch.as_ref() {
-                    MissionChange::EditFormation { .. } => "editFormation",
-                    MissionChange::UpdateFormation { .. } => "updateFormation",
-                    MissionChange::AssignSlot { .. } => "assignSlot",
-                    MissionChange::UpdatePort { .. } => "updatePort",
-                    MissionChange::UpdateLimit(_) => "updateLimit",
-                    MissionChange::UpdateInputCard(_) => "updateInputCard",
-                    MissionChange::UpdateGate(_) => "updateGate",
-                    MissionChange::UpdateEnd(_) => "updateEnd",
+                    MissionChange::EditFormation { .. } => "edit_formation",
+                    MissionChange::UpdateFormation { .. } => "update_formation",
+                    MissionChange::AssignSlot { .. } => "assign_slot",
+                    MissionChange::UpdatePort { .. } => "update_port",
+                    MissionChange::UpdateLimit(_) => "update_limit",
+                    MissionChange::UpdateInputCard(_) => "update_input_card",
+                    MissionChange::UpdateGate(_) => "update_gate",
+                    MissionChange::UpdateEnd(_) => "update_end",
                     change => panic!("unexpected edit {change:?}"),
                 };
                 assert_eq!(is_operation, *name);

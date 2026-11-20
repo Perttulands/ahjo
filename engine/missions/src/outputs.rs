@@ -75,7 +75,7 @@ fn resolve_events(events: &[RunEvent], mission: &Mission) -> Result<Resolved, Mi
                     key,
                     event
                         .data
-                        .get("inputRefs")
+                        .get("input_refs")
                         .and_then(|v| serde_json::from_value(v.clone()).ok())
                         .unwrap_or_default(),
                 );
@@ -92,9 +92,9 @@ fn resolve_events(events: &[RunEvent], mission: &Mission) -> Result<Resolved, Mi
                 }
             }
             "gate_verdict"
-                if event.data.get("routePort").and_then(|v| v.as_str()) == Some("pass") =>
+                if event.data.get("route_port").and_then(|v| v.as_str()) == Some("pass") =>
             {
-                let routes = event.data.get("routedEdges").and_then(|v| v.as_array());
+                let routes = event.data.get("routed_edges").and_then(|v| v.as_array());
                 let delivered = outgoing_from_port(mission, &event.gate_id, "pass").any(|edge| {
                     done(&edge.to)
                         && routes.is_none_or(|r| {
@@ -104,7 +104,7 @@ fn resolve_events(events: &[RunEvent], mission: &Mission) -> Result<Resolved, Mi
                 if delivered
                     && let Some(input) = event
                         .data
-                        .get("inputRef")
+                        .get("input_ref")
                         .and_then(|v| serde_json::from_value(v.clone()).ok())
                 {
                     follow(&input, &mut queue);
@@ -260,7 +260,7 @@ fn picked(events: &[RunEvent]) -> HashMap<Origin, serde_json::Value> {
         };
         let Some(origin) = event
             .data
-            .get("inputRef")
+            .get("input_ref")
             .and_then(|v| v.get("origin"))
             .and_then(|v| serde_json::from_value::<PublicOrigin>(v.clone()).ok())
         else {
@@ -268,7 +268,7 @@ fn picked(events: &[RunEvent]) -> HashMap<Origin, serde_json::Value> {
         };
         let attempt = pick.get("attempt").and_then(|v| v.as_i64()).unwrap_or(0);
         let started = pick
-            .get("pickSeq")
+            .get("pick_seq")
             .and_then(|v| v.as_u64())
             .and_then(|seq| events.iter().find(|e| e.seq == seq));
         let verdict = started
@@ -277,7 +277,7 @@ fn picked(events: &[RunEvent]) -> HashMap<Origin, serde_json::Value> {
             .into_iter()
             .flatten()
             .find(|c| c.get("attempt").and_then(|v| v.as_i64()) == Some(attempt))
-            .and_then(|c| c.get("verdictSeq"))
+            .and_then(|c| c.get("verdict_seq"))
             .and_then(|v| v.as_u64())
             .and_then(|seq| events.iter().find(|e| e.seq == seq));
         let reason = verdict
@@ -297,7 +297,7 @@ fn picked(events: &[RunEvent]) -> HashMap<Origin, serde_json::Value> {
         if !findings.is_empty() {
             detail["findings"] = serde_json::json!(findings);
         }
-        result.insert((origin.node_id, origin.port_id, origin.attempt), serde_json::json!({"nodeId":pick.get("nodeId").and_then(|v| v.as_str()).unwrap_or(""),"attempt":attempt,"gateId":event.gate_id,"seq":event.seq,"decidedBy":pick.get("decidedBy").and_then(|v| v.as_str()).unwrap_or(""),"verdict":detail}));
+        result.insert((origin.node_id, origin.port_id, origin.attempt), serde_json::json!({"node_id":pick.get("node_id").and_then(|v| v.as_str()).unwrap_or(""),"attempt":attempt,"gate_id":event.gate_id,"seq":event.seq,"decided_by":pick.get("decided_by").and_then(|v| v.as_str()).unwrap_or(""),"verdict":detail}));
     }
     result
 }
@@ -383,11 +383,11 @@ mod tests {
             "gate_verdict",
             "gate",
             1,
-            json!({"routePort":"pass","inputRef":{"origin":{"nodeId":"work","portId":"out","attempt":2}}}),
+            json!({"route_port":"pass","input_ref":{"origin":{"node_id":"work","port_id":"out","attempt":2}}}),
         );
         verdict.gate_id = "gate".into();
         let events = vec![
-            event("node_started", "work", 1, json!({"inputRefs":[]})),
+            event("node_started", "work", 1, json!({"input_refs":[]})),
             event(
                 "node_output",
                 "work",
@@ -398,7 +398,7 @@ mod tests {
                 "node_started",
                 "work",
                 2,
-                json!({"inputRefs":[{"fromNodeId":"gate","fromPortId":"fail","origin":{"nodeId":"work","portId":"out","attempt":1}}]}),
+                json!({"input_refs":[{"from_node_id":"gate","from_port_id":"fail","origin":{"node_id":"work","port_id":"out","attempt":1}}]}),
             ),
             event(
                 "node_output",
@@ -485,7 +485,7 @@ mod tests {
                 "node_started",
                 "fix",
                 1,
-                json!({"inputRefs":[{"fromNodeId":"gate","fromPortId":"fail","origin":{"nodeId":"work","portId":"out","attempt":1}}]}),
+                json!({"input_refs":[{"from_node_id":"gate","from_port_id":"fail","origin":{"node_id":"work","port_id":"out","attempt":1}}]}),
             ),
             event(
                 "node_output",
@@ -540,14 +540,14 @@ mod tests {
             "pick_started",
             "work",
             0,
-            json!({"candidates":[{"attempt":1,"verdictSeq":1}]}),
+            json!({"candidates":[{"attempt":1,"verdict_seq":1}]}),
         );
         started.seq = 2;
         let mut picked = event(
             "gate_verdict",
             "gate",
             2,
-            json!({"pick":{"nodeId":"work","attempt":1,"pickSeq":2,"decidedBy":"operator"},"inputRef":{"origin":{"nodeId":"work","portId":"out","attempt":1}}}),
+            json!({"pick":{"node_id":"work","attempt":1,"pick_seq":2,"decided_by":"operator"},"input_ref":{"origin":{"node_id":"work","port_id":"out","attempt":1}}}),
         );
         picked.seq = 3;
         picked.gate_id = "gate".into();
@@ -559,7 +559,7 @@ mod tests {
                 "node_started",
                 "fix",
                 1,
-                json!({"inputRefs":[{"origin":{"nodeId":"work","portId":"out","attempt":1}}]}),
+                json!({"input_refs":[{"origin":{"node_id":"work","port_id":"out","attempt":1}}]}),
             ),
             event(
                 "node_output",
@@ -638,7 +638,7 @@ mod tests {
                 json!({"outputs":{"port_work_out":{"ref":work,"text":"work"}}}),
             )];
             if use_fix {
-                events.push(event("node_started", "fmn_fix", 1, json!({"inputRefs":[{"fromNodeId":"gate_lint","fromPortId":"fail","origin":{"nodeId":"fmn_work","portId":"port_work_out","attempt":1}}]})));
+                events.push(event("node_started", "fmn_fix", 1, json!({"input_refs":[{"from_node_id":"gate_lint","from_port_id":"fail","origin":{"node_id":"fmn_work","port_id":"port_work_out","attempt":1}}]})));
                 events.push(event(
                     "node_output",
                     "fmn_fix",
@@ -646,7 +646,7 @@ mod tests {
                     json!({"outputs":{"port_fix_out":{"ref":fix,"text":"fixed"}}}),
                 ));
             } else {
-                events.push(event("node_started", "fmn_after", 1, json!({"inputRefs":[{"fromNodeId":"fmn_work","fromPortId":"port_work_out","origin":{"nodeId":"fmn_work","portId":"port_work_out","attempt":1}}]})));
+                events.push(event("node_started", "fmn_after", 1, json!({"input_refs":[{"from_node_id":"fmn_work","from_port_id":"port_work_out","origin":{"node_id":"fmn_work","port_id":"port_work_out","attempt":1}}]})));
                 events.push(event(
                     "node_output",
                     "fmn_after",
@@ -707,7 +707,7 @@ mod tests {
             "gate_verdict",
             "gate",
             1,
-            json!({"routePort":"pass","pick":{"nodeId":"work","attempt":1,"decidedBy":"operator"},"inputRef":{"origin":{"nodeId":"work","portId":"out","attempt":1}}}),
+            json!({"route_port":"pass","pick":{"node_id":"work","attempt":1,"decided_by":"operator"},"input_ref":{"origin":{"node_id":"work","port_id":"out","attempt":1}}}),
         );
         verdict.seq = 3;
         verdict.gate_id = "gate".into();

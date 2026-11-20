@@ -42,7 +42,7 @@ pub(crate) fn apply(
         ));
     }
     if !keep_slot_id.is_empty() && kind != "solo" {
-        return Err(invalid("keepSlotId applies only to solo"));
+        return Err(invalid("keep_slot_id applies only to solo"));
     }
     let current = mission
         .formation(&id)
@@ -65,7 +65,7 @@ pub(crate) fn apply(
             && (!current.slots.iter().any(|s| s.id == keep_slot_id)
                 || snapshot[0].id != keep_slot_id)
         {
-            return Err(invalid("keepSlotId must name the retained current slot"));
+            return Err(invalid("keep_slot_id must name the retained current slot"));
         }
         if current
             .slots
@@ -189,7 +189,7 @@ pub(crate) fn apply(
         for (key, field) in [
             ("id", &slot.id),
             ("label", &slot.label),
-            ("agentId", &slot.agent_id),
+            ("agent_id", &slot.agent_id),
             ("harness", &slot.harness),
             ("model", &slot.model),
             ("effort", &slot.effort),

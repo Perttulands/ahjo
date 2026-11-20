@@ -9,27 +9,27 @@ fn round<T: Serialize + DeserializeOwned>(v: Value) {
 
 #[test]
 fn requests_and_responses_round_trip() {
-    round::<CreateMission>(json!({"title":"Demo","slug":"demo","updatedBy":"human:test"}));
-    round::<DeleteMission>(json!({"expectedRev":2}));
+    round::<CreateMission>(json!({"title":"Demo","slug":"demo","updated_by":"human:test"}));
+    round::<DeleteMission>(json!({"expected_rev":2}));
     round::<EditNotes>(
-        json!({"target":"mission","author":"human:test","text":"hi","entryId":"n","action":"edit"}),
+        json!({"target":"mission","author":"human:test","text":"hi","entry_id":"n","action":"edit"}),
     );
     round::<EditLayout>(json!({"nodes":[{"id":"a","x":1,"y":2}]}));
-    round::<Abort>(json!({"requestedBy":"human:test","reason":"stop"}));
+    round::<Abort>(json!({"requested_by":"human:test","reason":"stop"}));
     round::<Land>(json!({"force":true}));
-    round::<RunId>(json!({"runId":"r"}));
+    round::<RunId>(json!({"run_id":"r"}));
     round::<Landed>(json!({"landed":true,"notes":["done"]}));
     round::<DeletionResponse>(
-        json!({"deletion":{"id":"m","slug":"demo","title":"Demo","archiveId":"a"}}),
+        json!({"deletion":{"id":"m","slug":"demo","title":"Demo","archive_id":"a"}}),
     );
     round::<Vec<AgentSeat>>(
-        json!([{"dispatchId":"d","slotId":"s","node":"local","session":"s","pane":2,"sessionName":"s","outcome":"","available":true,"waiting":{"state":"waiting","detail":"detail","since":"now","seq":1}}]),
+        json!([{"dispatch_id":"d","slot_id":"s","node":"local","session":"s","pane":2,"session_name":"s","outcome":"","available":true,"waiting":{"state":"waiting","detail":"detail","since":"now","seq":1}}]),
     );
     round::<ValidationResponse>(
-        json!({"missionRev":1,"missionEtag":"e","errors":[],"warnings":[]}),
+        json!({"mission_rev":1,"mission_etag":"e","errors":[],"warnings":[]}),
     );
     round::<NotesResponse>(
-        json!({"notes":{"schema":2,"missionId":"m","rev":1,"updatedAt":"2026-01-01T00:00:00Z","mission":[{"id":"n","author":"human:test","createdAt":"2026-01-01T00:00:00Z","text":"hello"}],"elements":[],"etag":"e"}}),
+        json!({"notes":{"schema":3,"mission_id":"m","rev":1,"updated_at":"2026-01-01T00:00:00Z","mission":[{"id":"n","author":"human:test","created_at":"2026-01-01T00:00:00Z","text":"hello"}],"elements":[],"etag":"e"}}),
     );
 }
 
@@ -37,7 +37,7 @@ fn requests_and_responses_round_trip() {
 fn mission_layout_and_edit_responses_carry_the_stored_shapes() {
     let mission = Mission::parse(
         r#"
-schema = 1
+schema = 2
 id = "m"
 slug = "demo"
 rev = 2
@@ -52,9 +52,9 @@ label = "Writer"
     .unwrap();
     let layout = Layout::parse(
         r#"
-schema = 1
-missionId = "m"
-missionRev = 2
+schema = 2
+mission_id = "m"
+mission_rev = 2
 [[node]]
 id = "f"
 x = 10
@@ -83,12 +83,12 @@ y = 20
         mission_etag: "m2".into(),
         layout,
         layout_etag: "l2".into(),
-        changed: [("gateId".into(), json!("g"))].into(),
+        changed: [("gate_id".into(), json!("g"))].into(),
     };
     let response = serde_json::to_value(edit).unwrap();
     assert_eq!(
         response,
-        json!({"mission":mission_value,"mission_etag":"m2","layout":layout_value,"layout_etag":"l2","gateId":"g"}),
+        json!({"mission":mission_value,"mission_etag":"m2","layout":layout_value,"layout_etag":"l2","gate_id":"g"}),
     );
     round::<EditResponse>(response);
 }
@@ -96,7 +96,7 @@ y = 20
 #[test]
 fn patch_and_frames_round_trip() {
     let patch: patch::UniquePatch = serde_json::from_value(
-        json!({"expectedRev":2,"createGate":{"title":"Review","kinds":["human"]}}),
+        json!({"expected_rev":2,"create_gate":{"title":"Review","kinds":["human"]}}),
     )
     .unwrap();
     assert!(matches!(
@@ -119,7 +119,7 @@ fn patch_and_frames_round_trip() {
 
 #[test]
 fn rejected_start_keeps_every_engine_finding() {
-    let value = json!({"error":{"code":"run_admission_failed","message":"run admission failed"},"findings":[{"code":"missing_input","nodeId":"input","message":"required"},{"code":"missing_file","nodeId":"step","message":"missing","path":"brief.md"}]});
+    let value = json!({"error":{"code":"run_admission_failed","message":"run admission failed"},"findings":[{"code":"missing_input","node_id":"input","message":"required"},{"code":"missing_file","node_id":"step","message":"missing","path":"brief.md"}]});
     round::<AdmissionRejection>(value);
 }
 
@@ -131,12 +131,12 @@ fn remaining_envelopes_and_queries_round_trip() {
     round::<EditLayout>(json!({"arrange":true}));
     round::<EditLayout>(json!({"edges":[{"id":"e","lane":"top"}]}));
     round::<LayoutResponse>(
-        json!({"layout":{"schema":1,"missionId":"m","missionRev":1,"node":[],"edge":[]},"etag":"e"}),
+        json!({"layout":{"schema":2,"mission_id":"m","mission_rev":1,"node":[],"edge":[]},"etag":"e"}),
     );
     round::<GateRequestResponse>(
-        json!({"request":{"gateId":"g","requestedSeq":2,"criterion":"Ready?","input":{"text":"yes","truncated":false}}}),
+        json!({"request":{"gate_id":"g","requested_seq":2,"criterion":"Ready?","input":{"text":"yes","truncated":false}}}),
     );
-    round::<AttemptsResponse>(json!({"attempts":{"runId":"r","steps":[]}}));
+    round::<AttemptsResponse>(json!({"attempts":{"run_id":"r","steps":[]}}));
 }
 
 #[test]

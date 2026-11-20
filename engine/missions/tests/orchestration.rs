@@ -70,8 +70,8 @@ impl SeatSide for LabSeats {
             let path = self.root.join(format!("{}.md", request.slot_id));
             std::fs::write(&path, &request.brief)
                 .map_err(|e| ahjo_mission_engine::Error::new("fake", e.to_string()))?;
-            let created = json!({"dispatchId":request.id,"node":seat.node,"sessionName":seat.session_name,"sessionId":seat.session.session_id,"paneId":seat.session.pane_id,"generation":seat.session.generation});
-            let prepared = json!({"seat":seat,"briefPath":path});
+            let created = json!({"dispatch_id":request.id,"node":seat.node,"session_name":seat.session_name,"session_id":seat.session.session_id,"pane_id":seat.session.pane_id,"generation":seat.session.generation});
+            let prepared = json!({"seat":seat,"brief_path":path});
             let events = vec![
                 SeatEvent {
                     key: "created".into(),
@@ -183,7 +183,7 @@ impl SeatSide for LabSeats {
                 .values_mut()
                 .find(|entry| entry.seat == seat)
                 .unwrap();
-            let data = json!({"sessionName":seat.session_name,"outcome":if cause == "shutdown" {"left_shutdown"} else {"ended"},"cause":cause});
+            let data = json!({"session_name":seat.session_name,"outcome":if cause == "shutdown" {"left_shutdown"} else {"ended"},"cause":cause});
             entry.alive = false;
             entry.events.push(SeatEvent {
                 key: "cleanup".into(),
@@ -216,7 +216,7 @@ async fn controller_output_reaches_gate_and_lost_workers_are_reported() {
         .replace("[[end]]", "[[formation.slot]]\nid = \"slot_a\"\nlabel = \"Worker A\"\nharness = \"openai-codex\"\neffort = \"medium\"\n[[formation.slot]]\nid = \"slot_b\"\nlabel = \"Worker B\"\nharness = \"claude-code\"\neffort = \"medium\"\n\n[[end]]");
     let mission = mission.replace("to = \"end_done:in\"", "to = \"gate_review:in\"");
     let mission = format!(
-        "{mission}\n[[gate]]\nid = \"gate_review\"\ntitle = \"Review\"\nkinds = [\"code\"]\ncheck = \"output_contains\"\ncheckVersion = \"1\"\ncheckValue = \"controller-result\"\n[[end]]\nid = \"end_rejected\"\ntitle = \"Rejected\"\noutcome = \"rejected\"\n[[connection]]\nid = \"edge_pass\"\nfrom = \"gate_review:pass\"\nto = \"end_done:in\"\n[[connection]]\nid = \"edge_fail\"\nfrom = \"gate_review:fail\"\nto = \"end_rejected:in\"\n"
+        "{mission}\n[[gate]]\nid = \"gate_review\"\ntitle = \"Review\"\nkinds = [\"code\"]\ncheck = \"output_contains\"\ncheck_version = \"1\"\ncheck_value = \"controller-result\"\n[[end]]\nid = \"end_rejected\"\ntitle = \"Rejected\"\noutcome = \"rejected\"\n[[connection]]\nid = \"edge_pass\"\nfrom = \"gate_review:pass\"\nto = \"end_done:in\"\n[[connection]]\nid = \"edge_fail\"\nfrom = \"gate_review:fail\"\nto = \"end_rejected:in\"\n"
     );
     std::fs::write(root.join("missions/hello.mission.toml"), mission).unwrap();
     let seats = LabSeats {
@@ -314,7 +314,7 @@ async fn controller_output_reaches_gate_and_lost_workers_are_reported() {
         .iter()
         .find(|event| event.kind == "orchestration_team")
         .unwrap();
-    assert_eq!(team.data["controllerSlot"], "slot_lead");
+    assert_eq!(team.data["controller_slot"], "slot_lead");
     assert_eq!(team.data["workers"].as_array().unwrap().len(), 2);
     assert_eq!(
         ledger
@@ -373,7 +373,7 @@ async fn controller_output_reaches_gate_and_lost_workers_are_reported() {
             status: "ok".into(),
             text: "```ahjo-outputs\n{\"port_out\":{\"text\":\"controller-result\"}}\n```".into(),
         });
-        let data = json!({"dispatchId":lead.dispatch.id,"sentinel":{"runId":run}});
+        let data = json!({"dispatch_id":lead.dispatch.id,"sentinel":{"run_id":run}});
         lead.events.push(SeatEvent {
             key: "result".into(),
             seq: 3,
@@ -546,7 +546,7 @@ async fn cli_runs_orchestration_to_end_with_controller_and_worker_seats() {
             status: "ok".into(),
             text: "```ahjo-outputs\n{\"port_out\":{\"text\":\"controller-result\"}}\n```".into(),
         });
-        let data = json!({"dispatchId":lead.dispatch.id,"sentinel":{"runId":run}});
+        let data = json!({"dispatch_id":lead.dispatch.id,"sentinel":{"run_id":run}});
         lead.events.push(SeatEvent {
             key: "result".into(),
             seq: 3,
@@ -568,7 +568,7 @@ async fn cli_runs_orchestration_to_end_with_controller_and_worker_seats() {
     {
         let entries = seats.entries.lock().unwrap();
         for event in ledger.iter().filter(|event| event.kind == "slot_dispatch") {
-            let id = event.data["dispatchId"].as_str().unwrap();
+            let id = event.data["dispatch_id"].as_str().unwrap();
             let session = &entries[id].seat.session_name;
             assert_eq!(event.data["session"], *session);
             assert_eq!(event.data["session_ref"], format!("terminal:{session}"));
@@ -577,7 +577,7 @@ async fn cli_runs_orchestration_to_end_with_controller_and_worker_seats() {
     assert!(
         ledger
             .iter()
-            .any(|e| e.kind == "orchestration_team" && e.data["controllerSlot"] == "slot_lead")
+            .any(|e| e.kind == "orchestration_team" && e.data["controller_slot"] == "slot_lead")
     );
     assert!(
         ledger

@@ -10,7 +10,7 @@ pub(crate) fn end(c: &Coordinator, id: &str, node: Option<&str>, cause: &str) ->
     for event in events {
         let name = event
             .data
-            .get("sessionName")
+            .get("session_name")
             .and_then(|v| v.as_str())
             .unwrap_or("");
         if name.is_empty() {
@@ -43,12 +43,12 @@ pub(crate) fn end(c: &Coordinator, id: &str, node: Option<&str>, cause: &str) ->
     {
         let name = seat
             .data
-            .get("sessionName")
+            .get("session_name")
             .and_then(|v| v.as_str())
             .unwrap_or("");
         let result = if seat
             .data
-            .get("sessionId")
+            .get("session_id")
             .and_then(|v| v.as_str())
             .is_none_or(str::is_empty)
         {
@@ -73,7 +73,7 @@ pub(crate) fn end(c: &Coordinator, id: &str, node: Option<&str>, cause: &str) ->
             "seat_cleanup",
             &seat.node_id,
             seat.attempt,
-            json!({"sessionName":name,"outcome":outcome,"cause":cause,"detail":detail}),
+            json!({"session_name":name,"outcome":outcome,"cause":cause,"detail":detail}),
         );
         event.slot_id = seat.slot_id;
         c.append(id, event)?;

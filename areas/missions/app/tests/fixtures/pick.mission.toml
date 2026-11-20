@@ -1,9 +1,9 @@
-schema = 1
+schema = 2
 id = "msn_gated"
 slug = "pick"
 title = "Gated"
 rev = 1
-[[inputCard]]
+[[input_card]]
 id = "inp_start"
 title = "Input"
 goal = "Deliver the brief"
@@ -58,4 +58,4 @@ id = "lim_cap"
 title = "Cap"
 target = "fmn_work"
 rounds = 2
-whenSpent = "best"
+when_spent = "best"

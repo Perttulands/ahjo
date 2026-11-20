@@ -41,7 +41,9 @@ fn parse_document(raw: &str) -> Result<DocumentMut, Error> {
 fn editable_arrays(patch: &MissionChange) -> &'static [&'static str] {
     match patch {
         MissionChange::Title(_) | MissionChange::Prefix(_) => &[],
-        MissionChange::UpdateInputCard(_) | MissionChange::CreateInputCard { .. } => &["inputCard"],
+        MissionChange::UpdateInputCard(_) | MissionChange::CreateInputCard { .. } => {
+            &["input_card"]
+        }
         MissionChange::CreateFormation { .. }
         | MissionChange::SetBrief { .. }
         | MissionChange::ClearBrief { .. }
@@ -65,13 +67,13 @@ fn editable_arrays(patch: &MissionChange) -> &'static [&'static str] {
         | MissionChange::WireConnection { .. }
         | MissionChange::RewireConnection { .. }
         | MissionChange::UnwireConnection { .. } => &["formation", "connection"],
-        MissionChange::DeleteInputCard { .. } => &["inputCard", "connection"],
+        MissionChange::DeleteInputCard { .. } => &["input_card", "connection"],
         MissionChange::DeleteFormation { .. } => &["formation", "limit", "connection"],
         MissionChange::DeleteGate { .. } => &["gate", "connection"],
         MissionChange::DeleteEnd { .. } => &["end", "connection"],
         MissionChange::DeleteLimit { .. } => &["limit", "connection"],
         MissionChange::RestoreNode { .. } => &[
-            "inputCard",
+            "input_card",
             "formation",
             "gate",
             "end",
@@ -148,7 +150,7 @@ impl Store {
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => (),
             Err(error) => return Err(crate::error::io(error)),
         }
-        doc["schema"] = value(1);
+        doc["schema"] = value(ahjo_mission_model::MISSION_SCHEMA);
         doc["id"] = value(id("msn")?);
         doc["slug"] = value(slug);
         doc["title"] = value(if title.trim().is_empty() {
@@ -160,11 +162,11 @@ impl Store {
         if !actor.trim().is_empty() {
             crate::write::set(
                 doc.as_table_mut(),
-                "updatedBy",
+                "updated_by",
                 toml_edit::value(actor.trim()),
             );
         }
-        crate::write::set(doc.as_table_mut(), "updatedAt", toml_edit::value(now()?));
+        crate::write::set(doc.as_table_mut(), "updated_at", toml_edit::value(now()?));
         let raw = doc.to_string();
         let result = edit(&raw)?;
         crate::write::atomic(&target, raw.as_bytes()).map_err(crate::error::io)?;
@@ -264,22 +266,22 @@ impl Store {
         );
         // A change by someone unnamed is not credited to whoever changed it last.
         if actor.is_empty() {
-            doc.as_table_mut().remove("updatedBy");
+            doc.as_table_mut().remove("updated_by");
         } else {
-            crate::write::set(doc.as_table_mut(), "updatedBy", toml_edit::value(actor));
+            crate::write::set(doc.as_table_mut(), "updated_by", toml_edit::value(actor));
         }
-        crate::write::set(doc.as_table_mut(), "updatedAt", toml_edit::value(now()?));
+        crate::write::set(doc.as_table_mut(), "updated_at", toml_edit::value(now()?));
         let raw = doc.to_string();
         let updated = edit(&raw)?;
         if let Some(mut layout) = layout {
             crate::write::set(
                 layout.as_table_mut(),
-                "missionRev",
+                "mission_rev",
                 value(updated.mission.rev),
             );
             crate::write::set(
                 layout.as_table_mut(),
-                "updatedAt",
+                "updated_at",
                 value(updated.mission.updated_at.clone()),
             );
             let layout_raw = layout.to_string();
@@ -462,8 +464,8 @@ fn stage_layout(
         ChangeEffect::Place(node) => {
             let layout = layout.get_or_insert_with(|| {
                 let mut doc = DocumentMut::new();
-                doc["schema"] = value(1);
-                doc["missionId"] = value(mission.id.clone());
+                doc["schema"] = value(ahjo_mission_model::LAYOUT_SCHEMA);
+                doc["mission_id"] = value(mission.id.clone());
                 doc
             });
             crate::authoring_create::append(layout, "node", &node)?;

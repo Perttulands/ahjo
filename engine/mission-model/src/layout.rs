@@ -6,10 +6,10 @@ use serde::{Deserialize, Serialize};
 
 use ahjo_core::Error;
 
-pub const LAYOUT_SCHEMA: i64 = 1;
+pub const LAYOUT_SCHEMA: i64 = 2;
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq, schemars::JsonSchema)]
-#[serde(default, deny_unknown_fields, rename_all = "camelCase")]
+#[serde(default, deny_unknown_fields, rename_all = "snake_case")]
 pub struct Layout {
     pub schema: i64,
     pub mission_id: String,
@@ -60,7 +60,7 @@ mod tests {
 
     #[test]
     fn layout_reads_places_and_lanes_strictly() {
-        let text = "schema = 1\nmissionId = \"msn_a\"\nmissionRev = 3\n\n[[node]]\nid = \"fmn_a\"\nx = 40\ny = -20\n\n[[edge]]\nid = \"edge_a\"\nlane = \"top\"\n";
+        let text = "schema = 2\nmission_id = \"msn_a\"\nmission_rev = 3\n\n[[node]]\nid = \"fmn_a\"\nx = 40\ny = -20\n\n[[edge]]\nid = \"edge_a\"\nlane = \"top\"\n";
         let layout = Layout::parse(text).unwrap();
         assert_eq!(
             (layout.nodes[0].y, layout.edges[0].lane.as_str()),

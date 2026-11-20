@@ -137,10 +137,10 @@ async fn create(State(m): State<Missions>, input: JsonBody<Value>) -> ResultResp
         };
         // A mission may start as a copy of an example.
         let created = match s(&v, "example") {
-            "" => m.store.create_mission(&name, &display, s(&v, "updatedBy")),
+            "" => m.store.create_mission(&name, &display, s(&v, "updated_by")),
             example => m
                 .store
-                .create_example(&name, &display, example, s(&v, "updatedBy")),
+                .create_example(&name, &display, example, s(&v, "updated_by")),
         };
         match created {
             Ok(edit) => {
@@ -171,7 +171,7 @@ async fn create(State(m): State<Missions>, input: JsonBody<Value>) -> ResultResp
             &slug,
             &steps,
             s(&v, "note"),
-            s(&v, "updatedBy"),
+            s(&v, "updated_by"),
         )?;
         m.store.mission_edit(&slug)?
     };
@@ -229,7 +229,7 @@ async fn edit(
     if let Some(card) = created.and_then(|kind| kind.added(&before.mission, &e.mission)) {
         use ahjo_missions_contract::commands::AddedCard;
         let (key, value) = match card {
-            AddedCard::InputCard(card) => ("inputCard", json!(card)),
+            AddedCard::InputCard(card) => ("input_card", json!(card)),
             AddedCard::Formation(card) => ("formation", json!(card)),
             AddedCard::Gate(card) => ("gate", json!(card)),
             AddedCard::End(card) => ("end", json!(card)),
@@ -238,11 +238,11 @@ async fn edit(
         changed.insert(key.into(), value);
     }
     for (op, key) in [
-        ("deleteFormation", "formationId"),
-        ("deleteGate", "gateId"),
-        ("deleteEnd", "endId"),
-        ("deleteLimit", "limitId"),
-        ("deleteInputCard", "inputCardId"),
+        ("delete_formation", "formation_id"),
+        ("delete_gate", "gate_id"),
+        ("delete_end", "end_id"),
+        ("delete_limit", "limit_id"),
+        ("delete_input_card", "input_card_id"),
     ] {
         if let Some(id) = v[op]["id"].as_str() {
             changed.insert(key.into(), json!(id));
@@ -269,7 +269,7 @@ async fn delete(
     let e = m.store.delete_mission(
         &id,
         Precondition {
-            rev: v["expectedRev"].as_i64().unwrap_or_default(),
+            rev: v["expected_rev"].as_i64().unwrap_or_default(),
             etag: etag(&h).into(),
         },
     )?;
@@ -279,14 +279,14 @@ async fn delete(
     // `mission archives`.
     m.store.remove_mission_archive(&e.slug, &e.archive_id)?;
     Ok(ok(
-        json!({"deletion":{"id":e.id,"slug":e.slug,"title":e.title,"archiveId":e.archive_id}}),
+        json!({"deletion":{"id":e.id,"slug":e.slug,"title":e.title,"archive_id":e.archive_id}}),
     ))
 }
 async fn validation(State(m): State<Missions>, Path(id): Path<String>) -> ResultResponse {
     let e = m.store.mission_edit(&id)?;
     let report = validate(&e.mission, &m.store.roles(), &Harnesses::from_host());
     Ok(tagged(
-        json!({"missionRev":e.mission.rev,"missionEtag":e.etag,"errors":report.errors,"warnings":report.warnings}),
+        json!({"mission_rev":e.mission.rev,"mission_etag":e.etag,"errors":report.errors,"warnings":report.warnings}),
         &e.etag,
     ))
 }
@@ -318,7 +318,7 @@ async fn edit_notes(
         s(&v, "author").into()
     };
     let text = s(&v, "text").into();
-    let id_entry = s(&v, "entryId").into();
+    let id_entry = s(&v, "entry_id").into();
     let p = match s(&v, "action") {
         "" | "append" => NotePatch::Append {
             target,

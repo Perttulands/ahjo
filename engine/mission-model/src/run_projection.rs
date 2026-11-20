@@ -9,7 +9,7 @@ use serde_json::Value;
 use crate::RunInput;
 
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "snake_case")]
 pub struct PublicEvent {
     pub seq: u64,
     #[serde(rename = "type")]
@@ -55,7 +55,7 @@ pub struct PublicEvent {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "snake_case")]
 pub struct PublicInputRef {
     pub edge_id: String,
     pub from_node_id: String,
@@ -65,7 +65,7 @@ pub struct PublicInputRef {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "snake_case")]
 pub struct PublicOrigin {
     pub node_id: String,
     pub port_id: String,
@@ -81,7 +81,7 @@ fn is_zero_u64(n: &u64) -> bool {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "snake_case")]
 pub struct WaitingGate {
     pub gate_id: String,
     pub requested_seq: u64,
@@ -93,7 +93,7 @@ pub struct WaitingGate {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "snake_case")]
 pub struct RunProjection {
     pub run_id: String,
     pub status: String,
@@ -130,7 +130,7 @@ pub struct RunProjection {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "snake_case")]
 pub struct Escalation {
     pub run_id: String,
     pub seq: u64,
@@ -146,7 +146,7 @@ pub struct Escalation {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "snake_case")]
 pub struct GateInput {
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub from_node_id: String,
@@ -157,7 +157,7 @@ pub struct GateInput {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "snake_case")]
 pub struct GateRequest {
     pub gate_id: String,
     pub requested_seq: u64,

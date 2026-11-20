@@ -38,7 +38,7 @@ pub(crate) fn validate(events: &[RunEvent]) -> io::Result<()> {
             "gate_verdict"
                 if event
                     .data
-                    .get("requestedSeq")
+                    .get("requested_seq")
                     .and_then(|value| value.as_u64())
                     .unwrap_or(0)
                     == 0

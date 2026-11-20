@@ -1,12 +1,12 @@
 # Historical archon-2fb proving mission from 2026-09-06. Its briefs target that task.
 # For current Archon operation use docs/CONTRACT.md; adapt before running.
-schema = 1
+schema = 2
 id = "brd_operations_proof"
 slug = "operations-proof"
 title = "Standalone operations proof"
 rev = 1
 
-[[inputCard]]
+[[input_card]]
 id = "mis_operations"
 title = "Prove a useful operations handoff"
 goal = "Produce, independently review and integrate a usable standalone operations guide. End at a real operator gate. This is archon-2fb work."
@@ -27,7 +27,7 @@ label = "Report"
 [[formation.slot]]
 id = "producer"
 label = "Producer"
-agentId = "builder"
+agent_id = "builder"
 harness = "openai-codex"
 controller = true
 effort = "medium"
@@ -48,7 +48,7 @@ label = "Report"
 [[formation.slot]]
 id = "reviewer"
 label = "Reviewer"
-agentId = "reviewer"
+agent_id = "reviewer"
 harness = "openai-codex"
 controller = true
 effort = "xhigh"
@@ -69,7 +69,7 @@ label = "Report"
 [[formation.slot]]
 id = "integrator"
 label = "Integrator"
-agentId = "builder"
+agent_id = "builder"
 harness = "openai-codex"
 controller = true
 effort = "medium"

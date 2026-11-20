@@ -28,7 +28,7 @@ fn check_limit(mission: &Mission, limit: &mut Limit) -> Result<(), Error> {
         "" | "stop" => "".into(),
         "best" => "best".into(),
         "fail" => "fail".into(),
-        _ => return Err(Error::new("invalid_limit", "invalid whenSpent")),
+        _ => return Err(Error::new("invalid_limit", "invalid when_spent")),
     };
     if !limit.target.is_empty()
         && !mission.has_input_card(&limit.target)
@@ -188,10 +188,10 @@ pub(crate) fn update(
             for (key, before, after) in [
                 ("title", &old.title, &next.title),
                 ("target", &old.target, &next.target),
-                ("whenSpent", &old.when_spent, &next.when_spent),
+                ("when_spent", &old.when_spent, &next.when_spent),
             ] {
                 if before != after {
-                    if key == "whenSpent" && after.is_empty() {
+                    if key == "when_spent" && after.is_empty() {
                         table.remove(key);
                     } else {
                         crate::write::set(table, key, value(after.clone()));
@@ -201,7 +201,7 @@ pub(crate) fn update(
             for (key, before, after) in [
                 ("rounds", old.rounds, next.rounds),
                 ("seconds", old.seconds, next.seconds),
-                ("warnSeconds", old.warn_seconds, next.warn_seconds),
+                ("warn_seconds", old.warn_seconds, next.warn_seconds),
                 ("tokens", old.tokens, next.tokens),
             ] {
                 if before != after {
@@ -285,8 +285,8 @@ pub(crate) fn update(
                 ("title", &old.title, &next.title),
                 ("criterion", &old.criterion, &next.criterion),
                 ("check", &old.check, &next.check),
-                ("checkVersion", &old.check_version, &next.check_version),
-                ("checkValue", &old.check_value, &next.check_value),
+                ("check_version", &old.check_version, &next.check_version),
+                ("check_value", &old.check_value, &next.check_value),
             ] {
                 if before != after {
                     if after.is_empty() && key.starts_with("check") {

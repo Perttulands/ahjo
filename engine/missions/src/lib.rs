@@ -25,6 +25,7 @@ mod contract_names;
 mod contract_outputs;
 mod contract_verdict;
 mod coordinator;
+mod document_migrate;
 mod error;
 mod examples;
 mod executor;

@@ -1,0 +1,14 @@
+schema = 3
+runId = "run_legacy"
+missionId = "msn_hello"
+missionSlug = "hello"
+missionRev = 1
+inputCardId = "inp_hello"
+
+[[binding]]
+nodeId = "fmn_work"
+slotId = "slot_work"
+agentId = "builder"
+harness = "openai-codex"
+model = ""
+effort = "medium"

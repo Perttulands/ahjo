@@ -67,7 +67,7 @@ pub(crate) fn advance(
         }
         let (input, attempt, anchor) = if let Some(open) = replay.evaluating.get(&gate.id) {
             let input =
-                serde_json::from_value(open.data.get("inputRef").cloned().unwrap_or_default())
+                serde_json::from_value(open.data.get("input_ref").cloned().unwrap_or_default())
                     .map_err(io::Error::other)?;
             (
                 input,
@@ -85,7 +85,7 @@ pub(crate) fn advance(
                 .filter(|e| e.kind == "gate_evaluating" && e.gate_id == gate.id)
                 .count() as i64
                 + 1;
-            let mut evaluating = event("gate_evaluating", &gate.id, 0, json!({"inputRef":input}));
+            let mut evaluating = event("gate_evaluating", &gate.id, 0, json!({"input_ref":input}));
             evaluating.gate_id = gate.id.clone();
             append(c, id, control, evaluating)?;
             (input.clone(), attempt, events.len() as u64 + 1)
@@ -128,7 +128,7 @@ pub(crate) fn advance(
             match checked {
                 Ok((result, mut data)) => {
                     if prior_code.is_none() {
-                        data["inputRef"] =
+                        data["input_ref"] =
                             serde_json::to_value(&input).map_err(io::Error::other)?;
                         let mut event = event("gate_kind_result", &gate.id, 0, data);
                         event.gate_id = gate.id.clone();
@@ -151,8 +151,8 @@ pub(crate) fn advance(
                 && let Some(resumed) = events.iter().rev().find(|event| {
                     event.seq > anchor
                         && event.kind == "run_resumed"
-                        && event.data.get("judgeVerdict").and_then(|v| v.as_str()) == Some("fail")
-                        && event.data.get("blockedGateId").and_then(|v| v.as_str())
+                        && event.data.get("judge_verdict").and_then(|v| v.as_str()) == Some("fail")
+                        && event.data.get("blocked_gate_id").and_then(|v| v.as_str())
                             == Some(gate.id.as_str())
                 })
             {
@@ -184,7 +184,7 @@ pub(crate) fn advance(
                     "gate_kind_result",
                     &gate.id,
                     0,
-                    json!({"kind":"formation","verdict":"fail","reason":result.reason,"evidence":[],"inputRef":input}),
+                    json!({"kind":"formation","verdict":"fail","reason":result.reason,"evidence":[],"input_ref":input}),
                 );
                 kind.gate_id = gate.id.clone();
                 append(c, id, control, kind)?;
@@ -341,7 +341,7 @@ pub(crate) fn settle_gate(
         .collect();
     let mut sequences = serde_json::Map::new();
     let mut per_kind = serde_json::Map::new();
-    let mut data = json!({"inputRef":input,"evidence":evidence});
+    let mut data = json!({"input_ref":input,"evidence":evidence});
     for entry in results {
         let name = entry
             .data
@@ -354,29 +354,29 @@ pub(crate) fn settle_gate(
             entry.data.get("verdict").cloned().unwrap_or_default(),
         );
         if name == "code" {
-            data["codeResultSeq"] = entry.seq.into();
+            data["code_result_seq"] = entry.seq.into();
             for (source, target) in [
-                ("verdict", "codeVerdict"),
-                ("reason", "codeReason"),
-                ("resultEncoding", "resultEncoding"),
-                ("resultSha256", "resultSha256"),
-                ("gateBindingId", "gateBindingId"),
+                ("verdict", "code_verdict"),
+                ("reason", "code_reason"),
+                ("result_encoding", "result_encoding"),
+                ("result_sha256", "result_sha256"),
+                ("gate_binding_id", "gate_binding_id"),
             ] {
                 if let Some(value) = entry.data.get(source) {
                     data[target] = value.clone();
                 }
             }
-            data["codePerKind"] = json!({"code":entry.data.get("verdict")});
+            data["code_per_kind"] = json!({"code":entry.data.get("verdict")});
         }
     }
     if !sequences.is_empty() {
-        data["kindResultSeqs"] = sequences.into();
+        data["kind_result_seqs"] = sequences.into();
     }
     if kind == "human_input_requested" {
         data["choices"] = json!(["pass", "fail"]);
-        data["nodeId"] = gate.id.clone().into();
-        data["gateId"] = gate.id.clone().into();
-        data["requestedBy"] = gate.id.clone().into();
+        data["node_id"] = gate.id.clone().into();
+        data["gate_id"] = gate.id.clone().into();
+        data["requested_by"] = gate.id.clone().into();
         data["prompt"] = crate::run_folder::reviewed_path(c, id, &events, input.origin.as_ref())
             .map(|path| format!("Attempt workspace: {}", path.display()))
             .unwrap_or_default()
@@ -393,11 +393,11 @@ pub(crate) fn settle_gate(
                 failed = true;
             }
         }
-        data["perKind"] = per_kind.into();
-        data["routePort"] = result.verdict.clone().into();
+        data["per_kind"] = per_kind.into();
+        data["route_port"] = result.verdict.clone().into();
         data["verdict"] = result.verdict.clone().into();
         data["reason"] = result.reason.clone().into();
-        data["routedEdges"] = crate::graph::outgoing_from_port(mission, &gate.id, &result.verdict)
+        data["routed_edges"] = crate::graph::outgoing_from_port(mission, &gate.id, &result.verdict)
             .map(|edge| edge.id.clone())
             .collect::<Vec<_>>()
             .into();

@@ -33,7 +33,7 @@ async fn mission_routes_on_a_node_with_fake_sessions() {
         .request(
             Method::PATCH,
             "/api/missions/example",
-            Some(json!({"expectedRev":1,"title":"Renamed"})),
+            Some(json!({"expected_rev":1,"title":"Renamed"})),
             Some(&etag),
         )
         .await
@@ -114,12 +114,12 @@ async fn mission_routes_on_a_node_with_fake_sessions() {
         (
             Method::POST,
             "/api/runs/run_missing/gates/g/verdict",
-            json!({"requestedSeq":1,"verdict":"pass"}),
+            json!({"requested_seq":1,"verdict":"pass"}),
         ),
         (
             Method::POST,
             "/api/runs/run_missing/gates/g/pick",
-            json!({"requestedSeq":1,"attempt":1}),
+            json!({"requested_seq":1,"attempt":1}),
         ),
     ] {
         let error = client
@@ -135,7 +135,7 @@ async fn mission_routes_on_a_node_with_fake_sessions() {
         .request(
             Method::POST,
             "/api/runs",
-            Some(json!({"expectedRev":"wrong"})),
+            Some(json!({"expected_rev":"wrong"})),
             None,
         )
         .await
@@ -185,7 +185,7 @@ async fn mission_routes_on_a_node_with_fake_sessions() {
         .request(
             Method::DELETE,
             "/api/missions/example",
-            Some(json!({"expectedRev":rev})),
+            Some(json!({"expected_rev":rev})),
             Some(&mission_etag),
         )
         .await
@@ -242,7 +242,7 @@ async fn run_changes_arrive_on_the_socket_through_completion() {
         .request(
             Method::POST,
             "/api/runs",
-            Some(json!({"mission":"admission-findings","inputCardId":"inp","expectedRev":1})),
+            Some(json!({"mission":"admission-findings","input_card_id":"inp","expected_rev":1})),
             None,
         )
         .await
@@ -264,7 +264,7 @@ async fn run_changes_arrive_on_the_socket_through_completion() {
             "id = \"fmn_work\"\ndevice = \"remote/linux\"",
         );
     std::fs::write(folder.join("remote.mission.toml"), remote).unwrap();
-    let error = client.request(Method::POST, "/api/runs", Some(json!({"mission":"remote","inputCardId":"inp_hello","expectedRev":1,"inputs":{"brief":"hello"}})), None).await.unwrap_err();
+    let error = client.request(Method::POST, "/api/runs", Some(json!({"mission":"remote","input_card_id":"inp_hello","expected_rev":1,"inputs":{"brief":"hello"}})), None).await.unwrap_err();
     assert!(format!("{error:#}").contains("run_admission_failed"));
     let (health, _) = client
         .request(Method::GET, "/api/health", None, None)
@@ -283,8 +283,8 @@ async fn run_changes_arrive_on_the_socket_through_completion() {
             &format!("id = \"fmn_work\"\ndevice = \"{place}\""),
         );
     std::fs::write(folder.join("local.mission.toml"), local).unwrap();
-    let (local_run, _) = client.request(Method::POST, "/api/runs", Some(json!({"mission":"local","inputCardId":"inp_hello","expectedRev":1,"inputs":{"brief":"hello"}})), None).await.unwrap();
-    assert!(local_run["runId"].is_string());
+    let (local_run, _) = client.request(Method::POST, "/api/runs", Some(json!({"mission":"local","input_card_id":"inp_hello","expected_rev":1,"inputs":{"brief":"hello"}})), None).await.unwrap();
+    assert!(local_run["run_id"].is_string());
     let (mut socket, _) = connect_async(node.ws()).await.unwrap();
     socket
         .send(Message::Binary(
@@ -300,8 +300,8 @@ async fn run_changes_arrive_on_the_socket_through_completion() {
             break;
         }
     }
-    let (started, _) = client.request(Method::POST, "/api/runs", Some(json!({"mission":"hello","inputCardId":"inp_hello","expectedRev":1,"inputs":{"brief":"hello"},"work":"gh:example/project#1"})), None).await.unwrap();
-    let id = started["runId"].as_str().unwrap();
+    let (started, _) = client.request(Method::POST, "/api/runs", Some(json!({"mission":"hello","input_card_id":"inp_hello","expected_rev":1,"inputs":{"brief":"hello"},"work":"gh:example/project#1"})), None).await.unwrap();
+    let id = started["run_id"].as_str().unwrap();
     let mut answered = false;
     let final_run = tokio::time::timeout(std::time::Duration::from_secs(10), async {
         'stream: loop {
@@ -317,17 +317,17 @@ async fn run_changes_arrive_on_the_socket_through_completion() {
                 if let Some(gate) = run.waiting_gates.first() && !answered {
                     let path = format!("/api/runs/{id}/gates/{}/request", gate.gate_id);
                     let (request, _) = client.request(Method::GET, &path, None, None).await.unwrap();
-                    assert_eq!(request["request"]["requestedSeq"], gate.requested_seq);
+                    assert_eq!(request["request"]["requested_seq"], gate.requested_seq);
                     let path = format!("/api/runs/{id}/gates/{}/verdict", gate.gate_id);
                     for (body, status) in [
-                        (json!({"requestedSeq":gate.requested_seq,"verdict":"pass","relayedBy":"-invalid"}), axum::http::StatusCode::BAD_REQUEST),
-                        (json!({"requestedSeq":1,"verdict":"pass"}), axum::http::StatusCode::CONFLICT),
+                        (json!({"requested_seq":gate.requested_seq,"verdict":"pass","relayed_by":"-invalid"}), axum::http::StatusCode::BAD_REQUEST),
+                        (json!({"requested_seq":1,"verdict":"pass"}), axum::http::StatusCode::CONFLICT),
                     ] {
                         let error = client.request(Method::POST, &path, Some(body), None).await.unwrap_err();
                         assert_eq!(error.downcast_ref::<NodeError>().unwrap().status, status);
                     }
-                    client.request(Method::POST, &path, Some(json!({"requestedSeq":gate.requested_seq,"verdict":"pass","reason":"  accepted\n","actor":"agent:http"})), None).await.unwrap();
-                    let duplicate = client.request(Method::POST, &path, Some(json!({"requestedSeq":gate.requested_seq,"verdict":"pass"})), None).await.unwrap_err();
+                    client.request(Method::POST, &path, Some(json!({"requested_seq":gate.requested_seq,"verdict":"pass","reason":"  accepted\n","actor":"agent:http"})), None).await.unwrap();
+                    let duplicate = client.request(Method::POST, &path, Some(json!({"requested_seq":gate.requested_seq,"verdict":"pass"})), None).await.unwrap_err();
                     assert_eq!(duplicate.downcast_ref::<NodeError>().unwrap().status, axum::http::StatusCode::CONFLICT);
                     answered = true;
                 }
@@ -350,13 +350,13 @@ async fn run_changes_arrive_on_the_socket_through_completion() {
             .any(|event| event.kind == "human_verdict_recorded"
                 && event.data["reason"] == "  accepted\n"
                 && event.actor == "agent:http"
-                && event.data["decidedBy"] == "agent:http")
+                && event.data["decided_by"] == "agent:http")
     );
     let unknown = client
         .request(
             Method::POST,
             &format!("/api/runs/{id}/resume"),
-            Some(json!({"grant":true,"completedDispatchId":"dsp_1"})),
+            Some(json!({"grant":true,"completed_dispatch_id":"dsp_1"})),
             None,
         )
         .await
@@ -404,7 +404,7 @@ async fn default_role_store_is_shared_and_isolated() {
         .unwrap();
     std::fs::create_dir_all(root.join("missions")).unwrap();
     let mission = include_str!("fixtures/solo-lab.mission.toml")
-        .replace("agentId = \"builder\"", "agentId = \"fixture-writer\"");
+        .replace("agent_id = \"builder\"", "agent_id = \"fixture-writer\"");
     std::fs::write(root.join("missions/hello.mission.toml"), mission).unwrap();
     let (report, _) = client
         .request(Method::GET, "/api/missions/hello/validation", None, None)
@@ -418,8 +418,8 @@ async fn default_role_store_is_shared_and_isolated() {
             .any(|f| f["code"] == "unavailable_persona"),
         "{report}"
     );
-    let (started, _) = client.request(Method::POST, "/api/runs", Some(json!({"mission":"hello","inputCardId":"inp_hello","expectedRev":1,"inputs":{"brief":"hello"}})), None).await.unwrap();
-    assert!(started["runId"].is_string());
+    let (started, _) = client.request(Method::POST, "/api/runs", Some(json!({"mission":"hello","input_card_id":"inp_hello","expected_rev":1,"inputs":{"brief":"hello"}})), None).await.unwrap();
+    assert!(started["run_id"].is_string());
     let other_client = NodeClient::new(Some(&format!("{}/", other.url()))).unwrap();
     assert!(
         other_client

@@ -1,0 +1,11 @@
+schema = 2
+missionId = "msn_hello"
+rev = 1
+updatedAt = "2026-01-01T00:00:00Z"
+
+[[entry]]
+id = "nte_legacy"
+target = "mission"
+author = "human:ui"
+createdAt = "2026-01-01T00:00:00Z"
+text = "Keep the legacy note."

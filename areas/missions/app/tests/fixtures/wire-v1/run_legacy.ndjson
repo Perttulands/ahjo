@@ -1,0 +1,3 @@
+{"ts":"2026-01-01T00:00:00Z","runId":"run_legacy","seq":1,"type":"run_started","actor":"agent:test","missionId":"msn_hello","missionRev":1,"inputCardId":"inp_hello","data":{"missionSlug":"hello","missionRev":1,"inputCardId":"inp_hello","contextPaths":[],"inputs":[{"name":"brief","kind":"text","value":"Legacy input"}]}}
+{"ts":"2026-01-01T00:00:01Z","runId":"run_legacy","seq":2,"type":"node_output","actor":"agent:test","nodeId":"fmn_work","data":{"outputs":{"userPort":{"text":"Legacy output"}}}}
+{"ts":"2026-01-01T00:00:02Z","runId":"run_legacy","seq":3,"type":"run_succeeded","actor":"agent:test","data":{"outputs":[{"name":"result","kind":"text","value":"Legacy output","nodeId":"fmn_work","portId":"port_out","attempt":1}],"endIds":["end_done"],"final":true}}

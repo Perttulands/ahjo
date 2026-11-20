@@ -1,8 +1,8 @@
 {"type":"run_started"}
-{"type":"node_started","nodeId":"inp_hello"}
-{"type":"node_output","nodeId":"inp_hello","status":"done"}
-{"type":"node_started","nodeId":"fmn_work","attempt":1}
-{"type":"slot_dispatch","nodeId":"fmn_work","slotId":"slot_work","attempt":1}
-{"type":"slot_result","nodeId":"fmn_work","slotId":"slot_work","attempt":1,"status":"ok"}
-{"type":"node_output","nodeId":"fmn_work","attempt":1,"status":"done"}
+{"type":"node_started","node_id":"inp_hello"}
+{"type":"node_output","node_id":"inp_hello","status":"done"}
+{"type":"node_started","node_id":"fmn_work","attempt":1}
+{"type":"slot_dispatch","node_id":"fmn_work","slot_id":"slot_work","attempt":1}
+{"type":"slot_result","node_id":"fmn_work","slot_id":"slot_work","attempt":1,"status":"ok"}
+{"type":"node_output","node_id":"fmn_work","attempt":1,"status":"done"}
 {"type":"run_succeeded"}

@@ -11,7 +11,7 @@ use std::{
 static NEXT_TEMP: AtomicU64 = AtomicU64::new(0);
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "snake_case")]
 pub struct Dispatch {
     pub id: String,
     pub run_id: String,
@@ -42,7 +42,7 @@ pub struct Dispatch {
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "snake_case")]
 pub struct SeatEvent {
     /// Unique within a dispatch; retries with the same key must agree.
     pub key: String,
@@ -52,7 +52,7 @@ pub struct SeatEvent {
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "snake_case")]
 pub struct DispatchResult {
     pub text: String,
     pub status: String,
@@ -60,7 +60,7 @@ pub struct DispatchResult {
 
 /// The immutable backend identity retained for cleanup and reattachment.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "snake_case")]
 pub struct SeatId {
     pub node: String,
     pub session_name: String,
@@ -82,7 +82,7 @@ impl SeatId {
 
 /// Public location and state of one seat; server-generation proof stays private.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "snake_case")]
 pub struct AgentSeat {
     pub dispatch_id: String,
     pub slot_id: String,
@@ -98,7 +98,7 @@ pub struct AgentSeat {
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "snake_case")]
 pub struct SeatWait {
     pub state: String,
     pub detail: String,
@@ -483,9 +483,17 @@ impl SeatRecords {
         f()
     }
 }
-fn read<T: for<'de> Deserialize<'de>>(path: &Path) -> io::Result<T> {
-    serde_json::from_slice(&fs::read(path)?)
-        .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))
+fn read(path: &Path) -> io::Result<Record> {
+    let mut value: Value = serde_json::from_slice(&fs::read(path)?)?;
+    let migrated = value["dispatch"].get("runId").is_some()
+        && crate::ledger_migrate::rename_json_keys(&mut value)?;
+    let record = serde_json::from_value(value)
+        .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
+    if migrated {
+        // All callers hold the dispatch lock, including record readers.
+        write_record(path, &record)?;
+    }
+    Ok(record)
 }
 fn write_record(path: &Path, record: &Record) -> io::Result<()> {
     publish(path, &serde_json::to_vec(record)?)

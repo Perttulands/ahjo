@@ -141,7 +141,7 @@ fn shutdown_block_with_completed_evidence_never_schedules_on_open() {
         .unwrap();
     let dispatch: serde_json::Value = serde_json::from_str(lines[cut]).unwrap();
     std::fs::write(&path, lines[..=cut].join("\n") + "\n").unwrap();
-    ahjo_mission_engine::Ledger::new(&path, &id).append(ahjo_mission_engine::RunEvent { kind:"run_blocked".into(), timestamp:"2026-01-01T00:00:00Z".into(), data:serde_json::json!({"code":"coordinator_shutdown","resumeAllowed":true,"openDispatches":[dispatch["data"]]}).as_object().unwrap().clone(), ..Default::default() }).unwrap();
+    ahjo_mission_engine::Ledger::new(&path, &id).append(ahjo_mission_engine::RunEvent { kind:"run_blocked".into(), timestamp:"2026-01-01T00:00:00Z".into(), data:serde_json::json!({"code":"coordinator_shutdown","resume_allowed":true,"open_dispatches":[dispatch["data"]]}).as_object().unwrap().clone(), ..Default::default() }).unwrap();
     let deadline = Instant::now() + Duration::from_secs(10);
     let c = loop {
         match Coordinator::open(&dir.0, RunSettings::default(), Box::new(CompletedOnly)) {
@@ -204,7 +204,7 @@ fn completed_dispatch_without_evidence_requires_reattach_or_redispatch() {
     let events = ahjo_mission_engine::Ledger::new(&path, &id).read().unwrap();
     let restart_block = events.iter().find(|e| e.kind == "run_blocked").unwrap();
     assert_eq!(
-        restart_block.data["openDispatches"]
+        restart_block.data["open_dispatches"]
             .as_array()
             .unwrap()
             .len(),
@@ -652,7 +652,7 @@ fn detached_seat_is_ended_before_a_new_attempt() {
             seat: ahjo_mission_engine::LeftSeat,
         ) -> Result<String, ahjo_mission_engine::Error> {
             {
-                assert_eq!(seat.identity["sessionId"], "$owned");
+                assert_eq!(seat.identity["session_id"], "$owned");
                 self.0.lock().unwrap().push(seat.cause);
                 Ok("ended".into())
             }
@@ -682,11 +682,11 @@ fn detached_seat_is_ended_before_a_new_attempt() {
     for (kind, data) in [
         (
             "seat_created",
-            serde_json::json!({"sessionName":"scratch-seat","sessionId":"$owned"}),
+            serde_json::json!({"session_name":"scratch-seat","session_id":"$owned"}),
         ),
         (
             "seat_cleanup",
-            serde_json::json!({"sessionName":"scratch-seat","outcome":"left_shutdown"}),
+            serde_json::json!({"session_name":"scratch-seat","outcome":"left_shutdown"}),
         ),
     ] {
         ledger
@@ -767,18 +767,18 @@ fn aborting_a_blocked_run_ends_the_detached_seat() {
     for (kind, data) in [
         (
             "seat_created",
-            serde_json::json!({"sessionName":"scratch-seat","sessionId":"$owned"}),
+            serde_json::json!({"session_name":"scratch-seat","session_id":"$owned"}),
         ),
         (
             "seat_cleanup",
-            serde_json::json!({"sessionName":"scratch-seat","outcome":"left_shutdown"}),
+            serde_json::json!({"session_name":"scratch-seat","outcome":"left_shutdown"}),
         ),
         // Blocked before the restart, so the restart leaves it blocked. A
         // run cut mid-step is resumed on restart, and its new attempt would
         // race the abort below to end the seat.
         (
             "run_blocked",
-            serde_json::json!({"code":"seat_gone","reason":"The step's terminal closed","blockedNodeId":"fmn_work","resumeAllowed":true,"resumePolicy":"explicit"}),
+            serde_json::json!({"code":"seat_gone","reason":"The step's terminal closed","blocked_node_id":"fmn_work","resume_allowed":true,"resume_policy":"explicit"}),
         ),
     ] {
         ledger
@@ -844,7 +844,7 @@ fn restart_at_each_ledger_cut_reaches_the_same_output() {
                     })
                     .collect()
             };
-            sink.emit(ahjo_mission_engine::ExecutionEvent { kind:"slot_dispatch".into(), slot_id:slot.id.clone(), data:serde_json::json!({"dispatchId":dispatch,"nodeId":req.formation.id,"slotId":slot.id}).as_object().unwrap().clone() }).map_err(|error| error.message)?;
+            sink.emit(ahjo_mission_engine::ExecutionEvent { kind:"slot_dispatch".into(), slot_id:slot.id.clone(), data:serde_json::json!({"dispatch_id":dispatch,"node_id":req.formation.id,"slot_id":slot.id}).as_object().unwrap().clone() }).map_err(|error| error.message)?;
             self.0.lock().unwrap().push(snapshot()?);
             let result = FormationResult {
                 status: "done".into(),
@@ -861,7 +861,7 @@ fn restart_at_each_ledger_cut_reaches_the_same_output() {
                 serde_json::to_vec(&result).unwrap(),
             )
             .map_err(|e| e.to_string())?;
-            sink.emit(ahjo_mission_engine::ExecutionEvent { kind:"slot_result".into(), slot_id:slot.id.clone(), data:serde_json::json!({"dispatchId":dispatch,"status":"ok","sentinel":{"runId":req.run_id}}).as_object().unwrap().clone() }).map_err(|error| error.message)?;
+            sink.emit(ahjo_mission_engine::ExecutionEvent { kind:"slot_result".into(), slot_id:slot.id.clone(), data:serde_json::json!({"dispatch_id":dispatch,"status":"ok","sentinel":{"run_id":req.run_id}}).as_object().unwrap().clone() }).map_err(|error| error.message)?;
             self.0.lock().unwrap().push(snapshot()?);
             Ok(result)
          })().map_err(|message: String| ahjo_mission_engine::Error::new("executor_error", message))
@@ -911,8 +911,9 @@ fn restart_at_each_ledger_cut_reaches_the_same_output() {
     let started = lines
         .iter()
         .position(|line| {
-            serde_json::from_str::<serde_json::Value>(line)
-                .is_ok_and(|event| event["type"] == "node_started" && event["nodeId"] == "fmn_work")
+            serde_json::from_str::<serde_json::Value>(line).is_ok_and(|event| {
+                event["type"] == "node_started" && event["node_id"] == "fmn_work"
+            })
         })
         .unwrap();
     let captured = snapshots.lock().unwrap().clone();
@@ -994,7 +995,7 @@ fn restart_at_each_ledger_cut_reaches_the_same_output() {
             .collect();
         assert_eq!(outputs.len(), baseline.len(), "cut {cut}");
         for (actual, expected) in outputs.iter().zip(&baseline) {
-            assert_eq!(actual.0, expected["nodeId"].as_str().unwrap());
+            assert_eq!(actual.0, expected["node_id"].as_str().unwrap());
             assert_eq!(actual.1, expected["data"].get("status"));
             assert_eq!(actual.2, expected["data"].get("text"));
             assert_eq!(actual.3, expected["data"].get("outputs"));
@@ -1007,7 +1008,7 @@ fn restart_at_each_ledger_cut_reaches_the_same_output() {
                     event.node_id.clone(),
                     event.slot_id.clone(),
                     event.attempt,
-                    event.data["dispatchId"].as_str().unwrap().to_owned(),
+                    event.data["dispatch_id"].as_str().unwrap().to_owned(),
                 )
             })
             .collect();
@@ -1047,7 +1048,7 @@ fn restart_between_steps_matches_archon_lab() {
         .lines()
         .position(|line| {
             serde_json::from_str::<serde_json::Value>(line)
-                .is_ok_and(|e| e["type"] == "node_output" && e["nodeId"] == "inp_hello")
+                .is_ok_and(|e| e["type"] == "node_output" && e["node_id"] == "inp_hello")
         })
         .unwrap();
     std::fs::write(
@@ -1071,7 +1072,7 @@ fn restart_between_steps_matches_archon_lab() {
         .map(|line| {
             let event: serde_json::Value = serde_json::from_str(line).unwrap();
             let mut normalized = serde_json::Map::new();
-            for key in ["type", "nodeId", "gateId", "slotId", "attempt"] {
+            for key in ["type", "node_id", "gate_id", "slot_id", "attempt"] {
                 if let Some(value) = event.get(key) {
                     normalized.insert(key.into(), value.clone());
                 }
@@ -1125,12 +1126,12 @@ fn lab_run_completes_with_archon_sequence_and_lock_excludes_other_owners() {
         .iter()
         .find(|event| event.kind == "slot_dispatch")
         .unwrap();
-    assert_eq!(dispatch.data["agentId"], "builder");
-    let brief = std::path::Path::new(dispatch.data["briefPath"].as_str().unwrap());
+    assert_eq!(dispatch.data["agent_id"], "builder");
+    let brief = std::path::Path::new(dispatch.data["brief_path"].as_str().unwrap());
     let brief_text = std::fs::read_to_string(brief).unwrap();
     assert!(brief_text.contains("input: hello"));
     assert!(brief_text.contains("role card:"));
-    assert_eq!(dispatch.data["recordedBeforeSend"], true);
+    assert_eq!(dispatch.data["recorded_before_send"], true);
     assert_eq!(c.list(None, false).unwrap()[0].number, 1);
 }
 struct Waiter(Arc<AtomicUsize>);
@@ -1383,7 +1384,7 @@ impl Executor for VerifyLease {
         let dispatch = ahjo_mission_engine::ExecutionEvent {
             kind: "slot_dispatch".into(),
             slot_id: request.formation.slots[0].id.clone(),
-            data: serde_json::json!({"dispatchId":"dsp_test"})
+            data: serde_json::json!({"dispatch_id":"dsp_test"})
                 .as_object()
                 .unwrap()
                 .clone(),
@@ -1401,7 +1402,7 @@ impl Executor for VerifyLease {
             .last()
             .is_some_and(|event| event.kind == "slot_dispatch");
         self.recorded.store(recorded, Ordering::Release);
-        events.emit(ahjo_mission_engine::ExecutionEvent { kind:"slot_result".into(),slot_id:request.formation.slots[0].id.clone(),data:serde_json::json!({"dispatchId":"dsp_test","sentinel":{"runId":request.run_id,"status":"ok"}}).as_object().unwrap().clone() }).map_err(|error| error.message)?;
+        events.emit(ahjo_mission_engine::ExecutionEvent { kind:"slot_result".into(),slot_id:request.formation.slots[0].id.clone(),data:serde_json::json!({"dispatch_id":"dsp_test","sentinel":{"run_id":request.run_id,"status":"ok"}}).as_object().unwrap().clone() }).map_err(|error| error.message)?;
         let outputs = request
             .formation
             .outputs
@@ -1442,12 +1443,12 @@ impl Executor for MissingOutput {
         events.emit(ahjo_mission_engine::ExecutionEvent {
             kind: "slot_dispatch".into(),
             slot_id: slot_id.clone(),
-            data: serde_json::json!({"dispatchId":"dsp_missing_output"})
+            data: serde_json::json!({"dispatch_id":"dsp_missing_output"})
                 .as_object()
                 .unwrap()
                 .clone(),
         }).map_err(|error| error.message)?;
-        events.emit(ahjo_mission_engine::ExecutionEvent{kind:"slot_result".into(),slot_id,data:serde_json::json!({"dispatchId":"dsp_missing_output","sentinel":{"runId":request.run_id,"status":"ok"}}).as_object().unwrap().clone()}).map_err(|error| error.message)?;
+        events.emit(ahjo_mission_engine::ExecutionEvent{kind:"slot_result".into(),slot_id,data:serde_json::json!({"dispatch_id":"dsp_missing_output","sentinel":{"run_id":request.run_id,"status":"ok"}}).as_object().unwrap().clone()}).map_err(|error| error.message)?;
         Ok(FormationResult {
             status: "done".into(),
             text: "incomplete".into(),
@@ -1518,7 +1519,7 @@ impl Executor for UnknownDispatch {
         events: ExecutionSink,
     ) -> Result<FormationResult, ahjo_mission_engine::Error> {
         (|| -> Result<FormationResult, String> {
-        events.emit(ahjo_mission_engine::ExecutionEvent{kind:"slot_result".into(),slot_id:request.formation.slots[0].id.clone(),data:serde_json::json!({"dispatchId":"missing","sentinel":{"runId":request.run_id,"status":"ok"}}).as_object().unwrap().clone()}).map_err(|error| error.message)?;
+        events.emit(ahjo_mission_engine::ExecutionEvent{kind:"slot_result".into(),slot_id:request.formation.slots[0].id.clone(),data:serde_json::json!({"dispatch_id":"missing","sentinel":{"run_id":request.run_id,"status":"ok"}}).as_object().unwrap().clone()}).map_err(|error| error.message)?;
         unreachable!()
      })().map_err(|message: String| ahjo_mission_engine::Error::new("executor_error", message))
     }
@@ -1557,12 +1558,12 @@ impl Executor for WrongRunSentinel {
         events.emit(ahjo_mission_engine::ExecutionEvent {
             kind: "slot_dispatch".into(),
             slot_id: slot_id.clone(),
-            data: serde_json::json!({"dispatchId":"dsp_wrong_run"})
+            data: serde_json::json!({"dispatch_id":"dsp_wrong_run"})
                 .as_object()
                 .unwrap()
                 .clone(),
         }).map_err(|error| error.message)?;
-        events.emit(ahjo_mission_engine::ExecutionEvent{kind:"slot_result".into(),slot_id,data:serde_json::json!({"dispatchId":"dsp_wrong_run","sentinel":{"runId":"run_wrong","status":"ok"}}).as_object().unwrap().clone()}).map_err(|error| error.message)?;
+        events.emit(ahjo_mission_engine::ExecutionEvent{kind:"slot_result".into(),slot_id,data:serde_json::json!({"dispatch_id":"dsp_wrong_run","sentinel":{"run_id":"run_wrong","status":"ok"}}).as_object().unwrap().clone()}).map_err(|error| error.message)?;
         unreachable!()
      })().map_err(|message: String| ahjo_mission_engine::Error::new("executor_error", message))
     }
@@ -1776,7 +1777,7 @@ fn recovery_publishes_an_output_recorded_before_its_commit() {
         .collect();
     let output = events
         .iter()
-        .position(|e| e["type"] == "node_output_pending" && e["nodeId"] == "fmn_work")
+        .position(|e| e["type"] == "node_output_pending" && e["node_id"] == "fmn_work")
         .unwrap();
     std::fs::write(
         &path,

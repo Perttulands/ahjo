@@ -62,10 +62,10 @@ pub fn parse_escalation(captured: &str, run_id: &str) -> Option<EscalationSentin
             reason: fields.get("reason").cloned().unwrap_or_default(),
             node_id: fields
                 .get("node")
-                .or_else(|| fields.get("nodeId"))
+                .or_else(|| fields.get("node_id"))
                 .cloned()
                 .unwrap_or_default(),
-            gate_id: fields.get("gateId").cloned().unwrap_or_default(),
+            gate_id: fields.get("gate_id").cloned().unwrap_or_default(),
             severity,
             blocks,
         });
@@ -122,7 +122,7 @@ mod tests {
     use super::parse_escalation;
     #[test]
     fn finds_matching_run_and_quoted_reason() {
-        let captured = "<<<AHJO-ESCALATE run-id=other reason=ignored>>> <<<AHJO-ESCALATE run-id=run_1 severity=stop reason='needs å review' nodeId=step>>>";
+        let captured = "<<<AHJO-ESCALATE run-id=other reason=ignored>>> <<<AHJO-ESCALATE run-id=run_1 severity=stop reason='needs å review' node_id=step>>>";
         let found = parse_escalation(captured, "run_1").unwrap();
         assert_eq!(found.reason, "needs å review");
         assert_eq!(found.node_id, "step");

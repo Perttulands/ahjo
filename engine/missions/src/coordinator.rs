@@ -115,12 +115,12 @@ impl Coordinator {
                         event.kind == "seat_state"
                             && event
                                 .data
-                                .get("dispatchId")
+                                .get("dispatch_id")
                                 .and_then(|value| value.as_str())
                                 == Some(seat.dispatch_id.as_str())
                             && event
                                 .data
-                                .get("seatEventSeq")
+                                .get("seat_event_seq")
                                 .and_then(|value| value.as_u64())
                                 == Some(waiting.seq)
                     }) {

@@ -4,7 +4,7 @@ use serde_json::Value;
 use std::collections::BTreeMap;
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
-#[serde(default, rename_all = "camelCase")]
+#[serde(default, rename_all = "snake_case")]
 pub struct OutputPayload {
     pub text: String,
     pub r#ref: String,
@@ -55,8 +55,8 @@ fn decode(text: &str) -> Result<BTreeMap<String, OutputPayload>, String> {
                 OutputPayload {
                     text: field("text"),
                     r#ref: field("ref"),
-                    report_ref: field("reportRef"),
-                    artifact_ref: field("artifactRef"),
+                    report_ref: field("report_ref"),
+                    artifact_ref: field("artifact_ref"),
                     kind: field("kind"),
                 },
             )

@@ -19,7 +19,7 @@ pub(crate) fn validate(events: &[RunEvent]) -> io::Result<()> {
             "human_verdict_recorded" => {
                 let seq = event
                     .data
-                    .get("requestedSeq")
+                    .get("requested_seq")
                     .and_then(|value| value.as_u64())
                     .unwrap_or(0);
                 let verdict = event
@@ -39,7 +39,7 @@ pub(crate) fn validate(events: &[RunEvent]) -> io::Result<()> {
             "gate_verdict" => {
                 let Some(seq) = event
                     .data
-                    .get("requestedSeq")
+                    .get("requested_seq")
                     .and_then(|value| value.as_u64())
                     .filter(|seq| *seq > 0)
                 else {
@@ -73,7 +73,7 @@ pub(crate) fn validate(events: &[RunEvent]) -> io::Result<()> {
                             && entry.gate_id == event.gate_id
                             && entry
                                 .data
-                                .get("requestedSeq")
+                                .get("requested_seq")
                                 .and_then(|value| value.as_u64())
                                 == Some(seq)
                     })
@@ -85,7 +85,7 @@ pub(crate) fn validate(events: &[RunEvent]) -> io::Result<()> {
                     })?;
                 // A pick carries the picked attempt's input, not the request's.
                 if (!crate::run_pick::is_pick(event)
-                    && event.data.get("inputRef") != request.data.get("inputRef"))
+                    && event.data.get("input_ref") != request.data.get("input_ref"))
                     || event.data.get("verdict") != answer.data.get("verdict")
                     || event.data.get("reason") != answer.data.get("reason")
                 {
@@ -113,13 +113,13 @@ pub(crate) fn route(
     for answer in events.iter().filter(|e| e.kind == "human_verdict_recorded") {
         let seq = answer
             .data
-            .get("requestedSeq")
+            .get("requested_seq")
             .and_then(|v| v.as_u64())
             .unwrap_or(0);
         if events.iter().any(|e| {
             e.kind == "gate_verdict"
                 && e.gate_id == answer.gate_id
-                && e.data.get("requestedSeq").and_then(|v| v.as_u64()) == Some(seq)
+                && e.data.get("requested_seq").and_then(|v| v.as_u64()) == Some(seq)
         }) {
             continue;
         }
@@ -137,15 +137,15 @@ pub(crate) fn route(
             .get("verdict")
             .and_then(|v| v.as_str())
             .unwrap_or("");
-        let mut data = json!({"routePort":verdict,"verdict":verdict,"reason":answer.data.get("reason"),"evidence":request.data.get("evidence"),"requestedSeq":seq,"inputRef":request.data.get("inputRef")});
+        let mut data = json!({"route_port":verdict,"verdict":verdict,"reason":answer.data.get("reason"),"evidence":request.data.get("evidence"),"requested_seq":seq,"input_ref":request.data.get("input_ref")});
         for name in [
-            "kindResultSeqs",
-            "codeResultSeq",
-            "codeVerdict",
-            "codeReason",
-            "resultEncoding",
-            "resultSha256",
-            "gateBindingId",
+            "kind_result_seqs",
+            "code_result_seq",
+            "code_verdict",
+            "code_reason",
+            "result_encoding",
+            "result_sha256",
+            "gate_binding_id",
         ] {
             if let Some(value) = request.data.get(name) {
                 data[name] = value.clone();
@@ -154,7 +154,7 @@ pub(crate) fn route(
         let mut per_kind = serde_json::Map::new();
         if let Some(sequences) = request
             .data
-            .get("kindResultSeqs")
+            .get("kind_result_seqs")
             .and_then(|v| v.as_object())
         {
             for (name, sequence) in sequences {
@@ -170,8 +170,8 @@ pub(crate) fn route(
             }
         }
         per_kind.insert("human".into(), verdict.into());
-        data["perKind"] = per_kind.into();
-        data["routedEdges"] = crate::graph::outgoing_from_port(mission, &answer.gate_id, verdict)
+        data["per_kind"] = per_kind.into();
+        data["routed_edges"] = crate::graph::outgoing_from_port(mission, &answer.gate_id, verdict)
             .map(|edge| edge.id.clone())
             .collect::<Vec<_>>()
             .into();
@@ -214,17 +214,17 @@ mod tests {
         let request = event(
             1,
             "human_input_requested",
-            json!({"inputRef":{"text":"approved"}}),
+            json!({"input_ref":{"text":"approved"}}),
         );
         let answer = event(
             2,
             "human_verdict_recorded",
-            json!({"requestedSeq":1,"verdict":"pass","reason":"  yes\n"}),
+            json!({"requested_seq":1,"verdict":"pass","reason":"  yes\n"}),
         );
         let route = event(
             3,
             "gate_verdict",
-            json!({"requestedSeq":1,"verdict":"pass","reason":"  yes\n","inputRef":{"text":"approved"}}),
+            json!({"requested_seq":1,"verdict":"pass","reason":"  yes\n","input_ref":{"text":"approved"}}),
         );
         assert!(validate(&[request.clone(), answer.clone(), route.clone()]).is_ok());
         let mut altered = route;
@@ -234,7 +234,7 @@ mod tests {
         let stale = event(
             3,
             "human_verdict_recorded",
-            json!({"requestedSeq":1,"verdict":"pass"}),
+            json!({"requested_seq":1,"verdict":"pass"}),
         );
         assert!(validate(&[request, newer, stale]).is_err());
     }

@@ -10,11 +10,11 @@ use serde::{Deserialize, Serialize};
 use crate::Error;
 use crate::links;
 
-pub const CHARACTERS_SCHEMA: i64 = 1;
+pub const CHARACTERS_SCHEMA: i64 = 2;
 pub const CHARACTERS_FILE: &str = "characters.json";
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq)]
-#[serde(default, deny_unknown_fields, rename_all = "camelCase")]
+#[serde(default, deny_unknown_fields, rename_all = "snake_case")]
 pub struct Character {
     pub id: String,
     pub name: String,
@@ -43,10 +43,12 @@ struct CharactersFile {
 
 /// Reads the characters in a roles directory; none when it has no file.
 pub fn read_characters(roles_dir: &Path) -> Result<Vec<Character>, Error> {
-    let text = match links::read_definition(&roles_dir.join(CHARACTERS_FILE)) {
+    let path = roles_dir.join(CHARACTERS_FILE);
+    let text = match links::read_definition(&path) {
         Err(error) if error.code == "not_found" => return Ok(Vec::new()),
         other => other?,
     };
+    let text = migrate_characters(&path, text)?;
     let file: CharactersFile = serde_json::from_str(&text).map_err(|err| {
         Error::new(
             "invalid_definition_source",
@@ -63,6 +65,48 @@ pub fn read_characters(roles_dir: &Path) -> Result<Vec<Character>, Error> {
         ));
     }
     Ok(file.characters)
+}
+
+fn migrate_characters(path: &Path, text: String) -> Result<String, Error> {
+    fn document(text: &str) -> Result<serde_json::Value, Error> {
+        serde_json::from_str(text).map_err(|error| {
+            Error::new(
+                "invalid_definition_source",
+                format!("{CHARACTERS_FILE}: {error}"),
+            )
+        })
+    }
+
+    if document(&text)?["schema"] != 1 {
+        return Ok(text);
+    }
+    // The edit path may already hold the ordinary characters lock.
+    let locks = crate::write::locks(path.parent().unwrap_or(path), "characters-schema");
+    let _guard = locks
+        .document
+        .lock()
+        .unwrap_or_else(|error| error.into_inner());
+    let current = links::read_definition(path)?;
+    let mut value = document(&current)?;
+    if value["schema"] != 1 {
+        return Ok(current);
+    }
+    crate::ledger_migrate::rename_json_keys(&mut value).map_err(crate::error::io)?;
+    value["schema"] = CHARACTERS_SCHEMA.into();
+    let file: CharactersFile = serde_json::from_value(value).map_err(|error| {
+        Error::new(
+            "invalid_definition_source",
+            format!("{CHARACTERS_FILE}: {error}"),
+        )
+    })?;
+    let updated = serde_json::to_string_pretty(&file).map_err(|error| {
+        Error::new(
+            "invalid_definition_source",
+            format!("{CHARACTERS_FILE}: {error}"),
+        )
+    })?;
+    crate::write::atomic(path, updated.as_bytes()).map_err(crate::error::io)?;
+    Ok(updated)
 }
 
 /// Writes saved staffings independently of missions.
@@ -221,7 +265,11 @@ mod tests {
             (characters[0].name.as_str(), characters[0].effort.as_str()),
             ("Astra", "max")
         );
-        std::fs::write(dir.join(CHARACTERS_FILE), r#"{"schema":2,"characters":[]}"#).unwrap();
+        std::fs::write(
+            dir.join(CHARACTERS_FILE),
+            r#"{"schema":99,"characters":[]}"#,
+        )
+        .unwrap();
         assert_eq!(
             read_characters(&dir).unwrap_err().code,
             "unsupported_schema"

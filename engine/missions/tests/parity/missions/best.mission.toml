@@ -1,12 +1,12 @@
 # Parity fixture: a Limit card that picks the best attempt, with and
 # without a gate that can pick.
-schema = 1
+schema = 2
 id = "msn_best"
 slug = "best"
 title = "Best"
 rev = 1
 
-[[inputCard]]
+[[input_card]]
 id = "inp"
 title = "Start"
 
@@ -33,7 +33,7 @@ id = "in"
 id = "out"
 [[formation.slot]]
 id = "judge"
-agentId = "judge"
+agent_id = "judge"
 harness = "claude-code"
 effort = "xhigh"
 
@@ -75,13 +75,13 @@ id = "lim_ok"
 title = "Picks"
 target = "fmn_draft"
 rounds = 3
-whenSpent = "best"
+when_spent = "best"
 
 [[limit]]
 id = "lim_twice"
 target = "fmn_twice"
 rounds = 3
-whenSpent = "best"
+when_spent = "best"
 
 [[connection]]
 id = "e1"

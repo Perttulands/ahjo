@@ -241,7 +241,7 @@ impl LocalSeats {
     }
     fn record_created(&self, id: &str, seat: &SeatId) -> Result<(), String> {
         let dispatch = self.records.dispatch(id).map_err(|e| e.to_string())?;
-        let data = json!({"dispatchId":id,"node":seat.node,"sessionName":seat.session_name,"sessionId":seat.session.session_id,"paneId":seat.session.pane_id,"generation":seat.session.generation,"harness":dispatch.harness,"model":dispatch.model,"effort":dispatch.effort});
+        let data = json!({"dispatch_id":id,"node":seat.node,"session_name":seat.session_name,"session_id":seat.session.session_id,"pane_id":seat.session.pane_id,"generation":seat.session.generation,"harness":dispatch.harness,"model":dispatch.model,"effort":dispatch.effort});
         self.records
             .append(
                 id,
@@ -312,7 +312,7 @@ impl LocalSeats {
                 Err(error) => ("left_cleanup_failed", error.to_string()),
             },
         };
-        let data = json!({"dispatchId":dispatch_id,"outcome":outcome,"cause":cause,"detail":detail,"sessionName":seat.session_name});
+        let data = json!({"dispatch_id":dispatch_id,"outcome":outcome,"cause":cause,"detail":detail,"session_name":seat.session_name});
         self.records
             .append(
                 dispatch_id,
@@ -331,7 +331,7 @@ impl LocalSeats {
             .seat(dispatch_id)
             .map_err(|e| e.to_string())?
             .ok_or("dispatch has no seat")?;
-        let data = json!({"dispatchId":dispatch_id,"outcome":"left_shutdown","cause":"shutdown","sessionName":seat.session_name});
+        let data = json!({"dispatch_id":dispatch_id,"outcome":"left_shutdown","cause":"shutdown","session_name":seat.session_name});
         self.records
             .append(
                 dispatch_id,

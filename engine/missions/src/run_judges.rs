@@ -292,10 +292,11 @@ fn correct_judge(
             old.node_id == node
                 && old.attempt == attempt
                 && old.kind == pending.event.kind
-                && old.data.get("dispatchId") == pending.event.data.get("dispatchId")
+                && old.data.get("dispatch_id") == pending.event.data.get("dispatch_id")
                 && (pending.event.kind == "slot_dispatch"
-                    || pending.event.data.get("seatEventSeq").is_some()
-                        && old.data.get("seatEventSeq") == pending.event.data.get("seatEventSeq"))
+                    || pending.event.data.get("seat_event_seq").is_some()
+                        && old.data.get("seat_event_seq")
+                            == pending.event.data.get("seat_event_seq"))
         });
         if replayed {
             let _ = pending.ack.send(Ok(()));
@@ -361,7 +362,7 @@ pub(crate) fn record_output(
             "node_output",
             node,
             attempt,
-            json!({"status":result.status,"text":result.text,"outputs":result.outputs,"reason":"judge","reportRef":format!("lab://{id}/{node}/report.md")}),
+            json!({"status":result.status,"text":result.text,"outputs":result.outputs,"reason":"judge","report_ref":format!("lab://{id}/{node}/report.md")}),
         ),
     )
 }

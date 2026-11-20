@@ -328,18 +328,18 @@ mod tests {
 
     fn output() -> AttemptOutput {
         serde_json::from_value(
-            serde_json::json!({"portId":"out", "kind":"text", "text":{"text":"", "bytes":0}}),
+            serde_json::json!({"port_id":"out", "kind":"text", "text":{"text":"", "bytes":0}}),
         )
         .unwrap()
     }
     fn verdict(gate: &str, verdict: &str, pending: bool) -> AttemptVerdict {
-        serde_json::from_value(serde_json::json!({"gateId":gate,"gateTitle":"Review","evaluationSeq":1,"verdict":verdict,"decidedBy":"human:operator","pending":pending,"reason":{"text":"","bytes":0},"evidence":[]})).unwrap()
+        serde_json::from_value(serde_json::json!({"gate_id":gate,"gate_title":"Review","evaluation_seq":1,"verdict":verdict,"decided_by":"human:operator","pending":pending,"reason":{"text":"","bytes":0},"evidence":[]})).unwrap()
     }
     fn make_pick() -> AttemptPick {
-        serde_json::from_value(serde_json::json!({"gateId":"gate","seq":1,"reason":{"text":"","bytes":0},"decidedBy":"human:operator","candidates":[],"trigger":""})).unwrap()
+        serde_json::from_value(serde_json::json!({"gate_id":"gate","seq":1,"reason":{"text":"","bytes":0},"decided_by":"human:operator","candidates":[],"trigger":""})).unwrap()
     }
     fn attempt(n: i64, status: &str, v: &str) -> StepAttempt {
-        serde_json::from_value(serde_json::json!({"attempt":n,"status":status,"startedSeq":1,"startedAt":"","outputs":[output()],"verdicts": if v.is_empty() { vec![] } else { vec![verdict("gate",v,false)] }})).unwrap()
+        serde_json::from_value(serde_json::json!({"attempt":n,"status":status,"started_seq":1,"started_at":"","outputs":[output()],"verdicts": if v.is_empty() { vec![] } else { vec![verdict("gate",v,false)] }})).unwrap()
     }
     fn step(attempts: Vec<StepAttempt>) -> StepAttempts {
         StepAttempts {

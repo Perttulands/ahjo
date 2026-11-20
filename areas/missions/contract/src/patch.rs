@@ -7,7 +7,7 @@ use std::sync::OnceLock;
 
 /// A single change sent by the app, carrying the revision it was read at.
 #[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "snake_case")]
 pub struct SingleEdit<'a> {
     pub expected_rev: i64,
     pub updated_by: &'a str,
@@ -38,7 +38,7 @@ impl Serialize for EditRequest {
         match &self.changes {
             Changes::Single(change) => {
                 #[derive(Serialize)]
-                #[serde(rename_all = "camelCase")]
+                #[serde(rename_all = "snake_case")]
                 struct Single<'a> {
                     #[serde(skip_serializing_if = "Option::is_none")]
                     expected_rev: Option<i64>,
@@ -144,7 +144,7 @@ pub fn decode(body: &Value) -> Result<MissionChange, String> {
 }
 
 #[derive(Default, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "snake_case")]
 struct Metadata {
     expected_rev: Option<i64>,
     updated_by: Option<String>,
@@ -152,7 +152,7 @@ struct Metadata {
 
 fn decode_single(map: &Map<String, Value>) -> Result<(MissionChange, Metadata), String> {
     fn metadata(map: &mut Map<String, Value>) -> Result<Metadata, String> {
-        let metadata = ["expectedRev", "updatedBy"]
+        let metadata = ["expected_rev", "updated_by"]
             .into_iter()
             .filter_map(|key| map.remove(key).map(|value| (key.into(), value)))
             .collect();
@@ -351,8 +351,8 @@ mod tests {
     #[test]
     fn a_single_edit_decodes_with_metadata_at_either_level() {
         for body in [
-            json!({"expectedRev":7,"updatedBy":"human:operator","createGate":{"title":"Review"}}),
-            json!({"createGate":{"expectedRev":7,"updatedBy":"human:operator","title":"Review"}}),
+            json!({"expected_rev":7,"updated_by":"human:operator","create_gate":{"title":"Review"}}),
+            json!({"create_gate":{"expected_rev":7,"updated_by":"human:operator","title":"Review"}}),
         ] {
             assert!(
                 matches!(decode(&body).unwrap(), MissionChange::CreateGate { title, .. } if title == "Review")
@@ -378,9 +378,9 @@ mod tests {
                 assert!(!error.contains("unknown operation"), "{op}: {error}");
             }
         }
-        let error = decode(&json!({"addFormation": {}})).unwrap_err();
+        let error = decode(&json!({"add_formation": {}})).unwrap_err();
         assert!(
-            error.contains("createFormation, updateFormation"),
+            error.contains("create_formation, update_formation"),
             "{error}"
         );
     }
@@ -408,23 +408,23 @@ mod tests {
 
     #[test]
     fn fields_from_other_operations_are_rejected() {
-        let error = decode(&json!({"assignSlot": {"device": "local"}})).unwrap_err();
+        let error = decode(&json!({"assign_slot": {"device": "local"}})).unwrap_err();
         assert_eq!(
             error,
-            "assignSlot: unknown field device; accepted fields: formationId, slotId, agentId, harness, model, effort",
+            "assign_slot: unknown field device; accepted fields: formation_id, slot_id, agent_id, harness, model, effort",
         );
     }
 
     #[test]
     fn malformed_operation_fields_are_not_silently_dropped() {
-        assert!(decode(&json!({"createEnd":{"outcome":42}})).is_err());
-        assert!(decode(&json!({"createFormation":{"x":"100"}})).is_err());
-        assert!(decode(&json!({"wireConnection":{"joinIfOccupied":"yes"}})).is_err());
+        assert!(decode(&json!({"create_end":{"outcome":42}})).is_err());
+        assert!(decode(&json!({"create_formation":{"x":"100"}})).is_err());
+        assert!(decode(&json!({"wire_connection":{"join_if_occupied":"yes"}})).is_err());
     }
     #[test]
     fn gate_without_kinds_defaults_to_human() {
         let MissionChange::CreateGate { kinds, .. } =
-            decode(&json!({"createGate":{"title":"Signoff"}})).unwrap()
+            decode(&json!({"create_gate":{"title":"Signoff"}})).unwrap()
         else {
             panic!("expected gate")
         };
@@ -432,7 +432,7 @@ mod tests {
     }
     #[test]
     fn restore_formation_reads_the_stored_shape() {
-        let body = json!({"restoreNode":{"gate":null,"formation":{"id":"f","type":"solo","title":"Work","input":[{"id":"in","label":"Input"}],"output":[],"slot":[{"id":"s","label":"Agent","controller":false}]}}});
+        let body = json!({"restore_node":{"gate":null,"formation":{"id":"f","type":"solo","title":"Work","input":[{"id":"in","label":"Input"}],"output":[],"slot":[{"id":"s","label":"Agent","controller":false}]}}});
         let MissionChange::RestoreNode {
             node: crate::RestoredNode::Formation(formation),
             ..
@@ -443,7 +443,7 @@ mod tests {
         assert_eq!(formation.inputs[0].id, "in");
         assert_eq!(formation.slots[0].id, "s");
         let mut invalid = body;
-        invalid["restoreNode"]["gate"] = json!({"id":"g"});
+        invalid["restore_node"]["gate"] = json!({"id":"g"});
         assert!(decode(&invalid).is_err());
     }
 }

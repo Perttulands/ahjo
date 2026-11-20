@@ -4,7 +4,7 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 
 #[derive(Clone, Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "snake_case")]
 pub struct Evidence {
     pub problems: Vec<Problem>,
     pub briefs: Vec<Brief>,
@@ -54,7 +54,7 @@ impl Evidence {
     }
 }
 #[derive(Clone, Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "snake_case")]
 pub struct Problem {
     pub seq: u64,
     pub node_id: String,
@@ -68,14 +68,14 @@ pub struct Text {
     pub text: String,
 }
 #[derive(Clone, Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "snake_case")]
 pub struct Brief {
     pub node_id: String,
     pub dispatch_seq: u64,
     pub path: String,
 }
 #[derive(Clone, Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "snake_case")]
 pub struct File {
     pub node_id: String,
     pub path: String,

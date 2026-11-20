@@ -1,11 +1,11 @@
 # Parity fixture: formation shapes, slot ids and staffing.
-schema = 1
+schema = 2
 id = "msn_formations"
 slug = "formations"
 title = "Formations"
 rev = 1
 
-[[inputCard]]
+[[input_card]]
 id = "inp"
 title = "Start"
 
@@ -107,22 +107,22 @@ harness = "claude-code"
 effort = "ultra"
 [[formation.slot]]
 id = "retired"
-agentId = "critic"
+agent_id = "critic"
 harness = "claude-code"
 effort = "xhigh"
 [[formation.slot]]
 id = "unknown"
-agentId = "oracle"
+agent_id = "oracle"
 harness = "claude-code"
 effort = "xhigh"
 [[formation.slot]]
 id = "bad_role"
-agentId = "Critic"
+agent_id = "Critic"
 harness = "claude-code"
 effort = "xhigh"
 [[formation.slot]]
 id = "builtin"
-agentId = "builder"
+agent_id = "builder"
 harness = "claude-code"
 effort = "medium"
 [[formation.slot]]

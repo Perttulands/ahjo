@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "snake_case")]
 pub struct BindingsSnapshot {
     pub schema: u8,
     pub run_id: String,
@@ -15,11 +15,15 @@ pub struct BindingsSnapshot {
     pub input_card_id: String,
     #[serde(default, rename = "binding")]
     pub bindings: Vec<RunBinding>,
-    #[serde(default, rename = "gateBinding", skip_serializing_if = "Vec::is_empty")]
+    #[serde(
+        default,
+        rename = "gate_binding",
+        skip_serializing_if = "Vec::is_empty"
+    )]
     pub gate_bindings: Vec<crate::CodeGateBinding>,
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "snake_case")]
 pub struct RunBinding {
     pub node_id: String,
     pub slot_id: String,

@@ -260,7 +260,7 @@ fn fill_ids(doc: &mut dyn TableLike, used: &mut HashSet<String>, assigned: &mut 
         }
     };
     for (key, kind) in [
-        ("inputCard", "inp"),
+        ("input_card", "inp"),
         ("formation", "fmn"),
         ("gate", "gate"),
         ("end", "end"),
@@ -338,7 +338,7 @@ fn stage_layout(
     } else {
         let mut doc = DocumentMut::new();
         doc["schema"] = value(ahjo_mission_model::LAYOUT_SCHEMA);
-        doc["missionId"] = value(mission.id.clone());
+        doc["mission_id"] = value(mission.id.clone());
         let layout = Layout {
             schema: ahjo_mission_model::LAYOUT_SCHEMA,
             mission_id: mission.id.clone(),
@@ -358,7 +358,7 @@ fn stage_layout(
             layout.nodes.push(node);
         }
     }
-    crate::write::set(doc.as_table_mut(), "missionRev", value(mission.rev));
+    crate::write::set(doc.as_table_mut(), "mission_rev", value(mission.rev));
     let raw = doc.to_string();
     Layout::parse(&raw)?;
     Ok(Some(raw))

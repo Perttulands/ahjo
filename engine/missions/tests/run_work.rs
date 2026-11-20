@@ -20,13 +20,13 @@ const ISSUE: &str = "gh:example/project#180";
 /// optionally its own; `inputs` declares the Input card's inputs.
 fn mission(inputs: &str, brief_work: &str) -> String {
     format!(
-        r#"schema = 1
+        r#"schema = 2
 id = "msn_work"
 slug = "work"
 title = "Work"
 rev = 1
 
-[[inputCard]]
+[[input_card]]
 id = "inp_work"
 title = "Work"
 goal = "Carry the work item"
@@ -49,7 +49,7 @@ label = "Result"
 id = "slot_work"
 label = "Worker"
 harness = "openai-codex"
-agentId = "builder"
+agent_id = "builder"
 model = ""
 effort = "medium"
 

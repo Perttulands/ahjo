@@ -20,7 +20,7 @@ fn request(
         run_id: id.into(),
         dispatch_id: dispatch
             .data
-            .get("dispatchId")
+            .get("dispatch_id")
             .and_then(|v| v.as_str())
             .unwrap_or("")
             .into(),
@@ -103,7 +103,7 @@ fn keep(
 ) -> io::Result<()> {
     let dispatch_id = dispatch
         .data
-        .get("dispatchId")
+        .get("dispatch_id")
         .and_then(|v| v.as_str())
         .unwrap_or("");
     let request = request(c, id, mission, dispatch, Some(control)).map_err(io::Error::other)?;
@@ -118,11 +118,11 @@ fn keep(
             event.node_id == dispatch.node_id
                 && event.attempt == dispatch.attempt
                 && event.kind == replay.kind
-                && event.data.get("dispatchId") == replay.data.get("dispatchId")
+                && event.data.get("dispatch_id") == replay.data.get("dispatch_id")
                 && (replay.kind == "slot_dispatch"
                     || replay.kind == "workspace_turn"
-                    || event.data.get("seatEventSeq").is_some()
-                        && event.data.get("seatEventSeq") == replay.data.get("seatEventSeq"))
+                    || event.data.get("seat_event_seq").is_some()
+                        && event.data.get("seat_event_seq") == replay.data.get("seat_event_seq"))
         });
         if already_recorded {
             continue;
@@ -140,7 +140,7 @@ fn keep(
         "slot_result",
         &dispatch.node_id,
         dispatch.attempt,
-        json!({"dispatchId":dispatch_id,"status":"ok","sentinel":{"runId":id,"status":"ok"}}),
+        json!({"dispatch_id":dispatch_id,"status":"ok","sentinel":{"run_id":id,"status":"ok"}}),
     );
     slot.slot_id = dispatch.slot_id.clone();
     if !c
@@ -150,7 +150,7 @@ fn keep(
         .iter()
         .any(|e| {
             e.kind == "slot_result"
-                && e.data.get("dispatchId").and_then(|v| v.as_str()) == Some(dispatch_id)
+                && e.data.get("dispatch_id").and_then(|v| v.as_str()) == Some(dispatch_id)
         })
     {
         c.append(id, slot)?;
@@ -171,7 +171,7 @@ fn keep(
         "node_output",
         &dispatch.node_id,
         dispatch.attempt,
-        json!({"status":result.status,"text":result.text,"outputs":result.outputs,"reportRef":format!("lab://{id}/{}/report.md",dispatch.node_id)}),
+        json!({"status":result.status,"text":result.text,"outputs":result.outputs,"report_ref":format!("lab://{id}/{}/report.md",dispatch.node_id)}),
     );
     if reason == "judge" {
         output.data.insert("reason".into(), "judge".into());
@@ -197,7 +197,7 @@ fn record_tokens(
             "token_usage",
             &dispatch.node_id,
             dispatch.attempt,
-            json!({"dispatchId":dispatch_id,"tokens":tokens}),
+            json!({"dispatch_id":dispatch_id,"tokens":tokens}),
         );
         usage.slot_id.clone_from(&dispatch.slot_id);
         crate::run_worker::append_live(c, id, control, usage)?;
@@ -254,11 +254,11 @@ pub(crate) fn resolve(
     let events = c.ledger(id)?.read().map_err(crate::error::to_io)?;
     let named: Vec<_> = blocked
         .data
-        .get("openDispatches")
+        .get("open_dispatches")
         .and_then(|v| v.as_array())
         .into_iter()
         .flatten()
-        .filter_map(|v| v.get("dispatchId").and_then(|v| v.as_str()))
+        .filter_map(|v| v.get("dispatch_id").and_then(|v| v.as_str()))
         .collect();
     let mut failed = Vec::new();
     let mut reasons = Vec::new();
@@ -279,7 +279,7 @@ pub(crate) fn resolve(
         }
         let dispatch_id = dispatch
             .data
-            .get("dispatchId")
+            .get("dispatch_id")
             .and_then(|v| v.as_str())
             .unwrap_or("");
         if mode == ResumeMode::Redispatch || !named.contains(&dispatch_id) {
@@ -292,7 +292,7 @@ pub(crate) fn resolve(
                 "slot_result",
                 &dispatch.node_id,
                 dispatch.attempt,
-                json!({"dispatchId":dispatch_id,"slotId":dispatch.slot_id,"status":"abandoned"}),
+                json!({"dispatch_id":dispatch_id,"slot_id":dispatch.slot_id,"status":"abandoned"}),
             );
             abandoned.slot_id = dispatch.slot_id.clone();
             c.append(id, abandoned)?;
@@ -350,7 +350,7 @@ pub(crate) fn resolve(
                     "error",
                     &dispatch.node_id,
                     dispatch.attempt,
-                    json!({"code":"dispatch_reattach_failed","reason":reason,"dispatchId":dispatch_id,"recoverable":true}),
+                    json!({"code":"dispatch_reattach_failed","reason":reason,"dispatch_id":dispatch_id,"recoverable":true}),
                 );
                 error.slot_id = dispatch.slot_id.clone();
                 c.append(id, error)?;
@@ -361,7 +361,7 @@ pub(crate) fn resolve(
     }
     if !failed.is_empty() {
         let (code, reason) = block_reason(&reasons);
-        c.append(id, RunEvent { kind:"run_blocked".into(), timestamp:crate::run_storage::now(), data:json!({"code":code,"reason":reason,"resumeAllowed":true,"resumePolicy":"explicit","openDispatches":failed}).as_object().unwrap().clone(), node_id: if failed.len() == 1 { failed[0]["nodeId"].as_str().unwrap_or("").into() } else { String::new() }, ..Default::default() })?;
+        c.append(id, RunEvent { kind:"run_blocked".into(), timestamp:crate::run_storage::now(), data:json!({"code":code,"reason":reason,"resume_allowed":true,"resume_policy":"explicit","open_dispatches":failed}).as_object().unwrap().clone(), node_id: if failed.len() == 1 { failed[0]["node_id"].as_str().unwrap_or("").into() } else { String::new() }, ..Default::default() })?;
         return Ok(false);
     }
     Ok(true)

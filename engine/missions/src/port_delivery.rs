@@ -9,7 +9,7 @@ pub struct GateEvidence {
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
-#[serde(default, rename_all = "camelCase")]
+#[serde(default, rename_all = "snake_case")]
 pub struct GateFeedback {
     pub gate_id: String,
     pub gate_attempt: i64,
@@ -25,7 +25,7 @@ pub struct GateFeedback {
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
-#[serde(default, rename_all = "camelCase")]
+#[serde(default, rename_all = "snake_case")]
 pub struct GateResponse {
     pub gate_id: String,
     pub gate_attempt: i64,
@@ -41,7 +41,7 @@ pub struct GateResponse {
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
-#[serde(default, rename_all = "camelCase")]
+#[serde(default, rename_all = "snake_case")]
 pub struct RoutedInput {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub feedback: Option<Box<GateFeedback>>,

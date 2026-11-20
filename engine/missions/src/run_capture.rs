@@ -323,8 +323,16 @@ pub(crate) fn discarded(events: &[RunEvent], pending: &RunEvent) -> bool {
     events.iter().any(|event| {
         event.seq > pending.seq
             && event.kind == "run_resumed"
-            && event.data.get("resumeMode").and_then(|v| v.as_str()) == Some("redispatch")
-            && event.data.get("redispatchNodeId").and_then(|v| v.as_str()) == Some(&pending.node_id)
-            && event.data.get("redispatchAttempt").and_then(|v| v.as_i64()) == Some(pending.attempt)
+            && event.data.get("resume_mode").and_then(|v| v.as_str()) == Some("redispatch")
+            && event
+                .data
+                .get("redispatch_node_id")
+                .and_then(|v| v.as_str())
+                == Some(&pending.node_id)
+            && event
+                .data
+                .get("redispatch_attempt")
+                .and_then(|v| v.as_i64())
+                == Some(pending.attempt)
     })
 }

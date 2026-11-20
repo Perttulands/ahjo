@@ -58,7 +58,7 @@ pub(crate) fn schedule(
                 "node_started",
                 &req.input_card_id,
                 0,
-                json!({"nodeKind":"inputCard","inputRefs":[],"reason":"initial"}),
+                json!({"node_kind":"input_card","input_refs":[],"reason":"initial"}),
             ),
         )?;
         append(
@@ -143,7 +143,8 @@ pub(crate) fn schedule(
         for (node, started) in replay.open {
             if started.seq < failure.seq
                 && node != failure.node_id
-                && failure.data.get("sourceNodeId").and_then(|v| v.as_str()) != Some(node.as_str())
+                && failure.data.get("source_node_id").and_then(|v| v.as_str())
+                    != Some(node.as_str())
             {
                 drain.insert(node);
             }
@@ -185,7 +186,7 @@ pub(crate) fn schedule(
                                 "gate_kind_result",
                                 &gate.id,
                                 0,
-                                json!({"kind":"formation","verdict":result.verdict,"reason":result.reason,"evidence":evidence,"inputRef":input}),
+                                json!({"kind":"formation","verdict":result.verdict,"reason":result.reason,"evidence":evidence,"input_ref":input}),
                             );
                             kind.gate_id = gate.id.clone();
                             append(c, id, control, kind)?;
@@ -224,7 +225,7 @@ pub(crate) fn schedule(
                                     "escalation_raised",
                                     &target,
                                     attempt,
-                                    json!({"severity":escalation.severity,"reason":escalation.reason,"source":"agent","sourceNodeId":node,"trigger":"sentinel","blocks":escalation.blocks}),
+                                    json!({"severity":escalation.severity,"reason":escalation.reason,"source":"agent","source_node_id":node,"trigger":"sentinel","blocks":escalation.blocks}),
                                 );
                                 raised.gate_id = escalation.gate_id;
                                 append(c, id, control, raised)?;
@@ -240,7 +241,7 @@ pub(crate) fn schedule(
                                     "node_output",
                                     &node,
                                     attempt,
-                                    json!({"status":result.status,"text":result.text,"outputs":result.outputs,"reportRef":format!("lab://{id}/{node}/report.md")}),
+                                    json!({"status":result.status,"text":result.text,"outputs":result.outputs,"report_ref":format!("lab://{id}/{node}/report.md")}),
                                 );
                                 if let Err(error) = crate::run_capture::publish(
                                     c, id, mission, req, &workspace, control, output,
@@ -298,7 +299,7 @@ pub(crate) fn schedule(
                 {
                     let node = pending
                         .data
-                        .get("folderNode")
+                        .get("folder_node")
                         .and_then(|node| node.as_str())
                         .unwrap_or_default();
                     record_error(c, id, control, node, &error)?;
@@ -453,7 +454,7 @@ fn append(c: &Coordinator, id: &str, control: &Control, event: crate::RunEvent) 
 
 /// What a failed step, judge chain or pick does to the run: a spent limit
 /// picks or stops the run at it, anything else records the error and stops
-/// the run. A card whose whenSpent is fail outranks any other stop.
+/// the run. A card whose when_spent is fail outranks any other stop.
 fn failed(
     c: &Coordinator,
     id: &str,
@@ -519,7 +520,7 @@ fn record_error(
             "error",
             node,
             0,
-            json!({"code":code,"detail":detail,"message":detail,"reason":detail,"nodeId":node,"recoverable":true}),
+            json!({"code":code,"detail":detail,"message":detail,"reason":detail,"node_id":node,"recoverable":true}),
         ),
     )
 }

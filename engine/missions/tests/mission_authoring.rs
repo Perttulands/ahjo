@@ -1241,7 +1241,7 @@ fn placement_has_no_ceiling_and_refuses_a_foreign_layout() {
         ..Default::default()
     };
     let mut layout = Layout {
-        schema: 1,
+        schema: ahjo_mission_model::LAYOUT_SCHEMA,
         mission_id: mission.id.clone(),
         ..Default::default()
     };

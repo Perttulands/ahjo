@@ -202,7 +202,7 @@ async fn start(
     {
         return Err(ahjo_core::Error::new(
             "bad_request",
-            "mission, one run target and expectedRev required",
+            "mission, one run target and expected_rev required",
         )
         .into());
     }
