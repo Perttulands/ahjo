@@ -5,9 +5,7 @@ use std::path::PathBuf;
 use ahjo::{AREAS, TOOL_SETS, install};
 use ahjo_core::Error;
 use ahjo_node_kit::identity::Identity;
-use ahjo_node_kit::{
-    Config, NodeClient, NodeError, Options, Unreachable, cli, config, hook, listing, mcp,
-};
+use ahjo_node_kit::{NodeClient, NodeError, Options, Unreachable, cli, config, hook, listing, mcp};
 use anyhow::Result;
 
 const USAGE: &str = "ahjo: the node of Ahjo Swarm, and the command line over its commands.
@@ -377,8 +375,8 @@ async fn serve(args: &[String]) -> Result<()> {
             _ => return Err(usage(format!("unknown flag {flag}"), SERVE_USAGE)),
         }
     }
-    let config = Config::load(&file)?;
-    let running = ahjo_node_kit::start_with(
+    let (config, harness_rename) = ahjo_harness::ConfigRename::load(&file)?;
+    let running = ahjo_node_kit::serve::start_with_config_commit(
         Options {
             dir,
             config,
@@ -386,6 +384,7 @@ async fn serve(args: &[String]) -> Result<()> {
         },
         AREAS,
         TOOL_SETS,
+        || harness_rename.map_or(Ok(()), ahjo_harness::ConfigRename::save),
     )
     .await?;
     stopped().await;

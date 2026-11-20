@@ -51,7 +51,7 @@ Each directory under an area, `kit/`, `bin/` and `engine/` is one crate. An
 app's package is `ahjo-app-<name>` (`ahjo-app-swarm`, `ahjo-app-brain`,
 `ahjo-app-desk`), since `ahjo-brain` is the brain area's node crate; its
 binary is the name the operator runs. The areas are terminals, files, work,
-brain, host, scheduled, agents and missions; fleet becomes one after the first
+brain, host, scheduled, harness and missions; fleet becomes one after the first
 release. The brain area's only part in Swarm is its Alt+L panel over the
 terminals, a page without a tab: Ahjo Brain is where the brain is read at
 length and edited, and its node side serves the `ahjo brain` commands and the

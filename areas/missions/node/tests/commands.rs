@@ -85,7 +85,7 @@ const EXPECTED: &[&str] = &[
 #[tokio::test(flavor = "multi_thread")]
 async fn command_list_and_coded_failures() {
     assert_eq!(ahjo_missions::LISTING.commands, EXPECTED);
-    let role_commands: Vec<_> = ahjo_agents::LISTING
+    let role_commands: Vec<_> = ahjo_harness::LISTING
         .commands
         .iter()
         .copied()

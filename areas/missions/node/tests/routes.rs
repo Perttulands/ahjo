@@ -360,7 +360,7 @@ async fn default_role_store_is_shared_and_isolated() {
     let areas = &[
         sessions::LISTING,
         ahjo_work::LISTING,
-        ahjo_agents::LISTING,
+        ahjo_harness::LISTING,
         LAB,
     ];
     let node = Node::start(areas, "").await.unwrap();

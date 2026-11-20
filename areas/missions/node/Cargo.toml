@@ -28,4 +28,4 @@ tower = { version = "0.5", features = ["util"] }
 ahjo-work = { path = "../../work/node" }
 futures-util = "0.3"
 tokio-tungstenite = "0.29"
-ahjo-agents = { path = "../../agents/node" }
+ahjo-harness = { path = "../../harness/node" }

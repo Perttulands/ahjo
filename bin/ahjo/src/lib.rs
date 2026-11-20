@@ -9,7 +9,7 @@ use ahjo_node_kit::mcp::ToolSet;
 /// The node's areas, in the order they are built. Adding an area adds one
 /// line here and one in Cargo.toml.
 pub const AREAS: &[Listing] = &[
-    ahjo_agents::LISTING,
+    ahjo_harness::LISTING,
     ahjo_terminals::LISTING,
     ahjo_scheduled::LISTING,
     ahjo_host::LISTING,

@@ -90,6 +90,16 @@ pub async fn start_with(
     areas: &[Listing],
     sets: &[mcp::ToolSet],
 ) -> Result<Running> {
+    start_with_config_commit(options, areas, sets, || Ok(())).await
+}
+
+/// Builds the node, commits a staged configuration change, then serves.
+pub async fn start_with_config_commit(
+    options: Options,
+    areas: &[Listing],
+    sets: &[mcp::ToolSet],
+    commit: impl FnOnce() -> Result<(), Error>,
+) -> Result<Running> {
     let Options {
         dir,
         config,
@@ -195,6 +205,7 @@ pub async fn start_with(
         ))
         .layer(middleware::from_fn_with_state(trust, trust::guard));
     let recorded = address::record(&dir, address)?;
+    commit()?;
     eprintln!(
         "ahjo: node {} ({}, {}) serving http://{address}",
         node.id,

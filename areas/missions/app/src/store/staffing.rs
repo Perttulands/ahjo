@@ -1,5 +1,5 @@
 //! Clamp slot choices to the catalog published by the node's role library.
-use ahjo_agents_contract::roles::Roles;
+use ahjo_harness_contract::roles::Roles;
 use ahjo_missions_contract::{MissionChange, Slot};
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]

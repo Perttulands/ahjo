@@ -126,10 +126,10 @@ dependencies = [
 name = "ahjo"
 version = "0.0.1"
 dependencies = [
- "ahjo-agents",
  "ahjo-brain",
  "ahjo-core",
  "ahjo-files",
+ "ahjo-harness",
  "ahjo-host",
  "ahjo-missions",
  "ahjo-node-kit",
@@ -145,58 +145,6 @@ dependencies = [
  "sha2 0.10.9",
  "tokio",
  "toml 1.2.1+spec-1.1.0",
-]
-
-[[package]]
-name = "ahjo-agents"
-version = "0.0.1"
-dependencies = [
- "ahjo-agents-contract",
- "ahjo-core",
- "ahjo-mission-engine",
- "ahjo-node-kit",
- "ahjo-term",
- "ahjo-terminals",
- "ahjo-testkit",
- "anyhow",
- "axum",
- "futures-util",
- "serde",
- "serde_json",
- "sha2 0.11.1",
- "tokio",
- "tokio-tungstenite 0.30.0",
- "toml 1.2.1+spec-1.1.0",
- "toml_edit 0.25.19+spec-1.1.0",
- "windows-sys 0.61.2",
-]
-
-[[package]]
-name = "ahjo-agents-app"
-version = "0.0.1"
-dependencies = [
- "ahjo-agents",
- "ahjo-agents-contract",
- "ahjo-app-kit",
- "ahjo-app-shell",
- "ahjo-core",
- "ahjo-node-kit",
- "ahjo-terminals-contract",
- "ahjo-testkit",
- "gpui-pre",
- "log",
- "serde",
- "serde_json",
- "tokio",
-]
-
-[[package]]
-name = "ahjo-agents-contract"
-version = "0.0.1"
-dependencies = [
- "ahjo-core",
- "serde",
- "serde_json",
 ]
 
 [[package]]
@@ -274,11 +222,11 @@ dependencies = [
 name = "ahjo-app-swarm"
 version = "0.0.1"
 dependencies = [
- "ahjo-agents-app",
  "ahjo-app-kit",
  "ahjo-app-shell",
  "ahjo-brain-app",
  "ahjo-files-app",
+ "ahjo-harness-app",
  "ahjo-host-app",
  "ahjo-missions-app",
  "ahjo-scheduled-app",
@@ -410,6 +358,60 @@ dependencies = [
 ]
 
 [[package]]
+name = "ahjo-harness"
+version = "0.0.1"
+dependencies = [
+ "ahjo-core",
+ "ahjo-harness-contract",
+ "ahjo-mission-engine",
+ "ahjo-node-kit",
+ "ahjo-term",
+ "ahjo-terminals",
+ "ahjo-testkit",
+ "anyhow",
+ "axum",
+ "futures-util",
+ "schemars",
+ "serde",
+ "serde_json",
+ "sha2 0.11.1",
+ "tokio",
+ "tokio-tungstenite 0.30.0",
+ "toml 1.2.1+spec-1.1.0",
+ "toml_edit 0.25.19+spec-1.1.0",
+ "windows-sys 0.61.2",
+]
+
+[[package]]
+name = "ahjo-harness-app"
+version = "0.0.1"
+dependencies = [
+ "ahjo-app-kit",
+ "ahjo-app-shell",
+ "ahjo-core",
+ "ahjo-harness",
+ "ahjo-harness-contract",
+ "ahjo-node-kit",
+ "ahjo-terminals-contract",
+ "ahjo-testkit",
+ "gpui-pre",
+ "log",
+ "serde",
+ "serde_json",
+ "tokio",
+]
+
+[[package]]
+name = "ahjo-harness-contract"
+version = "0.0.1"
+dependencies = [
+ "ahjo-core",
+ "schemars",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "ahjo-holder"
 version = "0.0.1"
 dependencies = [
@@ -512,8 +514,8 @@ dependencies = [
 name = "ahjo-missions"
 version = "0.0.1"
 dependencies = [
- "ahjo-agents",
  "ahjo-core",
+ "ahjo-harness",
  "ahjo-mission-engine",
  "ahjo-missions-contract",
  "ahjo-node-kit",
@@ -535,11 +537,11 @@ dependencies = [
 name = "ahjo-missions-app"
 version = "0.0.1"
 dependencies = [
- "ahjo-agents-contract",
  "ahjo-app-kit",
  "ahjo-app-shell",
  "ahjo-core",
  "ahjo-files",
+ "ahjo-harness-contract",
  "ahjo-mission-engine",
  "ahjo-missions",
  "ahjo-missions-contract",

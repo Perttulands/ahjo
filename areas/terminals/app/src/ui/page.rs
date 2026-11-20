@@ -78,7 +78,7 @@ pub enum Act {
     Copy(Key),
     Kill(Key),
     /// What shapes the agent started in the session's folder, on the
-    /// Agents page.
+    /// Harness page.
     Sees(Key),
     /// Kills the rail's picked rows that it shows.
     KillPicked,
@@ -1315,7 +1315,7 @@ impl Terminals {
                     self.report(&format!("{} has no folder to read", k.name), true, None);
                     return;
                 };
-                // The Agents page names harnesses by the tools report's ids.
+                // The Harness page names harnesses by the tools report's ids.
                 let harness = match crate::store::sessions::running(session) {
                     crate::store::sessions::Running::Harness("claude-code") => Some("claude"),
                     crate::store::sessions::Running::Harness("codex") => Some("codex"),

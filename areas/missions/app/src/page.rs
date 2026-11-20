@@ -90,7 +90,7 @@ pub struct MissionsPage {
     check_value: Entity<TextField>,
     history: undo::History,
     writing: bool,
-    roles: Option<ahjo_agents_contract::roles::Roles>,
+    roles: Option<ahjo_harness_contract::roles::Roles>,
     /// The repositories the node's config names, for a step's Repository.
     repositories: Option<Vec<String>>,
     role: Entity<TextField>,
@@ -823,7 +823,7 @@ impl MissionsPage {
             && let Some((node, _)) = self.state.selected.clone()
         {
             let asked = self.host.request(
-                Request::get(NodeId(node.clone()), ahjo_agents_contract::roles::PATH),
+                Request::get(NodeId(node.clone()), ahjo_harness_contract::roles::PATH),
                 cx,
             );
             self.read_repositories(node, cx);

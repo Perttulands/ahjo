@@ -1,0 +1,35 @@
+[package]
+name = "ahjo-harness"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[lints]
+workspace = true
+
+[dependencies]
+anyhow = "1"
+ahjo-harness-contract = { path = "../contract" }
+ahjo-core = { path = "../../../kit/core" }
+ahjo-node-kit = { path = "../../../kit/node-kit" }
+ahjo-mission-engine = { path = "../../../engine/missions" }
+axum = { version = "0.8", default-features = false, features = ["json"] }
+ahjo-term = { path = "../../../engine/term" }
+schemars.workspace = true
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["preserve_order"] }
+sha2 = "0.11"
+toml = { version = "1", default-features = false, features = ["parse", "serde", "std"] }
+toml_edit = "0.25"
+tokio = { version = "1", features = ["full"] }
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = ["Win32_System_Threading"] }
+
+[dev-dependencies]
+ahjo-testkit = { path = "../../../kit/testkit" }
+ahjo-terminals = { path = "../../terminals/node" }
+
+futures-util = "0.3"
+tokio-tungstenite = "0.30"

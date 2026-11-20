@@ -227,9 +227,9 @@ fn starts_a_run_sees_active_step_answers_gate_and_shows_admission_findings(
             cx,
         )
     });
-    // The Agents library asks to open a mission before its list has arrived.
+    // The Harness library asks to open a mission before its list has arrived.
     shell.update(cx, |s, cx| {
-        let host = Host::new(s.hub()).for_page("agents", &[]);
+        let host = Host::new(s.hub()).for_page("harness", &[]);
         host.ask(
             Ask::Reveal {
                 what: "mission".into(),

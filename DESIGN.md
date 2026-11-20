@@ -38,7 +38,7 @@ A page is judged by three questions, in this order:
 - **Files.** Read and change what agents wrote, beside the session that wrote
   it. At least as good as VS Code at finding, reading and editing a file.
   Being redesigned from a prototype.
-- **Agents.** See and edit what shapes an agent started in a given folder:
+- **Harness.** See and edit what shapes an agent started in a given folder:
   instructions and where each comes from, skills, hooks as "this event does
   that", settings and tools. Skills has its own page for managing them and
   for what is out of sync; Roles has another.

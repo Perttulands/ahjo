@@ -7,13 +7,14 @@ use ahjo_app_kit::Build;
 use ahjo_app_shell::start;
 use gpui::{App, AppContext, Bounds, WindowBounds, WindowOptions, point, px, size};
 use std::borrow::Cow;
+use std::path::Path;
 
 /// The first page is the one the app opens on: the terminals, where the
 /// operator spends the day.
 pub const PAGES: &[Build] = &[
     ahjo_terminals_app::build,
     ahjo_files_app::build,
-    ahjo_agents_app::build,
+    ahjo_harness_app::build,
     ahjo_work_app::build,
     ahjo_brain_app::build,
     ahjo_missions_app::build,
@@ -40,6 +41,24 @@ fn bounds(cx: &App) -> Bounds<gpui::Pixels> {
     }
 }
 
+/// Carry the last folder and harness forward when the page id changes.
+fn migrate_harness_preferences(path: &Path) -> std::io::Result<()> {
+    use ahjo_app_kit::settings::Settings;
+    let text = match std::fs::read_to_string(path) {
+        Ok(text) => text,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(error) => return Err(error),
+    };
+    if let Some(mut settings) = Settings::parse(&text)
+        && !settings.sections.contains_key("harness")
+        && let Some(previous) = settings.sections.remove("agents")
+    {
+        settings.sections.insert("harness".into(), previous);
+        Settings::write(path, &settings.text())?;
+    }
+    Ok(())
+}
+
 /// The app: `ahjo-swarm [--node http://host:port]`.
 pub fn run() {
     let node = {
@@ -49,6 +68,15 @@ pub fn run() {
             .and_then(|i| args.get(i + 1).cloned())
     };
     app_log::install();
+    let settings = ahjo_app_kit::settings::path();
+    if let Some(path) = settings.as_deref()
+        && let Err(error) = migrate_harness_preferences(path)
+    {
+        log::warn!(
+            "could not migrate Harness preferences at {}: {error}",
+            path.display()
+        );
+    }
     gpui_platform::application().run(move |cx: &mut App| {
         if let Err(e) = cx.text_system().add_fonts(fonts()) {
             panic!("the bundled fonts did not load: {e}");
@@ -68,7 +96,7 @@ pub fn run() {
             },
             |window, cx| {
                 cx.new(|cx| {
-                    let mut shell = start(PAGES, node, ahjo_app_kit::settings::path(), window, cx);
+                    let mut shell = start(PAGES, node, settings, window, cx);
                     shell.offer_updates(env!("AHJO_VERSION"), window, cx);
                     shell
                 })

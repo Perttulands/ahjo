@@ -75,13 +75,18 @@ impl Config {
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => String::new(),
             Err(e) => return Err(refused(format!("reading {}: {e}", path.display()))),
         };
-        Config::read(&text, path.to_owned())
-            .map_err(|e| refused(format!("in {}: {}", path.display(), e.message)))
+        Config::parse_file(&text, path.to_owned())
     }
 
     /// `text` as the file [`FILE`] in `dir`.
     pub fn parse(text: &str, dir: PathBuf) -> Result<Config, Error> {
         Config::read(text, dir.join(FILE))
+    }
+
+    /// Reads text as a particular file, preserving the base for relative paths.
+    pub fn parse_file(text: &str, path: PathBuf) -> Result<Config, Error> {
+        Self::read(text, path.clone())
+            .map_err(|e| refused(format!("in {}: {}", path.display(), e.message)))
     }
 
     fn read(text: &str, file: PathBuf) -> Result<Config, Error> {

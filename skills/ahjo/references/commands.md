@@ -2,10 +2,6 @@
 
 These are the commands advertised by the enabled areas. Run `ahjo <noun> <verb> --help` for arguments and behavior; availability depends on the node build and its enabled areas.
 
-## agents
-
-`ahjo agents hook-add`, `ahjo agents hook-remove`, `ahjo agents hook-set`, `ahjo agents hook-switch`, `ahjo agents link`, `ahjo agents read`, `ahjo agents setting-set`, `ahjo agents shape`, `ahjo agents show`, `ahjo agents sync`, `ahjo agents write`.
-
 ## brain
 
 `ahjo brain changes`, `ahjo brain collections`, `ahjo brain read`, `ahjo brain save`, `ahjo brain search`, `ahjo brain send`.
@@ -33,6 +29,10 @@ These are the commands advertised by the enabled areas. Run `ahjo <noun> <verb> 
 ## handoff
 
 `ahjo handoff reply`, `ahjo handoff start`, `ahjo handoff status`.
+
+## harness
+
+`ahjo harness hook-add`, `ahjo harness hook-remove`, `ahjo harness hook-set`, `ahjo harness hook-switch`, `ahjo harness link`, `ahjo harness read`, `ahjo harness setting-set`, `ahjo harness shape`, `ahjo harness show`, `ahjo harness sync`, `ahjo harness write`.
 
 ## host
 

@@ -1084,16 +1084,16 @@ mod tests {
     fn help_names_each_noun_once_with_its_verbs() {
         let tools: Vec<Value> = [
             "session_list",
-            "agents_hook_add",
+            "harness_hook_add",
             "session_read",
-            "agents_show",
+            "harness_show",
         ]
         .iter()
         .map(|n| json!({"name": n, "description": "Does it."}))
         .collect();
         assert_eq!(
             noun_index(&tools),
-            "  session  list read\n  agents   hook-add show"
+            "  session  list read\n  harness  hook-add show"
         );
     }
 

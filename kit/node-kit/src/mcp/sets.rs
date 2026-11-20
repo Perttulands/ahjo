@@ -92,7 +92,7 @@ pub(super) fn own(name: &str, every: &Arc<[Command]>, node: &NodeId) -> Option<C
             COMMANDS,
             Effect::Reads,
             "Find the Swarm commands this server has no tool of its own for: missions and \
-             their runs and gates, scheduled prompts, sessions, files, services, roles, agent \
+             their runs and gates, scheduled prompts, sessions, files, services, roles, harness \
              settings and more. Use this when the user asks for something none of the other \
              tools does. Answers each command's name, what it does, and whether to run it \
              with swarm_read (it only reads) or swarm_run (it changes something); detail \

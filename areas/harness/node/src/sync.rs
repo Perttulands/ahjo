@@ -1,0 +1,181 @@
+//! Sync: fetch, then fast-forward and run setup in a new tmux
+//! session so the operator can watch it and read what it said. Git is kept
+//! non-interactive even though the session has a terminal.
+
+use anyhow::Result;
+
+use super::checkout::SETUP;
+use super::report::checkout_paths;
+use super::{Home, run, skills};
+use ahjo_term::{Sessions, Start};
+
+/// Starts syncing the checkout the operator knows as `shown` (as the report
+/// shows its path), if it is one the skills come from. Returns the new
+/// session's name.
+pub async fn sync(home: &Home, sessions: &dyn Sessions, shown: &str) -> Result<String> {
+    let path = checkout(home, shown)?;
+    run::fetch(home, &path).await.map_err(anyhow::Error::msg)?;
+    sync_fetched(sessions, &path).await
+}
+
+/// Start the visible fast-forward using refs already fetched by the caller.
+pub(crate) async fn sync_fetched(
+    sessions: &dyn Sessions,
+    path: &std::path::Path,
+) -> Result<String> {
+    let name = path
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    let taken: Vec<String> = sessions
+        .listed()
+        .await?
+        .into_iter()
+        .filter(|s| s.user.is_none())
+        .map(|s| s.name)
+        .collect();
+    let session = free_name(&format!("sync-{}", tmux_safe(&name)), &taken);
+    let setup = SETUP
+        .iter()
+        .copied()
+        .find(|script| path.join(script).is_file());
+    sessions
+        .start(Start {
+            name: session.clone(),
+            folder: path.to_string_lossy().into_owned(),
+            command: line(setup),
+            user: String::new(),
+        })
+        .await?;
+    Ok(session)
+}
+
+pub(crate) fn checkout(home: &Home, shown: &str) -> Result<std::path::PathBuf> {
+    let paths = checkout_paths(&skills::scan(home));
+    if let Some(path) = paths.iter().find(|path| home.show(path) == shown) {
+        return Ok(path.clone());
+    }
+    let known: Vec<String> = paths.iter().map(|path| home.show(path)).collect();
+    match known.is_empty() {
+        true => anyhow::bail!(
+            "{shown} is not a checkout the skills come from, and no skills here come from one \
+             (ahjo harness show lists what there is)"
+        ),
+        false => anyhow::bail!(
+            "{shown} is not a checkout the skills come from; they come from {} \
+             (ahjo harness show lists them)",
+            known.join(", ")
+        ),
+    }
+}
+
+/// What the session types after a successful fetch: fast-forward, then setup.
+fn line(setup: Option<&str>) -> String {
+    #[cfg(windows)]
+    let prefix = "$env:GIT_TERMINAL_PROMPT = '0'; git merge --ff-only '@{upstream}'";
+    #[cfg(not(windows))]
+    let prefix = "export GIT_TERMINAL_PROMPT=0; git merge --ff-only '@{upstream}'";
+    match setup {
+        #[cfg(windows)]
+        Some(script) => format!("{prefix}; if ($?) {{ .\\{script} }}"),
+        #[cfg(not(windows))]
+        Some(script) => format!("{prefix} && ./{script}"),
+        None => prefix.into(),
+    }
+}
+
+/// Letters, digits, `_` and `-`, as a session name allows.
+fn tmux_safe(name: &str) -> String {
+    let safe: String = name
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '_' || c == '-' {
+                c
+            } else {
+                '-'
+            }
+        })
+        .take(40)
+        .collect();
+    if safe.is_empty() {
+        "checkout".into()
+    } else {
+        safe
+    }
+}
+
+/// `base`, or `base-2`, `base-3`… if that is taken.
+fn free_name(base: &str, taken: &[String]) -> String {
+    (1..)
+        .map(|n| {
+            if n == 1 {
+                base.to_owned()
+            } else {
+                format!("{base}-{n}")
+            }
+        })
+        .find(|name| !taken.contains(name))
+        .expect("a free name")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn names_the_session_after_the_checkout() {
+        assert_eq!(tmux_safe("agent-kit"), "agent-kit");
+        assert_eq!(tmux_safe("my.kit"), "my-kit");
+        let taken = vec!["sync-agent-kit".to_owned(), "sync-agent-kit-2".to_owned()];
+        assert_eq!(free_name("sync-agent-kit", &taken), "sync-agent-kit-3");
+        assert_eq!(free_name("sync-other", &taken), "sync-other");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn sync_is_noninteractive_and_runs_setup_only_after_a_successful_fast_forward() {
+        use std::process::Command;
+        let dir = std::env::temp_dir().join(format!("ahjo-sync-command-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let git = dir.join("git");
+        let setup = dir.join("install.sh");
+        ahjo_testkit::tmux::write_script(
+            &git,
+            "#!/bin/sh\nprintf '%s' \"$GIT_TERMINAL_PROMPT\" > git-prompt\nprintf '%s' \"$*\" > git-args\nif [ -f fail ]; then echo 'fatal: credentials unavailable' >&2; exit 1; fi\n",
+        );
+        ahjo_testkit::tmux::write_script(
+            &setup,
+            "#!/bin/sh\nprintf '%s' \"$GIT_TERMINAL_PROMPT\" > setup-prompt\n",
+        );
+        let invoke = || {
+            Command::new("/bin/sh")
+                .arg("-c")
+                .arg(line(Some("install.sh")))
+                .current_dir(&dir)
+                .env("PATH", &dir)
+                .env("GIT_TERMINAL_PROMPT", "1")
+                .output()
+                .unwrap()
+        };
+        std::fs::write(dir.join("fail"), "").unwrap();
+        let failed = invoke();
+        assert!(!failed.status.success());
+        assert!(String::from_utf8_lossy(&failed.stderr).contains("fatal: credentials unavailable"));
+        assert_eq!(
+            std::fs::read_to_string(dir.join("git-prompt")).unwrap(),
+            "0"
+        );
+        assert_eq!(
+            std::fs::read_to_string(dir.join("git-args")).unwrap(),
+            "merge --ff-only @{upstream}"
+        );
+        assert!(!dir.join("setup-prompt").exists());
+        std::fs::remove_file(dir.join("fail")).unwrap();
+        assert!(invoke().status.success());
+        assert_eq!(
+            std::fs::read_to_string(dir.join("setup-prompt")).unwrap(),
+            "0"
+        );
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+}

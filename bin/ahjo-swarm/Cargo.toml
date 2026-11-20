@@ -23,7 +23,7 @@ gpui = { package = "gpui-pre", version = "=0.3.12" }
 gpui_platform = { package = "gpui-pre-platform", version = "=0.3.12" }
 log = "0.4"
 # The pages, one line each, as in PAGES.
-ahjo-agents-app = { path = "../../areas/agents/app" }
+ahjo-harness-app = { path = "../../areas/harness/app" }
 ahjo-terminals-app = { path = "../../areas/terminals/app" }
 ahjo-scheduled-app = { path = "../../areas/scheduled/app" }
 ahjo-files-app = { path = "../../areas/files/app" }
