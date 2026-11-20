@@ -21,6 +21,23 @@ pub struct Layout {
     pub nodes: Vec<LayoutNode>,
     #[serde(rename = "edge")]
     pub edges: Vec<LayoutEdge>,
+    /// Notes that explain the shape: a titled group of cards.
+    #[serde(rename = "frame", skip_serializing_if = "Vec::is_empty")]
+    pub frames: Vec<LayoutFrame>,
+}
+
+/// A group of cards named for what it does together ("Review loop: up to
+/// three rounds"), drawn round them on the board. It explains the shape
+/// and never runs.
+#[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq)]
+#[serde(default, deny_unknown_fields)]
+pub struct LayoutFrame {
+    pub id: String,
+    pub title: String,
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub text: String,
+    /// The cards it holds, by node id.
+    pub nodes: Vec<String>,
 }
 
 /// A card's place: a node id, or `note:<target>` for a dragged sticky.

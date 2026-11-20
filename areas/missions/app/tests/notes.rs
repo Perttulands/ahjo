@@ -164,7 +164,8 @@ fn canvas_note_pin_opens_thread_and_preserves_edits(cx: &mut TestAppContext) {
     });
     click(cx, "canvas-note-close-fmn_work");
     until(cx, "closed thread", |cx| !has(cx, "canvas-note-field"));
-    click(cx, "canvas-note-fmn_work");
+    // Closed, a thread is its pin's count; the pin reopens it.
+    click(cx, "canvas-note-pin-fmn_work");
     until(cx, "reopened thread", |cx| has(cx, &entry));
     click(cx, &format!("canvas-note-delete-{id}"));
     until(cx, "deleted note", |_| {
@@ -231,6 +232,9 @@ fn a_note_is_written_in_flow_beside_its_step(cx: &mut TestAppContext) {
     let mission = format!("mission-{}-hello", running.node);
     until(cx, "mission", |cx| has(cx, &mission));
     click(cx, &mission);
+    // The steps are behind the panel's Steps tab; Build comes first.
+    until(cx, "the panel's Steps tab", |cx| has(cx, "side-steps"));
+    click(cx, "side-steps");
     until(cx, "Note beside the step", |cx| {
         has(cx, "flow-note-fmn_work")
     });
@@ -294,6 +298,9 @@ fn a_note_on_a_wire_shows_under_its_step_and_on_the_board(cx: &mut TestAppContex
     let mission = format!("mission-{}-hello", running.node);
     until(cx, "mission", |cx| has(cx, &mission));
     click(cx, &mission);
+    // The steps are behind the panel's Steps tab; Build comes first.
+    until(cx, "the panel's Steps tab", |cx| has(cx, "side-steps"));
+    click(cx, "side-steps");
     until(cx, "the wire's note in Flow", |cx| {
         has(cx, "flow-thread-edge_done")
     });
@@ -330,6 +337,7 @@ fn a_wide_window_shows_flow_beside_the_board_and_a_narrow_one_behind_its_toggle(
     until(cx, "Flow beside the board", |cx| {
         has(cx, "missions-flow") && has(cx, "mission-card-fmn_work")
     });
+    click(cx, "side-steps");
     // A step chosen in Flow is marked on both.
     click(cx, "flow-title-fmn_work");
     until(cx, "the step marked in Flow", |cx| {

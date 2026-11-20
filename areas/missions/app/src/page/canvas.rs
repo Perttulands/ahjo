@@ -48,7 +48,6 @@ const BADGE_SCALE: f32 = 0.75;
 const SLOT_PAD: f32 = 10.;
 const POOL_LABEL: f32 = 14.;
 const CHIP_PAD: f32 = 6.;
-const GATE_MARK: f32 = 40.;
 const END_MARK: f32 = 18.;
 const CHIP_ALPHA: f32 = 0.14;
 #[derive(Clone, Debug)]
@@ -287,7 +286,15 @@ impl MissionsPage {
             .chain(mission.formations.iter().map(|f| &f.id))
             .chain(mission.gates.iter().map(|g| &g.id))
             .chain(mission.ends.iter().map(|e| &e.id));
-        if ids.into_iter().any(|id| missing(id)) {
+        let judges = board::judges(mission);
+        let folded = |id: &str| {
+            judges.contains(id)
+                && mission
+                    .gates
+                    .iter()
+                    .any(|g| board::folded_judge(mission, &g.id).as_deref() == Some(id))
+        };
+        if ids.into_iter().any(|id| missing(id) && !folded(id)) {
             // A Limit card stands under what it caps; on a board laid out
             // whole, where the rows leave it room.
             let whole = layout.is_empty();
@@ -308,7 +315,15 @@ impl MissionsPage {
                 y: now.1.round() as i64,
             });
         }
-        board::board(mission, &flow, &layout, running)
+        board::board(mission, &flow, &layout, running, &self.frames())
+    }
+    /// The notes that explain the shape, as saved with the layout.
+    pub(super) fn frames(&self) -> Vec<ahjo_missions_contract::LayoutFrame> {
+        self.state
+            .layout
+            .as_ref()
+            .map(|l| l.frames.clone())
+            .unwrap_or_default()
     }
     /// The mission in reading rows for the board's room, with room under
     /// each card that has notes: how it opens until arranged, and Arrange.
@@ -319,13 +334,12 @@ impl MissionsPage {
             &flow::build(mission),
             self.canvas.room(),
             READABLE,
-            &|id| {
-                if noted.contains(id) {
-                    board::NOTE_ROOM
-                } else {
-                    0.
-                }
+            &|id| match crate::look::comments() {
+                // A pin takes no room; a tag its line.
+                crate::look::Comments::Tags if noted.contains(id) => super::notes::TAG_ROOM,
+                _ => 0.,
             },
+            &self.frames(),
         )
     }
     pub(super) fn render_canvas(
@@ -462,6 +476,9 @@ impl MissionsPage {
             }))
             // Its Ctrl+wheel is the board's zoom, not the whole app's.
             .child(ahjo_app_kit::zoom::claim(|_, _| true));
+        for f in &board.frames {
+            layer = layer.child(frame_view(t, f, &view));
+        }
         layer = layer.child(wires(
             t,
             &board,
@@ -486,7 +503,12 @@ impl MissionsPage {
             let Some(label) = w.label else { continue };
             let z = view.zoom;
             let (x, y) = view.position(label.0, label.1);
-            let colour = if w.route == "fail" { t.fail } else { t.wire };
+            let ink = crate::look::ink(t);
+            let colour = if w.route == "fail" {
+                ink.fail
+            } else {
+                ink.wire
+            };
             let selector = format!("canvas-loop-{}", w.id);
             layer = layer.child(
                 div()
@@ -498,12 +520,17 @@ impl MissionsPage {
                     .text_color(colour)
                     .whitespace_nowrap()
                     .child(format!(
-                        "↺ {}",
+                        "↺ BACK TO {}",
                         mission.node_name(&w.to_node).to_uppercase()
                     )),
             );
         }
-        for card in &board.cards {
+        let proposed = if running {
+            vec![]
+        } else {
+            self.proposed_cards(mission)
+        };
+        for card in board.cards.iter().filter(|c| c.kind != board::Kind::Frame) {
             let state = states
                 .as_ref()
                 .and_then(|s| s.states.get(&card.id))
@@ -516,6 +543,53 @@ impl MissionsPage {
                 t, mission, card, &view, running, state, attempts, &findings, cx,
             ));
             layer = layer.children(self.card_badge(t, mission, card, &view, &findings));
+            // A change the building agent proposes, marked until accepted.
+            if let Some((_, sign)) = proposed.iter().find(|(id, _)| *id == card.id) {
+                let z = view.zoom;
+                let (x, y) = view.position(card.x, card.y);
+                let ring = 5. * z;
+                let word = match sign {
+                    '+' => "PROPOSED · NEW",
+                    '-' => "PROPOSED · REMOVED",
+                    _ => "PROPOSED · CHANGED",
+                };
+                layer = layer
+                    .child(
+                        div()
+                            .absolute()
+                            .left(px(x - ring))
+                            .top(px(y - ring))
+                            .w(px(card.w * z + 2. * ring))
+                            .h(px(card.h * z + 2. * ring))
+                            .rounded(px(size::RADIUS * z + ring))
+                            .border_2()
+                            .border_dashed()
+                            .border_color(t.accent),
+                    )
+                    // Astride the ring's top edge, right-aligned short of
+                    // the comment bubble's corner: clear of frame titles
+                    // above and comment tags below.
+                    .child(
+                        div()
+                            .absolute()
+                            .left(px(x))
+                            .top(px(y - ring - 8. * z))
+                            .w(px(card.w * z))
+                            .flex()
+                            .justify_end()
+                            .pr(px(30. * z))
+                            .child(
+                                div()
+                                    .px(px(6. * z))
+                                    .rounded(px(4. * z))
+                                    .bg(t.accent)
+                                    .text_color(t.on_accent())
+                                    .text_size(px(CARD_SMALL * z))
+                                    .font_weight(FontWeight::BOLD)
+                                    .child(word),
+                            ),
+                    );
+            }
         }
         if !running {
             // "+" offers what comes next, so only where nothing does yet; a
@@ -527,7 +601,7 @@ impl MissionsPage {
             for card in board
                 .cards
                 .iter()
-                .filter(|c| c.kind != board::Kind::End && open(c))
+                .filter(|c| !matches!(c.kind, board::Kind::End | board::Kind::Frame) && open(c))
             {
                 layer = layer.child(self.canvas_next(t, card, &view, cx));
             }
@@ -819,6 +893,15 @@ impl MissionsPage {
             .filter(|(finding, _)| finding.node_id == id)
             .collect();
         let issue_color = self.finding_color(t, issues.iter().any(|(_, error)| *error));
+        let ink = crate::look::ink(t);
+        let gate = card.kind == board::Kind::Gate;
+        // A gate drawn as a mark has no card round it.
+        let boxless = gate && crate::look::gate() != crate::look::Gate::Card;
+        let human = gate
+            && mission
+                .gates
+                .iter()
+                .any(|g| g.id == card.id && g.kinds.iter().any(|k| k == "human"));
         let color = match state {
             Some(crate::store::run_state::NodeState::Done) => t.done,
             Some(
@@ -833,12 +916,14 @@ impl MissionsPage {
                     .iter()
                     .any(|e| e.id == card.id && e.outcome == "rejected")
                 {
-                    t.error
+                    ink.fail
                 } else {
-                    t.done
+                    ink.pass
                 }
             }
-            _ => t.divider,
+            _ if human => ink.human,
+            _ if gate => ink.gate_edge,
+            _ => ink.edge,
         };
         let rendered = div()
             .id(SharedString::from(format!("card-{id}")))
@@ -849,6 +934,8 @@ impl MissionsPage {
             .h(px(card.h * z))
             .overflow_hidden()
             .border_1()
+            // A gate's edge is heavier than a step's.
+            .when(gate, |d| d.border_2())
             // The step chosen in Flow, or last opened here, stands out.
             .when(self.flow_focus.as_deref() == Some(&id), |d| d.border_2())
             .border_color(if !issues.is_empty() && self.run_tried {
@@ -857,14 +944,19 @@ impl MissionsPage {
                 || card.kind == board::Kind::Input
                 || self.flow_focus.as_deref() == Some(&id)
             {
-                t.accent
+                if card.kind == board::Kind::Input {
+                    ink.input_edge
+                } else {
+                    t.accent
+                }
             } else {
                 color
             })
-            .bg(if card.kind == board::Kind::Limit {
-                t.raised
-            } else {
-                t.surface
+            .bg(match card.kind {
+                board::Kind::Limit => t.raised,
+                board::Kind::Input => ink.input_fill,
+                board::Kind::Gate => ink.gate_fill,
+                _ => ink.card,
             })
             .shadow_md()
             .when(card.kind == board::Kind::End, |d| {
@@ -875,7 +967,59 @@ impl MissionsPage {
             })
             .cursor_pointer()
             .debug_selector(move || selector.clone())
+            .when(boxless, |d| {
+                d.border_0().bg(gpui::transparent_black()).shadow_none()
+            })
+            .when_some(
+                match card.kind {
+                    board::Kind::Input => ink.band_input,
+                    board::Kind::Formation => ink.band_step,
+                    board::Kind::Gate if !boxless => {
+                        if human {
+                            ink.band_gate.map(|_| ink.human)
+                        } else {
+                            ink.band_gate
+                        }
+                    }
+                    _ => None,
+                },
+                |d, band| {
+                    d.child(
+                        div()
+                            .absolute()
+                            .top_0()
+                            .left_0()
+                            .right_0()
+                            .h(px(4. * z))
+                            .bg(band),
+                    )
+                },
+            )
             .child(face);
+        // The judge drawn in its gate's card opens as its own step.
+        let rendered = match board::folded_judge(mission, &card.id) {
+            Some(judge) if !running => {
+                let top = board::GATE_CARD_HEAD + 2. * board::GATE_CARD_ROW;
+                let selector = format!("canvas-judge-{judge}");
+                rendered.child(
+                    div()
+                        .id(SharedString::from(selector.clone()))
+                        .debug_selector(move || selector.clone())
+                        .absolute()
+                        .left_0()
+                        .right_0()
+                        .top(px(top * z))
+                        .h(px(board::GATE_CARD_JUDGE * z))
+                        .cursor_pointer()
+                        .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                        .on_click(cx.listener(move |page, _, _, cx| {
+                            cx.stop_propagation();
+                            page.edit_step(&judge, cx);
+                        })),
+                )
+            }
+            _ => rendered,
+        };
         let rendered = if card.kind == board::Kind::Input && !running {
             let card_id = card.id.clone();
             let runnable = self.mission_input_runnable(&card_id);
@@ -975,14 +1119,15 @@ impl MissionsPage {
     ) -> Stateful<Div> {
         let z = view.zoom;
         let diameter = board::PORT * z;
+        let ink = crate::look::ink(t);
         let colour = if port.endpoint.ends_with(":pass") {
-            t.pass
+            ink.pass
         } else if port.endpoint.ends_with(":fail") {
-            t.fail
+            ink.fail
         } else if port.endpoint.ends_with(":judge") {
-            t.dim
+            ink.tether
         } else {
-            t.wire
+            ink.wire
         };
         let endpoint = port.endpoint.clone();
         let out = port.out;
@@ -1235,7 +1380,9 @@ fn wires(
         .map(|(finding, _)| finding.node_id.clone())
         .collect();
     let accent = t.accent;
-    let (work, pass, fail, quiet, error) = (t.wire, t.pass, t.fail, t.dim, t.error);
+    let ink = crate::look::ink(t);
+    let (work, pass, fail, quiet, error) = (ink.wire, ink.pass, ink.fail, ink.tether, t.error);
+    let outcome = ink.outcome_width;
     let grid = (
         ahjo_app_kit::theme::alpha(t.text, DOT_ALPHA),
         ahjo_app_kit::theme::alpha(t.text, GRID_ALPHA),
@@ -1315,7 +1462,12 @@ fn wires(
                         _ => work,
                     }
                 };
-                let mut path = PathBuilder::stroke(px(WIRE));
+                let width = if matches!(w.route.as_str(), "pass" | "fail") {
+                    WIRE * outcome
+                } else {
+                    WIRE
+                };
+                let mut path = PathBuilder::stroke(px(width * z.max(0.6)));
                 // A judge's question and answer, and a Limit card's tether,
                 // are dotted; a loop back is dashed.
                 if matches!(w.route.as_str(), "judge" | "limit") {
@@ -1561,7 +1713,13 @@ fn card_face(
                         // A step is worked by one agent unless it says otherwise.
                         .when(f.kind != "solo", |d| d.child(chip(z, &f.kind, t.text2)))
                         // Each attempt in sessions of its own.
-                        .when(f.fresh, |d| d.child(chip(z, "fresh", t.text2))),
+                        .when(f.fresh, |d| d.child(chip(z, "fresh", t.text2)))
+                        // A cap on this step alone.
+                        .children(
+                            board::limits_on(mission, &f.id)
+                                .into_iter()
+                                .map(|l| chip(z, &format!("⏱ {}", limit_short(l)), t.text2)),
+                        ),
                 );
             face = face.child(head);
             let mut body = div()
@@ -1714,98 +1872,14 @@ fn card_face(
                 .when(asks_you(mission), |d| {
                     d.child(line("Human gates · notify me".into(), t.dim))
                 })
+                .children(board::limits_on(mission, &c.id).into_iter().map(|l| {
+                    line(
+                        format!("⏱ Limit · {}", crate::store::words::limit_line(l)),
+                        t.text2,
+                    )
+                }))
         }
-        board::Kind::Gate => {
-            let Some(g) = mission.gates.iter().find(|g| g.id == card.id) else {
-                return div();
-            };
-            let who = g
-                .kinds
-                .iter()
-                .map(|kind| match kind.as_str() {
-                    "formation" => "JUDGE".to_owned(),
-                    "human" => "YOU".to_owned(),
-                    other => other.to_uppercase(),
-                })
-                .collect::<Vec<_>>()
-                .join(" + ");
-            let number = flow::build(mission).numbers.get(&g.id).copied();
-            // A judge sending a step back that a limit caps at its best
-            // attempt: the best of so many.
-            let eyebrow = match (number, best_of(mission, &g.id)) {
-                (Some(n), Some(k)) => format!("{n} · BEST OF {k}"),
-                (None, Some(k)) => format!("BEST OF {k}"),
-                (Some(n), None) => format!("{n} · GATE · {who}"),
-                (None, None) => format!("GATE · {who}"),
-            };
-            // Each word beside its port, the ports close by the middle.
-            let beside_port =
-                |text: &'static str, colour: Hsla, dy: f32, selector: &'static str| {
-                    label(text.into(), colour)
-                        .debug_selector(move || selector.into())
-                        .absolute()
-                        .right(px(CARD_PAD * z))
-                        .top(px((card.h / 2. + dy - CARD_SMALL * 0.7) * z))
-                };
-            div()
-                .size_full()
-                .relative()
-                .flex()
-                .items_center()
-                .gap(px(CARD_PAD * z))
-                .pl(px(CARD_PAD * z))
-                .pr(px((CARD_PAD + 40.) * z))
-                .child(
-                    div()
-                        .size(px(GATE_MARK * z))
-                        .flex_none()
-                        .rounded_full()
-                        .border_2()
-                        .border_color(state_words(t, state).1)
-                        .bg(t.raised)
-                        .flex()
-                        .items_center()
-                        .justify_center()
-                        .text_size(px(TITLE_SIZE * z))
-                        .child("⛩"),
-                )
-                .child(
-                    div()
-                        .flex_1()
-                        .min_w_0()
-                        .flex()
-                        .flex_col()
-                        .child(label(eyebrow, t.dim))
-                        .child(
-                            div()
-                                .font_weight(FontWeight::BOLD)
-                                .text_size(px(CARD_TEXT * z))
-                                .truncate()
-                                .child(g.title.clone()),
-                        )
-                        .child(
-                            div()
-                                .min_w_0()
-                                .line_clamp(2)
-                                .text_ellipsis()
-                                .text_size(px(CARD_SMALL * z))
-                                .text_color(t.text2)
-                                .child(g.criterion.clone()),
-                        ),
-                )
-                .child(beside_port(
-                    "PASS",
-                    t.pass,
-                    -board::GATE_PORTS,
-                    "canvas-gate-pass-label",
-                ))
-                .child(beside_port(
-                    "FAIL",
-                    t.fail,
-                    board::GATE_PORTS,
-                    "canvas-gate-fail-label",
-                ))
-        }
+        board::Kind::Gate => super::gate_face::gate_face(t, mission, card, z, state),
         board::Kind::Limit => {
             let Some(l) = mission.limits.iter().find(|l| l.id == card.id) else {
                 return div();
@@ -1826,14 +1900,16 @@ fn card_face(
                 )
                 .child(label(crate::store::words::limit_line(l), t.text2))
         }
+        board::Kind::Frame => div(),
         board::Kind::End => {
             let Some(e) = mission.ends.iter().find(|e| e.id == card.id) else {
                 return div();
             };
+            let ink = crate::look::ink(t);
             let colour = if e.outcome == "rejected" {
-                t.error
+                ink.fail
             } else {
-                t.done
+                ink.pass
             };
             div()
                 .size_full()
@@ -1867,6 +1943,12 @@ fn card_face(
                 )
         }
     }
+}
+
+/// A limit in a chip's few words: its caps, without what follows.
+fn limit_short(l: &ahjo_missions_contract::Limit) -> String {
+    let line = crate::store::words::limit_line(l);
+    line.split(" · then").next().unwrap_or(&line).to_owned()
 }
 
 fn state_words(
@@ -1984,7 +2066,12 @@ fn slot_row(
 const CLAUDE: &str = "M20.998 10.949H24v3.102h-3v3.028h-1.487V20H18v-2.921h-1.487V20H15v-2.921H9V20H7.488v-2.921H6V20H4.487v-2.921H3V14.05H0V10.95h3V5h17.998v5.949zM6 10.949h1.488V8.102H6v2.847zm10.51 0H18V8.102h-1.49v2.847z";
 const CODEX: &str = "M8.086.457a6.105 6.105 0 013.046-.415c1.333.153 2.521.72 3.564 1.7a.117.117 0 00.107.029c1.408-.346 2.762-.224 4.061.366l.063.03.154.076c1.357.703 2.33 1.77 2.918 3.198.278.679.418 1.388.421 2.126a5.655 5.655 0 01-.18 1.631.167.167 0 00.04.155 5.982 5.982 0 011.578 2.891c.385 1.901-.01 3.615-1.183 5.14l-.182.22a6.063 6.063 0 01-2.934 1.851.162.162 0 00-.108.102c-.255.736-.511 1.364-.987 1.992-1.199 1.582-2.962 2.462-4.948 2.451-1.583-.008-2.986-.587-4.21-1.736a.145.145 0 00-.14-.032c-.518.167-1.04.191-1.604.185a5.924 5.924 0 01-2.595-.622 6.058 6.058 0 01-2.146-1.781c-.203-.269-.404-.522-.551-.821a7.74 7.74 0 01-.495-1.283 6.11 6.11 0 01-.017-3.064.166.166 0 00.008-.074.115.115 0 00-.037-.064 5.958 5.958 0 01-1.38-2.202 5.196 5.196 0 01-.333-1.589 6.915 6.915 0 01.188-2.132c.45-1.484 1.309-2.648 2.577-3.493.282-.188.55-.334.802-.438.286-.12.573-.22.861-.304a.129.129 0 00.087-.087A6.016 6.016 0 015.635 2.31C6.315 1.464 7.132.846 8.086.457zm-.804 7.85a.848.848 0 00-1.473.842l1.694 2.965-1.688 2.848a.849.849 0 001.46.864l1.94-3.272a.849.849 0 00.007-.854l-1.94-3.393zm5.446 6.24a.849.849 0 000 1.695h4.848a.849.849 0 000-1.696h-4.848z";
 thread_local! { static MARKS: std::cell::RefCell<std::collections::HashMap<String, std::sync::Arc<gpui::Image>>> = std::cell::RefCell::new(std::collections::HashMap::new()); }
-fn harness_mark(harness: &str, text: Hsla, secondary: Hsla, z: f32) -> Option<gpui::AnyElement> {
+pub(super) fn harness_mark(
+    harness: &str,
+    text: Hsla,
+    secondary: Hsla,
+    z: f32,
+) -> Option<gpui::AnyElement> {
     let (path, fill) = match harness {
         "claude-code" | "claude" => (CLAUDE, "#D97757".to_owned()),
         "openai-codex" | "codex" => {
@@ -2066,7 +2153,7 @@ impl MissionsPage {
             .as_ref()
             .map(|l| l.nodes.clone())
             .unwrap_or_default();
-        let b = board::board(&mission, &flow::build(&mission), &layout, false);
+        let b = board::board(&mission, &flow::build(&mission), &layout, false, &[]);
         let size = board::new_size(kind);
         let beside = after.and_then(|id| b.cards.iter().find(|c| c.id == id));
         let room = super::notes::STICKY_ROOM;
@@ -2108,6 +2195,8 @@ impl MissionsPage {
                 let target = after.unwrap_or_default();
                 json!({"createLimit":{"title":"Limit","target":target,"rounds":3,"x":x,"y":y}})
             }
+            // A frame is the layout's, never a card added to the mission.
+            board::Kind::Frame => return,
         };
         if matches!(kind, board::Kind::Formation | board::Kind::End) {
             self.new_step = Some((kind, beside.and_then(|c| leaving_port(&mission, &c.id))));
@@ -2268,22 +2357,81 @@ fn leaving_port(m: &Mission, card: &str) -> Option<String> {
         .then(|| format!("{card}:pass"))
 }
 
-/// How many attempts a gate picks the best of: its fail goes back to a step
-/// whose limit, once spent, lets the best attempt go on.
-fn best_of(mission: &Mission, gate: &str) -> Option<i64> {
-    let back = format!("{gate}:{}", ahjo_missions_contract::GATE_FAIL);
-    mission
-        .connections
-        .iter()
-        .filter(|c| c.from == back)
-        .filter_map(|c| c.to.split(':').next())
-        .find_map(|step| {
-            mission
-                .limits
-                .iter()
-                .find(|l| l.target == step && l.when_spent == "best")
-                .and_then(|l| l.rounds)
-        })
+/// A note that explains the shape, round its group: a tinted region with
+/// its title at its top (`regions`), or a rule over the group with its
+/// title on it (`brackets`).
+fn frame_view(t: &ahjo_app_kit::theme::Theme, f: &board::FrameBox, view: &View) -> Div {
+    let z = view.zoom;
+    let (x, y, w, h) = f.region;
+    let (sx, sy) = view.position(x, y);
+    let tone = t.accent;
+    let selector = format!("canvas-frame-{}", f.id);
+    let title = div()
+        .flex()
+        .items_baseline()
+        .gap(px(GAP * z))
+        .whitespace_nowrap()
+        .child(
+            div()
+                .text_size(px(CARD_TEXT * z))
+                .font_weight(FontWeight::BOLD)
+                .text_color(tone)
+                .child(f.title.clone()),
+        )
+        .when(!f.text.is_empty(), |d| {
+            d.child(
+                div()
+                    .text_size(px(CARD_SMALL * z))
+                    .text_color(t.text2)
+                    .child(f.text.clone()),
+            )
+        });
+    let frame = div()
+        .absolute()
+        .left(px(sx))
+        .top(px(sy))
+        .w(px(w * z))
+        .h(px(h * z))
+        .debug_selector(move || selector.clone());
+    match crate::look::shapes() {
+        crate::look::Shapes::Regions => frame
+            .rounded(px(14. * z))
+            .bg(ahjo_app_kit::theme::alpha(
+                tone,
+                if t.light { 0.06 } else { 0.07 },
+            ))
+            .border_1()
+            .border_dashed()
+            .border_color(ahjo_app_kit::theme::alpha(tone, 0.35))
+            .child(
+                title
+                    .absolute()
+                    .left(px(board::FRAME_PAD * z))
+                    .top(px(board::FRAME_PAD * 0.6 * z)),
+            ),
+        crate::look::Shapes::Brackets => frame
+            .child(
+                div()
+                    .absolute()
+                    .left_0()
+                    .right_0()
+                    .top(px(board::FRAME_TITLE * 0.55 * z))
+                    .h(px(10. * z))
+                    .border_t_2()
+                    .border_l_2()
+                    .border_r_2()
+                    .rounded_t(px(6. * z))
+                    .border_color(ahjo_app_kit::theme::alpha(tone, 0.6)),
+            )
+            .child(
+                title
+                    .absolute()
+                    .left(px(board::FRAME_PAD * z))
+                    .top_0()
+                    .px(px(GAP * z))
+                    .bg(t.bg),
+            ),
+    }
 }
 
 #[cfg(test)]

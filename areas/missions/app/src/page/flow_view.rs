@@ -283,10 +283,16 @@ impl MissionsPage {
                 pane::act(
                     t,
                     "mission-flow",
-                    if flow_shown { "Hide Flow" } else { "Flow" },
+                    match (flow_shown, crate::look::panel()) {
+                        (true, _) => "Hide panel",
+                        (false, crate::look::Panel::Chat) => "Agent",
+                        (false, crate::look::Panel::Notepad) => "Notepad",
+                    },
                 )
                 .debug_selector(|| "mission-flow".into())
-                .tooltip(kit::tip("The mission in words, beside its board"))
+                .tooltip(kit::tip(
+                    "Build the mission with an agent, talk to a run's agents, read its steps",
+                ))
                 .on_click(cx.listener(move |p, _, _, cx| {
                     p.flow_open = Some(!flow_shown);
                     p.canvas.room_changed();

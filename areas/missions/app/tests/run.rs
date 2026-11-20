@@ -247,6 +247,12 @@ fn starts_a_run_sees_active_step_answers_gate_and_shows_admission_findings(
             s.hub().read(cx).fleet.here().state == LinkState::Open
         })
     });
+    // The steps are behind the panel's Steps tab; Build comes first.
+    until(cx, "the panel's Steps tab", |cx| {
+        cx.debug_bounds("side-steps").is_some()
+    });
+    let steps = cx.debug_bounds("side-steps").unwrap().center();
+    cx.simulate_click(steps, gpui::Modifiers::none());
     until(cx, "mission flow", |cx| {
         cx.debug_bounds("flow-step-fmn_work").is_some()
     });

@@ -26,7 +26,7 @@ pub use authoring::{
 pub use branches::{kept_branch, run_branch, run_tag};
 pub use examples::{EXAMPLES, Example, example};
 pub use finding::{Code, Finding, Report};
-pub use layout::{LAYOUT_SCHEMA, Layout, LayoutEdge, LayoutNode};
+pub use layout::{LAYOUT_SCHEMA, Layout, LayoutEdge, LayoutFrame, LayoutNode};
 pub use mission::{MISSION_SCHEMA, Mission, MissionListing};
 pub use nodes::{
     Brief, Connection, DONE, END_IN, End, Formation, GATE_FAIL, GATE_IN, GATE_JUDGE, GATE_PASS,

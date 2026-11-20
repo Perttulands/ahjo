@@ -2,12 +2,14 @@ mod canvas;
 mod editor_diff;
 mod edits;
 mod flow_view;
+mod gate_face;
 mod manage;
 mod navigator;
 mod notes;
 mod run;
 mod run_view;
 mod staffing;
+mod talk;
 mod validation;
 use crate::store::{Store, canvas as board, undo};
 use ahjo_app_kit::{
@@ -58,6 +60,8 @@ pub struct MissionsPage {
     /// Flow beside the board, as the operator last left it; until then,
     /// open when the detail is wide enough for both.
     flow_open: Option<bool>,
+    side_tab: talk::SideTab,
+    talk_to: Option<String>,
     /// The step chosen in Flow or on the board, marked on both.
     flow_focus: Option<String>,
     flow_scroll: gpui::ScrollHandle,
@@ -182,6 +186,8 @@ impl MissionsPage {
             manage: manage::Manage::default(),
             canvas: canvas::View::default(),
             flow_open: None,
+            side_tab: talk::SideTab::default(),
+            talk_to: None,
             editor_more: false,
             note_paper: notes::NotesUi::default(),
             run: run::RunUi::new(cx),
@@ -1673,30 +1679,23 @@ impl Render for MissionsPage {
                 )
                 .children(error.map(|e| div().flex_none().px(px(PAD)).py(px(TAB_GAP)).child(e)))
                 .children(todo);
+            let pill = (!flow_shown && self.editor.is_none()).then(|| self.talk_pill(&t, &m, cx));
+            let board = board.relative().children(pill);
             let flow = flow_shown.then(|| {
-                let body = self.mission_flow(&t, &m, cx);
+                let body = self.side_panel(&t, &m, cx);
                 div()
                     .id(gpui::SharedString::from(format!(
                         "missions-detail-{}",
                         m.slug
                     )))
                     .debug_selector(|| "missions-flow".into())
-                    .track_scroll(&self.flow_scroll)
                     .flex_none()
                     .w(px(FLOW_W))
                     .h_full()
-                    .overflow_y_scroll()
                     .border_l_1()
                     .border_color(t.divider)
                     .bg(t.surface)
-                    .child(
-                        div()
-                            .p(px(size::PAD))
-                            .flex()
-                            .flex_col()
-                            .gap(px(size::SECTION_GAP))
-                            .child(body),
-                    )
+                    .child(body)
             });
             pane::detail_frame(head, div().size_full().flex().child(board).children(flow))
         } else if let Some(error) = error {

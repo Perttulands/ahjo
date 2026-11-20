@@ -128,6 +128,9 @@ fn the_list_opens_the_latest_run_and_reaches_every_run_of_a_mission(cx: &mut Tes
             && selector(cx, "run-finished-succeeded")
     });
     click(cx, &title);
+    // Its steps are behind the panel's Steps tab; Build comes first.
+    until(cx, "the panel's Steps tab", |cx| selector(cx, "side-steps"));
+    click(cx, "side-steps");
     until(cx, "mission opened by its name", |cx| {
         selector(cx, "flow-step-fmn_work")
     });

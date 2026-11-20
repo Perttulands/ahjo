@@ -101,6 +101,12 @@ fn opens_a_fixture_mission_on_the_canvas(cx: &mut TestAppContext) {
     });
     let at = cx.debug_bounds(selector).unwrap().center();
     cx.simulate_click(at, Modifiers::none());
+    // The steps are behind the panel's Steps tab; Build comes first.
+    until(cx, "the panel's Steps tab", |cx| {
+        cx.debug_bounds("side-steps").is_some()
+    });
+    let steps = cx.debug_bounds("side-steps").unwrap().center();
+    cx.simulate_click(steps, gpui::Modifiers::none());
     until(cx, "step in flow", |cx| {
         cx.debug_bounds("flow-step-fmn_work").is_some()
     });
@@ -255,11 +261,18 @@ fn cli_authored_graph_and_layout_open_on_the_canvas(cx: &mut TestAppContext) {
         .chain(steps.iter().map(|s| &s.0))
         .chain([&judge, &human, &end])
     {
-        let selector = Box::leak(format!("mission-card-{id}").into_boxed_str());
+        // A gate's only judge is drawn in the gate's card, as its judge row.
+        let card = Box::leak(format!("mission-card-{id}").into_boxed_str());
+        let folded = Box::leak(format!("canvas-judge-{id}").into_boxed_str());
         until(cx, "CLI-authored canvas card", |cx| {
-            cx.debug_bounds(selector).is_some()
+            cx.debug_bounds(card).is_some() || cx.debug_bounds(folded).is_some()
         });
     }
+    let judge_row = Box::leak(format!("canvas-judge-{}", steps[2].0).into_boxed_str());
+    assert!(
+        cx.debug_bounds(judge_row).is_some(),
+        "the judge sits in its gate"
+    );
     let client = NodeClient::new(Some(&format!("{}/", running.url))).unwrap();
     let layout = rt
         .block_on(client.request(

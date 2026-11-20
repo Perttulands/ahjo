@@ -99,7 +99,13 @@ fn run_is_only_emphasized_for_a_current_runnable_mission(cx: &mut TestAppContext
     // the only mission, without a click.
     let selector = Box::leak(format!("mission-{}-hello", running.id).into_boxed_str());
     until(cx, "the mission opened on its own", |cx| {
-        cx.debug_bounds(selector).is_some() && cx.debug_bounds("flow-input-inp_hello").is_some()
+        cx.debug_bounds(selector).is_some() && cx.debug_bounds("side-steps").is_some()
+    });
+    // Its steps are behind the panel's Steps tab; Build comes first.
+    let steps = cx.debug_bounds("side-steps").unwrap().center();
+    cx.simulate_click(steps, gpui::Modifiers::none());
+    until(cx, "the mission's steps", |cx| {
+        cx.debug_bounds("flow-input-inp_hello").is_some()
     });
     let rt = tokio::runtime::Runtime::new().unwrap();
     let client = NodeClient::new(Some(&format!("{}/", running.url))).unwrap();

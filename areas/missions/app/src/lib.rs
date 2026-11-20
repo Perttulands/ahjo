@@ -1,4 +1,5 @@
 //! Missions navigator and canvas.
+pub mod look;
 mod page;
 pub mod store;
 use ahjo_app_kit::{Mounted, mount};

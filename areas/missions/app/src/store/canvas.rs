@@ -3,9 +3,10 @@
 //! before zoom. A mission with no saved layout reads in rows, in run order,
 //! shaped for the room it is shown in, until it is arranged.
 
-use ahjo_missions_contract::flow::Flow;
-use ahjo_missions_contract::{LayoutNode, Mission};
-use std::collections::HashMap;
+use crate::look;
+use ahjo_missions_contract::flow::{Flow, judge_chain};
+use ahjo_missions_contract::{LayoutFrame, LayoutNode, Limit, Mission};
+use std::collections::{HashMap, HashSet};
 
 /// Archon's card shapes, at its density: a step card is its IN rows, its
 /// head, its slots and its OUT rows; ports sit on the rows.
@@ -13,8 +14,28 @@ pub const STEP_W: f32 = 300.;
 /// A peer or orchestrated step is a little wider.
 pub const WIDE_W: f32 = 316.;
 pub const INPUT_W: f32 = 240.;
-pub const GATE_W: f32 = 260.;
-pub const GATE_H: f32 = 84.;
+/// A gate as a verdict card: its head (who decides, its title and rule),
+/// the judge folded into it, and a row for each outcome with its port.
+pub const GATE_CARD_W: f32 = 284.;
+pub const GATE_CARD_HEAD: f32 = 74.;
+pub const GATE_CARD_JUDGE: f32 = 40.;
+pub const GATE_CARD_ROW: f32 = 28.;
+/// A gate as the flowchart's diamond, its words beside it.
+pub const DIAMOND: f32 = 60.;
+pub const DIAMOND_W: f32 = 300.;
+pub const DIAMOND_H: f32 = 76.;
+/// A gate as a checkpoint badge on the wire, its words under it.
+pub const BADGE: f32 = 56.;
+pub const BADGE_W: f32 = 168.;
+pub const BADGE_H: f32 = 132.;
+pub const BADGE_MID: f32 = 34.;
+/// What a note explaining the shape takes over its group: its title's
+/// line and the padding round the cards.
+pub const FRAME_PAD: f32 = 16.;
+pub const FRAME_TITLE: f32 = 22.;
+const FRAME_TOP: f32 = FRAME_PAD + FRAME_TITLE + 6.;
+/// A frame title's letters, to size the room it keeps clear of wires.
+const FRAME_LETTER: f32 = 7.4;
 pub const END_W: f32 = 176.;
 pub const END_H: f32 = 52.;
 /// A Limit card: a small card under the card it caps.
@@ -67,7 +88,6 @@ const CHANNEL_GAP: f32 = 12.;
 /// A judge's wires leave the gate's foot this far down, and pass its card
 /// this far out.
 const JUDGE_DROP: f32 = 18.;
-const JUDGE_SIDE: f32 = 26.;
 /// The radius a wire's corner is drawn with.
 pub const CORNER: f32 = 10.;
 
@@ -78,6 +98,9 @@ pub enum Kind {
     Gate,
     End,
     Limit,
+    /// A frame's title line: drawn by the frame, here only so wires keep
+    /// off its words.
+    Frame,
 }
 
 /// One card on the canvas.
@@ -137,6 +160,136 @@ fn span(a: P, b: P) -> f32 {
 pub struct Board {
     pub cards: Vec<Card>,
     pub wires: Vec<Wire>,
+    pub frames: Vec<FrameBox>,
+}
+
+/// A note that explains the shape, where it is drawn: the area round its
+/// cards and its title's line at the area's top.
+#[derive(Clone, Debug, PartialEq)]
+pub struct FrameBox {
+    pub id: String,
+    pub title: String,
+    pub text: String,
+    pub region: (f32, f32, f32, f32),
+    pub title_at: (f32, f32, f32, f32),
+}
+
+/// Where a gate's ports and foot are on it, by the look chosen.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct GateGeom {
+    pub w: f32,
+    pub h: f32,
+    pub in_y: f32,
+    pub pass_y: f32,
+    pub fail_y: f32,
+    /// Where its judge hangs from.
+    pub foot: (f32, f32),
+}
+
+pub fn gate_geom(m: &Mission, id: &str) -> GateGeom {
+    match look::gate() {
+        look::Gate::Card => {
+            // Room under the outcomes for the judge's row, or a little so
+            // the fail row clears the gate's border.
+            let judge = if folded_judge(m, id).is_some() {
+                GATE_CARD_JUDGE + 12.
+            } else {
+                8.
+            };
+            let h = GATE_CARD_HEAD + judge + 2. * GATE_CARD_ROW;
+            GateGeom {
+                w: GATE_CARD_W,
+                h,
+                in_y: GATE_CARD_HEAD / 2.,
+                pass_y: GATE_CARD_HEAD + 0.5 * GATE_CARD_ROW,
+                fail_y: GATE_CARD_HEAD + 1.5 * GATE_CARD_ROW,
+                foot: (GATE_CARD_W / 2., h),
+            }
+        }
+        look::Gate::Diamond => GateGeom {
+            w: DIAMOND_W,
+            h: DIAMOND_H,
+            in_y: DIAMOND_H / 2.,
+            pass_y: DIAMOND_H / 2. - GATE_PORTS,
+            fail_y: DIAMOND_H / 2. + GATE_PORTS,
+            // Under the diamond's tip, on the box's edge, so the tether
+            // leaves the gate rather than starting inside it.
+            foot: (DIAMOND / 2., DIAMOND_H),
+        },
+        look::Gate::Badge => GateGeom {
+            w: BADGE_W,
+            h: BADGE_H,
+            in_y: BADGE_MID,
+            pass_y: BADGE_MID - GATE_PORTS,
+            fail_y: BADGE_MID + GATE_PORTS,
+            foot: (BADGE_W / 2., BADGE_H),
+        },
+    }
+}
+
+/// The judge drawn inside its gate's card (the card look, a chain of one
+/// step): its own card is not on the board.
+pub fn folded_judge(m: &Mission, gate: &str) -> Option<String> {
+    if look::gate() != look::Gate::Card {
+        return None;
+    }
+    let chain = judge_chain(m, gate);
+    (chain.len() == 1).then(|| chain[0].clone())
+}
+
+fn folded(m: &Mission, id: &str) -> bool {
+    m.gates
+        .iter()
+        .any(|g| folded_judge(m, &g.id).as_deref() == Some(id))
+}
+
+/// Every step that judges a gate.
+pub fn judges(m: &Mission) -> HashSet<String> {
+    m.gates.iter().flat_map(|g| judge_chain(m, &g.id)).collect()
+}
+
+/// What a Limit caps, as the board shows it: a loop's rounds on the gate
+/// that sends the work back, the whole mission on its Input card, a step's
+/// time or tokens on the step; only one capping nothing is a card.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum LimitHome {
+    Gate(String),
+    Input(String),
+    Step(String),
+    Card,
+}
+
+pub fn limit_home(m: &Mission, l: &Limit) -> LimitHome {
+    if m.input_cards.iter().any(|c| c.id == l.target) {
+        return LimitHome::Input(l.target.clone());
+    }
+    if m.formations.iter().any(|f| f.id == l.target) {
+        let sends_back = m.gates.iter().find(|g| {
+            let fail = format!("{}:{}", g.id, ahjo_missions_contract::GATE_FAIL);
+            m.connections
+                .iter()
+                .any(|c| c.from == fail && port_of(&c.to).0 == l.target)
+        });
+        return match sends_back {
+            Some(g) if l.rounds.is_some() => LimitHome::Gate(g.id.clone()),
+            _ => LimitHome::Step(l.target.clone()),
+        };
+    }
+    LimitHome::Card
+}
+
+/// The limits shown on `id` (a gate, the Input card or a step).
+pub fn limits_on<'a>(m: &'a Mission, id: &str) -> Vec<&'a Limit> {
+    m.limits
+        .iter()
+        .filter(|l| {
+            matches!(limit_home(m, l), LimitHome::Gate(g) | LimitHome::Input(g) | LimitHome::Step(g) if g == id)
+        })
+        .collect()
+}
+
+fn carded(m: &Mission, l: &Limit) -> bool {
+    limit_home(m, l) == LimitHome::Card
 }
 
 /// Whether a step's workers or peers sit in a pool under its controller.
@@ -160,14 +313,15 @@ pub fn step_head(f: &ahjo_missions_contract::Formation, running: bool) -> f32 {
     }) + if running { RUN_CHIPS } else { 0. }
 }
 
-fn input_lines(c: &ahjo_missions_contract::InputCard) -> f32 {
-    // Inputs, and the human-gate channel.
-    1. + f32::from(u8::from(!c.inputs.is_empty()))
+fn input_lines(m: &Mission, c: &ahjo_missions_contract::InputCard) -> f32 {
+    // Inputs, and the human-gate channel, and a line for each limit on the
+    // whole mission.
+    1. + f32::from(u8::from(!c.inputs.is_empty())) + limits_on(m, &c.id).len() as f32
 }
 
 fn size(m: &Mission, id: &str, running: bool) -> Option<(Kind, f32, f32)> {
     if let Some(c) = m.input_cards.iter().find(|c| c.id == id) {
-        let h = INPUT_HEAD + INPUT_GOAL + INPUT_LINE * input_lines(c) + INPUT_FOOT;
+        let h = INPUT_HEAD + INPUT_GOAL + INPUT_LINE * input_lines(m, c) + INPUT_FOOT;
         return Some((Kind::Input, INPUT_W, h));
     }
     if let Some(f) = m.formations.iter().find(|f| f.id == id) {
@@ -181,7 +335,8 @@ fn size(m: &Mission, id: &str, running: bool) -> Option<(Kind, f32, f32)> {
         ));
     }
     if m.gates.iter().any(|g| g.id == id) {
-        return Some((Kind::Gate, GATE_W, GATE_H));
+        let g = gate_geom(m, id);
+        return Some((Kind::Gate, g.w, g.h));
     }
     if m.ends.iter().any(|e| e.id == id) {
         return Some((Kind::End, END_W, END_H));
@@ -195,7 +350,7 @@ fn size(m: &Mission, id: &str, running: bool) -> Option<(Kind, f32, f32)> {
 /// Run order, left to right in one row: what a card the layout misses
 /// falls back to.
 pub fn arranged(m: &Mission, flow: &Flow) -> Vec<LayoutNode> {
-    shaped(m, flow, (f32::MAX, f32::MAX), 0., &|_| 0.)
+    shaped(m, flow, (f32::MAX, f32::MAX), 0., &|_| 0., &[])
 }
 
 /// The run-order columns, each top to bottom: Input cards, each numbered
@@ -213,11 +368,12 @@ fn columns(m: &Mission, flow: &Flow) -> Vec<Vec<String>> {
             columns.push(vec![]);
         }
         columns[n].push(id.clone());
-        // A gate's judges sit under it, in a stable order.
+        // A gate's judges sit under it, in a stable order; one drawn in
+        // its gate's card takes no place of its own.
         let mut judges: Vec<&String> = flow
             .judge_of
             .iter()
-            .filter(|(_, gate)| **gate == id)
+            .filter(|(judge, gate)| **gate == id && !folded(m, judge))
             .map(|(judge, _)| judge)
             .collect();
         judges.sort();
@@ -237,13 +393,16 @@ type Column = (Vec<(String, f32)>, f32, f32);
 /// a wide one a single row. When even the best wrap draws them smaller
 /// than `floor`, the rows are as wide as still fit across at `floor`, and
 /// the board runs down past the view. Each card keeps the room `under`
-/// gives it beneath (for its notes), and its Limit cards stand under it.
+/// gives it beneath (for its notes). A row never breaks inside a loop, so
+/// work sent back runs back along its own row, nor inside a frame, whose
+/// title takes a line over its row.
 pub fn shaped(
     m: &Mission,
     flow: &Flow,
     room: (f32, f32),
     floor: f32,
     under: &dyn Fn(&str) -> f32,
+    frames: &[LayoutFrame],
 ) -> Vec<LayoutNode> {
     let room = (room.0.max(1.), room.1.max(1.));
     let columns: Vec<Column> = columns(m, flow)
@@ -257,7 +416,7 @@ pub fn shaped(
                 };
                 placed.push((id.clone(), y));
                 y += ch + under(&id);
-                for limit in m.limits.iter().filter(|l| l.target == id) {
+                for limit in m.limits.iter().filter(|l| l.target == id && carded(m, l)) {
                     y += LIMIT_GAP;
                     placed.push((limit.id.clone(), y));
                     y += LIMIT_H + under(&limit.id);
@@ -272,15 +431,73 @@ pub fn shaped(
     if columns.is_empty() {
         return vec![];
     }
+    let all = columns.len();
+    let column_of: HashMap<&str, usize> = columns
+        .iter()
+        .enumerate()
+        .flat_map(|(i, c)| c.0.iter().map(move |(id, _)| (id.as_str(), i)))
+        .collect();
+    // No break after a column inside a loop's or a frame's span.
+    let mut held = vec![false; all];
+    let mut hold = |a: usize, b: usize| {
+        for h in held.iter_mut().take(a.max(b)).skip(a.min(b)) {
+            *h = true;
+        }
+    };
+    for c in &m.connections {
+        let (from, to) = (port_of(&c.from).0, port_of(&c.to).0);
+        let back = matches!(
+            (flow.numbers.get(from), flow.numbers.get(to)),
+            (Some(a), Some(b)) if b <= a
+        );
+        if let (true, Some(a), Some(b)) = (back, column_of.get(from), column_of.get(to)) {
+            hold(*a, *b);
+        }
+    }
+    let framed: HashSet<usize> = frames
+        .iter()
+        .flat_map(|f| {
+            let cols: Vec<usize> = f
+                .nodes
+                .iter()
+                .filter_map(|id| column_of.get(id.as_str()).copied())
+                .collect();
+            if let (Some(a), Some(b)) = (cols.iter().min(), cols.iter().max()) {
+                hold(*a, *b);
+            }
+            cols
+        })
+        .collect();
+    // The rows for about `n` columns each, breaking only where allowed.
+    let rows_for = |n: usize| -> Vec<std::ops::Range<usize>> {
+        let mut rows = vec![];
+        let mut start = 0;
+        for (i, &kept) in held.iter().enumerate().take(all) {
+            if (i + 1 - start >= n && !kept) || i + 1 == all {
+                rows.push(start..i + 1);
+                start = i + 1;
+            }
+        }
+        rows
+    };
+    let top = |r: &std::ops::Range<usize>| {
+        if r.clone().any(|i| framed.contains(&i)) {
+            FRAME_TOP
+        } else {
+            0.
+        }
+    };
     let extent = |n: usize| {
-        let rows: Vec<_> = columns.chunks(n).collect();
+        let rows = rows_for(n);
         let w = rows
             .iter()
-            .map(|r| r.iter().map(|c| c.1).sum::<f32>() + GAP_X * (r.len() - 1) as f32)
+            .map(|r| {
+                columns[r.clone()].iter().map(|c| c.1).sum::<f32>() + GAP_X * (r.len() - 1) as f32
+            })
             .fold(0., f32::max);
         let h = rows
             .iter()
-            .map(|r| r.iter().map(|c| c.2).fold(0., f32::max))
+            .map(|r| top(r) + columns[r.clone()].iter().map(|c| c.2).fold(0., f32::max))
             .sum::<f32>()
             + ROW_GAP * (rows.len() - 1) as f32;
         (w + 2. * MARGIN, h + 2. * MARGIN)
@@ -289,7 +506,6 @@ pub fn shaped(
         let (w, h) = extent(n);
         (room.0 / w).min(room.1 / h).min(1.)
     };
-    let all = columns.len();
     // The fewest rows among those that draw it largest (the last of
     // equals wins).
     let best = (1..=all)
@@ -310,7 +526,7 @@ pub fn shaped(
             c.from == format!("{gate}:{}", ahjo_missions_contract::GATE_PASS)
                 && port_of(&c.to).0 == next
         });
-        let (Some((Kind::Gate, _, h)), Some((kind, _, nh))) =
+        let (Some((Kind::Gate, ..)), Some((kind, _, nh))) =
             (size(m, gate, false), size(m, next, false))
         else {
             return 0.;
@@ -321,18 +537,19 @@ pub fn shaped(
             nh / 2.
         };
         if passes {
-            (h / 2. - GATE_PORTS - way_in).max(0.)
+            (gate_geom(m, gate).pass_y - way_in).max(0.)
         } else {
             0.
         }
     };
     let mut out = vec![];
     let mut y = MARGIN;
-    for row in columns.chunks(per_row) {
+    for row in rows_for(per_row) {
         let mut x = MARGIN;
         let mut tallest = 0f32;
         let mut before: Option<&str> = None;
-        for (placed, w, h) in row {
+        y += top(&row);
+        for (placed, w, h) in &columns[row] {
             let first = placed.first().map(|(id, _)| id.as_str());
             let drop = match (before, first) {
                 (Some(gate), Some(next)) => level(gate, next),
@@ -364,12 +581,15 @@ fn port_of(endpoint: &str) -> (&str, &str) {
 fn port_at(m: &Mission, c: &Card, port: &str, out: bool) -> P {
     let side = if out { c.x + c.w } else { c.x };
     match c.kind {
-        Kind::Gate => match port {
-            "pass" => (side, c.y + c.h / 2. - GATE_PORTS),
-            "fail" => (side, c.y + c.h / 2. + GATE_PORTS),
-            "judge" => (c.x + c.w / 2., c.y + c.h),
-            _ => (side, c.y + c.h / 2.),
-        },
+        Kind::Gate => {
+            let g = gate_geom(m, &c.id);
+            match port {
+                "pass" => (side, c.y + g.pass_y),
+                "fail" => (side, c.y + g.fail_y),
+                "judge" => (c.x + g.foot.0, c.y + g.foot.1),
+                _ => (side, c.y + g.in_y),
+            }
+        }
         Kind::Formation => {
             let f = m.formations.iter().find(|f| f.id == c.id);
             let ports = f.map(|f| if out { &f.outputs } else { &f.inputs });
@@ -402,6 +622,9 @@ pub struct Port {
 /// leaves it and the verdict returns to it.
 pub fn ports(m: &Mission, b: &Board) -> Vec<Port> {
     let mut out = vec![];
+    // A judge's ports are its gate's business: the tether between them
+    // says it, so the judge shows none of its own.
+    let judges = judges(m);
     let wired = |e: &str| m.connections.iter().any(|c| c.from == e || c.to == e);
     let mut add = |c: &Card, port: &str, leaves: bool| {
         let endpoint = format!("{}:{port}", c.id);
@@ -416,6 +639,9 @@ pub fn ports(m: &Mission, b: &Board) -> Vec<Port> {
         match c.kind {
             Kind::Input => add(c, "out", true),
             Kind::Formation => {
+                if judges.contains(&c.id) {
+                    continue;
+                }
                 if let Some(f) = m.formations.iter().find(|f| f.id == c.id) {
                     for p in &f.inputs {
                         add(c, &p.id, false);
@@ -429,10 +655,18 @@ pub fn ports(m: &Mission, b: &Board) -> Vec<Port> {
                 add(c, "in", false);
                 add(c, "pass", true);
                 add(c, "fail", true);
-                add(c, "judge", true);
+                // A judge's port only where a judge decides, and not when
+                // the judge is drawn in the gate.
+                let judged = m
+                    .gates
+                    .iter()
+                    .any(|g| g.id == c.id && g.kinds.iter().any(|k| k == "formation"));
+                if judged && folded_judge(m, &c.id).is_none() {
+                    add(c, "judge", true);
+                }
             }
             Kind::End => add(c, "in", false),
-            Kind::Limit => {}
+            Kind::Limit | Kind::Frame => {}
         }
     }
     out
@@ -457,7 +691,13 @@ pub fn drop_target<'a>(ports: &'a [Port], from: &str, at: P) -> Option<&'a Port>
 /// The board for a mission at these places; a card the layout misses is
 /// placed where the run-order arrangement puts it.
 /// `running` gives step cards room for their run chips.
-pub fn board(m: &Mission, flow: &Flow, layout: &[LayoutNode], running: bool) -> Board {
+pub fn board(
+    m: &Mission,
+    flow: &Flow,
+    layout: &[LayoutNode],
+    running: bool,
+    frames: &[LayoutFrame],
+) -> Board {
     let fallback = arranged(m, flow);
     let mut at: HashMap<&str, P> = fallback
         .iter()
@@ -471,7 +711,12 @@ pub fn board(m: &Mission, flow: &Flow, layout: &[LayoutNode], running: bool) -> 
         .input_cards
         .iter()
         .map(|c| &c.id)
-        .chain(m.formations.iter().map(|f| &f.id))
+        .chain(
+            m.formations
+                .iter()
+                .map(|f| &f.id)
+                .filter(|id| !folded(m, id)),
+        )
         .chain(m.gates.iter().map(|g| &g.id))
         .chain(m.ends.iter().map(|e| &e.id));
     let mut cards: Vec<Card> = ids
@@ -490,7 +735,7 @@ pub fn board(m: &Mission, flow: &Flow, layout: &[LayoutNode], running: bool) -> 
         .collect();
     // A Limit card not yet placed sits under the card it caps, after any
     // other limit there.
-    for l in &m.limits {
+    for l in m.limits.iter().filter(|l| carded(m, l)) {
         let under = cards.iter().find(|c| c.id == l.target).map(|c| {
             let below = c.y + c.h + LIMIT_GAP;
             let taken = cards
@@ -513,6 +758,15 @@ pub fn board(m: &Mission, flow: &Flow, layout: &[LayoutNode], running: bool) -> 
             h: LIMIT_H,
         });
     }
+    let boxes = frame_boxes(&cards, frames);
+    cards.extend(boxes.iter().map(|f| Card {
+        id: format!("frame:{}", f.id),
+        kind: Kind::Frame,
+        x: f.title_at.0,
+        y: f.title_at.1,
+        w: f.title_at.2,
+        h: f.title_at.3,
+    }));
     let card = |id: &str| cards.iter().find(|c| c.id == id);
     let number = |id: &str| flow.numbers.get(id).copied();
     let mut wires = vec![];
@@ -523,7 +777,7 @@ pub fn board(m: &Mission, flow: &Flow, layout: &[LayoutNode], running: bool) -> 
         let (Some(a), Some(b)) = (card(from_node), card(to_node)) else {
             continue;
         };
-        // A judge's verdict returns to the gate's judge port from below.
+        // A judge's verdict returns to the gate's judge port.
         let returning = to_port == "judge";
         let route = match (from_port, returning) {
             ("pass" | "fail" | "judge", _) => from_port.to_string(),
@@ -531,11 +785,8 @@ pub fn board(m: &Mission, flow: &Flow, layout: &[LayoutNode], running: bool) -> 
             _ => String::new(),
         };
         let from = port_at(m, a, from_port, true);
-        let to = if returning {
-            (b.x + b.w / 2., b.y + b.h)
-        } else {
-            port_at(m, b, to_port, false)
-        };
+        // The verdict returns to the gate's foot, where its question left.
+        let to = port_at(m, b, to_port, false);
         // Back is told by the run's order, not by where the cards stand:
         // a chain wrapped onto a second row still reads forward.
         let back = route != "judge"
@@ -545,16 +796,12 @@ pub fn board(m: &Mission, flow: &Flow, layout: &[LayoutNode], running: bool) -> 
             .filter(|o| o.id != a.id && o.id != b.id)
             .collect();
         let points = if from_port == "judge" {
-            // The question goes down from the gate's foot to just over the
-            // judge, and in at its left; with the verdict's way back, it
-            // brackets the foot.
-            let (x, y) = (b.x - JUDGE_SIDE, b.y - JUDGE_DROP);
-            vec![from, (from.0, y), (x, y), (x, to.1), to]
+            // The gate and its judge are one relation, the question and
+            // the verdict alike: a tether from the gate's foot to the
+            // judge's top.
+            tether(from, b)
         } else if returning {
-            // The verdict leaves the judge's right, rises to just over it
-            // and comes in at the foot.
-            let (x, y) = (a.x + a.w + JUDGE_SIDE, a.y - JUDGE_DROP);
-            vec![from, (x, from.1), (x, y), (to.0, y), to]
+            tether(to, a)
         } else if back {
             loops.push(wires.len());
             vec![from, to]
@@ -578,7 +825,7 @@ pub fn board(m: &Mission, flow: &Flow, layout: &[LayoutNode], running: bool) -> 
         });
     }
     route_loops(&mut wires, &loops, &cards);
-    for l in &m.limits {
+    for l in m.limits.iter().filter(|l| carded(m, l)) {
         let (Some(a), Some(b)) = (card(&l.id), card(&l.target)) else {
             continue;
         };
@@ -603,7 +850,67 @@ pub fn board(m: &Mission, flow: &Flow, layout: &[LayoutNode], running: bool) -> 
             label: None,
         });
     }
-    Board { cards, wires }
+    Board {
+        cards,
+        wires,
+        frames: boxes,
+    }
+}
+
+/// From a gate's foot to its judge: straight down where the judge hangs
+/// under it, else down, across and down onto its top.
+fn tether(foot: P, judge: &Card) -> Vec<P> {
+    if judge.y >= foot.1 + LEVEL {
+        let x = foot
+            .0
+            .clamp(judge.x + CORNER * 2., judge.x + judge.w - CORNER * 2.);
+        if (x - foot.0).abs() < 0.5 {
+            return vec![foot, (x, judge.y)];
+        }
+        let mid = ((foot.1 + judge.y) / 2.).round();
+        return vec![foot, (foot.0, mid), (x, mid), (x, judge.y)];
+    }
+    let low = foot.1.max(judge.y + judge.h) + JUDGE_DROP;
+    let x = judge.x + judge.w / 2.;
+    vec![foot, (foot.0, low), (x, low), (x, judge.y + judge.h)]
+}
+
+/// Where each frame is drawn: round its cards on the board, its title's
+/// line at the top. A frame none of whose cards are shown is not drawn.
+fn frame_boxes(cards: &[Card], frames: &[LayoutFrame]) -> Vec<FrameBox> {
+    frames
+        .iter()
+        .filter_map(|f| {
+            let held: Vec<&Card> = cards.iter().filter(|c| f.nodes.contains(&c.id)).collect();
+            let x0 = held.iter().map(|c| c.x).fold(f32::MAX, f32::min);
+            let y0 = held.iter().map(|c| c.y).fold(f32::MAX, f32::min);
+            let x1 = held.iter().map(|c| c.x + c.w).fold(f32::MIN, f32::max);
+            let y1 = held.iter().map(|c| c.y + c.h).fold(f32::MIN, f32::max);
+            if held.is_empty() {
+                return None;
+            }
+            let region = (
+                x0 - FRAME_PAD,
+                y0 - FRAME_PAD - FRAME_TITLE,
+                x1 - x0 + 2. * FRAME_PAD,
+                y1 - y0 + 2. * FRAME_PAD + FRAME_TITLE,
+            );
+            let letters = (f.title.chars().count()
+                + if f.text.is_empty() {
+                    0
+                } else {
+                    f.text.chars().count() + 3
+                }) as f32;
+            let title_w = (letters * FRAME_LETTER + 2. * FRAME_PAD).min(region.2);
+            Some(FrameBox {
+                id: f.id.clone(),
+                title: f.title.clone(),
+                text: f.text.clone(),
+                region,
+                title_at: (region.0, region.1, title_w, FRAME_TITLE + FRAME_PAD / 2.),
+            })
+        })
+        .collect()
 }
 
 /// Whether the segment a to b crosses `c` grown by `margin` (Liang-Barsky).
@@ -806,10 +1113,15 @@ fn route_loops(wires: &mut [Wire], loops: &[usize], cards: &[Card]) {
     }
 }
 
-/// Where a loop names what it returns to: at its first turn, beside the
-/// port it leaves, where the eye starts following it.
+/// Where a loop names what it returns to: under the start of its longest
+/// level run, so the words lie along the way back and inside the board.
 fn loop_label(points: &[P]) -> P {
-    points.get(1).copied().unwrap_or(points[0])
+    points
+        .windows(2)
+        .filter(|w| (w[0].1 - w[1].1).abs() < 0.5)
+        .max_by(|a, b| (a[0].0 - a[1].0).abs().total_cmp(&(b[0].0 - b[1].0).abs()))
+        .map(|w| (w[0].0.min(w[1].0) + CORNER, w[0].1))
+        .unwrap_or_else(|| points.get(1).copied().unwrap_or(points[0]))
 }
 
 /// Bends cost as much as this much length, so a way round prefers few.
@@ -952,9 +1264,10 @@ pub fn new_size(kind: Kind) -> (f32, f32) {
     match kind {
         Kind::Input => (INPUT_W, INPUT_HEAD + INPUT_GOAL + INPUT_LINE + INPUT_FOOT),
         Kind::Formation => (STEP_W, 2. * IO_ROW + STEP_HEAD_EMPTY + body_h("solo", 1)),
-        Kind::Gate => (GATE_W, GATE_H),
+        Kind::Gate => (GATE_CARD_W, GATE_CARD_HEAD + 2. * GATE_CARD_ROW),
         Kind::End => (END_W, END_H),
         Kind::Limit => (LIMIT_W, LIMIT_H),
+        Kind::Frame => (0., 0.),
     }
 }
 
@@ -1028,8 +1341,10 @@ mod tests {
 
     #[test]
     fn an_unarranged_mission_reads_left_to_right_in_run_order() {
+        // The judge as its own card, under its gate.
+        let _look = crate::look::gate_for_test(crate::look::Gate::Diamond);
         let m = delivery();
-        let b = board(&m, &build(&m), &[], false);
+        let b = board(&m, &build(&m), &[], false, &[]);
         let x = |id: &str| b.cards.iter().find(|c| c.id == id).unwrap().x;
         assert!(x("mis_delivery") < x("fmn_plan"));
         assert!(x("fmn_plan") < x("fmn_beads"));
@@ -1089,8 +1404,8 @@ mod tests {
     fn wires_turn_at_right_angles() {
         let m = delivery();
         let flow = build(&m);
-        for layout in [vec![], shaped(&m, &flow, (700., 1400.), 0., &|_| 0.)] {
-            let b = board(&m, &flow, &layout, false);
+        for layout in [vec![], shaped(&m, &flow, (700., 1400.), 0., &|_| 0., &[])] {
+            let b = board(&m, &flow, &layout, false, &[]);
             for w in b.wires.iter().filter(|w| w.route != "limit") {
                 for s in w.points.windows(2) {
                     assert!(
@@ -1108,7 +1423,13 @@ mod tests {
         let m = delivery();
         let flow = build(&m);
         for room in [(4000., 900.), (1400., 900.), (700., 1400.), (500., 300.)] {
-            let b = board(&m, &flow, &shaped(&m, &flow, room, 0., &|_| 0.), false);
+            let b = board(
+                &m,
+                &flow,
+                &shaped(&m, &flow, room, 0., &|_| 0., &[]),
+                false,
+                &[],
+            );
             let cards: Vec<&Card> = b.cards.iter().collect();
             // Between its own two ports a wire crosses no card. A judge's
             // brackets and a limit's tether hug their own cards.
@@ -1165,15 +1486,17 @@ mod tests {
 
     #[test]
     fn a_board_shown_in_a_pane_is_laid_out_to_the_panes_shape() {
+        // The judge as its own card, under its gate.
+        let _look = crate::look::gate_for_test(crate::look::Gate::Diamond);
         let m = delivery();
         let flow = build(&m);
         let rows = |room: (f32, f32), floor: f32| {
-            let layout = shaped(&m, &flow, room, floor, &|_| 0.);
+            let layout = shaped(&m, &flow, room, floor, &|_| 0., &[]);
             // A row starts at the left margin (a column after a gate may
             // stand lower, level with the gate's pass). Cards stacked in
             // the first column (a judge, a limit) follow closer than a row
             // gap; the next row starts a full row gap further down.
-            let b = board(&m, &flow, &layout, false);
+            let b = board(&m, &flow, &layout, false, &[]);
             let left = b.cards.iter().map(|c| c.x).fold(f32::MAX, f32::min);
             let mut first: Vec<&Card> = b.cards.iter().filter(|c| c.x == left).collect();
             first.sort_by(|p, q| p.y.total_cmp(&q.y));
@@ -1190,7 +1513,7 @@ mod tests {
         let (tall, b) = rows((700., 1400.), 0.);
         assert!(tall > 1, "a tall pane wraps the chain");
         let (_, _, w, h) = extent(&b);
-        let (_, _, w1, h1) = extent(&board(&m, &flow, &arranged(&m, &flow), false));
+        let (_, _, w1, h1) = extent(&board(&m, &flow, &arranged(&m, &flow), false, &[]));
         assert!((700. / w).min(1400. / h) > (700. / w1).min(1400. / h1));
         // Too small for the floor: the rows still fit across at the floor
         // and the board runs down instead.
@@ -1199,14 +1522,21 @@ mod tests {
         // A card with notes keeps room for them under it: its judge stands
         // that much lower.
         let at = |layout: &[LayoutNode], id: &str| layout.iter().find(|p| p.id == id).unwrap().y;
-        let plain = shaped(&m, &flow, (4000., 900.), 0., &|_| 0.);
-        let noted = shaped(&m, &flow, (4000., 900.), 0., &|id| {
-            if id == "gate_beads_review" {
-                NOTE_ROOM
-            } else {
-                0.
-            }
-        });
+        let plain = shaped(&m, &flow, (4000., 900.), 0., &|_| 0., &[]);
+        let noted = shaped(
+            &m,
+            &flow,
+            (4000., 900.),
+            0.,
+            &|id| {
+                if id == "gate_beads_review" {
+                    NOTE_ROOM
+                } else {
+                    0.
+                }
+            },
+            &[],
+        );
         assert_eq!(
             at(&noted, "fmn_beads_reviewer") - at(&plain, "fmn_beads_reviewer"),
             NOTE_ROOM as i64
@@ -1220,8 +1550,9 @@ mod tests {
         let b = board(
             &m,
             &flow,
-            &shaped(&m, &flow, (700., 1400.), 0., &|_| 0.),
+            &shaped(&m, &flow, (700., 1400.), 0., &|_| 0., &[]),
             false,
+            &[],
         );
         let card = |id: &str| b.cards.iter().find(|c| c.id == id).unwrap();
         let wrapped: Vec<&Wire> = b
@@ -1256,9 +1587,11 @@ mod tests {
 
     #[test]
     fn every_wire_ends_at_the_named_visible_ports() {
+        // The judge as its own card, under its gate.
+        let _look = crate::look::gate_for_test(crate::look::Gate::Diamond);
         let mission = delivery();
         assert!(mission.formations.len() >= 5);
-        let board = board(&mission, &build(&mission), &[], false);
+        let board = board(&mission, &build(&mission), &[], false, &[]);
         let ports = ports(&mission, &board);
         assert_eq!(board.wires.len(), mission.connections.len());
         for connection in &mission.connections {
@@ -1267,6 +1600,21 @@ mod tests {
                 .iter()
                 .find(|wire| wire.id == connection.id)
                 .unwrap();
+            // A gate and its judge are tied by one tether, from the gate's
+            // foot to the judge's top, whichever way the connection runs;
+            // the judge shows no ports of its own.
+            if wire.route == "judge" {
+                let gate = board.cards.iter().find(|c| c.kind == Kind::Gate).unwrap();
+                let judge = board
+                    .cards
+                    .iter()
+                    .find(|c| c.id == "fmn_beads_reviewer")
+                    .unwrap();
+                let g = gate_geom(&mission, &gate.id);
+                assert_eq!(wire.from(), (gate.x + g.foot.0, gate.y + g.foot.1));
+                assert_eq!(wire.to().1, judge.y, "{}", connection.id);
+                continue;
+            }
             let source = ports
                 .iter()
                 .find(|port| port.endpoint == connection.from)
@@ -1283,7 +1631,7 @@ mod tests {
     #[test]
     fn a_new_card_lands_in_free_space_in_view() {
         let m = delivery();
-        let b = board(&m, &build(&m), &[], false);
+        let b = board(&m, &build(&m), &[], false, &[]);
         let (x0, y0, w, h) = extent(&b);
         let size = new_size(Kind::Formation);
         let clear = |(x, y): (f32, f32)| {
@@ -1314,7 +1662,7 @@ mod tests {
             x: 900,
             y: 700,
         }];
-        let b = board(&m, &build(&m), &saved, false);
+        let b = board(&m, &build(&m), &saved, false, &[]);
         let plan = b.cards.iter().find(|c| c.id == "fmn_plan").unwrap();
         assert_eq!((plan.x, plan.y), (900., 700.));
         let into = b.wires.iter().find(|w| w.to_node == "fmn_plan").unwrap();
@@ -1329,9 +1677,9 @@ mod tests {
             goal: "A brief".into(),
             ..Default::default()
         });
-        let full = board(&m, &build(&m), &[], false);
+        let full = board(&m, &build(&m), &[], false, &[]);
         m.formations[0].brief.as_mut().unwrap().goal = " \n ".into();
-        let compact = board(&m, &build(&m), &[], false);
+        let compact = board(&m, &build(&m), &[], false, &[]);
         let card = |b: &Board| b.cards.iter().find(|c| c.id == id).unwrap().clone();
         assert_eq!(
             card(&full).h - card(&compact).h,
@@ -1355,9 +1703,79 @@ mod tests {
     }
 
     #[test]
+    fn a_gate_card_holds_its_judge_and_the_limit_on_its_loop() {
+        let _look = crate::look::gate_for_test(crate::look::Gate::Card);
+        let mut m = delivery();
+        let limit = |id: &str, target: &str, rounds: Option<i64>| Limit {
+            id: id.into(),
+            title: id.into(),
+            target: target.into(),
+            rounds,
+            when_spent: "best".into(),
+            ..Limit::default()
+        };
+        m.limits = vec![
+            // Rounds on the step the gate sends back to: the gate's rule.
+            limit("lim_loop", "fmn_beads", Some(3)),
+            // A cap on the Input: the whole mission's.
+            limit("lim_all", "mis_delivery", None),
+            // Time on a step nothing sends back to: the step's own.
+            limit("lim_plan", "fmn_plan", None),
+        ];
+        assert_eq!(
+            limit_home(&m, &m.limits[0]),
+            LimitHome::Gate("gate_beads_review".into())
+        );
+        assert_eq!(
+            limit_home(&m, &m.limits[1]),
+            LimitHome::Input("mis_delivery".into())
+        );
+        assert_eq!(
+            limit_home(&m, &m.limits[2]),
+            LimitHome::Step("fmn_plan".into())
+        );
+        let b = board(&m, &build(&m), &[], false, &[]);
+        // Every limit lives on what it caps, so none is a card of its own.
+        assert!(b.cards.iter().all(|c| c.kind != Kind::Limit));
+        // The single judge is drawn in the gate: no card, no wires, and no
+        // judge port to drop one on.
+        assert_eq!(
+            folded_judge(&m, "gate_beads_review").as_deref(),
+            Some("fmn_beads_reviewer")
+        );
+        assert!(b.cards.iter().all(|c| c.id != "fmn_beads_reviewer"));
+        assert!(
+            b.wires
+                .iter()
+                .all(|w| w.from_node != "fmn_beads_reviewer" && w.to_node != "fmn_beads_reviewer")
+        );
+        let ports = ports(&m, &b);
+        assert!(
+            ports
+                .iter()
+                .all(|p| p.endpoint != "gate_beads_review:judge")
+        );
+        // The gate is tall enough for its judge row under its outcomes.
+        let gate = b
+            .cards
+            .iter()
+            .find(|c| c.id == "gate_beads_review")
+            .unwrap();
+        let g = gate_geom(&m, "gate_beads_review");
+        assert_eq!(gate.h, g.h);
+        assert!(g.fail_y > g.pass_y && g.h >= g.fail_y + GATE_CARD_JUDGE);
+        // The loop back still leaves the fail row, dashed and named.
+        let fail = b.wires.iter().find(|w| w.route == "fail").unwrap();
+        assert!(fail.back && fail.label.is_some());
+        assert_eq!(fail.from().1, gate.y + g.fail_y);
+    }
+
+    #[test]
     fn a_wire_drops_on_the_input_port_nearest_the_pointer() {
+        // The judge as its own card, under its gate.
+        let _look = crate::look::gate_for_test(crate::look::Gate::Diamond);
         let m = delivery();
-        let b = board(&m, &build(&m), &[], false);
+        let b = board(&m, &build(&m), &[], false, &[]);
         let ports = ports(&m, &b);
         let into_beads = ports
             .iter()

@@ -134,6 +134,12 @@ fn a_long_mission_opens_on_its_board_beside_flow_and_follows_the_choice(cx: &mut
             && cx.debug_bounds("missions-flow").is_some()
             && at(cx, format!("mission-card-{first}")).is_some()
     });
+    // Flow is the panel's Steps tab; Build comes first.
+    let steps = cx.debug_bounds("side-steps").unwrap().center();
+    cx.simulate_click(steps, Modifiers::none());
+    until(cx, "Flow in the panel", |cx| {
+        at(cx, format!("flow-title-{first}")).is_some()
+    });
     let pane = cx.debug_bounds("missions-board").unwrap();
     // It opens on its start, a card drawn no smaller than its words read
     // at (a step card is 300 wide on the board).

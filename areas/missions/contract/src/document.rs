@@ -25,7 +25,7 @@ const FORMATION: &[(&str, &str)] = &[
     ("output", "outputs"),
     ("slot", "slots"),
 ];
-const LAYOUT: &[(&str, &str)] = &[("node", "nodes"), ("edge", "edges")];
+const LAYOUT: &[(&str, &str)] = &[("node", "nodes"), ("edge", "edges"), ("frame", "frames")];
 fn reverse<'a>(pairs: &[(&'a str, &'a str)]) -> Vec<(&'a str, &'a str)> {
     pairs.iter().map(|(a, b)| (*b, *a)).collect()
 }

@@ -14,6 +14,11 @@ const STICKY_W: f32 = 210.;
 const OPEN_W: f32 = 320.;
 const GAP: f32 = 6.;
 pub(super) const STICKY_ROOM: f32 = board::NOTE_ROOM;
+/// A comment as a tag under its card: one line.
+pub(super) const TAG_H: f32 = 26.;
+pub(super) const TAG_ROOM: f32 = TAG_H + 2. * GAP;
+/// A comment as a pin: a bubble astride its card's top-right corner.
+const BUBBLE: f32 = 24.;
 /// The least room a closed paper is drawn in: its byline and a line.
 const STICKY_MIN: f32 = 44.;
 /// A closed paper's words, and how many lines of the latest note it shows.
@@ -501,11 +506,24 @@ impl MissionsPage {
         // cards' pins included, so it goes last.
         let mut opened = Vec::new();
         let mut input_sticky = false;
-        for card in &board.cards {
+        let comments = crate::look::comments();
+        for card in board.cards.iter().filter(|c| c.kind != board::Kind::Frame) {
             let entries = thread(notes, &card.id);
             let open = self.writing_in(&card.id, false);
-            out.push(self.canvas_note_pin(t, card, !entries.is_empty(), view, cx));
+            match comments {
+                crate::look::Comments::Pins if !entries.is_empty() => {
+                    out.push(self.canvas_bubble(t, card, entries, view, cx))
+                }
+                _ => out.push(self.canvas_note_pin(t, card, false, view, cx)),
+            }
             if entries.is_empty() && !open {
+                continue;
+            }
+            if !open {
+                // Closed, a pin says it all; a tag says its first line.
+                if comments == crate::look::Comments::Tags {
+                    out.push(self.canvas_tag(t, card, entries, view, cx));
+                }
                 continue;
             }
             // A closed paper never covers another card: it takes the room
@@ -623,8 +641,10 @@ impl MissionsPage {
         );
         // The mission's own paper appears once it holds something or is
         // being written; Note in the head opens it.
+        // The mission's own thread is in the panel beside the board; here
+        // only while it is being written from the board's menu.
         let writing = self.writing_in(MISSION_THREAD, false);
-        if !thread(notes, MISSION_THREAD).is_empty() || writing {
+        if writing {
             let paper = self.canvas_sticky(
                 t,
                 MISSION_THREAD,
@@ -937,6 +957,22 @@ impl MissionsPage {
                 .justify_end()
                 .gap(px(GAP * z))
                 .when(
+                    target != MISSION_THREAD && !entries.is_empty() && !done,
+                    |d| {
+                        let (target, entry) = (
+                            target.to_owned(),
+                            entries.last().map(|n| n.id.clone()).unwrap_or_default(),
+                        );
+                        d.child(
+                            kit::button(t, "canvas-note-resolve", "Resolve", Kind::Quiet)
+                                .debug_selector(|| "canvas-note-resolve".into())
+                                .on_click(cx.listener(move |page, _, _, cx| {
+                                    page.resolve_thread(target.clone(), entry.clone(), cx)
+                                })),
+                        )
+                    },
+                )
+                .when(
                     self.note_id.is_some() || self.note.read(cx).text != self.note_base,
                     |d| {
                         d.child(
@@ -971,5 +1007,143 @@ impl MissionsPage {
             )
         })
         .into_any_element()
+    }
+    /// A comment as a pin: a bubble astride the card's top-right corner,
+    /// amber with its count while open, a green tick once resolved.
+    fn canvas_bubble(
+        &self,
+        t: &Theme,
+        card: &board::Card,
+        entries: &[Note],
+        view: &View,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let z = view.zoom();
+        let side = (BUBBLE * z).max(PIN_MIN + 2.);
+        let (right, top) = view.position(card.x + card.w, card.y);
+        let done = resolved(entries);
+        let colour = if done {
+            crate::look::ink(t).pass
+        } else {
+            t.needs
+        };
+        let target = card.id.clone();
+        let selector = format!("canvas-note-pin-{target}");
+        let tip = entries
+            .first()
+            .map(|n| format!("{}: {}", author(&n.author).1, n.text))
+            .unwrap_or_default();
+        div()
+            .id(SharedString::from(selector.clone()))
+            .debug_selector(move || selector.clone())
+            .absolute()
+            .left(px(right - side * 0.6))
+            .top(px(top - side * 0.4))
+            .h(px(side))
+            .min_w(px(side))
+            .px(px(5. * z))
+            .rounded(px(side / 2.))
+            .rounded_bl(px(2.))
+            .when(!done, |d| {
+                d.bg(colour).text_color(if t.light { t.text } else { t.bg })
+            })
+            .when(done, |d| {
+                d.bg(t.surface)
+                    .border_1()
+                    .border_color(colour)
+                    .text_color(colour)
+            })
+            .shadow_md()
+            .text_size(px((CARD_SMALL * z).max(size::SMALL - 2.)))
+            .font_weight(FontWeight::BOLD)
+            .flex()
+            .items_center()
+            .justify_center()
+            .cursor_pointer()
+            .child(if done {
+                "✓".to_owned()
+            } else {
+                entries.len().to_string()
+            })
+            .tooltip(kit::tip(tip))
+            .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+            .on_click(cx.listener(move |page, _, window, cx| {
+                page.open_canvas_note(target.clone(), window, cx)
+            }))
+            .into_any_element()
+    }
+    /// A comment as a tag: one line under the card, the ask's first words,
+    /// amber while open, faint once resolved.
+    fn canvas_tag(
+        &self,
+        t: &Theme,
+        card: &board::Card,
+        entries: &[Note],
+        view: &View,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let z = view.zoom();
+        let (x, y) = view.position(card.x, card.y + card.h + GAP);
+        let done = resolved(entries);
+        let first = entries.first();
+        let target = card.id.clone();
+        let selector = selector_of(&target);
+        let rule = if done { t.divider } else { t.needs };
+        let words = first.map(|n| n.text.clone()).unwrap_or_default();
+        let replies = entries.len().saturating_sub(1);
+        div()
+            .id(SharedString::from(selector.clone()))
+            .debug_selector(move || selector.clone())
+            .absolute()
+            .left(px(x))
+            .top(px(y))
+            .w(px(card.w * z))
+            .h(px(TAG_H * z))
+            .px(px(GAP * z))
+            .flex()
+            .items_center()
+            .gap(px(GAP * z))
+            .rounded(px(4. * z))
+            .border_l(px(3. * z))
+            .border_color(rule)
+            .bg(if done {
+                t.bg
+            } else {
+                ahjo_app_kit::theme::alpha(t.needs, if t.light { 0.12 } else { 0.10 })
+            })
+            .text_size(px(CARD_SMALL * z))
+            .cursor_pointer()
+            .child(
+                div()
+                    .flex_none()
+                    .font_weight(FontWeight::BOLD)
+                    .text_color(if done {
+                        crate::look::ink(t).pass
+                    } else {
+                        t.needs
+                    })
+                    .child(if done { "✓" } else { "ASK" }),
+            )
+            .child(
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .truncate()
+                    .text_color(if done { t.dim } else { t.text })
+                    .child(words),
+            )
+            .when(replies > 0, |d| {
+                d.child(
+                    div()
+                        .flex_none()
+                        .text_color(t.text2)
+                        .child(format!("+{replies}")),
+                )
+            })
+            .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+            .on_click(cx.listener(move |page, _, window, cx| {
+                page.open_canvas_note(target.clone(), window, cx)
+            }))
+            .into_any_element()
     }
 }
