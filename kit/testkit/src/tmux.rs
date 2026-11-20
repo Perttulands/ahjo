@@ -55,14 +55,10 @@ impl Server {
                 "#!/bin/sh\necho \"ahjo test: $0 is a stub; run a fake harness by its path\" >&2\nexit 97\n",
             );
         }
-        // The server's default shell, which a launched session starts: a
-        // plain one with a fixed prompt, so no test reads the profile or
-        // the prompt of whoever runs it (ahjo-m97). tmux also runs a
-        // session's command through it, with `-c`.
-        write_script(
-            &dir.join(SHELL),
-            "#!/bin/sh\nPS1='$ '\nexport PS1\nif [ -x /bin/bash ]; then\n  case \"$1\" in -c) exec /bin/bash --noprofile --norc \"$@\" ;; esac\n  exec /bin/bash --noprofile --norc -i\nfi\ncase \"$1\" in -c) exec /bin/sh \"$@\" ;; esac\nexec /bin/sh -i\n",
-        );
+        // A launch needs the shell's bracketed-paste signal. Readline
+        // takes this file even when bash skips its profile and rc files.
+        std::fs::write(dir.join("inputrc"), "set enable-bracketed-paste on\n").unwrap();
+        write_script(&dir.join(SHELL), PLAIN_SHELL);
         let name = dir.file_name().unwrap().to_string_lossy().into_owned();
         Some(Server { name, dir })
     }
@@ -286,10 +282,23 @@ fn exiting(error: &str) -> bool {
     error.trim().trim_start_matches('[').trim_end_matches(']') == "server exited unexpectedly"
 }
 
-/// The harnesses a test must never start for real.
 /// The file name of the plain shell a test server starts sessions with.
 const SHELL: &str = "shell";
 
+/// tmux passes `-c` for a session command. A launch then starts this shell
+/// again with `-l`. Both invocations use the test's startup settings.
+const PLAIN_SHELL: &str = r#"#!/bin/sh
+unset ENV BASH_ENV PROMPT_COMMAND
+export PS1='$ ' INPUTRC="${0%/*}/inputrc" HISTFILE=/dev/null
+if [ -x /bin/bash ]; then
+    case "$1" in -c) exec /bin/bash --noprofile --norc "$@" ;; esac
+    exec /bin/bash --noprofile --norc -i
+fi
+case "$1" in -c) exec /bin/sh "$@" ;; esac
+exec /bin/sh -i
+"#;
+
+/// The harnesses a test must never start for real.
 pub const HARNESSES: [&str; 2] = ["claude", "codex"];
 
 /// `PATH` with `stubs` first.
@@ -418,4 +427,55 @@ pub fn capture(server: &Server, session: &str) -> String {
 pub fn whoami() -> String {
     let out = Command::new("id").arg("-un").output().unwrap();
     String::from_utf8(out.stdout).unwrap().trim().to_owned()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn a_launch_uses_only_the_test_shells_startup_settings() {
+        let Some(server) = Server::start() else {
+            return;
+        };
+        let home = server.dir();
+        let user_inputrc = home.join("user-inputrc");
+        let startup = r#": > "$HOME/startup-read""#;
+        for file in [".bash_profile", ".bashrc", ".profile", "user-env"] {
+            std::fs::write(home.join(file), startup).unwrap();
+        }
+        std::fs::write(&user_inputrc, "set enable-bracketed-paste off\n").unwrap();
+        let output = server
+            .command()
+            .env("HOME", home)
+            .env("BASH_ENV", home.join("user-env"))
+            .env("ENV", home.join("user-env"))
+            .env("PROMPT_COMMAND", startup)
+            .env("HISTFILE", home.join("user-history"))
+            .env("INPUTRC", user_inputrc)
+            .args(["new-session", "-d", "-s", "launch", "-c"])
+            .arg(home)
+            .arg(r#"exec "$SHELL" -l"#)
+            .output()
+            .unwrap();
+        assert!(output.status.success(), "{output:?}");
+        server.run(&[
+            "send-keys",
+            "-t",
+            "launch",
+            r#"printf '%s:%s\n' "$INPUTRC" "$HISTFILE" > startup-settings"#,
+            "Enter",
+        ]);
+        let settings = eventually("the shell's startup settings", || {
+            std::fs::read_to_string(home.join("startup-settings"))
+                .ok()
+                .filter(|contents| !contents.is_empty())
+        })
+        .await;
+        assert_eq!(
+            settings.trim(),
+            format!("{}:/dev/null", home.join("inputrc").display())
+        );
+        assert!(!home.join("startup-read").exists());
+    }
 }
