@@ -172,7 +172,7 @@ const LAB: ahjo_node_kit::Listing = ahjo_node_kit::Listing {
 async fn cli_refuses_to_save_unsupported_step_and_channel() {
     use ahjo_testkit::{node::Node, sessions};
     use serde_json::json;
-    let node = Node::start(&[sessions::LISTING, ahjo_work::LISTING, LAB], "")
+    let node = Node::start(&[sessions::LISTING, ahjo_issue::LISTING, LAB], "")
         .await
         .unwrap();
     let folder = node.dir().join("missions/missions");

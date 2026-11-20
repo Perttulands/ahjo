@@ -408,7 +408,7 @@ fn restart_cuts_preserve_branch_and_human_gate_outcomes() {
             .replace("seat_work", "seat_other")
             .replace(
                 "Return a short result",
-                "archon-lab-work:40ms Return a short result",
+                "archon-lab-issue:40ms Return a short result",
             );
         let mut mission = format!(
             "{}\n[[step]]{other}\n[[connection]]\nid = \"edge_other\"\nfrom = \"inp_hello:out\"\nto = \"fmn_other:port_in\"\n[[connection]]\nid = \"edge_other_end\"\nfrom = \"fmn_other:port_out\"\nto = \"end_done:in\"\n",
@@ -822,11 +822,11 @@ fn a_newer_human_request_makes_the_old_sequence_stale() {
         .replace("seat_work", "seat_other")
         .replace(
             "Return a short result",
-            "archon-lab-work:400ms Return a short result",
+            "archon-lab-issue:400ms Return a short result",
         );
     let base = gated_mission("kinds = [\"human\"]").replace(
         "Return a short result",
-        "archon-lab-work:50ms Return a short result",
+        "archon-lab-issue:50ms Return a short result",
     );
     let mission = format!(
         "{base}\n[[step]]{other}\n[[gate]]\nid = \"gate_check\"\ntitle = \"Check\"\nkinds = [\"code\"]\ncheck = \"output_contains\"\ncheck_version = \"1\"\ncheck_value = \"never present\"\n[[connection]]\nid = \"edge_other\"\nfrom = \"inp_hello:out\"\nto = \"fmn_other:port_in\"\n[[connection]]\nid = \"edge_check\"\nfrom = \"fmn_other:port_out\"\nto = \"gate_check:in\"\n[[connection]]\nid = \"edge_check_pass\"\nfrom = \"gate_check:pass\"\nto = \"end_done:in\"\n[[connection]]\nid = \"edge_check_fail\"\nfrom = \"gate_check:fail\"\nto = \"gate_review:in\"\n"
@@ -988,7 +988,7 @@ fn a_blocked_run_accepts_another_gates_verdict_and_routes_it_on_resume() {
         .replace("seat_work", "seat_other")
         .replace(
             "Return a short result",
-            "archon-lab-work:400ms Return a short result",
+            "archon-lab-issue:400ms Return a short result",
         );
     let mission = format!(
         "{}\n[[step]]{judge}\n[[step]]{other}\n[[gate]]\nid = \"gate_human\"\ntitle = \"Human\"\nkinds = [\"human\"]\n",
@@ -1295,11 +1295,11 @@ fn a_step_error_is_recorded_while_other_work_finishes_and_resume_retries_it() {
         .replace("seat_work", "seat_other")
         .replace(
             "Return a short result",
-            "archon-lab-work:400ms Return a short result",
+            "archon-lab-issue:400ms Return a short result",
         );
     let mission = solo.replace(
         "Return a short result",
-        "archon-lab-work:50ms Return a short result",
+        "archon-lab-issue:50ms Return a short result",
     ) + &format!(
         "\n[[step]]{other}\n[[connection]]\nid = \"edge_other\"\nfrom = \"inp_hello:out\"\nto = \"fmn_other:port_in\"\n[[connection]]\nid = \"edge_other_end\"\nfrom = \"fmn_other:port_out\"\nto = \"end_done:in\"\n"
     );
@@ -1383,11 +1383,11 @@ fn recovery_drains_started_work_without_retrying_a_recorded_error() {
         .replace("seat_work", "seat_other")
         .replace(
             "Return a short result",
-            "archon-lab-work:300ms Return a short result",
+            "archon-lab-issue:300ms Return a short result",
         );
     let mission = solo.replace(
         "Return a short result",
-        "archon-lab-work:50ms Return a short result",
+        "archon-lab-issue:50ms Return a short result",
     ) + &format!(
         "\n[[step]]{other}\n[[connection]]\nid = \"edge_other\"\nfrom = \"inp_hello:out\"\nto = \"fmn_other:port_in\"\n[[connection]]\nid = \"edge_other_end\"\nfrom = \"fmn_other:port_out\"\nto = \"end_done:in\"\n"
     );

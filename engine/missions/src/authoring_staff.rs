@@ -41,13 +41,13 @@ pub(crate) fn set(table: &mut dyn TableLike, key: &str, next: &str) {
     }
 }
 /// A brief's work item, if any, must be a reference in a written form.
-pub(crate) fn check_work(work: &str) -> Result<(), Error> {
-    if work.is_empty() {
+pub(crate) fn check_issue(issue: &str) -> Result<(), Error> {
+    if issue.is_empty() {
         return Ok(());
     }
-    ahjo_work_ref::parse(work)
+    ahjo_issue_ref::parse(issue)
         .map(|_| ())
-        .map_err(|invalid| Error::new("invalid_bead_id", invalid.to_string()))
+        .map_err(|invalid| Error::new("invalid_issue_ref", invalid.to_string()))
 }
 pub(crate) fn apply(
     doc: &mut DocumentMut,
@@ -60,19 +60,19 @@ pub(crate) fn apply(
             step_id,
             goal,
             repository,
-            work,
+            issue,
             files,
             links,
         } => {
             let mut brief = ahjo_mission_model::Brief {
                 goal,
                 repository,
-                work,
+                issue,
                 files,
                 links,
             };
             crate::authoring_create::file_refs(&mut brief.files)?;
-            check_work(&brief.work)?;
+            check_issue(&brief.issue)?;
             let step = mission.step(&step_id).ok_or_else(not_found)?;
             if step.brief.as_ref() == Some(&brief) {
                 return Ok(false);
@@ -96,7 +96,7 @@ pub(crate) fn apply(
         } => {
             if let Some(brief) = &mut brief {
                 crate::authoring_create::file_refs(&mut brief.files)?;
-                check_work(&brief.work)?;
+                check_issue(&brief.issue)?;
             }
             let step = mission.step(&id).ok_or_else(not_found)?;
             if step.title == title && step.brief == brief {

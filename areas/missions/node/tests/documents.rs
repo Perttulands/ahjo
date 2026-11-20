@@ -6,7 +6,7 @@ use std::path::PathBuf;
 
 const AREAS: &[Listing] = &[
     sessions::LISTING,
-    ahjo_work::LISTING,
+    ahjo_issue::LISTING,
     ahjo_missions::LISTING,
 ];
 
@@ -124,7 +124,7 @@ async fn document_commands_keep_bytes_and_reject_a_missing_or_stale_revision() {
 #[tokio::test(flavor = "multi_thread")]
 async fn apply_reports_assigned_ids_and_draft_errors_and_previews_without_writes() {
     let node = Node::start(AREAS, "").await.unwrap();
-    let document = r#"schema = 5
+    let document = r#"schema = 6
 slug = "draft"
 title = "Sample draft"
 step = [
@@ -200,7 +200,7 @@ step = [
 #[tokio::test(flavor = "multi_thread")]
 async fn apply_keeps_a_card_with_an_open_note_and_removes_its_position_after_resolution() {
     let node = Node::start(AREAS, "").await.unwrap();
-    let document = r#"schema = 5
+    let document = r#"schema = 6
 id = "mission_notes"
 slug = "noted"
 title = "Noted"
@@ -222,7 +222,7 @@ title = "Old card"
         .unwrap();
     let note = notes["note"].as_str().unwrap();
     let removal =
-        "schema = 5\nid = \"mission_notes\"\nslug = \"noted\"\nrev = 1\ntitle = \"Noted\"\n";
+        "schema = 6\nid = \"mission_notes\"\nslug = \"noted\"\nrev = 1\ntitle = \"Noted\"\n";
     let error = node
         .call("mission_apply", json!({"document":removal}))
         .await
@@ -262,7 +262,7 @@ title = "Old card"
 #[tokio::test(flavor = "multi_thread")]
 async fn repeat_port_labels_can_be_wired_by_exact_id() {
     let node = Node::start(AREAS, "").await.unwrap();
-    let document = r#"schema = 5
+    let document = r#"schema = 6
 slug = "ports"
 input_card = [{ id = "start", title = "Start" }]
 step = [
@@ -294,7 +294,7 @@ step = [
 #[tokio::test(flavor = "multi_thread")]
 async fn apply_refuses_unknown_vocabulary_and_keeps_saved_ultra() {
     let node = Node::start(AREAS, "").await.unwrap();
-    let source = r#"schema = 5
+    let source = r#"schema = 6
 slug = "effort"
 rev = 0
 
@@ -327,7 +327,7 @@ effort = "ultra"
         .unwrap();
     assert_eq!(exported["document"], stored);
     let before = Mission::parse(&stored).unwrap();
-    assert_eq!(before.schema, 5);
+    assert_eq!(before.schema, 6);
     assert_eq!(
         before.steps[0].seats[0].effort,
         ahjo_missions_contract::Effort::Ultra

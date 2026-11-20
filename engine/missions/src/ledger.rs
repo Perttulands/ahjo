@@ -26,7 +26,7 @@ pub struct RunEvent {
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub input_card_id: String,
     #[serde(default, skip_serializing_if = "String::is_empty")]
-    pub work: String,
+    pub issue: String,
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub card_id: String,
     #[serde(default, skip_serializing_if = "String::is_empty")]
@@ -183,8 +183,8 @@ impl Ledger {
         if event.input_card_id.is_empty() {
             event.input_card_id.clone_from(&first.input_card_id);
         }
-        if event.work.is_empty() {
-            event.work.clone_from(&first.work);
+        if event.issue.is_empty() {
+            event.issue.clone_from(&first.issue);
         }
         if event.epoch == 0 {
             event.epoch = last.epoch;

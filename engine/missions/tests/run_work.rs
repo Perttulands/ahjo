@@ -18,8 +18,13 @@ const ISSUE: &str = "gh:example/project#180";
 /// One solo step whose brief names the run's work item every way, and
 /// optionally its own; `inputs` declares the Input card's inputs.
 fn mission(inputs: &str, brief_work: &str) -> String {
+    let bead = if inputs.contains("name = \"bead\"") {
+        "{bead}"
+    } else {
+        "{{bead}}"
+    };
     format!(
-        r#"schema = 5
+        r#"schema = 6
 id = "msn_work"
 slug = "work"
 title = "Work"
@@ -36,7 +41,7 @@ id = "fmn_work"
 formation = "solo"
 title = "Work"
 [step.brief]
-goal = "bead={{bead}} issue={{issue}} literal={{{{bead}}}}"
+goal = "bead={bead} issue={{issue}} literal={{{{bead}}}}"
 {brief_work}
 [[step.input]]
 id = "port_in"
@@ -110,7 +115,7 @@ impl Executor for Recording {
 /// run's projection once final.
 fn run(
     mission: &str,
-    work: &str,
+    issue: &str,
     inputs: &[(&str, &str)],
 ) -> (StepExecution, ahjo_mission_model::RunProjection, String) {
     let dir = Scratch::new(mission);
@@ -121,7 +126,7 @@ fn run(
             mission: "work".into(),
             input_card_id: "inp_work".into(),
             expected_rev: 1,
-            work: work.into(),
+            issue: issue.into(),
             inputs: inputs
                 .iter()
                 .map(|(k, v)| (k.to_string(), v.to_string()))
@@ -137,38 +142,38 @@ fn run(
     let listed = c.list(None, false).unwrap();
     assert_eq!(listed.len(), 1);
     let execution = recording.0.lock().unwrap()[0].clone();
-    (execution, c.run(&id).unwrap(), listed[0].work.clone())
+    (execution, c.run(&id).unwrap(), listed[0].issue.clone())
 }
 
 #[test]
 fn a_bead_on_the_run_fills_bead_and_issue_and_is_projected() {
     let (execution, projection, listed) = run(&mission("", ""), BEAD, &[("brief", "go")]);
     assert_eq!(projection.status, "succeeded");
-    assert_eq!((projection.work.as_str(), listed.as_str()), (BEAD, BEAD));
-    assert_eq!(execution.work, BEAD);
+    assert_eq!((projection.issue.as_str(), listed.as_str()), (BEAD, BEAD));
+    assert_eq!(execution.issue, BEAD);
     assert_eq!(
         execution.step.brief.unwrap().goal,
-        "bead=ctx-12 issue=ctx-12 literal={bead}"
+        "bead={bead} issue=ctx-12 literal={bead}"
     );
 }
 
 #[test]
 fn a_github_issue_on_the_run_fills_the_same_placeholders() {
     let (execution, projection, _) = run(&mission("", ""), ISSUE, &[("brief", "go")]);
-    assert_eq!(projection.work, ISSUE);
+    assert_eq!(projection.issue, ISSUE);
     assert_eq!(
         execution.step.brief.unwrap().goal,
-        "bead=example/project#180 issue=example/project#180 literal={bead}"
+        "bead={bead} issue=example/project#180 literal={bead}"
     );
 }
 
 #[test]
 fn without_a_work_item_the_placeholders_are_empty() {
     let (execution, projection, _) = run(&mission("", ""), "", &[("brief", "go")]);
-    assert_eq!(projection.work, "");
+    assert_eq!(projection.issue, "");
     assert_eq!(
         execution.step.brief.unwrap().goal,
-        "bead= issue= literal={bead}"
+        "bead={bead} issue= literal={bead}"
     );
 }
 
@@ -190,17 +195,17 @@ fn a_declared_bead_input_wins_even_when_omitted() {
     let (execution, _, _) = run(&mission(declared, ""), ISSUE, &[]);
     assert_eq!(
         execution.step.brief.unwrap().goal,
-        "bead=example/project#180 issue=(not supplied) literal={bead}"
+        "bead={bead} issue=(not supplied) literal={bead}"
     );
 }
 
 #[test]
 fn a_brief_names_its_own_work_item_beside_the_runs() {
     for brief_work in ["ctx-9", ISSUE, BEAD] {
-        let line = format!("work = \"{brief_work}\"");
+        let line = format!("issue = \"{brief_work}\"");
         let (execution, _, _) = run(&mission("", &line), BEAD, &[("brief", "go")]);
-        assert_eq!(execution.work, BEAD);
-        assert_eq!(execution.step.brief.unwrap().work, brief_work);
+        assert_eq!(execution.issue, BEAD);
+        assert_eq!(execution.step.brief.unwrap().issue, brief_work);
     }
 }
 
@@ -213,7 +218,7 @@ fn admission_refuses_a_work_item_it_cannot_place() {
             mission: "work".into(),
             input_card_id: "inp_work".into(),
             expected_rev: 1,
-            work: work.into(),
+            issue: work.into(),
             inputs: BTreeMap::from([("brief".into(), "go".into())]),
             ..Default::default()
         });
@@ -283,7 +288,7 @@ fn an_old_ledgers_issue_survives_the_upgrade_and_a_resume() {
             mission: "work".into(),
             input_card_id: "inp_work".into(),
             expected_rev: 1,
-            work: ISSUE.into(),
+            issue: ISSUE.into(),
             inputs: BTreeMap::from([("brief".into(), "go".into())]),
             ..Default::default()
         })
@@ -299,10 +304,10 @@ fn an_old_ledgers_issue_survives_the_upgrade_and_a_resume() {
         .map(|line| {
             let mut event: serde_json::Map<String, serde_json::Value> =
                 serde_json::from_str(line).unwrap();
-            assert_eq!(event.remove("work").unwrap(), ISSUE);
+            assert_eq!(event.remove("issue").unwrap(), ISSUE);
             event.insert("issue".into(), "example/project#180".into());
             if let Some(serde_json::Value::Object(data)) = event.get_mut("data")
-                && let Some(work) = data.remove("work")
+                && let Some(work) = data.remove("issue")
             {
                 assert_eq!(work, ISSUE);
                 data.insert("issue".into(), "example/project#180".into());
@@ -315,10 +320,18 @@ fn an_old_ledgers_issue_survives_the_upgrade_and_a_resume() {
 
     let c = open(&dir, executor.clone());
     let migrated = std::fs::read_to_string(&path).unwrap();
-    assert!(!migrated.contains("\"issue\""), "{migrated}");
+    for line in migrated.lines() {
+        let event: serde_json::Value = serde_json::from_str(line).unwrap();
+        assert!(event.get("work").is_none());
+        assert_eq!(event["issue"], ISSUE);
+        if event["type"] == "run_started" {
+            assert!(event["data"].get("work").is_none());
+            assert_eq!(event["data"]["issue"], ISSUE);
+        }
+    }
     assert_eq!(migrated.lines().count(), old.lines().count());
-    assert_eq!(c.run(&id).unwrap().work, ISSUE);
-    assert_eq!(c.list(None, false).unwrap()[0].work, ISSUE);
+    assert_eq!(c.run(&id).unwrap().issue, ISSUE);
+    assert_eq!(c.list(None, false).unwrap()[0].issue, ISSUE);
     // Opening again finds nothing to do.
     drop(c);
     let c = open(&dir, executor.clone());
@@ -328,10 +341,10 @@ fn an_old_ledgers_issue_survives_the_upgrade_and_a_resume() {
     wait_for(&c, &id, |p| p.r#final);
     assert_eq!(c.run(&id).unwrap().status, "succeeded");
     let execution = executor.0.0.lock().unwrap().last().unwrap().clone();
-    assert_eq!(execution.work, ISSUE);
+    assert_eq!(execution.issue, ISSUE);
     assert_eq!(
         execution.step.brief.unwrap().goal,
-        "bead=example/project#180 issue=example/project#180 literal={bead}"
+        "bead={bead} issue=example/project#180 literal={bead}"
     );
 }
 
@@ -348,7 +361,7 @@ fn an_old_ledger_whose_issue_names_nothing_fails_alone() {
             mission: "work".into(),
             input_card_id: "inp_work".into(),
             expected_rev: 1,
-            work: ISSUE.into(),
+            issue: ISSUE.into(),
             inputs: BTreeMap::from([("brief".into(), "go".into())]),
             ..Default::default()
         })
@@ -369,7 +382,7 @@ fn an_old_ledger_whose_issue_names_nothing_fails_alone() {
         .map(|(n, issue)| {
             let old_id = format!("run_old{n}");
             let text = ledger.replace(&id, &old_id).replace(
-                &format!("\"work\":\"{ISSUE}\""),
+                &format!("\"issue\":\"{ISSUE}\""),
                 &format!("\"issue\":\"{issue}\""),
             );
             assert!(!text.contains(ISSUE));
@@ -379,7 +392,7 @@ fn an_old_ledger_whose_issue_names_nothing_fails_alone() {
         .collect();
 
     let c = open(&dir, executor);
-    assert_eq!(c.run(&id).unwrap().work, ISSUE);
+    assert_eq!(c.run(&id).unwrap().issue, ISSUE);
     assert_eq!(c.list(None, false).unwrap().len(), 1);
     for ((old_id, text), issue) in old.iter().zip(issues) {
         let refused = c.run(old_id).unwrap_err().to_string();

@@ -516,7 +516,7 @@ mod tests {
     use super::*;
 
     fn test_run(status: &str) -> Run {
-        serde_json::from_value(serde_json::json!({"run_id":"r", "status":status, "final":false, "resume_allowed":false, "epoch":1, "mission_slug":"m", "mission_id":"m", "mission_rev":1, "input_card_id":"i", "work":"", "cwd":"", "repository":"", "base":"", "context_paths":[], "inputs":[], "outputs":[], "event_count":0, "started_by":"", "started_at":"", "updated_at":"", "ended_by":"", "waiting_gates":[], "events":[]})).unwrap()
+        serde_json::from_value(serde_json::json!({"run_id":"r", "status":status, "final":false, "resume_allowed":false, "epoch":1, "mission_slug":"m", "mission_id":"m", "mission_rev":1, "input_card_id":"i", "issue":"", "cwd":"", "repository":"", "base":"", "context_paths":[], "inputs":[], "outputs":[], "event_count":0, "started_by":"", "started_at":"", "updated_at":"", "ended_by":"", "waiting_gates":[], "events":[]})).unwrap()
     }
 
     fn ev(seq: u64, kind: &str, node: &str) -> RunEvent {

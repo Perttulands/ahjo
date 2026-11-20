@@ -317,7 +317,7 @@ fn connection(id: &str, from: &str, to: &str) -> String {
 /// with the given Limit cards.
 fn pick_mission(kinds: &str, work_goal: &str, cards: &str) -> String {
     let mut mission = String::from(
-        "schema = 5\nid = \"msn_pick\"\nslug = \"hello\"\ntitle = \"Pick\"\nrev = 1\n\n[[input_card]]\nid = \"inp_hello\"\ntitle = \"Hello\"\ngoal = \"Return the supplied input\"\n\n",
+        "schema = 6\nid = \"msn_pick\"\nslug = \"hello\"\ntitle = \"Pick\"\nrev = 1\n\n[[input_card]]\nid = \"inp_hello\"\ntitle = \"Hello\"\ngoal = \"Return the supplied input\"\n\n",
     );
     mission += &step("fmn_work", "Work", work_goal);
     mission += &step("fmn_ship", "Ship", "Ship it.");
@@ -736,7 +736,7 @@ fn a_fail_time_limit_warns_then_cuts_off_the_working_attempt() {
     let run = Run::start(
         &pick_mission(
             "[\"step\"]",
-            "Draft. archon-lab-work: 6s",
+            "Draft. archon-lab-issue: 6s",
             &work_card("seconds = 2\nwarn_seconds = 1\nwhen_spent = \"fail\""),
         ),
         Scripted::default(),

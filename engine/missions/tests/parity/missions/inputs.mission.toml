@@ -1,5 +1,5 @@
 # Parity fixture: mission inputs, outputs and port kinds.
-schema = 5
+schema = 6
 id = "msn_inputs"
 slug = "inputs"
 title = "Inputs"
@@ -32,7 +32,7 @@ id = "fmn_a"
 formation = "solo"
 title = "Analysis"
 [step.brief]
-goal = "Change {change} in {repo} with {target} and {spec}; literal {{example}}; Bead {bead}; {missing} {missing} {Upper}"
+goal = "Change {change} in {repo} with {target} and {spec}; literal {{example}}; Issue {issue}; {missing} {missing} {Upper}"
 [[step.input]]
 id = "in"
 kind = "file"

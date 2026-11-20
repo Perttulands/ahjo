@@ -612,7 +612,7 @@ fn nothing_opened_on_the_page_resizes_a_session(cx: &mut TestAppContext) {
     let (shell, cx, settings) = open_pages_with_alpha(
         &running,
         "opened-size",
-        &[terminals, ahjo_files_app::build, ahjo_work_app::build],
+        &[terminals, ahjo_files_app::build, ahjo_issue_app::build],
         cx,
     );
     // Wide enough that a drawer could have moved the window aside.
@@ -800,7 +800,7 @@ fn nothing_opened_on_the_page_resizes_a_session(cx: &mut TestAppContext) {
 
     // Work lies over the windows the same way: its panel (Alt+B), ...
     {
-        let (keys, drawn, what) = ("alt-b", "work-panel", "the Work panel");
+        let (keys, drawn, what) = ("alt-b", "issue-panel", "the Work panel");
         cx.simulate_keystrokes(keys);
         until(cx, what, |cx| {
             cx.debug_bounds("terminals-beside").is_some() && cx.debug_bounds(drawn).is_some()
@@ -840,7 +840,7 @@ fn nothing_opened_on_the_page_resizes_a_session(cx: &mut TestAppContext) {
     let at = item(cx).expect("printed");
     cx.simulate_click(at, Modifiers::none());
     until(cx, "the item beside the windows", |cx| {
-        cx.debug_bounds("terminals-beside").is_some() && cx.debug_bounds("work-beside").is_some()
+        cx.debug_bounds("terminals-beside").is_some() && cx.debug_bounds("issue-beside").is_some()
     });
     unchanged(cx, "with a printed work item open beside");
     cx.simulate_keystrokes("alt-i");
@@ -855,7 +855,7 @@ fn nothing_opened_on_the_page_resizes_a_session(cx: &mut TestAppContext) {
     let path = picture.display().to_string();
     for (page_id, thing) in [
         ("files", vec!["--path", path.as_str()]),
-        ("work", vec!["--item", "parvi-pnu.7"]),
+        ("issue", vec!["--item", "parvi-pnu.7"]),
     ] {
         let args: Vec<String> = ["open", "--page", page_id]
             .into_iter()
@@ -900,7 +900,7 @@ fn what_lies_over_the_windows_takes_every_click_inside_it(cx: &mut TestAppContex
     let (shell, cx, settings) = open_pages_with_alpha(
         &running,
         "over",
-        &[terminals, toy, ahjo_files_app::build, ahjo_work_app::build],
+        &[terminals, toy, ahjo_files_app::build, ahjo_issue_app::build],
         cx,
     );
     cx.simulate_resize(gpui::size(px(1440.), px(900.)));
@@ -1045,7 +1045,7 @@ fn what_lies_over_the_windows_takes_every_click_inside_it(cx: &mut TestAppContex
     // Work: what is typed goes to its find, so the first Esc clears it and
     // the second closes the panel.
     {
-        let (keys, drawn) = ("alt-b", "work-panel-search");
+        let (keys, drawn) = ("alt-b", "issue-panel-search");
         cx.simulate_keystrokes(keys);
         until(cx, drawn, |cx| cx.debug_bounds(drawn).is_some());
         cx.simulate_input(MARK);
@@ -2128,7 +2128,7 @@ fn work_item_in_terminal_opens_beside_and_focus_is_published(cx: &mut TestAppCon
     let Some(running) = start("terminals-work-link") else {
         return;
     };
-    let (shell, cx, settings) = open_with_alpha(&running, "work-link", cx);
+    let (shell, cx, settings) = open_with_alpha(&running, "issue-link", cx);
     let page = PAGE.with(|p| p.borrow().clone()).unwrap();
     let toy = shell.read_with(cx, |s, _| Host::new(s.hub()).for_page("toy", &[]));
     let sessions = cx.update(|_, cx| toy.model::<SessionList>(cx)).unwrap();

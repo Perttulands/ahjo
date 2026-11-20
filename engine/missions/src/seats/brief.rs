@@ -57,12 +57,12 @@ fn render_for(request: &StepExecution, seat: &Seat, final_output: bool) -> Strin
     if let Some(turn) = &request.turn {
         let _ = writeln!(brief, "Starting commit: {}", turn.commit);
     }
-    if let Ok(work) = ahjo_work_ref::parse(&request.work) {
+    if let Ok(work) = ahjo_issue_ref::parse(&request.issue) {
         let _ = writeln!(brief, "Mission {}: {}", work.noun(), work.describe());
     }
     if let Some(details) = &request.step.brief {
         let _ = writeln!(brief, "Goal:\n{}\n", details.goal);
-        if let Ok(work) = ahjo_work_ref::parse(&details.work) {
+        if let Ok(work) = ahjo_issue_ref::parse(&details.issue) {
             let _ = writeln!(brief, "Brief {}: {}", work.noun(), work.describe());
         }
         for file in &details.files {
@@ -148,7 +148,7 @@ mod tests {
                 title: "Work".into(),
                 brief: Some(Brief {
                     goal: "Ship".into(),
-                    work: brief_work.into(),
+                    issue: brief_work.into(),
                     ..Brief::default()
                 }),
                 ..Step::default()
@@ -167,7 +167,7 @@ mod tests {
             turn: None,
             artifact_dir: "/a".into(),
             context_paths: Vec::new(),
-            work: run_work.into(),
+            issue: run_work.into(),
             inputs: Vec::new(),
             input_text: String::new(),
             attempt: 1,

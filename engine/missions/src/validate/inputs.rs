@@ -45,7 +45,7 @@ pub fn findings(mission: &Mission) -> Vec<Finding> {
         };
         let mut reported = HashSet::new();
         for name in references(&brief.goal) {
-            if crate::run_inputs::WORK_REFERENCES.contains(&name)
+            if name == crate::run_inputs::ISSUE_REFERENCE
                 || declared.contains(&name)
                 || !reported.insert(name)
             {

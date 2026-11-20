@@ -21,7 +21,7 @@ fn responses_read_back_with_their_empty_fields_left_out() {
         "run_id": "run_a", "status": "waiting_human", "final": false,
         "resume_allowed": false, "epoch": 1, "mission_slug": "hello",
         "mission_id": "msn_a", "mission_rev": 2, "input_card_id": "inp_a",
-        "work": "", "cwd": "/work", "repository": "", "base": "",
+        "issue": "", "cwd": "/work", "repository": "", "base": "",
         "context_paths": [], "inputs": [{"name": "brief", "kind": "text", "value": "hi"}],
         "outputs": [{"name": "plan", "kind": "text", "value": "done", "card_id": "fmn_a",
                      "port_id": "out", "attempt": 1}],
@@ -41,7 +41,7 @@ fn responses_read_back_with_their_empty_fields_left_out() {
     reads_back::<Vec<RunSummary>>(json!([{
         "run_id": "run_a", "number": 1, "status": "blocked", "final": false,
         "mission_slug": "hello", "mission_id": "msn_a", "mission_rev": 2,
-        "input_card_id": "inp_a", "work": "", "event_count": 3, "resume_allowed": true,
+        "input_card_id": "inp_a", "issue": "", "event_count": 3, "resume_allowed": true,
         "block_code": "limit_spent", "started_by": "human:operator",
         "started_at": "2026-11-11T00:00:00Z", "updated_at": "2026-11-11T00:00:01Z",
         "input_excerpt": "hi", "outputs": [],
@@ -87,7 +87,7 @@ fn requests_read_back_whole() {
     let start = reads_back::<RunStart>(json!({
         "mission": "hello", "input_card_id": "inp_a", "step_id": "",
         "expected_rev": 2, "expected_etag": "abc", "cwd": "/work", "repository": "",
-        "base": "", "context_paths": [], "work": "", "actor": "human:operator",
+        "base": "", "context_paths": [], "issue": "", "actor": "human:operator",
         "inputs": {"brief": "hi"}, "request_id": "req_1"
     }));
     assert_eq!(start.known_machines, None);

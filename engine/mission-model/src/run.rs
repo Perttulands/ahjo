@@ -7,7 +7,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
-#[serde(default, rename_all = "snake_case")]
+#[serde(default, deny_unknown_fields, rename_all = "snake_case")]
 pub struct RunStart {
     pub mission: String,
     pub input_card_id: String,
@@ -18,9 +18,9 @@ pub struct RunStart {
     pub repository: String,
     pub base: String,
     pub context_paths: Vec<String>,
-    /// The run's work item as a canonical reference (`docs/work.md`), or
+    /// The run's issue as a canonical reference (`docs/work.md`), or
     /// empty. The node resolves what was written before admission.
-    pub work: String,
+    pub issue: String,
     pub actor: String,
     pub inputs: BTreeMap<String, String>,
     /// The client's key for this start. A start repeated with a key that
@@ -68,7 +68,7 @@ pub struct RunSummary {
     pub mission_id: String,
     pub mission_rev: i64,
     pub input_card_id: String,
-    pub work: String,
+    pub issue: String,
     pub event_count: usize,
     pub resume_allowed: bool,
     #[serde(default, skip_serializing_if = "String::is_empty")]

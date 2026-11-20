@@ -100,7 +100,7 @@ async fn cli_authors_two_steps_answers_gate_and_finishes_with_fake_sessions() {
         ),
     );
     let config = format!("[missions]\nnotify_command = '{}'\n", command.display());
-    let node = Node::start(&[sessions::LISTING, ahjo_work::LISTING, MISSIONS], &config)
+    let node = Node::start(&[sessions::LISTING, ahjo_issue::LISTING, MISSIONS], &config)
         .await
         .unwrap();
     let fake = node.fake_sessions();

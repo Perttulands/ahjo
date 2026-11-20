@@ -112,7 +112,7 @@ fn start() -> Running {
     *RELEASE.lock().unwrap() = Some(receiver);
     let thread = std::thread::spawn(move || {
         tokio::runtime::Runtime::new().unwrap().block_on(async move {
-        let node = Node::start(&[sessions::LISTING, ahjo_work::LISTING, MISSIONS], "").await.unwrap();
+        let node = Node::start(&[sessions::LISTING, ahjo_issue::LISTING, MISSIONS], "").await.unwrap();
         *SESSIONS.lock().unwrap() = Some(node.fake_sessions());
         *NODE.lock().unwrap() = node.id();
         let dir = node.dir().join("missions/missions");

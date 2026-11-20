@@ -131,20 +131,22 @@ dependencies = [
  "ahjo-files",
  "ahjo-harness",
  "ahjo-host",
+ "ahjo-issue",
  "ahjo-missions",
  "ahjo-node-kit",
  "ahjo-scheduled",
  "ahjo-terminals",
  "ahjo-testkit",
- "ahjo-work",
  "anyhow",
  "axum",
  "jiff",
  "memchr",
  "serde_json",
  "sha2 0.10.9",
+ "tempfile",
  "tokio",
  "toml 1.2.1+spec-1.1.0",
+ "toml_edit 0.25.19+spec-1.1.0",
 ]
 
 [[package]]
@@ -232,10 +234,10 @@ dependencies = [
  "ahjo-files-app",
  "ahjo-harness-app",
  "ahjo-host-app",
+ "ahjo-issue-app",
  "ahjo-missions-app",
  "ahjo-scheduled-app",
  "ahjo-terminals-app",
- "ahjo-work-app",
  "async-channel",
  "embed-resource",
  "gpui-pre",
@@ -484,18 +486,77 @@ dependencies = [
 ]
 
 [[package]]
+name = "ahjo-issue"
+version = "0.0.1"
+dependencies = [
+ "ahjo-core",
+ "ahjo-issue-contract",
+ "ahjo-issue-ref",
+ "ahjo-node-kit",
+ "ahjo-testkit",
+ "anyhow",
+ "axum",
+ "futures-util",
+ "libc",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tokio-tungstenite 0.30.0",
+ "tower",
+]
+
+[[package]]
+name = "ahjo-issue-app"
+version = "0.0.1"
+dependencies = [
+ "ahjo-app-kit",
+ "ahjo-app-shell",
+ "ahjo-core",
+ "ahjo-issue",
+ "ahjo-issue-contract",
+ "ahjo-node-kit",
+ "ahjo-terminals",
+ "ahjo-terminals-app",
+ "ahjo-terminals-contract",
+ "ahjo-testkit",
+ "anyhow",
+ "async-channel",
+ "gpui-pre",
+ "jiff",
+ "log",
+ "serde_json",
+ "time",
+ "tokio",
+]
+
+[[package]]
+name = "ahjo-issue-contract"
+version = "0.0.1"
+dependencies = [
+ "ahjo-core",
+ "ahjo-issue-ref",
+ "schemars",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "ahjo-issue-ref"
+version = "0.0.1"
+
+[[package]]
 name = "ahjo-mission-engine"
 version = "0.0.1"
 dependencies = [
  "ahjo-core",
+ "ahjo-issue",
+ "ahjo-issue-ref",
  "ahjo-mission-model",
  "ahjo-missions",
  "ahjo-node-kit",
  "ahjo-term",
  "ahjo-terminals",
  "ahjo-testkit",
- "ahjo-work",
- "ahjo-work-ref",
  "anyhow",
  "getrandom 0.4.3",
  "hex",
@@ -527,13 +588,13 @@ version = "0.0.1"
 dependencies = [
  "ahjo-core",
  "ahjo-harness",
+ "ahjo-issue",
+ "ahjo-issue-contract",
  "ahjo-mission-engine",
  "ahjo-missions-contract",
  "ahjo-node-kit",
  "ahjo-term",
  "ahjo-testkit",
- "ahjo-work",
- "ahjo-work-contract",
  "anyhow",
  "axum",
  "futures-util",
@@ -554,13 +615,13 @@ dependencies = [
  "ahjo-core",
  "ahjo-files",
  "ahjo-harness-contract",
+ "ahjo-issue",
  "ahjo-mission-engine",
  "ahjo-missions",
  "ahjo-missions-contract",
  "ahjo-node-kit",
  "ahjo-term",
  "ahjo-testkit",
- "ahjo-work",
  "anyhow",
  "axum",
  "gpui-pre",
@@ -705,13 +766,13 @@ dependencies = [
  "ahjo-core",
  "ahjo-files",
  "ahjo-files-app",
+ "ahjo-issue-app",
+ "ahjo-issue-contract",
  "ahjo-node-kit",
  "ahjo-term",
  "ahjo-terminals",
  "ahjo-terminals-contract",
  "ahjo-testkit",
- "ahjo-work-app",
- "ahjo-work-contract",
  "alacritty_terminal",
  "async-channel",
  "gpui-pre",
@@ -751,64 +812,6 @@ dependencies = [
  "serde_json",
  "tokio",
 ]
-
-[[package]]
-name = "ahjo-work"
-version = "0.0.1"
-dependencies = [
- "ahjo-core",
- "ahjo-node-kit",
- "ahjo-testkit",
- "ahjo-work-contract",
- "ahjo-work-ref",
- "anyhow",
- "axum",
- "futures-util",
- "libc",
- "serde",
- "serde_json",
- "tokio",
- "tokio-tungstenite 0.30.0",
- "tower",
-]
-
-[[package]]
-name = "ahjo-work-app"
-version = "0.0.1"
-dependencies = [
- "ahjo-app-kit",
- "ahjo-app-shell",
- "ahjo-core",
- "ahjo-node-kit",
- "ahjo-terminals",
- "ahjo-terminals-app",
- "ahjo-terminals-contract",
- "ahjo-testkit",
- "ahjo-work",
- "ahjo-work-contract",
- "anyhow",
- "async-channel",
- "gpui-pre",
- "jiff",
- "log",
- "serde_json",
- "time",
- "tokio",
-]
-
-[[package]]
-name = "ahjo-work-contract"
-version = "0.0.1"
-dependencies = [
- "ahjo-core",
- "ahjo-work-ref",
- "serde",
- "serde_json",
-]
-
-[[package]]
-name = "ahjo-work-ref"
-version = "0.0.1"
 
 [[package]]
 name = "aho-corasick"

@@ -463,7 +463,7 @@ mod tests {
 
     fn mission(cards: &str) -> Mission {
         Mission::parse(&format!(
-            "schema = 5\nid = \"m\"\nslug = \"m\"\ntitle = \"M\"\nrev = 1\n[[input_card]]\nid = \"inp\"\ntitle = \"In\"\n[[step]]\nid = \"work\"\nformation = \"solo\"\ntitle = \"Review\"\n{cards}"
+            "schema = 6\nid = \"m\"\nslug = \"m\"\ntitle = \"M\"\nrev = 1\n[[input_card]]\nid = \"inp\"\ntitle = \"In\"\n[[step]]\nid = \"work\"\nformation = \"solo\"\ntitle = \"Review\"\n{cards}"
         ))
         .unwrap()
     }

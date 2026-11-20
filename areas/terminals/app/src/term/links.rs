@@ -567,7 +567,7 @@ fn names_a_file(word: &str) -> bool {
 /// Recognize complete tokens, so a path or a larger word is never offered as
 /// a partial item id. Soft-wrapped rows have already been joined by `Text`.
 fn work_items(t: &[char]) -> Vec<(usize, usize)> {
-    use ahjo_work_contract::work_ref::{is_bead_id, is_repo_part};
+    use ahjo_issue_contract::issue_ref::{is_bead_id, is_repo_part};
     let token = |c: char| c.is_ascii_alphanumeric() || "_./-#".contains(c);
     let mut found = Vec::new();
     let mut i = 0;

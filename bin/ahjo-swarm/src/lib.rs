@@ -15,7 +15,7 @@ pub const PAGES: &[Build] = &[
     ahjo_terminals_app::build,
     ahjo_files_app::build,
     ahjo_harness_app::build,
-    ahjo_work_app::build,
+    ahjo_issue_app::build,
     ahjo_brain_app::build,
     ahjo_missions_app::build,
     ahjo_scheduled_app::build,
@@ -41,20 +41,27 @@ fn bounds(cx: &App) -> Bounds<gpui::Pixels> {
     }
 }
 
-/// Carry the last folder and harness forward when the page id changes.
-fn migrate_harness_preferences(path: &Path) -> std::io::Result<()> {
+/// Retain saved choices when a page gets a new id.
+fn migrate_page_preferences(path: &Path) -> std::io::Result<()> {
     use ahjo_app_kit::settings::Settings;
     let text = match std::fs::read_to_string(path) {
         Ok(text) => text,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
         Err(error) => return Err(error),
     };
-    if let Some(mut settings) = Settings::parse(&text)
-        && !settings.sections.contains_key("harness")
-        && let Some(previous) = settings.sections.remove("agents")
-    {
-        settings.sections.insert("harness".into(), previous);
-        Settings::write(path, &settings.text())?;
+    if let Some(mut settings) = Settings::parse(&text) {
+        let mut changed = false;
+        for (old, new) in [("agents", "harness"), ("work", "issue")] {
+            if !settings.sections.contains_key(new)
+                && let Some(previous) = settings.sections.remove(old)
+            {
+                settings.sections.insert(new.into(), previous);
+                changed = true;
+            }
+        }
+        if changed {
+            Settings::write(path, &settings.text())?;
+        }
     }
     Ok(())
 }
@@ -70,10 +77,10 @@ pub fn run() {
     app_log::install();
     let settings = ahjo_app_kit::settings::path();
     if let Some(path) = settings.as_deref()
-        && let Err(error) = migrate_harness_preferences(path)
+        && let Err(error) = migrate_page_preferences(path)
     {
         log::warn!(
-            "could not migrate Harness preferences at {}: {error}",
+            "could not migrate Swarm page preferences at {}: {error}",
             path.display()
         );
     }

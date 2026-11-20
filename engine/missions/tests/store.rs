@@ -6,7 +6,7 @@ use std::path::PathBuf;
 use ahjo_mission_engine::{Error, Store};
 use ahjo_mission_model::Mission;
 
-const HELLO: &str = r#"schema = 5
+const HELLO: &str = r#"schema = 6
 id = "msn_hello"
 slug = "hello"
 title = "Hello"
@@ -113,11 +113,11 @@ fn a_mission_is_read_only_as_strict_toml_of_current_schema() {
         "invalid_definition_source"
     );
     assert_eq!(
-        code(Mission::parse(&HELLO.replace("schema = 5", "schema = 99"))),
+        code(Mission::parse(&HELLO.replace("schema = 6", "schema = 99"))),
         "unsupported_schema"
     );
     assert_eq!(
-        code(Mission::parse(&HELLO.replace("schema = 5\n", ""))),
+        code(Mission::parse(&HELLO.replace("schema = 6\n", ""))),
         "unsupported_schema"
     );
 }
@@ -126,7 +126,7 @@ fn a_mission_is_read_only_as_strict_toml_of_current_schema() {
 fn one_unreadable_mission_never_hides_the_rest() {
     let scratch = Scratch::new("broken");
     scratch.write("missions/hello.mission.toml", HELLO);
-    scratch.write("missions/bad.mission.toml", "schema = 5\nschema = 5\n");
+    scratch.write("missions/bad.mission.toml", "schema = 6\nschema = 6\n");
     scratch.write("missions/README.md", "not a mission");
     #[cfg(unix)]
     std::os::unix::fs::symlink(

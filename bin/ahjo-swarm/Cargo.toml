@@ -28,7 +28,7 @@ ahjo-terminals-app = { path = "../../areas/terminals/app" }
 ahjo-scheduled-app = { path = "../../areas/scheduled/app" }
 ahjo-files-app = { path = "../../areas/files/app" }
 ahjo-host-app = { path = "../../areas/host/app" }
-ahjo-work-app = { path = "../../areas/work/app" }
+ahjo-issue-app = { path = "../../areas/issue/app" }
 ahjo-brain-app = { path = "../../areas/brain/app" }
 ahjo-missions-app = { path = "../../areas/missions/app" }
 

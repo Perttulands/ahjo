@@ -26,7 +26,7 @@ anyhow = "1"
 http = "1"
 ahjo-app-shell = { path = "../../../kit/app-shell" }
 ahjo-missions = { path = "../node" }
-ahjo-work = { path = "../../work/node" }
+ahjo-issue = { path = "../../issue/node" }
 ahjo-files = { path = "../../files/node" }
 ahjo-testkit = { path = "../../../kit/testkit" }
 ahjo-node-kit = { path = "../../../kit/node-kit" }

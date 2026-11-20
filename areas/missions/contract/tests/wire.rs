@@ -37,7 +37,7 @@ fn requests_and_responses_round_trip() {
 fn mission_layout_and_edit_responses_carry_the_stored_shapes() {
     let mission = Mission::parse(
         r#"
-schema = 5
+schema = 6
 id = "m"
 slug = "demo"
 rev = 2

@@ -1,5 +1,5 @@
 # Parity fixture: several Input cards, human channels and reference files.
-schema = 5
+schema = 6
 id = "msn_cards"
 slug = "cards"
 title = "Cards"

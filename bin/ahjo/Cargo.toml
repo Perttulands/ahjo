@@ -16,13 +16,15 @@ axum = { version = "0.8", default-features = false }
 memchr = "2"
 serde_json = "1"
 sha2 = "0.10"
+tempfile = "3"
+toml_edit = "0.25"
 tokio = { version = "1", features = ["full"] }
 # The areas, one line each, as in AREAS.
 ahjo-harness = { path = "../../areas/harness/node" }
 ahjo-terminals = { path = "../../areas/terminals/node" }
 ahjo-scheduled = { path = "../../areas/scheduled/node" }
 ahjo-host = { path = "../../areas/host/node" }
-ahjo-work = { path = "../../areas/work/node" }
+ahjo-issue = { path = "../../areas/issue/node" }
 ahjo-brain = { path = "../../areas/brain/node" }
 ahjo-files = { path = "../../areas/files/node" }
 ahjo-missions = { path = "../../areas/missions/node" }

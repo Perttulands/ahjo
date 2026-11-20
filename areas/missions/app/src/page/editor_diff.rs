@@ -122,8 +122,8 @@ fn operations(
                 brief.repository = draft.fields[3].clone();
                 brief_changed = true;
             }
-            if compare!(4, "The work reference", &original.work) {
-                brief.work = draft.fields[4].clone();
+            if compare!(4, "The issue reference", &original.issue) {
+                brief.issue = draft.fields[4].clone();
                 brief_changed = true;
             }
             if compare!(5, "The files", &original.files.join("\n")) {

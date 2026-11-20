@@ -459,7 +459,7 @@ fn repeated_node_type_port_and_judge_edits_keep_bytes_and_check_etags() {
 // Port of TestS3StepBriefRejectsUnsafeNonEmptyBeadID. Ahjo's `work`
 // takes any written work reference (docs/missions.md).
 #[test]
-fn brief_rejects_unsafe_work_references_without_writing() {
+fn brief_rejects_unsafe_issue_references_without_writing() {
     let dir = Scratch::new();
     let store = Store::new(&dir.0);
     let edit = store.create_mission("brief", "Brief", "").unwrap();
@@ -495,7 +495,7 @@ fn brief_rejects_unsafe_work_references_without_writing() {
                 MissionChange::SetBrief {
                     step_id: id.clone(),
                     goal: "Ship".into(),
-                    work: work.into(),
+                    issue: work.into(),
                     repository: String::new(),
                     files: vec![],
                     links: vec![],
@@ -503,7 +503,7 @@ fn brief_rejects_unsafe_work_references_without_writing() {
                 "",
             )
             .unwrap_err();
-        assert_eq!(error.code.as_str(), "invalid_bead_id", "{work:?}");
+        assert_eq!(error.code.as_str(), "invalid_issue_ref", "{work:?}");
         assert_eq!(std::fs::read(&path).unwrap(), before);
     }
     let saved = store
@@ -514,7 +514,7 @@ fn brief_rejects_unsafe_work_references_without_writing() {
                 step_id: id,
                 goal: "Ship".into(),
                 repository: String::new(),
-                work: "srv-abc.2".into(),
+                issue: "srv-abc.2".into(),
                 files: vec!["C:/work/src/SessionPanel.tsx".into()],
                 links: vec!["https://example.com/spec".into()],
             },
@@ -522,7 +522,7 @@ fn brief_rejects_unsafe_work_references_without_writing() {
         )
         .unwrap();
     assert_eq!(
-        saved.mission.steps[0].brief.as_ref().unwrap().work,
+        saved.mission.steps[0].brief.as_ref().unwrap().issue,
         "srv-abc.2"
     );
     let mut latest = saved;
@@ -534,7 +534,7 @@ fn brief_rejects_unsafe_work_references_without_writing() {
                 MissionChange::SetBrief {
                     step_id: latest.mission.steps[0].id.clone(),
                     goal: "Ship".into(),
-                    work: work.into(),
+                    issue: work.into(),
                     repository: String::new(),
                     files: vec![],
                     links: vec![],

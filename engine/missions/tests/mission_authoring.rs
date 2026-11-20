@@ -1586,7 +1586,7 @@ fn repeated_brief_gate_and_controller_edits_save_nothing() {
             step_id: step.clone(),
             goal: "Do it".into(),
             repository: String::new(),
-            work: "archon-demo".into(),
+            issue: "archon-demo".into(),
             files: vec![],
             links: vec![],
         },

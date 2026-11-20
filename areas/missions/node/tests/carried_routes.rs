@@ -8,7 +8,7 @@ async fn start() -> (Node, NodeClient) {
     let node = Node::start(
         &[
             sessions::LISTING,
-            ahjo_work::LISTING,
+            ahjo_issue::LISTING,
             ahjo_missions::LISTING,
         ],
         "",

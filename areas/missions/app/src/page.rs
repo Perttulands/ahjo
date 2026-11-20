@@ -80,7 +80,7 @@ pub struct MissionsPage {
     goal: Entity<TextField>,
     extra: Entity<TextField>,
     repository: Entity<TextField>,
-    work: Entity<TextField>,
+    issue: Entity<TextField>,
     files: Entity<TextField>,
     links: Entity<TextField>,
     check: Entity<TextField>,
@@ -196,7 +196,7 @@ impl MissionsPage {
             goal: cx.new(|cx| TextField::new(cx, "Description").prose()),
             extra: cx.new(|cx| TextField::new(cx, "Environment or outcome")),
             repository: cx.new(|cx| TextField::new(cx, "Repository")),
-            work: cx.new(|cx| TextField::new(cx, "Work reference")),
+            issue: cx.new(|cx| TextField::new(cx, "Issue reference")),
             files: cx.new(|cx| TextField::new(cx, "One file per line").prose()),
             links: cx.new(|cx| TextField::new(cx, "One link per line").prose()),
             check: cx.new(|cx| TextField::new(cx, "Check profile")),
@@ -244,7 +244,7 @@ impl MissionsPage {
             &page.goal,
             &page.extra,
             &page.repository,
-            &page.work,
+            &page.issue,
             &page.files,
             &page.links,
             &page.check,
@@ -459,7 +459,7 @@ impl MissionsPage {
             &self.goal,
             &self.extra,
             &self.repository,
-            &self.work,
+            &self.issue,
             &self.files,
             &self.links,
             &self.check,
@@ -730,7 +730,7 @@ impl MissionsPage {
             .update(cx, |field, cx| field.set(&extra, false, cx));
         for (field, value) in [
             (&self.repository, brief.repository.clone()),
-            (&self.work, brief.work.clone()),
+            (&self.issue, brief.issue.clone()),
             (&self.files, brief.files.join("\n")),
             (&self.links, brief.links.join("\n")),
         ] {
@@ -1908,7 +1908,7 @@ impl Render for MissionsPage {
                             .child(kit::label(&t, "Environment")).child(div().flex().gap(px(TAB_GAP)).child(div().flex_1().child(self.extra.clone()))
                             .child(left(kit::button(&t, "set-environment", "Set environment", Kind::Quiet).on_click(cx.listener(|p, _, _, cx| p.set_environment(cx)))))))
                         .when(matches!(ed.kind, EditKind::Step) && self.editor_more, |d| d.child(kit::label(&t, "Repository")).child(self.repository_picker(&t, &self.repository, "repository", cx))
-                            .child(kit::label(&t, "Work")).child(div().child(self.work.clone()))
+                            .child(kit::label(&t, "Issue")).child(div().child(self.issue.clone()))
                             .child(kit::label(&t, "Files")).child(div().child(self.files.clone()))
                             .child(kit::label(&t, "Links")).child(div().child(self.links.clone())))
                         .when(!matches!(ed.kind, EditKind::Step), |d| {

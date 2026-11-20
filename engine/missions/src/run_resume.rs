@@ -137,7 +137,7 @@ impl Coordinator {
             repository: projection.repository.clone(),
             base: projection.base.clone(),
             context_paths: projection.context_paths,
-            work: projection.work,
+            issue: projection.issue,
             actor: projection.started_by,
             inputs: projection
                 .inputs

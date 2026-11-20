@@ -235,7 +235,7 @@ mod tests {
         if final_run {
             ledger.append(event("run_canceled")).unwrap();
         }
-        std::fs::write(root.join("runs").join(format!("{id}.snapshot.toml")), "schema = 5\nid = 'msn_hello'\nslug = 'hello'\ntitle = 'Hello'\nrev = 1\n[[gate]]\nid = 'review'\ntitle = 'Review'\nkinds = ['human']\ncriterion = 'Approve this?'\n").unwrap();
+        std::fs::write(root.join("runs").join(format!("{id}.snapshot.toml")), "schema = 6\nid = 'msn_hello'\nslug = 'hello'\ntitle = 'Hello'\nrev = 1\n[[gate]]\nid = 'review'\ntitle = 'Review'\nkinds = ['human']\ncriterion = 'Approve this?'\n").unwrap();
     }
     fn dispatcher(
         root: &Path,

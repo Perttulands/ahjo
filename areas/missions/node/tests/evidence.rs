@@ -121,7 +121,7 @@ async fn run(node: &Node, best: bool) -> String {
 }
 #[tokio::test(flavor = "multi_thread")]
 async fn cli_and_http_report_problems_briefs_files_and_picked_attempts() {
-    let node = Node::start(&[sessions::LISTING, ahjo_work::LISTING, LAB], "")
+    let node = Node::start(&[sessions::LISTING, ahjo_issue::LISTING, LAB], "")
         .await
         .unwrap();
     let id = run(&node, false).await;
@@ -214,7 +214,7 @@ async fn cli_and_http_report_problems_briefs_files_and_picked_attempts() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn show_puts_a_spent_limit_and_its_resume_command_first() {
-    let node = Node::start(&[sessions::LISTING, ahjo_work::LISTING, LAB], "")
+    let node = Node::start(&[sessions::LISTING, ahjo_issue::LISTING, LAB], "")
         .await
         .unwrap();
     let draft = format!(

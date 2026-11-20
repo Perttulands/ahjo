@@ -4,7 +4,6 @@ mod agents;
 mod checkout;
 mod home;
 mod link;
-mod migration;
 mod report;
 mod run;
 pub mod shape;
@@ -27,7 +26,6 @@ use tokio::task::JoinHandle;
 
 pub use checkout::Fetch;
 pub use home::Home;
-pub use migration::ConfigRename;
 pub use report::{Report, gather};
 pub use sync::sync;
 

@@ -9,7 +9,7 @@ use std::time::{Duration, Instant};
 
 const AREAS: &[Listing] = &[
     sessions::LISTING,
-    ahjo_work::LISTING,
+    ahjo_issue::LISTING,
     ahjo_missions::LISTING,
 ];
 struct Running {

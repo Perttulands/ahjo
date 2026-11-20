@@ -1,5 +1,5 @@
 # Parity fixture: End nodes, node ids and Limit cards.
-schema = 5
+schema = 6
 id = "msn_limits"
 slug = "limits"
 title = "Limits"

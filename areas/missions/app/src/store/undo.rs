@@ -704,7 +704,7 @@ mod tests {
             steps: vec![ahjo_missions_contract::Step {
                 id: "step".into(),
                 brief: Some(Brief {
-                    work: "ahjo-2".into(),
+                    issue: "ahjo-2".into(),
                     ..Default::default()
                 }),
                 ..Default::default()

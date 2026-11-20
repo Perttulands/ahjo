@@ -46,7 +46,7 @@ struct Missions {
     store: Store,
     coordinator: Coordinator,
     changes: broadcast::Sender<()>,
-    resolver: Arc<dyn ahjo_work_contract::Resolver>,
+    resolver: Arc<dyn ahjo_issue_contract::Resolver>,
     node: String,
     notify_task: Option<Arc<tokio::sync::Mutex<Option<tokio::task::JoinHandle<()>>>>>,
 }
@@ -87,7 +87,7 @@ pub fn build_with_executor(
             .get::<dyn Sessions>()
             .context("missions needs sessions")?;
         let resolver = provided
-            .get::<dyn ahjo_work_contract::Resolver>()
+            .get::<dyn ahjo_issue_contract::Resolver>()
             .context("missions needs Work reference resolution")?;
         let seats = LocalSeats::new(sessions, &root, node.clone(), TranscriptRoots::from_host())
             .with_repositories(repositories.clone());

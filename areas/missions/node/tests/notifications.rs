@@ -24,7 +24,7 @@ async fn start(root: &Path, config: &str) -> Running {
             config: Config::parse(config, root.into()).unwrap(),
             listen: Some("127.0.0.1:0".into()),
         },
-        &[sessions::LISTING, ahjo_work::LISTING, LAB],
+        &[sessions::LISTING, ahjo_issue::LISTING, LAB],
     )
     .await
     .unwrap()

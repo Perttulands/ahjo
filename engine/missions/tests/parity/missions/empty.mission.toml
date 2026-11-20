@@ -1,5 +1,5 @@
 # Parity fixture: a mission with no Input card.
-schema = 5
+schema = 6
 id = "msn_empty"
 slug = "empty"
 title = "Empty"

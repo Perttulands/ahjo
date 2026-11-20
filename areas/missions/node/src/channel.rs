@@ -136,8 +136,8 @@ mod tests {
     use super::*;
     use ahjo_mission_engine::{Coordinator, LabExecutor, RunSettings, Store};
     struct NoResolver;
-    impl ahjo_work_contract::Resolver for NoResolver {
-        fn resolve<'a>(&'a self, _: &'a str) -> ahjo_work_contract::Resolving<'a> {
+    impl ahjo_issue_contract::Resolver for NoResolver {
+        fn resolve<'a>(&'a self, _: &'a str) -> ahjo_issue_contract::Resolving<'a> {
             Box::pin(async { Err(ahjo_core::Error::new("bad_request", "unused")) })
         }
     }

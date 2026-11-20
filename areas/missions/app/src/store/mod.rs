@@ -174,7 +174,7 @@ mod tests {
                 ..Default::default()
             },
         );
-        let run: RunProjection = serde_json::from_value(json!({"run_id":"r", "status":"running", "final":false, "resume_allowed":false,"epoch":1,"mission_slug":"same","mission_id":"m","mission_rev":1,"input_card_id":"i","work":"","cwd":"","repository":"","base":"","context_paths":[],"inputs":[],"outputs":[],"event_count":1,"started_by":"","started_at":"","updated_at":"","waiting_gates":[],"events":[]})).unwrap();
+        let run: RunProjection = serde_json::from_value(json!({"run_id":"r", "status":"running", "final":false, "resume_allowed":false,"epoch":1,"mission_slug":"same","mission_id":"m","mission_rev":1,"input_card_id":"i","issue":"","cwd":"","repository":"","base":"","context_paths":[],"inputs":[],"outputs":[],"event_count":1,"started_by":"","started_at":"","updated_at":"","waiting_gates":[],"events":[]})).unwrap();
         s.nodes
             .get_mut("remote")
             .unwrap()
@@ -202,7 +202,7 @@ mod tests {
         let mut store = Store::default();
         let mut run = json!({"run_id":"r", "status":"running", "final":false, "resume_allowed":false,
           "epoch":1, "mission_slug":"hello", "mission_id":"m", "mission_rev":1,
-          "input_card_id":"i", "work":"", "cwd":"", "repository":"", "base":"",
+          "input_card_id":"i", "issue":"", "cwd":"", "repository":"", "base":"",
           "request_id":"", "context_paths":[], "inputs":[], "outputs":[], "event_count":9,
           "started_by":"", "started_at":"", "updated_at":"", "ended_by":"", "waiting_gates":[], "events":[]});
         let frame = store

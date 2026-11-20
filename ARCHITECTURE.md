@@ -44,13 +44,13 @@ bin/
     ahjo-swarm/  Swarm's native app: the shell in a window, and its list of pages
     ahjo-brain/  Ahjo Brain: the brain's sky, search and reader
     ahjo-desk/   Ahjo Desk: agents' asks answered in words and marks, over the desks' API
-engine/         terminal engine, session holder, work references, mission model and engine
+engine/         terminal engine, session holder, issue references, mission model and engine
 ```
 
 Each directory under an area, `kit/`, `bin/` and `engine/` is one crate. An
 app's package is `ahjo-app-<name>` (`ahjo-app-swarm`, `ahjo-app-brain`,
 `ahjo-app-desk`), since `ahjo-brain` is the brain area's node crate; its
-binary is the name the operator runs. The areas are terminals, files, work,
+binary is the name the operator runs. The areas are terminals, files, issue,
 brain, host, scheduled, harness and missions; fleet becomes one after the first
 release. The brain area's only part in Swarm is its Alt+L panel over the
 terminals, a page without a tab: Ahjo Brain is where the brain is read at
@@ -72,8 +72,8 @@ an area: the shell's Settings page lists what pages declare.
    and one dependency line to that binary's `Cargo.toml`; the workspace finds
    crates by where they sit, and CI by their names (`ahjo-<area>-app`).
 3. **Dependencies point one way.** `contract` depends on `core` and on plain
-   data in `engine/` that has no dependencies (`work-ref`, a work item's
-   reference, shared by the work area and the mission engine). The one other
+   data in `engine/` that has no dependencies (`issue-ref`, an issue's
+   reference, shared by the issue area and the mission engine). The one other
    is `mission-model`, the missions' wire data, which the mission engine uses
    and which depends only on `core`, serde's data formats and their schemas. `node` depends on
    its `contract` and `node-kit`; `app` on its `contract` and `app-kit`. An
@@ -114,7 +114,7 @@ real list, and `ahjo kinds` prints who owns which kinds.
   command line reads `/mcp`, so it sees every command in one request.
 - **Tool sets.** A binary may name tool sets (`ahjo`'s `TOOL_SETS`), each an
   MCP server at `/mcp/<set>` of chosen commands from any area, shaped for one
-  client: `chatgpt` holds the handoff, work and host tools. A set may add
+  client: `chatgpt` holds the handoff, issue and host tools. A set may add
   `swarm_commands`, which finds every other command by words, and
   `swarm_read` and `swarm_run`, which run one through the same call and
   `node` check as `tools/call`, each only for its kind: a read never needs
@@ -154,9 +154,9 @@ real list, and `ahjo kinds` prints who owns which kinds.
   area is built, so the order of `AREAS` never matters. An interface filled twice is
   refused, and an empty one reads as `not_provided`. `Sessions` (in
   `engine/term`: list, follow, deliver to, start, and run a mission's seats)
-  is the first; terminals provides it. `Resolver` (in `areas/work/contract`:
+  is the first; terminals provides it. `Resolver` (in `areas/issue/contract`:
   the canonical reference for a written one, a bare Bead id placed by the
-  node's Work configuration) is provided by work.
+  node's issue configuration) is provided by the issue area.
 - **Hooks.** `ahjo hook <url> [--then command...]` is how an outside
   program's own hook reports to the node: it posts its payload to the URL an
   area gave it and runs `--then` regardless. The URL carries what the area
@@ -197,7 +197,7 @@ reserves, or whose `everywhere` chords share a key, naming both;
   a path, reveal a thing, launch a session in a folder on a node) is plain data that goes to the page declaring it
   answers it; when none does, the asker gets an `unanswered` error and the
   status line says so. View control's `open` reaches pages the same way. A
-  beside ask (open a path beside, or a reveal marked `beside`, as a work item
+  beside ask (open a path beside, or a reveal marked `beside`, as an issue
   named in a terminal opens its card) leaves the asker shown: the answering page
   hands it a view (`Host::show_beside`), which the asker draws where its
   layout has room (`Host::beside`), as the terminals draw a file a link

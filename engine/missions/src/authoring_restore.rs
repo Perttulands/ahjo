@@ -126,7 +126,7 @@ pub(crate) fn apply(
             }
             if let Some(brief) = &mut n.brief {
                 crate::authoring_create::file_refs(&mut brief.files)?;
-                crate::authoring_staff::check_work(&brief.work)?;
+                crate::authoring_staff::check_issue(&brief.issue)?;
             }
             put(doc, "step", n, index)?;
         }

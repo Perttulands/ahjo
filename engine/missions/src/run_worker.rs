@@ -148,7 +148,7 @@ pub fn execute(
             },
             Ok(Outcome::Unfinished(nodes)) => {
                 let reason = "the run has unfinished work here; resume to continue it".to_owned();
-                if let Err(error) = c.append(&id, RunEvent { kind: "error".into(), card_id: nodes[0].clone(), timestamp: now(), data: json!({"code":"run_work_unfinished","message":reason,"reason":reason,"boundary":"engine","card_id":nodes[0],"recoverable":true}).as_object().unwrap().clone(), ..Default::default() }) { eprintln!("ahjo: cannot record run {id} unfinished work: {error}"); }
+                if let Err(error) = c.append(&id, RunEvent { kind: "error".into(), card_id: nodes[0].clone(), timestamp: now(), data: json!({"code":"run_work_unfinished","message":reason,"reason":reason,"boundary":"engine","card_id":nodes[0],"recoverable":true}).as_object().unwrap().clone(), ..Default::default() }) { eprintln!("ahjo: cannot record run {id} unfinished issue: {error}"); }
                 RunEvent { kind: "run_blocked".into(), card_id: nodes[0].clone(), timestamp: now(), data: json!({"code":"run_work_unfinished","reason":reason,"blocked_card_id":nodes[0],"resume_allowed":true,"resume_policy":"explicit"}).as_object().unwrap().clone(), ..Default::default() }
             },
             Ok(Outcome::Limit(stop)) => match crate::run_limit::final_event(&c, &id, &mission, &stop) {

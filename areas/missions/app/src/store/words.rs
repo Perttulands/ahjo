@@ -306,7 +306,7 @@ pub fn input_excerpt(run: &Run) -> String {
 
 /// A work reference as people write it: `gh:o/r#4` reads `o/r#4`, a Bead
 /// `bead:node:/srv#x-1` reads `x-1`.
-pub fn work_label(work: &str) -> String {
+pub fn issue_label(work: &str) -> String {
     if let Some(rest) = work.strip_prefix("gh:") {
         return rest.to_string();
     }
@@ -393,7 +393,7 @@ mod tests {
 
     #[test]
     fn a_run_and_its_gate_are_handed_over_by_what_answers_them() {
-        let run: Run = serde_json::from_value(serde_json::json!({"run_id":"r-7","status":"waiting_human","final":false,"resume_allowed":false,"epoch":1,"mission_slug":"daily","mission_id":"m","mission_rev":1,"input_card_id":"i","work":"","cwd":"","repository":"","base":"","context_paths":[],"inputs":[],"outputs":[],"event_count":1,"started_by":"","started_at":"","updated_at":"","waiting_gates":[],"events":[]})).unwrap();
+        let run: Run = serde_json::from_value(serde_json::json!({"run_id":"r-7","status":"waiting_human","final":false,"resume_allowed":false,"epoch":1,"mission_slug":"daily","mission_id":"m","mission_rev":1,"input_card_id":"i","issue":"","cwd":"","repository":"","base":"","context_paths":[],"inputs":[],"outputs":[],"event_count":1,"started_by":"","started_at":"","updated_at":"","waiting_gates":[],"events":[]})).unwrap();
         let gate = ahjo_missions_contract::WaitingGate {
             gate_id: "gate_review".into(),
             requested_seq: 12,
@@ -453,8 +453,8 @@ mod tests {
         assert_eq!(span(192), "3m 12s");
         assert_eq!(span(7500), "2h 5m");
         assert_eq!(span(3 * 86400 + 4 * 3600), "3d 4h");
-        assert_eq!(work_label("gh:acme/project#206"), "acme/project#206");
-        assert_eq!(work_label("bead:ab12:/srv#srv-12"), "srv-12");
+        assert_eq!(issue_label("gh:acme/project#206"), "acme/project#206");
+        assert_eq!(issue_label("bead:ab12:/srv#srv-12"), "srv-12");
         assert_eq!(agent_name("planner"), "Planner");
         let s = Seat {
             label: "Plan".into(),

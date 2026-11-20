@@ -672,8 +672,8 @@ async fn start_run(m: Missions, args: MissionRun) -> Result<MissionStarted, Erro
         context_paths: args.context_paths,
         ..Default::default()
     };
-    if let Some(work) = args.work.filter(|work| !work.is_empty()) {
-        request.work = m.resolver.resolve(&work).await?.to_string();
+    if let Some(issue) = args.issue.filter(|issue| !issue.is_empty()) {
+        request.issue = m.resolver.resolve(&issue).await?.to_string();
     }
     let from_step = args.from.is_some();
     if from_step {

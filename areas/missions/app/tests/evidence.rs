@@ -123,7 +123,7 @@ fn start() -> Running {
     let (stop, stopped) = mpsc::channel();
     let thread = std::thread::spawn(move || {
         tokio::runtime::Runtime::new().unwrap().block_on(async move {
-        let node = Node::start(&[sessions::LISTING, ahjo_work::LISTING, ahjo_files::LISTING, MISSIONS], "[files]\nroots = ['/tmp']\n").await.unwrap();
+        let node = Node::start(&[sessions::LISTING, ahjo_issue::LISTING, ahjo_files::LISTING, MISSIONS], "[files]\nroots = ['/tmp']\n").await.unwrap();
         let dir = node.dir().join("missions/missions");
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(dir.join("hello.mission.toml"), mission()).unwrap();

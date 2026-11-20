@@ -6,7 +6,7 @@ use serde_json::json;
 
 const AREAS: &[Listing] = &[
     sessions::LISTING,
-    ahjo_work::LISTING,
+    ahjo_issue::LISTING,
     ahjo_missions::LISTING,
 ];
 
@@ -166,16 +166,16 @@ async fn mission_routes_on_a_node_with_fake_sessions() {
         error.downcast_ref::<NodeError>().unwrap().code,
         "bad_request"
     );
-    let missing_work = client
+    let missing_issue = client
         .request(
             Method::POST,
             "/api/runs",
-            Some(json!({"work":"missing-1"})),
+            Some(json!({"issue":"missing-1"})),
             None,
         )
         .await
         .unwrap_err();
-    assert!(format!("{missing_work:#}").contains("bad_request"));
+    assert!(format!("{missing_issue:#}").contains("bad_request"));
     let (read, mission_etag) = client
         .request(Method::GET, "/api/missions/example", None, None)
         .await
@@ -223,7 +223,7 @@ const LAB: Listing = Listing {
 async fn run_changes_arrive_on_the_socket_through_completion() {
     use futures_util::{SinkExt, StreamExt};
     use tokio_tungstenite::{connect_async, tungstenite::Message};
-    let node = Node::start(&[sessions::LISTING, ahjo_work::LISTING, LAB], "")
+    let node = Node::start(&[sessions::LISTING, ahjo_issue::LISTING, LAB], "")
         .await
         .unwrap();
     let folder = node.dir().join("missions/missions");
@@ -296,7 +296,16 @@ async fn run_changes_arrive_on_the_socket_through_completion() {
             break;
         }
     }
-    let (started, _) = client.request(Method::POST, "/api/runs", Some(json!({"mission":"hello","input_card_id":"inp_hello","expected_rev":1,"inputs":{"brief":"hello"},"work":"gh:example/project#1"})), None).await.unwrap();
+    let legacy = client.request(
+        Method::POST,
+        "/api/runs",
+        Some(json!({"mission":"hello","input_card_id":"inp_hello","expected_rev":1,"inputs":{"brief":"hello"},"work":"gh:example/project#1"})),
+        None,
+    ).await.unwrap_err();
+    let legacy = legacy.downcast_ref::<NodeError>().unwrap();
+    assert_eq!(legacy.code, "bad_request");
+    assert!(legacy.message.contains("unknown field `work`"));
+    let (started, _) = client.request(Method::POST, "/api/runs", Some(json!({"mission":"hello","input_card_id":"inp_hello","expected_rev":1,"inputs":{"brief":"hello"},"issue":"gh:example/project#1"})), None).await.unwrap();
     let id = started["run_id"].as_str().unwrap();
     let mut answered = false;
     let final_run = tokio::time::timeout(std::time::Duration::from_secs(10), async {
@@ -361,7 +370,7 @@ async fn run_changes_arrive_on_the_socket_through_completion() {
         unknown.downcast_ref::<NodeError>().unwrap().status,
         axum::http::StatusCode::BAD_REQUEST
     );
-    assert_eq!(final_run.work, "gh:example/project#1");
+    assert_eq!(final_run.issue, "gh:example/project#1");
     let (listed, _) = client
         .request(Method::GET, "/api/runs", None, None)
         .await
@@ -381,7 +390,7 @@ async fn run_changes_arrive_on_the_socket_through_completion() {
 async fn default_agent_store_is_shared_and_isolated() {
     let areas = &[
         sessions::LISTING,
-        ahjo_work::LISTING,
+        ahjo_issue::LISTING,
         ahjo_harness::LISTING,
         LAB,
     ];

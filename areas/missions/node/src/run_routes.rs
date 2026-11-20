@@ -190,8 +190,8 @@ async fn start(
     body: Result<Json<RunStart>, JsonRejection>,
 ) -> ResultResponse {
     let Json(mut req) = body.map_err(|e| ahjo_core::Error::new("bad_request", e.body_text()))?;
-    if !req.work.is_empty() {
-        req.work = m.resolver.resolve(&req.work).await?.to_string();
+    if !req.issue.is_empty() {
+        req.issue = m.resolver.resolve(&req.issue).await?.to_string();
     }
     // Only the local environment can receive seats here.
     req.known_machines = Some(Vec::new());

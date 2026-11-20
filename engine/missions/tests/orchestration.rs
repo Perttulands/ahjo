@@ -490,7 +490,7 @@ async fn cli(node: &Node, noun: &str, args: &[&str]) -> serde_json::Value {
 }
 #[tokio::test(flavor = "multi_thread")]
 async fn cli_runs_orchestration_to_end_with_controller_and_worker_seats() {
-    let node = Node::start(&[sessions::LISTING, ahjo_work::LISTING, CLI_MISSIONS], "")
+    let node = Node::start(&[sessions::LISTING, ahjo_issue::LISTING, CLI_MISSIONS], "")
         .await
         .unwrap();
     let root = node.dir().join("missions");

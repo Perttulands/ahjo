@@ -118,8 +118,8 @@ pub use run_bindings::{BindingsSnapshot, RunBinding};
 pub use run_dispatch::{CompletionSentinel, parse_completion_sentinel};
 pub use run_escalation::{EscalationSentinel, parse_escalation, project_escalations};
 pub use run_inputs::{
-    WORK_REFERENCES, input_findings, mission_run_inputs, render_run_inputs, resolve_run_inputs,
-    substitute_run_inputs, work_placeholder,
+    ISSUE_REFERENCE, input_findings, issue_placeholder, mission_run_inputs, render_run_inputs,
+    resolve_run_inputs, substitute_run_inputs,
 };
 pub use run_projection::project_run;
 pub use run_wait::{RunWait, WaitUntil};

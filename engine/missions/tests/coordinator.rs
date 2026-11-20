@@ -570,7 +570,7 @@ fn shutdown_fences_work_and_leaves_active_run_resumable() {
     let path = dir.0.join("missions/hello.mission.toml");
     let mission = std::fs::read_to_string(&path).unwrap().replace(
         "Return a short result",
-        "archon-lab-work:10s Return a short result",
+        "archon-lab-issue:10s Return a short result",
     );
     std::fs::write(path, mission).unwrap();
     let c = Coordinator::open(&dir.0, RunSettings::default(), Box::new(LabExecutor)).unwrap();
@@ -1199,7 +1199,7 @@ fn lab_work_duration_can_be_aborted_without_a_result_event() {
     let path = dir.0.join("missions/hello.mission.toml");
     let raw = std::fs::read_to_string(&path).unwrap().replace(
         "Return a short result using the supplied output contract.",
-        "archon-lab-work: 10s",
+        "archon-lab-issue: 10s",
     );
     std::fs::write(path, raw).unwrap();
     let c = Coordinator::open(&dir.0, RunSettings::default(), Box::new(LabExecutor)).unwrap();
@@ -1251,14 +1251,14 @@ fn rejected_admission_allocates_nothing_and_stale_revision_conflicts() {
         Err(ahjo_mission_engine::AdmissionFailure::Invalid(_))
     ));
     let mut req = request();
-    req.work = "bad owner/repo#1".into();
+    req.issue = "bad owner/repo#1".into();
     assert!(matches!(
         c.start_mission(req),
         Err(ahjo_mission_engine::AdmissionFailure::Invalid(_))
     ));
     // A bare Bead id names no store: the node resolves it before admission.
     let mut req = request();
-    req.work = "ctx-12".into();
+    req.issue = "ctx-12".into();
     assert!(matches!(
         c.start_mission(req),
         Err(ahjo_mission_engine::AdmissionFailure::Invalid(_))
@@ -1360,7 +1360,7 @@ fn a_schema_two_frozen_mission_and_selected_step_run_replay_after_upgrade() {
     let snapshot = runs.join(format!("{id}.snapshot.toml"));
     let canonical = std::fs::read_to_string(&snapshot).unwrap();
     let old = canonical
-        .replace("schema = 5", "schema = 2")
+        .replace("schema = 6", "schema = 2")
         .replace("[[step.seat]]", "[[step.slot]]")
         .replace("\nagent = ", "\nagent_id = ")
         .replace("[[step", "[[formation")
@@ -1453,7 +1453,7 @@ fn a_schema_two_frozen_mission_and_selected_step_run_replay_after_upgrade() {
     assert!(
         std::fs::read_to_string(&snapshot)
             .unwrap()
-            .contains("schema = 5")
+            .contains("schema = 6")
     );
     let ledger = ahjo_mission_engine::Ledger::new(&ledger_path, &id)
         .read()
@@ -2121,7 +2121,7 @@ fn an_implicit_output_can_name_the_input_card() {
     let dir = Scratch::new();
     std::fs::write(
         dir.0.join("missions/hello.mission.toml"),
-        r#"schema = 5
+        r#"schema = 6
 id = "msn_hello"
 slug = "hello"
 title = "Hello"

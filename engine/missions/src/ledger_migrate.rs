@@ -1,17 +1,6 @@
-//! Brings run ledgers written before runs carried any work item (#180) up
-//! to date, once, when a coordinator opens its state directory. Those
-//! ledgers name a GitHub issue as `issue: "owner/repo#N"` on each event and
-//! in `run_started`'s data; they now name it as `work`, in the canonical
-//! form (`gh:owner/repo#N`). The next steps upgrade dispatch session fields
-//! and snake-case the keys in the ledger and its frozen documents.
-//! A ledger is rewritten whole, through a synced
-//! private temporary file renamed over it, so a crash leaves either the old
-//! ledger or the new one.
-//!
-//! The old admission accepted some issues that name no GitHub issue (`#0`,
-//! numbers past `u64`, an owner starting with `-`). Their ledgers are left
-//! byte for byte as they were, and only those runs refuse to open, saying
-//! why; the rest of the coordinator works.
+//! Upgrade run ledgers and frozen documents in place, preserving arbitrary
+//! authored data. Replacements are written atomically under the coordinator
+//! lock, and invalid old records leave only their own run unavailable.
 
 use std::collections::BTreeMap;
 use std::fs::{self, OpenOptions};
@@ -195,8 +184,11 @@ fn upgrade_ledger(text: &str) -> io::Result<Option<String>> {
             serde_json::from_str(line).map_err(|e| invalid(&e.to_string()))?;
         let legacy_wire = event.contains_key("runId");
         changed |= rename(&mut event)?;
+        let started = event.get("type").and_then(Value::as_str) == Some("run_started");
         if let Some(Value::Object(data)) = event.get_mut("data") {
-            changed |= rename(data)?;
+            if started {
+                changed |= rename(data)?;
+            }
             changed |= migrate_session(data);
             if let Some(Value::Array(dispatches)) = data.get_mut("openDispatches") {
                 for dispatch in dispatches.iter_mut().filter_map(Value::as_object_mut) {
@@ -527,30 +519,29 @@ fn replace_private(path: &Path, out: &str) -> io::Result<()> {
     Ok(())
 }
 
-/// Moves an object's `issue` to `work` as a canonical reference. An empty
-/// issue meant none, and so is dropped.
+/// Canonicalize a tracked issue without touching arbitrary event data.
 fn rename(object: &mut Map<String, Value>) -> io::Result<bool> {
-    let Some(issue) = object.remove("issue") else {
+    let old = object.remove("work");
+    let renamed = old.is_some();
+    if old.is_some() && object.contains_key("issue") {
+        return Err(invalid("both work and issue are present"));
+    }
+    let Some(value) = old.or_else(|| object.remove("issue")) else {
         return Ok(false);
     };
-    let issue = issue
+    let issue = value
         .as_str()
         .ok_or_else(|| invalid("issue is not a string"))?;
-    if !issue.is_empty() {
-        let work = ahjo_work_ref::parse(issue)
-            .ok()
-            .and_then(|written| match written {
-                ahjo_work_ref::Written::Ref(reference) => Some(reference.to_string()),
-                ahjo_work_ref::Written::Bead(_) => None,
-            })
-            .ok_or_else(|| {
-                invalid(&format!(
-                    "issue {issue:?} names no GitHub issue; correct it by hand and reopen"
-                ))
-            })?;
-        object.insert("work".into(), Value::String(work));
-    }
-    Ok(true)
+    let canonical = if issue.is_empty() {
+        String::new()
+    } else {
+        ahjo_issue_ref::parse_resolved(issue)
+            .map_err(|e| invalid(&e.to_string()))?
+            .to_string()
+    };
+    let changed = canonical != issue || renamed;
+    object.insert("issue".into(), Value::String(canonical));
+    Ok(changed)
 }
 
 fn migrate_session(data: &mut Map<String, Value>) -> bool {
@@ -603,7 +594,7 @@ mod tests {
         let text = fs::read_to_string(&ledger).unwrap();
         let _ = fs::remove_dir_all(&dir);
         assert_eq!(mode, 0o600);
-        assert_eq!(text, "{\"type\":\"run_started\",\"work\":\"gh:o/r#1\"}\n");
+        assert_eq!(text, "{\"type\":\"run_started\",\"issue\":\"gh:o/r#1\"}\n");
         assert!(!stale.exists());
     }
     #[test]
@@ -676,6 +667,23 @@ mod tests {
             blocked["data"]["pending_output"]["output"]["outputs"]["node_id"]["place"],
             "stage"
         );
+        assert!(upgrade_ledger(&migrated).unwrap().is_none());
+    }
+
+    #[test]
+    fn tracked_issue_upgrade_is_idempotent_and_leaves_dynamic_maps_alone() {
+        for issue in ["", "bead:n1:/srv/x#x-1", "gh:o/r#1"] {
+            let line = serde_json::json!({"type":"run_started", "issue":issue,
+                "data":{"issue":issue, "inputs":{"work":"keep", "issue":"keep"}}})
+            .to_string();
+            assert!(upgrade_ledger(&line).unwrap().is_none());
+        }
+        let line = r#"{"type":"run_started","work":"o/r#1","data":{"work":"o/r#1","inputs":{"work":"keep"}}}"#;
+        let migrated = upgrade_ledger(line).unwrap().unwrap();
+        let event: Value = serde_json::from_str(&migrated).unwrap();
+        assert_eq!(event["issue"], "gh:o/r#1");
+        assert_eq!(event["data"]["issue"], "gh:o/r#1");
+        assert_eq!(event["data"]["inputs"]["work"], "keep");
         assert!(upgrade_ledger(&migrated).unwrap().is_none());
     }
 

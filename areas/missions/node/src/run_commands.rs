@@ -213,7 +213,7 @@ fn state(run: &RunProjection) -> RunState {
         mission_id: run.mission_id.clone(),
         mission_rev: run.mission_rev,
         input_card_id: run.input_card_id.clone(),
-        work: run.work.clone(),
+        issue: run.issue.clone(),
         cwd: run.cwd.clone(),
         repository: run.repository.clone(),
         base: run.base.clone(),

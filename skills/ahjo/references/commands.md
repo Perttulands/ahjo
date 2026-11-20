@@ -62,6 +62,6 @@ These are the commands advertised by the enabled areas. Run `ahjo <noun> <verb> 
 
 `ahjo view open`, `ahjo view send`, `ahjo view show` (the connected apps are under `apps` in JSON).
 
-## work
+## issue
 
-`ahjo work create`, `ahjo work list`, `ahjo work search`, `ahjo work show`.
+`ahjo issue create`, `ahjo issue list`, `ahjo issue search`, `ahjo issue show`.

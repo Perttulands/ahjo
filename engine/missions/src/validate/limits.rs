@@ -63,7 +63,7 @@ pub fn findings(mission: &Mission) -> (Vec<Finding>, Vec<Finding>) {
                 duration_words(warn)
             )),
             (Some(warn), Some(seconds)) if seconds > 0 && warn >= seconds => add(format!(
-                "{name} warns with {} left of {}, before any work: warn with less time left",
+                "{name} warns with {} left of {}, before any issue: warn with less time left",
                 duration_words(warn),
                 duration_words(seconds)
             )),

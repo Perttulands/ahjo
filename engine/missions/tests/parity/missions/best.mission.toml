@@ -1,6 +1,6 @@
 # Parity fixture: a Limit card that picks the best attempt, with and
 # without a gate that can pick.
-schema = 5
+schema = 6
 id = "msn_best"
 slug = "best"
 title = "Best"

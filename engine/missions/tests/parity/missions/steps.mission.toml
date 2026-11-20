@@ -1,5 +1,5 @@
 # Parity fixture: step shapes, seat ids and staffing.
-schema = 5
+schema = 6
 id = "msn_steps"
 slug = "steps"
 title = "Steps"

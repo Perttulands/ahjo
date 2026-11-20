@@ -72,7 +72,7 @@ pub fn project_run(events: &[RunEvent], run_id: &str) -> Result<RunProjection, c
             mission_id: first.mission_id.clone(),
             mission_rev: first.mission_rev,
             input_card_id: first.input_card_id.clone(),
-            work: first.work.clone(),
+            issue: first.issue.clone(),
             cwd: string(first, "cwd"),
             repository: string(first, "repository"),
             base: string(first, "base"),

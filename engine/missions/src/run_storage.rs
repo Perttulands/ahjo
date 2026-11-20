@@ -37,10 +37,10 @@ pub fn validate_request(r: &RunStart) -> Result<(), AdmissionFailure> {
             "cwd must be an absolute existing directory".into(),
         ));
     }
-    if !r.work.is_empty()
-        && let Err(invalid) = ahjo_work_ref::parse_resolved(&r.work)
+    if !r.issue.is_empty()
+        && let Err(invalid) = ahjo_issue_ref::parse_resolved(&r.issue)
     {
-        return Err(AdmissionFailure::Invalid(format!("work: {invalid}")));
+        return Err(AdmissionFailure::Invalid(format!("issue: {invalid}")));
     }
     Ok(())
 }
@@ -137,7 +137,7 @@ pub fn create(
         } else {
             &req.actor
         };
-        let event=RunEvent{kind:"run_started".into(),timestamp:now(),actor:actor.into(),mission_id:mission.id.clone(),mission_rev:mission.rev,input_card_id:req.input_card_id.clone(),work:req.work.clone(),data:json!({"mission_slug":mission.slug,"mission_rev":mission.rev,"input_card_id":req.input_card_id,"step_id":req.step_id,"work":req.work,"snapshot":snapshot,"bindings_snapshot":binding_file,"cwd":workspace,"repository":req.repository,"request_id":req.request_id,"base":tree.as_ref().map(|t| t.base.as_str()).unwrap_or(""),"checkout":tree.as_ref().map(|t| t.checkout.as_path()),"context_paths":req.context_paths,"inputs":resolve_run_inputs(mission,&req.inputs)}).as_object().unwrap().clone(),..Default::default()};
+        let event=RunEvent{kind:"run_started".into(),timestamp:now(),actor:actor.into(),mission_id:mission.id.clone(),mission_rev:mission.rev,input_card_id:req.input_card_id.clone(),issue:req.issue.clone(),data:json!({"mission_slug":mission.slug,"mission_rev":mission.rev,"input_card_id":req.input_card_id,"step_id":req.step_id,"issue":req.issue,"snapshot":snapshot,"bindings_snapshot":binding_file,"cwd":workspace,"repository":req.repository,"request_id":req.request_id,"base":tree.as_ref().map(|t| t.base.as_str()).unwrap_or(""),"checkout":tree.as_ref().map(|t| t.checkout.as_path()),"context_paths":req.context_paths,"inputs":resolve_run_inputs(mission,&req.inputs)}).as_object().unwrap().clone(),..Default::default()};
         c.ledger(id)?.create(event).map_err(crate::error::to_io)
     })();
     if let Err(e) = result {

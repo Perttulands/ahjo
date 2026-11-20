@@ -24,7 +24,7 @@ pub mod error {
     pub const ALREADY_EXISTS: &str = "already_exists";
     pub const DUPLICATE_CONNECTION: &str = "duplicate_connection";
     pub const INPUT_OCCUPIED: &str = "input_occupied";
-    pub const INVALID_BEAD_ID: &str = "invalid_bead_id";
+    pub const INVALID_ISSUE_REF: &str = "invalid_issue_ref";
     pub const INVALID_CODE_GATE_PROFILE: &str = "invalid_code_gate_profile";
     pub const INVALID_CONTROLLER_ROLE: &str = "invalid_controller_role";
     pub const INVALID_DEFINITION: &str = "invalid_definition";

@@ -108,7 +108,7 @@ pub enum MissionChange {
         /// The card’s title.
         #[serde(default, deserialize_with = "default_on_null")]
         title: String,
-        /// Goal, repository, work reference, files and links. Null clears the brief.
+        /// Goal, repository, issue reference, files and links. Null clears the brief.
         #[serde(skip_serializing_if = "Option::is_none")]
         brief: Option<crate::Brief>,
     },
@@ -193,9 +193,9 @@ pub enum MissionChange {
         /// The repository this step works in.
         #[serde(default, deserialize_with = "default_on_null")]
         repository: String,
-        /// The work reference this step serves.
+        /// The issue reference this step serves.
         #[serde(default, deserialize_with = "default_on_null")]
-        work: String,
+        issue: String,
         /// Reference files as absolute paths.
         #[serde(default, deserialize_with = "default_on_null")]
         files: Vec<String>,

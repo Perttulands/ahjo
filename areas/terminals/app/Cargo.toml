@@ -13,7 +13,7 @@ workspace = true
 ahjo-app-kit = { path = "../../../kit/app-kit" }
 ahjo-core = { path = "../../../kit/core" }
 ahjo-terminals-contract = { path = "../contract" }
-ahjo-work-contract = { path = "../../work/contract" }
+ahjo-issue-contract = { path = "../../issue/contract" }
 gpui = { package = "gpui-pre", version = "=0.3.12" }
 alacritty_terminal = "0.26"
 async-channel = "2"
@@ -40,7 +40,7 @@ ahjo-app-shell = { path = "../../../kit/app-shell" }
 ahjo-terminals = { path = "../node" }
 ahjo-files = { path = "../../files/node" }
 ahjo-files-app = { path = "../../files/app" }
-ahjo-work-app = { path = "../../work/app" }
+ahjo-issue-app = { path = "../../issue/app" }
 ahjo-testkit = { path = "../../../kit/testkit" }
 ahjo-node-kit = { path = "../../../kit/node-kit" }
 ahjo-term = { path = "../../../engine/term" }

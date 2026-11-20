@@ -71,7 +71,7 @@ pub(crate) fn execute_step(
             &brief.goal,
             &mission_run_inputs(mission),
             inputs,
-            &crate::run_inputs::work_placeholder(&req.work),
+            &crate::run_inputs::issue_placeholder(&req.issue),
         );
     }
     if !crate::run_worker::append_live(
@@ -122,7 +122,7 @@ pub(crate) fn execute_step(
         turn,
         artifact_dir: crate::run_capture::attempt_dir(c, id, &node, attempt)?,
         context_paths: req.context_paths.iter().map(PathBuf::from).collect(),
-        work: req.work.clone(),
+        issue: req.issue.clone(),
         inputs: inputs.to_vec(),
         input_text: text.clone(),
         attempt,

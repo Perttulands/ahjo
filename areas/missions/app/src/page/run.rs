@@ -23,7 +23,7 @@ pub(super) struct RunUi {
     pub(super) cwd: Entity<TextField>,
     pub(super) repository: Entity<TextField>,
     pub(super) base: Entity<TextField>,
-    pub(super) work: Entity<TextField>,
+    pub(super) issue: Entity<TextField>,
     pub(super) paths: Entity<TextField>,
     pub(super) busy: bool,
     pub(super) abort_armed: bool,
@@ -74,7 +74,7 @@ impl RunUi {
             cwd,
             repository: cx.new(|cx| TextField::new(cx, "Repository")),
             base: cx.new(|cx| TextField::new(cx, "Base")),
-            work: cx.new(|cx| TextField::new(cx, "Work reference")),
+            issue: cx.new(|cx| TextField::new(cx, "Issue reference")),
             paths: cx.new(|cx| TextField::new(cx, "Context paths, one per line").prose()),
             busy: false,
             abort_armed: false,
@@ -112,7 +112,7 @@ impl MissionsPage {
                 || [
                     &self.run.repository,
                     &self.run.base,
-                    &self.run.work,
+                    &self.run.issue,
                     &self.run.paths,
                 ]
                 .iter()
@@ -304,7 +304,7 @@ impl MissionsPage {
         for field in [
             &self.run.repository,
             &self.run.base,
-            &self.run.work,
+            &self.run.issue,
             &self.run.paths,
         ] {
             field.update(cx, |field, cx| field.set("", false, cx));
@@ -563,7 +563,7 @@ impl MissionsPage {
             order.extend(self.run.fields.values().cloned());
         }
         order.extend([
-            self.run.work.clone(),
+            self.run.issue.clone(),
             self.run.cwd.clone(),
             self.run.repository.clone(),
             self.run.base.clone(),
@@ -704,7 +704,7 @@ impl MissionsPage {
             cwd: self.run.cwd.read(cx).text.clone(),
             repository: self.run.repository.read(cx).text.clone(),
             base: self.run.base.read(cx).text.clone(),
-            work: self.run.work.read(cx).text.clone(),
+            issue: self.run.issue.read(cx).text.clone(),
             context_paths: self
                 .run
                 .paths
@@ -1275,7 +1275,7 @@ impl MissionsPage {
             // holds something.
             let more = self.run.start_more
                 || !self.run.repository.read(cx).text.trim().is_empty()
-                || !self.run.work.read(cx).text.trim().is_empty()
+                || !self.run.issue.read(cx).text.trim().is_empty()
                 || !self.run.paths.read(cx).text.trim().is_empty();
             if !more {
                 form = form.child(
@@ -1309,8 +1309,8 @@ impl MissionsPage {
                         .child(div().child(self.run.base.clone()));
                 }
                 form = form
-                    .child(kit::label(t, "Work item"))
-                    .child(div().child(self.run.work.clone()))
+                    .child(kit::label(t, "Issue"))
+                    .child(div().child(self.run.issue.clone()))
                     .child(kit::label(t, "Context paths"))
                     .child(
                         div()

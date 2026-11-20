@@ -9,7 +9,7 @@ use std::time::{Duration, Instant};
 
 const AREAS: &[Listing] = &[
     sessions::LISTING,
-    ahjo_work::LISTING,
+    ahjo_issue::LISTING,
     ahjo_missions::LISTING,
 ];
 struct Running {
@@ -426,10 +426,10 @@ fn opens_a_mission_layout_notes_and_run_written_before_the_wire_upgrade(cx: &mut
     });
 
     for (path, schema, field) in [
-        ("missions/hello.mission.toml", 5, "input_card"),
+        ("missions/hello.mission.toml", 6, "input_card"),
         ("layout/hello.layout.toml", 3, "mission_id"),
         ("notes/hello.notes.toml", 3, "created_at"),
-        ("runs/run_legacy.snapshot.toml", 5, "input_card"),
+        ("runs/run_legacy.snapshot.toml", 6, "input_card"),
         ("runs/run_legacy.bindings.toml", 6, "seat_id"),
     ] {
         let text = std::fs::read_to_string(state.join(path)).unwrap();

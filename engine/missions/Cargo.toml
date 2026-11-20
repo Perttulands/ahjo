@@ -20,7 +20,7 @@ getrandom = "0.4"
 libc = "0.2"
 time = { version = "0.3", features = ["formatting", "parsing"] }
 ahjo-term = { path = "../term" }
-ahjo-work-ref = { path = "../work-ref" }
+ahjo-issue-ref = { path = "../issue-ref" }
 tokio = { version = "1", features = ["sync", "time", "macros", "rt"] }
 
 [target.'cfg(windows)'.dependencies]
@@ -34,6 +34,6 @@ anyhow = "1"
 tokio = { version = "1", features = ["full"] }
 ahjo-missions = { path = "../../areas/missions/node" }
 ahjo-terminals = { path = "../../areas/terminals/node" }
-ahjo-work = { path = "../../areas/work/node" }
+ahjo-issue = { path = "../../areas/issue/node" }
 ahjo-node-kit = { path = "../../kit/node-kit" }
 ahjo-testkit = { path = "../../kit/testkit" }

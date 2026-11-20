@@ -108,8 +108,8 @@ pub struct RunProjection {
     pub mission_id: String,
     pub mission_rev: i64,
     pub input_card_id: String,
-    /// The run's work item: a canonical reference, or empty.
-    pub work: String,
+    /// The run's issue: a canonical reference, or empty.
+    pub issue: String,
     pub cwd: String,
     pub repository: String,
     pub base: String,

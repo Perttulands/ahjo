@@ -102,7 +102,7 @@ fn editing_decoded_multiline_toml_keeps_unrelated_values() {
     let dir = Scratch::new();
     std::fs::create_dir_all(dir.0.join("missions")).unwrap();
     let path = dir.0.join("missions/quoted.mission.toml");
-    let raw = r###"schema = 5
+    let raw = r###"schema = 6
 id = 'msn_quoted'
 slug = 'quoted'
 "ti\u0074le" = """

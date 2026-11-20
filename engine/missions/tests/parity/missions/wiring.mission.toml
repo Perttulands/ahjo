@@ -1,5 +1,5 @@
 # Parity fixture: wires, gates and routes.
-schema = 5
+schema = 6
 id = "msn_wiring"
 slug = "wiring"
 title = "Wiring"

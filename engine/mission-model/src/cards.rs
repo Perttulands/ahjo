@@ -86,10 +86,10 @@ pub struct Brief {
     pub goal: String,
     #[serde(skip_serializing_if = "String::is_empty")]
     pub repository: String,
-    /// The work item this step serves, when it differs from the run's: a
+    /// The issue this step serves, when it differs from the run's: a
     /// reference in any written form (`docs/work.md`, References).
     #[serde(skip_serializing_if = "String::is_empty")]
-    pub work: String,
+    pub issue: String,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub files: Vec<String>,
     #[serde(skip_serializing_if = "Vec::is_empty")]

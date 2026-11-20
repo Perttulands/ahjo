@@ -389,7 +389,7 @@ impl Coordinator {
                     mission_id: p.mission_id,
                     mission_rev: p.mission_rev,
                     input_card_id: p.input_card_id,
-                    work: p.work,
+                    issue: p.issue,
                     event_count: p.event_count,
                     resume_allowed: p.resume_allowed,
                     resume_policy: p.resume_policy,

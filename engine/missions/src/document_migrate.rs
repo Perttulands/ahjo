@@ -67,6 +67,10 @@ pub(crate) fn upgrade_text(
                 upgrade_environment_and_scope(document.as_table_mut())?;
                 5
             }
+            (DocumentKind::Mission, 5) => {
+                upgrade_issue(document.as_table_mut())?;
+                6
+            }
             (DocumentKind::Layout, 2) => {
                 rename_field(document.as_table_mut(), "node", "card")?;
                 3
@@ -196,6 +200,69 @@ fn upgrade_environment_and_scope(mission: &mut dyn TableLike) -> Result<(), Erro
     }
     if let Some(limits) = mission.get_mut("limit") {
         for_table_array(limits, &mut |limit| rename_field(limit, "target", "scope"))?;
+    }
+    Ok(())
+}
+
+fn upgrade_issue(mission: &mut dyn TableLike) -> Result<(), Error> {
+    let mut declared = std::collections::HashSet::new();
+    if let Some(cards) = mission.get_mut("input_card") {
+        let mut first = true;
+        for_table_array(cards, &mut |card| {
+            if first {
+                first = false;
+                if let Some(inputs) = card.get_mut("inputs") {
+                    for_table_array(inputs, &mut |input| {
+                        if let Some(name) = input.get("name").and_then(Item::as_str) {
+                            declared.insert(name.to_owned());
+                        }
+                        Ok(())
+                    })?;
+                }
+            }
+            Ok(())
+        })?;
+    }
+    if let Some(steps) = mission.get_mut("step") {
+        for_table_array(steps, &mut |step| {
+            if let Some(brief) = step.get_mut("brief").and_then(Item::as_table_like_mut) {
+                rename_field(brief, "work", "issue")?;
+                rename_field(brief, "bead", "issue")?;
+                if let Some(goal) = brief.get_mut("goal").and_then(Item::as_value_mut)
+                    && let Some(text) = goal.as_str()
+                {
+                    let mut out = String::new();
+                    let mut rest = text;
+                    while let Some(pos) = rest.find('{') {
+                        out.push_str(&rest[..pos]);
+                        rest = &rest[pos..];
+                        if rest.starts_with("{{") {
+                            out.push_str("{{");
+                            rest = &rest[2..];
+                        } else if let Some(tail) = rest.strip_prefix("{bead}") {
+                            if declared.contains("bead") {
+                                out.push_str("{bead}");
+                            } else if declared.contains("issue") {
+                                out.push_str("{issue.ref}");
+                            } else {
+                                out.push_str("{issue}");
+                            }
+                            rest = tail;
+                        } else {
+                            out.push('{');
+                            rest = &rest[1..];
+                        }
+                    }
+                    out.push_str(rest);
+                    if out != text {
+                        let decor = goal.decor().clone();
+                        *goal = Value::from(out);
+                        *goal.decor_mut() = decor;
+                    }
+                }
+            }
+            Ok(())
+        })?;
     }
     Ok(())
 }
@@ -343,4 +410,59 @@ fn snake_case(key: &str) -> String {
         }
     }
     name
+}
+
+#[cfg(test)]
+mod issue_tests {
+    use super::*;
+
+    #[test]
+    fn upgrades_only_tracked_brief_fields_and_placeholders() {
+        let raw = r#"schema = 5
+id = 'm'
+slug = 'm'
+title = 'M'
+rev = 1
+[[input_card]]
+id = 'input'
+title = 'Input'
+inputs = [{ name = 'issue' }]
+[[step]]
+id = 's'
+title = 'S'
+formation = 'solo'
+[step.brief]
+work = 'abc-1'
+goal = 'input {issue}, tracked {bead}, literal {work}, escaped {{bead}}'
+"#;
+        let result = upgrade_text(raw, DocumentKind::Mission, |_, _, _| None)
+            .unwrap()
+            .unwrap();
+        let mission = Mission::parse(&result).unwrap();
+        let brief = mission.steps[0].brief.as_ref().unwrap();
+        assert_eq!(brief.issue, "abc-1");
+        let input = ahjo_mission_model::RunInput {
+            name: "issue".into(),
+            kind: "text".into(),
+            value: "chosen".into(),
+        };
+        assert_eq!(
+            crate::run_inputs::substitute_run_inputs(
+                &brief.goal,
+                &mission.input_cards[0].inputs,
+                &[input],
+                "x-1"
+            ),
+            "input chosen, tracked x-1, literal {work}, escaped {bead}"
+        );
+        assert_eq!(
+            brief.goal,
+            "input {issue}, tracked {issue.ref}, literal {work}, escaped {{bead}}"
+        );
+        assert!(
+            upgrade_text(&result, DocumentKind::Mission, |_, _, _| None)
+                .unwrap()
+                .is_none()
+        );
+    }
 }

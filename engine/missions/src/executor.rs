@@ -29,8 +29,8 @@ pub struct StepExecution {
     pub turn: Option<crate::TurnWorkspace>,
     pub artifact_dir: PathBuf,
     pub context_paths: Vec<PathBuf>,
-    /// The run's work item as a canonical reference, or empty.
-    pub work: String,
+    /// The run's issue as a canonical reference, or empty.
+    pub issue: String,
     pub inputs: Vec<RunInput>,
     pub input_text: String,
     pub attempt: i64,
@@ -193,7 +193,7 @@ impl Executor for LabExecutor {
         }
         if let Some(goal) = request.step.brief.as_ref().map(|b| b.goal.as_str())
             && let Some(duration) = goal
-                .split("archon-lab-work:")
+                .split("archon-lab-issue:")
                 .nth(1)
                 .and_then(|s| s.split_whitespace().next())
         {

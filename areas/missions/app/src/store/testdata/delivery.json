@@ -1,6 +1,6 @@
 {
  "mission": {
-  "schema": 5,
+  "schema": 6,
   "id": "brd_delivery",
   "slug": "delivery",
   "title": "Delivery",

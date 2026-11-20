@@ -126,7 +126,7 @@ fn execution(turn: Option<TurnWorkspace>, canceled: Arc<AtomicBool>) -> StepExec
         turn,
         artifact_dir: PathBuf::new(),
         context_paths: Vec::new(),
-        work: String::new(),
+        issue: String::new(),
         inputs: Vec::new(),
         input_text: String::new(),
         attempt: 1,

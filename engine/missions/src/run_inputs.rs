@@ -150,27 +150,24 @@ pub fn render_run_inputs(mission: &Mission, inputs: &[RunInput]) -> String {
         .join("\n")
 }
 
-/// The placeholders that take the run's work item: Archon's `{bead}` and
-/// Ahjo's `{issue}`, the same value under two names.
-pub const WORK_REFERENCES: [&str; 2] = ["bead", "issue"];
+/// The placeholder for the run's tracked issue.
+pub const ISSUE_REFERENCE: &str = "issue";
 
-/// What `{bead}` and `{issue}` take for a run's canonical work reference:
-/// the Bead id, as Archon gives it, or `owner/repo#N`; empty without one.
-pub fn work_placeholder(work: &str) -> String {
-    ahjo_work_ref::parse_resolved(work)
+/// The short form substituted for a run's canonical issue reference.
+pub fn issue_placeholder(issue: &str) -> String {
+    ahjo_issue_ref::parse_resolved(issue)
         .map(|r| r.short())
         .unwrap_or_default()
 }
 
 /// Replace only valid input references. Inserted values are never interpreted again.
-/// `{bead}` and `{issue}` take `work`, the run's work item as
-/// [`work_placeholder`] gives it, unless the mission declares an input of
-/// that name, which wins, including the optional-input rule when omitted.
+/// `{issue}` takes the run issue unless a declared input takes precedence.
+/// `{issue.ref}` always takes the run issue and preserves migrated missions.
 pub fn substitute_run_inputs(
     text: &str,
     declared: &[MissionInput],
     inputs: &[RunInput],
-    work: &str,
+    issue: &str,
 ) -> String {
     let known: HashSet<&str> = declared.iter().map(|input| input.name.as_str()).collect();
     let mut result = String::new();
@@ -178,6 +175,16 @@ pub fn substitute_run_inputs(
     while let Some(pos) = rest.find('{') {
         result.push_str(&rest[..pos]);
         rest = &rest[pos..];
+        if let Some(tail) = rest.strip_prefix("{{issue.ref}}") {
+            result.push_str("{issue.ref}");
+            rest = tail;
+            continue;
+        }
+        if let Some(tail) = rest.strip_prefix("{issue.ref}") {
+            result.push_str(issue);
+            rest = tail;
+            continue;
+        }
         let escaped = rest.starts_with("{{");
         let prefix = if escaped { 2 } else { 1 };
         let after = &rest[prefix..];
@@ -196,8 +203,8 @@ pub fn substitute_run_inputs(
                 result.push('{');
                 result.push_str(name);
                 result.push('}');
-            } else if WORK_REFERENCES.contains(&name) && !known.contains(name) {
-                result.push_str(work);
+            } else if name == ISSUE_REFERENCE && !known.contains(name) {
+                result.push_str(issue);
             } else if known.contains(name) {
                 result.push_str(
                     inputs

@@ -165,7 +165,7 @@ pub struct RunState {
     pub mission_id: String,
     pub mission_rev: i64,
     pub input_card_id: String,
-    pub work: String,
+    pub issue: String,
     pub cwd: String,
     pub repository: String,
     pub base: String,

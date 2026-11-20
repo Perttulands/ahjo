@@ -165,7 +165,7 @@ pub struct MissionRun {
     pub inputs: BTreeMap<String, String>,
     /// Run folder. Omit it for a fresh folder.
     pub cwd: Option<String>,
-    pub work: Option<String>,
+    pub issue: Option<String>,
     /// A configured repository. The run works in its own branch and worktree.
     pub repository: Option<String>,
     /// The branch the run starts from.

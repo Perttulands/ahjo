@@ -367,8 +367,8 @@ impl MissionsPage {
         for branch in run_state::kept_branches(&run.events) {
             out = out.child(pane::line(t, "Kept work", branch));
         }
-        if !run.work.is_empty() {
-            out = out.child(pane::line(t, "Work", words::work_label(&run.work)));
+        if !run.issue.is_empty() {
+            out = out.child(pane::line(t, "Issue", words::issue_label(&run.issue)));
         }
         out
     }

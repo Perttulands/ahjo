@@ -101,7 +101,7 @@ fn old_documents_keep_data_comments_and_backups_until_their_next_save() {
     let mission = store.mission_edit("old").unwrap();
     let layout = store.layout_edit("old").unwrap();
     let notes = store.notes_edit("old").unwrap();
-    assert_eq!(mission.mission.schema, 5);
+    assert_eq!(mission.mission.schema, 6);
     assert_eq!(
         mission.mission.input_cards[0].input_hint,
         "The inputCard text is a value"
@@ -216,7 +216,7 @@ connection = [{ id = "edge", from = "fmn_work:out", to = "end_done:in" }]
     std::fs::write(&marker, hex::encode(Sha256::digest(MISSION.as_bytes()))).unwrap();
 
     let mission = store.mission_edit("old").unwrap();
-    assert_eq!(mission.mission.schema, 5);
+    assert_eq!(mission.mission.schema, 6);
     assert_eq!(mission.mission.steps[0].id, "fmn_work");
     assert_eq!(
         mission.mission.steps[0].formation,
@@ -273,7 +273,7 @@ fn concurrent_readers_upgrade_once_and_keep_the_original_backup() {
         }
         for worker in workers {
             let mission = worker.join().unwrap();
-            assert_eq!(mission.schema, 5);
+            assert_eq!(mission.schema, 6);
             assert_eq!(mission.id, "msn_old");
         }
     });
@@ -281,7 +281,7 @@ fn concurrent_readers_upgrade_once_and_keep_the_original_backup() {
     assert!(
         std::fs::read_to_string(path)
             .unwrap()
-            .contains("schema = 5")
+            .contains("schema = 6")
     );
     std::fs::remove_dir_all(root).unwrap();
 }
@@ -511,7 +511,7 @@ rounds = 3
     std::fs::write(&path, old).unwrap();
 
     let mission = store.read_mission("old").unwrap();
-    assert_eq!(mission.schema, 5);
+    assert_eq!(mission.schema, 6);
     assert_eq!(mission.steps[0].environment, "builder/linux");
     assert_eq!(mission.limits[0].scope, "fmn_work");
     assert_eq!(

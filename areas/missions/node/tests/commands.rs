@@ -43,7 +43,7 @@ const EXPECTED: &[&str] = &[
 
 #[tokio::test(flavor = "multi_thread")]
 async fn cli_updates_step_environment_and_home_clears_it() {
-    let node = Node::start(&[sessions::LISTING, ahjo_work::LISTING, LAB], "")
+    let node = Node::start(&[sessions::LISTING, ahjo_issue::LISTING, LAB], "")
         .await
         .unwrap();
     let folder = node.dir().join("missions/missions");
@@ -96,7 +96,7 @@ async fn cli_updates_step_environment_and_home_clears_it() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn run_wait_and_show_explain_a_code_gate_send_back() {
-    let node = Node::start(&[sessions::LISTING, ahjo_work::LISTING, LAB], "")
+    let node = Node::start(&[sessions::LISTING, ahjo_issue::LISTING, LAB], "")
         .await
         .unwrap();
     let mission = include_str!("fixtures/solo-lab.mission.toml")
@@ -200,7 +200,7 @@ async fn command_list_and_coded_failures() {
             "agent_delete"
         ]
     );
-    let node = Node::start(&[sessions::LISTING, ahjo_work::LISTING, LAB], "")
+    let node = Node::start(&[sessions::LISTING, ahjo_issue::LISTING, LAB], "")
         .await
         .unwrap();
     for &command in EXPECTED {
@@ -224,7 +224,7 @@ async fn command_list_and_coded_failures() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn mission_command_schemas_and_cli_help_match_the_document_surface() {
-    let node = Node::start(&[sessions::LISTING, ahjo_work::LISTING, LAB], "")
+    let node = Node::start(&[sessions::LISTING, ahjo_issue::LISTING, LAB], "")
         .await
         .unwrap();
     let client = NodeClient::new(Some(&node.url())).unwrap();
@@ -378,7 +378,7 @@ async fn mission_command_schemas_and_cli_help_match_the_document_surface() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn mission_edit_rejects_an_unknown_agent_and_uses_work_in_both_brief_operations() {
-    let node = Node::start(&[sessions::LISTING, ahjo_work::LISTING, LAB], "")
+    let node = Node::start(&[sessions::LISTING, ahjo_issue::LISTING, LAB], "")
         .await
         .unwrap();
     node.call(
@@ -423,11 +423,11 @@ async fn mission_edit_rejects_an_unknown_agent_and_uses_work_in_both_brief_opera
 
     for (change, work) in [
         (
-            json!({"set_brief":{"step_id":id,"work":"ahjo-2"}}),
+            json!({"set_brief":{"step_id":id,"issue":"ahjo-2"}}),
             "ahjo-2",
         ),
         (
-            json!({"edit_step":{"id":id,"title":step["title"],"brief":{"work":"ahjo-3"}}}),
+            json!({"edit_step":{"id":id,"title":step["title"],"brief":{"issue":"ahjo-3"}}}),
             "ahjo-3",
         ),
     ] {
@@ -435,7 +435,7 @@ async fn mission_edit_rejects_an_unknown_agent_and_uses_work_in_both_brief_opera
             .await
             .unwrap();
         assert_eq!(
-            inspect().await.unwrap()["mission"]["step"][0]["brief"]["work"],
+            inspect().await.unwrap()["mission"]["step"][0]["brief"]["issue"],
             work
         );
     }
@@ -449,7 +449,7 @@ async fn mission_edit_rejects_an_unknown_agent_and_uses_work_in_both_brief_opera
             .unwrap_err();
         assert_eq!(error.code, "invalid_argument");
         assert!(
-            error.message.contains("bead_id") && error.message.contains("work"),
+            error.message.contains("bead_id") && error.message.contains("issue"),
             "{error}"
         );
     }
@@ -468,9 +468,9 @@ async fn mission_edit_rejects_an_unknown_agent_and_uses_work_in_both_brief_opera
     );
     let help = String::from_utf8(help).unwrap();
     assert!(
-        help.contains("edit_step {id, title, brief{goal, repository, work, files[], links[]}}")
+        help.contains("edit_step {id, title, brief{goal, repository, issue, files[], links[]}}")
     );
-    assert!(help.contains("set_brief {step_id, goal, repository, work, files[], links[]}"));
+    assert!(help.contains("set_brief {step_id, goal, repository, issue, files[], links[]}"));
     assert!(!help.contains("bead_id"));
 
     node.stop().await;
@@ -478,7 +478,7 @@ async fn mission_edit_rejects_an_unknown_agent_and_uses_work_in_both_brief_opera
 
 #[tokio::test(flavor = "multi_thread")]
 async fn author_and_run_with_tools() {
-    let node = Node::start(&[sessions::LISTING, ahjo_work::LISTING, LAB], "")
+    let node = Node::start(&[sessions::LISTING, ahjo_issue::LISTING, LAB], "")
         .await
         .unwrap();
     assert!(node.call("mission_list", json!({})).await.unwrap()["missions"].is_array());
@@ -681,7 +681,7 @@ async fn author_and_run_with_tools() {
 #[tokio::test(flavor = "multi_thread")]
 async fn gate_and_abort_commands_act_on_pending_runs() {
     use ahjo_mission_engine::{Ledger, RunEvent};
-    let node = Node::start(&[sessions::LISTING, ahjo_work::LISTING, LAB], "")
+    let node = Node::start(&[sessions::LISTING, ahjo_issue::LISTING, LAB], "")
         .await
         .unwrap();
     let event = |kind: &str| RunEvent {
@@ -810,7 +810,7 @@ async fn a_repository_run_can_be_landed() {
     git(&["add", "readme"]);
     git(&["commit", "-m", "initial"]);
     let config = format!("[missions]\nrepositories = {{ \"example/project\" = {root:?} }}\n");
-    let node = Node::start(&[sessions::LISTING, ahjo_work::LISTING, LAB], &config)
+    let node = Node::start(&[sessions::LISTING, ahjo_issue::LISTING, LAB], &config)
         .await
         .unwrap();
     let folder = node.dir().join("missions/missions");
@@ -860,7 +860,7 @@ async fn a_repository_run_can_be_landed() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn a_mission_built_through_commands_stays_arranged() {
-    let node = Node::start(&[sessions::LISTING, ahjo_work::LISTING, LAB], "")
+    let node = Node::start(&[sessions::LISTING, ahjo_issue::LISTING, LAB], "")
         .await
         .unwrap();
     let call = |name: &'static str, args: serde_json::Value| {
@@ -911,7 +911,7 @@ async fn a_mission_built_through_commands_stays_arranged() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn cli_uses_the_same_mission_commands() {
-    let node = Node::start(&[sessions::LISTING, ahjo_work::LISTING, LAB], "")
+    let node = Node::start(&[sessions::LISTING, ahjo_issue::LISTING, LAB], "")
         .await
         .unwrap();
     let mut output = Vec::new();
@@ -942,7 +942,7 @@ async fn cli_uses_the_same_mission_commands() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn cli_lists_and_removes_deleted_mission_archives() {
-    let node = Node::start(&[sessions::LISTING, ahjo_work::LISTING, LAB], "")
+    let node = Node::start(&[sessions::LISTING, ahjo_issue::LISTING, LAB], "")
         .await
         .unwrap();
     node.call(
@@ -1060,7 +1060,7 @@ async fn cli_lists_and_removes_deleted_mission_archives() {
 /// note beside what it is on, then answers and closes the notes it took up.
 #[tokio::test(flavor = "multi_thread")]
 async fn an_agent_picks_up_a_mission_from_its_notes() {
-    let node = Node::start(&[sessions::LISTING, ahjo_work::LISTING, LAB], "")
+    let node = Node::start(&[sessions::LISTING, ahjo_issue::LISTING, LAB], "")
         .await
         .unwrap();
     node.call(
@@ -1176,7 +1176,7 @@ async fn an_agent_picks_up_a_mission_from_its_notes() {
 /// Input to Done, with what it is for as its note.
 #[tokio::test(flavor = "multi_thread")]
 async fn a_mission_is_sketched_from_rough_steps() {
-    let node = Node::start(&[sessions::LISTING, ahjo_work::LISTING, LAB], "")
+    let node = Node::start(&[sessions::LISTING, ahjo_issue::LISTING, LAB], "")
         .await
         .unwrap();
     node.call(
@@ -1223,7 +1223,7 @@ async fn a_mission_is_sketched_from_rough_steps() {
 /// Arrange lays it out, every card in a place of its own.
 #[tokio::test(flavor = "multi_thread")]
 async fn a_long_sketch_is_made_whole_and_arranged() {
-    let node = Node::start(&[sessions::LISTING, ahjo_work::LISTING, LAB], "")
+    let node = Node::start(&[sessions::LISTING, ahjo_issue::LISTING, LAB], "")
         .await
         .unwrap();
     for count in [15, 60] {
@@ -1280,7 +1280,7 @@ async fn a_long_sketch_is_made_whole_and_arranged() {
 /// says the mission was not created.
 #[tokio::test(flavor = "multi_thread")]
 async fn a_failed_sketch_leaves_no_mission() {
-    let node = Node::start(&[sessions::LISTING, ahjo_work::LISTING, LAB], "")
+    let node = Node::start(&[sessions::LISTING, ahjo_issue::LISTING, LAB], "")
         .await
         .unwrap();
     // The steps are made first; the note, too large to keep, fails last.
@@ -1312,7 +1312,7 @@ async fn a_failed_sketch_leaves_no_mission() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn mission_edit_batches_commit_once_or_leave_the_mission_and_layout_untouched() {
-    let node = Node::start(&[sessions::LISTING, ahjo_work::LISTING, LAB], "")
+    let node = Node::start(&[sessions::LISTING, ahjo_issue::LISTING, LAB], "")
         .await
         .unwrap();
     node.call("mission_create", json!({"slug":"batch","title":"Original"}))
@@ -1409,7 +1409,7 @@ async fn mission_edit_batches_commit_once_or_leave_the_mission_and_layout_untouc
 
 #[tokio::test(flavor = "multi_thread")]
 async fn mission_show_resolves_seat_settings_and_names_the_session() {
-    let node = Node::start(&[sessions::LISTING, ahjo_work::LISTING, LAB], "")
+    let node = Node::start(&[sessions::LISTING, ahjo_issue::LISTING, LAB], "")
         .await
         .unwrap();
     node.call(

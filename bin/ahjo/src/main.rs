@@ -1,5 +1,7 @@
 //! `ahjo`: the node, and the CLI over its commands.
 
+mod config_migrate;
+
 use std::path::PathBuf;
 
 use ahjo::{AREAS, TOOL_SETS, install};
@@ -383,7 +385,7 @@ async fn serve(args: &[String]) -> Result<()> {
             _ => return Err(usage(format!("unknown flag {flag}"), SERVE_USAGE)),
         }
     }
-    let (config, harness_rename) = ahjo_harness::ConfigRename::load(&file)?;
+    let (config, rename) = config_migrate::ConfigRename::load(&file)?;
     let running = ahjo_node_kit::serve::start_with_config_commit(
         Options {
             dir,
@@ -392,7 +394,7 @@ async fn serve(args: &[String]) -> Result<()> {
         },
         AREAS,
         TOOL_SETS,
-        || harness_rename.map_or(Ok(()), ahjo_harness::ConfigRename::save),
+        || rename.map_or(Ok(()), config_migrate::ConfigRename::save),
     )
     .await?;
     stopped().await;

@@ -15,7 +15,7 @@ ahjo-core = { path = "../../../kit/core" }
 ahjo-node-kit = { path = "../../../kit/node-kit" }
 ahjo-term = { path = "../../../engine/term" }
 ahjo-mission-engine = { path = "../../../engine/missions" }
-ahjo-work-contract = { path = "../../work/contract" }
+ahjo-issue-contract = { path = "../../issue/contract" }
 ahjo-missions-contract = { path = "../contract" }
 schemars.workspace = true
 serde = { version = "1", features = ["derive"] }
@@ -26,7 +26,7 @@ tokio = { version = "1", features = ["full"] }
 ahjo-testkit = { path = "../../../kit/testkit" }
 tower = { version = "0.5", features = ["util"] }
 
-ahjo-work = { path = "../../work/node" }
+ahjo-issue = { path = "../../issue/node" }
 futures-util = "0.3"
 tokio-tungstenite = "0.29"
 ahjo-harness = { path = "../../harness/node" }

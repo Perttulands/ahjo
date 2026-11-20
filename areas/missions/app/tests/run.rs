@@ -141,7 +141,7 @@ fn start() -> Running {
         tokio::runtime::Runtime::new()
             .unwrap()
             .block_on(async move {
-                let node = Node::start(&[sessions::LISTING, ahjo_work::LISTING, MISSIONS], "")
+                let node = Node::start(&[sessions::LISTING, ahjo_issue::LISTING, MISSIONS], "")
                     .await
                     .unwrap();
                 *FAKE.lock().unwrap() = Some(node.fake_sessions());

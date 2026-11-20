@@ -9,7 +9,7 @@ fn answer(name: &str) -> Value {
         "host_show" => {
             json!({"host": {"at": 1700000000123_i64, "cpu": {"percent": 12.3}, "gpu": {"name": "GPU", "memory": {"used": 42}}}, "events": [{"at": 1700000000123_i64, "text": "ready"}]})
         }
-        "work_show" => {
+        "issue_show" => {
             json!({"item": {"id": "work-1", "title": "Fix it", "children": [{"id": "work-2", "status": "open"}]}, "warning": null})
         }
         "scheduled_list" => {
@@ -40,7 +40,12 @@ impl Area for Responses {
 fn build(_: &Setup) -> anyhow::Result<Built> {
     Built::now(Responses)
 }
-const NAMES: &[&str] = &["host_show", "work_show", "scheduled_list", "session_launch"];
+const NAMES: &[&str] = &[
+    "host_show",
+    "issue_show",
+    "scheduled_list",
+    "session_launch",
+];
 const AREA: Listing = Listing {
     name: "fixtures",
     kinds: &[],
@@ -65,7 +70,7 @@ async fn plain_cli_formats_nested_responses_and_json_stays_the_same() {
     let url = format!("http://{}/", node.address);
     for (noun, verb, name) in [
         ("host", "show", "host_show"),
-        ("work", "show", "work_show"),
+        ("issue", "show", "issue_show"),
         ("scheduled", "list", "scheduled_list"),
         ("session", "launch", "session_launch"),
     ] {
