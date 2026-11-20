@@ -15,6 +15,7 @@ pub mod pointer;
 pub mod settings;
 pub mod text;
 pub mod theme;
+pub mod update;
 pub mod widgets;
 pub mod zoom;
 

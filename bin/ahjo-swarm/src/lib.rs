@@ -67,7 +67,11 @@ pub fn run() {
                 ..Default::default()
             },
             |window, cx| {
-                cx.new(|cx| start(PAGES, node, ahjo_app_kit::settings::path(), window, cx))
+                cx.new(|cx| {
+                    let mut shell = start(PAGES, node, ahjo_app_kit::settings::path(), window, cx);
+                    shell.offer_updates(env!("AHJO_VERSION"), window, cx);
+                    shell
+                })
             },
         );
         if let Err(e) = opened {

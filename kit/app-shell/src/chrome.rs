@@ -119,11 +119,15 @@ impl Shell {
         };
         let address = hub.fleet.base().to_string();
         let keys_words = if keys_on { "Keys" } else { "Keys off" };
+        let update = self.update_badge(cx);
         let end_w = Self::words_w(window, keys_words)
             + END_PAD * 2.
             + theme::art::MARK
             + theme::art::MARK_PAD * 2.
-            + link.map_or(0., |(w, _)| Self::words_w(window, w) + END_PAD * 2.);
+            + link.map_or(0., |(w, _)| Self::words_w(window, w) + END_PAD * 2.)
+            + update
+                .as_ref()
+                .map_or(0., |b| Self::words_w(window, b.words) + END_PAD * 2.);
         // The pages with a tab, and whether each draws its own.
         let mut drawn: Vec<(usize, Option<gpui::AnyElement>)> = vec![];
         for (i, page) in self.pages.iter().enumerate() {
@@ -219,6 +223,7 @@ impl Shell {
                     )))
                     .child(words)
             }))
+            .children(update.map(|b| self.render_update(&t, b, END_PAD, cx)))
             .child(
                 kit::tab(&t, "keys-toggle", false, cx)
                     .debug_selector(|| "keys-toggle".into())

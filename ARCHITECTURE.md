@@ -333,6 +333,26 @@ restart signals only the node and a tmux server it started lives on.
 - **The address.** A node records the address it bound in its config folder
   (`listen`), so `ahjo` commands on the same machine reach it with no
   `--node`.
+- **Apps for other machines.** A node hands out the Windows builds of
+  Swarm, Brain and Desk made from its own commit, so another machine on
+  the tailnet installs them from it and stays in step with it; nothing is
+  published. `ahjo upgrade --windows-apps <dir>` checks that each carries
+  the new build's version, puts them in `<root>/apps/windows/<version>/`
+  with a manifest of sizes and SHA-256s, and removes every other
+  version's. The node serves the manifest at `/apps/<platform>`, each file
+  it names, and `/install.ps1`, a script pointed at the node as the
+  request named it and at `[node] desk`. `irm <node>/install.ps1 | iex`
+  puts the apps in `%LOCALAPPDATA%\Ahjo` with `install.json` naming the
+  node, sets Swarm's node and Desk's first desk, and adds Start-menu
+  entries; no administrator rights. An app with `install.json` beside it
+  asks the node at start, when its window comes forward and (Swarm) when
+  its link opens or is refused; when the node's build is not its own it
+  shows Update in its chrome. Update fetches every file, checks each,
+  renames the running files aside (Windows lets a running program's file
+  be renamed, not replaced), puts the new ones in place and restarts the
+  app with its arguments, after Swarm's unsaved-work guard; a node that
+  refused the app's protocol says so with Update as its action. The
+  operator's own apps have no `install.json` and never update this way.
 
 `deploy/` is the operator's own machine: `ahjo.service` as
 `ahjo install --root ~/.local/share/ahjo` wrote it there (listening on

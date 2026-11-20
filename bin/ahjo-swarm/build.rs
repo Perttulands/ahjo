@@ -10,20 +10,21 @@
 
 fn main() {
     println!("cargo:rerun-if-changed=build.rs");
+    let build = name_the_build();
     match std::env::var("CARGO_CFG_TARGET_OS").as_deref() {
-        Ok("windows") => embed_windows_resource(),
+        Ok("windows") => embed_windows_resource(&build),
         Ok("linux") => link_x11_libraries(),
         _ => {}
     }
 }
 
-fn embed_windows_resource() {
+fn embed_windows_resource(build: &str) {
     let manifest_dir = std::env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR");
     let icon = std::path::Path::new(&manifest_dir).join("assets/icon/ahjo.ico");
     println!("cargo:rerun-if-changed={}", icon.display());
     let version = |part: &str| std::env::var(format!("CARGO_PKG_VERSION_{part}")).expect(part);
     let (major, minor, patch) = (version("MAJOR"), version("MINOR"), version("PATCH"));
-    let text = std::env::var("CARGO_PKG_VERSION").expect("CARGO_PKG_VERSION");
+    let text = build;
     // FILEOS 0x40004 is VOS_NT_WINDOWS32 and FILETYPE 0x1 is VFT_APP, written
     // as numbers so the script needs no SDK header.
     let rc = format!(
@@ -111,4 +112,35 @@ fn link_x11_libraries() {
         }
     }
     println!("cargo:rustc-link-search=native={}", out.display());
+}
+
+/// Names the build as `kit/node-kit/build.rs` does for the node:
+/// `AHJO_VERSION` is the package version and the commit's first seven
+/// characters (`0.0.1+8cdb58b`), so the app knows whether the node it was
+/// installed from hands out another build.
+fn name_the_build() -> String {
+    let git = |args: &[&str]| -> Option<String> {
+        let output = std::process::Command::new("git").args(args).output().ok()?;
+        let text = String::from_utf8(output.stdout).ok()?;
+        (output.status.success() && !text.trim().is_empty()).then(|| text.trim().to_owned())
+    };
+    let version = std::env::var("CARGO_PKG_VERSION").expect("CARGO_PKG_VERSION");
+    let commit = git(&["rev-parse", "HEAD"]).map(|c| c[..7.min(c.len())].to_owned());
+    let build = match &commit {
+        Some(commit) => format!("{version}+{commit}"),
+        None => version,
+    };
+    println!("cargo:rustc-env=AHJO_VERSION={build}");
+    // A new commit moves HEAD or the branch it names; the build follows.
+    let mut watched = vec!["HEAD".to_owned(), "packed-refs".to_owned()];
+    watched.extend(git(&["symbolic-ref", "-q", "HEAD"]));
+    for name in watched {
+        let path = git(&["rev-parse", "--path-format=absolute", "--git-path", &name])
+            .map(std::path::PathBuf::from)
+            .filter(|path| path.exists());
+        if let Some(path) = path {
+            println!("cargo:rerun-if-changed={}", path.display());
+        }
+    }
+    build
 }

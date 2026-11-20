@@ -234,6 +234,8 @@ pub struct Start {
 }
 
 pub struct BrainApp {
+    /// Its updates from the node it was installed from, if it was.
+    updates: Entity<ahjo_app_kit::update::Updates>,
     /// Where the brain read is: this machine's, or another's copy.
     place: Where,
     /// This machine's brain, as the launch found it.
@@ -340,8 +342,17 @@ impl BrainApp {
         .detach();
         let me = cx.weak_entity();
         let reader = cx.new(|_| Reader::new(me));
+        // A draft is kept in the cache as it is typed, so a restart for an
+        // update loses nothing and needs no guard.
+        let updates = cx.new(|cx| {
+            let mut u = ahjo_app_kit::update::Updates::new(env!("AHJO_VERSION"));
+            u.check(cx);
+            u
+        });
+        cx.observe(&updates, |_, _, cx| cx.notify()).detach();
         cx.observe_window_activation(window, |me, window, cx| {
             if window.is_window_active() {
+                me.updates.update(cx, |u, cx| u.check(cx));
                 me.look_again(cx);
             }
         })
@@ -360,6 +371,7 @@ impl BrainApp {
         window.set_ui_scale(zoom::app::scale(app_size), cx);
         let others = crate::swarm::places();
         let mut app = BrainApp {
+            updates,
             app_size,
             app_wheel: Rc::default(),
             reader_text,
@@ -3076,7 +3088,8 @@ impl Render for BrainApp {
                 )
             });
         let switch = self.place.from.is_some() || !self.others.is_empty();
-        if counts.is_some() || switch {
+        let update = self.update_pill(&t, cx);
+        if counts.is_some() || switch || update.is_some() {
             root = root.child(
                 div()
                     .absolute()
@@ -3091,7 +3104,8 @@ impl Render for BrainApp {
                     .text_size(px(chrome::TEXT))
                     .text_color(t.dim)
                     .children(counts)
-                    .when(switch, |d| d.child(self.source_switch(&t, cx))),
+                    .when(switch, |d| d.child(self.source_switch(&t, cx)))
+                    .children(update),
             );
         }
         // Another machine's copy has no history of its own to replay.
@@ -3775,6 +3789,41 @@ impl BrainApp {
                     .on_click(cx.listener(|me, _, _, cx| me.choose_from(cx)))
                     .child(label),
             )
+    }
+
+    /// Update, beside whose brain is read, when the node this app was
+    /// installed from hands out another build: a pill as the switch is,
+    /// its words in the action colour.
+    fn update_pill(&self, t: &Theme, cx: &mut Context<Self>) -> Option<AnyElement> {
+        use ahjo_app_kit::update::Tone;
+        let badge = self.updates.read(cx).badge()?;
+        let updates = self.updates.clone();
+        Some(
+            div()
+                .id("update")
+                .h(px(chrome::SWITCH_HEIGHT))
+                .px(px(chrome::SWITCH_PAD_X))
+                .flex()
+                .items_center()
+                .rounded(px(chrome::RADIUS))
+                .bg(veil(t, chrome::PANEL_ALPHA))
+                .occlude()
+                .text_color(match badge.tone {
+                    Tone::Action => t.accent,
+                    Tone::Busy => t.dim,
+                    Tone::Failed => t.error,
+                })
+                .tooltip(kit::tip(badge.tip))
+                .when(badge.acts, |d| {
+                    d.cursor_pointer()
+                        .hover(|s| s.bg(t.raised))
+                        .on_click(move |_, window, cx| {
+                            updates.update(cx, |u, cx| u.act(window, cx))
+                        })
+                })
+                .child(badge.words)
+                .into_any_element(),
+        )
     }
 
     fn theme_button(&self, t: &Theme, cx: &mut Context<Self>) -> impl IntoElement {

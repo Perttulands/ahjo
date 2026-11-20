@@ -193,6 +193,8 @@ pub enum Aim {
 
 pub struct DeskApp {
     pub focus: FocusHandle,
+    /// Its updates from the node it was installed from, if it was.
+    pub updates: gpui::Entity<ahjo_app_kit::update::Updates>,
     pub desks: Vec<DeskState>,
     pub current: Option<Key>,
     pub drafts: HashMap<DraftKey, Draft>,
@@ -321,9 +323,21 @@ impl DeskApp {
             this.follow(window.is_window_active(), cx);
             if window.is_window_active() {
                 this.refresh_all(cx);
+                this.updates.update(cx, |u, cx| u.check(cx));
             }
         })
         .detach();
+        let updates = cx.new(|_| ahjo_app_kit::update::Updates::new(env!("AHJO_VERSION")));
+        let me = cx.weak_entity();
+        updates.update(cx, |u, cx| {
+            // Unsent answers are kept before the restart, as at closing.
+            u.set_guard(std::rc::Rc::new(move |_, cx| {
+                let _ = me.update(cx, |app, _| app.keep_drafts_now());
+                true
+            }));
+            u.check(cx);
+        });
+        cx.observe(&updates, |_, _, cx| cx.notify()).detach();
         let (page_said, heard) = async_channel::unbounded::<String>();
         cx.spawn(async move |this, cx| {
             while let Ok(message) = heard.recv().await {
@@ -357,6 +371,7 @@ impl DeskApp {
         });
         let mut app = Self {
             focus: cx.focus_handle(),
+            updates,
             desks: places
                 .into_iter()
                 .map(|place| DeskState {

@@ -120,7 +120,8 @@ fn chunked(head: &str) -> bool {
     })
 }
 
-fn parse(all: &[u8]) -> Result<(u16, Vec<u8>), String> {
+/// A whole HTTP/1.1 answer as its status and body.
+pub fn parse(all: &[u8]) -> Result<(u16, Vec<u8>), String> {
     let end = all
         .windows(4)
         .position(|w| w == b"\r\n\r\n")

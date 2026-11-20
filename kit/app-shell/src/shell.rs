@@ -60,6 +60,8 @@ pub struct Shell {
     pub(crate) panel_moved: Option<Instant>,
     /// A panel's inner edge is being dragged.
     pub(crate) panel_dragging: bool,
+    /// This app's updates, when it runs from an install (`update`).
+    pub(crate) updates: Option<Entity<ahjo_app_kit::update::Updates>>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -223,8 +225,14 @@ impl Shell {
             panel_drawn: None,
             panel_moved: None,
             panel_dragging: false,
+            updates: None,
             _subscriptions: subscriptions,
         }
+    }
+
+    /// Keeps `subscription` for the shell's life.
+    pub(crate) fn keep(&mut self, subscription: Subscription) {
+        self._subscriptions.push(subscription);
     }
 
     /// Draws the window at the app's size the settings keep.

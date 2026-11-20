@@ -8,6 +8,7 @@ mod keys;
 mod settings_page;
 pub mod shell;
 mod theme_picker;
+mod update;
 mod veil;
 pub mod view_control;
 

@@ -312,6 +312,28 @@ impl DeskApp {
             }))
     }
 
+    /// Update, when the node it was installed from hands out another
+    /// build: quiet words in the action colour, at the list's foot, or
+    /// beside the menu with the list away.
+    fn update_button(&self, t: &Theme, cx: &mut Context<Self>) -> Option<Stateful<Div>> {
+        use ahjo_app_kit::update::Tone;
+        let badge = self.updates.read(cx).badge()?;
+        let updates = self.updates.clone();
+        Some(
+            button(t, "update", badge.words, Kind::Quiet)
+                .flex_none()
+                .text_color(match badge.tone {
+                    Tone::Action => t.accent,
+                    Tone::Busy => t.dim,
+                    Tone::Failed => t.error,
+                })
+                .tooltip(kit::tip(badge.tip))
+                .when(badge.acts, |b| {
+                    b.on_click(move |_, window, cx| updates.update(cx, |u, cx| u.act(window, cx)))
+                }),
+        )
+    }
+
     /// The button that puts the list away or brings it back.
     fn list_button(&self, t: &Theme, cx: &mut Context<Self>) -> Stateful<Div> {
         let open = !self.config.fold_list;
@@ -460,6 +482,7 @@ impl DeskApp {
                         .flex()
                         .gap(px(2.))
                         .child(self.list_button(t, cx))
+                        .children(self.update_button(t, cx))
                         .child(self.menu_button(t, cx)),
                 )
             })
@@ -691,6 +714,17 @@ impl DeskApp {
                             .child(div().min_w_0().truncate().text_color(t.text2).child(e))
                     }))
             }))
+            // The list's head has no room to spare at its narrowest.
+            .children(self.update_button(t, cx).map(|b| {
+                div()
+                    .flex_none()
+                    .px(px(GAP_SMALL))
+                    .py(px(4.))
+                    .flex()
+                    .border_t_1()
+                    .border_color(t.divider)
+                    .child(b)
+            }))
             .into_any_element()
     }
 
@@ -817,6 +851,7 @@ impl DeskApp {
             // With the list away, its way back and the menu stand here.
             .when(folded, |d| {
                 d.child(self.list_button(t, cx))
+                    .children(self.update_button(t, cx))
                     .child(self.menu_button(t, cx))
                     .child(div().w(px(GAP_SMALL)))
             })
