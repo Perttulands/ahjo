@@ -845,7 +845,9 @@ pub(super) mod tests {
         let mut watching = work.subscribe();
         watching.next().await;
         let mut read = watching.next().await;
-        while store(&read, 1).error.is_none() {
+        // Each project publishes as its read lands, in no set order: wait
+        // for both.
+        while store(&read, 1).error.is_none() || repo(&read, 0).error.is_none() {
             read = watching.next().await;
         }
         assert_eq!(repo(&read, 0).error.as_deref(), Some("HTTP 504"));
