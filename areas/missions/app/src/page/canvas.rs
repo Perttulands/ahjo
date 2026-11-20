@@ -36,7 +36,7 @@ const RING_SIZE: f32 = 30.;
 const GAP: f32 = 8.;
 /// A finding's mark beside a control's size.
 const BADGE_SCALE: f32 = 0.75;
-const SLOT_PAD: f32 = 10.;
+const SEAT_PAD: f32 = 10.;
 const POOL_LABEL: f32 = 14.;
 const CHIP_PAD: f32 = 6.;
 const GATE_MARK: f32 = 46.;
@@ -705,7 +705,15 @@ impl MissionsPage {
         let id = card.id.clone();
         let from = (card.x, card.y);
         let selector = format!("mission-card-{id}");
-        let face = card_face(t, mission, card, z, running && !self.beside, state);
+        let face = card_face(
+            t,
+            mission,
+            card,
+            z,
+            running && !self.beside,
+            state,
+            self.agents.as_ref(),
+        );
         let issues: Vec<_> = findings
             .iter()
             .filter(|(finding, _)| finding.node_id == id)
@@ -1254,6 +1262,7 @@ fn card_face(
     z: f32,
     running: bool,
     state: Option<crate::store::run_state::NodeState>,
+    catalog: Option<&ahjo_harness_contract::agents::ListedAgents>,
 ) -> Div {
     let label = |text: String, colour: Hsla| {
         div()
@@ -1369,7 +1378,7 @@ fn card_face(
                 .border_b_1()
                 .border_color(t.divider)
                 .flex()
-                .gap(px(SLOT_PAD * z))
+                .gap(px(SEAT_PAD * z))
                 .child(titles)
                 .child(
                     div()
@@ -1386,22 +1395,22 @@ fn card_face(
                 );
             face = face.child(head);
             let mut body = div()
-                .h(px(board::body_h(f.formation, f.slots.len()) * z))
+                .h(px(board::body_h(f.formation, f.seats.len()) * z))
                 .flex_none()
-                .px(px(SLOT_PAD * z))
+                .px(px(SEAT_PAD * z))
                 .py(px(board::BODY_PAD * z))
                 .flex()
                 .flex_col()
-                .gap(px(board::SLOT_GAP * z));
+                .gap(px(board::SEAT_GAP * z));
             if board::pooled(f.formation) {
-                for slot in f.slots.iter().filter(|slot| slot.controller) {
-                    body = body.child(slot_row(t, mission, f, slot, z));
+                for seat in f.seats.iter().filter(|seat| seat.controller) {
+                    body = body.child(seat_row(t, mission, f, seat, z, catalog));
                 }
                 let mut pool = div()
                     .relative()
                     .flex()
                     .flex_col()
-                    .gap(px(board::SLOT_GAP * z))
+                    .gap(px(board::SEAT_GAP * z))
                     .pt(px(POOL_LABEL * z))
                     .pb(px((board::POOL_PAD - POOL_LABEL) * z))
                     .px(px(size::RADIUS * z))
@@ -1425,17 +1434,17 @@ fn card_face(
                         .px(px(CHIP_PAD * z))
                         .bg(t.surface),
                     );
-                for slot in f.slots.iter().filter(|slot| !slot.controller) {
-                    pool = pool.child(slot_row(t, mission, f, slot, z));
+                for seat in f.seats.iter().filter(|seat| !seat.controller) {
+                    pool = pool.child(seat_row(t, mission, f, seat, z, catalog));
                 }
                 body = body.child(pool);
             } else {
-                for slot in &f.slots {
-                    body = body.child(slot_row(t, mission, f, slot, z));
+                for seat in &f.seats {
+                    body = body.child(seat_row(t, mission, f, seat, z, catalog));
                 }
             }
-            if f.slots.is_empty() {
-                body = body.child(label("No slots".into(), t.dim));
+            if f.seats.is_empty() {
+                body = body.child(label("No seats".into(), t.dim));
             }
             face = face.child(body);
             for p in &f.outputs {
@@ -1707,29 +1716,32 @@ fn chip(z: f32, text: &str, colour: Hsla) -> Div {
         .child(text.to_uppercase())
 }
 
-fn slot_row(
+fn seat_row(
     t: &ahjo_app_kit::theme::Theme,
     mission: &Mission,
     f: &ahjo_missions_contract::Step,
-    slot: &ahjo_missions_contract::Slot,
+    seat: &ahjo_missions_contract::Seat,
     z: f32,
+    catalog: Option<&ahjo_harness_contract::agents::ListedAgents>,
 ) -> Div {
-    let agent =
-        (!slot.agent_id.is_empty()).then(|| crate::store::words::agent_name(&slot.agent_id));
-    let session = crate::store::words::session_of(mission, f, slot);
-    let mark = harness_mark(slot.harness.as_str(), t.text, t.text2, z);
+    let resolved =
+        catalog.and_then(|catalog| catalog.agents.iter().find(|agent| agent.id == seat.agent));
+    let agent = (!seat.agent.is_empty()).then(|| crate::store::words::agent_name(&seat.agent));
+    let session = crate::store::words::session_of(mission, f, seat);
+    let harness = seat.settings(resolved).harness;
+    let mark = harness_mark(harness.as_str(), t.text, t.text2, z);
     let selector = format!(
         "canvas-seat-{}-{}-{}",
-        crate::store::words::slot_label(slot),
-        crate::store::words::agent_name(&slot.agent_id),
-        crate::store::words::harness_name(slot.harness.as_str())
+        crate::store::words::seat_label(seat),
+        crate::store::words::agent_name(&seat.agent),
+        crate::store::words::harness_name(harness.as_str())
     );
     let ring = div()
         .size(px(RING_SIZE * z))
         .flex_none()
         .rounded_full()
         .border_2()
-        .border_color(if slot.controller {
+        .border_color(if seat.controller {
             ahjo_app_kit::theme::rgb(t.ansi[3])
         } else {
             t.text2
@@ -1740,7 +1752,7 @@ fn slot_row(
         .justify_center()
         .children(mark);
     div()
-        .h(px(board::SLOT_H * z))
+        .h(px(board::SEAT_H * z))
         .debug_selector(move || selector.clone())
         .flex_none()
         .flex()
@@ -1762,10 +1774,10 @@ fn slot_row(
                         .child(match agent {
                             Some(agent) => format!(
                                 "{} · {}",
-                                crate::store::words::slot_label(slot).to_uppercase(),
+                                crate::store::words::seat_label(seat).to_uppercase(),
                                 agent.to_uppercase()
                             ),
-                            None => crate::store::words::slot_label(slot).to_uppercase(),
+                            None => crate::store::words::seat_label(seat).to_uppercase(),
                         }),
                 )
                 // The agent by the session it works in, as the session list
@@ -1786,7 +1798,7 @@ fn slot_row(
                         .text_size(px(CARD_SMALL * z))
                         .text_color(t.text2)
                         .truncate()
-                        .child(crate::store::words::slot_line(slot)),
+                        .child(crate::store::words::seat_line(seat, resolved)),
                 ),
         )
 }

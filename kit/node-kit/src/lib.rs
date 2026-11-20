@@ -1,7 +1,7 @@
 //! What every Ahjo node is, whatever areas it serves (ARCHITECTURE.md,
 //! Node kit): who it is, its config, its server with the trust check, the
 //! socket's hello and frame routing, MCP and the CLI over the same commands,
-//! and the slots areas fill for one another.
+//! and the interfaces areas fill for one another.
 
 pub mod address;
 mod area;

@@ -56,7 +56,7 @@ fn mission(best: bool) -> String {
         .next()
         .unwrap()
         .replace("fmn_work", "fmn_judge")
-        .replace("slot_work", "slot_judge")
+        .replace("seat_work", "seat_judge")
         .replace(
             "Return a short result using the supplied output contract.",
             if best { "alwaysfail" } else { "judge" },

@@ -78,7 +78,7 @@ fn solo_lab_ledger_and_admission_findings_match_archon() {
         .map(|line| {
             let event: Value = serde_json::from_str(line).unwrap();
             let mut result = Map::new();
-            for key in ["type", "node_id", "gate_id", "slot_id", "attempt"] {
+            for key in ["type", "node_id", "gate_id", "seat_id", "attempt"] {
                 if let Some(value) = event.get(key) {
                     result.insert(key.into(), value.clone());
                 }
@@ -123,17 +123,17 @@ fn solo_lab_ledger_and_admission_findings_match_archon() {
     .unwrap();
     for finding in expected.as_array_mut().unwrap() {
         let message = match finding["code"].as_str().unwrap() {
-            "invalid_slot_settings" => {
-                r#"step "staff" slot "invalid" effort "ultra" is not one claude-code accepts; use low, medium, high, xhigh, max"#
+            "invalid_seat_settings" => {
+                r#"step "staff" seat "invalid" effort "ultra" is not one claude-code accepts; use low, medium, high, xhigh, max"#
             }
             "retired_persona" => {
-                r#"step "staff" slot "retired" uses archived agent "critic"; restaff it or restore the agent file"#
+                r#"step "staff" seat "retired" uses archived agent "critic"; restaff it or restore the agent file"#
             }
             "unavailable_persona" => {
-                r#"step "staff" slot "unavailable" names unknown agent "unknown""#
+                r#"step "staff" seat "unavailable" names unknown agent "unknown""#
             }
-            "unstaffed_slot" => {
-                r#"step "staff" slot "open" needs a harness and effort, and optionally an agent"#
+            "unstaffed_seat" => {
+                r#"step "staff" seat "open" needs a harness and effort, and optionally an agent"#
             }
             _ => continue,
         };

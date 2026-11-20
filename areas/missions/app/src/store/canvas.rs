@@ -8,7 +8,7 @@ use ahjo_missions_contract::{LayoutNode, Mission};
 use std::collections::HashMap;
 
 /// Archon's card sizes (steps-d7.css). A step card is its IN rows,
-/// its head, its slots and its OUT rows; ports sit on the rows.
+/// its head, its seats and its OUT rows; ports sit on the rows.
 pub const STEP_W: f32 = 320.;
 /// A peer or orchestrated step is a little wider.
 pub const WIDE_W: f32 = 336.;
@@ -29,10 +29,10 @@ pub const STEP_HEAD: f32 = 106.;
 /// Without a brief the head only needs room for the title and passport.
 pub const STEP_HEAD_EMPTY: f32 = 86.;
 pub const RUN_CHIPS: f32 = 30.;
-/// The slots' body: its padding, each slot and the gap between them.
+/// The seats' body: its padding, each seat and the gap between them.
 pub const BODY_PAD: f32 = 18.;
-pub const SLOT_H: f32 = 68.;
-pub const SLOT_GAP: f32 = 8.;
+pub const SEAT_H: f32 = 68.;
+pub const SEAT_GAP: f32 = 8.;
 /// The dashed box holding an orchestrated step's workers or a peer group.
 pub const POOL_PAD: f32 = 24.;
 /// An Input card: eyebrow and title, goal, then one line for each fact.
@@ -105,10 +105,10 @@ pub fn pooled(kind: ahjo_missions_contract::Formation) -> bool {
     )
 }
 
-/// The height of the slots' body for `slots` slots.
-pub fn body_h(kind: ahjo_missions_contract::Formation, slots: usize) -> f32 {
-    let n = slots.max(1) as f32;
-    BODY_PAD * 2. + n * SLOT_H + (n - 1.) * SLOT_GAP + if pooled(kind) { POOL_PAD } else { 0. }
+/// The height of the seats' body for `seats` seats.
+pub fn body_h(kind: ahjo_missions_contract::Formation, seats: usize) -> f32 {
+    let n = seats.max(1) as f32;
+    BODY_PAD * 2. + n * SEAT_H + (n - 1.) * SEAT_GAP + if pooled(kind) { POOL_PAD } else { 0. }
 }
 
 /// The face and the board must agree on the head height so ports meet rows.
@@ -138,7 +138,7 @@ fn size(m: &Mission, id: &str, running: bool) -> Option<(Kind, f32, f32)> {
         return Some((
             Kind::Step,
             w,
-            rows * IO_ROW + head + body_h(f.formation, f.slots.len()),
+            rows * IO_ROW + head + body_h(f.formation, f.seats.len()),
         ));
     }
     if m.gates.iter().any(|g| g.id == id) {
@@ -566,7 +566,7 @@ fn gap_above(cards: &[Card], a: &Card, b: &Card) -> f32 {
 }
 
 /// How big a card of this kind is when it is new: one port each way, one
-/// slot, no brief.
+/// seat, no brief.
 pub fn new_size(kind: Kind) -> (f32, f32) {
     match kind {
         Kind::Input => (INPUT_W, INPUT_HEAD + INPUT_GOAL + INPUT_LINE + INPUT_FOOT),

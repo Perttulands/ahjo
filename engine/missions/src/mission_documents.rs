@@ -198,7 +198,7 @@ fn all_ids(m: &Mission) -> impl Iterator<Item = &str> {
                 .iter()
                 .chain(&step.outputs)
                 .map(|port| port.id.as_str())
-                .chain(step.slots.iter().map(|slot| slot.id.as_str()))
+                .chain(step.seats.iter().map(|seat| seat.id.as_str()))
         }))
         .chain(std::iter::once(m.id.as_str()))
 }
@@ -271,7 +271,7 @@ fn fill_ids(doc: &mut dyn TableLike, used: &mut HashSet<String>, assigned: &mut 
             if key == "step" {
                 each(card, "input", |port| assign(port, "port", "label"));
                 each(card, "output", |port| assign(port, "port", "label"));
-                each(card, "slot", |slot| assign(slot, "slot", "label"));
+                each(card, "seat", |seat| assign(seat, "seat", "label"));
             }
         });
     }

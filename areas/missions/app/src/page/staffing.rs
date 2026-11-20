@@ -1,4 +1,4 @@
-//! The selected slot's agent, harness, model and effort pickers.
+//! The selected seat's agent, harness, model and effort pickers.
 use super::*;
 use crate::store::staffing::{self, Choice, Staffing};
 use ahjo_app_kit::theme::Theme;
@@ -26,18 +26,37 @@ fn chip(t: &Theme, id: SharedString, selected: bool) -> Stateful<Div> {
         .cursor_pointer()
 }
 impl MissionsPage {
+    pub(super) fn read_agents(&mut self, node: String, cx: &mut Context<Self>) {
+        let asked = self.host.call(
+            NodeId(node),
+            ahjo_harness_contract::agents::ListAgents {},
+            cx,
+        );
+        let generation = self.generation;
+        cx.spawn(async move |this, cx| {
+            let answer = asked.await;
+            let _ = this.update(cx, |page, cx| {
+                if page.generation == generation {
+                    page.agents = answer.ok();
+                    cx.notify();
+                }
+            });
+        })
+        .detach();
+    }
+
     pub(super) fn draft_staffing(&self, cx: &Context<Self>) -> Staffing {
         Staffing {
-            agent_id: self.agent_id.read(cx).text.clone(),
+            agent: self.agent.read(cx).text.clone(),
             harness: self.harness.read(cx).text.parse().unwrap_or_default(),
             model: self.model.read(cx).text.clone(),
             effort: self.effort.read(cx).text.parse().unwrap_or_default(),
         }
     }
 
-    /// Draw all choices for the selected slot, preserving unknown current
+    /// Draw all choices for the selected seat, preserving unknown current
     /// values while the catalog is loading or after it changes.
-    pub(super) fn slot_pickers(&self, t: &Theme, cx: &mut Context<Self>) -> Div {
+    pub(super) fn seat_pickers(&self, t: &Theme, cx: &mut Context<Self>) -> Div {
         let staff = self.draft_staffing(cx);
         let choices = staffing::choices(self.agents.as_ref(), &staff);
         let row = |label: &'static str,
@@ -53,6 +72,10 @@ impl MissionsPage {
                     label.to_lowercase(),
                     if choice.id.is_empty() {
                         "default"
+                    } else if matches!(part, Part::Model)
+                        && choice.id == ahjo_missions_contract::HARNESS_DEFAULT_MODEL
+                    {
+                        "harness-default"
                     } else {
                         &choice.id
                     },
@@ -79,13 +102,7 @@ impl MissionsPage {
             .flex()
             .flex_col()
             .gap(px(TAB_GAP))
-            .child(row(
-                "Agent",
-                Part::Agent,
-                choices.agents,
-                &staff.agent_id,
-                cx,
-            ))
+            .child(row("Agent", Part::Agent, choices.agents, &staff.agent, cx))
             .child(row(
                 "Harness",
                 Part::Harness,
@@ -112,31 +129,13 @@ impl MissionsPage {
     fn pick_staffing(&mut self, part: Part, id: &str, cx: &mut Context<Self>) {
         let mut staff = self.draft_staffing(cx);
         match part {
-            Part::Agent => {
-                if let Some(agent) = self
-                    .agents
-                    .as_ref()
-                    .and_then(|catalog| catalog.agents.iter().find(|agent| agent.id == id))
-                {
-                    staff.use_agent(agent);
-                } else {
-                    staff.agent_id = id.to_owned();
-                }
-            }
+            Part::Agent => staff.agent = id.to_owned(),
             Part::Harness => {
                 let Ok(harness) = id.parse() else { return };
-                if let Some(catalog) = &self.agents {
-                    staffing::pick_harness(catalog, &mut staff, harness);
-                } else {
-                    staff.harness = harness;
-                }
+                staff.harness = harness;
             }
             Part::Model => {
-                if let Some(catalog) = &self.agents {
-                    staffing::pick_model(catalog, &mut staff, id);
-                } else {
-                    staff.model = id.to_owned();
-                }
+                staff.model = id.to_owned();
             }
             Part::Effort => {
                 let Ok(effort) = id.parse() else { return };
@@ -144,7 +143,7 @@ impl MissionsPage {
             }
         }
         for (field, value) in [
-            (&self.agent_id, staff.agent_id.as_str()),
+            (&self.agent, staff.agent.as_str()),
             (&self.harness, staff.harness.as_str()),
             (&self.model, staff.model.as_str()),
             (&self.effort, staff.effort.as_str()),
@@ -153,14 +152,11 @@ impl MissionsPage {
                 field.update(cx, |f, cx| f.set(value, false, cx));
             }
         }
-        // A pick staffs the slot at once: no separate Assign, nothing for
-        // Save. One made during another write follows when that lands. A
-        // harness comes with an effort, so the slot is never half set.
-        let complete = staff.harness.is_unset() || !staff.effort.is_unset();
-        if complete && self.writing {
+        // A pick staffs the seat at once. A pick during a write follows it.
+        if self.writing {
             self.staff_pending = true;
-        } else if complete {
-            self.assign_slot(cx);
+        } else {
+            self.staff_seat(cx);
         }
         cx.notify();
     }

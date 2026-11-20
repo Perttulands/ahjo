@@ -2,7 +2,9 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::{Effort, EndOutcome, Formation, GateKind, Harness, HumanChannel, PortKind, WhenSpent};
+use crate::{
+    Agent, Effort, EndOutcome, Formation, GateKind, Harness, HumanChannel, PortKind, WhenSpent,
+};
 
 /// The mission's entry node (`[[input_card]]`), with its `out` port.
 #[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq, schemars::JsonSchema)]
@@ -74,8 +76,8 @@ pub struct Step {
     pub inputs: Vec<Port>,
     #[serde(rename = "output")]
     pub outputs: Vec<Port>,
-    #[serde(rename = "slot")]
-    pub slots: Vec<Slot>,
+    #[serde(rename = "seat")]
+    pub seats: Vec<Seat>,
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq, schemars::JsonSchema)]
@@ -123,19 +125,15 @@ impl Port {
 /// A position in a step, owning what its seat runs.
 #[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq, schemars::JsonSchema)]
 #[serde(default, deny_unknown_fields, rename_all = "snake_case")]
-pub struct Slot {
+pub struct Seat {
     pub id: String,
     pub label: String,
-    /// The agent who works the slot: its session is `<prefix>-<agent>`
-    /// ([`crate::agent_session`]). Blank names it after the step.
+    /// The reusable agent id. Blank means a plain agent.
     #[serde(skip_serializing_if = "String::is_empty")]
     pub agent: String,
-    /// The slot's reusable agent; none is a vanilla agent.
-    #[serde(skip_serializing_if = "String::is_empty")]
-    pub agent_id: String,
     #[serde(skip_serializing_if = "Harness::is_unset")]
     pub harness: Harness,
-    /// Blank is the harness default model.
+    /// Blank inherits the agent model. "default" uses the harness default.
     #[serde(skip_serializing_if = "String::is_empty")]
     pub model: String,
     #[serde(skip_serializing_if = "Effort::is_unset")]
@@ -143,16 +141,40 @@ pub struct Slot {
     pub controller: bool,
 }
 
-impl Slot {
-    /// Whether the slot names anything to run: a harness, model, effort or agent.
+impl Seat {
+    /// Whether the seat names anything to run: a harness, model, effort or agent.
     pub fn staffed(&self) -> bool {
-        !self.agent_id.is_empty()
+        !self.agent.is_empty()
             || !self.harness.is_unset()
             || !self.model.is_empty()
             || !self.effort.is_unset()
     }
 
-    /// The slot as sentences name it: `"Worker" (w1)`, or `"w1"`.
+    /// Resolve each optional override against the reusable agent.
+    pub fn settings(&self, agent: Option<&Agent>) -> SeatSettings {
+        let harness = if self.harness.is_unset() {
+            agent.map_or(Harness::Unset, |agent| agent.harness)
+        } else {
+            self.harness
+        };
+        let effort = if self.effort.is_unset() {
+            agent.map_or(Effort::Unset, |agent| agent.effort)
+        } else {
+            self.effort
+        };
+        let model = match self.model.as_str() {
+            "" => agent.map_or_else(String::new, |agent| agent.model.clone()),
+            HARNESS_DEFAULT_MODEL => String::new(),
+            model => model.to_owned(),
+        };
+        SeatSettings {
+            harness,
+            model,
+            effort,
+        }
+    }
+
+    /// The seat as sentences name it: `"Worker" (w1)`, or `"w1"`.
     pub fn name(&self) -> String {
         if self.label.is_empty() {
             format!("{:?}", self.id)
@@ -160,6 +182,16 @@ impl Slot {
             format!("{:?} ({})", self.label, self.id)
         }
     }
+}
+
+/// Explicitly choose a harness's default model instead of inheriting one.
+pub const HARNESS_DEFAULT_MODEL: &str = "default";
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct SeatSettings {
+    pub harness: Harness,
+    pub model: String,
+    pub effort: Effort,
 }
 
 /// A criterion with one or more kinds. Its ports are `in`, `pass`, `fail`
@@ -237,3 +269,41 @@ fn is_false(value: &bool) -> bool {
 
 /// An Input card's only port.
 pub const INPUT_CARD_OUT: &str = "out";
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn seat_overrides_are_resolved_independently() {
+        let agent = Agent {
+            harness: Harness::ClaudeCode,
+            model: "opus".into(),
+            effort: Effort::High,
+            ..Default::default()
+        };
+        let mut seat = Seat::default();
+        assert_eq!(
+            seat.settings(Some(&agent)),
+            SeatSettings {
+                harness: Harness::ClaudeCode,
+                model: "opus".into(),
+                effort: Effort::High,
+            }
+        );
+        seat.harness = Harness::OpenAiCodex;
+        seat.effort = Effort::Ultra;
+        assert_eq!(
+            seat.settings(Some(&agent)),
+            SeatSettings {
+                harness: Harness::OpenAiCodex,
+                model: "opus".into(),
+                effort: Effort::Ultra,
+            }
+        );
+        seat.model = HARNESS_DEFAULT_MODEL.into();
+        assert_eq!(seat.settings(Some(&agent)).model, "");
+        seat.model = "model".into();
+        assert_eq!(seat.settings(Some(&agent)).model, "model");
+        assert_eq!(Seat::default().settings(None), SeatSettings::default());
+    }
+}

@@ -6,7 +6,7 @@ use crate::{
     PublishedTurn, SeatEvent, SeatExecutor, SeatFuture, SeatId, SeatSide, StepExecution,
     TurnWorkspace, executor::PendingEvent,
 };
-use ahjo_mission_model::{Slot, Step};
+use ahjo_mission_model::{Seat, Step};
 use serde_json::json;
 use std::{
     path::PathBuf,
@@ -106,8 +106,8 @@ fn execution(turn: Option<TurnWorkspace>, canceled: Arc<AtomicBool>) -> StepExec
             id: "fmn_build".into(),
             formation: ahjo_mission_model::Formation::Solo,
             device: "box/windows".into(),
-            slots: vec![Slot {
-                id: "slot_1".into(),
+            seats: vec![Seat {
+                id: "seat_1".into(),
                 ..Default::default()
             }],
             ..Default::default()
@@ -178,8 +178,8 @@ fn a_step_waiting_for_its_place_says_so_and_a_stop_ends_the_wait() {
             panic!("one wait, then nothing: {events:?}");
         };
         assert_eq!(
-            (wait.kind.as_str(), wait.slot_id.as_str()),
-            ("seat_state", "slot_1")
+            (wait.kind.as_str(), wait.seat_id.as_str()),
+            ("seat_state", "seat_1")
         );
         assert_eq!(
             wait.data["detail"],
@@ -196,7 +196,7 @@ fn a_stop_leaves_the_seat_of_a_node_that_went_away() {
         seated: true,
         ..Default::default()
     };
-    let (events, result) = stop_at(seated, None, "slot_dispatch");
+    let (events, result) = stop_at(seated, None, "seat_dispatch");
     assert_eq!(events.len(), 1, "{events:?} {result:?}");
     assert_eq!(
         result,

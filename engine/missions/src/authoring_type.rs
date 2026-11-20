@@ -1,6 +1,6 @@
-//! Change a step's shape without silently discarding staffed slots.
+//! Change a step's shape without silently discarding staffed seats.
 use crate::Error;
-use ahjo_mission_model::{Formation, Mission, MissionChange, Slot};
+use ahjo_mission_model::{Formation, Mission, MissionChange, Seat};
 use std::collections::HashSet;
 use toml_edit::{DocumentMut, Item, value};
 fn invalid(message: &str) -> Error {
@@ -13,12 +13,12 @@ fn valid_id(id: &str) -> bool {
             .bytes()
             .all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-')
 }
-fn new_slot(label: &str, controller: bool) -> Result<Slot, Error> {
-    Ok(Slot {
-        id: crate::authoring::id("slot")?,
+fn new_seat(label: &str, controller: bool) -> Result<Seat, Error> {
+    Ok(Seat {
+        id: crate::authoring::id("seat")?,
         label: label.into(),
         controller,
-        ..Slot::default()
+        ..Seat::default()
     })
 }
 pub(crate) fn apply(
@@ -29,8 +29,8 @@ pub(crate) fn apply(
     let MissionChange::SetStepFormation {
         id,
         formation,
-        keep_slot_id,
-        slots,
+        keep_seat_id,
+        seats,
     } = patch
     else {
         unreachable!()
@@ -41,13 +41,13 @@ pub(crate) fn apply(
             "the step needs a formation",
         ));
     }
-    if !keep_slot_id.is_empty() && formation != Formation::Solo {
-        return Err(invalid("keep_slot_id applies only to solo"));
+    if !keep_seat_id.is_empty() && formation != Formation::Solo {
+        return Err(invalid("keep_seat_id applies only to solo"));
     }
     let current = mission
         .step(&id)
         .ok_or_else(|| Error::new("not_found", "step"))?;
-    let next = if let Some(snapshot) = slots {
+    let next = if let Some(snapshot) = seats {
         let mut seen = HashSet::new();
         let controllers = snapshot.iter().filter(|s| s.controller).count();
         if snapshot
@@ -59,77 +59,77 @@ pub(crate) fn apply(
                 _ => snapshot.len() < 2 || controllers != 1,
             }
         {
-            return Err(invalid("slot snapshot does not fit step formation"));
+            return Err(invalid("seat snapshot does not fit step formation"));
         }
-        if !keep_slot_id.is_empty()
-            && (!current.slots.iter().any(|s| s.id == keep_slot_id)
-                || snapshot[0].id != keep_slot_id)
+        if !keep_seat_id.is_empty()
+            && (!current.seats.iter().any(|s| s.id == keep_seat_id)
+                || snapshot[0].id != keep_seat_id)
         {
-            return Err(invalid("keep_slot_id must name the retained current slot"));
+            return Err(invalid("keep_seat_id must name the retained current seat"));
         }
         if current
-            .slots
+            .seats
             .iter()
             .any(|s| s.staffed() && !seen.contains(&s.id))
-            && keep_slot_id.is_empty()
+            && keep_seat_id.is_empty()
         {
             return Err(Error::new(
-                "slot_choice_required",
-                "snapshot would remove a staffed slot",
+                "seat_choice_required",
+                "snapshot would remove a staffed seat",
             ));
         }
         if mission
             .steps
             .iter()
-            .any(|f| f.id != id && f.slots.iter().any(|s| seen.contains(&s.id)))
+            .any(|f| f.id != id && f.seats.iter().any(|s| seen.contains(&s.id)))
         {
-            return Err(invalid("slot id already used"));
+            return Err(invalid("seat id already used"));
         }
         snapshot
     } else {
-        let mut slots = current.slots.clone();
-        if !keep_slot_id.is_empty() && !slots.iter().any(|s| s.id == keep_slot_id) {
-            return Err(invalid("slot to keep does not exist"));
+        let mut seats = current.seats.clone();
+        if !keep_seat_id.is_empty() && !seats.iter().any(|s| s.id == keep_seat_id) {
+            return Err(invalid("seat to keep does not exist"));
         }
         match formation {
             Formation::Solo => {
-                if slots.is_empty() {
-                    slots.push(new_slot("Agent", false)?);
+                if seats.is_empty() {
+                    seats.push(new_seat("Agent", false)?);
                 }
-                let staffed: Vec<_> = slots.iter().filter(|s| s.staffed()).collect();
-                if keep_slot_id.is_empty() && staffed.len() > 1 {
+                let staffed: Vec<_> = seats.iter().filter(|s| s.staffed()).collect();
+                if keep_seat_id.is_empty() && staffed.len() > 1 {
                     return Err(Error::new(
-                        "slot_choice_required",
-                        "choose the staffed slot to keep",
+                        "seat_choice_required",
+                        "choose the staffed seat to keep",
                     ));
                 }
-                let keep = if !keep_slot_id.is_empty() {
-                    &keep_slot_id
-                } else if let Some(slot) = staffed.first() {
-                    &slot.id
+                let keep = if !keep_seat_id.is_empty() {
+                    &keep_seat_id
+                } else if let Some(seat) = staffed.first() {
+                    &seat.id
                 } else {
-                    &slots[0].id
+                    &seats[0].id
                 };
-                let mut slot = slots.iter().find(|s| &s.id == keep).unwrap().clone();
-                slot.controller = false;
-                vec![slot]
+                let mut seat = seats.iter().find(|s| &s.id == keep).unwrap().clone();
+                seat.controller = false;
+                vec![seat]
             }
             Formation::Peer => {
-                for s in &mut slots {
+                for s in &mut seats {
                     s.controller = false;
                 }
-                while slots.len() < 2 {
-                    slots.push(new_slot("Peer", false)?);
+                while seats.len() < 2 {
+                    seats.push(new_seat("Peer", false)?);
                 }
-                slots
+                seats
             }
             _ => {
-                if slots.is_empty() {
-                    slots.push(new_slot("Orchestrator", true)?);
-                    slots.push(new_slot("Agent", false)?);
-                    slots.push(new_slot("Agent", false)?);
+                if seats.is_empty() {
+                    seats.push(new_seat("Orchestrator", true)?);
+                    seats.push(new_seat("Agent", false)?);
+                    seats.push(new_seat("Agent", false)?);
                 }
-                let controllers: Vec<_> = slots
+                let controllers: Vec<_> = seats
                     .iter()
                     .filter(|s| s.controller)
                     .map(|s| s.id.clone())
@@ -137,20 +137,20 @@ pub(crate) fn apply(
                 let controller = if controllers.len() == 1 {
                     &controllers[0]
                 } else {
-                    &slots[0].id
+                    &seats[0].id
                 }
                 .clone();
-                for slot in &mut slots {
-                    slot.controller = slot.id == controller;
+                for seat in &mut seats {
+                    seat.controller = seat.id == controller;
                 }
-                if slots.len() == 1 {
-                    slots.push(new_slot("Agent", false)?);
+                if seats.len() == 1 {
+                    seats.push(new_seat("Agent", false)?);
                 }
-                slots
+                seats
             }
         }
     };
-    if current.formation == formation && current.slots == next {
+    if current.formation == formation && current.seats == next {
         return Ok(false);
     }
     let table = doc["step"]
@@ -161,8 +161,8 @@ pub(crate) fn apply(
         })
         .ok_or_else(|| invalid("step source"))?;
     crate::write::set(table, "formation", value(formation.as_str()));
-    // Retain the source table of each kept slot, including its comments.
-    let old = table.remove("slot");
+    // Retain the source table of each kept seat, including its comments.
+    let old = table.remove("seat");
     let mut source = std::collections::HashMap::new();
     if let Some(Item::ArrayOfTables(tables)) = old {
         for table in tables.iter() {
@@ -180,19 +180,19 @@ pub(crate) fn apply(
         }
     }
     let mut result = toml_edit::ArrayOfTables::new();
-    for slot in &next {
-        let mut table = source.remove(&slot.id).unwrap_or_else(|| {
-            toml_edit::ser::to_document(slot)
-                .expect("slot serializes")
+    for seat in &next {
+        let mut table = source.remove(&seat.id).unwrap_or_else(|| {
+            toml_edit::ser::to_document(seat)
+                .expect("seat serializes")
                 .into_table()
         });
         for (key, field) in [
-            ("id", slot.id.as_str()),
-            ("label", slot.label.as_str()),
-            ("agent_id", slot.agent_id.as_str()),
-            ("harness", slot.harness.as_str()),
-            ("model", slot.model.as_str()),
-            ("effort", slot.effort.as_str()),
+            ("id", seat.id.as_str()),
+            ("label", seat.label.as_str()),
+            ("agent", seat.agent.as_str()),
+            ("harness", seat.harness.as_str()),
+            ("model", seat.model.as_str()),
+            ("effort", seat.effort.as_str()),
         ] {
             if field.is_empty() && !["id", "label"].contains(&key) {
                 table.remove(key);
@@ -200,11 +200,11 @@ pub(crate) fn apply(
                 crate::write::set(&mut table, key, value(field));
             }
         }
-        if table.get("controller").and_then(Item::as_bool) != Some(slot.controller) {
-            crate::write::set(&mut table, "controller", value(slot.controller));
+        if table.get("controller").and_then(Item::as_bool) != Some(seat.controller) {
+            crate::write::set(&mut table, "controller", value(seat.controller));
         }
         result.push(table);
     }
-    table["slot"] = Item::ArrayOfTables(result);
+    table["seat"] = Item::ArrayOfTables(result);
     Ok(true)
 }

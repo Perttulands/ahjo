@@ -41,7 +41,7 @@ fn start() -> Running {
                 let mut mission = prefix.to_owned();
                 for n in 1..=5 {
                     let step = step.replace("fmn_work", &format!("fmn_{n}"))
-                        .replace("slot_work", &format!("slot_{n}_opaque"))
+                        .replace("seat_work", &format!("seat_{n}_opaque"))
                         .replace("title = \"Work\"", &format!("title = \"Step {n}\""));
                     mission.push_str("[[step]]"); mission.push_str(&step);
                 }
@@ -142,7 +142,7 @@ fn five_step_canvas_can_pan_zoom_and_connect_visible_ports(cx: &mut TestAppConte
             .is_some()
     );
     assert!(
-        cx.debug_bounds("canvas-seat-\"Worker\" (slot_1_opaque)-Builder-Codex")
+        cx.debug_bounds("canvas-seat-\"Worker\" (seat_1_opaque)-Builder-Codex")
             .is_none()
     );
     let before = cx.debug_bounds("mission-card-fmn_1").unwrap();

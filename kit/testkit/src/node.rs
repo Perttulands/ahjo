@@ -79,8 +79,8 @@ impl Node {
             .expect("an area provides sessions")
     }
 
-    /// What fills the node's slot for `T`, as its areas read it; an empty
-    /// slot reads as `not_provided`.
+    /// What fills the node's interface for `T`, as its areas read it; an empty
+    /// interface reads as `not_provided`.
     pub fn provided<T: ?Sized + Send + Sync + 'static>(&self) -> Result<std::sync::Arc<T>, Error> {
         self.running().provided.get::<T>()
     }

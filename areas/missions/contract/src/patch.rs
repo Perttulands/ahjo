@@ -405,10 +405,10 @@ mod tests {
 
     #[test]
     fn fields_from_other_operations_are_rejected() {
-        let error = decode(&json!({"assign_slot": {"device": "local"}})).unwrap_err();
+        let error = decode(&json!({"staff_seat": {"device": "local"}})).unwrap_err();
         assert_eq!(
             error,
-            "assign_slot: unknown field device; accepted fields: step_id, slot_id, agent_id, harness, model, effort",
+            "staff_seat: unknown field device; accepted fields: step_id, seat_id, agent, harness, model, effort",
         );
     }
 
@@ -429,7 +429,7 @@ mod tests {
     }
     #[test]
     fn restore_step_reads_the_stored_shape() {
-        let body = json!({"restore_node":{"gate":null,"step":{"id":"f","formation":"solo","title":"Work","input":[{"id":"in","label":"Input"}],"output":[],"slot":[{"id":"s","label":"Agent","controller":false}]}}});
+        let body = json!({"restore_node":{"gate":null,"step":{"id":"f","formation":"solo","title":"Work","input":[{"id":"in","label":"Input"}],"output":[],"seat":[{"id":"s","label":"Agent","controller":false}]}}});
         let MissionChange::RestoreNode {
             node: crate::RestoredNode::Step(step),
             ..
@@ -438,7 +438,7 @@ mod tests {
             panic!("expected a step restore")
         };
         assert_eq!(step.inputs[0].id, "in");
-        assert_eq!(step.slots[0].id, "s");
+        assert_eq!(step.seats[0].id, "s");
         let mut invalid = body;
         invalid["restore_node"]["gate"] = json!({"id":"g"});
         assert!(decode(&invalid).is_err());

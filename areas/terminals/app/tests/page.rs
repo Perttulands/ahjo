@@ -3078,7 +3078,7 @@ fn arrange_tabs_view_drag_and_sizing_on_a_live_node(cx: &mut TestAppContext) {
                 .all
                 .iter()
                 .filter(|s| s.name == "alpha" || s.name == "beta")
-                .all(|s| s.seat == Some(ahjo_terminals_contract::Seat::Mine))
+                .all(|s| s.seat == Some(ahjo_terminals_contract::SizingPane::Mine))
         })
     });
     let _ = std::fs::remove_dir_all(settings.parent().unwrap());
@@ -3689,7 +3689,7 @@ fn opening_a_session_sizes_it_with_another_node_following(cx: &mut TestAppContex
                 return false;
             };
             session.foreign == Some(0)
-                && session.seat == Some(ahjo_terminals_contract::Seat::Mine)
+                && session.seat == Some(ahjo_terminals_contract::SizingPane::Mine)
                 && tmux(
                     &running,
                     &[
@@ -3939,10 +3939,9 @@ fn connecting_the_app_preserves_idle_session_activity(cx: &mut TestAppContext) {
     let page = PAGE.with(|p| p.borrow().clone()).unwrap();
     until(cx, "app follows the session", |cx| {
         page.read_with(cx, |p, _| {
-            p.fleet
-                .all
-                .iter()
-                .any(|s| s.name == "alpha" && s.seat == Some(ahjo_terminals_contract::Seat::Mine))
+            p.fleet.all.iter().any(|s| {
+                s.name == "alpha" && s.seat == Some(ahjo_terminals_contract::SizingPane::Mine)
+            })
         })
     });
     let after = read();

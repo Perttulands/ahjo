@@ -993,8 +993,8 @@ impl Terminals {
             }
         };
         let seat = session.as_ref().and_then(|s| match s.seat {
-            Some(ahjo_terminals_contract::Seat::Mine) => None,
-            Some(ahjo_terminals_contract::Seat::Other) => Some("viewing"),
+            Some(ahjo_terminals_contract::SizingPane::Mine) => None,
+            Some(ahjo_terminals_contract::SizingPane::Other) => Some("viewing"),
             None if s.pinned == Some(true) => Some("viewing"),
             None => None,
         });

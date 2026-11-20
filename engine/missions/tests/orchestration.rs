@@ -35,7 +35,7 @@ impl SeatSide for LabSeats {
     fn dispatch(&self, request: Dispatch) -> SeatFuture<'_, String> {
         Box::pin(async move {
             let name = if request.name.is_empty() {
-                format!("seat-{}", request.slot_id)
+                format!("seat-{}", request.seat_id)
             } else {
                 request.name.clone()
             };
@@ -67,7 +67,7 @@ impl SeatSide for LabSeats {
                 },
                 cwd: None,
             };
-            let path = self.root.join(format!("{}.md", request.slot_id));
+            let path = self.root.join(format!("{}.md", request.seat_id));
             std::fs::write(&path, &request.brief)
                 .map_err(|e| ahjo_mission_engine::Error::new("fake", e.to_string()))?;
             let created = json!({"dispatch_id":request.id,"node":seat.node,"session_name":seat.session_name,"session_id":seat.session.session_id,"pane_id":seat.session.pane_id,"generation":seat.session.generation});
@@ -194,8 +194,23 @@ impl SeatSide for LabSeats {
             Ok("ended".into())
         })
     }
-    fn seats(&self, _: &str) -> Result<Vec<AgentSeat>, ahjo_mission_engine::Error> {
-        Ok(vec![])
+    fn seats(&self, run_id: &str) -> Result<Vec<AgentSeat>, ahjo_mission_engine::Error> {
+        let entries = self.entries.lock().unwrap();
+        Ok(entries
+            .values()
+            .filter(|entry| entry.dispatch.run_id == run_id)
+            .map(|entry| AgentSeat {
+                dispatch_id: entry.dispatch.id.clone(),
+                seat_id: entry.dispatch.seat_id.clone(),
+                node: entry.seat.node.clone(),
+                session: entry.seat.session.session_id.clone(),
+                pane: Some(entry.seat.session.pane_id),
+                session_name: entry.seat.session_name.clone(),
+                outcome: if entry.alive { "" } else { "ended" }.into(),
+                available: entry.alive,
+                waiting: None,
+            })
+            .collect())
     }
     fn prepare_turn(&self, _: &str, _: &TurnWorkspace) -> SeatFuture<'_, PathBuf> {
         Box::pin(async { unreachable!() })
@@ -212,8 +227,8 @@ async fn controller_output_reaches_gate_and_lost_workers_are_reported() {
     std::fs::create_dir_all(root.join("missions")).unwrap();
     let mission = include_str!("parity/runs/missions/solo-lab.mission.toml")
         .replace("formation = \"solo\"", "formation = \"orchestrated\"")
-        .replace("id = \"slot_work\"", "id = \"slot_lead\"\ncontroller = true")
-        .replace("[[end]]", "[[step.slot]]\nid = \"slot_a\"\nlabel = \"Worker A\"\nharness = \"openai-codex\"\neffort = \"medium\"\n[[step.slot]]\nid = \"slot_b\"\nlabel = \"Worker B\"\nharness = \"claude-code\"\neffort = \"medium\"\n\n[[end]]");
+        .replace("id = \"seat_work\"", "id = \"seat_lead\"\ncontroller = true")
+        .replace("[[end]]", "[[step.seat]]\nid = \"seat_a\"\nlabel = \"Worker A\"\nharness = \"openai-codex\"\neffort = \"medium\"\n[[step.seat]]\nid = \"seat_b\"\nlabel = \"Worker B\"\nharness = \"claude-code\"\neffort = \"medium\"\n\n[[end]]");
     let mission = mission.replace("to = \"end_done:in\"", "to = \"gate_review:in\"");
     let mission = format!(
         "{mission}\n[[gate]]\nid = \"gate_review\"\ntitle = \"Review\"\nkinds = [\"code\"]\ncheck = \"output_contains\"\ncheck_version = \"1\"\ncheck_value = \"controller-result\"\n[[end]]\nid = \"end_rejected\"\ntitle = \"Rejected\"\noutcome = \"rejected\"\n[[connection]]\nid = \"edge_pass\"\nfrom = \"gate_review:pass\"\nto = \"end_done:in\"\n[[connection]]\nid = \"edge_fail\"\nfrom = \"gate_review:fail\"\nto = \"end_rejected:in\"\n"
@@ -249,13 +264,13 @@ async fn controller_output_reaches_gate_and_lost_workers_are_reported() {
             if projection
                 .events
                 .iter()
-                .any(|event| event.kind == "slot_dispatch" && event.slot_id == "slot_lead")
+                .any(|event| event.kind == "seat_dispatch" && event.seat_id == "seat_lead")
                 && seats
                     .entries
                     .lock()
                     .unwrap()
                     .values()
-                    .any(|entry| entry.dispatch.slot_id == "slot_lead" && entry.staged)
+                    .any(|entry| entry.dispatch.seat_id == "seat_lead" && entry.staged)
             {
                 break;
             }
@@ -275,7 +290,7 @@ async fn controller_output_reaches_gate_and_lost_workers_are_reported() {
         let entries = seats.entries.lock().unwrap();
         let lead = entries
             .values()
-            .find(|entry| entry.dispatch.slot_id == "slot_lead")
+            .find(|entry| entry.dispatch.seat_id == "seat_lead")
             .unwrap();
         let brief = std::fs::read_to_string(&lead.path).unwrap();
         assert!(lead.staged);
@@ -283,10 +298,10 @@ async fn controller_output_reaches_gate_and_lost_workers_are_reported() {
             .lines()
             .find(|line| line.starts_with("Attempt directory: "))
             .unwrap();
-        for worker in ["slot_a", "slot_b"] {
+        for worker in ["seat_a", "seat_b"] {
             let entry = entries
                 .values()
-                .find(|entry| entry.dispatch.slot_id == worker)
+                .find(|entry| entry.dispatch.seat_id == worker)
                 .unwrap();
             assert!(
                 !entry.staged,
@@ -314,7 +329,7 @@ async fn controller_output_reaches_gate_and_lost_workers_are_reported() {
         .iter()
         .find(|event| event.kind == "orchestration_team")
         .unwrap();
-    assert_eq!(team.data["controller_slot"], "slot_lead");
+    assert_eq!(team.data["controller_seat"], "seat_lead");
     assert_eq!(team.data["workers"].as_array().unwrap().len(), 2);
     assert_eq!(
         ledger
@@ -328,17 +343,17 @@ async fn controller_output_reaches_gate_and_lost_workers_are_reported() {
         let mut entries = seats.entries.lock().unwrap();
         entries
             .values_mut()
-            .find(|e| e.dispatch.slot_id == "slot_a")
+            .find(|e| e.dispatch.seat_id == "seat_a")
             .unwrap()
             .alive = false;
     }
     tokio::time::timeout(Duration::from_secs(10), async {
         loop {
             if seats.entries.lock().unwrap().values().any(|e| {
-                e.dispatch.slot_id == "slot_lead"
+                e.dispatch.seat_id == "seat_lead"
                     && e.notifications
                         .iter()
-                        .any(|text| text.contains("slot_a") && text.contains("gone"))
+                        .any(|text| text.contains("seat_a") && text.contains("gone"))
             }) {
                 break;
             }
@@ -352,7 +367,7 @@ async fn controller_output_reaches_gate_and_lost_workers_are_reported() {
         let entries = seats.entries.lock().unwrap();
         let worker = entries
             .values()
-            .find(|e| e.dispatch.slot_id == "slot_b")
+            .find(|e| e.dispatch.seat_id == "seat_b")
             .unwrap();
         let brief = std::fs::read_to_string(&worker.path).unwrap();
         PathBuf::from(
@@ -362,12 +377,12 @@ async fn controller_output_reaches_gate_and_lost_workers_are_reported() {
                 .unwrap(),
         )
     };
-    std::fs::write(attempt.join("worker-slot_b.md"), "worker-result").unwrap();
+    std::fs::write(attempt.join("worker-seat_b.md"), "worker-result").unwrap();
     {
         let mut entries = seats.entries.lock().unwrap();
         let lead = entries
             .values_mut()
-            .find(|e| e.dispatch.slot_id == "slot_lead")
+            .find(|e| e.dispatch.seat_id == "seat_lead")
             .unwrap();
         lead.result = Some(DispatchResult {
             status: "ok".into(),
@@ -377,7 +392,7 @@ async fn controller_output_reaches_gate_and_lost_workers_are_reported() {
         lead.events.push(SeatEvent {
             key: "result".into(),
             seq: 3,
-            kind: "slot_result".into(),
+            kind: "seat_result".into(),
             data: data.as_object().unwrap().clone(),
         });
     }
@@ -400,7 +415,7 @@ async fn controller_output_reaches_gate_and_lost_workers_are_reported() {
     .await
     .expect("run reaches End");
     assert_eq!(
-        std::fs::read_to_string(attempt.join("worker-slot_b.md")).unwrap(),
+        std::fs::read_to_string(attempt.join("worker-seat_b.md")).unwrap(),
         "worker-result"
     );
     let ledger =
@@ -409,17 +424,17 @@ async fn controller_output_reaches_gate_and_lost_workers_are_reported() {
             .unwrap();
     assert!(ledger.iter().any(|e| e.kind == "worker_observation"
         && e.data["outcome"] == "gone"
-        && e.slot_id == "slot_a"));
+        && e.seat_id == "seat_a"));
     assert!(
         ledger
             .iter()
             .any(|e| e.kind == "gate_kind_result" && e.data["verdict"] == "pass")
     );
-    for slot in ["slot_a", "slot_b"] {
+    for seat in ["seat_a", "seat_b"] {
         assert!(
             ledger
                 .iter()
-                .any(|e| e.kind == "seat_cleanup" && e.slot_id == slot)
+                .any(|e| e.kind == "seat_cleanup" && e.seat_id == seat)
         );
     }
     drop(coordinator);
@@ -431,6 +446,10 @@ async fn controller_output_reaches_gate_and_lost_workers_are_reported() {
 static CLI_SEATS: Mutex<Option<Arc<LabSeats>>> = Mutex::new(None);
 struct CliSeatExecutor(tokio::runtime::Handle);
 impl ahjo_mission_engine::Executor for CliSeatExecutor {
+    fn seats(&self, run_id: &str) -> Result<Vec<AgentSeat>, ahjo_mission_engine::Error> {
+        CLI_SEATS.lock().unwrap().as_ref().unwrap().seats(run_id)
+    }
+
     fn execute_step(
         &self,
         execution: ahjo_mission_engine::StepExecution,
@@ -483,8 +502,8 @@ async fn cli_runs_orchestration_to_end_with_controller_and_worker_seats() {
     *CLI_SEATS.lock().unwrap() = Some(seats.clone());
     let mission = include_str!("parity/runs/missions/solo-lab.mission.toml")
         .replace("formation = \"solo\"", "formation = \"orchestrated\"")
-        .replace("id = \"slot_work\"", "id = \"slot_lead\"\ncontroller = true")
-        .replace("[[end]]", "[[step.slot]]\nid = \"slot_worker\"\nlabel = \"Worker\"\nharness = \"openai-codex\"\neffort = \"medium\"\n\n[[end]]");
+        .replace("id = \"seat_work\"", "id = \"seat_lead\"\ncontroller = true")
+        .replace("[[end]]", "[[step.seat]]\nid = \"seat_worker\"\nlabel = \"Worker\"\nharness = \"openai-codex\"\neffort = \"medium\"\n\n[[end]]");
     std::fs::create_dir_all(root.join("missions")).unwrap();
     std::fs::write(root.join("missions/hello.mission.toml"), mission).unwrap();
     let inspect = cli(&node, "mission", &["show", "hello"]).await;
@@ -502,7 +521,7 @@ async fn cli_runs_orchestration_to_end_with_controller_and_worker_seats() {
                 entries.len() == 2
                     && entries
                         .values()
-                        .any(|e| e.dispatch.slot_id == "slot_lead" && e.staged)
+                        .any(|e| e.dispatch.seat_id == "seat_lead" && e.staged)
             };
             if ready {
                 break;
@@ -512,33 +531,47 @@ async fn cli_runs_orchestration_to_end_with_controller_and_worker_seats() {
     })
     .await
     .expect("controller and worker prepared");
+    let shown_run = cli(&node, "run", &["show", run, "--seats"]).await;
+    {
+        let entries = seats.entries.lock().unwrap();
+        let shown_seats = shown_run["seats"].as_array().unwrap();
+        assert_eq!(shown_seats.len(), entries.len());
+        for entry in entries.values() {
+            let shown = shown_seats
+                .iter()
+                .find(|shown| shown["seat_id"] == entry.dispatch.seat_id)
+                .unwrap();
+            assert_eq!(shown["session"], entry.seat.session_name);
+            assert_eq!(shown["session_id"], entry.seat.session.session_id);
+        }
+    }
     {
         let mut entries = seats.entries.lock().unwrap();
         assert!(
             entries
                 .values()
-                .any(|e| e.dispatch.slot_id == "slot_worker" && !e.staged)
+                .any(|e| e.dispatch.seat_id == "seat_worker" && !e.staged)
         );
-        let slots = inspect["steps"]
+        let seats = inspect["steps"]
             .as_array()
             .unwrap()
             .iter()
             .find(|step| step["id"] == "fmn_work")
-            .unwrap()["slots"]
+            .unwrap()["seats"]
             .as_array()
             .unwrap();
-        assert_eq!(slots.len(), entries.len());
+        assert_eq!(seats.len(), entries.len());
         for entry in entries.values() {
-            let slot = slots
+            let seat = seats
                 .iter()
-                .find(|slot| slot["id"] == entry.dispatch.slot_id)
+                .find(|seat| seat["id"] == entry.dispatch.seat_id)
                 .unwrap();
-            assert_eq!(slot["session"], entry.dispatch.name);
-            assert_eq!(slot["session"], entry.seat.session_name);
+            assert_eq!(seat["session"], entry.dispatch.name);
+            assert_eq!(seat["session"], entry.seat.session_name);
         }
         let lead = entries
             .values_mut()
-            .find(|e| e.dispatch.slot_id == "slot_lead")
+            .find(|e| e.dispatch.seat_id == "seat_lead")
             .unwrap();
         let brief = std::fs::read_to_string(&lead.path).unwrap();
         assert!(brief.contains("hello-work-worker"));
@@ -550,7 +583,7 @@ async fn cli_runs_orchestration_to_end_with_controller_and_worker_seats() {
         lead.events.push(SeatEvent {
             key: "result".into(),
             seq: 3,
-            kind: "slot_result".into(),
+            kind: "seat_result".into(),
             data: data.as_object().unwrap().clone(),
         });
     }
@@ -567,7 +600,7 @@ async fn cli_runs_orchestration_to_end_with_controller_and_worker_seats() {
             .unwrap();
     {
         let entries = seats.entries.lock().unwrap();
-        for event in ledger.iter().filter(|event| event.kind == "slot_dispatch") {
+        for event in ledger.iter().filter(|event| event.kind == "seat_dispatch") {
             let id = event.data["dispatch_id"].as_str().unwrap();
             let session = &entries[id].seat.session_name;
             assert_eq!(event.data["session"], *session);
@@ -577,7 +610,7 @@ async fn cli_runs_orchestration_to_end_with_controller_and_worker_seats() {
     assert!(
         ledger
             .iter()
-            .any(|e| e.kind == "orchestration_team" && e.data["controller_slot"] == "slot_lead")
+            .any(|e| e.kind == "orchestration_team" && e.data["controller_seat"] == "seat_lead")
     );
     assert!(
         ledger

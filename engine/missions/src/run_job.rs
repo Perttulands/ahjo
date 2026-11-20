@@ -42,10 +42,13 @@ pub(crate) fn execute_step(
     )?;
     let bindings: BindingsSnapshot =
         toml::from_str(&source).map_err(|_| io::Error::other("persona_snapshot_invalid"))?;
-    for slot in &step.slots {
-        bindings
-            .binding(mission, id, &req.input_card_id, &node, slot)
+    for seat in &mut step.seats {
+        let binding = bindings
+            .binding(mission, id, &req.input_card_id, &node, seat)
             .map_err(io::Error::other)?;
+        seat.harness = binding.harness.parse().map_err(io::Error::other)?;
+        seat.model.clone_from(&binding.model);
+        seat.effort = binding.effort.parse().map_err(io::Error::other)?;
     }
     if control.stopping.load(Ordering::Acquire) {
         return Err(io::Error::new(
@@ -150,7 +153,7 @@ pub(crate) fn execute_step(
                 attempt,
                 serde_json::Value::Object(evt.data),
             );
-            record.slot_id = evt.slot_id;
+            record.seat_id = evt.seat_id;
             let result = c.append(id, record).map_err(|e| e.to_string());
             let _ = pending.ack.send(result);
             continue;
@@ -163,18 +166,18 @@ pub(crate) fn execute_step(
                 .unwrap_or("")
                 .to_owned();
             let invalid = match evt.kind.as_str() {
-                "slot_dispatch" => {
+                "seat_dispatch" => {
                     if !dispatch_id.is_empty()
                         && !dispatches.contains_key(&dispatch_id)
-                        && step.slots.iter().any(|slot| slot.id == evt.slot_id)
+                        && step.seats.iter().any(|seat| seat.id == evt.seat_id)
                     {
                         ""
                     } else {
                         "unknown_dispatch"
                     }
                 }
-                "slot_result" => {
-                    if dispatches.get(&dispatch_id) != Some(&evt.slot_id) {
+                "seat_result" => {
+                    if dispatches.get(&dispatch_id) != Some(&evt.seat_id) {
                         "unknown_dispatch"
                     } else if evt
                         .data
@@ -203,26 +206,26 @@ pub(crate) fn execute_step(
                     attempt,
                     serde_json::Value::Object(evt.data),
                 );
-                warning.slot_id = evt.slot_id;
+                warning.seat_id = evt.seat_id;
                 let _ = pending.ack.send(claim_warning(c, id, control, warning));
                 continue;
             }
             let kind = evt.kind.clone();
-            let slot_id = evt.slot_id.clone();
+            let seat_id = evt.seat_id.clone();
             let mut e = event(
                 &evt.kind,
                 &node,
                 attempt,
                 serde_json::Value::Object(evt.data),
             );
-            e.slot_id = evt.slot_id;
+            e.seat_id = evt.seat_id;
             match crate::run_worker::append_live(c, id, control, e) {
                 Ok(true) => {
-                    if kind == "slot_dispatch" {
-                        dispatches.insert(dispatch_id, slot_id);
-                    } else if kind == "slot_result" {
+                    if kind == "seat_dispatch" {
+                        dispatches.insert(dispatch_id, seat_id);
+                    } else if kind == "seat_result" {
                         dispatches.remove(&dispatch_id);
-                        completed.insert(slot_id);
+                        completed.insert(seat_id);
                     }
                     let _ = pending.ack.send(Ok(()));
                 }
@@ -263,11 +266,11 @@ pub(crate) fn execute_step(
     if !dispatches.is_empty() {
         return Err(io::Error::other("step has unfinished dispatches"));
     }
-    if step.slots.iter().any(|slot| {
-        (step.formation != ahjo_mission_model::Formation::Orchestrated || slot.controller)
-            && !completed.contains(&slot.id)
+    if step.seats.iter().any(|seat| {
+        (step.formation != ahjo_mission_model::Formation::Orchestrated || seat.controller)
+            && !completed.contains(&seat.id)
     }) {
-        return Err(io::Error::other("step has missing slot results"));
+        return Err(io::Error::other("step has missing seat results"));
     }
     for port in &step.outputs {
         if !result.outputs.contains_key(&port.id) {

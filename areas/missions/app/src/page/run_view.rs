@@ -550,9 +550,16 @@ impl MissionsPage {
                 .iter()
                 .find(|f| f.id == step.id)
                 .map(|f| {
-                    f.slots
+                    f.seats
                         .iter()
-                        .map(words::who)
+                        .map(|seat| {
+                            words::who(
+                                seat,
+                                self.agents.as_ref().and_then(|catalog| {
+                                    catalog.agents.iter().find(|agent| agent.id == seat.agent)
+                                }),
+                            )
+                        })
                         .collect::<Vec<_>>()
                         .join(", ")
                 })

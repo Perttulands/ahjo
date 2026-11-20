@@ -413,7 +413,7 @@ fn accept_editor_operation(
         MissionChange::UpdateStep {
             device: Some(_), ..
         } => accept(2..3),
-        MissionChange::AssignSlot { .. } => accept(10..14),
+        MissionChange::StaffSeat { .. } => accept(10..14),
         MissionChange::UpdatePort { .. } => accept(14..16),
         MissionChange::UpdateLimit(_) => accept(16..22),
         MissionChange::UpdateInputCard(_) => {
@@ -532,20 +532,12 @@ pub(super) fn update_limit_patch(
     }))
 }
 
-pub(super) fn step_formation_patch(id: &str, kind: Formation, slot: &str) -> MissionChange {
+pub(super) fn step_formation_patch(id: &str, kind: Formation, seat: &str) -> MissionChange {
     MissionChange::SetStepFormation {
         id: id.into(),
         formation: kind,
-        keep_slot_id: slot.into(),
-        slots: None,
-    }
-}
-
-pub(super) fn name_agent_patch(id: &str, slot: &str, agent: &str) -> MissionChange {
-    MissionChange::NameAgent {
-        step_id: id.into(),
-        slot_id: slot.into(),
-        agent: agent.into(),
+        keep_seat_id: seat.into(),
+        seats: None,
     }
 }
 
@@ -576,16 +568,15 @@ mod tests {
     fn immediate_board_edits_decode() {
         for patch in [
             session_patch("step", true),
-            step_formation_patch("step", Formation::Peer, "slot"),
-            name_agent_patch("step", "slot", "writer"),
+            step_formation_patch("step", Formation::Peer, "seat"),
             device_patch("step", "node/environment"),
             crate::store::staffing::Staffing {
-                agent_id: "planner".into(),
+                agent: "planner".into(),
                 harness: ahjo_missions_contract::Harness::ClaudeCode,
                 model: "opus".into(),
                 effort: ahjo_missions_contract::Effort::High,
             }
-            .assign("step", "slot"),
+            .assign("step", "seat"),
             add_limit_patch("step"),
             delete_limit_patch("limit"),
             update_limit_patch("limit", "Cap", "stop", ["3", "90", "", "200"]).unwrap(),

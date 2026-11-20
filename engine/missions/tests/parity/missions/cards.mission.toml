@@ -1,5 +1,5 @@
 # Parity fixture: several Input cards, human channels and reference files.
-schema = 3
+schema = 4
 id = "msn_cards"
 slug = "cards"
 title = "Cards"
@@ -27,7 +27,7 @@ files = ["relative/brief.md", "/nonexistent/ahjo-64/brief.md"]
 id = "in"
 [[step.output]]
 id = "out"
-[[step.slot]]
+[[step.seat]]
 id = "a"
 harness = "claude-code"
 effort = "low"

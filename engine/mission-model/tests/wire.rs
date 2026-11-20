@@ -45,7 +45,7 @@ fn responses_read_back_with_their_empty_fields_left_out() {
         "block_code": "limit_spent", "started_by": "human:operator",
         "started_at": "2026-11-11T00:00:00Z", "updated_at": "2026-11-11T00:00:01Z",
         "input_excerpt": "hi", "outputs": [],
-        "sessions": [{"session_name": "ahjo-a", "node_id": "fmn_a", "slot_id": "w1"}]
+        "sessions": [{"session_name": "ahjo-a", "node_id": "fmn_a", "seat_id": "w1"}]
     }]));
     reads_back::<RunAttempts>(json!({"run_id": "run_a", "steps": [{
         "node_id": "fmn_a", "title": "Plan",

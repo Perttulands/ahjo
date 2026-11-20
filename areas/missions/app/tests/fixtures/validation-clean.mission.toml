@@ -1,4 +1,4 @@
-schema = 3
+schema = 4
 id = "msn_clean"
 slug = "clean"
 title = "Clean delivery"
@@ -19,10 +19,10 @@ label = "Input"
 [[step.output]]
 id = "out"
 label = "Result"
-[[step.slot]]
-id = "slot_work"
+[[step.seat]]
+id = "seat_work"
 label = "Worker"
-agent_id = "builder"
+agent = "builder"
 harness = "openai-codex"
 effort = "medium"
 [[gate]]

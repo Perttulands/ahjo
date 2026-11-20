@@ -21,7 +21,7 @@ fn lab_judge_routes_a_synthetic_verdict() {
         .next()
         .unwrap()
         .replace("fmn_work", "fmn_judge")
-        .replace("slot_work", "slot_judge");
+        .replace("seat_work", "seat_judge");
     let mission = solo.replace("to = \"end_done:in\"", "to = \"gate_review:in\"");
     let mission = format!(
         "{mission}\n[[step]]{judge}\n[[gate]]\nid = \"gate_review\"\ntitle = \"Review\"\nkinds = [\"step\"]\n\n[[end]]\nid = \"end_rejected\"\ntitle = \"Rejected\"\noutcome = \"rejected\"\n\n[[connection]]\nid = \"edge_pass\"\nfrom = \"gate_review:pass\"\nto = \"end_done:in\"\n\n[[connection]]\nid = \"edge_fail\"\nfrom = \"gate_review:fail\"\nto = \"end_rejected:in\"\n\n[[connection]]\nid = \"edge_judge\"\nfrom = \"gate_review:judge\"\nto = \"fmn_judge:port_in\"\n\n[[connection]]\nid = \"edge_return\"\nfrom = \"fmn_judge:port_out\"\nto = \"gate_review:judge\"\n"
@@ -210,7 +210,7 @@ fn judge_gets_one_correction_on_its_existing_attempt() {
         .next()
         .unwrap()
         .replace("fmn_work", "fmn_judge")
-        .replace("slot_work", "slot_judge");
+        .replace("seat_work", "seat_judge");
     let mission = format!(
         "{}\n[[step]]{judge}\n[[connection]]\nid = \"edge_judge\"\nfrom = \"gate_review:judge\"\nto = \"fmn_judge:port_in\"\n[[connection]]\nid = \"edge_return\"\nfrom = \"fmn_judge:port_out\"\nto = \"gate_review:judge\"\n",
         gated_mission("kinds = [\"step\"]")
@@ -265,10 +265,10 @@ fn resuming_invalid_final_judge_keeps_the_earlier_review() {
         .unwrap();
     let j1 = judge
         .replace("fmn_work", "fmn_judge1")
-        .replace("slot_work", "slot_judge1");
+        .replace("seat_work", "seat_judge1");
     let j2 = judge
         .replace("fmn_work", "fmn_judge2")
-        .replace("slot_work", "slot_judge2");
+        .replace("seat_work", "seat_judge2");
     let mission = format!(
         "{}\n[[step]]{j1}\n[[step]]{j2}\n[[connection]]\nid = \"edge_judge\"\nfrom = \"gate_review:judge\"\nto = \"fmn_judge1:port_in\"\n[[connection]]\nid = \"edge_chain\"\nfrom = \"fmn_judge1:port_out\"\nto = \"fmn_judge2:port_in\"\n[[connection]]\nid = \"edge_return\"\nfrom = \"fmn_judge2:port_out\"\nto = \"gate_review:judge\"\n",
         gated_mission("kinds = [\"step\"]")
@@ -349,7 +349,7 @@ fn judge_fail_pushes_back_typed_feedback_before_a_later_pass() {
         .next()
         .unwrap()
         .replace("fmn_work", "fmn_judge")
-        .replace("slot_work", "slot_judge");
+        .replace("seat_work", "seat_judge");
     let mission = gated_mission("kinds = [\"step\"]")
         .replace("to = \"end_rejected:in\"", "to = \"fmn_work:port_in\"");
     let mission = format!(
@@ -534,10 +534,10 @@ fn concurrent_judge_and_step_publish_only_their_own_files() {
         .unwrap();
     let judge = step
         .replace("fmn_work", "fmn_judge")
-        .replace("slot_work", "slot_judge");
+        .replace("seat_work", "seat_judge");
     let other = step
         .replace("fmn_work", "fmn_other")
-        .replace("slot_work", "slot_other");
+        .replace("seat_work", "seat_other");
     let mission = gated_mission("kinds = [\"step\"]")
         + &format!(
             "\n[[step]]{judge}\n[[step]]{other}\n[[connection]]\nid = \"edge_judge\"\nfrom = \"gate_review:judge\"\nto = \"fmn_judge:port_in\"\n[[connection]]\nid = \"edge_return\"\nfrom = \"fmn_judge:port_out\"\nto = \"gate_review:judge\"\n[[connection]]\nid = \"edge_other\"\nfrom = \"inp_hello:out\"\nto = \"fmn_other:port_in\"\n[[connection]]\nid = \"edge_other_end\"\nfrom = \"fmn_other:port_out\"\nto = \"end_done:in\"\n"

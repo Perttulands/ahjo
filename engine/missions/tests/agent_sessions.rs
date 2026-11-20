@@ -18,7 +18,7 @@ fn dispatch_in(id: &str, name: &str, keep: bool, cwd: impl Into<std::path::PathB
         id: id.into(),
         run_id: "run_1".into(),
         node_id: "fmn_write".into(),
-        slot_id: "slot_1".into(),
+        seat_id: "seat_1".into(),
         name: name.into(),
         harness: "pi".into(),
         model: String::new(),

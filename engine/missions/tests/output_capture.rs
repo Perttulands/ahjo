@@ -69,17 +69,17 @@ impl Executor for Output {
     ) -> Result<StepResult, ahjo_mission_engine::Error> {
         (|| -> Result<StepResult, String> {
             self.count.fetch_add(1, Ordering::SeqCst);
-            let slot = req.step.slots[0].id.clone();
+            let seat = req.step.seats[0].id.clone();
             for (kind, data) in [
-                ("slot_dispatch", json!({"dispatch_id":"test"})),
+                ("seat_dispatch", json!({"dispatch_id":"test"})),
                 (
-                    "slot_result",
+                    "seat_result",
                     json!({"dispatch_id":"test","sentinel":{"run_id":req.run_id,"status":"ok"}}),
                 ),
             ] {
                 sink.emit(ExecutionEvent {
                     kind: kind.into(),
-                    slot_id: slot.clone(),
+                    seat_id: seat.clone(),
                     data: data.as_object().unwrap().clone(),
                 })
                 .map_err(|error| error.message)?;
@@ -129,7 +129,7 @@ fn failed_capture_after_reattach_remains_redispatchable() {
     let cut = lines
         .iter()
         .position(|line| {
-            serde_json::from_str::<serde_json::Value>(line).unwrap()["type"] == "slot_dispatch"
+            serde_json::from_str::<serde_json::Value>(line).unwrap()["type"] == "seat_dispatch"
         })
         .unwrap();
     std::fs::write(&path, lines[..=cut].join("\n") + "\n").unwrap();

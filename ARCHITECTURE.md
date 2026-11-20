@@ -149,9 +149,9 @@ real list, and `ahjo kinds` prints who owns which kinds.
   session in Swarm's Send to Session.
 - **Provided interfaces.** What one area offers others is a narrow trait that
   lives with its provider's contract or engine crate, never in `node-kit`. The
-  provider fills the slot keyed by that trait (`setup.provided.provide`) while
-  it is built; a reader answers `Built::then` and reads the slot once every
-  area is built, so the order of `AREAS` never matters. A slot filled twice is
+  provider fills the interface keyed by that trait (`setup.provided.provide`) while
+  it is built; a reader answers `Built::then` and reads the interface once every
+  area is built, so the order of `AREAS` never matters. An interface filled twice is
   refused, and an empty one reads as `not_provided`. `Sessions` (in
   `engine/term`: list, follow, deliver to, start, and run a mission's seats)
   is the first; terminals provides it. `Resolver` (in `areas/work/contract`:

@@ -34,7 +34,7 @@ fn arrangements_match_the_goldens() {
                 for (from, to) in [
                     ("inputs", "input"),
                     ("outputs", "output"),
-                    ("slots", "slot"),
+                    ("seats", "seat"),
                 ] {
                     if let Some(value) = object.remove(from) {
                         object.insert(to.into(), value);

@@ -390,7 +390,7 @@ async fn areas_read_what_others_provide_in_any_order() {
     )
     .await
     {
-        Ok(_) => panic!("an area read a slot while areas were being built"),
+        Ok(_) => panic!("an area read a interface while areas were being built"),
         Err(error) => format!("{error:#}"),
     };
     assert!(error.contains("Built::then"), "{error}");

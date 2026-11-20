@@ -93,11 +93,11 @@ async fn seats(State(c): State<Coordinator>, Path(id): Path<String>) -> ResultRe
 pub(super) fn seat_wire(seat: ahjo_mission_engine::AgentSeat) -> contract::AgentSeat {
     contract::AgentSeat {
         dispatch_id: seat.dispatch_id,
-        slot_id: seat.slot_id,
+        seat_id: seat.seat_id,
         node: seat.node,
-        session: seat.session,
+        session: seat.session_name,
+        session_id: seat.session,
         pane: seat.pane,
-        session_name: seat.session_name,
         outcome: seat.outcome,
         available: seat.available,
         waiting: seat.waiting.map(|wait| contract::SeatWait {

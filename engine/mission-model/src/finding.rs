@@ -10,9 +10,9 @@ pub enum Code {
     DanglingConnection,
     DuplicateInputProducer,
     DuplicateNodeId,
-    DuplicateSlotId,
+    DuplicateSeatId,
     EmptyLimit,
-    StepWithoutSlots,
+    StepWithoutSeats,
     GateNotRoutable,
     InvalidEnd,
     InvalidStepShape,
@@ -22,8 +22,8 @@ pub enum Code {
     InvalidMissionInput,
     InvalidMissionOutput,
     InvalidPortKind,
-    InvalidSlotId,
-    InvalidSlotSettings,
+    InvalidSeatId,
+    InvalidSeatSettings,
     MissingFile,
     NoCheckout,
     PlacementWithoutRepository,
@@ -46,7 +46,7 @@ pub enum Code {
     InvalidInput,
     InputWithoutProducer,
     UnreachableNode,
-    UnstaffedSlot,
+    UnstaffedSeat,
 }
 
 impl Code {
@@ -55,9 +55,9 @@ impl Code {
             Code::DanglingConnection => "dangling_connection",
             Code::DuplicateInputProducer => "duplicate_input_producer",
             Code::DuplicateNodeId => "duplicate_node_id",
-            Code::DuplicateSlotId => "duplicate_slot_id",
+            Code::DuplicateSeatId => "duplicate_seat_id",
             Code::EmptyLimit => "empty_limit",
-            Code::StepWithoutSlots => "step_without_slots",
+            Code::StepWithoutSeats => "step_without_seats",
             Code::GateNotRoutable => "gate_not_routable",
             Code::InvalidEnd => "invalid_end",
             Code::InvalidStepShape => "invalid_step_shape",
@@ -67,8 +67,8 @@ impl Code {
             Code::InvalidMissionInput => "invalid_mission_input",
             Code::InvalidMissionOutput => "invalid_mission_output",
             Code::InvalidPortKind => "invalid_port_kind",
-            Code::InvalidSlotId => "invalid_slot_id",
-            Code::InvalidSlotSettings => "invalid_slot_settings",
+            Code::InvalidSeatId => "invalid_seat_id",
+            Code::InvalidSeatSettings => "invalid_seat_settings",
             Code::MissingFile => "missing_file",
             Code::NoCheckout => "no_checkout",
             Code::PlacementWithoutRepository => "placement_without_repository",
@@ -91,7 +91,7 @@ impl Code {
             Code::InvalidInput => "invalid_input",
             Code::InputWithoutProducer => "input_without_producer",
             Code::UnreachableNode => "unreachable_node",
-            Code::UnstaffedSlot => "unstaffed_slot",
+            Code::UnstaffedSeat => "unstaffed_seat",
         }
     }
 }

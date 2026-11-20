@@ -16,7 +16,7 @@ pub struct Dispatch {
     pub id: String,
     pub run_id: String,
     pub node_id: String,
-    pub slot_id: String,
+    pub seat_id: String,
     /// The readable stem of the seat's session name; blank names it by ids.
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub name: String,
@@ -85,7 +85,7 @@ impl SeatId {
 #[serde(rename_all = "snake_case")]
 pub struct AgentSeat {
     pub dispatch_id: String,
-    pub slot_id: String,
+    pub seat_id: String,
     pub node: String,
     pub session: String,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -267,7 +267,7 @@ impl SeatRecords {
                                 event.kind.as_str(),
                                 "seat_created"
                                     | "seat_prompt_consumed"
-                                    | "slot_result"
+                                    | "seat_result"
                                     | "seat_cleanup"
                                     | "seat_state"
                                     | "seat_idle_recovery"
@@ -301,7 +301,7 @@ impl SeatRecords {
                         });
                     Ok(Some(AgentSeat {
                         dispatch_id: record.dispatch.id.clone(),
-                        slot_id: record.dispatch.slot_id.clone(),
+                        seat_id: record.dispatch.seat_id.clone(),
                         node: seat.node.clone(),
                         session: seat.session.session_id.clone(),
                         pane: Some(seat.session.pane_id),
@@ -485,8 +485,20 @@ impl SeatRecords {
 }
 fn read(path: &Path) -> io::Result<Record> {
     let mut value: Value = serde_json::from_slice(&fs::read(path)?)?;
-    let migrated = value["dispatch"].get("runId").is_some()
+    let mut migrated = value["dispatch"].get("runId").is_some()
         && crate::ledger_migrate::rename_json_keys(&mut value)?;
+    if let Some(dispatch) = value.get_mut("dispatch").and_then(Value::as_object_mut) {
+        migrated |= crate::ledger_migrate::rename_seat_fields(dispatch)?;
+    }
+    if let Some(events) = value.get_mut("events").and_then(Value::as_array_mut) {
+        for event in events {
+            migrated |= crate::ledger_migrate::rename_seat_event(event, "kind")?;
+            if event["key"] == "slot-result" {
+                event["key"] = Value::String("seat-result".into());
+                migrated = true;
+            }
+        }
+    }
     let record = serde_json::from_value(value)
         .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
     if migrated {
@@ -558,7 +570,7 @@ mod tests {
             id: "dsp_test".into(),
             run_id: "run_1".into(),
             node_id: "step".into(),
-            slot_id: "worker".into(),
+            seat_id: "worker".into(),
             name: String::new(),
             harness: "pi".into(),
             model: "model".into(),
@@ -571,6 +583,37 @@ mod tests {
             turn: None,
         }
     }
+    #[test]
+    fn an_old_dispatch_keeps_its_identity_and_result_after_upgrade() {
+        let dir = scratch();
+        let store = SeatRecords::new(&dir);
+        let dispatch = request();
+        store.create(&dispatch).unwrap();
+        let path = dir.join("seats/dsp_test/dispatch.json");
+        let mut legacy: Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+        let fields = legacy["dispatch"].as_object_mut().unwrap();
+        let id = fields.remove("seat_id").unwrap();
+        fields.insert("slot_id".into(), id);
+        legacy["events"] = serde_json::json!([{
+            "key": "slot-result",
+            "seq": 1,
+            "kind": "slot_result",
+            "data": {"slot_id":"worker","status":"ok","sentinel":{"artifact":"slot-result"}}
+        }]);
+        fs::write(&path, serde_json::to_vec(&legacy).unwrap()).unwrap();
+
+        assert_eq!(store.dispatch("dsp_test").unwrap(), dispatch);
+        let current = store.events("dsp_test", 0).unwrap();
+        assert_eq!(current.len(), 1);
+        let result = &current[0];
+        assert_eq!(result.kind, "seat_result");
+        assert_eq!(result.key, "seat-result");
+        assert_eq!(result.data["seat_id"], "worker");
+        assert_eq!(result.data["sentinel"]["artifact"], "slot-result");
+        assert!(fs::read_to_string(path).unwrap().contains("\"seat_id\""));
+        fs::remove_dir_all(dir).unwrap();
+    }
+
     #[test]
     fn forgetting_a_run_removes_only_its_dispatch_folders() {
         let dir = scratch();

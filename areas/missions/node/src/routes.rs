@@ -54,10 +54,10 @@ impl From<ahjo_core::Error> for ApiError {
             | "input_occupied"
             | "duplicate_connection"
             | "not_pending"
-            | "slot_choice_required" => StatusCode::CONFLICT,
+            | "seat_choice_required" => StatusCode::CONFLICT,
             "precondition_required" => StatusCode::PRECONDITION_REQUIRED,
             "invalid_code_gate_profile"
-            | "invalid_slot_settings"
+            | "invalid_seat_settings"
             | "invalid_definition_source"
             | "unsupported_schema"
             | "self_wire" => StatusCode::UNPROCESSABLE_ENTITY,
@@ -401,7 +401,7 @@ mod error_tests {
     #[test]
     fn authoring_errors_keep_their_http_boundaries() {
         for (code, status) in [
-            ("slot_choice_required", StatusCode::CONFLICT),
+            ("seat_choice_required", StatusCode::CONFLICT),
             ("input_occupied", StatusCode::CONFLICT),
             ("duplicate_connection", StatusCode::CONFLICT),
             ("not_found", StatusCode::NOT_FOUND),

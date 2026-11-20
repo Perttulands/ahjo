@@ -3,13 +3,14 @@
 use std::collections::BTreeSet;
 
 use ahjo_missions_contract::{
-    Finding, MISSION_THREAD, Mission, Notes, Slot, Step, agent_session,
+    Finding, MISSION_THREAD, Mission, Notes, Seat, Step,
     commands::{
-        HandoverEnd, HandoverInput, HandoverJudge, HandoverLimit, HandoverNote, HandoverSlot,
+        HandoverEnd, HandoverInput, HandoverJudge, HandoverLimit, HandoverNote, HandoverSeat,
         HandoverStep, HandoverStepDetail, HandoverWire, HandoverWorker, MissionHandover,
         RemovedThread,
     },
     flow::{self, Decider, FlowStepKind, Target},
+    seat_session,
 };
 
 use crate::commands::shell_word;
@@ -17,6 +18,7 @@ use crate::commands::shell_word;
 pub fn handover(
     node: String,
     mission: &Mission,
+    agents: &ahjo_mission_engine::AgentStore,
     notes: &Notes,
     errors: &[Finding],
     warnings: &[Finding],
@@ -107,7 +109,7 @@ pub fn handover(
                             .join(", ")
                     });
                     HandoverStepDetail::Step {
-                        worker: worker(&prefix, work_step, true),
+                        worker: worker(&prefix, work_step, agents, true),
                         next: Some(or_nothing(targets(next))),
                         alongside,
                     }
@@ -136,7 +138,7 @@ pub fn handover(
                             placed.insert(judge.as_str());
                             Some(HandoverJudge {
                                 id: judge.clone(),
-                                worker: worker(&prefix, step, true),
+                                worker: worker(&prefix, step, agents, true),
                                 notes: thread(notes, judge),
                             })
                         })
@@ -174,7 +176,7 @@ pub fn handover(
                 id: step.id.clone(),
                 unreached: true,
                 detail: HandoverStepDetail::Step {
-                    worker: worker(&prefix, step, false),
+                    worker: worker(&prefix, step, agents, false),
                     next: None,
                     alongside: None,
                 },
@@ -316,16 +318,29 @@ fn minute(at: &str) -> String {
 
 /// The named session each seat asks for. A fresh step gets a run- and
 /// attempt-specific session when it executes.
-fn worker(prefix: &str, step: &Step, include_brief: bool) -> HandoverWorker {
+fn worker(
+    prefix: &str,
+    step: &Step,
+    agents: &ahjo_mission_engine::AgentStore,
+    include_brief: bool,
+) -> HandoverWorker {
     HandoverWorker {
         step: step.title.clone(),
-        who: who(&step.slots),
-        slots: step
-            .slots
+        who: who(&step.seats, agents),
+        seats: step
+            .seats
             .iter()
-            .map(|slot| HandoverSlot {
-                id: slot.id.clone(),
-                session: agent_session(prefix, &step.agent_of(slot)),
+            .map(|seat| {
+                let agent = agents.read(&seat.agent).ok();
+                let settings = seat.settings(agent.as_ref());
+                HandoverSeat {
+                    id: seat.id.clone(),
+                    agent: seat.agent.clone(),
+                    harness: settings.harness,
+                    model: settings.model,
+                    effort: settings.effort,
+                    session: seat_session(prefix, &step.session_part(seat)),
+                }
             })
             .collect(),
         fresh: step.fresh,
@@ -338,36 +353,37 @@ fn worker(prefix: &str, step: &Step, include_brief: bool) -> HandoverWorker {
     }
 }
 
-/// Who works a step, slot by slot: `maker: claude-code haiku low as builder`.
-fn who(slots: &[Slot]) -> String {
-    if slots.is_empty() {
+/// Who works a step, seat by seat: `maker: claude-code haiku low as builder`.
+fn who(seats: &[Seat], agents: &ahjo_mission_engine::AgentStore) -> String {
+    if seats.is_empty() {
         return "nobody".into();
     }
-    slots
+    seats
         .iter()
-        .map(|slot| {
-            if !slot.staffed() {
-                return format!("{}: not staffed", slot.name());
+        .map(|seat| {
+            if !seat.staffed() {
+                return format!("{}: not staffed", seat.name());
             }
-            let mut words = vec![if slot.agent.is_empty() {
-                slot.label.clone()
-            } else {
-                slot.agent.clone()
-            }];
-            words[0].push(':');
+            let agent = agents.read(&seat.agent).ok();
+            let settings = seat.settings(agent.as_ref());
+            let mut words = vec![format!("{}:", seat.name())];
+            if !seat.agent.is_empty() {
+                words.push(
+                    agent
+                        .as_ref()
+                        .map_or(seat.agent.clone(), |agent| agent.name.clone()),
+                );
+            }
             for part in [
-                slot.harness.as_str(),
-                slot.model.as_str(),
-                slot.effort.as_str(),
+                settings.harness.as_str(),
+                settings.model.as_str(),
+                settings.effort.as_str(),
             ] {
                 if !part.is_empty() {
                     words.push(part.to_owned());
                 }
             }
-            if !slot.agent_id.is_empty() {
-                words.push(format!("as {}", slot.agent_id));
-            }
-            if slot.controller {
+            if seat.controller {
                 words.push("(controller)".into());
             }
             words.join(" ")

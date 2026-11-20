@@ -335,8 +335,8 @@ async fn mission_edit_rejects_an_unknown_agent_and_uses_work_in_both_brief_opera
     let before = inspect().await.unwrap();
     let step = &before["mission"]["step"][0];
     let id = &step["id"];
-    let change = json!({"assign_slot":{
-        "step_id": id, "slot_id": step["slot"][0]["id"],
+    let change = json!({"staff_seat":{
+        "step_id": id, "seat_id": step["seat"][0]["id"],
         "role": "planner", "harness": "claude-code", "effort": "high"
     }});
     let error = node
@@ -346,7 +346,7 @@ async fn mission_edit_rejects_an_unknown_agent_and_uses_work_in_both_brief_opera
     assert_eq!(error.code, "invalid_argument");
     assert_eq!(
         error.message,
-        "assign_slot: unknown field role; accepted fields: step_id, slot_id, agent_id, harness, model, effort; accepted fields: mission, change, rev",
+        "staff_seat: unknown field role; accepted fields: step_id, seat_id, agent, harness, model, effort; accepted fields: mission, change, rev",
     );
     let args = vec![
         "edit".into(),
@@ -524,7 +524,7 @@ async fn author_and_run_with_tools() {
     assert_eq!(rejected.code, "run_admission_failed");
     assert!(
         rejected.message.contains("missing_input")
-            && rejected.message.contains("step_without_slots")
+            && rejected.message.contains("step_without_seats")
     );
     let started = node
         .call(
@@ -1348,5 +1348,118 @@ async fn mission_edit_batches_commit_once_or_leave_the_mission_and_layout_untouc
         .unwrap_err();
     assert_eq!(stale.code, "conflict");
     assert_eq!(layout().await.unwrap(), after_layout);
+    node.stop().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn mission_show_resolves_seat_settings_and_names_the_session() {
+    let node = Node::start(&[sessions::LISTING, ahjo_work::LISTING, LAB], "")
+        .await
+        .unwrap();
+    node.call(
+        "mission_create",
+        json!({"slug":"seat-demo","example":"write-and-review"}),
+    )
+    .await
+    .unwrap();
+
+    node.call(
+        "mission_edit",
+        json!({"mission":"seat-demo","change":{"staff_seat":{
+            "step_id":"fmn_write", "seat_id":"seat_write", "agent":"builder"
+        }}}),
+    )
+    .await
+    .unwrap();
+
+    let before = node
+        .call("mission_show", json!({"mission":"seat-demo","full":true}))
+        .await
+        .unwrap();
+    for change in [
+        json!({"name_agent":{"step_id":"fmn_write","seat_id":"seat_write","agent":"legacy"}}),
+        json!({"staff_seat":{"step_id":"fmn_write","seat_id":"seat_write","agent_id":"builder"}}),
+    ] {
+        let error = node
+            .call(
+                "mission_edit",
+                json!({"mission":"seat-demo","change":change}),
+            )
+            .await
+            .unwrap_err();
+        assert_eq!(error.code, "invalid_argument");
+        assert_eq!(
+            node.call("mission_show", json!({"mission":"seat-demo","full":true}))
+                .await
+                .unwrap(),
+            before
+        );
+    }
+
+    let summary = node
+        .call("mission_show", json!({"mission":"seat-demo"}))
+        .await
+        .unwrap();
+    let step = summary["steps"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|step| step["id"] == "fmn_write")
+        .unwrap();
+    let seat = &step["seats"][0];
+    assert_eq!(seat["id"], "seat_write");
+    assert_eq!(seat["agent"], "builder");
+    assert_eq!(seat["harness"], "claude-code");
+    assert_eq!(seat["model"], "");
+    assert_eq!(seat["effort"], "medium");
+    assert_eq!(seat["session"], "seatdemo-write");
+
+    let mut stdout = Vec::new();
+    let args = vec![
+        "show".into(),
+        "seat-demo".into(),
+        "--json".into(),
+        "--node".into(),
+        format!("{}/", node.url()),
+    ];
+    assert_eq!(
+        ahjo_node_kit::cli::run("mission", &args, &mut stdout)
+            .await
+            .unwrap(),
+        0
+    );
+    let cli: serde_json::Value = serde_json::from_slice(&stdout).unwrap();
+    assert_eq!(cli["steps"], summary["steps"]);
+
+    node.call(
+        "mission_edit",
+        json!({"mission":"seat-demo","change":{"staff_seat":{
+            "step_id":"fmn_write", "seat_id":"seat_write", "agent":"builder",
+            "harness":"openai-codex", "effort":"ultra"
+        }}}),
+    )
+    .await
+    .unwrap();
+    node.call(
+        "mission_edit",
+        json!({"mission":"seat-demo","change":{"update_step":{"id":"fmn_write","fresh":true}}}),
+    )
+    .await
+    .unwrap();
+    let summary = node
+        .call("mission_show", json!({"mission":"seat-demo"}))
+        .await
+        .unwrap();
+    let step = summary["steps"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|step| step["id"] == "fmn_write")
+        .unwrap();
+    assert_eq!(step["fresh"], true);
+    assert_eq!(step["seats"][0]["agent"], "builder");
+    assert_eq!(step["seats"][0]["harness"], "openai-codex");
+    assert_eq!(step["seats"][0]["effort"], "ultra");
+    assert_eq!(step["seats"][0]["session"], "seatdemo-write");
     node.stop().await;
 }

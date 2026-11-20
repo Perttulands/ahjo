@@ -77,7 +77,7 @@ async fn document_commands_keep_bytes_and_reject_a_missing_or_stale_revision() {
     assert_eq!(std::fs::read(&path).unwrap(), source.as_bytes());
     let model = Mission::parse(&source).unwrap();
     assert_eq!(model.id, "msn_example");
-    assert_eq!(model.steps[0].slots[0].id, "slot_write");
+    assert_eq!(model.steps[0].seats[0].id, "seat_write");
     let layout = stored_layout(&node, "post").await;
     assert!(layout.nodes.iter().any(|n| n.id == "fmn_write"));
 
@@ -86,7 +86,7 @@ async fn document_commands_keep_bytes_and_reject_a_missing_or_stale_revision() {
     let json_export: Value =
         serde_json::from_slice(&cli_mission(&node, &["export", "post", "--json"]).await).unwrap();
     assert_eq!(json_export["rev"], 1);
-    assert_eq!(json_export["step"][0]["slot"][0]["id"], "slot_write");
+    assert_eq!(json_export["step"][0]["seat"][0]["id"], "seat_write");
     assert!(json_export.get("input_card").is_some());
     assert!(json_export.get("document").is_none());
     std::fs::write(&file, &exported).unwrap();
@@ -124,7 +124,7 @@ async fn document_commands_keep_bytes_and_reject_a_missing_or_stale_revision() {
 #[tokio::test(flavor = "multi_thread")]
 async fn apply_reports_assigned_ids_and_draft_errors_and_previews_without_writes() {
     let node = Node::start(AREAS, "").await.unwrap();
-    let document = r#"schema = 3
+    let document = r#"schema = 4
 slug = "draft"
 title = "Sample draft"
 step = [
@@ -200,7 +200,7 @@ step = [
 #[tokio::test(flavor = "multi_thread")]
 async fn apply_keeps_a_card_with_an_open_note_and_removes_its_position_after_resolution() {
     let node = Node::start(AREAS, "").await.unwrap();
-    let document = r#"schema = 3
+    let document = r#"schema = 4
 id = "mission_notes"
 slug = "noted"
 title = "Noted"
@@ -216,7 +216,7 @@ title = "Old card"
     })).await.unwrap();
     let note = notes["note"].as_str().unwrap();
     let removal =
-        "schema = 3\nid = \"mission_notes\"\nslug = \"noted\"\nrev = 1\ntitle = \"Noted\"\n";
+        "schema = 4\nid = \"mission_notes\"\nslug = \"noted\"\nrev = 1\ntitle = \"Noted\"\n";
     let error = node
         .call("mission_apply", json!({"document":removal}))
         .await
@@ -256,7 +256,7 @@ title = "Old card"
 #[tokio::test(flavor = "multi_thread")]
 async fn repeat_port_labels_can_be_wired_by_exact_id() {
     let node = Node::start(AREAS, "").await.unwrap();
-    let document = r#"schema = 3
+    let document = r#"schema = 4
 slug = "ports"
 input_card = [{ id = "start", title = "Start" }]
 step = [
@@ -288,14 +288,14 @@ step = [
 #[tokio::test(flavor = "multi_thread")]
 async fn apply_refuses_unknown_vocabulary_and_keeps_saved_ultra() {
     let node = Node::start(AREAS, "").await.unwrap();
-    let source = r#"schema = 3
+    let source = r#"schema = 4
 slug = "effort"
 rev = 0
 
 [[step]]
 formation = "solo"
 
-[[step.slot]]
+[[step.seat]]
 harness = "openai-codex"
 effort = "ultra"
 "#;
@@ -321,9 +321,9 @@ effort = "ultra"
         .unwrap();
     assert_eq!(exported["document"], stored);
     let before = Mission::parse(&stored).unwrap();
-    assert_eq!(before.schema, 3);
+    assert_eq!(before.schema, 4);
     assert_eq!(
-        before.steps[0].slots[0].effort,
+        before.steps[0].seats[0].effort,
         ahjo_missions_contract::Effort::Ultra
     );
     node.call("mission_apply", json!({"document": stored}))

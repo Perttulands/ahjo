@@ -1,5 +1,5 @@
 use ahjo_mission_engine::{
-    Claude, Codex, HarnessAdapter, Pi, Pointer, Shell, SlotBinding, TokenUsage, TranscriptRoots,
+    Claude, Codex, HarnessAdapter, Pi, Pointer, SeatBinding, Shell, TokenUsage, TranscriptRoots,
     TurnState,
 };
 use std::{
@@ -23,12 +23,12 @@ fn pointer(name: &str, path: PathBuf) -> Pointer {
                 .file_name()
                 .is_some_and(|name| name.to_string_lossy().starts_with("codex"))
             {
-                SlotBinding {
+                SeatBinding {
                     model: "gpt-6-astra".into(),
                     effort: "low".into(),
                 }
             } else {
-                SlotBinding {
+                SeatBinding {
                     model: "opus".into(),
                     effort: "medium".into(),
                 }
@@ -135,7 +135,7 @@ fn pi_native_stop_and_tokens() {
         text: "pointer".into(),
         cwd: "/work".into(),
         transcript: Some(path.clone()),
-        binding: Some(SlotBinding::default()),
+        binding: Some(SeatBinding::default()),
         ..Pointer::default()
     };
     let head = "{\"type\":\"session\",\"id\":\"s\",\"cwd\":\"/work\"}\n{\"type\":\"message\",\"message\":{\"role\":\"user\",\"content\":\"pointer\"}}\n";
@@ -163,7 +163,7 @@ fn pi_native_stop_and_tokens() {
 }
 #[test]
 fn launch_quotes_both_shells_and_trusts_only_this_launch() {
-    let binding = SlotBinding {
+    let binding = SeatBinding {
         model: "model'with quote".into(),
         effort: "high".into(),
     };
@@ -242,15 +242,15 @@ fn real_native_sessions_match_archon_readers() {
             cwd: "/work".into(),
             transcript: Some(fixture(&format!("real/{name}.jsonl"))),
             binding: Some(match name {
-                "codex" => SlotBinding {
+                "codex" => SeatBinding {
                     model: "gpt-6.1-sol".into(),
                     effort: "low".into(),
                 },
-                "claude" => SlotBinding {
+                "claude" => SeatBinding {
                     model: "opus".into(),
                     effort: "medium".into(),
                 },
-                _ => SlotBinding {
+                _ => SeatBinding {
                     model: "anthropic/opus".into(),
                     effort: "medium".into(),
                 },
@@ -277,7 +277,7 @@ fn completed_turn_must_match_the_selected_model_and_effort() {
         text: "Reply exactly: <<<AHJO-DONE run-id=run_parity status=ok artifact=none>>>".into(),
         cwd: "/work".into(),
         transcript: Some(fixture("real/codex.jsonl")),
-        binding: Some(SlotBinding {
+        binding: Some(SeatBinding {
             model: "gpt-6.1-sol".into(),
             effort: "low".into(),
         }),
@@ -382,7 +382,7 @@ fn claude_only_consumes_a_human_pointer_in_the_dispatch_cwd() {
         text: pointer_text.into(),
         cwd: "/work".into(),
         transcript: Some(path.clone()),
-        binding: Some(SlotBinding {
+        binding: Some(SeatBinding {
             model: "opus".into(),
             effort: "medium".into(),
         }),
@@ -482,7 +482,7 @@ fn transcript_discovery_skips_files_older_than_the_dispatch() {
         text: "Reply exactly: <<<AHJO-DONE run-id=run_parity status=ok artifact=none>>>".into(),
         cwd: "/work".into(),
         not_before: Some(SystemTime::now() - Duration::from_secs(10)),
-        binding: Some(SlotBinding {
+        binding: Some(SeatBinding {
             model: "gpt-6.1-sol".into(),
             effort: "low".into(),
         }),

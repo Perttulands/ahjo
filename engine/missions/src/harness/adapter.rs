@@ -14,7 +14,7 @@ pub enum Shell {
     PowerShell,
 }
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct SlotBinding {
+pub struct SeatBinding {
     pub model: String,
     pub effort: String,
 }
@@ -68,7 +68,7 @@ pub struct Pointer {
     /// Ignore transcripts last written before this dispatch was prepared.
     pub not_before: Option<std::time::SystemTime>,
     /// The model and effort selected for this dispatch. Required for completion.
-    pub binding: Option<SlotBinding>,
+    pub binding: Option<SeatBinding>,
 }
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct TokenUsage {
@@ -122,7 +122,7 @@ impl Default for Turn {
 pub trait HarnessAdapter: Send + Sync {
     fn launch(
         &self,
-        binding: &SlotBinding,
+        binding: &SeatBinding,
         cwd: &Path,
         shell: Shell,
         roots: &TranscriptRoots,
@@ -153,7 +153,7 @@ macro_rules! adapter {
         impl HarnessAdapter for $name {
             fn launch(
                 &self,
-                binding: &SlotBinding,
+                binding: &SeatBinding,
                 cwd: &Path,
                 shell: Shell,
                 roots: &TranscriptRoots,

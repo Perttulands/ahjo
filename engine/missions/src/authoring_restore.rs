@@ -98,30 +98,30 @@ pub(crate) fn apply(
                     port.kind = PortKind::Unset;
                 }
             }
-            let controllers = n.slots.iter().filter(|s| s.controller).count();
+            let controllers = n.seats.iter().filter(|s| s.controller).count();
             if match n.formation {
-                Formation::Solo => n.slots.len() != 1,
-                Formation::Peer => n.slots.len() < 2 || controllers != 0,
-                _ => n.slots.len() < 2 || controllers != 1,
+                Formation::Solo => n.seats.len() != 1,
+                Formation::Peer => n.seats.len() < 2 || controllers != 0,
+                _ => n.seats.len() < 2 || controllers != 1,
             } {
                 return Err(invalid("invalid step shape"));
             }
             let mut seen = HashSet::new();
-            for slot in &n.slots {
-                if slot.id.is_empty()
-                    || slot.id.len() > 64
-                    || !slot.id.as_bytes()[0].is_ascii_alphanumeric()
-                    || !slot
+            for seat in &n.seats {
+                if seat.id.is_empty()
+                    || seat.id.len() > 64
+                    || !seat.id.as_bytes()[0].is_ascii_alphanumeric()
+                    || !seat
                         .id
                         .bytes()
                         .all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-')
-                    || !seen.insert(&slot.id)
+                    || !seen.insert(&seat.id)
                     || mission
                         .steps
                         .iter()
-                        .any(|f| f.slots.iter().any(|s| s.id == slot.id))
+                        .any(|f| f.seats.iter().any(|s| s.id == seat.id))
                 {
-                    return Err(invalid("invalid or duplicate slot id"));
+                    return Err(invalid("invalid or duplicate seat id"));
                 }
             }
             if let Some(brief) = &mut n.brief {

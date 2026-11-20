@@ -22,7 +22,7 @@ id = "fmn_work"
 type = "solo"
 title = "Work"
 [[formation.slot]]
-id = "slot_work"
+id = "seat_work"
 label = "Worker"
 agentId = "writer"
 
@@ -101,12 +101,12 @@ fn old_documents_keep_data_comments_and_backups_until_their_next_save() {
     let mission = store.mission_edit("old").unwrap();
     let layout = store.layout_edit("old").unwrap();
     let notes = store.notes_edit("old").unwrap();
-    assert_eq!(mission.mission.schema, 3);
+    assert_eq!(mission.mission.schema, 4);
     assert_eq!(
         mission.mission.input_cards[0].input_hint,
         "The inputCard text is a value"
     );
-    assert_eq!(mission.mission.steps[0].slots[0].agent_id, "writer");
+    assert_eq!(mission.mission.steps[0].seats[0].agent, "writer");
     assert_eq!(mission.mission.gates[0].check_value, "hello");
     assert_eq!(
         mission.mission.gates[0].kinds,
@@ -216,7 +216,7 @@ connection = [{ id = "edge", from = "fmn_work:out", to = "end_done:in" }]
     std::fs::write(&marker, hex::encode(Sha256::digest(MISSION.as_bytes()))).unwrap();
 
     let mission = store.mission_edit("old").unwrap();
-    assert_eq!(mission.mission.schema, 3);
+    assert_eq!(mission.mission.schema, 4);
     assert_eq!(mission.mission.steps[0].id, "fmn_work");
     assert_eq!(
         mission.mission.steps[0].formation,
@@ -273,7 +273,7 @@ fn concurrent_readers_upgrade_once_and_keep_the_original_backup() {
         }
         for worker in workers {
             let mission = worker.join().unwrap();
-            assert_eq!(mission.schema, 3);
+            assert_eq!(mission.schema, 4);
             assert_eq!(mission.id, "msn_old");
         }
     });
@@ -281,7 +281,7 @@ fn concurrent_readers_upgrade_once_and_keep_the_original_backup() {
     assert!(
         std::fs::read_to_string(path)
             .unwrap()
-            .contains("schema = 3")
+            .contains("schema = 4")
     );
     std::fs::remove_dir_all(root).unwrap();
 }
@@ -408,5 +408,80 @@ fn symlinked_documents_keep_the_link_and_backup_beside_the_target() {
             .is_symlink()
     );
     assert!(!backup(&target).exists());
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn old_staffing_keeps_only_settings_that_differ_from_the_agent() {
+    use ahjo_mission_model::{AGENT_SCHEMA, Agent, Effort, HARNESS_DEFAULT_MODEL, Harness};
+
+    let (root, store) = fixture();
+    let path = root.join("missions/old.mission.toml");
+    store
+        .agents()
+        .create(Agent {
+            schema: AGENT_SCHEMA,
+            id: "writer".into(),
+            name: "Writer".into(),
+            instructions: "Keep the evidence.".into(),
+            harness: Harness::OpenAiCodex,
+            model: "gpt-6".into(),
+            effort: Effort::Ultra,
+            ..Agent::default()
+        })
+        .unwrap();
+    let old = r#"schema = 3
+id = "msn_old"
+slug = "old"
+title = "Old"
+rev = 3
+
+[[step]]
+id = "fmn_work"
+title = "Write"
+formation = "peer"
+
+[[step.slot]]
+id = "original"
+label = "Writer"
+agent = "ignored-name"
+agent_id = "writer"
+harness = "openai-codex"
+model = "gpt-6"
+effort = "ultra"
+
+[[step.slot]]
+id = "override"
+label = "Reviewer"
+agent = "ignored-reviewer"
+agent_id = "writer"
+harness = "openai-codex"
+model = ""
+effort = "high"
+"#;
+    std::fs::write(&path, old).unwrap();
+
+    let mission = store.read_mission("old").unwrap();
+    let step = &mission.steps[0];
+    let inherited = &step.seats[0];
+    assert_eq!(inherited.id, "original");
+    assert_eq!(inherited.agent, "writer");
+    assert!(inherited.harness.is_unset());
+    assert!(inherited.model.is_empty());
+    assert!(inherited.effort.is_unset());
+    let changed = &step.seats[1];
+    assert_eq!(changed.id, "override");
+    assert_eq!(changed.agent, "writer");
+    assert!(changed.harness.is_unset());
+    assert_eq!(changed.model, HARNESS_DEFAULT_MODEL);
+    assert_eq!(changed.effort, Effort::High);
+
+    let updated = std::fs::read_to_string(&path).unwrap();
+    assert!(updated.contains("[[step.seat]]"));
+    assert!(!updated.contains("ignored"));
+    assert!(!updated.contains("harness ="));
+    assert!(!updated.contains("ultra"));
+    assert_eq!(std::fs::read_to_string(backup(&path)).unwrap(), old);
+    assert_eq!(store.read_mission("old").unwrap(), mission);
     std::fs::remove_dir_all(root).unwrap();
 }

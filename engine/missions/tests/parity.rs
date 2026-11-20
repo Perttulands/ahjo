@@ -3,7 +3,8 @@
 //! `tests/parity` is a state directory: missions, a retired role card and a
 //! Codex model cache. `archon-findings.json` holds what Archon's own
 //! `mission validate --json` reported on each mission, recorded by
-//! `archon-findings.sh`; this test holds Ahjo to every code and node.
+//! `archon-findings.sh`, with finding names updated to Ahjo's seat vocabulary.
+//! This test holds Ahjo to every code and node.
 
 use std::collections::BTreeMap;
 use std::path::Path;

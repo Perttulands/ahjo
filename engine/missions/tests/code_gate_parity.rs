@@ -187,7 +187,7 @@ fn starved_join_blocks_without_allowing_resume() {
         .next()
         .unwrap()
         .replace("fmn_work", "fmn_join")
-        .replace("slot_work", "slot_join")
+        .replace("seat_work", "seat_join")
         .replace(
             "[[step.output]]",
             "[[step.input]]\nid = \"port_second\"\nlabel = \"Second\"\n[[step.output]]",

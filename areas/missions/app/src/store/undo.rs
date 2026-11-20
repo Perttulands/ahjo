@@ -9,7 +9,7 @@
 use super::staffing::Staffing;
 use ahjo_missions_contract::{
     EndUpdate, GateUpdate, InputCardUpdate, LayoutNode as Placed, LimitUpdate, Mission,
-    MissionChange, RestoredNode, Slot,
+    MissionChange, RestoredNode, Seat,
 };
 
 #[derive(Clone, Debug, PartialEq)]
@@ -312,23 +312,12 @@ pub fn inverse_change(
                 when_spent: previous(&update.when_spent, &limit.when_spent),
             })
         }
-        NameAgent {
-            step_id, slot_id, ..
+        StaffSeat {
+            step_id, seat_id, ..
         } => {
-            let slot =
-                find_slot(mission, step_id, slot_id).ok_or("the named slot no longer exists")?;
-            NameAgent {
-                step_id: step_id.clone(),
-                slot_id: slot_id.clone(),
-                agent: slot.agent.clone(),
-            }
-        }
-        AssignSlot {
-            step_id, slot_id, ..
-        } => {
-            let slot =
-                find_slot(mission, step_id, slot_id).ok_or("the staffed slot no longer exists")?;
-            Staffing::from(slot).assign(step_id, slot_id)
+            let seat =
+                find_seat(mission, step_id, seat_id).ok_or("the staffed seat no longer exists")?;
+            Staffing::from(seat).assign(step_id, seat_id)
         }
         WireConnection {
             join_if_occupied: true,
@@ -372,8 +361,8 @@ pub fn inverse_change(
     Ok(vec![Step::board(reverse)])
 }
 
-fn find_slot<'a>(mission: &'a Mission, step: &str, slot: &str) -> Option<&'a Slot> {
-    mission.step(step)?.slots.iter().find(|s| s.id == slot)
+fn find_seat<'a>(mission: &'a Mission, step: &str, seat: &str) -> Option<&'a Seat> {
+    mission.step(step)?.seats.iter().find(|s| s.id == seat)
 }
 
 /// Reverse a change whose result identifies the node or wire it added.
@@ -532,9 +521,9 @@ mod tests {
                     id: "fmn_plan".into(),
                     title: "Plan".into(),
                     formation: ahjo_missions_contract::Formation::Solo,
-                    slots: vec![Slot {
+                    seats: vec![Seat {
                         id: "s1".into(),
-                        agent_id: "planner".into(),
+                        agent: "planner".into(),
                         harness: ahjo_missions_contract::Harness::ClaudeCode,
                         effort: ahjo_missions_contract::Effort::Xhigh,
                         ..Default::default()
@@ -616,24 +605,16 @@ mod tests {
         let undo_staff = inverse(&m, &[], &Step::board(staff.assign("fmn_plan", "s1"))).unwrap();
         assert_eq!(
             undo_staff,
-            vec![Step::board(AssignSlot {
+            vec![Step::board(StaffSeat {
                 step_id: "fmn_plan".into(),
-                slot_id: "s1".into(),
-                agent_id: "planner".into(),
+                seat_id: "s1".into(),
+                agent: "planner".into(),
                 harness: ahjo_missions_contract::Harness::ClaudeCode,
                 model: String::new(),
                 effort: ahjo_missions_contract::Effort::Xhigh,
             })]
         );
 
-        let name = |agent: &str| {
-            Step::board(NameAgent {
-                step_id: "fmn_plan".into(),
-                slot_id: "s1".into(),
-                agent: agent.into(),
-            })
-        };
-        assert_eq!(inverse(&m, &[], &name("writer")).unwrap(), vec![name("")]);
         let fresh = |fresh| {
             Step::board(UpdateStep {
                 id: "fmn_plan".into(),
@@ -648,11 +629,11 @@ mod tests {
     #[test]
     fn undo_of_a_staffing_change_restores_every_staffing_field() {
         let mut mission = mission();
-        let seat = &mut mission.steps[0].slots[0];
+        let seat = &mut mission.steps[0].seats[0];
         seat.model = "opus".into();
         let before = Staffing::from(&*seat);
         let edited = Staffing {
-            agent_id: "reviewer".into(),
+            agent: "reviewer".into(),
             harness: ahjo_missions_contract::Harness::OpenAiCodex,
             model: "gpt-6".into(),
             effort: ahjo_missions_contract::Effort::Low,

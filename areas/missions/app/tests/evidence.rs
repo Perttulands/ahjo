@@ -94,7 +94,7 @@ fn mission() -> String {
         .next()
         .unwrap()
         .replace("fmn_work", "fmn_judge")
-        .replace("slot_work", "slot_judge");
+        .replace("seat_work", "seat_judge");
     let work = solo
         .replace("label = \"Result\"", "label = \"Result\"\nkind = \"file\"")
         .replace("to = \"end_done:in\"", "to = \"gate_review:in\"");

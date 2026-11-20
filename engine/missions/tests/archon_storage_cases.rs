@@ -102,7 +102,7 @@ fn editing_decoded_multiline_toml_keeps_unrelated_values() {
     let dir = Scratch::new();
     std::fs::create_dir_all(dir.0.join("missions")).unwrap();
     let path = dir.0.join("missions/quoted.mission.toml");
-    let raw = r###"schema = 3
+    let raw = r###"schema = 4
 id = 'msn_quoted'
 slug = 'quoted'
 "ti\u0074le" = """
@@ -587,7 +587,7 @@ fn populated_inline_steps_and_connections_can_be_updated_and_deleted() {
     store.create_mission("inline", "Inline", "").unwrap();
     let path = dir.0.join("missions/inline.mission.toml");
     let raw = std::fs::read_to_string(&path).unwrap();
-    std::fs::write(&path, format!("{raw}step = [{{ id = 'fmn_a', formation = 'solo', title = 'A', slot = [{{ id = 'slot_a', label = 'Worker' }}], output = [{{ id = 'port_out', label = 'Out' }}] }}, {{ id = 'fmn_b', formation = 'solo', title = 'B', slot = [{{ id = 'slot_b', label = 'Worker' }}], input = [{{ id = 'port_in', label = 'In' }}] }}]\nconnection = [{{ id = 'edge_a', from = 'fmn_a:port_out', to = 'fmn_b:port_in' }}]\n")).unwrap();
+    std::fs::write(&path, format!("{raw}step = [{{ id = 'fmn_a', formation = 'solo', title = 'A', seat = [{{ id = 'seat_a', label = 'Worker' }}], output = [{{ id = 'port_out', label = 'Out' }}] }}, {{ id = 'fmn_b', formation = 'solo', title = 'B', seat = [{{ id = 'seat_b', label = 'Worker' }}], input = [{{ id = 'port_in', label = 'In' }}] }}]\nconnection = [{{ id = 'edge_a', from = 'fmn_a:port_out', to = 'fmn_b:port_in' }}]\n")).unwrap();
     let edit = store.mission_edit("inline").unwrap();
     let edit = store
         .patch(

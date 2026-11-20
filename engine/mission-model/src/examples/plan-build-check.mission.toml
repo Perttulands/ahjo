@@ -1,4 +1,4 @@
-schema = 3
+schema = 4
 id = "msn_example"
 slug = "plan-build-check"
 title = "Plan, build, check"
@@ -25,10 +25,9 @@ label = "Change"
 [[step.output]]
 id = "port_plan_out"
 label = "Plan"
-[[step.slot]]
-id = "slot_plan"
+[[step.seat]]
+id = "seat_plan"
 label = "Planner"
-agent = "planner"
 harness = "claude-code"
 effort = "high"
 
@@ -44,10 +43,9 @@ label = "Plan"
 [[step.output]]
 id = "port_build_out"
 label = "Change"
-[[step.slot]]
-id = "slot_build"
+[[step.seat]]
+id = "seat_build"
 label = "Builder"
-agent = "builder"
 harness = "claude-code"
 effort = "medium"
 
@@ -63,10 +61,9 @@ label = "Change"
 [[step.output]]
 id = "port_check_out"
 label = "Verdict"
-[[step.slot]]
-id = "slot_check"
+[[step.seat]]
+id = "seat_check"
 label = "Checker"
-agent = "checker"
 harness = "claude-code"
 effort = "medium"
 

@@ -83,7 +83,7 @@ pub(crate) struct Control {
 pub(crate) struct Inner {
     pub root: PathBuf,
     pub settings: RunSettings,
-    pub _lock: File,
+    lock: File,
     pub executor: Arc<dyn Executor>,
     pub admission: Mutex<()>,
     /// Folder snapshot and publication operations may share a user folder across runs.
@@ -95,6 +95,14 @@ pub(crate) struct Inner {
     /// to open, and nothing else does (ledger_migrate.rs).
     pub unmigrated: BTreeMap<String, String>,
     pub subscribers: tokio::sync::broadcast::Sender<RunProjection>,
+}
+impl Drop for Inner {
+    fn drop(&mut self) {
+        // A concurrent fork can briefly hold a copy of the file descriptor.
+        // Once the last coordinator reference is gone, release the writer
+        // lock even if that copy has not closed yet.
+        let _ = self.lock.unlock();
+    }
 }
 #[derive(Clone)]
 pub struct Coordinator {
@@ -171,7 +179,7 @@ impl Coordinator {
                 inner: Arc::new(Inner {
                     root: root.into(),
                     settings,
-                    _lock: lock,
+                    lock,
                     executor: Arc::from(executor),
                     admission: Mutex::new(()),
                     folder_workspace: Mutex::new(()),
@@ -362,7 +370,7 @@ impl Coordinator {
                                 sessions.push(RunSessionSummary {
                                     session_name: event.session_name.clone(),
                                     node_id: event.node_id.clone(),
-                                    slot_id: event.slot_id.clone(),
+                                    seat_id: event.seat_id.clone(),
                                 });
                             }
                         } else if event.kind == "seat_cleanup"
@@ -720,5 +728,25 @@ impl Coordinator {
             tell(&run, reason.unwrap_or(&run.block_code));
         }
         Ok(())
+    }
+}
+
+#[cfg(all(test, unix))]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn dropping_the_coordinator_releases_a_lock_with_an_inherited_descriptor() {
+        let root = ahjo_testkit::fresh_dir("coordinator-lock-descriptor");
+        let coordinator =
+            Coordinator::open(&root, RunSettings::default(), Box::new(crate::LabExecutor)).unwrap();
+        let inherited = coordinator.inner.lock.try_clone().unwrap();
+        drop(coordinator);
+
+        let reopened =
+            Coordinator::open(&root, RunSettings::default(), Box::new(crate::LabExecutor)).unwrap();
+        drop(inherited);
+        drop(reopened);
+        std::fs::remove_dir_all(root).unwrap();
     }
 }

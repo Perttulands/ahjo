@@ -8,7 +8,7 @@ use crate::store::sessions;
 use crate::store::workspace::LinkState;
 use crate::term::screen::Screen;
 use ahjo_terminals_contract::{
-    Down, Launch, Launcher, MAX_SEND, Outcome, Seat, Session, Up, encode_up,
+    Down, Launch, Launcher, MAX_SEND, Outcome, Session, SizingPane, Up, encode_up,
 };
 use parking_lot::Mutex;
 use std::collections::{HashMap, HashSet};
@@ -455,7 +455,7 @@ impl Remote {
         self.claimed.contains_key(&pane)
             || self
                 .session_of_pane(pane)
-                .is_some_and(|s| s.seat == Some(Seat::Mine))
+                .is_some_and(|s| s.seat == Some(SizingPane::Mine))
     }
 
     pub fn release(&mut self, pane: u32) {

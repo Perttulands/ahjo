@@ -1,6 +1,6 @@
 //! Local ownership of agent seats through the terminal engine.
 use crate::{
-    Claude, Codex, Dispatch, HarnessAdapter, Pi, SeatId, SeatRecords, Shell, SlotBinding,
+    Claude, Codex, Dispatch, HarnessAdapter, Pi, SeatBinding, SeatId, SeatRecords, Shell,
     TranscriptRoots,
 };
 use ahjo_term::{SessionSpec, Sessions, waiting::harness::Harness};
@@ -110,7 +110,7 @@ impl LocalSeats {
             } else {
                 Shell::Posix
             };
-            let binding = SlotBinding {
+            let binding = SeatBinding {
                 model: request.model.clone(),
                 effort: request.effort.clone(),
             };
@@ -124,7 +124,7 @@ impl LocalSeats {
                 format!(
                     "ahjo-{}-{}-{}",
                     component(&request.run_id),
-                    component(&request.slot_id),
+                    component(&request.seat_id),
                     &hash[..8]
                 )
             } else {

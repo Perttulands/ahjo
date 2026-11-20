@@ -5,7 +5,7 @@ use crate::{
     LeftSeat, OpenDispatch, SeatEvent, SeatFuture, SeatId, SeatSide, StepExecution, StepResult,
     parse_outputs, parse_verdict,
 };
-use ahjo_mission_model::Slot;
+use ahjo_mission_model::Seat;
 use serde_json::{Map, Value, json};
 use sha2::{Digest, Sha256};
 use std::{
@@ -20,7 +20,7 @@ use std::{
 #[derive(Clone)]
 struct HeldJudge {
     request: StepExecution,
-    slot: Slot,
+    definition: Seat,
     original: String,
     seat: SeatId,
     prompt: String,
@@ -42,36 +42,45 @@ impl SeatExecutor {
     fn turn(
         &self,
         request: &StepExecution,
-        slot: &Slot,
+        definition: &Seat,
         phase: &str,
         prompt: String,
         original: Option<&str>,
         sink: &ExecutionSink,
     ) -> Result<(String, String, SeatId), String> {
-        self.turn_prepared(request, slot, phase, prompt, original, sink, None, &[])
+        self.turn_prepared(
+            request,
+            definition,
+            phase,
+            prompt,
+            original,
+            sink,
+            None,
+            &[],
+        )
     }
     #[allow(clippy::too_many_arguments)]
     fn turn_prepared(
         &self,
         request: &StepExecution,
-        slot: &Slot,
+        definition: &Seat,
         phase: &str,
         prompt: String,
         original: Option<&str>,
         sink: &ExecutionSink,
         prepared: Option<(SeatId, String)>,
-        workers: &[(Slot, String, SeatId, String)],
+        workers: &[(Seat, String, SeatId, String)],
     ) -> Result<(String, String, SeatId), String> {
-        let id = dispatch_id(request, slot, phase);
+        let id = dispatch_id(request, definition, phase);
         let (seat, result) = self.runtime.block_on(async {
             let (seat, path) = match prepared {
                 Some(prepared) => prepared,
-                None => self.prepare(request, slot, phase, &prompt, original, sink).await?,
+                None => self.prepare(request, definition, phase, &prompt, original, sink).await?,
             };
             let mut events = self.seats.events(&id, 0).map_err(|error| error.message)?;
-            let data = dispatch_data(&id, &request.step.id, slot, &seat, &path, &prompt, phase, true);
-            if let Err(error) = sink.emit(ExecutionEvent { kind: "slot_dispatch".into(), slot_id: slot.id.clone(), data }).map_err(|e| format!("seat_ledger_unavailable: {e}")) {
-                if request.stopping.load(Ordering::Acquire) { self.detach(original.unwrap_or(&id), &seat, &slot.id, sink).await?; }
+            let data = dispatch_data(&id, &request.step.id, definition, &seat, &path, &prompt, phase, true);
+            if let Err(error) = sink.emit(ExecutionEvent { kind: "seat_dispatch".into(), seat_id: definition.id.clone(), data }).map_err(|e| format!("seat_ledger_unavailable: {e}")) {
+                if request.stopping.load(Ordering::Acquire) { self.detach(original.unwrap_or(&id), &seat, &definition.id, sink).await?; }
                 return Err(error);
             }
             self.seats.stage(&id, &prompt).await.map_err(|error| error.message)?;
@@ -85,7 +94,7 @@ impl SeatExecutor {
             let result = loop {
                 if request.canceled.load(Ordering::Acquire) {
                     if request.stopping.load(Ordering::Acquire) {
-                        self.detach(original.unwrap_or(&id), &seat, &slot.id, sink).await?;
+                        self.detach(original.unwrap_or(&id), &seat, &definition.id, sink).await?;
                         return Err("coordinator shutdown".into());
                     }
                     // A seat whose node does not answer cannot be ended now;
@@ -112,20 +121,20 @@ impl SeatExecutor {
                         if self.seats.away(&request.step.device).is_some() { break; }
                         if matches!(tokio::time::timeout(Duration::from_millis(250), self.seats.seat_alive(worker_seat)).await, Ok(Ok(false))) {
                             let text = format!("Worker {} (session {}) is gone. Continue without that worker.", worker.id, worker_seat.session_name);
-                            let data = json!({"mode":"agentic-leader","observer":"ahjo-seat","phase":"work","outcome":"gone","anomaly":true,"slot_id":worker.id,"controller_slot":slot.id,"session_ref":format!("terminal:{}", worker_seat.session_name)});
-                            sink.emit(ExecutionEvent { kind: "worker_observation".into(), slot_id: worker.id.clone(), data: data.as_object().unwrap().clone() }).map_err(|e| format!("seat_ledger_unavailable: {e}"))?;
+                            let data = json!({"mode":"agentic-leader","observer":"ahjo-seat","phase":"work","outcome":"gone","anomaly":true,"seat_id":worker.id,"controller_seat":definition.id,"session_ref":format!("terminal:{}", worker_seat.session_name)});
+                            sink.emit(ExecutionEvent { kind: "worker_observation".into(), seat_id: worker.id.clone(), data: data.as_object().unwrap().clone() }).map_err(|e| format!("seat_ledger_unavailable: {e}"))?;
                             self.seats.notify(&id, &text).await.map_err(|e| e.message)?;
                             lost.insert(worker.id.clone());
                         }
                     }
                 }
-                self.warn(&request.limits, &mut warned, &id, &slot.id, sink).await;
+                self.warn(&request.limits, &mut warned, &id, &definition.id, sink).await;
                 tokio::select! {
                     incoming = events.recv() => {
                         let event = incoming.ok_or("seat event stream ended")?.map_err(|error| error.message)?;
-                        terminal_event |= matches!(event.kind.as_str(), "slot_result" | "seat_failed");
+                        terminal_event |= matches!(event.kind.as_str(), "seat_result" | "seat_failed");
                         match event.kind.as_str() {
-                            "adapter_send" | "seat_prompt_consumed" | "slot_result" | "seat_state" | "seat_idle_recovery" => report_event(sink, &slot.id, event)?,
+                            "adapter_send" | "seat_prompt_consumed" | "seat_result" | "seat_state" | "seat_idle_recovery" => report_event(sink, &definition.id, event)?,
                             "seat_failed" => {},
                             _ => {},
                         }
@@ -140,7 +149,7 @@ impl SeatExecutor {
             if request.limits.counts_tokens()
                 && let Some(tokens) = self.seats.tokens(&id).map_err(|error| error.message)?.or((counted > 0).then_some(counted))
             {
-                sink.emit(ExecutionEvent { kind: "token_usage".into(), slot_id: slot.id.clone(), data: json!({"dispatch_id":id,"tokens":tokens}).as_object().cloned().unwrap_or_default() })
+                sink.emit(ExecutionEvent { kind: "token_usage".into(), seat_id: definition.id.clone(), data: json!({"dispatch_id":id,"tokens":tokens}).as_object().cloned().unwrap_or_default() })
                     .map_err(|e| format!("seat_ledger_unavailable: {e}"))?;
             }
             Ok::<_, String>((seat, result))
@@ -153,40 +162,42 @@ impl SeatExecutor {
                 } else {
                     result.text
                 };
-                Err(self.failed(original.unwrap_or(&id), &seat, &slot.id, sink, error))
+                Err(self.failed(original.unwrap_or(&id), &seat, &definition.id, sink, error))
             }
-            Err(error) => Err(self.failed(original.unwrap_or(&id), &seat, &slot.id, sink, error)),
+            Err(error) => {
+                Err(self.failed(original.unwrap_or(&id), &seat, &definition.id, sink, error))
+            }
         }
     }
     /// Bind a seat and persist its brief before the controller can address it.
     async fn prepare(
         &self,
         request: &StepExecution,
-        slot: &Slot,
+        definition: &Seat,
         phase: &str,
         prompt: &str,
         original: Option<&str>,
         sink: &ExecutionSink,
     ) -> Result<(SeatId, String), String> {
-        let id = dispatch_id(request, slot, phase);
-        let (name, keep) = request.seat_session(slot);
+        let id = dispatch_id(request, definition, phase);
+        let (name, keep) = request.seat_session(definition);
         let dispatch = Dispatch {
             id: id.clone(),
             run_id: request.run_id.clone(),
             node_id: request.step.id.clone(),
-            slot_id: slot.id.clone(),
+            seat_id: definition.id.clone(),
             name,
             keep,
-            harness: slot.harness.as_str().to_owned(),
-            model: slot.model.clone(),
-            effort: slot.effort.as_str().to_owned(),
+            harness: definition.harness.as_str().to_owned(),
+            model: definition.model.clone(),
+            effort: definition.effort.as_str().to_owned(),
             cwd: request.cwd.clone(),
             brief: prompt.into(),
             reuse_dispatch: original.map(str::to_owned),
             place: request.step.device.clone(),
             turn: request.turn.clone(),
         };
-        self.reach(request, &slot.id, sink, self.seats.dispatch(dispatch))
+        self.reach(request, &definition.id, sink, self.seats.dispatch(dispatch))
             .await?;
         let mut events = self.seats.events(&id, 0).map_err(|error| error.message)?;
         let mut created = None;
@@ -224,7 +235,7 @@ impl SeatExecutor {
                     .ok_or("brief path missing")?
                     .to_owned();
                 if let Some(event) = created
-                    && let Err(error) = report_event(sink, &slot.id, event)
+                    && let Err(error) = report_event(sink, &definition.id, event)
                 {
                     let _ = self.seats.end_seat(&seat, "run_final").await;
                     return Err(error);
@@ -240,7 +251,7 @@ impl SeatExecutor {
     async fn reach<T>(
         &self,
         request: &StepExecution,
-        slot: &str,
+        definition: &str,
         sink: &ExecutionSink,
         mut call: SeatFuture<'_, T>,
     ) -> Result<T, String> {
@@ -250,7 +261,7 @@ impl SeatExecutor {
             tokio::select! {
                 answer = &mut call => {
                     if waiting && answer.is_ok() {
-                        place_state(sink, slot, "working", &format!("{place} answers again"))?;
+                        place_state(sink, definition, "working", &format!("{place} answers again"))?;
                     }
                     return answer.map_err(|error| error.message);
                 }
@@ -264,7 +275,7 @@ impl SeatExecutor {
                 });
             }
             if !waiting && let Some(why) = self.seats.away(place) {
-                place_state(sink, slot, "waiting_for_device", &why)?;
+                place_state(sink, definition, "waiting_for_device", &why)?;
                 waiting = true;
             }
         }
@@ -276,7 +287,7 @@ impl SeatExecutor {
         limits: &crate::AttemptLimits,
         warned: &mut [bool],
         id: &str,
-        slot: &str,
+        definition: &str,
         sink: &ExecutionSink,
     ) {
         for (warning, sent) in limits.warnings.iter().zip(warned.iter_mut()) {
@@ -287,7 +298,7 @@ impl SeatExecutor {
             let data = json!({"dispatch_id":id,"limit_id":warning.limit_id,"mission":warning.mission,"text":warning.text});
             let claimed = sink.emit(ExecutionEvent {
                 kind: "limit_warning".into(),
-                slot_id: slot.into(),
+                seat_id: definition.into(),
                 data: data.as_object().cloned().unwrap_or_default(),
             });
             if claimed.is_ok()
@@ -356,7 +367,7 @@ impl SeatExecutor {
             let id = dispatch_key(
                 &request.run_id,
                 &request.node_id,
-                &request.slot_id,
+                &request.seat_id,
                 request.attempt,
                 &phase,
             );
@@ -438,7 +449,7 @@ impl SeatExecutor {
                     .map(Some)
                     .map_err(|e| e.to_string());
             }
-            if matches!(event.kind.as_str(), "slot_result" | "seat_failed") {
+            if matches!(event.kind.as_str(), "seat_result" | "seat_failed") {
                 break;
             }
         }
@@ -476,13 +487,13 @@ impl SeatExecutor {
                     .to_owned();
                 prepared = Some((seat, path));
             }
-            let terminal = matches!(event.kind.as_str(), "slot_result" | "seat_failed");
+            let terminal = matches!(event.kind.as_str(), "seat_result" | "seat_failed");
             if matches!(
                 event.kind.as_str(),
                 "seat_created"
                     | "adapter_send"
                     | "seat_prompt_consumed"
-                    | "slot_result"
+                    | "seat_result"
                     | "seat_state"
                     | "seat_idle_recovery"
             ) {
@@ -490,7 +501,7 @@ impl SeatExecutor {
                 data.insert("seat_event_seq".into(), json!(event.seq));
                 replay.push(ExecutionEvent {
                     kind: event.kind,
-                    slot_id: request.slot_id.clone(),
+                    seat_id: request.seat_id.clone(),
                     data,
                 });
             }
@@ -503,7 +514,7 @@ impl SeatExecutor {
         &self,
         id: &str,
         seat: &SeatId,
-        slot: &str,
+        definition: &str,
         sink: &ExecutionSink,
     ) -> Result<(), String> {
         self.seats
@@ -516,7 +527,7 @@ impl SeatExecutor {
             if event.kind == "seat_cleanup"
                 && event.data.get("outcome").and_then(Value::as_str) == Some("left_shutdown")
             {
-                report_event(sink, slot, event)?;
+                report_event(sink, definition, event)?;
                 return Ok(());
             }
         }
@@ -526,7 +537,7 @@ impl SeatExecutor {
         &self,
         id: &str,
         seat: &SeatId,
-        slot: &str,
+        definition: &str,
         sink: &ExecutionSink,
     ) -> Result<(), String> {
         self.runtime.block_on(async {
@@ -543,7 +554,7 @@ impl SeatExecutor {
                     .ok_or("seat event stream ended")?
                     .map_err(|error| error.message)?;
                 if event.kind == "seat_cleanup" {
-                    report_event(sink, slot, event)?;
+                    report_event(sink, definition, event)?;
                     break;
                 }
             }
@@ -559,7 +570,7 @@ impl SeatExecutor {
         &self,
         dispatch: &str,
         request: &StepExecution,
-        slot: &Slot,
+        definition: &Seat,
         sink: &ExecutionSink,
     ) -> Result<(), String> {
         let Some(turn) = &request.turn else {
@@ -570,7 +581,7 @@ impl SeatExecutor {
             dispatch,
             &request.step.device,
             turn,
-            &slot.id,
+            &definition.id,
         ))?;
         sink.emit(event)
             .map_err(|e| format!("seat_ledger_unavailable: {e}"))
@@ -580,35 +591,40 @@ impl SeatExecutor {
     fn orchestrate(
         &self,
         request: &StepExecution,
-        controller: &Slot,
+        controller: &Seat,
         sink: &ExecutionSink,
     ) -> Result<StepResult, String> {
-        let mut workers: Vec<(Slot, String, SeatId, String)> = Vec::new();
+        let mut workers: Vec<(Seat, String, SeatId, String)> = Vec::new();
         let setup = (|| -> Result<(SeatId, String, String), String> {
-            for slot in request.step.slots.iter().filter(|slot| !slot.controller) {
-                let prompt = brief::render_worker(request, slot);
+            for definition in request
+                .step
+                .seats
+                .iter()
+                .filter(|definition| !definition.controller)
+            {
+                let prompt = brief::render_worker(request, definition);
                 let (seat, path) = self
                     .runtime
-                    .block_on(self.prepare(request, slot, "worker", &prompt, None, sink))?;
+                    .block_on(self.prepare(request, definition, "worker", &prompt, None, sink))?;
                 workers.push((
-                    slot.clone(),
-                    dispatch_id(request, slot, "worker"),
+                    definition.clone(),
+                    dispatch_id(request, definition, "worker"),
                     seat,
                     path,
                 ));
             }
             let mut prompt = brief::render(request, controller);
             prompt.push_str("\nYou are the controller. Direct only these worker sessions. Each worker has a prepared brief with the same run context and attempt directory. Ask each worker to save its output in that directory before reporting back. Send the first task with the command shown, then coordinate and inspect the workers before finishing.\n");
-            for (slot, _, seat, path) in &workers {
+            for (definition, _, seat, path) in &workers {
                 let text = format!(
                     "Read your prepared brief at {path}, then work on the task I give you: <task>"
                 );
                 use std::fmt::Write;
                 let _ = writeln!(
                     prompt,
-                    "- {} (slot {}): ahjo session send {} --text {}",
+                    "- {} (definition {}): ahjo session send {} --text {}",
                     seat.session_name,
-                    slot.id,
+                    definition.id,
                     shell_word(&seat.session_name),
                     shell_word(&text)
                 );
@@ -625,11 +641,11 @@ impl SeatExecutor {
                 return Err(error);
             }
         };
-        let identity = |slot: &Slot, seat: &SeatId| json!({"slot_id":slot.id,"label":slot.label,"agent_id":slot.agent_id,"harness":slot.harness,"session_ref":format!("terminal:{}", seat.session_name)});
-        let data = json!({"mode":"agentic-leader","cwd":request.cwd,"controller_slot":controller.id,"controller":identity(controller, &controller_seat),"workers":workers.iter().map(|(slot, _, seat, _)| identity(slot, seat)).collect::<Vec<_>>()});
+        let identity = |definition: &Seat, seat: &SeatId| json!({"seat_id":definition.id,"label":definition.label,"agent":definition.agent,"harness":definition.harness,"session_ref":format!("terminal:{}", seat.session_name)});
+        let data = json!({"mode":"agentic-leader","cwd":request.cwd,"controller_seat":controller.id,"controller":identity(controller, &controller_seat),"workers":workers.iter().map(|(definition, _, seat, _)| identity(definition, seat)).collect::<Vec<_>>()});
         let team = sink.emit(ExecutionEvent {
             kind: "orchestration_team".into(),
-            slot_id: controller.id.clone(),
+            seat_id: controller.id.clone(),
             data: data.as_object().cloned().unwrap_or_default(),
         });
         if let Err(error) = team {
@@ -642,11 +658,11 @@ impl SeatExecutor {
             let _ = self.close_workers(request, &workers, sink);
             return Err(format!("seat_ledger_unavailable: {error}"));
         }
-        for (slot, _, seat, _) in &workers {
-            let data = json!({"mode":"agentic-leader","observer":"ahjo-seat","phase":"bind","outcome":"bound","anomaly":false,"slot_id":slot.id,"controller_slot":controller.id,"session_ref":format!("terminal:{}", seat.session_name)});
+        for (definition, _, seat, _) in &workers {
+            let data = json!({"mode":"agentic-leader","observer":"ahjo-seat","phase":"bind","outcome":"bound","anomaly":false,"seat_id":definition.id,"controller_seat":controller.id,"session_ref":format!("terminal:{}", seat.session_name)});
             if let Err(error) = sink.emit(ExecutionEvent {
                 kind: "worker_observation".into(),
-                slot_id: slot.id.clone(),
+                seat_id: definition.id.clone(),
                 data: data.as_object().cloned().unwrap_or_default(),
             }) {
                 let _ = self.cleanup(
@@ -716,23 +732,24 @@ impl SeatExecutor {
     fn close_workers(
         &self,
         request: &StepExecution,
-        workers: &[(Slot, String, SeatId, String)],
+        workers: &[(Seat, String, SeatId, String)],
         sink: &ExecutionSink,
     ) -> Result<(), String> {
         let mut errors = Vec::new();
-        for (slot, id, seat, _) in workers {
+        for (definition, id, seat, _) in workers {
             let result = if request.stopping.load(Ordering::Acquire) {
-                self.runtime.block_on(self.detach(id, seat, &slot.id, sink))
+                self.runtime
+                    .block_on(self.detach(id, seat, &definition.id, sink))
             } else if request.canceled.load(Ordering::Acquire) {
                 self.runtime
                     .block_on(self.seats.end_seat(seat, "run_final"))
                     .map(|_| ())
                     .map_err(|e| e.message)
             } else {
-                self.cleanup(id, seat, &slot.id, sink)
+                self.cleanup(id, seat, &definition.id, sink)
             };
             if let Err(error) = result {
-                errors.push(format!("worker {} cleanup: {error}", slot.id));
+                errors.push(format!("worker {} cleanup: {error}", definition.id));
             }
         }
         if errors.is_empty() {
@@ -745,7 +762,7 @@ impl SeatExecutor {
         &self,
         id: &str,
         seat: &SeatId,
-        slot: &str,
+        definition: &str,
         sink: &ExecutionSink,
         error: String,
     ) -> String {
@@ -757,7 +774,7 @@ impl SeatExecutor {
         if error.contains("seat_idle_without_sentinel") || error.contains("seat_stuck") {
             return error;
         }
-        if let Err(cleanup) = self.cleanup(id, seat, slot, sink) {
+        if let Err(cleanup) = self.cleanup(id, seat, definition, sink) {
             return format!("{error}; cleanup: {cleanup}");
         }
         error
@@ -808,14 +825,25 @@ impl Executor for SeatExecutor {
             let (mut replay, prepared) = self.replay(request, &request.dispatch_id).await?;
             let mut answer = request.dispatch_id.clone();
             let mut phase = "initial".to_owned();
-            let slot = request.step.slots.iter().find(|slot| slot.id == request.slot_id).ok_or("slot missing")?;
+            let mut definition = request
+                .step
+                .seats
+                .iter()
+                .find(|definition| definition.id == request.seat_id)
+                .cloned()
+                .ok_or("seat definition missing")?;
+            let original = self.seats.dispatch_info(&request.dispatch_id)
+                .map_err(|error| error.message)?;
+            definition.harness = original.harness.parse()?;
+            definition.model.clone_from(&original.model);
+            definition.effort = original.effort.parse()?;
             // The turns that followed on the same seat: continuations after a
             // resume, then the output correction the last of them owed.
             let follow = |replay: &mut Vec<ExecutionEvent>, id: String, label: String, events: Vec<ExecutionEvent>, seat: Option<(SeatId, String)>| -> Result<(), String> {
                 let (seat, path) = seat.ok_or("follow-up seat missing")?;
                 let brief = self.seats.dispatch_info(&id).map_err(|error| error.message)?.brief;
-                let data = dispatch_data(&id, &request.node_id, slot, &seat, &path, &brief, &label, false);
-                replay.push(ExecutionEvent { kind: "slot_dispatch".into(), slot_id: request.slot_id.clone(), data });
+                let data = dispatch_data(&id, &request.node_id, &definition, &seat, &path, &brief, &label, false);
+                replay.push(ExecutionEvent { kind: "seat_dispatch".into(), seat_id: request.seat_id.clone(), data });
                 replay.extend(events);
                 Ok(())
             };
@@ -825,7 +853,7 @@ impl Executor for SeatExecutor {
             {
                 continuation += 1;
                 let next = format!("continue-{continuation}");
-                let id = dispatch_key(&request.run_id, &request.node_id, &request.slot_id, request.attempt, &next);
+                let id = dispatch_key(&request.run_id, &request.node_id, &request.seat_id, request.attempt, &next);
                 if !matches!(self.seats.result(&id), Ok(Some(_))) {
                     break;
                 }
@@ -844,17 +872,15 @@ impl Executor for SeatExecutor {
                 answer = id;
             }
             if let Some((seat, _)) = prepared {
-                let persisted = self.seats.dispatch_info(&request.dispatch_id).map_err(|error| error.message)?;
                 let invalid_judge = request.final_judge && self.seats.result(&answer).map_err(|error| error.message)?.is_some_and(|result| parse_verdict(&result.text).is_err());
                 if invalid_judge {
-                    let slot = request.step.slots.iter().find(|slot| slot.id == request.slot_id).cloned().ok_or("slot missing")?;
                     let execution = StepExecution {
                         run_id: request.run_id.clone(), prefix: String::new(), run_number: 0, step: request.step.clone(),
                         bindings: crate::BindingsSnapshot { schema: 1, run_id: request.run_id.clone(), mission_id: String::new(), mission_slug: String::new(), mission_rev: 0, input_card_id: String::new(), bindings: Vec::new(), gate_bindings: Vec::new() },
-                        cwd: persisted.cwd, turn: persisted.turn.clone(), artifact_dir: request.artifact_dir.clone(), context_paths: Vec::new(), work: String::new(), inputs: Vec::new(), input_text: String::new(), attempt: request.attempt, judge: true, pick_attempts: Vec::new(),
+                        cwd: original.cwd, turn: original.turn, artifact_dir: request.artifact_dir.clone(), context_paths: Vec::new(), work: String::new(), inputs: Vec::new(), input_text: String::new(), attempt: request.attempt, judge: true, pick_attempts: Vec::new(),
                         canceled: request.canceled.clone().unwrap_or_default(), stopping: request.stopping.clone().unwrap_or_default(), limits: Default::default(),
                     };
-                    self.judges.lock().map_err(|e| e.to_string())?.insert((request.run_id.clone(), request.node_id.clone(), request.attempt), HeldJudge { request: execution, slot, original: persisted.reuse_dispatch.unwrap_or_else(|| request.dispatch_id.clone()), seat, prompt: persisted.brief });
+                    self.judges.lock().map_err(|e| e.to_string())?.insert((request.run_id.clone(), request.node_id.clone(), request.attempt), HeldJudge { request: execution, definition, original: original.reuse_dispatch.unwrap_or_else(|| request.dispatch_id.clone()), seat, prompt: original.brief });
                     return Ok(replay);
                 }
                 let outcome = self.seats.end_seat(&seat, "run_final").await.map_err(|error| error.message)?;
@@ -862,13 +888,13 @@ impl Executor for SeatExecutor {
                     return Err(format!("seat_cleanup: {outcome}"));
                 }
                 let data = json!({"dispatch_id":request.dispatch_id,"session_name":seat.session_name,"outcome":outcome,"cause":"run_final"});
-                replay.push(ExecutionEvent { kind: "seat_cleanup".into(), slot_id: request.slot_id.clone(), data: data.as_object().cloned().unwrap_or_default() });
+                replay.push(ExecutionEvent { kind: "seat_cleanup".into(), seat_id: request.seat_id.clone(), data: data.as_object().cloned().unwrap_or_default() });
             }
             // A placed turn is published once its seat has ended, also when
             // the coordinator restarted in between; publishing is idempotent.
             let original = self.seats.dispatch_info(&request.dispatch_id).map_err(|error| error.message)?;
             if let Some(turn) = &original.turn {
-                replay.push(published_turn(&*self.seats, &request.dispatch_id, &original.place, turn, &request.slot_id).await?);
+                replay.push(published_turn(&*self.seats, &request.dispatch_id, &original.place, turn, &request.seat_id).await?);
             }
             Ok(replay)
         }).map_err(|message: String| crate::Error::new("executor_error", message))
@@ -906,28 +932,28 @@ impl Executor for SeatExecutor {
         sink: ExecutionSink,
     ) -> Result<StepResult, crate::Error> {
         (|| -> Result<StepResult, String> {
-            let slot = match request.step.formation.as_str() {
-                "solo" if request.step.slots.len() == 1 => request.step.slots[0].clone(),
+            let definition = match request.step.formation.as_str() {
+                "solo" if request.step.seats.len() == 1 => request.step.seats[0].clone(),
                 "orchestrated"
-                    if request.step.slots.len() >= 2
+                    if request.step.seats.len() >= 2
                         && request
                             .step
-                            .slots
+                            .seats
                             .iter()
-                            .filter(|slot| slot.controller)
+                            .filter(|definition| definition.controller)
                             .count()
                             == 1 =>
                 {
                     request
                         .step
-                        .slots
+                        .seats
                         .iter()
-                        .find(|slot| slot.controller)
+                        .find(|definition| definition.controller)
                         .unwrap()
                         .clone()
                 }
                 _ => return Err(
-                    "seat executor requires a solo slot or an orchestrated controller and workers"
+                    "seat executor requires a solo definition or an orchestrated controller and workers"
                         .into(),
                 ),
             };
@@ -936,32 +962,32 @@ impl Executor for SeatExecutor {
                 let place = &request.step.device;
                 let cwd = self.runtime.block_on(self.reach(
                     &request,
-                    &slot.id,
+                    &definition.id,
                     &sink,
                     self.seats.prepare_turn(place, turn),
                 ))?;
                 let data = json!({"place":place,"commit":turn.commit,"cwd":cwd});
                 sink.emit(ExecutionEvent {
                     kind: "workspace_fetch".into(),
-                    slot_id: slot.id.clone(),
+                    seat_id: definition.id.clone(),
                     data: data.as_object().cloned().unwrap_or_default(),
                 })
                 .map_err(|e| format!("seat_ledger_unavailable: {e}"))?;
                 request.cwd = cwd;
             }
             if request.step.formation == ahjo_mission_model::Formation::Orchestrated {
-                return self.orchestrate(&request, &slot, &sink);
+                return self.orchestrate(&request, &definition, &sink);
             }
-            let prompt = brief::render(&request, &slot);
+            let prompt = brief::render(&request, &definition);
             let (original, mut text, seat) =
-                self.turn(&request, &slot, "initial", prompt.clone(), None, &sink)?;
+                self.turn(&request, &definition, "initial", prompt.clone(), None, &sink)?;
             let outputs = match outputs(&request, &text) {
                 Ok(outputs) => outputs,
                 Err(error) => {
                     let prompt = correction_prompt(&prompt, &error);
                     match self.turn(
                         &request,
-                        &slot,
+                        &definition,
                         "output-correction",
                         prompt,
                         Some(&original),
@@ -972,7 +998,7 @@ impl Executor for SeatExecutor {
                             match outputs(&request, &text) {
                                 Ok(outputs) => outputs,
                                 Err(e) => {
-                                    self.cleanup(&original, &seat, &slot.id, &sink)?;
+                                    self.cleanup(&original, &seat, &definition.id, &sink)?;
                                     return Err(e);
                                 }
                             }
@@ -990,15 +1016,15 @@ impl Executor for SeatExecutor {
                     ),
                     HeldJudge {
                         request: request.clone(),
-                        slot: slot.clone(),
+                        definition: definition.clone(),
                         original,
                         seat,
-                        prompt: brief::render(&request, &slot),
+                        prompt: brief::render(&request, &definition),
                     },
                 );
             } else {
-                self.cleanup(&original, &seat, &slot.id, &sink)?;
-                self.publish(&original, &request, &slot, &sink)?;
+                self.cleanup(&original, &seat, &definition.id, &sink)?;
+                self.publish(&original, &request, &definition, &sink)?;
             }
             Ok(StepResult {
                 status: "done".into(),
@@ -1028,7 +1054,7 @@ impl Executor for SeatExecutor {
         );
         let result = self.turn(
             &held.request,
-            &held.slot,
+            &held.definition,
             "judge-correction",
             prompt,
             Some(&held.original),
@@ -1036,8 +1062,8 @@ impl Executor for SeatExecutor {
         );
         match result {
             Ok((_, text, _)) => {
-                self.cleanup(&held.original, &held.seat, &held.slot.id, &sink)?;
-                self.publish(&held.original, &held.request, &held.slot, &sink)?;
+                self.cleanup(&held.original, &held.seat, &held.definition.id, &sink)?;
+                self.publish(&held.original, &held.request, &held.definition, &sink)?;
                 Ok(Some(text))
             }
             Err(error) => Err(error),
@@ -1058,21 +1084,26 @@ fn shell_word(value: &str) -> String {
     }
 }
 /// A seat state the coordinator observes about the step's place.
-fn place_state(sink: &ExecutionSink, slot: &str, state: &str, detail: &str) -> Result<(), String> {
+fn place_state(
+    sink: &ExecutionSink,
+    definition: &str,
+    state: &str,
+    detail: &str,
+) -> Result<(), String> {
     let data = json!({"state":state,"detail":detail,"since":crate::run_storage::now()});
     sink.emit(ExecutionEvent {
         kind: "seat_state".into(),
-        slot_id: slot.into(),
+        seat_id: definition.into(),
         data: data.as_object().cloned().unwrap_or_default(),
     })
     .map_err(|e| format!("seat_ledger_unavailable: {e}"))
 }
-fn report_event(sink: &ExecutionSink, slot: &str, event: SeatEvent) -> Result<(), String> {
+fn report_event(sink: &ExecutionSink, definition: &str, event: SeatEvent) -> Result<(), String> {
     let mut data = event.data;
     data.insert("seat_event_seq".into(), json!(event.seq));
     sink.emit(ExecutionEvent {
         kind: event.kind,
-        slot_id: slot.into(),
+        seat_id: definition.into(),
         data,
     })
     .map_err(|e| format!("seat_ledger_unavailable: {e}"))
@@ -1141,7 +1172,7 @@ fn owed_correction(
         dispatch_key(
             &request.run_id,
             &request.node_id,
-            &request.slot_id,
+            &request.seat_id,
             request.attempt,
             phase,
         )
@@ -1162,7 +1193,7 @@ fn owed_correction(
 fn dispatch_data(
     id: &str,
     node: &str,
-    slot: &Slot,
+    definition: &Seat,
     seat: &SeatId,
     path: &str,
     prompt: &str,
@@ -1170,20 +1201,21 @@ fn dispatch_data(
     recorded_before_send: bool,
 ) -> Map<String, Value> {
     let prompt_sha = hex::encode(Sha256::digest(prompt.as_bytes()));
-    let data = json!({"dispatch_id":id,"node_id":node,"slot_id":slot.id,"agent_id":slot.agent_id,"harness":slot.harness,"session":seat.session_name,"session_ref":format!("terminal:{}",seat.session_name),"brief_path":path,"prompt_sha256":prompt_sha,"prompt_ref":"","phase":phase,"recorded_before_send":recorded_before_send,"native_ack":false});
+    let data = json!({"dispatch_id":id,"node_id":node,"seat_id":definition.id,"agent":definition.agent,"harness":definition.harness,"session":seat.session_name,"session_ref":format!("terminal:{}",seat.session_name),"brief_path":path,"prompt_sha256":prompt_sha,"prompt_ref":"","phase":phase,"recorded_before_send":recorded_before_send,"native_ack":false});
     data.as_object().cloned().unwrap_or_default()
 }
-fn dispatch_id(request: &StepExecution, slot: &Slot, phase: &str) -> String {
+fn dispatch_id(request: &StepExecution, definition: &Seat, phase: &str) -> String {
     dispatch_key(
         &request.run_id,
         &request.step.id,
-        &slot.id,
+        &definition.id,
         request.attempt,
         phase,
     )
 }
-fn dispatch_key(run: &str, node: &str, slot: &str, attempt: i64, phase: &str) -> String {
-    let digest = Sha256::digest(format!("{run}\0{node}\0{slot}\0{attempt}\0{phase}").as_bytes());
+fn dispatch_key(run: &str, node: &str, definition: &str, attempt: i64, phase: &str) -> String {
+    let digest =
+        Sha256::digest(format!("{run}\0{node}\0{definition}\0{attempt}\0{phase}").as_bytes());
     format!("dsp_{}", hex::encode(digest))
 }
 
@@ -1193,7 +1225,7 @@ async fn published_turn(
     dispatch: &str,
     place: &str,
     turn: &crate::TurnWorkspace,
-    slot: &str,
+    definition: &str,
 ) -> Result<ExecutionEvent, String> {
     let published = seats
         .publish_turn(place, turn)
@@ -1202,7 +1234,7 @@ async fn published_turn(
     let data = json!({"dispatch_id":dispatch,"place":place,"commit":published.commit,"reference":published.reference});
     Ok(ExecutionEvent {
         kind: "workspace_turn".into(),
-        slot_id: slot.into(),
+        seat_id: definition.into(),
         data: data.as_object().cloned().unwrap_or_default(),
     })
 }

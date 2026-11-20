@@ -1,5 +1,5 @@
 # Parity fixture: wires, gates and routes.
-schema = 3
+schema = 4
 id = "msn_wiring"
 slug = "wiring"
 title = "Wiring"
@@ -25,7 +25,7 @@ label = "Result"
 [[step.output]]
 id = "extra"
 label = "Extra"
-[[step.slot]]
+[[step.seat]]
 id = "a"
 harness = "claude-code"
 effort = "low"
@@ -40,7 +40,7 @@ label = "Input"
 [[step.output]]
 id = "out"
 label = "Result"
-[[step.slot]]
+[[step.seat]]
 id = "b"
 harness = "claude-code"
 effort = "low"
@@ -52,7 +52,7 @@ formation = "solo"
 id = "in"
 [[step.output]]
 id = "out"
-[[step.slot]]
+[[step.seat]]
 id = "island"
 harness = "pi"
 effort = "high"

@@ -122,14 +122,14 @@ pub enum MissionChange {
         formation: Formation,
         /// The seat to keep when changing the step formation.
         #[serde(default, deserialize_with = "default_on_null")]
-        keep_slot_id: String,
+        keep_seat_id: String,
         /// Replacement seats for the changed step formation.
         #[serde(
             default,
             deserialize_with = "some",
             skip_serializing_if = "Option::is_none"
         )]
-        slots: Option<Vec<crate::Slot>>,
+        seats: Option<Vec<crate::Seat>>,
     },
     /// Remove a step, its wires and its Limit cards.
     DeleteStep {
@@ -138,52 +138,40 @@ pub enum MissionChange {
         id: String,
     },
     /// Set a seat’s agent and harness settings.
-    AssignSlot {
+    StaffSeat {
         /// The step’s id.
         #[serde(default, deserialize_with = "default_on_null")]
         step_id: String,
         /// The seat’s id.
         #[serde(default, deserialize_with = "default_on_null")]
-        slot_id: String,
+        seat_id: String,
         /// The seat’s reusable agent id.
         #[serde(default, deserialize_with = "default_on_null")]
-        agent_id: String,
+        agent: String,
         /// The harness the seat runs.
         #[serde(default, deserialize_with = "default_on_null")]
         harness: Harness,
-        /// The model the seat uses. Blank uses its harness default.
+        /// Blank inherits the agent model. "default" uses the harness default.
         #[serde(default, deserialize_with = "default_on_null")]
         model: String,
         /// The seat’s reasoning effort.
         #[serde(default, deserialize_with = "default_on_null")]
         effort: Effort,
     },
-    /// Name the agent in a seat and, by extension, its session.
-    NameAgent {
-        /// The step’s id.
-        #[serde(default, deserialize_with = "default_on_null")]
-        step_id: String,
-        /// The seat’s id.
-        #[serde(default, deserialize_with = "default_on_null")]
-        slot_id: String,
-        /// The agent’s name. Blank names its session after the step.
-        #[serde(default, deserialize_with = "default_on_null")]
-        agent: String,
-    },
     /// Swap staffing between two seats.
-    SwapSlots {
+    SwapSeats {
         /// The source step’s id.
         #[serde(default, deserialize_with = "default_on_null")]
         from_step: String,
         /// The source seat’s id.
         #[serde(default, deserialize_with = "default_on_null")]
-        from_slot: String,
+        from_seat: String,
         /// The destination step’s id.
         #[serde(default, deserialize_with = "default_on_null")]
         to_step: String,
         /// The destination seat’s id.
         #[serde(default, deserialize_with = "default_on_null")]
-        to_slot: String,
+        to_seat: String,
     },
     /// Make a seat the controller of its step.
     MakeController {
@@ -192,7 +180,7 @@ pub enum MissionChange {
         step_id: String,
         /// The seat’s id.
         #[serde(default, deserialize_with = "default_on_null")]
-        slot_id: String,
+        seat_id: String,
     },
     /// Replace a step’s brief.
     SetBrief {

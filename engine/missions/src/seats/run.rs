@@ -1,7 +1,7 @@
 //! Drive one local dispatch and retain its native result.
 use super::{local::adapter, transport::stage_guarded};
 use crate::{
-    DispatchResult, LocalSeats, Pointer, SeatEvent, SlotBinding, TurnWatch,
+    DispatchResult, LocalSeats, Pointer, SeatBinding, SeatEvent, TurnWatch,
     parse_completion_sentinel,
 };
 use serde_json::json;
@@ -27,7 +27,7 @@ impl LocalSeats {
         let dispatch = records.dispatch(id).map_err(|e| e.to_string())?;
         let events = records.events(id, 0).map_err(|e| e.to_string())?;
         let consumed_reported = events.iter().any(|event| event.key == "prompt-consumed");
-        let result_reported = events.iter().any(|event| event.key == "slot-result");
+        let result_reported = events.iter().any(|event| event.key == "seat-result");
         for event in &events {
             if public(event) {
                 report(event)?;
@@ -69,7 +69,7 @@ impl LocalSeats {
                 .and_then(|m| m.modified())
                 .ok()
                 .and_then(|time| time.checked_sub(std::time::Duration::from_secs(2))),
-            binding: Some(SlotBinding {
+            binding: Some(SeatBinding {
                 model: dispatch.model.clone(),
                 effort: dispatch.effort.clone(),
             }),
@@ -144,7 +144,7 @@ impl LocalSeats {
                 .map_err(|e| e.to_string())?;
         }
         let adapter_sent = events.iter().any(|event| event.key == "adapter-send");
-        let data = json!({"dispatch_id":id,"node_id":dispatch.node_id,"slot_id":dispatch.slot_id,"session_ref":format!("terminal:{}", seat.session_name),"adapter":"terminal","sent":true});
+        let data = json!({"dispatch_id":id,"node_id":dispatch.node_id,"seat_id":dispatch.seat_id,"session_ref":format!("terminal:{}", seat.session_name),"adapter":"terminal","sent":true});
         let event = records
             .append(
                 id,
@@ -190,12 +190,12 @@ impl LocalSeats {
             text: answer,
             status: sentinel.status.clone(),
         };
-        let data = json!({"dispatch_id":id,"node_id":dispatch.node_id,"slot_id":dispatch.slot_id,"status":sentinel.status,"sentinel":{"run_id":sentinel.run_id,"status":sentinel.status,"artifact":sentinel.artifact}});
+        let data = json!({"dispatch_id":id,"node_id":dispatch.node_id,"seat_id":dispatch.seat_id,"status":sentinel.status,"sentinel":{"run_id":sentinel.run_id,"status":sentinel.status,"artifact":sentinel.artifact}});
         let event = records
             .append(
                 id,
-                "slot-result",
-                "slot_result",
+                "seat-result",
+                "seat_result",
                 data.as_object().cloned().unwrap_or_default(),
             )
             .map_err(|e| e.to_string())?;
@@ -215,7 +215,7 @@ fn public(event: &SeatEvent) -> bool {
         "seat_created"
             | "seat_prompt_consumed"
             | "adapter_send"
-            | "slot_result"
+            | "seat_result"
             | "seat_cleanup"
             | "seat_state"
             | "seat_idle_recovery"

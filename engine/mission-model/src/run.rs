@@ -90,7 +90,7 @@ pub struct RunSummary {
 pub struct RunSessionSummary {
     pub session_name: String,
     pub node_id: String,
-    pub slot_id: String,
+    pub seat_id: String,
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
@@ -111,7 +111,7 @@ pub struct HumanPick {
     pub requested_seq: u64,
     pub attempt: i64,
     pub reason: String,
-    /// The slot ID of the seat that typed a pick the actor made.
+    /// The seat ID of the seat that typed a pick the actor made.
     pub relayed_by: String,
     pub actor: String,
 }

@@ -167,7 +167,7 @@ pub fn project_run(events: &[RunEvent], run_id: &str) -> Result<RunProjection, c
                 seq: event.seq,
                 kind: event.kind.clone(),
                 node_id: event.node_id.clone(),
-                slot_id: event.slot_id.clone(),
+                seat_id: event.seat_id.clone(),
                 gate_id: event.gate_id.clone(),
                 attempt: event.attempt,
                 requested_seq: event

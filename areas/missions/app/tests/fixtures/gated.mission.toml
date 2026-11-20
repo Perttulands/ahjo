@@ -1,4 +1,4 @@
-schema = 3
+schema = 4
 id = "msn_gated"
 slug = "gated"
 title = "Gated"
@@ -23,8 +23,8 @@ label = "Input"
 [[step.output]]
 id = "port_out"
 label = "Result"
-[[step.slot]]
-id = "slot_work"
+[[step.seat]]
+id = "seat_work"
 label = "Worker"
 harness = "openai-codex"
 effort = "medium"

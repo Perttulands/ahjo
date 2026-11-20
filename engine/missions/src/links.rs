@@ -28,7 +28,15 @@ pub fn read_definition(path: &Path) -> Result<String, Error> {
             }
         });
     match kind
-        .map(|kind| crate::document_migrate::upgrade_text(&text, kind))
+        .map(|kind| {
+            crate::document_migrate::upgrade_text(&text, kind, |_, _, id| {
+                let missions = path.parent()?;
+                let root = missions.parent()?;
+                (missions.file_name()?.to_str()? == "missions")
+                    .then(|| crate::Store::new(root).agents().read(id).ok())
+                    .flatten()
+            })
+        })
         .transpose()?
     {
         Some(Some(upgraded)) => {

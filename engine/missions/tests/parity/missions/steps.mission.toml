@@ -1,5 +1,5 @@
-# Parity fixture: step shapes, slot ids and staffing.
-schema = 3
+# Parity fixture: step shapes, seat ids and staffing.
+schema = 4
 id = "msn_steps"
 slug = "steps"
 title = "Steps"
@@ -13,7 +13,7 @@ title = "Start"
 id = "fmn_type"
 formation = "swarm"
 title = "Swarm"
-[[step.slot]]
+[[step.seat]]
 id = "swarm"
 harness = "claude-code"
 effort = "low"
@@ -22,12 +22,12 @@ effort = "low"
 id = "fmn_solo"
 formation = "solo"
 title = "Solo pair"
-[[step.slot]]
+[[step.seat]]
 id = "dup"
 label = "One"
 harness = "claude-code"
 effort = "low"
-[[step.slot]]
+[[step.seat]]
 id = "dup"
 label = "Two"
 harness = "claude-code"
@@ -37,12 +37,12 @@ effort = "low"
 id = "fmn_peer"
 formation = "peer"
 title = "Peers"
-[[step.slot]]
+[[step.seat]]
 id = "peer_1"
 harness = "claude-code"
 effort = "low"
 controller = true
-[[step.slot]]
+[[step.seat]]
 id = "peer_2"
 harness = "openai-codex"
 model = "gpt-small"
@@ -52,12 +52,12 @@ effort = "ultra"
 id = "fmn_orch"
 formation = "orchestrated"
 title = "No controller"
-[[step.slot]]
+[[step.seat]]
 id = "worker_1"
 harness = "openai-codex"
 model = "gpt-6-astra"
 effort = "ultra"
-[[step.slot]]
+[[step.seat]]
 id = "worker_2"
 harness = "openai-codex"
 model = "gpt-unknown"
@@ -67,7 +67,7 @@ effort = "ultra"
 id = "fmn_alone"
 formation = "orchestrated"
 title = "Controller alone"
-[[step.slot]]
+[[step.seat]]
 id = "lead"
 harness = "claude-code"
 effort = "low"
@@ -82,58 +82,58 @@ title = "Empty"
 id = "fmn_staff"
 formation = "peer"
 title = "Staffing"
-[[step.slot]]
+[[step.seat]]
 id = "open"
 label = "Open"
-[[step.slot]]
+[[step.seat]]
 id = "no_harness"
 effort = "low"
-[[step.slot]]
+[[step.seat]]
 id = "hermes"
 harness = "hermes"
 effort = "low"
-[[step.slot]]
+[[step.seat]]
 id = "spaced"
 harness = "pi"
 model = "anthropic/claude opus"
 effort = "low"
-[[step.slot]]
+[[step.seat]]
 id = "no_effort"
 harness = "claude-code"
 model = "opus"
-[[step.slot]]
+[[step.seat]]
 id = "too_much"
 harness = "claude-code"
 effort = "ultra"
-[[step.slot]]
+[[step.seat]]
 id = "retired"
-agent_id = "critic"
+agent = "critic"
 harness = "claude-code"
 effort = "xhigh"
-[[step.slot]]
+[[step.seat]]
 id = "unknown"
-agent_id = "oracle"
+agent = "oracle"
 harness = "claude-code"
 effort = "xhigh"
-[[step.slot]]
+[[step.seat]]
 id = "bad_role"
-agent_id = "Critic"
+agent = "Critic"
 harness = "claude-code"
 effort = "xhigh"
-[[step.slot]]
+[[step.seat]]
 id = "builtin"
-agent_id = "builder"
+agent = "builder"
 harness = "claude-code"
 effort = "medium"
-[[step.slot]]
+[[step.seat]]
 id = "_hidden"
 label = "Hidden"
 harness = "claude-code"
 effort = "low"
-[[step.slot]]
+[[step.seat]]
 id = "worker_1"
 harness = "claude-code"
 effort = "low"
-[[step.slot]]
+[[step.seat]]
 id = "harness_only"
 harness = "pi"

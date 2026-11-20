@@ -1,6 +1,6 @@
 {
  "mission": {
-  "schema": 1,
+  "schema": 4,
   "id": "brd_delivery",
   "slug": "delivery",
   "title": "Delivery",
@@ -41,11 +41,11 @@
       "label": "Input"
      }
     ],
-    "slot": [
+    "seat": [
      {
       "id": "plan",
       "label": "Plan",
-      "agent_id": "planner",
+      "agent": "planner",
       "harness": "claude-code",
       "effort": "xhigh",
       "controller": true
@@ -71,7 +71,7 @@
       "label": "Input"
      }
     ],
-    "slot": [
+    "seat": [
      {
       "id": "beads",
       "label": "Beads",
@@ -100,11 +100,11 @@
       "label": "Input"
      }
     ],
-    "slot": [
+    "seat": [
      {
       "id": "beads_reviewer",
       "label": "Beads reviewer",
-      "agent_id": "judge",
+      "agent": "judge",
       "harness": "claude-code",
       "effort": "xhigh",
       "controller": true
@@ -130,11 +130,11 @@
       "label": "Input"
      }
     ],
-    "slot": [
+    "seat": [
      {
       "id": "execution",
       "label": "Controller",
-      "agent_id": "orchestrator",
+      "agent": "orchestrator",
       "harness": "claude-code",
       "effort": "xhigh",
       "controller": true
@@ -142,7 +142,7 @@
      {
       "id": "worker_1",
       "label": "Worker 1",
-      "agent_id": "builder",
+      "agent": "builder",
       "harness": "openai-codex",
       "effort": "medium",
       "controller": false
@@ -150,7 +150,7 @@
      {
       "id": "worker_2",
       "label": "Worker 2",
-      "agent_id": "builder",
+      "agent": "builder",
       "harness": "openai-codex",
       "effort": "medium",
       "controller": false
@@ -158,7 +158,7 @@
      {
       "id": "worker_3",
       "label": "Worker 3",
-      "agent_id": "builder",
+      "agent": "builder",
       "harness": "openai-codex",
       "effort": "medium",
       "controller": false
@@ -184,11 +184,11 @@
       "label": "Input"
      }
     ],
-    "slot": [
+    "seat": [
      {
       "id": "final_review",
       "label": "Final review",
-      "agent_id": "reviewer",
+      "agent": "reviewer",
       "harness": "openai-codex",
       "model": "gpt-6-astra",
       "effort": "max",

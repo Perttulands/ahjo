@@ -13,8 +13,8 @@ pub(crate) fn open(events: &[RunEvent]) -> Vec<RunEvent> {
             continue;
         }
         match event.kind.as_str() {
-            "slot_dispatch" => dispatches.push(event.clone()),
-            "slot_result" => dispatches
+            "seat_dispatch" => dispatches.push(event.clone()),
+            "seat_result" => dispatches
                 .retain(|d| d.data.get("dispatch_id").and_then(|v| v.as_str()) != Some(id)),
             _ => {}
         }
@@ -25,15 +25,15 @@ pub(crate) fn open(events: &[RunEvent]) -> Vec<RunEvent> {
 /// Open dispatches and completed dispatches whose output was never retained.
 pub(crate) fn unresolved(events: &[RunEvent]) -> Vec<RunEvent> {
     let mut dispatches = open(events);
-    for dispatch in events.iter().filter(|event| event.kind == "slot_dispatch") {
+    for dispatch in events.iter().filter(|event| event.kind == "seat_dispatch") {
         let id = dispatch.data.get("dispatch_id").and_then(|v| v.as_str());
         let completed = events.iter().any(|event| {
-            event.kind == "slot_result"
+            event.kind == "seat_result"
                 && event.data.get("dispatch_id").and_then(|v| v.as_str()) == id
                 && event.data.get("status").and_then(|v| v.as_str()) == Some("ok")
         });
         let abandoned = events.iter().any(|event| {
-            event.kind == "slot_result"
+            event.kind == "seat_result"
                 && event.data.get("dispatch_id").and_then(|v| v.as_str()) == id
                 && event.data.get("status").and_then(|v| v.as_str()) == Some("abandoned")
         });
@@ -57,12 +57,12 @@ pub(crate) fn unresolved(events: &[RunEvent]) -> Vec<RunEvent> {
     dispatches
 }
 
-/// A completed slot followed by a recorded step error is not evidence of a
+/// A completed seat followed by a recorded step error is not evidence of a
 /// successful step. Its dispatch must be abandoned before a retry.
 pub(crate) fn failed_completion(events: &[RunEvent], dispatch: &RunEvent) -> bool {
     let id = dispatch.data.get("dispatch_id").and_then(|v| v.as_str());
     events.iter().any(|event| {
-        event.kind == "slot_result"
+        event.kind == "seat_result"
             && event.data.get("dispatch_id").and_then(|v| v.as_str()) == id
             && event.data.get("status").and_then(|v| v.as_str()) == Some("ok")
     }) && events.iter().any(|event| {

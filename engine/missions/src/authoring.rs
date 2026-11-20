@@ -49,9 +49,8 @@ fn editable_arrays(patch: &MissionChange) -> &'static [&'static str] {
         | MissionChange::ClearBrief { .. }
         | MissionChange::UpdateStep { .. }
         | MissionChange::EditStep { .. }
-        | MissionChange::AssignSlot { .. }
-        | MissionChange::NameAgent { .. }
-        | MissionChange::SwapSlots { .. }
+        | MissionChange::StaffSeat { .. }
+        | MissionChange::SwapSeats { .. }
         | MissionChange::MakeController { .. }
         | MissionChange::SetStepFormation { .. } => &["step"],
         MissionChange::CreateGate { .. } => &["gate"],
@@ -226,7 +225,7 @@ impl Store {
         for (index, patch) in changes.into_iter().enumerate() {
             let step = || {
                 let mut next = doc.clone();
-                let effect = apply_change(&mut next, &mission, patch)?;
+                let effect = apply_change(self, &mut next, &mission, patch)?;
                 if matches!(effect, ChangeEffect::Unchanged) {
                     return Ok::<_, Error>(());
                 }
@@ -301,6 +300,7 @@ enum ChangeEffect {
 }
 
 fn apply_change(
+    store: &Store,
     doc: &mut DocumentMut,
     mission: &Mission,
     patch: MissionChange,
@@ -382,13 +382,12 @@ fn apply_change(
         }
         patch @ (MissionChange::UpdateStep { .. }
         | MissionChange::EditStep { .. }
-        | MissionChange::AssignSlot { .. }
-        | MissionChange::NameAgent { .. }
-        | MissionChange::SwapSlots { .. }
+        | MissionChange::StaffSeat { .. }
+        | MissionChange::SwapSeats { .. }
         | MissionChange::MakeController { .. }
         | MissionChange::SetBrief { .. }
         | MissionChange::ClearBrief { .. }) => {
-            if !crate::authoring_staff::apply(doc, mission, patch)? {
+            if !crate::authoring_staff::apply(doc, mission, &store.agents(), patch)? {
                 return Ok(ChangeEffect::Unchanged);
             }
             ChangeEffect::Changed

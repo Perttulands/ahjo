@@ -1,4 +1,4 @@
-schema = 3
+schema = 4
 id = "msn_bad"
 slug = "admission-findings"
 title = "Admission findings"
@@ -26,22 +26,22 @@ title = "Staff"
 id = "in"
 [[step.output]]
 id = "out"
-[[step.slot]]
+[[step.seat]]
 id = "open"
-[[step.slot]]
+[[step.seat]]
 id = "invalid"
 harness = "wrong"
 effort = "low"
-[[step.slot]]
+[[step.seat]]
 id = "unavailable"
 harness = "claude-code"
 effort = "low"
-agent_id = "unknown"
-[[step.slot]]
+agent = "unknown"
+[[step.seat]]
 id = "retired"
 harness = "claude-code"
 effort = "low"
-agent_id = "critic"
+agent = "critic"
 
 [[step]]
 id = "orchestration"
@@ -51,7 +51,7 @@ title = "Orchestration"
 id = "in"
 [[step.output]]
 id = "out"
-[[step.slot]]
+[[step.seat]]
 id = "worker"
 harness = "claude-code"
 effort = "low"

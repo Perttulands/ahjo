@@ -53,29 +53,29 @@ impl ahjo_mission_engine::Executor for ControlledLab {
         sink: ahjo_mission_engine::ExecutionSink,
     ) -> Result<ahjo_mission_engine::StepResult, ahjo_mission_engine::Error> {
         let node = &request.step.id;
-        let slot = &request.step.slots[0];
+        let seat = &request.step.seats[0];
         self.0.wait(node, false);
-        let dispatch = format!("dsp_{}_{}_{}", request.run_id, slot.id, request.attempt);
+        let dispatch = format!("dsp_{}_{}_{}", request.run_id, seat.id, request.attempt);
         sink.emit(ahjo_mission_engine::ExecutionEvent {
-            kind: "slot_dispatch".into(),
-            slot_id: slot.id.clone(),
-            data: serde_json::json!({"dispatch_id":dispatch,"node_id":node,"slot_id":slot.id})
+            kind: "seat_dispatch".into(),
+            seat_id: seat.id.clone(),
+            data: serde_json::json!({"dispatch_id":dispatch,"node_id":node,"seat_id":seat.id})
                 .as_object()
                 .unwrap()
                 .clone(),
         })?;
         self.0.wait(node, true);
-        sink.emit(ahjo_mission_engine::ExecutionEvent { kind: "slot_result".into(), slot_id: slot.id.clone(), data: serde_json::json!({"dispatch_id":dispatch,"node_id":node,"slot_id":slot.id,"status":"ok","sentinel":{"run_id":request.run_id,"status":"ok"}}).as_object().unwrap().clone() })?;
+        sink.emit(ahjo_mission_engine::ExecutionEvent { kind: "seat_result".into(), seat_id: seat.id.clone(), data: serde_json::json!({"dispatch_id":dispatch,"node_id":node,"seat_id":seat.id,"status":"ok","sentinel":{"run_id":request.run_id,"status":"ok"}}).as_object().unwrap().clone() })?;
         let text = format!(
-            "lab-fake output from {} using {} for {}\nslot: {}\ninput:{}{}",
-            if slot.agent_id.is_empty() {
+            "lab-fake output from {} using {} for {}\nseat: {}\ninput:{}{}",
+            if seat.agent.is_empty() {
                 "vanilla"
             } else {
-                &slot.agent_id
+                &seat.agent
             },
-            slot.harness,
+            seat.harness,
             request.step.title,
-            slot.id,
+            seat.id,
             if request.input_text.starts_with("```") {
                 "\n"
             } else {
@@ -136,13 +136,13 @@ fn reattach_keeps_other_completed_dispatches_when_one_fails() {
             sink: ExecutionSink,
         ) -> Result<StepResult, ahjo_mission_engine::Error> {
             (|| -> Result<StepResult, String> {
-            let slot = &req.step.slots[0];
+            let seat = &req.step.seats[0];
             let dispatch = format!("dsp_{}_{}", req.step.id, req.attempt);
-            sink.emit(ExecutionEvent { kind:"slot_dispatch".into(), slot_id:slot.id.clone(), data:serde_json::json!({"dispatch_id":dispatch,"node_id":req.step.id,"slot_id":slot.id}).as_object().unwrap().clone() }).map_err(|error| error.message)?;
+            sink.emit(ExecutionEvent { kind:"seat_dispatch".into(), seat_id:seat.id.clone(), data:serde_json::json!({"dispatch_id":dispatch,"node_id":req.step.id,"seat_id":seat.id}).as_object().unwrap().clone() }).map_err(|error| error.message)?;
             while !self.release.load(Ordering::Acquire) {
                 std::thread::sleep(Duration::from_millis(5));
             }
-            sink.emit(ExecutionEvent { kind:"slot_result".into(), slot_id:slot.id.clone(), data:serde_json::json!({"dispatch_id":dispatch,"status":"ok","sentinel":{"run_id":req.run_id}}).as_object().unwrap().clone() }).map_err(|error| error.message)?;
+            sink.emit(ExecutionEvent { kind:"seat_result".into(), seat_id:seat.id.clone(), data:serde_json::json!({"dispatch_id":dispatch,"status":"ok","sentinel":{"run_id":req.run_id}}).as_object().unwrap().clone() }).map_err(|error| error.message)?;
             Ok(StepResult {
                 status: "done".into(),
                 text: "done".into(),
@@ -184,7 +184,7 @@ fn reattach_keeps_other_completed_dispatches_when_one_fails() {
         .next()
         .unwrap()
         .replace("fmn_work", "fmn_other")
-        .replace("slot_work", "slot_other");
+        .replace("seat_work", "seat_other");
     let mission = format!(
         "{solo}\n[[step]]{other}\n[[connection]]\nid = \"edge_other\"\nfrom = \"inp_hello:out\"\nto = \"fmn_other:port_in\"\n[[connection]]\nid = \"edge_other_end\"\nfrom = \"fmn_other:port_out\"\nto = \"end_done:in\"\n"
     );
@@ -215,7 +215,7 @@ fn reattach_keeps_other_completed_dispatches_when_one_fails() {
             .unwrap()
             .events
             .iter()
-            .filter(|e| e.kind == "slot_dispatch")
+            .filter(|e| e.kind == "seat_dispatch")
             .count()
             == 2
         {
@@ -405,7 +405,7 @@ fn restart_cuts_preserve_branch_and_human_gate_outcomes() {
             .next()
             .unwrap()
             .replace("fmn_work", "fmn_other")
-            .replace("slot_work", "slot_other")
+            .replace("seat_work", "seat_other")
             .replace(
                 "Return a short result",
                 "archon-lab-work:40ms Return a short result",
@@ -427,7 +427,7 @@ fn restart_cuts_preserve_branch_and_human_gate_outcomes() {
                 .next()
                 .unwrap()
                 .replace("fmn_work", "fmn_judge")
-                .replace("slot_work", "slot_judge");
+                .replace("seat_work", "seat_judge");
             mission.push_str(&format!("\n[[step]]{judge}\n[[connection]]\nid = \"edge_judge\"\nfrom = \"gate_review:judge\"\nto = \"fmn_judge:port_in\"\n[[connection]]\nid = \"edge_judge_return\"\nfrom = \"fmn_judge:port_out\"\nto = \"gate_review:judge\"\n"));
         }
         std::fs::write(root.0.join("missions/hello.mission.toml"), mission).unwrap();
@@ -504,11 +504,11 @@ fn fan_out_runs_concurrently_and_join_waits_for_both() {
             .unwrap();
         let first = step
             .replace("fmn_work", "fmn_a")
-            .replace("slot_work", "slot_a");
-        let second = first.replace("fmn_a", "fmn_b").replace("slot_a", "slot_b");
+            .replace("seat_work", "seat_a");
+        let second = first.replace("fmn_a", "fmn_b").replace("seat_a", "seat_b");
         let join = step
             .replace("fmn_work", "fmn_join")
-            .replace("slot_work", "slot_join")
+            .replace("seat_work", "seat_join")
             .replace(
                 "[[step.output]]",
                 "[[step.input]]\nid = \"port_second\"\nlabel = \"Second\"\n[[step.output]]",
@@ -689,7 +689,7 @@ fn human_answer_routes_while_another_branch_runs_and_rejection_waits() {
                 .next()
                 .unwrap()
                 .replace("fmn_work", "fmn_other")
-                .replace("slot_work", "slot_other");
+                .replace("seat_work", "seat_other");
             let mission = format!(
                 "{}\n[[step]]{other}\n[[connection]]\nid = \"edge_other\"\nfrom = \"inp_hello:out\"\nto = \"fmn_other:port_in\"\n[[connection]]\nid = \"edge_other_done\"\nfrom = \"fmn_other:port_out\"\nto = \"end_done:in\"\n",
                 gated_mission("kinds = [\"human\"]")
@@ -717,7 +717,7 @@ fn human_answer_routes_while_another_branch_runs_and_rejection_waits() {
             let requested = wait_for(&c, &id, "human_input_requested", "gate_review", deadline);
             if dispatch_before {
                 control.release("fmn_other", true, false);
-                wait_for(&c, &id, "slot_dispatch", "fmn_other", deadline);
+                wait_for(&c, &id, "seat_dispatch", "fmn_other", deadline);
             }
             c.record_verdict(
                 &id,
@@ -739,7 +739,7 @@ fn human_answer_routes_while_another_branch_runs_and_rejection_waits() {
             if !dispatch_before {
                 control.release("fmn_other", true, false);
             }
-            let dispatch = wait_for(&c, &id, "slot_dispatch", "fmn_other", deadline);
+            let dispatch = wait_for(&c, &id, "seat_dispatch", "fmn_other", deadline);
             assert_eq!(dispatch < decision, dispatch_before);
             control.release("fmn_other", false, true);
             let output = wait_for(&c, &id, "node_output", "fmn_other", deadline);
@@ -819,7 +819,7 @@ fn a_newer_human_request_makes_the_old_sequence_stale() {
         .next()
         .unwrap()
         .replace("fmn_work", "fmn_other")
-        .replace("slot_work", "slot_other")
+        .replace("seat_work", "seat_other")
         .replace(
             "Return a short result",
             "archon-lab-work:400ms Return a short result",
@@ -916,7 +916,7 @@ fn separate_human_gates_can_be_answered_in_either_order() {
         .next()
         .unwrap()
         .replace("fmn_work", "fmn_other")
-        .replace("slot_work", "slot_other");
+        .replace("seat_work", "seat_other");
     let mission = format!(
         "{}\n[[step]]{other}\n[[gate]]\nid = \"gate_other\"\ntitle = \"Other\"\nkinds = [\"human\"]\n\n[[connection]]\nid = \"edge_other\"\nfrom = \"inp_hello:out\"\nto = \"fmn_other:port_in\"\n[[connection]]\nid = \"edge_other_gate\"\nfrom = \"fmn_other:port_out\"\nto = \"gate_other:in\"\n[[connection]]\nid = \"edge_other_pass\"\nfrom = \"gate_other:pass\"\nto = \"end_done:in\"\n[[connection]]\nid = \"edge_other_fail\"\nfrom = \"gate_other:fail\"\nto = \"end_rejected:in\"\n",
         gated_mission("kinds = [\"human\"]")
@@ -976,7 +976,7 @@ fn a_blocked_run_accepts_another_gates_verdict_and_routes_it_on_resume() {
         .next()
         .unwrap()
         .replace("fmn_work", "fmn_judge")
-        .replace("slot_work", "slot_judge");
+        .replace("seat_work", "seat_judge");
     let other = solo
         .split("[[step]]")
         .nth(1)
@@ -985,7 +985,7 @@ fn a_blocked_run_accepts_another_gates_verdict_and_routes_it_on_resume() {
         .next()
         .unwrap()
         .replace("fmn_work", "fmn_other")
-        .replace("slot_work", "slot_other")
+        .replace("seat_work", "seat_other")
         .replace(
             "Return a short result",
             "archon-lab-work:400ms Return a short result",
@@ -1292,7 +1292,7 @@ fn a_step_error_is_recorded_while_other_work_finishes_and_resume_retries_it() {
         .next()
         .unwrap()
         .replace("fmn_work", "fmn_other")
-        .replace("slot_work", "slot_other")
+        .replace("seat_work", "seat_other")
         .replace(
             "Return a short result",
             "archon-lab-work:400ms Return a short result",
@@ -1380,7 +1380,7 @@ fn recovery_drains_started_work_without_retrying_a_recorded_error() {
         .next()
         .unwrap()
         .replace("fmn_work", "fmn_other")
-        .replace("slot_work", "slot_other")
+        .replace("seat_work", "seat_other")
         .replace(
             "Return a short result",
             "archon-lab-work:300ms Return a short result",
@@ -1481,7 +1481,7 @@ fn human_response_is_delivered_with_its_original_input_like_archon() {
         .next()
         .unwrap()
         .replace("fmn_work", "fmn_after")
-        .replace("slot_work", "slot_after");
+        .replace("seat_work", "seat_after");
     let mission = gated_mission("kinds = [\"human\"]")
         .replace("to = \"end_done:in\"", "to = \"fmn_after:port_in\"")
         + &format!(

@@ -258,10 +258,10 @@ id = "step_write"
 formation = "solo"
 title = "Write"
 
-[[step.slot]]
-id = "slot_writer"
+[[step.seat]]
+id = "seat_writer"
 label = "Writer"
-agent_id = "writer"
+agent = "writer"
 "#,
     )
     .unwrap();
@@ -276,7 +276,7 @@ agent_id = "writer"
         json!([{
             "mission_id":"mis_draft", "mission_slug":"draft", "mission_title":"Draft",
             "step_id":"step_write", "step_title":"Write",
-            "slot_id":"slot_writer", "slot_label":"Writer"
+            "seat_id":"seat_writer", "seat_label":"Writer"
         }])
     );
 

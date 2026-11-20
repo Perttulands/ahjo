@@ -178,7 +178,7 @@ impl Harnesses {
 
     /// Checks that a seat can start from a harness, model and effort; the
     /// error says why not. `subject` names what is checked, such as
-    /// `slot "Worker" (w1)`.
+    /// `seat "Worker" (w1)`.
     pub fn check(
         &self,
         subject: &str,
@@ -308,46 +308,46 @@ mod tests {
         let harnesses = Harnesses::from_codex_home(&home);
         std::fs::remove_dir_all(&home).unwrap();
         assert_eq!(
-            harnesses.check("slot", "openai-codex", "gpt-small", "medium"),
+            harnesses.check("seat", "openai-codex", "gpt-small", "medium"),
             Ok(())
         );
         assert_eq!(
             harnesses
-                .check("slot", "openai-codex", "gpt-small", "ultra")
+                .check("seat", "openai-codex", "gpt-small", "ultra")
                 .unwrap_err()
                 .message,
-            r#"slot effort "ultra" is not one gpt-small accepts; use low, medium"#
+            r#"seat effort "ultra" is not one gpt-small accepts; use low, medium"#
         );
         assert_eq!(
-            harnesses.check("slot", "openai-codex", "gpt-other", "ultra"),
+            harnesses.check("seat", "openai-codex", "gpt-other", "ultra"),
             Ok(())
         );
         assert_eq!(
             harnesses
-                .check_offered("slot", "openai-codex", "gpt-5.4-mini", "low")
+                .check_offered("seat", "openai-codex", "gpt-5.4-mini", "low")
                 .unwrap_err()
                 .message,
-            r#"slot model "gpt-5.4-mini" is not one Codex offers on this node; use gpt-small, or leave it empty for the harness's default"#
+            r#"seat model "gpt-5.4-mini" is not one Codex offers on this node; use gpt-small, or leave it empty for the harness's default"#
         );
         assert_eq!(
-            harnesses.check("slot", "claude-code", "haiku", "low"),
+            harnesses.check("seat", "claude-code", "haiku", "low"),
             Ok(())
         );
         assert_eq!(
-            harnesses.check_offered("slot", "claude-code", "claude-haiku-5-5", "low"),
+            harnesses.check_offered("seat", "claude-code", "claude-haiku-5-5", "low"),
             Ok(())
         );
         assert!(
             harnesses
-                .check_offered("slot", "claude-code", "gpt-small", "low")
+                .check_offered("seat", "claude-code", "gpt-small", "low")
                 .is_err()
         );
         assert_eq!(
             harnesses
-                .check("slot", "claude-code", "opus", "ultra")
+                .check("seat", "claude-code", "opus", "ultra")
                 .unwrap_err()
                 .message,
-            r#"slot effort "ultra" is not one claude-code accepts; use low, medium, high, xhigh, max"#
+            r#"seat effort "ultra" is not one claude-code accepts; use low, medium, high, xhigh, max"#
         );
     }
 
@@ -392,7 +392,7 @@ mod tokens;
 mod transcript;
 
 pub use adapter::{
-    Claude, Codex, HarnessAdapter, Keys, Launch, Pi, Pointer, Shell, SlotBinding, TokenUsage,
+    Claude, Codex, HarnessAdapter, Keys, Launch, Pi, Pointer, SeatBinding, Shell, TokenUsage,
     TranscriptRoots, Turn, TurnState,
 };
 

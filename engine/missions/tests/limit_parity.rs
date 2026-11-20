@@ -304,7 +304,7 @@ fn folder_retry_that_passes_publishes_that_attempt() {
 
 fn step(id: &str, title: &str, goal: &str) -> String {
     format!(
-        "[[step]]\nid = \"{id}\"\nformation = \"solo\"\ntitle = \"{title}\"\n[step.brief]\ngoal = \"{goal}\"\n[[step.input]]\nid = \"port_in\"\nlabel = \"Input\"\n[[step.output]]\nid = \"port_out\"\nlabel = \"Result\"\n[[step.slot]]\nid = \"slot_{id}\"\nlabel = \"Seat\"\nagent_id = \"builder\"\nharness = \"openai-codex\"\nmodel = \"\"\neffort = \"medium\"\n\n"
+        "[[step]]\nid = \"{id}\"\nformation = \"solo\"\ntitle = \"{title}\"\n[step.brief]\ngoal = \"{goal}\"\n[[step.input]]\nid = \"port_in\"\nlabel = \"Input\"\n[[step.output]]\nid = \"port_out\"\nlabel = \"Result\"\n[[step.seat]]\nid = \"seat_{id}\"\nlabel = \"Seat\"\nagent = \"builder\"\nharness = \"openai-codex\"\nmodel = \"\"\neffort = \"medium\"\n\n"
     )
 }
 
@@ -317,7 +317,7 @@ fn connection(id: &str, from: &str, to: &str) -> String {
 /// with the given Limit cards.
 fn pick_mission(kinds: &str, work_goal: &str, cards: &str) -> String {
     let mut mission = String::from(
-        "schema = 3\nid = \"msn_pick\"\nslug = \"hello\"\ntitle = \"Pick\"\nrev = 1\n\n[[input_card]]\nid = \"inp_hello\"\ntitle = \"Hello\"\ngoal = \"Return the supplied input\"\n\n",
+        "schema = 4\nid = \"msn_pick\"\nslug = \"hello\"\ntitle = \"Pick\"\nrev = 1\n\n[[input_card]]\nid = \"inp_hello\"\ntitle = \"Hello\"\ngoal = \"Return the supplied input\"\n\n",
     );
     mission += &step("fmn_work", "Work", work_goal);
     mission += &step("fmn_ship", "Ship", "Ship it.");
@@ -748,7 +748,7 @@ fn a_fail_time_limit_warns_then_cuts_off_the_working_attempt() {
     assert_eq!(failed["data"]["reason"], "Work ran out of time (2 s)");
     let warnings = run.of_type("limit_warning");
     assert_eq!(warnings.len(), 1, "{}", run.ledger_text());
-    assert_eq!(warnings[0]["slot_id"], "slot_fmn_work");
+    assert_eq!(warnings[0]["seat_id"], "seat_fmn_work");
     assert!(warnings[0]["data"]["text"].as_str().unwrap().starts_with("Ahjo: 1 s left of this step's working time (Limit card Cap). When it runs out the step stops and the run fails"));
 }
 
@@ -1290,12 +1290,12 @@ impl Executor for Lost {
                     .execute_step(request, events)
                     .map_err(|error| error.message);
             }
-            let slot = request.step.slots[0].id.clone();
+            let seat = request.step.seats[0].id.clone();
             events
                 .emit(ExecutionEvent {
-                    kind: "slot_dispatch".into(),
-                    slot_id: slot.clone(),
-                    data: json!({"dispatch_id":"dsp_lost","node_id":"fmn_work","slot_id":slot})
+                    kind: "seat_dispatch".into(),
+                    seat_id: seat.clone(),
+                    data: json!({"dispatch_id":"dsp_lost","node_id":"fmn_work","seat_id":seat})
                         .as_object()
                         .unwrap()
                         .clone(),
@@ -1350,7 +1350,7 @@ fn restarted_at_dispatch(mission: &str, lost: Lost, worked: Duration) -> Run {
     let mut lines: Vec<String> = text.lines().map(str::to_owned).collect();
     let event = |line: &str| serde_json::from_str::<Value>(line).unwrap();
     let dispatch = (lines.iter())
-        .position(|line| event(line)["type"] == "slot_dispatch")
+        .position(|line| event(line)["type"] == "seat_dispatch")
         .unwrap();
     lines.truncate(dispatch + 1);
     let started = (lines.iter())
@@ -1376,7 +1376,7 @@ fn restarted_at_dispatch(mission: &str, lost: Lost, worked: Duration) -> Run {
 
 impl Run {
     fn abandoned(&self, dispatch: &str) -> bool {
-        (self.of_type("slot_result").iter())
+        (self.of_type("seat_result").iter())
             .any(|e| e["data"]["dispatch_id"] == dispatch && e["data"]["status"] == "abandoned")
     }
 }

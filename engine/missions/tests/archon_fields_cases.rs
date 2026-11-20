@@ -109,7 +109,7 @@ fn input_and_step_titles_and_hint_can_be_set_and_cleared() {
             .unwrap();
         assert_eq!(edit.mission.steps[0].title, title);
         assert_eq!(edit.mission.steps[0].id, step);
-        assert_eq!(edit.mission.steps[0].slots.len(), 1);
+        assert_eq!(edit.mission.steps[0].seats.len(), 1);
     }
     let noop = store
         .patch(
@@ -246,10 +246,10 @@ fn gate_rejects_bad_kinds_and_checks_without_mutation() {
     assert!(!raw.contains("check_value"));
 }
 
-// Ported from slot_settings_test.go: a role is text; the slot states all
+// Ported from seat_settings_test.go: a role is text; the seat states all
 // executable settings, and invalid assignments must not touch the file.
 #[test]
-fn slot_settings_round_trip_and_invalid_assignments_write_nothing() {
+fn seat_settings_round_trip_and_invalid_assignments_write_nothing() {
     let dir = Scratch::new();
     let store = Store::new(&dir.0);
     let edit = store.create_mission("seat", "Seat", "").unwrap();
@@ -267,7 +267,7 @@ fn slot_settings_round_trip_and_invalid_assignments_write_nothing() {
         )
         .unwrap();
     let step = edit.mission.steps[0].id.clone();
-    let slot = edit.mission.steps[0].slots[0].id.clone();
+    let seat = edit.mission.steps[0].seats[0].id.clone();
     let path = dir.0.join("missions/seat.mission.toml");
     let before = std::fs::read(&path).unwrap();
     for (agent, harness, model, effort) in [
@@ -276,12 +276,10 @@ fn slot_settings_round_trip_and_invalid_assignments_write_nothing() {
         ("", "claude-code", "", "ultra"),
         ("", "hermes", "", "low"),
         ("", "claude-code", "opus 5", "low"),
-        ("reviewer", "", "", ""),
-        ("reviewer", "openai-codex", "", ""),
     ] {
         if harness == "hermes" {
             let error = serde_json::from_value::<MissionChange>(serde_json::json!({
-                "assign_slot": {"step_id": step, "slot_id": slot, "agent_id": agent,
+                "staff_seat": {"step_id": step, "seat_id": seat, "agent": agent,
                                 "harness": harness, "model": model, "effort": effort}
             }))
             .unwrap_err()
@@ -295,10 +293,10 @@ fn slot_settings_round_trip_and_invalid_assignments_write_nothing() {
             assert_eq!(std::fs::read(&path).unwrap(), before);
             continue;
         }
-        let patch = MissionChange::AssignSlot {
+        let patch = MissionChange::StaffSeat {
             step_id: step.clone(),
-            slot_id: slot.clone(),
-            agent_id: agent.into(),
+            seat_id: seat.clone(),
+            agent: agent.into(),
             harness: harness.parse().unwrap(),
             model: model.into(),
             effort: effort.parse().unwrap(),
@@ -309,12 +307,14 @@ fn slot_settings_round_trip_and_invalid_assignments_write_nothing() {
                 .unwrap_err()
                 .code
                 .as_str(),
-            "invalid_slot_settings"
+            "invalid_seat_settings"
         );
         assert_eq!(std::fs::read(&path).unwrap(), before);
     }
     for (agent, harness, model, effort) in [
         ("", "claude-code", "opus", "low"),
+        ("reviewer", "", "", ""),
+        ("reviewer", "openai-codex", "", ""),
         ("scout", "openai-codex", "", "xhigh"),
         ("", "", "", ""),
     ] {
@@ -322,10 +322,10 @@ fn slot_settings_round_trip_and_invalid_assignments_write_nothing() {
             .patch(
                 "seat",
                 pre(&edit),
-                MissionChange::AssignSlot {
+                MissionChange::StaffSeat {
                     step_id: step.clone(),
-                    slot_id: slot.clone(),
-                    agent_id: agent.into(),
+                    seat_id: seat.clone(),
+                    agent: agent.into(),
                     harness: harness.parse().unwrap(),
                     model: model.into(),
                     effort: effort.parse().unwrap(),
@@ -333,10 +333,10 @@ fn slot_settings_round_trip_and_invalid_assignments_write_nothing() {
                 "",
             )
             .unwrap();
-        let actual = &store.mission_edit("seat").unwrap().mission.steps[0].slots[0];
+        let actual = &store.mission_edit("seat").unwrap().mission.steps[0].seats[0];
         assert_eq!(
             (
-                &*actual.agent_id,
+                &*actual.agent,
                 actual.harness.as_str(),
                 &*actual.model,
                 actual.effort.as_str()
@@ -418,8 +418,8 @@ fn repeated_node_type_port_and_judge_edits_keep_bytes_and_check_etags() {
         MissionChange::SetStepFormation {
             id: f.id.clone(),
             formation: ahjo_mission_model::Formation::Orchestrated,
-            keep_slot_id: "".into(),
-            slots: None,
+            keep_seat_id: "".into(),
+            seats: None,
         },
         MissionChange::UpdatePort {
             step_id: f.id.clone(),
@@ -545,9 +545,9 @@ fn brief_rejects_unsafe_work_references_without_writing() {
     }
 }
 
-// Ports the S3 slot and controller cases: roles may repeat, seat settings do not.
+// Ports the S3 seat and controller cases: roles may repeat, seat settings do not.
 #[test]
-fn slots_share_a_role_but_keep_settings_and_exactly_one_controller() {
+fn seats_share_a_role_but_keep_settings_and_exactly_one_controller() {
     let dir = Scratch::new();
     let store = Store::new(&dir.0);
     let edit = store.create_mission("team", "Team", "").unwrap();
@@ -565,18 +565,18 @@ fn slots_share_a_role_but_keep_settings_and_exactly_one_controller() {
         )
         .unwrap();
     let team = edit.mission.steps[0].clone();
-    for (slot, harness, model, effort) in [
-        (&team.slots[0], "openai-codex", "", "medium"),
-        (&team.slots[1], "claude-code", "opus", "low"),
+    for (seat, harness, model, effort) in [
+        (&team.seats[0], "openai-codex", "", "medium"),
+        (&team.seats[1], "claude-code", "opus", "low"),
     ] {
         edit = store
             .patch(
                 "team",
                 pre(&edit),
-                MissionChange::AssignSlot {
+                MissionChange::StaffSeat {
                     step_id: team.id.clone(),
-                    slot_id: slot.id.clone(),
-                    agent_id: "builder".into(),
+                    seat_id: seat.id.clone(),
+                    agent: "builder".into(),
                     harness: harness.parse().unwrap(),
                     model: model.into(),
                     effort: effort.parse().unwrap(),
@@ -591,28 +591,28 @@ fn slots_share_a_role_but_keep_settings_and_exactly_one_controller() {
             pre(&edit),
             MissionChange::MakeController {
                 step_id: team.id,
-                slot_id: team.slots[1].id.clone(),
+                seat_id: team.seats[1].id.clone(),
             },
             "",
         )
         .unwrap();
-    let slots = &edit.mission.steps[0].slots;
-    assert_eq!(slots[0].agent_id, "builder");
-    assert_eq!(slots[1].agent_id, "builder");
+    let seats = &edit.mission.steps[0].seats;
+    assert_eq!(seats[0].agent, "builder");
+    assert_eq!(seats[1].agent, "builder");
     assert_eq!(
-        (slots[0].harness.as_str(), slots[0].effort.as_str()),
+        (seats[0].harness.as_str(), seats[0].effort.as_str()),
         ("openai-codex", "medium")
     );
     assert_eq!(
         (
-            slots[1].harness.as_str(),
-            &*slots[1].model,
-            slots[1].effort.as_str()
+            seats[1].harness.as_str(),
+            &*seats[1].model,
+            seats[1].effort.as_str()
         ),
         ("claude-code", "opus", "low")
     );
-    assert_eq!(slots.iter().filter(|slot| slot.controller).count(), 1);
-    assert!(slots[1].controller);
+    assert_eq!(seats.iter().filter(|seat| seat.controller).count(), 1);
+    assert!(seats[1].controller);
     let raw = std::fs::read_to_string(dir.0.join("missions/team.mission.toml")).unwrap();
     for line in raw.lines() {
         if let Some((field, _)) = line.split_once('=') {

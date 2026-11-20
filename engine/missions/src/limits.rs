@@ -198,7 +198,7 @@ fn time_used(mission: &Mission, events: &[RunEvent], limit: &Limit, now: OffsetD
             "node_output" | "error" => {
                 open.remove(&event.node_id);
             }
-            "slot_result" if text(event, "status") == "abandoned" => {
+            "seat_result" if text(event, "status") == "abandoned" => {
                 open.remove(&event.node_id);
             }
             "run_blocked" => blocked = true,
@@ -350,7 +350,7 @@ pub(crate) fn warning_refused(events: &[RunEvent], warning: &RunEvent) -> bool {
         }
         if event.node_id == warning.node_id
             && event.attempt == warning.attempt
-            && event.slot_id == warning.slot_id
+            && event.seat_id == warning.seat_id
         {
             return true;
         }
@@ -463,7 +463,7 @@ mod tests {
 
     fn mission(cards: &str) -> Mission {
         Mission::parse(&format!(
-            "schema = 3\nid = \"m\"\nslug = \"m\"\ntitle = \"M\"\nrev = 1\n[[input_card]]\nid = \"inp\"\ntitle = \"In\"\n[[step]]\nid = \"work\"\nformation = \"solo\"\ntitle = \"Review\"\n{cards}"
+            "schema = 4\nid = \"m\"\nslug = \"m\"\ntitle = \"M\"\nrev = 1\n[[input_card]]\nid = \"inp\"\ntitle = \"In\"\n[[step]]\nid = \"work\"\nformation = \"solo\"\ntitle = \"Review\"\n{cards}"
         ))
         .unwrap()
     }
@@ -609,7 +609,7 @@ mod tests {
             e.attempt = 1;
             e
         };
-        let warning = |seq, node: &str, slot: &str| {
+        let warning = |seq, node: &str, seat: &str| {
             let mut e = event(
                 seq,
                 "",
@@ -618,7 +618,7 @@ mod tests {
                 json!({"limit_id":"lim","mission":true}),
             );
             e.attempt = 1;
-            e.slot_id = slot.into();
+            e.seat_id = seat.into();
             e
         };
         let events = vec![

@@ -302,7 +302,7 @@ pub(crate) fn append_live(
 ) -> io::Result<bool> {
     let _guard = control.done.lock().unwrap();
     if control.canceled.load(Ordering::Acquire)
-        || (matches!(event.kind.as_str(), "node_started" | "slot_dispatch")
+        || (matches!(event.kind.as_str(), "node_started" | "seat_dispatch")
             && control.stopping.load(Ordering::Acquire))
     {
         return Ok(false);

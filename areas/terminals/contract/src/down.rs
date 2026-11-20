@@ -22,7 +22,7 @@ pub struct Pane {
 /// Who holds a session's sizing seat, as the node tells one client.
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
-pub enum Seat {
+pub enum SizingPane {
     Mine,
     Other,
 }
@@ -59,7 +59,7 @@ pub struct Session {
     #[serde(default)]
     pub panes: Vec<Pane>,
     #[serde(default)]
-    pub seat: Option<Seat>,
+    pub seat: Option<SizingPane>,
     #[serde(default)]
     pub windows: Option<u32>,
     #[serde(default)]
@@ -323,7 +323,7 @@ mod tests {
         };
         assert_eq!(list[0].user.as_deref(), Some("alice"));
         assert_eq!(list[0].panes[0].waiting.as_deref(), Some(""));
-        assert_eq!(list[0].seat, Some(Seat::Other));
+        assert_eq!(list[0].seat, Some(SizingPane::Other));
         assert_eq!(list[0].foreign, Some(1));
         let event = list[0].event.as_ref().unwrap();
         assert_eq!(

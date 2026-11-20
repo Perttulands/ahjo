@@ -110,7 +110,7 @@ pub(crate) fn apply(
                 return Ok(false);
             }
             let table = crate::authoring_staff::step_table(doc, &step_id)?;
-            let port = crate::authoring_staff::slot_table(
+            let port = crate::authoring_staff::seat_table(
                 table.get_mut(dir).ok_or_else(missing)?,
                 &port_id,
             )?;

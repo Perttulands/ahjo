@@ -30,7 +30,7 @@ fn pre(edit: &ahjo_mission_model::Edit) -> Precondition {
 // touching either file.
 #[test]
 fn invalid_step_shapes_are_refused_by_both_restore_paths() {
-    use ahjo_mission_model::{RestoredNode, Slot, Step};
+    use ahjo_mission_model::{RestoredNode, Seat, Step};
     let dir = Scratch::new();
     let store = Store::new(&dir.0);
     let edit = store.create_mission("shape", "Shape", "").unwrap();
@@ -52,29 +52,29 @@ fn invalid_step_shapes_are_refused_by_both_restore_paths() {
     let layout_path = dir.0.join("layout/shape.layout.toml");
     let mission_before = std::fs::read(&mission_path).unwrap();
     let layout_before = std::fs::read(&layout_path).unwrap();
-    let slot = |name: &str, controller| Slot {
+    let seat = |name: &str, controller| Seat {
         id: name.into(),
         controller,
         ..Default::default()
     };
     let shapes = vec![
         ("solo", vec![]),
-        ("solo", vec![slot("slot_a", false), slot("slot_b", false)]),
+        ("solo", vec![seat("seat_a", false), seat("seat_b", false)]),
         ("peer", vec![]),
-        ("peer", vec![slot("slot_a", false)]),
-        ("peer", vec![slot("slot_a", true), slot("slot_b", false)]),
+        ("peer", vec![seat("seat_a", false)]),
+        ("peer", vec![seat("seat_a", true), seat("seat_b", false)]),
         ("orchestrated", vec![]),
-        ("orchestrated", vec![slot("slot_a", true)]),
+        ("orchestrated", vec![seat("seat_a", true)]),
         (
             "orchestrated",
-            vec![slot("slot_a", false), slot("slot_b", false)],
+            vec![seat("seat_a", false), seat("seat_b", false)],
         ),
         (
             "orchestrated",
-            vec![slot("slot_a", true), slot("slot_b", true)],
+            vec![seat("seat_a", true), seat("seat_b", true)],
         ),
     ];
-    for (kind, slots) in shapes {
+    for (kind, seats) in shapes {
         let err = store
             .patch(
                 "shape",
@@ -82,8 +82,8 @@ fn invalid_step_shapes_are_refused_by_both_restore_paths() {
                 MissionChange::SetStepFormation {
                     id: id.clone(),
                     formation: kind.parse().unwrap(),
-                    keep_slot_id: "".into(),
-                    slots: Some(slots.clone()),
+                    keep_seat_id: "".into(),
+                    seats: Some(seats.clone()),
                 },
                 "",
             )
@@ -91,7 +91,7 @@ fn invalid_step_shapes_are_refused_by_both_restore_paths() {
         assert_eq!(
             err.code.as_str(),
             "invalid_type_change",
-            "{kind}: {slots:?}"
+            "{kind}: {seats:?}"
         );
         let err = store
             .patch(
@@ -101,7 +101,7 @@ fn invalid_step_shapes_are_refused_by_both_restore_paths() {
                     node: RestoredNode::Step(Step {
                         id: "fmn_bad".into(),
                         formation: kind.parse().unwrap(),
-                        slots: slots.clone(),
+                        seats: seats.clone(),
                         ..Default::default()
                     }),
                     connections: vec![],
@@ -115,7 +115,7 @@ fn invalid_step_shapes_are_refused_by_both_restore_paths() {
         assert_eq!(
             err.code.as_str(),
             "invalid_node_restore",
-            "{kind}: {slots:?}"
+            "{kind}: {seats:?}"
         );
         assert_eq!(std::fs::read(&mission_path).unwrap(), mission_before);
         assert_eq!(std::fs::read(&layout_path).unwrap(), layout_before);
@@ -260,9 +260,9 @@ fn restore_each_input_and_output_port_at_its_original_index() {
     }
 }
 
-// Exact slot snapshots are undo data.
+// Exact seat snapshots are undo data.
 #[test]
-fn step_formation_restores_exact_slot_snapshot_and_rejects_bad_choices() {
+fn step_formation_restores_exact_seat_snapshot_and_rejects_bad_choices() {
     let dir = Scratch::new();
     let store = Store::new(&dir.0);
     let edit = store.create_mission("type", "Type", "").unwrap();
@@ -280,7 +280,7 @@ fn step_formation_restores_exact_slot_snapshot_and_rejects_bad_choices() {
         )
         .unwrap();
     let step = edit.mission.steps[0].clone();
-    let snapshot = step.slots.clone();
+    let snapshot = step.seats.clone();
     edit = store
         .patch(
             "type",
@@ -288,8 +288,8 @@ fn step_formation_restores_exact_slot_snapshot_and_rejects_bad_choices() {
             MissionChange::SetStepFormation {
                 id: step.id.clone(),
                 formation: ahjo_mission_model::Formation::Solo,
-                keep_slot_id: snapshot[1].id.clone(),
-                slots: None,
+                keep_seat_id: snapshot[1].id.clone(),
+                seats: None,
             },
             "",
         )
@@ -301,17 +301,17 @@ fn step_formation_restores_exact_slot_snapshot_and_rejects_bad_choices() {
             MissionChange::SetStepFormation {
                 id: step.id.clone(),
                 formation: ahjo_mission_model::Formation::Orchestrated,
-                keep_slot_id: "".into(),
-                slots: Some(snapshot.clone()),
+                keep_seat_id: "".into(),
+                seats: Some(snapshot.clone()),
             },
             "",
         )
         .unwrap();
-    assert_eq!(edit.mission.steps[0].slots, snapshot);
+    assert_eq!(edit.mission.steps[0].seats, snapshot);
     let path = dir.0.join("missions/type.mission.toml");
     let before = std::fs::read(&path).unwrap();
     let duplicate = vec![snapshot[0].clone(), snapshot[0].clone()];
-    for (id, kind, keep, slots, code) in [
+    for (id, kind, keep, seats, code) in [
         (
             step.id.as_str(),
             "flow",
@@ -336,7 +336,7 @@ fn step_formation_restores_exact_slot_snapshot_and_rejects_bad_choices() {
         (
             step.id.as_str(),
             "solo",
-            "slot_missing",
+            "seat_missing",
             None,
             "invalid_type_change",
         ),
@@ -371,8 +371,8 @@ fn step_formation_restores_exact_slot_snapshot_and_rejects_bad_choices() {
                     MissionChange::SetStepFormation {
                         id: id.into(),
                         formation: kind.parse().unwrap(),
-                        keep_slot_id: keep.into(),
-                        slots
+                        keep_seat_id: keep.into(),
+                        seats
                     },
                     ""
                 )
@@ -816,7 +816,7 @@ fn restore_refuses_missing_foreign_and_occupied_connections_and_bad_nodes() {
             RestoredNode::Step(Step {
                 id: "fmn_copy".into(),
                 formation: ahjo_mission_model::Formation::Solo,
-                slots: other.slots.clone(),
+                seats: other.seats.clone(),
                 ..Default::default()
             }),
             vec![],
@@ -1152,10 +1152,10 @@ fn orchestrated_snapshot_cannot_silently_remove_a_staffed_seat() {
         .patch(
             "peer",
             pre(&edit),
-            MissionChange::AssignSlot {
+            MissionChange::StaffSeat {
                 step_id: team.id.clone(),
-                slot_id: team.slots[1].id.clone(),
-                agent_id: "builder".into(),
+                seat_id: team.seats[1].id.clone(),
+                agent: "builder".into(),
                 harness: ahjo_mission_model::Harness::ClaudeCode,
                 model: "".into(),
                 effort: ahjo_mission_model::Effort::Medium,
@@ -1163,10 +1163,10 @@ fn orchestrated_snapshot_cannot_silently_remove_a_staffed_seat() {
             "",
         )
         .unwrap();
-    // Keep a controller and enough workers when removing the staffed slot.
-    let mut three = edit.mission.steps[0].slots.clone();
-    three.push(ahjo_mission_model::Slot {
-        id: "slot_third".into(),
+    // Keep a controller and enough workers when removing the staffed seat.
+    let mut three = edit.mission.steps[0].seats.clone();
+    three.push(ahjo_mission_model::Seat {
+        id: "seat_third".into(),
         label: "Third".into(),
         ..Default::default()
     });
@@ -1177,8 +1177,8 @@ fn orchestrated_snapshot_cannot_silently_remove_a_staffed_seat() {
             MissionChange::SetStepFormation {
                 id: team.id.clone(),
                 formation: ahjo_mission_model::Formation::Orchestrated,
-                keep_slot_id: "".into(),
-                slots: Some(three.clone()),
+                keep_seat_id: "".into(),
+                seats: Some(three.clone()),
             },
             "",
         )
@@ -1187,7 +1187,7 @@ fn orchestrated_snapshot_cannot_silently_remove_a_staffed_seat() {
         .iter()
         .enumerate()
         .filter(|(index, _)| *index != 1)
-        .map(|(_, slot)| slot.clone())
+        .map(|(_, seat)| seat.clone())
         .collect();
     let refused = store
         .patch(
@@ -1196,22 +1196,22 @@ fn orchestrated_snapshot_cannot_silently_remove_a_staffed_seat() {
             MissionChange::SetStepFormation {
                 id: team.id.clone(),
                 formation: ahjo_mission_model::Formation::Orchestrated,
-                keep_slot_id: "".into(),
-                slots: Some(remaining.clone()),
+                keep_seat_id: "".into(),
+                seats: Some(remaining.clone()),
             },
             "",
         )
         .unwrap_err();
-    assert_eq!(refused.code.as_str(), "slot_choice_required");
+    assert_eq!(refused.code.as_str(), "seat_choice_required");
     assert_eq!(store.mission_edit("peer").unwrap().etag, edit.etag);
     edit = store
         .patch(
             "peer",
             pre(&edit),
-            MissionChange::AssignSlot {
+            MissionChange::StaffSeat {
                 step_id: team.id.clone(),
-                slot_id: team.slots[1].id.clone(),
-                agent_id: "".into(),
+                seat_id: team.seats[1].id.clone(),
+                agent: "".into(),
                 harness: ahjo_mission_model::Harness::Unset,
                 model: "".into(),
                 effort: ahjo_mission_model::Effort::Unset,
@@ -1226,11 +1226,11 @@ fn orchestrated_snapshot_cannot_silently_remove_a_staffed_seat() {
             MissionChange::SetStepFormation {
                 id: team.id,
                 formation: ahjo_mission_model::Formation::Orchestrated,
-                keep_slot_id: "".into(),
-                slots: Some(remaining.clone()),
+                keep_seat_id: "".into(),
+                seats: Some(remaining.clone()),
             },
             "",
         )
         .unwrap();
-    assert_eq!(edit.mission.steps[0].slots, remaining);
+    assert_eq!(edit.mission.steps[0].seats, remaining);
 }

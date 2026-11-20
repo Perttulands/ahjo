@@ -1,4 +1,4 @@
-schema = 3
+schema = 4
 id = "msn_example"
 slug = "write-and-review"
 title = "Write and review"
@@ -25,10 +25,9 @@ label = "Brief"
 [[step.output]]
 id = "port_write_out"
 label = "Draft"
-[[step.slot]]
-id = "slot_write"
+[[step.seat]]
+id = "seat_write"
 label = "Writer"
-agent = "writer"
 harness = "claude-code"
 effort = "medium"
 
@@ -44,10 +43,9 @@ label = "Draft"
 [[step.output]]
 id = "port_review_out"
 label = "Verdict"
-[[step.slot]]
-id = "slot_review"
+[[step.seat]]
+id = "seat_review"
 label = "Reviewer"
-agent = "reviewer"
 harness = "claude-code"
 effort = "high"
 

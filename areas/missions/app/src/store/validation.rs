@@ -11,8 +11,8 @@ pub fn todo_line(mission: &Mission, finding: &ahjo_missions_contract::Finding) -
     let name = mission.node_name(&finding.node_id);
     let step = mission.steps.iter().any(|f| f.id == finding.node_id);
     match finding.code {
-        Code::UnstaffedSlot | Code::StepWithoutSlots => format!("Choose who works {name}"),
-        Code::InvalidSlotSettings if finding.message.contains("needs an effort") => {
+        Code::UnstaffedSeat | Code::StepWithoutSeats => format!("Choose who works {name}"),
+        Code::InvalidSeatSettings if finding.message.contains("needs an effort") => {
             format!("Choose an effort for {name}")
         }
         Code::RouteLeadsNowhere if step => format!("Connect {name} to a next step or an End"),
@@ -74,8 +74,8 @@ pub fn readable_message(mission: &Mission, message: &str) -> String {
         for port in node.inputs.iter().chain(&node.outputs) {
             add(&mut names, &port.id, &port.label);
         }
-        for slot in &node.slots {
-            add(&mut names, &slot.id, &slot.label);
+        for seat in &node.seats {
+            add(&mut names, &seat.id, &seat.label);
         }
     }
     for node in &mission.gates {
@@ -209,7 +209,7 @@ mod tests {
         assert_eq!(
             readable_message(
                 &mission,
-                "Input card \"inp_1\" has no outgoing connection; step \"fmn_10\" uses \"slot_1\"; unknown inp_12"
+                "Input card \"inp_1\" has no outgoing connection; step \"fmn_10\" uses \"seat_1\"; unknown inp_12"
             ),
             "Input card \"Start\" has no outgoing connection; step \"Build\" uses \"Worker\"; unknown inp_12"
         );
@@ -226,19 +226,19 @@ mod tests {
         let mission: Mission = toml_fixture();
         let findings = [
             Finding::new(
-                Code::UnstaffedSlot,
+                Code::UnstaffedSeat,
                 "fmn_10",
-                "slot \"slot_1\" is unstaffed".into(),
+                "seat \"seat_1\" is unstaffed".into(),
             ),
             Finding::new(
-                Code::UnstaffedSlot,
+                Code::UnstaffedSeat,
                 "fmn_10",
-                "slot \"slot_2\" is unstaffed".into(),
+                "seat \"seat_2\" is unstaffed".into(),
             ),
             Finding::new(
-                Code::InvalidSlotSettings,
+                Code::InvalidSeatSettings,
                 "fmn_10",
-                "invalid_slot_settings: slot needs an effort; the policy is long".into(),
+                "invalid_seat_settings: seat needs an effort; the policy is long".into(),
             ),
         ];
         let lines: Vec<_> = todo_lines(&mission, findings)
@@ -254,7 +254,7 @@ mod tests {
         );
     }
     fn toml_fixture() -> Mission {
-        serde_json::from_value(serde_json::json!({"input_card":[{"id":"inp_1","title":"Start"}],"step":[{"id":"fmn_10","title":"Build","input":[{"id":"port_1","label":"Input"}],"slot":[{"id":"slot_1","label":"Worker"}]}],"connection":[{"id":"edge_1","from":"inp_1:out","to":"fmn_10:port_1"}]})).unwrap()
+        serde_json::from_value(serde_json::json!({"input_card":[{"id":"inp_1","title":"Start"}],"step":[{"id":"fmn_10","title":"Build","input":[{"id":"port_1","label":"Input"}],"seat":[{"id":"seat_1","label":"Worker"}]}],"connection":[{"id":"edge_1","from":"inp_1:out","to":"fmn_10:port_1"}]})).unwrap()
     }
     fn key(rev: i64) -> Key {
         Key {

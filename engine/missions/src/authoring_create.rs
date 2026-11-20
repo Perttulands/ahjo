@@ -2,7 +2,7 @@
 use crate::Error;
 use ahjo_mission_model::{
     End, EndOutcome, Formation, Gate, GateKind, HumanChannel, InputCard, Mission, MissionChange,
-    Port, Slot, Step,
+    Port, Seat, Step,
 };
 use serde::Serialize;
 use toml_edit::{ArrayOfTables, DocumentMut, Item};
@@ -90,7 +90,7 @@ pub(crate) fn apply(
             x,
             y,
         } => {
-            let (default_title, slots): (&str, &[(&str, bool)]) = match formation {
+            let (default_title, seats): (&str, &[(&str, bool)]) = match formation {
                 Formation::Unset | Formation::Solo => {
                     formation = Formation::Solo;
                     ("Solo task", &[("Agent", false)])
@@ -120,12 +120,12 @@ pub(crate) fn apply(
                 label: "Output".into(),
                 ..Port::default()
             });
-            for (label, controller) in slots {
-                node.slots.push(Slot {
-                    id: crate::authoring::id("slot")?,
+            for (label, controller) in seats {
+                node.seats.push(Seat {
+                    id: crate::authoring::id("seat")?,
                     label: (*label).into(),
                     controller: *controller,
-                    ..Slot::default()
+                    ..Seat::default()
                 });
             }
             append(doc, "step", &node)?;

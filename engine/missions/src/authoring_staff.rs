@@ -3,7 +3,7 @@ use crate::Error;
 use ahjo_mission_model::{Mission, MissionChange};
 use toml_edit::{DocumentMut, Item, TableLike, Value, value};
 fn not_found() -> Error {
-    Error::new("not_found", "step or slot")
+    Error::new("not_found", "step or seat")
 }
 pub(crate) fn step_table<'a>(
     doc: &'a mut DocumentMut,
@@ -17,7 +17,7 @@ pub(crate) fn step_table<'a>(
         })
         .ok_or_else(not_found)
 }
-pub(crate) fn slot_table<'a>(item: &'a mut Item, id: &str) -> Result<&'a mut dyn TableLike, Error> {
+pub(crate) fn seat_table<'a>(item: &'a mut Item, id: &str) -> Result<&'a mut dyn TableLike, Error> {
     match item {
         Item::ArrayOfTables(tables) => tables
             .iter_mut()
@@ -52,6 +52,7 @@ pub(crate) fn check_work(work: &str) -> Result<(), Error> {
 pub(crate) fn apply(
     doc: &mut DocumentMut,
     mission: &Mission,
+    agents: &crate::AgentStore,
     patch: MissionChange,
 ) -> Result<bool, Error> {
     match patch {
@@ -147,95 +148,98 @@ pub(crate) fn apply(
                 None => {}
             }
         }
-        MissionChange::NameAgent {
+        MissionChange::StaffSeat {
             step_id,
-            slot_id,
+            seat_id,
             agent,
-        } => {
-            let step = mission.step(&step_id).ok_or_else(not_found)?;
-            let slot = step
-                .slots
-                .iter()
-                .find(|s| s.id == slot_id)
-                .ok_or_else(not_found)?;
-            let agent = agent.trim();
-            if !agent.is_empty() && !ahjo_mission_model::valid_agent(agent) {
-                return Err(Error::new(
-                    "invalid_agent",
-                    "an agent's name is lower-case words of letters and digits joined by dashes",
-                ));
-            }
-            if slot.agent == agent {
-                return Ok(false);
-            }
-            let table = step_table(doc, &step_id)?;
-            let item = table.get_mut("slot").ok_or_else(not_found)?;
-            set(slot_table(item, &slot_id)?, "agent", agent);
-        }
-        MissionChange::AssignSlot {
-            step_id,
-            slot_id,
-            agent_id,
             harness,
             model,
             effort,
         } => {
             let step = mission.step(&step_id).ok_or_else(not_found)?;
-            let slot = step
-                .slots
+            let seat = step
+                .seats
                 .iter()
-                .find(|s| s.id == slot_id)
+                .find(|s| s.id == seat_id)
                 .ok_or_else(not_found)?;
-            let (agent_id, model) = (agent_id.trim(), model.trim());
-            if !agent_id.is_empty() && crate::check_agent_id(agent_id).is_err() {
-                return Err(Error::new("invalid_slot_settings", "invalid agent id"));
+            let (agent, model) = (agent.trim(), model.trim());
+            if !agent.is_empty() && crate::check_agent_id(agent).is_err() {
+                return Err(Error::new("invalid_seat_settings", "invalid agent id"));
             }
-            if [agent_id, harness.as_str(), model, effort.as_str()]
-                .iter()
-                .any(|s| !s.is_empty())
-            {
-                crate::Harnesses::from_host()
-                    .check_offered("slot", harness.as_str(), model, effort.as_str())
-                    .map_err(|e| Error::new("invalid_slot_settings", e.message))?;
+            let setup = if agent.is_empty() {
+                None
+            } else {
+                Some(
+                    agents
+                        .read(agent)
+                        .map_err(|error| Error::new("invalid_seat_settings", error.message))?,
+                )
+            };
+            let next = ahjo_mission_model::Seat {
+                agent: agent.to_owned(),
+                harness,
+                model: model.to_owned(),
+                effort,
+                ..Default::default()
+            };
+            if next.staffed() {
+                let resolved = next.settings(setup.as_ref());
+                let harnesses = crate::Harnesses::from_host();
+                let check = if model.is_empty() && setup.is_some() {
+                    harnesses.check(
+                        "seat",
+                        resolved.harness.as_str(),
+                        &resolved.model,
+                        resolved.effort.as_str(),
+                    )
+                } else {
+                    harnesses.check_offered(
+                        "seat",
+                        resolved.harness.as_str(),
+                        &resolved.model,
+                        resolved.effort.as_str(),
+                    )
+                };
+                check.map_err(|error| Error::new("invalid_seat_settings", error.message))?;
             }
             if (
-                slot.agent_id.as_str(),
-                slot.harness,
-                slot.model.as_str(),
-                slot.effort,
-            ) == (agent_id, harness, model, effort)
+                seat.agent.as_str(),
+                seat.harness,
+                seat.model.as_str(),
+                seat.effort,
+            ) == (agent, harness, model, effort)
             {
                 return Ok(false);
             }
             let table = step_table(doc, &step_id)?;
-            let item = table.get_mut("slot").ok_or_else(not_found)?;
-            let slot = slot_table(item, &slot_id)?;
+            let item = table.get_mut("seat").ok_or_else(not_found)?;
+            let seat = seat_table(item, &seat_id)?;
             for (key, val) in [
-                ("agent_id", agent_id),
+                ("agent", agent),
                 ("harness", harness.as_str()),
                 ("model", model),
                 ("effort", effort.as_str()),
             ] {
-                set(slot, key, val);
+                set(seat, key, val);
             }
         }
-        MissionChange::SwapSlots {
+        MissionChange::SwapSeats {
             from_step,
-            from_slot,
+            from_seat,
             to_step,
-            to_slot,
+            to_seat,
         } => {
-            let find = |step: &str, slot: &str| {
+            let find = |step: &str, seat: &str| {
                 mission
                     .step(step)
-                    .and_then(|f| f.slots.iter().find(|s| s.id == slot))
+                    .and_then(|f| f.seats.iter().find(|s| s.id == seat))
                     .ok_or_else(not_found)
             };
-            let from = find(&from_step, &from_slot)?;
-            let to = find(&to_step, &to_slot)?;
-            let settings = |s: &ahjo_mission_model::Slot| {
+            let from = find(&from_step, &from_seat)?;
+            let to = find(&to_step, &to_seat)?;
+            let settings = |s: &ahjo_mission_model::Seat| {
                 [
-                    s.agent_id.clone(),
+                    s.agent.clone(),
                     s.harness.as_str().to_owned(),
                     s.model.clone(),
                     s.effort.as_str().to_owned(),
@@ -247,20 +251,17 @@ pub(crate) fn apply(
                 return Ok(false);
             }
             for (step, id, values) in [
-                (&from_step, &from_slot, &second),
-                (&to_step, &to_slot, &first),
+                (&from_step, &from_seat, &second),
+                (&to_step, &to_seat, &first),
             ] {
                 let table = step_table(doc, step)?;
-                let slot = slot_table(table.get_mut("slot").ok_or_else(not_found)?, id)?;
-                for (key, value) in ["agent_id", "harness", "model", "effort"]
-                    .iter()
-                    .zip(values)
-                {
-                    set(slot, key, value);
+                let seat = seat_table(table.get_mut("seat").ok_or_else(not_found)?, id)?;
+                for (key, value) in ["agent", "harness", "model", "effort"].iter().zip(values) {
+                    set(seat, key, value);
                 }
             }
         }
-        MissionChange::MakeController { step_id, slot_id } => {
+        MissionChange::MakeController { step_id, seat_id } => {
             let step = mission.step(&step_id).ok_or_else(not_found)?;
             if step.formation != ahjo_mission_model::Formation::Orchestrated {
                 return Err(Error::new(
@@ -268,19 +269,19 @@ pub(crate) fn apply(
                     "step is not orchestrated",
                 ));
             }
-            if !step.slots.iter().any(|s| s.id == slot_id) {
+            if !step.seats.iter().any(|s| s.id == seat_id) {
                 return Err(not_found());
             }
-            if step.slots.iter().all(|s| s.controller == (s.id == slot_id)) {
+            if step.seats.iter().all(|s| s.controller == (s.id == seat_id)) {
                 return Ok(false);
             }
             let table = step_table(doc, &step_id)?;
-            let item = table.get_mut("slot").ok_or_else(not_found)?;
-            for slot in &step.slots {
+            let item = table.get_mut("seat").ok_or_else(not_found)?;
+            for seat in &step.seats {
                 crate::write::set(
-                    slot_table(item, &slot.id)?,
+                    seat_table(item, &seat.id)?,
                     "controller",
-                    value(slot.id == slot_id),
+                    value(seat.id == seat_id),
                 );
             }
         }

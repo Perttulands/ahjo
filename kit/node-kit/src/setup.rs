@@ -1,4 +1,4 @@
-//! What an area is built from, and the slots areas fill for one another.
+//! What an area is built from, and the interfaces areas fill for one another.
 
 use std::any::{Any, TypeId, type_name};
 use std::collections::HashMap;
@@ -29,19 +29,19 @@ pub struct Setup {
 }
 
 /// What areas provide one another, one value per interface: an area fills
-/// a slot by the trait it offers (`provided.provide::<dyn Sessions>(..)`)
+/// an interface by the trait it offers (`provided.provide::<dyn Sessions>(..)`)
 /// as it is built, and any area reads it by the same type once every area
 /// is built, so the order of the binary's list never matters. The trait
 /// lives with its provider (its contract or engine crate), not here.
 #[derive(Clone, Default)]
 pub struct Provided {
-    slots: Arc<Mutex<HashMap<TypeId, Box<dyn Any + Send + Sync>>>>,
-    /// Every area is built: slots are read, no longer filled.
+    interfaces: Arc<Mutex<HashMap<TypeId, Box<dyn Any + Send + Sync>>>>,
+    /// Every area is built: interfaces are read, no longer filled.
     built: Arc<AtomicBool>,
 }
 
 impl Provided {
-    /// Fills the slot for `T`; refused if another area did, or once every
+    /// Fills the interface for `T`; refused if another area did, or once every
     /// area is built.
     pub fn provide<T: ?Sized + Send + Sync + 'static>(&self, value: Arc<T>) -> Result<(), Error> {
         if self.built.load(Ordering::Acquire) {
@@ -53,18 +53,18 @@ impl Provided {
                 ),
             ));
         }
-        let mut slots = self.slots.lock().unwrap();
-        if slots.contains_key(&TypeId::of::<T>()) {
+        let mut interfaces = self.interfaces.lock().unwrap();
+        if interfaces.contains_key(&TypeId::of::<T>()) {
             return Err(Error::new(
                 "provided_twice",
                 format!("two areas provide {}", type_name::<T>()),
             ));
         }
-        slots.insert(TypeId::of::<T>(), Box::new(value));
+        interfaces.insert(TypeId::of::<T>(), Box::new(value));
         Ok(())
     }
 
-    /// What fills the slot for `T`. Read only once every area is built:
+    /// What fills the interface for `T`. Read only once every area is built:
     /// an area that needs it finishes in [`crate::Built::then`].
     pub fn get<T: ?Sized + Send + Sync + 'static>(&self) -> Result<Arc<T>, Error> {
         if !self.built.load(Ordering::Acquire) {
@@ -76,8 +76,8 @@ impl Provided {
                 ),
             ));
         }
-        let slots = self.slots.lock().unwrap();
-        slots
+        let interfaces = self.interfaces.lock().unwrap();
+        interfaces
             .get(&TypeId::of::<T>())
             .and_then(|value| value.downcast_ref::<Arc<T>>())
             .cloned()
@@ -89,7 +89,7 @@ impl Provided {
             })
     }
 
-    /// Every area is built: from now on slots are read, not filled.
+    /// Every area is built: from now on interfaces are read, not filled.
     pub(crate) fn seal(&self) {
         self.built.store(true, Ordering::Release);
     }

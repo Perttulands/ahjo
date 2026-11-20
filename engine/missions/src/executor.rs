@@ -1,7 +1,7 @@
 //! Step-level execution boundary. Executors report events; they never
 //! write a run ledger, so this boundary can later be placed on another node.
 use crate::BindingsSnapshot;
-use ahjo_mission_model::{RunInput, Slot, Step, agent_session, fresh_session};
+use ahjo_mission_model::{RunInput, Seat, Step, fresh_session, seat_session};
 use serde_json::{Map, Value, json};
 use sha2::{Digest, Sha256};
 use std::path::PathBuf;
@@ -15,7 +15,7 @@ use std::sync::{
 pub struct StepExecution {
     pub run_id: String,
     /// What the mission's agent sessions are named under
-    /// ([`ahjo_mission_model::agent_session`]); blank names seats by ids.
+    /// ([`ahjo_mission_model::seat_session`]); blank names seats by ids.
     pub prefix: String,
     /// The run's number as the Missions list shows it, naming a fresh
     /// attempt's sessions.
@@ -45,18 +45,18 @@ pub struct StepExecution {
 }
 impl StepExecution {
     /// The session name the seat requests and whether it stays for later runs.
-    pub(crate) fn seat_session(&self, slot: &Slot) -> (String, bool) {
+    pub(crate) fn seat_session(&self, seat: &Seat) -> (String, bool) {
         if self.prefix.is_empty() {
             return (String::new(), false);
         }
-        let agent = self.step.agent_of(slot);
+        let agent = self.step.session_part(seat);
         if self.step.fresh {
             (
                 fresh_session(&self.prefix, &agent, self.run_number, self.attempt),
                 false,
             )
         } else {
-            (agent_session(&self.prefix, &agent), true)
+            (seat_session(&self.prefix, &agent), true)
         }
     }
 }
@@ -64,7 +64,7 @@ impl StepExecution {
 #[derive(Clone, Debug)]
 pub struct ExecutionEvent {
     pub kind: String,
-    pub slot_id: String,
+    pub seat_id: String,
     pub data: Map<String, Value>,
 }
 pub(crate) struct PendingEvent {
@@ -111,7 +111,7 @@ pub struct OpenDispatch {
     pub run_id: String,
     pub dispatch_id: String,
     pub node_id: String,
-    pub slot_id: String,
+    pub seat_id: String,
     pub attempt: i64,
     pub step: Step,
     pub artifact_dir: PathBuf,
@@ -129,7 +129,7 @@ pub struct OpenDispatch {
 pub struct LeftSeat {
     pub run_id: String,
     pub node_id: String,
-    pub slot_id: String,
+    pub seat_id: String,
     pub identity: Map<String, Value>,
     pub cause: String,
 }
@@ -223,11 +223,11 @@ impl Executor for LabExecutor {
                         continue;
                     }
                     *sent = true;
-                    for slot in &request.step.slots {
+                    for seat in &request.step.seats {
                         // A refused warning is one this seat already had.
                         let _ = events.emit(ExecutionEvent {
                             kind: "limit_warning".into(),
-                            slot_id: slot.id.clone(),
+                            seat_id: seat.id.clone(),
                             data: json!({"limit_id":warning.limit_id,"mission":warning.mission,"text":warning.text})
                                 .as_object()
                                 .unwrap()
@@ -243,25 +243,25 @@ impl Executor for LabExecutor {
         }
         spend_lab_tokens(&request, &events)?;
         let result = lab_result(&request)?;
-        for slot in &request.step.slots {
+        for seat in &request.step.seats {
             if request.canceled.load(Ordering::Acquire) {
                 return Err("canceled".into());
             }
             let send = |kind: &str, data: Value| -> Result<(), String> {
                 events.emit(ExecutionEvent {
                     kind: kind.into(),
-                    slot_id: slot.id.clone(),
+                    seat_id: seat.id.clone(),
                     data: data.as_object().unwrap().clone(),
                 }).map_err(|error| error.message)
             };
-            let (session, _) = request.seat_session(slot);
-            let dispatch_id = format!("dsp_{}_{}_{}", request.run_id, slot.id, request.attempt);
+            let (session, _) = request.seat_session(seat);
+            let dispatch_id = format!("dsp_{}_{}_{}", request.run_id, seat.id, request.attempt);
             let mut brief = format!(
-                "run: {}\nnode: {}\nslot: {}\nharness: {}\ncwd: {}\ngoal: {}\ninput: {}\ncontext paths: {}\n",
+                "run: {}\nnode: {}\nseat: {}\nharness: {}\ncwd: {}\ngoal: {}\ninput: {}\ncontext paths: {}\n",
                 request.run_id,
                 request.step.id,
-                slot.id,
-                slot.harness,
+                seat.id,
+                seat.harness,
                 request.cwd.display(),
                 request
                     .step
@@ -290,7 +290,7 @@ impl Executor for LabExecutor {
                 }
             }
             if let Some(binding) = request.bindings.bindings.iter().find(|binding| {
-                binding.node_id == request.step.id && binding.slot_id == slot.id
+                binding.node_id == request.step.id && binding.seat_id == seat.id
             }) && let Some(instructions) = binding.instructions()
                 && !instructions.is_empty()
             {
@@ -307,7 +307,7 @@ impl Executor for LabExecutor {
                 }
             }
             std::fs::create_dir_all(&request.artifact_dir).map_err(|e| e.to_string())?;
-            let brief_path = request.artifact_dir.join(format!("brief-{}.md", slot.id));
+            let brief_path = request.artifact_dir.join(format!("brief-{}.md", seat.id));
             let mut options = std::fs::OpenOptions::new();
             options.create_new(true).write(true);
             #[cfg(unix)]
@@ -322,8 +322,8 @@ impl Executor for LabExecutor {
                 .map_err(|e| e.to_string())?;
             let digest = hex::encode(Sha256::digest(brief.as_bytes()));
             send(
-                "slot_dispatch",
-                json!({"dispatch_id":dispatch_id,"node_id":request.step.id,"slot_id":slot.id,"agent_id":slot.agent_id,"harness":slot.harness,"session":session,"session_ref":format!("lab:{session}"),"brief_path":brief_path,"prompt_sha256":digest,"prompt_ref":"","phase":"","recorded_before_send":true,"native_ack":false}),
+                "seat_dispatch",
+                json!({"dispatch_id":dispatch_id,"node_id":request.step.id,"seat_id":seat.id,"agent":seat.agent,"harness":seat.harness,"session":session,"session_ref":format!("lab:{session}"),"brief_path":brief_path,"prompt_sha256":digest,"prompt_ref":"","phase":"","recorded_before_send":true,"native_ack":false}),
             )?;
             let evidence = serde_json::to_vec(&result).map_err(|e| e.to_string())?;
             let path = request.artifact_dir.join("lab-completed.json");
@@ -339,8 +339,8 @@ impl Executor for LabExecutor {
                 .and_then(|()| file.sync_all())
                 .map_err(|e| e.to_string())?;
             send(
-                "slot_result",
-                json!({"dispatch_id":dispatch_id,"node_id":request.step.id,"slot_id":slot.id,"status":"ok","sentinel":{"run_id":request.run_id,"status":"ok","artifact":format!("lab-{}.md",slot.id)}}),
+                "seat_result",
+                json!({"dispatch_id":dispatch_id,"node_id":request.step.id,"seat_id":seat.id,"status":"ok","sentinel":{"run_id":request.run_id,"status":"ok","artifact":format!("lab-{}.md",seat.id)}}),
             )?;
         }
         Ok(result)
@@ -349,8 +349,8 @@ impl Executor for LabExecutor {
 
     fn reattach(&self, dispatch: OpenDispatch) -> Result<StepResult, crate::Error> {
         (|| -> Result<StepResult, String> {
-            if dispatch.step.slots.len() != 1 {
-                return Err("lab evidence cannot recover a multi-slot step".into());
+            if dispatch.step.seats.len() != 1 {
+                return Err("lab evidence cannot recover a multi-seat step".into());
             }
             let path = dispatch.artifact_dir.join("lab-completed.json");
             let bytes = std::fs::read(path).map_err(|e| e.to_string())?;
@@ -384,16 +384,16 @@ fn spend_lab_tokens(request: &StepExecution, events: &ExecutionSink) -> Result<(
         .ok()
         .filter(|n| *n > 0)
         .ok_or_else(|| format!("lab tokens {count:?} is not a positive whole number"))?;
-    let slot = request
+    let seat = request
         .step
-        .slots
+        .seats
         .first()
         .map(|s| s.id.clone())
         .unwrap_or_default();
-    let dispatch = format!("{}/{}/{slot}", request.step.id, request.attempt);
+    let dispatch = format!("{}/{}/{seat}", request.step.id, request.attempt);
     events.emit(ExecutionEvent {
         kind: "token_usage".into(),
-        slot_id: slot,
+        seat_id: seat,
         data: json!({"tokens":tokens,"usage":{"input":tokens,"cache_write":0,"cache_read":0,"output":0}})
             .as_object()
             .unwrap()
@@ -409,19 +409,19 @@ fn spend_lab_tokens(request: &StepExecution, events: &ExecutionSink) -> Result<(
 fn lab_result(request: &StepExecution) -> Result<StepResult, String> {
     let lines: Vec<_> = request
         .step
-        .slots
+        .seats
         .iter()
-        .map(|slot| {
+        .map(|seat| {
             format!(
-                "lab-fake output from {} using {} for {}\nslot: {}\ninput:{}{}",
-                if slot.agent_id.is_empty() {
+                "lab-fake output from {} using {} for {}\nseat: {}\ninput:{}{}",
+                if seat.agent.is_empty() {
                     "vanilla"
                 } else {
-                    &slot.agent_id
+                    &seat.agent
                 },
-                slot.harness,
+                seat.harness,
                 request.step.title,
-                slot.id,
+                seat.id,
                 if request.input_text.starts_with("```") {
                     "\n"
                 } else {

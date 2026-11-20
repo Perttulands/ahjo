@@ -23,7 +23,7 @@ fn requests_and_responses_round_trip() {
         json!({"deletion":{"id":"m","slug":"demo","title":"Demo","archive_id":"a"}}),
     );
     round::<Vec<AgentSeat>>(
-        json!([{"dispatch_id":"d","slot_id":"s","node":"local","session":"s","pane":2,"session_name":"s","outcome":"","available":true,"waiting":{"state":"waiting","detail":"detail","since":"now","seq":1}}]),
+        json!([{"dispatch_id":"d","seat_id":"s","node":"local","session":"s","session_id":"$1","pane":2,"outcome":"","available":true,"waiting":{"state":"waiting","detail":"detail","since":"now","seq":1}}]),
     );
     round::<ValidationResponse>(
         json!({"mission_rev":1,"mission_etag":"e","errors":[],"warnings":[]}),
@@ -37,14 +37,14 @@ fn requests_and_responses_round_trip() {
 fn mission_layout_and_edit_responses_carry_the_stored_shapes() {
     let mission = Mission::parse(
         r#"
-schema = 3
+schema = 4
 id = "m"
 slug = "demo"
 rev = 2
 [[step]]
 id = "f"
 formation = "solo"
-[[step.slot]]
+[[step.seat]]
 id = "s"
 label = "Writer"
 "#,

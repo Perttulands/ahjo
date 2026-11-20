@@ -30,9 +30,9 @@
             "label": "Output"
           }
         ],
-        "slots": [
+        "seats": [
           {
-            "id": "slot_01M4RTE1YY1MDAG8N58JHGFE72",
+            "id": "seat_01M4RTE1YY1MDAG8N58JHGFE72",
             "label": "Agent",
             "harness": "openai-codex",
             "model": "gpt-6-luna",
@@ -60,9 +60,9 @@
             "label": "Output"
           }
         ],
-        "slots": [
+        "seats": [
           {
-            "id": "slot_01M4RTE2147H23617KEQRZSSWK",
+            "id": "seat_01M4RTE2147H23617KEQRZSSWK",
             "label": "Agent",
             "harness": "openai-codex",
             "model": "gpt-6-luna",
@@ -90,9 +90,9 @@
             "label": "Output"
           }
         ],
-        "slots": [
+        "seats": [
           {
-            "id": "slot_01M4RTE24DDYPDN8KFVXH0F4XM",
+            "id": "seat_01M4RTE24DDYPDN8KFVXH0F4XM",
             "label": "Agent",
             "harness": "openai-codex",
             "model": "gpt-6-luna",
@@ -120,9 +120,9 @@
             "label": "Output"
           }
         ],
-        "slots": [
+        "seats": [
           {
-            "id": "slot_01M4RTE28KNWDKJ92VGD00S05E",
+            "id": "seat_01M4RTE28KNWDKJ92VGD00S05E",
             "label": "Agent",
             "harness": "openai-codex",
             "model": "gpt-6-luna",
@@ -150,9 +150,9 @@
             "label": "Output"
           }
         ],
-        "slots": [
+        "seats": [
           {
-            "id": "slot_01M54RDKKQNRMZEH5AFPHW9HRW",
+            "id": "seat_01M54RDKKQNRMZEH5AFPHW9HRW",
             "label": "Agent",
             "harness": "openai-codex",
             "model": "gpt-6-luna",
@@ -180,9 +180,9 @@
             "label": "Output"
           }
         ],
-        "slots": [
+        "seats": [
           {
-            "id": "slot_01M54RDKQ9RT19YNTEBPDS1AJH",
+            "id": "seat_01M54RDKQ9RT19YNTEBPDS1AJH",
             "label": "Agent",
             "harness": "openai-codex",
             "model": "gpt-6-luna",

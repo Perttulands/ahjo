@@ -121,11 +121,11 @@ async fn cli_authors_two_steps_answers_gate_and_finishes_with_fake_sessions() {
         .await;
         let step = &result["step"];
         let id = step["id"].as_str().unwrap().to_owned();
-        let slot = step["slot"][0]["id"].as_str().unwrap();
+        let seat = step["seat"][0]["id"].as_str().unwrap();
         edit(
             &node,
-            json!({"assign_slot":{
-                "step_id":id, "slot_id":slot, "harness":"openai-codex", "effort":"medium"
+            json!({"staff_seat":{
+                "step_id":id, "seat_id":seat, "harness":"openai-codex", "effort":"medium"
             }}),
         )
         .await;

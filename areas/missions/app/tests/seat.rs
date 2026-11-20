@@ -50,11 +50,11 @@ impl Executor for SeatLab {
         let sessions = SESSIONS.lock().unwrap().clone().unwrap();
         let name = format!("seat-{}", request.step.id);
         let session = sessions.add(&name);
-        let slot = request.step.slots[0].id.clone();
+        let seat = request.step.seats[0].id.clone();
         let node = NODE.lock().unwrap().clone();
         sink.emit(ExecutionEvent {
             kind: "seat_created".into(),
-            slot_id: slot.clone(),
+            seat_id: seat.clone(),
             data:
                 json!({"node":node,"session_name":name,"session_id":session,"dispatch_id":"lab-seat"})
                     .as_object()
@@ -68,7 +68,7 @@ impl Executor for SeatLab {
         let result = LabExecutor.execute_step(request, sink.clone())?;
         sink.emit(ExecutionEvent {
             kind: "seat_cleanup".into(),
-            slot_id: slot,
+            seat_id: seat,
             data: json!({"session_name":name,"outcome":"ended","cause":"run_final"})
                 .as_object()
                 .unwrap()

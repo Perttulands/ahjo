@@ -6,7 +6,7 @@ use std::path::PathBuf;
 use ahjo_mission_engine::{Error, Store};
 use ahjo_mission_model::Mission;
 
-const HELLO: &str = r#"schema = 3
+const HELLO: &str = r#"schema = 4
 id = "msn_hello"
 slug = "hello"
 title = "Hello"
@@ -30,12 +30,12 @@ label = "Input"
 [[step.output]]
 id = "port_out"
 label = "Result"
-[[step.slot]]
-id = "slot_work"
+[[step.seat]]
+id = "seat_work"
 label = "Worker"
-agent_id = "builder"
+agent = "builder"
 harness = "openai-codex"
-model = "" # harness default
+model = "default" # harness default
 effort = "medium"
 
 [[end]]
@@ -90,12 +90,12 @@ fn code(result: Result<Mission, Error>) -> String {
 fn the_contracts_minimal_mission_loads_with_a_device() {
     let mission = Mission::parse(HELLO).unwrap();
     assert_eq!(mission.steps[0].device, "rig-wsl");
-    assert_eq!(mission.steps[0].slots[0].agent_id, "builder");
+    assert_eq!(mission.steps[0].seats[0].agent, "builder");
     assert_eq!(mission.node_name("fmn_work"), "Work");
 }
 
 #[test]
-fn a_mission_is_read_only_as_strict_toml_of_schema_one() {
+fn a_mission_is_read_only_as_strict_toml_of_current_schema() {
     let repeated = HELLO.replace("rev = 1", "rev = 1\nrev = 2");
     assert_eq!(code(Mission::parse(&repeated)), "invalid_definition_source");
     let typo = HELLO.replace("effort = \"medium\"", "efort = \"medium\"");
@@ -113,11 +113,11 @@ fn a_mission_is_read_only_as_strict_toml_of_schema_one() {
         "invalid_definition_source"
     );
     assert_eq!(
-        code(Mission::parse(&HELLO.replace("schema = 3", "schema = 99"))),
+        code(Mission::parse(&HELLO.replace("schema = 4", "schema = 99"))),
         "unsupported_schema"
     );
     assert_eq!(
-        code(Mission::parse(&HELLO.replace("schema = 3\n", ""))),
+        code(Mission::parse(&HELLO.replace("schema = 4\n", ""))),
         "unsupported_schema"
     );
 }
@@ -126,7 +126,7 @@ fn a_mission_is_read_only_as_strict_toml_of_schema_one() {
 fn one_unreadable_mission_never_hides_the_rest() {
     let scratch = Scratch::new("broken");
     scratch.write("missions/hello.mission.toml", HELLO);
-    scratch.write("missions/bad.mission.toml", "schema = 3\nschema = 3\n");
+    scratch.write("missions/bad.mission.toml", "schema = 4\nschema = 4\n");
     scratch.write("missions/README.md", "not a mission");
     #[cfg(unix)]
     std::os::unix::fs::symlink(

@@ -34,8 +34,8 @@ pub struct AgentUse {
     pub mission_title: String,
     pub step_id: String,
     pub step_title: String,
-    pub slot_id: String,
-    pub slot_label: String,
+    pub seat_id: String,
+    pub seat_label: String,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]

@@ -75,7 +75,7 @@ fn output_values(outputs: &[MissionOutput]) -> Vec<(String, String, String, bool
 fn operations(
     kind: EditKind,
     id: &str,
-    slot: Option<&str>,
+    seat: Option<&str>,
     port: Option<&str>,
     limit: Option<&str>,
     base: &EditorSnapshot,
@@ -148,25 +148,25 @@ fn operations(
             if compare!(2, "Where the step is placed", &f.device) {
                 ops.push(undo::Step::board(edits::device_patch(id, &draft.fields[2])));
             }
-            if let Some(slot) = slot.filter(|_| base.fields[10..14] != draft.fields[10..14]) {
-                let Some(current) = f.slots.iter().find(|s| s.id == slot) else {
+            if let Some(seat) = seat.filter(|_| base.fields[10..14] != draft.fields[10..14]) {
+                let Some(current) = f.seats.iter().find(|s| s.id == seat) else {
                     return Err(vec![
-                        "The selected slot is gone: it was deleted elsewhere.".into(),
+                        "The selected seat is gone: it was deleted elsewhere.".into(),
                     ]);
                 };
                 let current = Staffing::from(current);
                 let update = Staffing {
-                    agent_id: drafted!(10, "The slot's agent", &current.agent_id)
-                        .unwrap_or_else(|| current.agent_id.clone()),
-                    harness: drafted_enum!(11, "The slot's harness", &current.harness)
+                    agent: drafted!(10, "The seat's agent", &current.agent)
+                        .unwrap_or_else(|| current.agent.clone()),
+                    harness: drafted_enum!(11, "The seat's harness", &current.harness)
                         .unwrap_or(current.harness),
-                    model: drafted!(12, "The slot's model", &current.model)
+                    model: drafted!(12, "The seat's model", &current.model)
                         .unwrap_or_else(|| current.model.clone()),
-                    effort: drafted_enum!(13, "The slot's effort", &current.effort)
+                    effort: drafted_enum!(13, "The seat's effort", &current.effort)
                         .unwrap_or(current.effort),
                 };
                 if update != current {
-                    ops.push(undo::Step::board(update.assign(id, slot)));
+                    ops.push(undo::Step::board(update.assign(id, seat)));
                 }
             }
             if let Some(port) = port.filter(|_| base.fields[14..16] != draft.fields[14..16]) {
@@ -334,7 +334,7 @@ impl MissionsPage {
             return;
         };
         let (kind, id) = (editor.kind, editor.id.clone());
-        let slot = self.slot.clone();
+        let seat = self.seat.clone();
         let port = self.port.clone();
         let limit = self.limit.clone();
         if let Some(editor) = &mut self.editor {
@@ -375,7 +375,7 @@ impl MissionsPage {
                 let ops = operations(
                     kind,
                     &id,
-                    slot.as_deref(),
+                    seat.as_deref(),
                     port.as_deref(),
                     limit.as_deref(),
                     &base,
@@ -422,7 +422,7 @@ mod tests {
     use super::*;
     #[test]
     fn every_editor_save_patch_decodes() {
-        use ahjo_missions_contract::{End, Gate, InputCard, Limit, Port, Slot, Step};
+        use ahjo_missions_contract::{End, Gate, InputCard, Limit, Port, Seat, Step};
         let mission = Mission {
             input_cards: vec![InputCard {
                 id: "input".into(),
@@ -434,8 +434,8 @@ mod tests {
                     id: "port".into(),
                     ..Default::default()
                 }],
-                slots: vec![Slot {
-                    id: "slot".into(),
+                seats: vec![Seat {
+                    id: "seat".into(),
                     ..Default::default()
                 }],
                 ..Default::default()
@@ -486,7 +486,7 @@ mod tests {
                 &[
                     "edit_step",
                     "update_step",
-                    "assign_slot",
+                    "staff_seat",
                     "update_port",
                     "update_limit",
                 ][..],
@@ -534,7 +534,7 @@ mod tests {
             let steps = operations(
                 kind,
                 id,
-                Some("slot"),
+                Some("seat"),
                 Some("port"),
                 Some("limit"),
                 &base,
@@ -550,7 +550,7 @@ mod tests {
                 let is_operation = match patch.as_ref() {
                     MissionChange::EditStep { .. } => "edit_step",
                     MissionChange::UpdateStep { .. } => "update_step",
-                    MissionChange::AssignSlot { .. } => "assign_slot",
+                    MissionChange::StaffSeat { .. } => "staff_seat",
                     MissionChange::UpdatePort { .. } => "update_port",
                     MissionChange::UpdateLimit(_) => "update_limit",
                     MissionChange::UpdateInputCard(_) => "update_input_card",

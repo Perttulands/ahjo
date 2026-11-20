@@ -1,12 +1,12 @@
 use ahjo_mission_engine::{AgentStore, Harnesses, run_admission, validate};
-use ahjo_mission_model::{Mission, Port, Slot, Step};
+use ahjo_mission_model::{Mission, Port, Seat, Step};
 use std::collections::BTreeMap;
 
 #[test]
 fn admission_checks_inputs_and_frozen_staffing_across_the_mission() {
     let mut mission =
         Mission::parse(include_str!("parity/runs/missions/solo-lab.mission.toml")).unwrap();
-    let error = serde_json::from_value::<Slot>(serde_json::json!({
+    let error = serde_json::from_value::<Seat>(serde_json::json!({
         "id": "bad", "harness": "unknown", "effort": "medium"
     }))
     .unwrap_err()
@@ -20,7 +20,7 @@ fn admission_checks_inputs_and_frozen_staffing_across_the_mission() {
     mission.steps.push(Step {
         id: "unreachable".into(),
         formation: ahjo_mission_model::Formation::Solo,
-        slots: vec![Slot {
+        seats: vec![Seat {
             id: "bad".into(),
             harness: ahjo_mission_model::Harness::ClaudeCode,
             effort: ahjo_mission_model::Effort::Ultra,
@@ -31,7 +31,7 @@ fn admission_checks_inputs_and_frozen_staffing_across_the_mission() {
     mission.steps.push(Step {
         id: "unreachable_unstaffed".into(),
         formation: ahjo_mission_model::Formation::Solo,
-        slots: vec![Slot {
+        seats: vec![Seat {
             id: "empty".into(),
             ..Default::default()
         }],
@@ -56,13 +56,13 @@ fn admission_checks_inputs_and_frozen_staffing_across_the_mission() {
         report
             .errors
             .iter()
-            .any(|f| f.code.as_str() == "invalid_slot_settings" && f.node_id == "unreachable")
+            .any(|f| f.code.as_str() == "invalid_seat_settings" && f.node_id == "unreachable")
     );
     assert!(
         report
             .errors
             .iter()
-            .any(|f| f.code.as_str() == "unstaffed_slot" && f.node_id == "unreachable_unstaffed")
+            .any(|f| f.code.as_str() == "unstaffed_seat" && f.node_id == "unreachable_unstaffed")
     );
 }
 

@@ -1,14 +1,14 @@
-//! Step types, their slot shapes, and slot ids.
+//! Step types, their seat shapes, and seat ids.
 
 use super::possessive;
 use ahjo_mission_model::{Code, Finding, Formation, Mission, Step};
 
-/// What a slot id may be, for messages: its seat's session is named after
+/// What a seat id may be, for messages: its seat's session is named after
 /// it, and a relayed verdict names it.
-const SLOT_ID_RULE: &str =
+const SEAT_ID_RULE: &str =
     "a letter or digit, then up to 63 letters, digits, underscores or hyphens";
 
-pub fn valid_slot_id(id: &str) -> bool {
+pub fn valid_seat_id(id: &str) -> bool {
     let mut chars = id.chars();
     id.len() <= 64
         && chars.next().is_some_and(|c| c.is_ascii_alphanumeric())
@@ -64,65 +64,65 @@ pub fn shape_findings(mission: &Mission) -> Vec<Finding> {
                 format!("step {:?} needs a formation", step.id),
             ));
         } else {
-            findings.extend(slot_shape_finding(step));
+            findings.extend(seat_shape_finding(step));
         }
     }
     findings
 }
 
-/// Solo has one slot; peer has two or more and no controller; orchestrated
+/// Solo has one seat; peer has two or more and no controller; orchestrated
 /// has one controller and a worker beside it.
-fn slot_shape_finding(step: &Step) -> Option<Finding> {
+fn seat_shape_finding(step: &Step) -> Option<Finding> {
     let id = &step.id;
     let problem = |code, message| Some(Finding::new(code, id, message));
-    let slots = step.slots.len();
-    if slots == 0 {
+    let seats = step.seats.len();
+    if seats == 0 {
         return problem(
-            Code::StepWithoutSlots,
-            format!("step {id:?} has no slots; add a slot and staff it"),
+            Code::StepWithoutSeats,
+            format!("step {id:?} has no seats; add a seat and staff it"),
         );
     }
-    let controllers = step.slots.iter().filter(|slot| slot.controller).count();
+    let controllers = step.seats.iter().filter(|seat| seat.controller).count();
     match step.formation {
-        Formation::Solo if slots != 1 => problem(
+        Formation::Solo if seats != 1 => problem(
             Code::InvalidStepShape,
-            format!("solo step {id:?} needs exactly one slot; it has {slots}"),
+            format!("solo step {id:?} needs exactly one seat; it has {seats}"),
         ),
-        Formation::Peer if slots < 2 || controllers != 0 => problem(
+        Formation::Peer if seats < 2 || controllers != 0 => problem(
             Code::InvalidStepShape,
             format!(
-                "peer step {id:?} needs at least two slots and no controllers; it has {slots} slots and {controllers} controllers"
+                "peer step {id:?} needs at least two seats and no controllers; it has {seats} seats and {controllers} controllers"
             ),
         ),
         Formation::Orchestrated if controllers != 1 => problem(
             Code::OrchestratedController,
             format!(
-                "orchestrated step {id:?} needs exactly one controller slot; it has {controllers}"
+                "orchestrated step {id:?} needs exactly one controller seat; it has {controllers}"
             ),
         ),
-        Formation::Orchestrated if slots < 2 => problem(
+        Formation::Orchestrated if seats < 2 => problem(
             Code::OrchestratedController,
-            format!("orchestrated step {id:?} needs a worker slot beside its controller"),
+            format!("orchestrated step {id:?} needs a worker seat beside its controller"),
         ),
         _ => None,
     }
 }
 
-/// A slot id used by more than one slot, and one that breaks the slot id
+/// A seat id used by more than one seat, and one that breaks the seat id
 /// rule. Two seats with one id would share a session name, and a verdict
-/// relayed by that slot would name neither.
-pub fn slot_id_findings(mission: &Mission) -> Vec<Finding> {
+/// relayed by that seat would name neither.
+pub fn seat_id_findings(mission: &Mission) -> Vec<Finding> {
     let mut holders: Vec<(&str, Vec<&str>)> = Vec::new();
     for step in &mission.steps {
-        for slot in mission_slots(step) {
-            match holders.iter_mut().find(|(id, _)| *id == slot) {
+        for seat in mission_seats(step) {
+            match holders.iter_mut().find(|(id, _)| *id == seat) {
                 Some((_, steps)) => steps.push(&step.id),
-                None => holders.push((slot, vec![&step.id])),
+                None => holders.push((seat, vec![&step.id])),
             }
         }
     }
     let mut findings = Vec::new();
-    for (slot, steps) in holders.iter().filter(|(_, steps)| steps.len() > 1) {
+    for (seat, steps) in holders.iter().filter(|(_, steps)| steps.len() > 1) {
         let mut nodes: Vec<&str> = Vec::new();
         for node in steps {
             if !nodes.contains(node) {
@@ -130,7 +130,7 @@ pub fn slot_id_findings(mission: &Mission) -> Vec<Finding> {
             }
         }
         let described = match nodes.as_slice() {
-            [only] => format!("{} slots of step {only:?}", steps.len()),
+            [only] => format!("{} seats of step {only:?}", steps.len()),
             _ => {
                 let quoted: Vec<_> = nodes.iter().map(|node| format!("{node:?}")).collect();
                 format!("steps {}", quoted.join(" and "))
@@ -138,19 +138,19 @@ pub fn slot_id_findings(mission: &Mission) -> Vec<Finding> {
         };
         for node in &nodes {
             findings.push(Finding::new(
-                Code::DuplicateSlotId,
+                Code::DuplicateSeatId,
                 node,
-                format!("slot id {slot:?} is used by {described}; give every slot in the mission its own id"),
+                format!("seat id {seat:?} is used by {described}; give every seat in the mission its own id"),
             ));
         }
     }
     for step in &mission.steps {
-        for slot in mission_slots(step).filter(|slot| !valid_slot_id(slot)) {
+        for seat in mission_seats(step).filter(|seat| !valid_seat_id(seat)) {
             findings.push(Finding::new(
-                Code::InvalidSlotId,
+                Code::InvalidSeatId,
                 &step.id,
                 format!(
-                    "{} slot id {slot:?} is not a slot id Ahjo can use: {SLOT_ID_RULE}; rename it in the mission file",
+                    "{} seat id {seat:?} is not a seat id Ahjo can use: {SEAT_ID_RULE}; rename it in the mission file",
                     possessive(mission.node_name(&step.id))
                 ),
             ));
@@ -159,25 +159,25 @@ pub fn slot_id_findings(mission: &Mission) -> Vec<Finding> {
     findings
 }
 
-/// A step's non-blank slot ids.
-fn mission_slots(step: &Step) -> impl Iterator<Item = &str> {
-    step.slots
+/// A step's non-blank seat ids.
+fn mission_seats(step: &Step) -> impl Iterator<Item = &str> {
+    step.seats
         .iter()
-        .map(|slot| slot.id.as_str())
+        .map(|seat| seat.id.as_str())
         .filter(|id| !id.is_empty())
 }
 
 #[cfg(test)]
 mod tests {
-    use super::valid_slot_id;
+    use super::valid_seat_id;
 
     #[test]
-    fn slot_ids_follow_the_rule() {
-        assert!(valid_slot_id("w1"));
-        assert!(valid_slot_id(&format!("a{}", "b".repeat(63))));
-        assert!(!valid_slot_id(&format!("a{}", "b".repeat(64))));
-        assert!(!valid_slot_id("_w"));
-        assert!(!valid_slot_id("worker one"));
-        assert!(!valid_slot_id("työ"));
+    fn seat_ids_follow_the_rule() {
+        assert!(valid_seat_id("w1"));
+        assert!(valid_seat_id(&format!("a{}", "b".repeat(63))));
+        assert!(!valid_seat_id(&format!("a{}", "b".repeat(64))));
+        assert!(!valid_seat_id("_w"));
+        assert!(!valid_seat_id("worker one"));
+        assert!(!valid_seat_id("työ"));
     }
 }

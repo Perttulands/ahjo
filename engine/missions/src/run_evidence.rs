@@ -65,7 +65,7 @@ impl Coordinator {
             if !related {
                 continue;
             }
-            if event.kind == "slot_dispatch" {
+            if event.kind == "seat_dispatch" {
                 if let Some(path) = event
                     .data
                     .get("brief_path")
@@ -74,7 +74,7 @@ impl Coordinator {
                 {
                     briefs.push(RunBrief {
                         node_id: event.node_id.clone(),
-                        slot_id: event.slot_id.clone(),
+                        seat_id: event.seat_id.clone(),
                         attempt: event.attempt,
                         dispatch_seq: event.seq,
                         path: path.into(),
@@ -176,7 +176,7 @@ fn problem(event: &RunEvent) -> bool {
         "gate_verdict" | "gate_kind_result" => {
             event.data.get("verdict").and_then(Value::as_str) == Some("fail")
         }
-        "slot_result" => event
+        "seat_result" => event
             .data
             .get("status")
             .and_then(Value::as_str)

@@ -37,7 +37,8 @@ pub use layout::{LAYOUT_SCHEMA, Layout, LayoutEdge, LayoutNode};
 pub use mission::{MISSION_SCHEMA, Mission, MissionArchive, MissionListing};
 pub use nodes::{
     Brief, Connection, END_IN, End, GATE_FAIL, GATE_IN, GATE_JUDGE, GATE_PASS, Gate,
-    INPUT_CARD_OUT, InputCard, Limit, MissionInput, MissionOutput, Port, Slot, Step,
+    HARNESS_DEFAULT_MODEL, INPUT_CARD_OUT, InputCard, Limit, MissionInput, MissionOutput, Port,
+    Seat, SeatSettings, Step,
 };
 pub use notes::{MISSION_THREAD, NOTES_SCHEMA, NoteEntry, Notes, valid_author};
 pub use run::{
@@ -57,7 +58,7 @@ pub use run_projection::{
     Escalation, GateInput, GateRequest, PublicEvent, PublicInputRef, PublicOrigin, RunProjection,
     RunSendBack, WaitingGate, plain_reason,
 };
-pub use sessions::{agent_session, fresh_session, valid_agent, valid_prefix};
+pub use sessions::{fresh_session, seat_session, valid_prefix};
 pub use vocabulary::{
     Effort, EndOutcome, Formation, GateKind, Harness, HumanChannel, PortKind, WhenSpent,
 };

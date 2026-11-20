@@ -18,7 +18,7 @@ pub(crate) fn end(c: &Coordinator, id: &str, node: Option<&str>, cause: &str) ->
         }
         let key = (
             event.node_id.clone(),
-            event.slot_id.clone(),
+            event.seat_id.clone(),
             name.to_owned(),
         );
         if event.kind == "seat_created" {
@@ -60,7 +60,7 @@ pub(crate) fn end(c: &Coordinator, id: &str, node: Option<&str>, cause: &str) ->
             c.inner.executor.end_left_seat(LeftSeat {
                 run_id: id.into(),
                 node_id: seat.node_id.clone(),
-                slot_id: seat.slot_id.clone(),
+                seat_id: seat.seat_id.clone(),
                 identity: seat.data.clone(),
                 cause: cause.into(),
             })
@@ -75,7 +75,7 @@ pub(crate) fn end(c: &Coordinator, id: &str, node: Option<&str>, cause: &str) ->
             seat.attempt,
             json!({"session_name":name,"outcome":outcome,"cause":cause,"detail":detail}),
         );
-        event.slot_id = seat.slot_id;
+        event.seat_id = seat.seat_id;
         c.append(id, event)?;
         if !["ended", "gone", "kept"].contains(&outcome.as_str()) {
             failures.push(format!("seat cleanup {outcome}: {detail}"));

@@ -1,6 +1,6 @@
 # Missions
 
-A mission is a reusable graph. An Input card starts it, steps have staffed slots and ports, gates route verdicts, and End nodes end paths as `done` or `rejected`. A run snapshots the graph and staffing at admission; later edits affect later runs. Each step's agents work in ordinary tmux sessions with the harness's access, named `<prefix>-<agent>` so the session list groups a mission's sessions under its prefix.
+A mission is a reusable graph. An Input card starts it, steps have staffed seats and ports, gates route verdicts, and End nodes end paths as `done` or `rejected`. A run snapshots the graph and staffing at admission; later edits affect later runs. Each step's agents work in ordinary tmux sessions with the harness's access, named `<prefix>-<step>[-<seat>]` so the session list groups a mission's sessions under its prefix.
 
 ## Connect
 
@@ -8,7 +8,7 @@ Use the node that owns the mission, as described in [the Ahjo Swarm skill](../SK
 
 ## Pick up a mission
 
-The operator sketches a mission roughly and writes notes on it: on the mission as a whole (what they are trying to build), on steps, gates, limits, the Input card, Ends and wires. Notes are their intent; your job is usually to turn the sketch into a mission that runs. `ahjo mission show <mission>` is the whole hand-over in one answer: the intent notes under `about`, the steps in the order a run meets them (numbered as the app numbers them, with who does each, each slot’s session, the brief, where it leads, gates with what they check and where pass and fail go), limits with what they cap, every note beside what it is on with its id, author and whether it is resolved, and the `problems` that still stop a run. `--full --json` is the whole definition with every port and slot id, for wiring. For a fresh attempt or a session name already in use, `ahjo run show <run-id> --seats` shows the session bound during the run.
+The operator sketches a mission roughly and writes notes on it: on the mission as a whole (what they are trying to build), on steps, gates, limits, the Input card, Ends and wires. Notes are their intent; your job is usually to turn the sketch into a mission that runs. `ahjo mission show <mission>` is the whole hand-over in one answer: the intent notes under `about`, the steps in the order a run meets them (numbered as the app numbers them, with who does each, each seat’s session, the brief, where it leads, gates with what they check and where pass and fail go), limits with what they cap, every note beside what it is on with its id, author and whether it is resolved, and the `problems` that still stop a run. `--full --json` is the whole definition with every port and seat id, for wiring. For a fresh attempt or a session name already in use, `ahjo run show <run-id> --seats` shows the session bound during the run.
 
 Answer the notes where they are, so the operator sees on the board what you did: `ahjo mission reply <mission> <note-id> --text '<answer or question>' --author <your-name>` asks or answers in the note's thread, and `ahjo mission resolve <mission> <note-id> --text '<what you did about it>' --author <your-name>` closes it with what you did; a later note from anyone opens it again. Leave your own explanations with `ahjo mission note <mission> --target <id-or-title> --text '...' --author <your-name>` (no `--target`: the mission itself; a wire is `From->To`, or `Gate:fail->Step`). `--author claude-7` writes as `agent:claude-7`; give your session's name. `--edit <note-id>` and `--delete <note-id>` change only your own notes; reply rather than rewrite someone else's. Notes express intent; briefs instruct seats: translate notes into briefs, staffing and wiring. `ahjo mission notes <mission>` lists the threads as they are stored.
 
@@ -25,7 +25,7 @@ ahjo mission apply post.toml
 
 Give a new mission its own `slug` and `id`, or omit its `id` to assign one. Keep the exported `rev` when editing an existing mission. If apply reports a conflict, export again and merge your edits into that copy. Apply saves drafts and reports validation. Fix the errors before using its run command. Reply to open notes before removing their cards. Over MCP, give `mission_apply` the TOML text in `document`.
 
-Mission files use schema 3 and layout files use schema 2. Existing mission files are upgraded when the node loads them. The mission file uses `[[input_card]]`, `[[step]]`, `[[gate]]`, `[[end]]`, `[[limit]]`, and `[[connection]]`. Each step specifies its formation as `solo`, `peer`, or `orchestrated`. A step nests `input`, `output`, and `slot` tables. Use saved ids in `from` and `to` as `node:port`, and give every card you connect an id. `ahjo mission export --json` uses the same keys.
+Mission files use schema 4 and layout files use schema 2. Existing mission files are upgraded when the node loads them. The mission file uses `[[input_card]]`, `[[step]]`, `[[gate]]`, `[[end]]`, `[[limit]]`, and `[[connection]]`. Each step specifies its formation as `solo`, `peer`, or `orchestrated`. A step nests `input`, `output`, and `seat` tables. Use saved ids in `from` and `to` as `node:port`, and give every card you connect an id. `ahjo mission export --json` uses the same keys.
 
 ### Individual changes
 
@@ -35,7 +35,7 @@ Read `ahjo mission show <mission> --full --json` for card and port ids. Sketch a
 
 ## Agents and sessions
 
-A slot's `agent` names its session. With no name it uses the step's title. Set `fresh = true` on a step to start a fresh session for each attempt. The prefix is the slug's letters and digits unless the mission supplies `prefix`. A mission can reuse only a session that a run started. A busy or independently started session is left alone and the run uses a separate session. Do not type into a mission's session while its step runs.
+A seat's `agent` picks a reusable agent by id; omit it for a plain agent. Omit the seat's `harness`, `model`, or `effort` to use the reusable agent's setting. Set `model = "default"` to use the harness's default model even when the agent names one. For a plain agent, give the seat a harness and effort. The session name uses the step's title and, when its step has several seats, the seat's label. Set `fresh = true` on a step to start a fresh session for each attempt. The prefix is the slug's letters and digits unless the mission supplies `prefix`. A mission can reuse only a session that a run started. A busy or independently started session is left alone and the run uses a separate session. `mission show` reports the derived session name; `run show --seats` reports the session actually bound and its backend `session_id`. Do not type into a mission's session while its step runs.
 
 ## Inputs and outputs
 

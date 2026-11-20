@@ -32,13 +32,13 @@ pub fn run_admission(
         | Code::UnsupportedHumanChannel
         | Code::InvalidStepFormation
         | Code::InvalidStepShape
-        | Code::StepWithoutSlots
+        | Code::StepWithoutSeats
         | Code::OrchestratedController
         | Code::SeveralInputCards
         | Code::InvalidMissionInput
         | Code::InvalidLimit
-        | Code::UnstaffedSlot
-        | Code::InvalidSlotSettings
+        | Code::UnstaffedSeat
+        | Code::InvalidSeatSettings
         | Code::UnavailablePersona
         | Code::RetiredPersona => true,
         // A single step's run is handed every input itself.

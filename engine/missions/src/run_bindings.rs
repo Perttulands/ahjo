@@ -1,8 +1,8 @@
 //! Frozen settings and agent definitions for a run.
 use crate::AgentStore;
 
-pub(crate) const BINDINGS_SCHEMA: u8 = 4;
-use ahjo_mission_model::{Mission, Slot};
+pub(crate) const BINDINGS_SCHEMA: u8 = 5;
+use ahjo_mission_model::{Agent, Mission, Seat};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
@@ -28,8 +28,8 @@ pub struct BindingsSnapshot {
 #[serde(rename_all = "snake_case")]
 pub struct RunBinding {
     pub node_id: String,
-    pub slot_id: String,
-    pub agent_id: String,
+    pub seat_id: String,
+    pub agent: String,
     pub harness: String,
     pub model: String,
     pub effort: String,
@@ -41,9 +41,23 @@ pub struct RunBinding {
     pub agent_sha256: String,
 }
 impl RunBinding {
+    pub(crate) fn agent_definition(&self) -> Result<Option<Agent>, crate::Error> {
+        if self.agent.is_empty() {
+            return Ok(None);
+        }
+        if self.agent_toml.is_empty() || hash(&self.agent_toml) != self.agent_sha256 {
+            return Err(crate::Error::new(
+                "persona_snapshot_invalid",
+                "frozen agent definition failed its integrity check",
+            ));
+        }
+        crate::agents::parse_agent(&self.agent, &self.agent_toml).map(Some)
+    }
+
     pub(crate) fn instructions(&self) -> Option<String> {
-        crate::agents::parse_agent(&self.agent_id, &self.agent_toml)
+        self.agent_definition()
             .ok()
+            .flatten()
             .map(|agent| agent.instructions)
     }
 }
@@ -58,33 +72,42 @@ impl BindingsSnapshot {
         (|| -> Result<Self, String> {
             let mut bindings = Vec::new();
             for step in &mission.steps {
-                for slot in &step.slots {
-                    if !slot.staffed() {
+                for seat in &step.seats {
+                    if !seat.staffed() {
                         continue;
                     }
-                    let agent_toml = if slot.agent_id.is_empty() {
+                    let agent_toml = if seat.agent.is_empty() {
                         String::new()
                     } else {
-                        agents.source(&slot.agent_id).map_err(|e| e.to_string())?
+                        agents.source(&seat.agent).map_err(|e| e.to_string())?
                     };
                     let agent_sha256 = if agent_toml.is_empty() {
                         String::new()
                     } else {
                         hash(&agent_toml)
                     };
+                    let agent = if seat.agent.is_empty() {
+                        None
+                    } else {
+                        Some(
+                            crate::agents::parse_agent(&seat.agent, &agent_toml)
+                                .map_err(|e| e.to_string())?,
+                        )
+                    };
+                    let settings = seat.settings(agent.as_ref());
                     bindings.push(RunBinding {
                         node_id: step.id.clone(),
-                        slot_id: slot.id.clone(),
-                        agent_id: slot.agent_id.clone(),
-                        harness: slot.harness.as_str().to_owned(),
-                        model: slot.model.clone(),
-                        effort: slot.effort.as_str().to_owned(),
-                        agent_path: if slot.agent_id.is_empty() {
+                        seat_id: seat.id.clone(),
+                        agent: seat.agent.clone(),
+                        harness: settings.harness.as_str().to_owned(),
+                        model: settings.model,
+                        effort: settings.effort.as_str().to_owned(),
+                        agent_path: if seat.agent.is_empty() {
                             String::new()
                         } else {
                             agents
                                 .dir()
-                                .join(format!("{}.toml", slot.agent_id))
+                                .join(format!("{}.toml", seat.agent))
                                 .to_string_lossy()
                                 .into_owned()
                         },
@@ -151,7 +174,7 @@ impl BindingsSnapshot {
         run_id: &str,
         input_card_id: &str,
         node_id: &str,
-        slot: &Slot,
+        seat: &Seat,
     ) -> Result<&RunBinding, crate::Error> {
         let invalid = || {
             crate::Error::new(
@@ -171,20 +194,19 @@ impl BindingsSnapshot {
         let mut matches = self
             .bindings
             .iter()
-            .filter(|binding| binding.node_id == node_id && binding.slot_id == slot.id);
+            .filter(|binding| binding.node_id == node_id && binding.seat_id == seat.id);
         let Some(binding) = matches.next() else {
             return Err(invalid());
         };
+        let agent = binding.agent_definition().map_err(|_| invalid())?;
+        let settings = seat.settings(agent.as_ref());
         if matches.next().is_some()
-            || binding.agent_id != slot.agent_id
-            || binding.harness != slot.harness.as_str()
-            || binding.model != slot.model
-            || binding.effort != slot.effort.as_str()
-            || binding.effort.is_empty()
-            || (!binding.agent_id.is_empty()
-                && (binding.agent_toml.is_empty()
-                    || hash(&binding.agent_toml) != binding.agent_sha256
-                    || crate::agents::parse_agent(&binding.agent_id, &binding.agent_toml).is_err()))
+            || binding.agent != seat.agent
+            || binding.harness != settings.harness.as_str()
+            || binding.model != settings.model
+            || binding.effort != settings.effort.as_str()
+            || settings.harness.is_unset()
+            || settings.effort.is_unset()
         {
             return Err(invalid());
         }

@@ -103,7 +103,7 @@ pub use executor::{
     StepExecution, StepResult, UnavailableExecutor,
 };
 pub use harness::{
-    Claude, Codex, HarnessAdapter, Harnesses, Keys, Launch, Pi, Pointer, Shell, SlotBinding,
+    Claude, Codex, HarnessAdapter, Harnesses, Keys, Launch, Pi, Pointer, SeatBinding, Shell,
     TokenUsage, TranscriptRoots, Turn, TurnState, codex_threads, harness_id, harness_word,
 };
 pub use kept_copy::{Budget, KeptCopy};

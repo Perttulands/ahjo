@@ -1,5 +1,5 @@
 # Parity fixture: mission inputs, outputs and port kinds.
-schema = 3
+schema = 4
 id = "msn_inputs"
 slug = "inputs"
 title = "Inputs"
@@ -49,7 +49,7 @@ kind = "folder"
 [[step.output]]
 id = "picture"
 kind = "image"
-[[step.slot]]
+[[step.seat]]
 id = "a"
 harness = "claude-code"
 effort = "low"
@@ -60,7 +60,7 @@ formation = "solo"
 title = "Notes"
 [step.brief]
 goal = "Uses {brief} and {other}."
-[[step.slot]]
+[[step.seat]]
 id = "b"
 harness = "claude-code"
 effort = "low"

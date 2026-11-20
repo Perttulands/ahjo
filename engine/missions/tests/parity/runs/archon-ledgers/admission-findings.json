@@ -5,9 +5,9 @@
     "message": "input sketch must be the absolute path of an existing file; \"relative\" is a relative path"
   },
   {
-    "code": "invalid_slot_settings",
+    "code": "invalid_seat_settings",
     "node_id": "staff",
-    "message": "step \"staff\" slot \"invalid\" harness \"wrong\" cannot start seats; use claude-code or openai-codex or pi"
+    "message": "step \"staff\" seat \"invalid\" harness \"wrong\" cannot start seats; use claude-code or openai-codex or pi"
   },
   {
     "code": "missing_input",
@@ -17,22 +17,22 @@
   {
     "code": "orchestrated_controller",
     "node_id": "orchestration",
-    "message": "orchestrated step \"orchestration\" needs exactly one controller slot; it has 0"
+    "message": "orchestrated step \"orchestration\" needs exactly one controller seat; it has 0"
   },
   {
     "code": "retired_persona",
     "node_id": "staff",
-    "message": "step \"staff\" slot \"retired\" uses retired role \"critic\"; staff it with another role or none, or bring the role back"
+    "message": "step \"staff\" seat \"retired\" uses retired role \"critic\"; staff it with another role or none, or bring the role back"
   },
   {
-    "code": "step_without_slots",
+    "code": "step_without_seats",
     "node_id": "empty",
-    "message": "step \"empty\" has no slots; add a slot and staff it"
+    "message": "step \"empty\" has no seats; add a seat and staff it"
   },
   {
     "code": "unavailable_persona",
     "node_id": "staff",
-    "message": "step \"staff\" slot \"unavailable\" names unknown role \"unknown\""
+    "message": "step \"staff\" seat \"unavailable\" names unknown role \"unknown\""
   },
   {
     "code": "unknown_input",
@@ -40,8 +40,8 @@
     "message": "mission admission-findings has no input named \"unexpected\"; its inputs are topic, sketch"
   },
   {
-    "code": "unstaffed_slot",
+    "code": "unstaffed_seat",
     "node_id": "staff",
-    "message": "step \"staff\" slot \"open\" needs a harness and effort, and optionally a role"
+    "message": "step \"staff\" seat \"open\" needs a harness and effort, and optionally a role"
   }
 ]

@@ -1,7 +1,7 @@
 //! The words Missions shows, as Archon's cockpit says them: run states,
 //! harness names, staffing sentences, times and spans.
 
-use ahjo_missions_contract::{RunOutput, RunProjection as Run, Slot};
+use ahjo_missions_contract::{RunOutput, RunProjection as Run, Seat};
 use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
 
@@ -57,25 +57,29 @@ pub fn harness_name(harness: &str) -> String {
     }
 }
 
-/// What works a slot, the same wherever it is shown: `Claude haiku · low`,
+/// What works a seat, the same wherever it is shown: `Claude haiku · low`,
 /// `Codex · medium` when the harness's own model is used.
-pub fn slot_line(s: &Slot) -> String {
-    let harness = harness_name(s.harness.as_str());
-    let mut parts = vec![if s.model.is_empty() || s.model == "default" {
+pub fn seat_line(s: &Seat, agent: Option<&ahjo_missions_contract::Agent>) -> String {
+    let settings = s.settings(agent);
+    if settings.harness.is_unset() && !s.agent.is_empty() {
+        return "agent defaults".into();
+    }
+    let harness = harness_name(settings.harness.as_str());
+    let mut parts = vec![if settings.model.is_empty() {
         harness
     } else {
-        format!("{harness} {}", s.model)
+        format!("{harness} {}", settings.model)
     }];
-    if !s.effort.is_unset() {
-        parts.push(s.effort.as_str().to_owned());
+    if !settings.effort.is_unset() {
+        parts.push(settings.effort.as_str().to_owned());
     }
     parts.join(" · ")
 }
 
 /// Who works a step: its agent and harness settings, `Builder · Claude haiku
 /// · low`.
-pub fn who(s: &Slot) -> String {
-    format!("{} · {}", agent_name(&s.agent_id), slot_line(s))
+pub fn who(s: &Seat, agent: Option<&ahjo_missions_contract::Agent>) -> String {
+    format!("{} · {}", agent_name(&s.agent), seat_line(s, agent))
 }
 
 /// An agent id as a display name: `planner` reads Planner.
@@ -94,14 +98,14 @@ pub fn agent_name(agent: &str) -> String {
         .unwrap_or_default()
 }
 
-/// The session a slot's agent works in, as the session list shows it: the
+/// The session a seat's agent works in, as the session list shows it: the
 /// agent's own, or for a step that starts fresh, one per attempt.
 pub fn session_of(
     m: &ahjo_missions_contract::Mission,
     f: &ahjo_missions_contract::Step,
-    slot: &Slot,
+    seat: &Seat,
 ) -> String {
-    let session = ahjo_missions_contract::agent_session(&m.session_prefix(), &f.agent_of(slot));
+    let session = ahjo_missions_contract::seat_session(&m.session_prefix(), &f.session_part(seat));
     if f.fresh {
         format!("{session}-*")
     } else {
@@ -134,24 +138,24 @@ pub fn limit_line(l: &ahjo_missions_contract::Limit) -> String {
     }
 }
 
-/// A human-readable slot label. Internal IDs are not names.
-pub fn slot_label(slot: &Slot) -> &str {
-    if slot.label.trim().is_empty() {
+/// A human-readable seat label. Internal IDs are not names.
+pub fn seat_label(seat: &Seat) -> &str {
+    if seat.label.trim().is_empty() {
         "Agent"
     } else {
-        slot.label.trim()
+        seat.label.trim()
     }
 }
 
-/// Flow's staffing sentence for one slot: `Plan (controller) is Planner on
+/// Flow's staffing sentence for one seat: `Plan (controller) is Planner on
 /// Claude · xhigh.`
-pub fn staffing(s: &Slot) -> String {
+pub fn staffing(s: &Seat, agent: Option<&ahjo_missions_contract::Agent>) -> String {
     let controller = if s.controller { " (controller)" } else { "" };
     format!(
         "{}{controller} is {} on {}.",
-        slot_label(s),
-        agent_name(&s.agent_id),
-        slot_line(s)
+        seat_label(s),
+        agent_name(&s.agent),
+        seat_line(s, agent)
     )
 }
 
@@ -452,16 +456,16 @@ mod tests {
         assert_eq!(work_label("gh:acme/project#206"), "acme/project#206");
         assert_eq!(work_label("bead:ab12:/srv#srv-12"), "srv-12");
         assert_eq!(agent_name("planner"), "Planner");
-        let s = Slot {
+        let s = Seat {
             label: "Plan".into(),
-            agent_id: "planner".into(),
+            agent: "planner".into(),
             harness: ahjo_missions_contract::Harness::ClaudeCode,
             effort: ahjo_missions_contract::Effort::Xhigh,
             controller: true,
             ..Default::default()
         };
         assert_eq!(
-            staffing(&s),
+            staffing(&s, None),
             "Plan (controller) is Planner on Claude · xhigh."
         );
     }

@@ -79,8 +79,6 @@ pub struct MissionsPage {
     title: Entity<TextField>,
     goal: Entity<TextField>,
     extra: Entity<TextField>,
-    /// The selected slot's agent, written on its own by Name.
-    agent_name: Entity<TextField>,
     repository: Entity<TextField>,
     work: Entity<TextField>,
     files: Entity<TextField>,
@@ -93,11 +91,11 @@ pub struct MissionsPage {
     agents: Option<ahjo_harness_contract::agents::ListedAgents>,
     /// The repositories the node's config names, for a step's Repository.
     repositories: Option<Vec<String>>,
-    agent_id: Entity<TextField>,
+    agent: Entity<TextField>,
     harness: Entity<TextField>,
     model: Entity<TextField>,
     effort: Entity<TextField>,
-    slot: Option<String>,
+    seat: Option<String>,
     note: Entity<TextField>,
     notes: Option<ahjo_missions_contract::document::NotesDocument>,
     port_label: Entity<TextField>,
@@ -197,7 +195,6 @@ impl MissionsPage {
             title: cx.new(|cx| TextField::new(cx, "Step title")),
             goal: cx.new(|cx| TextField::new(cx, "Description").prose()),
             extra: cx.new(|cx| TextField::new(cx, "Device or outcome")),
-            agent_name: cx.new(|cx| TextField::new(cx, "Named after the step")),
             repository: cx.new(|cx| TextField::new(cx, "Repository")),
             work: cx.new(|cx| TextField::new(cx, "Work reference")),
             files: cx.new(|cx| TextField::new(cx, "One file per line").prose()),
@@ -209,11 +206,11 @@ impl MissionsPage {
             writing: false,
             agents: None,
             repositories: None,
-            agent_id: cx.new(|cx| TextField::new(cx, "Agent id")),
+            agent: cx.new(|cx| TextField::new(cx, "Agent id")),
             harness: cx.new(|cx| TextField::new(cx, "Harness")),
             model: cx.new(|cx| TextField::new(cx, "Model")),
             effort: cx.new(|cx| TextField::new(cx, "Effort")),
-            slot: None,
+            seat: None,
             note: cx.new(|cx| TextField::new(cx, "Add a note").prose()),
             notes: None,
             port_label: cx.new(|cx| TextField::new(cx, "Port label")),
@@ -253,7 +250,7 @@ impl MissionsPage {
             &page.check,
             &page.check_version,
             &page.check_value,
-            &page.agent_id,
+            &page.agent,
             &page.harness,
             &page.model,
             &page.effort,
@@ -468,7 +465,7 @@ impl MissionsPage {
             &self.check,
             &self.check_version,
             &self.check_value,
-            &self.agent_id,
+            &self.agent,
             &self.harness,
             &self.model,
             &self.effort,
@@ -564,6 +561,8 @@ impl MissionsPage {
         self.generation += 1;
         let generation = self.generation;
         self.state.selected = Some((node.clone(), slug.clone()));
+        self.agents = None;
+        self.read_agents(node.clone(), cx);
         // Read now, so a form that offers them does not reflow as it opens.
         self.read_repositories(node.clone(), cx);
         self.state.mission = None;
@@ -802,23 +801,23 @@ impl MissionsPage {
             keep_open: false,
             edits: 0,
         });
-        self.slot = m
+        self.seat = m
             .steps
             .iter()
             .find(|f| f.id == id)
-            .and_then(|f| f.slots.first())
+            .and_then(|f| f.seats.first())
             .map(|s| s.id.clone());
-        if let Some(slot) = m
+        if let Some(seat) = m
             .steps
             .iter()
             .find(|f| f.id == id)
-            .and_then(|f| f.slots.first())
+            .and_then(|f| f.seats.first())
         {
             for (field, text) in [
-                (&self.agent_id, slot.agent_id.as_str()),
-                (&self.harness, slot.harness.as_str()),
-                (&self.model, slot.model.as_str()),
-                (&self.effort, slot.effort.as_str()),
+                (&self.agent, seat.agent.as_str()),
+                (&self.harness, seat.harness.as_str()),
+                (&self.model, seat.model.as_str()),
+                (&self.effort, seat.effort.as_str()),
             ] {
                 field.update(cx, |field, cx| field.set(text, false, cx));
             }
@@ -826,23 +825,8 @@ impl MissionsPage {
         if matches!(kind, EditKind::Step)
             && let Some((node, _)) = self.state.selected.clone()
         {
-            let asked = self.host.call(
-                NodeId(node.clone()),
-                ahjo_harness_contract::agents::ListAgents {},
-                cx,
-            );
+            self.read_agents(node.clone(), cx);
             self.read_repositories(node, cx);
-            let generation = self.generation;
-            cx.spawn(async move |this, cx| {
-                let answer = asked.await;
-                let _ = this.update(cx, |page, cx| {
-                    if page.generation == generation {
-                        page.agents = answer.ok();
-                        cx.notify();
-                    }
-                });
-            })
-            .detach();
         }
         let snapshot = self
             .editor
@@ -866,9 +850,9 @@ impl MissionsPage {
             return div();
         };
         let names: Vec<String> = f
-            .slots
+            .seats
             .iter()
-            .map(|slot| crate::store::words::session_of(m, f, slot))
+            .map(|seat| crate::store::words::session_of(m, f, seat))
             .collect();
         let pick = |selector: &'static str, text: &'static str, fresh: bool| {
             let id = f.id.clone();
@@ -899,24 +883,6 @@ impl MissionsPage {
                     .child(pick("step-sessions-kept", "Agent's own", false))
                     .child(pick("step-sessions-fresh", "Fresh each attempt", true)),
             )
-            .when(self.slot.is_some(), |d| {
-                d.child(
-                    div()
-                        .flex()
-                        .gap(px(TAB_GAP))
-                        .child(
-                            div()
-                                .flex_1()
-                                .debug_selector(|| "step-agent-name".into())
-                                .child(self.agent_name.clone()),
-                        )
-                        .child(
-                            kit::button(t, "step-agent-set", "Name", Kind::Quiet)
-                                .debug_selector(|| "step-agent-set".into())
-                                .on_click(cx.listener(|p, _, _, cx| p.name_agent(cx))),
-                        ),
-                )
-            })
             .child(
                 div()
                     .debug_selector(|| "step-session-names".into())
@@ -947,7 +913,7 @@ impl MissionsPage {
         let reverse = undo::inverse_change(&mission, layout, &patch).unwrap_or_default();
         let submitted = self.editor.as_ref().map(|ed| self.editor_snapshot(ed, cx));
         let saved_fields = match &patch {
-            MissionChange::AssignSlot { .. } => Some(10..14),
+            MissionChange::StaffSeat { .. } => Some(10..14),
             MissionChange::UpdateStep {
                 device: Some(_), ..
             } => Some(2..3),
@@ -1028,7 +994,7 @@ impl MissionsPage {
                                 page.state.error = None;
                                 page.created_step(&mission, cx);
                                 if std::mem::take(&mut page.staff_pending) {
-                                    page.assign_slot(cx);
+                                    page.staff_seat(cx);
                                 }
                             }
                             Err(e) => page.state.error = Some(e.to_string()),
@@ -1214,7 +1180,7 @@ impl MissionsPage {
         self.accept_group(14..16, cx);
         cx.notify();
     }
-    fn select_slot(&mut self, id: &str, cx: &mut Context<Self>) {
+    fn select_seat(&mut self, id: &str, cx: &mut Context<Self>) {
         if self.group_is_dirty(10..14, cx) {
             if let Some(ed) = &mut self.editor {
                 ed.error = Some("Save this agent's staffing before choosing another.".into());
@@ -1225,27 +1191,24 @@ impl MissionsPage {
         let Some(ed) = &self.editor else {
             return;
         };
-        let Some(slot) = self
+        let Some(seat) = self
             .state
             .mission
             .as_ref()
             .and_then(|m| m.steps.iter().find(|f| f.id == ed.id))
-            .and_then(|f| f.slots.iter().find(|s| s.id == id))
+            .and_then(|f| f.seats.iter().find(|s| s.id == id))
         else {
             return;
         };
         for (field, text) in [
-            (&self.agent_id, slot.agent_id.as_str()),
-            (&self.harness, slot.harness.as_str()),
-            (&self.model, slot.model.as_str()),
-            (&self.effort, slot.effort.as_str()),
+            (&self.agent, seat.agent.as_str()),
+            (&self.harness, seat.harness.as_str()),
+            (&self.model, seat.model.as_str()),
+            (&self.effort, seat.effort.as_str()),
         ] {
             field.update(cx, |field, cx| field.set(text, false, cx));
         }
-        let agent = slot.agent.clone();
-        self.agent_name
-            .update(cx, |field, cx| field.set(&agent, false, cx));
-        self.slot = Some(id.to_owned());
+        self.seat = Some(id.to_owned());
         self.accept_group(10..14, cx);
         cx.notify();
     }
@@ -1362,14 +1325,7 @@ impl MissionsPage {
             return;
         };
         let patch =
-            edits::step_formation_patch(&ed.id, kind, self.slot.as_deref().unwrap_or_default());
-        self.write_board(patch, WriteMode::Edit, cx);
-    }
-    fn name_agent(&mut self, cx: &mut Context<Self>) {
-        let (Some(ed), Some(slot)) = (&self.editor, &self.slot) else {
-            return;
-        };
-        let patch = edits::name_agent_patch(&ed.id, slot, self.agent_name.read(cx).text.trim());
+            edits::step_formation_patch(&ed.id, kind, self.seat.as_deref().unwrap_or_default());
         self.write_board(patch, WriteMode::Edit, cx);
     }
     fn set_device(&mut self, cx: &mut Context<Self>) {
@@ -1379,11 +1335,11 @@ impl MissionsPage {
         let patch = edits::device_patch(&ed.id, &self.extra.read(cx).text);
         self.write_board(patch, WriteMode::Edit, cx);
     }
-    pub(super) fn assign_slot(&mut self, cx: &mut Context<Self>) {
-        let (Some(ed), Some(slot)) = (&self.editor, &self.slot) else {
+    pub(super) fn staff_seat(&mut self, cx: &mut Context<Self>) {
+        let (Some(ed), Some(seat)) = (&self.editor, &self.seat) else {
             return;
         };
-        let patch = self.draft_staffing(cx).assign(&ed.id, slot);
+        let patch = self.draft_staffing(cx).assign(&ed.id, seat);
         self.write_board(patch, WriteMode::Edit, cx);
     }
     fn arrange(&mut self, cx: &mut Context<Self>) {
@@ -1936,15 +1892,15 @@ impl Render for MissionsPage {
                         .when(matches!(ed.kind, EditKind::Step), |mut d| {
                             if let Some(f) = self.state.mission.as_ref().and_then(|m| m.steps.iter().find(|f| f.id == ed.id)) {
                                 d = d.child(kit::label(&t, "Agents"));
-                                for slot in &f.slots {
-                                    let id = slot.id.clone(); let selected = id.clone(); let selector = format!("slot-{id}");
-                                    d = d.child(left(kit::button(&t, gpui::SharedString::from(format!("slot-{id}")), crate::store::words::slot_label(slot), Kind::Quiet).debug_selector(move || selector.clone()).on_click(cx.listener(move |p, _, _, cx| p.select_slot(&selected, cx)))));
+                                for seat in &f.seats {
+                                    let id = seat.id.clone(); let selected = id.clone(); let selector = format!("seat-{id}");
+                                    d = d.child(left(kit::button(&t, gpui::SharedString::from(format!("seat-{id}")), crate::store::words::seat_label(seat), Kind::Quiet).debug_selector(move || selector.clone()).on_click(cx.listener(move |p, _, _, cx| p.select_seat(&selected, cx)))));
                                 }
                                 d = d.child(self.session_choice(&t, f, cx));
                             }
                             d
                         })
-                        .when(matches!(ed.kind, EditKind::Step) && self.slot.is_some(), |d| d.child(self.slot_pickers(&t, cx)))
+                        .when(matches!(ed.kind, EditKind::Step) && self.seat.is_some(), |d| d.child(self.seat_pickers(&t, cx)))
                         .when(matches!(ed.kind, EditKind::Step) && !self.editor_more, |d| d.child(left(kit::button(&t, "step-more", "More…", Kind::Quiet).debug_selector(|| "step-more".into()).on_click(cx.listener(|p, _, _, cx| { p.editor_more = true; cx.notify(); })))))
                         .when(matches!(ed.kind, EditKind::Step) && self.editor_more, |d| d.child(kit::label(&t, "Team"))
                             .child({ let current = self.state.mission.as_ref().and_then(|m| m.steps.iter().find(|f| f.id == ed.id)).map(|f| f.formation); let pick = |id: &'static str, text: &'static str, ty: Formation| kit::button(&t, id, text, if current == Some(ty) { Kind::Plain } else { Kind::Quiet }).on_click(cx.listener(move |p, _, _, cx| p.set_formation(ty, cx))); div().flex().gap(px(TAB_GAP)).child(pick("formation-solo", "Solo", Formation::Solo)).child(pick("formation-peer", "Peer", Formation::Peer)).child(pick("formation-orchestrated", "Orchestrated", Formation::Orchestrated)) })

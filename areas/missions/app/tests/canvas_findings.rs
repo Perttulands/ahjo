@@ -40,6 +40,7 @@ fn start() -> Running {
                 let invalid = clean.replace("msn_clean", "msn_findings")
                     .replace("slug = \"clean\"", "slug = \"findings\"")
                     .replace("Clean delivery", "Delivery with findings")
+                    .replace("agent = \"builder\"", "agent = \"\"")
                     .replace("harness = \"openai-codex\"", "harness = \"\"")
                     .replace("kinds = [\"human\"]", "kinds = [\"code\"]")
                     + "\n[[connection]]\nid = \"edge_duplicate\"\nfrom = \"inp_start:out\"\nto = \"gate_review:in\"\n[[connection]]\nid = \"edge_dangling\"\nfrom = \"step_work:out\"\nto = \"missing:in\"\n";

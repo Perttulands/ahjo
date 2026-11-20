@@ -1,4 +1,4 @@
-schema = 3
+schema = 4
 id = "msn_example"
 slug = "best-of-three"
 title = "Best of three"
@@ -26,10 +26,9 @@ label = "Brief"
 [[step.output]]
 id = "port_attempt_out"
 label = "Result"
-[[step.slot]]
-id = "slot_attempt"
+[[step.seat]]
+id = "seat_attempt"
 label = "Maker"
-agent = "maker"
 harness = "claude-code"
 effort = "medium"
 
@@ -45,10 +44,9 @@ label = "Attempt"
 [[step.output]]
 id = "port_judge_out"
 label = "Verdict"
-[[step.slot]]
-id = "slot_judge"
+[[step.seat]]
+id = "seat_judge"
 label = "Judge"
-agent = "judge"
 harness = "claude-code"
 effort = "high"
 

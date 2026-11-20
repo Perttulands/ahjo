@@ -20,9 +20,9 @@ fn reports_unsupported_capabilities_on_the_nodes_and_refuses_admission() {
     )));
     let step = &mut mission.steps[0];
     step.formation = ahjo_mission_model::Formation::Peer;
-    let mut slot = step.slots[0].clone();
-    slot.id = "second".into();
-    step.slots.push(slot);
+    let mut seat = step.seats[0].clone();
+    seat.id = "second".into();
+    step.seats.push(seat);
     mission.input_cards[0].human_channel = ahjo_mission_model::HumanChannel::Session;
     let report = validate(&mission, &store.agents(), &Harnesses::default());
     assert!(report.errors.iter().any(|f| f.code == Code::UnsupportedStep
@@ -58,7 +58,7 @@ fn reports_unsupported_capabilities_on_the_nodes_and_refuses_admission() {
     );
     mission.input_cards[0].human_channel = ahjo_mission_model::HumanChannel::Unset;
     mission.steps[0].formation = ahjo_mission_model::Formation::Orchestrated;
-    mission.steps[0].slots[0].controller = true;
+    mission.steps[0].seats[0].controller = true;
     let report = validate(&mission, &store.agents(), &Harnesses::default());
     assert!(!report.errors.iter().any(|f| matches!(
         f.code,
@@ -140,8 +140,8 @@ fn legacy_missions_can_be_repaired_without_allowing_unrelated_saves() {
             MissionChange::SetStepFormation {
                 id: step,
                 formation: ahjo_mission_model::Formation::Solo,
-                keep_slot_id: "".into(),
-                slots: None,
+                keep_seat_id: "".into(),
+                seats: None,
             },
             "",
         )

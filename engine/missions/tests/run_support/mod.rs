@@ -1,3 +1,5 @@
+//! Recorded Archon outcomes retain their order and payloads, with the seat
+//! vocabulary updated to match the current wire and fixture identifiers.
 use serde_json::{Map, Value};
 use std::path::PathBuf;
 
@@ -42,7 +44,7 @@ pub fn normalized_ledger(root: &Scratch, id: &str) -> Vec<Value> {
         .map(|line| {
             let event: Value = serde_json::from_str(line).unwrap();
             let mut result = Map::new();
-            for key in ["type", "node_id", "gate_id", "slot_id", "attempt"] {
+            for key in ["type", "node_id", "gate_id", "seat_id", "attempt"] {
                 if let Some(value) = event.get(key) {
                     result.insert(key.into(), value.clone());
                 }

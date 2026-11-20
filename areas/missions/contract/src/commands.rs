@@ -54,7 +54,7 @@ pub struct MissionExamples {}
 #[serde(deny_unknown_fields)]
 pub struct MissionShow {
     pub mission: String,
-    /// Read the whole definition with every port and slot id.
+    /// Read the whole definition with every port and seat id.
     #[serde(default)]
     pub full: bool,
 }
@@ -323,7 +323,7 @@ pub enum HandoverStepDetail {
 pub struct HandoverWorker {
     pub step: String,
     pub who: String,
-    pub slots: Vec<HandoverSlot>,
+    pub seats: Vec<HandoverSeat>,
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub fresh: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -331,8 +331,13 @@ pub struct HandoverWorker {
 }
 
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
-pub struct HandoverSlot {
+pub struct HandoverSeat {
     pub id: String,
+    pub agent: String,
+    pub harness: crate::Harness,
+    pub model: String,
+    pub effort: crate::Effort,
+    /// The base session name. Fresh attempts receive their own suffix.
     pub session: String,
 }
 

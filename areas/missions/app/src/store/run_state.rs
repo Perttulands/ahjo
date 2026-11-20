@@ -189,11 +189,11 @@ pub fn project(events: &[RunEvent]) -> Projection {
         if !e.gate_id.is_empty() {
             p.gates.insert(e.gate_id.clone());
         }
-        if e.attempt > 0 && (e.kind == "node_started" || e.kind == "slot_dispatch") {
+        if e.attempt > 0 && (e.kind == "node_started" || e.kind == "seat_dispatch") {
             p.attempts.insert(node.to_string(), e.attempt);
         }
         match e.kind.as_str() {
-            "node_started" | "slot_dispatch" | "gate_evaluating" => {
+            "node_started" | "seat_dispatch" | "gate_evaluating" => {
                 p.set(node, NodeState::Running, seq)
             }
             "human_input_requested" | "node_waiting" => p.set(node, NodeState::Waiting, seq),

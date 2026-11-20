@@ -4,7 +4,7 @@ use crate::{
     AgentSeat, Dispatch, DispatchResult, Executor, OpenDispatch, PublishedTurn, SeatEvent,
     SeatExecutor, SeatFuture, SeatId, SeatSide, TurnWorkspace,
 };
-use ahjo_mission_model::{Slot, Step};
+use ahjo_mission_model::{Seat, Step};
 use std::{
     collections::{HashMap, VecDeque},
     path::PathBuf,
@@ -65,7 +65,7 @@ impl SeatSide for Kept {
                 id: id.into(),
                 run_id: "run_1".into(),
                 node_id: "fmn_answer".into(),
-                slot_id: "slot_1".into(),
+                seat_id: "seat_1".into(),
                 name: "forget-1-answer".into(),
                 harness: "claude-code".into(),
                 model: "haiku".into(),
@@ -114,13 +114,13 @@ fn open() -> OpenDispatch {
         run_id: "run_1".into(),
         dispatch_id: "dsp_initial".into(),
         node_id: "fmn_answer".into(),
-        slot_id: "slot_1".into(),
+        seat_id: "seat_1".into(),
         attempt: 1,
         step: Step {
             id: "fmn_answer".into(),
             formation: ahjo_mission_model::Formation::Solo,
-            slots: vec![Slot {
-                id: "slot_1".into(),
+            seats: vec![Seat {
+                id: "seat_1".into(),
                 ..Default::default()
             }],
             ..Default::default()

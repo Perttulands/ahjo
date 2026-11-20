@@ -25,7 +25,7 @@ fn runtime_errors_use_the_shared_shape() {
     assert_error(parse_verdict("no verdict").unwrap_err(), "invalid_contract");
     assert_error(
         Harnesses::default()
-            .check("slot", "unknown", "", "low")
+            .check("seat", "unknown", "", "low")
             .unwrap_err(),
         "invalid_contract",
     );

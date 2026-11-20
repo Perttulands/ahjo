@@ -251,7 +251,7 @@ async fn run_changes_arrive_on_the_socket_through_completion() {
     assert_eq!(rejected.code, "run_admission_failed");
     let findings = rejected.findings.as_ref().unwrap().as_array().unwrap();
     assert!(findings.iter().any(|f| f["code"] == "missing_input"));
-    assert!(findings.iter().any(|f| f["code"] == "step_without_slots"));
+    assert!(findings.iter().any(|f| f["code"] == "step_without_seats"));
     let remote = include_str!("fixtures/solo-lab.mission.toml")
         .replace("slug = \"hello\"", "slug = \"remote\"")
         .replace("id = \"msn_hello\"", "id = \"msn_remote\"")
@@ -395,7 +395,7 @@ async fn default_agent_store_is_shared_and_isolated() {
     ).await.unwrap();
     std::fs::create_dir_all(root.join("missions")).unwrap();
     let mission = include_str!("fixtures/solo-lab.mission.toml")
-        .replace("agent_id = \"builder\"", "agent_id = \"fixture-writer\"");
+        .replace("agent = \"builder\"", "agent = \"fixture-writer\"");
     std::fs::write(root.join("missions/hello.mission.toml"), mission).unwrap();
     let (report, _) = client
         .request(Method::GET, "/api/missions/hello/validation", None, None)

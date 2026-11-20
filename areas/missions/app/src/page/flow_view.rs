@@ -488,22 +488,29 @@ impl MissionsPage {
         match &step.kind {
             flow::FlowStepKind::Step { next } => {
                 if let Some(step) = mission.steps.iter().find(|f| f.id == step.id) {
-                    if step.slots.is_empty() {
+                    if step.seats.is_empty() {
                         block = block.child(
                             div()
                                 .text_color(t.error)
                                 .child("Nobody does this step yet."),
                         );
-                    } else if step.slots.iter().all(|slot| slot.harness.is_unset()) {
+                    } else if step.seats.iter().all(|seat| !seat.staffed()) {
                         // A sketched step: who does it is still open.
                         block = block.child(sub("Nobody chosen to do it yet".into()));
                     } else {
                         // Who, not the session they will work in: that is
                         // the step's own detail.
                         let who = step
-                            .slots
+                            .seats
                             .iter()
-                            .map(crate::store::words::who)
+                            .map(|seat| {
+                                crate::store::words::who(
+                                    seat,
+                                    self.agents.as_ref().and_then(|catalog| {
+                                        catalog.agents.iter().find(|agent| agent.id == seat.agent)
+                                    }),
+                                )
+                            })
                             .collect::<Vec<_>>()
                             .join(", ");
                         block = block.child(sub(who));
@@ -547,9 +554,15 @@ impl MissionsPage {
                         block = block.child(sub(format!(
                             "judged by {}: {}",
                             mission.node_name(judge),
-                            step.slots
+                            step.seats
                                 .iter()
-                                .map(crate::store::words::who)
+                                .map(|seat| crate::store::words::who(
+                                    seat,
+                                    self.agents.as_ref().and_then(|catalog| catalog
+                                        .agents
+                                        .iter()
+                                        .find(|agent| agent.id == seat.agent))
+                                ))
                                 .collect::<Vec<_>>()
                                 .join(", ")
                         )));

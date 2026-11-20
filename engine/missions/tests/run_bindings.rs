@@ -1,10 +1,10 @@
 use ahjo_mission_engine::{AgentStore, BindingsSnapshot};
-use ahjo_mission_model::{Mission, Slot, Step};
+use ahjo_mission_model::{Mission, Seat, Step};
 #[test]
 fn frozen_bindings_reject_mutated_settings_and_agents() {
-    let slot = Slot {
+    let seat = Seat {
         id: "worker".into(),
-        agent_id: "builder".into(),
+        agent: "builder".into(),
         harness: ahjo_mission_model::Harness::OpenAiCodex,
         effort: ahjo_mission_model::Effort::Medium,
         ..Default::default()
@@ -15,7 +15,7 @@ fn frozen_bindings_reject_mutated_settings_and_agents() {
         rev: 1,
         steps: vec![Step {
             id: "step".into(),
-            slots: vec![slot.clone()],
+            seats: vec![seat.clone()],
             ..Default::default()
         }],
         ..Default::default()
@@ -24,10 +24,10 @@ fn frozen_bindings_reject_mutated_settings_and_agents() {
     let mut frozen = BindingsSnapshot::capture("run_a", &mission, "input", &agents).unwrap();
     assert!(
         frozen
-            .binding(&mission, "run_a", "input", "step", &slot)
+            .binding(&mission, "run_a", "input", "step", &seat)
             .is_ok()
     );
-    let mut changed = slot.clone();
+    let mut changed = seat.clone();
     changed.effort = ahjo_mission_model::Effort::High;
     assert_eq!(
         frozen
@@ -39,7 +39,7 @@ fn frozen_bindings_reject_mutated_settings_and_agents() {
     frozen.bindings[0].agent_toml.push_str("bad");
     assert_eq!(
         frozen
-            .binding(&mission, "run_a", "input", "step", &slot)
+            .binding(&mission, "run_a", "input", "step", &seat)
             .unwrap_err()
             .code,
         "persona_snapshot_invalid"
@@ -47,7 +47,7 @@ fn frozen_bindings_reject_mutated_settings_and_agents() {
     frozen.schema = 2;
     assert!(
         frozen
-            .binding(&mission, "run_a", "input", "step", &slot)
+            .binding(&mission, "run_a", "input", "step", &seat)
             .is_err()
     );
 }

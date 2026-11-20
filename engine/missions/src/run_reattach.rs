@@ -25,7 +25,7 @@ fn request(
             .unwrap_or("")
             .into(),
         node_id: dispatch.node_id.clone(),
-        slot_id: dispatch.slot_id.clone(),
+        seat_id: dispatch.seat_id.clone(),
         attempt: dispatch.attempt,
         step,
         dispatch_data: dispatch.data.clone(),
@@ -119,7 +119,7 @@ fn keep(
                 && event.attempt == dispatch.attempt
                 && event.kind == replay.kind
                 && event.data.get("dispatch_id") == replay.data.get("dispatch_id")
-                && (replay.kind == "slot_dispatch"
+                && (replay.kind == "seat_dispatch"
                     || replay.kind == "workspace_turn"
                     || event.data.get("seat_event_seq").is_some()
                         && event.data.get("seat_event_seq") == replay.data.get("seat_event_seq"))
@@ -133,27 +133,27 @@ fn keep(
             dispatch.attempt,
             serde_json::Value::Object(replay.data),
         );
-        record.slot_id = replay.slot_id;
+        record.seat_id = replay.seat_id;
         c.append(id, record)?;
     }
-    let mut slot = crate::run_worker::event(
-        "slot_result",
+    let mut seat = crate::run_worker::event(
+        "seat_result",
         &dispatch.node_id,
         dispatch.attempt,
         json!({"dispatch_id":dispatch_id,"status":"ok","sentinel":{"run_id":id,"status":"ok"}}),
     );
-    slot.slot_id = dispatch.slot_id.clone();
+    seat.seat_id = dispatch.seat_id.clone();
     if !c
         .ledger(id)?
         .read()
         .map_err(crate::error::to_io)?
         .iter()
         .any(|e| {
-            e.kind == "slot_result"
+            e.kind == "seat_result"
                 && e.data.get("dispatch_id").and_then(|v| v.as_str()) == Some(dispatch_id)
         })
     {
-        c.append(id, slot)?;
+        c.append(id, seat)?;
     }
     let events = c.ledger(id)?.read().map_err(crate::error::to_io)?;
     let reason = events
@@ -199,7 +199,7 @@ fn record_tokens(
             dispatch.attempt,
             json!({"dispatch_id":dispatch_id,"tokens":tokens}),
         );
-        usage.slot_id.clone_from(&dispatch.slot_id);
+        usage.seat_id.clone_from(&dispatch.seat_id);
         crate::run_worker::append_live(c, id, control, usage)?;
     }
     Ok(())
@@ -289,12 +289,12 @@ pub(crate) fn resolve(
                 .unwrap()
                 .remove(&(id.to_owned(), dispatch_id.to_owned()));
             let mut abandoned = crate::run_worker::event(
-                "slot_result",
+                "seat_result",
                 &dispatch.node_id,
                 dispatch.attempt,
-                json!({"dispatch_id":dispatch_id,"slot_id":dispatch.slot_id,"status":"abandoned"}),
+                json!({"dispatch_id":dispatch_id,"seat_id":dispatch.seat_id,"status":"abandoned"}),
             );
-            abandoned.slot_id = dispatch.slot_id.clone();
+            abandoned.seat_id = dispatch.seat_id.clone();
             c.append(id, abandoned)?;
             continue;
         }
@@ -352,7 +352,7 @@ pub(crate) fn resolve(
                     dispatch.attempt,
                     json!({"code":"dispatch_reattach_failed","reason":reason,"dispatch_id":dispatch_id,"recoverable":true}),
                 );
-                error.slot_id = dispatch.slot_id.clone();
+                error.seat_id = dispatch.seat_id.clone();
                 c.append(id, error)?;
                 reasons.push(format!("{}: {reason}", dispatch.node_id));
                 failed.push(dispatch.data.clone());

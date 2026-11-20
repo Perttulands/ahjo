@@ -1,6 +1,6 @@
 # Historical archon-2fb proving mission from 2026-09-06. Its briefs target that task.
 # For current Archon operation use docs/CONTRACT.md; adapt before running.
-schema = 3
+schema = 4
 id = "brd_operations_proof"
 slug = "operations-proof"
 title = "Standalone operations proof"
@@ -24,10 +24,10 @@ label = "Input"
 [[step.output]]
 id = "port_producer_out"
 label = "Report"
-[[step.slot]]
+[[step.seat]]
 id = "producer"
 label = "Producer"
-agent_id = "builder"
+agent = "builder"
 harness = "openai-codex"
 controller = true
 effort = "medium"
@@ -45,10 +45,10 @@ label = "Input"
 [[step.output]]
 id = "port_reviewer_out"
 label = "Report"
-[[step.slot]]
+[[step.seat]]
 id = "reviewer"
 label = "Reviewer"
-agent_id = "reviewer"
+agent = "reviewer"
 harness = "openai-codex"
 controller = true
 effort = "xhigh"
@@ -66,10 +66,10 @@ label = "Input"
 [[step.output]]
 id = "port_integrator_out"
 label = "Report"
-[[step.slot]]
+[[step.seat]]
 id = "integrator"
 label = "Integrator"
-agent_id = "builder"
+agent = "builder"
 harness = "openai-codex"
 controller = true
 effort = "medium"

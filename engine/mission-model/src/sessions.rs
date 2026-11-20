@@ -1,17 +1,15 @@
-//! What a mission's agents are called where people see them: ordinary tmux
-//! sessions named under the mission's prefix, `<prefix>-<agent>`, so the
-//! session list groups them by that prefix.
+//! Names for the tmux sessions associated with mission seats.
 //!
-//! A step names its agent; a run starts that agent's session when it is
-//! not live, and the session stays for the next run to use. Only a session
-//! a run started is the agent's: one that merely has its name is left
-//! alone, and the step works in a session of its own beside it. A
-//! step that always starts fresh gets a session of its own for each
-//! attempt, `<prefix>-<agent>-<run>-<attempt>`, which ends with the attempt.
+//! A session component comes from the step title and, for a team, the seat
+//! label. The mission prefix groups its sessions in the session list.
+//!
+//! A run reuses a live session prepared for that seat. If a different session
+//! already has its name, the run opens one beside it. A step set to start
+//! fresh has a session per attempt, which ends with that attempt.
 
-use crate::{Mission, Slot, Step};
+use crate::{Mission, Seat, Step};
 
-/// The longest a prefix or an agent's name grows.
+/// The longest a prefix or session component grows.
 const MOST: usize = 24;
 
 /// Lower-case letters and digits of `text`, words joined by `join`, at most
@@ -44,12 +42,6 @@ pub fn valid_prefix(prefix: &str) -> bool {
     !prefix.is_empty() && prefix.len() <= MOST && prefix.bytes().all(|b| b.is_ascii_alphanumeric())
 }
 
-/// An agent's name as a step may set it: words of letters and digits joined
-/// by single dashes.
-pub fn valid_agent(agent: &str) -> bool {
-    !agent.is_empty() && words(agent, "-") == agent
-}
-
 impl Mission {
     /// The prefix its sessions are named under: the one it sets, else its
     /// slug's letters and digits.
@@ -65,23 +57,19 @@ impl Mission {
 }
 
 impl Step {
-    /// The agent a slot of this step names: the slot's own name, else the
-    /// step's title (with the slot's label when the step has several).
-    pub fn agent_of(&self, slot: &Slot) -> String {
-        if !slot.agent.trim().is_empty() {
-            return words(&slot.agent, "-");
-        }
+    /// The session name component from the step title and, for a team, seat label.
+    pub fn session_part(&self, seat: &Seat) -> String {
         let title = if self.title.trim().is_empty() {
             &self.id
         } else {
             &self.title
         };
-        let label = if slot.label.trim().is_empty() {
-            &slot.id
+        let label = if seat.label.trim().is_empty() {
+            &seat.id
         } else {
-            &slot.label
+            &seat.label
         };
-        let name = if self.slots.len() > 1 {
+        let name = if self.seats.len() > 1 {
             words(&format!("{title} {label}"), "-")
         } else {
             words(title, "-")
@@ -94,31 +82,31 @@ impl Step {
     }
 }
 
-/// The session an agent of `mission` works in.
-pub fn agent_session(prefix: &str, agent: &str) -> String {
-    format!("{prefix}-{agent}")
+/// The session for a mission seat.
+pub fn seat_session(prefix: &str, part: &str) -> String {
+    format!("{prefix}-{part}")
 }
 
 /// The session a fresh attempt works in, its own for that attempt.
-pub fn fresh_session(prefix: &str, agent: &str, run: u64, attempt: i64) -> String {
-    format!("{prefix}-{agent}-{run}-{attempt}")
+pub fn fresh_session(prefix: &str, part: &str, run: u64, attempt: i64) -> String {
+    format!("{prefix}-{part}-{run}-{attempt}")
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    fn step(title: &str, slots: &[(&str, &str)]) -> Step {
+    fn step(title: &str, seats: &[(&str, &str)]) -> Step {
         Step {
             id: "fmn_a".into(),
             title: title.into(),
-            slots: slots
+            seats: seats
                 .iter()
-                .map(|(label, agent)| Slot {
+                .map(|(label, agent)| Seat {
                     id: format!("s-{label}"),
                     label: (*label).into(),
                     agent: (*agent).into(),
-                    ..Slot::default()
+                    ..Seat::default()
                 })
                 .collect(),
             ..Step::default()
@@ -138,17 +126,16 @@ mod tests {
         };
         assert_eq!(set.session_prefix(), "bo3");
         let solo = step("Write the draft!", &[("", "")]);
-        assert_eq!(solo.agent_of(&solo.slots[0]), "write-the-draft");
-        let named = step("Write", &[("", "Writer")]);
+        assert_eq!(solo.session_part(&solo.seats[0]), "write-the-draft");
+        let named = step("Write", &[("", "reviewer")]);
         assert_eq!(
-            agent_session("bo3", &named.agent_of(&named.slots[0])),
-            "bo3-writer"
+            seat_session("bo3", &named.session_part(&named.seats[0])),
+            "bo3-write"
         );
         let team = step("Review", &[("Lead", ""), ("Second", "")]);
-        assert_eq!(team.agent_of(&team.slots[1]), "review-second");
+        assert_eq!(team.session_part(&team.seats[1]), "review-second");
         assert_eq!(fresh_session("bo3", "writer", 4, 2), "bo3-writer-4-2");
         // A name the list would split, or tmux refuse, is not a prefix.
         assert!(valid_prefix("bo3") && !valid_prefix("bo-3") && !valid_prefix("a:b"));
-        assert!(valid_agent("lead-writer") && !valid_agent("Lead Writer"));
     }
 }

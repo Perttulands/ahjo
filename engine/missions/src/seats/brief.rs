@@ -1,38 +1,38 @@
 //! Render the complete, private instructions a seat reads by pointer.
 use crate::StepExecution;
-use ahjo_mission_model::Slot;
+use ahjo_mission_model::Seat;
 use std::fmt::Write;
 
-pub(super) fn render(request: &StepExecution, slot: &Slot) -> String {
-    render_for(request, slot, true)
+pub(super) fn render(request: &StepExecution, seat: &Seat) -> String {
+    render_for(request, seat, true)
 }
 
 /// A worker has the same context, but the controller owns the final output.
-pub(super) fn render_worker(request: &StepExecution, slot: &Slot) -> String {
-    let mut brief = render_for(request, slot, false);
+pub(super) fn render_worker(request: &StepExecution, seat: &Seat) -> String {
+    let mut brief = render_for(request, seat, false);
     let _ = writeln!(
         brief,
         "You are a worker on this team. Work on the controller's assigned task, save your output in the attempt directory as worker-{}.md, and report its path and findings to the controller. The controller owns the step's final output.",
-        slot.id
+        seat.id
     );
     brief
 }
 
-fn render_for(request: &StepExecution, slot: &Slot, final_output: bool) -> String {
+fn render_for(request: &StepExecution, seat: &Seat, final_output: bool) -> String {
     let mut brief = String::new();
     let _ = writeln!(
         brief,
-        "Run: {}\nStep: {} ({})\nSlot: {}\nAgent: {}\nHarness: {}\nWorking directory: {}\nAttempt directory: {}\n",
+        "Run: {}\nStep: {} ({})\nSeat: {}\nAgent: {}\nHarness: {}\nWorking directory: {}\nAttempt directory: {}\n",
         request.run_id,
         request.step.title,
         request.step.id,
-        slot.id,
-        if slot.agent_id.is_empty() {
+        seat.id,
+        if seat.agent.is_empty() {
             "vanilla (no role)"
         } else {
-            &slot.agent_id
+            &seat.agent
         },
-        slot.harness,
+        seat.harness,
         request.cwd.display(),
         request.artifact_dir.display()
     );
@@ -76,7 +76,7 @@ fn render_for(request: &StepExecution, slot: &Slot, final_output: bool) -> Strin
         .bindings
         .bindings
         .iter()
-        .find(|binding| binding.node_id == request.step.id && binding.slot_id == slot.id)
+        .find(|binding| binding.node_id == request.step.id && binding.seat_id == seat.id)
         && let Some(instructions) = binding.instructions()
         && !instructions.is_empty()
     {
@@ -185,17 +185,17 @@ mod tests {
     fn names_the_runs_work_item_and_the_briefs_own() {
         let text = render(
             &execution("bead:n1:/srv/x#x-1", "gh:a/b#2"),
-            &Slot::default(),
+            &Seat::default(),
         );
         assert!(
             text.contains("Mission bead: x-1 (store: /srv/x)\n"),
             "{text}"
         );
         assert!(text.contains("Brief issue: a/b#2\n"), "{text}");
-        let text = render(&execution("gh:a/b#2", "x-9"), &Slot::default());
+        let text = render(&execution("gh:a/b#2", "x-9"), &Seat::default());
         assert!(text.contains("Mission issue: a/b#2\n"), "{text}");
         assert!(text.contains("Brief bead: x-9\n"), "{text}");
-        let text = render(&execution("", ""), &Slot::default());
+        let text = render(&execution("", ""), &Seat::default());
         assert!(
             !text.contains("Mission ") && !text.contains("Brief "),
             "{text}"

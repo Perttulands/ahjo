@@ -127,12 +127,12 @@ pub(crate) fn abandon_cut_off(
             continue;
         }
         let mut result = event(
-            "slot_result",
+            "seat_result",
             node,
             attempt,
-            json!({"dispatch_id":dispatch.data.get("dispatch_id"),"node_id":node,"slot_id":dispatch.slot_id,"status":"abandoned","reason":format!("attempt {attempt} was cut short by its Limit card")}),
+            json!({"dispatch_id":dispatch.data.get("dispatch_id"),"node_id":node,"seat_id":dispatch.seat_id,"status":"abandoned","reason":format!("attempt {attempt} was cut short by its Limit card")}),
         );
-        result.slot_id.clone_from(&dispatch.slot_id);
+        result.seat_id.clone_from(&dispatch.seat_id);
         crate::run_worker::append_live(c, id, control, result)?;
     }
     Ok(())

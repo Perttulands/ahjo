@@ -215,16 +215,16 @@ impl AgentStore {
                 }
             };
             for step in &mission.steps {
-                for slot in &step.slots {
-                    if slot.agent_id == id {
+                for seat in &step.seats {
+                    if seat.agent == id {
                         result.usage.push(AgentUse {
                             mission_id: mission.id.clone(),
                             mission_slug: listing.slug.clone(),
                             mission_title: mission.title.clone(),
                             step_id: step.id.clone(),
                             step_title: step.title.clone(),
-                            slot_id: slot.id.clone(),
-                            slot_label: slot.label.clone(),
+                            seat_id: seat.id.clone(),
+                            seat_label: seat.label.clone(),
                         });
                     }
                 }

@@ -1,5 +1,5 @@
 # Import the companion delivery.notes.toml into .archon/notes/.
-schema = 3
+schema = 4
 id = "brd_delivery"
 slug = "delivery"
 title = "Delivery"
@@ -25,10 +25,10 @@ label = "Input"
 [[step.output]]
 id = "port_plan_out"
 label = "Plan"
-[[step.slot]]
+[[step.seat]]
 id = "plan"
 label = "Plan"
-agent_id = "planner"
+agent = "planner"
 harness = "claude-code"
 controller = true
 effort = "xhigh"
@@ -45,7 +45,7 @@ label = "Input"
 [[step.output]]
 id = "port_beads_out"
 label = "Bead graph"
-[[step.slot]]
+[[step.seat]]
 id = "beads"
 label = "Beads"
 harness = "claude-code"
@@ -64,10 +64,10 @@ label = "Input"
 [[step.output]]
 id = "port_beads_reviewer_out"
 label = "Verdict"
-[[step.slot]]
+[[step.seat]]
 id = "beads_reviewer"
 label = "Beads reviewer"
-agent_id = "judge"
+agent = "judge"
 harness = "claude-code"
 controller = true
 effort = "xhigh"
@@ -84,31 +84,31 @@ label = "Input"
 [[step.output]]
 id = "port_execution_out"
 label = "Delivery"
-[[step.slot]]
+[[step.seat]]
 id = "execution"
 label = "Controller"
-agent_id = "orchestrator"
+agent = "orchestrator"
 harness = "claude-code"
 controller = true
 effort = "xhigh"
-[[step.slot]]
+[[step.seat]]
 id = "worker_1"
 label = "Worker 1"
-agent_id = "builder"
+agent = "builder"
 harness = "openai-codex"
 controller = false
 effort = "medium"
-[[step.slot]]
+[[step.seat]]
 id = "worker_2"
 label = "Worker 2"
-agent_id = "builder"
+agent = "builder"
 harness = "openai-codex"
 controller = false
 effort = "medium"
-[[step.slot]]
+[[step.seat]]
 id = "worker_3"
 label = "Worker 3"
-agent_id = "builder"
+agent = "builder"
 harness = "openai-codex"
 controller = false
 effort = "medium"
@@ -125,10 +125,10 @@ label = "Input"
 [[step.output]]
 id = "port_final_review_out"
 label = "Report"
-[[step.slot]]
+[[step.seat]]
 id = "final_review"
 label = "Final review"
-agent_id = "reviewer"
+agent = "reviewer"
 harness = "openai-codex"
 controller = true
 model = "gpt-6-astra"

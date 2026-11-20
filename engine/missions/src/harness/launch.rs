@@ -1,4 +1,4 @@
-use super::adapter::{Launch, Shell, SlotBinding, TranscriptRoots};
+use super::adapter::{Launch, SeatBinding, Shell, TranscriptRoots};
 use ahjo_term::waiting::harness::Harness;
 use std::{io, path::Path};
 fn quote(s: &str, shell: Shell) -> String {
@@ -9,7 +9,7 @@ fn quote(s: &str, shell: Shell) -> String {
 }
 pub(super) fn render(
     harness: Harness,
-    binding: &SlotBinding,
+    binding: &SeatBinding,
     cwd: &Path,
     shell: Shell,
     roots: &TranscriptRoots,

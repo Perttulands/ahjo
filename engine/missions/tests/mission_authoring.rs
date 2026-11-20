@@ -169,7 +169,7 @@ fn create_nodes_with_default_shapes() {
             "human:ui",
         )
         .unwrap();
-    assert_eq!(edit.mission.steps[0].slots.len(), 3);
+    assert_eq!(edit.mission.steps[0].seats.len(), 3);
     assert_eq!(
         edit.mission.gates[0].kinds,
         [ahjo_mission_model::GateKind::Step]
@@ -481,7 +481,7 @@ fn layout_changes_are_etag_checked_and_keep_other_layers() {
 }
 
 #[test]
-fn type_changes_require_an_explicit_choice_before_dropping_staffed_slots() {
+fn type_changes_require_an_explicit_choice_before_dropping_staffed_seats() {
     let dir = Scratch::new();
     let store = Store::new(&dir.0);
     let edit = store.create_mission("work", "Work", "").unwrap();
@@ -499,10 +499,10 @@ fn type_changes_require_an_explicit_choice_before_dropping_staffed_slots() {
         )
         .unwrap();
     let step = edit.mission.steps[0].clone();
-    let mut slots = step.slots.clone();
-    for slot in &mut slots {
-        slot.harness = ahjo_mission_model::Harness::ClaudeCode;
-        slot.effort = ahjo_mission_model::Effort::Medium;
+    let mut seats = step.seats.clone();
+    for seat in &mut seats {
+        seat.harness = ahjo_mission_model::Harness::ClaudeCode;
+        seat.effort = ahjo_mission_model::Effort::Medium;
     }
     edit = store
         .patch(
@@ -511,8 +511,8 @@ fn type_changes_require_an_explicit_choice_before_dropping_staffed_slots() {
             MissionChange::SetStepFormation {
                 id: step.id.clone(),
                 formation: ahjo_mission_model::Formation::Orchestrated,
-                keep_slot_id: String::new(),
-                slots: Some(slots.clone()),
+                keep_seat_id: String::new(),
+                seats: Some(seats.clone()),
             },
             "",
         )
@@ -524,13 +524,13 @@ fn type_changes_require_an_explicit_choice_before_dropping_staffed_slots() {
             MissionChange::SetStepFormation {
                 id: step.id.clone(),
                 formation: ahjo_mission_model::Formation::Solo,
-                keep_slot_id: String::new(),
-                slots: None,
+                keep_seat_id: String::new(),
+                seats: None,
             },
             "",
         )
         .unwrap_err();
-    assert_eq!(error.code.as_str(), "slot_choice_required");
+    assert_eq!(error.code.as_str(), "seat_choice_required");
     edit = store
         .patch(
             "work",
@@ -538,13 +538,13 @@ fn type_changes_require_an_explicit_choice_before_dropping_staffed_slots() {
             MissionChange::SetStepFormation {
                 id: step.id,
                 formation: ahjo_mission_model::Formation::Solo,
-                keep_slot_id: slots[1].id.clone(),
-                slots: None,
+                keep_seat_id: seats[1].id.clone(),
+                seats: None,
             },
             "",
         )
         .unwrap();
-    assert_eq!(edit.mission.steps[0].slots[0].id, slots[1].id);
+    assert_eq!(edit.mission.steps[0].seats[0].id, seats[1].id);
 }
 
 #[test]
@@ -566,27 +566,27 @@ fn staffing_is_validated_and_repeated_assignment_is_a_noop() {
         )
         .unwrap();
     let step = &edit.mission.steps[0];
-    let (step_id, slot_id) = (step.id.clone(), step.slots[0].id.clone());
-    let assignment = || MissionChange::AssignSlot {
+    let (step_id, seat_id) = (step.id.clone(), step.seats[0].id.clone());
+    let assignment = || MissionChange::StaffSeat {
         step_id: step_id.clone(),
-        slot_id: slot_id.clone(),
-        agent_id: "builder".into(),
+        seat_id: seat_id.clone(),
+        agent: "builder".into(),
         harness: ahjo_mission_model::Harness::ClaudeCode,
         model: String::new(),
         effort: ahjo_mission_model::Effort::Medium,
     };
     edit = store.patch("work", pre(&edit), assignment(), "").unwrap();
-    assert_eq!(edit.mission.steps[0].slots[0].agent_id, "builder");
+    assert_eq!(edit.mission.steps[0].seats[0].agent, "builder");
     let repeated = store.patch("work", pre(&edit), assignment(), "").unwrap();
     assert_eq!(repeated.etag, edit.etag);
     let bad = store
         .patch(
             "work",
             pre(&edit),
-            MissionChange::AssignSlot {
+            MissionChange::StaffSeat {
                 step_id,
-                slot_id,
-                agent_id: String::new(),
+                seat_id,
+                agent: String::new(),
                 harness: ahjo_mission_model::Harness::ClaudeCode,
                 model: String::new(),
                 effort: ahjo_mission_model::Effort::Ultra,
@@ -594,7 +594,7 @@ fn staffing_is_validated_and_repeated_assignment_is_a_noop() {
             "",
         )
         .unwrap_err();
-    assert_eq!(bad.code.as_str(), "invalid_slot_settings");
+    assert_eq!(bad.code.as_str(), "invalid_seat_settings");
 }
 
 #[test]
@@ -1394,14 +1394,14 @@ fn each_node_kind_round_trips_through_delete_and_restore() {
 
 #[test]
 fn invalid_restore_leaves_mission_and_layout_untouched() {
-    use ahjo_mission_model::{RestoredNode, Slot, Step};
+    use ahjo_mission_model::{RestoredNode, Seat, Step};
     let dir = Scratch::new();
     let store = Store::new(&dir.0);
     let edit = store.create_mission("work", "Work", "").unwrap();
     let bad = Step {
         id: "fmn_bad".into(),
         formation: ahjo_mission_model::Formation::Peer,
-        slots: vec![Slot {
+        seats: vec![Seat {
             id: "only".into(),
             ..Default::default()
         }],
@@ -1579,7 +1579,7 @@ fn repeated_brief_gate_and_controller_edits_save_nothing() {
         )
         .unwrap();
     let step = edit.mission.steps[0].id.clone();
-    let slot = edit.mission.steps[0].slots[1].id.clone();
+    let seat = edit.mission.steps[0].seats[1].id.clone();
     let gate = edit.mission.gates[0].id.clone();
     let patches = [
         MissionChange::SetBrief {
@@ -1592,7 +1592,7 @@ fn repeated_brief_gate_and_controller_edits_save_nothing() {
         },
         MissionChange::MakeController {
             step_id: step,
-            slot_id: slot,
+            seat_id: seat,
         },
         MissionChange::UpdateGate(GateUpdate {
             id: gate,
@@ -1792,20 +1792,20 @@ fn swapping_staffing_is_one_revision_and_reversible_across_steps() {
     }
     let a = &edit.mission.steps[0];
     let b = &edit.mission.steps[1];
-    let (af, aslot, bf, bslot) = (
+    let (af, aseat, bf, bseat) = (
         a.id.clone(),
-        a.slots[0].id.clone(),
+        a.seats[0].id.clone(),
         b.id.clone(),
-        b.slots[0].id.clone(),
+        b.seats[0].id.clone(),
     );
     edit = store
         .patch(
             "work",
             pre(&edit),
-            MissionChange::AssignSlot {
+            MissionChange::StaffSeat {
                 step_id: af.clone(),
-                slot_id: aslot.clone(),
-                agent_id: "builder".into(),
+                seat_id: aseat.clone(),
+                agent: "builder".into(),
                 harness: ahjo_mission_model::Harness::ClaudeCode,
                 model: "opus".into(),
                 effort: ahjo_mission_model::Effort::Medium,
@@ -1813,25 +1813,25 @@ fn swapping_staffing_is_one_revision_and_reversible_across_steps() {
             "",
         )
         .unwrap();
-    let swap = || MissionChange::SwapSlots {
+    let swap = || MissionChange::SwapSeats {
         from_step: af.clone(),
-        from_slot: aslot.clone(),
+        from_seat: aseat.clone(),
         to_step: bf.clone(),
-        to_slot: bslot.clone(),
+        to_seat: bseat.clone(),
     };
     let before = edit.mission.rev;
     edit = store.patch("work", pre(&edit), swap(), "").unwrap();
     assert_eq!(edit.mission.rev, before + 1);
-    assert_eq!(edit.mission.steps[0].slots[0].agent_id, "");
-    assert_eq!(edit.mission.steps[1].slots[0].agent_id, "builder");
+    assert_eq!(edit.mission.steps[0].seats[0].agent, "");
+    assert_eq!(edit.mission.steps[1].seats[0].agent, "builder");
     edit = store.patch("work", pre(&edit), swap(), "").unwrap();
-    assert_eq!(edit.mission.steps[0].slots[0].agent_id, "builder");
-    assert_eq!(edit.mission.steps[1].slots[0].agent_id, "");
-    let invalid = MissionChange::SwapSlots {
+    assert_eq!(edit.mission.steps[0].seats[0].agent, "builder");
+    assert_eq!(edit.mission.steps[1].seats[0].agent, "");
+    let invalid = MissionChange::SwapSeats {
         from_step: af,
-        from_slot: aslot,
+        from_seat: aseat,
         to_step: bf,
-        to_slot: "missing".into(),
+        to_seat: "missing".into(),
     };
     assert_eq!(
         store
@@ -1842,7 +1842,7 @@ fn swapping_staffing_is_one_revision_and_reversible_across_steps() {
         "not_found"
     );
     assert_eq!(
-        store.read_mission("work").unwrap().steps[0].slots[0].agent_id,
+        store.read_mission("work").unwrap().steps[0].seats[0].agent,
         "builder"
     );
 }
@@ -2237,4 +2237,79 @@ fn deleting_a_replacement_does_not_archive_or_remove_older_unrelated_notes() {
             .retained_notes
     );
     assert!(!live_notes.exists());
+}
+
+#[test]
+fn staffing_resolves_agent_defaults_and_validates_effective_overrides() {
+    use ahjo_mission_model::{Effort, HARNESS_DEFAULT_MODEL, Harness};
+    let dir = Scratch::new();
+    let store = Store::new(&dir.0);
+    let mut setup = store.agents().agent_edit("builder").unwrap();
+    setup.agent.harness = Harness::OpenAiCodex;
+    setup.agent.model = "test-model".into();
+    setup.agent.effort = Effort::Ultra;
+    store
+        .agents()
+        .edit("builder", &setup.etag, setup.agent)
+        .unwrap();
+    let mission = store.create_mission("inherit", "Inherit", "").unwrap();
+    let mission = store
+        .patch(
+            "inherit",
+            pre(&mission),
+            MissionChange::CreateStep {
+                formation: ahjo_mission_model::Formation::Solo,
+                title: "Work".into(),
+                x: 0,
+                y: 0,
+            },
+            "",
+        )
+        .unwrap();
+    let step_id = mission.mission.steps[0].id.clone();
+    let seat_id = mission.mission.steps[0].seats[0].id.clone();
+    let change = |harness, model: &str, effort| MissionChange::StaffSeat {
+        step_id: step_id.clone(),
+        seat_id: seat_id.clone(),
+        agent: "builder".into(),
+        harness,
+        model: model.into(),
+        effort,
+    };
+    let mission = store
+        .patch(
+            "inherit",
+            pre(&mission),
+            change(Harness::Unset, "", Effort::Unset),
+            "",
+        )
+        .unwrap();
+    let seat = &mission.mission.steps[0].seats[0];
+    assert_eq!(seat.agent, "builder");
+    assert_eq!(seat.harness, Harness::Unset);
+    assert_eq!(seat.effort, Effort::Unset);
+    assert!(seat.model.is_empty());
+    let before = mission.etag.clone();
+    let error = store
+        .patch(
+            "inherit",
+            pre(&mission),
+            change(Harness::ClaudeCode, "", Effort::Unset),
+            "",
+        )
+        .unwrap_err();
+    assert_eq!(error.code, "invalid_seat_settings");
+    assert_eq!(store.mission_edit("inherit").unwrap().etag, before);
+    let mission = store
+        .patch(
+            "inherit",
+            pre(&mission),
+            change(Harness::OpenAiCodex, HARNESS_DEFAULT_MODEL, Effort::High),
+            "",
+        )
+        .unwrap();
+    assert_eq!(
+        mission.mission.steps[0].seats[0].model,
+        HARNESS_DEFAULT_MODEL
+    );
 }

@@ -128,7 +128,7 @@ fn usage_reports_known_seats_and_unreadable_missions() {
     std::fs::write(
         missions.join("work.mission.toml"),
         r#"
-schema = 3
+schema = 4
 id = "msn_work"
 slug = "work"
 title = "Work"
@@ -137,10 +137,10 @@ rev = 1
 id = "fmn_work"
 formation = "solo"
 title = "Step"
-[[step.slot]]
-id = "slot_work"
+[[step.seat]]
+id = "seat_work"
 label = "Worker"
-agent_id = "builder"
+agent = "builder"
 "#,
     )
     .unwrap();
@@ -149,7 +149,7 @@ agent_id = "builder"
     assert!(!report.complete);
     assert_eq!(report.unreadable[0].name, "broken");
     assert_eq!(report.usage.len(), 1);
-    assert_eq!(report.usage[0].slot_id, "slot_work");
+    assert_eq!(report.usage[0].seat_id, "seat_work");
 }
 
 #[test]
@@ -310,7 +310,7 @@ fn conflict_error_keeps_its_code_and_message() {
 }
 
 #[test]
-fn agent_usage_reports_every_slot_in_every_mission() {
+fn agent_usage_reports_every_seat_in_every_mission() {
     let dir = Scratch::new();
     let store = ahjo_mission_engine::Store::new(&dir.0);
     for (slug, title) in [("one", "One"), ("two", "Two")] {
@@ -332,7 +332,7 @@ fn agent_usage_reports_every_slot_in_every_mission() {
             )
             .unwrap();
         let step = edit.mission.steps[0].clone();
-        for slot in step.slots {
+        for seat in step.seats {
             edit = store
                 .patch(
                     slug,
@@ -340,10 +340,10 @@ fn agent_usage_reports_every_slot_in_every_mission() {
                         rev: edit.mission.rev,
                         etag: edit.etag.clone(),
                     },
-                    ahjo_mission_model::MissionChange::AssignSlot {
+                    ahjo_mission_model::MissionChange::StaffSeat {
                         step_id: step.id.clone(),
-                        slot_id: slot.id,
-                        agent_id: "builder".into(),
+                        seat_id: seat.id,
+                        agent: "builder".into(),
                         harness: ahjo_mission_model::Harness::ClaudeCode,
                         model: "".into(),
                         effort: ahjo_mission_model::Effort::Medium,

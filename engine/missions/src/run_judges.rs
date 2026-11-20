@@ -28,7 +28,7 @@ pub(crate) fn run_judges(
     let mut final_text = String::new();
     let mut final_node = String::new();
     let mut final_attempt = 0;
-    let mut final_slot = String::new();
+    let mut final_seat = String::new();
     let mut final_ports = Vec::new();
     let mut final_output: Option<crate::StepResult> = None;
     let ledger = c.ledger(id)?.read().map_err(crate::error::to_io)?;
@@ -69,8 +69,8 @@ pub(crate) fn run_judges(
                 .into();
             final_node.clone_from(&judge.id);
             final_attempt = output.attempt;
-            final_slot = judge
-                .slots
+            final_seat = judge
+                .seats
                 .first()
                 .map(|s| s.id.clone())
                 .unwrap_or_default();
@@ -123,8 +123,8 @@ pub(crate) fn run_judges(
         final_node.clone_from(&judge.id);
         final_ports = judge.outputs.iter().map(|port| port.id.clone()).collect();
         final_attempt = attempt;
-        final_slot = judge
-            .slots
+        final_seat = judge
+            .seats
             .first()
             .map(|s| s.id.clone())
             .unwrap_or_default();
@@ -216,7 +216,7 @@ pub(crate) fn run_judges(
                 json!({"code":"invalid_judge_result","reason":error,"correction":true,"returned":rejected(&final_text)}),
             );
             failed.gate_id = gate.id.clone();
-            failed.slot_id = final_slot.clone();
+            failed.seat_id = final_seat.clone();
             append(c, id, control, failed)?;
             match crate::parse_verdict(&corrected) {
                 Ok(verdict) => {
@@ -293,7 +293,7 @@ fn correct_judge(
                 && old.attempt == attempt
                 && old.kind == pending.event.kind
                 && old.data.get("dispatch_id") == pending.event.data.get("dispatch_id")
-                && (pending.event.kind == "slot_dispatch"
+                && (pending.event.kind == "seat_dispatch"
                     || pending.event.data.get("seat_event_seq").is_some()
                         && old.data.get("seat_event_seq")
                             == pending.event.data.get("seat_event_seq"))
@@ -308,7 +308,7 @@ fn correct_judge(
             attempt,
             serde_json::Value::Object(pending.event.data),
         );
-        record.slot_id = pending.event.slot_id;
+        record.seat_id = pending.event.seat_id;
         let detached = record.kind == "seat_cleanup"
             && record.data.get("outcome").and_then(|value| value.as_str()) == Some("left_shutdown")
             && control.stopping.load(std::sync::atomic::Ordering::Acquire);

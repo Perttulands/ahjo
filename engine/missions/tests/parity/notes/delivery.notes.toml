@@ -16,7 +16,7 @@ id = "nte_delivery_beads"
 target = "fmn_beads"
 author = "agent:archon"
 created_at = "2026-09-09T00:00:00Z"
-text = "Claude drafts Beads in the target repository store and revises the same graph on gate feedback. Give the slot a role or change its brief scope; preserve parent links and verifiable goals."
+text = "Claude drafts Beads in the target repository store and revises the same graph on gate feedback. Give the seat a role or change its brief scope; preserve parent links and verifiable goals."
 
 [[entry]]
 id = "nte_delivery_beads_reviewer"

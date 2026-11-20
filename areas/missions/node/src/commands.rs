@@ -193,6 +193,7 @@ fn show(m: &Missions, args: MissionShow) -> Result<MissionShown, Error> {
     Ok(MissionShown::Summary(Box::new(crate::handover::handover(
         m.node.clone(),
         &current.mission,
+        &m.store.agents(),
         &notes,
         &report.errors,
         &report.warnings,

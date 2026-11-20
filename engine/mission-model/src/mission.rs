@@ -13,7 +13,7 @@ use crate::nodes::{Connection, End, Gate, InputCard, Limit, Step};
 use ahjo_core::Error;
 
 /// The only mission file schema Ahjo reads.
-pub const MISSION_SCHEMA: i64 = 3;
+pub const MISSION_SCHEMA: i64 = 4;
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq, schemars::JsonSchema)]
 #[serde(default, deny_unknown_fields, rename_all = "snake_case")]

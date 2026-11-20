@@ -54,11 +54,37 @@ fn migrate_run(runs: &Path, id: &str, ledger: &Path) -> io::Result<()> {
     // the process stops between replacements.
     let snapshot = runs.join(format!("{id}.snapshot.toml"));
     let bindings = runs.join(format!("{id}.bindings.toml"));
+    let frozen = match fs::read_to_string(&bindings) {
+        Ok(text) => Some(text),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => None,
+        Err(error) => return Err(error),
+    };
+    let upgraded_bindings = frozen
+        .as_deref()
+        .map(upgrade_bindings)
+        .transpose()
+        .map_err(|error| invalid(&format!("{}: {error}", bindings.display())))?
+        .flatten();
+    let frozen = upgraded_bindings
+        .as_deref()
+        .or(frozen.as_deref())
+        .and_then(|text| toml::from_str::<crate::BindingsSnapshot>(text).ok());
     let changes = [
         upgrade_toml(snapshot, |text| {
-            document_migrate::upgrade_text(text, DocumentKind::Mission)
+            document_migrate::upgrade_text(text, DocumentKind::Mission, |node, seat, agent| {
+                frozen
+                    .as_ref()?
+                    .bindings
+                    .iter()
+                    .find(|binding| {
+                        binding.node_id == node && binding.seat_id == seat && binding.agent == agent
+                    })?
+                    .agent_definition()
+                    .ok()
+                    .flatten()
+            })
         })?,
-        upgrade_toml(bindings, upgrade_bindings)?,
+        upgraded_bindings.map(|text| (bindings, text)),
         upgrade_ledger(&fs::read_to_string(ledger)?)?.map(|text| (ledger.to_path_buf(), text)),
     ];
     for (path, contents) in changes.into_iter().flatten() {
@@ -90,7 +116,8 @@ fn upgrade_bindings(text: &str) -> Result<Option<String>, crate::Error> {
     if text.contains("runId") {
         document_migrate::rename_camel_keys(&mut document)?;
     }
-    if document.get("schema").and_then(Item::as_integer) == Some(3) {
+    let schema = document.get("schema").and_then(Item::as_integer);
+    if schema == Some(3) {
         crate::write::table_arrays(&mut document, &["binding"]);
         if let Some(bindings) = document
             .get_mut("binding")
@@ -127,6 +154,18 @@ fn upgrade_bindings(text: &str) -> Result<Option<String>, crate::Error> {
                 }
             }
         }
+    }
+    if matches!(schema, Some(3 | 4)) {
+        crate::write::table_arrays(&mut document, &["binding"]);
+        if let Some(bindings) = document
+            .get_mut("binding")
+            .and_then(Item::as_array_of_tables_mut)
+        {
+            for binding in bindings.iter_mut() {
+                document_migrate::rename_field(binding, "slot_id", "seat_id")?;
+                document_migrate::rename_field(binding, "agent_id", "agent")?;
+            }
+        }
         document["schema"] = value(i64::from(crate::run_bindings::BINDINGS_SCHEMA));
     }
     let updated = document.to_string();
@@ -159,10 +198,62 @@ fn upgrade_ledger(text: &str) -> io::Result<Option<String>> {
             changed |= rename_json_keys(&mut event)?;
         }
         changed |= rename_step_event(&mut event)?;
+        changed |= rename_seat_event(&mut event, "type")?;
         out.push_str(&serde_json::to_string(&event)?);
         out.push('\n');
     }
     Ok(changed.then_some(out))
+}
+
+pub(crate) fn rename_seat_event(event: &mut Value, kind: &str) -> io::Result<bool> {
+    let Some(event) = event.as_object_mut() else {
+        return Ok(false);
+    };
+    let mut changed = rename_seat_fields(event)?;
+    if let Some(field) = event.get_mut(kind) {
+        let updated = match field.as_str() {
+            Some("slot_dispatch") => Some("seat_dispatch"),
+            Some("slot_result") => Some("seat_result"),
+            _ => None,
+        };
+        if let Some(updated) = updated {
+            *field = Value::String(updated.into());
+            changed = true;
+        }
+    }
+    let Some(data) = event.get_mut("data").and_then(Value::as_object_mut) else {
+        return Ok(changed);
+    };
+    changed |= rename_seat_fields(data)?;
+    if let Some(controller) = data.get_mut("controller").and_then(Value::as_object_mut) {
+        changed |= rename_seat_fields(controller)?;
+    }
+    for field in ["workers", "open_dispatches"] {
+        if let Some(entries) = data.get_mut(field).and_then(Value::as_array_mut) {
+            for entry in entries.iter_mut().filter_map(Value::as_object_mut) {
+                changed |= rename_seat_fields(entry)?;
+            }
+        }
+    }
+    Ok(changed)
+}
+
+pub(crate) fn rename_seat_fields(fields: &mut Map<String, Value>) -> io::Result<bool> {
+    let mut changed = false;
+    for (old, new) in [
+        ("slot_id", "seat_id"),
+        ("agent_id", "agent"),
+        ("controller_slot", "controller_seat"),
+    ] {
+        if let Some(previous) = fields.remove(old) {
+            if fields.contains_key(new) {
+                return Err(invalid(&format!("both {old} and {new} are present")));
+            }
+            fields.insert(new.into(), previous);
+            changed = true;
+        }
+    }
+    Ok(changed)
 }
 
 /// Change only protocol fields, keeping IDs, inputs, outputs and prose exactly

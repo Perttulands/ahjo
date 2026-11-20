@@ -24,9 +24,9 @@ pub type BoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
 pub type Build = fn(&Setup) -> anyhow::Result<Built>;
 
 /// What a [`Build`] answers. Areas are built in two steps, so their order in
-/// the binary's list never matters: each is built and fills the slots it
+/// the binary's list never matters: each is built and fills the interfaces it
 /// provides ([`Setup::provided`]); then those that use what others provide
-/// finish, reading those slots.
+/// finish, reading those interfaces.
 pub enum Built {
     /// The area, which uses nothing another area provides.
     Now(Arc<dyn Area>),

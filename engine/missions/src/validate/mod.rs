@@ -26,7 +26,7 @@ pub fn validate(mission: &Mission, agents: &AgentStore, harnesses: &Harnesses) -
     errors.extend(wiring::connection_findings(mission));
     errors.extend(wiring::gate_findings(mission));
     errors.extend(steps::shape_findings(mission));
-    errors.extend(steps::slot_id_findings(mission));
+    errors.extend(steps::seat_id_findings(mission));
     errors.extend(steps::device_findings(mission));
     errors.extend(nodes::findings(mission));
     let (limit_errors, limit_warnings) = limits::findings(mission);

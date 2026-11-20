@@ -1,5 +1,5 @@
 # Parity fixture: a mission with no Input card.
-schema = 3
+schema = 4
 id = "msn_empty"
 slug = "empty"
 title = "Empty"
@@ -9,7 +9,7 @@ rev = 1
 id = "fmn_a"
 formation = "solo"
 title = "Orphan"
-[[step.slot]]
+[[step.seat]]
 id = "a"
 harness = "claude-code"
 effort = "low"

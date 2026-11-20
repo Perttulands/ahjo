@@ -1,7 +1,7 @@
 //! Stepwise upgrades for mission definitions and their layout and notes.
 //! The caller validates the upgraded text before publishing it.
 
-use ahjo_mission_model::{Layout, Mission, Notes};
+use ahjo_mission_model::{Agent, HARNESS_DEFAULT_MODEL, Layout, Mission, Notes};
 use toml_edit::{DocumentMut, Item, TableLike, Value};
 
 use crate::Error;
@@ -32,7 +32,11 @@ impl DocumentKind {
 }
 
 /// Returns upgraded and validated TOML, or None when no migration is needed.
-pub(crate) fn upgrade_text(raw: &str, kind: DocumentKind) -> Result<Option<String>, Error> {
+pub(crate) fn upgrade_text(
+    raw: &str,
+    kind: DocumentKind,
+    mut agent: impl FnMut(&str, &str, &str) -> Option<Agent>,
+) -> Result<Option<String>, Error> {
     let mut document: DocumentMut = raw.parse().map_err(|error: toml_edit::TomlError| {
         Error::new("invalid_definition_source", error.to_string())
     })?;
@@ -54,6 +58,10 @@ pub(crate) fn upgrade_text(raw: &str, kind: DocumentKind) -> Result<Option<Strin
             (DocumentKind::Mission, 2) => {
                 upgrade_steps(document.as_table_mut())?;
                 3
+            }
+            (DocumentKind::Mission, 3) => {
+                upgrade_seats(document.as_table_mut(), &mut agent)?;
+                4
             }
             (DocumentKind::Notes, 2) => {
                 rename_keys(document.as_table_mut(), false)?;
@@ -121,6 +129,57 @@ fn upgrade_steps(mission: &mut dyn TableLike) -> Result<(), Error> {
     rename_field(mission, "formation", "step")
 }
 
+fn upgrade_seats(
+    mission: &mut dyn TableLike,
+    resolve: &mut impl FnMut(&str, &str, &str) -> Option<Agent>,
+) -> Result<(), Error> {
+    let Some(steps) = mission.get_mut("step") else {
+        return Ok(());
+    };
+    for_table_array(steps, &mut |step| {
+        let step_id = step
+            .get("id")
+            .and_then(Item::as_str)
+            .unwrap_or("")
+            .to_owned();
+        if let Some(seats) = step.get_mut("slot") {
+            for_table_array(seats, &mut |seat| {
+                seat.remove("agent");
+                rename_field(seat, "agent_id", "agent")?;
+                let id = seat.get("id").and_then(Item::as_str).unwrap_or("");
+                let agent_id = seat.get("agent").and_then(Item::as_str).unwrap_or("");
+                if agent_id.is_empty() {
+                    return Ok(());
+                }
+                let agent = resolve(&step_id, id, agent_id);
+                // A blank old model always used the harness default. Preserve
+                // that choice even when the named agent cannot be read today.
+                if agent.as_ref().is_none_or(|agent| !agent.model.is_empty())
+                    && seat
+                        .get("model")
+                        .is_none_or(|model| model.as_str() == Some(""))
+                {
+                    seat.insert("model", toml_edit::value(HARNESS_DEFAULT_MODEL));
+                }
+                let Some(agent) = agent else {
+                    return Ok(());
+                };
+                for (field, default) in [
+                    ("harness", agent.harness.as_str()),
+                    ("effort", agent.effort.as_str()),
+                    ("model", agent.model.as_str()),
+                ] {
+                    if seat.get(field).and_then(Item::as_str) == Some(default) {
+                        seat.remove(field);
+                    }
+                }
+                Ok(())
+            })?;
+        }
+        rename_field(step, "slot", "seat")
+    })
+}
+
 fn for_table_array(
     item: &mut Item,
     apply: &mut impl FnMut(&mut dyn TableLike) -> Result<(), Error>,
@@ -143,7 +202,7 @@ fn for_table_array(
     Ok(())
 }
 
-fn rename_field(table: &mut dyn TableLike, old: &str, new: &str) -> Result<(), Error> {
+pub(crate) fn rename_field(table: &mut dyn TableLike, old: &str, new: &str) -> Result<(), Error> {
     if !table.contains_key(old) {
         return Ok(());
     }

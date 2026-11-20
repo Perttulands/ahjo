@@ -36,14 +36,14 @@ pub mod error {
     pub const INVALID_NOTE_PATCH: &str = "invalid_note_patch";
     pub const INVALID_PORT: &str = "invalid_port";
     pub const INVALID_PORT_DIRECTION: &str = "invalid_port_direction";
-    pub const INVALID_SLOT_SETTINGS: &str = "invalid_slot_settings";
+    pub const INVALID_SEAT_SETTINGS: &str = "invalid_seat_settings";
     pub const INVALID_TYPE_CHANGE: &str = "invalid_type_change";
     pub const IO: &str = "io";
     pub const NOTE_AUTHOR_MISMATCH: &str = "note_author_mismatch";
     pub const NOTE_TOO_LARGE: &str = "note_too_large";
     pub const RELATIVE_FILE_REFERENCE: &str = "relative_file_reference";
     pub const SELF_WIRE: &str = "self_wire";
-    pub const SLOT_CHOICE_REQUIRED: &str = "slot_choice_required";
+    pub const SEAT_CHOICE_REQUIRED: &str = "seat_choice_required";
     pub const UNSUPPORTED_STEP_FORMATION: &str = "unsupported_step_formation";
     pub const UNSUPPORTED_SCHEMA: &str = "unsupported_schema";
     pub const INVALID_DEFINITION_SOURCE: &str = "invalid_definition_source";
@@ -135,12 +135,14 @@ pub struct Landed {
 #[serde(rename_all = "snake_case")]
 pub struct AgentSeat {
     pub dispatch_id: String,
-    pub slot_id: String,
+    pub seat_id: String,
     pub node: String,
+    /// The session's name.
     pub session: String,
+    /// The backend session id used to open it.
+    pub session_id: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub pane: Option<u32>,
-    pub session_name: String,
     pub outcome: String,
     pub available: bool,
     #[serde(skip_serializing_if = "Option::is_none")]

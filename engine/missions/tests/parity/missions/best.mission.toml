@@ -1,6 +1,6 @@
 # Parity fixture: a Limit card that picks the best attempt, with and
 # without a gate that can pick.
-schema = 3
+schema = 4
 id = "msn_best"
 slug = "best"
 title = "Best"
@@ -18,7 +18,7 @@ title = "Draft"
 id = "in"
 [[step.output]]
 id = "out"
-[[step.slot]]
+[[step.seat]]
 id = "draft"
 harness = "claude-code"
 effort = "low"
@@ -31,9 +31,9 @@ title = "Judge"
 id = "in"
 [[step.output]]
 id = "out"
-[[step.slot]]
+[[step.seat]]
 id = "judge"
-agent_id = "judge"
+agent = "judge"
 harness = "claude-code"
 effort = "xhigh"
 
@@ -45,7 +45,7 @@ title = "Twice judged"
 id = "in"
 [[step.output]]
 id = "out"
-[[step.slot]]
+[[step.seat]]
 id = "twice"
 harness = "claude-code"
 effort = "low"

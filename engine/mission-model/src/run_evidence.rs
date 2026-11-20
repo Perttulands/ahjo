@@ -34,7 +34,7 @@ pub struct RunProblem {
 #[serde(rename_all = "snake_case")]
 pub struct RunBrief {
     pub node_id: String,
-    pub slot_id: String,
+    pub seat_id: String,
     pub attempt: i64,
     pub dispatch_seq: u64,
     pub path: String,
