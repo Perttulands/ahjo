@@ -118,7 +118,7 @@ fn open() -> OpenDispatch {
         attempt: 1,
         step: Step {
             id: "fmn_answer".into(),
-            formation: "solo".into(),
+            formation: ahjo_mission_model::Formation::Solo,
             slots: vec![Slot {
                 id: "slot_1".into(),
                 ..Default::default()

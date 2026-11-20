@@ -2,10 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 
-/// What a mission input, mission output or output port carries.
-pub const KIND_TEXT: &str = "text";
-pub const KIND_FILE: &str = "file";
-pub const KIND_FOLDER: &str = "folder";
+use crate::{Effort, EndOutcome, Formation, GateKind, Harness, HumanChannel, PortKind, WhenSpent};
 
 /// The mission's entry node (`[[input_card]]`), with its `out` port.
 #[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq, schemars::JsonSchema)]
@@ -24,9 +21,9 @@ pub struct InputCard {
     pub inputs: Vec<MissionInput>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub outputs: Vec<MissionOutput>,
-    /// `notify` (the default, also blank) or `session`.
-    #[serde(skip_serializing_if = "String::is_empty")]
-    pub human_channel: String,
+    /// How to reach the operator. Blank uses notifications.
+    #[serde(skip_serializing_if = "HumanChannel::is_unset")]
+    pub human_channel: HumanChannel,
 }
 
 /// A named value each run supplies. Briefs reference it as `{name}`.
@@ -36,8 +33,8 @@ pub struct MissionInput {
     pub name: String,
     #[serde(skip_serializing_if = "String::is_empty")]
     pub description: String,
-    /// `text` (also blank), `file` or `folder`.
-    pub kind: String,
+    /// What this value carries. Blank uses text.
+    pub kind: PortKind,
     pub required: bool,
 }
 
@@ -48,8 +45,8 @@ pub struct MissionOutput {
     pub name: String,
     #[serde(skip_serializing_if = "String::is_empty")]
     pub description: String,
-    /// `text` (also blank), `file` or `folder`.
-    pub kind: String,
+    /// What this value carries. Blank uses text.
+    pub kind: PortKind,
     pub required: bool,
     /// The bound step output port, `<step-id>:<port-id>`; blank is a draft.
     #[serde(skip_serializing_if = "String::is_empty")]
@@ -61,8 +58,8 @@ pub struct MissionOutput {
 #[serde(default, deny_unknown_fields)]
 pub struct Step {
     pub id: String,
-    /// `solo`, `peer` or `orchestrated`.
-    pub formation: String,
+    /// How the seats work together.
+    pub formation: Formation,
     pub title: String,
     /// The environment the step runs on; blank runs it on the coordinator.
     #[serde(skip_serializing_if = "String::is_empty")]
@@ -80,10 +77,6 @@ pub struct Step {
     #[serde(rename = "slot")]
     pub slots: Vec<Slot>,
 }
-
-pub const SOLO: &str = "solo";
-pub const PEER: &str = "peer";
-pub const ORCHESTRATED: &str = "orchestrated";
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq, schemars::JsonSchema)]
 #[serde(default, deny_unknown_fields, rename_all = "snake_case")]
@@ -108,17 +101,14 @@ pub struct Port {
     pub label: String,
     /// What an output port carries: `text` (also absent), `file` or
     /// `folder`. Input ports carry no kind.
-    #[serde(skip_serializing_if = "String::is_empty")]
-    pub kind: String,
+    #[serde(skip_serializing_if = "PortKind::is_unset")]
+    pub kind: PortKind,
 }
 
 impl Port {
     /// The port's kind, `text` when unset.
-    pub fn kind(&self) -> &str {
-        match self.kind.trim() {
-            "" => KIND_TEXT,
-            kind => kind,
-        }
+    pub fn kind(&self) -> PortKind {
+        self.kind.effective()
     }
 
     /// The port's label, or its id when it has none.
@@ -143,22 +133,23 @@ pub struct Slot {
     /// The slot's optional role card; none is a vanilla agent.
     #[serde(skip_serializing_if = "String::is_empty")]
     pub agent_id: String,
-    #[serde(skip_serializing_if = "String::is_empty")]
-    pub harness: String,
+    #[serde(skip_serializing_if = "Harness::is_unset")]
+    pub harness: Harness,
     /// Blank is the harness default model.
     #[serde(skip_serializing_if = "String::is_empty")]
     pub model: String,
-    #[serde(skip_serializing_if = "String::is_empty")]
-    pub effort: String,
+    #[serde(skip_serializing_if = "Effort::is_unset")]
+    pub effort: Effort,
     pub controller: bool,
 }
 
 impl Slot {
     /// Whether the slot names anything to run: a harness, model, effort or role.
     pub fn staffed(&self) -> bool {
-        [&self.agent_id, &self.harness, &self.model, &self.effort]
-            .iter()
-            .any(|value| !value.is_empty())
+        !self.agent_id.is_empty()
+            || !self.harness.is_unset()
+            || !self.model.is_empty()
+            || !self.effort.is_unset()
     }
 
     /// The slot as sentences name it: `"Worker" (w1)`, or `"w1"`.
@@ -178,8 +169,8 @@ impl Slot {
 pub struct Gate {
     pub id: String,
     pub title: String,
-    /// `code`, `step` or `human`.
-    pub kinds: Vec<String>,
+    /// Who or what decides.
+    pub kinds: Vec<GateKind>,
     /// Free-text intent, never run as a step.
     pub criterion: String,
     /// A code check's profile, its exact version and its parameter.
@@ -204,13 +195,11 @@ pub const GATE_JUDGE: &str = "judge";
 pub struct End {
     pub id: String,
     pub title: String,
-    /// `done` or `rejected`.
-    pub outcome: String,
+    /// What this path ends with.
+    pub outcome: EndOutcome,
 }
 
 pub const END_IN: &str = "in";
-pub const DONE: &str = "done";
-pub const REJECTED: &str = "rejected";
 
 /// Caps the rounds, time and tokens of one step, or of the whole mission when
 /// it covers the Input card. A knob is `None` when the card does not set it.
@@ -228,9 +217,9 @@ pub struct Limit {
     pub warn_seconds: Option<i64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tokens: Option<i64>,
-    /// `stop` (also blank), `best` or `fail`.
-    #[serde(skip_serializing_if = "String::is_empty")]
-    pub when_spent: String,
+    /// What to do at the cap. Blank stops the run.
+    #[serde(skip_serializing_if = "WhenSpent::is_unset")]
+    pub when_spent: WhenSpent,
 }
 
 /// A directed wire between `node-id:port-id` endpoints.

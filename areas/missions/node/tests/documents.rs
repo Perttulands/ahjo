@@ -284,3 +284,54 @@ step = [
     assert_eq!(edit["mission"]["connection"][0]["to"], "merge:second");
     node.stop().await;
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn apply_refuses_unknown_vocabulary_and_keeps_saved_ultra() {
+    let node = Node::start(AREAS, "").await.unwrap();
+    let source = r#"schema = 3
+slug = "effort"
+rev = 0
+
+[[step]]
+formation = "solo"
+
+[[step.slot]]
+harness = "openai-codex"
+effort = "ultra"
+"#;
+    let invalid = source.replace("solo", "combined");
+    let error = node
+        .call("mission_apply", json!({"document": invalid}))
+        .await
+        .unwrap_err();
+    assert_eq!(error.code, "invalid_definition_source");
+    for word in ["formation", "combined", "solo", "peer", "orchestrated"] {
+        assert!(error.message.contains(word), "{error}");
+    }
+    assert!(!mission_path(&node, "effort").exists());
+
+    node.call("mission_apply", json!({"document": source}))
+        .await
+        .unwrap();
+    let stored = std::fs::read_to_string(mission_path(&node, "effort")).unwrap();
+    assert!(stored.contains("effort = \"ultra\""));
+    let exported = node
+        .call("mission_export", json!({"mission": "effort"}))
+        .await
+        .unwrap();
+    assert_eq!(exported["document"], stored);
+    let before = Mission::parse(&stored).unwrap();
+    assert_eq!(before.schema, 3);
+    assert_eq!(
+        before.steps[0].slots[0].effort,
+        ahjo_missions_contract::Effort::Ultra
+    );
+    node.call("mission_apply", json!({"document": stored}))
+        .await
+        .unwrap();
+    assert_eq!(
+        std::fs::read_to_string(mission_path(&node, "effort")).unwrap(),
+        stored
+    );
+    node.stop().await;
+}

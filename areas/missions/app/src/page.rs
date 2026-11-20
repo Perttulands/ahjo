@@ -23,8 +23,8 @@ use ahjo_app_kit::{
 use ahjo_core::NodeId;
 use ahjo_missions_contract::flow;
 use ahjo_missions_contract::{
-    EditLayout, EditResponse, ErrorResponse, LayoutResponse, MissionChange, MissionResponse, WATCH,
-    WATCH_RUNS,
+    EditLayout, EditResponse, ErrorResponse, Formation, LayoutResponse, MissionChange,
+    MissionResponse, WATCH, WATCH_RUNS,
 };
 use gpui::{
     AppContext, Context, Div, Entity, FocusHandle, FontWeight, IntoElement, KeyDownEvent,
@@ -697,7 +697,7 @@ impl MissionsPage {
                 EditKind::Input,
                 c.title.clone(),
                 c.goal.clone(),
-                c.human_channel.clone(),
+                c.human_channel.as_str().to_owned(),
                 Default::default(),
             )
         } else if let Some(g) = m.gates.iter().find(|g| g.id == id) {
@@ -705,7 +705,11 @@ impl MissionsPage {
                 EditKind::Gate,
                 g.title.clone(),
                 g.criterion.clone(),
-                g.kinds.join(","),
+                g.kinds
+                    .iter()
+                    .map(|kind| kind.as_str())
+                    .collect::<Vec<_>>()
+                    .join(","),
                 Default::default(),
             )
         } else if let Some(e) = m.ends.iter().find(|e| e.id == id) {
@@ -713,7 +717,7 @@ impl MissionsPage {
                 EditKind::End,
                 e.title.clone(),
                 String::new(),
-                e.outcome.clone(),
+                e.outcome.as_str().to_owned(),
                 Default::default(),
             )
         } else {
@@ -763,7 +767,7 @@ impl MissionsPage {
                         });
                         let kind = cx.new(|cx| {
                             let mut f = TextField::new(cx, "text, file, or folder");
-                            f.set(&o.kind, false, cx);
+                            f.set(o.kind.as_str(), false, cx);
                             f
                         });
                         let from = cx.new(|cx| {
@@ -811,10 +815,10 @@ impl MissionsPage {
             .and_then(|f| f.slots.first())
         {
             for (field, text) in [
-                (&self.role, &slot.agent_id),
-                (&self.harness, &slot.harness),
-                (&self.model, &slot.model),
-                (&self.effort, &slot.effort),
+                (&self.role, slot.agent_id.as_str()),
+                (&self.harness, slot.harness.as_str()),
+                (&self.model, slot.model.as_str()),
+                (&self.effort, slot.effort.as_str()),
             ] {
                 field.update(cx, |field, cx| field.set(text, false, cx));
             }
@@ -1233,10 +1237,10 @@ impl MissionsPage {
             return;
         };
         for (field, text) in [
-            (&self.role, &slot.agent_id),
-            (&self.harness, &slot.harness),
-            (&self.model, &slot.model),
-            (&self.effort, &slot.effort),
+            (&self.role, slot.agent_id.as_str()),
+            (&self.harness, slot.harness.as_str()),
+            (&self.model, slot.model.as_str()),
+            (&self.effort, slot.effort.as_str()),
         ] {
             field.update(cx, |field, cx| field.set(text, false, cx));
         }
@@ -1251,14 +1255,19 @@ impl MissionsPage {
         let Some(ed) = &self.editor else {
             return;
         };
-        if let Some(patch) = edits::port_patch(
+        match edits::port_patch(
             op,
             &ed.id,
             self.port.as_deref(),
             &self.port_label.read(cx).text,
             &self.port_kind.read(cx).text,
         ) {
-            self.write_board(patch, WriteMode::Edit, cx);
+            Ok(Some(patch)) => self.write_board(patch, WriteMode::Edit, cx),
+            Ok(None) => {}
+            Err(error) => {
+                self.state.error = Some(error);
+                cx.notify();
+            }
         }
     }
     fn select_limit(&mut self, id: &str, cx: &mut Context<Self>) {
@@ -1284,7 +1293,7 @@ impl MissionsPage {
             (&self.limit_seconds, value(limit.seconds)),
             (&self.limit_warn, value(limit.warn_seconds)),
             (&self.limit_tokens, value(limit.tokens)),
-            (&self.limit_spent, limit.when_spent.clone()),
+            (&self.limit_spent, limit.when_spent.as_str().to_owned()),
         ] {
             field.update(cx, |f, cx| f.set(&text, false, cx));
         }
@@ -1350,7 +1359,7 @@ impl MissionsPage {
         }
         cx.notify();
     }
-    fn set_formation(&mut self, kind: &str, cx: &mut Context<Self>) {
+    fn set_formation(&mut self, kind: Formation, cx: &mut Context<Self>) {
         let Some(ed) = &self.editor else {
             return;
         };
@@ -1940,7 +1949,7 @@ impl Render for MissionsPage {
                         .when(matches!(ed.kind, EditKind::Step) && self.slot.is_some(), |d| d.child(self.slot_pickers(&t, cx)))
                         .when(matches!(ed.kind, EditKind::Step) && !self.editor_more, |d| d.child(left(kit::button(&t, "step-more", "More…", Kind::Quiet).debug_selector(|| "step-more".into()).on_click(cx.listener(|p, _, _, cx| { p.editor_more = true; cx.notify(); })))))
                         .when(matches!(ed.kind, EditKind::Step) && self.editor_more, |d| d.child(kit::label(&t, "Team"))
-                            .child({ let current = self.state.mission.as_ref().and_then(|m| m.steps.iter().find(|f| f.id == ed.id)).map(|f| f.formation.as_str()); let pick = |id: &'static str, text: &'static str, ty: &'static str| kit::button(&t, id, text, if current == Some(ty) { Kind::Plain } else { Kind::Quiet }).on_click(cx.listener(move |p, _, _, cx| p.set_formation(ty, cx))); div().flex().gap(px(TAB_GAP)).child(pick("formation-solo", "Solo", "solo")).child(pick("formation-peer", "Peer", "peer")).child(pick("formation-orchestrated", "Orchestrated", "orchestrated")) })
+                            .child({ let current = self.state.mission.as_ref().and_then(|m| m.steps.iter().find(|f| f.id == ed.id)).map(|f| f.formation); let pick = |id: &'static str, text: &'static str, ty: Formation| kit::button(&t, id, text, if current == Some(ty) { Kind::Plain } else { Kind::Quiet }).on_click(cx.listener(move |p, _, _, cx| p.set_formation(ty, cx))); div().flex().gap(px(TAB_GAP)).child(pick("formation-solo", "Solo", Formation::Solo)).child(pick("formation-peer", "Peer", Formation::Peer)).child(pick("formation-orchestrated", "Orchestrated", Formation::Orchestrated)) })
                             .child(kit::label(&t, "Device")).child(div().flex().gap(px(TAB_GAP)).child(div().flex_1().child(self.extra.clone()))
                             .child(left(kit::button(&t, "set-device", "Set device", Kind::Quiet).on_click(cx.listener(|p, _, _, cx| p.set_device(cx)))))))
                         .when(matches!(ed.kind, EditKind::Step) && self.editor_more, |d| d.child(kit::label(&t, "Repository")).child(self.repository_picker(&t, &self.repository, "repository", cx))
@@ -1960,8 +1969,8 @@ impl Render for MissionsPage {
                             if let Some(f) = self.state.mission.as_ref().and_then(|m| m.steps.iter().find(|f| f.id == ed.id)) {
                                 d = d.child(kit::label(&t, "Ports"));
                                 for (dir, port) in f.inputs.iter().map(|p| ("in", p)).chain(f.outputs.iter().map(|p| ("out", p))) {
-                                    let id = port.id.clone(); let selected = id.clone(); let label = port.label.clone(); let kind = port.kind.clone(); let selector = format!("port-{id}");
-                                    d = d.child(left(kit::button(&t, gpui::SharedString::from(format!("port-{id}")), format!("{dir} · {}", if port.label.trim().is_empty() { &id } else { &port.label }), Kind::Quiet).debug_selector(move || selector.clone()).on_click(cx.listener(move |p, _, _, cx| { p.select_port(&selected, &label, &kind, cx); }))));
+                                    let id = port.id.clone(); let selected = id.clone(); let label = port.label.clone(); let kind = port.kind; let selector = format!("port-{id}");
+                                    d = d.child(left(kit::button(&t, gpui::SharedString::from(format!("port-{id}")), format!("{dir} · {}", if port.label.trim().is_empty() { &id } else { &port.label }), Kind::Quiet).debug_selector(move || selector.clone()).on_click(cx.listener(move |p, _, _, cx| { p.select_port(&selected, &label, kind.as_str(), cx); }))));
                                 }
                                 d = d.child(div().child(self.port_label.clone())).child(div().child(self.port_kind.clone()))
                                     .child(left(kit::button(&t, "port-add-in", "+ Input port", Kind::Quiet).on_click(cx.listener(|p, _, _, cx| p.port_edit("input", cx)))))

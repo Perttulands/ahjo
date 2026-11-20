@@ -1,6 +1,6 @@
 //! Judge chain attachment and detachment.
 use crate::Error;
-use ahjo_mission_model::{Mission, MissionChange};
+use ahjo_mission_model::{GateKind, Mission, MissionChange};
 use std::collections::BTreeSet;
 use toml_edit::{DocumentMut, Item, value};
 fn missing() -> Error {
@@ -24,8 +24,8 @@ pub(crate) fn apply(
         if chain.is_empty() {
             return Err(missing());
         }
-        if !kinds.iter().any(|k| k == "step") {
-            kinds.push("step".into());
+        if !kinds.contains(&GateKind::Step) {
+            kinds.push(GateKind::Step);
         }
         let mut previous = endpoint.clone();
         for id in &chain {
@@ -59,9 +59,9 @@ pub(crate) fn apply(
             return Ok(false);
         }
     } else {
-        kinds.retain(|k| k != "step");
+        kinds.retain(|k| *k != GateKind::Step);
         if kinds.is_empty() {
-            kinds.push("human".into());
+            kinds.push(GateKind::Human);
         }
         if kinds == gate.kinds
             && !mission

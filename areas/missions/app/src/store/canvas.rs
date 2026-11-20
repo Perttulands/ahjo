@@ -98,12 +98,15 @@ pub struct Board {
 }
 
 /// Whether a step's workers or peers sit in a pool under its controller.
-pub fn pooled(kind: &str) -> bool {
-    matches!(kind, "orchestrated" | "peer")
+pub fn pooled(kind: ahjo_missions_contract::Formation) -> bool {
+    matches!(
+        kind,
+        ahjo_missions_contract::Formation::Orchestrated | ahjo_missions_contract::Formation::Peer
+    )
 }
 
 /// The height of the slots' body for `slots` slots.
-pub fn body_h(kind: &str, slots: usize) -> f32 {
+pub fn body_h(kind: ahjo_missions_contract::Formation, slots: usize) -> f32 {
     let n = slots.max(1) as f32;
     BODY_PAD * 2. + n * SLOT_H + (n - 1.) * SLOT_GAP + if pooled(kind) { POOL_PAD } else { 0. }
 }
@@ -129,13 +132,13 @@ fn size(m: &Mission, id: &str, running: bool) -> Option<(Kind, f32, f32)> {
         return Some((Kind::Input, INPUT_W, h));
     }
     if let Some(f) = m.steps.iter().find(|f| f.id == id) {
-        let w = if pooled(&f.formation) { WIDE_W } else { STEP_W };
+        let w = if pooled(f.formation) { WIDE_W } else { STEP_W };
         let rows = (f.inputs.len() + f.outputs.len()) as f32;
         let head = step_head(f, running);
         return Some((
             Kind::Step,
             w,
-            rows * IO_ROW + head + body_h(&f.formation, f.slots.len()),
+            rows * IO_ROW + head + body_h(f.formation, f.slots.len()),
         ));
     }
     if m.gates.iter().any(|g| g.id == id) {
@@ -567,7 +570,10 @@ fn gap_above(cards: &[Card], a: &Card, b: &Card) -> f32 {
 pub fn new_size(kind: Kind) -> (f32, f32) {
     match kind {
         Kind::Input => (INPUT_W, INPUT_HEAD + INPUT_GOAL + INPUT_LINE + INPUT_FOOT),
-        Kind::Step => (STEP_W, 2. * IO_ROW + STEP_HEAD_EMPTY + body_h("solo", 1)),
+        Kind::Step => (
+            STEP_W,
+            2. * IO_ROW + STEP_HEAD_EMPTY + body_h(ahjo_missions_contract::Formation::Solo, 1),
+        ),
         Kind::Gate => (GATE_W, GATE_H),
         Kind::End => (END_W, END_H),
         Kind::Limit => (LIMIT_W, LIMIT_H),

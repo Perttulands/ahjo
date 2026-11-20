@@ -104,7 +104,7 @@ impl MissionsPage {
                     if !value.required {
                         words.push_str(" (optional)");
                     }
-                    if value.kind != "text" && !value.kind.is_empty() {
+                    if value.kind.effective() != ahjo_missions_contract::PortKind::Text {
                         words.push_str(&format!(", a {}", value.kind));
                     }
                     if !value.description.is_empty() {
@@ -132,7 +132,7 @@ impl MissionsPage {
                         .split_once(':')
                         .map(|(step, _)| format!(" from {}", mission.node_name(step)))
                         .unwrap_or_else(|| " (not wired yet)".into());
-                    let kind = if value.kind.is_empty() || value.kind == "text" {
+                    let kind = if value.kind.effective() == ahjo_missions_contract::PortKind::Text {
                         String::new()
                     } else {
                         format!(", a {}", value.kind)
@@ -180,7 +180,7 @@ impl MissionsPage {
                                 .gap(px(size::HEAD_GAP))
                                 .child(pane::cell({
                                     let name = mission.node_name(&end.id);
-                                    if name.eq_ignore_ascii_case(&end.outcome) {
+                                    if name.eq_ignore_ascii_case(end.outcome.as_str()) {
                                         name.to_owned()
                                     } else {
                                         format!("{name} ({})", end.outcome)
@@ -494,7 +494,7 @@ impl MissionsPage {
                                 .text_color(t.error)
                                 .child("Nobody does this step yet."),
                         );
-                    } else if step.slots.iter().all(|slot| slot.harness.is_empty()) {
+                    } else if step.slots.iter().all(|slot| slot.harness.is_unset()) {
                         // A sketched step: who does it is still open.
                         block = block.child(sub("Nobody chosen to do it yet".into()));
                     } else {

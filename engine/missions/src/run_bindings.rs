@@ -69,9 +69,9 @@ impl BindingsSnapshot {
                         node_id: step.id.clone(),
                         slot_id: slot.id.clone(),
                         agent_id: slot.agent_id.clone(),
-                        harness: slot.harness.clone(),
+                        harness: slot.harness.as_str().to_owned(),
                         model: slot.model.clone(),
-                        effort: slot.effort.clone(),
+                        effort: slot.effort.as_str().to_owned(),
                         card_path: if slot.agent_id.is_empty() {
                             String::new()
                         } else {
@@ -89,7 +89,7 @@ impl BindingsSnapshot {
             let gate_bindings = mission
                 .gates
                 .iter()
-                .filter(|gate| gate.kinds.iter().any(|kind| kind == "code"))
+                .filter(|gate| gate.kinds.contains(&ahjo_mission_model::GateKind::Code))
                 .filter_map(|gate| crate::CodeGateBinding::new(run_id, gate).ok())
                 .collect();
             Ok(Self {
@@ -170,9 +170,9 @@ impl BindingsSnapshot {
         };
         if matches.next().is_some()
             || binding.agent_id != slot.agent_id
-            || binding.harness != slot.harness
+            || binding.harness != slot.harness.as_str()
             || binding.model != slot.model
-            || binding.effort != slot.effort
+            || binding.effort != slot.effort.as_str()
             || binding.effort.is_empty()
             || (!binding.agent_id.is_empty()
                 && (binding.card_toml.is_empty()

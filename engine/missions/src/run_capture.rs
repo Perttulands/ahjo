@@ -41,7 +41,11 @@ pub(crate) fn publish(
     let Some(step) = mission.step(&output.node_id) else {
         return crate::run_workspace::publish_output(c, id, req, workspace, control, output);
     };
-    if !step.outputs.iter().any(|p| p.kind() != "text") {
+    if !step
+        .outputs
+        .iter()
+        .any(|p| p.kind() != ahjo_mission_model::PortKind::Text)
+    {
         return crate::run_workspace::publish_output(c, id, req, workspace, control, output);
     }
     validate_refs(step, &output)?;
@@ -59,7 +63,11 @@ fn validate_refs(step: &ahjo_mission_model::Step, output: &RunEvent) -> io::Resu
         .get("outputs")
         .and_then(|v| v.as_object())
         .ok_or_else(|| io::Error::other("invalid_output_payloads"))?;
-    for port in step.outputs.iter().filter(|p| p.kind() != "text") {
+    for port in step
+        .outputs
+        .iter()
+        .filter(|p| p.kind() != ahjo_mission_model::PortKind::Text)
+    {
         let value = payloads
             .get(&port.id)
             .and_then(|v| v.get("ref"))
@@ -75,7 +83,8 @@ fn validate_refs(step: &ahjo_mission_model::Step, output: &RunEvent) -> io::Resu
         }
         let meta = fs::metadata(path)
             .map_err(|e| io::Error::other(format!("unavailable_output_ref: {value}: {e}")))?;
-        if (port.kind() == "file" && !meta.is_file()) || (port.kind() == "folder" && !meta.is_dir())
+        if (port.kind() == ahjo_mission_model::PortKind::File && !meta.is_file())
+            || (port.kind() == ahjo_mission_model::PortKind::Folder && !meta.is_dir())
         {
             return Err(io::Error::other(format!(
                 "invalid_output_ref: {value} is not a {}",
@@ -145,7 +154,7 @@ fn accept(
             .and_then(|v| v.as_object_mut())
             .ok_or_else(|| io::Error::other("invalid_output_payloads"))?;
         for port in &step.outputs {
-            let kind = port.kind();
+            let kind = port.kind().as_str();
             if kind == "text" {
                 continue;
             }

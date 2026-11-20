@@ -327,7 +327,7 @@ fn role_usage_reports_every_slot_in_every_mission() {
                     etag: edit.etag.clone(),
                 },
                 ahjo_mission_model::MissionChange::CreateStep {
-                    formation: "orchestrated".into(),
+                    formation: ahjo_mission_model::Formation::Orchestrated,
                     title: "Pair".into(),
                     x: 0,
                     y: 0,
@@ -348,9 +348,9 @@ fn role_usage_reports_every_slot_in_every_mission() {
                         step_id: step.id.clone(),
                         slot_id: slot.id,
                         agent_id: "builder".into(),
-                        harness: "claude-code".into(),
+                        harness: ahjo_mission_model::Harness::ClaudeCode,
                         model: "".into(),
-                        effort: "medium".into(),
+                        effort: ahjo_mission_model::Effort::Medium,
                     },
                     "",
                 )

@@ -118,7 +118,7 @@ fn create_nodes_with_default_shapes() {
                 title: "Input".into(),
                 goal: String::new(),
                 files: vec![],
-                human_channel: String::new(),
+                human_channel: ahjo_mission_model::HumanChannel::Unset,
                 x: 10,
                 y: 20,
             },
@@ -132,7 +132,7 @@ fn create_nodes_with_default_shapes() {
             MissionChange::CreateStep {
                 x: 30,
                 y: 40,
-                formation: "orchestrated".into(),
+                formation: ahjo_mission_model::Formation::Orchestrated,
                 title: String::new(),
             },
             "human:ui",
@@ -164,14 +164,20 @@ fn create_nodes_with_default_shapes() {
                 title: String::new(),
                 x: 70,
                 y: 80,
-                outcome: String::new(),
+                outcome: ahjo_mission_model::EndOutcome::Unset,
             },
             "human:ui",
         )
         .unwrap();
     assert_eq!(edit.mission.steps[0].slots.len(), 3);
-    assert_eq!(edit.mission.gates[0].kinds, ["step"]);
-    assert_eq!(edit.mission.ends[0].outcome, "done");
+    assert_eq!(
+        edit.mission.gates[0].kinds,
+        [ahjo_mission_model::GateKind::Step]
+    );
+    assert_eq!(
+        edit.mission.ends[0].outcome,
+        ahjo_mission_model::EndOutcome::Done
+    );
     let step_id = edit.mission.steps[0].id.clone();
     let layout = store.read_layout("work").unwrap().unwrap();
     assert_eq!(layout.nodes.len(), 4);
@@ -208,7 +214,7 @@ fn delete_archives_mission_layout_and_its_own_notes() {
             pre(&edit),
             MissionChange::CreateEnd {
                 title: String::new(),
-                outcome: String::new(),
+                outcome: ahjo_mission_model::EndOutcome::Unset,
                 x: 1,
                 y: 2,
             },
@@ -265,7 +271,7 @@ fn join_creates_a_new_input_and_refusals_do_not_edit() {
                 "join",
                 pre(&edit),
                 MissionChange::CreateStep {
-                    formation: "solo".into(),
+                    formation: ahjo_mission_model::Formation::Solo,
                     title: name.into(),
                     x: 0,
                     y: 0,
@@ -484,7 +490,7 @@ fn type_changes_require_an_explicit_choice_before_dropping_staffed_slots() {
             "work",
             pre(&edit),
             MissionChange::CreateStep {
-                formation: "orchestrated".into(),
+                formation: ahjo_mission_model::Formation::Orchestrated,
                 title: "Team".into(),
                 x: 0,
                 y: 0,
@@ -495,8 +501,8 @@ fn type_changes_require_an_explicit_choice_before_dropping_staffed_slots() {
     let step = edit.mission.steps[0].clone();
     let mut slots = step.slots.clone();
     for slot in &mut slots {
-        slot.harness = "claude-code".into();
-        slot.effort = "medium".into();
+        slot.harness = ahjo_mission_model::Harness::ClaudeCode;
+        slot.effort = ahjo_mission_model::Effort::Medium;
     }
     edit = store
         .patch(
@@ -504,7 +510,7 @@ fn type_changes_require_an_explicit_choice_before_dropping_staffed_slots() {
             pre(&edit),
             MissionChange::SetStepFormation {
                 id: step.id.clone(),
-                formation: "orchestrated".into(),
+                formation: ahjo_mission_model::Formation::Orchestrated,
                 keep_slot_id: String::new(),
                 slots: Some(slots.clone()),
             },
@@ -517,7 +523,7 @@ fn type_changes_require_an_explicit_choice_before_dropping_staffed_slots() {
             pre(&edit),
             MissionChange::SetStepFormation {
                 id: step.id.clone(),
-                formation: "solo".into(),
+                formation: ahjo_mission_model::Formation::Solo,
                 keep_slot_id: String::new(),
                 slots: None,
             },
@@ -531,7 +537,7 @@ fn type_changes_require_an_explicit_choice_before_dropping_staffed_slots() {
             pre(&edit),
             MissionChange::SetStepFormation {
                 id: step.id,
-                formation: "solo".into(),
+                formation: ahjo_mission_model::Formation::Solo,
                 keep_slot_id: slots[1].id.clone(),
                 slots: None,
             },
@@ -551,7 +557,7 @@ fn staffing_is_validated_and_repeated_assignment_is_a_noop() {
             "work",
             pre(&edit),
             MissionChange::CreateStep {
-                formation: "solo".into(),
+                formation: ahjo_mission_model::Formation::Solo,
                 title: "Agent".into(),
                 x: 0,
                 y: 0,
@@ -565,9 +571,9 @@ fn staffing_is_validated_and_repeated_assignment_is_a_noop() {
         step_id: step_id.clone(),
         slot_id: slot_id.clone(),
         agent_id: "builder".into(),
-        harness: "claude-code".into(),
+        harness: ahjo_mission_model::Harness::ClaudeCode,
         model: String::new(),
-        effort: "medium".into(),
+        effort: ahjo_mission_model::Effort::Medium,
     };
     edit = store.patch("work", pre(&edit), assignment(), "").unwrap();
     assert_eq!(edit.mission.steps[0].slots[0].agent_id, "builder");
@@ -581,9 +587,9 @@ fn staffing_is_validated_and_repeated_assignment_is_a_noop() {
                 step_id,
                 slot_id,
                 agent_id: String::new(),
-                harness: "claude-code".into(),
+                harness: ahjo_mission_model::Harness::ClaudeCode,
                 model: String::new(),
-                effort: "ultra".into(),
+                effort: ahjo_mission_model::Effort::Ultra,
             },
             "",
         )
@@ -633,7 +639,7 @@ fn input_card_updates_validate_declarations_and_preserve_identity() {
                 title: "Input".into(),
                 goal: String::new(),
                 files: vec![],
-                human_channel: String::new(),
+                human_channel: ahjo_mission_model::HumanChannel::Unset,
                 x: 0,
                 y: 0,
             },
@@ -645,13 +651,13 @@ fn input_card_updates_validate_declarations_and_preserve_identity() {
         id: id.clone(),
         inputs: Some(vec![MissionInput {
             name: "change".into(),
-            kind: String::new(),
+            kind: ahjo_mission_model::PortKind::Unset,
             required: true,
             ..Default::default()
         }]),
         outputs: Some(vec![MissionOutput {
             name: "report".into(),
-            kind: "file".into(),
+            kind: ahjo_mission_model::PortKind::File,
             from: "step:output".into(),
             ..Default::default()
         }]),
@@ -666,7 +672,10 @@ fn input_card_updates_validate_declarations_and_preserve_identity() {
         )
         .unwrap();
     assert_eq!(edit.mission.input_cards[0].id, id);
-    assert_eq!(edit.mission.input_cards[0].inputs[0].kind, "text");
+    assert_eq!(
+        edit.mission.input_cards[0].inputs[0].kind,
+        ahjo_mission_model::PortKind::Text
+    );
     assert_eq!(
         store
             .patch(
@@ -714,7 +723,7 @@ fn deleted_node_and_port_restore_their_identities_and_wires() {
                 "work",
                 pre(&edit),
                 MissionChange::CreateStep {
-                    formation: "solo".into(),
+                    formation: ahjo_mission_model::Formation::Solo,
                     title: title.into(),
                     x: 0,
                     y: 0,
@@ -807,7 +816,7 @@ fn judge_and_limit_edits_use_the_same_revision_path() {
             "work",
             pre(&edit),
             MissionChange::CreateStep {
-                formation: "solo".into(),
+                formation: ahjo_mission_model::Formation::Solo,
                 title: "Judge".into(),
                 x: 0,
                 y: 0,
@@ -870,7 +879,10 @@ fn judge_and_limit_edits_use_the_same_revision_path() {
         )
         .unwrap();
     assert!(edit.mission.connections.is_empty());
-    assert_eq!(edit.mission.gates[0].kinds, ["human"]);
+    assert_eq!(
+        edit.mission.gates[0].kinds,
+        [ahjo_mission_model::GateKind::Human]
+    );
     edit = store
         .patch(
             "work",
@@ -894,7 +906,7 @@ fn judge_and_limit_edits_use_the_same_revision_path() {
                 seconds: None,
                 warn_seconds: None,
                 tokens: None,
-                when_spent: String::new(),
+                when_spent: ahjo_mission_model::WhenSpent::Unset,
                 x: 0,
                 y: 0,
             },
@@ -967,7 +979,7 @@ fn node_create_does_not_publish_mission_if_layout_cannot_be_staged() {
         pre(&before),
         MissionChange::CreateEnd {
             title: String::new(),
-            outcome: String::new(),
+            outcome: ahjo_mission_model::EndOutcome::Unset,
             x: 0,
             y: 0,
         },
@@ -990,7 +1002,7 @@ fn removing_code_kind_clears_check_and_relative_files_are_refused() {
             pre(&edit),
             MissionChange::CreateGate {
                 title: "Review".into(),
-                kinds: vec!["code".into()],
+                kinds: vec![ahjo_mission_model::GateKind::Code],
                 criterion: String::new(),
                 check: "output_contains".into(),
                 check_version: "1".into(),
@@ -1022,7 +1034,7 @@ fn removing_code_kind_clears_check_and_relative_files_are_refused() {
             pre(&edit),
             MissionChange::UpdateGate(GateUpdate {
                 id: gate,
-                kinds: Some(vec!["human".into()]),
+                kinds: Some(vec![ahjo_mission_model::GateKind::Human]),
                 ..Default::default()
             }),
             "",
@@ -1042,7 +1054,7 @@ fn free_layout_position_accounts_for_saved_and_fallback_nodes() {
             "work",
             pre(&edit),
             MissionChange::CreateStep {
-                formation: "solo".into(),
+                formation: ahjo_mission_model::Formation::Solo,
                 title: "A".into(),
                 x: 112,
                 y: 112,
@@ -1066,7 +1078,7 @@ fn rewire_join_undo_removes_only_its_extra_port_and_keeps_wire_id() {
                 "work",
                 pre(&edit),
                 MissionChange::CreateStep {
-                    formation: "solo".into(),
+                    formation: ahjo_mission_model::Formation::Solo,
                     title: title.into(),
                     x: 0,
                     y: 0,
@@ -1150,7 +1162,7 @@ fn restored_node_allocates_new_wire_id_when_original_is_taken() {
                 "work",
                 pre(&edit),
                 MissionChange::CreateStep {
-                    formation: "solo".into(),
+                    formation: ahjo_mission_model::Formation::Solo,
                     title: title.into(),
                     x: 0,
                     y: 0,
@@ -1287,7 +1299,7 @@ fn each_node_kind_round_trips_through_delete_and_restore() {
                 title: "Input".into(),
                 goal: "Do it".into(),
                 files: vec![],
-                human_channel: "session".into(),
+                human_channel: ahjo_mission_model::HumanChannel::Session,
                 x: 0,
                 y: 0,
             },
@@ -1300,7 +1312,7 @@ fn each_node_kind_round_trips_through_delete_and_restore() {
             pre(&edit),
             MissionChange::CreateGate {
                 title: "Check".into(),
-                kinds: vec!["human".into()],
+                kinds: vec![ahjo_mission_model::GateKind::Human],
                 criterion: "Confirm".into(),
                 check: String::new(),
                 check_version: String::new(),
@@ -1318,7 +1330,7 @@ fn each_node_kind_round_trips_through_delete_and_restore() {
             pre(&edit),
             MissionChange::CreateEnd {
                 title: "Done".into(),
-                outcome: "done".into(),
+                outcome: ahjo_mission_model::EndOutcome::Done,
                 x: 0,
                 y: 0,
             },
@@ -1336,7 +1348,7 @@ fn each_node_kind_round_trips_through_delete_and_restore() {
                 seconds: None,
                 warn_seconds: None,
                 tokens: None,
-                when_spent: String::new(),
+                when_spent: ahjo_mission_model::WhenSpent::Unset,
                 x: 0,
                 y: 0,
             },
@@ -1388,7 +1400,7 @@ fn invalid_restore_leaves_mission_and_layout_untouched() {
     let edit = store.create_mission("work", "Work", "").unwrap();
     let bad = Step {
         id: "fmn_bad".into(),
-        formation: "peer".into(),
+        formation: ahjo_mission_model::Formation::Peer,
         slots: vec![Slot {
             id: "only".into(),
             ..Default::default()
@@ -1450,7 +1462,7 @@ fn gate_fail_feedback_can_share_an_occupied_input_without_a_join() {
                 title: "Input".into(),
                 goal: String::new(),
                 files: vec![],
-                human_channel: String::new(),
+                human_channel: ahjo_mission_model::HumanChannel::Unset,
                 x: 0,
                 y: 0,
             },
@@ -1462,7 +1474,7 @@ fn gate_fail_feedback_can_share_an_occupied_input_without_a_join() {
             "work",
             pre(&edit),
             MissionChange::CreateStep {
-                formation: "solo".into(),
+                formation: ahjo_mission_model::Formation::Solo,
                 title: "Worker".into(),
                 x: 0,
                 y: 0,
@@ -1476,7 +1488,7 @@ fn gate_fail_feedback_can_share_an_occupied_input_without_a_join() {
             pre(&edit),
             MissionChange::CreateGate {
                 title: "Review".into(),
-                kinds: vec!["human".into()],
+                kinds: vec![ahjo_mission_model::GateKind::Human],
                 criterion: String::new(),
                 check: String::new(),
                 check_version: String::new(),
@@ -1540,7 +1552,7 @@ fn repeated_brief_gate_and_controller_edits_save_nothing() {
             "work",
             pre(&edit),
             MissionChange::CreateStep {
-                formation: "orchestrated".into(),
+                formation: ahjo_mission_model::Formation::Orchestrated,
                 title: "Team".into(),
                 x: 0,
                 y: 0,
@@ -1554,7 +1566,7 @@ fn repeated_brief_gate_and_controller_edits_save_nothing() {
             pre(&edit),
             MissionChange::CreateGate {
                 title: "Review".into(),
-                kinds: vec!["code".into()],
+                kinds: vec![ahjo_mission_model::GateKind::Code],
                 criterion: "check".into(),
                 check: "output_contains".into(),
                 check_version: "1".into(),
@@ -1656,7 +1668,7 @@ fn restore_port_refusals_preserve_revision_and_etag() {
             "work",
             pre(&edit),
             MissionChange::CreateStep {
-                formation: "solo".into(),
+                formation: ahjo_mission_model::Formation::Solo,
                 title: "Work".into(),
                 x: 0,
                 y: 0,
@@ -1708,7 +1720,7 @@ fn step_title_and_brief_commit_atomically() {
             "work",
             pre(&created),
             MissionChange::CreateStep {
-                formation: "solo".into(),
+                formation: ahjo_mission_model::Formation::Solo,
                 title: "Old".into(),
                 x: 0,
                 y: 0,
@@ -1769,7 +1781,7 @@ fn swapping_staffing_is_one_revision_and_reversible_across_steps() {
                 "work",
                 pre(&edit),
                 MissionChange::CreateStep {
-                    formation: "solo".into(),
+                    formation: ahjo_mission_model::Formation::Solo,
                     title: title.into(),
                     x: 0,
                     y: 0,
@@ -1794,9 +1806,9 @@ fn swapping_staffing_is_one_revision_and_reversible_across_steps() {
                 step_id: af.clone(),
                 slot_id: aslot.clone(),
                 agent_id: "builder".into(),
-                harness: "claude-code".into(),
+                harness: ahjo_mission_model::Harness::ClaudeCode,
                 model: "opus".into(),
-                effort: "medium".into(),
+                effort: ahjo_mission_model::Effort::Medium,
             },
             "",
         )
@@ -1848,7 +1860,7 @@ fn deleted_mission_archives_can_be_listed_and_removed_without_touching_reused_sl
             pre(&original),
             MissionChange::CreateEnd {
                 title: "Done".into(),
-                outcome: "done".into(),
+                outcome: ahjo_mission_model::EndOutcome::Done,
                 x: 10,
                 y: 20,
             },

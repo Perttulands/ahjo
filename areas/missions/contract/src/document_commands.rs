@@ -1,6 +1,6 @@
 //! Inputs and outputs of whole-mission authoring commands.
-use crate::{DocumentChanges, Report};
-use schemars::JsonSchema;
+use crate::{DocumentChanges, Mission, Report};
+use schemars::{JsonSchema, Schema, SchemaGenerator, json_schema};
 use serde::{Deserialize, Serialize};
 
 /// Read a mission or example as its stored TOML document.
@@ -26,11 +26,19 @@ pub struct ExportedMission {
 #[serde(deny_unknown_fields)]
 pub struct ApplyMission {
     /// TOML text over MCP. On the command line, a local file or - for stdin.
-    #[schemars(extend("x-ahjo-cli-file" = true))]
+    #[schemars(schema_with = "document_schema", extend("x-ahjo-cli-file" = true))]
     pub document: String,
     /// Compute the change and validation while leaving files as they are.
     #[serde(default)]
     pub dry_run: bool,
+}
+
+fn document_schema(generator: &mut SchemaGenerator) -> Schema {
+    json_schema!({
+        "type": "string",
+        "contentMediaType": "application/toml",
+        "contentSchema": generator.subschema_for::<Mission>(),
+    })
 }
 
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]

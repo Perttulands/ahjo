@@ -4,7 +4,7 @@
 //! when the step's gate judged one since its last pick; anything else
 //! records the limit and blocks the run there for a grant.
 use crate::coordinator::Control;
-use crate::limits::{self, LIMIT_REACHED, LimitUse, WHEN_SPENT_BEST, WHEN_SPENT_FAIL};
+use crate::limits::{self, LIMIT_REACHED, LimitUse};
 use crate::run_worker::event;
 use crate::{Coordinator, RunEvent};
 use ahjo_mission_model::Mission;
@@ -66,9 +66,9 @@ pub(crate) fn pick_or_stop(
     } = reached;
     let events = c.ledger(id)?.read().map_err(crate::error::to_io)?;
     let when_spent = limits::card(mission, &use_.limit_id)
-        .map(|card| card.when_spent.as_str())
-        .unwrap_or("");
-    if when_spent == WHEN_SPENT_BEST
+        .map(|card| card.when_spent)
+        .unwrap_or_default();
+    if when_spent == ahjo_mission_model::WhenSpent::Best
         && let Some(pick) = crate::run_pick::pick_for(mission, &events, node, use_)
         && crate::run_pick::judged_since_last_pick(&events, node, &pick.candidates)
     {
@@ -78,7 +78,7 @@ pub(crate) fn pick_or_stop(
         crate::run_pick::start(c, id, control, mission, node, &pick, use_, "when_spent")?;
         return Ok(None);
     }
-    let fail = when_spent == WHEN_SPENT_FAIL;
+    let fail = when_spent == ahjo_mission_model::WhenSpent::Fail;
     if !fail {
         append_limit_error(c, id, control, mission, node, use_)?;
     }

@@ -19,11 +19,11 @@ fn reports_unsupported_capabilities_on_the_nodes_and_refuses_admission() {
         Code::UnsupportedStep | Code::UnsupportedHumanChannel
     )));
     let step = &mut mission.steps[0];
-    step.formation = "peer".into();
+    step.formation = ahjo_mission_model::Formation::Peer;
     let mut slot = step.slots[0].clone();
     slot.id = "second".into();
     step.slots.push(slot);
-    mission.input_cards[0].human_channel = "session".into();
+    mission.input_cards[0].human_channel = ahjo_mission_model::HumanChannel::Session;
     let report = validate(&mission, &store.roles(), &Harnesses::default());
     assert!(report.errors.iter().any(|f| f.code == Code::UnsupportedStep
         && f.node_id == mission.steps[0].id
@@ -56,15 +56,15 @@ fn reports_unsupported_capabilities_on_the_nodes_and_refuses_admission() {
             .iter()
             .any(|f| f.code == Code::UnsupportedHumanChannel)
     );
-    mission.input_cards[0].human_channel.clear();
-    mission.steps[0].formation = "orchestrated".into();
+    mission.input_cards[0].human_channel = ahjo_mission_model::HumanChannel::Unset;
+    mission.steps[0].formation = ahjo_mission_model::Formation::Orchestrated;
     mission.steps[0].slots[0].controller = true;
     let report = validate(&mission, &store.roles(), &Harnesses::default());
     assert!(!report.errors.iter().any(|f| matches!(
         f.code,
         Code::UnsupportedStep | Code::UnsupportedHumanChannel | Code::OrchestratedController
     )));
-    mission.input_cards[0].human_channel = "session".into();
+    mission.input_cards[0].human_channel = ahjo_mission_model::HumanChannel::Session;
     mission.connections.clear();
     let report = validate(&mission, &store.roles(), &Harnesses::default());
     assert!(
@@ -127,7 +127,7 @@ fn legacy_missions_can_be_repaired_without_allowing_unrelated_saves() {
             pre(&current),
             MissionChange::UpdateInputCard(InputCardUpdate {
                 id: card,
-                human_channel: Some("notify".into()),
+                human_channel: Some(ahjo_mission_model::HumanChannel::Notify),
                 ..Default::default()
             }),
             "",
@@ -139,14 +139,17 @@ fn legacy_missions_can_be_repaired_without_allowing_unrelated_saves() {
             pre(&repaired),
             MissionChange::SetStepFormation {
                 id: step,
-                formation: "solo".into(),
+                formation: ahjo_mission_model::Formation::Solo,
                 keep_slot_id: "".into(),
                 slots: None,
             },
             "",
         )
         .unwrap();
-    assert_eq!(repaired.mission.steps[0].formation, "solo");
+    assert_eq!(
+        repaired.mission.steps[0].formation,
+        ahjo_mission_model::Formation::Solo
+    );
     store
         .patch(
             "gated",

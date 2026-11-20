@@ -407,7 +407,7 @@ pub(crate) fn schedule(
                 if let Some(delivery) = replay
                     .ended
                     .iter()
-                    .find(|delivery| delivery.outcome == "rejected")
+                    .find(|delivery| delivery.outcome == ahjo_mission_model::EndOutcome::Rejected)
                 {
                     return Ok(Outcome::Rejected {
                         end_id: delivery.end_id.clone(),

@@ -40,7 +40,7 @@ fn input_and_step_titles_and_hint_can_be_set_and_cleared() {
                 title: "Frame".into(),
                 goal: "Original".into(),
                 files: vec![],
-                human_channel: "".into(),
+                human_channel: ahjo_mission_model::HumanChannel::Unset,
                 x: 0,
                 y: 0,
             },
@@ -52,7 +52,7 @@ fn input_and_step_titles_and_hint_can_be_set_and_cleared() {
             "updates",
             pre(&edit),
             MissionChange::CreateStep {
-                formation: "solo".into(),
+                formation: ahjo_mission_model::Formation::Solo,
                 title: "Map".into(),
                 x: 1,
                 y: 2,
@@ -144,7 +144,7 @@ fn gate_rejects_bad_kinds_and_checks_without_mutation() {
             pre(&edit),
             MissionChange::CreateGate {
                 title: "Review".into(),
-                kinds: vec!["code".into()],
+                kinds: vec![ahjo_mission_model::GateKind::Code],
                 criterion: "ready".into(),
                 check: "output_contains".into(),
                 check_version: "1".into(),
@@ -159,6 +159,16 @@ fn gate_rejects_bad_kinds_and_checks_without_mutation() {
     let id = edit.mission.gates[0].id.clone();
     let path = dir.0.join("missions/gate.mission.toml");
     let before = std::fs::read(&path).unwrap();
+    let error = serde_json::from_value::<ahjo_mission_model::GateUpdate>(serde_json::json!({
+        "id": id, "kinds": ["human", "robot"]
+    }))
+    .unwrap_err()
+    .to_string();
+    assert!(
+        error.contains("robot") && error.contains("code") && error.contains("human"),
+        "{error}"
+    );
+    assert_eq!(std::fs::read(&path).unwrap(), before);
     for (update, code) in [
         (
             ahjo_mission_model::GateUpdate {
@@ -171,15 +181,7 @@ fn gate_rejects_bad_kinds_and_checks_without_mutation() {
         (
             ahjo_mission_model::GateUpdate {
                 id: id.clone(),
-                kinds: Some(vec!["human".into(), "robot".into()]),
-                ..Default::default()
-            },
-            "invalid_gate_kind",
-        ),
-        (
-            ahjo_mission_model::GateUpdate {
-                id: id.clone(),
-                kinds: Some(vec!["human".into()]),
+                kinds: Some(vec![ahjo_mission_model::GateKind::Human]),
                 check: Some("output_contains".into()),
                 ..Default::default()
             },
@@ -256,7 +258,7 @@ fn slot_settings_round_trip_and_invalid_assignments_write_nothing() {
             "seat",
             pre(&edit),
             MissionChange::CreateStep {
-                formation: "solo".into(),
+                formation: ahjo_mission_model::Formation::Solo,
                 title: "Worker".into(),
                 x: 0,
                 y: 0,
@@ -277,13 +279,29 @@ fn slot_settings_round_trip_and_invalid_assignments_write_nothing() {
         ("reviewer", "", "", ""),
         ("reviewer", "openai-codex", "", ""),
     ] {
+        if harness == "hermes" {
+            let error = serde_json::from_value::<MissionChange>(serde_json::json!({
+                "assign_slot": {"step_id": step, "slot_id": slot, "agent_id": agent,
+                                "harness": harness, "model": model, "effort": effort}
+            }))
+            .unwrap_err()
+            .to_string();
+            assert!(
+                error.contains("hermes")
+                    && error.contains("claude-code")
+                    && error.contains("openai-codex"),
+                "{error}"
+            );
+            assert_eq!(std::fs::read(&path).unwrap(), before);
+            continue;
+        }
         let patch = MissionChange::AssignSlot {
             step_id: step.clone(),
             slot_id: slot.clone(),
             agent_id: agent.into(),
-            harness: harness.into(),
+            harness: harness.parse().unwrap(),
             model: model.into(),
-            effort: effort.into(),
+            effort: effort.parse().unwrap(),
         };
         assert_eq!(
             store
@@ -308,9 +326,9 @@ fn slot_settings_round_trip_and_invalid_assignments_write_nothing() {
                     step_id: step.clone(),
                     slot_id: slot.clone(),
                     agent_id: agent.into(),
-                    harness: harness.into(),
+                    harness: harness.parse().unwrap(),
                     model: model.into(),
-                    effort: effort.into(),
+                    effort: effort.parse().unwrap(),
                 },
                 "",
             )
@@ -319,9 +337,9 @@ fn slot_settings_round_trip_and_invalid_assignments_write_nothing() {
         assert_eq!(
             (
                 &*actual.agent_id,
-                &*actual.harness,
+                actual.harness.as_str(),
                 &*actual.model,
-                &*actual.effort
+                actual.effort.as_str()
             ),
             (agent, harness, model, effort)
         );
@@ -343,7 +361,7 @@ fn repeated_node_type_port_and_judge_edits_keep_bytes_and_check_etags() {
                 title: "Input".into(),
                 goal: "Goal".into(),
                 files: vec![],
-                human_channel: "".into(),
+                human_channel: ahjo_mission_model::HumanChannel::Unset,
                 x: 0,
                 y: 0,
             },
@@ -355,7 +373,7 @@ fn repeated_node_type_port_and_judge_edits_keep_bytes_and_check_etags() {
             "same",
             pre(&edit),
             MissionChange::CreateStep {
-                formation: "solo".into(),
+                formation: ahjo_mission_model::Formation::Solo,
                 title: "Worker".into(),
                 x: 0,
                 y: 0,
@@ -369,7 +387,7 @@ fn repeated_node_type_port_and_judge_edits_keep_bytes_and_check_etags() {
             pre(&edit),
             MissionChange::CreateGate {
                 title: "Gate".into(),
-                kinds: vec!["human".into()],
+                kinds: vec![ahjo_mission_model::GateKind::Human],
                 criterion: "".into(),
                 check: "".into(),
                 check_version: "".into(),
@@ -399,7 +417,7 @@ fn repeated_node_type_port_and_judge_edits_keep_bytes_and_check_etags() {
         },
         MissionChange::SetStepFormation {
             id: f.id.clone(),
-            formation: "orchestrated".into(),
+            formation: ahjo_mission_model::Formation::Orchestrated,
             keep_slot_id: "".into(),
             slots: None,
         },
@@ -450,7 +468,7 @@ fn brief_rejects_unsafe_work_references_without_writing() {
             "brief",
             pre(&edit),
             MissionChange::CreateStep {
-                formation: "solo".into(),
+                formation: ahjo_mission_model::Formation::Solo,
                 title: "Ship".into(),
                 x: 0,
                 y: 0,
@@ -538,7 +556,7 @@ fn slots_share_a_role_but_keep_settings_and_exactly_one_controller() {
             "team",
             pre(&edit),
             MissionChange::CreateStep {
-                formation: "orchestrated".into(),
+                formation: ahjo_mission_model::Formation::Orchestrated,
                 title: "Team".into(),
                 x: 0,
                 y: 0,
@@ -559,9 +577,9 @@ fn slots_share_a_role_but_keep_settings_and_exactly_one_controller() {
                     step_id: team.id.clone(),
                     slot_id: slot.id.clone(),
                     agent_id: "builder".into(),
-                    harness: harness.into(),
+                    harness: harness.parse().unwrap(),
                     model: model.into(),
-                    effort: effort.into(),
+                    effort: effort.parse().unwrap(),
                 },
                 "",
             )
@@ -582,11 +600,15 @@ fn slots_share_a_role_but_keep_settings_and_exactly_one_controller() {
     assert_eq!(slots[0].agent_id, "builder");
     assert_eq!(slots[1].agent_id, "builder");
     assert_eq!(
-        (&*slots[0].harness, &*slots[0].effort),
+        (slots[0].harness.as_str(), slots[0].effort.as_str()),
         ("openai-codex", "medium")
     );
     assert_eq!(
-        (&*slots[1].harness, &*slots[1].model, &*slots[1].effort),
+        (
+            slots[1].harness.as_str(),
+            &*slots[1].model,
+            slots[1].effort.as_str()
+        ),
         ("claude-code", "opus", "low")
     );
     assert_eq!(slots.iter().filter(|slot| slot.controller).count(), 1);

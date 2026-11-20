@@ -1,18 +1,22 @@
 //! Edit step ports and restore their wire identities on undo.
 use crate::Error;
-use ahjo_mission_model::{Mission, MissionChange, Port};
+use ahjo_mission_model::{Mission, MissionChange, Port, PortKind};
 use toml_edit::{DocumentMut, Item, Value, value};
 fn missing() -> Error {
     Error::new("not_found", "step or port")
 }
-fn kind(direction: &str, raw: &str) -> Result<String, Error> {
-    let kind = raw.trim();
-    if !["", "text", "file", "folder"].contains(&kind)
-        || (direction == "input" && !["", "text"].contains(&kind))
-    {
-        return Err(Error::new("invalid_port", "invalid port kind"));
+fn kind(direction: &str, kind: PortKind) -> Result<PortKind, Error> {
+    if direction == "input" && kind.effective() != PortKind::Text {
+        return Err(Error::new(
+            "invalid_port",
+            "only output ports carry file or folder kinds",
+        ));
     }
-    Ok(if kind == "text" { "" } else { kind }.into())
+    Ok(if kind == PortKind::Text {
+        PortKind::Unset
+    } else {
+        kind
+    })
 }
 fn direction(s: &str) -> Result<&str, Error> {
     if ["input", "output"].contains(&s) {
@@ -72,7 +76,7 @@ pub(crate) fn apply(
             let port = Port {
                 id: crate::authoring::id("port")?,
                 label,
-                kind: kind(&dir, &raw)?,
+                kind: kind(&dir, raw)?,
             };
             insert(doc, &step_id, &dir, &port, None)?;
         }
@@ -99,7 +103,7 @@ pub(crate) fn apply(
             if label.as_ref().is_some_and(String::is_empty) {
                 return Err(Error::new("invalid_port", "a port needs a label"));
             }
-            let next_kind = raw.map(|s| kind(dir, &s)).transpose()?;
+            let next_kind = raw.map(|s| kind(dir, s)).transpose()?;
             if label.as_ref().is_none_or(|s| s == &old.label)
                 && next_kind.as_ref().is_none_or(|s| s == &old.kind)
             {
@@ -114,7 +118,7 @@ pub(crate) fn apply(
                 crate::authoring_staff::set(port, "label", &label);
             }
             if let Some(kind) = next_kind {
-                crate::authoring_staff::set(port, "kind", &kind);
+                crate::authoring_staff::set(port, "kind", kind.as_str());
             }
         }
         MissionChange::RemovePort { step_id, port_id } => {
@@ -191,7 +195,7 @@ pub(crate) fn apply(
                     "invalid or duplicate port",
                 ));
             }
-            port.kind = kind(&dir, &port.kind)?;
+            port.kind = kind(&dir, port.kind)?;
             insert(doc, &step_id, &dir, &port, index)?;
             let mut current = Mission::parse(&doc.to_string())?;
             let endpoint = format!("{step_id}:{}", port.id);

@@ -1,6 +1,8 @@
 //! Restore a deleted node, its wires and its canvas position in one edit.
 use crate::Error;
-use ahjo_mission_model::{Connection, LayoutNode, Mission, MissionChange, RestoredNode};
+use ahjo_mission_model::{
+    Connection, EndOutcome, Formation, LayoutNode, Mission, MissionChange, PortKind, RestoredNode,
+};
 use serde::Serialize;
 use std::collections::HashSet;
 use toml_edit::{ArrayOfTables, DocumentMut, Item};
@@ -68,7 +70,7 @@ pub(crate) fn apply(
                 &current,
                 ahjo_mission_model::InputCardUpdate {
                     id: n.id.clone(),
-                    human_channel: Some(n.human_channel.clone()),
+                    human_channel: Some(n.human_channel),
                     inputs: Some(n.inputs.clone()),
                     outputs: Some(n.outputs.clone()),
                     ..Default::default()
@@ -76,7 +78,7 @@ pub(crate) fn apply(
             )?;
         }
         RestoredNode::Step(n) => {
-            if !["solo", "peer", "orchestrated"].contains(&n.formation.as_str()) {
+            if n.formation == Formation::Unset {
                 return Err(Error::new(
                     "unsupported_step_formation",
                     "invalid step formation",
@@ -88,24 +90,18 @@ pub(crate) fn apply(
                     return Err(invalid("invalid or duplicate port id"));
                 }
             }
-            if n.inputs
-                .iter()
-                .any(|p| !["", "text"].contains(&p.kind.as_str()))
-                || n.outputs
-                    .iter()
-                    .any(|p| !["", "text", "file", "folder"].contains(&p.kind.as_str()))
-            {
+            if n.inputs.iter().any(|p| p.kind() != PortKind::Text) {
                 return Err(Error::new("invalid_port", "invalid port kind"));
             }
             for port in n.inputs.iter_mut().chain(&mut n.outputs) {
-                if port.kind == "text" {
-                    port.kind.clear();
+                if port.kind == PortKind::Text {
+                    port.kind = PortKind::Unset;
                 }
             }
             let controllers = n.slots.iter().filter(|s| s.controller).count();
-            if match n.formation.as_str() {
-                "solo" => n.slots.len() != 1,
-                "peer" => n.slots.len() < 2 || controllers != 0,
+            if match n.formation {
+                Formation::Solo => n.slots.len() != 1,
+                Formation::Peer => n.slots.len() < 2 || controllers != 0,
                 _ => n.slots.len() < 2 || controllers != 1,
             } {
                 return Err(invalid("invalid step shape"));
@@ -139,15 +135,11 @@ pub(crate) fn apply(
             put(doc, "gate", n, index)?;
         }
         RestoredNode::End(n) => {
-            n.outcome = n.outcome.trim().into();
-            if n.outcome.is_empty() {
-                n.outcome = "done".into();
-            }
-            if !["done", "rejected"].contains(&n.outcome.as_str()) {
-                return Err(Error::new("invalid_end_outcome", "invalid End outcome"));
+            if n.outcome == EndOutcome::Unset {
+                n.outcome = EndOutcome::Done;
             }
             if n.title.trim().is_empty() {
-                n.title = if n.outcome == "done" {
+                n.title = if n.outcome == EndOutcome::Done {
                     "Done"
                 } else {
                     "Rejected"

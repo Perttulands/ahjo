@@ -1,6 +1,6 @@
 //! Admission and rendering of values supplied to a mission run.
 
-use ahjo_mission_model::{Code, Finding, Mission, MissionInput, RunInput};
+use ahjo_mission_model::{Code, Finding, Mission, MissionInput, PortKind, RunInput};
 use std::collections::{BTreeMap, HashSet};
 use std::path::Path;
 
@@ -13,16 +13,14 @@ pub fn mission_run_inputs(mission: &Mission) -> Vec<MissionInput> {
             .iter()
             .cloned()
             .map(|mut input| {
-                if input.kind.is_empty() {
-                    input.kind = "text".into();
-                }
+                input.kind = input.kind.effective();
                 input
             })
             .collect();
     }
     vec![MissionInput {
         name: "brief".into(),
-        kind: "text".into(),
+        kind: PortKind::Text,
         required: true,
         description: mission
             .input_card()
@@ -55,7 +53,7 @@ pub fn input_findings(mission: &Mission, supplied: &BTreeMap<String, String>) ->
             }
             continue;
         }
-        if input.kind == "file" || input.kind == "folder" {
+        if input.kind == PortKind::File || input.kind == PortKind::Folder {
             let path = Path::new(value);
             let problem = if !path.is_absolute() {
                 Some(format!("{value:?} is a relative path"))
@@ -65,17 +63,17 @@ pub fn input_findings(mission: &Mission, supplied: &BTreeMap<String, String>) ->
                         Some(format!("{value} does not exist"))
                     }
                     Err(err) => Some(format!("{value} cannot be read: {err}")),
-                    Ok(meta) if input.kind == "file" && !meta.is_file() => {
+                    Ok(meta) if input.kind == PortKind::File && !meta.is_file() => {
                         Some(format!("{value} is not a regular file"))
                     }
-                    Ok(meta) if input.kind == "folder" && !meta.is_dir() => {
+                    Ok(meta) if input.kind == PortKind::Folder && !meta.is_dir() => {
                         Some(format!("{value} is not a directory"))
                     }
                     Ok(_) => None,
                 }
             };
             if let Some(problem) = problem {
-                let kind = if input.kind == "file" {
+                let kind = if input.kind == PortKind::File {
                     "file"
                 } else {
                     "directory"
@@ -125,12 +123,12 @@ pub fn resolve_run_inputs(mission: &Mission, supplied: &BTreeMap<String, String>
             }
             Some(RunInput {
                 name: input.name,
-                value: if input.kind == "text" {
+                value: if input.kind == PortKind::Text {
                     value.clone()
                 } else {
                     value.trim().to_owned()
                 },
-                kind: input.kind,
+                kind: input.kind.as_str().to_owned(),
             })
         })
         .collect()

@@ -54,7 +54,7 @@ fn resolve_events(events: &[RunEvent], mission: &Mission) -> Result<Resolved, Mi
     let done = |to: &str| {
         mission
             .end(endpoint_node(to))
-            .is_some_and(|end| end.outcome != "rejected")
+            .is_some_and(|end| end.outcome != ahjo_mission_model::EndOutcome::Rejected)
     };
     let follow = |input: &RoutedInput, queue: &mut VecDeque<Origin>| {
         if !(mission.gate(&input.from_node_id).is_some() && input.from_port_id == "fail")
@@ -152,11 +152,7 @@ fn resolve_events(events: &[RunEvent], mission: &Mission) -> Result<Resolved, Mi
         .flat_map(|card| &card.outputs)
     {
         let (node, port) = output.from.split_once(':').unwrap_or(("", ""));
-        let kind = if output.kind.is_empty() {
-            "text"
-        } else {
-            &output.kind
-        };
+        let kind = output.kind.effective().as_str();
         let found = reached.get(&(node.to_owned(), port.to_owned()));
         let value = found
             .and_then(|(_, p)| p.get(if kind == "text" { "text" } else { "ref" }))
@@ -369,7 +365,7 @@ mod tests {
             }],
             ends: vec![End {
                 id: "end".into(),
-                outcome: "done".into(),
+                outcome: ahjo_mission_model::EndOutcome::Done,
                 ..Default::default()
             }],
             connections: vec![Connection {
@@ -422,7 +418,7 @@ mod tests {
             }],
             ends: vec![End {
                 id: "done".into(),
-                outcome: "done".into(),
+                outcome: ahjo_mission_model::EndOutcome::Done,
                 ..Default::default()
             }],
             connections: vec![Connection {
@@ -464,7 +460,7 @@ mod tests {
             }],
             ends: vec![End {
                 id: "done".into(),
-                outcome: "done".into(),
+                outcome: ahjo_mission_model::EndOutcome::Done,
                 ..Default::default()
             }],
             connections: vec![Connection {
@@ -519,7 +515,7 @@ mod tests {
             }],
             ends: vec![End {
                 id: "done".into(),
-                outcome: "done".into(),
+                outcome: ahjo_mission_model::EndOutcome::Done,
                 ..Default::default()
             }],
             connections: vec![Connection {
@@ -601,7 +597,7 @@ mod tests {
                 input_cards: vec![InputCard {
                     outputs: vec![MissionOutput {
                         name: name.into(),
-                        kind: "folder".into(),
+                        kind: ahjo_mission_model::PortKind::Folder,
                         from: format!("fmn_{bound}:port_{bound}_out"),
                         required: true,
                         ..Default::default()
@@ -614,7 +610,7 @@ mod tests {
                 }],
                 ends: vec![End {
                     id: "done".into(),
-                    outcome: "done".into(),
+                    outcome: ahjo_mission_model::EndOutcome::Done,
                     ..Default::default()
                 }],
                 connections: vec![
@@ -686,7 +682,7 @@ mod tests {
             }],
             ends: vec![End {
                 id: "done".into(),
-                outcome: "done".into(),
+                outcome: ahjo_mission_model::EndOutcome::Done,
                 ..Default::default()
             }],
             connections: vec![

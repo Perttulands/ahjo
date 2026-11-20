@@ -8,7 +8,11 @@ use std::{
 };
 
 pub(crate) fn materialize(step: &Step, outputs: &mut Map<String, Value>) -> io::Result<()> {
-    for port in step.outputs.iter().filter(|port| port.kind() == "text") {
+    for port in step
+        .outputs
+        .iter()
+        .filter(|port| port.kind() == ahjo_mission_model::PortKind::Text)
+    {
         let Some(payload) = outputs.get_mut(&port.id).and_then(Value::as_object_mut) else {
             continue;
         };

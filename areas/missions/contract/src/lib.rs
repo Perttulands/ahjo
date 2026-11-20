@@ -28,9 +28,7 @@ pub mod error {
     pub const INVALID_CODE_GATE_PROFILE: &str = "invalid_code_gate_profile";
     pub const INVALID_CONTROLLER_ROLE: &str = "invalid_controller_role";
     pub const INVALID_DEFINITION: &str = "invalid_definition";
-    pub const INVALID_END_OUTCOME: &str = "invalid_end_outcome";
     pub const INVALID_GATE_KIND: &str = "invalid_gate_kind";
-    pub const INVALID_HUMAN_CHANNEL: &str = "invalid_human_channel";
     pub const INVALID_LIMIT: &str = "invalid_limit";
     pub const INVALID_MISSION_INPUT: &str = "invalid_mission_input";
     pub const INVALID_MISSION_OUTPUT: &str = "invalid_mission_output";

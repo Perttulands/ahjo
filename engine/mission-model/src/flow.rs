@@ -5,7 +5,7 @@
 //! goes breadth first along outputs, passes before fails, never enters a
 //! judge chain as a step, and numbers a node once, where it is first met.
 
-use crate::{Connection, Mission};
+use crate::{Connection, EndOutcome, GateKind, Mission};
 use std::collections::{HashMap, VecDeque};
 
 #[derive(Clone, Debug, PartialEq)]
@@ -21,7 +21,7 @@ pub enum Target {
     End {
         node: String,
         title: String,
-        outcome: String,
+        outcome: EndOutcome,
     },
     /// A route not wired yet.
     Nowhere,
@@ -222,7 +222,7 @@ pub fn build(m: &Mission) -> Flow {
                     return Target::End {
                         node,
                         title: end.title.clone(),
-                        outcome: end.outcome.clone(),
+                        outcome: end.outcome,
                     };
                 }
                 let number = numbers.get(&node).copied();
@@ -259,12 +259,12 @@ pub fn build(m: &Mission) -> Flow {
                 };
                 FlowStepKind::Gate {
                     deciders: [
-                        ("human", Decider::You),
-                        ("step", Decider::Judge),
-                        ("code", Decider::Code),
+                        (GateKind::Human, Decider::You),
+                        (GateKind::Step, Decider::Judge),
+                        (GateKind::Code, Decider::Code),
                     ]
                     .into_iter()
-                    .filter(|(k, _)| g.kinds.iter().any(|x| x == k))
+                    .filter(|(k, _)| g.kinds.contains(k))
                     .map(|(_, d)| d)
                     .collect(),
                     judges: judge_chain(m, id),

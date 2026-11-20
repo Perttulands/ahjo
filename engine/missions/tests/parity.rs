@@ -9,7 +9,7 @@ use std::collections::BTreeMap;
 use std::path::Path;
 
 use ahjo_mission_engine::{Harnesses, Store, validate};
-use ahjo_mission_model::Finding;
+use ahjo_mission_model::{Finding, Mission};
 use serde::Deserialize;
 
 #[derive(Deserialize)]
@@ -47,7 +47,52 @@ fn findings_match_archons_on_every_parity_mission() {
         "every parity mission has Archon's findings"
     );
     for (slug, archon) in expected {
-        let mut mission = store.read_mission(&slug).unwrap();
+        let source =
+            std::fs::read_to_string(parity.join("missions").join(format!("{slug}.mission.toml")))
+                .unwrap();
+        let replacements: &[(&str, &str, &str)] = match slug.as_str() {
+            "cards" => &[(
+                "human_channel = \"pager\"",
+                "human_channel = \"\"",
+                "notify",
+            )],
+            "steps" => &[
+                ("formation = \"swarm\"", "formation = \"\"", "solo"),
+                ("harness = \"hermes\"", "harness = \"\"", "claude-code"),
+            ],
+            "inputs" => &[
+                ("kind = \"url\"", "kind = \"text\"", "folder"),
+                ("kind = \"website\"", "kind = \"text\"", "folder"),
+                ("kind = \"image\"", "kind = \"text\"", "folder"),
+            ],
+            "limits" => &[
+                ("outcome = \"maybe\"", "outcome = \"\"", "rejected"),
+                ("outcome = \"  \"", "outcome = \"done\"", "rejected"),
+                ("when_spent = \"maybe\"", "when_spent = \"\"", "best"),
+            ],
+            "wiring" => &[("\"vibes\", ", "", "human")],
+            _ => &[],
+        };
+        let sanitized = replacements
+            .iter()
+            .fold(source.clone(), |text, (bad, good, _)| {
+                assert!(text.contains(bad), "{slug}: missing {bad}");
+                text.replacen(bad, good, 1)
+            });
+        // Each invalid value is rejected on its own, with valid values in the error.
+        for (index, (_, _, allowed)) in replacements.iter().enumerate() {
+            let candidate = replacements
+                .iter()
+                .enumerate()
+                .filter(|(other, _)| *other != index)
+                .fold(source.clone(), |text, (_, (bad, good, _))| {
+                    text.replacen(bad, good, 1)
+                });
+            let error = Mission::parse(&candidate).unwrap_err();
+            assert_eq!(error.code, "invalid_definition_source");
+            assert!(error.message.contains(allowed), "{slug}: {error}");
+        }
+        let mut mission = Mission::parse(&sanitized).unwrap();
         // The recorded fixture uses Unix absolute paths. Preserve its existing,
         // missing and relative cases using paths native to the test host.
         if slug == "cards" {
@@ -80,6 +125,24 @@ fn findings_match_archons_on_every_parity_mission() {
         }
         let report = validate(&mission, &store.roles(), &harnesses);
         let mut sorted = archon.errors.clone();
+        // Those findings now fail decoding, which is checked above.
+        let decoded = match slug.as_str() {
+            "cards" => vec![("invalid_human_channel", "inp_one")],
+            "inputs" => vec![
+                ("invalid_mission_input", "inp"),
+                ("invalid_mission_output", "inp"),
+                ("invalid_port_kind", "fmn_a"),
+            ],
+            "limits" => vec![("invalid_limit", "lim_warn_late")],
+            _ => vec![],
+        };
+        for (code, node) in decoded {
+            let index = sorted
+                .iter()
+                .position(|pair| pair.0 == code && pair.1 == node)
+                .unwrap_or_else(|| panic!("{slug}: missing recorded finding {code} on {node}"));
+            sorted.remove(index);
+        }
         sorted.sort();
         // Ahjo deliberately refuses peer steps that Archon accepts.
         let (unsupported, comparable): (Vec<_>, Vec<_>) = report

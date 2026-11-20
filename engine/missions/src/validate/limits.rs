@@ -6,7 +6,7 @@ use std::collections::HashMap;
 
 use crate::graph;
 use crate::limits::duration_words;
-use ahjo_mission_model::{Code, Finding, Limit, Mission};
+use ahjo_mission_model::{Code, Finding, Limit, Mission, WhenSpent};
 
 const DEFAULT_TITLE: &str = "Limit";
 
@@ -103,15 +103,8 @@ fn card_name(mission: &Mission, id: &str) -> String {
 /// Why a card cannot do what its when_spent asks: best needs a step whose
 /// selecting gate a judge or a human decides, so someone can pick.
 fn when_spent_problem(mission: &Mission, limit: &Limit, name: &str) -> Option<String> {
-    match limit.when_spent.trim() {
-        "" | "stop" | "fail" => return None,
-        "best" => {}
-        _ => {
-            return Some(format!(
-                "{name} holds when_spent = {:?}: set it to stop, best or fail",
-                limit.when_spent
-            ));
-        }
+    if limit.when_spent != WhenSpent::Best {
+        return None;
     }
     if mission.has_input_card(&limit.target) {
         return Some(format!(

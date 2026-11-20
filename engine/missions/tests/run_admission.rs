@@ -6,20 +6,31 @@ use std::collections::BTreeMap;
 fn admission_checks_inputs_and_frozen_staffing_across_the_mission() {
     let mut mission =
         Mission::parse(include_str!("parity/runs/missions/solo-lab.mission.toml")).unwrap();
+    let error = serde_json::from_value::<Slot>(serde_json::json!({
+        "id": "bad", "harness": "unknown", "effort": "medium"
+    }))
+    .unwrap_err()
+    .to_string();
+    assert!(
+        error.contains("unknown")
+            && error.contains("claude-code")
+            && error.contains("openai-codex"),
+        "{error}"
+    );
     mission.steps.push(Step {
         id: "unreachable".into(),
-        formation: "solo".into(),
+        formation: ahjo_mission_model::Formation::Solo,
         slots: vec![Slot {
             id: "bad".into(),
-            harness: "unknown".into(),
-            effort: "medium".into(),
+            harness: ahjo_mission_model::Harness::ClaudeCode,
+            effort: ahjo_mission_model::Effort::Ultra,
             ..Default::default()
         }],
         ..Default::default()
     });
     mission.steps.push(Step {
         id: "unreachable_unstaffed".into(),
-        formation: "solo".into(),
+        formation: ahjo_mission_model::Formation::Solo,
         slots: vec![Slot {
             id: "empty".into(),
             ..Default::default()

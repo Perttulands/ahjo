@@ -29,9 +29,9 @@ impl MissionsPage {
     pub(super) fn draft_staffing(&self, cx: &Context<Self>) -> Staffing {
         Staffing {
             role: self.role.read(cx).text.clone(),
-            harness: self.harness.read(cx).text.clone(),
+            harness: self.harness.read(cx).text.parse().unwrap_or_default(),
             model: self.model.read(cx).text.clone(),
-            effort: self.effort.read(cx).text.clone(),
+            effort: self.effort.read(cx).text.parse().unwrap_or_default(),
         }
     }
 
@@ -84,7 +84,7 @@ impl MissionsPage {
                 "Harness",
                 Part::Harness,
                 choices.harnesses,
-                &staff.harness,
+                staff.harness.as_str(),
                 cx,
             ))
             .child(row("Model", Part::Model, choices.models, &staff.model, cx))
@@ -92,7 +92,7 @@ impl MissionsPage {
                 "Effort",
                 Part::Effort,
                 choices.efforts,
-                &staff.effort,
+                staff.effort.as_str(),
                 cx,
             ))
             .when(self.roles.is_none(), |d| {
@@ -108,10 +108,11 @@ impl MissionsPage {
         match part {
             Part::Role => staff.role = id.to_owned(),
             Part::Harness => {
+                let Ok(harness) = id.parse() else { return };
                 if let Some(catalog) = &self.roles {
-                    staffing::pick_harness(catalog, &mut staff, id);
+                    staffing::pick_harness(catalog, &mut staff, harness);
                 } else {
-                    staff.harness = id.to_owned();
+                    staff.harness = harness;
                 }
             }
             Part::Model => {
@@ -121,13 +122,16 @@ impl MissionsPage {
                     staff.model = id.to_owned();
                 }
             }
-            Part::Effort => staff.effort = id.to_owned(),
+            Part::Effort => {
+                let Ok(effort) = id.parse() else { return };
+                staff.effort = effort;
+            }
         }
         for (field, value) in [
-            (&self.role, &staff.role),
-            (&self.harness, &staff.harness),
-            (&self.model, &staff.model),
-            (&self.effort, &staff.effort),
+            (&self.role, staff.role.as_str()),
+            (&self.harness, staff.harness.as_str()),
+            (&self.model, staff.model.as_str()),
+            (&self.effort, staff.effort.as_str()),
         ] {
             if field.read(cx).text != *value {
                 field.update(cx, |f, cx| f.set(value, false, cx));
@@ -136,12 +140,12 @@ impl MissionsPage {
         // A pick staffs the slot at once: no separate Assign, nothing for
         // Save. One made during another write follows when that lands. A
         // harness comes with an effort, so the slot is never half set.
-        if !staff.harness.is_empty() && staff.effort.is_empty() {
-            staff.effort = staffing::usual_effort(&staff.role).to_owned();
+        if !staff.harness.is_unset() && staff.effort.is_unset() {
+            staff.effort = staffing::usual_effort(&staff.role);
             self.effort
-                .update(cx, |f, cx| f.set(&staff.effort, false, cx));
+                .update(cx, |f, cx| f.set(staff.effort.as_str(), false, cx));
         }
-        let complete = staff.harness.is_empty() || !staff.effort.is_empty();
+        let complete = staff.harness.is_unset() || !staff.effort.is_unset();
         if complete && self.writing {
             self.staff_pending = true;
         } else if complete {

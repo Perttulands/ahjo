@@ -108,7 +108,13 @@ fn old_documents_keep_data_comments_and_backups_until_their_next_save() {
     );
     assert_eq!(mission.mission.steps[0].slots[0].agent_id, "writer");
     assert_eq!(mission.mission.gates[0].check_value, "hello");
-    assert_eq!(mission.mission.gates[0].kinds, ["human", "step"]);
+    assert_eq!(
+        mission.mission.gates[0].kinds,
+        [
+            ahjo_mission_model::GateKind::Human,
+            ahjo_mission_model::GateKind::Step
+        ]
+    );
     assert_eq!(mission.mission.limits[0].warn_seconds, Some(10));
     assert_eq!(layout.layout.schema, 2);
     assert_eq!(layout.layout.nodes[0].x, 42);
@@ -212,13 +218,22 @@ connection = [{ id = "edge", from = "fmn_work:out", to = "end_done:in" }]
     let mission = store.mission_edit("old").unwrap();
     assert_eq!(mission.mission.schema, 3);
     assert_eq!(mission.mission.steps[0].id, "fmn_work");
-    assert_eq!(mission.mission.steps[0].formation, "solo");
+    assert_eq!(
+        mission.mission.steps[0].formation,
+        ahjo_mission_model::Formation::Solo
+    );
     assert_eq!(mission.mission.steps[0].title, "formation");
     assert_eq!(
         mission.mission.steps[0].brief.as_ref().unwrap().goal,
         "formation"
     );
-    assert_eq!(mission.mission.gates[0].kinds, ["human", "step"]);
+    assert_eq!(
+        mission.mission.gates[0].kinds,
+        [
+            ahjo_mission_model::GateKind::Human,
+            ahjo_mission_model::GateKind::Step
+        ]
+    );
     assert_eq!(mission.mission.gates[0].criterion, "formation");
     assert_eq!(std::fs::read_to_string(backup(&path)).unwrap(), MISSION);
     let migrated = std::fs::read_to_string(&path).unwrap();

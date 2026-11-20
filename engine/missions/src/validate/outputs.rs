@@ -6,38 +6,25 @@ use std::collections::HashSet;
 use super::inputs::valid_name;
 use super::possessive;
 use crate::graph::split_endpoint;
-use ahjo_mission_model::{
-    Code, Finding, KIND_FILE, KIND_FOLDER, KIND_TEXT, Mission, MissionOutput, Port,
-};
-
-const KINDS: [&str; 3] = [KIND_TEXT, KIND_FILE, KIND_FOLDER];
+use ahjo_mission_model::{Code, Finding, Mission, MissionOutput, Port, PortKind};
 
 /// Only output ports carry a kind, and it is text, file or folder.
 pub fn port_kind_findings(mission: &Mission) -> Vec<Finding> {
     let mut findings = Vec::new();
     for step in &mission.steps {
         let owner = possessive(mission.node_name(&step.id));
-        for port in step.inputs.iter().filter(|port| port.kind() != KIND_TEXT) {
-            findings.push(Finding::new(
-                Code::InvalidPortKind,
-                &step.id,
-                format!(
-                    "{owner} input {} has kind {:?}; only output ports carry a kind",
-                    port.id, port.kind
-                ),
-            ));
-        }
         for port in step
-            .outputs
+            .inputs
             .iter()
-            .filter(|port| !KINDS.contains(&port.kind()))
+            .filter(|port| port.kind() != PortKind::Text)
         {
             findings.push(Finding::new(
                 Code::InvalidPortKind,
                 &step.id,
                 format!(
-                    "{owner} output {} has kind {:?}; use text, file or folder",
-                    port.id, port.kind
+                    "{owner} input {} has kind {:?}; only output ports carry a kind",
+                    port.id,
+                    port.kind.as_str()
                 ),
             ));
         }
@@ -78,7 +65,7 @@ pub fn mission_output_findings(mission: &Mission) -> Vec<Finding> {
                 );
                 continue;
             };
-            let kind = output_kind(output);
+            let kind = output.kind.effective();
             if port.kind() != kind {
                 add(
                     Code::MissionOutputKindMismatch,
@@ -95,24 +82,11 @@ pub fn mission_output_findings(mission: &Mission) -> Vec<Finding> {
     findings
 }
 
-fn output_kind(output: &MissionOutput) -> &str {
-    if output.kind.is_empty() {
-        KIND_TEXT
-    } else {
-        &output.kind
-    }
-}
-
 fn declaration_problem(output: &MissionOutput, seen: &HashSet<&str>) -> Option<String> {
-    let (name, kind) = (&output.name, output_kind(output));
+    let name = &output.name;
     if !valid_name(name) {
         return Some(format!(
             "output name {name:?} must start with a lowercase letter and hold only lowercase letters, digits and underscores, such as report or site_dir"
-        ));
-    }
-    if !KINDS.contains(&kind) {
-        return Some(format!(
-            "output {name} has kind {kind:?}; use text, file or folder"
         ));
     }
     if seen.contains(name.as_str()) {

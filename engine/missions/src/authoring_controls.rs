@@ -1,6 +1,8 @@
 //! End, Limit and gate field edits.
 use crate::Error;
-use ahjo_mission_model::{Gate, LayoutNode, Limit, Mission, MissionChange};
+use ahjo_mission_model::{
+    EndOutcome, Gate, GateKind, LayoutNode, Limit, Mission, MissionChange, WhenSpent,
+};
 use toml_edit::{DocumentMut, Item, value};
 fn missing() -> Error {
     Error::new("not_found", "node")
@@ -24,12 +26,9 @@ fn check_limit(mission: &Mission, limit: &mut Limit) -> Result<(), Error> {
     if limit.title.is_empty() {
         limit.title = "Limit".into();
     }
-    limit.when_spent = match limit.when_spent.trim() {
-        "" | "stop" => "".into(),
-        "best" => "best".into(),
-        "fail" => "fail".into(),
-        _ => return Err(Error::new("invalid_limit", "invalid when_spent")),
-    };
+    if limit.when_spent == WhenSpent::Stop {
+        limit.when_spent = WhenSpent::Unset;
+    }
     if !limit.target.is_empty()
         && !mission.has_input_card(&limit.target)
         && mission.step(&limit.target).is_none()
@@ -86,27 +85,15 @@ pub(crate) fn create_limit(
     Ok(LayoutNode { id: limit.id, x, y })
 }
 pub(crate) fn check_gate(gate: &mut Gate) -> Result<(), Error> {
-    let mut kinds = Vec::new();
-    for kind in &gate.kinds {
-        let kind = kind.trim();
-        if !["code", "step", "human"].contains(&kind) {
-            return Err(Error::new(
-                "invalid_gate_kind",
-                format!("invalid gate kind {kind:?}: a gate is human, step (a judge) or code"),
-            ));
-        }
-        if !kinds.iter().any(|k| k == kind) {
-            kinds.push(kind.to_owned());
-        }
-    }
-    if kinds.is_empty() {
+    let mut seen = std::collections::HashSet::new();
+    gate.kinds.retain(|kind| seen.insert(*kind));
+    if gate.kinds.is_empty() {
         return Err(Error::new("invalid_gate_kind", "gate needs a kind"));
     }
-    gate.kinds = kinds;
     crate::authoring_create::file_refs(&mut gate.files)?;
     let has_check_profile =
         !gate.check.is_empty() || !gate.check_version.is_empty() || !gate.check_value.is_empty();
-    if has_check_profile && !gate.kinds.iter().any(|k| k == "code") {
+    if has_check_profile && !gate.kinds.contains(&GateKind::Code) {
         return Err(Error::new(
             "invalid_code_gate_profile",
             "check needs code kind",
@@ -133,12 +120,9 @@ pub(crate) fn update(
     match patch {
         MissionChange::UpdateEnd(u) => {
             let old = mission.end(&u.id).ok_or_else(missing)?;
-            let outcome = match u.outcome.as_deref().unwrap_or(&old.outcome).trim() {
-                "" | "done" => "done",
-                "rejected" => "rejected",
-                _ => {
-                    return Err(Error::new("invalid_end_outcome", "invalid outcome"));
-                }
+            let outcome = match u.outcome.unwrap_or(old.outcome) {
+                EndOutcome::Unset => EndOutcome::Done,
+                outcome => outcome,
             };
             let title = u.title.as_deref().unwrap_or(&old.title);
             if title == old.title && outcome == old.outcome {
@@ -149,7 +133,7 @@ pub(crate) fn update(
                 crate::write::set(table, "title", value(title));
             }
             if outcome != old.outcome {
-                crate::write::set(table, "outcome", value(outcome));
+                crate::write::set(table, "outcome", value(outcome.as_str()));
             }
         }
         MissionChange::UpdateLimit(u) => {
@@ -186,15 +170,19 @@ pub(crate) fn update(
             }
             let table = table(doc, "limit", &u.id)?;
             for (key, before, after) in [
-                ("title", &old.title, &next.title),
-                ("target", &old.target, &next.target),
-                ("when_spent", &old.when_spent, &next.when_spent),
+                ("title", old.title.as_str(), next.title.as_str()),
+                ("target", old.target.as_str(), next.target.as_str()),
+                (
+                    "when_spent",
+                    old.when_spent.as_str(),
+                    next.when_spent.as_str(),
+                ),
             ] {
                 if before != after {
                     if key == "when_spent" && after.is_empty() {
                         table.remove(key);
                     } else {
-                        crate::write::set(table, key, value(after.clone()));
+                        crate::write::set(table, key, value(after));
                     }
                 }
             }
@@ -241,7 +229,7 @@ pub(crate) fn update(
             if let Some(v) = u.files {
                 next.files = v;
             }
-            if !next.kinds.iter().any(|k| k == "code") {
+            if !next.kinds.contains(&GateKind::Code) {
                 if sets_check
                     && !(next.check.is_empty()
                         && next.check_version.is_empty()
@@ -259,7 +247,7 @@ pub(crate) fn update(
             if sets_kinds || sets_check || sets_files {
                 let mut check = next.clone();
                 if !sets_kinds {
-                    check.kinds = vec!["code".into(), "step".into(), "human".into()];
+                    check.kinds = GateKind::ALL.to_vec();
                 }
                 if !sets_check {
                     check.check.clear();
@@ -296,23 +284,19 @@ pub(crate) fn update(
                     }
                 }
             }
-            for (key, before, after) in [
-                ("kinds", &old.kinds, &next.kinds),
-                ("files", &old.files, &next.files),
-            ] {
-                if before != after {
-                    if after.is_empty() {
-                        table.remove(key);
-                    } else {
-                        let mut a = toml_edit::Array::new();
-                        for s in after {
-                            a.push(s.as_str());
-                        }
-                        crate::write::set(table, key, value(a));
-                    }
+            if old.kinds != next.kinds {
+                let kinds: toml_edit::Array = next.kinds.iter().map(|kind| kind.as_str()).collect();
+                crate::write::set(table, "kinds", value(kinds));
+            }
+            if old.files != next.files {
+                if next.files.is_empty() {
+                    table.remove("files");
+                } else {
+                    let files: toml_edit::Array = next.files.iter().map(String::as_str).collect();
+                    crate::write::set(table, "files", value(files));
                 }
             }
-            if old.kinds.iter().any(|k| k == "step") && !next.kinds.iter().any(|k| k == "step") {
+            if old.kinds.contains(&GateKind::Step) && !next.kinds.contains(&GateKind::Step) {
                 let endpoint = format!("{}:judge", u.id);
                 if let Some(wires) = doc
                     .get_mut("connection")

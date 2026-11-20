@@ -177,9 +177,9 @@ impl SeatExecutor {
             slot_id: slot.id.clone(),
             name,
             keep,
-            harness: slot.harness.clone(),
+            harness: slot.harness.as_str().to_owned(),
             model: slot.model.clone(),
-            effort: slot.effort.clone(),
+            effort: slot.effort.as_str().to_owned(),
             cwd: request.cwd.clone(),
             brief: prompt.into(),
             reuse_dispatch: original.map(str::to_owned),
@@ -949,7 +949,7 @@ impl Executor for SeatExecutor {
                 .map_err(|e| format!("seat_ledger_unavailable: {e}"))?;
                 request.cwd = cwd;
             }
-            if request.step.formation == "orchestrated" {
+            if request.step.formation == ahjo_mission_model::Formation::Orchestrated {
                 return self.orchestrate(&request, &slot, &sink);
             }
             let prompt = brief::render(&request, &slot);

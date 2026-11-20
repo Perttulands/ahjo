@@ -4,7 +4,7 @@
 use std::collections::HashSet;
 
 use super::possessive;
-use ahjo_mission_model::{Code, Finding, KIND_FILE, KIND_FOLDER, KIND_TEXT, Mission, MissionInput};
+use ahjo_mission_model::{Code, Finding, Mission, MissionInput};
 
 /// The input of a mission that declares none.
 pub const IMPLICIT_INPUT: &str = "brief";
@@ -66,20 +66,10 @@ pub fn findings(mission: &Mission) -> Vec<Finding> {
 }
 
 fn declaration_problem(input: &MissionInput, seen: &HashSet<&str>) -> Option<String> {
-    let kind = if input.kind.is_empty() {
-        KIND_TEXT
-    } else {
-        input.kind.as_str()
-    };
     let name = &input.name;
     if !valid_name(name) {
         return Some(format!(
             "input name {name:?} must start with a lowercase letter and hold only lowercase letters, digits and underscores, such as brief or target_repo"
-        ));
-    }
-    if ![KIND_TEXT, KIND_FILE, KIND_FOLDER].contains(&kind) {
-        return Some(format!(
-            "input {name} has kind {kind:?}; use text, file or folder"
         ));
     }
     seen.contains(name.as_str())

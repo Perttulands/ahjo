@@ -47,7 +47,7 @@ pub fn handover(
                 .inputs
                 .iter()
                 .map(|value| {
-                    let mut words = format!("{} ({}", value.name, kind(&value.kind));
+                    let mut words = format!("{} ({}", value.name, value.kind.effective());
                     words.push_str(if value.required { ")" } else { ", optional)" });
                     if !value.description.is_empty() {
                         words.push_str(&format!(": {}", value.description));
@@ -228,7 +228,7 @@ pub fn handover(
             HandoverEnd {
                 id: end.id.clone(),
                 end: end.title.clone(),
-                outcome: end.outcome.clone(),
+                outcome: end.outcome.as_str().to_owned(),
                 notes: thread(notes, &end.id),
             }
         })
@@ -314,10 +314,6 @@ fn minute(at: &str) -> String {
     at.chars().take(16).collect::<String>().replace('T', " ")
 }
 
-fn kind(kind: &str) -> &str {
-    if kind.is_empty() { "text" } else { kind }
-}
-
 /// The named session each seat asks for. A fresh step gets a run- and
 /// attempt-specific session when it executes.
 fn worker(prefix: &str, step: &Step, include_brief: bool) -> HandoverWorker {
@@ -359,9 +355,13 @@ fn who(slots: &[Slot]) -> String {
                 slot.agent.clone()
             }];
             words[0].push(':');
-            for part in [&slot.harness, &slot.model, &slot.effort] {
+            for part in [
+                slot.harness.as_str(),
+                slot.model.as_str(),
+                slot.effort.as_str(),
+            ] {
                 if !part.is_empty() {
-                    words.push(part.clone());
+                    words.push(part.to_owned());
                 }
             }
             if !slot.agent_id.is_empty() {

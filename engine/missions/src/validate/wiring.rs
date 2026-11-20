@@ -7,7 +7,9 @@ use std::collections::{HashMap, HashSet};
 use super::possessive;
 use crate::code_check::{code_check, code_check_names};
 use crate::graph::{self, Direction};
-use ahjo_mission_model::{Code, Finding, GATE_FAIL, GATE_PASS, Gate, Mission};
+use ahjo_mission_model::{
+    Code, Finding, GATE_FAIL, GATE_PASS, Gate, GateKind, HumanChannel, Mission,
+};
 
 pub fn connection_findings(mission: &Mission) -> Vec<Finding> {
     let mut findings = Vec::new();
@@ -76,25 +78,22 @@ pub fn gate_findings(mission: &Mission) -> Vec<Finding> {
 /// What a gate still needs before a run can route through it.
 fn route_gaps(mission: &Mission, gate: &Gate) -> Vec<String> {
     if gate.kinds.is_empty() {
-        return vec!["a kind: code, step or human".to_owned()];
+        return vec!["at least one kind".to_owned()];
     }
     let mut gaps = Vec::new();
     let mut seen = HashSet::new();
     for kind in &gate.kinds {
-        if !seen.insert(kind.as_str()) {
+        if !seen.insert(*kind) {
             continue;
         }
-        match kind.as_str() {
-            "code" => gaps.extend(code_check_gap(gate)),
-            "step" if graph::judge_chain(mission, &gate.id).is_empty() => {
+        match kind {
+            GateKind::Code => gaps.extend(code_check_gap(gate)),
+            GateKind::Step if graph::judge_chain(mission, &gate.id).is_empty() => {
                 gaps.push(
                     "a judge chain wired from its judge port through a step and back".to_owned(),
                 );
             }
-            "step" | "human" => {}
-            other => gaps.push(format!(
-                "a supported kind in place of {other:?} (code, step or human)"
-            )),
+            GateKind::Step | GateKind::Human => {}
         }
     }
     gaps
@@ -222,18 +221,6 @@ pub fn input_card_findings(mission: &Mission) -> Vec<Finding> {
             ));
         }
     }
-    for card in &mission.input_cards {
-        if !matches!(card.human_channel.trim(), "" | "notify" | "session") {
-            findings.push(Finding::new(
-                Code::InvalidHumanChannel,
-                &card.id,
-                format!(
-                    "Input card {:?} has human channel {:?}; set it to notify or session",
-                    card.id, card.human_channel
-                ),
-            ));
-        }
-    }
     findings
 }
 
@@ -242,10 +229,10 @@ pub fn unsupported_human_channels(mission: &Mission) -> Vec<Finding> {
     let reached: std::collections::HashSet<String> = mission
         .input_cards
         .iter()
-        .filter(|card| card.human_channel.trim() == "session")
+        .filter(|card| card.human_channel == HumanChannel::Session)
         .flat_map(|card| graph::reachable(mission, &card.id))
         .collect();
-    mission.gates.iter().filter(|gate| reached.contains(&gate.id) && gate.kinds.iter().any(|kind| kind == "human"))
+    mission.gates.iter().filter(|gate| reached.contains(&gate.id) && gate.kinds.contains(&GateKind::Human))
         .map(|gate| Finding::new(Code::UnsupportedHumanChannel, &gate.id, format!("human gate {:?} uses a session channel, which is not supported; set the Input card channel to notify", gate.id)))
         .collect()
 }

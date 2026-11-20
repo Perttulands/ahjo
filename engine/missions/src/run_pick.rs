@@ -200,7 +200,11 @@ pub(crate) fn start(
     trigger: &str,
 ) -> io::Result<()> {
     let mut data = json!({"node_id":step,"gate_id":pick.gate.id,"trigger":trigger,"limit":use_,"candidates":pick.candidates});
-    if pick.gate.kinds.iter().any(|kind| kind == "step") {
+    if pick
+        .gate
+        .kinds
+        .contains(&ahjo_mission_model::GateKind::Step)
+    {
         let chain: Vec<_> = (crate::graph::judge_chain(mission, &pick.gate.id).into_iter())
             .map(|judge| judge.id.clone())
             .collect();
@@ -576,14 +580,14 @@ pub(crate) fn advance(
         }
         let input = pick_input(id, mission, gate, started, &details);
         let attempts: Vec<_> = details.iter().map(|detail| detail.attempt).collect();
-        if gate.kinds.iter().any(|kind| kind == "step") {
+        if gate.kinds.contains(&ahjo_mission_model::GateKind::Step) {
             if crate::graph::judge_chain(mission, &gate.id).is_empty() {
                 return Err(invalid(&format!("gate {:?} has no judge chain", gate.id)));
             }
             spawn_judges(context, gate.clone(), started.clone(), input, attempts);
             return Ok(PickAction::Judging(gate.id.clone()));
         }
-        if !gate.kinds.iter().any(|kind| kind == "human") {
+        if !gate.kinds.contains(&ahjo_mission_model::GateKind::Human) {
             return Err(invalid(&format!(
                 "gate {:?} has no judge or human to pick",
                 gate.id
@@ -764,7 +768,7 @@ impl Judging<'_> {
         match parse_pick(&final_text, attempts) {
             Ok(mut choice) => {
                 choice.decided_by = judge;
-                if gate.kinds.iter().any(|kind| kind == "human") {
+                if gate.kinds.contains(&ahjo_mission_model::GateKind::Human) {
                     let events = c.ledger(id)?.read().map_err(crate::error::to_io)?;
                     let details = details(c, id, &events, started)?;
                     let input = pick_input(id, mission, gate, started, &details);

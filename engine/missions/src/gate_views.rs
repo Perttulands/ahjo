@@ -122,7 +122,7 @@ impl Coordinator {
                         };
                         let picks_best = spent.as_ref().map(|spent| {
                             crate::limits::card(&mission, &spent.limit_id)
-                                .is_some_and(|card| card.when_spent == "best")
+                                .is_some_and(|card| card.when_spent == ahjo_mission_model::WhenSpent::Best)
                                 && crate::run_pick::pick_for(&mission, &events, node, spent)
                                     .is_some_and(|pick| crate::run_pick::judged_since_last_pick(&events, node, &pick.candidates))
                         });
@@ -131,7 +131,7 @@ impl Coordinator {
                             picks_best, spent_limit: spent.map(DecisionLimit::from),
                         })
                     } else if let Some(end) = mission.end(node) {
-                        Some(DecisionTargetKind::End { title: end.title.clone(), outcome: end.outcome.clone() })
+                        Some(DecisionTargetKind::End { title: end.title.clone(), outcome: end.outcome.as_str().to_owned() })
                     } else {
                         mission.gate(node).map(|next| DecisionTargetKind::Gate { title: next.title.clone() })
                     };
@@ -143,7 +143,7 @@ impl Coordinator {
                 // other active work or pending gate remains.
                 let rejected = targets.iter().any(|target| {
                     matches!(&target.detail, Some(DecisionTargetKind::End {outcome, ..}) if outcome == "rejected")
-                }) || replay.ended.iter().any(|delivery| delivery.outcome == "rejected");
+                }) || replay.ended.iter().any(|delivery| delivery.outcome == ahjo_mission_model::EndOutcome::Rejected);
                 let starved = mission.steps.iter().any(|step| replay.ports.get(&step.id).is_some_and(|ports| ports.values().any(|(_, unread)| *unread) && step.inputs.iter().any(|port| !ports.contains_key(&port.id))));
                 let ready = mission.steps.iter().any(|step| replay.ports.get(&step.id).is_some_and(|ports| ports.values().any(|(_, unread)| *unread) && step.inputs.iter().all(|port| ports.contains_key(&port.id))));
                 let ends_run = !ready && (rejected || !starved) && !targets.is_empty()

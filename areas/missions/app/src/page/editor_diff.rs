@@ -3,7 +3,7 @@
 use super::*;
 use crate::store::staffing::Staffing;
 use ahjo_missions_contract::{
-    EndUpdate, GateUpdate, InputCardUpdate, LimitUpdate, Mission, MissionOutput,
+    EndUpdate, GateKind, GateUpdate, InputCardUpdate, LimitUpdate, Mission, MissionOutput,
 };
 
 fn changed<T: PartialEq>(
@@ -43,6 +43,18 @@ fn number(value: &str, name: &str) -> Result<i64, String> {
         .parse()
         .map_err(|_| format!("{name} must be a whole number"))
 }
+fn enum_value<T: std::str::FromStr<Err = String>>(
+    raw: &str,
+    problems: &mut Vec<String>,
+) -> Option<T> {
+    match raw.trim().parse() {
+        Ok(value) => Some(value),
+        Err(error) => {
+            problems.push(error);
+            None
+        }
+    }
+}
 fn output_values(outputs: &[MissionOutput]) -> Vec<(String, String, String, bool, String)> {
     outputs
         .iter()
@@ -50,7 +62,7 @@ fn output_values(outputs: &[MissionOutput]) -> Vec<(String, String, String, bool
             (
                 o.name.clone(),
                 o.description.clone(),
-                o.kind.clone(),
+                o.kind.as_str().to_owned(),
                 o.required,
                 o.from.clone(),
             )
@@ -86,6 +98,11 @@ fn operations(
     macro_rules! drafted {
         ($index:expr, $name:expr, $current:expr) => {
             compare!($index, $name, $current).then(|| draft.fields[$index].clone())
+        };
+    }
+    macro_rules! drafted_enum {
+        ($index:expr, $name:expr, $current:expr) => {
+            drafted!($index, $name, $current).and_then(|value| enum_value(&value, &mut problems))
         };
     }
     match kind {
@@ -141,12 +158,12 @@ fn operations(
                 let update = Staffing {
                     role: drafted!(10, "The slot's role", &current.role)
                         .unwrap_or_else(|| current.role.clone()),
-                    harness: drafted!(11, "The slot's harness", &current.harness)
-                        .unwrap_or_else(|| current.harness.clone()),
+                    harness: drafted_enum!(11, "The slot's harness", &current.harness)
+                        .unwrap_or(current.harness),
                     model: drafted!(12, "The slot's model", &current.model)
                         .unwrap_or_else(|| current.model.clone()),
-                    effort: drafted!(13, "The slot's effort", &current.effort)
-                        .unwrap_or_else(|| current.effort.clone()),
+                    effort: drafted_enum!(13, "The slot's effort", &current.effort)
+                        .unwrap_or(current.effort),
                 };
                 if update != current {
                     ops.push(undo::Step::board(update.assign(id, slot)));
@@ -159,7 +176,7 @@ fn operations(
                     ]);
                 };
                 let label = drafted!(14, "The port label", &current.label);
-                let kind = drafted!(15, "The port kind", &current.kind);
+                let kind = drafted_enum!(15, "The port kind", &current.kind);
                 if label.is_some() || kind.is_some() {
                     ops.push(undo::Step::board(MissionChange::UpdatePort {
                         step_id: id.into(),
@@ -179,7 +196,7 @@ fn operations(
             let mut update = InputCardUpdate {
                 title: drafted!(0, "The title", &card.title),
                 goal: drafted!(1, "The goal", &card.goal),
-                human_channel: drafted!(2, "The human channel", &card.human_channel),
+                human_channel: drafted_enum!(2, "The human channel", &card.human_channel),
                 ..Default::default()
             };
             if draft.outputs.iter().any(|o| o.0.trim().is_empty()) {
@@ -195,12 +212,14 @@ fn operations(
                 let outputs: Vec<_> = draft
                     .outputs
                     .iter()
-                    .map(|(name, description, kind, required, from)| MissionOutput {
-                        name: name.clone(),
-                        description: description.clone(),
-                        kind: kind.clone(),
-                        required: *required,
-                        from: from.clone(),
+                    .filter_map(|(name, description, kind, required, from)| {
+                        Some(MissionOutput {
+                            name: name.clone(),
+                            description: description.clone(),
+                            kind: enum_value(kind, &mut problems)?,
+                            required: *required,
+                            from: from.clone(),
+                        })
                     })
                     .collect();
                 update.outputs = Some(outputs);
@@ -217,12 +236,21 @@ fn operations(
             let mut update = GateUpdate {
                 title: drafted!(0, "The title", &gate.title),
                 criterion: drafted!(1, "The criterion", &gate.criterion),
-                kinds: drafted!(2, "Who decides", gate.kinds.join(",")).map(|kinds| {
+                kinds: drafted!(
+                    2,
+                    "Who decides",
+                    gate.kinds
+                        .iter()
+                        .map(|kind| kind.as_str())
+                        .collect::<Vec<_>>()
+                        .join(",")
+                )
+                .map(|kinds| {
                     kinds
                         .split(',')
                         .map(str::trim)
                         .filter(|kind| !kind.is_empty())
-                        .map(str::to_owned)
+                        .filter_map(|kind| enum_value::<GateKind>(kind, &mut problems))
                         .collect()
                 }),
                 files: drafted!(5, "The files", gate.files.join("\n")).map(|files| lines(&files)),
@@ -242,7 +270,7 @@ fn operations(
             };
             let mut update = EndUpdate {
                 title: drafted!(0, "The title", &end.title),
-                outcome: drafted!(2, "The outcome", &end.outcome),
+                outcome: drafted_enum!(2, "The outcome", &end.outcome),
                 ..Default::default()
             };
             if update != EndUpdate::default() {
@@ -274,7 +302,7 @@ fn operations(
             seconds: knob(18, "The limit time", limit.seconds),
             warn_seconds: knob(19, "The warning time", limit.warn_seconds),
             tokens: knob(20, "The token limit", limit.tokens),
-            when_spent: drafted!(21, "What the limit does", &limit.when_spent),
+            when_spent: drafted_enum!(21, "What the limit does", &limit.when_spent),
             ..Default::default()
         };
         if update != LimitUpdate::default() {

@@ -30,8 +30,8 @@ id = "out"
 id = "open"
 [[step.slot]]
 id = "invalid"
-harness = "wrong"
-effort = "low"
+harness = "claude-code"
+effort = "ultra"
 [[step.slot]]
 id = "unavailable"
 harness = "claude-code"

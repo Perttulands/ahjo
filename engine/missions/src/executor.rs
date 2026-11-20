@@ -283,7 +283,7 @@ impl Executor for LabExecutor {
             ));
             for port in &request.step.outputs {
                 brief.push_str(&format!("output port: {} kind: {}\n", port.id, port.kind()));
-                if port.kind() != "text" {
+                if port.kind() != ahjo_mission_model::PortKind::Text {
                     brief.push_str(
                         "The ref must be the absolute path; text is a one-line summary.\n",
                     );
@@ -444,10 +444,12 @@ fn lab_result(request: &StepExecution) -> Result<StepResult, String> {
             text.clone()
         };
         let mut payload = json!({"text":output});
-        if port.kind() == "file" || port.kind() == "folder" {
+        if port.kind() == ahjo_mission_model::PortKind::File
+            || port.kind() == ahjo_mission_model::PortKind::Folder
+        {
             std::fs::create_dir_all(&request.artifact_dir).map_err(|e| e.to_string())?;
             let path = request.artifact_dir.join(format!("lab-output-{index}"));
-            let file = if port.kind() == "folder" {
+            let file = if port.kind() == ahjo_mission_model::PortKind::Folder {
                 std::fs::create_dir(&path).map_err(|e| e.to_string())?;
                 path.join("index.md")
             } else {

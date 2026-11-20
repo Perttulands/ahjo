@@ -238,7 +238,9 @@ fn catalog_pickers_offer_sorted_roles_and_model_efforts_and_save_the_choice(
     };
     until(cx, "staffing saved", |_| {
         let (_, slot) = read();
-        slot.agent_id == "planner" && slot.model == "gpt-6" && slot.effort == "high"
+        slot.agent_id == "planner"
+            && slot.model == "gpt-6"
+            && slot.effort == ahjo_missions_contract::Effort::High
     });
     let (rev, original) = read();
     until(cx, "history ready after staffing", |cx| {
@@ -249,9 +251,9 @@ fn catalog_pickers_offer_sorted_roles_and_model_efforts_and_save_the_choice(
     until(cx, "harness change saved", |_| {
         let (now, slot) = read();
         now == rev + 1
-            && slot.harness == "claude-code"
+            && slot.harness == ahjo_missions_contract::Harness::ClaudeCode
             && slot.model.is_empty()
-            && slot.effort == "medium"
+            && slot.effort == ahjo_missions_contract::Effort::Medium
     });
     until(cx, "undo ready after harness change", |cx| {
         cx.debug_bounds("undo").is_some()

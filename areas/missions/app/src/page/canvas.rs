@@ -1,7 +1,7 @@
 //! Mission canvas interaction, adapted from the original Missions page.
 use super::*;
 use ahjo_app_kit::widgets::boundary;
-use ahjo_missions_contract::{LayoutNode, Mission};
+use ahjo_missions_contract::{EndOutcome, GateKind, HumanChannel, LayoutNode, Mission, WhenSpent};
 use gpui::{
     AnyElement, Bounds, Hsla, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent,
     PathBuilder, Pixels, Point, ScrollEvent, SharedString, Stateful, canvas, point,
@@ -723,7 +723,7 @@ impl MissionsPage {
                 if mission
                     .ends
                     .iter()
-                    .any(|e| e.id == card.id && e.outcome == "rejected")
+                    .any(|e| e.id == card.id && e.outcome == EndOutcome::Rejected)
                 {
                     t.error
                 } else {
@@ -1378,22 +1378,22 @@ fn card_face(
                         .items_end()
                         .gap(px(CHIP_PAD * z))
                         // A step is worked by one agent unless it says otherwise.
-                        .when(f.formation != "solo", |d| {
-                            d.child(chip(z, &f.formation, t.text2))
+                        .when(f.formation != Formation::Solo, |d| {
+                            d.child(chip(z, f.formation.as_str(), t.text2))
                         })
                         // Each attempt in sessions of its own.
                         .when(f.fresh, |d| d.child(chip(z, "fresh", t.text2))),
                 );
             face = face.child(head);
             let mut body = div()
-                .h(px(board::body_h(&f.formation, f.slots.len()) * z))
+                .h(px(board::body_h(f.formation, f.slots.len()) * z))
                 .flex_none()
                 .px(px(SLOT_PAD * z))
                 .py(px(board::BODY_PAD * z))
                 .flex()
                 .flex_col()
                 .gap(px(board::SLOT_GAP * z));
-            if board::pooled(&f.formation) {
+            if board::pooled(f.formation) {
                 for slot in f.slots.iter().filter(|slot| slot.controller) {
                     body = body.child(slot_row(t, mission, f, slot, z));
                 }
@@ -1411,7 +1411,7 @@ fn card_face(
                     .rounded(px(GAP * z))
                     .child(
                         label(
-                            if f.formation == "peer" {
+                            if f.formation == Formation::Peer {
                                 "PEERS"
                             } else {
                                 "WORKERS"
@@ -1641,7 +1641,7 @@ fn card_face(
             let Some(e) = mission.ends.iter().find(|e| e.id == card.id) else {
                 return div();
             };
-            let colour = if e.outcome == "rejected" {
+            let colour = if e.outcome == EndOutcome::Rejected {
                 t.error
             } else {
                 t.done
@@ -1716,12 +1716,12 @@ fn slot_row(
 ) -> Div {
     let role = (!slot.agent_id.is_empty()).then(|| crate::store::words::role_name(&slot.agent_id));
     let session = crate::store::words::session_of(mission, f, slot);
-    let mark = harness_mark(&slot.harness, t.text, t.text2, z);
+    let mark = harness_mark(slot.harness.as_str(), t.text, t.text2, z);
     let selector = format!(
         "canvas-seat-{}-{}-{}",
         crate::store::words::slot_label(slot),
         crate::store::words::role_name(&slot.agent_id),
-        crate::store::words::harness_name(&slot.harness)
+        crate::store::words::harness_name(slot.harness.as_str())
     );
     let ring = div()
         .size(px(RING_SIZE * z))
@@ -1837,7 +1837,7 @@ pub(super) fn asks_you(mission: &Mission) -> bool {
     mission
         .gates
         .iter()
-        .any(|gate| gate.kinds.iter().any(|kind| kind == "human"))
+        .any(|gate| gate.kinds.contains(&GateKind::Human))
 }
 
 impl MissionsPage {
@@ -2086,24 +2086,24 @@ fn new_card_items(
         (
             "canvas-new-solo",
             "Solo step",
-            new_step("solo", "New step", x, y),
+            new_step(Formation::Solo, "New step", x, y),
         ),
         (
             "canvas-new-orch",
             "Orchestrated step",
-            new_step("orchestrated", "New step", x, y),
+            new_step(Formation::Orchestrated, "New step", x, y),
         ),
         ("canvas-new-gate", "Gate", new_gate("Review gate", x, y)),
         ("canvas-new-limit", "Limit", new_limit("", x, y)),
         (
             "canvas-new-done",
             "End · done",
-            new_end("Done", "done", x, y),
+            new_end("Done", EndOutcome::Done, x, y),
         ),
         (
             "canvas-new-rejected",
             "End · rejected",
-            new_end("Rejected", "rejected", x, y),
+            new_end("Rejected", EndOutcome::Rejected, x, y),
         ),
     ]
     .into_iter()
@@ -2113,9 +2113,9 @@ fn new_card_items(
 fn place_patch(kind: board::Kind, after: Option<&str>, x: i64, y: i64) -> MissionChange {
     match kind {
         board::Kind::Input => new_input(x, y),
-        board::Kind::Step => new_step("solo", "New step", x, y),
+        board::Kind::Step => new_step(Formation::Solo, "New step", x, y),
         board::Kind::Gate => new_gate("New gate", x, y),
-        board::Kind::End => new_end("End", "done", x, y),
+        board::Kind::End => new_end("End", EndOutcome::Done, x, y),
         board::Kind::Limit => new_limit(after.unwrap_or_default(), x, y),
     }
 }
@@ -2125,15 +2125,15 @@ fn new_input(x: i64, y: i64) -> MissionChange {
         title: "Input".into(),
         goal: String::new(),
         files: vec![],
-        human_channel: String::new(),
+        human_channel: HumanChannel::Unset,
         x,
         y,
     }
 }
 
-fn new_step(kind: &str, title: &str, x: i64, y: i64) -> MissionChange {
+fn new_step(kind: Formation, title: &str, x: i64, y: i64) -> MissionChange {
     MissionChange::CreateStep {
-        formation: kind.into(),
+        formation: kind,
         title: title.into(),
         x,
         y,
@@ -2143,7 +2143,7 @@ fn new_step(kind: &str, title: &str, x: i64, y: i64) -> MissionChange {
 fn new_gate(title: &str, x: i64, y: i64) -> MissionChange {
     MissionChange::CreateGate {
         title: title.into(),
-        kinds: vec!["human".into()],
+        kinds: vec![GateKind::Human],
         criterion: String::new(),
         check: String::new(),
         check_version: String::new(),
@@ -2154,10 +2154,10 @@ fn new_gate(title: &str, x: i64, y: i64) -> MissionChange {
     }
 }
 
-fn new_end(title: &str, outcome: &str, x: i64, y: i64) -> MissionChange {
+fn new_end(title: &str, outcome: EndOutcome, x: i64, y: i64) -> MissionChange {
     MissionChange::CreateEnd {
         title: title.into(),
-        outcome: outcome.into(),
+        outcome,
         x,
         y,
     }
@@ -2172,7 +2172,7 @@ fn new_limit(target: &str, x: i64, y: i64) -> MissionChange {
         seconds: None,
         warn_seconds: None,
         tokens: None,
-        when_spent: String::new(),
+        when_spent: WhenSpent::Unset,
         x,
         y,
     }

@@ -400,7 +400,12 @@ impl MissionsPage {
             input
                 .inputs
                 .iter()
-                .map(|i| (i.name.clone(), i.kind.is_empty() || i.kind == "text"))
+                .map(|i| {
+                    (
+                        i.name.clone(),
+                        i.kind.effective() == ahjo_missions_contract::PortKind::Text,
+                    )
+                })
                 .collect()
         };
         let Some(definition) = self

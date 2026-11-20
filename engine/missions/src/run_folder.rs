@@ -63,7 +63,7 @@ pub(crate) fn prepare(
     let only_one = mission.limits.iter().any(|card| {
         (card.target == node || mission.has_input_card(&card.target))
             && card.rounds == Some(1)
-            && card.when_spent == crate::limits::WHEN_SPENT_FAIL
+            && card.when_spent == ahjo_mission_model::WhenSpent::Fail
     });
     if gates.is_empty() || only_one {
         return Ok(workspace.to_path_buf());

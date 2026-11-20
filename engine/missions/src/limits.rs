@@ -20,8 +20,6 @@ pub(crate) const TIME: &str = "time";
 pub(crate) const TOKENS: &str = "tokens";
 /// The code of the error, block or failure a spent limit records.
 pub(crate) const LIMIT_REACHED: &str = "limit_reached";
-pub(crate) const WHEN_SPENT_BEST: &str = "best";
-pub(crate) const WHEN_SPENT_FAIL: &str = "fail";
 
 /// A Limit card's knob as the run used it: `used` of `max`, `max` counting
 /// the card's own value and every grant. Time is in whole seconds.
@@ -367,9 +365,11 @@ fn warning_text(mission: &Mission, limit: &Limit, left: i64) -> String {
     } else {
         "this step's"
     };
-    let ending = match limit.when_spent.as_str() {
-        WHEN_SPENT_FAIL => "fails, keeping the attempts as evidence",
-        WHEN_SPENT_BEST => "picks the best judged attempt, or waits if none is eligible",
+    let ending = match limit.when_spent {
+        ahjo_mission_model::WhenSpent::Fail => "fails, keeping the attempts as evidence",
+        ahjo_mission_model::WhenSpent::Best => {
+            "picks the best judged attempt, or waits if none is eligible"
+        }
         _ => "waits for the operator",
     };
     format!(

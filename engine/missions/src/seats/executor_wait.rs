@@ -104,7 +104,7 @@ fn execution(turn: Option<TurnWorkspace>, canceled: Arc<AtomicBool>) -> StepExec
         run_number: 0,
         step: Step {
             id: "fmn_build".into(),
-            formation: "solo".into(),
+            formation: ahjo_mission_model::Formation::Solo,
             device: "box/windows".into(),
             slots: vec![Slot {
                 id: "slot_1".into(),

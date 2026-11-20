@@ -24,9 +24,12 @@ pub fn findings(mission: &Mission, roles: &RoleStore, harnesses: &Harnesses) -> 
             // What the seat runs comes first, so a harness no seat can start
             // is named whatever role the slot has.
             let subject = format!("slot {name}");
-            if let Err(problem) =
-                harnesses.check(&subject, &slot.harness, &slot.model, &slot.effort)
-            {
+            if let Err(problem) = harnesses.check(
+                &subject,
+                slot.harness.as_str(),
+                &slot.model,
+                slot.effort.as_str(),
+            ) {
                 add(
                     Code::InvalidSlotSettings,
                     format!("step {id:?} {}", problem.message),

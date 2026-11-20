@@ -464,27 +464,27 @@ pub(super) fn port_patch(
     port: Option<&str>,
     label: &str,
     kind: &str,
-) -> Option<MissionChange> {
+) -> Result<Option<MissionChange>, String> {
     let step_id = id.into();
-    Some(match op {
+    Ok(Some(match op {
         "input" | "output" => MissionChange::AddPort {
             step_id,
             direction: op.into(),
             label: label.into(),
-            kind: kind.into(),
+            kind: kind.trim().parse()?,
         },
         "update" => MissionChange::UpdatePort {
             step_id,
             port_id: port.unwrap_or_default().into(),
             label: Some(label.into()),
-            kind: Some(kind.into()),
+            kind: Some(kind.trim().parse()?),
         },
         "remove" => MissionChange::RemovePort {
             step_id,
             port_id: port.unwrap_or_default().into(),
         },
-        _ => return None,
-    })
+        _ => return Ok(None),
+    }))
 }
 
 pub(super) fn add_limit_patch(target: &str) -> MissionChange {
@@ -495,7 +495,7 @@ pub(super) fn add_limit_patch(target: &str) -> MissionChange {
         seconds: None,
         warn_seconds: None,
         tokens: None,
-        when_spent: "stop".into(),
+        when_spent: ahjo_missions_contract::WhenSpent::Stop,
         x: 0,
         y: 0,
     }
@@ -528,14 +528,14 @@ pub(super) fn update_limit_patch(
         seconds: Some(parse("seconds", seconds)?),
         warn_seconds: Some(parse("warn_seconds", warn_seconds)?),
         tokens: Some(parse("tokens", tokens)?),
-        when_spent: Some(when_spent.into()),
+        when_spent: Some(when_spent.trim().parse()?),
     }))
 }
 
-pub(super) fn step_formation_patch(id: &str, kind: &str, slot: &str) -> MissionChange {
+pub(super) fn step_formation_patch(id: &str, kind: Formation, slot: &str) -> MissionChange {
     MissionChange::SetStepFormation {
         id: id.into(),
-        formation: kind.into(),
+        formation: kind,
         keep_slot_id: slot.into(),
         slots: None,
     }
@@ -576,14 +576,14 @@ mod tests {
     fn immediate_board_edits_decode() {
         for patch in [
             session_patch("step", true),
-            step_formation_patch("step", "peer", "slot"),
+            step_formation_patch("step", Formation::Peer, "slot"),
             name_agent_patch("step", "slot", "writer"),
             device_patch("step", "node/environment"),
             crate::store::staffing::Staffing {
                 role: "planner".into(),
-                harness: "claude-code".into(),
+                harness: ahjo_missions_contract::Harness::ClaudeCode,
                 model: "opus".into(),
-                effort: "high".into(),
+                effort: ahjo_missions_contract::Effort::High,
             }
             .assign("step", "slot"),
             add_limit_patch("step"),
@@ -593,7 +593,11 @@ mod tests {
             assert_patch_decodes(&board_body(&patch, 7));
         }
         for op in ["input", "output", "update", "remove"] {
-            assert_patch_decodes(&port_patch(op, "step", Some("port"), "Result", "text").unwrap());
+            assert_patch_decodes(
+                &port_patch(op, "step", Some("port"), "Result", "text")
+                    .unwrap()
+                    .unwrap(),
+            );
         }
         for kind in [
             EditKind::Step,

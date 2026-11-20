@@ -21,7 +21,7 @@ pub(crate) struct Replay {
 
 pub(crate) struct EndDelivery {
     pub end_id: String,
-    pub outcome: String,
+    pub outcome: ahjo_mission_model::EndOutcome,
     pub gate_id: String,
     pub reason: String,
     pub actor: String,
@@ -255,7 +255,7 @@ impl Replay {
         } else if let Some(end) = mission.end(node) {
             self.ended.push(EndDelivery {
                 end_id: end.id.clone(),
-                outcome: end.outcome.clone(),
+                outcome: end.outcome,
                 gate_id: gate.into(),
                 reason: if gate.is_empty() {
                     format!("the path ended at {} (rejected)", end.title)
@@ -458,7 +458,7 @@ mod tests {
             ends: vec![ahjo_mission_model::End {
                 id: "end".into(),
                 title: "No".into(),
-                outcome: "rejected".into(),
+                outcome: ahjo_mission_model::EndOutcome::Rejected,
             }],
             connections: vec![Connection {
                 id: "fail".into(),

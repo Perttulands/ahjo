@@ -284,6 +284,8 @@ pub(crate) mod flow_tests {
         let FlowStepKind::Step { next } = &flow.sections[0].steps[4].kind else {
             panic!("a step")
         };
-        assert!(matches!(&next[0], Target::End { outcome, .. } if outcome == "done"));
+        assert!(
+            matches!(&next[0], Target::End { outcome, .. } if *outcome == ahjo_missions_contract::EndOutcome::Done)
+        );
     }
 }

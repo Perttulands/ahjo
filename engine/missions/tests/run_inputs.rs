@@ -20,7 +20,7 @@ fn admission_reports_all_bad_values_and_keeps_text_verbatim() {
                 },
                 MissionInput {
                     name: "file".into(),
-                    kind: "file".into(),
+                    kind: ahjo_mission_model::PortKind::File,
                     ..Default::default()
                 },
             ],

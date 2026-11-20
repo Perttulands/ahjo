@@ -142,21 +142,22 @@ mod tests {
     }
     #[test]
     fn a_route_says_where_an_answer_leads() {
-        let end = |outcome: &str| Target::End {
+        use ahjo_missions_contract::EndOutcome;
+        let end = |outcome| Target::End {
             node: "e".into(),
             title: "End".into(),
-            outcome: outcome.into(),
+            outcome,
         };
         assert_eq!(
-            route(&[end("done")], "Approve", true).1,
+            route(&[end(EndOutcome::Done)], "Approve", true).1,
             "Approve and end the run"
         );
         assert_eq!(
-            route(&[end("rejected")], "Send back", true).1,
+            route(&[end(EndOutcome::Rejected)], "Send back", true).1,
             "Send back and end the run"
         );
         assert_eq!(
-            route(&[end("rejected")], "Send back", false).0,
+            route(&[end(EndOutcome::Rejected)], "Send back", false).0,
             "Send back: this path ends (rejected), so the run is sent back once its other open work ends."
         );
         let back = Target::Step {

@@ -1,6 +1,9 @@
 //! Construct graph nodes with Archon's default shape.
 use crate::Error;
-use ahjo_mission_model::{End, Gate, InputCard, Mission, MissionChange, Port, Slot, Step};
+use ahjo_mission_model::{
+    End, EndOutcome, Formation, Gate, GateKind, HumanChannel, InputCard, Mission, MissionChange,
+    Port, Slot, Step,
+};
 use serde::Serialize;
 use toml_edit::{ArrayOfTables, DocumentMut, Item};
 
@@ -62,12 +65,6 @@ pub(crate) fn apply(
             y,
         } => {
             file_refs(&mut files)?;
-            if !["", "notify", "session"].contains(&human_channel.as_str()) {
-                return Err(Error::new(
-                    "invalid_human_channel",
-                    "human channel must be notify or session",
-                ));
-            }
             let node = InputCard {
                 id: crate::authoring::id("inp")?,
                 title: if title.is_empty() {
@@ -77,8 +74,8 @@ pub(crate) fn apply(
                 },
                 goal,
                 files,
-                human_channel: if human_channel == "notify" {
-                    String::new()
+                human_channel: if human_channel == HumanChannel::Notify {
+                    HumanChannel::Unset
                 } else {
                     human_channel
                 },
@@ -93,27 +90,19 @@ pub(crate) fn apply(
             x,
             y,
         } => {
-            if formation.is_empty() {
-                formation = "solo".into();
-            }
-            let slots: &[(&str, bool)] = match formation.as_str() {
-                "solo" => &[("Agent", false)],
-                "peer" => &[("Peer", false), ("Peer", false)],
-                "orchestrated" => &[("Orchestrator", true), ("Agent", false), ("Agent", false)],
-                _ => {
-                    return Err(Error::new(
-                        "unsupported_step_formation",
-                        "use solo, peer or orchestrated",
-                    ));
+            let (default_title, slots): (&str, &[(&str, bool)]) = match formation {
+                Formation::Unset | Formation::Solo => {
+                    formation = Formation::Solo;
+                    ("Solo task", &[("Agent", false)])
                 }
+                Formation::Peer => ("Peer huddle", &[("Peer", false), ("Peer", false)]),
+                Formation::Orchestrated => (
+                    "Orchestration",
+                    &[("Orchestrator", true), ("Agent", false), ("Agent", false)],
+                ),
             };
             if title.is_empty() {
-                title = match formation.as_str() {
-                    "solo" => "Solo task",
-                    "peer" => "Peer huddle",
-                    _ => "Orchestration",
-                }
-                .into();
+                title = default_title.into();
             }
             let mut node = Step {
                 id: crate::authoring::id("fmn")?,
@@ -154,7 +143,7 @@ pub(crate) fn apply(
             y,
         } => {
             if kinds.is_empty() {
-                kinds.push("step".into());
+                kinds.push(GateKind::Step);
             }
             let mut node = Gate {
                 id: crate::authoring::id("gate")?,
@@ -180,19 +169,12 @@ pub(crate) fn apply(
             x,
             y,
         } => {
-            outcome = outcome.trim().into();
             title = title.trim().into();
-            if outcome.is_empty() {
-                outcome = "done".into();
-            }
-            if !["done", "rejected"].contains(&outcome.as_str()) {
-                return Err(Error::new(
-                    "invalid_end_outcome",
-                    "outcome must be done or rejected",
-                ));
+            if outcome == EndOutcome::Unset {
+                outcome = EndOutcome::Done;
             }
             if title.is_empty() {
-                title = if outcome == "done" {
+                title = if outcome == EndOutcome::Done {
                     "Done"
                 } else {
                     "Rejected"

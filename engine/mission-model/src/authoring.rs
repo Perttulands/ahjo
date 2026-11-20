@@ -5,8 +5,9 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Deserializer, Serialize};
 
 use crate::{
-    End, Gate, InputCard, Layout, LayoutEdge, LayoutNode, Limit, Mission, MissionInput,
-    MissionOutput, Notes, Step,
+    Effort, End, EndOutcome, Formation, Gate, GateKind, Harness, HumanChannel, InputCard, Layout,
+    LayoutEdge, LayoutNode, Limit, Mission, MissionInput, MissionOutput, Notes, PortKind, Step,
+    WhenSpent,
 };
 
 #[derive(Clone, Debug, Default)]
@@ -51,9 +52,9 @@ pub enum MissionChange {
         /// Reference files as absolute paths.
         #[serde(default, deserialize_with = "default_on_null")]
         files: Vec<String>,
-        /// How to reach the operator, `notify` (default) or `session`.
+        /// How to reach the operator. Blank uses notifications.
         #[serde(default, deserialize_with = "default_on_null")]
-        human_channel: String,
+        human_channel: HumanChannel,
         /// Horizontal board position.
         #[serde(default, deserialize_with = "default_on_null")]
         x: i64,
@@ -71,9 +72,9 @@ pub enum MissionChange {
     },
     /// Add a step with seats for its formation.
     CreateStep {
-        /// `solo`, `peer` or `orchestrated`.
+        /// How the seats work together.
         #[serde(default, deserialize_with = "default_on_null")]
-        formation: String,
+        formation: Formation,
         /// The card’s title.
         #[serde(default, deserialize_with = "default_on_null")]
         title: String,
@@ -116,9 +117,9 @@ pub enum MissionChange {
         /// The id of the card or wire.
         #[serde(default, deserialize_with = "default_on_null")]
         id: String,
-        /// `solo`, `peer` or `orchestrated`.
+        /// How the seats work together.
         #[serde(default, deserialize_with = "default_on_null")]
-        formation: String,
+        formation: Formation,
         /// The seat to keep when changing the step formation.
         #[serde(default, deserialize_with = "default_on_null")]
         keep_slot_id: String,
@@ -149,13 +150,13 @@ pub enum MissionChange {
         agent_id: String,
         /// The harness the seat runs.
         #[serde(default, deserialize_with = "default_on_null")]
-        harness: String,
+        harness: Harness,
         /// The model the seat uses. Blank uses its harness default.
         #[serde(default, deserialize_with = "default_on_null")]
         model: String,
         /// The seat’s reasoning effort.
         #[serde(default, deserialize_with = "default_on_null")]
-        effort: String,
+        effort: Effort,
     },
     /// Name the agent in a seat and, by extension, its session.
     NameAgent {
@@ -231,9 +232,9 @@ pub enum MissionChange {
         /// The port’s label.
         #[serde(default, deserialize_with = "default_on_null")]
         label: String,
-        /// What an output carries, `text`, `file` or `folder`.
+        /// What an output carries. Blank uses text.
         #[serde(default, deserialize_with = "default_on_null")]
-        kind: String,
+        kind: PortKind,
     },
     /// Change a port’s label or kind.
     UpdatePort {
@@ -246,9 +247,9 @@ pub enum MissionChange {
         /// The port’s label.
         #[serde(skip_serializing_if = "Option::is_none")]
         label: Option<String>,
-        /// What an output carries, `text`, `file` or `folder`.
+        /// What an output carries. Blank uses text.
         #[serde(skip_serializing_if = "Option::is_none")]
-        kind: Option<String>,
+        kind: Option<PortKind>,
     },
     /// Remove a port and its wires.
     RemovePort {
@@ -327,9 +328,9 @@ pub enum MissionChange {
         /// The card’s title.
         #[serde(default, deserialize_with = "default_on_null")]
         title: String,
-        /// `code`, `step` or `human`. Defaults to `human` on creation.
+        /// Who or what decides. Defaults to `human` on creation.
         #[serde(default = "human_gate", deserialize_with = "gate_kinds")]
-        kinds: Vec<String>,
+        kinds: Vec<GateKind>,
         /// What the gate checks.
         #[serde(default, deserialize_with = "default_on_null")]
         criterion: String,
@@ -380,9 +381,9 @@ pub enum MissionChange {
         /// The card’s title.
         #[serde(default, deserialize_with = "default_on_null")]
         title: String,
-        /// `done` or `rejected`.
+        /// What this path ends with.
         #[serde(default, deserialize_with = "default_on_null")]
-        outcome: String,
+        outcome: EndOutcome,
         /// Horizontal board position.
         #[serde(default, deserialize_with = "default_on_null")]
         x: i64,
@@ -418,9 +419,9 @@ pub enum MissionChange {
         /// The token cap.
         #[serde(skip_serializing_if = "Option::is_none")]
         tokens: Option<i64>,
-        /// What to do at the cap, `stop`, `best` or `fail`.
+        /// What to do at the cap. Blank stops the run.
         #[serde(default, deserialize_with = "default_on_null")]
-        when_spent: String,
+        when_spent: WhenSpent,
         /// Horizontal board position.
         #[serde(default, deserialize_with = "default_on_null")]
         x: i64,
@@ -472,12 +473,12 @@ fn some<'de, D: Deserializer<'de>, T: Deserialize<'de>>(
     T::deserialize(deserializer).map(Some)
 }
 
-fn human_gate() -> Vec<String> {
-    vec!["human".into()]
+fn human_gate() -> Vec<GateKind> {
+    vec![GateKind::Human]
 }
 
-fn gate_kinds<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Vec<String>, D::Error> {
-    let kinds: Vec<String> = default_on_null(deserializer)?;
+fn gate_kinds<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Vec<GateKind>, D::Error> {
+    let kinds: Vec<GateKind> = default_on_null(deserializer)?;
     Ok(if kinds.is_empty() {
         human_gate()
     } else {
@@ -507,9 +508,9 @@ pub struct EndUpdate {
     /// The card’s title.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub title: Option<String>,
-    /// `done` or `rejected`.
+    /// What this path ends with.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub outcome: Option<String>,
+    pub outcome: Option<EndOutcome>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Deserialize, Serialize, JsonSchema)]
@@ -536,9 +537,9 @@ pub struct LimitUpdate {
     /// The token cap.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tokens: Option<i64>,
-    /// What to do at the cap, `stop`, `best` or `fail`.
+    /// What to do at the cap. Blank stops the run.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub when_spent: Option<String>,
+    pub when_spent: Option<WhenSpent>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Deserialize, Serialize, JsonSchema)]
@@ -550,9 +551,9 @@ pub struct GateUpdate {
     /// The card’s title.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub title: Option<String>,
-    /// `code`, `step` or `human`. Defaults to `human` on creation.
+    /// Who or what decides. Defaults to `human` on creation.
     #[serde(deserialize_with = "some", skip_serializing_if = "Option::is_none")]
-    pub kinds: Option<Vec<String>>,
+    pub kinds: Option<Vec<GateKind>>,
     /// What the gate checks.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub criterion: Option<String>,
@@ -588,9 +589,9 @@ pub struct InputCardUpdate {
     /// What to include in the run brief.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub input_hint: Option<String>,
-    /// How to reach the operator, `notify` (default) or `session`.
+    /// How to reach the operator. Blank uses notifications.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub human_channel: Option<String>,
+    pub human_channel: Option<HumanChannel>,
     /// Inputs declared by the card.
     #[serde(deserialize_with = "some", skip_serializing_if = "Option::is_none")]
     pub inputs: Option<Vec<MissionInput>>,

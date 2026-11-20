@@ -264,7 +264,8 @@ pub(crate) fn execute_step(
         return Err(io::Error::other("step has unfinished dispatches"));
     }
     if step.slots.iter().any(|slot| {
-        (step.formation != "orchestrated" || slot.controller) && !completed.contains(&slot.id)
+        (step.formation != ahjo_mission_model::Formation::Orchestrated || slot.controller)
+            && !completed.contains(&slot.id)
     }) {
         return Err(io::Error::other("step has missing slot results"));
     }

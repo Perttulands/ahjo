@@ -186,29 +186,23 @@ pub(crate) fn apply(
                 .iter()
                 .find(|s| s.id == slot_id)
                 .ok_or_else(not_found)?;
-            let harness = crate::harness::harness_id(&harness);
-            let (agent_id, harness, model, effort) = (
-                agent_id.trim(),
-                harness.as_str(),
-                model.trim(),
-                effort.trim(),
-            );
+            let (agent_id, model) = (agent_id.trim(), model.trim());
             if !agent_id.is_empty() && crate::roles::check_role_id(agent_id).is_err() {
                 return Err(Error::new("invalid_slot_settings", "invalid role id"));
             }
-            if [agent_id, harness, model, effort]
+            if [agent_id, harness.as_str(), model, effort.as_str()]
                 .iter()
                 .any(|s| !s.is_empty())
             {
                 crate::Harnesses::from_host()
-                    .check_offered("slot", harness, model, effort)
+                    .check_offered("slot", harness.as_str(), model, effort.as_str())
                     .map_err(|e| Error::new("invalid_slot_settings", e.message))?;
             }
             if (
                 slot.agent_id.as_str(),
-                slot.harness.as_str(),
+                slot.harness,
                 slot.model.as_str(),
-                slot.effort.as_str(),
+                slot.effort,
             ) == (agent_id, harness, model, effort)
             {
                 return Ok(false);
@@ -218,9 +212,9 @@ pub(crate) fn apply(
             let slot = slot_table(item, &slot_id)?;
             for (key, val) in [
                 ("agent_id", agent_id),
-                ("harness", harness),
+                ("harness", harness.as_str()),
                 ("model", model),
-                ("effort", effort),
+                ("effort", effort.as_str()),
             ] {
                 set(slot, key, val);
             }
@@ -242,9 +236,9 @@ pub(crate) fn apply(
             let settings = |s: &ahjo_mission_model::Slot| {
                 [
                     s.agent_id.clone(),
-                    s.harness.clone(),
+                    s.harness.as_str().to_owned(),
                     s.model.clone(),
-                    s.effort.clone(),
+                    s.effort.as_str().to_owned(),
                 ]
             };
             let first = settings(from);
@@ -268,7 +262,7 @@ pub(crate) fn apply(
         }
         MissionChange::MakeController { step_id, slot_id } => {
             let step = mission.step(&step_id).ok_or_else(not_found)?;
-            if step.formation != "orchestrated" {
+            if step.formation != ahjo_mission_model::Formation::Orchestrated {
                 return Err(Error::new(
                     "invalid_controller_role",
                     "step is not orchestrated",

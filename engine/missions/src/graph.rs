@@ -172,11 +172,12 @@ pub fn selecting_gate<'a>(mission: &'a Mission, step: &str) -> Result<&'a Gate, 
             ));
         }
     };
-    if !gate
-        .kinds
-        .iter()
-        .any(|kind| kind == "step" || kind == "human")
-    {
+    if !gate.kinds.iter().any(|kind| {
+        matches!(
+            kind,
+            ahjo_mission_model::GateKind::Step | ahjo_mission_model::GateKind::Human
+        )
+    }) {
         return Err(format!(
             "its gate {} checks with code only, which cannot compare attempts: give it a judge or a human, or set it to stop or fail",
             mission.node_name(&gate.id)

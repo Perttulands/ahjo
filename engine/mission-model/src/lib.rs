@@ -20,6 +20,7 @@ mod run_evidence;
 mod run_gates;
 mod run_projection;
 mod sessions;
+mod vocabulary;
 
 pub use authoring::{
     DocumentChanges, Edit, EndUpdate, GateUpdate, InputCardUpdate, LayoutEdit, LayoutPatch,
@@ -31,9 +32,8 @@ pub use finding::{Code, Finding, Report};
 pub use layout::{LAYOUT_SCHEMA, Layout, LayoutEdge, LayoutNode};
 pub use mission::{MISSION_SCHEMA, Mission, MissionArchive, MissionListing};
 pub use nodes::{
-    Brief, Connection, DONE, END_IN, End, GATE_FAIL, GATE_IN, GATE_JUDGE, GATE_PASS, Gate,
-    INPUT_CARD_OUT, InputCard, KIND_FILE, KIND_FOLDER, KIND_TEXT, Limit, MissionInput,
-    MissionOutput, ORCHESTRATED, PEER, Port, REJECTED, SOLO, Slot, Step,
+    Brief, Connection, END_IN, End, GATE_FAIL, GATE_IN, GATE_JUDGE, GATE_PASS, Gate,
+    INPUT_CARD_OUT, InputCard, Limit, MissionInput, MissionOutput, Port, Slot, Step,
 };
 pub use notes::{MISSION_THREAD, NOTES_SCHEMA, NoteEntry, Notes, valid_author};
 pub use run::{
@@ -54,3 +54,6 @@ pub use run_projection::{
     RunSendBack, WaitingGate, plain_reason,
 };
 pub use sessions::{agent_session, fresh_session, valid_agent, valid_prefix};
+pub use vocabulary::{
+    Effort, EndOutcome, Formation, GateKind, Harness, HumanChannel, PortKind, WhenSpent,
+};

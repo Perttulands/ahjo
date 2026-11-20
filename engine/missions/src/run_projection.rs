@@ -40,7 +40,7 @@ impl Coordinator {
             .ended
             .into_iter()
             .find(|delivery| {
-                delivery.outcome == "rejected"
+                delivery.outcome == ahjo_mission_model::EndOutcome::Rejected
                     && delivery.end_id == end.node_id
                     && delivery.gate_id == end.gate_id
             })

@@ -1,26 +1,20 @@
 //! Partial Input card edits and declaration normalization.
 use crate::Error;
-use ahjo_mission_model::{InputCardUpdate, Mission};
+use ahjo_mission_model::{HumanChannel, InputCardUpdate, Mission, PortKind};
 use serde::Serialize;
 use std::collections::HashSet;
 use toml_edit::{DocumentMut, Item, value};
 
 fn normalize_name(
     name: &mut String,
-    kind: &mut String,
+    kind: &mut PortKind,
     seen: &mut HashSet<String>,
     code: &'static str,
 ) -> Result<(), Error> {
     *name = name.trim().into();
-    *kind = kind.trim().into();
-    if kind.is_empty() {
-        *kind = "text".into();
-    }
-    if !crate::validate::inputs::valid_name(name)
-        || !["text", "file", "folder"].contains(&kind.as_str())
-        || !seen.insert(name.clone())
-    {
-        return Err(Error::new(code, "invalid or duplicate name or kind"));
+    *kind = kind.effective();
+    if !crate::validate::inputs::valid_name(name) || !seen.insert(name.clone()) {
+        return Err(Error::new(code, "invalid or duplicate name"));
     }
     Ok(())
 }
@@ -58,15 +52,9 @@ pub(crate) fn apply(
         next.input_hint = hint;
     }
     if let Some(channel) = update.human_channel {
-        next.human_channel = match channel.trim() {
-            "" | "notify" => "".into(),
-            "session" => "session".into(),
-            _ => {
-                return Err(Error::new(
-                    "invalid_human_channel",
-                    "human channel must be notify or session",
-                ));
-            }
+        next.human_channel = match channel {
+            HumanChannel::Notify => HumanChannel::Unset,
+            channel => channel,
         };
     }
     if let Some(mut inputs) = update.inputs {
@@ -113,13 +101,18 @@ pub(crate) fn apply(
         })
         .ok_or_else(|| Error::new("not_found", "Input card"))?;
     for (key, before, after, optional) in [
-        ("title", &old.title, &next.title, false),
-        ("goal", &old.goal, &next.goal, false),
-        ("input_hint", &old.input_hint, &next.input_hint, true),
+        ("title", old.title.as_str(), next.title.as_str(), false),
+        ("goal", old.goal.as_str(), next.goal.as_str(), false),
+        (
+            "input_hint",
+            old.input_hint.as_str(),
+            next.input_hint.as_str(),
+            true,
+        ),
         (
             "human_channel",
-            &old.human_channel,
-            &next.human_channel,
+            old.human_channel.as_str(),
+            next.human_channel.as_str(),
             true,
         ),
     ] {
@@ -127,7 +120,7 @@ pub(crate) fn apply(
             if optional && after.is_empty() {
                 table.remove(key);
             } else {
-                crate::write::set(table, key, value(after.clone()));
+                crate::write::set(table, key, value(after));
             }
         }
     }

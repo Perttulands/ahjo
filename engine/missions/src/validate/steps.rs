@@ -1,7 +1,7 @@
 //! Step types, their slot shapes, and slot ids.
 
 use super::possessive;
-use ahjo_mission_model::{Code, Finding, Mission, ORCHESTRATED, PEER, SOLO, Step};
+use ahjo_mission_model::{Code, Finding, Formation, Mission, Step};
 
 /// What a slot id may be, for messages: its seat's session is named after
 /// it, and a relayed verdict names it.
@@ -47,7 +47,7 @@ pub fn device_findings(mission: &Mission) -> Vec<Finding> {
 pub fn shape_findings(mission: &Mission) -> Vec<Finding> {
     let mut findings = Vec::new();
     for step in &mission.steps {
-        if step.formation == PEER {
+        if step.formation == Formation::Peer {
             findings.push(Finding::new(
                 Code::UnsupportedStep,
                 &step.id,
@@ -57,14 +57,11 @@ pub fn shape_findings(mission: &Mission) -> Vec<Finding> {
                 ),
             ));
         }
-        if ![SOLO, PEER, ORCHESTRATED].contains(&step.formation.as_str()) {
+        if step.formation == Formation::Unset {
             findings.push(Finding::new(
                 Code::InvalidStepFormation,
                 &step.id,
-                format!(
-                    "step {:?} has unsupported type {:?}; change it to solo, peer or orchestrated, or delete it",
-                    step.id, step.formation
-                ),
+                format!("step {:?} needs a formation", step.id),
             ));
         } else {
             findings.extend(slot_shape_finding(step));
@@ -86,24 +83,24 @@ fn slot_shape_finding(step: &Step) -> Option<Finding> {
         );
     }
     let controllers = step.slots.iter().filter(|slot| slot.controller).count();
-    match step.formation.as_str() {
-        SOLO if slots != 1 => problem(
+    match step.formation {
+        Formation::Solo if slots != 1 => problem(
             Code::InvalidStepShape,
             format!("solo step {id:?} needs exactly one slot; it has {slots}"),
         ),
-        PEER if slots < 2 || controllers != 0 => problem(
+        Formation::Peer if slots < 2 || controllers != 0 => problem(
             Code::InvalidStepShape,
             format!(
                 "peer step {id:?} needs at least two slots and no controllers; it has {slots} slots and {controllers} controllers"
             ),
         ),
-        ORCHESTRATED if controllers != 1 => problem(
+        Formation::Orchestrated if controllers != 1 => problem(
             Code::OrchestratedController,
             format!(
                 "orchestrated step {id:?} needs exactly one controller slot; it has {controllers}"
             ),
         ),
-        ORCHESTRATED if slots < 2 => problem(
+        Formation::Orchestrated if slots < 2 => problem(
             Code::OrchestratedController,
             format!("orchestrated step {id:?} needs a worker slot beside its controller"),
         ),

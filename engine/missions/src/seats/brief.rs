@@ -99,7 +99,9 @@ fn render_for(request: &StepExecution, slot: &Slot, final_output: bool) -> Strin
             .outputs
             .iter()
             .map(|port| {
-                let payload = if port.kind() == "file" || port.kind() == "folder" {
+                let payload = if port.kind() == ahjo_mission_model::PortKind::File
+                    || port.kind() == ahjo_mission_model::PortKind::Folder
+                {
                     serde_json::json!({"text":"result", "ref":"/absolute/path/to/artifact"})
                 } else {
                     serde_json::json!({"text":"result"})

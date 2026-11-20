@@ -5,8 +5,8 @@ fn frozen_bindings_reject_mutated_settings_and_roles() {
     let slot = Slot {
         id: "worker".into(),
         agent_id: "builder".into(),
-        harness: "openai-codex".into(),
-        effort: "medium".into(),
+        harness: ahjo_mission_model::Harness::OpenAiCodex,
+        effort: ahjo_mission_model::Effort::Medium,
         ..Default::default()
     };
     let mission = Mission {
@@ -28,7 +28,7 @@ fn frozen_bindings_reject_mutated_settings_and_roles() {
             .is_ok()
     );
     let mut changed = slot.clone();
-    changed.effort = "high".into();
+    changed.effort = ahjo_mission_model::Effort::High;
     assert_eq!(
         frozen
             .binding(&mission, "run_a", "input", "step", &changed)

@@ -153,7 +153,7 @@ pub(crate) fn validate_results(
         let Some(gate) = mission.gate(&aggregate.gate_id) else {
             continue;
         };
-        if !gate.kinds.iter().any(|kind| kind == "code") {
+        if !gate.kinds.contains(&ahjo_mission_model::GateKind::Code) {
             continue;
         }
         let through = aggregate

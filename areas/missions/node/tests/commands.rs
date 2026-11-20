@@ -205,6 +205,56 @@ async fn mission_command_schemas_and_cli_help_match_the_document_surface() {
         );
     }
 
+    fn has_field_enum(schema: &serde_json::Value, field: &str, values: &[&str]) -> bool {
+        if let Some(property) = schema["properties"].get(field) {
+            let values = json!(values);
+            if property["enum"] == values || property["items"]["enum"] == values {
+                return true;
+            }
+        }
+        match schema {
+            serde_json::Value::Object(fields) => fields
+                .values()
+                .any(|child| has_field_enum(child, field, values)),
+            serde_json::Value::Array(items) => items
+                .iter()
+                .any(|child| has_field_enum(child, field, values)),
+            _ => false,
+        }
+    }
+
+    let command_schema =
+        |name| &tools.iter().find(|tool| tool["name"] == name).unwrap()["inputSchema"];
+    let apply = &command_schema("mission_apply")["properties"]["document"];
+    assert_eq!(apply["type"], "string");
+    assert_eq!(apply["contentMediaType"], "application/toml");
+    assert_eq!(apply["x-ahjo-cli-file"], true);
+    let document = &apply["contentSchema"];
+    let change = &command_schema("mission_edit")["properties"]["change"];
+    let vocabulary: &[(&str, &[&str])] = &[
+        ("formation", &["", "solo", "peer", "orchestrated"]),
+        ("kinds", &["code", "step", "human"]),
+        ("outcome", &["", "done", "rejected"]),
+        ("kind", &["", "text", "file", "folder"]),
+        ("human_channel", &["", "notify", "session"]),
+        ("when_spent", &["", "stop", "best", "fail"]),
+        ("harness", &["", "claude-code", "openai-codex", "pi"]),
+        (
+            "effort",
+            &["", "low", "medium", "high", "xhigh", "max", "ultra"],
+        ),
+    ];
+    for (field, values) in vocabulary {
+        assert!(
+            has_field_enum(document, field, values),
+            "mission_apply {field}"
+        );
+        assert!(
+            has_field_enum(change, field, values),
+            "mission_edit {field}"
+        );
+    }
+
     let address = format!("{}/", node.url());
     let mut output = Vec::new();
     let help = ["--node".into(), address.clone()];
@@ -455,11 +505,22 @@ async fn author_and_run_with_tools() {
         include_str!("fixtures/solo-lab.mission.toml"),
     )
     .unwrap();
+    let path = folder.join("admission-findings.mission.toml");
+    let source = include_str!("fixtures/admission-findings.mission.toml");
     std::fs::write(
-        folder.join("admission-findings.mission.toml"),
-        include_str!("fixtures/admission-findings.mission.toml"),
+        &path,
+        source.replacen("harness = \"claude-code\"", "harness = \"wrong\"", 1),
     )
     .unwrap();
+    let unknown_harness = node
+        .call("mission_run", json!({"mission":"admission-findings"}))
+        .await
+        .unwrap_err();
+    assert_eq!(unknown_harness.code, "invalid_definition_source");
+    assert!(
+        unknown_harness.message.contains("harness") && unknown_harness.message.contains("wrong")
+    );
+    std::fs::write(path, source).unwrap();
     let rejected = node
         .call("mission_run", json!({"mission":"admission-findings"}))
         .await
@@ -1215,8 +1276,8 @@ async fn mission_edit_batches_commit_once_or_leave_the_mission_and_layout_untouc
     for (second, code, message) in [
         (
             json!({"create_end":{"outcome":"invalid"}}),
-            "invalid_end_outcome",
-            "outcome must be done or rejected",
+            "invalid_argument",
+            "create_end: unknown variant `invalid`, expected one of ``, `done`, `rejected`",
         ),
         (
             json!({"create_end":{"unexpected":null}}),

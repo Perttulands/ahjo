@@ -425,7 +425,7 @@ mod tests {
         else {
             panic!("expected gate")
         };
-        assert_eq!(kinds, ["human"]);
+        assert_eq!(kinds, [crate::GateKind::Human]);
     }
     #[test]
     fn restore_step_reads_the_stored_shape() {

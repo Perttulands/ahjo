@@ -55,7 +55,7 @@ pub(crate) fn advance(
     } = context;
     for gate in &mission.gates {
         if stopped
-            && !(gate.kinds.len() == 1 && gate.kinds[0] == "human")
+            && !(gate.kinds.len() == 1 && gate.kinds[0] == ahjo_mission_model::GateKind::Human)
             && !(drain_gates.contains(&gate.id) && replay.evaluating.contains_key(&gate.id))
         {
             continue;
@@ -104,7 +104,7 @@ pub(crate) fn advance(
                 && e.gate_id == gate.id
                 && e.data.get("kind").and_then(|v| v.as_str()) == Some("step")
         });
-        let result = if gate.kinds.iter().any(|kind| kind == "code") {
+        let result = if gate.kinds.contains(&ahjo_mission_model::GateKind::Code) {
             let checked = (|| -> Result<(crate::JudgeVerdict, serde_json::Value), String> {
                 let source = std::fs::read_to_string(
                     c.inner
@@ -145,7 +145,7 @@ pub(crate) fn advance(
             None
         };
         if result.as_ref().is_none_or(|r| r.verdict != "fail")
-            && gate.kinds.iter().any(|k| k == "step")
+            && gate.kinds.contains(&ahjo_mission_model::GateKind::Step)
         {
             if prior_judge.is_none()
                 && let Some(resumed) = events.iter().rev().find(|event| {
@@ -309,11 +309,12 @@ pub(crate) fn settle_gate(
         input,
         result,
     } = settlement;
-    let kind = if result.verdict == "pass" && gate.kinds.iter().any(|k| k == "human") {
-        "human_input_requested"
-    } else {
-        "gate_verdict"
-    };
+    let kind =
+        if result.verdict == "pass" && gate.kinds.contains(&ahjo_mission_model::GateKind::Human) {
+            "human_input_requested"
+        } else {
+            "gate_verdict"
+        };
     let events = c.ledger(id)?.read().map_err(crate::error::to_io)?;
     let anchor = events
         .iter()
@@ -383,10 +384,11 @@ pub(crate) fn settle_gate(
             .into();
     } else {
         let mut failed = false;
-        for name in ["code", "step", "human"] {
-            if !gate.kinds.iter().any(|kind| kind == name) {
+        for gate_kind in ahjo_mission_model::GateKind::ALL {
+            if !gate.kinds.contains(gate_kind) {
                 continue;
             }
+            let name = gate_kind.as_str();
             if failed {
                 per_kind.insert(name.into(), "not_run".into());
             } else if per_kind.get(name).and_then(|v| v.as_str()) == Some("fail") {

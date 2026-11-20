@@ -21,7 +21,10 @@ impl Scratch {
         .unwrap();
         std::fs::write(
             p.join("missions/admission-findings.mission.toml"),
-            include_str!("../parity/runs/missions/admission-findings.mission.toml"),
+            include_str!("../parity/runs/missions/admission-findings.mission.toml").replace(
+                "harness = \"wrong\"\neffort = \"low\"",
+                "harness = \"claude-code\"\neffort = \"ultra\"",
+            ),
         )
         .unwrap();
         Self(p)

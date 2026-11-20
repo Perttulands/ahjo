@@ -108,7 +108,7 @@ impl Walk<'_> {
                     .map(|p| StepPort {
                         id: p.id.clone(),
                         label: p.label.clone(),
-                        kind: p.kind().to_owned(),
+                        kind: p.kind().as_str().to_owned(),
                     })
                     .collect(),
                 attempts: Vec::new(),

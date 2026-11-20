@@ -39,7 +39,7 @@ fn invalid_step_shapes_are_refused_by_both_restore_paths() {
             "shape",
             pre(&edit),
             MissionChange::CreateStep {
-                formation: "solo".into(),
+                formation: ahjo_mission_model::Formation::Solo,
                 title: "Work".into(),
                 x: 3,
                 y: 4,
@@ -81,7 +81,7 @@ fn invalid_step_shapes_are_refused_by_both_restore_paths() {
                 pre(&edit),
                 MissionChange::SetStepFormation {
                     id: id.clone(),
-                    formation: kind.into(),
+                    formation: kind.parse().unwrap(),
                     keep_slot_id: "".into(),
                     slots: Some(slots.clone()),
                 },
@@ -100,7 +100,7 @@ fn invalid_step_shapes_are_refused_by_both_restore_paths() {
                 MissionChange::RestoreNode {
                     node: RestoredNode::Step(Step {
                         id: "fmn_bad".into(),
-                        formation: kind.into(),
+                        formation: kind.parse().unwrap(),
                         slots: slots.clone(),
                         ..Default::default()
                     }),
@@ -136,7 +136,7 @@ fn restore_each_input_and_output_port_at_its_original_index() {
                     "ports",
                     pre(&edit),
                     MissionChange::CreateStep {
-                        formation: "solo".into(),
+                        formation: ahjo_mission_model::Formation::Solo,
                         title: title.into(),
                         x: 0,
                         y: 0,
@@ -160,7 +160,7 @@ fn restore_each_input_and_output_port_at_its_original_index() {
                     step_id: edited_id.clone(),
                     direction: direction.into(),
                     label: "Second".into(),
-                    kind: "".into(),
+                    kind: ahjo_mission_model::PortKind::Unset,
                 },
                 "",
             )
@@ -271,7 +271,7 @@ fn step_formation_restores_exact_slot_snapshot_and_rejects_bad_choices() {
             "type",
             pre(&edit),
             MissionChange::CreateStep {
-                formation: "orchestrated".into(),
+                formation: ahjo_mission_model::Formation::Orchestrated,
                 title: "Desk".into(),
                 x: 0,
                 y: 0,
@@ -287,7 +287,7 @@ fn step_formation_restores_exact_slot_snapshot_and_rejects_bad_choices() {
             pre(&edit),
             MissionChange::SetStepFormation {
                 id: step.id.clone(),
-                formation: "solo".into(),
+                formation: ahjo_mission_model::Formation::Solo,
                 keep_slot_id: snapshot[1].id.clone(),
                 slots: None,
             },
@@ -300,7 +300,7 @@ fn step_formation_restores_exact_slot_snapshot_and_rejects_bad_choices() {
             pre(&edit),
             MissionChange::SetStepFormation {
                 id: step.id.clone(),
-                formation: "orchestrated".into(),
+                formation: ahjo_mission_model::Formation::Orchestrated,
                 keep_slot_id: "".into(),
                 slots: Some(snapshot.clone()),
             },
@@ -349,6 +349,20 @@ fn step_formation_restores_exact_slot_snapshot_and_rejects_bad_choices() {
         ),
         ("fmn_missing", "solo", "", None, "not_found"),
     ] {
+        if code == "unsupported_step_formation" {
+            let error = serde_json::from_value::<MissionChange>(serde_json::json!({
+                "set_step_formation": {"id": id, "formation": kind}
+            }))
+            .unwrap_err()
+            .to_string();
+            assert!(error.contains(kind), "{error}");
+            assert!(
+                error.contains("solo") && error.contains("peer") && error.contains("orchestrated"),
+                "{error}"
+            );
+            assert_eq!(std::fs::read(&path).unwrap(), before);
+            continue;
+        }
         assert_eq!(
             store
                 .patch(
@@ -356,7 +370,7 @@ fn step_formation_restores_exact_slot_snapshot_and_rejects_bad_choices() {
                     pre(&edit),
                     MissionChange::SetStepFormation {
                         id: id.into(),
-                        formation: kind.into(),
+                        formation: kind.parse().unwrap(),
                         keep_slot_id: keep.into(),
                         slots
                     },
@@ -382,7 +396,7 @@ fn changing_gate_kinds_detaches_judge_without_touching_layout() {
             "judge",
             pre(&edit),
             MissionChange::CreateStep {
-                formation: "solo".into(),
+                formation: ahjo_mission_model::Formation::Solo,
                 title: "Reviewer".into(),
                 x: 0,
                 y: 0,
@@ -396,7 +410,10 @@ fn changing_gate_kinds_detaches_judge_without_touching_layout() {
             pre(&edit),
             MissionChange::CreateGate {
                 title: "Gate".into(),
-                kinds: vec!["code".into(), "step".into()],
+                kinds: vec![
+                    ahjo_mission_model::GateKind::Code,
+                    ahjo_mission_model::GateKind::Step,
+                ],
                 criterion: "Review".into(),
                 check: "output_contains".into(),
                 check_version: "1".into(),
@@ -429,7 +446,10 @@ fn changing_gate_kinds_detaches_judge_without_touching_layout() {
             pre(&edit),
             MissionChange::UpdateGate(ahjo_mission_model::GateUpdate {
                 id: gate.clone(),
-                kinds: Some(vec!["code".into(), "human".into()]),
+                kinds: Some(vec![
+                    ahjo_mission_model::GateKind::Code,
+                    ahjo_mission_model::GateKind::Human,
+                ]),
                 ..Default::default()
             }),
             "",
@@ -447,7 +467,10 @@ fn changing_gate_kinds_detaches_judge_without_touching_layout() {
             pre(&edit),
             MissionChange::UpdateGate(ahjo_mission_model::GateUpdate {
                 id: gate,
-                kinds: Some(vec!["human".into(), "step".into()]),
+                kinds: Some(vec![
+                    ahjo_mission_model::GateKind::Human,
+                    ahjo_mission_model::GateKind::Step,
+                ]),
                 ..Default::default()
             }),
             "",
@@ -470,7 +493,7 @@ fn join_keeps_gate_single_feed_and_rejects_stale_writes() {
                 "join-gate",
                 pre(&edit),
                 MissionChange::CreateStep {
-                    formation: "solo".into(),
+                    formation: ahjo_mission_model::Formation::Solo,
                     title: title.into(),
                     x: 0,
                     y: 0,
@@ -485,7 +508,7 @@ fn join_keeps_gate_single_feed_and_rejects_stale_writes() {
             pre(&edit),
             MissionChange::CreateGate {
                 title: "Gate".into(),
-                kinds: vec!["human".into()],
+                kinds: vec![ahjo_mission_model::GateKind::Human],
                 criterion: "".into(),
                 check: "".into(),
                 check_version: "".into(),
@@ -548,7 +571,7 @@ fn feedback_rewire_and_join_undo_preserve_pushback_exception() {
                 "feedback",
                 pre(&edit),
                 MissionChange::CreateStep {
-                    formation: "solo".into(),
+                    formation: ahjo_mission_model::Formation::Solo,
                     title: title.into(),
                     x: 0,
                     y: 0,
@@ -563,7 +586,7 @@ fn feedback_rewire_and_join_undo_preserve_pushback_exception() {
             pre(&edit),
             MissionChange::CreateGate {
                 title: "Review".into(),
-                kinds: vec!["human".into()],
+                kinds: vec![ahjo_mission_model::GateKind::Human],
                 criterion: "".into(),
                 check: "".into(),
                 check_version: "".into(),
@@ -695,7 +718,7 @@ fn restore_refuses_missing_foreign_and_occupied_connections_and_bad_nodes() {
                 "restore",
                 pre(&edit),
                 MissionChange::CreateStep {
-                    formation: "solo".into(),
+                    formation: ahjo_mission_model::Formation::Solo,
                     title: title.into(),
                     x: 0,
                     y: 0,
@@ -765,7 +788,7 @@ fn restore_refuses_missing_foreign_and_occupied_connections_and_bad_nodes() {
         (
             RestoredNode::Step(Step {
                 id: "fmn_old".into(),
-                formation: "flow".into(),
+                formation: ahjo_mission_model::Formation::Unset,
                 ..Default::default()
             }),
             vec![],
@@ -782,7 +805,7 @@ fn restore_refuses_missing_foreign_and_occupied_connections_and_bad_nodes() {
         (
             RestoredNode::Gate(Gate {
                 id: "gate_new".into(),
-                kinds: vec!["human".into()],
+                kinds: vec![ahjo_mission_model::GateKind::Human],
                 check_value: "PASS".into(),
                 ..Default::default()
             }),
@@ -792,7 +815,7 @@ fn restore_refuses_missing_foreign_and_occupied_connections_and_bad_nodes() {
         (
             RestoredNode::Step(Step {
                 id: "fmn_copy".into(),
-                formation: "solo".into(),
+                formation: ahjo_mission_model::Formation::Solo,
                 slots: other.slots.clone(),
                 ..Default::default()
             }),
@@ -800,6 +823,17 @@ fn restore_refuses_missing_foreign_and_occupied_connections_and_bad_nodes() {
             "invalid_node_restore",
         ),
     ];
+    let error = serde_json::from_value::<RestoredNode>(serde_json::json!({
+        "step": {"id": "fmn_old", "formation": "flow"}
+    }))
+    .unwrap_err()
+    .to_string();
+    assert!(
+        error.contains("flow") && error.contains("solo") && error.contains("orchestrated"),
+        "{error}"
+    );
+    assert_eq!(std::fs::read(&mission_path).unwrap(), mission_before);
+    assert_eq!(std::fs::read(&layout_path).unwrap(), layout_before);
     for (node, connections, code) in cases {
         let error = store
             .patch(
@@ -834,7 +868,7 @@ fn judge_chain_extends_its_return_and_refuses_occupied_inputs() {
                 "chain",
                 pre(&edit),
                 MissionChange::CreateStep {
-                    formation: "solo".into(),
+                    formation: ahjo_mission_model::Formation::Solo,
                     title: title.into(),
                     x: 0,
                     y: 0,
@@ -849,7 +883,7 @@ fn judge_chain_extends_its_return_and_refuses_occupied_inputs() {
             pre(&edit),
             MissionChange::CreateGate {
                 title: "Review".into(),
-                kinds: vec!["human".into()],
+                kinds: vec![ahjo_mission_model::GateKind::Human],
                 criterion: "".into(),
                 check: "".into(),
                 check_version: "".into(),
@@ -958,7 +992,7 @@ fn refused_rewire_retains_original_and_occupied_connections() {
                 "rewire",
                 pre(&edit),
                 MissionChange::CreateStep {
-                    formation: "solo".into(),
+                    formation: ahjo_mission_model::Formation::Solo,
                     title: title.into(),
                     x: 0,
                     y: 0,
@@ -1033,7 +1067,7 @@ fn removing_a_dynamic_port_prunes_only_its_connections() {
                 "ports",
                 pre(&edit),
                 MissionChange::CreateStep {
-                    formation: "solo".into(),
+                    formation: ahjo_mission_model::Formation::Solo,
                     title: title.into(),
                     x: 0,
                     y: 0,
@@ -1051,7 +1085,7 @@ fn removing_a_dynamic_port_prunes_only_its_connections() {
                 step_id: target.clone(),
                 direction: "input".into(),
                 label: "Second".into(),
-                kind: "".into(),
+                kind: ahjo_mission_model::PortKind::Unset,
             },
             "",
         )
@@ -1105,7 +1139,7 @@ fn orchestrated_snapshot_cannot_silently_remove_a_staffed_seat() {
             "peer",
             pre(&edit),
             MissionChange::CreateStep {
-                formation: "orchestrated".into(),
+                formation: ahjo_mission_model::Formation::Orchestrated,
                 title: "Team".into(),
                 x: 0,
                 y: 0,
@@ -1122,9 +1156,9 @@ fn orchestrated_snapshot_cannot_silently_remove_a_staffed_seat() {
                 step_id: team.id.clone(),
                 slot_id: team.slots[1].id.clone(),
                 agent_id: "builder".into(),
-                harness: "claude-code".into(),
+                harness: ahjo_mission_model::Harness::ClaudeCode,
                 model: "".into(),
-                effort: "medium".into(),
+                effort: ahjo_mission_model::Effort::Medium,
             },
             "",
         )
@@ -1142,7 +1176,7 @@ fn orchestrated_snapshot_cannot_silently_remove_a_staffed_seat() {
             pre(&edit),
             MissionChange::SetStepFormation {
                 id: team.id.clone(),
-                formation: "orchestrated".into(),
+                formation: ahjo_mission_model::Formation::Orchestrated,
                 keep_slot_id: "".into(),
                 slots: Some(three.clone()),
             },
@@ -1161,7 +1195,7 @@ fn orchestrated_snapshot_cannot_silently_remove_a_staffed_seat() {
             pre(&edit),
             MissionChange::SetStepFormation {
                 id: team.id.clone(),
-                formation: "orchestrated".into(),
+                formation: ahjo_mission_model::Formation::Orchestrated,
                 keep_slot_id: "".into(),
                 slots: Some(remaining.clone()),
             },
@@ -1178,9 +1212,9 @@ fn orchestrated_snapshot_cannot_silently_remove_a_staffed_seat() {
                 step_id: team.id.clone(),
                 slot_id: team.slots[1].id.clone(),
                 agent_id: "".into(),
-                harness: "".into(),
+                harness: ahjo_mission_model::Harness::Unset,
                 model: "".into(),
-                effort: "".into(),
+                effort: ahjo_mission_model::Effort::Unset,
             },
             "",
         )
@@ -1191,7 +1225,7 @@ fn orchestrated_snapshot_cannot_silently_remove_a_staffed_seat() {
             pre(&edit),
             MissionChange::SetStepFormation {
                 id: team.id,
-                formation: "orchestrated".into(),
+                formation: ahjo_mission_model::Formation::Orchestrated,
                 keep_slot_id: "".into(),
                 slots: Some(remaining.clone()),
             },

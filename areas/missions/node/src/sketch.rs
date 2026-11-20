@@ -66,19 +66,19 @@ fn sketch(m: &Missions, id: &str, steps: &[String], note: &str, actor: &str) -> 
             title: "Input".into(),
             goal: String::new(),
             files: Vec::new(),
-            human_channel: String::new(),
+            human_channel: wire::HumanChannel::Unset,
             x: 0,
             y: 0,
         }];
         cards.extend(steps.iter().map(|title| MissionChange::CreateStep {
-            formation: wire::SOLO.into(),
+            formation: wire::Formation::Solo,
             title: title.clone(),
             x: 0,
             y: 0,
         }));
         cards.push(MissionChange::CreateEnd {
             title: "Done".into(),
-            outcome: wire::DONE.into(),
+            outcome: wire::EndOutcome::Done,
             x: 0,
             y: 0,
         });

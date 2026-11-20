@@ -26,7 +26,10 @@ impl Scratch {
         .unwrap();
         std::fs::write(
             p.join("missions/admission-findings.mission.toml"),
-            include_str!("parity/runs/missions/admission-findings.mission.toml"),
+            include_str!("parity/runs/missions/admission-findings.mission.toml").replace(
+                "harness = \"wrong\"\neffort = \"low\"",
+                "harness = \"claude-code\"\neffort = \"ultra\"",
+            ),
         )
         .unwrap();
         Self(p)
@@ -39,6 +42,15 @@ impl Drop for Scratch {
 }
 #[test]
 fn solo_lab_ledger_and_admission_findings_match_archon() {
+    let invalid = ahjo_mission_model::Mission::parse(include_str!(
+        "parity/runs/missions/admission-findings.mission.toml"
+    ))
+    .unwrap_err();
+    assert_eq!(invalid.code, "invalid_definition_source");
+    assert!(
+        invalid.message.contains("wrong") && invalid.message.contains("claude-code"),
+        "{invalid}"
+    );
     let root = Scratch::new();
     let coordinator =
         Coordinator::open(&root.0, RunSettings::default(), Box::new(LabExecutor)).unwrap();
@@ -105,9 +117,18 @@ fn solo_lab_ledger_and_admission_findings_match_archon() {
         .filter(|finding| finding.code != ahjo_mission_model::Code::UnsupportedStep)
         .collect();
     let actual = serde_json::to_value(comparable).unwrap();
-    let expected: Value = serde_json::from_str(include_str!(
+    let mut expected: Value = serde_json::from_str(include_str!(
         "parity/runs/archon-ledgers/admission-findings.json"
     ))
     .unwrap();
+    let staffing = expected
+        .as_array_mut()
+        .unwrap()
+        .iter_mut()
+        .find(|finding| finding["code"] == "invalid_slot_settings")
+        .unwrap();
+    staffing["message"] = serde_json::json!(
+        "step \"staff\" slot \"invalid\" effort \"ultra\" is not one claude-code accepts; use low, medium, high, xhigh, max"
+    );
     assert_eq!(actual, expected);
 }

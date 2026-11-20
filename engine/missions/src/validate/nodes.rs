@@ -3,7 +3,7 @@
 
 use std::collections::HashMap;
 
-use ahjo_mission_model::{Code, DONE, Finding, Mission, REJECTED};
+use ahjo_mission_model::{Code, EndOutcome, Finding, Mission};
 
 pub fn findings(mission: &Mission) -> Vec<Finding> {
     let mut seen: HashMap<&str, &str> = HashMap::new();
@@ -18,17 +18,11 @@ pub fn findings(mission: &Mission) -> Vec<Finding> {
     let mut findings = Vec::new();
     for end in &mission.ends {
         findings.extend(claim(&mut seen, &end.id, "End", "End node"));
-        let outcome = end.outcome.trim();
-        if end.outcome.is_empty() || !(outcome.is_empty() || outcome == DONE || outcome == REJECTED)
-        {
+        if end.outcome == EndOutcome::Unset {
             findings.push(Finding::new(
                 Code::InvalidEnd,
                 &end.id,
-                format!(
-                    "End node {} has outcome {:?}; set it to done or rejected",
-                    mission.node_name(&end.id),
-                    end.outcome
-                ),
+                format!("End node {} needs an outcome", mission.node_name(&end.id)),
             ));
         }
     }

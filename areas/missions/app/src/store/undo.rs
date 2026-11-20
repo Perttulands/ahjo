@@ -531,12 +531,12 @@ mod tests {
                 ahjo_missions_contract::Step {
                     id: "fmn_plan".into(),
                     title: "Plan".into(),
-                    formation: "solo".into(),
+                    formation: ahjo_missions_contract::Formation::Solo,
                     slots: vec![Slot {
                         id: "s1".into(),
                         agent_id: "planner".into(),
-                        harness: "claude-code".into(),
-                        effort: "xhigh".into(),
+                        harness: ahjo_missions_contract::Harness::ClaudeCode,
+                        effort: ahjo_missions_contract::Effort::Xhigh,
                         ..Default::default()
                     }],
                     ..Default::default()
@@ -544,14 +544,14 @@ mod tests {
                 ahjo_missions_contract::Step {
                     id: "fmn_beads".into(),
                     title: "Beads".into(),
-                    formation: "solo".into(),
+                    formation: ahjo_missions_contract::Formation::Solo,
                     ..Default::default()
                 },
             ],
             gates: vec![Gate {
                 id: "gate_r".into(),
                 title: "Review".into(),
-                kinds: vec!["step".into()],
+                kinds: vec![ahjo_missions_contract::GateKind::Step],
                 criterion: "ok".into(),
                 ..Default::default()
             }],
@@ -609,8 +609,8 @@ mod tests {
             vec![gate_patch("ok")]
         );
         let staff = Staffing {
-            harness: "openai-codex".into(),
-            effort: "high".into(),
+            harness: ahjo_missions_contract::Harness::OpenAiCodex,
+            effort: ahjo_missions_contract::Effort::High,
             ..Default::default()
         };
         let undo_staff = inverse(&m, &[], &Step::board(staff.assign("fmn_plan", "s1"))).unwrap();
@@ -620,9 +620,9 @@ mod tests {
                 step_id: "fmn_plan".into(),
                 slot_id: "s1".into(),
                 agent_id: "planner".into(),
-                harness: "claude-code".into(),
+                harness: ahjo_missions_contract::Harness::ClaudeCode,
                 model: String::new(),
-                effort: "xhigh".into(),
+                effort: ahjo_missions_contract::Effort::Xhigh,
             })]
         );
 
@@ -653,9 +653,9 @@ mod tests {
         let before = Staffing::from(&*seat);
         let edited = Staffing {
             role: "reviewer".into(),
-            harness: "openai-codex".into(),
+            harness: ahjo_missions_contract::Harness::OpenAiCodex,
             model: "gpt-6".into(),
-            effort: "low".into(),
+            effort: ahjo_missions_contract::Effort::Low,
         };
         let forward = Step::board(edited.assign("fmn_plan", "s1"));
         assert_eq!(
@@ -700,7 +700,7 @@ mod tests {
             answered(
                 &CreateStep {
                     title: "New".into(),
-                    formation: "solo".into(),
+                    formation: ahjo_missions_contract::Formation::Solo,
                     x: 0,
                     y: 0
                 },
@@ -904,7 +904,7 @@ mod tests {
         m.steps[0].inputs = vec![Port {
             id: "in".into(),
             label: "Original".into(),
-            kind: "text".into(),
+            kind: ahjo_missions_contract::PortKind::Text,
         }];
         let update = |label: &str| {
             Step::board(UpdatePort {

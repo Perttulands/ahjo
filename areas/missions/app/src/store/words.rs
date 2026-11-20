@@ -60,14 +60,14 @@ pub fn harness_name(harness: &str) -> String {
 /// What works a slot, the same wherever it is shown: `Claude haiku · low`,
 /// `Codex · medium` when the harness's own model is used.
 pub fn slot_line(s: &Slot) -> String {
-    let harness = harness_name(&s.harness);
+    let harness = harness_name(s.harness.as_str());
     let mut parts = vec![if s.model.is_empty() || s.model == "default" {
         harness
     } else {
         format!("{harness} {}", s.model)
     }];
-    if !s.effort.is_empty() {
-        parts.push(s.effort.clone());
+    if !s.effort.is_unset() {
+        parts.push(s.effort.as_str().to_owned());
     }
     parts.join(" · ")
 }
@@ -455,8 +455,8 @@ mod tests {
         let s = Slot {
             label: "Plan".into(),
             agent_id: "planner".into(),
-            harness: "claude-code".into(),
-            effort: "xhigh".into(),
+            harness: ahjo_missions_contract::Harness::ClaudeCode,
+            effort: ahjo_missions_contract::Effort::Xhigh,
             controller: true,
             ..Default::default()
         };

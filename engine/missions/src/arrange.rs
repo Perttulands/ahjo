@@ -27,7 +27,7 @@ pub fn arrange(mission: &Mission, layout: &Layout) -> Layout {
         items.insert(
             n.id.clone(),
             Item {
-                kind: n.formation.clone(),
+                kind: n.formation.as_str().to_owned(),
                 files: n.brief.as_ref().is_some_and(|b| !b.files.is_empty()),
             },
         );
