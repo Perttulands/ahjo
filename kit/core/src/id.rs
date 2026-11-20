@@ -1,11 +1,14 @@
 //! Every resource is a node and an id local to it, so a fleet of nodes is
 //! one namespace without a central registry.
 
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
 /// A node's id: stable across restarts and upgrades.
-#[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[derive(
+    Clone, Debug, Default, Deserialize, Serialize, PartialEq, Eq, Hash, PartialOrd, Ord, JsonSchema,
+)]
 #[serde(transparent)]
 pub struct NodeId(pub String);
 

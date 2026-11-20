@@ -7,15 +7,16 @@ use std::sync::Arc;
 use std::time::UNIX_EPOCH;
 
 use ahjo_core::{Error, NodeId};
-use ahjo_node_kit::args::{flag, maybe_text, object, text};
 use ahjo_node_kit::{Command, Effect};
-use ahjo_terminals_contract::{COMMAND_FAILED, MAX_SEND};
+use ahjo_terminals_contract::{COMMAND_FAILED, MAX_SEND, commands::*};
 use anyhow::{Context, Result, bail};
-use serde_json::{Value, json};
+use futures_util::{StreamExt, stream};
+use schemars::JsonSchema;
+use serde::{Serialize, de::DeserializeOwned};
 
-use crate::hub::Hub;
 use crate::launch::Launch;
 use crate::launcher::Launcher;
+use crate::{handoff, hub::Hub};
 use ahjo_term::control::PaneId;
 use ahjo_term::engine::SessionInfo;
 use ahjo_term::search::{self, Target};
@@ -28,359 +29,53 @@ pub(crate) struct Ctx {
     pub projects: Arc<crate::projects::Projects>,
 }
 
-/// One command: its schema from `ctx` as the tools are listed, and its
-/// call with `ctx` once the sessions are listed, whose failure is a
-/// [`COMMAND_FAILED`] error.
-macro_rules! command {
-    ($ctx:expr, $name:expr, $effect:expr, $description:expr, |$s:ident| $schema:expr, $call:path) => {{
-        let (schema_ctx, call_ctx) = ($ctx.clone(), $ctx.clone());
-        Command::new(
-            $name,
-            $effect,
-            $description,
-            move || {
-                let $s: &Ctx = &schema_ctx;
-                $schema
-            },
-            move |args: Value| {
-                let ctx = call_ctx.clone();
-                async move {
-                    ctx.hub.ready().await.map_err(failed)?;
-                    $call(&ctx, &args).await.map_err(failed)
-                }
-            },
-        )
-    }};
+fn command<Input, Output, Fut>(
+    ctx: &Arc<Ctx>,
+    name: &'static str,
+    effect: Effect,
+    call: fn(Arc<Ctx>, Input) -> Fut,
+) -> Command
+where
+    Input: DeserializeOwned + JsonSchema + Send + 'static,
+    Output: Serialize + JsonSchema,
+    Fut: Future<Output = Result<Output>> + Send + 'static,
+{
+    let ctx = ctx.clone();
+    Command::typed(name, effect, move |args| {
+        let ctx = ctx.clone();
+        async move {
+            ctx.hub.ready().await.map_err(failed)?;
+            call(ctx, args).await.map_err(failed)
+        }
+    })
 }
 
 fn failed(error: anyhow::Error) -> Error {
     Error::new(COMMAND_FAILED, format!("{error:#}"))
 }
 
-/// Every session command.
 pub(crate) fn commands(ctx: &Arc<Ctx>) -> Vec<Command> {
     vec![
-        command!(
-            ctx,
-            "session_list",
-            Effect::Reads,
-            "List the sessions on this node: id, name, panes, whether \
-        they are active, when they last wrote, and the question a pane waits on.",
-            |_ctx| object(json!({}), &[]),
-            list_sessions
-        ),
-        command!(
-            ctx,
-            "session_read",
-            Effect::Reads,
-            "Read the visible screen of a session's pane as plain text.",
-            |_ctx| object(target_properties(json!({})), &["session"]),
-            read_screen
-        ),
-        command!(
-            ctx,
-            "session_send",
-            Effect::Writes,
-            "Type text into a session's pane as one paste, then press Enter \
-        unless enter is false. Answers once tmux has taken it.",
-            |_ctx| {
-                object(
-                    target_properties(json!({
-                        "text": { "type": "string" },
-                        "enter": { "type": "boolean", "default": true },
-                    })),
-                    &["session", "text"],
-                )
-            },
-            send_text
-        ),
-        command!(
-            ctx,
-            "session_launch",
-            Effect::Writes,
-            "Start a new session running a harness in a folder. Answers with \
-        the new session's id once it is listed.",
-            |ctx| {
-                let launcher = ctx.launcher.get();
-                let harnesses: Vec<&str> =
-                    launcher.harnesses.iter().map(|h| h.id.as_str()).collect();
-                let mut properties = json!({
-                    "harness": { "type": "string", "enum": harnesses },
-                    "folder": {
-                        "type": "string",
-                        "description": "Absolute or under ~.",
-                        "examples": launcher.folders,
-                    },
-                    "name": {
-                        "type": "string",
-                        "description": "Letters, digits, _ and -, at most 50.",
-                    },
-                    "flags": {
-                        "type": "string",
-                        "description": "The whole flag line; the harness's defaults if absent.",
-                    },
-                    "cols": { "type": "integer", "minimum": 1, "maximum": 65535, "description": "Initial terminal columns; supply with rows." },
-                    "rows": { "type": "integer", "minimum": 1, "maximum": 65535, "description": "Initial terminal rows; supply with cols." },
-                    "install_completion_hooks": {
-                        "type": "boolean",
-                        "default": false,
-                        "description": "Install hooks that report completion and requests for input.",
-                    },
-                });
-                // Only a node that follows other users' servers has a choice
-                // to offer: an empty enum would take no value at all.
-                let users = ctx.hub.users();
-                if !users.is_empty() {
-                    properties["user"] = json!({
-                        "type": "string",
-                        "enum": users,
-                        "description": "Whose tmux server runs it; the node's own if absent.",
-                    });
-                }
-                object(properties, &["harness", "folder", "name"])
-            },
-            launch_agent
-        ),
-        command!(
-            ctx,
-            "session_copy",
-            Effect::Writes,
-            "Copy a session's running harness in its folder on the same user, under the next free family name.",
-            |_ctx| {
-                object(
-                    json!({"session": {"type": "string", "description": "A session id or name."}, "install_completion_hooks": {"type": "boolean", "default": false, "description": "Install completion hooks; the app preference is unavailable to the node."}}),
-                    &["session"],
-                )
-            },
-            copy
-        ),
-        command!(
-            ctx,
-            "session_history",
-            Effect::Reads,
-            "Read a pane's scrollback and screen as plain text, oldest line \
-        first: the newest 200 lines, or the newest last lines, or with all every \
-        line. A cut answer says how many lines it left out.",
-            |_ctx| {
-                object(
-                    target_properties(json!({
-                        "last": { "type": "integer", "description": "Keep only this many of the newest lines (200 if not said)." },
-                        "all": { "type": "boolean", "description": "Every line, however many." },
-                    })),
-                    &["session"],
-                )
-            },
-            history
-        ),
-        command!(
-            ctx,
-            "session_search",
-            Effect::Reads,
-            "Search every pane's scrollback for text. Case matters only if \
-        the query has a capital letter. Answers with each matching line and the \
-        lines either side, at most 500.",
-            |_ctx| object(json!({ "query": { "type": "string" } }), &["query"]),
-            search
-        ),
-        command!(
-            ctx,
-            "session_keys",
-            Effect::Writes,
-            "Press keys in a session's pane, in order. Each key is a name \
-        (Enter, Tab, Escape, BSpace, Space, Up, Down, Left, Right, Home, End, \
-        PageUp, PageDown, Delete, C-c and other C-<letter>) or else text typed as it is.",
-            |_ctx| {
-                object(
-                    target_properties(json!({
-                        "keys": { "type": "array", "items": { "type": "string" } },
-                    })),
-                    &["session", "keys"],
-                )
-            },
-            keys
-        ),
-        command!(
-            ctx,
-            "session_rename",
-            Effect::Sets,
-            "Rename a session. Refused if another session on its tmux \
-        server has the name. Answers once the session list shows the new name.",
-            |_ctx| {
-                object(
-                    json!({
-                        "session": { "type": "string", "description": "A session id or name." },
-                        "name": {
-                            "type": "string",
-                            "description": "The new name: letters, digits, _ and -, at most 50.",
-                        },
-                    }),
-                    &["session", "name"],
-                )
-            },
-            rename
-        ),
-        command!(
-            ctx,
-            "session_kill",
-            Effect::Destroys,
-            "End a session and everything running in it.",
-            |_ctx| {
-                object(
-                    json!({ "session": { "type": "string", "description": "A session id or name." } }),
-                    &["session"],
-                )
-            },
-            kill
-        ),
-        command!(
-            ctx,
-            "session_mouse",
-            Effect::Sets,
-            "Turn tmux's mouse mode on or off on every tmux server this \
-        node follows. On, the wheel scrolls a session's history and a drag \
-        selects inside tmux; off, the wheel and clicks go to the program.",
-            |_ctx| {
-                object(
-                    json!({ "mouse": { "type": "string", "enum": ["on", "off"] } }),
-                    &["mouse"],
-                )
-            },
-            mouse
-        ),
-        command!(
-            ctx,
-            "session_seen",
-            Effect::Sets,
-            "Mark a session's last report (finished, needs-input) as seen, \
-        so it stops showing as news.",
-            |_ctx| {
-                object(
-                    json!({ "session": { "type": "string", "description": "A session id or name." } }),
-                    &["session"],
-                )
-            },
-            seen
-        ),
-        command!(
-            ctx,
-            "project_find",
-            Effect::Reads,
-            "Find project folders on this machine by a fragment of their name or path \
-        (\"kor\" finds /srv/games/korpi), best match first, each with whether it has Git and \
-        Beads. Use this when the user names a project and you need its folder.",
-            |_ctx| {
-                object(
-                    json!({ "query": {
-                        "type": "string",
-                        "description": "A fragment of the project's name, or words in its path.",
-                    } }),
-                    &["query"],
-                )
-            },
-            crate::handoff::find_project
-        ),
-        command!(
-            ctx,
-            "handoff_start",
-            Effect::Writes,
-            "Hand work to a coding agent on Swarm. Use this when the user wants an agent \
-        (Codex, Claude Code) to take over work from this conversation. It opens a session in \
-        the project's folder, gives the agent the brief as its first message, waits up to a \
-        minute for it to start, and answers the session to follow and a line to tell the user. \
-        Write the brief to stand on its own: the goal, what was decided, constraints, what \
-        counts as done, and links (brain [[slugs]], a Bead id).",
-            |ctx| {
-                let launcher = ctx.launcher.get();
-                let agents: Vec<&str> = launcher
-                    .harnesses
-                    .iter()
-                    .map(|h| h.id.as_str())
-                    .filter(|id| *id != crate::launch::SHELL)
-                    .collect();
-                let mut harness = json!({ "type": "string" });
-                if let Some(first) = agents.first() {
-                    harness["enum"] = json!(agents);
-                    harness["description"] = json!(format!("The agent; {first} if not said."));
-                }
-                object(
-                    json!({
-                        "project": {
-                            "type": "string",
-                            "description": "The project's folder, or a fragment of its name as project_find takes it.",
-                        },
-                        "brief": {
-                            "type": "string",
-                            "description": "The agent's first message, standing on its own.",
-                        },
-                        "harness": harness,
-                        "name": {
-                            "type": "string",
-                            "description": "The session's name: letters, digits, _ and -; the folder's name if not said.",
-                        },
-                        "work": {
-                            "type": "string",
-                            "description": "A work item (Bead id) the agent is to own, named at the end of the brief.",
-                        },
-                    }),
-                    &["project", "brief"],
-                )
-            },
-            crate::handoff::start
-        ),
-        command!(
-            ctx,
-            "handoff_status",
-            Effect::Reads,
-            "Where an agent's session is: working, needs-input (with the question its screen \
-        asks), finished (with its last report), idle (at its prompt with no finished turn \
-        reported) or gone, and the bottom of its screen. Use this to follow a handoff or any \
-        session. With wait, it answers as soon as the agent stops working, waiting at most \
-        that many seconds.",
-            |_ctx| {
-                object(
-                    json!({
-                        "session": { "type": "string", "description": "A session id or name." },
-                        "wait": {
-                            "type": "integer",
-                            "minimum": 0,
-                            "maximum": crate::handoff::MAX_WAIT,
-                            "description": "Seconds to wait while the agent works; 0 if not said.",
-                        },
-                        "lines": {
-                            "type": "integer",
-                            "minimum": 1,
-                            "description": "How many of the screen's bottom lines (40 if not said).",
-                        },
-                    }),
-                    &["session"],
-                )
-            },
-            crate::handoff::status
-        ),
-        command!(
-            ctx,
-            "handoff_reply",
-            Effect::Writes,
-            "Answer an agent or send it a follow-up: the text is typed into its session and \
-        submitted. While its screen asks with a menu (handoff_status says needs-input and shows \
-        the options), the text is the option's number, pressed as a key. Answers where the \
-        agent is just after.",
-            |_ctx| {
-                object(
-                    json!({
-                        "session": { "type": "string", "description": "A session id or name." },
-                        "text": { "type": "string" },
-                    }),
-                    &["session", "text"],
-                )
-            },
-            crate::handoff::reply
-        ),
+        command(ctx, "session_list", Effect::Reads, list_sessions),
+        command(ctx, "session_read", Effect::Reads, read),
+        command(ctx, "session_send", Effect::Writes, send_text),
+        command(ctx, "session_launch", Effect::Writes, launch_agent),
+        command(ctx, "session_copy", Effect::Writes, copy),
+        command(ctx, "session_search", Effect::Reads, search),
+        command(ctx, "session_keys", Effect::Writes, keys),
+        command(ctx, "session_rename", Effect::Sets, rename),
+        command(ctx, "session_kill", Effect::Destroys, kill),
+        command(ctx, "session_mouse", Effect::Sets, mouse),
+        command(ctx, "session_seen", Effect::Sets, seen),
+        command(ctx, "project_find", Effect::Reads, handoff::find_project),
+        command(ctx, "handoff_start", Effect::Writes, handoff::start),
+        command(ctx, "handoff_status", Effect::Reads, handoff::status),
+        command(ctx, "handoff_reply", Effect::Writes, handoff::reply),
     ]
 }
 
-async fn copy(ctx: &Ctx, args: &Value) -> Result<Value> {
-    let source = find(ctx, text(args, "session")?)?;
+async fn copy(ctx: Arc<Ctx>, args: SessionCopy) -> Result<SessionLaunched> {
+    let source = find(&ctx, &args.session)?;
     let facts = source
         .facts
         .as_ref()
@@ -408,180 +103,174 @@ async fn copy(ctx: &Ctx, args: &Value) -> Result<Value> {
         name,
         flags: harness.flags.clone(),
         user: source.user.unwrap_or_default(),
-        install_completion_hooks: flag(args, "install_completion_hooks", false)?,
+        install_completion_hooks: args.install_completion_hooks.unwrap_or_default(),
         size: None,
     };
     let (session, warning) = ctx.hub.launch(&launcher, &launch).await?;
-    Ok(json!({"node": ctx.node, "session": session, "warning": warning}))
+    Ok(SessionLaunched {
+        node: ctx.node.clone(),
+        session,
+        warning,
+    })
 }
 
-/// `session` and an optional `pane`, besides `more`.
-fn target_properties(mut more: Value) -> Value {
-    more["session"] = json!({ "type": "string", "description": "A session id or name." });
-    more["pane"] = json!({
-        "type": "integer",
-        "description": "One of the session's panes; its first if absent.",
-    });
-    more
-}
-
-async fn list_sessions(ctx: &Ctx, _args: &Value) -> Result<Value> {
+async fn list_sessions(ctx: Arc<Ctx>, _: SessionList) -> Result<SessionsListed> {
     let listed = ctx.hub.sessions();
-    let reports = ctx.hub.events(&listed);
-    let sessions: Vec<Value> = listed
-        .iter()
-        .map(|s| {
-            let mut value = session(s);
-            value["report"] = reports.get(&s.id).map_or(Value::Null, |event| {
-                json!({
-                    "kind": event.kind.word(),
-                    "at": event.at,
-                    "summary": event.summary,
-                    "seen": event.seen,
-                })
-            });
-            value
-        })
-        .collect();
-    Ok(json!({ "node": ctx.node, "sessions": sessions }))
+    let mut reports = ctx.hub.events(&listed);
+    let sessions = stream::iter(listed.into_iter().map(|info| {
+        let report = reports.remove(&info.id);
+        let ctx = &ctx;
+        async move { session_summary(ctx, info, report).await }
+    }))
+    .buffered(8)
+    .collect()
+    .await;
+    Ok(SessionsListed {
+        node: ctx.node.clone(),
+        sessions,
+    })
 }
 
-fn session(session: &SessionInfo) -> Value {
-    let waiting = |pane: PaneId| {
-        session
-            .waiting
-            .iter()
-            .find(|(id, _)| *id == pane)
-            .map(|(_, question)| question.as_str())
-    };
-    let panes: Vec<Value> = session
+async fn session_summary(
+    ctx: &Ctx,
+    info: SessionInfo,
+    report: Option<crate::agent_events::Event>,
+) -> SessionSummary {
+    let (harness, state) = handoff::session_state(ctx, &info).await;
+    let panes = info
         .panes
         .iter()
-        .map(|&(id, cols, rows)| {
-            json!({ "id": id, "cols": cols, "rows": rows, "waiting": waiting(id) })
+        .map(|&(id, cols, rows)| PaneSummary {
+            id,
+            cols,
+            rows,
+            waiting: info
+                .waiting
+                .iter()
+                .find(|(pane, _)| *pane == id)
+                .map(|(_, question)| question.clone()),
         })
         .collect();
-    let last_output = session
+    let last_output = info
         .activity
         .last_output
         .and_then(|at| at.duration_since(UNIX_EPOCH).ok())
         .map(|since| since.as_secs());
-    json!({
-        "id": session.id,
-        "name": session.name,
-        "user": session.user,
-        "active": session.activity.active,
-        "last_output": last_output,
-        "panes": panes,
-    })
+    SessionSummary {
+        id: info.id,
+        name: info.name,
+        user: info.user,
+        active: info.activity.active,
+        last_output,
+        harness,
+        state,
+        panes,
+        report: report.map(|event| SessionReport {
+            report: handoff::report_summary(&event),
+            seen: event.seen,
+        }),
+    }
 }
 
-async fn read_screen(ctx: &Ctx, args: &Value) -> Result<Value> {
-    let (session, pane) = target(ctx, args).await?;
+/// A pane's visible text, once the node has begun following it.
+pub(crate) async fn visible(ctx: &Ctx, pane: PaneId) -> Result<String> {
     let mut changed = ctx.hub.watch();
-    let text = tokio::time::timeout(std::time::Duration::from_secs(5), async {
+    tokio::time::timeout(std::time::Duration::from_secs(5), async {
         loop {
             if let Some(text) = ctx.hub.text(pane) {
-                break Ok::<_, anyhow::Error>(text);
+                break Ok(text);
             }
             changed.changed().await.context("session stream closed")?;
         }
     })
     .await
-    .context("the pane is still being read from tmux; try again")??;
-    Ok(json!({
-        "node": ctx.node,
-        "session": session.id,
-        "pane": pane,
-        "text": text.trim_end(),
-    }))
+    .context("the pane is still being read from tmux; try again")?
 }
 
-async fn send_text(ctx: &Ctx, args: &Value) -> Result<Value> {
-    let (session, pane) = target(ctx, args).await?;
-    let text = text(args, "text")?;
-    if text.len() > MAX_SEND {
+async fn read(ctx: Arc<Ctx>, args: SessionRead) -> Result<SessionReadout> {
+    let all = args.all.unwrap_or_default();
+    if all && args.lines.is_some() {
+        bail!("give lines or all, not both");
+    }
+    let (session, pane) = target(&ctx, &args.session, args.pane).await?;
+    let (cut, text) = if all || args.lines.is_some() {
+        let (server, own) = ctx.hub.pane(pane).context("the pane went")?;
+        let capture = search::capture(server.backend(), own).await?;
+        let plain = strip_escapes(&capture);
+        let lines: Vec<_> = plain.trim_end().lines().collect();
+        let keep = args.lines.unwrap_or(lines.len());
+        let left_out = lines.len().saturating_sub(keep);
+        let cut = (left_out > 0).then(|| {
+            format!(
+                "the newest {keep} of {} lines; --lines <n> or --all for more",
+                lines.len()
+            )
+        });
+        (cut, lines[left_out..].join("\n"))
+    } else {
+        (None, visible(&ctx, pane).await?.trim_end().into())
+    };
+    Ok(SessionReadout {
+        node: ctx.node.clone(),
+        session: session.id,
+        pane,
+        cut,
+        text,
+    })
+}
+
+async fn send_text(ctx: Arc<Ctx>, args: SessionSend) -> Result<SessionSent> {
+    let (session, pane) = target(&ctx, &args.session, args.pane).await?;
+    if args.text.len() > MAX_SEND {
         bail!("text is longer than {MAX_SEND} bytes");
     }
-    let enter = flag(args, "enter", true)?;
-    ctx.hub.deliver(pane, text.to_owned(), enter).await?.await?;
-    Ok(json!({ "node": ctx.node, "session": session.id, "pane": pane, "sent": true }))
+    ctx.hub
+        .deliver(pane, args.text, args.enter.unwrap_or(true))
+        .await?
+        .await?;
+    Ok(SessionSent {
+        node: ctx.node.clone(),
+        session: session.id,
+        pane,
+        sent: true,
+    })
 }
 
-async fn launch_agent(ctx: &Ctx, args: &Value) -> Result<Value> {
-    let harness = text(args, "harness")?;
-    let folder = text(args, "folder")?;
+async fn launch_agent(ctx: Arc<Ctx>, args: SessionLaunch) -> Result<SessionLaunched> {
     let launcher = ctx.launcher.get();
-    let dimension = |key: &str| -> Result<Option<u16>> {
-        match args.get(key) {
-            None | Some(Value::Null) => Ok(None),
-            Some(value) => {
-                let n = value
-                    .as_u64()
-                    .and_then(|n| u16::try_from(n).ok())
-                    .filter(|n| *n > 0)
-                    .with_context(|| format!("{key} must be between 1 and 65535"))?;
-                Ok(Some(n))
-            }
-        }
-    };
-    let size = match (dimension("cols")?, dimension("rows")?) {
+    let size = match (args.cols, args.rows) {
         (None, None) => None,
-        (Some(cols), Some(rows)) => Some((cols, rows)),
+        (Some(cols), Some(rows)) => Some((cols.get(), rows.get())),
         _ => bail!("cols and rows must be supplied together"),
     };
+    let flags = args.flags.unwrap_or_else(|| {
+        launcher
+            .harnesses
+            .iter()
+            .find(|h| h.id == args.harness)
+            .map(|h| h.flags.clone())
+            .unwrap_or_default()
+    });
     let launch = Launch {
-        harness: harness.to_owned(),
+        harness: args.harness,
         // The launcher resolves ~ and checks the folder, as for the app.
-        folder: folder.to_owned(),
-        name: text(args, "name")?.to_owned(),
-        flags: match maybe_text(args, "flags")? {
-            Some(flags) => flags.to_owned(),
-            None => launcher
-                .harnesses
-                .iter()
-                .find(|h| h.id == harness)
-                .map(|h| h.flags.clone())
-                .unwrap_or_default(),
-        },
-        user: maybe_text(args, "user")?.unwrap_or_default().to_owned(),
-        install_completion_hooks: flag(args, "install_completion_hooks", false)?,
+        folder: args.folder,
+        name: args.name,
+        flags,
+        user: args.user.unwrap_or_default(),
+        install_completion_hooks: args.install_completion_hooks.unwrap_or_default(),
         size,
     };
     let (session, warning) = ctx.hub.launch(&launcher, &launch).await?;
-    Ok(json!({ "node": ctx.node, "session": session, "warning": warning }))
+    Ok(SessionLaunched {
+        node: ctx.node.clone(),
+        session,
+        warning,
+    })
 }
 
-/// How many of a pane's newest lines `session history` answers with when
-/// not told: a screenful or several, never a whole scrollback unasked.
-const HISTORY_LINES: usize = 200;
-
-async fn history(ctx: &Ctx, args: &Value) -> Result<Value> {
-    let (session, pane) = target(ctx, args).await?;
-    let (server, own) = ctx.hub.pane(pane).context("the pane went")?;
-    let capture = search::capture(server.backend(), own).await?;
-    let plain = strip_escapes(&capture);
-    let lines: Vec<&str> = plain.trim_end().lines().collect();
-    let keep = match (args.get("last"), flag(args, "all", false)?) {
-        (None | Some(Value::Null), true) => lines.len(),
-        (None | Some(Value::Null), false) => HISTORY_LINES,
-        (Some(_), true) => bail!("give last or all, not both"),
-        (Some(last), false) => last.as_u64().context("last is a count of lines")? as usize,
-    };
-    let left_out = lines.len().saturating_sub(keep);
-    let text = lines[left_out..].join("\n");
-    // Said before the text, so a reader cut short by it still sees it.
-    let cut = (left_out > 0).then(|| {
-        format!(
-            "the newest {keep} of {} lines; --last <n> or --all for more",
-            lines.len()
-        )
-    });
-    Ok(json!({ "node": ctx.node, "session": session.id, "pane": pane, "cut": cut, "text": text }))
-}
-
-async fn search(ctx: &Ctx, args: &Value) -> Result<Value> {
-    let query = text(args, "query")?;
+async fn search(ctx: Arc<Ctx>, args: SessionSearch) -> Result<SessionsSearched> {
+    let query = &args.query;
     if query.is_empty() {
         bail!("query is empty");
     }
@@ -607,91 +296,93 @@ async fn search(ctx: &Ctx, args: &Value) -> Result<Value> {
         all
     };
     let (summary, found) = tokio::join!(search::search(panes, query, found), gather);
-    let session_of = |pane: PaneId| {
-        sessions
-            .iter()
-            .find(|s| s.panes.iter().any(|&(id, _, _)| id == pane))
-            .map(|s| s.id.as_str())
-    };
-    let matches: Vec<Value> = found
-        .iter()
-        .map(|m| {
-            json!({
-                "session": session_of(m.pane),
-                "pane": m.pane,
-                "line": m.line,
-                "text": strip_escapes(&m.context[1]),
-                "before": strip_escapes(&m.context[0]),
-                "after": strip_escapes(&m.context[2]),
+    let matches = found
+        .into_iter()
+        .filter_map(|m| {
+            let session = sessions
+                .iter()
+                .find(|s| s.panes.iter().any(|&(id, _, _)| id == m.pane))?;
+            Some(SessionMatch {
+                session: session.name.clone(),
+                pane: m.pane,
+                line: m.line,
+                text: strip_escapes(&m.context[1]),
+                before: strip_escapes(&m.context[0]),
+                after: strip_escapes(&m.context[2]),
             })
         })
         .collect();
-    Ok(json!({
-        "node": ctx.node,
-        "matches": matches,
-        "panes": summary.panes,
-        "truncated": summary.truncated,
-    }))
+    Ok(SessionsSearched {
+        node: ctx.node.clone(),
+        matches,
+        panes: summary.panes,
+        truncated: summary.truncated,
+    })
 }
 
-async fn keys(ctx: &Ctx, args: &Value) -> Result<Value> {
-    let (session, pane) = target(ctx, args).await?;
-    let keys = args
-        .get("keys")
-        .and_then(Value::as_array)
-        .context("keys is required, as a list of keys")?;
-    let mut bytes = Vec::new();
-    for key in keys {
-        bytes.extend(key_bytes(key.as_str().context("each key is a string")?));
-    }
+async fn keys(ctx: Arc<Ctx>, args: SessionKeys) -> Result<SessionSent> {
+    let (session, pane) = target(&ctx, &args.session, args.pane).await?;
+    let bytes: Vec<_> = args.keys.iter().flat_map(|key| key_bytes(key)).collect();
     if bytes.len() > MAX_SEND {
         bail!("keys come to more than {MAX_SEND} bytes");
     }
     ctx.hub.send_input(pane, bytes).await?;
-    Ok(json!({ "node": ctx.node, "session": session.id, "pane": pane, "sent": true }))
+    Ok(SessionSent {
+        node: ctx.node.clone(),
+        session: session.id,
+        pane,
+        sent: true,
+    })
 }
 
-async fn kill(ctx: &Ctx, args: &Value) -> Result<Value> {
-    let session = find(ctx, text(args, "session")?)?;
+async fn kill(ctx: Arc<Ctx>, args: SessionKill) -> Result<SessionKilled> {
+    let session = find(&ctx, &args.session)?;
     let (server, id) = ctx.hub.session(&session.id)?;
     crate::launch::delete(server.backend(), id).await?;
-    Ok(json!({ "node": ctx.node, "session": session.id, "killed": true }))
+    Ok(SessionKilled {
+        node: ctx.node.clone(),
+        session: session.id,
+        killed: true,
+    })
 }
 
-async fn rename(ctx: &Ctx, args: &Value) -> Result<Value> {
-    let session = find(ctx, text(args, "session")?)?;
-    let name = text(args, "name")?;
-    ctx.hub.rename(&session.id, name).await?;
-    Ok(json!({ "node": ctx.node, "session": session.id, "name": name }))
+async fn rename(ctx: Arc<Ctx>, args: SessionRename) -> Result<SessionRenamed> {
+    let session = find(&ctx, &args.session)?;
+    ctx.hub.rename(&session.id, &args.name).await?;
+    Ok(SessionRenamed {
+        node: ctx.node.clone(),
+        session: session.id,
+        name: args.name,
+    })
 }
 
-async fn mouse(ctx: &Ctx, args: &Value) -> Result<Value> {
-    let on = match text(args, "mouse")? {
-        "on" => true,
-        "off" => false,
-        other => bail!("mouse is on or off, not {other:?}"),
-    };
+async fn mouse(ctx: Arc<Ctx>, args: SessionMouse) -> Result<MouseSet> {
+    let on = matches!(args.mouse, MouseMode::On);
     let mouse = ctx.hub.mouse(on).await;
-    if mouse.applied() == 0 {
+    let applied = mouse.applied();
+    if applied == 0 {
         bail!("{}", mouse.text(on));
     }
-    Ok(json!({
-        "node": ctx.node,
-        "mouse": if on { "on" } else { "off" },
-        "applied": mouse.applied(),
-        "total": mouse.total,
-        "failures": mouse.failures,
-    }))
+    Ok(MouseSet {
+        node: ctx.node.clone(),
+        mouse: args.mouse,
+        applied,
+        total: mouse.total,
+        failures: mouse.failures,
+    })
 }
 
-async fn seen(ctx: &Ctx, args: &Value) -> Result<Value> {
-    let session = find(ctx, text(args, "session")?)?;
-    let reports = ctx.hub.events(std::slice::from_ref(&session));
-    let Some(report) = reports.get(&session.id) else {
-        return Ok(json!({ "node": ctx.node, "session": session.id, "report": false }));
-    };
-    ctx.hub.event_seen(&session.id, report.at);
-    Ok(json!({ "node": ctx.node, "session": session.id, "report": true }))
+async fn seen(ctx: Arc<Ctx>, args: SessionSeen) -> Result<SessionSeenResult> {
+    let session = find(&ctx, &args.session)?;
+    let reports = ctx.hub.events(&ctx.hub.sessions());
+    if let Some(report) = reports.get(&session.id) {
+        ctx.hub.event_seen(&session.id, report.at);
+    }
+    Ok(SessionSeenResult {
+        node: ctx.node.clone(),
+        report: reports.contains_key(&session.id),
+        session: session.id,
+    })
 }
 
 /// What pressing `key` sends: a named key's sequence, else the text itself.
@@ -746,26 +437,18 @@ fn strip_escapes(text: &str) -> String {
 
 /// The session `session` names, by id or else by name, and its pane
 /// `pane`, or else its active one ([`Hub::active_pane`]).
-async fn target(ctx: &Ctx, args: &Value) -> Result<(SessionInfo, PaneId)> {
-    let wanted = text(args, "session")?;
+pub(crate) async fn target(
+    ctx: &Ctx,
+    wanted: &str,
+    pane: Option<PaneId>,
+) -> Result<(SessionInfo, PaneId)> {
     let session = find(ctx, wanted)?;
-    let session = &session;
-    let pane = match args.get("pane") {
-        None | Some(Value::Null) => Some(ctx.hub.active_pane(&session.id).await?),
-        Some(pane) => {
-            let pane = pane
-                .as_u64()
-                .and_then(|id| PaneId::try_from(id).ok())
-                .context("pane is a pane id")?;
-            session
-                .panes
-                .iter()
-                .any(|&(id, _, _)| id == pane)
-                .then_some(pane)
-        }
-    }
-    .with_context(|| format!("session {wanted} has no such pane"))?;
-    Ok((session.clone(), pane))
+    let pane = match pane {
+        None => ctx.hub.active_pane(&session.id).await?,
+        Some(pane) if session.panes.iter().any(|&(id, _, _)| id == pane) => pane,
+        Some(_) => bail!("session {wanted} has no such pane"),
+    };
+    Ok((session, pane))
 }
 
 /// The session `wanted` names, by id or else by unique name.

@@ -61,7 +61,6 @@ pub const LISTING: Listing = Listing {
         "session_send",
         "session_launch",
         "session_copy",
-        "session_history",
         "session_search",
         "session_keys",
         "session_rename",

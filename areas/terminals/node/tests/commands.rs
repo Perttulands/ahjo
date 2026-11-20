@@ -153,7 +153,6 @@ async fn speaks_the_mcp_lifecycle_and_offers_every_session_tool() {
             "session_send",
             "session_launch",
             "session_copy",
-            "session_history",
             "session_search",
             "session_keys",
             "session_rename",
@@ -172,6 +171,20 @@ async fn speaks_the_mcp_lifecycle_and_offers_every_session_tool() {
         assert!(
             tool["inputSchema"]["properties"].get("node").is_none(),
             "{tool}"
+        );
+        assert_eq!(tool["inputSchema"]["additionalProperties"], false, "{tool}");
+        assert_eq!(tool["outputSchema"]["type"], "object", "{tool}");
+        assert!(!tool.to_string().contains("\"$ref\""), "{tool}");
+        let name = tool["name"].as_str().unwrap();
+        let error = node
+            .node
+            .call(name, json!({ "unknown_field": null }))
+            .await
+            .unwrap_err();
+        assert_eq!(error.code, "invalid_argument", "{name}: {error}");
+        assert!(
+            error.message.contains("unknown_field") && error.message.contains("accepted fields:"),
+            "{name}: {error}"
         );
     }
 
@@ -251,6 +264,97 @@ async fn lists_sessions_and_reads_a_screen() {
         .call("session_read", json!({ "session": "alpha", "pane": 99999 }))
         .await;
     assert!(wrong_pane.unwrap_err().contains("no such pane"));
+    node.stop().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn session_list_names_the_harness_and_tracks_its_screen() {
+    let Some(node) = Node::start("list-harness").await else {
+        return;
+    };
+    // A real executable name lets tmux report the harness on both Unix platforms.
+    let source = node.tmux.dir().join("stand_in.rs");
+    let harness = node.tmux.dir().join("claude");
+    std::fs::write(
+        &source,
+        r#"
+use std::io::{self, BufRead, Write};
+
+fn main() {
+    show("❯");
+    for input in io::stdin().lock().lines() {
+        match input.unwrap().trim() {
+            "work" => show("✶ Working… (8s)\n❯"),
+            "ask" => show("Do you want to proceed?\n❯ 1. Yes\n  2. No\n\nEsc to cancel"),
+            _ => show("Ready\n❯"),
+        }
+    }
+}
+
+fn show(screen: &str) {
+    print!("\x1b[2J\x1b[H{screen}");
+    io::stdout().flush().unwrap();
+}
+"#,
+    )
+    .unwrap();
+    let compiled =
+        std::process::Command::new(std::env::var_os("RUSTC").unwrap_or_else(|| "rustc".into()))
+            .arg(source)
+            .arg("-o")
+            .arg(&harness)
+            .output()
+            .unwrap();
+    assert!(
+        compiled.status.success(),
+        "{}",
+        String::from_utf8_lossy(&compiled.stderr)
+    );
+    node.tmux.run(&[
+        "new-session",
+        "-d",
+        "-s",
+        "coding",
+        harness.to_str().unwrap(),
+    ]);
+    let sessions = node.node.sessions();
+    for (input, marker, expected) in [
+        (None, "❯", "idle"),
+        (Some("work"), "Working…", "working"),
+        (Some("ask"), "Esc to cancel", "needs-input"),
+        (Some("done"), "Ready", "idle"),
+    ] {
+        if let Some(input) = input {
+            node.tmux
+                .run(&["send-keys", "-t", "coding", input, "Enter"]);
+        }
+        eventually(marker, || {
+            session_text(sessions.as_ref(), "coding")?
+                .contains(marker)
+                .then_some(())
+        })
+        .await;
+        let mut output = Vec::new();
+        let args = ["list", "--json", "--node", &node.node.url()].map(str::to_owned);
+        assert_eq!(
+            ahjo_node_kit::cli::run("session", &args, &mut output)
+                .await
+                .unwrap(),
+            0
+        );
+        let listed: Value = serde_json::from_slice(&output).unwrap();
+        let coding = session_named(&listed, "coding");
+        assert_eq!(coding["harness"], "claude-code", "{coding}");
+        assert_eq!(coding["state"], expected, "{coding}");
+        let shell = session_named(&listed, "alpha");
+        assert_eq!(shell["harness"], "none", "{shell}");
+        let expected = if shell["active"] == true {
+            "working"
+        } else {
+            "idle"
+        };
+        assert_eq!(shell["state"], expected, "{shell}");
+    }
     node.stop().await;
 }
 
@@ -358,36 +462,56 @@ async fn presses_keys_reads_history_searches_and_kills() {
     .await;
 
     let history = node
-        .call("session_history", json!({ "session": "alpha" }))
+        .call("session_read", json!({ "session": "alpha", "lines": 200 }))
         .await
         .unwrap();
     let text = history["text"].as_str().unwrap();
     assert!(text.lines().any(|line| line.trim() == "keyed-42"), "{text}");
     assert!(!text.contains('\x1b'), "plain text: {text:?}");
     let last = node
-        .call("session_history", json!({ "session": "alpha", "last": 1 }))
+        .call("session_read", json!({ "session": "alpha", "lines": 1 }))
         .await
         .unwrap();
     assert_eq!(last["text"].as_str().unwrap().lines().count(), 1, "{last}");
     assert!(last["cut"].as_str().unwrap().contains("--all"), "{last}");
 
-    // Unasked, a long scrollback is cut to its newest 200 lines, saying so.
+    // The explicit limit cuts a long scrollback to 200 lines and explains the cut.
     node.call(
         "session_keys",
         json!({ "session": "alpha", "keys": ["seq 1000 1300", "Enter"] }),
     )
     .await
     .unwrap();
-    eventually("the long output ran", || {
-        (capture(&node.tmux, "alpha").lines())
+    let sessions = node.node.sessions();
+    eventually("the node has the last line of the long output", || {
+        session_text(sessions.as_ref(), "alpha")?
+            .lines()
             .any(|line| line.trim() == "1300")
             .then_some(())
     })
     .await;
-    let cut = node
-        .call("session_history", json!({ "session": "alpha" }))
-        .await
-        .unwrap();
+    let url = node.node.url();
+    let cli = async |flags: &[&str]| {
+        let args: Vec<_> = ["read", "alpha", "--node", &url, "--json"]
+            .into_iter()
+            .chain(flags.iter().copied())
+            .map(str::to_owned)
+            .collect();
+        let mut output = Vec::new();
+        assert_eq!(
+            ahjo_node_kit::cli::run("session", &args, &mut output)
+                .await
+                .unwrap(),
+            0
+        );
+        serde_json::from_slice::<Value>(&output).unwrap()
+    };
+    let screen = cli(&[]).await;
+    let text = screen["text"].as_str().unwrap();
+    assert!(text.contains("1300") && !text.contains("1000"), "{text}");
+    assert!(text.lines().count() <= 30, "{screen}");
+
+    let cut = cli(&["--lines", "200"]).await;
     let text = cut["text"].as_str().unwrap();
     assert_eq!(text.lines().count(), 200, "{cut}");
     assert!(text.contains("1300") && !text.contains("1000"), "{text}");
@@ -398,15 +522,22 @@ async fn presses_keys_reads_history_searches_and_kills() {
             .starts_with("the newest 200 of "),
         "{cut}"
     );
-    let all = node
-        .call(
-            "session_history",
-            json!({ "session": "alpha", "all": true }),
-        )
-        .await
-        .unwrap();
+    let all = cli(&["--all"]).await;
     assert!(all["text"].as_str().unwrap().contains("\n1000\n"), "{all}");
     assert!(all["cut"].is_null(), "{all}");
+    let args = ["history", "alpha", "--node", &url].map(str::to_owned);
+    let error = ahjo_node_kit::cli::run("session", &args, &mut Vec::new())
+        .await
+        .unwrap_err();
+    assert!(error.to_string().contains("history"), "{error}");
+    let both = node
+        .call(
+            "session_read",
+            json!({"session": "alpha", "lines": 200, "all": true}),
+        )
+        .await
+        .unwrap_err();
+    assert!(both.contains("give lines or all"), "{both}");
 
     let found = node
         .call("session_search", json!({ "query": "keyed-42" }))
@@ -416,10 +547,11 @@ async fn presses_keys_reads_history_searches_and_kills() {
     assert!(
         matches
             .iter()
-            .any(|m| m["text"].as_str().unwrap().trim() == "keyed-42"),
+            .any(|m| m["session"] == "alpha" && m["text"].as_str().unwrap().trim() == "keyed-42"),
         "{found}"
     );
-    let alpha = matches[0]["session"].as_str().unwrap().to_owned();
+    let listed = node.call("session_list", json!({})).await.unwrap();
+    let alpha = &session_named(&listed, "alpha")["id"];
 
     let seen = node
         .call("session_seen", json!({ "session": "alpha" }))
@@ -431,7 +563,7 @@ async fn presses_keys_reads_history_searches_and_kills() {
         .call("session_kill", json!({ "session": "alpha" }))
         .await
         .unwrap();
-    assert_eq!(killed["session"], alpha);
+    assert_eq!(&killed["session"], alpha);
     eventually("alpha is gone", || {
         let listed = node
             .tmux
@@ -565,10 +697,12 @@ async fn turns_the_mouse_on_and_off_for_the_whole_server() {
         .unwrap();
     assert_eq!(mouse().trim(), "off");
     let bad = node
+        .node
         .call("session_mouse", json!({ "mouse": "maybe" }))
         .await
         .unwrap_err();
-    assert!(bad.contains("on or off"), "{bad}");
+    assert_eq!(bad.code, "invalid_argument");
+    assert!(bad.message.contains("expected `on` or `off`"), "{bad}");
     assert_eq!(mouse().trim(), "off");
     node.stop().await;
 }
@@ -790,7 +924,7 @@ async fn cli_manages_and_reads_a_session_on_the_test_node() {
         );
         tokio::time::sleep(Duration::from_millis(20)).await;
     }
-    let history = run(vec!["history".into(), "cli-journey".into()]).await;
+    let history = run(vec!["read".into(), "cli-journey".into(), "--all".into()]).await;
     assert!(history["text"].as_str().unwrap().contains("journey-42"));
     let listed = run(vec!["list".into()]).await;
     assert_eq!(session_named(&listed, "cli-journey")["name"], "cli-journey");

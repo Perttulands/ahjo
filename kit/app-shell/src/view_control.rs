@@ -10,9 +10,8 @@ use crate::shell::Shell;
 use ahjo_app_kit::Ask;
 use ahjo_app_kit::link::client::LinkState;
 use ahjo_app_kit::link::socket::LinkId;
-use ahjo_core::NodeId;
+use ahjo_core::{NodeId, commands::View};
 use gpui::{Context, Task, Window};
-use serde::Serialize;
 use serde_json::{Map, Value};
 use std::time::{Duration, Instant};
 
@@ -25,12 +24,6 @@ pub const VIEW_DO: u8 = 0xb8;
 
 /// The serving node hears of changes at most this often.
 const EVERY: Duration = Duration::from_millis(250);
-
-/// What the app shows.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
-pub struct View {
-    pub page: Option<String>,
-}
 
 pub fn view(json: &[u8]) -> Vec<u8> {
     [&[VIEW][..], json].concat()

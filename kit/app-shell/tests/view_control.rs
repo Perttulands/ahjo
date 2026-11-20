@@ -101,7 +101,7 @@ fn an_agent_opens_a_page_and_a_path_on_it_in_the_app(cx: &mut TestAppContext) {
     let shown = loop {
         let (code, shown) = ahjo(&rt, cx, &url, &["show"]);
         assert_eq!(code, 0);
-        if shown != json!([]) {
+        if shown != json!({"apps": []}) {
             break shown;
         }
         assert!(
@@ -110,7 +110,7 @@ fn an_agent_opens_a_page_and_a_path_on_it_in_the_app(cx: &mut TestAppContext) {
         );
         std::thread::sleep(Duration::from_millis(50));
     };
-    assert_eq!(shown[0]["page"], "other");
+    assert_eq!(shown["apps"][0]["page"], "other");
 
     // Opened by an agent: the page comes forward and is asked to reveal
     // the path.

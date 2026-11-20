@@ -6,6 +6,7 @@
 use ahjo_core::Error;
 use ahjo_core::frame::Kinds;
 
+pub mod commands;
 mod down;
 pub mod session_copy;
 pub use down::{

@@ -12,28 +12,30 @@
 //! ChatGPT tunnel request may take.
 
 use std::path::Path;
+use std::sync::Arc;
 use std::time::Duration;
 
 use ahjo_term::control::PaneId;
 use ahjo_term::engine::{NotReady, SessionInfo};
 use ahjo_term::waiting::harness::{self, Harness};
-use ahjo_terminals_contract::MAX_SEND;
 use ahjo_terminals_contract::session_copy::next_name;
+use ahjo_terminals_contract::{
+    MAX_SEND,
+    commands::{HandoffState as State, *},
+};
 use anyhow::{Context, Result, bail};
-use serde_json::{Value, json};
 use tokio::time::{Instant, sleep, sleep_until, timeout};
 
 use crate::agent_events::{Event, Kind};
-use crate::commands::{Ctx, find};
+use crate::commands::{Ctx, find, target, visible};
 use crate::launch::{Launch, SHELL, check_name};
 use crate::projects;
-use ahjo_node_kit::args::{maybe_text, text};
 
 /// How long `handoff start` waits in all for the agent to take its brief.
 const START_WAIT: Duration = Duration::from_secs(60);
 
 /// The longest `handoff status` waits while the agent works.
-pub const MAX_WAIT: u64 = 90;
+const MAX_WAIT: u64 = 90;
 
 /// How long `handoff reply` waits to see the agent take the reply.
 const REPLY_WAIT: Duration = Duration::from_secs(20);
@@ -50,34 +52,6 @@ const FOUND: usize = 12;
 
 /// How often a wait looks again, besides when the sessions change.
 const LOOK_EVERY: Duration = Duration::from_millis(500);
-
-/// Where an agent is, as a handoff reports it.
-#[derive(Clone, Debug, PartialEq, Eq)]
-enum State {
-    /// Running a turn.
-    Working,
-    /// Its screen asks something: a menu, a permission.
-    NeedsInput,
-    /// At its prompt, having reported a finished turn.
-    Finished,
-    /// At its prompt with no finished turn reported: not yet started, or
-    /// a harness that does not report.
-    Idle,
-    /// The session has ended.
-    Gone,
-}
-
-impl State {
-    fn word(&self) -> &'static str {
-        match self {
-            State::Working => "working",
-            State::NeedsInput => "needs-input",
-            State::Finished => "finished",
-            State::Idle => "idle",
-            State::Gone => "gone",
-        }
-    }
-}
 
 /// One look at a session.
 struct Look {
@@ -121,35 +95,92 @@ fn look(ctx: &Ctx, session: &str, pane: PaneId, kind: Option<Harness>) -> Look {
         };
     };
     let report = ctx.hub.events(&sessions).remove(session);
-    let screen = ctx.hub.read_screen(pane);
-    let text = ctx.hub.text(pane);
-    let question = info
-        .waiting
-        .iter()
-        .find(|(id, _)| *id == pane)
-        .map(|(_, question)| question.clone())
-        .or_else(|| ahjo_term::waiting::waiting(text.as_deref().unwrap_or_default().lines()));
-    let kind = kind.or_else(|| info.facts.as_ref().and_then(|f| kind_of(&f.command)));
-    let working = match (kind, &screen) {
-        (Some(kind), Some(screen)) => harness::working(kind, screen),
-        _ => info.activity.active,
-    };
-    let state = if question.is_some() {
-        State::NeedsInput
-    } else if working {
-        State::Working
-    } else if report.as_ref().is_some_and(|r| r.kind == Kind::Finished) {
-        State::Finished
-    } else {
-        State::Idle
+    let (state, question, screen) = observe(
+        ctx,
+        info,
+        Some(pane),
+        kind.or_else(|| session_harness(info)),
+        ctx.hub.text(pane),
+    );
+    let state = match state {
+        SessionState::Working => State::Working,
+        SessionState::NeedsInput => State::NeedsInput,
+        SessionState::Idle if report.as_ref().is_some_and(|r| r.kind == Kind::Finished) => {
+            State::Finished
+        }
+        SessionState::Idle => State::Idle,
     };
     Look {
         state,
         question,
         report,
-        screen: text.map(|t| t.trim_end().to_owned()),
+        screen,
         last_output: last_output(info),
     }
+}
+
+fn session_harness(info: &SessionInfo) -> Option<Harness> {
+    info.facts
+        .as_ref()
+        .and_then(|facts| kind_of(&facts.command))
+}
+
+/// The active pane's harness and state, using the same screen recognition
+/// as a handoff. Wait for the screen of a recognized harness on a cold node.
+pub(crate) async fn session_state(ctx: &Ctx, info: &SessionInfo) -> (SessionHarness, SessionState) {
+    let kind = session_harness(info);
+    let pane = if kind.is_some() || !info.waiting.is_empty() {
+        ctx.hub.active_pane(&info.id).await.ok()
+    } else {
+        None
+    };
+    let text = match (kind, pane) {
+        (Some(_), Some(pane)) => visible(ctx, pane).await.ok(),
+        _ => None,
+    };
+    let (state, _, _) = observe(ctx, info, pane, kind, text);
+    let harness = match kind {
+        Some(Harness::Claude) => SessionHarness::ClaudeCode,
+        Some(Harness::Codex) => SessionHarness::OpenaiCodex,
+        Some(Harness::Pi) => SessionHarness::Pi,
+        None => SessionHarness::None,
+    };
+    (harness, state)
+}
+
+/// A question on the active pane takes precedence over a running turn.
+/// Without a harness screen, use the engine's activity observation.
+fn observe(
+    ctx: &Ctx,
+    info: &SessionInfo,
+    pane: Option<PaneId>,
+    kind: Option<Harness>,
+    text: Option<String>,
+) -> (SessionState, Option<String>, Option<String>) {
+    let question = pane
+        .and_then(|pane| {
+            info.waiting
+                .iter()
+                .find(|(id, _)| *id == pane)
+                .map(|(_, question)| question.clone())
+        })
+        .or_else(|| ahjo_term::waiting::waiting(text.as_deref().unwrap_or_default().lines()));
+    let working = kind
+        .zip(pane)
+        .and_then(|(kind, pane)| {
+            ctx.hub
+                .read_screen(pane)
+                .map(|screen| harness::working(kind, &screen))
+        })
+        .unwrap_or(info.activity.active);
+    let state = if question.is_some() {
+        SessionState::NeedsInput
+    } else if working {
+        SessionState::Working
+    } else {
+        SessionState::Idle
+    };
+    (state, question, text.map(|text| text.trim_end().to_owned()))
 }
 
 /// Seconds since the session last wrote, if known: none while it writes,
@@ -174,60 +205,64 @@ fn tail(screen: &str, lines: usize) -> String {
     all[all.len().saturating_sub(lines)..].join("\n")
 }
 
-/// A look as the commands answer it.
-fn answer(ctx: &Ctx, info: &SessionInfo, look: &Look, lines: usize) -> Value {
-    json!({
-        "node": ctx.node,
-        "session": info.id,
-        "name": info.name,
-        "state": look.state.word(),
-        "question": look.question,
-        "report": look.report.as_ref().map(|r| json!({
-            "kind": r.kind.word(),
-            "summary": r.summary,
-            "at": r.at,
-        })),
-        "last_output_seconds_ago": look.last_output,
-        "screen": look.screen.as_deref().map(|s| tail(s, lines)),
-    })
+pub(crate) fn report_summary(event: &Event) -> HandoffReport {
+    HandoffReport {
+        kind: match event.kind {
+            Kind::Finished => ReportKind::Finished,
+            Kind::NeedsInput => ReportKind::NeedsInput,
+        },
+        summary: event.summary.clone(),
+        at: event.at,
+    }
+}
+
+/// The details shared by each handoff answer about a session it observed.
+fn detail(info: &SessionInfo, look: &Look, lines: usize) -> HandoffDetail {
+    HandoffDetail {
+        name: info.name.clone(),
+        question: look.question.clone(),
+        report: look.report.as_ref().map(report_summary),
+        last_output_seconds_ago: look.last_output,
+        screen: look.screen.as_deref().map(|screen| tail(screen, lines)),
+    }
 }
 
 /// `project find`: the project folders a fragment names.
-pub async fn find_project(ctx: &Ctx, args: &Value) -> Result<Value> {
-    let query = text(args, "query")?;
+pub async fn find_project(ctx: Arc<Ctx>, args: ProjectFind) -> Result<ProjectsFound> {
+    let query = &args.query;
     let projects = ctx.projects.list().await;
     let found = projects::matching(&projects, query);
-    let listed: Vec<Value> = found
+    let listed = found
         .iter()
         .take(FOUND)
         .map(|&(_, path)| {
             let (git, beads) = projects::kinds(Path::new(path));
-            json!({
-                "path": path,
-                "name": path.rsplit(['/', '\\']).next().unwrap_or(path),
-                "git": git,
-                "beads": beads,
-            })
+            ProjectSummary {
+                path: path.into(),
+                name: path.rsplit(['/', '\\']).next().unwrap_or(path).into(),
+                git,
+                beads,
+            }
         })
         .collect();
-    let mut answer = json!({
-        "node": ctx.node,
-        "projects": listed,
-        "more": found.len().saturating_sub(FOUND),
-    });
-    if found.is_empty() {
-        let roots: Vec<String> = ctx
+    let none = found.is_empty().then(|| {
+        let roots: Vec<_> = ctx
             .projects
             .roots()
             .iter()
             .map(|r| r.display().to_string())
             .collect();
-        answer["none"] = json!(format!(
+        format!(
             "no project under {} matches {query:?}; give the folder's absolute path",
             roots.join(", ")
-        ));
-    }
-    Ok(answer)
+        )
+    });
+    Ok(ProjectsFound {
+        node: ctx.node.clone(),
+        projects: listed,
+        more: found.len().saturating_sub(FOUND),
+        none,
+    })
 }
 
 /// The folder `project` names: a path as it is, else the one project the
@@ -294,14 +329,14 @@ fn session_name(ctx: &Ctx, folder: &str) -> String {
 
 /// `handoff start`: a coding agent in a session of its own, in the
 /// project's folder, given the brief as its first message.
-pub async fn start(ctx: &Ctx, args: &Value) -> Result<Value> {
+pub async fn start(ctx: Arc<Ctx>, args: HandoffStart) -> Result<HandoffStarted> {
     let begun = Instant::now();
     let deadline = begun + START_WAIT;
-    let brief = text(args, "brief")?.trim();
+    let brief = args.brief.trim();
     if brief.is_empty() {
         bail!("brief is empty: say what the agent is to do");
     }
-    let brief = match maybe_text(args, "work")? {
+    let brief = match args.work.as_deref() {
         Some(work) => format!("{brief}\n\nYour work item: {}", work.trim()),
         None => brief.to_owned(),
     };
@@ -314,7 +349,7 @@ pub async fn start(ctx: &Ctx, args: &Value) -> Result<Value> {
         .iter()
         .filter(|h| h.id != SHELL)
         .collect();
-    let harness = match maybe_text(args, "harness")? {
+    let harness = match args.harness.as_deref() {
         Some(id) => *agents
             .iter()
             .find(|h| h.id == id)
@@ -323,11 +358,8 @@ pub async fn start(ctx: &Ctx, args: &Value) -> Result<Value> {
             .first()
             .context("the launcher has no agent harness; add one to launch.conf")?,
     };
-    let folder = folder(ctx, text(args, "project")?).await?;
-    let name = match maybe_text(args, "name")? {
-        Some(name) => name.to_owned(),
-        None => session_name(ctx, &folder),
-    };
+    let folder = folder(&ctx, &args.project).await?;
+    let name = args.name.unwrap_or_else(|| session_name(&ctx, &folder));
     check_name(&name)?;
     let launch = Launch {
         harness: harness.id.clone(),
@@ -339,7 +371,7 @@ pub async fn start(ctx: &Ctx, args: &Value) -> Result<Value> {
         size: None,
     };
     let (session, warning) = ctx.hub.launch(&launcher, &launch).await?;
-    let info = find(ctx, &session)?;
+    let info = find(&ctx, &session)?;
     let pane = ctx.hub.active_pane(&session).await?;
     let kind = kind_of(&harness.command);
 
@@ -363,7 +395,7 @@ pub async fn start(ctx: &Ctx, args: &Value) -> Result<Value> {
                 });
             }
             () = next_look(&mut changed) => {
-                let now = look(ctx, &session, pane, kind);
+                let now = look(&ctx, &session, pane, kind);
                 match (now.state, asked_since) {
                     (State::Gone, _) => break Err("the session ended before it took the brief".into()),
                     (State::NeedsInput, Some(since)) if since.elapsed() >= ASKS_FOR => {
@@ -381,18 +413,13 @@ pub async fn start(ctx: &Ctx, args: &Value) -> Result<Value> {
     };
 
     // Then until the agent has taken it: working, or already done.
-    let mut now = look(ctx, &session, pane, kind);
+    let mut now = look(&ctx, &session, pane, kind);
     if sent.is_ok() {
         while now.state == State::Idle && Instant::now() < deadline {
             next_look(&mut changed).await;
-            now = look(ctx, &session, pane, kind);
+            now = look(&ctx, &session, pane, kind);
         }
     }
-    let mut answered = answer(ctx, &info, &now, TAIL);
-    answered["folder"] = json!(folder);
-    answered["harness"] = json!(harness.id);
-    answered["warning"] = json!(warning);
-    answered["brief_sent"] = json!(sent.is_ok());
     let follow = format!(
         "Follow it with handoff_status (session {}, wait up to {MAX_WAIT} seconds while it works) \
          and answer it with handoff_reply; from a shell, ahjo handoff status {} --wait 60.",
@@ -424,9 +451,18 @@ pub async fn start(ctx: &Ctx, args: &Value) -> Result<Value> {
             }
         ),
     };
-    answered["say"] = json!(said);
-    answered["follow"] = json!(follow);
-    Ok(answered)
+    Ok(HandoffStarted {
+        node: ctx.node.clone(),
+        detail: detail(&info, &now, TAIL),
+        session: info.id,
+        state: now.state,
+        folder,
+        harness: harness.id.clone(),
+        warning,
+        brief_sent: sent.is_ok(),
+        say: said,
+        follow,
+    })
 }
 
 fn harness_choice(id: &str, agents: &[&crate::launch::Harness]) -> String {
@@ -437,78 +473,61 @@ fn harness_choice(id: &str, agents: &[&crate::launch::Harness]) -> String {
     )
 }
 
-/// The session `args` names and its pane: the one a send goes to.
-async fn target(ctx: &Ctx, args: &Value) -> Result<(SessionInfo, PaneId)> {
-    let info = find(ctx, text(args, "session")?)?;
-    let pane = ctx.hub.active_pane(&info.id).await?;
-    Ok((info, pane))
-}
-
 /// `handoff status`: where the agent is; with `wait`, once it stops
 /// working or the wait ends.
-pub async fn status(ctx: &Ctx, args: &Value) -> Result<Value> {
-    let wait = match args.get("wait") {
-        None | Some(Value::Null) => 0,
-        Some(wait) => wait
-            .as_u64()
-            .context("wait is a whole number of seconds")?
-            .min(MAX_WAIT),
+pub async fn status(ctx: Arc<Ctx>, args: HandoffStatus) -> Result<HandoffStatusResult> {
+    let wait = args.wait.unwrap_or_default().min(MAX_WAIT);
+    let lines = args.lines.map_or(TAIL, |lines| lines.get());
+    let wanted = args.session;
+    let Ok(info) = find(&ctx, &wanted) else {
+        return Ok(HandoffStatusResult {
+            node: ctx.node.clone(),
+            say: Some(format!(
+                "no session {wanted} on this node: it has ended, or never was; session_list shows those there are"
+            )),
+            session: wanted,
+            state: State::Gone,
+            detail: None,
+            waited_seconds: None,
+        });
     };
-    let lines = match args.get("lines") {
-        None | Some(Value::Null) => TAIL,
-        Some(lines) => lines.as_u64().context("lines is a count")? as usize,
-    };
-    let wanted = text(args, "session")?;
-    if find(ctx, wanted).is_err() {
-        return Ok(json!({
-            "node": ctx.node,
-            "session": wanted,
-            "state": State::Gone.word(),
-            "say": format!("no session {wanted} on this node: it has ended, or never was; session_list shows those there are"),
-        }));
-    }
-    let (info, pane) = target(ctx, args).await?;
-    // The screen is read once the engine follows the pane.
+    let pane = ctx.hub.active_pane(&info.id).await?;
     let _follow = ctx.hub.subscribe(pane);
     let mut changed = ctx.hub.watch();
-    let seeded = async {
-        while ctx.hub.text(pane).is_none() {
-            if changed.changed().await.is_err() {
-                break;
-            }
-        }
-    };
-    let _ = timeout(Duration::from_secs(5), seeded).await;
+    let _ = visible(&ctx, pane).await;
     let begun = Instant::now();
     let deadline = begun + Duration::from_secs(wait);
-    let mut now = look(ctx, &info.id, pane, None);
+    let mut now = look(&ctx, &info.id, pane, None);
     while now.state == State::Working && Instant::now() < deadline {
         tokio::select! {
             () = next_look(&mut changed) => {}
             () = sleep_until(deadline) => {}
         }
-        now = look(ctx, &info.id, pane, None);
+        now = look(&ctx, &info.id, pane, None);
     }
-    let mut answered = answer(ctx, &info, &now, lines);
-    if wait > 0 {
-        answered["waited_seconds"] = json!(begun.elapsed().as_secs());
-    }
-    Ok(answered)
+    Ok(HandoffStatusResult {
+        node: ctx.node.clone(),
+        detail: Some(detail(&info, &now, lines)),
+        session: info.id,
+        state: now.state,
+        say: None,
+        waited_seconds: (wait > 0).then(|| begun.elapsed().as_secs()),
+    })
 }
 
 /// `handoff reply`: the text typed into the agent and submitted, or, while
 /// its screen asks with a menu, the option's key pressed.
-pub async fn reply(ctx: &Ctx, args: &Value) -> Result<Value> {
-    let text = text(args, "text")?;
+pub async fn reply(ctx: Arc<Ctx>, args: HandoffReply) -> Result<HandoffReplied> {
+    let text = args.text;
     if text.trim().is_empty() {
         bail!("text is empty");
     }
     if text.len() > MAX_SEND {
         bail!("text is longer than {MAX_SEND} bytes");
     }
-    let (info, pane) = target(ctx, args).await?;
+    let (info, pane) = target(&ctx, &args.session, None).await?;
     let _follow = ctx.hub.subscribe(pane);
-    let before = look(ctx, &info.id, pane, None);
+    let before = look(&ctx, &info.id, pane, None);
     let pressed = match (&before.state, &before.question) {
         (State::Gone, _) => bail!("{} has ended", info.name),
         (State::NeedsInput, Some(question)) => {
@@ -524,29 +543,37 @@ pub async fn reply(ctx: &Ctx, args: &Value) -> Result<Value> {
             true
         }
         _ => {
-            ctx.hub.deliver(pane, text.to_owned(), true).await?.await?;
+            ctx.hub.deliver(pane, text, true).await?.await?;
             false
         }
     };
     // Until the agent has taken it: its screen changed from what it was.
     let mut changed = ctx.hub.watch();
     let deadline = Instant::now() + REPLY_WAIT;
-    let mut now = look(ctx, &info.id, pane, None);
+    let mut now = look(&ctx, &info.id, pane, None);
     while (now.state == before.state && now.question == before.question)
         && now.state != State::Working
         && Instant::now() < deadline
     {
         next_look(&mut changed).await;
-        now = look(ctx, &info.id, pane, None);
+        now = look(&ctx, &info.id, pane, None);
     }
     // A moment more for a menu's answer to be drawn over.
     if pressed && now.state == State::NeedsInput {
         sleep(LOOK_EVERY).await;
-        now = look(ctx, &info.id, pane, None);
+        now = look(&ctx, &info.id, pane, None);
     }
-    let mut answered = answer(ctx, &info, &now, TAIL);
-    answered["sent"] = json!(if pressed { "key" } else { "text" });
-    Ok(answered)
+    Ok(HandoffReplied {
+        node: ctx.node.clone(),
+        detail: detail(&info, &now, TAIL),
+        session: info.id,
+        state: now.state,
+        sent: if pressed {
+            ReplyKind::Key
+        } else {
+            ReplyKind::Text
+        },
+    })
 }
 
 #[cfg(test)]

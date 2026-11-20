@@ -72,11 +72,11 @@ These are the commands advertised by the enabled areas. Run `ahjo <noun> <verb> 
 
 ## session
 
-`ahjo session copy`, `ahjo session history`, `ahjo session keys`, `ahjo session kill`, `ahjo session launch`, `ahjo session list`, `ahjo session mouse`, `ahjo session read`, `ahjo session rename`, `ahjo session search`, `ahjo session seen`, `ahjo session send`.
+`ahjo session copy`, `ahjo session keys`, `ahjo session kill`, `ahjo session launch`, `ahjo session list`, `ahjo session mouse`, `ahjo session read`, `ahjo session rename`, `ahjo session search`, `ahjo session seen`, `ahjo session send`.
 
 ## view
 
-`ahjo view open`, `ahjo view send`, `ahjo view show`.
+`ahjo view open`, `ahjo view send`, `ahjo view show` (the connected apps are under `apps` in JSON).
 
 ## work
 

@@ -9,7 +9,7 @@
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
-use ahjo_core::Error;
+use ahjo_core::{Error, commands::ConfigShown};
 use serde::Deserialize;
 use serde::de::DeserializeOwned;
 
@@ -107,7 +107,7 @@ impl Config {
     /// What `ahjo config show` answers: the file and each section's keys
     /// and values as the file has them, or only `section`'s. A section is
     /// the node's or one of `areas`; another is `unknown_section`.
-    pub fn show(&self, section: Option<&str>, areas: &[&str]) -> Result<serde_json::Value, Error> {
+    pub fn show(&self, section: Option<&str>, areas: &[&str]) -> Result<ConfigShown, Error> {
         let sections: toml::Table = match section {
             None => self.table.clone(),
             Some(name) if name == NODE || areas.contains(&name) => {
@@ -126,7 +126,24 @@ impl Config {
                 ));
             }
         };
-        Ok(serde_json::json!({ "path": self.file, "sections": sections }))
+        let sections = sections
+            .into_iter()
+            .map(|(name, table)| match serde_json::to_value(table) {
+                Ok(serde_json::Value::Object(fields)) => Ok((name, fields)),
+                Ok(_) => Err(Error::new(
+                    "internal",
+                    format!("config section [{name}] is not a table"),
+                )),
+                Err(error) => Err(Error::new(
+                    "internal",
+                    format!("cannot encode config section [{name}]: {error}"),
+                )),
+            })
+            .collect::<Result<_, _>>()?;
+        Ok(ConfigShown {
+            path: self.file.clone(),
+            sections,
+        })
     }
 
     /// The node's own section.
@@ -253,7 +270,7 @@ rooms = ['{srv}', "notes", "~/notes"]
     fn show_answers_the_file_and_its_sections_as_read() {
         let config =
             Config::parse("[lights]\nrooms = [\"a\"]\n", PathBuf::from("/etc/ahjo")).unwrap();
-        let all = config.show(None, &["lights", "dark"]).unwrap();
+        let all = serde_json::to_value(config.show(None, &["lights", "dark"]).unwrap()).unwrap();
         assert_eq!(
             all["path"],
             Path::new("/etc/ahjo").join(FILE).to_str().unwrap()
@@ -262,7 +279,8 @@ rooms = ['{srv}', "notes", "~/notes"]
             all["sections"],
             serde_json::json!({"lights": {"rooms": ["a"]}})
         );
-        let dark = config.show(Some("dark"), &["lights", "dark"]).unwrap();
+        let dark =
+            serde_json::to_value(config.show(Some("dark"), &["lights", "dark"]).unwrap()).unwrap();
         assert_eq!(dark["sections"], serde_json::json!({"dark": {}}));
         let unknown = config.show(Some("nodes"), &["lights"]).unwrap_err();
         assert_eq!(unknown.code, "unknown_section");

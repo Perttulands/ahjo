@@ -2,6 +2,7 @@
 //! every resource carries, and the frame envelope and hello of the node's
 //! socket.
 
+pub mod commands;
 mod error;
 pub mod frame;
 mod hello;

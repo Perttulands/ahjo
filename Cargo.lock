@@ -293,6 +293,7 @@ dependencies = [
 name = "ahjo-core"
 version = "0.0.1"
 dependencies = [
+ "schemars",
  "serde",
  "serde_json",
 ]
@@ -675,6 +676,7 @@ dependencies = [
  "axum",
  "futures-util",
  "libc",
+ "schemars",
  "serde",
  "serde_json",
  "tokio",
@@ -720,6 +722,7 @@ name = "ahjo-terminals-contract"
 version = "0.0.1"
 dependencies = [
  "ahjo-core",
+ "schemars",
  "serde",
  "serde_json",
 ]

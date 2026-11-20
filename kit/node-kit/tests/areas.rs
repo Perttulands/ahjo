@@ -1043,7 +1043,10 @@ async fn view_open_reaches_the_app_and_answers_its_answer() {
     let node = start(&[], "").await.unwrap();
     let url = format!("http://{}/", node.address);
     let client = NodeClient::new(Some(&url)).unwrap();
-    assert_eq!(ahjo("view", &["show"], &url).await, (0, json!([])));
+    assert_eq!(
+        ahjo("view", &["show"], &url).await,
+        (0, json!({"apps": []}))
+    );
     assert_eq!(
         ahjo("view", &["open", "--page", "files"], &url).await.0,
         1,
@@ -1079,7 +1082,10 @@ async fn view_open_reaches_the_app_and_answers_its_answer() {
         .unwrap();
     ws.next().await.unwrap().unwrap(); // the hello
     // Not an app until it says what it shows.
-    assert_eq!(tool(&client, "view_show", json!({})).await, Ok(json!([])));
+    assert_eq!(
+        tool(&client, "view_show", json!({})).await,
+        Ok(json!({"apps": []}))
+    );
     ws.send(Message::Binary(
         [&[0xb0][..], br#"{"page":"sessions"}"#].concat().into(),
     ))
@@ -1087,12 +1093,12 @@ async fn view_open_reaches_the_app_and_answers_its_answer() {
     .unwrap();
     let shown = loop {
         let shown = tool(&client, "view_show", json!({})).await.unwrap();
-        if shown != json!([]) {
+        if shown != json!({"apps": []}) {
             break shown;
         }
         tokio::time::sleep(std::time::Duration::from_millis(20)).await;
     };
-    assert_eq!(shown[0]["page"], "sessions");
+    assert_eq!(shown["apps"][0]["page"], "sessions");
 
     // Two things at once are refused before reaching the app.
     let two = json!({ "page": "files", "path": "/a", "item": "x" });
@@ -1164,11 +1170,11 @@ async fn view_open_reaches_the_app_and_answers_its_answer() {
     let mut shown = json!(null);
     for _ in 0..100 {
         shown = tool(&client, "view_show", json!({})).await.unwrap();
-        if shown == json!([]) {
+        if shown == json!({"apps": []}) {
             break;
         }
         tokio::time::sleep(std::time::Duration::from_millis(20)).await;
     }
-    assert_eq!(shown, json!([]));
+    assert_eq!(shown, json!({"apps": []}));
     node.stop().await.unwrap();
 }
