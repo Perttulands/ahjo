@@ -130,6 +130,9 @@ pub struct Code {
     told: (usize, usize),
     /// The text's size in pixels: `size::TEXT` unless the view zooms it.
     text_px: f32,
+    /// Written as prose, not code: no line numbers and no band on the
+    /// caret's line.
+    prose: bool,
 }
 
 impl EventEmitter<CodeEvent> for Code {}
@@ -265,6 +268,7 @@ impl Code {
             text_px: size::TEXT,
             told: (0, 0),
             ruler: None,
+            prose: false,
         }
     }
 
@@ -498,6 +502,15 @@ impl Code {
         self.wrap
     }
 
+    /// Shows the text as prose, as a note is written: no line numbers and
+    /// no band on the caret's line.
+    pub fn set_prose(&mut self, on: bool, cx: &mut Context<Self>) {
+        if self.prose != on {
+            self.prose = on;
+            cx.notify();
+        }
+    }
+
     /// Draws the text at `text_px` pixels (a zoom), keeping the line at the
     /// top in view.
     pub fn set_text_size(&mut self, text_px: f32, cx: &mut Context<Self>) {
@@ -534,6 +547,11 @@ impl Code {
         }
         starts.push(row);
         self.row_starts = starts;
+    }
+
+    /// The rows the text takes, wrapped as last drawn.
+    pub fn rows(&self) -> usize {
+        self.rows_total()
     }
 
     fn rows_total(&self) -> usize {
@@ -1437,7 +1455,11 @@ impl Element for CodeElement {
         let lh = line_height(tp);
         let digits = c.starts.len().to_string().len().max(3);
         let char_w = shape(window, tp, "0", t.text, &[]).width;
-        let gutter_w = char_w * digits as f32 + px(24.);
+        let gutter_w = if c.prose {
+            px(0.)
+        } else {
+            char_w * digits as f32 + px(24.)
+        };
         let all = c.rows_total().max(1) as f32;
         let ruled = !c.marks.is_empty() || !c.found.is_empty() || all * lh > bounds.size.height;
         let ruler_w = if ruled { px(RULER_W) } else { px(0.) };
@@ -1572,7 +1594,7 @@ impl Element for CodeElement {
                     )),
                     _ => {}
                 }
-                if k == 0 {
+                if k == 0 && !c.prose {
                     let num = shape(
                         window,
                         tp,
@@ -1626,13 +1648,15 @@ impl Element for CodeElement {
                             t.accent,
                         ));
                     }
-                    quads.insert(
-                        0,
-                        fill(
-                            Bounds::new(point(bounds.origin.x, y), sz(bounds.size.width, lh)),
-                            alpha(t.text, 0.04),
-                        ),
-                    );
+                    if !c.prose {
+                        quads.insert(
+                            0,
+                            fill(
+                                Bounds::new(point(bounds.origin.x, y), sz(bounds.size.width, lh)),
+                                alpha(t.text, 0.04),
+                            ),
+                        );
+                    }
                 }
                 lines.push((point(x0, y), shaped));
                 drawn += 1;
@@ -1674,16 +1698,19 @@ impl Element for CodeElement {
         );
         let lh = line_height(tp);
         window.with_content_mask(Some(gpui::ContentMask { bounds }), |window| {
-            window.paint_quad(fill(
-                Bounds::new(
-                    bounds.origin,
-                    sz(
-                        p.area.origin.x - bounds.origin.x - px(8.),
-                        bounds.size.height,
+            // The line numbers' band; prose has none.
+            if p.area.origin.x > bounds.origin.x {
+                window.paint_quad(fill(
+                    Bounds::new(
+                        bounds.origin,
+                        sz(
+                            p.area.origin.x - bounds.origin.x - px(8.),
+                            bounds.size.height,
+                        ),
                     ),
-                ),
-                t.surface,
-            ));
+                    t.surface,
+                ));
+            }
             for (o, l) in &p.gutter {
                 let _ = l.paint(*o, lh, gpui::TextAlign::Left, None, window, cx);
             }
