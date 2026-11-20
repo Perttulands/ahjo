@@ -78,10 +78,8 @@ mod tests {
         let (config, rename) = ConfigRename::load(&path).unwrap();
         assert_eq!(config.file(), path);
         assert!(!config.enabled("harness").unwrap());
-        assert_eq!(
-            config.show(Some("harness"), &["harness"]).unwrap()["sections"]["harness"]["path"][0],
-            "./tools"
-        );
+        let shown = config.show(Some("harness"), &["harness"]).unwrap();
+        assert_eq!(shown.sections["harness"]["path"][0], "./tools");
         assert_eq!(std::fs::read_to_string(&path).unwrap(), before);
         rename.unwrap().save().unwrap();
         let after = std::fs::read_to_string(&path).unwrap();
