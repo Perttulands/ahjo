@@ -1,7 +1,7 @@
 //! Formation-level execution boundary. Executors report events; they never
 //! write a run ledger, so this boundary can later be placed on another node.
 use crate::BindingsSnapshot;
-use ahjo_mission_model::{Formation, RunInput};
+use ahjo_mission_model::{Formation, RunInput, Slot, agent_session, fresh_session};
 use serde_json::{Map, Value, json};
 use sha2::{Digest, Sha256};
 use std::path::PathBuf;
@@ -43,6 +43,24 @@ pub struct FormationExecution {
     pub stopping: Arc<AtomicBool>,
     pub limits: crate::AttemptLimits,
 }
+impl FormationExecution {
+    /// The session name the seat requests and whether it stays for later runs.
+    pub(crate) fn seat_session(&self, slot: &Slot) -> (String, bool) {
+        if self.prefix.is_empty() {
+            return (String::new(), false);
+        }
+        let agent = self.formation.agent_of(slot);
+        if self.formation.fresh {
+            (
+                fresh_session(&self.prefix, &agent, self.run_number, self.attempt),
+                false,
+            )
+        } else {
+            (agent_session(&self.prefix, &agent), true)
+        }
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct ExecutionEvent {
     pub kind: String,
@@ -240,11 +258,7 @@ impl Executor for LabExecutor {
                     data: data.as_object().unwrap().clone(),
                 }).map_err(|error| error.message)
             };
-            let stem = if slot.agent_id.is_empty() {
-                &slot.id
-            } else {
-                &slot.agent_id
-            };
+            let (session, _) = request.seat_session(slot);
             let dispatch_id = format!("dsp_{}_{}_{}", request.run_id, slot.id, request.attempt);
             let mut brief = format!(
                 "run: {}\nnode: {}\nslot: {}\nharness: {}\ncwd: {}\ngoal: {}\ninput: {}\ncontext paths: {}\n",
@@ -312,7 +326,7 @@ impl Executor for LabExecutor {
             let digest = hex::encode(Sha256::digest(brief.as_bytes()));
             send(
                 "slot_dispatch",
-                json!({"dispatchId":dispatch_id,"nodeId":request.formation.id,"slotId":slot.id,"agentId":slot.agent_id,"harness":slot.harness,"sessionStem":stem,"sessionRef":format!("lab:{stem}"),"briefPath":brief_path,"promptSha256":digest,"promptRef":"","phase":"","recordedBeforeSend":true,"nativeAck":false}),
+                json!({"dispatchId":dispatch_id,"nodeId":request.formation.id,"slotId":slot.id,"agentId":slot.agent_id,"harness":slot.harness,"session":session,"session_ref":format!("lab:{session}"),"briefPath":brief_path,"promptSha256":digest,"promptRef":"","phase":"","recordedBeforeSend":true,"nativeAck":false}),
             )?;
             let evidence = serde_json::to_vec(&result).map_err(|e| e.to_string())?;
             let path = request.artifact_dir.join("lab-completed.json");

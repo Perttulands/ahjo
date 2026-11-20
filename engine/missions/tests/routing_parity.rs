@@ -645,7 +645,7 @@ fn human_gate_records_and_routes_the_exact_request() {
     let verdict = HumanVerdict {
         requested_seq: request,
         verdict: "pass".into(),
-        response: " yes\n".into(),
+        reason: " yes\n".into(),
         ..Default::default()
     };
     c.record_verdict(&id, "gate_review", verdict.clone())
@@ -729,7 +729,7 @@ fn human_answer_routes_while_another_branch_runs_and_rejection_waits() {
                 HumanVerdict {
                     requested_seq: requested,
                     verdict: verdict.into(),
-                    response: if verdict == "fail" {
+                    reason: if verdict == "fail" {
                         "needs work"
                     } else {
                         "yes"
@@ -1031,7 +1031,7 @@ fn a_blocked_run_accepts_another_gates_verdict_and_routes_it_on_resume() {
             ahjo_mission_model::HumanVerdict {
                 requested_seq: requested,
                 verdict: "pass".into(),
-                response: "approved while blocked".into(),
+                reason: "approved while blocked".into(),
                 ..Default::default()
             },
         )
@@ -1518,7 +1518,7 @@ fn human_response_is_delivered_with_its_original_input_like_archon() {
         ahjo_mission_model::HumanVerdict {
             requested_seq: seq,
             verdict: "pass".into(),
-            response: "yes".into(),
+            reason: "yes".into(),
             ..Default::default()
         },
     )

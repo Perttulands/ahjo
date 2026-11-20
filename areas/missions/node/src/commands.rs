@@ -173,7 +173,7 @@ fn description(name: &str) -> &'static str {
             "Permanently remove a listed mission archive's definition, layout and associated notes; unrelated notes and run history remain."
         }
         "mission_inspect" => {
-            "Read a mission as an agent picks it up: the operator's notes beside the step, gate, limit or wire each is on, the steps in the order a run meets them with who does each and where they lead, and what still stops it running. --full gives the whole definition with every port."
+            "Read a mission as an agent picks it up: the operator's notes beside the step, gate, limit or wire each is on, the steps in the order a run meets them with who does each, the slots’ session names, and where they lead, and what still stops it running. --full gives the whole definition with every port."
         }
         "mission_validate" => {
             "Say whether a mission can run, with its errors and warnings and the next command."
@@ -315,7 +315,7 @@ fn schema(name: &str) -> Value {
         "run_land" => object(json!({"run":s,"force":b}), &["run"]),
         "gate_request" => object(json!({"run":s,"gate":s}), &["run", "gate"]),
         "gate_approve" | "gate_reject" => object(
-            json!({"run":s,"gate":s,"requested_seq":i,"response":s,"relayed_by":s,"actor":s}),
+            json!({"run":s,"gate":s,"requested_seq":i,"reason":s,"relayed_by":s,"actor":s}),
             &["run", "gate", "requested_seq"],
         ),
         "gate_pick" => object(
@@ -876,7 +876,7 @@ async fn call(m: Missions, name: &str, a: Value) -> Result<Value, Error> {
                         "fail"
                     }
                     .into(),
-                    response: optional(&a, "response", "")?.into(),
+                    reason: optional(&a, "reason", "")?.into(),
                     relayed_by: optional(&a, "relayed_by", "")?.into(),
                     actor: command_actor(&a)?,
                 },

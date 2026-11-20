@@ -325,6 +325,37 @@ async fn cli_authors_two_steps_answers_gate_and_finishes_with_fake_sessions() {
     .await;
     assert_eq!(timed["outcome"], "timeout");
     assert_eq!(timed["status"], "waiting_human");
+    let mut help = Vec::new();
+    let address = format!("{}/", node.url());
+    let args = ["approve", "--help", "--node", &address].map(str::to_owned);
+    assert_eq!(
+        ahjo_node_kit::cli::run("gate", &args, &mut help)
+            .await
+            .unwrap(),
+        0
+    );
+    let help = String::from_utf8(help).unwrap();
+    assert!(help.contains("--reason"), "{help}");
+    assert!(!help.contains("--response"), "{help}");
+    let args = [
+        "approve",
+        run,
+        &gate,
+        &seq.to_string(),
+        "--response",
+        "old flag",
+        "--node",
+        &address,
+    ]
+    .map(str::to_owned);
+    let error = ahjo_node_kit::cli::run("gate", &args, &mut Vec::new())
+        .await
+        .unwrap_err();
+    assert!(
+        error.to_string().contains("unknown flag --response"),
+        "{error}"
+    );
+
     cli(
         &node,
         "gate",
@@ -333,7 +364,7 @@ async fn cli_authors_two_steps_answers_gate_and_finishes_with_fake_sessions() {
             run,
             &gate,
             &seq.to_string(),
-            "--response",
+            "--reason",
             "approved",
             "--actor",
             "agent:journey",
@@ -349,6 +380,17 @@ async fn cli_authors_two_steps_answers_gate_and_finishes_with_fake_sessions() {
         .unwrap();
     assert_eq!(human_gate["state"], "answered");
     assert_eq!(human_gate["verdict"], "pass");
+    let ledger = ahjo_mission_engine::Store::root_in(node.dir())
+        .join("runs")
+        .join(format!("{run}.ndjson"));
+    let events = ahjo_mission_engine::Ledger::new(ledger, run)
+        .read()
+        .unwrap();
+    let verdict = events
+        .iter()
+        .find(|event| event.kind == "human_verdict_recorded" && event.gate_id == gate)
+        .unwrap();
+    assert_eq!(verdict.data["reason"], "approved");
     assert_eq!(human_gate["by"], "agent:journey");
     let error = node
         .call("gate_request", serde_json::json!({"run":run,"gate":gate}))

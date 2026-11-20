@@ -144,7 +144,7 @@ impl LocalSeats {
                 .map_err(|e| e.to_string())?;
         }
         let adapter_sent = events.iter().any(|event| event.key == "adapter-send");
-        let data = json!({"dispatchId":id,"nodeId":dispatch.node_id,"slotId":dispatch.slot_id,"sessionRef":format!("terminal:{}", seat.session_name),"adapter":"terminal","sent":true});
+        let data = json!({"dispatchId":id,"nodeId":dispatch.node_id,"slotId":dispatch.slot_id,"session_ref":format!("terminal:{}", seat.session_name),"adapter":"terminal","sent":true});
         let event = records
             .append(
                 id,

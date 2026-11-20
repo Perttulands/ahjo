@@ -23,7 +23,7 @@ async fn launches_in_the_folder_at_the_size_and_deletes_exactly_one() {
         name: "launched".into(),
         flags: "launched-here".into(),
         user: String::new(),
-        notify: false,
+        install_completion_hooks: false,
         size: None,
     };
     let engine = ahjo_term::engine::Engine::start(server.socket());
@@ -75,7 +75,7 @@ async fn launches_in_the_folder_at_the_size_and_deletes_exactly_one() {
         harness: "claude".into(),
         name: "unhooked".into(),
         flags: String::new(),
-        notify: true,
+        install_completion_hooks: true,
         ..launch.clone()
     };
     let launched = crate::launch::launch(&engine, &claude, &hooked, Ok(&hooks))
@@ -130,7 +130,7 @@ async fn launches_in_the_folder_at_the_size_and_deletes_exactly_one() {
         name: "theirs".into(),
         flags: String::new(),
         user: "someone-else".into(),
-        notify: false,
+        install_completion_hooks: false,
         size: None,
     };
     let refused = crate::launch::launch(&engine, &config, &theirs, NO_HOOKS).await;

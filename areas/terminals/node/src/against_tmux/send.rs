@@ -212,7 +212,7 @@ async fn launched_shell(server: &Server, engine: &Engine, startup: &str) -> u32 
         name: "fresh".into(),
         flags: String::new(),
         user: String::new(),
-        notify: false,
+        install_completion_hooks: false,
         size: None,
     };
     let result = crate::launch::launch(
@@ -501,7 +501,7 @@ async fn an_unrecognised_harness_question_receives_nothing() {
         name: "agent".into(),
         flags: file.to_string_lossy().into_owned(),
         user: String::new(),
-        notify: false,
+        install_completion_hooks: false,
         size: None,
     };
     let result = crate::launch::launch(&engine, &config, &request, Err("none"))

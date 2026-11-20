@@ -335,7 +335,7 @@ pub async fn start(ctx: &Ctx, args: &Value) -> Result<Value> {
         name,
         flags: harness.flags.clone(),
         user: String::new(),
-        notify: true,
+        install_completion_hooks: true,
         size: None,
     };
     let (session, warning) = ctx.hub.launch(&launcher, &launch).await?;

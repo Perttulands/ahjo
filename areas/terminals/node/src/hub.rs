@@ -340,7 +340,7 @@ impl Hub {
         let server = self.server(&launch.user)?;
         let hooks = self.hooks.as_ref().map_err(String::as_str);
         if let Ok(hooks) = hooks
-            && launch.notify
+            && launch.install_completion_hooks
         {
             let live: Vec<String> = self.sessions().into_iter().map(|s| s.id).collect();
             hooks.prune(&live);

@@ -4,13 +4,15 @@
 
 use super::workspace::Workspace;
 use crate::theme::size;
-use ahjo_app_kit::Setting;
 use ahjo_app_kit::zoom::{self, Zoom};
+use ahjo_app_kit::{Error, Host, Setting};
+use gpui::App;
 use serde::{Deserialize, Deserializer, Serialize};
+use serde_json::{Map, Value};
 use std::collections::BTreeMap;
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(default)]
+#[serde(default, deny_unknown_fields)]
 pub struct Settings {
     pub font_size: f32,
     /// Peek's own text size, zoomed with Ctrl+wheel; none is `font_size`.
@@ -31,7 +33,7 @@ pub struct Settings {
     /// Flags typed per harness, when they differ from the node's.
     pub flags: BTreeMap<String, String>,
     /// The launcher asks a harness to report when it finishes.
-    pub notify: bool,
+    pub install_completion_hooks: bool,
     /// A report marks its session's rail row and the tab holding it.
     pub event_marks: bool,
     /// A report pops the toast; the status line keeps it either way.
@@ -65,7 +67,7 @@ pub const DECLARED: &[Setting] = &[
     ),
     Setting::toggle("copy_on_select", "Copy on select", true)
         .note("A selection is copied as the mouse is released."),
-    Setting::toggle("notify", "Report when done", true)
+    Setting::toggle("install_completion_hooks", "Report when done", true)
         .note("The launcher asks a harness to report when it finishes."),
     Setting::toggle("event_marks", "Mark reports", true)
         .note("A report marks its session's row and the tab holding it."),
@@ -85,13 +87,14 @@ pub struct Kept {
 
 /// What can be used to start an ended session again.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Restart {
     pub id: String,
     pub folder: String,
     /// Absent for sessions whose launch the app did not witness.
     pub harness: Option<String>,
     pub flags: String,
-    pub notify: bool,
+    pub install_completion_hooks: bool,
 }
 
 impl Default for Settings {
@@ -107,7 +110,7 @@ impl Default for Settings {
             last_harness: None,
             launched_folders: Default::default(),
             flags: Default::default(),
-            notify: true,
+            install_completion_hooks: true,
             event_marks: true,
             event_toast: true,
             event_tone: false,
@@ -127,12 +130,25 @@ fn mended<'de, D: Deserializer<'de>>(d: D) -> Result<Workspace, D::Error> {
 }
 
 impl Settings {
+    /// Both startup and live settings reloads use the same, one-time rewrite.
+    pub fn load(host: &Host, cx: &mut App) -> Result<Self, Error> {
+        let mut section: Map<String, Value> = host.setting(cx)?;
+        let migrated = migrate_completion_hooks(&mut section);
+        let settings = Self::deserialize(Value::Object(section.clone())).map_err(|error| {
+            Error::new("settings_unreadable", format!("Sessions settings: {error}"))
+        })?;
+        if migrated {
+            host.set_setting(&section, cx)?;
+        }
+        Ok(settings.mend())
+    }
+
     /// Takes what the Settings page sets ([`DECLARED`]) from `fresh`,
     /// keeping the rest as the page has it.
     pub fn take_declared(&mut self, fresh: Settings) {
         self.font_size = fresh.font_size;
         self.copy_on_select = fresh.copy_on_select;
-        self.notify = fresh.notify;
+        self.install_completion_hooks = fresh.install_completion_hooks;
         self.event_marks = fresh.event_marks;
         self.event_toast = fresh.event_toast;
         self.event_tone = fresh.event_tone;
@@ -164,6 +180,29 @@ impl Settings {
         self.font_size = self.font_size.clamp(size::TERM_MIN, size::TERM_MAX);
         self
     }
+}
+
+/// Move the old setting in the launcher and in each saved restart recipe.
+fn migrate_completion_hooks(section: &mut Map<String, Value>) -> bool {
+    fn rename(object: &mut Map<String, Value>) -> bool {
+        if object.contains_key("install_completion_hooks") {
+            // A conflicting old key is rejected by the normal decoder.
+            return false;
+        }
+        if let Some(value) = object.remove("notify") {
+            object.insert("install_completion_hooks".into(), value);
+            return true;
+        }
+        false
+    }
+
+    let mut migrated = rename(section);
+    if let Some(Value::Object(restarts)) = section.get_mut("restarts") {
+        for restart in restarts.values_mut().filter_map(Value::as_object_mut) {
+            migrated |= rename(restart);
+        }
+    }
+    migrated
 }
 
 /// Where [`Settings::launched_folders`] keeps a node's folders for `user`

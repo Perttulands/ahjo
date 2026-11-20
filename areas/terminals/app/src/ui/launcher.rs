@@ -364,7 +364,7 @@ impl Launcher {
                 name: name.clone(),
                 flags: flags.clone(),
                 user: user.clone(),
-                notify: s.settings.notify
+                install_completion_hooks: s.settings.install_completion_hooks
                     && notify_offered(&command, &user)
                     && conf.as_ref().is_some_and(|l| l.notify_off.is_none()),
                 // Once Send closes, its new agent has the full focused tile.
@@ -515,7 +515,7 @@ impl Render for Launcher {
                 launch::folders(launched, &c.folders, sessions, &self.user, self.home(c))
             })
             .unwrap_or_default();
-        let notify_on = shell.settings.notify;
+        let notify_on = shell.settings.install_completion_hooks;
         let values = self.values(shell, cx);
         let places = self.places(&rows, target.as_deref(), cx);
         let alone = |places: Option<gpui::AnyElement>, note: String| {
@@ -670,7 +670,8 @@ impl Render for Launcher {
                             |l, _, _, cx| {
                                 if let Some(shell) = l.shell.upgrade() {
                                     shell.update(cx, |s, cx| {
-                                        s.settings.notify = !s.settings.notify;
+                                        s.settings.install_completion_hooks =
+                                            !s.settings.install_completion_hooks;
                                         s.save(cx);
                                     });
                                 }

@@ -100,7 +100,7 @@ fn requests_read_back_whole() {
         "requestedSeq": 2, "verdict": "pass", "reason": "fine", "relayedBy": "",
         "actor": "human:operator"
     }));
-    assert_eq!(verdict.response, "fine");
+    assert_eq!(verdict.reason, "fine");
     reads_back::<HumanPick>(json!({
         "requestedSeq": 2, "attempt": 1, "reason": "best", "relayedBy": "w1",
         "actor": "human:operator"

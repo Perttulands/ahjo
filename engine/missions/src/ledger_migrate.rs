@@ -2,7 +2,8 @@
 //! to date, once, when a coordinator opens its state directory. Those
 //! ledgers name a GitHub issue as `issue: "owner/repo#N"` on each event and
 //! in `run_started`'s data; they now name it as `work`, in the canonical
-//! form (`gh:owner/repo#N`). A ledger is rewritten whole, through a synced
+//! form (`gh:owner/repo#N`). Also updates old dispatch session fields.
+//! A ledger is rewritten whole, through a synced
 //! private temporary file renamed over it, so a crash leaves either the old
 //! ledger or the new one.
 //!
@@ -18,7 +19,7 @@ use std::path::Path;
 
 use serde_json::{Map, Value};
 
-/// Migrates every ledger in `runs` that still has an `issue` field, and
+/// Migrates every ledger in `runs` with old fields, and
 /// returns, by run id, why each one it could not migrate was left as it
 /// was. The caller holds the coordinator lock, so nothing appends meanwhile.
 pub(crate) fn migrate(runs: &Path) -> io::Result<BTreeMap<String, String>> {
@@ -34,7 +35,7 @@ pub(crate) fn migrate(runs: &Path) -> io::Result<BTreeMap<String, String>> {
         };
         if let Err(error) = migrate_one(&path) {
             let reason = format!(
-                "run ledger {} was written before #180 and could not be migrated, \
+                "run ledger {} could not be migrated, \
                  so it was left as it was: {error}",
                 path.display()
             );
@@ -47,8 +48,10 @@ pub(crate) fn migrate(runs: &Path) -> io::Result<BTreeMap<String, String>> {
 
 fn migrate_one(path: &Path) -> io::Result<()> {
     let text = fs::read_to_string(path)?;
-    // Cheap check first: most ledgers never had an issue.
-    if !text.contains("\"issue\"") {
+    if !["\"issue\"", "\"sessionStem\"", "\"sessionRef\""]
+        .iter()
+        .any(|key| text.contains(key))
+    {
         return Ok(());
     }
     let mut changed = false;
@@ -59,6 +62,12 @@ fn migrate_one(path: &Path) -> io::Result<()> {
         changed |= rename(&mut event)?;
         if let Some(Value::Object(data)) = event.get_mut("data") {
             changed |= rename(data)?;
+            changed |= migrate_session(data);
+            if let Some(Value::Array(dispatches)) = data.get_mut("openDispatches") {
+                for dispatch in dispatches.iter_mut().filter_map(Value::as_object_mut) {
+                    changed |= migrate_session(dispatch);
+                }
+            }
         }
         out.push_str(&serde_json::to_string(&event)?);
         out.push('\n');
@@ -114,6 +123,26 @@ fn rename(object: &mut Map<String, Value>) -> io::Result<bool> {
         object.insert("work".into(), Value::String(work));
     }
     Ok(true)
+}
+
+fn migrate_session(data: &mut Map<String, Value>) -> bool {
+    let dispatch = data.remove("sessionStem").is_some();
+    let Some(reference) = data.remove("sessionRef") else {
+        return dispatch;
+    };
+    if let Some(name) = reference
+        .as_str()
+        .and_then(|value| value.strip_prefix("terminal:"))
+    {
+        if dispatch {
+            data.entry("session")
+                .or_insert_with(|| Value::String(name.into()));
+        }
+        data.entry("session_ref").or_insert(reference);
+    }
+    // Old lab references carried a slot or role id, with no session name
+    // to recover from the reference.
+    true
 }
 
 fn invalid(message: &str) -> io::Error {

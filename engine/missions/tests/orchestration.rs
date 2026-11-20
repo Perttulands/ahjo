@@ -34,10 +34,15 @@ struct Entry {
 impl SeatSide for LabSeats {
     fn dispatch(&self, request: Dispatch) -> SeatFuture<'_, String> {
         Box::pin(async move {
+            let name = if request.name.is_empty() {
+                format!("seat-{}", request.slot_id)
+            } else {
+                request.name.clone()
+            };
             let id = self
                 .sessions
                 .start(Start {
-                    name: format!("seat-{}", request.slot_id),
+                    name: name.clone(),
                     folder: request.cwd.to_string_lossy().into(),
                     command: String::new(),
                     user: String::new(),
@@ -51,7 +56,7 @@ impl SeatSide for LabSeats {
                 .map_err(|e| ahjo_mission_engine::Error::new("fake", e.to_string()))?;
             let seat = SeatId {
                 node: "test-node".into(),
-                session_name: format!("seat-{}", request.slot_id),
+                session_name: name,
                 session: ahjo_term::SessionRef {
                     session_id: id,
                     pane_id: pane,
@@ -482,6 +487,7 @@ async fn cli_runs_orchestration_to_end_with_controller_and_worker_seats() {
         .replace("[[end]]", "[[formation.slot]]\nid = \"slot_worker\"\nlabel = \"Worker\"\nharness = \"openai-codex\"\neffort = \"medium\"\n\n[[end]]");
     std::fs::create_dir_all(root.join("missions")).unwrap();
     std::fs::write(root.join("missions/hello.mission.toml"), mission).unwrap();
+    let inspect = cli(&node, "mission", &["inspect", "hello"]).await;
     let started = cli(
         &node,
         "mission",
@@ -513,12 +519,29 @@ async fn cli_runs_orchestration_to_end_with_controller_and_worker_seats() {
                 .values()
                 .any(|e| e.dispatch.slot_id == "slot_worker" && !e.staged)
         );
+        let slots = inspect["steps"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|step| step["id"] == "fmn_work")
+            .unwrap()["slots"]
+            .as_array()
+            .unwrap();
+        assert_eq!(slots.len(), entries.len());
+        for entry in entries.values() {
+            let slot = slots
+                .iter()
+                .find(|slot| slot["id"] == entry.dispatch.slot_id)
+                .unwrap();
+            assert_eq!(slot["session"], entry.dispatch.name);
+            assert_eq!(slot["session"], entry.seat.session_name);
+        }
         let lead = entries
             .values_mut()
             .find(|e| e.dispatch.slot_id == "slot_lead")
             .unwrap();
         let brief = std::fs::read_to_string(&lead.path).unwrap();
-        assert!(brief.contains("seat-slot_worker"));
+        assert!(brief.contains("hello-work-worker"));
         lead.result = Some(DispatchResult {
             status: "ok".into(),
             text: "```ahjo-outputs\n{\"port_out\":{\"text\":\"controller-result\"}}\n```".into(),
@@ -542,6 +565,15 @@ async fn cli_runs_orchestration_to_end_with_controller_and_worker_seats() {
         ahjo_mission_engine::Ledger::new(root.join("runs").join(format!("{run}.ndjson")), run)
             .read()
             .unwrap();
+    {
+        let entries = seats.entries.lock().unwrap();
+        for event in ledger.iter().filter(|event| event.kind == "slot_dispatch") {
+            let id = event.data["dispatchId"].as_str().unwrap();
+            let session = &entries[id].seat.session_name;
+            assert_eq!(event.data["session"], *session);
+            assert_eq!(event.data["session_ref"], format!("terminal:{session}"));
+        }
+    }
     assert!(
         ledger
             .iter()

@@ -419,9 +419,8 @@ impl Terminals {
         // What opens beside the windows may have their whole area.
         host.widens_beside(cx);
         let mut said = vec![];
-        let settings = match host.setting::<Settings>(cx) {
-            Ok(s) => {
-                let mut s = s.mend();
+        let settings = match Settings::load(&host, cx) {
+            Ok(mut s) => {
                 s.workspace.fold_empty();
                 s
             }
@@ -851,7 +850,7 @@ impl Terminals {
                             folder: launch.folder.clone(),
                             harness: Some(launch.harness.clone()),
                             flags: launch.flags.clone(),
-                            notify: launch.notify,
+                            install_completion_hooks: launch.install_completion_hooks,
                         },
                     );
                     self.save(cx);
@@ -1855,8 +1854,8 @@ impl Page for Terminals {
 
     /// The Settings page changed one of ours: taken, the rest as it is.
     fn settings_changed(&mut self, _: &mut Window, cx: &mut Context<Self>) {
-        match self.host.setting::<Settings>(cx) {
-            Ok(fresh) => self.settings.take_declared(fresh.mend()),
+        match Settings::load(&self.host, cx) {
+            Ok(fresh) => self.settings.take_declared(fresh),
             Err(e) => self.report(
                 &format!("The Sessions settings did not read: {}", e.message),
                 true,
@@ -2018,7 +2017,8 @@ fn restart_launch(k: &Key, saved: Option<&crate::store::settings::Restart>) -> L
             .map(|s| s.flags.clone())
             .unwrap_or_default(),
         user: k.user.clone(),
-        notify: saved.is_some_and(|s| s.harness.is_some() && s.notify),
+        install_completion_hooks: saved
+            .is_some_and(|s| s.harness.is_some() && s.install_completion_hooks),
         size: None,
     }
 }
@@ -2081,13 +2081,13 @@ mod tests {
             (l.harness.as_str(), l.folder.as_str(), l.flags.as_str()),
             ("shell", "", "")
         );
-        assert!(!l.notify);
+        assert!(!l.install_completion_hooks);
         let saved = crate::store::settings::Restart {
             id: "$1".into(),
             folder: "/tmp/work".into(),
             harness: Some("fake".into()),
             flags: "--chosen".into(),
-            notify: true,
+            install_completion_hooks: true,
         };
         let l = restart_launch(&k, Some(&saved));
         assert_eq!(
@@ -2095,7 +2095,7 @@ mod tests {
                 l.harness.as_str(),
                 l.folder.as_str(),
                 l.flags.as_str(),
-                l.notify
+                l.install_completion_hooks
             ),
             ("fake", "/tmp/work", "--chosen", true)
         );
@@ -2109,7 +2109,7 @@ mod tests {
                 l.harness.as_str(),
                 l.folder.as_str(),
                 l.flags.as_str(),
-                l.notify
+                l.install_completion_hooks
             ),
             ("shell", "/tmp/work", "", false)
         );

@@ -1309,6 +1309,52 @@ fn scroll_to_launch(cx: &mut VisualTestContext, scroll: &str) {
 }
 
 #[gpui::test]
+fn legacy_completion_hook_settings_are_rewritten_on_load(cx: &mut TestAppContext) {
+    let Some(running) = start("terminals-hook-settings") else {
+        return;
+    };
+    let path = ahjo_testkit::fresh_dir("hook-settings").join("app.json");
+    std::fs::write(
+        &path,
+        serde_json::json!({
+            "sessions": {
+                "notify": false,
+                "restarts": {
+                    "old": {"id": "old", "folder": "/tmp", "harness": "codex",
+                            "flags": "--search", "notify": true}
+                }
+            }
+        })
+        .to_string(),
+    )
+    .unwrap();
+    cx.executor().allow_parking();
+    cx.update(ahjo_app_shell::prepare);
+    let url = running.url.clone();
+    let settings_path = path.clone();
+    let (_, cx) = cx.add_window_view(move |window, cx| {
+        ahjo_app_shell::start(&[terminals], Some(url), Some(settings_path), window, cx)
+    });
+    let page = PAGE.with(|p| p.borrow().clone()).unwrap();
+    page.read_with(cx, |p, _| {
+        assert!(!p.settings.install_completion_hooks);
+        assert!(p.settings.restarts["old"].install_completion_hooks);
+    });
+    until(cx, "the old hook preferences rewritten", |cx| {
+        cx.executor().advance_clock(Duration::from_millis(300));
+        let saved: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        let section = &saved["sessions"];
+        section.get("notify").is_none()
+            && section["install_completion_hooks"] == false
+            && section["restarts"]["old"]["install_completion_hooks"] == true
+            && section["restarts"]["old"].get("notify").is_none()
+            && section["restarts"]["old"]["flags"] == "--search"
+    });
+    std::fs::remove_dir_all(path.parent().unwrap()).unwrap();
+}
+
+#[gpui::test]
 fn launches_use_each_tile_grid(cx: &mut TestAppContext) {
     let Some(running) = start("terminals-sized-launches") else {
         return;

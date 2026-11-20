@@ -587,7 +587,7 @@ async fn a_client_launches_and_deletes_a_session() {
         name: "fresh".into(),
         flags: String::new(),
         user: String::new(),
-        notify: false,
+        install_completion_hooks: false,
         // The grid of the window it is launched into (#161).
         size: Some((90, 28)),
     };
@@ -834,7 +834,7 @@ async fn a_client_sees_and_uses_another_users_server() {
         name: "fresh".into(),
         flags: String::new(),
         user: user.clone(),
-        notify: false,
+        install_completion_hooks: false,
         size: None,
     };
     ws.send(Message::Binary(

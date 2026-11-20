@@ -141,7 +141,7 @@ fn mixed_code_and_human_gate_preserves_its_durable_code_result() {
         ahjo_mission_model::HumanVerdict {
             requested_seq: requested,
             verdict: "pass".into(),
-            response: "approved".into(),
+            reason: "approved".into(),
             ..Default::default()
         },
     )

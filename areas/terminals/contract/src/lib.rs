@@ -237,12 +237,12 @@ pub fn decode_up(frame: &[u8]) -> Result<Up, Error> {
             // user's own tmux server. A sixth, "1", asks for completion hooks.
             // A seventh, `<cols>x<rows>`, is the grid of the window the
             // session is launched into.
-            let (&[harness, folder, name, flags], user, notify, size) = match fields[..] {
+            let (&[harness, folder, name, flags], user, hooks, size) = match fields[..] {
                 [a, b, c, d] => (&[a, b, c, d], "", "", None),
                 [a, b, c, d, user] => (&[a, b, c, d], user, "", None),
-                [a, b, c, d, user, notify] => (&[a, b, c, d], user, notify, None),
-                [a, b, c, d, user, notify, size] => {
-                    (&[a, b, c, d], user, notify, Some(launch_size(size)?))
+                [a, b, c, d, user, hooks] => (&[a, b, c, d], user, hooks, None),
+                [a, b, c, d, user, hooks, size] => {
+                    (&[a, b, c, d], user, hooks, Some(launch_size(size)?))
                 }
                 _ => bail!("launch frame needs four to seven fields"),
             };
@@ -254,7 +254,7 @@ pub fn decode_up(frame: &[u8]) -> Result<Up, Error> {
                     name: name.into(),
                     flags: flags.into(),
                     user: user.into(),
-                    notify: notify == "1",
+                    install_completion_hooks: hooks == "1",
                     size,
                 },
             });
@@ -330,13 +330,17 @@ pub fn encode_up(up: &Up) -> Vec<u8> {
             let mut text = [&launch.harness, &launch.folder, &launch.name, &launch.flags]
                 .map(String::as_str)
                 .join("\0");
-            if !launch.user.is_empty() || launch.notify || launch.size.is_some() {
+            if !launch.user.is_empty() || launch.install_completion_hooks || launch.size.is_some() {
                 text.push('\0');
                 text.push_str(&launch.user);
             }
-            if launch.notify || launch.size.is_some() {
+            if launch.install_completion_hooks || launch.size.is_some() {
                 text.push('\0');
-                text.push_str(if launch.notify { "1" } else { "" });
+                text.push_str(if launch.install_completion_hooks {
+                    "1"
+                } else {
+                    ""
+                });
             }
             if let Some((cols, rows)) = launch.size {
                 text.push_str(&format!("\0{cols}x{rows}"));
@@ -383,7 +387,7 @@ pub struct Launch {
     pub user: String,
     /// Install the harness's completion hooks, if it takes them
     /// (the node's agent events).
-    pub notify: bool,
+    pub install_completion_hooks: bool,
     /// The grid of the window it is launched into, which its window is
     /// given at creation instead of the launcher's size (#161). `None` for
     /// a launch into no window.
@@ -555,7 +559,7 @@ mod tests {
                     name: "claude-work".into(),
                     flags: "--model x".into(),
                     user: String::new(),
-                    notify: false,
+                    install_completion_hooks: false,
                     size: None,
                 },
             },
@@ -567,7 +571,7 @@ mod tests {
                     name: "fitted".into(),
                     flags: String::new(),
                     user: String::new(),
-                    notify: false,
+                    install_completion_hooks: false,
                     size: Some((97, 31)),
                 },
             },
@@ -579,7 +583,7 @@ mod tests {
                     name: "told".into(),
                     flags: String::new(),
                     user: String::new(),
-                    notify: true,
+                    install_completion_hooks: true,
                     size: None,
                 },
             },
@@ -591,7 +595,7 @@ mod tests {
                     name: "theirs".into(),
                     flags: String::new(),
                     user: "alice".into(),
-                    notify: true,
+                    install_completion_hooks: true,
                     size: Some((300, 80)),
                 },
             },
@@ -639,21 +643,26 @@ mod tests {
         assert_eq!(f[9], 1);
         assert_eq!(&f[10..], b"go");
         assert_eq!(send(12, false, true)[9], 2);
-        let launch =
-            |harness: &str, folder: &str, name: &str, flags: &str, user: &str, notify, size| {
-                encode_up(&Up::Launch {
-                    id: 2,
-                    launch: Launch {
-                        harness: harness.into(),
-                        folder: folder.into(),
-                        name: name.into(),
-                        flags: flags.into(),
-                        user: user.into(),
-                        notify,
-                        size,
-                    },
-                })
-            };
+        let launch = |harness: &str,
+                      folder: &str,
+                      name: &str,
+                      flags: &str,
+                      user: &str,
+                      install_completion_hooks,
+                      size| {
+            encode_up(&Up::Launch {
+                id: 2,
+                launch: Launch {
+                    harness: harness.into(),
+                    folder: folder.into(),
+                    name: name.into(),
+                    flags: flags.into(),
+                    user: user.into(),
+                    install_completion_hooks,
+                    size,
+                },
+            })
+        };
         assert_eq!(
             &launch("claude", "~", "c", "", "", true, None)[5..],
             b"claude\0~\0c\0\0\x001"

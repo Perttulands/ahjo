@@ -75,7 +75,7 @@ impl Sessions for Provided {
                 name: start.name,
                 flags: String::new(),
                 user: start.user,
-                notify: false,
+                install_completion_hooks: false,
                 size: None,
             };
             let (session, _) = self.hub.launch(&config, &launch).await?;

@@ -53,6 +53,56 @@ fn wait_final(c: &Coordinator, id: &str) {
 }
 
 #[test]
+fn a_legacy_dispatch_is_migrated_and_the_run_still_replays() {
+    let dir = Scratch::new();
+    let c = Coordinator::open(&dir.0, RunSettings::default(), Box::new(LabExecutor)).unwrap();
+    let id = c.start_mission(request()).unwrap();
+    wait_final(&c, &id);
+    c.shutdown(Instant::now() + Duration::from_secs(10))
+        .unwrap();
+    let before = c.run(&id).unwrap();
+    drop(c);
+
+    let path = dir.0.join("runs").join(format!("{id}.ndjson"));
+    let mut old = String::new();
+    let mut replaced = false;
+    for line in std::fs::read_to_string(&path).unwrap().lines() {
+        let mut event: serde_json::Value = serde_json::from_str(line).unwrap();
+        if event["type"] == "slot_dispatch" {
+            let dispatch = event["data"].as_object_mut().unwrap();
+            assert_eq!(dispatch.remove("session").unwrap(), "hello-work");
+            assert_eq!(dispatch.remove("session_ref").unwrap(), "lab:hello-work");
+            dispatch.insert("sessionStem".into(), "slot_work".into());
+            dispatch.insert("sessionRef".into(), "terminal:hello-work".into());
+            replaced = true;
+        }
+        old.push_str(&serde_json::to_string(&event).unwrap());
+        old.push('\n');
+    }
+    assert!(replaced);
+    std::fs::write(&path, old).unwrap();
+
+    let c = Coordinator::open(&dir.0, RunSettings::default(), Box::new(LabExecutor)).unwrap();
+    let after = c.run(&id).unwrap();
+    assert!(after.r#final);
+    assert_eq!(after.status, before.status);
+    assert_eq!(after.event_count, before.event_count);
+    let migrated = std::fs::read_to_string(&path).unwrap();
+    let ledger = ahjo_mission_engine::Ledger::new(&path, &id).read().unwrap();
+    let dispatch = ledger
+        .iter()
+        .find(|event| event.kind == "slot_dispatch")
+        .unwrap();
+    assert!(!migrated.contains("sessionStem"), "{migrated}");
+    assert_eq!(dispatch.data["session"], "hello-work");
+    assert_eq!(dispatch.data["session_ref"], "terminal:hello-work");
+    drop(c);
+
+    let _c = Coordinator::open(&dir.0, RunSettings::default(), Box::new(LabExecutor)).unwrap();
+    assert_eq!(std::fs::read_to_string(&path).unwrap(), migrated);
+}
+
+#[test]
 fn shutdown_block_with_completed_evidence_never_schedules_on_open() {
     struct CompletedOnly;
     impl Executor for CompletedOnly {

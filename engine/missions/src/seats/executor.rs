@@ -112,7 +112,7 @@ impl SeatExecutor {
                         if self.seats.away(&request.formation.device).is_some() { break; }
                         if matches!(tokio::time::timeout(Duration::from_millis(250), self.seats.seat_alive(worker_seat)).await, Ok(Ok(false))) {
                             let text = format!("Worker {} (session {}) is gone. Continue without that worker.", worker.id, worker_seat.session_name);
-                            let data = json!({"mode":"agentic-leader","observer":"ahjo-seat","phase":"work","outcome":"gone","anomaly":true,"slotId":worker.id,"controllerSlot":slot.id,"sessionRef":format!("terminal:{}", worker_seat.session_name)});
+                            let data = json!({"mode":"agentic-leader","observer":"ahjo-seat","phase":"work","outcome":"gone","anomaly":true,"slotId":worker.id,"controllerSlot":slot.id,"session_ref":format!("terminal:{}", worker_seat.session_name)});
                             sink.emit(ExecutionEvent { kind: "worker_observation".into(), slot_id: worker.id.clone(), data: data.as_object().unwrap().clone() }).map_err(|e| format!("seat_ledger_unavailable: {e}"))?;
                             self.seats.notify(&id, &text).await.map_err(|e| e.message)?;
                             lost.insert(worker.id.clone());
@@ -169,7 +169,7 @@ impl SeatExecutor {
         sink: &ExecutionSink,
     ) -> Result<(SeatId, String), String> {
         let id = dispatch_id(request, slot, phase);
-        let (name, keep) = seat_session(request, slot);
+        let (name, keep) = request.seat_session(slot);
         let dispatch = Dispatch {
             id: id.clone(),
             run_id: request.run_id.clone(),
@@ -630,7 +630,7 @@ impl SeatExecutor {
                 return Err(error);
             }
         };
-        let identity = |slot: &Slot, seat: &SeatId| json!({"slotId":slot.id,"label":slot.label,"agentId":slot.agent_id,"harness":slot.harness,"sessionRef":format!("terminal:{}", seat.session_name)});
+        let identity = |slot: &Slot, seat: &SeatId| json!({"slotId":slot.id,"label":slot.label,"agentId":slot.agent_id,"harness":slot.harness,"session_ref":format!("terminal:{}", seat.session_name)});
         let data = json!({"mode":"agentic-leader","cwd":request.cwd,"controllerSlot":controller.id,"controller":identity(controller, &controller_seat),"workers":workers.iter().map(|(slot, _, seat, _)| identity(slot, seat)).collect::<Vec<_>>()});
         let team = sink.emit(ExecutionEvent {
             kind: "orchestration_team".into(),
@@ -648,7 +648,7 @@ impl SeatExecutor {
             return Err(format!("seat_ledger_unavailable: {error}"));
         }
         for (slot, _, seat, _) in &workers {
-            let data = json!({"mode":"agentic-leader","observer":"ahjo-seat","phase":"bind","outcome":"bound","anomaly":false,"slotId":slot.id,"controllerSlot":controller.id,"sessionRef":format!("terminal:{}", seat.session_name)});
+            let data = json!({"mode":"agentic-leader","observer":"ahjo-seat","phase":"bind","outcome":"bound","anomaly":false,"slotId":slot.id,"controllerSlot":controller.id,"session_ref":format!("terminal:{}", seat.session_name)});
             if let Err(error) = sink.emit(ExecutionEvent {
                 kind: "worker_observation".into(),
                 slot_id: slot.id.clone(),
@@ -1178,7 +1178,7 @@ fn dispatch_data(
     recorded_before_send: bool,
 ) -> Map<String, Value> {
     let prompt_sha = hex::encode(Sha256::digest(prompt.as_bytes()));
-    let data = json!({"dispatchId":id,"nodeId":node,"slotId":slot.id,"agentId":slot.agent_id,"harness":slot.harness,"sessionStem":slot.id,"sessionRef":format!("terminal:{}",seat.session_name),"briefPath":path,"promptSha256":prompt_sha,"promptRef":"","phase":phase,"recordedBeforeSend":recorded_before_send,"nativeAck":false});
+    let data = json!({"dispatchId":id,"nodeId":node,"slotId":slot.id,"agentId":slot.agent_id,"harness":slot.harness,"session":seat.session_name,"session_ref":format!("terminal:{}",seat.session_name),"briefPath":path,"promptSha256":prompt_sha,"promptRef":"","phase":phase,"recordedBeforeSend":recorded_before_send,"nativeAck":false});
     data.as_object().cloned().unwrap_or_default()
 }
 fn dispatch_id(request: &FormationExecution, slot: &Slot, phase: &str) -> String {
@@ -1213,28 +1213,4 @@ async fn published_turn(
         slot_id: slot.into(),
         data: data.as_object().cloned().unwrap_or_default(),
     })
-}
-
-/// The session a slot's seat works in, and whether it is the agent's own
-/// to keep: `<prefix>-<agent>`, or for a step that starts fresh one of the
-/// attempt's own.
-fn seat_session(request: &FormationExecution, slot: &Slot) -> (String, bool) {
-    if request.prefix.is_empty() {
-        return (String::new(), false);
-    }
-    let agent = request.formation.agent_of(slot);
-    if request.formation.fresh {
-        let name = ahjo_mission_model::fresh_session(
-            &request.prefix,
-            &agent,
-            request.run_number,
-            request.attempt,
-        );
-        (name, false)
-    } else {
-        (
-            ahjo_mission_model::agent_session(&request.prefix, &agent),
-            true,
-        )
-    }
 }

@@ -88,7 +88,7 @@ impl Terminals {
             name: name.clone(),
             flags: harness.flags.clone(),
             user: k.user.clone(),
-            notify: self.settings.notify
+            install_completion_hooks: self.settings.install_completion_hooks
                 && notify_offered(&harness.command, &k.user)
                 && conf.as_ref().is_some_and(|l| l.notify_off.is_none()),
             size: self.launch_grids.borrow()[self.settings.workspace.focus],
@@ -154,7 +154,7 @@ impl Terminals {
             name: name.clone(),
             flags,
             user: String::new(),
-            notify: self.settings.notify
+            install_completion_hooks: self.settings.install_completion_hooks
                 && notify_offered(&harness.command, "")
                 && conf.notify_off.is_none(),
             size: self.launch_grids.borrow()[self.settings.workspace.focus],

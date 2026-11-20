@@ -25,7 +25,6 @@ pub struct RunBinding {
     pub slot_id: String,
     pub agent_id: String,
     pub harness: String,
-    pub session_stem: String,
     pub model: String,
     pub effort: String,
     #[serde(default)]
@@ -67,11 +66,6 @@ impl BindingsSnapshot {
                         slot_id: slot.id.clone(),
                         agent_id: slot.agent_id.clone(),
                         harness: slot.harness.clone(),
-                        session_stem: if slot.agent_id.is_empty() {
-                            slot.id.clone()
-                        } else {
-                            slot.agent_id.clone()
-                        },
                         model: slot.model.clone(),
                         effort: slot.effort.clone(),
                         card_path: if slot.agent_id.is_empty() {
@@ -173,12 +167,6 @@ impl BindingsSnapshot {
         if matches.next().is_some()
             || binding.agent_id != slot.agent_id
             || binding.harness != slot.harness
-            || binding.session_stem.as_str()
-                != if slot.agent_id.is_empty() {
-                    slot.id.as_str()
-                } else {
-                    slot.agent_id.as_str()
-                }
             || binding.model != slot.model
             || binding.effort != slot.effort
             || binding.effort.is_empty()

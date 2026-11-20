@@ -3,7 +3,7 @@
 //! running, sized to read in one go. `mission inspect --full` is the whole
 //! definition.
 use ahjo_missions_contract::{
-    Finding, MISSION_THREAD, Mission, NoteEntry, Notes, Slot,
+    Finding, Formation, MISSION_THREAD, Mission, NoteEntry, Notes, Slot, agent_session,
     flow::{self, Decider, StepKind, Target},
 };
 use serde_json::{Map, Value, json};
@@ -18,6 +18,7 @@ pub fn handover(
     warnings: &[Finding],
 ) -> Value {
     let flow = flow::build(mission);
+    let prefix = mission.session_prefix();
     let mut out = Map::new();
     let slug = shell_word(&mission.slug);
     out.insert("mission".into(), json!(mission.slug));
@@ -117,6 +118,7 @@ pub fn handover(
                     };
                     row.insert("step".into(), json!(formation.title));
                     row.insert("who".into(), json!(who(&formation.slots)));
+                    row.insert("slots".into(), slots(&prefix, formation));
                     if formation.fresh {
                         row.insert("fresh".into(), json!(true));
                     }
@@ -175,6 +177,10 @@ pub fn handover(
                         j.insert("id".into(), json!(judge));
                         j.insert("step".into(), json!(formation.title));
                         j.insert("who".into(), json!(who(&formation.slots)));
+                        j.insert("slots".into(), slots(&prefix, formation));
+                        if formation.fresh {
+                            j.insert("fresh".into(), json!(true));
+                        }
                         let brief = formation.brief.as_ref().map(|b| b.goal.trim());
                         j.insert("brief".into(), json!(brief.unwrap_or_default()));
                         j.insert("notes".into(), thread(notes, judge));
@@ -196,6 +202,8 @@ pub fn handover(
                 "step": formation.title,
                 "unreached": true,
                 "who": who(&formation.slots),
+                "slots": slots(&prefix, formation),
+                "fresh": formation.fresh,
                 "notes": thread(notes, &formation.id),
             }));
         }
@@ -316,6 +324,23 @@ fn minute(at: &str) -> String {
 
 fn kind(kind: &str) -> &str {
     if kind.is_empty() { "text" } else { kind }
+}
+
+/// The named session each slot asks for. A fresh step gets a run- and
+/// attempt-specific session when it executes.
+fn slots(prefix: &str, formation: &Formation) -> Value {
+    json!(
+        formation
+            .slots
+            .iter()
+            .map(|slot| {
+                json!({
+                    "id": slot.id,
+                    "session": agent_session(prefix, &formation.agent_of(slot)),
+                })
+            })
+            .collect::<Vec<_>>()
+    )
 }
 
 /// Who works a step, slot by slot: `maker: claude-code haiku low as builder`.

@@ -289,7 +289,7 @@ pub struct Launched {
 /// the folder is left to tmux to find.
 ///
 /// `hooks` is how this node hooks a harness, or why it can't; they are
-/// asked for with `launch.notify`, only on the service user's own server,
+/// asked for with `launch.install_completion_hooks`, only on the service user's own server,
 /// whose ids are the hub's. They go before the flag line; flags that would
 /// override them stop them being installed rather than lose to them. They
 /// are settled before the session exists, as CHROTE settles them. Hooks that
@@ -330,7 +330,7 @@ pub async fn launch(
     let folder = resolve_folder(&launch.folder, home.as_deref(), own)?;
     let mut warning = None;
     let plan = match hooks {
-        _ if !launch.notify || !own => None,
+        _ if !launch.install_completion_hooks || !own => None,
         Err(why) if hooks::takes_hooks(&harness.command) => {
             warning = Some(why.to_owned());
             None

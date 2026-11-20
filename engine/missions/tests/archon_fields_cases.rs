@@ -594,7 +594,10 @@ fn slots_share_a_role_but_keep_settings_and_exactly_one_controller() {
     assert_eq!(slots.iter().filter(|slot| slot.controller).count(), 1);
     assert!(slots[1].controller);
     let raw = std::fs::read_to_string(dir.0.join("missions/team.mission.toml")).unwrap();
-    for forbidden in ["sessionName", "sessionStem", "tmux"] {
-        assert!(!raw.contains(forbidden));
+    for line in raw.lines() {
+        if let Some((field, _)) = line.split_once('=') {
+            assert!(!field.trim().starts_with("session"), "{line}");
+        }
     }
+    assert!(!raw.contains("tmux"));
 }

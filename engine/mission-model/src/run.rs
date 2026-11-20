@@ -97,8 +97,7 @@ pub struct RunSessionSummary {
 pub struct HumanVerdict {
     pub requested_seq: u64,
     pub verdict: String,
-    #[serde(rename = "reason")]
-    pub response: String,
+    pub reason: String,
     pub relayed_by: String,
     pub actor: String,
 }

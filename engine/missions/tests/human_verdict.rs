@@ -37,7 +37,7 @@ fn verdicts_are_atomic_and_preserve_response() {
                     HumanVerdict {
                         requested_seq: 3,
                         verdict: "pass".into(),
-                        response: "  yes\n".into(),
+                        reason: "  yes\n".into(),
                         relayed_by: "seat-1".into(),
                         ..Default::default()
                     },

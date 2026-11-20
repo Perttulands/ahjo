@@ -86,7 +86,7 @@ async fn an_agents_report_reaches_the_client_until_it_is_seen() {
         name: "told".into(),
         flags: "--search".into(),
         user: String::new(),
-        notify: true,
+        install_completion_hooks: true,
         size: None,
     };
     ws.send(Message::Binary(

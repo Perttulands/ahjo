@@ -45,7 +45,7 @@ impl Coordinator {
             node_id: gate.into(),
             timestamp: now(),
             actor: actor.into(),
-            data: json!({"requestedSeq":request.requested_seq,"verdict":request.verdict,"reason":request.response,"decidedBy":actor,"relayedBy":request.relayed_by}).as_object().unwrap().clone(),
+            data: json!({"requestedSeq":request.requested_seq,"verdict":request.verdict,"reason":request.reason,"decidedBy":actor,"relayedBy":request.relayed_by}).as_object().unwrap().clone(),
             ..Default::default()
         };
         let appended = self.ledger(run)?.append_checked(event, |events| {

@@ -964,7 +964,7 @@ fn a_human_gate_quotes_its_input_and_the_attempts_keep_each_answer() {
                 HumanVerdict {
                     requested_seq: seq,
                     verdict: "fail".into(),
-                    response: format!("not yet {n}"),
+                    reason: format!("not yet {n}"),
                     ..Default::default()
                 },
             )
@@ -1155,7 +1155,7 @@ fn an_operator_picks_at_a_human_gate() {
                 HumanVerdict {
                     requested_seq: gate.requested_seq,
                     verdict: "fail".into(),
-                    response: "not yet".into(),
+                    reason: "not yet".into(),
                     ..Default::default()
                 },
             )

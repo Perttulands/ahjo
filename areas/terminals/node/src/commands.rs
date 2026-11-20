@@ -121,10 +121,10 @@ pub(crate) fn commands(ctx: &Arc<Ctx>) -> Vec<Command> {
                     },
                     "cols": { "type": "integer", "minimum": 1, "maximum": 65535, "description": "Initial terminal columns; supply with rows." },
                     "rows": { "type": "integer", "minimum": 1, "maximum": 65535, "description": "Initial terminal rows; supply with cols." },
-                    "notify": {
+                    "install_completion_hooks": {
                         "type": "boolean",
                         "default": false,
-                        "description": "Report when the agent finishes or waits on input.",
+                        "description": "Install hooks that report completion and requests for input.",
                     },
                 });
                 // Only a node that follows other users' servers has a choice
@@ -148,7 +148,7 @@ pub(crate) fn commands(ctx: &Arc<Ctx>) -> Vec<Command> {
             "Copy a session's running harness in its folder on the same user, under the next free family name.",
             |_ctx| {
                 object(
-                    json!({"session": {"type": "string", "description": "A session id or name."}, "notify": {"type": "boolean", "default": false, "description": "Install notification hooks; the app preference is unavailable to the node."}}),
+                    json!({"session": {"type": "string", "description": "A session id or name."}, "install_completion_hooks": {"type": "boolean", "default": false, "description": "Install completion hooks; the app preference is unavailable to the node."}}),
                     &["session"],
                 )
             },
@@ -408,7 +408,7 @@ async fn copy(ctx: &Ctx, args: &Value) -> Result<Value> {
         name,
         flags: harness.flags.clone(),
         user: source.user.unwrap_or_default(),
-        notify: flag(args, "notify", false)?,
+        install_completion_hooks: flag(args, "install_completion_hooks", false)?,
         size: None,
     };
     let (session, warning) = ctx.hub.launch(&launcher, &launch).await?;
@@ -545,7 +545,7 @@ async fn launch_agent(ctx: &Ctx, args: &Value) -> Result<Value> {
                 .unwrap_or_default(),
         },
         user: maybe_text(args, "user")?.unwrap_or_default().to_owned(),
-        notify: flag(args, "notify", false)?,
+        install_completion_hooks: flag(args, "install_completion_hooks", false)?,
         size,
     };
     let (session, warning) = ctx.hub.launch(&launcher, &launch).await?;
