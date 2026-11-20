@@ -5,11 +5,12 @@
 //! asks as its server sends them, `desk` the server's calls, `answer` what
 //! an answer says, `marks` his marks, `page` a published page inside the
 //! window, `video` and `player` the clips, `app` the window's state, and
-//! `stage` and `views` how it is drawn.
+//! `stage`, `views` and `icons` how it is drawn.
 
 pub mod answer;
 pub mod app;
 pub mod desk;
+pub mod icons;
 pub mod marks;
 pub mod model;
 pub mod page;
@@ -42,53 +43,55 @@ fn bounds(cx: &App) -> Bounds<gpui::Pixels> {
 pub fn run() {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let loaded = desk::load(&args);
-    gpui_platform::application().run(move |cx: &mut App| {
-        let fonts = ahjo_app_kit::theme::FONT_FILES
-            .iter()
-            .map(|f| Cow::Borrowed(*f))
-            .collect();
-        if let Err(e) = cx.text_system().add_fonts(fonts) {
-            panic!("the bundled fonts did not load: {e}");
-        }
-        // Its own theme once chosen here, else the one chosen in Ahjo Swarm.
-        let (theme, unknown) = match Direction::from_key(&loaded.config.theme) {
-            Some(d) => (Theme::new(d), None),
-            None => ahjo_app_kit::theme::chosen(),
-        };
-        let notice = loaded.notice.clone().or(unknown);
-        cx.set_global(theme);
-        field::bind_keys(cx);
-        cx.set_app_identity("io.ahjo.desk", "Ahjo Desk");
-        let opened = cx.open_window(
-            WindowOptions {
-                window_bounds: Some(WindowBounds::Windowed(bounds(cx))),
-                titlebar: Some(gpui::TitlebarOptions {
-                    title: Some("Ahjo Desk".into()),
+    gpui_platform::application()
+        .with_assets(icons::Assets)
+        .run(move |cx: &mut App| {
+            let fonts = ahjo_app_kit::theme::FONT_FILES
+                .iter()
+                .map(|f| Cow::Borrowed(*f))
+                .collect();
+            if let Err(e) = cx.text_system().add_fonts(fonts) {
+                panic!("the bundled fonts did not load: {e}");
+            }
+            // Its own theme once chosen here, else the one chosen in Ahjo Swarm.
+            let (theme, unknown) = match Direction::from_key(&loaded.config.theme) {
+                Some(d) => (Theme::new(d), None),
+                None => ahjo_app_kit::theme::chosen(),
+            };
+            let notice = loaded.notice.clone().or(unknown);
+            cx.set_global(theme);
+            field::bind_keys(cx);
+            cx.set_app_identity("io.ahjo.desk", "Ahjo Desk");
+            let opened = cx.open_window(
+                WindowOptions {
+                    window_bounds: Some(WindowBounds::Windowed(bounds(cx))),
+                    titlebar: Some(gpui::TitlebarOptions {
+                        title: Some("Ahjo Desk".into()),
+                        ..Default::default()
+                    }),
+                    app_id: Some("ahjo-desk".into()),
+                    window_min_size: Some(size(px(tokens::WINDOW_MIN.0), px(tokens::WINDOW_MIN.1))),
                     ..Default::default()
-                }),
-                app_id: Some("ahjo-desk".into()),
-                window_min_size: Some(size(px(tokens::WINDOW_MIN.0), px(tokens::WINDOW_MIN.1))),
-                ..Default::default()
-            },
-            |window, cx| {
-                // Its own size once zoomed here, else the one chosen in
-                // Ahjo Swarm.
-                let own = desk::size_path().map(|p| desk::read_size(&p));
-                let scale = match &own {
-                    Some(Ok(Some(size))) => ahjo_app_kit::zoom::app::scale(*size),
-                    _ => ahjo_app_kit::theme::chosen_scale(),
-                };
-                window.set_ui_scale(scale, cx);
-                let notice = match own {
-                    Some(Err(e)) => Some(notice.map_or(e.clone(), |n| format!("{n} · {e}"))),
-                    _ => notice,
-                };
-                cx.new(|cx| app::DeskApp::new(loaded, notice, window, cx))
-            },
-        );
-        if let Err(e) = opened {
-            panic!("the window did not open: {e}");
-        }
-        cx.on_window_closed(|cx, _| cx.quit()).detach();
-    });
+                },
+                |window, cx| {
+                    // Its own size once zoomed here, else the one chosen in
+                    // Ahjo Swarm.
+                    let own = desk::size_path().map(|p| desk::read_size(&p));
+                    let scale = match &own {
+                        Some(Ok(Some(size))) => ahjo_app_kit::zoom::app::scale(*size),
+                        _ => ahjo_app_kit::theme::chosen_scale(),
+                    };
+                    window.set_ui_scale(scale, cx);
+                    let notice = match own {
+                        Some(Err(e)) => Some(notice.map_or(e.clone(), |n| format!("{n} · {e}"))),
+                        _ => notice,
+                    };
+                    cx.new(|cx| app::DeskApp::new(loaded, notice, window, cx))
+                },
+            );
+            if let Err(e) = opened {
+                panic!("the window did not open: {e}");
+            }
+            cx.on_window_closed(|cx, _| cx.quit()).detach();
+        });
 }
