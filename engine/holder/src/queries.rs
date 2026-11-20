@@ -74,7 +74,8 @@ mod tests {
     use super::*;
 
     fn answer(chunks: &[&[u8]]) -> Vec<u8> {
-        let mut screen = vt100::Parser::new(5, 20, 0);
+        let mut screen =
+            vt100::Parser::new(5_u16.try_into().unwrap(), 20_u16.try_into().unwrap(), 0);
         let mut queries = Queries::default();
         chunks
             .iter()
@@ -112,7 +113,8 @@ mod tests {
 
     #[test]
     fn the_screen_gets_every_byte() {
-        let mut screen = vt100::Parser::new(5, 20, 0);
+        let mut screen =
+            vt100::Parser::new(5_u16.try_into().unwrap(), 20_u16.try_into().unwrap(), 0);
         let mut queries = Queries::default();
         queries.answer(&mut screen, b"one \x1b[6ntwo \x1b[");
         queries.answer(&mut screen, b"1mthree");

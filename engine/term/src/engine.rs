@@ -24,6 +24,7 @@
 //! is detached and no other client's flags change ([`Seat`]).
 
 use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
+use std::num::NonZeroU16;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime};
@@ -483,8 +484,8 @@ impl Engine {
                         let (rows, cols) = pane.screen.screen().size();
                         Some(PaneSnapshot {
                             id: *pane_id,
-                            cols,
-                            rows,
+                            cols: cols.get(),
+                            rows: rows.get(),
                             synced: pane.synced,
                             text: pane.screen.screen().contents(),
                         })
@@ -509,7 +510,7 @@ impl Engine {
                     .iter()
                     .filter_map(|pane_id| {
                         let (rows, cols) = state.panes.get(pane_id)?.screen.screen().size();
-                        Some((*pane_id, cols, rows))
+                        Some((*pane_id, cols.get(), rows.get()))
                     })
                     .collect(),
                 seat: session.seat,
@@ -561,13 +562,13 @@ impl Engine {
                 let screen = pane.screen.screen();
                 let (rows, cols) = screen.size();
                 let lines: Vec<String> = screen
-                    .rows(0, cols)
+                    .rows(0, cols.get())
                     .map(|row| row.trim_end().to_owned())
                     .collect();
                 Thumbnail {
                     pane: id,
-                    cols,
-                    rows,
+                    cols: cols.get(),
+                    rows: rows.get(),
                     text: lines.join("\n"),
                 }
             })
@@ -877,7 +878,7 @@ impl Pane {
         self.looked = self.changes;
         let screen = self.screen.screen();
         let (_, cols) = screen.size();
-        let rows: Vec<String> = screen.rows(0, cols).collect();
+        let rows: Vec<String> = screen.rows(0, cols.get()).collect();
         let now = crate::waiting::waiting(rows.iter().map(String::as_str));
         if now == self.waiting {
             return false;
@@ -890,9 +891,9 @@ impl Pane {
         let screen = self.screen.screen();
         let (rows, cols) = screen.size();
         PaneUpdate::Screen {
-            cols,
-            rows,
-            bytes: screen.state_formatted().into(),
+            cols: cols.get(),
+            rows: rows.get(),
+            bytes: Arc::from(screen.state_formatted().into_bytes()),
         }
     }
 
@@ -1065,9 +1066,11 @@ async fn follow_when_needed(
     follow(shared, session, requests, supervisor).await;
 }
 
+type PaneSize = (PaneId, NonZeroU16, NonZeroU16);
+
 #[derive(Default)]
 struct Discovery {
-    panes: HashMap<String, Vec<(PaneId, u16, u16)>>,
+    panes: HashMap<String, Vec<PaneSize>>,
     facts: HashMap<String, Facts>,
     activity: HashMap<String, SystemTime>,
 }
@@ -1167,7 +1170,7 @@ fn discover_unfollowed(shared: &Shared, session: &str, name: &str, found: &Disco
             }
         });
         if pane.owner == session && pane.screen.screen().size() != (rows, cols) {
-            pane.screen.screen_mut().set_size(rows, cols);
+            pane.screen.set_size(rows, cols);
             changed = true;
         }
     }
@@ -2134,7 +2137,7 @@ fn on_reply(
             unreachable!("handled in follow_inner")
         }
         Pending::ListPanes if ok => {
-            let listed: Vec<(PaneId, u16, u16)> = lines
+            let listed: Vec<PaneSize> = lines
                 .iter()
                 .filter_map(|line| {
                     let mut fields = line.split(' ');
@@ -2169,7 +2172,7 @@ fn on_reply(
                 // A new pane needs seeding. A resized one does too, because
                 // tmux reflows the pane itself and sends no output for that.
                 if (!pane.synced && !pane.seeding) || size != (rows, cols) {
-                    pane.screen.screen_mut().set_size(rows, cols);
+                    pane.screen.set_size(rows, cols);
                     reseed(pane, id, out, pending);
                     changed = true;
                 }
@@ -2240,7 +2243,7 @@ fn on_reply(
     }
 }
 
-fn pane_screen(rows: u16, cols: u16, replace_invalid_utf8: bool) -> vt100::Parser {
+fn pane_screen(rows: NonZeroU16, cols: NonZeroU16, replace_invalid_utf8: bool) -> vt100::Parser {
     let mut screen = vt100::Parser::new(rows, cols, SCROLLBACK_LINES);
     if replace_invalid_utf8 {
         screen.render_replacement();
@@ -2348,7 +2351,8 @@ mod tests {
     #[test]
     fn seeding_redraws_the_capture_and_places_the_cursor() {
         let capture = vec!["\x1b[1mbold\x1b[0m line".to_owned(), "$ ".to_owned()];
-        let mut screen = vt100::Parser::new(5, 20, 0);
+        let mut screen =
+            vt100::Parser::new(5_u16.try_into().unwrap(), 20_u16.try_into().unwrap(), 0);
         screen.process(&seed(&capture, 2, 1, false, false));
         assert_eq!(screen.screen().contents(), "bold line\n$ ");
         assert_eq!(screen.screen().cursor_position(), (1, 2));
@@ -2358,7 +2362,8 @@ mod tests {
 
     #[test]
     fn seeding_an_alternate_screen_switches_to_it() {
-        let mut screen = vt100::Parser::new(5, 20, 0);
+        let mut screen =
+            vt100::Parser::new(5_u16.try_into().unwrap(), 20_u16.try_into().unwrap(), 0);
         screen.process(&seed(&["vim".to_owned()], 0, 0, true, true));
         assert!(screen.screen().alternate_screen());
     }

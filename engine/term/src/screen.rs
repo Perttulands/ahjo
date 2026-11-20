@@ -30,9 +30,9 @@ pub struct Screen {
 impl Screen {
     pub(crate) fn from_vt(screen: &vt100::Screen) -> Self {
         let (rows, cols) = screen.size();
-        let rows = (0..rows)
+        let rows = (0..rows.get())
             .map(|row| {
-                (0..cols)
+                (0..cols.get())
                     .map(|col| {
                         let cell = screen.cell(row, col).expect("cell within screen");
                         Cell {
@@ -73,7 +73,8 @@ mod tests {
 
     #[test]
     fn reads_dim_and_normal_cells_and_cursor() {
-        let mut parser = vt100::Parser::new(2, 12, 0);
+        let mut parser =
+            vt100::Parser::new(2_u16.try_into().unwrap(), 12_u16.try_into().unwrap(), 0);
         parser.process(b"\x1b[2mghost\x1b[22mtyped");
         let screen = Screen::from_vt(parser.screen());
         assert_eq!(screen.rows[0][0].text, "g");
@@ -86,17 +87,19 @@ mod tests {
 
     #[test]
     fn blank_rows_keep_erase_attributes_through_edits_and_resize() {
-        let mut parser = vt100::Parser::new(3, 8, 0);
+        let mut parser =
+            vt100::Parser::new(3_u16.try_into().unwrap(), 8_u16.try_into().unwrap(), 0);
         parser.process(b"\x1b[41m\x1b[2J\x1b[2;3HX\x1b[2@Y");
-        parser.screen_mut().set_size(4, 10);
+        parser.set_size(4_u16.try_into().unwrap(), 10_u16.try_into().unwrap());
         let screen = parser.screen();
         assert_eq!(screen.cell(0, 0).unwrap().bgcolor(), vt100::Color::Idx(1));
         assert_eq!(screen.cell(1, 2).unwrap().contents(), "X");
         assert_eq!(screen.cell(1, 3).unwrap().contents(), "Y");
         assert_eq!(screen.cell(1, 7).unwrap().bgcolor(), vt100::Color::Idx(1));
         assert_eq!(screen.cell(1, 8).unwrap().bgcolor(), vt100::Color::Default);
-        let mut restored = vt100::Parser::new(4, 10, 0);
-        restored.process(&screen.state_formatted());
+        let mut restored =
+            vt100::Parser::new(4_u16.try_into().unwrap(), 10_u16.try_into().unwrap(), 0);
+        restored.process(screen.state_formatted().as_bytes());
         for row in 0..4 {
             for col in 0..10 {
                 assert_eq!(screen.cell(row, col), restored.screen().cell(row, col));

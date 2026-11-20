@@ -267,7 +267,7 @@ pub fn trust_dialog(harness: Harness, screen: &Screen) -> bool {
 mod tests {
     use super::*;
     fn screen(text: &str) -> Screen {
-        let mut p = vt100::Parser::new(24, 120, 0);
+        let mut p = vt100::Parser::new(24_u16.try_into().unwrap(), 120_u16.try_into().unwrap(), 0);
         p.process(text.replace('\n', "\r\n").as_bytes());
         Screen::from_vt(p.screen())
     }

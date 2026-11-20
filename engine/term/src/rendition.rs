@@ -63,9 +63,10 @@ mod tests {
 
     #[test]
     fn carries_attributes_from_a_wide_cell_and_defaults_at_column_zero() {
-        let mut source = vt100::Parser::new(2, 20, 0);
+        let mut source =
+            vt100::Parser::new(2_u16.try_into().unwrap(), 20_u16.try_into().unwrap(), 0);
         source.process("\x1b[2;3;4;7;38;2;1;2;3;48;5;42m界".as_bytes());
-        let mut next = vt100::Parser::new(2, 20, 0);
+        let mut next = vt100::Parser::new(2_u16.try_into().unwrap(), 20_u16.try_into().unwrap(), 0);
         next.process(&before_cursor(source.screen(), 0, 2));
         next.process(b"x");
         let cell = next.screen().cell(0, 0).unwrap();
@@ -80,9 +81,10 @@ mod tests {
     fn an_erase_after_a_cursor_in_a_coloured_band_leaves_the_screen_plain() {
         // Codex after a resize: cursor in its gray composer, then a full
         // erase before any colour is set.
-        let mut source = vt100::Parser::new(4, 10, 0);
+        let mut source =
+            vt100::Parser::new(4_u16.try_into().unwrap(), 10_u16.try_into().unwrap(), 0);
         source.process(b"\x1b[3;1H\x1b[48;2;30;30;30m> \x1b[K\x1b[0m");
-        let mut next = vt100::Parser::new(4, 10, 0);
+        let mut next = vt100::Parser::new(4_u16.try_into().unwrap(), 10_u16.try_into().unwrap(), 0);
         next.process(&before_cursor(source.screen(), 2, 2));
         next.process(b"\x1b[1;1H\x1b[J");
         assert_eq!(next.screen().cell(1, 5).unwrap().bgcolor(), Color::Default);

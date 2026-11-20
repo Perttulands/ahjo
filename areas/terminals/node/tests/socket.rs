@@ -333,7 +333,7 @@ async fn a_client_watches_and_types_into_a_pane() {
     assert_eq!(pane_of(&screen), pane);
     assert_eq!(u16::from_le_bytes([screen[5], screen[6]]), 100);
     assert_eq!(u16::from_le_bytes([screen[7], screen[8]]), 30);
-    let mut seen = vt100::Parser::new(30, 100, 0);
+    let mut seen = vt100::Parser::new(30_u16.try_into().unwrap(), 100_u16.try_into().unwrap(), 0);
     seen.process(&screen[9..]);
     assert!(seen.screen().contents().contains("seeded-marker"));
 

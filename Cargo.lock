@@ -408,7 +408,7 @@ dependencies = [
  "anyhow",
  "serde_json",
  "tokio",
- "vt100 0.16.2",
+ "vt100 0.18.1",
  "windows-sys 0.61.2",
 ]
 
@@ -641,8 +641,8 @@ dependencies = [
  "serde",
  "serde_json",
  "tokio",
- "vt100 0.16.2",
- "vt100 0.16.2 (git+https://github.com/doy/vt100-rust.git?rev=eb66ffaf7d771c13303ef73b29f6f2a56fdacecf)",
+ "vt100 0.18.1",
+ "vt100 0.18.1 (git+https://github.com/doy/vt100-rust.git?rev=fb0f54ec7222f4805f33cd3ca530229e0a0fe6ad)",
 ]
 
 [[package]]
@@ -663,7 +663,7 @@ dependencies = [
  "tokio",
  "tokio-tungstenite 0.30.0",
  "toml 1.2.1+spec-1.1.0",
- "vt100 0.16.2",
+ "vt100 0.18.1",
 ]
 
 [[package]]
@@ -7841,7 +7841,7 @@ dependencies = [
 
 [[package]]
 name = "vt100"
-version = "0.16.2"
+version = "0.18.1"
 dependencies = [
  "itoa",
  "unicode-width",
@@ -7850,8 +7850,8 @@ dependencies = [
 
 [[package]]
 name = "vt100"
-version = "0.16.2"
-source = "git+https://github.com/doy/vt100-rust.git?rev=eb66ffaf7d771c13303ef73b29f6f2a56fdacecf#eb66ffaf7d771c13303ef73b29f6f2a56fdacecf"
+version = "0.18.1"
+source = "git+https://github.com/doy/vt100-rust.git?rev=fb0f54ec7222f4805f33cd3ca530229e0a0fe6ad#fb0f54ec7222f4805f33cd3ca530229e0a0fe6ad"
 dependencies = [
  "itoa",
  "unicode-width",

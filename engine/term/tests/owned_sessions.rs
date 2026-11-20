@@ -201,7 +201,7 @@ async fn output_keeps_active_style_after_attach_and_resize_reseed() {
     let Some(PaneUpdate::Screen { cols, rows, bytes }) = stream.screen.take() else {
         panic!("seeded screen")
     };
-    let mut viewer = vt100::Parser::new(rows, cols, 0);
+    let mut viewer = vt100::Parser::new(rows.try_into().unwrap(), cols.try_into().unwrap(), 0);
     viewer.process(&bytes);
     assert!(viewer.screen().dim(), "viewer seed lost active dim style");
     engine.send_input(pane, b"\r".to_vec()).await.unwrap();
@@ -231,7 +231,7 @@ async fn output_keeps_active_style_after_attach_and_resize_reseed() {
     })
     .await
     .expect("resize reseed");
-    let mut viewer = vt100::Parser::new(rows, cols, 0);
+    let mut viewer = vt100::Parser::new(rows.try_into().unwrap(), cols.try_into().unwrap(), 0);
     viewer.process(&bytes);
     assert!(viewer.screen().dim(), "viewer reseed lost active dim style");
     engine.send_input(pane, b"\r".to_vec()).await.unwrap();

@@ -167,7 +167,8 @@ mod tests {
     fn modern_tmux_replaces_a_broken_character_after_an_escape() {
         for broken in [&b"\xc3"[..], &b"\xe3\xc3"[..]] {
             let mut gate = Utf8Gate::new(true);
-            let mut screen = vt100::Parser::new(5, 20, 0);
+            let mut screen =
+                vt100::Parser::new(5_u16.try_into().unwrap(), 20_u16.try_into().unwrap(), 0);
             screen.render_replacement();
             let mut start = b"garbage ".to_vec();
             start.extend_from_slice(broken);
@@ -248,7 +249,8 @@ mod tests {
             (b"m\xe3\x81", b"n", "mn", (0, 2)),
         ] {
             let mut gate = Utf8Gate::default();
-            let mut screen = vt100::Parser::new(5, 20, 0);
+            let mut screen =
+                vt100::Parser::new(5_u16.try_into().unwrap(), 20_u16.try_into().unwrap(), 0);
             screen.process(&gate.pass(cut.to_vec()));
             screen.process(&gate.pass(then.to_vec()));
             assert_eq!(screen.screen().contents(), shows, "{then:?}");

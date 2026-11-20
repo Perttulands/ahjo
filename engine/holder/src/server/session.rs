@@ -63,7 +63,13 @@ pub struct Feeds {
 impl Session {
     pub fn start(id: u32, pane: u32, spec: Spec) -> Result<(Arc<Session>, Feeds)> {
         let (cols, rows) = clamp(spec.cols, spec.rows);
-        let spawned = conpty::spawn(&spec.command, spec.cwd.as_deref(), &spec.env, cols, rows)?;
+        let spawned = conpty::spawn(
+            &spec.command,
+            spec.cwd.as_deref(),
+            &spec.env,
+            cols.get(),
+            rows.get(),
+        )?;
         let session = Arc::new(Session {
             id,
             pane,
@@ -172,9 +178,9 @@ impl Session {
             return;
         }
         if let Some(console) = &*self.console.lock().unwrap() {
-            console.resize(cols, rows);
+            console.resize(cols.get(), rows.get());
         }
-        state.screen.screen_mut().set_size(rows, cols);
+        state.screen.set_size(rows, cols);
         let layout = format!(
             "%layout-change @{0} {cols}x{rows} {cols}x{rows} *\n",
             self.id

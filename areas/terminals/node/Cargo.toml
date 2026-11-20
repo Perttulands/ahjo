@@ -23,6 +23,6 @@ toml = { version = "1", default-features = false, features = ["parse", "serde", 
 [dev-dependencies]
 libc = "0.2"
 ahjo-testkit = { path = "../../../kit/testkit" }
-vt100 = "0.16.2"
+vt100 = "=0.18.1"
 futures-util = { version = "0.3", default-features = false, features = ["sink"] }
 tokio-tungstenite = "0.30"
