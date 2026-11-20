@@ -22,7 +22,7 @@ pub struct Edit {
 }
 
 /// A single board mutation, shared by the engine and the missions contract.
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize, JsonSchema)]
 #[serde(
     rename_all = "camelCase",
     rename_all_fields = "camelCase",
@@ -493,7 +493,7 @@ pub struct MissionDeletion {
     pub archive_id: String,
 }
 
-#[derive(Clone, Debug, Default, Deserialize, Serialize, JsonSchema)]
+#[derive(Clone, Debug, Default, PartialEq, Deserialize, Serialize, JsonSchema)]
 #[serde(default, rename_all = "camelCase", deny_unknown_fields)]
 pub struct EndUpdate {
     /// The card’s id.
@@ -507,7 +507,7 @@ pub struct EndUpdate {
     pub outcome: Option<String>,
 }
 
-#[derive(Clone, Debug, Default, Deserialize, Serialize, JsonSchema)]
+#[derive(Clone, Debug, Default, PartialEq, Deserialize, Serialize, JsonSchema)]
 #[serde(default, rename_all = "camelCase", deny_unknown_fields)]
 pub struct LimitUpdate {
     /// The card’s id.
@@ -536,7 +536,7 @@ pub struct LimitUpdate {
     pub when_spent: Option<String>,
 }
 
-#[derive(Clone, Debug, Default, Deserialize, Serialize, JsonSchema)]
+#[derive(Clone, Debug, Default, PartialEq, Deserialize, Serialize, JsonSchema)]
 #[serde(default, rename_all = "camelCase", deny_unknown_fields)]
 pub struct GateUpdate {
     /// The card’s id.
@@ -565,7 +565,7 @@ pub struct GateUpdate {
     pub files: Option<Vec<String>>,
 }
 
-#[derive(Clone, Debug, Default, Deserialize, Serialize, JsonSchema)]
+#[derive(Clone, Debug, Default, PartialEq, Deserialize, Serialize, JsonSchema)]
 #[serde(default, rename_all = "camelCase", deny_unknown_fields)]
 pub struct InputCardUpdate {
     /// The card’s id.
@@ -594,7 +594,7 @@ pub struct InputCardUpdate {
     pub outputs: Option<Vec<MissionOutput>>,
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase", try_from = "RestoredCards")]
 pub enum RestoredNode {
     InputCard(InputCard),

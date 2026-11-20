@@ -1,6 +1,6 @@
 //! The selected slot's role, harness, model and effort pickers.
 use super::*;
-use crate::store::staffing::{self, Choice};
+use crate::store::staffing::{self, Choice, Staffing};
 use ahjo_app_kit::theme::Theme;
 use gpui::{SharedString, Stateful};
 
@@ -26,15 +26,19 @@ fn chip(t: &Theme, id: SharedString, selected: bool) -> Stateful<Div> {
         .cursor_pointer()
 }
 impl MissionsPage {
+    pub(super) fn draft_staffing(&self, cx: &Context<Self>) -> Staffing {
+        Staffing {
+            role: self.role.read(cx).text.clone(),
+            harness: self.harness.read(cx).text.clone(),
+            model: self.model.read(cx).text.clone(),
+            effort: self.effort.read(cx).text.clone(),
+        }
+    }
+
     /// Draw all choices for the selected slot, preserving unknown current
     /// values while the catalog is loading or after it changes.
     pub(super) fn slot_pickers(&self, t: &Theme, cx: &mut Context<Self>) -> Div {
-        let staff = [
-            self.role.read(cx).text.clone(),
-            self.harness.read(cx).text.clone(),
-            self.model.read(cx).text.clone(),
-            self.effort.read(cx).text.clone(),
-        ];
+        let staff = self.draft_staffing(cx);
         let choices = staffing::choices(self.roles.as_ref(), &staff);
         let row = |label: &'static str,
                    part: Part,
@@ -75,16 +79,22 @@ impl MissionsPage {
             .flex()
             .flex_col()
             .gap(px(TAB_GAP))
-            .child(row("Role", Part::Role, choices.roles, &staff[0], cx))
+            .child(row("Role", Part::Role, choices.roles, &staff.role, cx))
             .child(row(
                 "Harness",
                 Part::Harness,
                 choices.harnesses,
-                &staff[1],
+                &staff.harness,
                 cx,
             ))
-            .child(row("Model", Part::Model, choices.models, &staff[2], cx))
-            .child(row("Effort", Part::Effort, choices.efforts, &staff[3], cx))
+            .child(row("Model", Part::Model, choices.models, &staff.model, cx))
+            .child(row(
+                "Effort",
+                Part::Effort,
+                choices.efforts,
+                &staff.effort,
+                cx,
+            ))
             .when(self.roles.is_none(), |d| {
                 d.child(
                     div()
@@ -94,35 +104,30 @@ impl MissionsPage {
             })
     }
     fn pick_staffing(&mut self, part: Part, id: &str, cx: &mut Context<Self>) {
-        let mut staff = [
-            self.role.read(cx).text.clone(),
-            self.harness.read(cx).text.clone(),
-            self.model.read(cx).text.clone(),
-            self.effort.read(cx).text.clone(),
-        ];
+        let mut staff = self.draft_staffing(cx);
         match part {
-            Part::Role => staff[0] = id.to_owned(),
+            Part::Role => staff.role = id.to_owned(),
             Part::Harness => {
                 if let Some(catalog) = &self.roles {
                     staffing::pick_harness(catalog, &mut staff, id);
                 } else {
-                    staff[1] = id.to_owned();
+                    staff.harness = id.to_owned();
                 }
             }
             Part::Model => {
                 if let Some(catalog) = &self.roles {
                     staffing::pick_model(catalog, &mut staff, id);
                 } else {
-                    staff[2] = id.to_owned();
+                    staff.model = id.to_owned();
                 }
             }
-            Part::Effort => staff[3] = id.to_owned(),
+            Part::Effort => staff.effort = id.to_owned(),
         }
         for (field, value) in [
-            (&self.role, &staff[0]),
-            (&self.harness, &staff[1]),
-            (&self.model, &staff[2]),
-            (&self.effort, &staff[3]),
+            (&self.role, &staff.role),
+            (&self.harness, &staff.harness),
+            (&self.model, &staff.model),
+            (&self.effort, &staff.effort),
         ] {
             if field.read(cx).text != *value {
                 field.update(cx, |f, cx| f.set(value, false, cx));
@@ -131,11 +136,12 @@ impl MissionsPage {
         // A pick staffs the slot at once: no separate Assign, nothing for
         // Save. One made during another write follows when that lands. A
         // harness comes with an effort, so the slot is never half set.
-        if !staff[1].is_empty() && staff[3].is_empty() {
-            staff[3] = staffing::usual_effort(&staff[0]).to_owned();
-            self.effort.update(cx, |f, cx| f.set(&staff[3], false, cx));
+        if !staff.harness.is_empty() && staff.effort.is_empty() {
+            staff.effort = staffing::usual_effort(&staff.role).to_owned();
+            self.effort
+                .update(cx, |f, cx| f.set(&staff.effort, false, cx));
         }
-        let complete = staff[1].is_empty() || !staff[3].is_empty();
+        let complete = staff.harness.is_empty() || !staff.effort.is_empty();
         if complete && self.writing {
             self.staff_pending = true;
         } else if complete {

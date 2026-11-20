@@ -23,7 +23,8 @@ use ahjo_app_kit::{
 use ahjo_core::NodeId;
 use ahjo_missions_contract::flow;
 use ahjo_missions_contract::{
-    EditResponse, ErrorResponse, LayoutResponse, MissionResponse, WATCH, WATCH_RUNS,
+    EditLayout, EditResponse, ErrorResponse, LayoutResponse, MissionChange, MissionResponse, WATCH,
+    WATCH_RUNS,
 };
 use gpui::{
     AppContext, Context, Div, Entity, FocusHandle, FontWeight, IntoElement, KeyDownEvent,
@@ -922,7 +923,7 @@ impl MissionsPage {
                     .child(names.join(", ")),
             )
     }
-    fn write_board(&mut self, patch: serde_json::Value, mode: WriteMode, cx: &mut Context<Self>) {
+    fn write_board(&mut self, patch: MissionChange, mode: WriteMode, cx: &mut Context<Self>) {
         if self.writing || self.editor.as_ref().is_some_and(|e| e.busy) {
             return;
         }
@@ -935,63 +936,43 @@ impl MissionsPage {
         let Some(etag) = self.state.mission_etag.clone() else {
             return;
         };
-        let before = match serde_json::to_value(ahjo_missions_contract::document::MissionDocument {
-            mission: mission.clone(),
-            etag: None,
-        }) {
-            Ok(v) => v,
-            Err(e) => {
-                self.state.error = Some(e.to_string());
-                return;
-            }
-        };
         let layout = self
             .state
             .layout
             .as_ref()
             .map(|l| l.nodes.as_slice())
             .unwrap_or(&[]);
-        let reverse =
-            undo::inverse(&before, layout, &undo::Step::Board(patch.clone())).unwrap_or_default();
+        let reverse = undo::inverse_change(&mission, layout, &patch).unwrap_or_default();
         let submitted = self.editor.as_ref().map(|ed| self.editor_snapshot(ed, cx));
-        let saved_fields = if patch.get("assignSlot").is_some() {
-            Some(10..14)
-        } else if patch
-            .get("updateFormation")
-            .is_some_and(|v| v.get("device").is_some())
-        {
-            Some(2..3)
-        } else if ["addPort", "updatePort", "removePort"]
-            .iter()
-            .any(|op| patch.get(*op).is_some())
-        {
-            Some(14..16)
-        } else if ["updateLimit", "deleteLimit"]
-            .iter()
-            .any(|op| patch.get(*op).is_some())
-        {
-            Some(16..22)
-        } else {
-            None
+        let saved_fields = match &patch {
+            MissionChange::AssignSlot { .. } => Some(10..14),
+            MissionChange::UpdateFormation {
+                device: Some(_), ..
+            } => Some(2..3),
+            MissionChange::AddPort { .. }
+            | MissionChange::UpdatePort { .. }
+            | MissionChange::RemovePort { .. } => Some(14..16),
+            MissionChange::UpdateLimit(_) | MissionChange::DeleteLimit { .. } => Some(16..22),
+            _ => None,
         };
-        let deleted_card = [
-            "deleteFormation",
-            "deleteInputCard",
-            "deleteGate",
-            "deleteEnd",
-        ]
-        .iter()
-        .find_map(|key| {
-            patch
-                .get(*key)
-                .and_then(|v| v.get("id"))
-                .and_then(|v| v.as_str())
-                .map(str::to_owned)
-        });
-        let body = edits::board_body(patch.clone(), mission.rev);
-        let request = Request::new("PATCH", NodeId(node), mission_path(&slug))
-            .header("If-Match", etag)
-            .json(&body);
+        let deleted_card = match &patch {
+            MissionChange::DeleteFormation { id }
+            | MissionChange::DeleteInputCard { id }
+            | MissionChange::DeleteGate { id }
+            | MissionChange::DeleteEnd { id } => Some(id.clone()),
+            _ => None,
+        };
+        let request =
+            Request::new("PATCH", NodeId(node), mission_path(&slug)).header("If-Match", etag);
+        let request = match edits::with_json_body(request, &edits::board_body(&patch, mission.rev))
+        {
+            Ok(request) => request,
+            Err(error) => {
+                self.state.error = Some(error.to_string());
+                cx.notify();
+                return;
+            }
+        };
         self.writing = true;
         let asked = self.host.request(request, cx);
         let generation = self.generation;
@@ -1006,9 +987,8 @@ impl MissionsPage {
                     Ok(answer) if answer.ok() => {
                         match serde_json::from_slice::<EditResponse>(&answer.body) {
                             Ok(v) => {
-                                let after = serde_json::to_value(&v.mission).unwrap_or_default();
                                 let steps = if reverse.is_empty() {
-                                    undo::answered(&patch, &before, &after)
+                                    undo::answered(&patch, &mission, &v.mission.mission)
                                 } else {
                                     reverse
                                 };
@@ -1398,16 +1378,7 @@ impl MissionsPage {
         let (Some(ed), Some(slot)) = (&self.editor, &self.slot) else {
             return;
         };
-        let patch = edits::staffing_patch(
-            &ed.id,
-            slot,
-            [
-                &self.role.read(cx).text,
-                &self.harness.read(cx).text,
-                &self.model.read(cx).text,
-                &self.effort.read(cx).text,
-            ],
-        );
+        let patch = self.draft_staffing(cx).assign(&ed.id, slot);
         self.write_board(patch, WriteMode::Edit, cx);
     }
     fn arrange(&mut self, cx: &mut Context<Self>) {
@@ -1420,9 +1391,19 @@ impl MissionsPage {
             return;
         };
         let path = format!("{}/layout", mission_path(&slug));
-        let request = Request::new("PATCH", NodeId(node), path)
-            .header("If-Match", etag)
-            .json(&json!({"arrange":true}));
+        let request = Request::new("PATCH", NodeId(node), path).header("If-Match", etag);
+        let body = EditLayout {
+            arrange: Some(true),
+            ..Default::default()
+        };
+        let request = match edits::with_json_body(request, &body) {
+            Ok(request) => request,
+            Err(error) => {
+                self.state.error = Some(error.to_string());
+                cx.notify();
+                return;
+            }
+        };
         self.writing = true;
         let asked = self.host.request(request, cx);
         let generation = self.generation;
@@ -2050,8 +2031,12 @@ fn left(control: impl IntoElement) -> Div {
 }
 
 #[cfg(test)]
-fn assert_patch_decodes(patch: &serde_json::Value) {
-    ahjo_missions_contract::patch::decode(patch).unwrap_or_else(|error| panic!("{patch}: {error}"));
+pub(crate) fn assert_patch_decodes(patch: &impl serde::Serialize) {
+    let encoded = serde_json::to_vec(patch).unwrap();
+    let decoded: ahjo_missions_contract::patch::UniquePatch =
+        serde_json::from_slice(&encoded).unwrap();
+    ahjo_missions_contract::patch::decode(&decoded.0)
+        .unwrap_or_else(|error| panic!("{}: {error}", decoded.0));
 }
 
 #[cfg(test)]

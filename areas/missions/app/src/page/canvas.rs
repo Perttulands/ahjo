@@ -982,8 +982,19 @@ impl MissionsPage {
             NodeId(node),
             format!("{}/layout", mission_path(&slug)),
         )
-        .header("If-Match", etag)
-        .json(&json!({"nodes":nodes}));
+        .header("If-Match", etag);
+        let body = EditLayout {
+            nodes: Some(nodes),
+            ..Default::default()
+        };
+        let request = match edits::with_json_body(request, &body) {
+            Ok(request) => request,
+            Err(error) => {
+                self.state.error = Some(error.to_string());
+                cx.notify();
+                return;
+            }
+        };
         self.writing = true;
         let asked = self.host.request(request, cx);
         cx.spawn(async move |this, cx| {
@@ -1036,7 +1047,7 @@ impl MissionsPage {
         view: &View,
         cx: &mut Context<Self>,
     ) -> Div {
-        let item = |id: &'static str, label: &'static str, patch: serde_json::Value| {
+        let item = |id: &'static str, label: &'static str, patch: MissionChange| {
             div()
                 .id(id)
                 .debug_selector(move || id.into())
@@ -2033,17 +2044,28 @@ fn leaving_port(m: &Mission, card: &str) -> Option<String> {
         .then(|| format!("{card}:pass"))
 }
 
-fn wire_patch(from: &str, lifted: Option<&str>, to: Option<&str>) -> Option<serde_json::Value> {
+fn wire_patch(from: &str, lifted: Option<&str>, to: Option<&str>) -> Option<MissionChange> {
+    let from = from.to_owned();
     Some(match (lifted, to) {
         (None, None) => return None,
         (Some(old), Some(to)) if old == to => return None,
-        (None, Some(to)) => {
-            json!({"wireConnection":{"from":from,"to":to,"joinIfOccupied":true}})
-        }
-        (Some(old), Some(to)) => {
-            json!({"rewireConnection":{"from":from,"previousTo":old,"to":to,"joinIfOccupied":true}})
-        }
-        (Some(old), None) => json!({"unwireConnection":{"from":from,"to":old}}),
+        (None, Some(to)) => MissionChange::WireConnection {
+            id: String::new(),
+            from,
+            to: to.into(),
+            join_if_occupied: true,
+        },
+        (Some(old), Some(to)) => MissionChange::RewireConnection {
+            from,
+            previous_to: old.into(),
+            to: to.into(),
+            join_if_occupied: true,
+            remove_previous_input: false,
+        },
+        (Some(old), None) => MissionChange::UnwireConnection {
+            from,
+            to: old.into(),
+        },
     })
 }
 
@@ -2051,39 +2073,101 @@ fn new_card_items(
     x: i64,
     y: i64,
     show_input: bool,
-) -> impl Iterator<Item = (&'static str, &'static str, serde_json::Value)> {
+) -> impl Iterator<Item = (&'static str, &'static str, MissionChange)> {
     [
-        ("canvas-new-input", "Input card", json!({"createInputCard":{"title":"Input","goal":"","x":x,"y":y}})),
-        ("canvas-new-solo", "Solo formation", json!({"createFormation":{"type":"solo","title":"New formation","x":x,"y":y}})),
-        ("canvas-new-orch", "Orchestrated formation", json!({"createFormation":{"type":"orchestrated","title":"New formation","x":x,"y":y}})),
-        ("canvas-new-gate", "Gate", json!({"createGate":{"title":"Review gate","kinds":["human"],"criterion":"","x":x,"y":y}})),
-        ("canvas-new-limit", "Limit", json!({"createLimit":{"title":"Limit","target":"","rounds":3,"x":x,"y":y}})),
-        ("canvas-new-done", "End · done", json!({"createEnd":{"outcome":"done","title":"Done","x":x,"y":y}})),
-        ("canvas-new-rejected", "End · rejected", json!({"createEnd":{"outcome":"rejected","title":"Rejected","x":x,"y":y}})),
+        ("canvas-new-input", "Input card", new_input(x, y)),
+        (
+            "canvas-new-solo",
+            "Solo formation",
+            new_formation("solo", "New formation", x, y),
+        ),
+        (
+            "canvas-new-orch",
+            "Orchestrated formation",
+            new_formation("orchestrated", "New formation", x, y),
+        ),
+        ("canvas-new-gate", "Gate", new_gate("Review gate", x, y)),
+        ("canvas-new-limit", "Limit", new_limit("", x, y)),
+        (
+            "canvas-new-done",
+            "End · done",
+            new_end("Done", "done", x, y),
+        ),
+        (
+            "canvas-new-rejected",
+            "End · rejected",
+            new_end("Rejected", "rejected", x, y),
+        ),
     ]
     .into_iter()
     .skip(usize::from(!show_input))
 }
 
-fn place_patch(kind: board::Kind, after: Option<&str>, x: i64, y: i64) -> serde_json::Value {
+fn place_patch(kind: board::Kind, after: Option<&str>, x: i64, y: i64) -> MissionChange {
     match kind {
-        board::Kind::Input => {
-            json!({"createInputCard":{"title":"Input","goal":"","x":x,"y":y}})
-        }
-        board::Kind::Formation => {
-            json!({"createFormation":{"type":"solo","title":"New step","x":x,"y":y}})
-        }
-        board::Kind::Gate => {
-            json!({"createGate":{"title":"New gate","kinds":["human"],"x":x,"y":y}})
-        }
-        board::Kind::End => {
-            json!({"createEnd":{"title":"End","outcome":"done","x":x,"y":y}})
-        }
-        // A cap on the card it is added after, three rounds to start.
-        board::Kind::Limit => {
-            let target = after.unwrap_or_default();
-            json!({"createLimit":{"title":"Limit","target":target,"rounds":3,"x":x,"y":y}})
-        }
+        board::Kind::Input => new_input(x, y),
+        board::Kind::Formation => new_formation("solo", "New step", x, y),
+        board::Kind::Gate => new_gate("New gate", x, y),
+        board::Kind::End => new_end("End", "done", x, y),
+        board::Kind::Limit => new_limit(after.unwrap_or_default(), x, y),
+    }
+}
+
+fn new_input(x: i64, y: i64) -> MissionChange {
+    MissionChange::CreateInputCard {
+        title: "Input".into(),
+        goal: String::new(),
+        files: vec![],
+        human_channel: String::new(),
+        x,
+        y,
+    }
+}
+
+fn new_formation(kind: &str, title: &str, x: i64, y: i64) -> MissionChange {
+    MissionChange::CreateFormation {
+        kind: kind.into(),
+        title: title.into(),
+        x,
+        y,
+    }
+}
+
+fn new_gate(title: &str, x: i64, y: i64) -> MissionChange {
+    MissionChange::CreateGate {
+        title: title.into(),
+        kinds: vec!["human".into()],
+        criterion: String::new(),
+        check: String::new(),
+        check_version: String::new(),
+        check_value: String::new(),
+        files: vec![],
+        x,
+        y,
+    }
+}
+
+fn new_end(title: &str, outcome: &str, x: i64, y: i64) -> MissionChange {
+    MissionChange::CreateEnd {
+        title: title.into(),
+        outcome: outcome.into(),
+        x,
+        y,
+    }
+}
+
+// New limits start at three rounds and, when placed after a card, cover it.
+fn new_limit(target: &str, x: i64, y: i64) -> MissionChange {
+    MissionChange::CreateLimit {
+        title: "Limit".into(),
+        target: target.into(),
+        rounds: Some(3),
+        seconds: None,
+        warn_seconds: None,
+        tokens: None,
+        when_spent: String::new(),
+        x,
+        y,
     }
 }
 

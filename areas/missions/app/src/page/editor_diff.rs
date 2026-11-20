@@ -1,7 +1,10 @@
 //! Three-way editor save: only fields changed by the operator are written,
 //! and a simultaneous edit of the same field is refused.
 use super::*;
-use ahjo_missions_contract::{Mission, MissionOutput};
+use crate::store::staffing::Staffing;
+use ahjo_missions_contract::{
+    EndUpdate, GateUpdate, InputCardUpdate, LimitUpdate, Mission, MissionOutput,
+};
 
 fn changed<T: PartialEq>(
     name: &str,
@@ -80,6 +83,11 @@ fn operations(
             )
         };
     }
+    macro_rules! drafted {
+        ($index:expr, $name:expr, $current:expr) => {
+            compare!($index, $name, $current).then(|| draft.fields[$index].clone())
+        };
+    }
     match kind {
         EditKind::Step => {
             let Some(f) = now.formations.iter().find(|f| f.id == id) else {
@@ -110,10 +118,18 @@ fn operations(
                 brief_changed = true;
             }
             if title_changed || brief_changed {
-                ops.push(undo::Step::Board(json!({"editFormation":{"id":id,"title":if title_changed {&draft.fields[0]} else {&f.title},"brief":brief}})));
+                ops.push(undo::Step::board(MissionChange::EditFormation {
+                    id: id.into(),
+                    title: if title_changed {
+                        draft.fields[0].clone()
+                    } else {
+                        f.title.clone()
+                    },
+                    brief: Some(brief),
+                }));
             }
             if compare!(2, "Where the step is placed", &f.device) {
-                ops.push(undo::Step::Board(edits::device_patch(id, &draft.fields[2])));
+                ops.push(undo::Step::board(edits::device_patch(id, &draft.fields[2])));
             }
             if let Some(slot) = slot.filter(|_| base.fields[10..14] != draft.fields[10..14]) {
                 let Some(current) = f.slots.iter().find(|s| s.id == slot) else {
@@ -121,36 +137,19 @@ fn operations(
                         "The selected slot is gone: it was deleted elsewhere.".into(),
                     ]);
                 };
-                let current = [
-                    &current.agent_id,
-                    &current.harness,
-                    &current.model,
-                    &current.effort,
-                ];
-                let mut update = false;
-                for (index, name) in [
-                    (10, "The slot's role"),
-                    (11, "The slot's harness"),
-                    (12, "The slot's model"),
-                    (13, "The slot's effort"),
-                ] {
-                    update |= compare!(index, name, current[index - 10]);
-                }
-                if update {
-                    let result: Vec<_> = (10..14)
-                        .map(|index| {
-                            if draft.fields[index] != base.fields[index] {
-                                draft.fields[index].clone()
-                            } else {
-                                (*current[index - 10]).clone()
-                            }
-                        })
-                        .collect();
-                    ops.push(undo::Step::Board(edits::staffing_patch(
-                        id,
-                        slot,
-                        [&result[0], &result[1], &result[2], &result[3]],
-                    )));
+                let current = Staffing::from(current);
+                let update = Staffing {
+                    role: drafted!(10, "The slot's role", &current.role)
+                        .unwrap_or_else(|| current.role.clone()),
+                    harness: drafted!(11, "The slot's harness", &current.harness)
+                        .unwrap_or_else(|| current.harness.clone()),
+                    model: drafted!(12, "The slot's model", &current.model)
+                        .unwrap_or_else(|| current.model.clone()),
+                    effort: drafted!(13, "The slot's effort", &current.effort)
+                        .unwrap_or_else(|| current.effort.clone()),
+                };
+                if update != current {
+                    ops.push(undo::Step::board(update.assign(id, slot)));
                 }
             }
             if let Some(port) = port.filter(|_| base.fields[14..16] != draft.fields[14..16]) {
@@ -159,17 +158,15 @@ fn operations(
                         "The selected port is gone: it was deleted elsewhere.".into(),
                     ]);
                 };
-                let label = compare!(14, "The port label", &current.label);
-                let kind = compare!(15, "The port kind", &current.kind);
-                if label || kind {
-                    let mut fields = json!({"formationId":id,"portId":port});
-                    if label {
-                        fields["label"] = json!(draft.fields[14]);
-                    }
-                    if kind {
-                        fields["kind"] = json!(draft.fields[15]);
-                    }
-                    ops.push(undo::Step::Board(json!({"updatePort":fields})));
+                let label = drafted!(14, "The port label", &current.label);
+                let kind = drafted!(15, "The port kind", &current.kind);
+                if label.is_some() || kind.is_some() {
+                    ops.push(undo::Step::board(MissionChange::UpdatePort {
+                        formation_id: id.into(),
+                        port_id: port.into(),
+                        label,
+                        kind,
+                    }));
                 }
             }
         }
@@ -179,16 +176,12 @@ fn operations(
                     "The Input card is gone: it was deleted elsewhere.".into(),
                 ]);
             };
-            let mut fields = json!({"id":id});
-            if compare!(0, "The title", &card.title) {
-                fields["title"] = json!(draft.fields[0]);
-            }
-            if compare!(1, "The goal", &card.goal) {
-                fields["goal"] = json!(draft.fields[1]);
-            }
-            if compare!(2, "The human channel", &card.human_channel) {
-                fields["humanChannel"] = json!(draft.fields[2]);
-            }
+            let mut update = InputCardUpdate {
+                title: drafted!(0, "The title", &card.title),
+                goal: drafted!(1, "The goal", &card.goal),
+                human_channel: drafted!(2, "The human channel", &card.human_channel),
+                ..Default::default()
+            };
             if draft.outputs.iter().any(|o| o.0.trim().is_empty()) {
                 problems.push("Every output needs a name.".into());
             }
@@ -210,62 +203,51 @@ fn operations(
                         from: from.clone(),
                     })
                     .collect();
-                fields["outputs"] = json!(outputs);
+                update.outputs = Some(outputs);
             }
-            if fields.as_object().unwrap().len() > 1 {
-                ops.push(undo::Step::Board(json!({"updateInputCard":fields})));
+            if update != InputCardUpdate::default() {
+                update.id = id.into();
+                ops.push(undo::Step::board(MissionChange::UpdateInputCard(update)));
             }
         }
         EditKind::Gate => {
-            let Some(gate) = now.gates.iter().find(|g| g.id == id) else {
+            let Some(gate) = now.gate(id) else {
                 return Err(vec!["The gate is gone: it was deleted elsewhere.".into()]);
             };
-            let mut fields = json!({"id":id});
-            for (index, name, key, current) in [
-                (0, "The title", "title", gate.title.clone()),
-                (1, "The criterion", "criterion", gate.criterion.clone()),
-                (2, "Who decides", "kinds", gate.kinds.join(",")),
-                (5, "The files", "files", gate.files.join("\n")),
-                (7, "The check", "check", gate.check.clone()),
-                (
-                    8,
-                    "The check version",
-                    "checkVersion",
-                    gate.check_version.clone(),
-                ),
-                (9, "The check value", "checkValue", gate.check_value.clone()),
-            ] {
-                if compare!(index, name, &current) {
-                    fields[key] = match key {
-                        "kinds" => json!(
-                            draft.fields[index]
-                                .split(',')
-                                .map(str::trim)
-                                .filter(|v| !v.is_empty())
-                                .collect::<Vec<_>>()
-                        ),
-                        "files" => json!(lines(&draft.fields[index])),
-                        _ => json!(draft.fields[index]),
-                    };
-                }
-            }
-            if fields.as_object().unwrap().len() > 1 {
-                ops.push(undo::Step::Board(json!({"updateGate":fields})));
+            let mut update = GateUpdate {
+                title: drafted!(0, "The title", &gate.title),
+                criterion: drafted!(1, "The criterion", &gate.criterion),
+                kinds: drafted!(2, "Who decides", gate.kinds.join(",")).map(|kinds| {
+                    kinds
+                        .split(',')
+                        .map(str::trim)
+                        .filter(|kind| !kind.is_empty())
+                        .map(str::to_owned)
+                        .collect()
+                }),
+                files: drafted!(5, "The files", gate.files.join("\n")).map(|files| lines(&files)),
+                check: drafted!(7, "The check", &gate.check),
+                check_version: drafted!(8, "The check version", &gate.check_version),
+                check_value: drafted!(9, "The check value", &gate.check_value),
+                ..Default::default()
+            };
+            if update != GateUpdate::default() {
+                update.id = id.into();
+                ops.push(undo::Step::board(MissionChange::UpdateGate(update)));
             }
         }
         EditKind::End => {
-            let Some(end) = now.ends.iter().find(|e| e.id == id) else {
+            let Some(end) = now.end(id) else {
                 return Err(vec!["The End is gone: it was deleted elsewhere.".into()]);
             };
-            let mut fields = json!({"id":id});
-            if compare!(0, "The title", &end.title) {
-                fields["title"] = json!(draft.fields[0]);
-            }
-            if compare!(2, "The outcome", &end.outcome) {
-                fields["outcome"] = json!(draft.fields[2]);
-            }
-            if fields.as_object().unwrap().len() > 1 {
-                ops.push(undo::Step::Board(json!({"updateEnd":fields})));
+            let mut update = EndUpdate {
+                title: drafted!(0, "The title", &end.title),
+                outcome: drafted!(2, "The outcome", &end.outcome),
+                ..Default::default()
+            };
+            if update != EndUpdate::default() {
+                update.id = id.into();
+                ops.push(undo::Step::board(MissionChange::UpdateEnd(update)));
             }
         }
     }
@@ -275,59 +257,29 @@ fn operations(
                 "The selected limit is gone: it was deleted elsewhere.".into(),
             ]);
         };
-        let mut fields = json!({"id":id});
-        for (index, name, key, current) in [
-            (16, "The limit title", "title", limit.title.clone()),
-            (
-                17,
-                "The limit rounds",
-                "rounds",
-                limit.rounds.map(|n| n.to_string()).unwrap_or_default(),
-            ),
-            (
-                18,
-                "The limit time",
-                "seconds",
-                limit.seconds.map(|n| n.to_string()).unwrap_or_default(),
-            ),
-            (
-                19,
-                "The warning time",
-                "warnSeconds",
-                limit
-                    .warn_seconds
-                    .map(|n| n.to_string())
-                    .unwrap_or_default(),
-            ),
-            (
-                20,
-                "The token limit",
-                "tokens",
-                limit.tokens.map(|n| n.to_string()).unwrap_or_default(),
-            ),
-            (
-                21,
-                "What the limit does",
-                "whenSpent",
-                limit.when_spent.clone(),
-            ),
-        ] {
-            if compare!(index, name, &current) {
-                fields[key] = if matches!(index, 17..=20) {
-                    match number(&draft.fields[index], name) {
-                        Ok(value) => json!(value),
-                        Err(error) => {
-                            problems.push(error);
-                            continue;
-                        }
-                    }
-                } else {
-                    json!(draft.fields[index])
-                };
+        let title = drafted!(16, "The limit title", &limit.title);
+        let mut knob = |index: usize, name: &str, current: Option<i64>| {
+            let current = current.map(|value| value.to_string()).unwrap_or_default();
+            if compare!(index, name, current) {
+                match number(&draft.fields[index], name) {
+                    Ok(value) => return Some(value),
+                    Err(error) => problems.push(error),
+                }
             }
-        }
-        if fields.as_object().unwrap().len() > 1 {
-            ops.push(undo::Step::Board(json!({"updateLimit":fields})));
+            None
+        };
+        let mut update = LimitUpdate {
+            title,
+            rounds: knob(17, "The limit rounds", limit.rounds),
+            seconds: knob(18, "The limit time", limit.seconds),
+            warn_seconds: knob(19, "The warning time", limit.warn_seconds),
+            tokens: knob(20, "The token limit", limit.tokens),
+            when_spent: drafted!(21, "What the limit does", &limit.when_spent),
+            ..Default::default()
+        };
+        if update != LimitUpdate::default() {
+            update.id = id.into();
+            ops.push(undo::Step::board(MissionChange::UpdateLimit(update)));
         }
     }
     if problems.is_empty() {
@@ -442,19 +394,38 @@ mod tests {
     use super::*;
     #[test]
     fn every_editor_save_patch_decodes() {
-        let mission: Mission = serde_json::from_value(json!({
-            "inputCard": [{"id":"input"}],
-            "formation": [{"id":"step","input":[{"id":"port"}],"slot":[{"id":"slot"}]}],
-            "gate": [{"id":"gate"}],
-            "end": [{"id":"end"}],
-            "limit": [{"id":"limit"}],
-        }))
-        .unwrap();
-        let before = serde_json::to_value(ahjo_missions_contract::document::MissionDocument {
-            mission: mission.clone(),
-            etag: None,
-        })
-        .unwrap();
+        use ahjo_missions_contract::{End, Formation, Gate, InputCard, Limit, Port, Slot};
+        let mission = Mission {
+            input_cards: vec![InputCard {
+                id: "input".into(),
+                ..Default::default()
+            }],
+            formations: vec![Formation {
+                id: "step".into(),
+                inputs: vec![Port {
+                    id: "port".into(),
+                    ..Default::default()
+                }],
+                slots: vec![Slot {
+                    id: "slot".into(),
+                    ..Default::default()
+                }],
+                ..Default::default()
+            }],
+            gates: vec![Gate {
+                id: "gate".into(),
+                ..Default::default()
+            }],
+            ends: vec![End {
+                id: "end".into(),
+                ..Default::default()
+            }],
+            limits: vec![Limit {
+                id: "limit".into(),
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
         let base = EditorSnapshot {
             fields: vec![String::new(); 22],
             outputs: vec![],
@@ -548,9 +519,20 @@ mod tests {
                 let undo::Step::Board(patch) = step else {
                     panic!("expected board edit")
                 };
-                assert!(patch.get(*name).is_some(), "{patch}");
+                let is_operation = match patch.as_ref() {
+                    MissionChange::EditFormation { .. } => "editFormation",
+                    MissionChange::UpdateFormation { .. } => "updateFormation",
+                    MissionChange::AssignSlot { .. } => "assignSlot",
+                    MissionChange::UpdatePort { .. } => "updatePort",
+                    MissionChange::UpdateLimit(_) => "updateLimit",
+                    MissionChange::UpdateInputCard(_) => "updateInputCard",
+                    MissionChange::UpdateGate(_) => "updateGate",
+                    MissionChange::UpdateEnd(_) => "updateEnd",
+                    change => panic!("unexpected edit {change:?}"),
+                };
+                assert_eq!(is_operation, *name);
                 assert_patch_decodes(patch);
-                let reverse = undo::inverse(&before, &[], step).unwrap();
+                let reverse = undo::inverse(&mission, &[], step).unwrap();
                 assert_eq!(reverse.len(), 1);
                 let undo::Step::Board(patch) = &reverse[0] else {
                     panic!("expected reverse board edit")
@@ -596,12 +578,17 @@ mod tests {
         let undo::Step::Board(patch) = &ops[0] else {
             panic!("board edit")
         };
-        assert_eq!(patch["editFormation"]["title"], "Concurrent title");
-        assert_eq!(
-            patch["editFormation"]["brief"]["repository"],
-            "kept elsewhere"
-        );
-        assert_eq!(patch["editFormation"]["brief"]["goal"], "My goal");
+        let MissionChange::EditFormation {
+            title,
+            brief: Some(brief),
+            ..
+        } = patch.as_ref()
+        else {
+            panic!("expected a step edit, got {patch:?}");
+        };
+        assert_eq!(title, "Concurrent title");
+        assert_eq!(brief.repository, "kept elsewhere");
+        assert_eq!(brief.goal, "My goal");
         mission.formations[0].brief.as_mut().unwrap().goal = "Other goal".into();
         assert!(
             operations(

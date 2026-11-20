@@ -6,15 +6,24 @@
 //! mission as it is later. Undoing an entry writes its steps and keeps
 //! their own reverses as the redo.
 
-use ahjo_missions_contract::LayoutNode as Placed;
-use serde_json::{Value, json};
+use super::staffing::Staffing;
+use ahjo_missions_contract::{
+    EndUpdate, GateUpdate, InputCardUpdate, LayoutNode as Placed, LimitUpdate, Mission,
+    MissionChange, RestoredNode, Slot,
+};
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Step {
-    /// A mission patch: `{"<operation>": {...}}`.
-    Board(Value),
+    /// A change to the mission board.
+    Board(Box<MissionChange>),
     /// A layout patch: where cards sit.
     Layout(Vec<Placed>),
+}
+
+impl Step {
+    pub fn board(change: MissionChange) -> Self {
+        Self::Board(Box::new(change))
+    }
 }
 
 /// One edit's undo: its steps run in order. `label` names the edit, as in
@@ -105,353 +114,467 @@ impl History {
     }
 }
 
-const KINDS: [(&str, &str, &str); 5] = [
-    ("inputCard", "inputCards", "Input card"),
-    ("formation", "formations", "formation"),
-    ("gate", "gates", "gate"),
-    ("end", "ends", "End node"),
-    ("limit", "limits", "Limit card"),
-];
-
-fn list<'a>(m: &'a Value, key: &str) -> &'a [Value] {
-    m[key].as_array().map(Vec::as_slice).unwrap_or_default()
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum CardKind {
+    Input,
+    Formation,
+    Gate,
+    End,
+    Limit,
 }
 
-/// A node of the mission: its kind, itself as the node sent it, and its
-/// place among the nodes of its kind.
-fn node_of<'a>(m: &'a Value, id: &str) -> Option<(&'static str, &'static str, &'a Value, usize)> {
-    KINDS.iter().find_map(|(kind, key, word)| {
-        list(m, key)
-            .iter()
-            .position(|n| n["id"] == id)
-            .map(|i| (*kind, *word, &list(m, key)[i], i))
-    })
-}
-
-pub fn quoted(title: &str, fallback: &str) -> String {
-    if title.is_empty() {
-        fallback.to_string()
-    } else {
-        format!("“{title}”")
-    }
-}
-
-/// How an edit of a node is named: `formation “Plan”`.
-pub fn node_words(m: &Value, id: &str) -> String {
-    match node_of(m, id) {
-        Some((_, word, n, _)) => format!(
-            "{word} {}",
-            quoted(n["title"].as_str().unwrap_or(""), "untitled")
-        ),
-        None => "a card".into(),
-    }
-}
-
-/// The step that puts back a deleted node: the node as the node sent it,
-/// every wire touching it, where it sat and its place among its kind.
-pub fn restore_step(m: &Value, id: &str, at: (i64, i64)) -> Option<Step> {
-    let (kind, _, node, index) = node_of(m, id)?;
-    let wires: Vec<Value> = list(m, "connections")
-        .iter()
-        .filter(|c| {
-            let end = |k: &str| c[k].as_str().unwrap_or("").split(':').next() == Some(id);
-            end("from") || end("to")
-        })
-        .map(|c| json!({"id": c["id"], "from": c["from"], "to": c["to"]}))
-        .collect();
-    Some(Step::Board(json!({"restoreNode": {
-        kind: node, "connections": wires, "index": index,
-        "x": at.0, "y": at.1,
-    }})))
-}
-
-fn op_of(patch: &Value) -> Option<(&str, &Value)> {
-    patch
-        .as_object()?
-        .iter()
-        .next()
-        .map(|(k, v)| (k.as_str(), v))
-}
-
-/// The steps that reverse `step` when written to mission `m` with layout
-/// `layout`, worked out before it is written. A create is reversed once
-/// its answer names what it made (`created`).
-pub fn inverse(m: &Value, layout: &[Placed], step: &Step) -> Result<Vec<Step>, String> {
-    let patch = match step {
-        Step::Layout(nodes) => {
-            return Ok(vec![Step::Layout(
-                nodes
-                    .iter()
-                    .filter_map(|n| layout.iter().find(|p| p.id == n.id).cloned())
-                    .collect(),
-            )]);
-        }
-        Step::Board(p) => p,
-    };
-    let (op, v) = op_of(patch).ok_or("an empty edit")?;
-    let id = v["id"].as_str().unwrap_or("");
-    let board = |p: Value| Ok(vec![Step::Board(p)]);
-    if op == "title" {
-        return board(json!({"title": m["title"]}));
-    }
-    if op.starts_with("create") || op == "removePort" {
-        // Reversed from its answer: the id it made, or the wire a removed
-        // port took with it, is known once it is written.
-        return Ok(vec![]);
-    }
-    if op.starts_with("delete") {
-        let at = layout
-            .iter()
-            .find(|p| p.id == id)
-            .map(|p| (p.x, p.y))
-            .unwrap_or((200, 200));
-        return restore_step(m, id, at)
-            .map(|s| vec![s])
-            .ok_or_else(|| "the card is already gone".to_string());
-    }
-    if op == "restoreNode" {
-        let (kind, node) = KINDS
-            .iter()
-            .find_map(|(k, _, _)| v.get(*k).filter(|n| !n.is_null()).map(|n| (*k, n)))
-            .ok_or("the restored card has no kind")?;
-        let mut name = kind.to_string();
-        name[..1].make_ascii_uppercase();
-        return board(json!({ format!("delete{name}"): {"id": node["id"]} }));
-    }
-    if op == "updatePort" {
-        let formation = v["formationId"].as_str().unwrap_or("");
-        let slot = list(m, "formations")
-            .iter()
-            .find(|f| f["id"] == formation)
-            .and_then(|f| {
-                list(f, "inputs")
-                    .iter()
-                    .chain(list(f, "outputs"))
-                    .find(|p| p["id"] == v["portId"])
-            })
-            .ok_or("the edited port no longer exists")?;
-        let mut fields = json!({"formationId":formation,"portId":v["portId"]});
-        for key in ["label", "kind"] {
-            if v.get(key).is_some() {
-                fields[key] = slot.get(key).cloned().unwrap_or_else(|| json!(""));
-            }
-        }
-        return board(json!({"updatePort":fields}));
-    }
-    if op.starts_with("update") || op == "editFormation" {
-        let (_, _, node, _) = node_of(m, id).ok_or("the edited card no longer exists")?;
-        let mut fields = serde_json::Map::new();
-        fields.insert("id".into(), id.into());
-        for key in v.as_object().into_iter().flatten().map(|(k, _)| k) {
-            if key == "id" {
-                continue;
-            }
-            let before = match node.get(key) {
-                Some(x) if !x.is_null() => x.clone(),
-                _ => match key.as_str() {
-                    "files" | "inputs" | "outputs" | "kinds" => json!([]),
-                    "rounds" | "seconds" | "warnSeconds" | "tokens" => json!(0),
-                    "brief" => json!({}),
-                    "fresh" => json!(false),
-                    _ => json!(""),
-                },
-            };
-            fields.insert(key.clone(), before);
-        }
-        return board(json!({ op: fields }));
-    }
-    if op == "nameAgent" {
-        let f = v["formationId"].as_str().unwrap_or("");
-        let slot = list(m, "formations")
-            .iter()
-            .find(|n| n["id"] == f)
-            .and_then(|n| list(n, "slots").iter().find(|s| s["id"] == v["slotId"]))
-            .ok_or("the named slot no longer exists")?;
-        return board(json!({"nameAgent": {
-            "formationId": f, "slotId": v["slotId"], "agent": slot["agent"].as_str().unwrap_or(""),
-        }}));
-    }
-    if op == "assignSlot" {
-        let f = v["formationId"].as_str().unwrap_or("");
-        let slot = list(m, "formations")
-            .iter()
-            .find(|n| n["id"] == f)
-            .and_then(|n| list(n, "slots").iter().find(|s| s["id"] == v["slotId"]))
-            .ok_or("the staffed slot no longer exists")?;
-        let w = |k: &str| slot[k].as_str().unwrap_or("").to_string();
-        return board(json!({"assignSlot": {
-            "formationId": f, "slotId": v["slotId"], "agentId": w("agentId"),
-            "harness": w("harness"), "model": w("model"), "effort": w("effort"),
-        }}));
-    }
-    if op == "wireConnection" && v["joinIfOccupied"] == true {
-        // A join may add a port: reversed from its answer.
-        return Ok(vec![]);
-    }
-    if op == "wireConnection" {
-        return board(json!({"unwireConnection": {"from": v["from"], "to": v["to"]}}));
-    }
-    if op == "unwireConnection" {
-        let wire = list(m, "connections")
-            .iter()
-            .find(|c| c["from"] == v["from"] && c["to"] == v["to"])
-            .ok_or("the wire no longer exists")?;
-        return board(
-            json!({"wireConnection": {"id": wire["id"], "from": wire["from"], "to": wire["to"]}}),
-        );
-    }
-    if op == "rewireConnection" && v["joinIfOccupied"] == true {
-        return Ok(vec![]);
-    }
-    if op == "rewireConnection" {
-        return board(json!({"rewireConnection": {
-            "from": v["from"], "previousTo": v["to"], "to": v["previousTo"],
-        }}));
-    }
-    Err(format!("{op} cannot be undone"))
-}
-
-/// The reverse of a step only its answer can tell (Archon's wire and
-/// rewireTarget): what a create made, or where a wire that may have
-/// joined an occupied input actually landed.
-pub fn answered(patch: &Value, before: &Value, after: &Value) -> Vec<Step> {
-    let Some((op, v)) = op_of(patch) else {
-        return vec![];
-    };
-    let wires = |m: &'_ Value| list(m, "connections").to_vec();
-    let landed = |id: &Value| {
-        wires(after)
-            .into_iter()
-            .find(|c| c["id"] == *id)
-            .map(|c| c["to"].clone())
-    };
-    match op {
-        "wireConnection" => {
-            let added = wires(after).into_iter().find(|c| {
-                c["from"] == v["from"] && !wires(before).iter().any(|b| b["id"] == c["id"])
-            });
-            let Some(added) = added else { return vec![] };
-            if added["to"] == v["to"] {
-                return vec![Step::Board(
-                    json!({"unwireConnection": {"from": v["from"], "to": v["to"]}}),
-                )];
-            }
-            // It joined: the port it added goes again, with its wire.
-            let to = added["to"].as_str().unwrap_or("");
-            let (formation, port) = to.split_once(':').unwrap_or((to, ""));
-            vec![Step::Board(
-                json!({"removePort": {"formationId": formation, "portId": port}}),
-            )]
-        }
-        "rewireConnection" => {
-            let old = wires(before)
-                .into_iter()
-                .find(|c| c["from"] == v["from"] && c["to"] == v["previousTo"]);
-            let Some(old) = old else { return vec![] };
-            let Some(to) = landed(&old["id"]) else {
-                return vec![];
-            };
-            let mut back = json!({"from": v["from"], "previousTo": to, "to": v["previousTo"]});
-            if to != v["to"] {
-                back["removePreviousInput"] = json!(true);
-            }
-            vec![Step::Board(json!({"rewireConnection": back}))]
-        }
-        // An undone join is redone by joining again: the wire the port
-        // took goes back to an input of that step, which joins it anew.
-        "removePort" => {
-            let formation = v["formationId"].as_str().unwrap_or("");
-            let port = format!("{formation}:{}", v["portId"].as_str().unwrap_or(""));
-            let mine = |c: &Value| {
-                c["to"]
-                    .as_str()
-                    .is_some_and(|t| t.split_once(':').is_some_and(|(f, _)| f == formation))
-            };
-            let first_input = || {
-                list(after, "formations")
-                    .iter()
-                    .find(|f| f["id"] == formation)
-                    .and_then(|f| f["inputs"][0]["id"].as_str())
-                    .map(|p| json!(format!("{formation}:{p}")))
-            };
-            let Some(to) = wires(after)
+fn card(mission: &Mission, id: &str) -> Option<(RestoredNode, usize)> {
+    macro_rules! find {
+        ($cards:ident, $kind:ident) => {
+            mission
+                .$cards
                 .iter()
-                .find(|c| mine(c))
-                .map(|c| c["to"].clone())
-                .or_else(first_input)
+                .enumerate()
+                .find(|(_, card)| card.id == id)
+                .map(|(index, card)| (RestoredNode::$kind(card.clone()), index))
+        };
+    }
+    find!(input_cards, InputCard)
+        .or_else(|| find!(formations, Formation))
+        .or_else(|| find!(gates, Gate))
+        .or_else(|| find!(ends, End))
+        .or_else(|| find!(limits, Limit))
+}
+
+/// Restore a deleted card, its wires, its position and its order among its kind.
+fn restore_step(mission: &Mission, id: &str, (x, y): (i64, i64)) -> Option<Step> {
+    let (node, index) = card(mission, id)?;
+    let connections = mission
+        .connections
+        .iter()
+        .filter(|wire| {
+            let touches = |endpoint: &str| endpoint.split(':').next() == Some(id);
+            touches(&wire.from) || touches(&wire.to)
+        })
+        .cloned()
+        .collect();
+    Some(Step::board(MissionChange::RestoreNode {
+        node,
+        connections,
+        index: Some(index),
+        x,
+        y,
+    }))
+}
+
+fn previous<T: Clone>(changed: &Option<T>, before: &T) -> Option<T> {
+    changed.as_ref().map(|_| before.clone())
+}
+
+/// Work out the reverse of a step before it is sent. A create or a wire that
+/// may join an occupied input needs its response to identify what it made.
+pub fn inverse(mission: &Mission, layout: &[Placed], step: &Step) -> Result<Vec<Step>, String> {
+    match step {
+        Step::Board(change) => inverse_change(mission, layout, change),
+        Step::Layout(nodes) => Ok(vec![Step::Layout(
+            nodes
+                .iter()
+                .filter_map(|n| layout.iter().find(|p| p.id == n.id).cloned())
+                .collect(),
+        )]),
+    }
+}
+
+pub fn inverse_change(
+    mission: &Mission,
+    layout: &[Placed],
+    change: &MissionChange,
+) -> Result<Vec<Step>, String> {
+    use MissionChange::*;
+    let missing = "the edited card no longer exists";
+    let reverse = match change {
+        Title(_) => Title(mission.title.clone()),
+        CreateInputCard { .. }
+        | CreateFormation { .. }
+        | CreateGate { .. }
+        | CreateEnd { .. }
+        | CreateLimit { .. }
+        | RemovePort { .. } => return Ok(vec![]),
+        DeleteInputCard { id }
+        | DeleteFormation { id }
+        | DeleteGate { id }
+        | DeleteEnd { id }
+        | DeleteLimit { id } => {
+            let at = layout
+                .iter()
+                .find(|p| p.id == *id)
+                .map(|p| (p.x, p.y))
+                .unwrap_or((200, 200));
+            return restore_step(mission, id, at)
+                .map(|step| vec![step])
+                .ok_or_else(|| "the card is already gone".to_owned());
+        }
+        RestoreNode { node, .. } => match node {
+            RestoredNode::InputCard(card) => delete(CardKind::Input, &card.id),
+            RestoredNode::Formation(card) => delete(CardKind::Formation, &card.id),
+            RestoredNode::Gate(card) => delete(CardKind::Gate, &card.id),
+            RestoredNode::End(card) => delete(CardKind::End, &card.id),
+            RestoredNode::Limit(card) => delete(CardKind::Limit, &card.id),
+        },
+        UpdatePort {
+            formation_id,
+            port_id,
+            label,
+            kind,
+        } => {
+            let port = mission
+                .formation(formation_id)
+                .and_then(|f| f.inputs.iter().chain(&f.outputs).find(|p| p.id == *port_id))
+                .ok_or("the edited port no longer exists")?;
+            UpdatePort {
+                formation_id: formation_id.clone(),
+                port_id: port_id.clone(),
+                label: previous(label, &port.label),
+                kind: previous(kind, &port.kind),
+            }
+        }
+        UpdateInputCard(update) => {
+            let input = mission
+                .input_cards
+                .iter()
+                .find(|n| n.id == update.id)
+                .ok_or(missing)?;
+            UpdateInputCard(InputCardUpdate {
+                id: update.id.clone(),
+                title: previous(&update.title, &input.title),
+                goal: previous(&update.goal, &input.goal),
+                files: previous(&update.files, &input.files),
+                input_hint: previous(&update.input_hint, &input.input_hint),
+                human_channel: previous(&update.human_channel, &input.human_channel),
+                inputs: previous(&update.inputs, &input.inputs),
+                outputs: previous(&update.outputs, &input.outputs),
+            })
+        }
+        UpdateFormation {
+            id,
+            title,
+            device,
+            fresh,
+        } => {
+            let step = mission.formation(id).ok_or(missing)?;
+            UpdateFormation {
+                id: id.clone(),
+                title: previous(title, &step.title),
+                device: previous(device, &step.device),
+                fresh: previous(fresh, &step.fresh),
+            }
+        }
+        EditFormation { id, .. } => {
+            let step = mission.formation(id).ok_or(missing)?;
+            EditFormation {
+                id: id.clone(),
+                title: step.title.clone(),
+                brief: Some(step.brief.clone().unwrap_or_default()),
+            }
+        }
+        UpdateGate(update) => {
+            let gate = mission.gate(&update.id).ok_or(missing)?;
+            UpdateGate(GateUpdate {
+                id: update.id.clone(),
+                title: previous(&update.title, &gate.title),
+                kinds: previous(&update.kinds, &gate.kinds),
+                criterion: previous(&update.criterion, &gate.criterion),
+                check: previous(&update.check, &gate.check),
+                check_version: previous(&update.check_version, &gate.check_version),
+                check_value: previous(&update.check_value, &gate.check_value),
+                files: previous(&update.files, &gate.files),
+            })
+        }
+        UpdateEnd(update) => {
+            let end = mission.end(&update.id).ok_or(missing)?;
+            UpdateEnd(EndUpdate {
+                id: update.id.clone(),
+                title: previous(&update.title, &end.title),
+                outcome: previous(&update.outcome, &end.outcome),
+            })
+        }
+        UpdateLimit(update) => {
+            let limit = mission
+                .limits
+                .iter()
+                .find(|n| n.id == update.id)
+                .ok_or(missing)?;
+            UpdateLimit(LimitUpdate {
+                id: update.id.clone(),
+                title: previous(&update.title, &limit.title),
+                target: previous(&update.target, &limit.target),
+                rounds: update.rounds.map(|_| limit.rounds.unwrap_or_default()),
+                seconds: update.seconds.map(|_| limit.seconds.unwrap_or_default()),
+                warn_seconds: update
+                    .warn_seconds
+                    .map(|_| limit.warn_seconds.unwrap_or_default()),
+                tokens: update.tokens.map(|_| limit.tokens.unwrap_or_default()),
+                when_spent: previous(&update.when_spent, &limit.when_spent),
+            })
+        }
+        NameAgent {
+            formation_id,
+            slot_id,
+            ..
+        } => {
+            let slot = find_slot(mission, formation_id, slot_id)
+                .ok_or("the named slot no longer exists")?;
+            NameAgent {
+                formation_id: formation_id.clone(),
+                slot_id: slot_id.clone(),
+                agent: slot.agent.clone(),
+            }
+        }
+        AssignSlot {
+            formation_id,
+            slot_id,
+            ..
+        } => {
+            let slot = find_slot(mission, formation_id, slot_id)
+                .ok_or("the staffed slot no longer exists")?;
+            Staffing::from(slot).assign(formation_id, slot_id)
+        }
+        WireConnection {
+            join_if_occupied: true,
+            ..
+        }
+        | RewireConnection {
+            join_if_occupied: true,
+            ..
+        } => return Ok(vec![]),
+        WireConnection { from, to, .. } => UnwireConnection {
+            from: from.clone(),
+            to: to.clone(),
+        },
+        UnwireConnection { from, to } => {
+            let wire = mission
+                .connections
+                .iter()
+                .find(|c| c.from == *from && c.to == *to)
+                .ok_or("the wire no longer exists")?;
+            WireConnection {
+                id: wire.id.clone(),
+                from: from.clone(),
+                to: to.clone(),
+                join_if_occupied: false,
+            }
+        }
+        RewireConnection {
+            from,
+            previous_to,
+            to,
+            ..
+        } => RewireConnection {
+            from: from.clone(),
+            previous_to: to.clone(),
+            to: previous_to.clone(),
+            join_if_occupied: false,
+            remove_previous_input: false,
+        },
+        _ => return Err("This edit cannot be undone".into()),
+    };
+    Ok(vec![Step::board(reverse)])
+}
+
+fn find_slot<'a>(mission: &'a Mission, formation: &str, slot: &str) -> Option<&'a Slot> {
+    mission
+        .formation(formation)?
+        .slots
+        .iter()
+        .find(|s| s.id == slot)
+}
+
+/// Reverse a change whose result identifies the node or wire it added.
+pub fn answered(change: &MissionChange, before: &Mission, after: &Mission) -> Vec<Step> {
+    use MissionChange::*;
+    match change {
+        WireConnection { from, to, .. } => {
+            let Some(added) = after
+                .connections
+                .iter()
+                .find(|c| c.from == *from && !before.connections.iter().any(|old| old.id == c.id))
             else {
                 return vec![];
             };
-            wires(before)
+            let reverse = if added.to == *to {
+                UnwireConnection {
+                    from: from.clone(),
+                    to: to.clone(),
+                }
+            } else {
+                // The joined wire goes with the extra port it created.
+                let (formation, port) = added.to.split_once(':').unwrap_or((&added.to, ""));
+                RemovePort {
+                    formation_id: formation.into(),
+                    port_id: port.into(),
+                }
+            };
+            vec![Step::board(reverse)]
+        }
+        RewireConnection {
+            from,
+            previous_to,
+            to,
+            ..
+        } => {
+            let Some(old) = before
+                .connections
                 .iter()
-                .filter(|c| c["to"] == json!(port))
+                .find(|c| c.from == *from && c.to == *previous_to)
+            else {
+                return vec![];
+            };
+            let Some(landed) = after.connections.iter().find(|c| c.id == old.id) else {
+                return vec![];
+            };
+            vec![Step::board(RewireConnection {
+                from: from.clone(),
+                previous_to: landed.to.clone(),
+                to: previous_to.clone(),
+                join_if_occupied: false,
+                remove_previous_input: landed.to != *to,
+            })]
+        }
+        RemovePort {
+            formation_id,
+            port_id,
+        } => {
+            // An undone join is redone by wiring to an input of the same step.
+            let removed = format!("{formation_id}:{port_id}");
+            let Some(to) = after
+                .connections
+                .iter()
+                .find(|c| c.to.split_once(':').is_some_and(|(f, _)| f == formation_id))
+                .map(|c| c.to.clone())
+                .or_else(|| {
+                    let first = after.formation(formation_id)?.inputs.first()?;
+                    Some(format!("{formation_id}:{}", first.id))
+                })
+            else {
+                return vec![];
+            };
+            before
+                .connections
+                .iter()
+                .filter(|c| c.to == removed)
                 .map(|c| {
-                    Step::Board(json!({"wireConnection": {
-                        "from": c["from"], "to": to, "joinIfOccupied": true,
-                    }}))
+                    Step::board(WireConnection {
+                        id: String::new(),
+                        from: c.from.clone(),
+                        to: to.clone(),
+                        join_if_occupied: true,
+                    })
                 })
                 .collect()
         }
         _ => created(before, after)
-            .map(|(id, kind)| vec![uncreate(&id, kind)])
+            .map(|(id, kind)| vec![Step::board(delete(kind, id))])
             .unwrap_or_default(),
     }
 }
 
-/// The id a create made: in the mission after it, not before.
-pub fn created(before: &Value, after: &Value) -> Option<(String, &'static str)> {
-    KINDS.iter().find_map(|(kind, key, _)| {
-        list(after, key)
+fn created<'a>(before: &Mission, after: &'a Mission) -> Option<(&'a str, CardKind)> {
+    fn added<'a, T>(before: &[T], after: &'a [T], id: impl Fn(&T) -> &str) -> Option<&'a str> {
+        after
             .iter()
-            .filter_map(|n| n["id"].as_str())
-            .find(|id| !list(before, key).iter().any(|b| b["id"] == *id))
-            .map(|id| (id.to_string(), *kind))
-    })
+            .map(&id)
+            .find(|new| !before.iter().any(|old| id(old) == *new))
+    }
+    added(&before.input_cards, &after.input_cards, |n| &n.id)
+        .map(|id| (id, CardKind::Input))
+        .or_else(|| {
+            added(&before.formations, &after.formations, |n| &n.id)
+                .map(|id| (id, CardKind::Formation))
+        })
+        .or_else(|| added(&before.gates, &after.gates, |n| &n.id).map(|id| (id, CardKind::Gate)))
+        .or_else(|| added(&before.ends, &after.ends, |n| &n.id).map(|id| (id, CardKind::End)))
+        .or_else(|| added(&before.limits, &after.limits, |n| &n.id).map(|id| (id, CardKind::Limit)))
 }
 
-/// The reverse of a create, from what it made.
-pub fn uncreate(id: &str, kind: &str) -> Step {
-    let mut name = kind.to_string();
-    name[..1].make_ascii_uppercase();
-    Step::Board(json!({ format!("delete{name}"): {"id": id} }))
+fn delete(kind: CardKind, id: &str) -> MissionChange {
+    let id = id.to_owned();
+    match kind {
+        CardKind::Input => MissionChange::DeleteInputCard { id },
+        CardKind::Formation => MissionChange::DeleteFormation { id },
+        CardKind::Gate => MissionChange::DeleteGate { id },
+        CardKind::End => MissionChange::DeleteEnd { id },
+        CardKind::Limit => MissionChange::DeleteLimit { id },
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use MissionChange::*;
+    use ahjo_missions_contract::{Brief, Connection, End, Formation, Gate, InputCard, Limit, Port};
 
     fn check_patches(steps: Vec<Step>) -> Vec<Step> {
         for step in &steps {
-            if let Step::Board(patch) = step {
-                ahjo_missions_contract::patch::decode(patch)
-                    .unwrap_or_else(|error| panic!("{patch}: {error}"));
+            if let Step::Board(change) = step {
+                crate::page::assert_patch_decodes(change);
             }
         }
         steps
     }
 
-    fn inverse(m: &Value, layout: &[Placed], step: &Step) -> Result<Vec<Step>, String> {
+    fn inverse(m: &Mission, layout: &[Placed], step: &Step) -> Result<Vec<Step>, String> {
         super::inverse(m, layout, step).map(check_patches)
     }
-
-    fn answered(patch: &Value, before: &Value, after: &Value) -> Vec<Step> {
-        check_patches(super::answered(patch, before, after))
+    fn answered(change: &MissionChange, before: &Mission, after: &Mission) -> Vec<Step> {
+        check_patches(super::answered(change, before, after))
     }
-
-    fn mission() -> Value {
-        json!({
-            "title": "Delivery",
-            "formations": [
-                {"id": "fmn_plan", "title": "Plan", "type": "solo",
-                 "slots": [{"id": "s1", "agentId": "planner", "harness": "claude-code", "model": "", "effort": "xhigh"}]},
-                {"id": "fmn_beads", "title": "Beads", "type": "solo", "slots": []}
+    fn connection(id: &str, from: &str, to: &str) -> Connection {
+        Connection {
+            id: id.into(),
+            from: from.into(),
+            to: to.into(),
+        }
+    }
+    fn wire(from: &str, to: &str, join_if_occupied: bool) -> MissionChange {
+        WireConnection {
+            id: String::new(),
+            from: from.into(),
+            to: to.into(),
+            join_if_occupied,
+        }
+    }
+    fn mission() -> Mission {
+        Mission {
+            title: "Delivery".into(),
+            formations: vec![
+                Formation {
+                    id: "fmn_plan".into(),
+                    title: "Plan".into(),
+                    kind: "solo".into(),
+                    slots: vec![Slot {
+                        id: "s1".into(),
+                        agent_id: "planner".into(),
+                        harness: "claude-code".into(),
+                        effort: "xhigh".into(),
+                        ..Default::default()
+                    }],
+                    ..Default::default()
+                },
+                Formation {
+                    id: "fmn_beads".into(),
+                    title: "Beads".into(),
+                    kind: "solo".into(),
+                    ..Default::default()
+                },
             ],
-            "gates": [{"id": "gate_r", "title": "Review", "kinds": ["formation"], "criterion": "ok"}],
-            "connections": [
-                {"id": "c1", "from": "fmn_plan:out", "to": "fmn_beads:in"},
-                {"id": "c2", "from": "fmn_beads:out", "to": "gate_r:in"}
-            ]
-        })
+            gates: vec![Gate {
+                id: "gate_r".into(),
+                title: "Review".into(),
+                kinds: vec!["formation".into()],
+                criterion: "ok".into(),
+                ..Default::default()
+            }],
+            connections: vec![
+                connection("c1", "fmn_plan:out", "fmn_beads:in"),
+                connection("c2", "fmn_beads:out", "gate_r:in"),
+            ],
+            ..Default::default()
+        }
     }
 
     #[test]
@@ -462,137 +585,224 @@ mod tests {
             x: 420,
             y: 80,
         }];
-        let del = Step::Board(json!({"deleteFormation": {"id": "fmn_beads"}}));
+        let del = Step::board(DeleteFormation {
+            id: "fmn_beads".into(),
+        });
         let inv = inverse(&m, &at, &del).unwrap();
-        let Step::Board(p) = &inv[0] else { panic!() };
-        let r = &p["restoreNode"];
-        assert_eq!(r["formation"]["title"], "Beads");
-        assert_eq!(r["connections"].as_array().unwrap().len(), 2);
-        assert_eq!((r["x"].as_i64(), r["index"].as_u64()), (Some(420), Some(1)));
-        // And the restore is undone by deleting it again: the redo.
-        let back = inverse(&m, &at, &inv[0]).unwrap();
-        assert_eq!(back, vec![del]);
+        let Step::Board(change) = &inv[0] else {
+            panic!("expected restore")
+        };
+        let RestoreNode {
+            node: RestoredNode::Formation(card),
+            connections,
+            x,
+            y,
+            index,
+        } = change.as_ref()
+        else {
+            panic!("expected formation restore");
+        };
+        assert_eq!(card.title, "Beads");
+        assert_eq!(connections.len(), 2);
+        assert_eq!((*x, *y, *index), (420, 80, Some(1)));
+        assert_eq!(inverse(&m, &at, &inv[0]).unwrap(), vec![del]);
     }
 
     #[test]
     fn an_update_is_undone_by_writing_back_only_the_fields_it_changed() {
         let m = mission();
-        let up = Step::Board(json!({"updateGate": {"id": "gate_r", "criterion": "better"}}));
-        let inv = inverse(&m, &[], &up).unwrap();
-        assert_eq!(
-            inv,
-            vec![Step::Board(
-                json!({"updateGate": {"id": "gate_r", "criterion": "ok"}})
-            )]
-        );
-        let staff = Step::Board(
-            json!({"assignSlot": {"formationId": "fmn_plan", "slotId": "s1", "agentId": "", "harness": "openai-codex", "model": "", "effort": "high"}}),
-        );
-        let Step::Board(p) = &inverse(&m, &[], &staff).unwrap()[0] else {
-            panic!()
+        let gate_patch = |criterion: &str| {
+            Step::board(UpdateGate(GateUpdate {
+                id: "gate_r".into(),
+                criterion: Some(criterion.into()),
+                ..Default::default()
+            }))
         };
-        assert_eq!(p["assignSlot"]["harness"], "claude-code");
-        assert_eq!(p["assignSlot"]["agentId"], "planner");
-        // Naming an agent is undone to no name, and switching a step to
-        // fresh sessions back to the agent's own.
-        let name = Step::Board(
-            json!({"nameAgent": {"formationId": "fmn_plan", "slotId": "s1", "agent": "writer"}}),
-        );
         assert_eq!(
-            inverse(&m, &[], &name).unwrap(),
-            vec![Step::Board(
-                json!({"nameAgent": {"formationId": "fmn_plan", "slotId": "s1", "agent": ""}})
-            )]
+            inverse(&m, &[], &gate_patch("better")).unwrap(),
+            vec![gate_patch("ok")]
         );
-        let fresh = Step::Board(json!({"updateFormation": {"id": "fmn_plan", "fresh": true}}));
+        let staff = Staffing {
+            harness: "openai-codex".into(),
+            effort: "high".into(),
+            ..Default::default()
+        };
+        let undo_staff = inverse(&m, &[], &Step::board(staff.assign("fmn_plan", "s1"))).unwrap();
         assert_eq!(
-            inverse(&m, &[], &fresh).unwrap(),
-            vec![Step::Board(
-                json!({"updateFormation": {"id": "fmn_plan", "fresh": false}})
-            )]
+            undo_staff,
+            vec![Step::board(AssignSlot {
+                formation_id: "fmn_plan".into(),
+                slot_id: "s1".into(),
+                agent_id: "planner".into(),
+                harness: "claude-code".into(),
+                model: String::new(),
+                effort: "xhigh".into(),
+            })]
+        );
+
+        let name = |agent: &str| {
+            Step::board(NameAgent {
+                formation_id: "fmn_plan".into(),
+                slot_id: "s1".into(),
+                agent: agent.into(),
+            })
+        };
+        assert_eq!(inverse(&m, &[], &name("writer")).unwrap(), vec![name("")]);
+        let fresh = |fresh| {
+            Step::board(UpdateFormation {
+                id: "fmn_plan".into(),
+                title: None,
+                device: None,
+                fresh: Some(fresh),
+            })
+        };
+        assert_eq!(inverse(&m, &[], &fresh(true)).unwrap(), vec![fresh(false)]);
+    }
+
+    #[test]
+    fn undo_of_a_staffing_change_restores_every_staffing_field() {
+        let mut mission = mission();
+        let seat = &mut mission.formations[0].slots[0];
+        seat.model = "opus".into();
+        let before = Staffing::from(&*seat);
+        let edited = Staffing {
+            role: "reviewer".into(),
+            harness: "openai-codex".into(),
+            model: "gpt-6".into(),
+            effort: "low".into(),
+        };
+        let forward = Step::board(edited.assign("fmn_plan", "s1"));
+        assert_eq!(
+            inverse(&mission, &[], &forward).unwrap(),
+            vec![Step::board(before.assign("fmn_plan", "s1"))],
         );
     }
 
     #[test]
     fn wires_moves_and_creates_reverse() {
         let m = mission();
-        let unwire = Step::Board(
-            json!({"unwireConnection": {"from": "fmn_plan:out", "to": "fmn_beads:in"}}),
-        );
-        let Step::Board(p) = &inverse(&m, &[], &unwire).unwrap()[0] else {
-            panic!()
+        let unwire = Step::board(UnwireConnection {
+            from: "fmn_plan:out".into(),
+            to: "fmn_beads:in".into(),
+        });
+        let Step::Board(change) = &inverse(&m, &[], &unwire).unwrap()[0] else {
+            panic!("expected wire")
         };
-        assert_eq!(p["wireConnection"]["id"], "c1");
+        assert!(matches!(change.as_ref(), WireConnection { id, .. } if id == "c1"));
         let at = [Placed {
             id: "fmn_plan".into(),
             x: 40,
             y: 40,
         }];
-        let mv = Step::Layout(vec![Placed {
+        let moved = Step::Layout(vec![Placed {
             id: "fmn_plan".into(),
             x: 300,
             y: 90,
         }]);
         assert_eq!(
-            inverse(&m, &at, &mv).unwrap(),
+            inverse(&m, &at, &moved).unwrap(),
             vec![Step::Layout(at.to_vec())]
         );
         let mut after = m.clone();
-        after["formations"]
-            .as_array_mut()
-            .unwrap()
-            .push(json!({"id": "fmn_new", "title": "New"}));
-        assert_eq!(created(&m, &after), Some(("fmn_new".into(), "formation")));
+        after.formations.push(Formation {
+            id: "fmn_new".into(),
+            title: "New".into(),
+            ..Default::default()
+        });
+        assert_eq!(created(&m, &after), Some(("fmn_new", CardKind::Formation)));
         assert_eq!(
-            uncreate("fmn_new", "formation"),
-            Step::Board(json!({"deleteFormation": {"id": "fmn_new"}}))
+            answered(
+                &CreateFormation {
+                    title: "New".into(),
+                    kind: "solo".into(),
+                    x: 0,
+                    y: 0
+                },
+                &m,
+                &after
+            ),
+            vec![Step::board(DeleteFormation {
+                id: "fmn_new".into()
+            })],
         );
     }
 
     #[test]
     fn undo_and_redo_patches_decode_for_each_card_kind() {
-        let m = json!({
-            "inputCards": [{"id":"input"}],
-            "formations": [{"id":"step","brief":{"work":"ahjo-2"},"inputs":[],"outputs":[],"slots":[]}],
-            "gates": [{"id":"gate"}],
-            "ends": [{"id":"end"}],
-            "limits": [{"id":"limit"}],
-        });
-        for (op, id, kind) in [
-            ("deleteInputCard", "input", "inputCard"),
-            ("deleteFormation", "step", "formation"),
-            ("deleteGate", "gate", "gate"),
-            ("deleteEnd", "end", "end"),
-            ("deleteLimit", "limit", "limit"),
+        let m = Mission {
+            input_cards: vec![InputCard {
+                id: "input".into(),
+                ..Default::default()
+            }],
+            formations: vec![Formation {
+                id: "step".into(),
+                brief: Some(Brief {
+                    work: "ahjo-2".into(),
+                    ..Default::default()
+                }),
+                ..Default::default()
+            }],
+            gates: vec![Gate {
+                id: "gate".into(),
+                ..Default::default()
+            }],
+            ends: vec![End {
+                id: "end".into(),
+                ..Default::default()
+            }],
+            limits: vec![Limit {
+                id: "limit".into(),
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+        for (kind, id) in [
+            (CardKind::Input, "input"),
+            (CardKind::Formation, "step"),
+            (CardKind::Gate, "gate"),
+            (CardKind::End, "end"),
+            (CardKind::Limit, "limit"),
         ] {
-            let delete = Step::Board(json!({op: {"id": id}}));
+            let delete = Step::board(delete(kind, id));
             let restore = inverse(&m, &[], &delete).unwrap();
             assert_eq!(restore.len(), 1);
-            assert_eq!(inverse(&m, &[], &restore[0]).unwrap(), vec![delete.clone()]);
-            assert_eq!(check_patches(vec![uncreate(id, kind)]), vec![delete]);
+            assert_eq!(inverse(&m, &[], &restore[0]).unwrap(), vec![delete]);
         }
     }
 
     #[test]
     fn title_and_wire_inverses_decode() {
         let before = mission();
-        for patch in [
-            json!({"title":"Other"}),
-            json!({"wireConnection":{"from":"fmn_plan:out","to":"fmn_beads:in"}}),
-            json!({"rewireConnection":{"from":"fmn_plan:out","previousTo":"fmn_beads:in","to":"gate_r:in"}}),
+        let rewire = |join_if_occupied| RewireConnection {
+            from: "fmn_plan:out".into(),
+            previous_to: "fmn_beads:in".into(),
+            to: "gate_r:in".into(),
+            join_if_occupied,
+            remove_previous_input: false,
+        };
+        for change in [
+            Title("Other".into()),
+            wire("fmn_plan:out", "fmn_beads:in", false),
+            rewire(false),
         ] {
-            assert_eq!(inverse(&before, &[], &Step::Board(patch)).unwrap().len(), 1);
+            assert_eq!(
+                inverse(&before, &[], &Step::board(change)).unwrap().len(),
+                1
+            );
         }
-        let patch = json!({"rewireConnection":{
-            "from":"fmn_plan:out","previousTo":"fmn_beads:in","to":"gate_r:in","joinIfOccupied":true,
-        }});
         let mut after = before.clone();
-        after["connections"][0]["to"] = json!("gate_r:in_2");
-        let steps = answered(&patch, &before, &after);
+        after.connections[0].to = "gate_r:in_2".into();
+        let steps = answered(&rewire(true), &before, &after);
         let Step::Board(reverse) = &steps[0] else {
             panic!("expected board edit")
         };
-        assert_eq!(reverse["rewireConnection"]["removePreviousInput"], true);
+        assert!(matches!(
+            reverse.as_ref(),
+            RewireConnection {
+                remove_previous_input: true,
+                ..
+            }
+        ));
     }
 
     #[test]
@@ -614,15 +824,16 @@ mod tests {
 
     #[test]
     fn undo_is_refused_once_another_client_has_written_the_mission() {
-        // A renames a step (rev 4 -> 5); B renames it again (rev 6). A's
-        // undo would write A's old title over B's: it is refused, and the
-        // history, worked out against what B overwrote, is dropped.
+        // A renames a step at rev 5; B renames it again at rev 6.
         let mut h = History::default();
         let rename = Entry {
             label: "the title".into(),
-            steps: vec![Step::Board(
-                json!({"updateFormation": {"id": "fmn_plan", "title": "A"}}),
-            )],
+            steps: vec![Step::board(UpdateFormation {
+                id: "fmn_plan".into(),
+                title: Some("A".into()),
+                device: None,
+                fresh: None,
+            })],
         };
         h.record(rename.clone());
         let mine = Version {
@@ -636,7 +847,6 @@ mod tests {
         };
         assert_eq!(h.take(false, &theirs), Err(Stale));
         assert!(!h.can_undo() && !h.can_redo());
-        // A layout written elsewhere refuses it the same way.
         h.record(rename.clone());
         h.wrote(mine.clone());
         let moved = Version {
@@ -644,8 +854,6 @@ mod tests {
             ..mine.clone()
         };
         assert_eq!(h.take(false, &moved), Err(Stale));
-        // Untouched since, the undo goes ahead, and so does the redo after
-        // the undo's own write.
         h.record(rename.clone());
         h.wrote(mine.clone());
         let e = h.take(false, &mine).unwrap().unwrap();
@@ -659,67 +867,70 @@ mod tests {
     fn a_wire_that_joined_an_occupied_input_is_undone_by_removing_the_port_it_added() {
         let before = mission();
         let mut after = before.clone();
-        after["connections"]
-            .as_array_mut()
-            .unwrap()
-            .push(json!({"id": "c3", "from": "gate_r:pass", "to": "fmn_beads:in_2"}));
-        let wire = json!({"wireConnection": {"from": "gate_r:pass", "to": "fmn_beads:in", "joinIfOccupied": true}});
-        assert_eq!(
-            inverse(&before, &[], &Step::Board(wire.clone())).unwrap(),
-            vec![]
+        after
+            .connections
+            .push(connection("c3", "gate_r:pass", "fmn_beads:in_2"));
+        let joining = wire("gate_r:pass", "fmn_beads:in", true);
+        assert!(
+            inverse(&before, &[], &Step::board(joining.clone()))
+                .unwrap()
+                .is_empty()
         );
         assert_eq!(
-            answered(&wire, &before, &after),
-            vec![Step::Board(
-                json!({"removePort": {"formationId": "fmn_beads", "portId": "in_2"}})
-            )]
+            answered(&joining, &before, &after),
+            vec![Step::board(RemovePort {
+                formation_id: "fmn_beads".into(),
+                port_id: "in_2".into()
+            })],
         );
-        after["connections"].as_array_mut().unwrap().pop();
-        after["connections"]
-            .as_array_mut()
-            .unwrap()
-            .push(json!({"id": "c3", "from": "gate_r:pass", "to": "fmn_plan:in"}));
-        let plain = json!({"wireConnection": {"from": "gate_r:pass", "to": "fmn_plan:in", "joinIfOccupied": true}});
-        let Step::Board(p) = &answered(&plain, &before, &after)[0] else {
-            panic!()
+        after.connections.last_mut().unwrap().to = "fmn_plan:in".into();
+        let plain = wire("gate_r:pass", "fmn_plan:in", true);
+        let Step::Board(reverse) = &answered(&plain, &before, &after)[0] else {
+            panic!("expected unwire")
         };
-        assert_eq!(p["unwireConnection"]["to"], "fmn_plan:in");
+        assert!(matches!(reverse.as_ref(), UnwireConnection { to, .. } if to == "fmn_plan:in"));
     }
 
     #[test]
     fn an_undone_join_is_redone_by_joining_the_same_input_again() {
-        let joined = {
-            let mut m = mission();
-            m["connections"]
-                .as_array_mut()
-                .unwrap()
-                .push(json!({"id": "c3", "from": "gate_r:pass", "to": "fmn_beads:in_2"}));
-            m
+        let mut joined = mission();
+        joined
+            .connections
+            .push(connection("c3", "gate_r:pass", "fmn_beads:in_2"));
+        let remove = RemovePort {
+            formation_id: "fmn_beads".into(),
+            port_id: "in_2".into(),
         };
-        let remove = json!({"removePort": {"formationId": "fmn_beads", "portId": "in_2"}});
-        assert_eq!(
-            inverse(&joined, &[], &Step::Board(remove.clone())).unwrap(),
-            vec![]
+        assert!(
+            inverse(&joined, &[], &Step::board(remove.clone()))
+                .unwrap()
+                .is_empty()
         );
         assert_eq!(
             answered(&remove, &joined, &mission()),
-            vec![Step::Board(json!({"wireConnection": {
-                "from": "gate_r:pass", "to": "fmn_beads:in", "joinIfOccupied": true,
-            }}))]
+            vec![Step::board(wire("gate_r:pass", "fmn_beads:in", true))],
         );
     }
+
     #[test]
     fn a_port_edit_reverses_only_its_changed_fields() {
         let mut m = mission();
-        m["formations"][0]["inputs"] = json!([{"id":"in","label":"Original","kind":"text"}]);
-        let step = Step::Board(
-            json!({"updatePort":{"formationId":"fmn_plan","portId":"in","label":"Renamed"}}),
-        );
+        m.formations[0].inputs = vec![Port {
+            id: "in".into(),
+            label: "Original".into(),
+            kind: "text".into(),
+        }];
+        let update = |label: &str| {
+            Step::board(UpdatePort {
+                formation_id: "fmn_plan".into(),
+                port_id: "in".into(),
+                label: Some(label.into()),
+                kind: None,
+            })
+        };
         assert_eq!(
-            inverse(&m, &[], &step).unwrap(),
-            vec![Step::Board(
-                json!({"updatePort":{"formationId":"fmn_plan","portId":"in","label":"Original"}})
-            )]
+            inverse(&m, &[], &update("Renamed")).unwrap(),
+            vec![update("Original")]
         );
     }
 }

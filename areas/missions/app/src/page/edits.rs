@@ -2,6 +2,7 @@
 //! version left by the previous one, and a partial write keeps both the
 //! completed reverse and the unwritten remainder in the history.
 use super::*;
+use ahjo_missions_contract::{EditLayout, LimitUpdate, patch::SingleEdit};
 use std::collections::VecDeque;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -110,23 +111,13 @@ impl MissionsPage {
             );
             return;
         };
-        let before = match serde_json::to_value(ahjo_missions_contract::document::MissionDocument {
-            mission: mission.clone(),
-            etag: None,
-        }) {
-            Ok(value) => value,
-            Err(error) => {
-                self.history_finished(pending, Some(error.to_string()), false, cx);
-                return;
-            }
-        };
         let layout = self
             .state
             .layout
             .as_ref()
             .map(|layout| layout.nodes.as_slice())
             .unwrap_or_default();
-        let reverse = match undo::inverse(&before, layout, &step) {
+        let reverse = match undo::inverse(&mission, layout, &step) {
             Ok(reverse) => reverse,
             Err(error) => {
                 self.history_finished(pending, Some(error), false, cx);
@@ -145,10 +136,11 @@ impl MissionsPage {
                     );
                     return;
                 };
-                let body = board_body(patch.clone(), mission.rev);
-                Request::new("PATCH", NodeId(pending.node.clone()), path)
-                    .header("If-Match", etag)
-                    .json(&body)
+                with_json_body(
+                    Request::new("PATCH", NodeId(pending.node.clone()), path)
+                        .header("If-Match", etag),
+                    &board_body(patch, mission.rev),
+                )
             }
             undo::Step::Layout(nodes) => {
                 let Some(etag) = self.state.layout_etag.clone() else {
@@ -160,13 +152,25 @@ impl MissionsPage {
                     );
                     return;
                 };
-                Request::new(
-                    "PATCH",
-                    NodeId(pending.node.clone()),
-                    format!("{path}/layout"),
+                with_json_body(
+                    Request::new(
+                        "PATCH",
+                        NodeId(pending.node.clone()),
+                        format!("{path}/layout"),
+                    )
+                    .header("If-Match", etag),
+                    &EditLayout {
+                        nodes: Some(nodes.clone()),
+                        ..Default::default()
+                    },
                 )
-                .header("If-Match", etag)
-                .json(&json!({"nodes":nodes}))
+            }
+        };
+        let request = match request {
+            Ok(request) => request,
+            Err(error) => {
+                self.history_finished(pending, Some(error.to_string()), false, cx);
+                return;
             }
         };
         let asked = self.host.request(request, cx);
@@ -199,10 +203,8 @@ impl MissionsPage {
                     undo::Step::Board(patch) => {
                         match serde_json::from_slice::<EditResponse>(&answer.body) {
                             Ok(response) => {
-                                let after =
-                                    serde_json::to_value(&response.mission).unwrap_or_default();
                                 let reverse = if reverse.is_empty() {
-                                    undo::answered(patch, &before, &after)
+                                    undo::answered(patch, &mission, &response.mission.mission)
                                 } else {
                                     reverse
                                 };
@@ -400,53 +402,60 @@ fn keep_written(
 fn accept_editor_operation(
     base: &mut EditorSnapshot,
     submitted: &EditorSnapshot,
-    patch: &serde_json::Value,
+    patch: &MissionChange,
 ) {
     let mut accept = |range| base.accept_fields(submitted, range);
-    if patch.get("editFormation").is_some() {
-        accept(0..2);
-        accept(3..7);
-    }
-    if patch
-        .get("updateFormation")
-        .is_some_and(|v| v.get("device").is_some())
-    {
-        accept(2..3);
-    }
-    if patch.get("assignSlot").is_some() {
-        accept(10..14);
-    }
-    if patch.get("updatePort").is_some() {
-        accept(14..16);
-    }
-    if patch.get("updateLimit").is_some() {
-        accept(16..22);
-    }
-    if patch.get("updateInputCard").is_some() {
-        accept(0..3);
-    }
-    if patch.get("updateGate").is_some() {
-        accept(0..3);
-        accept(5..6);
-        accept(7..10);
-    }
-    if patch.get("updateEnd").is_some() {
-        accept(0..1);
-        accept(2..3);
-    }
-    if patch.get("updateInputCard").is_some() {
-        base.outputs = submitted.outputs.clone();
+    match patch {
+        MissionChange::EditFormation { .. } => {
+            accept(0..2);
+            accept(3..7);
+        }
+        MissionChange::UpdateFormation {
+            device: Some(_), ..
+        } => accept(2..3),
+        MissionChange::AssignSlot { .. } => accept(10..14),
+        MissionChange::UpdatePort { .. } => accept(14..16),
+        MissionChange::UpdateLimit(_) => accept(16..22),
+        MissionChange::UpdateInputCard(_) => {
+            accept(0..3);
+            base.outputs = submitted.outputs.clone();
+        }
+        MissionChange::UpdateGate(_) => {
+            accept(0..3);
+            accept(5..6);
+            accept(7..10);
+        }
+        MissionChange::UpdateEnd(_) => {
+            accept(0..1);
+            accept(2..3);
+        }
+        _ => (),
     }
 }
 
-pub(super) fn board_body(mut patch: serde_json::Value, rev: i64) -> serde_json::Value {
-    patch["expectedRev"] = json!(rev);
-    patch["updatedBy"] = json!("human:operator");
-    patch
+pub(super) fn with_json_body(
+    mut request: Request,
+    body: &impl serde::Serialize,
+) -> serde_json::Result<Request> {
+    request.body = Some(("application/json".into(), serde_json::to_vec(body)?));
+    Ok(request)
 }
 
-pub(super) fn session_patch(id: &str, fresh: bool) -> serde_json::Value {
-    json!({"updateFormation":{"id":id,"fresh":fresh}})
+pub(super) fn board_body(patch: &MissionChange, rev: i64) -> SingleEdit<'_> {
+    SingleEdit {
+        expected_rev: rev,
+        updated_by: "human:operator",
+        change: patch,
+    }
+}
+
+pub(super) fn session_patch(id: &str, fresh: bool) -> MissionChange {
+    MissionChange::UpdateFormation {
+        id: id.into(),
+        title: None,
+        device: None,
+        fresh: Some(fresh),
+    }
 }
 
 pub(super) fn port_patch(
@@ -455,25 +464,45 @@ pub(super) fn port_patch(
     port: Option<&str>,
     label: &str,
     kind: &str,
-) -> Option<serde_json::Value> {
+) -> Option<MissionChange> {
+    let formation_id = id.into();
     Some(match op {
-        "input" | "output" => {
-            json!({"addPort":{"formationId":id,"direction":op,"label":label,"kind":kind}})
-        }
-        "update" => {
-            json!({"updatePort":{"formationId":id,"portId":port,"label":label,"kind":kind}})
-        }
-        "remove" => json!({"removePort":{"formationId":id,"portId":port}}),
+        "input" | "output" => MissionChange::AddPort {
+            formation_id,
+            direction: op.into(),
+            label: label.into(),
+            kind: kind.into(),
+        },
+        "update" => MissionChange::UpdatePort {
+            formation_id,
+            port_id: port.unwrap_or_default().into(),
+            label: Some(label.into()),
+            kind: Some(kind.into()),
+        },
+        "remove" => MissionChange::RemovePort {
+            formation_id,
+            port_id: port.unwrap_or_default().into(),
+        },
         _ => return None,
     })
 }
 
-pub(super) fn add_limit_patch(target: &str) -> serde_json::Value {
-    json!({"createLimit":{"title":"Limit","target":target,"rounds":3,"whenSpent":"stop","x":0,"y":0}})
+pub(super) fn add_limit_patch(target: &str) -> MissionChange {
+    MissionChange::CreateLimit {
+        title: "Limit".into(),
+        target: target.into(),
+        rounds: Some(3),
+        seconds: None,
+        warn_seconds: None,
+        tokens: None,
+        when_spent: "stop".into(),
+        x: 0,
+        y: 0,
+    }
 }
 
-pub(super) fn delete_limit_patch(id: &str) -> serde_json::Value {
-    json!({"deleteLimit":{"id":id}})
+pub(super) fn delete_limit_patch(id: &str) -> MissionChange {
+    MissionChange::DeleteLimit { id: id.into() }
 }
 
 pub(super) fn update_limit_patch(
@@ -481,55 +510,62 @@ pub(super) fn update_limit_patch(
     title: &str,
     when_spent: &str,
     [rounds, seconds, warn_seconds, tokens]: [&str; 4],
-) -> Result<serde_json::Value, String> {
-    let mut fields = json!({"id":id, "title":title, "whenSpent":when_spent});
-    for (key, text) in [
-        ("rounds", rounds),
-        ("seconds", seconds),
-        ("warnSeconds", warn_seconds),
-        ("tokens", tokens),
-    ] {
+) -> Result<MissionChange, String> {
+    let parse = |name: &str, text: &str| {
         let text = text.trim();
-        let value = if text.is_empty() {
-            0
+        if text.is_empty() {
+            Ok(0)
         } else {
             text.parse::<i64>()
-                .map_err(|_| format!("{key} must be a whole number"))?
-        };
-        fields[key] = json!(value);
-    }
-    Ok(json!({"updateLimit":fields}))
-}
-
-pub(super) fn formation_type_patch(id: &str, kind: &str, slot: &str) -> serde_json::Value {
-    json!({"setFormationType":{"id":id,"type":kind,"keepSlotId":slot}})
-}
-
-pub(super) fn name_agent_patch(id: &str, slot: &str, agent: &str) -> serde_json::Value {
-    json!({"nameAgent":{"formationId":id,"slotId":slot,"agent":agent}})
-}
-
-pub(super) fn device_patch(id: &str, device: &str) -> serde_json::Value {
-    json!({"updateFormation":{"id":id,"device":device}})
-}
-
-pub(super) fn staffing_patch(
-    id: &str,
-    slot: &str,
-    [agent_id, harness, model, effort]: [&str; 4],
-) -> serde_json::Value {
-    json!({"assignSlot":{"formationId":id,"slotId":slot,
-        "agentId":agent_id,"harness":harness,"model":model,"effort":effort}})
-}
-
-pub(super) fn delete_card_patch(kind: EditKind, id: &str) -> serde_json::Value {
-    let op = match kind {
-        EditKind::Step => "deleteFormation",
-        EditKind::Input => "deleteInputCard",
-        EditKind::Gate => "deleteGate",
-        EditKind::End => "deleteEnd",
+                .map_err(|_| format!("{name} must be a whole number"))
+        }
     };
-    json!({op: {"id": id}})
+    Ok(MissionChange::UpdateLimit(LimitUpdate {
+        id: id.into(),
+        title: Some(title.into()),
+        target: None,
+        rounds: Some(parse("rounds", rounds)?),
+        seconds: Some(parse("seconds", seconds)?),
+        warn_seconds: Some(parse("warnSeconds", warn_seconds)?),
+        tokens: Some(parse("tokens", tokens)?),
+        when_spent: Some(when_spent.into()),
+    }))
+}
+
+pub(super) fn formation_type_patch(id: &str, kind: &str, slot: &str) -> MissionChange {
+    MissionChange::SetFormationType {
+        id: id.into(),
+        kind: kind.into(),
+        keep_slot_id: slot.into(),
+        slots: None,
+    }
+}
+
+pub(super) fn name_agent_patch(id: &str, slot: &str, agent: &str) -> MissionChange {
+    MissionChange::NameAgent {
+        formation_id: id.into(),
+        slot_id: slot.into(),
+        agent: agent.into(),
+    }
+}
+
+pub(super) fn device_patch(id: &str, device: &str) -> MissionChange {
+    MissionChange::UpdateFormation {
+        id: id.into(),
+        title: None,
+        device: Some(device.into()),
+        fresh: None,
+    }
+}
+
+pub(super) fn delete_card_patch(kind: EditKind, id: &str) -> MissionChange {
+    let id = id.to_owned();
+    match kind {
+        EditKind::Step => MissionChange::DeleteFormation { id },
+        EditKind::Input => MissionChange::DeleteInputCard { id },
+        EditKind::Gate => MissionChange::DeleteGate { id },
+        EditKind::End => MissionChange::DeleteEnd { id },
+    }
 }
 
 #[cfg(test)]
@@ -543,12 +579,18 @@ mod tests {
             formation_type_patch("step", "peer", "slot"),
             name_agent_patch("step", "slot", "writer"),
             device_patch("step", "node/environment"),
-            staffing_patch("step", "slot", ["planner", "claude-code", "opus", "high"]),
+            crate::store::staffing::Staffing {
+                role: "planner".into(),
+                harness: "claude-code".into(),
+                model: "opus".into(),
+                effort: "high".into(),
+            }
+            .assign("step", "slot"),
             add_limit_patch("step"),
             delete_limit_patch("limit"),
             update_limit_patch("limit", "Cap", "stop", ["3", "90", "", "200"]).unwrap(),
         ] {
-            assert_patch_decodes(&board_body(patch, 7));
+            assert_patch_decodes(&board_body(&patch, 7));
         }
         for op in ["input", "output", "update", "remove"] {
             assert_patch_decodes(&port_patch(op, "step", Some("port"), "Result", "text").unwrap());
@@ -573,16 +615,24 @@ mod tests {
             fields: vec!["after".into(); 22],
             outputs: vec![],
         };
-        accept_editor_operation(&mut base, &submitted, &json!({"editFormation": {}}));
+        accept_editor_operation(
+            &mut base,
+            &submitted,
+            &MissionChange::EditFormation {
+                id: "step".into(),
+                title: String::new(),
+                brief: None,
+            },
+        );
         assert_eq!(base.fields[1], "after");
         assert_eq!(base.fields[2], "before");
         assert_eq!(base.fields[10], "before");
     }
     #[test]
     fn a_partial_undo_keeps_its_completed_reverse_and_unwritten_work() {
-        let first = undo::Step::Board(json!({"first":{}}));
-        let second = undo::Step::Board(json!({"second":{}}));
-        let opposite = undo::Step::Board(json!({"opposite":{}}));
+        let first = undo::Step::board(MissionChange::Title("first".into()));
+        let second = undo::Step::board(MissionChange::Title("second".into()));
+        let opposite = undo::Step::board(MissionChange::Title("opposite".into()));
         let mut history = undo::History::default();
         let before = undo::Version {
             rev: 1,

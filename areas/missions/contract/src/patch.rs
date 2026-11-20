@@ -1,8 +1,18 @@
 //! Mission edit envelopes and diagnostics for the shared mutation type.
 use crate::MissionChange;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 use std::sync::OnceLock;
+
+/// A single change sent by the app, carrying the revision it was read at.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SingleEdit<'a> {
+    pub expected_rev: i64,
+    pub updated_by: &'a str,
+    #[serde(flatten)]
+    pub change: &'a MissionChange,
+}
 
 pub struct EditRequest {
     pub rev: Option<i64>,

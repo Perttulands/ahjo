@@ -265,28 +265,26 @@ impl MissionsPage {
             }
         }
         let request = match &doing {
-            Doing::Create { node } => Request::new("POST", NodeId(node.clone()), "/api/missions")
-                .json(&json!({"title":title, "example":example.map(|e| e.name).unwrap_or(""), "note":intent, "steps":steps, "updatedBy":"human:operator"})),
-            Doing::Rename {
-                node,
-                slug,
-                rev,
-                etag,
-                ..
-            } => Request::new("PATCH", NodeId(node.clone()), mission_path(slug))
+            Doing::Create { node } => Ok(Request::new("POST", NodeId(node.clone()), "/api/missions")
+                .json(&json!({"title":title, "example":example.map(|e| e.name).unwrap_or(""), "note":intent, "steps":steps, "updatedBy":"human:operator"}))),
+            Doing::Rename { node, slug, rev, etag, .. } => edits::with_json_body(
+                Request::new("PATCH", NodeId(node.clone()), mission_path(slug))
+                    .header("If-Match", etag.clone()),
+                &edits::board_body(&rename_patch(&title), *rev),
+            ),
+            Doing::Archive { node, slug, rev, etag, .. } => Ok(Request::new("DELETE", NodeId(node.clone()), mission_path(slug))
                 .header("If-Match", etag.clone())
-                .json(&edits::board_body(rename_patch(&title), *rev)),
-            Doing::Archive {
-                node,
-                slug,
-                rev,
-                etag,
-                ..
-            } => Request::new("DELETE", NodeId(node.clone()), mission_path(slug))
-                .header("If-Match", etag.clone())
-                .json(&json!({"expectedRev":rev})),
+                .json(&json!({"expectedRev":rev}))),
         };
         let form = self.manage.form.as_mut().unwrap();
+        let request = match request {
+            Ok(request) => request,
+            Err(error) => {
+                form.problem = Some(error.to_string());
+                cx.notify();
+                return;
+            }
+        };
         form.busy = true;
         form.problem = None;
         let asked = self.host.request(request, cx);
@@ -318,7 +316,7 @@ impl MissionsPage {
                         Doing::Rename { title: old_title, .. } => match serde_json::from_slice::<EditResponse>(&answer.body) {
                             Ok(result) => {
                                 page.history.wrote(undo::Version { rev:result.mission.mission.rev, layout:Some(result.layout.etag.clone()) });
-                                page.history.record(undo::Entry { label:"mission name".into(), steps:vec![undo::Step::Board(rename_patch(old_title))] });
+                                page.history.record(undo::Entry { label:"mission name".into(), steps:vec![undo::Step::board(rename_patch(old_title))] });
                                 page.state.mission_etag = result.mission.etag;
                                 page.state.mission = Some(result.mission.mission);
                                 page.state.layout_etag = Some(result.layout.etag);
@@ -517,8 +515,8 @@ impl MissionsPage {
     }
 }
 
-fn rename_patch(title: &str) -> serde_json::Value {
-    json!({"title": title})
+fn rename_patch(title: &str) -> MissionChange {
+    MissionChange::Title(title.into())
 }
 
 #[cfg(test)]
@@ -527,7 +525,7 @@ mod patch_tests {
 
     #[test]
     fn rename_and_its_undo_decode() {
-        assert_patch_decodes(&edits::board_body(rename_patch("New mission title"), 7));
+        assert_patch_decodes(&edits::board_body(&rename_patch("New mission title"), 7));
         assert_patch_decodes(&rename_patch("Previous title"));
     }
 }

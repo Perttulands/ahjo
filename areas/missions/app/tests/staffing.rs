@@ -1,6 +1,7 @@
 #![cfg(unix)]
 use ahjo_app_kit::{Ask, Host};
 use ahjo_core::NodeId;
+use ahjo_missions_contract::MissionResponse;
 use ahjo_node_kit::{Area, Built, Listing, NodeClient, Setup};
 use ahjo_testkit::{node::Node, sessions};
 use gpui::{Modifiers, TestAppContext, VisualTestContext, point, px};
@@ -226,22 +227,36 @@ fn catalog_pickers_offer_sorted_roles_and_model_efforts_and_save_the_choice(
     });
     // Each pick staffs the slot; nothing else needs pressing.
     let rt = tokio::runtime::Runtime::new().unwrap();
-    let deadline = Instant::now() + Duration::from_secs(10);
-    loop {
-        cx.run_until_parked();
-        let doc = rt.block_on(async {
-            NodeClient::new(Some(&format!("{}/", running.url)))
-                .unwrap()
-                .request(http::Method::GET, "/api/missions/hello", None, None)
-                .await
-                .unwrap()
-                .0
-        });
-        let slot = &doc["mission"]["formations"][0]["slots"][0];
-        if slot["agentId"] == "planner" && slot["model"] == "gpt-6" && slot["effort"] == "high" {
-            break;
-        }
-        assert!(Instant::now() < deadline, "slot not saved: {slot}");
-        std::thread::sleep(Duration::from_millis(20));
-    }
+    let client = NodeClient::new(Some(&format!("{}/", running.url))).unwrap();
+    let read = || {
+        let (body, _) = rt
+            .block_on(client.request(http::Method::GET, "/api/missions/hello", None, None))
+            .unwrap();
+        let response: MissionResponse = serde_json::from_value(body).unwrap();
+        let mission = response.mission.mission;
+        (mission.rev, mission.formations[0].slots[0].clone())
+    };
+    until(cx, "staffing saved", |_| {
+        let (_, slot) = read();
+        slot.agent_id == "planner" && slot.model == "gpt-6" && slot.effort == "high"
+    });
+    let (rev, original) = read();
+    until(cx, "history ready after staffing", |cx| {
+        cx.debug_bounds("undo").is_some()
+    });
+
+    click(cx, "staffing-harness-claude-code");
+    until(cx, "harness change saved", |_| {
+        let (now, slot) = read();
+        now == rev + 1
+            && slot.harness == "claude-code"
+            && slot.model.is_empty()
+            && slot.effort == "medium"
+    });
+    until(cx, "undo ready after harness change", |cx| {
+        cx.debug_bounds("undo").is_some()
+    });
+    click(cx, "undo");
+    until(cx, "staffing undo saved", |_| read().0 == rev + 2);
+    assert_eq!(read().1, original, "undo must restore the exact seat");
 }
