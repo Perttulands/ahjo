@@ -80,12 +80,22 @@ pub fn find(args: &[String]) -> Where {
 }
 
 /// The other machine asked for at launch: `--from <node url>` or
-/// `BRAIN_FROM`, named by its host.
+/// `BRAIN_FROM`, named by its host: `rig` for `http://rig.tail1.ts.net:7300`.
 pub fn asked_from(args: &[String]) -> Option<Remote> {
     let url = arg(args, "--from").or_else(|| std::env::var("BRAIN_FROM").ok())?;
-    let name = url.trim_start_matches("http://");
-    let name = name.split([':', '/']).next().unwrap_or(name).to_string();
-    Some(Remote { name, url })
+    Some(Remote {
+        name: host_name(&url),
+        url,
+    })
+}
+
+fn host_name(url: &str) -> String {
+    let host = url.trim_start_matches("http://");
+    let host = host.split([':', '/']).next().unwrap_or(host);
+    if host.parse::<std::net::IpAddr>().is_ok() {
+        return host.to_string();
+    }
+    host.split('.').next().unwrap_or(host).to_string()
 }
 
 fn default_root() -> Option<PathBuf> {
@@ -275,6 +285,13 @@ pub fn marker(root: &Path) -> Option<std::time::SystemTime> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn another_machine_is_named_by_its_host() {
+        assert_eq!(host_name("http://rig.tail1.ts.net:7300"), "rig");
+        assert_eq!(host_name("http://100.64.0.2:7300"), "100.64.0.2");
+        assert_eq!(host_name("rig:7300"), "rig");
+    }
 
     #[test]
     fn wsl_names_its_distributions_in_utf16() {
