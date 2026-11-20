@@ -602,6 +602,8 @@ async fn an_edit_is_one_commit_signed_as_the_operator() {
 #[tokio::test]
 async fn typed_save_accepts_a_page_at_the_size_limit_and_refuses_more() {
     let corpus = shelved("save-limit");
+    git(&corpus.0, &["config", "user.name", "Corpus Owner"]);
+    git(&corpus.0, &["config", "user.email", "owner@example.org"]);
     let addr = serve_brain(Some(&corpus.0), None).await;
     let text = "x".repeat(1 << 20);
     let input = json!({"path":"self/pace.md", "text":text, "summary":"At the limit"});
