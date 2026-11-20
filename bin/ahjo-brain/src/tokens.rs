@@ -321,6 +321,8 @@ pub mod search {
     pub const AWAY: f32 = 52.;
     /// What changed lately, before anything is asked.
     pub const RECENT: usize = 8;
+    /// The inbox's list at its widest.
+    pub const INBOX_W: f32 = 480.;
     pub const ROW_PAD_X: f32 = 14.;
     pub const ROW_PAD_Y: f32 = 8.;
     /// A result's title and the words under it: the snippet at the
@@ -489,4 +491,10 @@ pub mod editor {
     pub const LEAST: f32 = 480.;
     /// The source's widest: about ninety letters a line, wrapped.
     pub const MEASURE: f32 = 860.;
+    /// A note over the sky: at most this wide and tall.
+    pub const NOTE_W: f32 = 880.;
+    pub const NOTE_H: f32 = 760.;
+    /// The header shown above the words: at most this many lines before it
+    /// scrolls.
+    pub const HEAD_LINES: usize = 8;
 }

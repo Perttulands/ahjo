@@ -31,8 +31,31 @@ pub struct History {
 
 /// Reads the brain's log with Git. Blocking: run it off the UI.
 pub fn read(root: &Path) -> Result<History, String> {
-    // A brain on a WSL share is read by git inside that distribution: the
-    // same log through the share takes tens of seconds.
+    let mut git = git(root);
+    git.args(["-c", "diff.renameLimit=20000"]).args([
+        "log",
+        "-M",
+        "--format=@%at",
+        "--name-status",
+        "--",
+        "*.md",
+    ]);
+    let out = git.output().map_err(|e| {
+        format!("the replay reads the brain's history with git, which did not run: {e}")
+    })?;
+    if !out.status.success() {
+        return Err(format!(
+            "git could not read the brain's history: {}",
+            String::from_utf8_lossy(&out.stderr).trim()
+        ));
+    }
+    Ok(parse(&String::from_utf8_lossy(&out.stdout)))
+}
+
+/// Git in the brain's folder, as this machine reaches it: a brain on a
+/// WSL share is read by git inside that distribution, since the same log
+/// through the share takes tens of seconds. Only reads are run.
+pub fn git(root: &Path) -> std::process::Command {
     let mut git = match in_wsl(&root.to_string_lossy()) {
         Some((distro, path)) => {
             let mut wsl = std::process::Command::new("wsl.exe");
@@ -46,26 +69,15 @@ pub fn read(root: &Path) -> Result<History, String> {
         }
     };
     // A brain reached across WSL's share is owned by another user as
-    // Windows sees it; reading its log is all this does.
-    git.args(["-c", "safe.directory=*"])
-        .args(["-c", "diff.renameLimit=20000", "-c", "core.quotePath=false"])
-        .args(["log", "-M", "--format=@%at", "--name-status", "--", "*.md"]);
+    // Windows sees it; reading it is all this does.
+    git.args(["-c", "safe.directory=*", "-c", "core.quotePath=false"]);
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;
         const CREATE_NO_WINDOW: u32 = 0x0800_0000;
         git.creation_flags(CREATE_NO_WINDOW);
     }
-    let out = git.output().map_err(|e| {
-        format!("the replay reads the brain's history with git, which did not run: {e}")
-    })?;
-    if !out.status.success() {
-        return Err(format!(
-            "git could not read the brain's history: {}",
-            String::from_utf8_lossy(&out.stderr).trim()
-        ));
-    }
-    Ok(parse(&String::from_utf8_lossy(&out.stdout)))
+    git
 }
 
 /// A Windows path into a WSL distribution (`\\wsl.localhost\<distro>\…` or

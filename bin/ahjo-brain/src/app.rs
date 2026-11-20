@@ -15,8 +15,10 @@ use crate::arrange::{self, Orbit};
 use crate::camera::{Camera, Flight, ease_in_out, ease_out};
 use crate::citadel::{self, Hit};
 use crate::corpus::{self, Corpus, Entry};
-use crate::editor::{self, Editor, EditorEvent};
+use crate::editor::{self, Editor, EditorEvent, Mode};
+use crate::front;
 use crate::history::{self, History};
+use crate::inbox;
 use crate::mirror::{self, Remote};
 use crate::paint::{self, Align, Dot, Face, Label, Light, Line, Picture, Ring, Shape};
 use crate::reader::{self, Reader};
@@ -57,6 +59,8 @@ pub struct Data {
     pub moved: Vec<usize>,
     pub max_evidence: usize,
     pub strongest: u32,
+    /// The notes caught here waiting in the inbox, newest first.
+    pub waiting: Vec<usize>,
 }
 
 impl Data {
@@ -316,6 +320,17 @@ pub struct BrainApp {
     app_wheel: Rc<std::cell::Cell<zoom::Wheel>>,
     /// The page read, being written in place beside itself.
     editing: Option<Entity<Editor>>,
+    /// A note over the sky: one caught, the day's, or one from the inbox.
+    note: Option<Entity<Editor>>,
+    /// Notes closed while their save runs, to tell how it went.
+    filing: Vec<Entity<Editor>>,
+    /// A note closed that its save did not file: Ctrl+N brings it back.
+    held: Option<Entity<Editor>>,
+    /// The inbox's list is open, and the row stood on.
+    inbox: Option<usize>,
+    /// The notes caught here that agents filed, as the brain's history last
+    /// told it, or why it did not.
+    filed: Option<Result<Vec<inbox::Filed>, String>>,
 }
 
 impl Focusable for BrainApp {
@@ -445,6 +460,11 @@ impl BrainApp {
             // The field takes the keys from the start (above).
             typing: true,
             editing: None,
+            note: None,
+            filing: vec![],
+            held: None,
+            inbox: None,
+            filed: None,
         };
         app.load(cx);
         app
@@ -788,6 +808,18 @@ impl BrainApp {
                 .max()
                 .unwrap_or(1)
                 .max(1),
+            waiting: {
+                let mut w: Vec<usize> = (0..corpus.pages.len())
+                    .filter(|&p| front::waiting(&corpus.pages[p].path))
+                    .collect();
+                // Newest first, by the day the note gives, then its file:
+                // a brain fetched anew has every file new.
+                w.sort_by_key(|&p| {
+                    let page = &corpus.pages[p];
+                    std::cmp::Reverse((page.updated, page.modified))
+                });
+                w
+            },
             corpus,
             sky,
         });
@@ -1295,27 +1327,7 @@ impl BrainApp {
         let page = data.corpus.pages[p].clone();
         let file = data.root.join(&page.path);
         let cache = self.place.cache.clone();
-        // The pages a link may name: lately changed first, as `[[` offers
-        // them before anything is typed.
-        let mut order: Vec<usize> = data.recent.clone();
-        let seen: HashSet<usize> = order.iter().copied().collect();
-        order.extend((0..data.corpus.pages.len()).filter(|i| !seen.contains(i)));
-        let names: Rc<Vec<editor::Name>> = Rc::new(
-            order
-                .into_iter()
-                .filter(|&i| i != p)
-                .map(|i| {
-                    let q = &data.corpus.pages[i];
-                    editor::Name {
-                        slug: q.slug.clone(),
-                        title: q.title.clone(),
-                        aliases: q.aliases.clone(),
-                        hue: data.hues[q.subject],
-                        subject: data.corpus.subjects[q.subject].name.clone(),
-                    }
-                })
-                .collect(),
-        );
+        let names = link_names(&data, Some(p));
         let path = page.path.clone();
         let read = cx.background_spawn(async move {
             let base = std::fs::read(&file)
@@ -1346,16 +1358,19 @@ impl BrainApp {
                         title: page.title.clone(),
                         base,
                         draft,
+                        mode: Mode::Page,
+                        fresh: None,
                     };
-                    let app = cx.entity().downgrade();
+                    let root = data.root.clone();
                     let ed =
-                        cx.new(|cx| Editor::new(app, opened, names, citadel, cache, window, cx));
+                        cx.new(|cx| Editor::new(root, opened, names, citadel, cache, window, cx));
                     cx.subscribe_in(&ed, window, |me, ed, ev, window, cx| match ev {
                         EditorEvent::Changed => {
                             let text = ed.read(cx).text(cx).to_string();
                             me.reader.update(cx, |r, cx| r.preview(text, cx));
                         }
                         EditorEvent::Saved => me.look_again(cx),
+                        EditorEvent::NotSaved => {}
                         EditorEvent::Leave => {
                             me.stop_editing(cx);
                             window.focus(&me.focus, cx);
@@ -1374,6 +1389,315 @@ impl BrainApp {
             });
         })
         .detach();
+    }
+
+    // ---- Notes over the sky.
+
+    /// Whether notes can be written here: another machine's brain is read
+    /// only, and says so.
+    fn may_write(&mut self, cx: &mut Context<Self>) -> bool {
+        if self.data.is_none() {
+            return false;
+        }
+        if let Some(remote) = &self.place.from {
+            let words = format!(
+                "Notes are caught in a brain on its own machine; {}'s is read only from here.",
+                remote.name
+            );
+            self.say(words, cx);
+            return false;
+        }
+        true
+    }
+
+    /// Catches a note: an empty page over the sky, its first line its
+    /// title, filed in the inbox when it is closed, where agents file it
+    /// into the brain. A note open is filed first. One left unfiled, or
+    /// not filed before the app closed, comes back.
+    fn catch_note(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if !self.may_write(cx) {
+            return;
+        }
+        self.inbox = None;
+        if self.note.is_some() {
+            self.leave_note(window, cx);
+        }
+        if let Some(ed) = self.held.take() {
+            self.show_note(ed, window, cx);
+            return;
+        }
+        let day = today().to_string();
+        let start = front::join(&front::note_head(&day), front::NOTE_START);
+        let filing: Vec<String> = self
+            .filing
+            .iter()
+            .map(|ed| ed.read(cx).begun_as().to_string())
+            .collect();
+        let kept = self
+            .place
+            .cache
+            .as_ref()
+            .and_then(|c| editor::caught_draft(c, &filing));
+        let path = kept
+            .as_ref()
+            .map_or_else(editor::caught_key, |d| d.path.clone());
+        let draft = kept.unwrap_or(editor::Draft {
+            path: path.clone(),
+            base: String::new(),
+            text: start.clone(),
+        });
+        self.open_note(
+            editor::Opened {
+                path,
+                title: String::new(),
+                base: String::new(),
+                draft: Some(draft),
+                mode: Mode::Note,
+                fresh: Some(editor::Fresh { named: true, start }),
+            },
+            window,
+            cx,
+        );
+    }
+
+    /// The day's note: one page a day in the inbox, its heading the day,
+    /// begun when it is not there yet.
+    fn day_note(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if !self.may_write(cx) {
+            return;
+        }
+        let now = today();
+        let path = front::daily_path(&now.to_string());
+        if let Some(ed) = &self.note
+            && ed.read(cx).path() == path
+        {
+            let code = ed.read(cx).code.clone();
+            ahjo_app_kit::widgets::code::Code::focus(&code, window, cx);
+            return;
+        }
+        let heading = format!(
+            "{} {} {} {}",
+            now.weekday(),
+            now.day(),
+            now.month(),
+            now.year()
+        );
+        let start = front::join(
+            &front::note_head(&now.to_string()),
+            &front::daily_start(&heading),
+        );
+        self.open_note_at(path, Some(start), window, cx);
+    }
+
+    /// Opens the note at `path` over the sky, read from the brain; one not
+    /// there yet begins as `start`.
+    fn open_note_at(
+        &mut self,
+        path: String,
+        start: Option<String>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(file) = self.file_of(&path) else {
+            return;
+        };
+        self.inbox = None;
+        if self.note.is_some() {
+            self.leave_note(window, cx);
+        }
+        // The note still being filed, or kept when filing failed, is the
+        // one to go on writing: its file may not say all of it yet.
+        let same = |ed: &Entity<Editor>, cx: &App| {
+            let ed = ed.read(cx);
+            ed.path() == path || ed.begun_as() == path
+        };
+        if let Some(i) = self.filing.iter().position(|ed| same(ed, cx)) {
+            let ed = self.filing.remove(i);
+            self.show_note(ed, window, cx);
+            return;
+        }
+        if let Some(ed) = self.held.take_if(|ed| same(ed, cx)) {
+            self.show_note(ed, window, cx);
+            return;
+        }
+        let base = match std::fs::read(&file) {
+            Ok(b) => String::from_utf8_lossy(&b).into_owned(),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound && start.is_some() => String::new(),
+            Err(e) => {
+                self.say(format!("This note did not read: {e}"), cx);
+                return;
+            }
+        };
+        let kept = self
+            .place
+            .cache
+            .as_ref()
+            .and_then(|c| editor::read_draft(c, &path));
+        let fresh = match (base.is_empty(), start) {
+            (true, Some(start)) => Some(editor::Fresh {
+                named: false,
+                start,
+            }),
+            _ => None,
+        };
+        let draft = match &fresh {
+            Some(f) => Some(kept.unwrap_or(editor::Draft {
+                path: path.clone(),
+                base: String::new(),
+                text: f.start.clone(),
+            })),
+            None => kept,
+        };
+        let title = front::title(front::split(&base).1);
+        self.open_note(
+            editor::Opened {
+                path,
+                title,
+                base,
+                draft,
+                mode: Mode::Note,
+                fresh,
+            },
+            window,
+            cx,
+        );
+    }
+
+    /// A note's editor over the sky, the keys its.
+    fn open_note(&mut self, opened: editor::Opened, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(data) = self.data.clone() else {
+            return;
+        };
+        let names = link_names(&data, data.corpus.by_path(&opened.path));
+        let (citadel, cache) = (self.place.citadel.clone(), self.place.cache.clone());
+        let root = data.root.clone();
+        let ed = cx.new(|cx| Editor::new(root, opened, names, citadel, cache, window, cx));
+        cx.subscribe_in(&ed, window, |me, ed, ev, window, cx| match ev {
+            EditorEvent::Changed => {}
+            EditorEvent::Saved => {
+                // Closed while it saved: said here, as the pane is gone.
+                if let Some(i) = me.filing.iter().position(|f| f == ed) {
+                    me.filing.remove(i);
+                    let title = ed.read(cx).title(cx);
+                    me.say(format!("Filed in the inbox: {title}"), cx);
+                }
+                me.look_again(cx);
+            }
+            EditorEvent::NotSaved => {
+                if let Some(i) = me.filing.iter().position(|f| f == ed) {
+                    me.filing.remove(i);
+                    me.held = Some(ed.clone());
+                    me.say(
+                        "Your note was not filed, and is kept: Ctrl+N opens it again.".into(),
+                        cx,
+                    );
+                }
+            }
+            EditorEvent::Leave => me.leave_note(window, cx),
+        })
+        .detach();
+        self.show_note(ed, window, cx);
+    }
+
+    fn show_note(&mut self, ed: Entity<Editor>, window: &mut Window, cx: &mut Context<Self>) {
+        let code = ed.read(cx).code.clone();
+        ahjo_app_kit::widgets::code::Code::focus(&code, window, cx);
+        self.note = Some(ed);
+        cx.notify();
+    }
+
+    /// Closes the note, filing what was written in it: the pane goes at
+    /// once and the save goes on, told when it ends. A note begun and left
+    /// empty leaves nothing behind.
+    fn leave_note(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(ed) = self.note.take() else {
+            return;
+        };
+        ed.update(cx, |ed, cx| {
+            ed.keep(cx);
+            if ed.written(cx) {
+                ed.save(cx);
+            }
+        });
+        if ed.read(cx).is_saving() {
+            self.filing.push(ed);
+        }
+        match &self.editing {
+            Some(page) => {
+                let code = page.read(cx).code.clone();
+                ahjo_app_kit::widgets::code::Code::focus(&code, window, cx);
+            }
+            None => window.focus(&self.focus, cx),
+        }
+        cx.notify();
+    }
+
+    // ---- The inbox.
+
+    /// Opens the inbox's list, reading again which notes agents filed, or
+    /// closes it.
+    fn toggle_inbox(&mut self, cx: &mut Context<Self>) {
+        if self.inbox.take().is_some() {
+            cx.notify();
+            return;
+        }
+        let Some(data) = self.data.clone() else {
+            return;
+        };
+        self.inbox = Some(0);
+        // The list takes the keys, not the search.
+        self.leave_field = true;
+        if self.place.from.is_none() {
+            let root = data.root.clone();
+            let read = cx.background_spawn(async move { inbox::read(&root) });
+            cx.spawn(async move |me, cx| {
+                let filed = read.await;
+                let _ = me.update(cx, |me, cx| {
+                    me.filed = Some(filed);
+                    cx.notify();
+                });
+            })
+            .detach();
+        }
+        cx.notify();
+    }
+
+    /// The inbox's rows: the notes waiting, then those filed, each with
+    /// what picking it does.
+    fn inbox_rows(&self) -> Vec<InboxRow> {
+        let Some(data) = &self.data else {
+            return vec![];
+        };
+        let mut rows: Vec<InboxRow> = data.waiting.iter().map(|&p| InboxRow::Waiting(p)).collect();
+        if let Some(Ok(filed)) = &self.filed {
+            rows.extend(
+                filed
+                    .iter()
+                    .take(search::RECENT)
+                    .cloned()
+                    .map(InboxRow::Filed),
+            );
+        }
+        rows
+    }
+
+    fn pick_inbox(&mut self, row: InboxRow, window: &mut Window, cx: &mut Context<Self>) {
+        self.inbox = None;
+        let Some(data) = self.data.clone() else {
+            return;
+        };
+        match row {
+            InboxRow::Waiting(p) if self.place.from.is_none() => {
+                let path = data.corpus.pages[p].path.clone();
+                self.open_note_at(path, None, window, cx);
+            }
+            InboxRow::Waiting(p) => self.open(p, cx),
+            InboxRow::Filed(f) => match f.to.first().and_then(|to| data.corpus.by_path(to)) {
+                Some(p) => self.open(p, cx),
+                None => self.say(format!("{} is no longer in the brain.", f.title), cx),
+            },
+        }
+        cx.notify();
     }
 
     /// Back to reading: the page as the brain holds it. A page written and
@@ -1739,6 +2063,42 @@ impl BrainApp {
             cx.stop_propagation();
             return;
         }
+        // From anywhere: Ctrl+N catches a note, Ctrl+D opens the day's.
+        if (m.control || m.platform) && !m.alt && !m.shift {
+            match ks.key.as_str() {
+                "n" => {
+                    self.catch_note(window, cx);
+                    cx.stop_propagation();
+                    return;
+                }
+                "d" => {
+                    self.day_note(window, cx);
+                    cx.stop_propagation();
+                    return;
+                }
+                _ => {}
+            }
+        }
+        // A note has the keys.
+        if self.note.is_some() {
+            return;
+        }
+        // The inbox's list takes the arrows, Enter and Esc while it is open;
+        // Ctrl+I opens it.
+        if self.inbox.is_some() && !typing && self.inbox_key(ks.key.as_str(), m, window, cx) {
+            cx.stop_propagation();
+            return;
+        }
+        if (m.control || m.platform)
+            && !m.alt
+            && !m.shift
+            && ks.key == "i"
+            && self.editing.is_none()
+        {
+            self.toggle_inbox(cx);
+            cx.stop_propagation();
+            return;
+        }
         // Writing in place, the keys are the source's; Ctrl+E goes back to
         // reading as it came.
         if self.editing.is_some() {
@@ -1883,6 +2243,25 @@ impl BrainApp {
             _ => {}
         }
     }
+}
+
+/// When a note was caught, and where when it was not here: `from
+/// ChatGPT · 2 h ago`.
+fn caught(origin: &str, when: String) -> String {
+    match origin {
+        "" | front::ORIGIN => when,
+        "chatgpt" => format!("from ChatGPT · {when}"),
+        o => format!("from {o} · {when}"),
+    }
+}
+
+/// A row of the inbox's list.
+#[derive(Clone, Debug)]
+enum InboxRow {
+    /// A note waiting, by its page.
+    Waiting(usize),
+    /// A note an agent filed.
+    Filed(inbox::Filed),
 }
 
 /// How a key moves the page read.
@@ -3136,6 +3515,12 @@ impl Render for BrainApp {
         } else {
             root = root.children(self.said_view(&t));
         }
+        if self.inbox.is_some() {
+            root = root.child(self.inbox_panel(&t, cx));
+        }
+        if let Some(ed) = &self.note {
+            root = root.child(self.note_pane(&t, &ed.clone(), cx));
+        }
         // Ctrl+wheel the page read did not take sizes the whole app.
         let me = cx.entity().downgrade();
         root.child(zoom::app_catch(
@@ -3826,35 +4211,313 @@ impl BrainApp {
         )
     }
 
+    /// The inbox's keys while its list is open; answers whether it took
+    /// the key.
+    fn inbox_key(
+        &mut self,
+        key: &str,
+        m: &gpui::Modifiers,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        if m.control || m.alt || m.platform {
+            return false;
+        }
+        let rows = self.inbox_rows();
+        let n = rows.len();
+        match key {
+            "escape" => self.inbox = None,
+            "down" if n > 0 => self.inbox = self.inbox.map(|i| (i + 1) % n),
+            "up" if n > 0 => self.inbox = self.inbox.map(|i| (i + n - 1) % n),
+            "enter" => {
+                if let Some(row) = self.inbox.and_then(|i| rows.get(i).cloned()) {
+                    self.pick_inbox(row, window, cx);
+                }
+            }
+            _ => return false,
+        }
+        cx.notify();
+        true
+    }
+
+    /// The notes caught here: those waiting in the inbox for an agent, and
+    /// those agents filed, with where each went.
+    fn inbox_panel(&self, t: &Theme, cx: &mut Context<Self>) -> impl IntoElement {
+        let right = if self.reading.is_some() {
+            reader::sheet_width(self.size.0, self.reader_k()) + chrome::INSET
+        } else {
+            chrome::INSET
+        };
+        let now = SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos() as u64)
+            .unwrap_or(0);
+        let today = time::OffsetDateTime::now_utc().date().to_julian_day();
+        let at = self.inbox.unwrap_or(0);
+        let rows = self.inbox_rows();
+        let waiting = rows
+            .iter()
+            .filter(|r| matches!(r, InboxRow::Waiting(_)))
+            .count();
+        let filed = rows.len() - waiting;
+        let mut list = div()
+            .id("inbox")
+            .absolute()
+            .top(px(chrome::INSET + search::FIELD_HEIGHT + search::LIST_GAP))
+            .right(px(right))
+            .w(px(self.recent_width().min(search::INBOX_W)))
+            .max_h(px(self.size.1 - chrome::INSET * 3. - search::FIELD_HEIGHT))
+            .overflow_y_scroll()
+            .flex()
+            .flex_col()
+            .py(px(4.))
+            .rounded(px(chrome::RADIUS))
+            .bg(veil(t, chrome::PANEL_ALPHA))
+            .border_1()
+            .border_color(t.divider)
+            .occlude()
+            .on_scroll(|_, _, cx| cx.stop_propagation());
+        let label = |words: String| {
+            kit::label(t, words)
+                .px(px(search::ROW_PAD_X))
+                .pt(px(search::ROW_PAD_Y))
+                .pb(px(2.))
+        };
+        let Some(data) = self.data.clone() else {
+            return list;
+        };
+        let pending = self.place.from.is_none() && self.filed.is_none();
+        if rows.is_empty() && !pending {
+            return list.child(
+                div()
+                    .px(px(search::ROW_PAD_X))
+                    .py(px(search::ROW_PAD_Y * 2.))
+                    .text_size(px(search::SNIPPET))
+                    .text_color(t.text2)
+                    .child("No notes yet. Ctrl+N catches one in the inbox, and an agent files it into the brain."),
+            );
+        }
+        let row = |i: usize, id: &'static str| {
+            div()
+                .id((id, i))
+                .flex()
+                .items_center()
+                .gap(px(10.))
+                .px(px(search::ROW_PAD_X))
+                .py(px(search::ROW_PAD_Y - 2.))
+                .cursor_pointer()
+                .when(i == at, |d| d.bg(alpha(t.accent, 0.14)))
+                .hover(|s| s.bg(alpha(t.text, 0.06)))
+        };
+        let age = |words: String| {
+            div()
+                .flex_none()
+                .text_size(px(search::SNIPPET))
+                .text_color(t.dim)
+                .child(words)
+        };
+        if waiting > 0 {
+            list = list.child(label(format!("Waiting for an agent · {waiting}")));
+        }
+        for (i, r) in rows.iter().enumerate() {
+            let pick = r.clone();
+            let el = match r {
+                InboxRow::Waiting(p) => {
+                    let page = &data.corpus.pages[*p];
+                    row(i, "waiting")
+                        .child(div().flex_none().size(px(7.)).rounded(px(7.)).bg(t.dim))
+                        .child(
+                            div()
+                                .flex_1()
+                                .min_w_0()
+                                .truncate()
+                                .text_size(px(search::TITLE))
+                                .text_color(t.text)
+                                .child(page.title.clone()),
+                        )
+                        .child(age(caught(&page.origin, {
+                            // A file's time says when it was fetched as
+                            // much as written: the note's day says older.
+                            match page.updated {
+                                Some(day) if day < today => reader::age(day, today),
+                                _ => reader::since(page.modified, now),
+                            }
+                        })))
+                }
+                InboxRow::Filed(f) => {
+                    let named: Vec<(String, Hsla)> =
+                        f.to.iter()
+                            .filter_map(|to| data.corpus.by_path(to))
+                            .map(|p| {
+                                let page = &data.corpus.pages[p];
+                                (page.title.clone(), data.hues[page.subject])
+                            })
+                            .collect();
+                    let hue = named.first().map_or(t.dim, |n| n.1);
+                    let went = match (f.moved, named.as_slice()) {
+                        (_, []) if f.to.is_empty() => "Taken out of the inbox".to_string(),
+                        (_, []) => "Filed in a page since gone".to_string(),
+                        (true, [(title, _)]) if *title == f.title => {
+                            let p = f.to.first().and_then(|to| data.corpus.by_path(to));
+                            let subject = p
+                                .map(|p| {
+                                    data.corpus.subjects[data.corpus.pages[p].subject]
+                                        .name
+                                        .clone()
+                                })
+                                .unwrap_or_default();
+                            format!("Filed in {subject}")
+                        }
+                        (true, [(title, _)]) => {
+                            let p = f.to.first().and_then(|to| data.corpus.by_path(to));
+                            let subject = p
+                                .map(|p| {
+                                    data.corpus.subjects[data.corpus.pages[p].subject]
+                                        .name
+                                        .clone()
+                                })
+                                .unwrap_or_default();
+                            format!("Filed in {subject} as {title}")
+                        }
+                        (_, [(title, _)]) => format!("Folded into {title}"),
+                        (_, [(title, _), rest @ ..]) => {
+                            format!("Folded into {title} and {} more", rest.len())
+                        }
+                    };
+                    row(i, "filed")
+                        .child(div().flex_none().size(px(7.)).rounded(px(7.)).bg(hue))
+                        .child(
+                            div()
+                                .flex_1()
+                                .min_w_0()
+                                .flex()
+                                .flex_col()
+                                .child(
+                                    div()
+                                        .truncate()
+                                        .text_size(px(search::TITLE))
+                                        .text_color(alpha(t.text, 0.9))
+                                        .child(f.title.clone()),
+                                )
+                                .child(
+                                    div()
+                                        .truncate()
+                                        .text_size(px(search::SNIPPET))
+                                        .text_color(t.text2)
+                                        .child(went),
+                                ),
+                        )
+                        .child(age(caught(
+                            &f.origin,
+                            reader::since(f.when.max(0) as u64 * 1_000_000_000, now),
+                        )))
+                }
+            };
+            if i == waiting && filed > 0 {
+                list = list.child(label("Filed by agents".into()).mt(px(search::ROW_PAD_Y)));
+            }
+            list = list.child(el.on_click(
+                cx.listener(move |me, _, window, cx| me.pick_inbox(pick.clone(), window, cx)),
+            ));
+        }
+        match (&self.place.from, &self.filed) {
+            (Some(r), _) => {
+                list = list.child(
+                    div()
+                        .px(px(search::ROW_PAD_X))
+                        .py(px(search::ROW_PAD_Y))
+                        .text_size(px(search::SNIPPET))
+                        .text_color(t.dim)
+                        .child(format!(
+                            "Which notes agents filed shows on {}'s own machine.",
+                            r.name
+                        )),
+                )
+            }
+            (None, Some(Err(e))) => {
+                list = list.child(
+                    div()
+                        .px(px(search::ROW_PAD_X))
+                        .py(px(search::ROW_PAD_Y))
+                        .text_size(px(search::SNIPPET))
+                        .text_color(t.dim)
+                        .child(format!("Which notes agents filed did not read: {e}")),
+                )
+            }
+            _ => {}
+        }
+        list
+    }
+
     fn theme_button(&self, t: &Theme, cx: &mut Context<Self>) -> impl IntoElement {
         let right = if self.reading.is_some() {
             reader::sheet_width(self.size.0, self.reader_k()) + chrome::INSET
         } else {
             chrome::INSET
         };
+        let chip = |id: &'static str| {
+            div()
+                .id(id)
+                .h(px(chrome::SWITCH_HEIGHT))
+                .flex()
+                .items_center()
+                .gap(px(6.))
+                .px(px(chrome::SWITCH_PAD_X))
+                .rounded(px(chrome::RADIUS))
+                .bg(veil(t, chrome::PANEL_ALPHA))
+                .cursor_pointer()
+                .text_size(px(chrome::TEXT))
+                .text_color(t.text2)
+                .hover(|s| s.text_color(t.text).bg(t.raised))
+        };
+        let writable = self.place.from.is_none() && self.data.is_some();
         div()
-            .id("theme")
             .absolute()
             .top(px(
                 chrome::INSET + (search::FIELD_HEIGHT - chrome::SWITCH_HEIGHT) / 2.
             ))
             .right(px(right))
-            .h(px(chrome::SWITCH_HEIGHT))
             .flex()
-            .items_center()
             .gap(px(6.))
-            .px(px(chrome::SWITCH_PAD_X))
-            .rounded(px(chrome::RADIUS))
-            .bg(veil(t, chrome::PANEL_ALPHA))
             .occlude()
-            .cursor_pointer()
-            .text_size(px(chrome::TEXT))
-            .text_color(t.text2)
-            .hover(|s| s.text_color(t.text).bg(t.raised))
-            .tooltip(kit::tip("Next theme (Ctrl+T)"))
-            .on_click(cx.listener(|me, _, _, cx| me.next_theme(cx)))
-            .child(img(t.art.mark.clone()).size(px(chrome::MARK)))
-            .child(t.direction.label())
+            .when(self.data.is_some(), |d| {
+                let waiting = self.data.as_ref().map_or(0, |d| d.waiting.len());
+                d.child(
+                    chip("inbox")
+                        .when(self.inbox.is_some(), |c| c.text_color(t.text).bg(t.raised))
+                        .tooltip(kit::tip(
+                            "The notes waiting in the inbox, and where agents filed them (Ctrl+I)",
+                        ))
+                        .on_click(cx.listener(|me, _, _, cx| me.toggle_inbox(cx)))
+                        .child("Inbox")
+                        .when(waiting > 0, |c| {
+                            c.child(div().text_color(t.dim).child(waiting.to_string()))
+                        }),
+                )
+            })
+            .when(writable, |d| {
+                d.child(
+                    chip("note")
+                        .tooltip(kit::tip(
+                            "A new note, filed in the inbox when you close it (Ctrl+N)",
+                        ))
+                        .on_click(cx.listener(|me, _, window, cx| me.catch_note(window, cx)))
+                        .child("New note"),
+                )
+                .child(
+                    chip("today")
+                        .tooltip(kit::tip("Today's note (Ctrl+D)"))
+                        .on_click(cx.listener(|me, _, window, cx| me.day_note(window, cx)))
+                        .child("Today"),
+                )
+            })
+            .child(
+                chip("theme")
+                    .tooltip(kit::tip("Next theme (Ctrl+T)"))
+                    .on_click(cx.listener(|me, _, _, cx| me.next_theme(cx)))
+                    .child(img(t.art.mark.clone()).size(px(chrome::MARK)))
+                    .child(t.direction.label()),
+            )
     }
 
     fn sheet(&self, t: &Theme, cx: &mut Context<Self>) -> impl IntoElement {
@@ -3970,6 +4633,54 @@ impl BrainApp {
 }
 
 impl BrainApp {
+    /// A note over the sky at a reading measure; a click beside it closes
+    /// it, filing what was written.
+    fn note_pane(
+        &self,
+        t: &Theme,
+        ed: &Entity<Editor>,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement {
+        let w = (self.size.0 - 2. * chrome::INSET).min(tokens::editor::NOTE_W);
+        let h = (self.size.1 - 2. * chrome::INSET).min(tokens::editor::NOTE_H);
+        div()
+            .absolute()
+            .inset_0()
+            .flex()
+            .items_center()
+            .justify_center()
+            .bg(veil(t, chrome::PANEL_ALPHA))
+            .occlude()
+            .on_mouse_move(|_, _, cx| cx.stop_propagation())
+            .on_scroll(|_, _, cx| cx.stop_propagation())
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(|me, _, window, cx| {
+                    cx.stop_propagation();
+                    me.leave_note(window, cx);
+                }),
+            )
+            .on_mouse_up(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+            .child(
+                div()
+                    .w(px(w))
+                    .h(px(h))
+                    .rounded(px(chrome::RADIUS))
+                    .border_1()
+                    .border_color(t.divider)
+                    .overflow_hidden()
+                    .shadow(vec![gpui::BoxShadow {
+                        color: t.shadow(),
+                        offset: gpui::point(px(0.), px(12.)),
+                        blur_radius: px(40.),
+                        spread_radius: px(0.),
+                        inset: false,
+                    }])
+                    .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                    .child(ed.clone()),
+            )
+    }
+
     /// The page's source, left of the page it makes; the whole window when
     /// the page leaves too little beside it.
     fn source_pane(&self, ed: &Entity<Editor>) -> impl IntoElement {
@@ -3993,6 +4704,39 @@ impl BrainApp {
             .on_mouse_up(MouseButton::Left, |_, _, cx| cx.stop_propagation())
             .child(ed.clone())
     }
+}
+
+/// The pages a link may name, but `except`: lately changed first, as `[[`
+/// offers them before anything is typed.
+fn link_names(data: &Data, except: Option<usize>) -> Rc<Vec<editor::Name>> {
+    let mut order: Vec<usize> = data.recent.clone();
+    let seen: HashSet<usize> = order.iter().copied().collect();
+    order.extend((0..data.corpus.pages.len()).filter(|i| !seen.contains(i)));
+    Rc::new(
+        order
+            .into_iter()
+            .filter(|&i| Some(i) != except)
+            // A note in the inbox takes a new name when an agent files it,
+            // so a link to it would break.
+            .filter(|&i| !front::waiting(&data.corpus.pages[i].path))
+            .map(|i| {
+                let q = &data.corpus.pages[i];
+                editor::Name {
+                    slug: q.slug.clone(),
+                    title: q.title.clone(),
+                    aliases: q.aliases.clone(),
+                    hue: data.hues[q.subject],
+                    subject: data.corpus.subjects[q.subject].name.clone(),
+                }
+            })
+            .collect(),
+    )
+}
+
+fn today() -> time::Date {
+    time::OffsetDateTime::now_local()
+        .unwrap_or_else(|_| time::OffsetDateTime::now_utc())
+        .date()
 }
 
 /// A search's snippet with the words it matched lit; the page's summary

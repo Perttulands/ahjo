@@ -43,6 +43,9 @@ pub struct Entry {
     pub aliases: Vec<String>,
     /// The slugs it links to, as written.
     pub refs: Vec<String>,
+    /// Who wrote it, where its header says (`origin`).
+    #[serde(default)]
+    pub origin: String,
 }
 
 #[derive(Clone, Debug)]
@@ -58,6 +61,8 @@ pub struct Page {
     pub words: u32,
     pub aliases: Vec<String>,
     pub subject: usize,
+    /// Who wrote it, where its header says.
+    pub origin: String,
 }
 
 impl Page {
@@ -125,6 +130,7 @@ impl Corpus {
                 words: e.words,
                 aliases: e.aliases.clone(),
                 subject,
+                origin: e.origin.clone(),
             });
         }
         let mut corpus = Corpus {
@@ -473,6 +479,7 @@ pub fn parse(path: &str, text: &str) -> Entry {
         words: body.split_whitespace().count() as u32,
         aliases: fields.get("aliases").cloned().unwrap_or_default(),
         refs: links_of(body, path),
+        origin: one("origin"),
         slug,
     }
 }

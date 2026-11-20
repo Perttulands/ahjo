@@ -9,7 +9,11 @@ so they share Swarm's look but not its shell. `ahjo-brain` is Ahjo Brain, the
 company brain as a night sky with its search, reader and editor. It reads the
 brain's files directly and writes a page only through Context Citadel's write
 route, the brain's one writer, which runs `brain check` and commits; a page
-another writer changed meanwhile is not written over unasked. Another
+another writer changed meanwhile is not written over unasked. A note caught
+in it (and the note for each day) goes the same way into `knowledge/_inbox`,
+its header filled in for it, where agents file inbox notes into the brain;
+which they filed, and where to, the app reads from the brain's git history
+when its inbox is opened. Another
 machine's brain (one of Swarm's places, or `--from <node>`) is read through
 that machine's node, whose brain area lists its page files and hands their
 texts; the app keeps a copy in its cache, takes only what changed each time
