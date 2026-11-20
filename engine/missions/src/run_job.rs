@@ -101,6 +101,9 @@ pub(crate) fn execute_formation(
             attempt,
         )?;
         (workspace.to_path_buf(), Some(turn))
+    } else if req.repository.is_empty() && req.formation_id.is_empty() && reason != "judge" {
+        let path = crate::run_folder::prepare(c, id, mission, workspace, control, &node, attempt)?;
+        (path, None)
     } else {
         let path =
             crate::run_workspace::prepare_turn(c, id, req, workspace, control, &node, attempt)?;

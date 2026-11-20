@@ -53,6 +53,7 @@ impl Coordinator {
             for dir in [root.join("artifacts").join(id), made] {
                 crate::kept_copy::remove_tree(&dir)?;
             }
+            crate::run_folder::discard_run(self, id)?;
             crate::SeatRecords::new(root)
                 .forget_run(id)
                 .map_err(crate::error::to_io)?;

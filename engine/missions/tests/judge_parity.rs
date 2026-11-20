@@ -399,11 +399,27 @@ fn judge_fail_pushes_back_typed_feedback_before_a_later_pass() {
             "missing {expected:?} in {retry:?}"
         );
     }
-    let expected: Vec<Value> =
+    let mut expected: Vec<Value> =
         include_str!("parity/runs/archon-ledgers/judge-fail-pushback.ndjson")
             .lines()
             .map(|line| serde_json::from_str(line).unwrap())
             .collect();
+    // Ahjo records the private copy after each start and the selection
+    // before routing its pass. The Archon events and payloads still match.
+    for attempt in [1, 2] {
+        let start = expected
+            .iter()
+            .position(|e| {
+                e["type"] == "node_started" && e["nodeId"] == "fmn_work" && e["attempt"] == attempt
+            })
+            .unwrap();
+        expected.insert(start + 1, serde_json::json!({"type":"folder_attempt_started","nodeId":"fmn_work","attempt":attempt}));
+    }
+    let pass = expected
+        .iter()
+        .position(|e| e["type"] == "gate_verdict" && e["verdict"] == "pass")
+        .unwrap();
+    expected.insert(pass, serde_json::json!({"type":"folder_verdict_pending","gateId":"gate_review","nodeId":"gate_review","attempt":2,"verdict":"pass"}));
     assert_eq!(normalized_ledger(&root, &id), expected);
     run_support::assert_payload_parity(
         &root,

@@ -377,7 +377,10 @@ pub(crate) fn settle_gate(
         data["nodeId"] = gate.id.clone().into();
         data["gateId"] = gate.id.clone().into();
         data["requestedBy"] = gate.id.clone().into();
-        data["prompt"] = "".into();
+        data["prompt"] = crate::run_folder::reviewed_path(c, id, &events, input.origin.as_ref())
+            .map(|path| format!("Attempt workspace: {}", path.display()))
+            .unwrap_or_default()
+            .into();
     } else {
         let mut failed = false;
         for name in ["code", "formation", "human"] {
@@ -406,7 +409,7 @@ pub(crate) fn settle_gate(
         data,
     );
     e.gate_id = gate.id.clone();
-    append(c, id, control, e)
+    crate::run_folder::record_verdict(c, id, control, &events, e)
 }
 
 fn append(c: &Coordinator, id: &str, control: &Control, event: crate::RunEvent) -> io::Result<()> {

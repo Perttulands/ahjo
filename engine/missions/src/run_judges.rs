@@ -32,6 +32,7 @@ pub(crate) fn run_judges(
     let mut final_ports = Vec::new();
     let mut final_output: Option<crate::FormationResult> = None;
     let ledger = c.ledger(id)?.read().map_err(crate::error::to_io)?;
+    let reviewed = crate::run_folder::reviewed_path(c, id, &ledger, input.origin.as_ref());
     let anchor = ledger
         .iter()
         .rev()
@@ -94,6 +95,10 @@ pub(crate) fn run_judges(
             .unwrap_or(0)
             .max(gate_attempt - 1)
             + 1;
+        let mut prompt = current.text.clone();
+        if let Some(path) = &reviewed {
+            prompt.push_str(&format!("\nAttempt workspace: {}\n", path.display()));
+        }
         let result = execute_formation(
             c,
             id,
@@ -104,7 +109,7 @@ pub(crate) fn run_judges(
             judge.id.clone(),
             attempt,
             vec![serde_json::to_value(&current)?],
-            current.text.clone(),
+            prompt,
             inputs,
             "judge",
             index + 1 == count,

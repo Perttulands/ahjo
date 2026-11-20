@@ -276,7 +276,7 @@ fn schema(name: &str) -> Value {
             let properties = json!({"mission":s,"formation":s,
                 "input":{"type":"string","description":"Which Input card (id or title), when the mission has several; not an input value."},
                 "inputs":{"type":"object","description":"The input values as a JSON object, e.g. '{\"topic\":\"fog\"}'."},
-                "cwd":{"type":"string","description":"The folder the steps work in; a new one per run when left out."},
+                "cwd":{"type":"string","description":"Run folder (new if omitted). Retrying steps use private copies and publish the chosen copy only if the run folder stayed unchanged."},
                 "work":s,
                 "repository":{"type":"string","description":"A repository named under [missions] repositories in the node's config; the run works on its own branch and worktree."},
                 "base":{"type":"string","description":"The branch the run's branch starts from."},

@@ -291,6 +291,24 @@ pub(crate) fn schedule(
             wake_rx.recv().map_err(io::Error::other)?;
             continue;
         }
+        if let Some(pending) = crate::run_folder::pending(&events) {
+            if running.is_empty() {
+                if let Err(error) =
+                    crate::run_folder::settle(c, id, &workspace, control, &events, pending)
+                {
+                    let node = pending
+                        .data
+                        .get("folderNode")
+                        .and_then(|node| node.as_str())
+                        .unwrap_or_default();
+                    record_error(c, id, control, node, &error)?;
+                    return Err(error);
+                }
+            } else {
+                wake_rx.recv().map_err(io::Error::other)?;
+            }
+            continue;
+        }
         let replay = crate::run_replay::Replay::read(mission, &events);
         let previous_noted = noted;
         noted = events.len() as u64;

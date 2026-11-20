@@ -142,7 +142,11 @@ pub(crate) fn pick_for<'a>(
         return None;
     }
     let gate = crate::graph::selecting_gate(mission, step).ok()?;
-    let candidates = candidates(events, step, &gate.id);
+    let last = crate::run_folder::last_selection(events, step);
+    let candidates = candidates(events, step, &gate.id)
+        .into_iter()
+        .filter(|candidate| candidate.output_seq > last)
+        .collect::<Vec<_>>();
     (!candidates.is_empty()).then_some(StepPick { gate, candidates })
 }
 
@@ -250,12 +254,18 @@ pub(crate) fn unsettled(events: &[RunEvent]) -> Vec<&RunEvent> {
 /// gate input that verdict judged, which a pick carries on.
 struct Detail {
     attempt: i64,
+    workspace: Option<std::path::PathBuf>,
     verdict: String,
     reason: String,
     input: Value,
 }
 
-fn details(events: &[RunEvent], started: &RunEvent) -> io::Result<Vec<Detail>> {
+fn details(
+    c: &Coordinator,
+    id: &str,
+    events: &[RunEvent],
+    started: &RunEvent,
+) -> io::Result<Vec<Detail>> {
     let candidates: Vec<Candidate> =
         serde_json::from_value(started.data.get("candidates").cloned().unwrap_or_default())
             .map_err(|e| invalid(&format!("pick {} candidates: {e}", started.seq)))?;
@@ -271,6 +281,13 @@ fn details(events: &[RunEvent], started: &RunEvent) -> io::Result<Vec<Detail>> {
             })?;
         details.push(Detail {
             attempt: candidate.attempt,
+            workspace: crate::run_folder::attempt_path(
+                c,
+                id,
+                events,
+                &started.node_id,
+                candidate.attempt,
+            ),
             verdict: text(&Value::Object(verdict.data.clone()), "verdict").into(),
             reason: text(&Value::Object(verdict.data.clone()), "reason").into(),
             input: verdict.data.get("inputRef").cloned().unwrap_or_default(),
@@ -309,6 +326,9 @@ fn pick_input(
             "\nattempt {}\nverdict: {}\nreason: {}\n",
             detail.attempt, detail.verdict, detail.reason
         );
+        if let Some(path) = &detail.workspace {
+            body += &format!("attempt workspace: {}\n", path.display());
+        }
         let kind = text(&detail.input, "kind");
         let reference = text(&detail.input, "ref");
         if (kind == "file" || kind == "folder") && !reference.is_empty() {
@@ -443,7 +463,7 @@ fn resolve(
     answer: Option<(&RunEvent, &RunEvent)>,
 ) -> io::Result<()> {
     let events = c.ledger(id)?.read().map_err(crate::error::to_io)?;
-    let details = details(&events, started)?;
+    let details = details(c, id, &events, started)?;
     let picked = (details.iter())
         .find(|detail| detail.attempt == choice.attempt)
         .ok_or_else(|| {
@@ -482,7 +502,7 @@ fn resolve(
     );
     verdict.gate_id.clone_from(&started.gate_id);
     verdict.actor = actor;
-    crate::run_worker::append_live(c, id, control, verdict).map(|_| ())
+    crate::run_folder::record_verdict(c, id, control, &events, verdict)
 }
 
 /// Ask the operator to pick the best attempt, with the judge's pick as a
@@ -543,7 +563,7 @@ pub(crate) fn advance(
                 started.seq, started.gate_id
             ))
         })?;
-        let details = details(events, started)?;
+        let details = details(c, id, events, started)?;
         if let [only] = details.as_slice() {
             let choice = Choice {
                 attempt: only.attempt,
@@ -746,7 +766,7 @@ impl Judging<'_> {
                 choice.decided_by = judge;
                 if gate.kinds.iter().any(|kind| kind == "human") {
                     let events = c.ledger(id)?.read().map_err(crate::error::to_io)?;
-                    let details = details(&events, started)?;
+                    let details = details(c, id, &events, started)?;
                     let input = pick_input(id, mission, gate, started, &details);
                     let request = ask(gate, started, &input, attempts, Some(&choice));
                     crate::run_worker::append_live(c, id, control, request).map(|_| ())

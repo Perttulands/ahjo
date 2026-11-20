@@ -224,6 +224,7 @@ pub(crate) fn only_waiting(
         })
     });
     !projection.waiting_gates.is_empty()
+        && crate::run_folder::pending(events).is_none()
         && replay.open.is_empty()
         && replay.evaluating.is_empty()
         && replay.queue.values().all(|q| q.is_empty())

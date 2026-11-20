@@ -305,6 +305,7 @@ fn reattach_keeps_other_completed_dispatches_when_one_fails() {
 
 #[test]
 fn restart_cuts_preserve_branch_and_human_gate_outcomes() {
+    use sha2::{Digest, Sha256};
     struct JudgeLab;
     impl ahjo_mission_engine::Executor for JudgeLab {
         fn execute_formation(
@@ -371,7 +372,12 @@ fn restart_cuts_preserve_branch_and_human_gate_outcomes() {
                     Err(e) => panic!("verdict: {e}"),
                 }
             }
-            assert!(Instant::now() < deadline, "run {id} did not settle");
+            assert!(
+                Instant::now() < deadline,
+                "run {id} did not settle ({} {})",
+                p.status,
+                p.block_code
+            );
             std::thread::sleep(Duration::from_millis(5));
         }
     }
@@ -459,6 +465,23 @@ fn restart_cuts_preserve_branch_and_human_gate_outcomes() {
                 lines[..cut].join("\n") + "\n",
             )
             .unwrap();
+            // A real crash retains any copies recorded before the cut.
+            // These fixture steps only write reports, so the folders are empty.
+            for line in &lines[..cut] {
+                let event: Value = serde_json::from_str(line).unwrap();
+                if event["type"] == "folder_attempt_started" {
+                    let node = event["nodeId"].as_str().unwrap();
+                    let attempt = event["attempt"].as_i64().unwrap();
+                    let copy = scratch
+                        .0
+                        .join("folder-attempts")
+                        .join(&id)
+                        .join(hex::encode(Sha256::digest(node.as_bytes())))
+                        .join(attempt.to_string());
+                    std::fs::create_dir_all(copy.join("base")).unwrap();
+                    std::fs::create_dir(copy.join("work")).unwrap();
+                }
+            }
             let c =
                 Coordinator::open(&scratch.0, RunSettings::default(), Box::new(JudgeLab)).unwrap();
             assert_eq!(

@@ -11,9 +11,296 @@ use run_support::Scratch;
 use serde_json::{Value, json};
 use std::{
     collections::{BTreeMap, HashMap},
+    path::PathBuf,
     sync::{Arc, Mutex},
     time::{Duration, Instant},
 };
+
+/// A real folder run whose judges inspect the attempt directories they were
+/// given. The shared record lets the test check what downstream steps saw.
+#[derive(Clone)]
+struct FolderExecutor {
+    workspace: PathBuf,
+    conflict: bool,
+    pass_retry: bool,
+    calls: Arc<Mutex<Vec<(String, i64, PathBuf)>>>,
+    compared: Arc<Mutex<Vec<(PathBuf, String)>>>,
+}
+
+impl FolderExecutor {
+    fn new(workspace: PathBuf, conflict: bool, pass_retry: bool) -> Self {
+        Self {
+            workspace,
+            conflict,
+            pass_retry,
+            calls: Arc::new(Mutex::new(Vec::new())),
+            compared: Arc::new(Mutex::new(Vec::new())),
+        }
+    }
+}
+
+impl Executor for FolderExecutor {
+    fn execute_formation(
+        &self,
+        request: FormationExecution,
+        events: ExecutionSink,
+    ) -> Result<FormationResult, ahjo_mission_engine::Error> {
+        let run = || -> Result<FormationResult, String> {
+            let node = request.formation.id.as_str();
+            self.calls.lock().unwrap().push((
+                node.to_owned(),
+                request.attempt,
+                request.cwd.clone(),
+            ));
+            let text = match node {
+                "fmn_work" => {
+                    let seed = std::fs::read_to_string(request.cwd.join("draft.txt"))
+                        .map_err(|e| e.to_string())?;
+                    if seed != "original" {
+                        return Err(format!("attempt {} saw {seed:?}", request.attempt));
+                    }
+                    if !request.cwd.join("delete.txt").exists() {
+                        return Err("the second attempt inherited the first deletion".into());
+                    }
+                    std::fs::write(
+                        request.cwd.join("draft.txt"),
+                        format!("attempt {}", request.attempt),
+                    )
+                    .map_err(|e| e.to_string())?;
+                    if request.attempt == 1 {
+                        std::fs::remove_file(request.cwd.join("delete.txt"))
+                            .map_err(|e| e.to_string())?;
+                    }
+                    format!("draft {}", request.attempt)
+                }
+                "fmn_j1" => "review".into(),
+                "fmn_j2" if !request.pick_attempts.is_empty() => {
+                    let mut compared = Vec::new();
+                    let mut candidate = None;
+                    for line in request.input_text.lines() {
+                        if let Some(number) = line
+                            .strip_prefix("attempt ")
+                            .and_then(|text| text.parse::<i64>().ok())
+                            && let Some(missing) = candidate.replace(number)
+                        {
+                            return Err(format!("attempt {missing} has no workspace"));
+                        }
+                        let Some(path) = line.strip_prefix("attempt workspace: ") else {
+                            continue;
+                        };
+                        let number = candidate.take().ok_or("workspace has no attempt number")?;
+                        let path = PathBuf::from(path);
+                        if !path.is_absolute() {
+                            return Err(format!("attempt {number} path is not absolute"));
+                        }
+                        let bytes = std::fs::read_to_string(path.join("draft.txt"))
+                            .map_err(|e| e.to_string())?;
+                        if bytes != format!("attempt {number}") {
+                            return Err(format!("attempt {number} contains {bytes:?}"));
+                        }
+                        compared.push((path, bytes));
+                    }
+                    if compared.len() != 2 || candidate.is_some() {
+                        return Err(format!("picker saw {} workspaces", compared.len()));
+                    }
+                    *self.compared.lock().unwrap() = compared;
+                    if self.conflict {
+                        std::fs::write(self.workspace.join("draft.txt"), "outside change")
+                            .map_err(|e| e.to_string())?;
+                        std::fs::write(self.workspace.join("other.txt"), "new outside file")
+                            .map_err(|e| e.to_string())?;
+                    }
+                    pick_block(1, "first has the desired deletion", &[])
+                }
+                "fmn_j2" => {
+                    if self.pass_retry && request.attempt == 2 {
+                        verdict("pass", "second draft accepted")
+                    } else {
+                        verdict("fail", "try again")
+                    }
+                }
+                "fmn_ship" => {
+                    if request.cwd != self.workspace {
+                        return Err("one-attempt step did not use the run folder".into());
+                    }
+                    let draft = std::fs::read_to_string(request.cwd.join("draft.txt"))
+                        .map_err(|e| e.to_string())?;
+                    let expected = if self.pass_retry {
+                        "attempt 2"
+                    } else {
+                        "attempt 1"
+                    };
+                    if draft != expected {
+                        return Err(format!("downstream saw {draft:?}, expected {expected:?}"));
+                    }
+                    if !self.pass_retry && request.cwd.join("delete.txt").exists() {
+                        return Err("selected deletion was not published".into());
+                    }
+                    "shipped".into()
+                }
+                _ => return Err(format!("unexpected step {node}")),
+            };
+            let mut result = LabExecutor
+                .execute_formation(request, events)
+                .map_err(|e| e.message)?;
+            result.text.clone_from(&text);
+            for output in result.outputs.values_mut() {
+                output["text"] = text.clone().into();
+            }
+            Ok(result)
+        };
+        run().map_err(|message| ahjo_mission_engine::Error::new("executor_error", message))
+    }
+}
+
+fn folder_run(conflict: bool, pass_retry: bool) -> (Run, FolderExecutor, PathBuf) {
+    let root = Scratch::new();
+    let workspace = root.0.join("chosen folder");
+    std::fs::create_dir(&workspace).unwrap();
+    std::fs::write(workspace.join("draft.txt"), "original").unwrap();
+    std::fs::write(workspace.join("delete.txt"), "keep until picked").unwrap();
+    let card = if pass_retry {
+        work_card("rounds = 3")
+    } else {
+        work_card("rounds = 2\nwhenSpent = \"best\"")
+    };
+    let mission = pick_mission("[\"formation\"]", "Draft.", &card);
+    std::fs::write(root.0.join("missions/hello.mission.toml"), mission).unwrap();
+    let lab = FolderExecutor::new(workspace.clone(), conflict, pass_retry);
+    let c = Coordinator::open(&root.0, RunSettings::default(), Box::new(lab.clone())).unwrap();
+    let id = c
+        .start_mission(RunStart {
+            mission: "hello".into(),
+            input_card_id: "inp_hello".into(),
+            expected_rev: 1,
+            cwd: workspace.to_string_lossy().into_owned(),
+            inputs: BTreeMap::from([("brief".into(), "the task".into())]),
+            ..Default::default()
+        })
+        .unwrap_or_else(|e| panic!("start: {e:?}"));
+    (Run { root, c, id }, lab, workspace)
+}
+
+fn workspaces(lab: &FolderExecutor) -> Vec<PathBuf> {
+    lab.calls
+        .lock()
+        .unwrap()
+        .iter()
+        .filter(|(node, _, _)| node == "fmn_work")
+        .map(|(_, _, path)| path.clone())
+        .collect()
+}
+
+#[test]
+fn folder_pick_compares_own_files_and_publishes_the_winners_deletion() {
+    let (run, lab, workspace) = folder_run(false, false);
+    let projection = run.settle();
+    assert_eq!(projection.status, "picked", "{}", run.ledger_text());
+    let paths = workspaces(&lab);
+    assert_eq!(paths.len(), 2);
+    assert_ne!(paths[0], paths[1]);
+    assert!(
+        paths
+            .iter()
+            .all(|path| path != &workspace && !path.exists())
+    );
+    assert_eq!(
+        *lab.compared.lock().unwrap(),
+        [
+            (paths[0].clone(), "attempt 1".into()),
+            (paths[1].clone(), "attempt 2".into())
+        ]
+    );
+    assert_eq!(
+        std::fs::read_to_string(workspace.join("draft.txt")).unwrap(),
+        "attempt 1"
+    );
+    assert!(!workspace.join("delete.txt").exists());
+}
+
+#[test]
+fn folder_pick_refuses_changes_since_the_snapshot_and_can_resume() {
+    let (run, lab, workspace) = folder_run(true, false);
+    let projection = run.settle();
+    assert_eq!(projection.status, "blocked", "{}", run.ledger_text());
+    assert_eq!(
+        projection.block_code,
+        "folder_workspace_conflict",
+        "{}",
+        run.ledger_text()
+    );
+    assert!(projection.resume_allowed);
+    let blocked = run.of_type("run_blocked");
+    let reason = blocked.last().unwrap()["data"]["reason"].as_str().unwrap();
+    assert!(
+        reason.contains("draft.txt") && reason.contains("other.txt"),
+        "{reason}"
+    );
+    assert_eq!(
+        std::fs::read_to_string(workspace.join("draft.txt")).unwrap(),
+        "outside change"
+    );
+    assert_eq!(
+        std::fs::read_to_string(workspace.join("other.txt")).unwrap(),
+        "new outside file"
+    );
+    assert_eq!(
+        std::fs::read_to_string(workspace.join("delete.txt")).unwrap(),
+        "keep until picked"
+    );
+    let paths = workspaces(&lab);
+    assert_eq!(paths.len(), 2);
+    assert!(paths.iter().all(|path| path.exists()));
+    assert!(
+        !lab.calls
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|(node, _, _)| node == "fmn_ship")
+    );
+
+    std::fs::write(workspace.join("draft.txt"), "original").unwrap();
+    std::fs::remove_file(workspace.join("other.txt")).unwrap();
+    run.resume(resume_with(false, false)).unwrap();
+    assert_eq!(run.settle().status, "picked", "{}", run.ledger_text());
+    assert_eq!(
+        std::fs::read_to_string(workspace.join("draft.txt")).unwrap(),
+        "attempt 1"
+    );
+    assert!(!workspace.join("delete.txt").exists());
+    assert!(paths.iter().all(|path| !path.exists()));
+    assert_eq!(
+        lab.calls
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|(node, _, _)| node == "fmn_j2")
+            .count(),
+        3
+    );
+}
+
+#[test]
+fn folder_retry_that_passes_publishes_that_attempt() {
+    let (run, lab, workspace) = folder_run(false, true);
+    assert_eq!(run.settle().status, "succeeded", "{}", run.ledger_text());
+    let paths = workspaces(&lab);
+    assert_eq!(paths.len(), 2);
+    assert_ne!(paths[0], paths[1]);
+    assert!(
+        paths
+            .iter()
+            .all(|path| path != &workspace && !path.exists())
+    );
+    assert_eq!(
+        std::fs::read_to_string(workspace.join("draft.txt")).unwrap(),
+        "attempt 2"
+    );
+    assert_eq!(
+        std::fs::read_to_string(workspace.join("delete.txt")).unwrap(),
+        "keep until picked"
+    );
+}
 
 fn formation(id: &str, title: &str, goal: &str) -> String {
     format!(

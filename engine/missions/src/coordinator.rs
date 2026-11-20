@@ -86,6 +86,8 @@ pub(crate) struct Inner {
     pub _lock: File,
     pub executor: Arc<dyn Executor>,
     pub admission: Mutex<()>,
+    /// Folder snapshot and publication operations may share a user folder across runs.
+    pub folder_workspace: Mutex<()>,
     pub shutting_down: AtomicBool,
     pub controls: Mutex<BTreeMap<String, Arc<Control>>>,
     pub recovered: Mutex<BTreeMap<(String, String), crate::FormationResult>>,
@@ -172,6 +174,7 @@ impl Coordinator {
                     _lock: lock,
                     executor: Arc::from(executor),
                     admission: Mutex::new(()),
+                    folder_workspace: Mutex::new(()),
                     shutting_down: AtomicBool::new(false),
                     controls: Mutex::new(BTreeMap::new()),
                     recovered: Mutex::new(BTreeMap::new()),
@@ -674,6 +677,7 @@ impl Coordinator {
                     return Err(io::Error::new(io::ErrorKind::AlreadyExists, "run is final"));
                 } else {
                     crate::run_left_seats::end(self, id, None, "run_final")?;
+                    crate::run_folder::discard_run(self, id)?;
                     self.append(
                         id,
                         RunEvent {

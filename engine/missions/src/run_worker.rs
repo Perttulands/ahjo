@@ -61,6 +61,15 @@ pub fn execute(
         result = Err(error);
         control.canceled.store(false, Ordering::Release);
     }
+    if !control.stopping.load(Ordering::Acquire)
+        && (control.canceled.load(Ordering::Acquire)
+            || matches!(result, Ok(Outcome::Succeeded(_) | Outcome::Rejected { .. }))
+            || matches!(&result, Ok(Outcome::Limit(stop)) if stop.fail))
+        && let Err(error) = crate::run_folder::discard_run(&c, &id)
+    {
+        result = Err(error);
+        control.canceled.store(false, Ordering::Release);
+    }
     let mut done = control.done.lock().unwrap();
     let canceled = control.canceled.load(Ordering::Acquire);
     let stopping = control.stopping.load(Ordering::Acquire);
@@ -254,6 +263,8 @@ pub(crate) fn error_code(detail: &str) -> &'static str {
         "reachable_node_starved",
         "run_work_unfinished",
         "run_finalization_interrupted",
+        crate::run_folder::CONFLICT,
+        "folder_workspace_publish_failed",
     ]
     .into_iter()
     .find(|code| detail.contains(code))
@@ -307,6 +318,10 @@ fn execute_inner(
     workspace: PathBuf,
     control: &Arc<Control>,
 ) -> io::Result<Outcome> {
+    if req.repository.is_empty() {
+        let events = c.ledger(id)?.read().map_err(crate::error::to_io)?;
+        crate::run_folder::recover(c, id, &events)?;
+    }
     crate::run_capture::recover(c, id, mission, req, &workspace, control)?;
     crate::run_workspace_recovery::recover_pending(c, id, mission, req, &workspace, control)?;
     if req.formation_id.is_empty() {
