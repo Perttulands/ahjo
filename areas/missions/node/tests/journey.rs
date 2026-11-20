@@ -9,7 +9,7 @@ use ahjo_testkit::{
     node::Node,
     sessions::{self, FakeSessions},
 };
-use serde_json::Value;
+use serde_json::{Value, json};
 use std::sync::{Arc, Mutex};
 
 // The executor delivers each step to the testkit's fake Sessions, then uses
@@ -79,6 +79,15 @@ async fn cli(node: &Node, noun: &str, args: &[&str]) -> Value {
     assert_eq!(exit, 0, "{noun} {args:?}");
     serde_json::from_slice(&output).unwrap()
 }
+async fn edit(node: &Node, change: Value) -> Value {
+    cli(
+        node,
+        "mission",
+        &["edit", "relay", "--change", &change.to_string()],
+    )
+    .await
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn cli_authors_two_steps_answers_gate_and_finishes_with_fake_sessions() {
     let scratch = ahjo_testkit::fresh_dir("mission-notify-cli");
@@ -98,124 +107,76 @@ async fn cli_authors_two_steps_answers_gate_and_finishes_with_fake_sessions() {
         .unwrap();
     let fake = node.fake_sessions();
     *FAKE.lock().unwrap() = Some(fake.clone());
-    cli(&node, "mission", &["new", "relay", "--title", "Relay"]).await;
-    let card = cli(
+    cli(&node, "mission", &["create", "relay", "--title", "Relay"]).await;
+    let started = edit(
         &node,
-        "mission",
-        &[
-            "create",
-            "relay",
-            "--title",
-            "Start",
-            "--goal",
-            "Relay the brief",
-        ],
+        json!({"createInputCard": {"title":"Start","goal":"Relay the brief"}}),
     )
-    .await["inputCard"]["id"]
-        .as_str()
-        .unwrap()
-        .to_owned();
+    .await;
+    let card = started["input_card"]["id"].as_str().unwrap();
     let mut steps = Vec::new();
     for title in ["Draft", "Polish", "Judge"] {
-        let result = cli(
+        let result = edit(
             &node,
-            "formation",
-            &["create", "relay", "--type", "solo", "--title", title],
+            json!({"createFormation":{"type":"solo","title":title}}),
         )
         .await;
         let step = &result["formation"];
         let id = step["id"].as_str().unwrap().to_owned();
         let slot = step["slot"][0]["id"].as_str().unwrap();
-        cli(
+        edit(
             &node,
-            "formation",
-            &[
-                "assign",
-                "relay",
-                &id,
-                "--slot",
-                slot,
-                "--harness",
-                "openai-codex",
-                "--effort",
-                "medium",
-            ],
+            json!({"assignSlot":{
+                "formationId":id, "slotId":slot, "harness":"openai-codex", "effort":"medium"
+            }}),
         )
         .await;
-        cli(
-            &node,
-            "formation",
-            &["set-brief", "relay", &id, "--goal", title],
-        )
-        .await;
+        edit(&node, json!({"setBrief":{"formationId":id,"goal":title}})).await;
         steps.push((
             format!("{id}:{}", step["input"][0]["id"].as_str().unwrap()),
             format!("{id}:{}", step["output"][0]["id"].as_str().unwrap()),
             id,
         ));
     }
-    let judge_gate = cli(
+    let judge_gate = edit(
         &node,
-        "gate",
-        &[
-            "create",
-            "relay",
-            "--title",
-            "Judge review",
-            "--kinds",
-            "formation",
-        ],
+        json!({"createGate":{"title":"Judge review","kinds":["formation"]}}),
     )
     .await["gate"]["id"]
         .as_str()
         .unwrap()
         .to_owned();
-    cli(
+    edit(
         &node,
-        "gate",
-        &["judge", "relay", &judge_gate, "--chain", &steps[2].2],
+        json!({"setGateJudge":{"gateId":judge_gate,"chain":[steps[2].2]}}),
     )
     .await;
-    let gate = cli(
+    let gate = edit(
         &node,
-        "gate",
-        &[
-            "create",
-            "relay",
-            "--title",
-            "Review",
-            "--criterion",
-            "Is this ready?",
-        ],
+        json!({"createGate":{"title":"Review","criterion":"Is this ready?"}}),
     )
     .await["gate"]["id"]
         .as_str()
         .unwrap()
         .to_owned();
-    let done = cli(&node, "end", &["create", "relay", "--outcome", "done"]).await["end"]["id"]
+    let done = edit(&node, json!({"createEnd":{"outcome":"done"}})).await["end"]["id"]
         .as_str()
         .unwrap()
         .to_owned();
-    let rejected =
-        cli(&node, "end", &["create", "relay", "--outcome", "rejected"]).await["end"]["id"]
-            .as_str()
-            .unwrap()
-            .to_owned();
-    cli(
-        &node,
-        "mission",
-        &["wire", "relay", &steps[0].0, "--input", &card],
-    )
-    .await;
+    let rejected = edit(&node, json!({"createEnd":{"outcome":"rejected"}})).await["end"]["id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
     for (from, to) in [
-        (&steps[0].1, format!("{judge_gate}:in")),
-        (&format!("{judge_gate}:pass"), format!("{gate}:in")),
-        (&format!("{judge_gate}:fail"), format!("{rejected}:in")),
-        (&format!("{gate}:pass"), steps[1].0.clone()),
-        (&format!("{gate}:fail"), format!("{rejected}:in")),
-        (&steps[1].1, format!("{done}:in")),
+        (format!("{card}:out"), steps[0].0.clone()),
+        (steps[0].1.clone(), format!("{judge_gate}:in")),
+        (format!("{judge_gate}:pass"), format!("{gate}:in")),
+        (format!("{judge_gate}:fail"), format!("{rejected}:in")),
+        (format!("{gate}:pass"), steps[1].0.clone()),
+        (format!("{gate}:fail"), format!("{rejected}:in")),
+        (steps[1].1.clone(), format!("{done}:in")),
     ] {
-        cli(&node, "formation", &["wire", "relay", from, &to]).await;
+        edit(&node, json!({"wireConnection":{"from":from,"to":to}})).await;
     }
     let started = cli(
         &node,
@@ -223,7 +184,7 @@ async fn cli_authors_two_steps_answers_gate_and_finishes_with_fake_sessions() {
         &["run", "relay", "--inputs", r#"{"brief":"hello"}"#],
     )
     .await;
-    let run = started["runId"].as_str().unwrap();
+    let run = started["run_id"].as_str().unwrap();
     let waiting = cli(&node, "run", &["wait", run, "--timeout", "10"]).await;
     assert_eq!(waiting["outcome"], "needs-you", "{waiting}");
     assert_eq!(waiting["asks"][0]["gate"], gate);
@@ -455,7 +416,7 @@ async fn cli_authors_two_steps_answers_gate_and_finishes_with_fake_sessions() {
         &["run", "broken", "--inputs", r#"{"brief":"hi"}"#],
     )
     .await;
-    let broken_id = broken["runId"].as_str().unwrap();
+    let broken_id = broken["run_id"].as_str().unwrap();
     let block = cli(&node, "run", &["wait", broken_id, "--timeout", "10"]).await;
     assert_eq!(block["status"], "blocked");
     assert!(

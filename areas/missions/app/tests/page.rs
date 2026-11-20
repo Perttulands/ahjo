@@ -202,32 +202,68 @@ fn cli_authored_graph_and_layout_open_on_the_canvas(cx: &mut TestAppContext) {
         );
         serde_json::from_slice(&output).unwrap()
     }
+    async fn edit(url: &str, change: serde_json::Value) -> serde_json::Value {
+        cli(
+            url,
+            "mission",
+            &["edit", "cli-board", "--change", &change.to_string()],
+        )
+        .await
+    }
     let (input, steps, judge, human, end) = rt.block_on(async {
         let u = &running.url;
-        cli(u, "mission", &["new", "cli-board", "--title", "CLI Board"]).await;
-        let input = cli(u, "mission", &["create", "cli-board", "--title", "Start"]).await["inputCard"]["id"].as_str().unwrap().to_owned();
+        cli(
+            u,
+            "mission",
+            &["create", "cli-board", "--title", "CLI Board"],
+        )
+        .await;
+        let input = edit(u, json!({"createInputCard":{"title":"Start"}})).await["input_card"]["id"]
+            .as_str()
+            .unwrap()
+            .to_owned();
         let mut steps = Vec::new();
         for title in ["Draft", "Polish", "Judge"] {
-            let step = cli(u, "formation", &["create", "cli-board", "--type", "solo", "--title", title]).await["formation"].clone();
+            let step = edit(u, json!({"createFormation":{"type":"solo","title":title}})).await;
+            let step = &step["formation"];
             let id = step["id"].as_str().unwrap().to_owned();
             let input = format!("{id}:{}", step["input"][0]["id"].as_str().unwrap());
             let output = format!("{id}:{}", step["output"][0]["id"].as_str().unwrap());
             steps.push((id, input, output));
         }
-        let judge = cli(u, "gate", &["create", "cli-board", "--title", "Judge gate", "--kinds", "formation"]).await["gate"]["id"].as_str().unwrap().to_owned();
-        cli(u, "gate", &["judge", "cli-board", &judge, "--chain", &steps[2].0]).await;
-        let human = cli(u, "gate", &["create", "cli-board", "--title", "Human gate"]).await["gate"]["id"].as_str().unwrap().to_owned();
-        let end = cli(u, "end", &["create", "cli-board", "--outcome", "done"]).await["end"]["id"].as_str().unwrap().to_owned();
-        cli(u, "mission", &["wire", "cli-board", &steps[0].1, "--input", &input]).await;
+        let judge = edit(
+            u,
+            json!({"createGate":{"title":"Judge gate","kinds":["formation"]}}),
+        )
+        .await["gate"]["id"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        edit(
+            u,
+            json!({"setGateJudge":{"gateId":judge,"chain":[steps[2].0]}}),
+        )
+        .await;
+        let human = edit(u, json!({"createGate":{"title":"Human gate"}})).await["gate"]["id"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        let end = edit(u, json!({"createEnd":{"outcome":"done"}})).await["end"]["id"]
+            .as_str()
+            .unwrap()
+            .to_owned();
         for (from, to) in [
+            (format!("{input}:out"), steps[0].1.clone()),
             (steps[0].2.clone(), format!("{judge}:in")),
             (format!("{judge}:pass"), steps[1].1.clone()),
             (steps[1].2.clone(), format!("{human}:in")),
             (format!("{human}:pass"), format!("{end}:in")),
         ] {
-            cli(u, "formation", &["wire", "cli-board", &from, &to]).await;
+            edit(u, json!({"wireConnection":{"from":from,"to":to}})).await;
         }
-        cli(u, "mission", &["move", "cli-board", &steps[0].0, "--x", "123", "--y", "456"]).await;
+        cli(u, "mission", &["arrange", "cli-board"]).await;
+        let change = json!({"nodes":[{"id":steps[0].0,"x":123,"y":456}]});
+        cli(u, "layout", &["edit", "cli-board", &change.to_string()]).await;
         (input, steps, judge, human, end)
     });
     let settings = std::env::temp_dir()

@@ -1,6 +1,7 @@
 //! Mission edit envelopes and diagnostics for the shared mutation type.
 use crate::MissionChange;
-use serde::{Deserialize, Serialize};
+use schemars::{JsonSchema, Schema, SchemaGenerator};
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use serde_json::{Map, Value};
 use std::sync::OnceLock;
 
@@ -23,6 +24,78 @@ pub struct EditRequest {
 pub enum Changes {
     Single(Box<MissionChange>),
     Batch(Vec<MissionChange>),
+}
+
+impl<'de> Deserialize<'de> for EditRequest {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let body = Value::deserialize(deserializer)?;
+        decode_request(&body).map_err(serde::de::Error::custom)
+    }
+}
+
+impl Serialize for EditRequest {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        match &self.changes {
+            Changes::Single(change) => {
+                #[derive(Serialize)]
+                #[serde(rename_all = "camelCase")]
+                struct Single<'a> {
+                    #[serde(skip_serializing_if = "Option::is_none")]
+                    expected_rev: Option<i64>,
+                    #[serde(skip_serializing_if = "str::is_empty")]
+                    updated_by: &'a str,
+                    #[serde(flatten)]
+                    change: &'a MissionChange,
+                }
+                Single {
+                    expected_rev: self.rev,
+                    updated_by: &self.updated_by,
+                    change,
+                }
+                .serialize(serializer)
+            }
+            Changes::Batch(changes) => {
+                #[derive(Serialize)]
+                struct Batch<'a> {
+                    rev: i64,
+                    changes: &'a [MissionChange],
+                }
+                let rev = self.rev.ok_or_else(|| {
+                    serde::ser::Error::custom("a batch needs the mission revision")
+                })?;
+                Batch { rev, changes }.serialize(serializer)
+            }
+        }
+    }
+}
+
+impl JsonSchema for EditRequest {
+    fn schema_name() -> std::borrow::Cow<'static, str> {
+        "MissionEditRequest".into()
+    }
+
+    fn json_schema(generator: &mut SchemaGenerator) -> Schema {
+        let operation = generator.subschema_for::<MissionChange>();
+        schemars::json_schema!({
+            "type": "object",
+            "description": format!(
+                "Send one operation, or a batch as {{\"rev\": n, \"changes\": [<operation>, ...]}}. Ids are those mission show --full gives. Operations and fields: {}.",
+                operation_help()
+            ),
+            "anyOf": [
+                operation,
+                {
+                    "type": "object",
+                    "required": ["rev", "changes"],
+                    "additionalProperties": false,
+                    "properties": {
+                        "rev": generator.subschema_for::<i64>(),
+                        "changes": {"type": "array", "minItems": 1, "items": operation}
+                    }
+                }
+            ]
+        })
+    }
 }
 
 /// Accept the historic single-operation form, and the revision-checked batch form.

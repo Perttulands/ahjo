@@ -10,21 +10,13 @@ These are the commands advertised by the enabled areas. Run `ahjo <noun> <verb> 
 
 `ahjo config show`.
 
-## end
-
-`ahjo end create`, `ahjo end delete`, `ahjo end update`.
-
 ## file
 
 `ahjo file copy`, `ahjo file delete`, `ahjo file diff`, `ahjo file list`, `ahjo file locate`, `ahjo file mkdir`, `ahjo file move`, `ahjo file read`, `ahjo file recent`, `ahjo file resume`, `ahjo file search`, `ahjo file stat`, `ahjo file status`, `ahjo file transfer`, `ahjo file write`.
 
-## formation
-
-`ahjo formation add-input`, `ahjo formation add-output`, `ahjo formation agent`, `ahjo formation assign`, `ahjo formation create`, `ahjo formation delete`, `ahjo formation fresh`, `ahjo formation inspect`, `ahjo formation list`, `ahjo formation place`, `ahjo formation rename`, `ahjo formation run`, `ahjo formation set-brief`, `ahjo formation set-port`, `ahjo formation set-slots`, `ahjo formation set-type`, `ahjo formation unassign`, `ahjo formation unwire`, `ahjo formation wire`.
-
 ## gate
 
-`ahjo gate approve`, `ahjo gate create`, `ahjo gate delete`, `ahjo gate judge`, `ahjo gate pick`, `ahjo gate reject`, `ahjo gate request`, `ahjo gate update`.
+`ahjo gate approve`, `ahjo gate pick`, `ahjo gate reject`, `ahjo gate request`.
 
 ## handoff
 
@@ -42,13 +34,9 @@ These are the commands advertised by the enabled areas. Run `ahjo <noun> <verb> 
 
 `ahjo layout edit`, `ahjo layout show`.
 
-## limit
-
-`ahjo limit create`, `ahjo limit delete`, `ahjo limit update`.
-
 ## mission
 
-`ahjo mission apply`, `ahjo mission archives`, `ahjo mission arrange`, `ahjo mission create`, `ahjo mission delete`, `ahjo mission edit`, `ahjo mission examples`, `ahjo mission export`, `ahjo mission input`, `ahjo mission inspect`, `ahjo mission list`, `ahjo mission move`, `ahjo mission new`, `ahjo mission note`, `ahjo mission notes`, `ahjo mission output`, `ahjo mission prefix`, `ahjo mission purge-archive`, `ahjo mission rename`, `ahjo mission reply`, `ahjo mission resolve`, `ahjo mission run`, `ahjo mission update`, `ahjo mission validate`, `ahjo mission wire`.
+`ahjo mission apply`, `ahjo mission archives`, `ahjo mission arrange`, `ahjo mission create`, `ahjo mission delete`, `ahjo mission edit`, `ahjo mission examples`, `ahjo mission export`, `ahjo mission list`, `ahjo mission note`, `ahjo mission notes`, `ahjo mission purge`, `ahjo mission reply`, `ahjo mission resolve`, `ahjo mission run`, `ahjo mission show`, `ahjo mission validate`.
 
 ## project
 

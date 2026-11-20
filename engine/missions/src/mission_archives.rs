@@ -1,23 +1,9 @@
 //! Mission definition, layout and note archives. Removing an archived
 //! symlink unlinks it and never removes its target.
 use crate::{Error, Store};
-use ahjo_mission_model::{Mission, Notes};
-use serde::Serialize;
+use ahjo_mission_model::{Mission, MissionArchive, Notes};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
-
-/// The archived components that remain for one deletion or old note edit.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct MissionArchive {
-    pub slug: String,
-    pub archive_id: String,
-    pub mission: bool,
-    pub layout: bool,
-    pub notes: bool,
-    /// Notes retained by an older delete, associated only by missionId.
-    pub retained_notes: bool,
-}
 
 fn check_archive_id(id: &str) -> Result<(), Error> {
     let suffix = id.strip_prefix("archive_").unwrap_or("");

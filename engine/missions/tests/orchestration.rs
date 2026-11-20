@@ -487,14 +487,14 @@ async fn cli_runs_orchestration_to_end_with_controller_and_worker_seats() {
         .replace("[[end]]", "[[formation.slot]]\nid = \"slot_worker\"\nlabel = \"Worker\"\nharness = \"openai-codex\"\neffort = \"medium\"\n\n[[end]]");
     std::fs::create_dir_all(root.join("missions")).unwrap();
     std::fs::write(root.join("missions/hello.mission.toml"), mission).unwrap();
-    let inspect = cli(&node, "mission", &["inspect", "hello"]).await;
+    let inspect = cli(&node, "mission", &["show", "hello"]).await;
     let started = cli(
         &node,
         "mission",
         &["run", "hello", "--inputs", r#"{"brief":"ship"}"#],
     )
     .await;
-    let run = started["runId"].as_str().unwrap();
+    let run = started["run_id"].as_str().unwrap();
     tokio::time::timeout(Duration::from_secs(10), async {
         loop {
             let ready = {

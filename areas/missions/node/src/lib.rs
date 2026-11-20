@@ -1,11 +1,12 @@
 //! The node-side mission service.
-mod authoring;
 mod channel;
 mod commands;
+mod created_card;
 pub use commands::DOCUMENT_FILE_ARGUMENTS;
 mod handover;
 mod notify;
 mod routes;
+mod run_commands;
 mod run_routes;
 mod sketch;
 

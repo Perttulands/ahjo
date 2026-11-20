@@ -59,7 +59,7 @@ A page is judged by three questions, in this order:
   name, what it is for, a few rough steps) and write notes on it, on the
   mission, a step, a gate, a limit or a wire, as plain multi-line text where
   they read it. An agent picks it up from one command (`ahjo mission
-  inspect`), builds a version that runs, and answers the notes in place,
+  show`), builds a version that runs, and answers the notes in place,
   resolving the ones it took up. The page exists so a person understands a
   complex flow: in what order the steps run, who does each, and where the
   gates and limits are and what each checks or caps, readable without

@@ -1,4 +1,4 @@
-use ahjo_node_kit::{Built, Listing, Setup};
+use ahjo_node_kit::{Built, Listing, NodeClient, Setup};
 use ahjo_testkit::{node::Node, sessions};
 use serde_json::json;
 
@@ -12,10 +12,10 @@ const LAB: Listing = Listing {
 const EXPECTED: &[&str] = &[
     "mission_list",
     "mission_archives",
-    "mission_purge_archive",
-    "mission_inspect",
+    "mission_purge",
+    "mission_show",
     "mission_validate",
-    "mission_new",
+    "mission_create",
     "mission_examples",
     "mission_export",
     "mission_apply",
@@ -27,7 +27,8 @@ const EXPECTED: &[&str] = &[
     "layout_show",
     "layout_edit",
     "mission_run",
-    "formation_run",
+    "mission_arrange",
+    "mission_delete",
     "run_list",
     "run_status",
     "run_wait",
@@ -44,44 +45,6 @@ const EXPECTED: &[&str] = &[
     "gate_approve",
     "gate_reject",
     "gate_pick",
-    "mission_arrange",
-    "mission_rename",
-    "mission_prefix",
-    "mission_move",
-    "mission_create",
-    "mission_update",
-    "mission_delete",
-    "mission_input",
-    "mission_output",
-    "mission_wire",
-    "formation_list",
-    "formation_inspect",
-    "formation_create",
-    "formation_rename",
-    "formation_place",
-    "formation_set_type",
-    "formation_set_slots",
-    "formation_assign",
-    "formation_unassign",
-    "formation_agent",
-    "formation_fresh",
-    "formation_set_brief",
-    "formation_add_input",
-    "formation_add_output",
-    "formation_set_port",
-    "formation_wire",
-    "formation_unwire",
-    "formation_delete",
-    "gate_create",
-    "gate_update",
-    "gate_judge",
-    "gate_delete",
-    "end_create",
-    "end_update",
-    "end_delete",
-    "limit_create",
-    "limit_update",
-    "limit_delete",
 ];
 
 #[tokio::test(flavor = "multi_thread")]
@@ -119,12 +82,90 @@ async fn command_list_and_coded_failures() {
             _ => json!({}),
         };
         let error = node.call(command, args).await.unwrap_err();
-        if command == "mission_apply" {
-            assert_eq!(error.code, "invalid_argument", "{error}");
-            assert!(error.message.contains("accepted fields: document, dry_run"));
+        if (command.starts_with("mission_") || command.starts_with("layout_"))
+            && command != "mission_export"
+        {
+            assert_eq!(error.code, "invalid_argument", "{command}: {error}");
         } else {
             assert_eq!(error.code, "bad_request", "{command}: {error}");
         }
+    }
+    node.stop().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn mission_command_schemas_and_cli_help_match_the_document_surface() {
+    let node = Node::start(&[sessions::LISTING, ahjo_work::LISTING, LAB], "")
+        .await
+        .unwrap();
+    let client = NodeClient::new(Some(&node.url())).unwrap();
+    let (answer, _) = client
+        .request(
+            axum::http::Method::POST,
+            "/mcp/missions",
+            Some(json!({"jsonrpc":"2.0","id":1,"method":"tools/list"})),
+            None,
+        )
+        .await
+        .unwrap();
+    let tools = answer["result"]["tools"].as_array().unwrap();
+    assert_eq!(tools.len(), EXPECTED.len());
+    for name in ahjo_missions_contract::commands::NAMES {
+        let tool = tools.iter().find(|tool| tool["name"] == *name).unwrap();
+        assert_eq!(tool["inputSchema"]["additionalProperties"], false, "{name}");
+        assert!(tool["outputSchema"].is_object(), "{tool}");
+        let error = node
+            .call(name, json!({"unexpected": true}))
+            .await
+            .unwrap_err();
+        assert_eq!(error.code, "invalid_argument", "{name}: {error}");
+        assert!(
+            error.message.contains("unknown arguments: unexpected"),
+            "{error}"
+        );
+    }
+
+    let address = format!("{}/", node.url());
+    let mut output = Vec::new();
+    let help = ["--node".into(), address.clone()];
+    assert_eq!(
+        ahjo_node_kit::cli::run("mission", &help, &mut output)
+            .await
+            .unwrap(),
+        0
+    );
+    let help = String::from_utf8(output).unwrap();
+    for verb in ["create", "show", "edit", "export", "apply", "purge"] {
+        assert!(
+            help.lines().any(|line| line
+                .split_whitespace()
+                .take(3)
+                .eq(["ahjo", "mission", verb])),
+            "{help}"
+        );
+    }
+    for (noun, verb) in [
+        ("mission", "new"),
+        ("mission", "inspect"),
+        ("mission", "wire"),
+        ("formation", "run"),
+        ("end", "create"),
+        ("limit", "create"),
+        ("gate", "create"),
+    ] {
+        let args = [
+            verb.into(),
+            "--node".into(),
+            address.clone(),
+            "--help".into(),
+        ];
+        let error = ahjo_node_kit::cli::run(noun, &args, &mut Vec::new())
+            .await
+            .unwrap_err();
+        assert!(
+            error.downcast_ref::<ahjo_node_kit::cli::Usage>().is_some(),
+            "{error}"
+        );
     }
     node.stop().await;
 }
@@ -135,12 +176,12 @@ async fn mission_edit_rejects_an_unknown_role_and_uses_work_in_both_brief_operat
         .await
         .unwrap();
     node.call(
-        "mission_new",
+        "mission_create",
         json!({"slug":"pair","example":"write-and-review"}),
     )
     .await
     .unwrap();
-    let inspect = || node.call("mission_inspect", json!({"mission":"pair","full":true}));
+    let inspect = || node.call("mission_show", json!({"mission":"pair","full":true}));
     let before = inspect().await.unwrap();
     let step = &before["mission"]["formation"][0];
     let id = &step["id"];
@@ -152,10 +193,10 @@ async fn mission_edit_rejects_an_unknown_role_and_uses_work_in_both_brief_operat
         .call("mission_edit", json!({"mission":"pair","change":change}))
         .await
         .unwrap_err();
-    assert_eq!(error.code, "bad_request");
+    assert_eq!(error.code, "invalid_argument");
     assert_eq!(
         error.message,
-        "assignSlot: unknown field role; accepted fields: formationId, slotId, agentId, harness, model, effort",
+        "assignSlot: unknown field role; accepted fields: formationId, slotId, agentId, harness, model, effort; accepted fields: mission, change, rev",
     );
     let args = vec![
         "edit".into(),
@@ -200,7 +241,7 @@ async fn mission_edit_rejects_an_unknown_role_and_uses_work_in_both_brief_operat
             .call("mission_edit", json!({"mission":"pair","change":change}))
             .await
             .unwrap_err();
-        assert_eq!(error.code, "bad_request");
+        assert_eq!(error.code, "invalid_argument");
         assert!(
             error.message.contains("beadId") && error.message.contains("work"),
             "{error}"
@@ -235,12 +276,12 @@ async fn author_and_run_with_tools() {
         .await
         .unwrap();
     assert!(node.call("mission_list", json!({})).await.unwrap()["missions"].is_array());
-    node.call("mission_new", json!({"slug":"demo","title":"Demo"}))
+    node.call("mission_create", json!({"slug":"demo","title":"Demo"}))
         .await
         .unwrap();
     let copied = node
         .call(
-            "mission_new",
+            "mission_create",
             json!({"slug":"pair","example":"write-and-review"}),
         )
         .await
@@ -250,7 +291,7 @@ async fn author_and_run_with_tools() {
         json!([{"id":"fmn_write","title":"Write"},{"id":"fmn_review","title":"Review"}])
     );
     assert_eq!(
-        node.call("mission_inspect", json!({"mission":"demo"}))
+        node.call("mission_show", json!({"mission":"demo"}))
             .await
             .unwrap()["title"],
         "Demo"
@@ -268,7 +309,12 @@ async fn author_and_run_with_tools() {
         )
         .await
         .unwrap();
-    let id = edited["inputCard"]["id"].as_str().unwrap();
+    use ahjo_missions_contract::commands::{AddedCard, MissionEdited};
+    let receipt: MissionEdited = serde_json::from_value(edited).unwrap();
+    let Some(AddedCard::InputCard(card)) = receipt.added else {
+        panic!("missing new Input card")
+    };
+    let id = &card.id;
     assert!(!id.is_empty());
     let note = node
         .call("mission_note", json!({"mission":"demo","text":"intent"}))
@@ -326,7 +372,7 @@ async fn author_and_run_with_tools() {
         )
         .await
         .unwrap();
-    let run = started["runId"].as_str().unwrap();
+    let run = started["run_id"].as_str().unwrap();
     assert!(node.call("run_list", json!({})).await.unwrap()["runs"].is_array());
     let waited = node
         .call("run_wait", json!({"run":run,"until":"final","timeout":5}))
@@ -398,12 +444,12 @@ async fn author_and_run_with_tools() {
     );
     let formation = node
         .call(
-            "formation_run",
-            json!({"mission":"hello","formation":"fmn_work","inputs":{"brief":"hi"}}),
+            "mission_run",
+            json!({"mission":"hello","from":"fmn_work","inputs":{"brief":"hi"}}),
         )
         .await
         .unwrap();
-    assert!(formation["runId"].is_string());
+    assert!(formation["run_id"].is_string());
     node.stop().await;
 }
 
@@ -556,7 +602,7 @@ async fn a_repository_run_can_be_landed() {
         )
         .await
         .unwrap();
-    let run = start["runId"].as_str().unwrap();
+    let run = start["run_id"].as_str().unwrap();
     assert_eq!(
         node.call("run_wait", json!({"run":run,"until":"final","timeout":5}))
             .await
@@ -596,42 +642,13 @@ async fn a_mission_built_through_commands_stays_arranged() {
         let node = &node;
         async move { node.call(name, args).await.unwrap() }
     };
-    call("mission_new", json!({"slug":"line"})).await;
-    let input = call("mission_create", json!({"mission":"line","title":"Start"})).await;
-    let input = input["inputCard"]["id"].as_str().unwrap().to_owned();
-    let mut steps = Vec::new();
-    for title in ["Write", "Review"] {
-        let step = call(
-            "formation_create",
-            json!({"mission":"line","type":"solo","title":title}),
-        )
-        .await;
-        steps.push(step["formation"].clone());
-    }
-    let port = |n: usize, side: &str| {
-        format!(
-            "{}:{}",
-            steps[n]["id"].as_str().unwrap(),
-            steps[n][side][0]["id"].as_str().unwrap()
-        )
-    };
-    call(
-        "mission_wire",
-        json!({"mission":"line","input":input,"to":port(0, "input")}),
+    let made = call(
+        "mission_create",
+        json!({"slug":"line","steps":"Write; Review"}),
     )
     .await;
-    call(
-        "formation_wire",
-        json!({"mission":"line","from":port(0, "output"),"to":port(1, "input")}),
-    )
-    .await;
-    let end = call("end_create", json!({"mission":"line","title":"Done"})).await;
-    let end = end["end"]["id"].as_str().unwrap().to_owned();
-    call(
-        "formation_wire",
-        json!({"mission":"line","from":port(1, "output"),"to":format!("{end}:in")}),
-    )
-    .await;
+    let shown = call("mission_show", json!({"mission":"line","full":true})).await;
+    let shown = &shown["mission"];
     let places = |layout: &serde_json::Value| {
         let mut v: Vec<(String, i64, i64)> = layout["layout"]["node"]
             .as_array()
@@ -658,10 +675,10 @@ async fn a_mission_built_through_commands_stays_arranged() {
     // Read left to right: Start, Write, Review, Done.
     let x = |id: &str| built.iter().find(|p| p.0 == id).unwrap().1;
     let ids = [
-        input.as_str(),
-        steps[0]["id"].as_str().unwrap(),
-        steps[1]["id"].as_str().unwrap(),
-        end.as_str(),
+        shown["inputCard"][0]["id"].as_str().unwrap(),
+        made["steps"][0]["id"].as_str().unwrap(),
+        made["steps"][1]["id"].as_str().unwrap(),
+        shown["end"][0]["id"].as_str().unwrap(),
     ];
     assert!(ids.windows(2).all(|w| x(w[0]) < x(w[1])));
     node.stop().await;
@@ -674,7 +691,7 @@ async fn cli_uses_the_same_mission_commands() {
         .unwrap();
     let mut output = Vec::new();
     let args = vec![
-        "new".to_string(),
+        "create".to_string(),
         "demo".to_string(),
         "--node".to_string(),
         format!("{}/", node.url()),
@@ -693,385 +710,8 @@ async fn cli_uses_the_same_mission_commands() {
     assert!(result.get("mission").is_none());
     assert_eq!(
         result["next"][0],
-        format!("ahjo mission inspect --node {}/ demo", node.url())
+        format!("ahjo mission show --node {}/ demo", node.url())
     );
-    node.stop().await;
-}
-
-#[tokio::test(flavor = "multi_thread")]
-async fn end_create_help_names_the_outcomes_and_default() {
-    let node = Node::start(&[sessions::LISTING, ahjo_work::LISTING, LAB], "")
-        .await
-        .unwrap();
-    let args = vec![
-        "create".to_owned(),
-        "--help".to_owned(),
-        "--node".to_owned(),
-        format!("{}/", node.url()),
-    ];
-    let mut output = Vec::new();
-    assert_eq!(
-        ahjo_node_kit::cli::run("end", &args, &mut output)
-            .await
-            .unwrap(),
-        0
-    );
-    let help = String::from_utf8(output).unwrap();
-    assert!(
-        help.contains("--outcome is done (the default) or rejected"),
-        "{help}"
-    );
-    node.stop().await;
-}
-
-/// An agent building a one-seat mission names no seat and no port, and a
-/// wrong name is answered with the names there are.
-#[tokio::test(flavor = "multi_thread")]
-async fn a_simple_mission_needs_no_seat_or_port_names() {
-    let node = Node::start(&[sessions::LISTING, ahjo_work::LISTING, LAB], "")
-        .await
-        .unwrap();
-    node.call("mission_new", json!({"slug":"plain"}))
-        .await
-        .unwrap();
-    node.call("mission_create", json!({"mission":"plain"}))
-        .await
-        .unwrap();
-    let step = node
-        .call(
-            "formation_create",
-            json!({"mission":"plain","title":"Answer"}),
-        )
-        .await
-        .unwrap();
-    let step_id = step["formation"]["id"].as_str().unwrap().to_owned();
-    let assigned = node
-        .call(
-            "formation_assign",
-            json!({"mission":"plain","formation":"Answer","harness":"Claude","model":"haiku","effort":"low"}),
-        )
-        .await
-        .unwrap();
-    assert_eq!(assigned["changed"][0]["slot"][0]["harness"], "claude-code");
-    assert!(assigned.get("formation").is_none() && assigned["mission"] == "plain");
-    node.call("end_create", json!({"mission":"plain","title":"Done"}))
-        .await
-        .unwrap();
-    node.call(
-        "formation_wire",
-        json!({"mission":"plain","from":"Answer","to":"Done"}),
-    )
-    .await
-    .unwrap();
-    // Without a wire from its Input card the mission cannot run, and
-    // validate says so, with the command that fixes it.
-    let unwired = node
-        .call("mission_validate", json!({"mission":"plain"}))
-        .await
-        .unwrap();
-    assert_eq!(unwired["errors"], json!([]), "{unwired}");
-    assert_eq!(unwired["valid"], false, "{unwired}");
-    assert!(
-        unwired["summary"]
-            .as_str()
-            .unwrap()
-            .starts_with("not runnable: "),
-        "{unwired}"
-    );
-    assert_eq!(
-        unwired["next"],
-        format!("ahjo mission wire plain --to {step_id}")
-    );
-    node.call("mission_wire", json!({"mission":"plain","to":"Answer"}))
-        .await
-        .unwrap();
-    let valid = node
-        .call("mission_validate", json!({"mission":"plain"}))
-        .await
-        .unwrap();
-    assert_eq!(
-        (&valid["valid"], &valid["summary"], &valid["next"]),
-        (
-            &json!(true),
-            &json!("valid"),
-            &json!("ahjo mission run plain --inputs '{\"brief\":\"...\"}'")
-        ),
-        "{valid}"
-    );
-    let edges = node
-        .call("mission_inspect", json!({"mission":"plain","full":true}))
-        .await
-        .unwrap()["mission"]["connection"]
-        .to_string();
-    assert!(edges.matches(&step_id).count() == 2, "{edges}");
-    let wrong = node
-        .call(
-            "mission_run",
-            json!({"mission":"plain","input":"topic=fog"}),
-        )
-        .await
-        .unwrap_err()
-        .to_string();
-    assert!(
-        wrong.contains("this mission has: Input") && wrong.contains("takes: brief"),
-        "{wrong}"
-    );
-    node.stop().await;
-}
-
-#[tokio::test(flavor = "multi_thread")]
-async fn specialized_authoring_commands_build_and_edit_a_graph() {
-    let node = Node::start(&[sessions::LISTING, ahjo_work::LISTING, LAB], "")
-        .await
-        .unwrap();
-    node.call("mission_new", json!({"slug":"board"}))
-        .await
-        .unwrap();
-    node.call("mission_rename", json!({"mission":"board","title":"Board"}))
-        .await
-        .unwrap();
-    let input = node
-        .call("mission_create", json!({"mission":"board","title":"Start"}))
-        .await
-        .unwrap();
-    let input_id = input["inputCard"]["id"].as_str().unwrap().to_owned();
-    node.call("mission_update", json!({"mission":"board","goal":"A goal"}))
-        .await
-        .unwrap();
-    node.call(
-        "mission_input",
-        json!({"mission":"board","name":"topic","required":true}),
-    )
-    .await
-    .unwrap();
-    node.call("mission_output", json!({"mission":"board","name":"result"}))
-        .await
-        .unwrap();
-    let step = node
-        .call(
-            "formation_create",
-            json!({"mission":"board","type":"solo","title":"Work"}),
-        )
-        .await
-        .unwrap();
-    let step_id = step["formation"]["id"].as_str().unwrap().to_owned();
-    assert!(
-        node.call("formation_list", json!({"mission":"board"}))
-            .await
-            .unwrap()["formation"]
-            .is_array()
-    );
-    assert_eq!(
-        node.call(
-            "formation_inspect",
-            json!({"mission":"board","formation":step_id})
-        )
-        .await
-        .unwrap()["formation"]["id"],
-        step_id
-    );
-    node.call(
-        "formation_rename",
-        json!({"mission":"board","formation":step_id,"title":"Build"}),
-    )
-    .await
-    .unwrap();
-    node.call(
-        "formation_place",
-        json!({"mission":"board","formation":step_id,"place":"home"}),
-    )
-    .await
-    .unwrap();
-    node.call(
-        "formation_set_type",
-        json!({"mission":"board","formation":step_id,"type":"solo"}),
-    )
-    .await
-    .unwrap();
-    let mut cli_out = Vec::new();
-    let cli_args = vec![
-        "set-type".into(),
-        "board".into(),
-        step_id.clone(),
-        "solo".into(),
-        "--node".into(),
-        format!("{}/", node.url()),
-        "--json".into(),
-    ];
-    assert_eq!(
-        ahjo_node_kit::cli::run("formation", &cli_args, &mut cli_out)
-            .await
-            .unwrap(),
-        0
-    );
-    node.call(
-        "formation_set_slots",
-        json!({"mission":"board","formation":step_id,"slot":["seat=Worker"]}),
-    )
-    .await
-    .unwrap();
-    node.call("formation_assign",json!({"mission":"board","formation":step_id,"slot":"seat","harness":"claude-code","effort":"medium"})).await.unwrap();
-    let store = ahjo_mission_engine::Store::new(ahjo_mission_engine::Store::root_in(node.dir()));
-    ahjo_mission_engine::CharacterStore::new(store.roles().dir())
-        .create(ahjo_mission_engine::Character {
-            name: "Test stamp".into(),
-            harness: "claude-code".into(),
-            effort: "high".into(),
-            ..Default::default()
-        })
-        .unwrap();
-    let stamped = node
-        .call(
-            "formation_assign",
-            json!({"mission":"board","formation":step_id,"slot":"seat","character":"test-stamp"}),
-        )
-        .await
-        .unwrap();
-    assert_eq!(stamped["changed"][0]["slot"][0]["effort"], "high");
-    node.call(
-        "formation_unassign",
-        json!({"mission":"board","formation":step_id,"slot":"seat"}),
-    )
-    .await
-    .unwrap();
-    let brief = node
-        .call(
-            "formation_set_brief",
-            json!({"mission":"board","formation":step_id,"goal":"Do the work","bead":"ahjo-2"}),
-        )
-        .await
-        .unwrap();
-    assert_eq!(brief["changed"][0]["brief"]["work"], "ahjo-2");
-    let with_input = node
-        .call(
-            "formation_add_input",
-            json!({"mission":"board","formation":step_id,"label":"Extra input"}),
-        )
-        .await
-        .unwrap();
-    let input_port = with_input["changed"][0]["input"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .find(|p| p["label"] == "Extra input")
-        .unwrap()["id"]
-        .as_str()
-        .unwrap()
-        .to_owned();
-    let with_output = node
-        .call(
-            "formation_add_output",
-            json!({"mission":"board","formation":step_id,"label":"Extra output"}),
-        )
-        .await
-        .unwrap();
-    let output_port = with_output["changed"][0]["output"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .find(|p| p["label"] == "Extra output")
-        .unwrap()["id"]
-        .as_str()
-        .unwrap()
-        .to_owned();
-    node.call(
-        "formation_set_port",
-        json!({"mission":"board","formation":step_id,"port":output_port,"label":"Result"}),
-    )
-    .await
-    .unwrap();
-    node.call(
-        "mission_wire",
-        json!({"mission":"board","input":input_id,"to":format!("{step_id}:{input_port}")}),
-    )
-    .await
-    .unwrap();
-    let end = node
-        .call(
-            "end_create",
-            json!({"mission":"board","title":"Done","outcome":"done"}),
-        )
-        .await
-        .unwrap();
-    let end_id = end["end"]["id"].as_str().unwrap().to_owned();
-    node.call(
-        "end_update",
-        json!({"mission":"board","end":end_id,"title":"Finished"}),
-    )
-    .await
-    .unwrap();
-    let from = format!("{step_id}:{output_port}");
-    let to = format!("{end_id}:in");
-    node.call(
-        "formation_wire",
-        json!({"mission":"board","from":from,"to":to}),
-    )
-    .await
-    .unwrap();
-    node.call(
-        "formation_unwire",
-        json!({"mission":"board","from":from,"to":to}),
-    )
-    .await
-    .unwrap();
-    let gate = node
-        .call("gate_create", json!({"mission":"board","title":"Review"}))
-        .await
-        .unwrap();
-    let gate_id = gate["gate"]["id"].as_str().unwrap().to_owned();
-    node.call(
-        "gate_update",
-        json!({"mission":"board","gate":gate_id,"title":"Review work"}),
-    )
-    .await
-    .unwrap();
-    node.call(
-        "gate_judge",
-        json!({"mission":"board","gate":gate_id,"detach":true}),
-    )
-    .await
-    .unwrap();
-    let limit = node
-        .call(
-            "limit_create",
-            json!({"mission":"board","target":step_id,"rounds":"2"}),
-        )
-        .await
-        .unwrap();
-    let limit_id = limit["limit"]["id"].as_str().unwrap().to_owned();
-    node.call(
-        "limit_update",
-        json!({"mission":"board","limit":limit_id,"rounds":"3"}),
-    )
-    .await
-    .unwrap();
-    node.call(
-        "mission_move",
-        json!({"mission":"board","card":step_id,"x":100,"y":200}),
-    )
-    .await
-    .unwrap();
-    node.call("mission_arrange", json!({"mission":"board"}))
-        .await
-        .unwrap();
-    node.call("limit_delete", json!({"mission":"board","limit":limit_id}))
-        .await
-        .unwrap();
-    node.call("gate_delete", json!({"mission":"board","gate":gate_id}))
-        .await
-        .unwrap();
-    node.call("end_delete", json!({"mission":"board","end":end_id}))
-        .await
-        .unwrap();
-    node.call(
-        "formation_delete",
-        json!({"mission":"board","formation":step_id}),
-    )
-    .await
-    .unwrap();
-    node.call("mission_delete", json!({"mission":"board"}))
-        .await
-        .unwrap();
     node.stop().await;
 }
 
@@ -1080,9 +720,12 @@ async fn cli_lists_and_removes_deleted_mission_archives() {
     let node = Node::start(&[sessions::LISTING, ahjo_work::LISTING, LAB], "")
         .await
         .unwrap();
-    node.call("mission_new", json!({"slug":"archived","title":"Archived"}))
-        .await
-        .unwrap();
+    node.call(
+        "mission_create",
+        json!({"slug":"archived","title":"Archived"}),
+    )
+    .await
+    .unwrap();
     node.call(
         "mission_edit",
         json!({"mission":"archived","change":{"createInputCard":{"title":"Start","goal":"Work"}}}),
@@ -1122,12 +765,9 @@ async fn cli_lists_and_removes_deleted_mission_archives() {
         0
     );
     let help = String::from_utf8(help).unwrap();
-    assert!(
-        help.contains("archive") && help.contains("purge-archive"),
-        "{help}"
-    );
+    assert!(help.contains("archive") && help.contains("purge"), "{help}");
     let deletion = cli(&node, &["delete", "archived"]).await;
-    let archive = deletion["deletion"]["archiveId"].as_str().unwrap();
+    let archive = deletion["deletion"]["archive_id"].as_str().unwrap();
     assert!(
         cli(&node, &["list"]).await["missions"]
             .as_array()
@@ -1139,7 +779,7 @@ async fn cli_lists_and_removes_deleted_mission_archives() {
         .as_array()
         .unwrap()
         .iter()
-        .find(|entry| entry["archiveId"] == archive)
+        .find(|entry| entry["archive_id"] == archive)
         .unwrap();
     assert_eq!(record["slug"], "archived");
     assert_eq!(record["mission"], true);
@@ -1148,7 +788,7 @@ async fn cli_lists_and_removes_deleted_mission_archives() {
     // Reusing the slug must not let purging the earlier archive remove the
     // new definition, its notes, or any run history.
     node.call(
-        "mission_new",
+        "mission_create",
         json!({"slug":"archived","title":"Replacement"}),
     )
     .await
@@ -1165,8 +805,8 @@ async fn cli_lists_and_removes_deleted_mission_archives() {
     let run_dir = node.dir().join("missions/runs");
     std::fs::create_dir_all(&run_dir).unwrap();
     std::fs::write(run_dir.join("keep-history"), "unrelated run").unwrap();
-    let removed = cli(&node, &["purge-archive", "archived", archive]).await;
-    assert_eq!(removed["removed"]["archiveId"], archive);
+    let removed = cli(&node, &["purge", "archived", archive]).await;
+    assert_eq!(removed["removed"]["archive_id"], archive);
     assert!(
         cli(&node, &["archives"]).await["archives"]
             .as_array()
@@ -1174,7 +814,7 @@ async fn cli_lists_and_removes_deleted_mission_archives() {
             .is_empty()
     );
     assert_eq!(
-        node.call("mission_inspect", json!({"mission":"archived"}))
+        node.call("mission_show", json!({"mission":"archived"}))
             .await
             .unwrap()["title"],
         "Replacement"
@@ -1199,7 +839,7 @@ async fn an_agent_picks_up_a_mission_from_its_notes() {
         .await
         .unwrap();
     node.call(
-        "mission_new",
+        "mission_create",
         json!({"slug":"ship","example":"plan-build-check"}),
     )
     .await
@@ -1217,7 +857,7 @@ async fn an_agent_picks_up_a_mission_from_its_notes() {
         node.call("mission_note", note(target, text)).await.unwrap();
     }
     let read = node
-        .call("mission_inspect", json!({"mission":"ship"}))
+        .call("mission_show", json!({"mission":"ship"}))
         .await
         .unwrap();
     assert_eq!(read["notes"], "4 threads, 4 open", "{read}");
@@ -1262,7 +902,7 @@ async fn an_agent_picks_up_a_mission_from_its_notes() {
     .await
     .unwrap();
     let read = node
-        .call("mission_inspect", json!({"mission":"ship"}))
+        .call("mission_show", json!({"mission":"ship"}))
         .await
         .unwrap();
     assert_eq!(read["notes"], "4 threads, 3 open");
@@ -1272,7 +912,7 @@ async fn an_agent_picks_up_a_mission_from_its_notes() {
         .await
         .unwrap();
     let read = node
-        .call("mission_inspect", json!({"mission":"ship"}))
+        .call("mission_show", json!({"mission":"ship"}))
         .await
         .unwrap();
     assert_eq!(read["notes"], "4 threads, 4 open");
@@ -1315,13 +955,13 @@ async fn a_mission_is_sketched_from_rough_steps() {
         .await
         .unwrap();
     node.call(
-        "mission_new",
+        "mission_create",
         json!({"slug":"digest","steps":"Collect\nGroup; Write\n\n","note":"A Monday digest"}),
     )
     .await
     .unwrap();
     let read = node
-        .call("mission_inspect", json!({"mission":"digest"}))
+        .call("mission_show", json!({"mission":"digest"}))
         .await
         .unwrap();
     let order: Vec<_> = (read["steps"].as_array().unwrap().iter())
@@ -1340,14 +980,14 @@ async fn a_mission_is_sketched_from_rough_steps() {
     assert_eq!(read["about"][0]["text"], "A Monday digest");
     let mixed = node
         .call(
-            "mission_new",
+            "mission_create",
             json!({"slug":"both","steps":"One","example":"write-and-review"}),
         )
         .await
         .unwrap_err();
     assert_eq!(mixed.code, "bad_request");
     assert!(
-        node.call("mission_inspect", json!({"mission":"both"}))
+        node.call("mission_show", json!({"mission":"both"}))
             .await
             .is_err()
     );
@@ -1365,12 +1005,15 @@ async fn a_long_sketch_is_made_whole_and_arranged() {
         let slug = format!("long{count}");
         let steps: Vec<_> = (1..=count).map(|i| format!("Step {i}")).collect();
         let made = node
-            .call("mission_new", json!({"slug":slug,"steps":steps.join("\n")}))
+            .call(
+                "mission_create",
+                json!({"slug":slug,"steps":steps.join("\n")}),
+            )
             .await
             .unwrap();
         assert_eq!(made["steps"].as_array().unwrap().len(), count, "{made}");
         let read = node
-            .call("mission_inspect", json!({"mission":slug}))
+            .call("mission_show", json!({"mission":slug}))
             .await
             .unwrap();
         let last = read["steps"].as_array().unwrap().last().unwrap().clone();
@@ -1418,7 +1061,7 @@ async fn a_failed_sketch_leaves_no_mission() {
     // The steps are made first; the note, too large to keep, fails last.
     let failed = node
         .call(
-            "mission_new",
+            "mission_create",
             json!({"slug":"half","steps":"Collect\nWrite","note":"x".repeat(70 * 1024)}),
         )
         .await
@@ -1429,14 +1072,14 @@ async fn a_failed_sketch_leaves_no_mission() {
         "{failed:?}"
     );
     let missing = node
-        .call("mission_inspect", json!({"mission":"half"}))
+        .call("mission_show", json!({"mission":"half"}))
         .await
         .unwrap_err();
     assert_eq!(missing.code, "not_found");
     let archives = node.call("mission_archives", json!({})).await.unwrap();
     assert_eq!(archives["archives"], json!([]), "{archives}");
     // The name is free again.
-    node.call("mission_new", json!({"slug":"half","steps":"Collect"}))
+    node.call("mission_create", json!({"slug":"half","steps":"Collect"}))
         .await
         .unwrap();
     node.stop().await;
@@ -1447,11 +1090,11 @@ async fn mission_edit_batches_commit_once_or_leave_the_mission_and_layout_untouc
     let node = Node::start(&[sessions::LISTING, ahjo_work::LISTING, LAB], "")
         .await
         .unwrap();
-    node.call("mission_new", json!({"slug":"batch","title":"Original"}))
+    node.call("mission_create", json!({"slug":"batch","title":"Original"}))
         .await
         .unwrap();
 
-    let inspect = || node.call("mission_inspect", json!({"mission":"batch","full":true}));
+    let inspect = || node.call("mission_show", json!({"mission":"batch","full":true}));
     let layout = || node.call("layout_show", json!({"mission":"batch"}));
     let before = inspect().await.unwrap();
     let before_layout = layout().await.unwrap();
@@ -1465,7 +1108,7 @@ async fn mission_edit_batches_commit_once_or_leave_the_mission_and_layout_untouc
         ),
         (
             json!({"createEnd":{"unexpected":null}}),
-            "bad_request",
+            "invalid_argument",
             "createEnd: unknown field unexpected; accepted fields: title, outcome, x, y",
         ),
     ] {
@@ -1476,7 +1119,15 @@ async fn mission_edit_batches_commit_once_or_leave_the_mission_and_layout_untouc
             .await
             .unwrap_err();
         assert_eq!(error.code, code);
-        assert_eq!(error.message, format!("change at index 1: {message}"));
+        let message = format!("change at index 1: {message}");
+        if code == "invalid_argument" {
+            assert_eq!(
+                error.message,
+                format!("{message}; accepted fields: mission, change, rev")
+            );
+        } else {
+            assert_eq!(error.message, message);
+        }
         assert_eq!(inspect().await.unwrap(), before);
         assert_eq!(layout().await.unwrap(), before_layout);
     }

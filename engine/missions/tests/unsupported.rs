@@ -185,50 +185,41 @@ async fn cli_refuses_to_save_unsupported_formation_and_channel() {
     )
     .unwrap();
     let before = std::fs::read(folder.join("gated.mission.toml")).unwrap();
-    let mut output = Vec::new();
-    let args = vec![
-        "create".into(),
-        "gated".into(),
-        "--type".into(),
-        "peer".into(),
-        "--node".into(),
-        format!("{}/", node.url()),
-    ];
-    assert_eq!(
-        ahjo_node_kit::cli::run("formation", &args, &mut output)
+    for (operation, code) in [
+        (
+            json!({"createFormation":{"type":"peer"}}),
+            "unsupported_formation",
+        ),
+        (
+            json!({"updateInputCard":{"id":"inp_start","humanChannel":"session"}}),
+            "unsupported_human_channel",
+        ),
+    ] {
+        let mut output = Vec::new();
+        let args = vec![
+            "edit".into(),
+            "gated".into(),
+            "--change".into(),
+            operation.to_string(),
+            "--node".into(),
+            format!("{}/", node.url()),
+        ];
+        assert_eq!(
+            ahjo_node_kit::cli::run("mission", &args, &mut output)
+                .await
+                .unwrap(),
+            1
+        );
+        let error = node
+            .call(
+                "mission_edit",
+                json!({"mission":"gated","change":operation}),
+            )
             .await
-            .unwrap(),
-        1
-    );
-    let error = node
-        .call("formation_create", json!({"mission":"gated","type":"peer"}))
-        .await
-        .unwrap_err();
-    assert_eq!(error.code, "unsupported_formation");
-    assert!(error.message.contains("not supported"));
-    let args = vec![
-        "update".into(),
-        "gated".into(),
-        "--human-channel".into(),
-        "session".into(),
-        "--node".into(),
-        format!("{}/", node.url()),
-    ];
-    assert_eq!(
-        ahjo_node_kit::cli::run("mission", &args, &mut output)
-            .await
-            .unwrap(),
-        1
-    );
-    let error = node
-        .call(
-            "mission_update",
-            json!({"mission":"gated","human_channel":"session"}),
-        )
-        .await
-        .unwrap_err();
-    assert_eq!(error.code, "unsupported_human_channel");
-    assert!(error.message.contains("not supported"));
+            .unwrap_err();
+        assert_eq!(error.code, code);
+        assert!(error.message.contains("not supported"));
+    }
     assert_eq!(
         std::fs::read(folder.join("gated.mission.toml")).unwrap(),
         before

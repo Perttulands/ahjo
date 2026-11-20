@@ -4,7 +4,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 /// Read a mission or example as its stored TOML document.
-#[derive(Debug, Deserialize, JsonSchema)]
+#[derive(Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ExportMission {
     /// The mission's slug or id.
@@ -14,7 +14,7 @@ pub struct ExportMission {
     pub example: Option<String>,
 }
 
-#[derive(Debug, Serialize, JsonSchema)]
+#[derive(Debug, Deserialize, Serialize, JsonSchema)]
 pub struct ExportedMission {
     /// The exact TOML text, including its revision.
     #[schemars(extend("x-ahjo-cli-toml" = true))]
@@ -22,7 +22,7 @@ pub struct ExportedMission {
 }
 
 /// Create or replace a mission from its TOML document, or preview the change.
-#[derive(Debug, Deserialize, JsonSchema)]
+#[derive(Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ApplyMission {
     /// TOML text over MCP. On the command line, a local file or - for stdin.
@@ -33,7 +33,7 @@ pub struct ApplyMission {
     pub dry_run: bool,
 }
 
-#[derive(Debug, Serialize, JsonSchema)]
+#[derive(Debug, Deserialize, Serialize, JsonSchema)]
 pub struct AppliedMission {
     /// The slug named in the document.
     pub mission: String,

@@ -130,7 +130,7 @@ fn start() -> Running {
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(dir.join("hello.mission.toml"), mission()).unwrap();
         let result = node.call("mission_run", json!({"mission":"hello","input":"inp_hello","inputs":{"brief":"ship"},"cwd":node.dir()})).await.unwrap();
-        let id = result["runId"].as_str().unwrap().to_owned();
+        let id = result["run_id"].as_str().unwrap().to_owned();
         let deadline = Instant::now() + Duration::from_secs(15);
         loop {
             let state = node.call("run_status", json!({"run":id})).await.unwrap();

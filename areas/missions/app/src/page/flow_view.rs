@@ -634,7 +634,7 @@ impl MissionsPage {
                         .gap(px(size::HEAD_GAP))
                         .child(div().flex_1().min_w_0().text_color(t.text2).child(
                             "Write what you are making, as roughly as you like: an agent \
-                             reads it with ahjo mission inspect and builds from it.",
+                             reads it with ahjo mission show and builds from it.",
                         ))
                         .child(
                             kit::button(t, button, "Write it", Kind::Primary)

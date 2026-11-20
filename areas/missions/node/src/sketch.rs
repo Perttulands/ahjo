@@ -3,8 +3,7 @@
 //! the steps yet; an agent reading the notes staffs and briefs them.
 use crate::Missions;
 use ahjo_core::Error;
-use ahjo_missions_contract::{self as wire, NotePatch, Precondition};
-use serde_json::json;
+use ahjo_missions_contract::{self as wire, LayoutPatch, MissionChange, NotePatch, Precondition};
 
 /// The rough steps written one per line (or separated by `;`), trimmed,
 /// with the empty ones left out.
@@ -22,15 +21,16 @@ pub(crate) fn steps(text: &str) -> Vec<String> {
 /// archive, and the error says so.
 pub(crate) fn fill(
     m: &Missions,
+    id: &str,
     slug: &str,
     steps: &[String],
     note: &str,
     actor: &str,
 ) -> Result<(), Error> {
-    let Err(error) = sketch(m, slug, steps, note, actor) else {
+    let Err(error) = sketch(m, id, steps, note, actor) else {
         return Ok(());
     };
-    let message = match discard(m, slug) {
+    let message = match discard(m, id) {
         Ok(()) => format!(
             "{}; the mission was not created and nothing of it is left, so create it again once that is put right",
             error.message
@@ -45,10 +45,10 @@ pub(crate) fn fill(
 }
 
 /// Remove the mission `slug` this sketch made, archive and all.
-fn discard(m: &Missions, slug: &str) -> Result<(), Error> {
-    let current = m.store.mission_edit(slug)?;
+fn discard(m: &Missions, id: &str) -> Result<(), Error> {
+    let current = m.store.mission_edit(id)?;
     let deleted = m.store.delete_mission(
-        slug,
+        id,
         Precondition {
             rev: current.mission.rev,
             etag: current.etag,
@@ -59,44 +59,68 @@ fn discard(m: &Missions, slug: &str) -> Result<(), Error> {
     Ok(())
 }
 
-fn sketch(
-    m: &Missions,
-    slug: &str,
-    steps: &[String],
-    note: &str,
-    actor: &str,
-) -> Result<(), Error> {
-    let call = |name: &str, args: serde_json::Value| {
-        let mut args = args;
-        args["mission"] = json!(slug);
-        args["updated_by"] = json!(actor);
-        crate::authoring::call(m, name, &args)
-    };
+fn sketch(m: &Missions, id: &str, steps: &[String], note: &str, actor: &str) -> Result<(), Error> {
     if !steps.is_empty() {
-        call("mission_create", json!({}))?;
-        let mut previous: Option<String> = None;
-        for title in steps {
-            let made = call("formation_create", json!({"title": title}))?;
-            let id = made["formation"]["id"]
-                .as_str()
-                .unwrap_or_default()
-                .to_owned();
-            match &previous {
-                None => call("mission_wire", json!({"to": id}))?,
-                Some(from) => call("formation_wire", json!({"from": from, "to": id}))?,
-            };
-            previous = Some(id);
+        let current = m.store.mission_edit(id)?;
+        let mut cards = vec![MissionChange::CreateInputCard {
+            title: "Input".into(),
+            goal: String::new(),
+            files: Vec::new(),
+            human_channel: String::new(),
+            x: 0,
+            y: 0,
+        }];
+        cards.extend(steps.iter().map(|title| MissionChange::CreateFormation {
+            kind: wire::SOLO.into(),
+            title: title.clone(),
+            x: 0,
+            y: 0,
+        }));
+        cards.push(MissionChange::CreateEnd {
+            title: "Done".into(),
+            outcome: wire::DONE.into(),
+            x: 0,
+            y: 0,
+        });
+        let edited = m.store.patch_batch(
+            id,
+            Precondition {
+                rev: current.mission.rev,
+                etag: current.etag,
+            },
+            cards,
+            actor,
+        )?;
+        let input = &edited.mission.input_cards[current.mission.input_cards.len()];
+        let end = &edited.mission.ends[current.mission.ends.len()];
+        let mut from = format!("{}:{}", input.id, wire::INPUT_CARD_OUT);
+        let mut wires = Vec::with_capacity(steps.len() + 1);
+        for step in &edited.mission.formations[current.mission.formations.len()..] {
+            wires.push(connection(
+                from,
+                format!("{}:{}", step.id, step.inputs[0].id),
+            ));
+            from = format!("{}:{}", step.id, step.outputs[0].id);
         }
-        let end = call("end_create", json!({"title": "Done"}))?;
-        let end = end["end"]["id"].as_str().unwrap_or_default();
-        if let Some(last) = previous {
-            call("formation_wire", json!({"from": last, "to": end}))?;
-        }
+        wires.push(connection(from, format!("{}:{}", end.id, wire::END_IN)));
+        let edited = m.store.patch_batch(
+            id,
+            Precondition {
+                rev: edited.mission.rev,
+                etag: edited.etag,
+            },
+            wires,
+            actor,
+        )?;
+        let layout = m.store.layout_edit(id)?;
+        let arranged = ahjo_mission_engine::arrange(&edited.mission, &layout.layout);
+        m.store
+            .patch_layout(id, &layout.etag, LayoutPatch::Nodes(arranged.nodes))?;
     }
     if !note.trim().is_empty() {
-        let current = m.store.notes_edit(slug)?;
+        let current = m.store.notes_edit(id)?;
         m.store.patch_notes(
-            slug,
+            id,
             &current.etag,
             NotePatch::Append {
                 target: wire::MISSION_THREAD.into(),
@@ -110,6 +134,15 @@ fn sketch(
         )?;
     }
     Ok(())
+}
+
+fn connection(from: String, to: String) -> MissionChange {
+    MissionChange::WireConnection {
+        from,
+        to,
+        id: String::new(),
+        join_if_occupied: false,
+    }
 }
 
 #[cfg(test)]

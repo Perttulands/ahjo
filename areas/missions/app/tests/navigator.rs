@@ -43,7 +43,7 @@ fn start() -> Running {
         let mut runs = Vec::new();
         for _ in 0..6 {
             let answer = node.call("mission_run", json!({"mission":"hello","input":"inp_hello","inputs":{"brief":"ship"},"cwd":node.dir()})).await.unwrap();
-            let id = answer["runId"].as_str().unwrap().to_owned();
+            let id = answer["run_id"].as_str().unwrap().to_owned();
             let deadline = Instant::now() + Duration::from_secs(15);
             loop {
                 let state = node.call("run_status", json!({"run":id})).await.unwrap();

@@ -17,6 +17,7 @@ ahjo-term = { path = "../../../engine/term" }
 ahjo-mission-engine = { path = "../../../engine/missions" }
 ahjo-work-contract = { path = "../../work/contract" }
 ahjo-missions-contract = { path = "../contract" }
+schemars.workspace = true
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["preserve_order"] }
 tokio = { version = "1", features = ["full"] }

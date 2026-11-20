@@ -27,7 +27,7 @@ pub use branches::{kept_branch, run_branch, run_tag};
 pub use examples::{EXAMPLES, Example, example};
 pub use finding::{Code, Finding, Report};
 pub use layout::{LAYOUT_SCHEMA, Layout, LayoutEdge, LayoutNode};
-pub use mission::{MISSION_SCHEMA, Mission, MissionListing};
+pub use mission::{MISSION_SCHEMA, Mission, MissionArchive, MissionListing};
 pub use nodes::{
     Brief, Connection, DONE, END_IN, End, Formation, GATE_FAIL, GATE_IN, GATE_JUDGE, GATE_PASS,
     Gate, INPUT_CARD_OUT, InputCard, KIND_FILE, KIND_FOLDER, KIND_TEXT, Limit, MissionInput,

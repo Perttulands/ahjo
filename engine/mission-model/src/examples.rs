@@ -1,5 +1,5 @@
 //! Missions a person starts from: each is a whole graph, staffed and
-//! wired, that `ahjo mission new <slug> --example <name>` copies under a
+//! wired, that `ahjo mission create <slug> --example <name>` copies under a
 //! new id.
 pub struct Example {
     pub name: &'static str,

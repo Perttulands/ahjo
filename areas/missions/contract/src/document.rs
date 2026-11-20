@@ -3,7 +3,7 @@ use crate::NoteEntry;
 use serde::{Deserialize, Serialize};
 
 /// Notes are grouped by target on the wire, rather than the flat file form.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct NotesDocument {
     pub schema: i64,
@@ -16,7 +16,7 @@ pub struct NotesDocument {
     pub elements: Vec<NoteThread>,
     pub etag: String,
 }
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct Note {
     pub id: String,
@@ -40,7 +40,7 @@ impl From<NoteEntry> for Note {
         }
     }
 }
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct NoteThread {
     pub node_id: String,

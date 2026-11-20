@@ -492,7 +492,7 @@ fn restore_index<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Option<us
 }
 
 /// An archived mission and the id shared by its archived layout.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 pub struct MissionDeletion {
     pub id: String,
     pub slug: String,

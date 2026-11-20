@@ -102,8 +102,8 @@ pub struct EditNotes {
     pub entry_id: String,
     pub action: String,
 }
-#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
-#[serde(default, rename_all = "camelCase")]
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(default, deny_unknown_fields)]
 pub struct EditLayout {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub arrange: Option<bool>,
@@ -156,6 +156,7 @@ pub struct SeatWait {
     pub seq: u64,
 }
 
+pub mod commands;
 pub mod document;
 pub mod document_commands;
 

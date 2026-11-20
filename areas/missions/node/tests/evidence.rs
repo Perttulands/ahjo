@@ -98,7 +98,7 @@ async fn run(node: &Node, best: bool) -> String {
         )
         .await
         .unwrap();
-    let id = answer["runId"].as_str().unwrap().to_owned();
+    let id = answer["run_id"].as_str().unwrap().to_owned();
     tokio::time::timeout(Duration::from_secs(10), async {
         loop {
             let status = node.call("run_status", json!({"run":id})).await.unwrap();

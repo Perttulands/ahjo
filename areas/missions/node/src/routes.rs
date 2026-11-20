@@ -165,7 +165,14 @@ async fn create(State(m): State<Missions>, input: JsonBody<Value>) -> ResultResp
         result
     } else {
         let slug = result.mission.slug.clone();
-        crate::sketch::fill(&m, &slug, &steps, s(&v, "note"), s(&v, "updatedBy"))?;
+        crate::sketch::fill(
+            &m,
+            &result.mission.id,
+            &slug,
+            &steps,
+            s(&v, "note"),
+            s(&v, "updatedBy"),
+        )?;
         m.store.mission_edit(&slug)?
     };
     m.changed();
@@ -204,19 +211,31 @@ async fn edit(
     };
     let before = m.store.mission_edit(&id)?;
     let actor = &request.updated_by;
-    let e = match request.changes {
-        patch::Changes::Single(change) => m.store.patch(&id, precondition, *change, actor),
-        patch::Changes::Batch(changes) => m.store.patch_batch(&id, precondition, changes, actor),
-    }?;
+    let (e, created) = match request.changes {
+        patch::Changes::Single(change) => {
+            let created = crate::created_card::CreatedCard::from_change(&change);
+            (m.store.patch(&id, precondition, *change, actor)?, created)
+        }
+        patch::Changes::Batch(changes) => (
+            m.store.patch_batch(&id, precondition, changes, actor)?,
+            None,
+        ),
+    };
     if e.etag != before.etag {
         m.changed();
     }
     let layout = m.store.layout_edit(&id)?;
     let mut changed = std::collections::BTreeMap::new();
-    if let Some(key) = crate::authoring::creation_key(&v)
-        && let Some(card) = crate::authoring::added_card(key, &before.mission, &e.mission)
-    {
-        changed.insert(key.into(), card);
+    if let Some(card) = created.and_then(|kind| kind.added(&before.mission, &e.mission)) {
+        use ahjo_missions_contract::commands::AddedCard;
+        let (key, value) = match card {
+            AddedCard::InputCard(card) => ("inputCard", json!(card)),
+            AddedCard::Formation(card) => ("formation", json!(card)),
+            AddedCard::Gate(card) => ("gate", json!(card)),
+            AddedCard::End(card) => ("end", json!(card)),
+            AddedCard::Limit(card) => ("limit", json!(card)),
+        };
+        changed.insert(key.into(), value);
     }
     for (op, key) in [
         ("deleteFormation", "formationId"),

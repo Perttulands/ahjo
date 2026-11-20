@@ -254,7 +254,7 @@ title = "Old card"
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn a_port_choice_names_ids_even_when_labels_repeat() {
+async fn repeat_port_labels_can_be_wired_by_exact_id() {
     let node = Node::start(AREAS, "").await.unwrap();
     let document = r#"schema = 1
 slug = "ports"
@@ -269,16 +269,18 @@ formation = [
     node.call("mission_apply", json!({"document":document}))
         .await
         .unwrap();
-    for to in ["Merge", "Merge:Input"] {
-        let error = node
-            .call(
-                "formation_wire",
-                json!({"mission":"ports","from":"Start","to":to}),
-            )
-            .await
-            .unwrap_err();
-        assert!(error.message.contains("merge:first"), "{error}");
-        assert!(error.message.contains("merge:second"), "{error}");
-    }
+    let shown = node
+        .call("mission_show", json!({"mission":"ports","full":true}))
+        .await
+        .unwrap();
+    let inputs = &shown["mission"]["formation"][0]["input"];
+    assert_eq!(inputs[0]["label"], inputs[1]["label"]);
+    assert_eq!(inputs[0]["id"], "first");
+    assert_eq!(inputs[1]["id"], "second");
+    let edit = node.call(
+        "mission_edit",
+        json!({"mission":"ports","change":{"wireConnection":{"from":"start:out","to":"merge:second"}}}),
+    ).await.unwrap();
+    assert_eq!(edit["mission"]["connection"][0]["to"], "merge:second");
     node.stop().await;
 }

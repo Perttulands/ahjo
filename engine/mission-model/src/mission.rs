@@ -15,7 +15,7 @@ use ahjo_core::Error;
 /// The only mission file schema Ahjo reads.
 pub const MISSION_SCHEMA: i64 = 1;
 
-#[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq)]
+#[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq, schemars::JsonSchema)]
 #[serde(default, deny_unknown_fields, rename_all = "camelCase")]
 pub struct Mission {
     pub schema: i64,
@@ -114,7 +114,7 @@ fn is_zero(n: &usize) -> bool {
 }
 
 /// One mission file as the listing shows it.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct MissionListing {
     pub slug: String,
     #[serde(default, skip_serializing_if = "String::is_empty")]
@@ -130,4 +130,16 @@ pub struct MissionListing {
     /// the other fields are then empty but the slug.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub broken: Option<String>,
+}
+
+/// The archived components that remain for one deletion or old note edit.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct MissionArchive {
+    pub slug: String,
+    pub archive_id: String,
+    pub mission: bool,
+    pub layout: bool,
+    pub notes: bool,
+    /// Notes retained by an older delete, associated only by missionId.
+    pub retained_notes: bool,
 }

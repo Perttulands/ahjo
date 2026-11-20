@@ -8,7 +8,7 @@ use ahjo_core::Error;
 
 pub const LAYOUT_SCHEMA: i64 = 1;
 
-#[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq)]
+#[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq, schemars::JsonSchema)]
 #[serde(default, deny_unknown_fields, rename_all = "camelCase")]
 pub struct Layout {
     pub schema: i64,
@@ -24,7 +24,7 @@ pub struct Layout {
 }
 
 /// A card's place: a node id, or `note:<target>` for a dragged sticky.
-#[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq)]
+#[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq, schemars::JsonSchema)]
 #[serde(default, deny_unknown_fields)]
 pub struct LayoutNode {
     pub id: String,
@@ -33,7 +33,7 @@ pub struct LayoutNode {
 }
 
 /// The lane a wire, by connection id, takes.
-#[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq)]
+#[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq, schemars::JsonSchema)]
 #[serde(default, deny_unknown_fields)]
 pub struct LayoutEdge {
     pub id: String,

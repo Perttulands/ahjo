@@ -74,7 +74,7 @@ async fn node_restart_does_not_resend_and_old_final_runs_are_ignored() {
         &["run", "hello", "--inputs", r#"{"brief":"hi"}"#],
     )
     .await;
-    let old_id = old["runId"].as_str().unwrap();
+    let old_id = old["run_id"].as_str().unwrap();
     assert_eq!(
         cli(
             &first,
@@ -103,7 +103,7 @@ async fn node_restart_does_not_resend_and_old_final_runs_are_ignored() {
         &["run", "review", "--inputs", r#"{"brief":"hi"}"#],
     )
     .await;
-    let id = started["runId"].as_str().unwrap();
+    let id = started["run_id"].as_str().unwrap();
     assert_eq!(
         cli(&second, "run", &["wait", id, "--timeout", "10"]).await["outcome"],
         "needs-you"
