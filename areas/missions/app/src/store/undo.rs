@@ -652,7 +652,7 @@ mod tests {
         seat.model = "opus".into();
         let before = Staffing::from(&*seat);
         let edited = Staffing {
-            role: "reviewer".into(),
+            agent_id: "reviewer".into(),
             harness: ahjo_missions_contract::Harness::OpenAiCodex,
             model: "gpt-6".into(),
             effort: ahjo_missions_contract::Effort::Low,

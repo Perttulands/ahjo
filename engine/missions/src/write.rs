@@ -11,7 +11,7 @@ static REFERENCES: OnceLock<Registry<RwLock<()>>> = OnceLock::new();
 static DOCUMENTS: OnceLock<Registry<Mutex<()>>> = OnceLock::new();
 static FILES: OnceLock<Registry<Mutex<()>>> = OnceLock::new();
 
-/// A mission's three files share one lock; role deletion excludes mission writers.
+/// A mission's three files share one lock; agent archival excludes mission writers.
 pub(crate) struct Locks {
     pub references: Arc<RwLock<()>>,
     pub document: Arc<Mutex<()>>,
@@ -60,14 +60,14 @@ fn get<T: Default>(registry: &Registry<T>, key: PathBuf) -> Arc<T> {
 #[cfg(test)]
 mod reference_lock_tests {
     #[test]
-    fn role_deletion_and_mission_writes_share_the_reference_lock() {
+    fn agent_archival_and_mission_writes_share_the_reference_lock() {
         let root = std::env::temp_dir().join(format!("ahjo-reference-lock-{}", std::process::id()));
         let mission = super::locks(&root, "mission:example");
-        let role = super::locks(&root, "role:writer");
+        let agent = super::locks(&root, "agent:writer");
         let guard = mission.references.read().unwrap();
-        assert!(role.references.try_write().is_err());
+        assert!(agent.references.try_write().is_err());
         drop(guard);
-        assert!(role.references.try_write().is_ok());
+        assert!(agent.references.try_write().is_ok());
     }
 }
 

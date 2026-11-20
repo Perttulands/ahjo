@@ -371,6 +371,7 @@ dependencies = [
  "ahjo-core",
  "ahjo-harness-contract",
  "ahjo-mission-engine",
+ "ahjo-mission-model",
  "ahjo-node-kit",
  "ahjo-term",
  "ahjo-terminals",
@@ -413,6 +414,7 @@ name = "ahjo-harness-contract"
 version = "0.0.1"
 dependencies = [
  "ahjo-core",
+ "ahjo-mission-model",
  "schemars",
  "serde",
  "serde_json",

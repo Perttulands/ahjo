@@ -26,6 +26,27 @@ fn located(findings: &[Finding]) -> Vec<(String, String)> {
     pairs
 }
 
+struct Scratch(std::path::PathBuf);
+
+impl Scratch {
+    fn agents(parity: &Path) -> Self {
+        let root = Self(ahjo_testkit::fresh_dir("agent-parity"));
+        std::fs::create_dir_all(root.0.join("roles")).unwrap();
+        std::fs::copy(
+            parity.join("roles/critic.toml"),
+            root.0.join("roles/critic.toml"),
+        )
+        .unwrap();
+        root
+    }
+}
+
+impl Drop for Scratch {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.0);
+    }
+}
+
 #[test]
 fn findings_match_archons_on_every_parity_mission() {
     let parity = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/parity");
@@ -34,6 +55,8 @@ fn findings_match_archons_on_every_parity_mission() {
     )
     .unwrap();
     let store = Store::new(&parity);
+    let scratch = Scratch::agents(&parity);
+    let agents = Store::new(&scratch.0).agents();
     let harnesses = Harnesses::from_codex_home(&parity.join("codex"));
     let listed: Vec<_> = store
         .list_missions()
@@ -123,7 +146,7 @@ fn findings_match_archons_on_every_parity_mission() {
                 }
             }
         }
-        let report = validate(&mission, &store.roles(), &harnesses);
+        let report = validate(&mission, &agents, &harnesses);
         let mut sorted = archon.errors.clone();
         // Those findings now fail decoding, which is checked above.
         let decoded = match slug.as_str() {
@@ -173,10 +196,12 @@ fn findings_match_archons_on_every_parity_mission() {
 fn archons_examples_load_and_validate_clean() {
     let parity = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/parity");
     let store = Store::new(&parity);
+    let scratch = Scratch::agents(&parity);
+    let agents = Store::new(&scratch.0).agents();
     for slug in ["delivery", "operations-proof"] {
         let mission = store.read_mission(slug).unwrap();
         assert_eq!(mission.input_cards.len(), 1);
-        let report = validate(&mission, &store.roles(), &Harnesses::default());
+        let report = validate(&mission, &agents, &Harnesses::default());
         assert_eq!(report, Default::default(), "{slug}");
     }
 }

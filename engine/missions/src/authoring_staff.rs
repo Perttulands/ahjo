@@ -187,8 +187,8 @@ pub(crate) fn apply(
                 .find(|s| s.id == slot_id)
                 .ok_or_else(not_found)?;
             let (agent_id, model) = (agent_id.trim(), model.trim());
-            if !agent_id.is_empty() && crate::roles::check_role_id(agent_id).is_err() {
-                return Err(Error::new("invalid_slot_settings", "invalid role id"));
+            if !agent_id.is_empty() && crate::check_agent_id(agent_id).is_err() {
+                return Err(Error::new("invalid_slot_settings", "invalid agent id"));
             }
             if [agent_id, harness.as_str(), model, effort.as_str()]
                 .iter()

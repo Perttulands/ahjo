@@ -1,11 +1,11 @@
 //! Staffing: every slot states a harness and effort a seat can start with,
-//! and any role it names exists and is not retired.
+//! and any agent it names is available.
 
+use crate::AgentStore;
 use crate::harness::Harnesses;
-use crate::roles::{RETIRED, RoleStore};
 use ahjo_mission_model::{Code, Finding, Mission};
 
-pub fn findings(mission: &Mission, roles: &RoleStore, harnesses: &Harnesses) -> Vec<Finding> {
+pub fn findings(mission: &Mission, agents: &AgentStore, harnesses: &Harnesses) -> Vec<Finding> {
     let mut findings = Vec::new();
     for step in &mission.steps {
         let id = &step.id;
@@ -16,7 +16,7 @@ pub fn findings(mission: &Mission, roles: &RoleStore, harnesses: &Harnesses) -> 
                 add(
                     Code::UnstaffedSlot,
                     format!(
-                        "step {id:?} slot {name} needs a harness and effort, and optionally a role"
+                        "step {id:?} slot {name} needs a harness and effort, and optionally an agent"
                     ),
                 );
                 continue;
@@ -39,23 +39,34 @@ pub fn findings(mission: &Mission, roles: &RoleStore, harnesses: &Harnesses) -> 
             if slot.agent_id.is_empty() {
                 continue;
             }
-            let role = &slot.agent_id;
-            match roles.read(role) {
-                Ok(card) if card.status == RETIRED => add(
-                    Code::RetiredPersona,
-                    format!(
-                        "step {id:?} slot {name} uses retired role {role:?}; staff it with another role or none, or bring the role back"
-                    ),
-                ),
-                Ok(_) => {}
-                Err(error) if error.code == "not_found" => add(
-                    Code::UnavailablePersona,
-                    format!("step {id:?} slot {name} names unknown role {role:?}"),
-                ),
-                Err(err) => add(
-                    Code::UnavailablePersona,
-                    format!("step {id:?} slot {name} cannot read role {role:?}: {err}"),
-                ),
+            let agent_id = &slot.agent_id;
+            if let Err(error) = agents.read(agent_id) {
+                let (code, message) = if error.code == "not_found" {
+                    if agents
+                        .dir()
+                        .join("archive")
+                        .join(format!("{agent_id}.toml"))
+                        .is_file()
+                    {
+                        (
+                            Code::RetiredPersona,
+                            format!(
+                                "uses archived agent {agent_id:?}; restaff it or restore the agent file"
+                            ),
+                        )
+                    } else {
+                        (
+                            Code::UnavailablePersona,
+                            format!("names unknown agent {agent_id:?}"),
+                        )
+                    }
+                } else {
+                    (
+                        Code::UnavailablePersona,
+                        format!("cannot read agent {agent_id:?}: {error}"),
+                    )
+                };
+                add(code, format!("step {id:?} slot {name} {message}"));
             }
         }
     }

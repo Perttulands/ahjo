@@ -53,10 +53,10 @@ async fn commands_and_channel_work_over_the_node() {
         .await
         .unwrap_err();
     assert_eq!(old_path.downcast_ref::<NodeError>().unwrap().status, 404);
-    for tool in tools
-        .iter()
-        .filter(|tool| tool["name"].as_str().unwrap().starts_with("harness_"))
-    {
+    for tool in tools.iter().filter(|tool| {
+        let name = tool["name"].as_str().unwrap();
+        name.starts_with("harness_") || name.starts_with("agent_")
+    }) {
         for key in ["inputSchema", "outputSchema"] {
             assert_eq!(tool[key]["type"], "object", "{tool}");
             let schema = tool[key].to_string();
@@ -87,15 +87,11 @@ async fn commands_and_channel_work_over_the_node() {
             "harness_hook_remove",
             "harness_hook_switch",
             "harness_setting_set",
-            "role_list",
-            "role_inspect",
-            "role_usage",
-            "role_new",
-            "role_edit",
-            "role_retire",
-            "role_restore",
-            "role_delete",
-            "role_characters"
+            "agent_list",
+            "agent_show",
+            "agent_create",
+            "agent_edit",
+            "agent_delete"
         ]
     );
     assert_eq!(ahjo_harness::LISTING.commands, names);
@@ -183,65 +179,69 @@ async fn next_kind(
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn role_routes_and_commands_keep_versions_and_usage() {
-    let root = fresh_dir("ahjo-roles-node");
+async fn agent_commands_keep_versions_and_usage_and_archive() {
+    let root = fresh_dir("ahjo-agent-node");
     let config = format!("[harness]\nhome = {:?}\npath = []\n", root);
     let node = Node::start(&[sessions::LISTING, ahjo_harness::LISTING], &config)
         .await
         .unwrap();
-    let client = NodeClient::new(Some(&node.url())).unwrap();
-    let (created, tag) = client.request(Method::POST, "/api/roles", Some(json!({"id":"writer","displayName":"Writer","kind":"specialist","summary":"Writes","capabilities":["draft"],"personality":"calm"})), None).await.unwrap();
-    assert_eq!(created["displayName"], "Writer");
-    assert!(!tag.is_empty());
-    let (list, _) = client
-        .request(
-            Method::GET,
-            "/api/roles?capable=draft&assignable=true",
-            None,
-            None,
+    let created = node
+        .call(
+            "agent_create",
+            json!({
+                "id":"writer", "name":"Writer", "instructions":"Writes",
+                "harness":"claude-code", "model":"", "effort":"medium"
+            }),
         )
         .await
         .unwrap();
-    assert_eq!(list["roles"][0]["id"], "writer");
-    let (read, etag) = client
-        .request(Method::GET, "/api/roles/writer", None, None)
-        .await
-        .unwrap();
-    assert_eq!(etag, tag);
-    assert_eq!(read["etag"], tag);
-    let (changed, next) = client
-        .request(
-            Method::PATCH,
-            "/api/roles/writer",
-            Some(json!({"summary":"Revised","note":"Keep context","capabilities":["draft"]})),
-            Some(&tag),
-        )
-        .await
-        .unwrap();
-    assert_eq!(changed["summary"], "Revised");
-    assert_eq!(changed["notes"][0]["text"], "Keep context");
+    assert_eq!(created["agent"]["name"], "Writer");
+    let etag = created["etag"].as_str().unwrap().to_owned();
+    assert!(!etag.is_empty());
+
+    let listed = node.call("agent_list", json!({})).await.unwrap();
     assert!(
-        changed["tags"]
+        listed["agents"]
             .as_array()
             .unwrap()
-            .contains(&json!("personality:calm"))
+            .iter()
+            .any(|agent| agent["id"] == "writer")
     );
-    let conflict = client
-        .request(
-            Method::PATCH,
-            "/api/roles/writer",
-            Some(json!({"summary":"stale"})),
-            Some(&tag),
+    let catalog = listed["harnesses"].as_array().unwrap();
+    let codex = catalog
+        .iter()
+        .find(|item| item["id"] == "openai-codex")
+        .unwrap();
+    assert!(
+        codex["efforts"]
+            .as_array()
+            .unwrap()
+            .contains(&json!("ultra"))
+    );
+    assert!(listed["effort_policy"].is_array());
+    let changed = node
+        .call(
+            "agent_edit",
+            json!({
+                "agent":"writer", "etag":etag, "instructions":"Revised",
+                "notes":[{"at":"2026-11-20T12:00:00Z","by":"human:ui","text":"Keep context"}]
+            }),
+        )
+        .await
+        .unwrap();
+    assert_eq!(changed["agent"]["instructions"], "Revised");
+    assert_eq!(changed["agent"]["notes"][0]["text"], "Keep context");
+    let conflict = node
+        .call(
+            "agent_edit",
+            json!({
+                "agent":"writer", "etag":etag, "instructions":"stale"
+            }),
         )
         .await
         .unwrap_err();
-    assert_eq!(
-        conflict
-            .downcast_ref::<ahjo_node_kit::NodeError>()
-            .unwrap()
-            .code,
-        "conflict"
-    );
+    assert_eq!(conflict.code, "conflict");
+
     let state = ahjo_mission_engine::Store::root_in(node.dir());
     let mission = state.join("missions/draft.mission.toml");
     std::fs::create_dir_all(mission.parent().unwrap()).unwrap();
@@ -265,102 +265,196 @@ agent_id = "writer"
 "#,
     )
     .unwrap();
-    let (usage, _) = client
-        .request(Method::GET, "/api/roles/writer/usage", None, None)
+    let shown = node
+        .call("agent_show", json!({"agent":"writer"}))
         .await
         .unwrap();
-    assert_eq!(usage["complete"], true);
+    assert_eq!(shown["etag"], changed["etag"]);
+    assert_eq!(shown["usage"]["complete"], true);
     assert_eq!(
-        usage["usage"],
+        shown["usage"]["usage"],
         json!([{
-            "mission_id": "mis_draft",
-            "mission_slug": "draft",
-            "mission_title": "Draft",
-            "step_id": "step_write",
-            "step_title": "Write",
-            "slot_id": "slot_writer",
-            "slot_label": "Writer"
+            "mission_id":"mis_draft", "mission_slug":"draft", "mission_title":"Draft",
+            "step_id":"step_write", "step_title":"Write",
+            "slot_id":"slot_writer", "slot_label":"Writer"
         }])
     );
-    let called = node
-        .call("role_usage", json!({"role":"writer"}))
+
+    let stale_delete = node
+        .call("agent_delete", json!({"agent":"writer","etag":etag}))
         .await
-        .unwrap();
-    assert_eq!(called["usage"], usage["usage"]);
-    assert_eq!(called["complete"], true);
-    std::fs::remove_file(mission).unwrap();
-    let (retired, next) = client
-        .request(
-            Method::PATCH,
-            "/api/roles/writer",
-            Some(json!({"retire":true})),
-            Some(&next),
+        .unwrap_err();
+    assert_eq!(stale_delete.code, "conflict");
+    let deleted = node
+        .call(
+            "agent_delete",
+            json!({"agent":"writer","etag":shown["etag"]}),
         )
         .await
         .unwrap();
-    assert_eq!(retired["status"], "retired");
-    let (filtered, _) = client
-        .request(
-            Method::GET,
-            "/api/roles?capable=draft&assignable=true",
-            None,
-            None,
-        )
-        .await
-        .unwrap();
-    assert_eq!(filtered["roles"], json!([]));
-    let (restored, next) = client
-        .request(
-            Method::PATCH,
-            "/api/roles/writer",
-            Some(json!({"retire":false})),
-            Some(&next),
-        )
-        .await
-        .unwrap();
-    assert_eq!(restored["status"], "active");
-    let (deleted, _) = client
-        .request(Method::DELETE, "/api/roles/writer", None, Some(&next))
-        .await
-        .unwrap();
-    assert_eq!(deleted["deleted"], "writer");
-    assert!(!state.join("roles/writer.toml").exists());
-    let names = [
-        "role_list",
-        "role_inspect",
-        "role_usage",
-        "role_new",
-        "role_edit",
-        "role_retire",
-        "role_restore",
-        "role_delete",
-        "role_characters",
-    ];
-    assert!(ahjo_harness::LISTING.commands.ends_with(&names));
-    let role = node
-        .call("role_new", json!({"role":"editor","display_name":"Editor"}))
-        .await
-        .unwrap();
-    assert_eq!(role["id"], "editor");
+    assert_eq!(deleted["agent"], "writer");
+    assert!(!state.join("agents/writer.toml").exists());
+    assert!(state.join("agents/archive/writer.toml").exists());
     assert_eq!(
-        node.call("role_inspect", json!({"role":"editor"}))
+        node.call("agent_show", json!({"agent":"writer"}))
             .await
-            .unwrap()["id"],
-        "editor"
+            .unwrap_err()
+            .code,
+        "not_found"
     );
-    // A list gives what tells roles apart; every field when asked.
-    let listed = node.call("role_list", json!({})).await.unwrap();
-    let editor = (listed["roles"].as_array().unwrap().iter())
-        .find(|r| r["id"] == "editor")
-        .unwrap();
-    assert_eq!(editor["displayName"], "Editor", "{listed}");
-    assert!(editor.get("schema").is_none(), "{listed}");
-    assert!(listed.get("harnesses").is_none(), "{listed}");
-    let full = node.call("role_list", json!({"full": true})).await.unwrap();
-    assert!(full["roles"][0].get("schema").is_some(), "{full}");
-    assert!(full["harnesses"].is_array(), "{full}");
+    std::fs::rename(
+        state.join("agents/archive/writer.toml"),
+        state.join("agents/writer.toml"),
+    )
+    .unwrap();
+    assert_eq!(
+        node.call("agent_show", json!({"agent":"writer"}))
+            .await
+            .unwrap()["agent"]["id"],
+        "writer"
+    );
+
+    let bad = node
+        .call(
+            "agent_create",
+            json!({
+                "id":"editor", "name":"Editor", "instructions":"Edit",
+                "harness":"claude-code", "effort":"high", "unknown":true
+            }),
+        )
+        .await
+        .unwrap_err();
+    assert_eq!(bad.code, "invalid_argument");
+    let client = NodeClient::new(Some(&node.url())).unwrap();
+    let old = client
+        .request(Method::GET, "/api/roles", None, None)
+        .await
+        .unwrap_err();
+    assert_eq!(old.downcast_ref::<NodeError>().unwrap().status, 404);
+    let mut help = Vec::new();
+    let args = vec!["--node".into(), format!("{}/", node.url())];
+    assert_eq!(cli::run("agent", &args, &mut help).await.unwrap(), 0);
+    let help = String::from_utf8(help).unwrap();
+    for verb in ["list", "show", "create", "edit", "delete"] {
+        assert!(help.contains(verb), "{help}");
+    }
+    let index = cli::index(Some(&format!("{}/", node.url()))).await.unwrap();
+    assert!(
+        !index
+            .lines()
+            .any(|line| line.split_whitespace().next() == Some("role")),
+        "{index}"
+    );
     node.stop().await;
     std::fs::remove_dir_all(root).unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn startup_upgrades_roles_and_characters_before_agent_list() {
+    use ahjo_node_kit::{Config, Options};
+
+    let dir = fresh_dir("ahjo-agent-upgrade-node");
+    let roles = dir.join("missions/roles");
+    std::fs::create_dir_all(&roles).unwrap();
+    std::fs::write(
+        roles.join("writer.toml"),
+        r#"schema = 1
+[card]
+id = "writer"
+display_name = "Writer"
+kind = "specialist"
+summary = "Writes careful drafts"
+status = "active"
+[[note]]
+ts = "2026-11-20T12:00:00Z"
+actor = "human:ui"
+text = "Keep context"
+"#,
+    )
+    .unwrap();
+    std::fs::write(
+        roles.join("reviewer.toml"),
+        r#"schema = 1
+[card]
+id = "reviewer"
+display_name = "Reviewer"
+kind = "reviewer"
+summary = "Retired reviewer"
+status = "retired"
+"#,
+    )
+    .unwrap();
+    let characters = r#"{"schema":2,"characters":[{"id":"night-writer","name":"Night writer","agent_id":"writer","harness":"openai-codex","model":"","effort":"ultra"}]}"#;
+    std::fs::write(roles.join("characters.json"), characters).unwrap();
+
+    let config = Config::parse("", dir.clone()).unwrap();
+    let running = ahjo_node_kit::start(
+        Options {
+            dir: dir.clone(),
+            config,
+            listen: Some("127.0.0.1:0".into()),
+        },
+        &[sessions::LISTING, ahjo_harness::LISTING],
+    )
+    .await
+    .unwrap();
+    let url = format!("http://{}/", running.address);
+    let client = NodeClient::new(Some(&url)).unwrap();
+    let (listed, _) = client
+        .request(Method::POST, "/api/call/agent_list", Some(json!({})), None)
+        .await
+        .unwrap();
+    let agents = listed["agents"].as_array().unwrap();
+    assert_eq!(agents.len(), 8, "{listed}");
+    for id in [
+        "scout",
+        "planner",
+        "builder",
+        "judge",
+        "orchestrator",
+        "debugger",
+        "writer",
+        "night-writer",
+    ] {
+        assert!(
+            agents.iter().any(|agent| agent["id"] == id),
+            "{id}: {listed}"
+        );
+    }
+    assert!(!agents.iter().any(|agent| agent["id"] == "reviewer"));
+    let writer = agents.iter().find(|agent| agent["id"] == "writer").unwrap();
+    assert!(
+        writer["instructions"]
+            .as_str()
+            .unwrap()
+            .contains("Writes careful drafts")
+    );
+    assert_eq!(writer["notes"][0]["text"], "Keep context");
+    let night = agents
+        .iter()
+        .find(|agent| agent["id"] == "night-writer")
+        .unwrap();
+    assert_eq!(night["harness"], "openai-codex");
+    assert_eq!(night["effort"], "ultra");
+    assert!(
+        night["instructions"]
+            .as_str()
+            .unwrap()
+            .contains("Writes careful drafts")
+    );
+    assert!(dir.join("missions/agents/archive/reviewer.toml").exists());
+    assert!(!roles.join("characters.json").exists());
+    assert_eq!(
+        std::fs::read_to_string(roles.join("characters.json.bak")).unwrap(),
+        characters
+    );
+    let mut output = Vec::new();
+    let args = vec!["list".into(), "--node".into(), url, "--json".into()];
+    assert_eq!(cli::run("agent", &args, &mut output).await.unwrap(), 0);
+    let from_cli: Value = serde_json::from_slice(&output).unwrap();
+    assert_eq!(from_cli["agents"], listed["agents"]);
+    running.stop().await.unwrap();
+    std::fs::remove_dir_all(dir).unwrap();
 }
 
 #[cfg(unix)]

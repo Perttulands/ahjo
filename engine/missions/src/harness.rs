@@ -3,27 +3,47 @@
 
 use std::path::{Path, PathBuf};
 
+use ahjo_mission_model::{Effort, EffortPolicy, Harness, HarnessChoices, HarnessModel};
 use serde::Deserialize;
 
-struct Harness {
-    id: &'static str,
+struct HarnessOptions {
+    id: Harness,
     /// What the CLI's effort flag accepts: `claude --effort`, Codex's
     /// `model_reasoning_effort`, Pi's thinking level.
-    efforts: &'static [&'static str],
+    efforts: &'static [Effort],
 }
 
-const HARNESSES: &[Harness] = &[
-    Harness {
-        id: "claude-code",
-        efforts: &["low", "medium", "high", "xhigh", "max"],
+const HARNESSES: &[HarnessOptions] = &[
+    HarnessOptions {
+        id: Harness::ClaudeCode,
+        efforts: &[
+            Effort::Low,
+            Effort::Medium,
+            Effort::High,
+            Effort::Xhigh,
+            Effort::Max,
+        ],
     },
-    Harness {
-        id: "openai-codex",
-        efforts: &["low", "medium", "high", "xhigh", "max", "ultra"],
+    HarnessOptions {
+        id: Harness::OpenAiCodex,
+        efforts: &[
+            Effort::Low,
+            Effort::Medium,
+            Effort::High,
+            Effort::Xhigh,
+            Effort::Max,
+            Effort::Ultra,
+        ],
     },
-    Harness {
-        id: "pi",
-        efforts: &["low", "medium", "high", "xhigh", "max"],
+    HarnessOptions {
+        id: Harness::Pi,
+        efforts: &[
+            Effort::Low,
+            Effort::Medium,
+            Effort::High,
+            Effort::Xhigh,
+            Effort::Max,
+        ],
     },
 ];
 
@@ -93,12 +113,65 @@ impl Harnesses {
         }
     }
 
-    /// The models the node knows for an authoring picker.
-    pub fn models(&self, harness: &str) -> Vec<serde_json::Value> {
+    /// The harnesses and models the node offers when authoring an agent or mission.
+    pub fn catalog(&self) -> Vec<HarnessChoices> {
+        HARNESSES
+            .iter()
+            .map(|known| HarnessChoices {
+                id: known.id,
+                efforts: known.efforts.to_vec(),
+                default_effort: Effort::Medium,
+                models: self.models(known.id.as_str()),
+            })
+            .collect()
+    }
+
+    pub fn effort_policy() -> Vec<EffortPolicy> {
+        [
+            (Effort::Low, "errands"),
+            (Effort::Medium, "making things"),
+            (Effort::Xhigh, "architecture and review"),
+            (Effort::Max, "consequential reviews"),
+        ]
+        .into_iter()
+        .map(|(effort, usage)| EffortPolicy {
+            effort,
+            usage: usage.into(),
+        })
+        .collect()
+    }
+
+    fn models(&self, harness: &str) -> Vec<HarnessModel> {
+        let named = |ids: &[&str]| {
+            ids.iter()
+                .map(|id| HarnessModel {
+                    id: (*id).to_owned(),
+                    efforts: vec![],
+                })
+                .collect()
+        };
         match harness {
-            "claude-code" => ["opus", "sonnet", "haiku", "fable"].iter().map(|id| serde_json::json!({"id":id})).collect(),
-            "pi" => ["anthropic/claude-opus-5-5", "anthropic/claude-sonnet-5-5", "anthropic/claude-haiku-5-5", "anthropic/claude-fable-5-1"].iter().map(|id| serde_json::json!({"id":id})).collect(),
-            "openai-codex" => self.codex_models.iter().filter(|m| !m.slug.is_empty()).map(|m| serde_json::json!({"id":m.slug,"efforts":m.levels.iter().map(|level| &level.effort).filter(|level| !level.is_empty()).collect::<Vec<_>>()})).collect(),
+            "claude-code" => named(&["opus", "sonnet", "haiku", "fable"]),
+            "pi" => named(&[
+                "anthropic/claude-opus-5-5",
+                "anthropic/claude-sonnet-5-5",
+                "anthropic/claude-haiku-5-5",
+                "anthropic/claude-fable-5-1",
+            ]),
+            "openai-codex" => self
+                .codex_models
+                .iter()
+                .filter(|m| !m.slug.is_empty())
+                .map(|m| HarnessModel {
+                    id: m.slug.clone(),
+                    efforts: m
+                        .levels
+                        .iter()
+                        .filter_map(|level| level.effort.parse::<Effort>().ok())
+                        .filter(|effort| !effort.is_unset())
+                        .collect(),
+                })
+                .collect(),
             _ => Vec::new(),
         }
     }
@@ -116,13 +189,13 @@ impl Harnesses {
         (|| -> Result<(), String> {
             let ids = HARNESSES
                 .iter()
-                .map(|h| h.id)
+                .map(|h| h.id.as_str())
                 .collect::<Vec<_>>()
                 .join(" or ");
             if harness.is_empty() {
                 return Err(format!("{subject} needs a harness: {ids}"));
             }
-            let Some(known) = HARNESSES.iter().find(|h| h.id == harness) else {
+            let Some(known) = HARNESSES.iter().find(|h| h.id.as_str() == harness) else {
                 return Err(format!(
                     "{subject} harness {harness:?} cannot start seats; use {ids}"
                 ));
@@ -191,11 +264,7 @@ impl Harnesses {
     /// Claude's names and Codex's cached list. Claude also takes a full
     /// `claude-…` id.
     fn offered(&self, harness: &str) -> Option<Vec<String>> {
-        let ids: Vec<String> = self
-            .models(harness)
-            .iter()
-            .filter_map(|m| m["id"].as_str().map(str::to_owned))
-            .collect();
+        let ids: Vec<String> = self.models(harness).into_iter().map(|m| m.id).collect();
         match harness {
             "openai-codex" if !ids.is_empty() => Some(ids),
             "claude-code" => Some(ids),

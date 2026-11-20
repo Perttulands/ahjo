@@ -104,12 +104,12 @@ impl HarnessPage {
         for (harness, _) in sh::HARNESSES {
             let path = format!("{}?dir={}&harness={harness}", sh::PATH, sh::encode(&dir));
             let asked = dir.clone();
-            self.mission_call(&node, "GET", &path, None, cx, move |page, answer, cx| {
+            self.harness_request(&node, "GET", &path, None, cx, move |page, answer, cx| {
                 let c = &mut page.catalog;
                 if c.dir != asked {
                     return;
                 }
-                match crate::library::response::<Shape>(answer) {
+                match crate::request::response::<Shape>(answer) {
                     Ok(shape) => {
                         c.shapes.retain(|s| s.harness != shape.harness);
                         c.shapes.push(shape);

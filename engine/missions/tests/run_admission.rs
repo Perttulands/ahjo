@@ -1,4 +1,4 @@
-use ahjo_mission_engine::{Harnesses, RoleStore, run_admission, validate};
+use ahjo_mission_engine::{AgentStore, Harnesses, run_admission, validate};
 use ahjo_mission_model::{Mission, Port, Slot, Step};
 use std::collections::BTreeMap;
 
@@ -37,10 +37,10 @@ fn admission_checks_inputs_and_frozen_staffing_across_the_mission() {
         }],
         ..Default::default()
     });
-    let roles = RoleStore::new(std::env::temp_dir().join("ahjo-99-no-such-roles"));
+    let agents = AgentStore::new(ahjo_testkit::fresh_dir("run-agents").join("agents"));
     let report = run_admission(
         &mission,
-        &roles,
+        &agents,
         &Harnesses::default(),
         "inp_hello",
         false,
@@ -74,12 +74,12 @@ fn admission_checks_inputs_and_frozen_staffing_across_the_mission() {
 fn a_reached_step_with_an_input_nothing_feeds_is_refused_before_the_run() {
     let mut mission =
         Mission::parse(include_str!("parity/runs/missions/solo-lab.mission.toml")).unwrap();
-    let roles = RoleStore::new(std::env::temp_dir().join("ahjo-99-no-such-roles"));
+    let agents = AgentStore::new(ahjo_testkit::fresh_dir("run-agents").join("agents"));
     let inputs = BTreeMap::from([("brief".to_owned(), "hello".to_owned())]);
     let admit = |mission: &Mission, root: &str, single: bool| {
         run_admission(
             mission,
-            &roles,
+            &agents,
             &Harnesses::default(),
             root,
             single,
@@ -100,7 +100,7 @@ fn a_reached_step_with_an_input_nothing_feeds_is_refused_before_the_run() {
         label: "More".into(),
         ..Default::default()
     });
-    let validation = validate(&mission, &roles, &Harnesses::default());
+    let validation = validate(&mission, &agents, &Harnesses::default());
     let found = unfed(&validation);
     assert_eq!(found.len(), 1, "{validation:?}");
     assert_eq!(found[0].node_id, "fmn_work");
@@ -114,7 +114,7 @@ fn a_reached_step_with_an_input_nothing_feeds_is_refused_before_the_run() {
     // A step no run reaches is only warned of as unreachable.
     mission.connections.retain(|c| c.id != "edge_start");
     assert_eq!(
-        unfed(&validate(&mission, &roles, &Harnesses::default())),
+        unfed(&validate(&mission, &agents, &Harnesses::default())),
         vec![]
     );
 }

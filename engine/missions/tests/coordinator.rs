@@ -1143,7 +1143,10 @@ fn lab_run_completes_with_archon_sequence_and_lock_excludes_other_owners() {
     let brief = std::path::Path::new(dispatch.data["brief_path"].as_str().unwrap());
     let brief_text = std::fs::read_to_string(brief).unwrap();
     assert!(brief_text.contains("input: hello"));
-    assert!(brief_text.contains("role card:"));
+    assert!(
+        brief_text.contains("agent instructions:")
+            && brief_text.contains("Implements scoped changes")
+    );
     assert_eq!(dispatch.data["recorded_before_send"], true);
     assert_eq!(c.list(None, false).unwrap()[0].number, 1);
 }

@@ -1,7 +1,6 @@
 //! Harness: whether the harnesses can run with their skills current, and
-//! what to do where they cannot, across nodes; and the roles library.
-mod library;
-mod role_state;
+//! what to do where they cannot, across nodes.
+mod request;
 pub mod shape_state;
 mod shape_view;
 mod skills_view;
@@ -14,9 +13,7 @@ mod tokens {
     pub const OFF_PAD: f32 = 6.;
     /// A sync on its way.
     pub const DIMMED: f32 = 0.5;
-    /// The role library's measures.
     pub const P4: f32 = 4.;
-    pub const P8: f32 = 8.;
     /// The Agent view: the anatomy's share of the detail and its least,
     /// and the least the reader beside it keeps. A detail narrower than
     /// both shows one of them at a time.
@@ -31,9 +28,6 @@ mod tokens {
     /// A skill's name and a setting's key, at most.
     pub const SKILL_W: f32 = 180.;
     pub const KEY_W: f32 = 220.;
-    /// A role's mark.
-    pub const MARK: f32 = 20.;
-    pub const MARK_BIG: f32 = 28.;
 }
 use ahjo_app_kit::host::Status;
 use ahjo_app_kit::link::client::LinkState;
@@ -46,19 +40,17 @@ use gpui::{App, Context, Entity, IntoElement, Render, SharedString, Window, div,
 use state::{HarnessState, Synced, WATCH};
 use std::collections::BTreeMap;
 
-/// The page's three views: what an agent gets, the skills, the roles.
+/// The page's views: what an agent gets and the skills.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 enum Sub {
     #[default]
     Agent,
     Skills,
-    Roles,
 }
 
 pub struct HarnessPage {
     host: Host,
     sub: Sub,
-    library: library::Library,
     state: HarnessState,
     places: BTreeMap<String, String>,
     shape: shape_state::ShapeView,
@@ -88,7 +80,6 @@ impl HarnessPage {
             inputs: shape_view::Inputs::new(window, cx),
             host,
             sub: Sub::Agent,
-            library: library::Library::default(),
             state: HarnessState::default(),
             places: BTreeMap::new(),
             shape,
@@ -104,7 +95,6 @@ impl HarnessPage {
         for (sub, name, id) in [
             (Sub::Agent, "Agent", "harness-sub-agent"),
             (Sub::Skills, "Skills", "harness-sub-skills"),
-            (Sub::Roles, "Roles", "harness-sub-roles"),
         ] {
             let on = self.sub == sub;
             row = row.child(
@@ -132,7 +122,6 @@ impl HarnessPage {
                     self.catalog_open(path, cx);
                 }
             }
-            Sub::Roles => self.load_role_library(cx),
             Sub::Agent => {
                 if let shape_state::Pick::File(path) = self.shape.pick.clone() {
                     self.file_read(path, cx);
@@ -290,7 +279,6 @@ impl Render for HarnessPage {
         match self.sub {
             Sub::Agent => self.render_shape(window, cx),
             Sub::Skills => self.render_agents(window, cx),
-            Sub::Roles => self.render_role_library(window, cx),
         }
     }
 }

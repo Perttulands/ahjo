@@ -130,7 +130,7 @@ pub struct Slot {
     /// ([`crate::agent_session`]). Blank names it after the step.
     #[serde(skip_serializing_if = "String::is_empty")]
     pub agent: String,
-    /// The slot's optional role card; none is a vanilla agent.
+    /// The slot's reusable agent; none is a vanilla agent.
     #[serde(skip_serializing_if = "String::is_empty")]
     pub agent_id: String,
     #[serde(skip_serializing_if = "Harness::is_unset")]
@@ -144,7 +144,7 @@ pub struct Slot {
 }
 
 impl Slot {
-    /// Whether the slot names anything to run: a harness, model, effort or role.
+    /// Whether the slot names anything to run: a harness, model, effort or agent.
     pub fn staffed(&self) -> bool {
         !self.agent_id.is_empty()
             || !self.harness.is_unset()

@@ -4,7 +4,7 @@
 //! <state-dir>/missions/<slug>.mission.toml
 //!             notes/<slug>.notes.toml
 //!             layout/<slug>.layout.toml
-//!             roles/<id>.toml and characters.json
+//!             agents/<id>.toml
 //! ```
 //!
 //! Any of these directories and files may be a symlink, for example to a
@@ -14,10 +14,9 @@
 use ahjo_mission_model::{Layout, Mission, MissionListing, Notes};
 use std::path::{Path, PathBuf};
 
+use crate::AgentStore;
 use crate::Error;
-use crate::characters::{Character, read_characters};
 use crate::links::{list_names, read_definition};
-use crate::roles::RoleStore;
 
 const MISSION_SUFFIX: &str = ".mission.toml";
 
@@ -31,7 +30,7 @@ impl Store {
         Store { root: root.into() }
     }
 
-    /// Where a node keeps its missions, roles and runs: `missions` in the
+    /// Where a node keeps its missions, agents and runs: `missions` in the
     /// node's own folder, the one place every area reads it from.
     pub fn root_in(node_dir: &Path) -> PathBuf {
         node_dir.join("missions")
@@ -41,12 +40,8 @@ impl Store {
         &self.root
     }
 
-    pub fn roles(&self) -> RoleStore {
-        RoleStore::new(self.root.join("roles"))
-    }
-
-    pub fn characters(&self) -> Result<Vec<Character>, Error> {
-        read_characters(self.roles().dir())
+    pub fn agents(&self) -> AgentStore {
+        AgentStore::new(self.root.join("agents"))
     }
 
     /// Every mission file by slug, the unreadable ones marked broken.

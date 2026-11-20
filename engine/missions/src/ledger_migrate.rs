@@ -82,14 +82,53 @@ fn upgrade_toml(
 }
 
 fn upgrade_bindings(text: &str) -> Result<Option<String>, crate::Error> {
-    if !text.contains("runId") {
-        return Ok(None);
-    }
+    use toml_edit::{Item, value};
     let error = |error: &dyn std::fmt::Display| {
         crate::Error::new("invalid_definition_source", error.to_string())
     };
     let mut document: toml_edit::DocumentMut = text.parse().map_err(|cause| error(&cause))?;
-    document_migrate::rename_camel_keys(&mut document)?;
+    if text.contains("runId") {
+        document_migrate::rename_camel_keys(&mut document)?;
+    }
+    if document.get("schema").and_then(Item::as_integer) == Some(3) {
+        crate::write::table_arrays(&mut document, &["binding"]);
+        if let Some(bindings) = document
+            .get_mut("binding")
+            .and_then(Item::as_array_of_tables_mut)
+        {
+            for binding in bindings.iter_mut() {
+                let id = binding
+                    .get("agent_id")
+                    .and_then(Item::as_str)
+                    .unwrap_or_default()
+                    .to_owned();
+                if let Some(path) = binding.remove("card_path") {
+                    binding.insert("agent_path", path);
+                }
+                let source = binding.remove("card_toml");
+                let digest = binding.remove("card_sha256");
+                if let Some(source) = source
+                    .as_ref()
+                    .and_then(Item::as_str)
+                    .filter(|s| !s.is_empty())
+                {
+                    if digest.as_ref().and_then(Item::as_str)
+                        != Some(&crate::run_bindings::hash(source))
+                    {
+                        return Err(crate::Error::new(
+                            "persona_snapshot_invalid",
+                            format!("frozen role {id:?} failed its integrity check"),
+                        ));
+                    }
+                    let agent = crate::agents_migration::agent_from_role(&id, source)?;
+                    let raw = crate::agents::encode_agent(&agent)?;
+                    binding.insert("agent_sha256", value(crate::run_bindings::hash(&raw)));
+                    binding.insert("agent_toml", value(raw));
+                }
+            }
+        }
+        document["schema"] = value(i64::from(crate::run_bindings::BINDINGS_SCHEMA));
+    }
     let updated = document.to_string();
     if updated == text {
         return Ok(None);
@@ -404,5 +443,62 @@ mod tests {
     fn conflicting_ledger_fields_are_refused() {
         let original = r#"{"type":"run_started","data":{"formation_id":"a","step_id":"b"}}"#;
         assert!(upgrade_ledger(original).is_err());
+    }
+}
+
+#[cfg(test)]
+mod binding_tests {
+    use super::upgrade_bindings;
+
+    const ROLE: &str = "schema = 1\n[card]\nid = \"writer\"\nkind = \"specialist\"\nsummary = \"Read the evidence.\"\n";
+
+    #[test]
+    fn frozen_roles_become_frozen_agents_without_rebinding_the_run() {
+        let digest = crate::run_bindings::hash(ROLE);
+        let original = format!(
+            r#"schema = 3
+run_id = "run_one"
+mission_id = "mission_one"
+mission_slug = "one"
+mission_rev = 4
+input_card_id = "input"
+
+[[binding]]
+node_id = "step"
+slot_id = "writer"
+agent_id = "writer"
+harness = "openai-codex"
+model = ""
+effort = "ultra"
+card_path = "/fixture/roles/writer.toml"
+card_toml = '''
+{ROLE}'''
+card_sha256 = "{digest}"
+"#
+        );
+        let upgraded = upgrade_bindings(&original).unwrap().unwrap();
+        let snapshot: crate::BindingsSnapshot = toml::from_str(&upgraded).unwrap();
+        assert_eq!(snapshot.schema, crate::run_bindings::BINDINGS_SCHEMA);
+        assert_eq!(snapshot.run_id, "run_one");
+        assert_eq!(snapshot.mission_rev, 4);
+        let binding = &snapshot.bindings[0];
+        assert_eq!(binding.harness, "openai-codex");
+        assert_eq!(binding.effort, "ultra");
+        assert_eq!(binding.agent_path, "/fixture/roles/writer.toml");
+        assert_eq!(
+            binding.instructions().as_deref(),
+            Some("Read the evidence.")
+        );
+        assert_eq!(
+            binding.agent_sha256,
+            crate::run_bindings::hash(&binding.agent_toml)
+        );
+        assert!(upgrade_bindings(&upgraded).unwrap().is_none());
+
+        let tampered = original.replace("Read the evidence.", "Trust the guess.");
+        assert_eq!(
+            upgrade_bindings(&tampered).unwrap_err().code,
+            "persona_snapshot_invalid"
+        );
     }
 }

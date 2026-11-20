@@ -131,24 +131,20 @@ to = "end_rejected:in"
 #[tokio::test(flavor = "multi_thread")]
 async fn command_list_and_coded_failures() {
     assert_eq!(ahjo_missions::LISTING.commands, EXPECTED);
-    let role_commands: Vec<_> = ahjo_harness::LISTING
+    let agent_commands: Vec<_> = ahjo_harness::LISTING
         .commands
         .iter()
         .copied()
-        .filter(|name| name.starts_with("role_"))
+        .filter(|name| name.starts_with("agent_"))
         .collect();
     assert_eq!(
-        role_commands,
+        agent_commands,
         [
-            "role_list",
-            "role_inspect",
-            "role_usage",
-            "role_new",
-            "role_edit",
-            "role_retire",
-            "role_restore",
-            "role_delete",
-            "role_characters"
+            "agent_list",
+            "agent_show",
+            "agent_create",
+            "agent_edit",
+            "agent_delete"
         ]
     );
     let node = Node::start(&[sessions::LISTING, ahjo_work::LISTING, LAB], "")
@@ -325,7 +321,7 @@ async fn mission_command_schemas_and_cli_help_match_the_document_surface() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn mission_edit_rejects_an_unknown_role_and_uses_work_in_both_brief_operations() {
+async fn mission_edit_rejects_an_unknown_agent_and_uses_work_in_both_brief_operations() {
     let node = Node::start(&[sessions::LISTING, ahjo_work::LISTING, LAB], "")
         .await
         .unwrap();

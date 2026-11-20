@@ -284,7 +284,7 @@ async fn delete(
 }
 async fn validation(State(m): State<Missions>, Path(id): Path<String>) -> ResultResponse {
     let e = m.store.mission_edit(&id)?;
-    let report = validate(&e.mission, &m.store.roles(), &Harnesses::from_host());
+    let report = validate(&e.mission, &m.store.agents(), &Harnesses::from_host());
     Ok(tagged(
         json!({"mission_rev":e.mission.rev,"mission_etag":e.etag,"errors":report.errors,"warnings":report.warnings}),
         &e.etag,

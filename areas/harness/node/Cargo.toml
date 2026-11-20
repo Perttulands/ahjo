@@ -14,6 +14,7 @@ ahjo-harness-contract = { path = "../contract" }
 ahjo-core = { path = "../../../kit/core" }
 ahjo-node-kit = { path = "../../../kit/node-kit" }
 ahjo-mission-engine = { path = "../../../engine/missions" }
+ahjo-mission-model = { path = "../../../engine/mission-model" }
 axum = { version = "0.8", default-features = false, features = ["json"] }
 ahjo-term = { path = "../../../engine/term" }
 schemars.workspace = true

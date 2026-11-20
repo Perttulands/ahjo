@@ -1,4 +1,4 @@
-//! The selected slot's role, harness, model and effort pickers.
+//! The selected slot's agent, harness, model and effort pickers.
 use super::*;
 use crate::store::staffing::{self, Choice, Staffing};
 use ahjo_app_kit::theme::Theme;
@@ -6,7 +6,7 @@ use gpui::{SharedString, Stateful};
 
 #[derive(Clone, Copy)]
 enum Part {
-    Role,
+    Agent,
     Harness,
     Model,
     Effort,
@@ -28,7 +28,7 @@ fn chip(t: &Theme, id: SharedString, selected: bool) -> Stateful<Div> {
 impl MissionsPage {
     pub(super) fn draft_staffing(&self, cx: &Context<Self>) -> Staffing {
         Staffing {
-            role: self.role.read(cx).text.clone(),
+            agent_id: self.agent_id.read(cx).text.clone(),
             harness: self.harness.read(cx).text.parse().unwrap_or_default(),
             model: self.model.read(cx).text.clone(),
             effort: self.effort.read(cx).text.parse().unwrap_or_default(),
@@ -39,7 +39,7 @@ impl MissionsPage {
     /// values while the catalog is loading or after it changes.
     pub(super) fn slot_pickers(&self, t: &Theme, cx: &mut Context<Self>) -> Div {
         let staff = self.draft_staffing(cx);
-        let choices = staffing::choices(self.roles.as_ref(), &staff);
+        let choices = staffing::choices(self.agents.as_ref(), &staff);
         let row = |label: &'static str,
                    part: Part,
                    values: Vec<Choice>,
@@ -79,7 +79,13 @@ impl MissionsPage {
             .flex()
             .flex_col()
             .gap(px(TAB_GAP))
-            .child(row("Role", Part::Role, choices.roles, &staff.role, cx))
+            .child(row(
+                "Agent",
+                Part::Agent,
+                choices.agents,
+                &staff.agent_id,
+                cx,
+            ))
             .child(row(
                 "Harness",
                 Part::Harness,
@@ -95,7 +101,7 @@ impl MissionsPage {
                 staff.effort.as_str(),
                 cx,
             ))
-            .when(self.roles.is_none(), |d| {
+            .when(self.agents.is_none(), |d| {
                 d.child(
                     div()
                         .text_color(t.dim)
@@ -106,17 +112,27 @@ impl MissionsPage {
     fn pick_staffing(&mut self, part: Part, id: &str, cx: &mut Context<Self>) {
         let mut staff = self.draft_staffing(cx);
         match part {
-            Part::Role => staff.role = id.to_owned(),
+            Part::Agent => {
+                if let Some(agent) = self
+                    .agents
+                    .as_ref()
+                    .and_then(|catalog| catalog.agents.iter().find(|agent| agent.id == id))
+                {
+                    staff.use_agent(agent);
+                } else {
+                    staff.agent_id = id.to_owned();
+                }
+            }
             Part::Harness => {
                 let Ok(harness) = id.parse() else { return };
-                if let Some(catalog) = &self.roles {
+                if let Some(catalog) = &self.agents {
                     staffing::pick_harness(catalog, &mut staff, harness);
                 } else {
                     staff.harness = harness;
                 }
             }
             Part::Model => {
-                if let Some(catalog) = &self.roles {
+                if let Some(catalog) = &self.agents {
                     staffing::pick_model(catalog, &mut staff, id);
                 } else {
                     staff.model = id.to_owned();
@@ -128,7 +144,7 @@ impl MissionsPage {
             }
         }
         for (field, value) in [
-            (&self.role, staff.role.as_str()),
+            (&self.agent_id, staff.agent_id.as_str()),
             (&self.harness, staff.harness.as_str()),
             (&self.model, staff.model.as_str()),
             (&self.effort, staff.effort.as_str()),
@@ -140,11 +156,6 @@ impl MissionsPage {
         // A pick staffs the slot at once: no separate Assign, nothing for
         // Save. One made during another write follows when that lands. A
         // harness comes with an effort, so the slot is never half set.
-        if !staff.harness.is_unset() && staff.effort.is_unset() {
-            staff.effort = staffing::usual_effort(&staff.role);
-            self.effort
-                .update(cx, |f, cx| f.set(staff.effort.as_str(), false, cx));
-        }
         let complete = staff.harness.is_unset() || !staff.effort.is_unset();
         if complete && self.writing {
             self.staff_pending = true;

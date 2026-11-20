@@ -291,10 +291,11 @@ impl Executor for LabExecutor {
             }
             if let Some(binding) = request.bindings.bindings.iter().find(|binding| {
                 binding.node_id == request.step.id && binding.slot_id == slot.id
-            }) && !binding.card_toml.is_empty()
+            }) && let Some(instructions) = binding.instructions()
+                && !instructions.is_empty()
             {
-                brief.push_str("role card:\n");
-                brief.push_str(&binding.card_toml);
+                brief.push_str("agent instructions:\n");
+                brief.push_str(&instructions);
                 brief.push('\n');
             }
             if let Some(details) = &request.step.brief {

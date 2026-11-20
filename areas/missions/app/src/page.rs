@@ -90,10 +90,10 @@ pub struct MissionsPage {
     check_value: Entity<TextField>,
     history: undo::History,
     writing: bool,
-    roles: Option<ahjo_harness_contract::roles::Roles>,
+    agents: Option<ahjo_harness_contract::agents::ListedAgents>,
     /// The repositories the node's config names, for a step's Repository.
     repositories: Option<Vec<String>>,
-    role: Entity<TextField>,
+    agent_id: Entity<TextField>,
     harness: Entity<TextField>,
     model: Entity<TextField>,
     effort: Entity<TextField>,
@@ -207,9 +207,9 @@ impl MissionsPage {
             check_value: cx.new(|cx| TextField::new(cx, "Check value")),
             history: undo::History::default(),
             writing: false,
-            roles: None,
+            agents: None,
             repositories: None,
-            role: cx.new(|cx| TextField::new(cx, "Role id")),
+            agent_id: cx.new(|cx| TextField::new(cx, "Agent id")),
             harness: cx.new(|cx| TextField::new(cx, "Harness")),
             model: cx.new(|cx| TextField::new(cx, "Model")),
             effort: cx.new(|cx| TextField::new(cx, "Effort")),
@@ -253,7 +253,7 @@ impl MissionsPage {
             &page.check,
             &page.check_version,
             &page.check_value,
-            &page.role,
+            &page.agent_id,
             &page.harness,
             &page.model,
             &page.effort,
@@ -468,7 +468,7 @@ impl MissionsPage {
             &self.check,
             &self.check_version,
             &self.check_value,
-            &self.role,
+            &self.agent_id,
             &self.harness,
             &self.model,
             &self.effort,
@@ -815,7 +815,7 @@ impl MissionsPage {
             .and_then(|f| f.slots.first())
         {
             for (field, text) in [
-                (&self.role, slot.agent_id.as_str()),
+                (&self.agent_id, slot.agent_id.as_str()),
                 (&self.harness, slot.harness.as_str()),
                 (&self.model, slot.model.as_str()),
                 (&self.effort, slot.effort.as_str()),
@@ -826,8 +826,9 @@ impl MissionsPage {
         if matches!(kind, EditKind::Step)
             && let Some((node, _)) = self.state.selected.clone()
         {
-            let asked = self.host.request(
-                Request::get(NodeId(node.clone()), ahjo_harness_contract::roles::PATH),
+            let asked = self.host.call(
+                NodeId(node.clone()),
+                ahjo_harness_contract::agents::ListAgents {},
                 cx,
             );
             self.read_repositories(node, cx);
@@ -836,10 +837,7 @@ impl MissionsPage {
                 let answer = asked.await;
                 let _ = this.update(cx, |page, cx| {
                     if page.generation == generation {
-                        page.roles = answer
-                            .ok()
-                            .filter(|a| a.ok())
-                            .and_then(|a| serde_json::from_slice(&a.body).ok());
+                        page.agents = answer.ok();
                         cx.notify();
                     }
                 });
@@ -1237,7 +1235,7 @@ impl MissionsPage {
             return;
         };
         for (field, text) in [
-            (&self.role, slot.agent_id.as_str()),
+            (&self.agent_id, slot.agent_id.as_str()),
             (&self.harness, slot.harness.as_str()),
             (&self.model, slot.model.as_str()),
             (&self.effort, slot.effort.as_str()),

@@ -189,7 +189,7 @@ fn show(m: &Missions, args: MissionShow) -> Result<MissionShown, Error> {
         })));
     }
     let notes = m.store.notes_edit(id)?.notes;
-    let report = validate(&current.mission, &m.store.roles(), &Harnesses::from_host());
+    let report = validate(&current.mission, &m.store.agents(), &Harnesses::from_host());
     Ok(MissionShown::Summary(Box::new(crate::handover::handover(
         m.node.clone(),
         &current.mission,
@@ -201,7 +201,7 @@ fn show(m: &Missions, args: MissionShow) -> Result<MissionShown, Error> {
 
 fn check_mission(m: &Missions, args: MissionValidate) -> Result<MissionValidated, Error> {
     let edit = m.store.mission_edit(required(&args.mission, "mission")?)?;
-    let report = validate(&edit.mission, &m.store.roles(), &Harnesses::from_host());
+    let report = validate(&edit.mission, &m.store.agents(), &Harnesses::from_host());
     // An unwired Input is allowed in a draft, but makes admission fail.
     let unwired = report
         .warnings
@@ -531,7 +531,7 @@ fn apply_document(m: &Missions, input: ApplyMission) -> Result<AppliedMission, E
     if applied.wrote {
         m.changed();
     }
-    let validation = validate(&applied.mission, &m.store.roles(), &Harnesses::from_host());
+    let validation = validate(&applied.mission, &m.store.agents(), &Harnesses::from_host());
     let slug = shell_word(&applied.mission.slug);
     let next = if input.dry_run {
         "ahjo mission apply -".to_owned()

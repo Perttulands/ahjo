@@ -1714,13 +1714,14 @@ fn slot_row(
     slot: &ahjo_missions_contract::Slot,
     z: f32,
 ) -> Div {
-    let role = (!slot.agent_id.is_empty()).then(|| crate::store::words::role_name(&slot.agent_id));
+    let agent =
+        (!slot.agent_id.is_empty()).then(|| crate::store::words::agent_name(&slot.agent_id));
     let session = crate::store::words::session_of(mission, f, slot);
     let mark = harness_mark(slot.harness.as_str(), t.text, t.text2, z);
     let selector = format!(
         "canvas-seat-{}-{}-{}",
         crate::store::words::slot_label(slot),
-        crate::store::words::role_name(&slot.agent_id),
+        crate::store::words::agent_name(&slot.agent_id),
         crate::store::words::harness_name(slot.harness.as_str())
     );
     let ring = div()
@@ -1758,11 +1759,11 @@ fn slot_row(
                         .text_size(px(CARD_SMALL * z))
                         .text_color(t.dim)
                         .truncate()
-                        .child(match role {
-                            Some(role) => format!(
+                        .child(match agent {
+                            Some(agent) => format!(
                                 "{} · {}",
                                 crate::store::words::slot_label(slot).to_uppercase(),
-                                role.to_uppercase()
+                                agent.to_uppercase()
                             ),
                             None => crate::store::words::slot_label(slot).to_uppercase(),
                         }),

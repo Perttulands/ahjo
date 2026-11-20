@@ -1,7 +1,7 @@
-use ahjo_mission_engine::{BindingsSnapshot, RoleStore};
+use ahjo_mission_engine::{AgentStore, BindingsSnapshot};
 use ahjo_mission_model::{Mission, Slot, Step};
 #[test]
-fn frozen_bindings_reject_mutated_settings_and_roles() {
+fn frozen_bindings_reject_mutated_settings_and_agents() {
     let slot = Slot {
         id: "worker".into(),
         agent_id: "builder".into(),
@@ -20,8 +20,8 @@ fn frozen_bindings_reject_mutated_settings_and_roles() {
         }],
         ..Default::default()
     };
-    let roles = RoleStore::new(std::env::temp_dir().join("ahjo-99-no-such-roles"));
-    let mut frozen = BindingsSnapshot::capture("run_a", &mission, "input", &roles).unwrap();
+    let agents = AgentStore::new(ahjo_testkit::fresh_dir("run-agents").join("agents"));
+    let mut frozen = BindingsSnapshot::capture("run_a", &mission, "input", &agents).unwrap();
     assert!(
         frozen
             .binding(&mission, "run_a", "input", "step", &slot)
@@ -36,7 +36,7 @@ fn frozen_bindings_reject_mutated_settings_and_roles() {
             .code,
         "persona_snapshot_invalid"
     );
-    frozen.bindings[0].card_toml.push_str("bad");
+    frozen.bindings[0].agent_toml.push_str("bad");
     assert_eq!(
         frozen
             .binding(&mission, "run_a", "input", "step", &slot)

@@ -430,7 +430,7 @@ fn opens_a_mission_layout_notes_and_run_written_before_the_wire_upgrade(cx: &mut
         ("layout/hello.layout.toml", 2, "mission_id"),
         ("notes/hello.notes.toml", 3, "created_at"),
         ("runs/run_legacy.snapshot.toml", 3, "input_card"),
-        ("runs/run_legacy.bindings.toml", 3, "slot_id"),
+        ("runs/run_legacy.bindings.toml", 4, "slot_id"),
     ] {
         let text = std::fs::read_to_string(state.join(path)).unwrap();
         assert!(

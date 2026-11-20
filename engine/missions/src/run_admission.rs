@@ -1,6 +1,6 @@
 //! Findings for the portion of a mission reached by a new run.
 use crate::graph::{endpoint_node, reachable};
-use crate::{Harnesses, RoleStore, input_findings, validate};
+use crate::{AgentStore, Harnesses, input_findings, validate};
 use ahjo_mission_model::{Code, Finding, Mission, Report};
 use std::collections::{BTreeMap, HashSet};
 
@@ -8,7 +8,7 @@ use std::collections::{BTreeMap, HashSet};
 /// the same report as the graph so the caller can repair all problems at once.
 pub fn run_admission(
     mission: &Mission,
-    roles: &RoleStore,
+    agents: &AgentStore,
     harnesses: &Harnesses,
     root: &str,
     step: bool,
@@ -47,7 +47,7 @@ pub fn run_admission(
             selected.contains(&finding.node_id) || connection_ids.contains(finding.node_id.as_str())
         }
     };
-    let validation = validate(mission, roles, harnesses);
+    let validation = validate(mission, agents, harnesses);
     let mut report = Report::default();
     report
         .errors

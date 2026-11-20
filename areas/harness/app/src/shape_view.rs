@@ -174,13 +174,13 @@ impl HarnessPage {
             sh::encode(&asked.1)
         );
         let node = v.node.clone();
-        self.mission_call(&node, "GET", &path, None, cx, move |page, answer, cx| {
+        self.harness_request(&node, "GET", &path, None, cx, move |page, answer, cx| {
             let v = &mut page.shape;
             if v.asking.as_ref() != Some(&asked) {
                 return;
             }
             v.asking = None;
-            match crate::library::response::<Shape>(answer) {
+            match crate::request::response::<Shape>(answer) {
                 Ok(shape) => {
                     v.dir = shape.dir.clone();
                     // Only a folder that could be read is offered again.
@@ -282,8 +282,8 @@ impl HarnessPage {
         self.shape.editing = false;
         let node = self.shape.node.clone();
         let url = format!("{}?path={}", sh::FILE, sh::encode(&path));
-        self.mission_call(&node, "GET", &url, None, cx, move |page, answer, cx| {
-            match crate::library::response::<Text>(answer) {
+        self.harness_request(&node, "GET", &url, None, cx, move |page, answer, cx| {
+            match crate::request::response::<Text>(answer) {
                 Ok(text) => {
                     let lang = syntax::lang(&text.path);
                     page.inputs.reader.update(cx, |c, cx| {
@@ -338,7 +338,7 @@ impl HarnessPage {
         });
         self.shape.saving = true;
         let node = self.shape.node.clone();
-        self.mission_call(
+        self.harness_request(
             &node,
             "PUT",
             sh::FILE,
@@ -346,7 +346,7 @@ impl HarnessPage {
             cx,
             |page, answer, cx| {
                 page.shape.saving = false;
-                match crate::library::response::<Text>(answer) {
+                match crate::request::response::<Text>(answer) {
                     Ok(text) => {
                         let shown = match &page.shape.shape {
                             Some(sp) => sh::short(&text.path, sp.root.as_deref(), &sp.home),
@@ -376,14 +376,14 @@ impl HarnessPage {
             change,
         };
         let node = self.shape.node.clone();
-        self.mission_call(
+        self.harness_request(
             &node,
             "POST",
             sh::HOOK,
             Some(json!(edit)),
             cx,
             |page, answer, cx| {
-                match crate::library::response::<Value>(answer) {
+                match crate::request::response::<Value>(answer) {
                     Ok(_) => {
                         page.shape.pick = Pick::None;
                         page.shape_load(cx);
@@ -451,14 +451,14 @@ impl HarnessPage {
             value,
         };
         let node = self.shape.node.clone();
-        self.mission_call(
+        self.harness_request(
             &node,
             "POST",
             sh::SETTING,
             Some(json!(edit)),
             cx,
             |page, answer, cx| {
-                match crate::library::response::<Value>(answer) {
+                match crate::request::response::<Value>(answer) {
                     Ok(_) => {
                         page.shape.pick = Pick::None;
                         page.shape_load(cx);

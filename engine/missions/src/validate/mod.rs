@@ -14,13 +14,13 @@ mod staffing;
 mod steps;
 mod wiring;
 
+use crate::AgentStore;
 use crate::harness::Harnesses;
-use crate::roles::RoleStore;
 use ahjo_mission_model::{Mission, Report};
 
-/// Validates a whole mission. Role cards come from `roles`, and what each
+/// Validates a whole mission. Agent definitions come from `agents`, and what each
 /// harness model accepts from `harnesses`.
-pub fn validate(mission: &Mission, roles: &RoleStore, harnesses: &Harnesses) -> Report {
+pub fn validate(mission: &Mission, agents: &AgentStore, harnesses: &Harnesses) -> Report {
     let mut report = Report::default();
     let errors = &mut report.errors;
     errors.extend(wiring::connection_findings(mission));
@@ -38,7 +38,7 @@ pub fn validate(mission: &Mission, roles: &RoleStore, harnesses: &Harnesses) -> 
     errors.extend(outputs::mission_output_findings(mission));
     errors.extend(wiring::input_card_findings(mission));
     errors.extend(wiring::unsupported_human_channels(mission));
-    errors.extend(staffing::findings(mission, roles, harnesses));
+    errors.extend(staffing::findings(mission, agents, harnesses));
 
     let warnings = &mut report.warnings;
     warnings.extend(limit_warnings);

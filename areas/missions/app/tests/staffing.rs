@@ -1,6 +1,7 @@
 #![cfg(unix)]
 use ahjo_app_kit::{Ask, Host};
-use ahjo_core::NodeId;
+use ahjo_core::{NodeId, TypedCommand};
+use ahjo_harness_contract::agents::{ListAgents, ListedAgents};
 use ahjo_missions_contract::MissionResponse;
 use ahjo_node_kit::{Area, Built, Listing, NodeClient, Setup};
 use ahjo_testkit::{node::Node, sessions};
@@ -11,21 +12,38 @@ use std::{
     time::{Duration, Instant},
 };
 
-struct Roles;
-impl Area for Roles {
-    fn routes(&self) -> axum::Router {
-        axum::Router::new().route("/api/roles", axum::routing::get(|| async {
-            axum::Json(json!({"roles":[{"id":"reviewer","displayName":"Zed"},{"id":"retired","displayName":"Retired","status":"retired"},{"id":"planner","displayName":"Alpha"}],"harnesses":[{"id":"openai-codex","efforts":["low","medium","high","xhigh"],"models":[{"id":"gpt-6","efforts":["low","high"]}]},{"id":"claude-code","efforts":["low","medium"],"models":[{"id":"opus"}]}]}))
-        }))
+struct AgentCatalog;
+impl Area for AgentCatalog {
+    fn commands(&self) -> Vec<ahjo_node_kit::Command> {
+        vec![ahjo_node_kit::Command::for_request(
+            ahjo_node_kit::Effect::Reads,
+            |_: ListAgents| async {
+                let catalog: ListedAgents = serde_json::from_value(json!({
+                "node": "test",
+                "agents": [
+                    {"schema":1, "id":"reviewer", "name":"Zed", "instructions":"Review", "harness":"claude-code","model":"","effort":"low","notes":[]},
+                    {"schema":1, "id":"planner", "name":"Alpha", "instructions":"Plan", "harness":"openai-codex","model":"","effort":"medium","notes":[]}
+                ],
+                "unreadable": [],
+                "harnesses": [
+                    {"id":"openai-codex", "efforts":["low","medium","high","xhigh"], "default_effort":"medium", "models":[{"id":"gpt-6","efforts":["low","high"]}]},
+                    {"id":"claude-code", "efforts":["low","medium"], "default_effort":"medium", "models":[{"id":"opus"}]}
+                ],
+                "effort_policy": []
+            })).unwrap();
+                Ok(catalog)
+            },
+        )]
     }
 }
+
 fn build(_: &Setup) -> anyhow::Result<Built> {
-    Ok(Built::Now(Arc::new(Roles)))
+    Ok(Built::Now(Arc::new(AgentCatalog)))
 }
-const ROLES: Listing = Listing {
-    name: "test-roles",
+const AGENTS: Listing = Listing {
+    name: "test-agents",
     kinds: &[],
-    commands: &[],
+    commands: &[ListAgents::NAME],
     build,
 };
 struct Running {
@@ -44,7 +62,7 @@ impl Drop for Running {
 }
 fn start() -> Running {
     // The node checks a chosen model against this host's Codex models; give
-    // it the one the roles fake offers. Alone in its binary, so the
+    // it the one the catalog test node offers. Alone in its binary, so the
     // process-wide variable is safe to set.
     let codex = std::env::temp_dir().join(format!("ahjo-staffing-codex-{}", std::process::id()));
     std::fs::create_dir_all(&codex).unwrap();
@@ -65,7 +83,7 @@ fn start() -> Running {
                         sessions::LISTING,
                         ahjo_work::LISTING,
                         ahjo_missions::LISTING,
-                        ROLES,
+                        AGENTS,
                     ],
                     "",
                 )
@@ -133,7 +151,7 @@ fn scroll(cx: &mut VisualTestContext, delta: f32) {
     cx.run_until_parked();
 }
 #[gpui::test]
-fn catalog_pickers_offer_sorted_roles_and_model_efforts_and_save_the_choice(
+fn catalog_pickers_offer_sorted_agents_and_model_efforts_and_save_the_choice(
     cx: &mut TestAppContext,
 ) {
     let running = start();
@@ -182,18 +200,18 @@ fn catalog_pickers_offer_sorted_roles_and_model_efforts_and_save_the_choice(
     until(cx, "slot", |cx| cx.debug_bounds("slot-slot_work").is_some());
     click(cx, "slot-slot_work");
     until(cx, "catalog", |cx| {
-        cx.debug_bounds("staffing-role-planner").is_some()
+        cx.debug_bounds("staffing-agent-planner").is_some()
     });
-    assert!(cx.debug_bounds("staffing-role-retired").is_none());
-    let alpha = cx.debug_bounds("staffing-role-planner").unwrap();
-    let zed = cx.debug_bounds("staffing-role-reviewer").unwrap();
+    assert!(cx.debug_bounds("staffing-agent-retired").is_none());
+    let alpha = cx.debug_bounds("staffing-agent-planner").unwrap();
+    let zed = cx.debug_bounds("staffing-agent-reviewer").unwrap();
     assert!(
         alpha.origin.y < zed.origin.y
             || (alpha.origin.y == zed.origin.y && alpha.origin.x < zed.origin.x)
     );
-    click(cx, "staffing-role-planner");
-    until(cx, "selected role", |cx| {
-        cx.debug_bounds("staffing-role-planner-selected").is_some()
+    click(cx, "staffing-agent-planner");
+    until(cx, "selected agent", |cx| {
+        cx.debug_bounds("staffing-agent-planner-selected").is_some()
     });
     click(cx, "staffing-model-gpt-6");
     until(cx, "selected model", |cx| {

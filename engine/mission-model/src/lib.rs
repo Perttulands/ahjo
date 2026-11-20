@@ -5,11 +5,13 @@
 //! (ARCHITECTURE.md, rule 3); the mission engine reads, writes, validates
 //! and runs it.
 
+mod agent;
 mod authoring;
 mod branches;
 mod examples;
 mod finding;
 pub mod flow;
+mod harness_choices;
 mod layout;
 mod mission;
 mod nodes;
@@ -22,6 +24,7 @@ mod run_projection;
 mod sessions;
 mod vocabulary;
 
+pub use agent::{AGENT_SCHEMA, Agent, AgentNote, AgentUsage, AgentUse, UnreadableAgent};
 pub use authoring::{
     DocumentChanges, Edit, EndUpdate, GateUpdate, InputCardUpdate, LayoutEdit, LayoutPatch,
     LimitUpdate, MissionChange, MissionDeletion, NotePatch, NotesEdit, Precondition, RestoredNode,
@@ -29,6 +32,7 @@ pub use authoring::{
 pub use branches::{kept_branch, run_branch, run_tag};
 pub use examples::{EXAMPLES, Example, example};
 pub use finding::{Code, Finding, Report};
+pub use harness_choices::{EffortPolicy, HarnessChoices, HarnessModel};
 pub use layout::{LAYOUT_SCHEMA, Layout, LayoutEdge, LayoutNode};
 pub use mission::{MISSION_SCHEMA, Mission, MissionArchive, MissionListing};
 pub use nodes::{

@@ -378,7 +378,7 @@ async fn run_changes_arrive_on_the_socket_through_completion() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn default_role_store_is_shared_and_isolated() {
+async fn default_agent_store_is_shared_and_isolated() {
     let areas = &[
         sessions::LISTING,
         ahjo_work::LISTING,
@@ -389,15 +389,10 @@ async fn default_role_store_is_shared_and_isolated() {
     let other = Node::start(areas, "").await.unwrap();
     let root = ahjo_mission_engine::Store::root_in(node.dir());
     let client = NodeClient::new(Some(&format!("{}/", node.url()))).unwrap();
-    client
-        .request(
-            Method::POST,
-            "/api/roles",
-            Some(json!({"id":"fixture-writer","displayName":"Reviewer","kind":"specialist"})),
-            None,
-        )
-        .await
-        .unwrap();
+    node.call(
+        "agent_create",
+        json!({"id":"fixture-writer","name":"Reviewer","instructions":"Write a review.","harness":"claude-code","effort":"medium"}),
+    ).await.unwrap();
     std::fs::create_dir_all(root.join("missions")).unwrap();
     let mission = include_str!("fixtures/solo-lab.mission.toml")
         .replace("agent_id = \"builder\"", "agent_id = \"fixture-writer\"");
@@ -417,11 +412,13 @@ async fn default_role_store_is_shared_and_isolated() {
     let (started, _) = client.request(Method::POST, "/api/runs", Some(json!({"mission":"hello","input_card_id":"inp_hello","expected_rev":1,"inputs":{"brief":"hello"}})), None).await.unwrap();
     assert!(started["run_id"].is_string());
     let other_client = NodeClient::new(Some(&format!("{}/", other.url()))).unwrap();
-    assert!(
-        other_client
-            .request(Method::GET, "/api/roles/fixture-writer", None, None)
+    assert_eq!(
+        other
+            .call("agent_show", json!({"agent":"fixture-writer"}))
             .await
-            .is_err()
+            .unwrap_err()
+            .code,
+        "not_found"
     );
     assert!(
         other_client

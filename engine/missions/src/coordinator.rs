@@ -452,7 +452,7 @@ impl Coordinator {
         };
         let report = run_admission(
             &mission,
-            &store.roles(),
+            &store.agents(),
             &Harnesses::from_host(),
             root,
             single,
@@ -568,7 +568,7 @@ impl Coordinator {
         }
         let id = crate::run_storage::run_id()?;
         let bindings =
-            BindingsSnapshot::capture(&id, &mission, &request.input_card_id, &store.roles())
+            BindingsSnapshot::capture(&id, &mission, &request.input_card_id, &store.agents())
                 .map_err(|error| AdmissionFailure::Invalid(error.message))?;
         let workspace =
             crate::run_storage::create(self, &id, &slug, &mission, &bindings, &request)?;

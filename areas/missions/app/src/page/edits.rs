@@ -580,7 +580,7 @@ mod tests {
             name_agent_patch("step", "slot", "writer"),
             device_patch("step", "node/environment"),
             crate::store::staffing::Staffing {
-                role: "planner".into(),
+                agent_id: "planner".into(),
                 harness: ahjo_missions_contract::Harness::ClaudeCode,
                 model: "opus".into(),
                 effort: ahjo_missions_contract::Effort::High,

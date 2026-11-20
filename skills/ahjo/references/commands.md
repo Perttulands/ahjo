@@ -2,6 +2,10 @@
 
 These are the commands advertised by the enabled areas. Run `ahjo <noun> <verb> --help` for arguments and behavior; availability depends on the node build and its enabled areas.
 
+## agent
+
+`ahjo agent create`, `ahjo agent delete`, `ahjo agent edit`, `ahjo agent list`, `ahjo agent show`.
+
 ## brain
 
 `ahjo brain changes`, `ahjo brain collection`, `ahjo brain collections`, `ahjo brain files`, `ahjo brain read`, `ahjo brain save`, `ahjo brain search`, `ahjo brain send`, `ahjo brain texts`.
@@ -37,10 +41,6 @@ These are the commands advertised by the enabled areas. Run `ahjo <noun> <verb> 
 ## project
 
 `ahjo project find`.
-
-## role
-
-`ahjo role characters`, `ahjo role delete`, `ahjo role edit`, `ahjo role inspect`, `ahjo role list`, `ahjo role new`, `ahjo role restore`, `ahjo role retire`, `ahjo role usage`.
 
 ## run
 

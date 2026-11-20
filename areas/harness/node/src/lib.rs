@@ -1,11 +1,11 @@
 //! Reports the node's agent tools and skills, starts checkout syncs and
 //! links a checkout's skills into the folders missing them.
+mod agents;
 mod checkout;
 mod home;
 mod link;
 mod migration;
 mod report;
-mod roles;
 mod run;
 pub mod shape;
 mod skills;
@@ -47,15 +47,11 @@ pub const LISTING: Listing = Listing {
         "harness_hook_remove",
         "harness_hook_switch",
         "harness_setting_set",
-        "role_list",
-        "role_inspect",
-        "role_usage",
-        "role_new",
-        "role_edit",
-        "role_retire",
-        "role_restore",
-        "role_delete",
-        "role_characters",
+        "agent_list",
+        "agent_show",
+        "agent_create",
+        "agent_edit",
+        "agent_delete",
     ],
     build,
 };
@@ -64,7 +60,7 @@ struct HarnessArea {
     home: Option<Home>,
     sessions: Arc<dyn Sessions>,
     node: String,
-    roles: Arc<roles::Service>,
+    agents: Arc<agents::Service>,
     sync_state: Arc<SyncState>,
     shapes: Option<Arc<shape::Roots>>,
 }
@@ -156,7 +152,7 @@ pub fn build(setup: &Setup) -> Result<Built> {
         home.path = path.iter().map(|p| setup.config.path(p)).collect();
     }
     let root = ahjo_mission_engine::Store::root_in(&setup.dir);
-    let roles = Arc::new(roles::Service::new(root, fixture_codex));
+    let agents = Arc::new(agents::Service::new(root, fixture_codex)?);
     let node = setup.node.id.to_string();
     let sync_state = Arc::new(SyncState::default());
     let shapes = home
@@ -167,7 +163,7 @@ pub fn build(setup: &Setup) -> Result<Built> {
             shapes,
             home,
             node,
-            roles,
+            agents,
             sync_state,
             sessions: provided
                 .get::<dyn Sessions>()
@@ -178,7 +174,7 @@ pub fn build(setup: &Setup) -> Result<Built> {
 
 impl Area for HarnessArea {
     fn routes(&self) -> axum::Router {
-        let router = roles::routes(self.roles.clone());
+        let router = axum::Router::new();
         match &self.shapes {
             Some(roots) => router.merge(shape::routes::routes(roots.clone())),
             None => router,
@@ -261,7 +257,7 @@ impl Area for HarnessArea {
             self.shapes.clone(),
             self.node.clone(),
         ));
-        commands.extend(roles::commands(self.roles.clone(), self.node.clone()));
+        commands.extend(agents::commands(self.agents.clone(), self.node.clone()));
         commands
     }
 }

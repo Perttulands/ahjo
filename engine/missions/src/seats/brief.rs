@@ -77,9 +77,10 @@ fn render_for(request: &StepExecution, slot: &Slot, final_output: bool) -> Strin
         .bindings
         .iter()
         .find(|binding| binding.node_id == request.step.id && binding.slot_id == slot.id)
-        && !binding.card_toml.is_empty()
+        && let Some(instructions) = binding.instructions()
+        && !instructions.is_empty()
     {
-        let _ = writeln!(brief, "\nRole card:\n{}", binding.card_toml);
+        let _ = writeln!(brief, "\nAgent instructions:\n{instructions}");
     }
     for path in &request.context_paths {
         let _ = writeln!(brief, "Context path: {}", path.display());

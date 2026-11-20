@@ -72,14 +72,14 @@ pub fn slot_line(s: &Slot) -> String {
     parts.join(" · ")
 }
 
-/// Who works a step: its role, then what works it, `Builder · Claude haiku
+/// Who works a step: its agent and harness settings, `Builder · Claude haiku
 /// · low`.
 pub fn who(s: &Slot) -> String {
-    format!("{} · {}", role_name(&s.agent_id), slot_line(s))
+    format!("{} · {}", agent_name(&s.agent_id), slot_line(s))
 }
 
-/// A role id as its card's name: `planner` reads Planner.
-pub fn role_name(agent: &str) -> String {
+/// An agent id as a display name: `planner` reads Planner.
+pub fn agent_name(agent: &str) -> String {
     if agent.is_empty() {
         return "vanilla".into();
     }
@@ -146,11 +146,11 @@ pub fn slot_label(slot: &Slot) -> &str {
 /// Flow's staffing sentence for one slot: `Plan (controller) is Planner on
 /// Claude · xhigh.`
 pub fn staffing(s: &Slot) -> String {
-    let role = if s.controller { " (controller)" } else { "" };
+    let controller = if s.controller { " (controller)" } else { "" };
     format!(
-        "{}{role} is {} on {}.",
+        "{}{controller} is {} on {}.",
         slot_label(s),
-        role_name(&s.agent_id),
+        agent_name(&s.agent_id),
         slot_line(s)
     )
 }
@@ -451,7 +451,7 @@ mod tests {
         assert_eq!(span(3 * 86400 + 4 * 3600), "3d 4h");
         assert_eq!(work_label("gh:acme/project#206"), "acme/project#206");
         assert_eq!(work_label("bead:ab12:/srv#srv-12"), "srv-12");
-        assert_eq!(role_name("planner"), "Planner");
+        assert_eq!(agent_name("planner"), "Planner");
         let s = Slot {
             label: "Plan".into(),
             agent_id: "planner".into(),

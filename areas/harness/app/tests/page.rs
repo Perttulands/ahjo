@@ -9,7 +9,6 @@ use std::time::{Duration, Instant};
 
 struct Running {
     url: String,
-    role_file: PathBuf,
     home: PathBuf,
     stop: mpsc::Sender<()>,
     thread: Option<std::thread::JoinHandle<()>>,
@@ -38,10 +37,7 @@ fn start() -> Running {
             let node = Node::start(&[sessions::LISTING, ahjo_harness::LISTING], &config)
                 .await
                 .unwrap();
-            let role_file = node.dir().join("missions/roles/fixture-writer.toml");
-            std::fs::create_dir_all(role_file.parent().unwrap()).unwrap();
-            std::fs::write(&role_file, "schema = 1\n[card]\nid = \"fixture-writer\"\ndisplay_name = \"Fixture writer\"\nkind = \"specialist\"\nsummary = \"Before edit\"\nstatus = \"active\"\n").unwrap();
-            ready.send((node.url(), role_file, home.clone())).unwrap();
+            ready.send((node.url(), home.clone())).unwrap();
             while stopped.try_recv().is_err() {
                 tokio::time::sleep(Duration::from_millis(50)).await;
             }
@@ -49,10 +45,9 @@ fn start() -> Running {
             std::fs::remove_dir_all(home).unwrap();
         });
     });
-    let (url, role_file, home) = wait.recv().unwrap();
+    let (url, home) = wait.recv().unwrap();
     Running {
         url,
-        role_file,
         home,
         stop,
         thread: Some(thread),
@@ -74,7 +69,7 @@ fn until(
     }
 }
 #[gpui::test]
-fn role_library_edits_and_saves_a_fixture_card(cx: &mut TestAppContext) {
+fn skills_and_agent_views_remain_accessible(cx: &mut TestAppContext) {
     let running = start();
     let settings = fresh_dir("ahjo-harness-page-settings");
     cx.executor().allow_parking();
@@ -102,41 +97,12 @@ fn role_library_edits_and_saves_a_fixture_card(cx: &mut TestAppContext) {
     });
     let at = cx.debug_bounds("agents-tool-claude").unwrap().center();
     cx.simulate_click(at, Modifiers::none());
-    let at = cx.debug_bounds("harness-sub-roles").unwrap().center();
+    let at = cx.debug_bounds("harness-sub-agent").unwrap().center();
     cx.simulate_click(at, Modifiers::none());
-    // The library opens on its first role, unasked.
-    until(cx, "the first role's detail", |cx| {
-        cx.debug_bounds("role-edit").is_some()
+    until(cx, "the agent folder", |cx| {
+        cx.debug_bounds("shape-folder").is_some()
     });
-    let at = cx.debug_bounds("role-fixture-writer").unwrap().center();
-    cx.simulate_click(at, Modifiers::none());
-    until(cx, "the fixture role's detail", |cx| {
-        cx.debug_bounds("role-fixture-writer-shown").is_some()
-    });
-    until(cx, "the role detail", |cx| {
-        cx.debug_bounds("role-edit").is_some()
-    });
-    let at = cx.debug_bounds("role-edit").unwrap().center();
-    cx.simulate_click(at, Modifiers::none());
-    until(cx, "the role form", |cx| {
-        cx.debug_bounds("role-field-Summary").is_some()
-    });
-    let at = cx.debug_bounds("role-field-Summary").unwrap().center();
-    cx.simulate_click(at, Modifiers::none());
-    cx.simulate_keystrokes("ctrl-a");
-    cx.simulate_input("Updated from the library");
-    let at = cx.debug_bounds("role-save").unwrap().center();
-    cx.simulate_click(at, Modifiers::none());
-    until(cx, "the edited card to be saved", |_| {
-        std::fs::read_to_string(&running.role_file)
-            .is_ok_and(|s| s.contains("summary = \"Updated from the library\""))
-    });
-    let saved = std::fs::read_to_string(&running.role_file).unwrap();
-    assert!(saved.contains("id = \"fixture-writer\""));
-    assert!(!saved.contains("Before edit"));
-    until(cx, "the saved role detail", |cx| {
-        cx.debug_bounds("role-edit").is_some()
-    });
+    assert!(cx.debug_bounds("harness-sub-roles").is_none());
     std::fs::remove_dir_all(settings).unwrap();
 }
 

@@ -137,7 +137,7 @@ pub enum MissionChange {
         #[serde(default, deserialize_with = "default_on_null")]
         id: String,
     },
-    /// Set a seat’s role and harness settings.
+    /// Set a seat’s agent and harness settings.
     AssignSlot {
         /// The step’s id.
         #[serde(default, deserialize_with = "default_on_null")]
@@ -145,7 +145,7 @@ pub enum MissionChange {
         /// The seat’s id.
         #[serde(default, deserialize_with = "default_on_null")]
         slot_id: String,
-        /// The seat’s role id.
+        /// The seat’s reusable agent id.
         #[serde(default, deserialize_with = "default_on_null")]
         agent_id: String,
         /// The harness the seat runs.

@@ -113,6 +113,8 @@ pub fn build_with_executor(
             ..Default::default()
         };
         let executor = override_executor.unwrap_or_else(|| Box::new(executor));
+        let store = Store::new(&root);
+        store.agents().upgrade()?;
         let coordinator = Coordinator::open(&root, settings, executor)?;
         let notify_task = Some(Arc::new(tokio::sync::Mutex::new(Some(notify::start(
             coordinator.clone(),
@@ -121,7 +123,7 @@ pub fn build_with_executor(
             events,
         )))));
         Ok(Arc::new(Missions {
-            store: Store::new(root),
+            store,
             coordinator,
             changes: broadcast::channel(32).0,
             resolver,

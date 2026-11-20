@@ -156,8 +156,8 @@ fn operations(
                 };
                 let current = Staffing::from(current);
                 let update = Staffing {
-                    role: drafted!(10, "The slot's role", &current.role)
-                        .unwrap_or_else(|| current.role.clone()),
+                    agent_id: drafted!(10, "The slot's agent", &current.agent_id)
+                        .unwrap_or_else(|| current.agent_id.clone()),
                     harness: drafted_enum!(11, "The slot's harness", &current.harness)
                         .unwrap_or(current.harness),
                     model: drafted!(12, "The slot's model", &current.model)

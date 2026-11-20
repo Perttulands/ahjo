@@ -13,7 +13,7 @@ fn reports_unsupported_capabilities_on_the_nodes_and_refuses_admission() {
     let root = ahjo_testkit::fresh_dir("unsupported-validation");
     let store = Store::new(&root);
     let mut mission = gated();
-    let solo = validate(&mission, &store.roles(), &Harnesses::default());
+    let solo = validate(&mission, &store.agents(), &Harnesses::default());
     assert!(!solo.errors.iter().any(|f| matches!(
         f.code,
         Code::UnsupportedStep | Code::UnsupportedHumanChannel
@@ -24,7 +24,7 @@ fn reports_unsupported_capabilities_on_the_nodes_and_refuses_admission() {
     slot.id = "second".into();
     step.slots.push(slot);
     mission.input_cards[0].human_channel = ahjo_mission_model::HumanChannel::Session;
-    let report = validate(&mission, &store.roles(), &Harnesses::default());
+    let report = validate(&mission, &store.agents(), &Harnesses::default());
     assert!(report.errors.iter().any(|f| f.code == Code::UnsupportedStep
         && f.node_id == mission.steps[0].id
         && f.message.contains("not supported")));
@@ -38,7 +38,7 @@ fn reports_unsupported_capabilities_on_the_nodes_and_refuses_admission() {
     );
     let admitted = run_admission(
         &mission,
-        &store.roles(),
+        &store.agents(),
         &Harnesses::default(),
         &mission.input_cards[0].id,
         false,
@@ -59,14 +59,14 @@ fn reports_unsupported_capabilities_on_the_nodes_and_refuses_admission() {
     mission.input_cards[0].human_channel = ahjo_mission_model::HumanChannel::Unset;
     mission.steps[0].formation = ahjo_mission_model::Formation::Orchestrated;
     mission.steps[0].slots[0].controller = true;
-    let report = validate(&mission, &store.roles(), &Harnesses::default());
+    let report = validate(&mission, &store.agents(), &Harnesses::default());
     assert!(!report.errors.iter().any(|f| matches!(
         f.code,
         Code::UnsupportedStep | Code::UnsupportedHumanChannel | Code::OrchestratedController
     )));
     mission.input_cards[0].human_channel = ahjo_mission_model::HumanChannel::Session;
     mission.connections.clear();
-    let report = validate(&mission, &store.roles(), &Harnesses::default());
+    let report = validate(&mission, &store.agents(), &Harnesses::default());
     assert!(
         !report
             .errors
@@ -92,7 +92,7 @@ fn legacy_missions_can_be_repaired_without_allowing_unrelated_saves() {
     std::fs::write(folder.join("gated.mission.toml"), source).unwrap();
     let store = Store::new(&root);
     let current = store.mission_edit("gated").unwrap();
-    let findings = validate(&current.mission, &store.roles(), &Harnesses::default());
+    let findings = validate(&current.mission, &store.agents(), &Harnesses::default());
     assert!(
         findings
             .errors

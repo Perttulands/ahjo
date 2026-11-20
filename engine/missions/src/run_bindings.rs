@@ -1,5 +1,7 @@
-//! Frozen seat settings and complete role sources for a run.
-use crate::RoleStore;
+//! Frozen settings and agent definitions for a run.
+use crate::AgentStore;
+
+pub(crate) const BINDINGS_SCHEMA: u8 = 4;
 use ahjo_mission_model::{Mission, Slot};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -32,18 +34,26 @@ pub struct RunBinding {
     pub model: String,
     pub effort: String,
     #[serde(default)]
-    pub card_path: String,
+    pub agent_path: String,
     #[serde(default)]
-    pub card_toml: String,
+    pub agent_toml: String,
     #[serde(default)]
-    pub card_sha256: String,
+    pub agent_sha256: String,
 }
+impl RunBinding {
+    pub(crate) fn instructions(&self) -> Option<String> {
+        crate::agents::parse_agent(&self.agent_id, &self.agent_toml)
+            .ok()
+            .map(|agent| agent.instructions)
+    }
+}
+
 impl BindingsSnapshot {
     pub fn capture(
         run_id: &str,
         mission: &Mission,
         input_card_id: &str,
-        roles: &RoleStore,
+        agents: &AgentStore,
     ) -> Result<Self, crate::Error> {
         (|| -> Result<Self, String> {
             let mut bindings = Vec::new();
@@ -52,18 +62,15 @@ impl BindingsSnapshot {
                     if !slot.staffed() {
                         continue;
                     }
-                    let card_toml = if slot.agent_id.is_empty() {
+                    let agent_toml = if slot.agent_id.is_empty() {
                         String::new()
                     } else {
-                        let root = roles.dir().parent().unwrap_or(roles.dir());
-                        let locks = crate::write::locks(root, &format!("role:{}", slot.agent_id));
-                        let _role = locks.document.lock().unwrap_or_else(|e| e.into_inner());
-                        roles.source(&slot.agent_id).map_err(|e| e.to_string())?
+                        agents.source(&slot.agent_id).map_err(|e| e.to_string())?
                     };
-                    let card_sha256 = if card_toml.is_empty() {
+                    let agent_sha256 = if agent_toml.is_empty() {
                         String::new()
                     } else {
-                        hash(&card_toml)
+                        hash(&agent_toml)
                     };
                     bindings.push(RunBinding {
                         node_id: step.id.clone(),
@@ -72,17 +79,17 @@ impl BindingsSnapshot {
                         harness: slot.harness.as_str().to_owned(),
                         model: slot.model.clone(),
                         effort: slot.effort.as_str().to_owned(),
-                        card_path: if slot.agent_id.is_empty() {
+                        agent_path: if slot.agent_id.is_empty() {
                             String::new()
                         } else {
-                            roles
+                            agents
                                 .dir()
                                 .join(format!("{}.toml", slot.agent_id))
                                 .to_string_lossy()
                                 .into_owned()
                         },
-                        card_toml,
-                        card_sha256,
+                        agent_toml,
+                        agent_sha256,
                     });
                 }
             }
@@ -93,7 +100,7 @@ impl BindingsSnapshot {
                 .filter_map(|gate| crate::CodeGateBinding::new(run_id, gate).ok())
                 .collect();
             Ok(Self {
-                schema: 3,
+                schema: BINDINGS_SCHEMA,
                 run_id: run_id.into(),
                 mission_id: mission.id.clone(),
                 mission_slug: mission.slug.clone(),
@@ -112,7 +119,7 @@ impl BindingsSnapshot {
         gate: &ahjo_mission_model::Gate,
     ) -> Result<&crate::CodeGateBinding, crate::Error> {
         (|| -> Result<&crate::CodeGateBinding, String> {
-            if self.schema != 3
+            if self.schema != BINDINGS_SCHEMA
                 || self.run_id != run_id
                 || self.mission_id != mission.id
                 || self.mission_slug != mission.slug
@@ -152,7 +159,7 @@ impl BindingsSnapshot {
                 "persona snapshot does not match the requested seat",
             )
         };
-        if self.schema != 3
+        if self.schema != BINDINGS_SCHEMA
             || self.run_id != run_id
             || self.mission_id != mission.id
             || self.mission_slug != mission.slug
@@ -175,15 +182,15 @@ impl BindingsSnapshot {
             || binding.effort != slot.effort.as_str()
             || binding.effort.is_empty()
             || (!binding.agent_id.is_empty()
-                && (binding.card_toml.is_empty()
-                    || hash(&binding.card_toml) != binding.card_sha256
-                    || crate::roles::parse_card(&binding.agent_id, &binding.card_toml).is_err()))
+                && (binding.agent_toml.is_empty()
+                    || hash(&binding.agent_toml) != binding.agent_sha256
+                    || crate::agents::parse_agent(&binding.agent_id, &binding.agent_toml).is_err()))
         {
             return Err(invalid());
         }
         Ok(binding)
     }
 }
-fn hash(s: &str) -> String {
+pub(crate) fn hash(s: &str) -> String {
     hex::encode(Sha256::digest(s.as_bytes()))
 }

@@ -15,7 +15,7 @@ pub(crate) fn find(name: &str) -> Result<&'static Example, Error> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{Harnesses, RoleStore, validate};
+    use crate::{AgentStore, Harnesses, validate};
     use ahjo_mission_model::Mission;
 
     #[test]
@@ -25,8 +25,8 @@ mod tests {
                 .unwrap_or_else(|e| panic!("{}: {e:?}", example.name));
             assert_eq!(mission.slug, example.name);
             assert_eq!(mission.title, example.title);
-            let roles = RoleStore::new(std::env::temp_dir().join("ahjo-no-roles"));
-            let report = validate(&mission, &roles, &Harnesses::default());
+            let agents = AgentStore::new(ahjo_testkit::fresh_dir("example-agents").join("agents"));
+            let report = validate(&mission, &agents, &Harnesses::default());
             assert!(
                 report.errors.is_empty(),
                 "{}: {:?}",

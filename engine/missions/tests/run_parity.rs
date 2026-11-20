@@ -121,14 +121,23 @@ fn solo_lab_ledger_and_admission_findings_match_archon() {
         "parity/runs/archon-ledgers/admission-findings.json"
     ))
     .unwrap();
-    let staffing = expected
-        .as_array_mut()
-        .unwrap()
-        .iter_mut()
-        .find(|finding| finding["code"] == "invalid_slot_settings")
-        .unwrap();
-    staffing["message"] = serde_json::json!(
-        "step \"staff\" slot \"invalid\" effort \"ultra\" is not one claude-code accepts; use low, medium, high, xhigh, max"
-    );
+    for finding in expected.as_array_mut().unwrap() {
+        let message = match finding["code"].as_str().unwrap() {
+            "invalid_slot_settings" => {
+                r#"step "staff" slot "invalid" effort "ultra" is not one claude-code accepts; use low, medium, high, xhigh, max"#
+            }
+            "retired_persona" => {
+                r#"step "staff" slot "retired" uses archived agent "critic"; restaff it or restore the agent file"#
+            }
+            "unavailable_persona" => {
+                r#"step "staff" slot "unavailable" names unknown agent "unknown""#
+            }
+            "unstaffed_slot" => {
+                r#"step "staff" slot "open" needs a harness and effort, and optionally an agent"#
+            }
+            _ => continue,
+        };
+        finding["message"] = message.into();
+    }
     assert_eq!(actual, expected);
 }

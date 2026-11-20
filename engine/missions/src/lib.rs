@@ -1,10 +1,12 @@
 //! Ahjo's mission engine. This crate holds the state directory that stores
-//! missions, notes, layouts, role cards and characters, the validation that
+//! missions, notes, layouts, agents, the validation that
 //! names what stops a run, and the runs. The data it reads, writes and
 //! answers with is `ahjo-mission-model`'s.
 //!
 //! Mission definitions and run state use Ahjo's schema and validation codes.
 
+mod agents;
+mod agents_migration;
 mod arrange;
 mod attempt_limits;
 mod authoring;
@@ -18,7 +20,6 @@ mod authoring_restore;
 mod authoring_staff;
 mod authoring_type;
 mod authoring_wire;
-mod characters;
 mod code_binding;
 mod code_check;
 mod contract_names;
@@ -50,8 +51,6 @@ mod notifications;
 mod output_refs;
 pub mod outputs;
 mod port_delivery;
-mod roles;
-mod roles_authoring;
 mod run_admission;
 mod run_attempts;
 mod run_bindings;
@@ -90,10 +89,10 @@ mod verdict;
 mod workspaces;
 mod write;
 
+pub use agents::{AgentEdit, AgentStore, check_agent_id};
 pub use ahjo_core::Error;
 pub use arrange::arrange;
 pub use attempt_limits::{AttemptLimits, TokenMeter};
-pub use characters::{Character, CharacterStore};
 pub use code_binding::CodeGateBinding;
 pub use code_check::{CodeGateEvaluator, GateEvaluator, evaluate_code_check};
 pub use contract_outputs::{OutputPayload, parse_outputs};
@@ -114,8 +113,6 @@ pub use limits::{LimitUse, LimitWarning};
 pub use mission_documents::AppliedDocument;
 pub use notifications::{gate_commands, resume_commands, shell_word};
 pub use port_delivery::{GateEvidence, GateFeedback, GateResponse, RoutedInput, merge_port_inputs};
-pub use roles::{RoleCard, RoleNote, RoleStore, RoleUsage, RoleUse, Unreadable};
-pub use roles_authoring::RoleEdit;
 pub use run_admission::run_admission;
 pub use run_bindings::{BindingsSnapshot, RunBinding};
 pub use run_dispatch::{CompletionSentinel, parse_completion_sentinel};
