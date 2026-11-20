@@ -36,6 +36,16 @@ pub const FORK_LINE: f32 = 70.;
 pub const FORK_DOT: f32 = 14.;
 /// An exit: the band under the step it checks.
 pub const BAND_H: f32 = 52.;
+/// A card's inner padding across.
+pub const CARD_PAD: f32 = 12.;
+/// A gate's condition: its type size and line, the most lines it takes
+/// before it is cut (the whole of it then on hover), and a glyph's advance
+/// per unit of type size, at the widest of the faces the themes use, so a
+/// condition is never given fewer lines than it wraps to.
+pub const CRITERION_SIZE: f32 = 11.5;
+pub const CRITERION_LINE: f32 = 17.;
+pub const CRITERION_MOST: usize = 10;
+const GLYPH: f32 = 0.62;
 /// A tag: a small card whose right side points the way on.
 pub const TAG_W: f32 = 222.;
 pub const TAG_H: f32 = 70.;
@@ -183,8 +193,8 @@ fn size(m: &Mission, flow: &Flow, id: &str, running: bool) -> Option<(Kind, f32,
             + if running { RUN_ROW } else { 0. };
         return Some((Kind::Formation, STEP_W, h));
     }
-    if m.gates.iter().any(|g| g.id == id) {
-        let (w, h) = gate_size();
+    if let Some(g) = m.gates.iter().find(|g| g.id == id) {
+        let (w, h) = gate_size(&g.criterion);
         return Some((Kind::Gate, w, h));
     }
     if m.ends.iter().any(|e| e.id == id) {
@@ -193,12 +203,54 @@ fn size(m: &Mission, flow: &Flow, id: &str, running: bool) -> Option<(Kind, f32,
     None
 }
 
-fn gate_size() -> (f32, f32) {
+/// A gate grows down with its condition, which it shows whole: the fork
+/// has two lines of it at its least, an exit and a tag one.
+fn gate_size(criterion: &str) -> (f32, f32) {
+    let lines = criterion_lines(criterion, criterion_width());
+    let more = |least: usize| lines.saturating_sub(least) as f32 * CRITERION_LINE;
     match look::gate() {
-        GateLook::Fork => (FORK_W, FORK_H),
-        GateLook::Exit => (STEP_W, BAND_H),
-        GateLook::Tag => (TAG_W, TAG_H),
+        GateLook::Fork => (FORK_W, FORK_H + more(2)),
+        GateLook::Exit => (STEP_W, BAND_H + more(1)),
+        GateLook::Tag => (TAG_W, TAG_H + more(1)),
     }
+}
+
+/// How wide a gate's condition runs in this look.
+pub fn criterion_width() -> f32 {
+    match look::gate() {
+        GateLook::Fork => FORK_W - FORK_DOT,
+        GateLook::Exit => STEP_W - 2. * CARD_PAD,
+        GateLook::Tag => TAG_W - CARD_PAD - TAG_POINT,
+    }
+}
+
+/// The lines `text` wraps to at `width`, word by word, at most
+/// `CRITERION_MOST`.
+pub fn criterion_lines(text: &str, width: f32) -> usize {
+    wrapped_lines(text, width).clamp(1, CRITERION_MOST)
+}
+
+/// The lines `text` wraps to at `width`, word by word, a word longer
+/// than a line broken across lines.
+pub fn wrapped_lines(text: &str, width: f32) -> usize {
+    let per_line = ((width / (CRITERION_SIZE * GLYPH)) as usize).max(1);
+    let (mut lines, mut used) = (0usize, 0usize);
+    for word in text.split_whitespace() {
+        let n = word.chars().count();
+        if used > 0 && used + 1 + n <= per_line {
+            used += 1 + n;
+        } else {
+            lines += if used > 0 { 1 } else { 0 } + n.saturating_sub(1) / per_line;
+            used = (n - 1) % per_line + 1;
+        }
+    }
+    lines + usize::from(used > 0)
+}
+
+/// Where the line runs through a fork of height `h`, from its top: a
+/// longer condition stands taller above it.
+pub fn fork_line(h: f32) -> f32 {
+    h - (FORK_H - FORK_LINE)
 }
 
 /// Run order, left to right in one row: what a card the layout misses
@@ -498,9 +550,9 @@ fn port_at(m: &Mission, c: &Card, port: &str, out: bool) -> P {
     let side = if out { c.x + c.w } else { c.x };
     match c.kind {
         Kind::Gate => match (look::gate(), port) {
-            (GateLook::Fork, "pass") => (c.x + c.w, c.y + FORK_LINE),
+            (GateLook::Fork, "pass") => (c.x + c.w, c.y + fork_line(c.h)),
             (GateLook::Fork, "fail") => (c.x + FORK_DOT, c.y + c.h),
-            (GateLook::Fork, _) => (c.x, c.y + FORK_LINE),
+            (GateLook::Fork, _) => (c.x, c.y + fork_line(c.h)),
             (GateLook::Exit, "in") => (c.x + c.w / 2., c.y),
             (_, "pass") => (c.x + c.w, c.y + c.h / 2.),
             (_, "fail") => (c.x + FAIL_X, c.y + c.h),
@@ -1106,7 +1158,7 @@ pub fn new_size(kind: Kind) -> (f32, f32) {
     match kind {
         Kind::Input => (START, START),
         Kind::Formation => (STEP_W, STEP_H),
-        Kind::Gate => gate_size(),
+        Kind::Gate => gate_size(""),
         Kind::End => (END_W, END_H),
         Kind::Limit => (0., 0.),
     }
@@ -1379,16 +1431,40 @@ mod tests {
     }
 
     #[test]
+    fn a_gate_grows_to_show_its_whole_condition() {
+        let width = 7. * CRITERION_SIZE * GLYPH * 1.01; // seven glyphs a line
+        assert_eq!(wrapped_lines("", width), 0);
+        assert_eq!(wrapped_lines("ship it", width), 1);
+        assert_eq!(wrapped_lines("ship it now", width), 2);
+        assert_eq!(wrapped_lines("abcdefghij", width), 2);
+        assert_eq!(criterion_lines(&"word ".repeat(200), width), CRITERION_MOST);
+        let mut m = delivery();
+        let gate = m.gates[0].id.clone();
+        let flow = build(&m);
+        m.gates[0].criterion = "it builds".into();
+        let short = size(&m, &flow, &gate, false).unwrap().2;
+        m.gates[0].criterion = "the whole suite passes, slow tests included, and nothing \
+            new is flaky across three runs on a clean checkout"
+            .into();
+        let tall = size(&m, &flow, &gate, false).unwrap().2;
+        assert!(tall > short, "{tall} should exceed {short}");
+    }
+
+    #[test]
     fn a_loop_is_never_wrapped_between_rows_when_a_whole_one_reads() {
         let m = delivery();
         let flow = build(&m);
         for width in [700., 900., 1100., 1300., 1600.] {
             let layout = shaped(&m, &flow, (width, 2000.), 0.8, &|_| 0.);
-            let y = |id: &str| layout.iter().find(|p| p.id == id).unwrap().y;
-            let (step, gate) = (y("fmn_beads"), y("gate_beads_review"));
+            // On one row the two stand side by side, so their heights meet.
+            let span = |id: &str| {
+                let y = layout.iter().find(|p| p.id == id).unwrap().y as f32;
+                (y, y + size(&m, &flow, id, false).unwrap().2)
+            };
+            let (step, gate) = (span("fmn_beads"), span("gate_beads_review"));
             assert!(
-                (step - gate).abs() < ROW_GAP as i64,
-                "at {width} the loop's ends are on two rows: {step} and {gate}"
+                step.0 < gate.1 && gate.0 < step.1,
+                "at {width} the loop's ends are on two rows: {step:?} and {gate:?}"
             );
         }
     }

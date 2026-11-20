@@ -36,7 +36,7 @@ const DOT_SIZE: f32 = 1.5;
 const ZOOM_BUTTON: (f32, f32) = (76., 32.);
 const WIRE: f32 = 1.5;
 /// A card's inner padding across and down, at Archon's density.
-const CARD_PAD: f32 = 12.;
+const CARD_PAD: f32 = board::CARD_PAD;
 const HEAD_PAD: f32 = 8.;
 /// A step's number in its ring.
 const GAP: f32 = 8.;
@@ -1472,7 +1472,7 @@ fn paint_gate(
     };
     match crate::look::gate() {
         crate::look::Gate::Fork => {
-            let y = c.y + board::FORK_LINE;
+            let y = c.y + board::fork_line(c.h);
             let dot = c.x + board::FORK_DOT;
             line(&[(c.x, y), (dot, y)], work, window);
             line(
@@ -1988,13 +1988,20 @@ fn gate_face(
                 .text_color(t.text)
                 .child(g.title.clone()),
         );
-    let criterion = |lines: usize| {
+    // The condition is the decision: it shows whole, the gate sized to
+    // it, and only one past all reason is cut, whole on hover.
+    let cut = board::wrapped_lines(&g.criterion, board::criterion_width()) > board::CRITERION_MOST;
+    let whole = g.criterion.clone();
+    let criterion = || {
         div()
+            .id(SharedString::from(format!("canvas-criterion-{}", g.id)))
             .min_w_0()
-            .line_clamp(lines)
+            .line_clamp(board::CRITERION_MOST)
             .text_ellipsis()
-            .text_size(px(CARD_SMALL * z))
+            .text_size(px(board::CRITERION_SIZE * z))
+            .line_height(px(board::CRITERION_LINE * z))
             .text_color(t.text2)
+            .when(cut, |d| d.tooltip(kit::tip(whole.clone())))
             .child(g.criterion.clone())
     };
     match crate::look::gate() {
@@ -2006,19 +2013,19 @@ fn gate_face(
                     .absolute()
                     .left(px(board::FORK_DOT * z))
                     .right_0()
-                    .bottom(px((card.h - board::FORK_LINE + GAP) * z))
+                    .bottom(px((card.h - board::fork_line(card.h) + GAP) * z))
                     .flex()
                     .flex_col()
                     .gap(px(EDGE * z))
                     .child(title)
-                    .child(criterion(2)),
+                    .child(criterion()),
             )
             .child(
                 answerer(t, mission, &g.id, z, on_judge)
                     .absolute()
                     .left(px((board::FORK_DOT + CARD_PAD) * z))
                     .right_0()
-                    .top(px((board::FORK_LINE + GAP) * z)),
+                    .top(px((board::fork_line(card.h) + GAP) * z)),
             ),
         crate::look::Gate::Exit => div()
             .size_full()
@@ -2035,7 +2042,7 @@ fn gate_face(
                     .child(title.flex_1())
                     .child(answerer(t, mission, &g.id, z, on_judge).flex_none()),
             )
-            .child(criterion(1)),
+            .child(criterion()),
         crate::look::Gate::Tag => div()
             .size_full()
             .flex()
@@ -2045,7 +2052,7 @@ fn gate_face(
             .pl(px(CARD_PAD * z))
             .pr(px(board::TAG_POINT * z))
             .child(title)
-            .child(criterion(1))
+            .child(criterion())
             .child(answerer(t, mission, &g.id, z, on_judge)),
     }
 }
