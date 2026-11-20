@@ -6,7 +6,7 @@ mod tabs;
 mod zoomed;
 
 use crate::open::Show;
-use crate::page::{FilesPage, Pick};
+use crate::page::{FilesPage, Pick, Rename};
 use crate::store::Side;
 use crate::store::{format, paths, tree::Row};
 use ahjo_app_kit::theme::{Theme, size, theme};
@@ -409,6 +409,21 @@ pub fn state_tip(state: char) -> &'static str {
 }
 
 impl FilesPage {
+    fn rename_detail(&self, path: &str) -> Option<(&'static str, String)> {
+        if self.states.get(path) != Some(&'R') {
+            return None;
+        }
+        let (prefix, other) = match self.renames.get(path)? {
+            Rename::From(source) => ("Renamed from ", source),
+            Rename::To(destination) => ("Renamed to ", destination),
+        };
+        let repo = self.repository_of(path);
+        let other = repo
+            .as_deref()
+            .map_or(other.as_str(), |repo| paths::relative(repo, other));
+        Some((prefix, other.to_owned()))
+    }
+
     /// Letters a row's words have in the list.
     fn row_letters(&self, indent: f32) -> usize {
         let width = self.list_room.get().unwrap_or(size::LIST) - 2. * size::ROW_PAD - indent;
@@ -463,6 +478,7 @@ impl FilesPage {
                 // An uncommitted file says how it stands, and where in its
                 // repository it is.
                 let state = self.states.get(&c.path).copied();
+                let rename = self.rename_detail(&c.path);
                 if c.modified == 0
                     && let Some(repo) = self.repository_of(&c.path)
                 {
@@ -480,6 +496,18 @@ impl FilesPage {
                         folder = format!("{n} files");
                     }
                 }
+                let detail = rename
+                    .as_ref()
+                    .filter(|_| c.modified == 0)
+                    .map(|(prefix, other)| (*prefix, other.as_str()))
+                    .or((!folder.is_empty()).then_some(("", folder.as_str())));
+                let tip = match &rename {
+                    Some((prefix, other)) => format!("{}\n{prefix}{other}", c.path),
+                    None => state.map_or_else(
+                        || c.path.clone(),
+                        |s| format!("{}\n{}", c.path, state_tip(s)),
+                    ),
+                };
                 let path = c.path.clone();
                 let selector = format!("recent-{name}");
                 self.file_row(
@@ -487,7 +515,7 @@ impl FilesPage {
                     SharedString::from(format!("recent-{}", c.path)),
                     picked,
                     &name,
-                    Some(folder).filter(|f| !f.is_empty()),
+                    detail,
                     room,
                     (c.modified != 0).then(|| format::ago(c.modified)),
                     cx,
@@ -495,13 +523,14 @@ impl FilesPage {
                 .when_some(state.filter(|_| !picked), |row, s| {
                     row.text_color(state_colour(t, s))
                 })
-                .children(state.map(|s| pane::meta(t, state_word(s), Some(state_colour(t, s)))))
+                .children(state.map(|s| {
+                    let selector = format!("recent-state-{name}-{s}");
+                    pane::meta(t, state_word(s), Some(state_colour(t, s)))
+                        .debug_selector(move || selector.clone())
+                }))
                 .pl(px(size::ROW_PAD - size::ROW_INSET + indent))
                 .debug_selector(move || selector.clone())
-                .tooltip(kit::tip(match state {
-                    Some(s) => format!("{}\n{}", c.path, state_tip(s)),
-                    None => c.path.clone(),
-                }))
+                .tooltip(kit::tip(tip))
                 .on_mouse_down(
                     MouseButton::Right,
                     self.menu_at(c.path.clone(), c.files.is_some(), cx),
@@ -586,7 +615,7 @@ impl FilesPage {
                         SharedString::from(format!("hit-{i}")),
                         picked,
                         &name,
-                        Some(place),
+                        Some(("", &place)),
                         room,
                         None,
                         cx,
@@ -627,7 +656,7 @@ impl FilesPage {
                     SharedString::from(format!("hit-file-{path}")),
                     picked,
                     &name,
-                    Some(folder),
+                    Some(("", &folder)),
                     room,
                     Some(n.to_string()),
                     cx,
@@ -677,7 +706,7 @@ impl FilesPage {
     }
 
     /// A file's row: its name shortened in the middle to `room` letters,
-    /// the folder it is in dim after it while there is room, and `age`.
+    /// its location or rename in dim after it while there is room, and `age`.
     #[allow(clippy::too_many_arguments)]
     fn file_row(
         &self,
@@ -685,7 +714,7 @@ impl FilesPage {
         id: SharedString,
         picked: bool,
         name: &str,
-        folder: Option<String>,
+        detail: Option<(&str, &str)>,
         room: usize,
         age: Option<String>,
         _cx: &mut Context<Self>,
@@ -704,18 +733,20 @@ impl FilesPage {
                     .overflow_hidden()
                     .whitespace_nowrap()
                     .child(div().flex_none().child(shown))
-                    .children(folder.filter(|_| left >= 4).map(|f| {
+                    .children(detail.filter(|_| left >= 4).map(|(prefix, path)| {
                         // Small letters: more of them fit. Shortened in its
                         // middle, a folder keeps its root and its nearest
                         // folders, the parts that tell two hits apart.
                         let fit = (left as f32 * size::TEXT / size::SMALL) as usize;
+                        let path = pane::middle(path, fit.saturating_sub(prefix.len()));
                         div()
                             .min_w_0()
                             .overflow_hidden()
+                            .text_ellipsis()
                             .text_size(px(size::SMALL))
                             .text_color(t.dim)
                             .font_weight(gpui::FontWeight::NORMAL)
-                            .child(pane::middle(&f, fit))
+                            .child(format!("{prefix}{path}"))
                     })),
             )
             .children(age.map(|a| pane::meta(t, a, None)))

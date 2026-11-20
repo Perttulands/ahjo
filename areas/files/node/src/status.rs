@@ -1,7 +1,7 @@
 //! Which files of a folder's repository differ from its HEAD, as `git
 //! status` says: what the tree marks.
 use std::io::Read;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
 use super::{error::FilesError, roots::Roots};
@@ -12,7 +12,11 @@ const MOST: usize = 5000;
 const LIMIT: u64 = 4 << 20;
 
 pub fn read(roots: &Roots, requested: &str) -> Result<RepoStatus, FilesError> {
-    let folder = roots.existing(requested)?;
+    let folder = match roots.existing(requested) {
+        Ok(path) => path,
+        Err(FilesError::NotFound) => roots.gone(requested)?,
+        Err(e) => return Err(e),
+    };
     let folder = if folder.is_dir() {
         folder
     } else {
@@ -31,7 +35,7 @@ pub fn read(roots: &Roots, requested: &str) -> Result<RepoStatus, FilesError> {
             "--porcelain=v1",
             "-z",
             "--untracked-files=all",
-            "--no-renames",
+            "--renames",
         ])
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -43,23 +47,31 @@ pub fn read(roots: &Roots, requested: &str) -> Result<RepoStatus, FilesError> {
             return Ok(result);
         }
     };
+    let stderr = child.stderr.take().expect("piped stderr");
+    let errors = std::thread::spawn(move || {
+        let mut bytes = Vec::new();
+        let _ = stderr.take(LIMIT).read_to_end(&mut bytes);
+        bytes
+    });
     let mut bytes = Vec::new();
-    let _ = child
+    let read = child
         .stdout
         .take()
         .expect("piped stdout")
-        .take(LIMIT)
+        .take(LIMIT + 1)
         .read_to_end(&mut bytes);
-    let mut errors = Vec::new();
-    let _ = child
-        .stderr
-        .take()
-        .expect("piped stderr")
-        .take(LIMIT)
-        .read_to_end(&mut errors);
-    let _ = child.kill();
-    match child.wait() {
-        Ok(status) if !status.success() => {
+    result.truncated = bytes.len() as u64 > LIMIT;
+    if result.truncated || read.is_err() {
+        let _ = child.kill();
+    }
+    let status = child.wait();
+    let errors = errors.join().unwrap_or_default();
+    if let Err(e) = read {
+        result.error = Some(e.to_string());
+        return Ok(result);
+    }
+    match status {
+        Ok(status) if !status.success() && !result.truncated => {
             let message = String::from_utf8_lossy(&errors).trim().to_owned();
             result.error = Some(if message.is_empty() {
                 format!("git exited with {status}")
@@ -74,35 +86,60 @@ pub fn read(roots: &Roots, requested: &str) -> Result<RepoStatus, FilesError> {
         }
         _ => {}
     }
-    for (state, relative) in entries(&String::from_utf8_lossy(&bytes)) {
+    bytes.truncate(LIMIT as usize);
+    let out = String::from_utf8_lossy(&bytes);
+    let complete = out.rsplit_once('\0').map_or("", |(complete, _)| complete);
+    let absolute = |path: &str| {
+        // Git separates components with `/` on every platform.
+        repository
+            .join(path.split('/').collect::<PathBuf>())
+            .to_string_lossy()
+            .into_owned()
+    };
+    for (state, relative, renamed_from) in entries(complete) {
         if result.files.len() == MOST {
             result.truncated = true;
             break;
         }
         result.files.push(FileState {
-            path: repository.join(relative).to_string_lossy().into_owned(),
+            path: absolute(relative),
             state,
+            renamed_from: renamed_from.map(absolute),
         });
     }
     Ok(result)
 }
 
-/// `XY path\0` entries: the state that matters to a reader, worktree first.
-fn entries(out: &str) -> impl Iterator<Item = (char, &str)> {
-    out.split('\0').filter_map(|entry| {
-        let (xy, path) = (entry.get(..2)?, entry.get(3..)?);
-        let mut c = xy.chars();
-        let (x, y) = (c.next()?, c.next()?);
-        let state = match (x, y) {
-            ('?', '?') => '?',
-            // Unmerged: both sides changed it, and it waits to be settled.
-            ('U', _) | (_, 'U') | ('A', 'A') | ('D', 'D') => 'C',
-            (_, 'D') | ('D', _) => 'D',
-            ('A', _) => 'A',
-            ('R', _) => 'R',
-            _ => 'M',
-        };
-        (!path.is_empty() && !path.ends_with('/')).then_some((state, path))
+/// `XY path\0` entries. With `-z`, a rename or copy writes the destination
+/// first and adds a separate NUL-delimited source with no status prefix.
+fn entries(out: &str) -> impl Iterator<Item = (char, &str, Option<&str>)> {
+    let mut fields = out.split('\0');
+    std::iter::from_fn(move || {
+        loop {
+            let entry = fields.next()?;
+            let [x, y, b' ', ..] = entry.as_bytes() else {
+                continue;
+            };
+            let path = &entry[3..];
+            let has_source = matches!(x, b'R' | b'C') || matches!(y, b'R' | b'C');
+            let source = if has_source {
+                Some(fields.next()?)
+            } else {
+                None
+            };
+            let state = match (*x, *y) {
+                (b'?', b'?') => '?',
+                // Unmerged: both sides changed it, and it waits to be settled.
+                (b'U', _) | (_, b'U') | (b'A', b'A') | (b'D', b'D') => 'C',
+                (_, b'D') | (b'D', _) => 'D',
+                (b'R', _) | (_, b'R') => 'R',
+                (b'A' | b'C', _) | (_, b'C') => 'A',
+                _ => 'M',
+            };
+            if !path.is_empty() && !path.ends_with('/') {
+                return Some((state, path, source.filter(|_| state == 'R')));
+            }
+        }
     })
 }
 
@@ -116,13 +153,27 @@ mod tests {
         assert_eq!(
             got,
             [
-                ('M', "a.rs"),
-                ('?', "new/b.md"),
-                ('A', "c.txt"),
-                ('D', "gone.rs"),
-                ('M', "both.rs"),
-                ('C', "fight.rs"),
-                ('C', "theirs.rs")
+                ('M', "a.rs", None),
+                ('?', "new/b.md", None),
+                ('A', "c.txt", None),
+                ('D', "gone.rs", None),
+                ('M', "both.rs", None),
+                ('C', "fight.rs", None),
+                ('C', "theirs.rs", None),
+            ]
+        );
+    }
+
+    #[test]
+    fn rename_sources_are_consumed_even_when_they_look_like_another_entry() {
+        let out =
+            "RM new name.rs\0?? old\nname.rs\0RD gone.rs\0M  before.rs\0?? real.rs\0R  partial.rs";
+        assert_eq!(
+            super::entries(out).collect::<Vec<_>>(),
+            [
+                ('R', "new name.rs", Some("?? old\nname.rs")),
+                ('D', "gone.rs", None),
+                ('?', "real.rs", None),
             ]
         );
     }

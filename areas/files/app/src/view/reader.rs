@@ -338,10 +338,25 @@ impl FilesPage {
     /// (a click steps to the next change), or that it is new.
     pub(super) fn change_count(&self, t: &Theme, cx: &mut Context<Self>) -> Option<AnyElement> {
         let o = self.opened.as_ref()?;
-        let c = o.changes.as_ref()?;
         if o.editing {
             return None;
         }
+        if let Some((prefix, other)) = self.rename_detail(&o.path) {
+            let words = format!("{prefix}{other}");
+            let selector = format!("files-{words}");
+            return Some(
+                pane::meta(t, words.clone(), Some(t.needs))
+                    .id("files-renamed-file")
+                    .max_w(gpui::relative(0.35))
+                    .overflow_hidden()
+                    .whitespace_nowrap()
+                    .text_ellipsis()
+                    .tooltip(kit::tip(words))
+                    .debug_selector(move || selector.clone())
+                    .into_any_element(),
+            );
+        }
+        let c = o.changes.as_ref()?;
         let said = |words: &'static str, selector: &'static str| {
             pane::meta(t, words, Some(t.error))
                 .debug_selector(move || selector.into())

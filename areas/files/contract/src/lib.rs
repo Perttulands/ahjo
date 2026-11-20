@@ -66,6 +66,9 @@ pub struct DiffAt {
 pub struct FileState {
     pub path: String,
     pub state: char,
+    /// The previous absolute path of a rename.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub renamed_from: Option<String>,
 }
 
 /// Every file of a folder's repository that differs from its HEAD. A

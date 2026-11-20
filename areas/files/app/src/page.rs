@@ -35,6 +35,11 @@ const TYPED: Duration = Duration::from_millis(90);
 /// The page the Files panel opens beside.
 const PANEL_BESIDE: &str = "sessions";
 
+pub(crate) enum Rename {
+    From(String),
+    To(String),
+}
+
 struct Upload {
     source: PathBuf,
     node: NodeId,
@@ -237,6 +242,7 @@ pub struct FilesPage {
     no_repo: std::collections::HashSet<String>,
     status_asked: std::collections::HashSet<String>,
     pub states: HashMap<String, char>,
+    pub(crate) renames: HashMap<String, Rename>,
     pub holding: std::collections::HashSet<String>,
     /// The second group of tabs beside the first, and (in it) the page it
     /// is beside.
@@ -703,6 +709,7 @@ impl FilesPage {
             no_repo: Default::default(),
             status_asked: Default::default(),
             states: HashMap::new(),
+            renames: HashMap::new(),
             holding: Default::default(),
             split: None,
             split_of: None,
@@ -1527,6 +1534,7 @@ impl FilesPage {
             window.focus(&self.focus, cx);
         }
         self.follow_open(&path);
+        self.ask_status(&paths::parent(&path), cx);
         self.keep(cx);
         let kind = store::kinds::kind(&name);
         if matches!(
@@ -1693,10 +1701,6 @@ impl FilesPage {
         };
         let node = o.node.clone();
         let path = o.path.clone();
-        // Which repository it is in: a find inside files searches it.
-        if node == self.tree.node {
-            self.ask_status(&paths::parent(&path), cx);
-        }
         self.request(
             Request::get(
                 NodeId(node.clone()),

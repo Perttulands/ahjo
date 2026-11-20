@@ -418,6 +418,7 @@ async fn status_names_every_file_that_differs_from_head_and_a_whole_diff_has_eve
     let lines: String = (1..=20).map(|n| format!("line {n}\n")).collect();
     std::fs::write(repo.join("kept.txt"), &lines).unwrap();
     std::fs::write(repo.join("docs/gone.md"), "gone\n").unwrap();
+    std::fs::write(repo.join("docs/old name.md"), "rename me\n").unwrap();
     git(&["add", "."]);
     git(&[
         "-c",
@@ -435,6 +436,8 @@ async fn status_names_every_file_that_differs_from_head_and_a_whole_diff_has_eve
     .unwrap();
     std::fs::remove_file(repo.join("docs/gone.md")).unwrap();
     std::fs::write(repo.join("docs/new.md"), "new\n").unwrap();
+    git(&["config", "status.renames", "false"]);
+    git(&["mv", "docs/old name.md", "renamed.md"]);
     let app = app(&scratch.0);
     let (status, body, _) = call(
         &app,
@@ -465,8 +468,33 @@ async fn status_names_every_file_that_differs_from_head_and_a_whole_diff_has_eve
         [
             ("/docs/gone.md".to_owned(), 'D'),
             ("/docs/new.md".to_owned(), '?'),
-            ("/kept.txt".to_owned(), 'M')
+            ("/kept.txt".to_owned(), 'M'),
+            ("/renamed.md".to_owned(), 'R'),
         ]
+    );
+    let rename = result.files.iter().find(|file| file.state == 'R').unwrap();
+    assert_eq!(
+        rename.renamed_from.as_deref(),
+        repo.join("docs/old name.md").to_str()
+    );
+    assert!(
+        result
+            .files
+            .iter()
+            .filter(|file| file.state != 'R')
+            .all(|file| file.renamed_from.is_none())
+    );
+    let (status, body, _) = call(
+        &app,
+        "GET",
+        &at("status", &repo.join("missing/parent")),
+        Body::empty(),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(
+        serde_json::from_slice::<ahjo_files_contract::RepoStatus>(&body).unwrap(),
+        result
     );
     let file = repo.join("kept.txt");
     let (_, body, _) = call(&app, "GET", &at("diff", &file), Body::empty()).await;

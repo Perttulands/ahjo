@@ -2439,6 +2439,51 @@ fn changes_list_the_uncommitted_files_and_a_deleted_one_shows_what_went(cx: &mut
     std::fs::remove_dir_all(root).unwrap();
 }
 
+#[gpui::test]
+fn a_staged_rename_has_one_changes_row_and_both_paths_say_where_it_moved(cx: &mut TestAppContext) {
+    let root = repository("files-renamed", &[("old/before.rs", "fn demo() {}\n")], &[]);
+    let old = root.join("old/before.rs").to_string_lossy().into_owned();
+    assert!(
+        std::process::Command::new("git")
+            .current_dir(&root)
+            .args(["mv", "old/before.rs", "after.rs"])
+            .status()
+            .unwrap()
+            .success()
+    );
+    std::fs::remove_dir(root.join("old")).unwrap();
+    let running = start(root.clone());
+    cx.executor().allow_parking();
+    cx.update(ahjo_app_shell::prepare);
+    let url = running.url.clone();
+    let (_, cx) = cx.add_window_view(move |w, cx| {
+        ahjo_app_shell::start(&[observed_files], Some(url), None, w, cx)
+    });
+    let page = SEARCH_PAGE.with(|p| p.borrow().as_ref().unwrap().clone());
+    tree(cx, "file-row-after.rs");
+    click(cx, "files-side-changes");
+    until(cx, "one rename row at the destination", |cx| {
+        cx.debug_bounds("recent-state-after.rs-R").is_some()
+    });
+    assert!(cx.debug_bounds("recent-before.rs").is_none());
+    click(cx, "recent-after.rs");
+    until(cx, "the destination names its source", |cx| {
+        cx.debug_bounds("files-Renamed from old/before.rs")
+            .is_some()
+    });
+    assert!(cx.debug_bounds("files-new-file").is_none());
+
+    page.update_in(cx, |p, w, cx| p.open(old, w, cx));
+    until(cx, "the old path names the destination", |cx| {
+        cx.debug_bounds("files-Renamed to after.rs").is_some()
+            && (cx.debug_bounds("files-diff-inline").is_some()
+                || cx.debug_bounds("files-diff-sides").is_some())
+    });
+    assert!(cx.debug_bounds("files-gone-file").is_none());
+    drop(running);
+    std::fs::remove_dir_all(root).unwrap();
+}
+
 /// The changes view opens on the first change with the unchanged lines
 /// around it folded, says which change of how many is in view, and N goes
 /// on to the next; a fold opens on a click.

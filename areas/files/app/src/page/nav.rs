@@ -1033,13 +1033,22 @@ impl FilesPage {
         }
     }
 
-    /// Each changed file's state, and the folders holding any.
+    /// Each changed file's state, both ends of a rename, and the folders holding changes.
     fn mark_states(&mut self) {
         self.states.clear();
+        self.renames.clear();
         self.holding.clear();
         for (repo, files) in &self.repos {
             for f in files {
                 self.states.insert(f.path.clone(), f.state);
+                if let Some(source) = &f.renamed_from {
+                    self.states.entry(source.clone()).or_insert('R');
+                    self.renames
+                        .entry(source.clone())
+                        .or_insert_with(|| Rename::To(f.path.clone()));
+                    self.renames
+                        .insert(f.path.clone(), Rename::From(source.clone()));
+                }
                 let mut folder = paths::parent(&f.path);
                 while paths::inside(repo, &folder) && self.holding.insert(folder.clone()) {
                     folder = paths::parent(&folder);
