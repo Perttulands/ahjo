@@ -200,6 +200,12 @@ impl TextField {
         self
     }
 
+    /// Changes the cap on a field already made, as the window's height
+    /// changes; it takes effect at the next draw.
+    pub fn set_max_lines(&mut self, lines: usize) {
+        self.max_lines = Some(lines.max(1));
+    }
+
     /// Prose in the theme's reading face rather than the mono face.
     pub fn reading(mut self) -> Self {
         self.reading = true;

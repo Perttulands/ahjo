@@ -38,7 +38,7 @@ pub const RAIL: f32 = 360.;
 /// never narrower than these, and the window never narrower than
 /// [`WINDOW_MIN`].
 pub const COLUMN_MIN: f32 = 320.;
-pub const RAIL_MIN: f32 = 200.;
+pub const RAIL_MIN: f32 = 216.;
 pub const RAIL_SHARE: f32 = 0.21;
 pub const COLUMN_SHARE: f32 = 0.32;
 pub const WINDOW_MIN: (f32, f32) = (880., 560.);
@@ -77,7 +77,7 @@ pub const TICK_W: f32 = 3.;
 pub const CAP: f32 = 22.;
 /// The most of an option's name a "Lean to" chip shows: the chips wrap,
 /// so a name reads whole unless it is a sentence.
-pub const LEAN_WORDS: usize = 40;
+pub const LEAN_WORDS: usize = 72;
 /// The accent rule beside a recommendation.
 pub const RULE_W: f32 = 3.;
 /// How far a picture fits up: never past twice its size, so a small one
@@ -116,6 +116,22 @@ pub const VIDEO_BEHIND: usize = 90;
 pub const PICTURE_CACHE: usize = 900 << 20;
 
 /// The queue rail's and the conversation's widths in a window `wide`.
+/// The least a clip's track narrows to, so it can still be sought.
+pub const TRACK_MIN: f32 = 96.;
+
+/// The waiting list folded: a strip of ids.
+pub const LIST_STRIP: f32 = 64.;
+
+/// The share of the window's height his words may take before they
+/// scroll: a short window keeps the question in sight above them.
+pub const WORDS_SHARE: f32 = 0.3;
+
+/// How many lines his words show before they scroll, in a window `tall`
+/// high with reading text of `read`.
+pub fn words_lines(tall: f32, read: f32) -> usize {
+    ((tall * WORDS_SHARE / (read * 1.5)).floor() as usize).clamp(3, WORDS_LINES)
+}
+
 pub fn columns(wide: f32) -> (f32, f32) {
     (
         (wide * RAIL_SHARE).clamp(RAIL_MIN, RAIL),
@@ -211,5 +227,16 @@ mod tests {
         assert_eq!(grid(3, room, 9. / 16., 2.).0, 3);
         // Twelve no longer read: the strip takes them.
         assert!(grid(12, room, 16. / 9., 2.).1 < SIDE_LEAST);
+    }
+
+    #[test]
+    fn a_short_window_keeps_the_question_above_the_words() {
+        // Full HD: the full twelve lines.
+        assert_eq!(words_lines(1080., 15.), WORDS_LINES);
+        // A laptop window at 150%: the words take under a third.
+        let n = words_lines(626., 15.);
+        assert!(n < WORDS_LINES && n as f32 * 15. * 1.5 <= 626. * WORDS_SHARE);
+        // Never fewer than three.
+        assert_eq!(words_lines(200., 15.), 3);
     }
 }

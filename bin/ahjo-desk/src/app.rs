@@ -1896,6 +1896,13 @@ impl DeskApp {
         cx.notify();
     }
 
+    /// Folds the waiting list to a strip of ids, or opens it; kept.
+    pub fn toggle_fold(&mut self, cx: &mut Context<Self>) {
+        self.config.fold_list = !self.config.fold_list;
+        self.keep_config(cx);
+        cx.notify();
+    }
+
     pub fn toggle_tell(&mut self, cx: &mut Context<Self>) {
         self.config.tell_session = !self.config.tell_session;
         self.keep_config(cx);
@@ -2016,6 +2023,7 @@ impl DeskApp {
             match key {
                 "pagedown" => return self.step_ask(1, cx),
                 "pageup" => return self.step_ask(-1, cx),
+                "b" => return self.toggle_fold(cx),
                 "enter" if !self.typing(window, cx) => return self.send(Verdict::Send, window, cx),
                 // Pasted anywhere, a picture goes with the answer and words
                 // go into it.

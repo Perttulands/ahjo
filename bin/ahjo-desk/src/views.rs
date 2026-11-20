@@ -27,6 +27,8 @@ impl Render for DeskApp {
         let t = theme(cx).clone();
         let wide = f32::from(window.viewport_size().width);
         let (rail_w, column_w) = tokens::columns(wide);
+        let lines = tokens::words_lines(f32::from(window.viewport_size().height), t.ty.read);
+        self.words.update(cx, |f, _| f.set_max_lines(lines));
         let body = if self.settings_open {
             self.settings_view(&t, window, cx)
         } else if self.desks.is_empty() {
@@ -72,7 +74,11 @@ impl Render for DeskApp {
             div()
                 .size_full()
                 .flex()
-                .child(self.rail(&t, rail_w, cx))
+                .child(if self.config.fold_list {
+                    self.strip(&t, cx)
+                } else {
+                    self.rail(&t, rail_w, cx)
+                })
                 .child(div().flex_1().min_w_0().h_full().child(main))
                 .into_any_element()
         };
@@ -365,18 +371,22 @@ impl DeskApp {
                                             .text_size(px(META))
                                             .child(
                                                 div()
+                                                    .flex_none()
                                                     .size(px(8.))
                                                     .rounded(px(2.))
                                                     .bg(t.identity_of(&desk)),
                                             )
                                             .child(
                                                 div()
+                                                    .flex_none()
                                                     .text_color(t.text2)
                                                     .child(format!("{desk} {}", ask.id)),
                                             )
                                             .when(started, |d| {
                                                 d.child(
                                                     div()
+                                                        .min_w_0()
+                                                        .truncate()
                                                         .text_color(t.accent)
                                                         .child("· your draft"),
                                                 )
@@ -486,7 +496,7 @@ impl DeskApp {
             .py(px(GAP_SMALL))
             .flex()
             .items_center()
-            .gap(px(GAP_SMALL))
+            .gap(px(4.))
             .border_b_1()
             .border_color(t.divider)
             .text_size(px(META))
@@ -514,6 +524,88 @@ impl DeskApp {
                     cx.listener(|app, _: &ClickEvent, _, cx| app.set_list(List::Answered, cx)),
                 ),
             )
+            .child(div().flex_1())
+            .child(
+                tab("fold-list", "‹".into(), false)
+                    .tooltip(kit::tip("Fold the list to give the picture room · Ctrl+B"))
+                    .on_click(cx.listener(|app, _: &ClickEvent, _, cx| app.toggle_fold(cx))),
+            )
+    }
+
+    /// The list folded to a strip: each ask by its id, the one in front
+    /// lit, its title on hover; a click opens one.
+    fn strip(&mut self, t: &Theme, cx: &mut Context<Self>) -> AnyElement {
+        let listed = self.listed();
+        let mut col = div()
+            .id("strip")
+            .flex_1()
+            .min_h_0()
+            .overflow_y_scroll()
+            .flex()
+            .flex_col()
+            .items_center()
+            .gap(px(GAP_SMALL))
+            .py(px(GAP_SMALL));
+        for key in listed {
+            let Some(a) = self.ask(&key) else { continue };
+            let on = self.current.as_ref() == Some(&key);
+            let name = self.desks[key.0].name();
+            let id = a.id.clone();
+            let open = key.clone();
+            col = col.child(
+                div()
+                    .id(SharedString::from(format!("strip-{}-{id}", key.0)))
+                    .w(px(tokens::LIST_STRIP - 12.))
+                    .py(px(6.))
+                    .flex()
+                    .flex_col()
+                    .items_center()
+                    .gap(px(3.))
+                    .rounded(px(tokens::RADIUS))
+                    .cursor_pointer()
+                    .when(on, |d| d.bg(t.accent_light()).text_color(t.text))
+                    .when(!on, |d| {
+                        d.text_color(t.text2).hover(|d| d.bg(t.accent_soft()))
+                    })
+                    .tooltip(kit::tip(format!("{name} {id} · {}", a.title)))
+                    .child(div().size(px(8.)).rounded(px(2.)).bg(t.identity_of(&name)))
+                    .child(div().text_size(px(META)).child(id))
+                    .on_click(cx.listener(move |app, _: &ClickEvent, _, cx| {
+                        app.open(Some(open.clone()), cx)
+                    })),
+            );
+        }
+        let n = self.listed().len();
+        div()
+            .w(px(tokens::LIST_STRIP))
+            .flex_none()
+            .h_full()
+            .flex()
+            .flex_col()
+            .border_r_1()
+            .border_color(t.divider)
+            .bg(t.surface)
+            .child(
+                div()
+                    .id("unfold-list")
+                    .h(px(tokens::CAP + 4.))
+                    .m(px(GAP_SMALL))
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .gap(px(4.))
+                    .rounded(px(tokens::RADIUS))
+                    .cursor_pointer()
+                    .text_size(px(META))
+                    .bg(t.accent_light())
+                    .hover(|d| d.bg(t.accent_soft()))
+                    .tooltip(kit::tip("Open the list · Ctrl+B"))
+                    .child(n.to_string())
+                    .child(div().text_color(t.dim).child("›"))
+                    .on_click(cx.listener(|app, _: &ClickEvent, _, cx| app.toggle_fold(cx))),
+            )
+            .child(col)
+            .into_any_element()
     }
 
     // ---- The conversation ----
@@ -616,11 +708,17 @@ impl DeskApp {
             .flex()
             .flex_col()
             .gap(px(GAP_SMALL + 2.))
-            .child(div().text_size(px(META)).text_color(t.dim).child(format!(
-                "{by} · round {} · {}",
-                round.round(),
-                age(&round.created_at)
-            )))
+            .child(
+                div()
+                    .text_size(px(META))
+                    .text_color(t.dim)
+                    .truncate()
+                    .child(format!(
+                        "{by} · round {} · {}",
+                        round.round(),
+                        age(&round.created_at)
+                    )),
+            )
             .child(
                 div()
                     .font_family(t.ty.reading)
@@ -1026,27 +1124,25 @@ impl DeskApp {
             }
         } else if form == Form::Open && !ask.options.is_empty() {
             has_top = true;
-            top = top.child(div().text_size(px(META)).text_color(t.dim).child("Lean to"));
-            for (i, _) in ask.options.iter().enumerate() {
-                let letter = model::letter(&ask.options, i);
-                let label = model::label(&ask.options, i);
-                top = top.child(
-                    chip(
-                        t,
-                        SharedString::from(format!("lean-{i}")),
-                        &format!("{letter} {}", clip_words(&label, tokens::LEAN_WORDS)),
-                        draft.pick == Some(i),
-                        None,
-                    )
-                    .on_click(cx.listener(move |app, _: &ClickEvent, _, cx| app.pick(i, cx))),
-                );
-            }
             top = top.child(
                 div()
                     .text_size(px(META))
                     .text_color(t.dim)
-                    .child("· optional"),
+                    .child("Lean to · optional"),
             );
+            for (i, _) in ask.options.iter().enumerate() {
+                let letter = model::letter(&ask.options, i);
+                let label = model::label(&ask.options, i);
+                top = top.child(
+                    lean_chip(
+                        t,
+                        SharedString::from(format!("lean-{i}")),
+                        &format!("{letter} {}", clip_words(&label, tokens::LEAN_WORDS)),
+                        draft.pick == Some(i),
+                    )
+                    .on_click(cx.listener(move |app, _: &ClickEvent, _, cx| app.pick(i, cx))),
+                );
+            }
         }
         let marks = draft.marks(ask).len();
         let pasted = self.pasted_strip(t, ask, &draft.pictures, cx);
@@ -1174,20 +1270,24 @@ impl DeskApp {
             .children(pasted)
             .child(actions)
             .child(
+                // What Send does reads whole: when it and the way out do
+                // not fit one line, the way out goes under it, at the right.
                 div()
                     .flex()
+                    .flex_wrap()
                     .items_center()
                     .gap(px(GAP_SMALL))
-                    .child(
-                        div()
-                            .flex_1()
-                            .min_w_0()
-                            .truncate()
-                            .text_size(px(META))
-                            .text_color(t.text2)
-                            .child(status),
-                    )
-                    .child(elsewhere),
+                    .when(!status.is_empty(), |d| {
+                        d.child(
+                            div()
+                                .flex_grow(1.)
+                                .min_w_0()
+                                .text_size(px(META))
+                                .text_color(t.text2)
+                                .child(status),
+                        )
+                    })
+                    .child(div().ml_auto().flex_none().child(elsewhere)),
             )
             .into_any_element()
     }
@@ -1622,6 +1722,27 @@ pub(crate) fn chip(
         .children(state.map(|c| div().size(px(6.)).rounded_full().bg(c)))
         // A name longer than the column ends in an ellipsis, not past it.
         .child(div().min_w_0().truncate().child(words.to_string()))
+}
+
+/// An option to lean to: a chip whose name wraps in a narrow column
+/// instead of ending in an ellipsis.
+fn lean_chip(t: &Theme, id: impl Into<gpui::ElementId>, words: &str, on: bool) -> Stateful<Div> {
+    div()
+        .id(id)
+        .max_w_full()
+        .min_h(px(tokens::CAP + 4.))
+        .px(px(GAP_SMALL + 2.))
+        .py(px(2.))
+        .flex()
+        .items_center()
+        .rounded(px(tokens::RADIUS))
+        .border_1()
+        .border_color(if on { t.accent } else { t.divider })
+        .when(on, |d| d.bg(t.accent).text_color(t.on_accent()))
+        .when(!on, |d| d.hover(|d| d.bg(t.accent_soft())))
+        .cursor_pointer()
+        .text_size(px(META))
+        .child(div().min_w_0().child(words.to_string()))
 }
 
 /// A number on a mark's ink, as the surface draws it.

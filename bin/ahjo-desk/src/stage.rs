@@ -138,14 +138,15 @@ impl DeskApp {
             .bg(t.surface)
             .border_b_1()
             .border_color(t.divider)
+            .overflow_hidden()
             .text_size(px(META))
             .text_color(t.text2);
         if item.doc {
             return bar
-                .child(format!(
+                .child(div().min_w_0().truncate().child(format!(
                     "{} · select words to comment on them",
                     item.media.path
-                ))
+                )))
                 .into_any_element();
         }
         if item.kind() == Some(MediaKind::Page) {
@@ -218,7 +219,9 @@ impl DeskApp {
             (Tool::Arrow, _) => "Drag from the comment to the thing",
             (Tool::Pen, _) => "Draw",
         };
-        bar.child(div().pl(px(GAP_SMALL)).child(hint))
+        // A narrow stage cuts the hint with an ellipsis, never under the
+        // column beside it.
+        bar.child(div().pl(px(GAP_SMALL)).min_w_0().truncate().child(hint))
             .into_any_element()
     }
 
@@ -232,6 +235,11 @@ impl DeskApp {
                 let v = window.viewport_size();
                 let (w, h) = (f32::from(v.width), f32::from(v.height));
                 let (rail, column) = tokens::columns(w);
+                let rail = if self.config.fold_list {
+                    tokens::LIST_STRIP
+                } else {
+                    rail
+                };
                 (
                     w - rail - column,
                     h - tokens::BAR - tokens::TOOLS - tokens::STRIP_H,
@@ -744,6 +752,7 @@ impl DeskApp {
                 div()
                     .id("track")
                     .flex_1()
+                    .min_w(px(tokens::TRACK_MIN))
                     .h(px(tokens::TRANSPORT))
                     .flex()
                     .items_center()
@@ -800,8 +809,12 @@ impl DeskApp {
                     })),
             )
             .child(
+                // Narrow, the track keeps room to seek and the words end
+                // in an ellipsis.
                 div()
-                    .flex_none()
+                    .flex_shrink(1.)
+                    .min_w_0()
+                    .truncate()
                     .text_size(px(META))
                     .text_color(t.text2)
                     .child(words),
@@ -930,10 +943,22 @@ impl DeskApp {
             .bg(t.surface)
             .border_t_1()
             .border_color(t.divider)
-            .children(thumbs)
-            .child(div().flex_1())
+            // Many pictures scroll along the strip; how it is shown keeps
+            // its place at the right.
             .child(
                 div()
+                    .id("film")
+                    .flex_1()
+                    .min_w_0()
+                    .h_full()
+                    .flex()
+                    .gap(px(GAP_SMALL))
+                    .overflow_x_scroll()
+                    .children(thumbs),
+            )
+            .child(
+                div()
+                    .flex_none()
                     .flex()
                     .items_center()
                     .gap(px(GAP))
