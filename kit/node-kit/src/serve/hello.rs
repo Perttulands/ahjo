@@ -6,7 +6,7 @@ use ahjo_core::PROTOCOL;
 use ahjo_core::frame::HELLO;
 use ahjo_core::json::push_string as push_json_string;
 
-/// `0x00` and JSON: `{"node":…,"device":…,"environment":"wsl","version":"0.0.1","protocol":17}`.
+/// `0x00` and JSON: `{"node":…,"device":…,"environment":"wsl","version":"0.0.1","protocol":18}`.
 pub fn hello(node: &Identity, off: &[&str]) -> Vec<u8> {
     let mut json = String::from("{\"node\":");
     push_json_string(&mut json, node.id.as_str());
@@ -62,7 +62,7 @@ mod tests {
         assert_eq!(
             std::str::from_utf8(&frame[1..]).unwrap(),
             format!(
-                r#"{{"node":"0123abcd","device":"rig \"main\"","environment":"wsl","version":"{}","protocol":17}}"#,
+                r#"{{"node":"0123abcd","device":"rig \"main\"","environment":"wsl","version":"{}","protocol":18}}"#,
                 crate::VERSION
             )
         );

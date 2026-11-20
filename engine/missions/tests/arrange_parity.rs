@@ -18,7 +18,7 @@ fn arrangements_match_the_goldens() {
         board.remove("tools");
         for (from, to) in [
             ("input_cards", "input_card"),
-            ("formations", "formation"),
+            ("steps", "step"),
             ("gates", "gate"),
             ("ends", "end"),
             ("limits", "limit"),
@@ -28,9 +28,9 @@ fn arrangements_match_the_goldens() {
                 board.insert(to.into(), value);
             }
         }
-        if let Some(formations) = board.get_mut("formation").and_then(|v| v.as_array_mut()) {
-            for formation in formations {
-                let object = formation.as_object_mut().unwrap();
+        if let Some(steps) = board.get_mut("step").and_then(|v| v.as_array_mut()) {
+            for step in steps {
+                let object = step.as_object_mut().unwrap();
                 for (from, to) in [
                     ("inputs", "input"),
                     ("outputs", "output"),

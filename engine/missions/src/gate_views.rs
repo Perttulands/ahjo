@@ -110,10 +110,10 @@ impl Coordinator {
                 let mut targets = Vec::new();
                 for edge in crate::graph::outgoing_from_port(&mission, gate, verdict) {
                     let node = crate::graph::endpoint_node(&edge.to);
-                    let detail = if let Some(formation) = mission.formation(node) {
+                    let detail = if let Some(step) = mission.step(node) {
                         let limits = crate::limits::uses_for_step(&mission, &events, node, now)
                             .into_iter().map(DecisionLimit::from).collect();
-                        let waits_for_inputs = formation.inputs.iter().any(|port| {
+                        let waits_for_inputs = step.inputs.iter().any(|port| {
                             !replay.ports.get(node).is_some_and(|ports| ports.contains_key(&port.id))
                                 && !crate::graph::outgoing_from_port(&mission, gate, verdict).any(|edge| crate::graph::endpoint_node(&edge.to) == node && crate::graph::endpoint_port(&edge.to) == port.id)
                         });
@@ -126,8 +126,8 @@ impl Coordinator {
                                 && crate::run_pick::pick_for(&mission, &events, node, spent)
                                     .is_some_and(|pick| crate::run_pick::judged_since_last_pick(&events, node, &pick.candidates))
                         });
-                        Some(DecisionTargetKind::Formation {
-                            title: formation.title.clone(), limits, waits_for_inputs,
+                        Some(DecisionTargetKind::Step {
+                            title: step.title.clone(), limits, waits_for_inputs,
                             picks_best, spent_limit: spent.map(DecisionLimit::from),
                         })
                     } else if let Some(end) = mission.end(node) {
@@ -144,8 +144,8 @@ impl Coordinator {
                 let rejected = targets.iter().any(|target| {
                     matches!(&target.detail, Some(DecisionTargetKind::End {outcome, ..}) if outcome == "rejected")
                 }) || replay.ended.iter().any(|(_, outcome, _, _, _)| outcome == "rejected");
-                let starved = mission.formations.iter().any(|formation| replay.ports.get(&formation.id).is_some_and(|ports| ports.values().any(|(_, unread)| *unread) && formation.inputs.iter().any(|port| !ports.contains_key(&port.id))));
-                let ready = mission.formations.iter().any(|formation| replay.ports.get(&formation.id).is_some_and(|ports| ports.values().any(|(_, unread)| *unread) && formation.inputs.iter().all(|port| ports.contains_key(&port.id))));
+                let starved = mission.steps.iter().any(|step| replay.ports.get(&step.id).is_some_and(|ports| ports.values().any(|(_, unread)| *unread) && step.inputs.iter().any(|port| !ports.contains_key(&port.id))));
+                let ready = mission.steps.iter().any(|step| replay.ports.get(&step.id).is_some_and(|ports| ports.values().any(|(_, unread)| *unread) && step.inputs.iter().all(|port| ports.contains_key(&port.id))));
                 let ends_run = !ready && (rejected || !starved) && !targets.is_empty()
                     && targets.iter().all(|target| matches!(target.detail, Some(DecisionTargetKind::End {..})))
                     && projection.waiting_gates.len() == 1
@@ -155,7 +155,7 @@ impl Coordinator {
                     && replay.queue.values().all(|q| q.is_empty())
                     && replay.unfinished.is_empty();
                 let picks_best = targets.iter().any(|target| {
-                    matches!(target.detail, Some(DecisionTargetKind::Formation { picks_best: Some(true), .. }))
+                    matches!(target.detail, Some(DecisionTargetKind::Step { picks_best: Some(true), .. }))
                 });
                 DecisionRoute { verdict: verdict.into(), targets, ends_run, picks_best }
             })

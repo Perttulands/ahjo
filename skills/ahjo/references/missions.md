@@ -1,6 +1,6 @@
 # Missions
 
-A mission is a reusable graph. An Input card starts it, formations are steps with staffed slots and ports, gates route verdicts, and End nodes end paths as `done` or `rejected`. A run snapshots the graph and staffing at admission; later edits affect later runs. Each step's agents work in ordinary tmux sessions with the harness's access, named `<prefix>-<agent>` so the session list groups a mission's sessions under its prefix.
+A mission is a reusable graph. An Input card starts it, steps have staffed slots and ports, gates route verdicts, and End nodes end paths as `done` or `rejected`. A run snapshots the graph and staffing at admission; later edits affect later runs. Each step's agents work in ordinary tmux sessions with the harness's access, named `<prefix>-<agent>` so the session list groups a mission's sessions under its prefix.
 
 ## Connect
 
@@ -25,7 +25,7 @@ ahjo mission apply post.toml
 
 Give a new mission its own `slug` and `id`, or omit its `id` to assign one. Keep the exported `rev` when editing an existing mission. If apply reports a conflict, export again and merge your edits into that copy. Apply saves drafts and reports validation. Fix the errors before using its run command. Reply to open notes before removing their cards. Over MCP, give `mission_apply` the TOML text in `document`.
 
-Mission and layout files use schema 2. Existing mission files are upgraded when the node loads them. The mission file uses `[[input_card]]`, `[[formation]]`, `[[gate]]`, `[[end]]`, `[[limit]]`, and `[[connection]]`. A formation nests `input`, `output`, and `slot` tables. Use saved ids in `from` and `to` as `node:port`, and give every card you connect an id. `ahjo mission export --json` uses the same keys.
+Mission files use schema 3 and layout files use schema 2. Existing mission files are upgraded when the node loads them. The mission file uses `[[input_card]]`, `[[step]]`, `[[gate]]`, `[[end]]`, `[[limit]]`, and `[[connection]]`. Each step specifies its formation as `solo`, `peer`, or `orchestrated`. A step nests `input`, `output`, and `slot` tables. Use saved ids in `from` and `to` as `node:port`, and give every card you connect an id. `ahjo mission export --json` uses the same keys.
 
 ### Individual changes
 
@@ -35,7 +35,7 @@ Read `ahjo mission show <mission> --full --json` for card and port ids. Sketch a
 
 ## Agents and sessions
 
-A slot's `agent` names its session. With no name it uses the step's title. Set `fresh = true` on a formation to start a fresh session for each attempt. The prefix is the slug's letters and digits unless the mission supplies `prefix`. A mission can reuse only a session that a run started. A busy or independently started session is left alone and the run uses a separate session. Do not type into a mission's session while its step runs.
+A slot's `agent` names its session. With no name it uses the step's title. Set `fresh = true` on a step to start a fresh session for each attempt. The prefix is the slug's letters and digits unless the mission supplies `prefix`. A mission can reuse only a session that a run started. A busy or independently started session is left alone and the run uses a separate session. Do not type into a mission's session while its step runs.
 
 ## Inputs and outputs
 
@@ -43,7 +43,7 @@ Declare inputs and outputs on the mission's Input card. With no declarations the
 
 ## Gates
 
-Set a criterion and gate kinds in the mission file. A human-only gate is the default. A judge uses a staffed solo formation in the gate's judge chain. A code gate checks `output_contains` or `output_absent` version 1. Kinds execute in code, formation, human order and stop at failure. Wire `<gate-id>:in`, `<gate-id>:pass` and `<gate-id>:fail` to their respective ports. Cap send-back loops with a Limit card.
+Set a criterion and gate kinds in the mission file. A human-only gate is the default. A judge uses a staffed solo step in the gate's judge chain. A code gate checks `output_contains` or `output_absent` version 1. Kinds execute in code, step, human order and stop at failure. Wire `<gate-id>:in`, `<gate-id>:pass` and `<gate-id>:fail` to their respective ports. Cap send-back loops with a Limit card.
 
 The runtime supplies each seat its output contract; a judge also returns a fenced verdict block containing `verdict` (`pass` or `fail`), `reason`, and `evidence`. Do not direct a seat by typing into its session. Use `ahjo run show <run-id> --evidence --seats` if a result fails to route.
 

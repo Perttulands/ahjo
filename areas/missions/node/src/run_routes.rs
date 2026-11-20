@@ -197,7 +197,7 @@ async fn start(
     req.known_devices = Some(Vec::new());
     let c = m.coordinator;
     if req.mission.is_empty()
-        || (req.input_card_id.is_empty() == req.formation_id.is_empty())
+        || (req.input_card_id.is_empty() == req.step_id.is_empty())
         || req.expected_rev <= 0
     {
         return Err(ahjo_core::Error::new(
@@ -212,10 +212,10 @@ async fn start(
         .unwrap_or("")
         .into();
     let result = off(c, move |c| {
-        if req.formation_id.is_empty() {
+        if req.step_id.is_empty() {
             c.start_mission(req)
         } else {
-            c.start_formation(req)
+            c.start_step(req)
         }
     })
     .await?;

@@ -5,8 +5,8 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Deserializer, Serialize};
 
 use crate::{
-    End, Formation, Gate, InputCard, Layout, LayoutEdge, LayoutNode, Limit, Mission, MissionInput,
-    MissionOutput, Notes,
+    End, Gate, InputCard, Layout, LayoutEdge, LayoutNode, Limit, Mission, MissionInput,
+    MissionOutput, Notes, Step,
 };
 
 #[derive(Clone, Debug, Default)]
@@ -69,12 +69,11 @@ pub enum MissionChange {
         #[serde(default, deserialize_with = "default_on_null")]
         id: String,
     },
-    /// Add a step with seats for its formation type.
-    CreateFormation {
+    /// Add a step with seats for its formation.
+    CreateStep {
         /// `solo`, `peer` or `orchestrated`.
-        #[serde(rename = "type")]
         #[serde(default, deserialize_with = "default_on_null")]
-        kind: String,
+        formation: String,
         /// The card’s title.
         #[serde(default, deserialize_with = "default_on_null")]
         title: String,
@@ -86,7 +85,7 @@ pub enum MissionChange {
         y: i64,
     },
     /// Change a step’s title, environment or session reuse.
-    UpdateFormation {
+    UpdateStep {
         /// The id of the card or wire.
         #[serde(default, deserialize_with = "default_on_null")]
         id: String,
@@ -101,7 +100,7 @@ pub enum MissionChange {
         fresh: Option<bool>,
     },
     /// Replace a step’s title and brief.
-    EditFormation {
+    EditStep {
         /// The id of the card or wire.
         #[serde(default, deserialize_with = "default_on_null")]
         id: String,
@@ -113,18 +112,17 @@ pub enum MissionChange {
         brief: Option<crate::Brief>,
     },
     /// Change how the seats in a step work together.
-    SetFormationType {
+    SetStepFormation {
         /// The id of the card or wire.
         #[serde(default, deserialize_with = "default_on_null")]
         id: String,
         /// `solo`, `peer` or `orchestrated`.
-        #[serde(rename = "type")]
         #[serde(default, deserialize_with = "default_on_null")]
-        kind: String,
-        /// The seat to keep when changing the formation type.
+        formation: String,
+        /// The seat to keep when changing the step formation.
         #[serde(default, deserialize_with = "default_on_null")]
         keep_slot_id: String,
-        /// Replacement seats for the changed formation type.
+        /// Replacement seats for the changed step formation.
         #[serde(
             default,
             deserialize_with = "some",
@@ -133,7 +131,7 @@ pub enum MissionChange {
         slots: Option<Vec<crate::Slot>>,
     },
     /// Remove a step, its wires and its Limit cards.
-    DeleteFormation {
+    DeleteStep {
         /// The id of the card or wire.
         #[serde(default, deserialize_with = "default_on_null")]
         id: String,
@@ -142,7 +140,7 @@ pub enum MissionChange {
     AssignSlot {
         /// The step’s id.
         #[serde(default, deserialize_with = "default_on_null")]
-        formation_id: String,
+        step_id: String,
         /// The seat’s id.
         #[serde(default, deserialize_with = "default_on_null")]
         slot_id: String,
@@ -163,7 +161,7 @@ pub enum MissionChange {
     NameAgent {
         /// The step’s id.
         #[serde(default, deserialize_with = "default_on_null")]
-        formation_id: String,
+        step_id: String,
         /// The seat’s id.
         #[serde(default, deserialize_with = "default_on_null")]
         slot_id: String,
@@ -175,13 +173,13 @@ pub enum MissionChange {
     SwapSlots {
         /// The source step’s id.
         #[serde(default, deserialize_with = "default_on_null")]
-        from_formation: String,
+        from_step: String,
         /// The source seat’s id.
         #[serde(default, deserialize_with = "default_on_null")]
         from_slot: String,
         /// The destination step’s id.
         #[serde(default, deserialize_with = "default_on_null")]
-        to_formation: String,
+        to_step: String,
         /// The destination seat’s id.
         #[serde(default, deserialize_with = "default_on_null")]
         to_slot: String,
@@ -190,7 +188,7 @@ pub enum MissionChange {
     MakeController {
         /// The step’s id.
         #[serde(default, deserialize_with = "default_on_null")]
-        formation_id: String,
+        step_id: String,
         /// The seat’s id.
         #[serde(default, deserialize_with = "default_on_null")]
         slot_id: String,
@@ -199,7 +197,7 @@ pub enum MissionChange {
     SetBrief {
         /// The step’s id.
         #[serde(default, deserialize_with = "default_on_null")]
-        formation_id: String,
+        step_id: String,
         /// What the work should accomplish.
         #[serde(default, deserialize_with = "default_on_null")]
         goal: String,
@@ -220,13 +218,13 @@ pub enum MissionChange {
     ClearBrief {
         /// The step’s id.
         #[serde(default, deserialize_with = "default_on_null")]
-        formation_id: String,
+        step_id: String,
     },
     /// Add an input or output port to a step.
     AddPort {
         /// The step’s id.
         #[serde(default, deserialize_with = "default_on_null")]
-        formation_id: String,
+        step_id: String,
         /// Which side of the step, `input` or `output`.
         #[serde(default, deserialize_with = "default_on_null")]
         direction: String,
@@ -241,7 +239,7 @@ pub enum MissionChange {
     UpdatePort {
         /// The step’s id.
         #[serde(default, deserialize_with = "default_on_null")]
-        formation_id: String,
+        step_id: String,
         /// The port’s id.
         #[serde(default, deserialize_with = "default_on_null")]
         port_id: String,
@@ -256,7 +254,7 @@ pub enum MissionChange {
     RemovePort {
         /// The step’s id.
         #[serde(default, deserialize_with = "default_on_null")]
-        formation_id: String,
+        step_id: String,
         /// The port’s id.
         #[serde(default, deserialize_with = "default_on_null")]
         port_id: String,
@@ -265,7 +263,7 @@ pub enum MissionChange {
     RestorePort {
         /// The step’s id.
         #[serde(default, deserialize_with = "default_on_null")]
-        formation_id: String,
+        step_id: String,
         /// Which side of the step, `input` or `output`.
         #[serde(default, deserialize_with = "default_on_null")]
         direction: String,
@@ -329,7 +327,7 @@ pub enum MissionChange {
         /// The card’s title.
         #[serde(default, deserialize_with = "default_on_null")]
         title: String,
-        /// `code`, `formation` or `human`. Defaults to `human` on creation.
+        /// `code`, `step` or `human`. Defaults to `human` on creation.
         #[serde(default = "human_gate", deserialize_with = "gate_kinds")]
         kinds: Vec<String>,
         /// What the gate checks.
@@ -552,7 +550,7 @@ pub struct GateUpdate {
     /// The card’s title.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub title: Option<String>,
-    /// `code`, `formation` or `human`. Defaults to `human` on creation.
+    /// `code`, `step` or `human`. Defaults to `human` on creation.
     #[serde(deserialize_with = "some", skip_serializing_if = "Option::is_none")]
     pub kinds: Option<Vec<String>>,
     /// What the gate checks.
@@ -605,7 +603,7 @@ pub struct InputCardUpdate {
 #[serde(rename_all = "snake_case", try_from = "RestoredCards")]
 pub enum RestoredNode {
     InputCard(InputCard),
-    Formation(Formation),
+    Step(Step),
     Gate(Gate),
     End(End),
     Limit(Limit),
@@ -616,7 +614,7 @@ pub enum RestoredNode {
 #[serde(rename_all = "snake_case")]
 struct RestoredCards {
     input_card: Option<InputCard>,
-    formation: Option<Formation>,
+    step: Option<Step>,
     gate: Option<Gate>,
     end: Option<End>,
     limit: Option<Limit>,
@@ -628,7 +626,7 @@ impl TryFrom<RestoredCards> for RestoredNode {
     fn try_from(cards: RestoredCards) -> Result<Self, Self::Error> {
         let mut nodes = [
             cards.input_card.map(Self::InputCard),
-            cards.formation.map(Self::Formation),
+            cards.step.map(Self::Step),
             cards.gate.map(Self::Gate),
             cards.end.map(Self::End),
             cards.limit.map(Self::Limit),

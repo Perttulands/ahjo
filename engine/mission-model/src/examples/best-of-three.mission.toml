@@ -1,4 +1,4 @@
-schema = 2
+schema = 3
 id = "msn_example"
 slug = "best-of-three"
 title = "Best of three"
@@ -13,39 +13,39 @@ inputs = [
 ]
 outputs = [{ name = "result", description = "The attempt the judge passed, or the best of the three.", kind = "text", required = false, from = "fmn_attempt:port_attempt_out" }]
 
-[[formation]]
+[[step]]
 id = "fmn_attempt"
-type = "solo"
+formation = "solo"
 title = "Attempt"
 fresh = true
-[formation.brief]
+[step.brief]
 goal = "Do this work in the run's folder, starting from nothing:\n\n{brief}\n\nWhen the judge sent an earlier attempt back, its reason arrives on your input: do better on that point, without copying the earlier attempt. Return what you made and where it is on your output."
-[[formation.input]]
+[[step.input]]
 id = "port_attempt_in"
 label = "Brief"
-[[formation.output]]
+[[step.output]]
 id = "port_attempt_out"
 label = "Result"
-[[formation.slot]]
+[[step.slot]]
 id = "slot_attempt"
 label = "Maker"
 agent = "maker"
 harness = "claude-code"
 effort = "medium"
 
-[[formation]]
+[[step]]
 id = "fmn_judge"
-type = "solo"
+formation = "solo"
 title = "Judge"
-[formation.brief]
+[step.brief]
 goal = "Judge the attempt on your input against this work:\n\n{brief}\n\nRead what it made. Pass it only when it does the work well; fail it with the one thing that would most improve it."
-[[formation.input]]
+[[step.input]]
 id = "port_judge_in"
 label = "Attempt"
-[[formation.output]]
+[[step.output]]
 id = "port_judge_out"
 label = "Verdict"
-[[formation.slot]]
+[[step.slot]]
 id = "slot_judge"
 label = "Judge"
 agent = "judge"
@@ -55,7 +55,7 @@ effort = "high"
 [[gate]]
 id = "gate_best"
 title = "Good enough?"
-kinds = ["formation"]
+kinds = ["step"]
 criterion = "The attempt does the work the brief asks for, and does it well."
 
 [[limit]]

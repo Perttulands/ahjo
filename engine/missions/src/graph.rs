@@ -3,8 +3,8 @@
 use std::collections::{HashSet, VecDeque};
 
 use ahjo_mission_model::{
-    Connection, END_IN, Formation, GATE_FAIL, GATE_IN, GATE_JUDGE, GATE_PASS, Gate, INPUT_CARD_OUT,
-    Mission,
+    Connection, END_IN, GATE_FAIL, GATE_IN, GATE_JUDGE, GATE_PASS, Gate, INPUT_CARD_OUT, Mission,
+    Step,
 };
 
 /// Which way a port carries work.
@@ -38,10 +38,10 @@ pub fn endpoint_allows(mission: &Mission, endpoint: &str, direction: Direction) 
     let Some((node, port)) = split_endpoint(endpoint) else {
         return false;
     };
-    if let Some(formation) = mission.formation(node) {
+    if let Some(step) = mission.step(node) {
         let ports = match direction {
-            Direction::Input => &formation.inputs,
-            Direction::Output => &formation.outputs,
+            Direction::Input => &step.inputs,
+            Direction::Output => &step.outputs,
         };
         return ports.iter().any(|candidate| candidate.id == port);
     }
@@ -110,7 +110,7 @@ pub fn reachable(mission: &Mission, root: &str) -> HashSet<String> {
 /// either returns to the port, which completes the chain, or hands on to the
 /// first step it feeds. A chain that leaves the steps, loops or never returns
 /// is no chain, and the result is empty.
-pub fn judge_chain<'a>(mission: &'a Mission, gate: &str) -> Vec<&'a Formation> {
+pub fn judge_chain<'a>(mission: &'a Mission, gate: &str) -> Vec<&'a Step> {
     let Some(entry) = outgoing_from_port(mission, gate, GATE_JUDGE).next() else {
         return Vec::new();
     };
@@ -118,17 +118,17 @@ pub fn judge_chain<'a>(mission: &'a Mission, gate: &str) -> Vec<&'a Formation> {
     let mut visited = HashSet::new();
     let mut chain = Vec::new();
     while !current.is_empty() && visited.insert(current) {
-        let Some(formation) = mission.formation(current) else {
+        let Some(step) = mission.step(current) else {
             return Vec::new();
         };
-        chain.push(formation);
+        chain.push(step);
         let mut next = "";
         for connection in outgoing(mission, current) {
             let to = endpoint_node(&connection.to);
             if to == gate && endpoint_port(&connection.to) == GATE_JUDGE {
                 return chain;
             }
-            if next.is_empty() && mission.formation(to).is_some() {
+            if next.is_empty() && mission.step(to).is_some() {
                 next = to;
             }
         }
@@ -175,7 +175,7 @@ pub fn selecting_gate<'a>(mission: &'a Mission, step: &str) -> Result<&'a Gate, 
     if !gate
         .kinds
         .iter()
-        .any(|kind| kind == "formation" || kind == "human")
+        .any(|kind| kind == "step" || kind == "human")
     {
         return Err(format!(
             "its gate {} checks with code only, which cannot compare attempts: give it a judge or a human, or set it to stop or fail",
@@ -194,7 +194,7 @@ mod tests {
     #[derive(Deserialize)]
     struct Case {
         name: String,
-        formations: Vec<String>,
+        steps: Vec<String>,
         connections: Vec<(String, String)>,
         chain: Vec<String>,
     }
@@ -213,12 +213,12 @@ mod tests {
                 }]
             };
             let mission = Mission {
-                formations: (case.formations.iter())
-                    .map(|id| Formation {
+                steps: (case.steps.iter())
+                    .map(|id| Step {
                         id: id.clone(),
                         inputs: port("in"),
                         outputs: port("out"),
-                        ..Formation::default()
+                        ..Step::default()
                     })
                     .collect(),
                 gates: ["gate_g", "gate_h"]

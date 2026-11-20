@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize};
 pub struct RunStart {
     pub mission: String,
     pub input_card_id: String,
-    pub formation_id: String,
+    pub step_id: String,
     pub expected_rev: i64,
     pub expected_etag: String,
     pub cwd: String,

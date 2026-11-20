@@ -20,7 +20,7 @@ use std::{
 #[serde(rename_all = "snake_case")]
 pub struct TurnWorkspace {
     pub run_id: String,
-    /// The step (formation) the turn belongs to.
+    /// The step (step) the turn belongs to.
     pub node_id: String,
     pub attempt: i64,
     /// The repository, as named in `missions.repositories`.

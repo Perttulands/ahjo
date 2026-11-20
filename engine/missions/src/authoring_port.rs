@@ -1,9 +1,9 @@
-//! Edit formation ports and restore their wire identities on undo.
+//! Edit step ports and restore their wire identities on undo.
 use crate::Error;
 use ahjo_mission_model::{Mission, MissionChange, Port};
 use toml_edit::{DocumentMut, Item, Value, value};
 fn missing() -> Error {
-    Error::new("not_found", "formation or port")
+    Error::new("not_found", "step or port")
 }
 fn kind(direction: &str, raw: &str) -> Result<String, Error> {
     let kind = raw.trim();
@@ -26,17 +26,17 @@ fn direction(s: &str) -> Result<&str, Error> {
 }
 fn insert(
     doc: &mut DocumentMut,
-    formation_id: &str,
+    step_id: &str,
     direction: &str,
     port: &Port,
     index: Option<usize>,
 ) -> Result<(), Error> {
-    let formation = crate::authoring_staff::formation_table(doc, formation_id)?;
+    let step = crate::authoring_staff::step_table(doc, step_id)?;
     let mut table = toml_edit::ser::to_document(port)
         .map_err(|e| Error::new("invalid_port", e.to_string()))?
         .into_table();
     table.set_implicit(false);
-    let item = formation
+    let item = step
         .entry(direction)
         .or_insert_with(|| value(toml_edit::Array::new()));
     if let Some(tables) = item.as_array_of_tables_mut() {
@@ -57,13 +57,13 @@ pub(crate) fn apply(
 ) -> Result<bool, Error> {
     match patch {
         MissionChange::AddPort {
-            formation_id,
+            step_id,
             direction: dir,
             mut label,
             kind: raw,
         } => {
             direction(&dir)?;
-            if mission.formation(&formation_id).is_none() {
+            if mission.step(&step_id).is_none() {
                 return Err(missing());
             }
             if label.is_empty() {
@@ -74,23 +74,22 @@ pub(crate) fn apply(
                 label,
                 kind: kind(&dir, &raw)?,
             };
-            insert(doc, &formation_id, &dir, &port, None)?;
+            insert(doc, &step_id, &dir, &port, None)?;
         }
         MissionChange::UpdatePort {
-            formation_id,
+            step_id,
             port_id,
             label,
             kind: raw,
         } => {
-            let formation = mission.formation(&formation_id).ok_or_else(missing)?;
-            let (dir, old) = formation
+            let step = mission.step(&step_id).ok_or_else(missing)?;
+            let (dir, old) = step
                 .inputs
                 .iter()
                 .find(|p| p.id == port_id)
                 .map(|p| ("input", p))
                 .or_else(|| {
-                    formation
-                        .outputs
+                    step.outputs
                         .iter()
                         .find(|p| p.id == port_id)
                         .map(|p| ("output", p))
@@ -106,7 +105,7 @@ pub(crate) fn apply(
             {
                 return Ok(false);
             }
-            let table = crate::authoring_staff::formation_table(doc, &formation_id)?;
+            let table = crate::authoring_staff::step_table(doc, &step_id)?;
             let port = crate::authoring_staff::slot_table(
                 table.get_mut(dir).ok_or_else(missing)?,
                 &port_id,
@@ -118,19 +117,16 @@ pub(crate) fn apply(
                 crate::authoring_staff::set(port, "kind", &kind);
             }
         }
-        MissionChange::RemovePort {
-            formation_id,
-            port_id,
-        } => {
-            let formation = mission.formation(&formation_id).ok_or_else(missing)?;
-            let dir = if formation.inputs.iter().any(|p| p.id == port_id) {
+        MissionChange::RemovePort { step_id, port_id } => {
+            let step = mission.step(&step_id).ok_or_else(missing)?;
+            let dir = if step.inputs.iter().any(|p| p.id == port_id) {
                 "input"
-            } else if formation.outputs.iter().any(|p| p.id == port_id) {
+            } else if step.outputs.iter().any(|p| p.id == port_id) {
                 "output"
             } else {
                 return Err(missing());
             };
-            let table = crate::authoring_staff::formation_table(doc, &formation_id)?;
+            let table = crate::authoring_staff::step_table(doc, &step_id)?;
             let item = table.get_mut(dir).ok_or_else(missing)?;
             match item {
                 Item::ArrayOfTables(a) => {
@@ -154,7 +150,7 @@ pub(crate) fn apply(
                 }
                 _ => return Err(missing()),
             }
-            let endpoint = format!("{formation_id}:{port_id}");
+            let endpoint = format!("{step_id}:{port_id}");
             if let Some(wires) = doc
                 .get_mut("connection")
                 .and_then(Item::as_array_of_tables_mut)
@@ -175,19 +171,19 @@ pub(crate) fn apply(
             }
         }
         MissionChange::RestorePort {
-            formation_id,
+            step_id,
             direction: dir,
             mut port,
             index,
             connections,
         } => {
             direction(&dir)?;
-            let formation = mission.formation(&formation_id).ok_or_else(missing)?;
+            let step = mission.step(&step_id).ok_or_else(missing)?;
             if !crate::authoring_restore::valid_id(&port.id)
-                || formation
+                || step
                     .inputs
                     .iter()
-                    .chain(&formation.outputs)
+                    .chain(&step.outputs)
                     .any(|p| p.id == port.id)
             {
                 return Err(Error::new(
@@ -196,9 +192,9 @@ pub(crate) fn apply(
                 ));
             }
             port.kind = kind(&dir, &port.kind)?;
-            insert(doc, &formation_id, &dir, &port, index)?;
+            insert(doc, &step_id, &dir, &port, index)?;
             let mut current = Mission::parse(&doc.to_string())?;
-            let endpoint = format!("{formation_id}:{}", port.id);
+            let endpoint = format!("{step_id}:{}", port.id);
             for mut connection in connections {
                 if connection.from != endpoint && connection.to != endpoint {
                     return Err(Error::new(

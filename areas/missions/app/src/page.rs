@@ -682,43 +682,43 @@ impl MissionsPage {
         let Some(etag) = self.state.mission_etag.clone() else {
             return;
         };
-        let (kind, title, goal, extra, brief) =
-            if let Some(f) = m.formations.iter().find(|f| f.id == id) {
-                let brief = f.brief.clone().unwrap_or_default();
-                (
-                    EditKind::Step,
-                    f.title.clone(),
-                    brief.goal.clone(),
-                    f.device.clone(),
-                    brief,
-                )
-            } else if let Some(c) = m.input_cards.iter().find(|c| c.id == id) {
-                (
-                    EditKind::Input,
-                    c.title.clone(),
-                    c.goal.clone(),
-                    c.human_channel.clone(),
-                    Default::default(),
-                )
-            } else if let Some(g) = m.gates.iter().find(|g| g.id == id) {
-                (
-                    EditKind::Gate,
-                    g.title.clone(),
-                    g.criterion.clone(),
-                    g.kinds.join(","),
-                    Default::default(),
-                )
-            } else if let Some(e) = m.ends.iter().find(|e| e.id == id) {
-                (
-                    EditKind::End,
-                    e.title.clone(),
-                    String::new(),
-                    e.outcome.clone(),
-                    Default::default(),
-                )
-            } else {
-                return;
-            };
+        let (kind, title, goal, extra, brief) = if let Some(f) = m.steps.iter().find(|f| f.id == id)
+        {
+            let brief = f.brief.clone().unwrap_or_default();
+            (
+                EditKind::Step,
+                f.title.clone(),
+                brief.goal.clone(),
+                f.device.clone(),
+                brief,
+            )
+        } else if let Some(c) = m.input_cards.iter().find(|c| c.id == id) {
+            (
+                EditKind::Input,
+                c.title.clone(),
+                c.goal.clone(),
+                c.human_channel.clone(),
+                Default::default(),
+            )
+        } else if let Some(g) = m.gates.iter().find(|g| g.id == id) {
+            (
+                EditKind::Gate,
+                g.title.clone(),
+                g.criterion.clone(),
+                g.kinds.join(","),
+                Default::default(),
+            )
+        } else if let Some(e) = m.ends.iter().find(|e| e.id == id) {
+            (
+                EditKind::End,
+                e.title.clone(),
+                String::new(),
+                e.outcome.clone(),
+                Default::default(),
+            )
+        } else {
+            return;
+        };
         self.title
             .update(cx, |field, cx| field.set(&title, false, cx));
         self.goal
@@ -799,13 +799,13 @@ impl MissionsPage {
             edits: 0,
         });
         self.slot = m
-            .formations
+            .steps
             .iter()
             .find(|f| f.id == id)
             .and_then(|f| f.slots.first())
             .map(|s| s.id.clone());
         if let Some(slot) = m
-            .formations
+            .steps
             .iter()
             .find(|f| f.id == id)
             .and_then(|f| f.slots.first())
@@ -857,7 +857,7 @@ impl MissionsPage {
     fn session_choice(
         &self,
         t: &ahjo_app_kit::theme::Theme,
-        f: &ahjo_missions_contract::Formation,
+        f: &ahjo_missions_contract::Step,
         cx: &mut Context<Self>,
     ) -> Div {
         let Some(m) = self.state.mission.as_ref() else {
@@ -946,7 +946,7 @@ impl MissionsPage {
         let submitted = self.editor.as_ref().map(|ed| self.editor_snapshot(ed, cx));
         let saved_fields = match &patch {
             MissionChange::AssignSlot { .. } => Some(10..14),
-            MissionChange::UpdateFormation {
+            MissionChange::UpdateStep {
                 device: Some(_), ..
             } => Some(2..3),
             MissionChange::AddPort { .. }
@@ -956,7 +956,7 @@ impl MissionsPage {
             _ => None,
         };
         let deleted_card = match &patch {
-            MissionChange::DeleteFormation { id }
+            MissionChange::DeleteStep { id }
             | MissionChange::DeleteInputCard { id }
             | MissionChange::DeleteGate { id }
             | MissionChange::DeleteEnd { id } => Some(id.clone()),
@@ -1227,7 +1227,7 @@ impl MissionsPage {
             .state
             .mission
             .as_ref()
-            .and_then(|m| m.formations.iter().find(|f| f.id == ed.id))
+            .and_then(|m| m.steps.iter().find(|f| f.id == ed.id))
             .and_then(|f| f.slots.iter().find(|s| s.id == id))
         else {
             return;
@@ -1350,12 +1350,12 @@ impl MissionsPage {
         }
         cx.notify();
     }
-    fn set_type(&mut self, kind: &str, cx: &mut Context<Self>) {
+    fn set_formation(&mut self, kind: &str, cx: &mut Context<Self>) {
         let Some(ed) = &self.editor else {
             return;
         };
         let patch =
-            edits::formation_type_patch(&ed.id, kind, self.slot.as_deref().unwrap_or_default());
+            edits::step_formation_patch(&ed.id, kind, self.slot.as_deref().unwrap_or_default());
         self.write_board(patch, WriteMode::Edit, cx);
     }
     fn name_agent(&mut self, cx: &mut Context<Self>) {
@@ -1614,7 +1614,7 @@ impl Render for MissionsPage {
                 .state
                 .mission
                 .as_ref()
-                .is_some_and(|m| !m.input_cards.is_empty() || !m.formations.is_empty());
+                .is_some_and(|m| !m.input_cards.is_empty() || !m.steps.is_empty());
         if beside != self.beside {
             // The one board is framed again for where it now stands.
             self.beside = beside;
@@ -1927,7 +1927,7 @@ impl Render for MissionsPage {
                         )
                         // Who does the step comes first: it is what a new step lacks.
                         .when(matches!(ed.kind, EditKind::Step), |mut d| {
-                            if let Some(f) = self.state.mission.as_ref().and_then(|m| m.formations.iter().find(|f| f.id == ed.id)) {
+                            if let Some(f) = self.state.mission.as_ref().and_then(|m| m.steps.iter().find(|f| f.id == ed.id)) {
                                 d = d.child(kit::label(&t, "Agents"));
                                 for slot in &f.slots {
                                     let id = slot.id.clone(); let selected = id.clone(); let selector = format!("slot-{id}");
@@ -1940,7 +1940,7 @@ impl Render for MissionsPage {
                         .when(matches!(ed.kind, EditKind::Step) && self.slot.is_some(), |d| d.child(self.slot_pickers(&t, cx)))
                         .when(matches!(ed.kind, EditKind::Step) && !self.editor_more, |d| d.child(left(kit::button(&t, "step-more", "More…", Kind::Quiet).debug_selector(|| "step-more".into()).on_click(cx.listener(|p, _, _, cx| { p.editor_more = true; cx.notify(); })))))
                         .when(matches!(ed.kind, EditKind::Step) && self.editor_more, |d| d.child(kit::label(&t, "Team"))
-                            .child({ let current = self.state.mission.as_ref().and_then(|m| m.formations.iter().find(|f| f.id == ed.id)).map(|f| f.kind.as_str()); let pick = |id: &'static str, text: &'static str, ty: &'static str| kit::button(&t, id, text, if current == Some(ty) { Kind::Plain } else { Kind::Quiet }).on_click(cx.listener(move |p, _, _, cx| p.set_type(ty, cx))); div().flex().gap(px(TAB_GAP)).child(pick("type-solo", "Solo", "solo")).child(pick("type-peer", "Peer", "peer")).child(pick("type-orchestrated", "Orchestrated", "orchestrated")) })
+                            .child({ let current = self.state.mission.as_ref().and_then(|m| m.steps.iter().find(|f| f.id == ed.id)).map(|f| f.formation.as_str()); let pick = |id: &'static str, text: &'static str, ty: &'static str| kit::button(&t, id, text, if current == Some(ty) { Kind::Plain } else { Kind::Quiet }).on_click(cx.listener(move |p, _, _, cx| p.set_formation(ty, cx))); div().flex().gap(px(TAB_GAP)).child(pick("formation-solo", "Solo", "solo")).child(pick("formation-peer", "Peer", "peer")).child(pick("formation-orchestrated", "Orchestrated", "orchestrated")) })
                             .child(kit::label(&t, "Device")).child(div().flex().gap(px(TAB_GAP)).child(div().flex_1().child(self.extra.clone()))
                             .child(left(kit::button(&t, "set-device", "Set device", Kind::Quiet).on_click(cx.listener(|p, _, _, cx| p.set_device(cx)))))))
                         .when(matches!(ed.kind, EditKind::Step) && self.editor_more, |d| d.child(kit::label(&t, "Repository")).child(self.repository_picker(&t, &self.repository, "repository", cx))
@@ -1957,7 +1957,7 @@ impl Render for MissionsPage {
                             .child(div().debug_selector(|| "step-extra".into()).child(self.extra.clone()))
                         })
                         .when(matches!(ed.kind, EditKind::Step) && self.editor_more, |mut d| {
-                            if let Some(f) = self.state.mission.as_ref().and_then(|m| m.formations.iter().find(|f| f.id == ed.id)) {
+                            if let Some(f) = self.state.mission.as_ref().and_then(|m| m.steps.iter().find(|f| f.id == ed.id)) {
                                 d = d.child(kit::label(&t, "Ports"));
                                 for (dir, port) in f.inputs.iter().map(|p| ("in", p)).chain(f.outputs.iter().map(|p| ("out", p))) {
                                     let id = port.id.clone(); let selected = id.clone(); let label = port.label.clone(); let kind = port.kind.clone(); let selector = format!("port-{id}");

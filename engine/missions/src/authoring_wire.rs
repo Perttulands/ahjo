@@ -73,24 +73,24 @@ pub(crate) fn apply(
                         "previous input remains in use",
                     ));
                 }
-                let (formation_id, port_id) = previous_to
+                let (step_id, port_id) = previous_to
                     .split_once(':')
                     .ok_or_else(|| Error::new("not_found", "previous input"))?;
                 if !remaining
-                    .formations
+                    .steps
                     .iter()
-                    .any(|f| f.id == formation_id && f.inputs.iter().any(|p| p.id == port_id))
+                    .any(|f| f.id == step_id && f.inputs.iter().any(|p| p.id == port_id))
                 {
                     return Err(Error::new("not_found", "previous input"));
                 }
-                let formation = doc["formation"]
+                let step = doc["step"]
                     .as_array_of_tables_mut()
                     .and_then(|a| {
                         a.iter_mut()
-                            .find(|t| t.get("id").and_then(Item::as_str) == Some(formation_id))
+                            .find(|t| t.get("id").and_then(Item::as_str) == Some(step_id))
                     })
-                    .ok_or_else(|| Error::new("not_found", "formation"))?;
-                let ports = formation
+                    .ok_or_else(|| Error::new("not_found", "step"))?;
+                let ports = step
                     .get_mut("input")
                     .ok_or_else(|| Error::new("not_found", "previous input"))?;
                 if let Some(tables) = ports.as_array_of_tables_mut() {
@@ -156,16 +156,16 @@ pub(crate) fn apply(
                     .iter()
                     .any(|c| c.to == to && !fail(&from) && !fail(&c.from));
             if occupied {
-                if !join_if_occupied || mission.formation(to_node).is_none() {
+                if !join_if_occupied || mission.step(to_node).is_none() {
                     return Err(Error::new("input_occupied", "input already has a wire"));
                 }
-                let formation = doc["formation"]
+                let step = doc["step"]
                     .as_array_of_tables_mut()
                     .and_then(|a| {
                         a.iter_mut()
                             .find(|t| t.get("id").and_then(Item::as_str) == Some(to_node))
                     })
-                    .ok_or_else(|| Error::new("not_found", "formation"))?;
+                    .ok_or_else(|| Error::new("not_found", "step"))?;
                 let port = Port {
                     id: crate::authoring::id("port")?,
                     label: "Input".into(),
@@ -174,15 +174,15 @@ pub(crate) fn apply(
                 let table = toml_edit::ser::to_document(&port)
                     .map_err(|e| Error::new("invalid_port", e.to_string()))?
                     .into_table();
-                let inputs = formation
+                let inputs = step
                     .get_mut("input")
-                    .ok_or_else(|| Error::new("invalid_port", "formation inputs"))?;
+                    .ok_or_else(|| Error::new("invalid_port", "step inputs"))?;
                 if let Some(tables) = inputs.as_array_of_tables_mut() {
                     tables.push(table);
                 } else if let Some(array) = inputs.as_array_mut() {
                     array.push(table.into_inline_table());
                 } else {
-                    return Err(Error::new("invalid_port", "formation inputs"));
+                    return Err(Error::new("invalid_port", "step inputs"));
                 }
                 to = format!("{to_node}:{}", port.id);
             }

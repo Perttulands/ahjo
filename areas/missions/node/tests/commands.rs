@@ -162,7 +162,7 @@ async fn mission_command_schemas_and_cli_help_match_the_document_surface() {
         ("mission", "new"),
         ("mission", "inspect"),
         ("mission", "wire"),
-        ("formation", "run"),
+        ("step", "run"),
         ("end", "create"),
         ("limit", "create"),
         ("gate", "create"),
@@ -200,10 +200,10 @@ async fn mission_edit_rejects_an_unknown_role_and_uses_work_in_both_brief_operat
     .unwrap();
     let inspect = || node.call("mission_show", json!({"mission":"pair","full":true}));
     let before = inspect().await.unwrap();
-    let step = &before["mission"]["formation"][0];
+    let step = &before["mission"]["step"][0];
     let id = &step["id"];
     let change = json!({"assign_slot":{
-        "formation_id": id, "slot_id": step["slot"][0]["id"],
+        "step_id": id, "slot_id": step["slot"][0]["id"],
         "role": "planner", "harness": "claude-code", "effort": "high"
     }});
     let error = node
@@ -213,7 +213,7 @@ async fn mission_edit_rejects_an_unknown_role_and_uses_work_in_both_brief_operat
     assert_eq!(error.code, "invalid_argument");
     assert_eq!(
         error.message,
-        "assign_slot: unknown field role; accepted fields: formation_id, slot_id, agent_id, harness, model, effort; accepted fields: mission, change, rev",
+        "assign_slot: unknown field role; accepted fields: step_id, slot_id, agent_id, harness, model, effort; accepted fields: mission, change, rev",
     );
     let args = vec![
         "edit".into(),
@@ -234,11 +234,11 @@ async fn mission_edit_rejects_an_unknown_role_and_uses_work_in_both_brief_operat
 
     for (change, work) in [
         (
-            json!({"set_brief":{"formation_id":id,"work":"ahjo-2"}}),
+            json!({"set_brief":{"step_id":id,"work":"ahjo-2"}}),
             "ahjo-2",
         ),
         (
-            json!({"edit_formation":{"id":id,"title":step["title"],"brief":{"work":"ahjo-3"}}}),
+            json!({"edit_step":{"id":id,"title":step["title"],"brief":{"work":"ahjo-3"}}}),
             "ahjo-3",
         ),
     ] {
@@ -246,13 +246,13 @@ async fn mission_edit_rejects_an_unknown_role_and_uses_work_in_both_brief_operat
             .await
             .unwrap();
         assert_eq!(
-            inspect().await.unwrap()["mission"]["formation"][0]["brief"]["work"],
+            inspect().await.unwrap()["mission"]["step"][0]["brief"]["work"],
             work
         );
     }
     for change in [
-        json!({"set_brief":{"formation_id":id,"bead_id":"ahjo-2"}}),
-        json!({"edit_formation":{"id":id,"title":step["title"],"brief":{"bead_id":"ahjo-2"}}}),
+        json!({"set_brief":{"step_id":id,"bead_id":"ahjo-2"}}),
+        json!({"edit_step":{"id":id,"title":step["title"],"brief":{"bead_id":"ahjo-2"}}}),
     ] {
         let error = node
             .call("mission_edit", json!({"mission":"pair","change":change}))
@@ -279,11 +279,9 @@ async fn mission_edit_rejects_an_unknown_role_and_uses_work_in_both_brief_operat
     );
     let help = String::from_utf8(help).unwrap();
     assert!(
-        help.contains(
-            "edit_formation {id, title, brief{goal, repository, work, files[], links[]}}"
-        )
+        help.contains("edit_step {id, title, brief{goal, repository, work, files[], links[]}}")
     );
-    assert!(help.contains("set_brief {formation_id, goal, repository, work, files[], links[]}"));
+    assert!(help.contains("set_brief {step_id, goal, repository, work, files[], links[]}"));
     assert!(!help.contains("bead_id"));
 
     node.stop().await;
@@ -382,7 +380,7 @@ async fn author_and_run_with_tools() {
     assert_eq!(rejected.code, "run_admission_failed");
     assert!(
         rejected.message.contains("missing_input")
-            && rejected.message.contains("formation_without_slots")
+            && rejected.message.contains("step_without_slots")
     );
     let started = node
         .call(
@@ -469,14 +467,14 @@ async fn author_and_run_with_tools() {
             .iter()
             .any(|event| event.kind == "run_resumed")
     );
-    let formation = node
+    let step = node
         .call(
             "mission_run",
             json!({"mission":"hello","from":"fmn_work","inputs":{"brief":"hi"}}),
         )
         .await
         .unwrap();
-    assert!(formation["run_id"].is_string());
+    assert!(step["run_id"].is_string());
     node.stop().await;
 }
 
@@ -1141,7 +1139,7 @@ async fn mission_edit_batches_commit_once_or_leave_the_mission_and_layout_untouc
     ] {
         let error = node
             .call("mission_edit", json!({"mission":"batch","change":{
-                "rev":rev, "changes":[{"create_formation":{"title":"Work","x":10,"y":20}}, second, {"title":"New"}]
+                "rev":rev, "changes":[{"create_step":{"title":"Work","x":10,"y":20}}, second, {"title":"New"}]
             }}))
             .await
             .unwrap_err();
@@ -1160,7 +1158,7 @@ async fn mission_edit_batches_commit_once_or_leave_the_mission_and_layout_untouc
     }
 
     let change = json!({"rev":rev,"changes":[
-        {"create_formation":{"title":"Work","x":10,"y":20}},
+        {"create_step":{"title":"Work","x":10,"y":20}},
         {"create_end":{"title":"Done","x":100,"y":200}},
         {"title":"New"}
     ]});
@@ -1183,7 +1181,7 @@ async fn mission_edit_batches_commit_once_or_leave_the_mission_and_layout_untouc
     let after: serde_json::Value = serde_json::from_slice(&output).unwrap();
     assert_eq!(after["mission"]["rev"], rev + 1);
     assert_eq!(after["mission"]["title"], "New");
-    assert_eq!(after["mission"]["formation"][0]["title"], "Work");
+    assert_eq!(after["mission"]["step"][0]["title"], "Work");
     assert_eq!(after["mission"]["end"][0]["title"], "Done");
     assert_eq!(inspect().await.unwrap()["mission"], after["mission"]);
 
@@ -1191,7 +1189,7 @@ async fn mission_edit_batches_commit_once_or_leave_the_mission_and_layout_untouc
     assert_eq!(after_layout["layout"]["mission_rev"], rev + 1);
     let nodes = after_layout["layout"]["node"].as_array().unwrap();
     for (id, x, y) in [
-        (&after["mission"]["formation"][0]["id"], 10, 20),
+        (&after["mission"]["step"][0]["id"], 10, 20),
         (&after["mission"]["end"][0]["id"], 100, 200),
     ] {
         assert!(

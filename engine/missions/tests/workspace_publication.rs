@@ -1,8 +1,7 @@
 #[allow(dead_code)]
 mod run_support;
 use ahjo_mission_engine::{
-    Coordinator, ExecutionSink, Executor, FormationExecution, FormationResult, LabExecutor,
-    RunSettings,
+    Coordinator, ExecutionSink, Executor, LabExecutor, RunSettings, StepExecution, StepResult,
 };
 use ahjo_mission_model::RunStart;
 use run_support::{Scratch, gated_mission};
@@ -76,11 +75,11 @@ struct Committer {
     dirty: bool,
 }
 impl Executor for Committer {
-    fn execute_formation(
+    fn execute_step(
         &self,
-        req: FormationExecution,
+        req: StepExecution,
         sink: ExecutionSink,
-    ) -> Result<FormationResult, ahjo_mission_engine::Error> {
+    ) -> Result<StepResult, ahjo_mission_engine::Error> {
         {
             std::fs::write(req.cwd.join("agent-file"), "committed by agent").unwrap();
             git(&req.cwd, &["add", "agent-file"]);
@@ -93,7 +92,7 @@ impl Executor for Committer {
                 std::fs::write(req.cwd.join("dirty-file"), "uncommitted").unwrap();
             }
             LabExecutor
-                .execute_formation(req, sink)
+                .execute_step(req, sink)
                 .map_err(|error| error.message)
         }
         .map_err(|message: String| ahjo_mission_engine::Error::new("executor_error", message))
@@ -137,12 +136,12 @@ struct Failure {
     started: Arc<AtomicBool>,
 }
 impl Executor for Failure {
-    fn execute_formation(
+    fn execute_step(
         &self,
-        req: FormationExecution,
+        req: StepExecution,
         sink: ExecutionSink,
-    ) -> Result<FormationResult, ahjo_mission_engine::Error> {
-        (|| -> Result<FormationResult, String> {
+    ) -> Result<StepResult, ahjo_mission_engine::Error> {
+        (|| -> Result<StepResult, String> {
             std::fs::write(req.cwd.join("unfinished"), "partial").unwrap();
             self.started.store(true, Ordering::Release);
             if self.mode == "error" {
@@ -156,7 +155,7 @@ impl Executor for Failure {
             }
             let id = req.run_id.clone();
             let mut result = LabExecutor
-                .execute_formation(req, sink)
+                .execute_step(req, sink)
                 .map_err(|error| error.message)?;
             result.text = format!("<<<AHJO-ESCALATE run-id={id} severity=stop reason=blocked>>>");
             Ok(result)
@@ -253,18 +252,18 @@ fn error_cancel_and_escalation_keep_their_work_and_remove_their_turn_worktrees()
 }
 struct Locking;
 impl Executor for Locking {
-    fn execute_formation(
+    fn execute_step(
         &self,
-        req: FormationExecution,
+        req: StepExecution,
         sink: ExecutionSink,
-    ) -> Result<FormationResult, ahjo_mission_engine::Error> {
+    ) -> Result<StepResult, ahjo_mission_engine::Error> {
         {
             std::fs::write(req.cwd.join("changed"), "value").unwrap();
             let primary = req.cwd.parent().unwrap().join(&req.run_id);
             let lock = git(&primary, &["rev-parse", "--git-path", "index.lock"]);
             std::fs::write(lock, "locked").unwrap();
             LabExecutor
-                .execute_formation(req, sink)
+                .execute_step(req, sink)
                 .map_err(|error| error.message)
         }
         .map_err(|message: String| ahjo_mission_engine::Error::new("executor_error", message))

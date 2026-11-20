@@ -32,7 +32,7 @@ fn check_limit(mission: &Mission, limit: &mut Limit) -> Result<(), Error> {
     };
     if !limit.target.is_empty()
         && !mission.has_input_card(&limit.target)
-        && mission.formation(&limit.target).is_none()
+        && mission.step(&limit.target).is_none()
     {
         return Err(Error::new("invalid_limit", "invalid target"));
     }
@@ -89,10 +89,10 @@ pub(crate) fn check_gate(gate: &mut Gate) -> Result<(), Error> {
     let mut kinds = Vec::new();
     for kind in &gate.kinds {
         let kind = kind.trim();
-        if !["code", "formation", "human"].contains(&kind) {
+        if !["code", "step", "human"].contains(&kind) {
             return Err(Error::new(
                 "invalid_gate_kind",
-                format!("invalid gate kind {kind:?}: a gate is human, formation (a judge) or code"),
+                format!("invalid gate kind {kind:?}: a gate is human, step (a judge) or code"),
             ));
         }
         if !kinds.iter().any(|k| k == kind) {
@@ -259,7 +259,7 @@ pub(crate) fn update(
             if sets_kinds || sets_check || sets_files {
                 let mut check = next.clone();
                 if !sets_kinds {
-                    check.kinds = vec!["code".into(), "formation".into(), "human".into()];
+                    check.kinds = vec!["code".into(), "step".into(), "human".into()];
                 }
                 if !sets_check {
                     check.check.clear();
@@ -312,9 +312,7 @@ pub(crate) fn update(
                     }
                 }
             }
-            if old.kinds.iter().any(|k| k == "formation")
-                && !next.kinds.iter().any(|k| k == "formation")
-            {
+            if old.kinds.iter().any(|k| k == "step") && !next.kinds.iter().any(|k| k == "step") {
                 let endpoint = format!("{}:judge", u.id);
                 if let Some(wires) = doc
                     .get_mut("connection")

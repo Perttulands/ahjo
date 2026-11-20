@@ -98,7 +98,7 @@ pub fn role_name(agent: &str) -> String {
 /// agent's own, or for a step that starts fresh, one per attempt.
 pub fn session_of(
     m: &ahjo_missions_contract::Mission,
-    f: &ahjo_missions_contract::Formation,
+    f: &ahjo_missions_contract::Step,
     slot: &Slot,
 ) -> String {
     let session = ahjo_missions_contract::agent_session(&m.session_prefix(), &f.agent_of(slot));

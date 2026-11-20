@@ -29,15 +29,15 @@
     ],
     "warnings": []
   },
-  "formations": {
+  "steps": {
     "errors": [
       ["duplicate_slot_id", "fmn_orch"],
       ["duplicate_slot_id", "fmn_solo"],
       ["duplicate_slot_id", "fmn_staff"],
-      ["formation_without_slots", "fmn_empty"],
-      ["invalid_formation_shape", "fmn_peer"],
-      ["invalid_formation_shape", "fmn_solo"],
-      ["invalid_formation_type", "fmn_type"],
+      ["step_without_slots", "fmn_empty"],
+      ["invalid_step_shape", "fmn_peer"],
+      ["invalid_step_shape", "fmn_solo"],
+      ["invalid_step_formation", "fmn_type"],
       ["invalid_slot_id", "fmn_staff"],
       ["invalid_slot_settings", "fmn_peer"],
       ["invalid_slot_settings", "fmn_staff"],

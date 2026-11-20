@@ -23,11 +23,11 @@ pub fn arrange(mission: &Mission, layout: &Layout) -> Layout {
             },
         );
     }
-    for n in &mission.formations {
+    for n in &mission.steps {
         items.insert(
             n.id.clone(),
             Item {
-                kind: n.kind.clone(),
+                kind: n.formation.clone(),
                 files: n.brief.as_ref().is_some_and(|b| !b.files.is_empty()),
             },
         );
@@ -80,7 +80,7 @@ pub fn arrange(mission: &Mission, layout: &Layout) -> Layout {
         }
     }
     for n in &mission.limits {
-        if mission.formation(&n.target).is_some() || mission.has_input_card(&n.target) {
+        if mission.step(&n.target).is_some() || mission.has_input_card(&n.target) {
             owner.insert(n.id.clone(), n.target.clone());
             below
                 .entry(n.target.clone())

@@ -22,9 +22,9 @@ impl From<&Slot> for Staffing {
 }
 
 impl Staffing {
-    pub fn assign(self, formation_id: &str, slot_id: &str) -> MissionChange {
+    pub fn assign(self, step_id: &str, slot_id: &str) -> MissionChange {
         MissionChange::AssignSlot {
-            formation_id: formation_id.into(),
+            step_id: step_id.into(),
             slot_id: slot_id.into(),
             agent_id: self.role,
             harness: self.harness,

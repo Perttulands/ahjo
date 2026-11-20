@@ -1,7 +1,7 @@
 //! Runs a gate's judge chain, reusing durable earlier reviews.
 use crate::Coordinator;
 use crate::coordinator::Control;
-use crate::run_job::execute_formation;
+use crate::run_job::execute_step;
 use crate::run_worker::event;
 use ahjo_mission_model::{Mission, RunStart};
 use serde_json::json;
@@ -30,7 +30,7 @@ pub(crate) fn run_judges(
     let mut final_attempt = 0;
     let mut final_slot = String::new();
     let mut final_ports = Vec::new();
-    let mut final_output: Option<crate::FormationResult> = None;
+    let mut final_output: Option<crate::StepResult> = None;
     let ledger = c.ledger(id)?.read().map_err(crate::error::to_io)?;
     let reviewed = crate::run_folder::reviewed_path(c, id, &ledger, input.origin.as_ref());
     let anchor = ledger
@@ -99,7 +99,7 @@ pub(crate) fn run_judges(
         if let Some(path) = &reviewed {
             prompt.push_str(&format!("\nAttempt workspace: {}\n", path.display()));
         }
-        let result = execute_formation(
+        let result = execute_step(
             c,
             id,
             mission,
@@ -350,7 +350,7 @@ pub(crate) fn record_output(
     control: &Control,
     node: &str,
     attempt: i64,
-    result: &crate::FormationResult,
+    result: &crate::StepResult,
 ) -> io::Result<()> {
     crate::run_workspace::publish_output(
         c,

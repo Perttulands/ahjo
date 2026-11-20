@@ -70,8 +70,8 @@ fn sketch(m: &Missions, id: &str, steps: &[String], note: &str, actor: &str) -> 
             x: 0,
             y: 0,
         }];
-        cards.extend(steps.iter().map(|title| MissionChange::CreateFormation {
-            kind: wire::SOLO.into(),
+        cards.extend(steps.iter().map(|title| MissionChange::CreateStep {
+            formation: wire::SOLO.into(),
             title: title.clone(),
             x: 0,
             y: 0,
@@ -95,7 +95,7 @@ fn sketch(m: &Missions, id: &str, steps: &[String], note: &str, actor: &str) -> 
         let end = &edited.mission.ends[current.mission.ends.len()];
         let mut from = format!("{}:{}", input.id, wire::INPUT_CARD_OUT);
         let mut wires = Vec::with_capacity(steps.len() + 1);
-        for step in &edited.mission.formations[current.mission.formations.len()..] {
+        for step in &edited.mission.steps[current.mission.steps.len()..] {
             wires.push(connection(
                 from,
                 format!("{}:{}", step.id, step.inputs[0].id),

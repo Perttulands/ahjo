@@ -7,7 +7,7 @@ use ahjo_missions_contract::flow::Flow;
 use ahjo_missions_contract::{LayoutNode, Mission};
 use std::collections::HashMap;
 
-/// Archon's card sizes (formations-d7.css). A step card is its IN rows,
+/// Archon's card sizes (steps-d7.css). A step card is its IN rows,
 /// its head, its slots and its OUT rows; ports sit on the rows.
 pub const STEP_W: f32 = 320.;
 /// A peer or orchestrated step is a little wider.
@@ -53,7 +53,7 @@ pub const LOOP_OUT: f32 = 24.;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Kind {
     Input,
-    Formation,
+    Step,
     Gate,
     End,
     Limit,
@@ -109,7 +109,7 @@ pub fn body_h(kind: &str, slots: usize) -> f32 {
 }
 
 /// The face and the board must agree on the head height so ports meet rows.
-pub fn step_head(f: &ahjo_missions_contract::Formation, running: bool) -> f32 {
+pub fn step_head(f: &ahjo_missions_contract::Step, running: bool) -> f32 {
     let has_brief = f.brief.as_ref().is_some_and(|b| !b.goal.trim().is_empty());
     (if has_brief {
         STEP_HEAD
@@ -128,14 +128,14 @@ fn size(m: &Mission, id: &str, running: bool) -> Option<(Kind, f32, f32)> {
         let h = INPUT_HEAD + INPUT_GOAL + INPUT_LINE * input_lines(c) + INPUT_FOOT;
         return Some((Kind::Input, INPUT_W, h));
     }
-    if let Some(f) = m.formations.iter().find(|f| f.id == id) {
-        let w = if pooled(&f.kind) { WIDE_W } else { STEP_W };
+    if let Some(f) = m.steps.iter().find(|f| f.id == id) {
+        let w = if pooled(&f.formation) { WIDE_W } else { STEP_W };
         let rows = (f.inputs.len() + f.outputs.len()) as f32;
         let head = step_head(f, running);
         return Some((
-            Kind::Formation,
+            Kind::Step,
             w,
-            rows * IO_ROW + head + body_h(&f.kind, f.slots.len()),
+            rows * IO_ROW + head + body_h(&f.formation, f.slots.len()),
         ));
     }
     if m.gates.iter().any(|g| g.id == id) {
@@ -313,8 +313,8 @@ fn port_at(m: &Mission, c: &Card, port: &str, out: bool) -> (f32, f32) {
             "judge" => (c.x + c.w / 2., c.y + c.h),
             _ => (side, c.y + c.h / 2.),
         },
-        Kind::Formation => {
-            let f = m.formations.iter().find(|f| f.id == c.id);
+        Kind::Step => {
+            let f = m.steps.iter().find(|f| f.id == c.id);
             let ports = f.map(|f| if out { &f.outputs } else { &f.inputs });
             let n = ports.map(|p| p.len()).unwrap_or(0);
             let i = ports
@@ -358,8 +358,8 @@ pub fn ports(m: &Mission, b: &Board) -> Vec<Port> {
     for c in &b.cards {
         match c.kind {
             Kind::Input => add(c, "out", true),
-            Kind::Formation => {
-                if let Some(f) = m.formations.iter().find(|f| f.id == c.id) {
+            Kind::Step => {
+                if let Some(f) = m.steps.iter().find(|f| f.id == c.id) {
                     for p in &f.inputs {
                         add(c, &p.id, false);
                     }
@@ -413,7 +413,7 @@ pub fn board(m: &Mission, flow: &Flow, layout: &[LayoutNode], running: bool) -> 
         .input_cards
         .iter()
         .map(|c| &c.id)
-        .chain(m.formations.iter().map(|f| &f.id))
+        .chain(m.steps.iter().map(|f| &f.id))
         .chain(m.gates.iter().map(|g| &g.id))
         .chain(m.ends.iter().map(|e| &e.id));
     let mut cards: Vec<Card> = ids
@@ -567,7 +567,7 @@ fn gap_above(cards: &[Card], a: &Card, b: &Card) -> f32 {
 pub fn new_size(kind: Kind) -> (f32, f32) {
     match kind {
         Kind::Input => (INPUT_W, INPUT_HEAD + INPUT_GOAL + INPUT_LINE + INPUT_FOOT),
-        Kind::Formation => (STEP_W, 2. * IO_ROW + STEP_HEAD_EMPTY + body_h("solo", 1)),
+        Kind::Step => (STEP_W, 2. * IO_ROW + STEP_HEAD_EMPTY + body_h("solo", 1)),
         Kind::Gate => (GATE_W, GATE_H),
         Kind::End => (END_W, END_H),
         Kind::Limit => (LIMIT_W, LIMIT_H),
@@ -735,7 +735,7 @@ mod tests {
     #[test]
     fn every_wire_ends_at_the_named_visible_ports() {
         let mission = delivery();
-        assert!(mission.formations.len() >= 5);
+        assert!(mission.steps.len() >= 5);
         let board = board(&mission, &build(&mission), &[], false);
         let ports = ports(&mission, &board);
         assert_eq!(board.wires.len(), mission.connections.len());
@@ -763,7 +763,7 @@ mod tests {
         let m = delivery();
         let b = board(&m, &build(&m), &[], false);
         let (x0, y0, w, h) = extent(&b);
-        let size = new_size(Kind::Formation);
+        let size = new_size(Kind::Step);
         let clear = |(x, y): (f32, f32)| {
             b.cards
                 .iter()
@@ -802,13 +802,13 @@ mod tests {
     #[test]
     fn empty_briefs_leave_no_band_and_outputs_follow_the_card() {
         let mut m = delivery();
-        let id = m.formations[0].id.clone();
-        m.formations[0].brief = Some(ahjo_missions_contract::Brief {
+        let id = m.steps[0].id.clone();
+        m.steps[0].brief = Some(ahjo_missions_contract::Brief {
             goal: "A brief".into(),
             ..Default::default()
         });
         let full = board(&m, &build(&m), &[], false);
-        m.formations[0].brief.as_mut().unwrap().goal = " \n ".into();
+        m.steps[0].brief.as_mut().unwrap().goal = " \n ".into();
         let compact = board(&m, &build(&m), &[], false);
         let card = |b: &Board| b.cards.iter().find(|c| c.id == id).unwrap().clone();
         assert_eq!(
@@ -826,10 +826,7 @@ mod tests {
             .find(|p| p.endpoint == output.endpoint)
             .unwrap();
         assert_eq!(old.at.1 - output.at.1, STEP_HEAD - STEP_HEAD_EMPTY);
-        assert_eq!(
-            step_head(&m.formations[0], true),
-            STEP_HEAD_EMPTY + RUN_CHIPS
-        );
+        assert_eq!(step_head(&m.steps[0], true), STEP_HEAD_EMPTY + RUN_CHIPS);
     }
 
     #[test]

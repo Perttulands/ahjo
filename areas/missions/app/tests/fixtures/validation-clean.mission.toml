@@ -1,4 +1,4 @@
-schema = 2
+schema = 3
 id = "msn_clean"
 slug = "clean"
 title = "Clean delivery"
@@ -7,19 +7,19 @@ rev = 1
 id = "inp_start"
 title = "Brief"
 goal = "Describe the task"
-[[formation]]
+[[step]]
 id = "step_work"
-type = "solo"
+formation = "solo"
 title = "Work"
-[formation.brief]
+[step.brief]
 goal = "Prepare the result"
-[[formation.input]]
+[[step.input]]
 id = "in"
 label = "Input"
-[[formation.output]]
+[[step.output]]
 id = "out"
 label = "Result"
-[[formation.slot]]
+[[step.slot]]
 id = "slot_work"
 label = "Worker"
 agent_id = "builder"

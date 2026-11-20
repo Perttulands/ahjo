@@ -112,7 +112,7 @@ pub fn execute(
         }
     } else {
         match result {
-            Ok(Outcome::Succeeded(end_ids)) => match if req.formation_id.is_empty() {
+            Ok(Outcome::Succeeded(end_ids)) => match if req.step_id.is_empty() {
                 c.ledger(&id).map_err(crate::outputs::MissingOutput::Ledger).and_then(|ledger| crate::outputs::resolve_with_picks(&ledger, &mission))
             } else { Ok(crate::outputs::Resolved { outputs: Vec::new(), picks: Vec::new() }) } {
                 Ok(resolved) => success_event(end_ids, resolved),
@@ -324,35 +324,31 @@ fn execute_inner(
     }
     crate::run_capture::recover(c, id, mission, req, &workspace, control)?;
     crate::run_workspace_recovery::recover_pending(c, id, mission, req, &workspace, control)?;
-    if req.formation_id.is_empty() {
+    if req.step_id.is_empty() {
         return crate::run_scheduler::schedule(c, id, mission, req, workspace, control);
     }
     let events = c.ledger(id)?.read().map_err(crate::error::to_io)?;
     if events
         .iter()
         .rev()
-        .find(|e| {
-            e.node_id == req.formation_id && (e.kind == "node_output" || e.kind == "node_started")
-        })
+        .find(|e| e.node_id == req.step_id && (e.kind == "node_output" || e.kind == "node_started"))
         .is_some_and(|e| {
             e.kind == "node_output"
-                && mission
-                    .formation(&req.formation_id)
-                    .is_some_and(|formation| {
-                        formation.outputs.iter().all(|port| {
-                            e.data
-                                .get("outputs")
-                                .and_then(|v| v.get(&port.id))
-                                .is_some()
-                        })
+                && mission.step(&req.step_id).is_some_and(|step| {
+                    step.outputs.iter().all(|port| {
+                        e.data
+                            .get("outputs")
+                            .and_then(|v| v.get(&port.id))
+                            .is_some()
                     })
+                })
         })
     {
         return Ok(Outcome::Succeeded(Vec::new()));
     }
     let inputs = resolve_run_inputs(mission, &req.inputs);
     let input = render_run_inputs(mission, &inputs);
-    let node = req.formation_id.clone();
+    let node = req.step_id.clone();
     let attempt = c
         .ledger(id)?
         .read()
@@ -366,7 +362,7 @@ fn execute_inner(
     if control.canceled.load(Ordering::Acquire) {
         return Ok(Outcome::Succeeded(Vec::new()));
     }
-    let result = crate::run_job::execute_formation(
+    let result = crate::run_job::execute_step(
         c,
         id,
         mission,

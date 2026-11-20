@@ -1,6 +1,6 @@
 //! Construct graph nodes with Archon's default shape.
 use crate::Error;
-use ahjo_mission_model::{End, Formation, Gate, InputCard, Mission, MissionChange, Port, Slot};
+use ahjo_mission_model::{End, Gate, InputCard, Mission, MissionChange, Port, Slot, Step};
 use serde::Serialize;
 use toml_edit::{ArrayOfTables, DocumentMut, Item};
 
@@ -87,39 +87,39 @@ pub(crate) fn apply(
             append(doc, "input_card", &node)?;
             Ok(ahjo_mission_model::LayoutNode { id: node.id, x, y })
         }
-        MissionChange::CreateFormation {
-            mut kind,
+        MissionChange::CreateStep {
+            mut formation,
             mut title,
             x,
             y,
         } => {
-            if kind.is_empty() {
-                kind = "solo".into();
+            if formation.is_empty() {
+                formation = "solo".into();
             }
-            let slots: &[(&str, bool)] = match kind.as_str() {
+            let slots: &[(&str, bool)] = match formation.as_str() {
                 "solo" => &[("Agent", false)],
                 "peer" => &[("Peer", false), ("Peer", false)],
                 "orchestrated" => &[("Orchestrator", true), ("Agent", false), ("Agent", false)],
                 _ => {
                     return Err(Error::new(
-                        "unsupported_formation_type",
+                        "unsupported_step_formation",
                         "use solo, peer or orchestrated",
                     ));
                 }
             };
             if title.is_empty() {
-                title = match kind.as_str() {
+                title = match formation.as_str() {
                     "solo" => "Solo task",
                     "peer" => "Peer huddle",
                     _ => "Orchestration",
                 }
                 .into();
             }
-            let mut node = Formation {
+            let mut node = Step {
                 id: crate::authoring::id("fmn")?,
-                kind,
+                formation,
                 title,
-                ..Formation::default()
+                ..Step::default()
             };
             node.inputs.push(Port {
                 id: crate::authoring::id("port")?,
@@ -139,7 +139,7 @@ pub(crate) fn apply(
                     ..Slot::default()
                 });
             }
-            append(doc, "formation", &node)?;
+            append(doc, "step", &node)?;
             Ok(ahjo_mission_model::LayoutNode { id: node.id, x, y })
         }
         MissionChange::CreateGate {
@@ -154,7 +154,7 @@ pub(crate) fn apply(
             y,
         } => {
             if kinds.is_empty() {
-                kinds.push("formation".into());
+                kinds.push("step".into());
             }
             let mut node = Gate {
                 id: crate::authoring::id("gate")?,

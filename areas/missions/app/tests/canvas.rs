@@ -35,7 +35,7 @@ fn start() -> Running {
                 let node = Node::start(AREAS, "").await.unwrap();
                 let folder = node.dir().join("missions/missions");
                 std::fs::create_dir_all(&folder).unwrap();
-                let mission = include_str!("fixtures/solo-lab.mission.toml").replace("[[formation]]", "[[input_card]]\nid = \"inp_other\"\ntitle = \"Other input\"\ngoal = \"Alternative\"\ninputs = [{ name = \"second\", kind = \"text\", required = false }]\n\n[[formation]]");
+                let mission = include_str!("fixtures/solo-lab.mission.toml").replace("[[step]]", "[[input_card]]\nid = \"inp_other\"\ntitle = \"Other input\"\ngoal = \"Alternative\"\ninputs = [{ name = \"second\", kind = \"text\", required = false }]\n\n[[step]]");
                 std::fs::write(
                     folder.join("hello.mission.toml"),
                     mission,

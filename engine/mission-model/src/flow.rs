@@ -35,13 +35,13 @@ pub enum Decider {
 }
 
 #[derive(Clone, Debug, PartialEq)]
-pub enum StepKind {
-    Formation {
+pub enum FlowStepKind {
+    Step {
         next: Vec<Target>,
     },
     Gate {
         deciders: Vec<Decider>,
-        /// The judge chain's formation ids.
+        /// The judge chain's step ids.
         judges: Vec<String>,
         pass: Vec<Target>,
         fail: Vec<Target>,
@@ -49,12 +49,12 @@ pub enum StepKind {
 }
 
 #[derive(Clone, Debug, PartialEq)]
-pub struct Step {
+pub struct FlowStep {
     pub id: String,
     pub number: usize,
     /// Siblings one output dispatches together; they share the number.
     pub parallel: Vec<String>,
-    pub kind: StepKind,
+    pub kind: FlowStepKind,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -62,14 +62,14 @@ pub struct Section {
     /// The Input card; `None` for the steps no Input card reaches.
     pub input: Option<String>,
     pub start: Vec<Target>,
-    pub steps: Vec<Step>,
+    pub steps: Vec<FlowStep>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Flow {
     pub sections: Vec<Section>,
     pub numbers: HashMap<String, usize>,
-    /// Judge formation id to the gate it judges.
+    /// Judge step id to the gate it judges.
     pub judge_of: HashMap<String, String>,
 }
 
@@ -89,7 +89,7 @@ pub fn judge_chain(m: &Mission, gate: &str) -> Vec<String> {
     let Some(send) = m.connections.iter().find(|c| c.from == socket) else {
         return vec![];
     };
-    let is_step = |id: &str| m.formations.iter().any(|f| f.id == id);
+    let is_step = |id: &str| m.steps.iter().any(|f| f.id == id);
     let mut chain: Vec<String> = vec![];
     let mut current = node_of(&send.to).to_string();
     while !current.is_empty() && !chain.contains(&current) {
@@ -117,7 +117,7 @@ pub fn judge_chain(m: &Mission, gate: &str) -> Vec<String> {
 
 pub fn build(m: &Mission) -> Flow {
     let title_of = |id: &str| -> String {
-        m.formations
+        m.steps
             .iter()
             .find(|f| f.id == id)
             .map(|f| f.title.clone())
@@ -147,7 +147,7 @@ pub fn build(m: &Mission) -> Flow {
     };
     let is_step = |id: &str| {
         !judge_of.contains_key(id)
-            && (m.formations.iter().any(|f| f.id == id) || m.gates.iter().any(|g| g.id == id))
+            && (m.steps.iter().any(|f| f.id == id) || m.gates.iter().any(|g| g.id == id))
     };
     // One output dispatches its siblings together; they share a number.
     let mut by_output: Vec<(String, Vec<String>)> = vec![];
@@ -206,7 +206,7 @@ pub fn build(m: &Mission) -> Flow {
         order.push(walk(starts, &mut numbers));
     }
     let unreached: Vec<String> = m
-        .formations
+        .steps
         .iter()
         .map(|f| f.id.clone())
         .chain(m.gates.iter().map(|g| g.id.clone()))
@@ -242,7 +242,7 @@ pub fn build(m: &Mission) -> Flow {
             t
         }
     };
-    let step_of = |id: &String| -> Step {
+    let step_of = |id: &String| -> FlowStep {
         let number = numbers[id];
         let routes = work_routes(id);
         let kind = match m.gates.iter().find(|g| &g.id == id) {
@@ -257,10 +257,10 @@ pub fn build(m: &Mission) -> Flow {
                             .collect(),
                     ))
                 };
-                StepKind::Gate {
+                FlowStepKind::Gate {
                     deciders: [
                         ("human", Decider::You),
-                        ("formation", Decider::Judge),
+                        ("step", Decider::Judge),
                         ("code", Decider::Code),
                     ]
                     .into_iter()
@@ -272,11 +272,11 @@ pub fn build(m: &Mission) -> Flow {
                     fail: on("fail"),
                 }
             }
-            None => StepKind::Formation {
+            None => FlowStepKind::Step {
                 next: or_nowhere(targets(number, routes)),
             },
         };
-        Step {
+        FlowStep {
             id: id.clone(),
             number,
             parallel: siblings.get(id).cloned().unwrap_or_default(),

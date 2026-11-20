@@ -98,11 +98,11 @@ fn solo_lab_ledger_and_admission_findings_match_archon() {
         panic!("admission did not reject")
     };
     assert!(findings.iter().any(|finding| finding.code
-        == ahjo_mission_model::Code::UnsupportedFormation
+        == ahjo_mission_model::Code::UnsupportedStep
         && finding.node_id == "staff"));
     let comparable: Vec<_> = findings
         .into_iter()
-        .filter(|finding| finding.code != ahjo_mission_model::Code::UnsupportedFormation)
+        .filter(|finding| finding.code != ahjo_mission_model::Code::UnsupportedStep)
         .collect();
     let actual = serde_json::to_value(comparable).unwrap();
     let expected: Value = serde_json::from_str(include_str!(

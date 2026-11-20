@@ -60,7 +60,7 @@ impl MissionsPage {
         cx: &mut Context<Self>,
     ) -> (Div, Div) {
         let head = self.mission_head(t, mission, cx);
-        if mission.input_cards.is_empty() && mission.formations.is_empty() {
+        if mission.input_cards.is_empty() && mission.steps.is_empty() {
             let button = "flow-empty-input";
             let body = pane::empty(
                 t,
@@ -207,7 +207,7 @@ impl MissionsPage {
         let ready = self.mission_run_ready();
         let complete = self.validation_complete();
         // An empty mission's body already says how to begin.
-        let empty = mission.input_cards.is_empty() && mission.formations.is_empty();
+        let empty = mission.input_cards.is_empty() && mission.steps.is_empty();
         // Start only when it can run; until then, what it still lacks,
         // one click from the canvas where it is done.
         let start = if ready {
@@ -328,7 +328,7 @@ impl MissionsPage {
             .when(mission.input_cards.is_empty(), |d| {
                 d.child(add("new-input", "Add input", board::Kind::Input))
             })
-            .child(add("new-step", "Add step", board::Kind::Formation))
+            .child(add("new-step", "Add step", board::Kind::Step))
             // Undo and Redo only when there is something to undo or redo.
             .when(self.history.can_undo(), |d| {
                 d.child(
@@ -403,7 +403,7 @@ impl MissionsPage {
         &self,
         t: &Theme,
         mission: &Mission,
-        step: &flow::Step,
+        step: &flow::FlowStep,
         cx: &mut Context<Self>,
     ) -> gpui::Stateful<Div> {
         let id = step.id.clone();
@@ -486,21 +486,21 @@ impl MissionsPage {
         let sub = |text: String| div().text_color(t.text2).child(text);
         let quiet = |text: String| div().text_color(t.text).child(text);
         match &step.kind {
-            flow::StepKind::Formation { next } => {
-                if let Some(formation) = mission.formations.iter().find(|f| f.id == step.id) {
-                    if formation.slots.is_empty() {
+            flow::FlowStepKind::Step { next } => {
+                if let Some(step) = mission.steps.iter().find(|f| f.id == step.id) {
+                    if step.slots.is_empty() {
                         block = block.child(
                             div()
                                 .text_color(t.error)
                                 .child("Nobody does this step yet."),
                         );
-                    } else if formation.slots.iter().all(|slot| slot.harness.is_empty()) {
+                    } else if step.slots.iter().all(|slot| slot.harness.is_empty()) {
                         // A sketched step: who does it is still open.
                         block = block.child(sub("Nobody chosen to do it yet".into()));
                     } else {
                         // Who, not the session they will work in: that is
                         // the step's own detail.
-                        let who = formation
+                        let who = step
                             .slots
                             .iter()
                             .map(crate::store::words::who)
@@ -508,7 +508,7 @@ impl MissionsPage {
                             .join(", ");
                         block = block.child(sub(who));
                     }
-                    if let Some(brief) = &formation.brief
+                    if let Some(brief) = &step.brief
                         && !brief.goal.trim().is_empty()
                     {
                         block = block.child(
@@ -521,7 +521,7 @@ impl MissionsPage {
                 block = block.child(sub(format!("then {}", run::target_words(next))));
                 block = block.children(self.flow_wire_threads(t, mission, &step.id, cx));
             }
-            flow::StepKind::Gate {
+            flow::FlowStepKind::Gate {
                 deciders,
                 judges,
                 pass,
@@ -543,12 +543,11 @@ impl MissionsPage {
                     block = block.child(quiet(gate.criterion.clone()).pt(px(size::LABEL_BOTTOM)));
                 }
                 for judge in judges {
-                    if let Some(formation) = mission.formations.iter().find(|f| &f.id == judge) {
+                    if let Some(step) = mission.steps.iter().find(|f| &f.id == judge) {
                         block = block.child(sub(format!(
                             "judged by {}: {}",
                             mission.node_name(judge),
-                            formation
-                                .slots
+                            step.slots
                                 .iter()
                                 .map(crate::store::words::who)
                                 .collect::<Vec<_>>()

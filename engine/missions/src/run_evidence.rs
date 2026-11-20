@@ -27,7 +27,7 @@ impl Coordinator {
             })?;
         let mission = self.frozen_mission(id)?;
         if let Some(step) = only
-            && mission.formation(step).is_none()
+            && mission.step(step).is_none()
         {
             return Err(crate::Error::new(
                 "not_found",
@@ -115,12 +115,12 @@ impl Coordinator {
         let mut files = Vec::new();
         let mut truncated = false;
         let root = self.inner.root.join("artifacts").join(id);
-        for formation in &mission.formations {
-            if only.is_some_and(|step| step != formation.id) {
+        for step in &mission.steps {
+            if only.is_some_and(|id| id != step.id) {
                 continue;
             }
-            let dir = root.join(&formation.id);
-            walk(&dir, &formation.id, 0, &mut files, &mut truncated).map_err(crate::error::io)?;
+            let dir = root.join(&step.id);
+            walk(&dir, &step.id, 0, &mut files, &mut truncated).map_err(crate::error::io)?;
         }
         // What the run's agents wrote into its folder: a mission need not
         // declare a file for the operator to find it.

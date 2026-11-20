@@ -58,7 +58,7 @@ pub(crate) fn unresolved(events: &[RunEvent]) -> Vec<RunEvent> {
 }
 
 /// A completed slot followed by a recorded step error is not evidence of a
-/// successful formation. Its dispatch must be abandoned before a retry.
+/// successful step. Its dispatch must be abandoned before a retry.
 pub(crate) fn failed_completion(events: &[RunEvent], dispatch: &RunEvent) -> bool {
     let id = dispatch.data.get("dispatch_id").and_then(|v| v.as_str());
     events.iter().any(|event| {

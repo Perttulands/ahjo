@@ -251,11 +251,7 @@ async fn run_changes_arrive_on_the_socket_through_completion() {
     assert_eq!(rejected.code, "run_admission_failed");
     let findings = rejected.findings.as_ref().unwrap().as_array().unwrap();
     assert!(findings.iter().any(|f| f["code"] == "missing_input"));
-    assert!(
-        findings
-            .iter()
-            .any(|f| f["code"] == "formation_without_slots")
-    );
+    assert!(findings.iter().any(|f| f["code"] == "step_without_slots"));
     let remote = include_str!("fixtures/solo-lab.mission.toml")
         .replace("slug = \"hello\"", "slug = \"remote\"")
         .replace("id = \"msn_hello\"", "id = \"msn_remote\"")

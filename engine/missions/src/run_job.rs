@@ -1,8 +1,8 @@
-//! Executes one formation attempt and validates its dispatches.
+//! Executes one step attempt and validates its dispatches.
 use crate::coordinator::Control;
 use crate::run_worker::event;
 use crate::{
-    BindingsSnapshot, Coordinator, FormationExecution, mission_run_inputs, substitute_run_inputs,
+    BindingsSnapshot, Coordinator, StepExecution, mission_run_inputs, substitute_run_inputs,
 };
 use ahjo_mission_model::{Mission, RunStart};
 use serde_json::json;
@@ -13,7 +13,7 @@ use std::{
 };
 
 #[allow(clippy::too_many_arguments)]
-pub(crate) fn execute_formation(
+pub(crate) fn execute_step(
     c: &Coordinator,
     id: &str,
     mission: &Mission,
@@ -29,9 +29,9 @@ pub(crate) fn execute_formation(
     final_judge: bool,
     started: Option<mpsc::SyncSender<()>>,
     pick_attempts: Vec<i64>,
-) -> io::Result<crate::FormationResult> {
-    let mut formation = mission
-        .formation(&node)
+) -> io::Result<crate::StepResult> {
+    let mut step = mission
+        .step(&node)
         .cloned()
         .ok_or_else(|| io::Error::other("route requires the gate scheduler"))?;
     let source = std::fs::read_to_string(
@@ -42,7 +42,7 @@ pub(crate) fn execute_formation(
     )?;
     let bindings: BindingsSnapshot =
         toml::from_str(&source).map_err(|_| io::Error::other("persona_snapshot_invalid"))?;
-    for slot in &formation.slots {
+    for slot in &step.slots {
         bindings
             .binding(mission, id, &req.input_card_id, &node, slot)
             .map_err(io::Error::other)?;
@@ -63,7 +63,7 @@ pub(crate) fn execute_formation(
         return Err(crate::run_limit::reached(&node, spent, false));
     }
     crate::run_left_seats::end(c, id, Some(&node), "new_attempt")?;
-    if let Some(brief) = formation.brief.as_mut() {
+    if let Some(brief) = step.brief.as_mut() {
         brief.goal = substitute_run_inputs(
             &brief.goal,
             &mission_run_inputs(mission),
@@ -79,7 +79,7 @@ pub(crate) fn execute_formation(
             "node_started",
             &node,
             attempt,
-            json!({"node_kind":"formation","reason":reason,"input_refs":refs,"brief":formation.brief}),
+            json!({"node_kind":"step","reason":reason,"input_refs":refs,"brief":step.brief}),
         ),
     )? {
         return Err(io::Error::new(io::ErrorKind::Interrupted, "run canceled"));
@@ -89,7 +89,7 @@ pub(crate) fn execute_formation(
         let _ = started.send(());
     }
     let (limits, _timer) = attempt_limits(c, id, mission, control, &node)?;
-    let placed = !formation.device.is_empty() && formation.device != c.inner.settings.environment;
+    let placed = !step.device.is_empty() && step.device != c.inner.settings.environment;
     let (turn_workspace, turn) = if placed {
         let turn = crate::run_workspace::prepare_placed_turn(
             c,
@@ -97,11 +97,11 @@ pub(crate) fn execute_formation(
             req,
             workspace,
             control,
-            (node.as_str(), formation.device.as_str()),
+            (node.as_str(), step.device.as_str()),
             attempt,
         )?;
         (workspace.to_path_buf(), Some(turn))
-    } else if req.repository.is_empty() && req.formation_id.is_empty() && reason != "judge" {
+    } else if req.repository.is_empty() && req.step_id.is_empty() && reason != "judge" {
         let path = crate::run_folder::prepare(c, id, mission, workspace, control, &node, attempt)?;
         (path, None)
     } else {
@@ -109,11 +109,11 @@ pub(crate) fn execute_formation(
             crate::run_workspace::prepare_turn(c, id, req, workspace, control, &node, attempt)?;
         (path, None)
     };
-    let call = FormationExecution {
+    let call = StepExecution {
         run_id: id.into(),
         prefix: mission.session_prefix(),
         run_number: run_number(c, id, mission),
-        formation: formation.clone(),
+        step: step.clone(),
         bindings,
         cwd: turn_workspace,
         turn,
@@ -133,7 +133,7 @@ pub(crate) fn execute_formation(
     let (tx, rx) = mpsc::channel();
     let executor = c.inner.executor.clone();
     let thread = std::thread::spawn(move || {
-        executor.execute_formation(call, crate::ExecutionSink { sender: tx })
+        executor.execute_step(call, crate::ExecutionSink { sender: tx })
     });
     let mut write_error = None;
     let mut dispatches = std::collections::BTreeMap::new();
@@ -166,7 +166,7 @@ pub(crate) fn execute_formation(
                 "slot_dispatch" => {
                     if !dispatch_id.is_empty()
                         && !dispatches.contains_key(&dispatch_id)
-                        && formation.slots.iter().any(|slot| slot.id == evt.slot_id)
+                        && step.slots.iter().any(|slot| slot.id == evt.slot_id)
                     {
                         ""
                     } else {
@@ -256,38 +256,38 @@ pub(crate) fn execute_formation(
     let mut result = result.map_err(io::Error::other)?;
     if result.status != "done" {
         return Err(io::Error::other(format!(
-            "executor_failed: formation returned {:?}",
+            "executor_failed: step returned {:?}",
             result.status
         )));
     }
     if !dispatches.is_empty() {
-        return Err(io::Error::other("formation has unfinished dispatches"));
+        return Err(io::Error::other("step has unfinished dispatches"));
     }
-    if formation.slots.iter().any(|slot| {
-        (formation.kind != "orchestrated" || slot.controller) && !completed.contains(&slot.id)
+    if step.slots.iter().any(|slot| {
+        (step.formation != "orchestrated" || slot.controller) && !completed.contains(&slot.id)
     }) {
-        return Err(io::Error::other("formation has missing slot results"));
+        return Err(io::Error::other("step has missing slot results"));
     }
-    for port in &formation.outputs {
+    for port in &step.outputs {
         if !result.outputs.contains_key(&port.id) {
             return Err(io::Error::other(format!(
-                "missing_output_payload: formation {} did not produce output for port {}",
-                formation.id, port.id
+                "missing_output_payload: step {} did not produce output for port {}",
+                step.id, port.id
             )));
         }
     }
     if result
         .outputs
         .keys()
-        .any(|id| !formation.outputs.iter().any(|port| &port.id == id))
+        .any(|id| !step.outputs.iter().any(|port| &port.id == id))
     {
         return Err(io::Error::other(format!(
-            "invalid_output_payloads: formation {} produced an unknown output port",
-            formation.id
+            "invalid_output_payloads: step {} produced an unknown output port",
+            step.id
         )));
     }
 
-    crate::output_refs::materialize(&formation, &mut result.outputs)?;
+    crate::output_refs::materialize(&step, &mut result.outputs)?;
     Ok(result)
 }
 
@@ -400,7 +400,7 @@ pub(crate) fn cut_off(
     Ok(crate::run_limit::reached(node, use_, true))
 }
 
-/// Inputs and channels used to start the next ready formation.
+/// Inputs and channels used to start the next ready step.
 pub(crate) struct JobContext<'a> {
     pub c: &'a Coordinator,
     pub id: &'a str,
@@ -435,41 +435,40 @@ pub(crate) fn start_ready(
         wake: wake_tx,
         mut drain,
     } = context;
-    for formation in &mission.formations {
-        if drain.as_ref().is_some_and(|d| !d.contains(&formation.id)) {
+    for step in &mission.steps {
+        if drain.as_ref().is_some_and(|d| !d.contains(&step.id)) {
             continue;
         }
-        if running.contains(&formation.id) {
+        if running.contains(&step.id) {
             continue;
         }
-        let refs: Vec<_> = if let Some(open) = replay.open.get(&formation.id) {
+        let refs: Vec<_> = if let Some(open) = replay.open.get(&step.id) {
             open.data
                 .get("input_refs")
                 .and_then(|v| v.as_array())
                 .cloned()
                 .unwrap_or_default()
-        } else if replay.unfinished.contains(&formation.id)
+        } else if replay.unfinished.contains(&step.id)
             && events.iter().any(|event| event.kind == "run_resumed")
         {
             events
                 .iter()
                 .rev()
-                .find(|event| event.kind == "node_started" && event.node_id == formation.id)
+                .find(|event| event.kind == "node_started" && event.node_id == step.id)
                 .and_then(|event| event.data.get("input_refs"))
                 .and_then(|value| value.as_array())
                 .cloned()
                 .unwrap_or_default()
         } else {
-            let Some(ports) = replay.ports.get(&formation.id) else {
+            let Some(ports) = replay.ports.get(&step.id) else {
                 continue;
             };
-            if !formation.inputs.iter().all(|p| ports.contains_key(&p.id))
+            if !step.inputs.iter().all(|p| ports.contains_key(&p.id))
                 || !ports.values().any(|(_, unread)| *unread)
             {
                 continue;
             }
-            formation
-                .inputs
+            step.inputs
                 .iter()
                 .filter_map(|p| ports.get(&p.id))
                 .map(|(input, _)| serde_json::to_value(input).unwrap())
@@ -510,8 +509,8 @@ pub(crate) fn start_ready(
         {
             text.push_str("Input paths are kept copies of earlier work and are read-only; write new versions in your own attempt directory.\n");
         }
-        let attempt = replay.attempts.get(&formation.id).copied().unwrap_or(0) + 1;
-        let node = formation.id.clone();
+        let attempt = replay.attempts.get(&step.id).copied().unwrap_or(0) + 1;
+        let node = step.id.clone();
         if let Some(drain) = &mut drain {
             drain.remove(&node);
         }
@@ -529,7 +528,7 @@ pub(crate) fn start_ready(
             wake_tx.clone(),
         );
         std::thread::spawn(move || {
-            let result = execute_formation(
+            let result = execute_step(
                 &c,
                 &id,
                 &mission,

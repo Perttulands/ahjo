@@ -1,139 +1,139 @@
-# Parity fixture: formation shapes, slot ids and staffing.
-schema = 2
-id = "msn_formations"
-slug = "formations"
-title = "Formations"
+# Parity fixture: step shapes, slot ids and staffing.
+schema = 3
+id = "msn_steps"
+slug = "steps"
+title = "Steps"
 rev = 1
 
 [[input_card]]
 id = "inp"
 title = "Start"
 
-[[formation]]
+[[step]]
 id = "fmn_type"
-type = "swarm"
+formation = "swarm"
 title = "Swarm"
-[[formation.slot]]
+[[step.slot]]
 id = "swarm"
 harness = "claude-code"
 effort = "low"
 
-[[formation]]
+[[step]]
 id = "fmn_solo"
-type = "solo"
+formation = "solo"
 title = "Solo pair"
-[[formation.slot]]
+[[step.slot]]
 id = "dup"
 label = "One"
 harness = "claude-code"
 effort = "low"
-[[formation.slot]]
+[[step.slot]]
 id = "dup"
 label = "Two"
 harness = "claude-code"
 effort = "low"
 
-[[formation]]
+[[step]]
 id = "fmn_peer"
-type = "peer"
+formation = "peer"
 title = "Peers"
-[[formation.slot]]
+[[step.slot]]
 id = "peer_1"
 harness = "claude-code"
 effort = "low"
 controller = true
-[[formation.slot]]
+[[step.slot]]
 id = "peer_2"
 harness = "openai-codex"
 model = "gpt-small"
 effort = "ultra"
 
-[[formation]]
+[[step]]
 id = "fmn_orch"
-type = "orchestrated"
+formation = "orchestrated"
 title = "No controller"
-[[formation.slot]]
+[[step.slot]]
 id = "worker_1"
 harness = "openai-codex"
 model = "gpt-6-astra"
 effort = "ultra"
-[[formation.slot]]
+[[step.slot]]
 id = "worker_2"
 harness = "openai-codex"
 model = "gpt-unknown"
 effort = "ultra"
 
-[[formation]]
+[[step]]
 id = "fmn_alone"
-type = "orchestrated"
+formation = "orchestrated"
 title = "Controller alone"
-[[formation.slot]]
+[[step.slot]]
 id = "lead"
 harness = "claude-code"
 effort = "low"
 controller = true
 
-[[formation]]
+[[step]]
 id = "fmn_empty"
-type = "solo"
+formation = "solo"
 title = "Empty"
 
-[[formation]]
+[[step]]
 id = "fmn_staff"
-type = "peer"
+formation = "peer"
 title = "Staffing"
-[[formation.slot]]
+[[step.slot]]
 id = "open"
 label = "Open"
-[[formation.slot]]
+[[step.slot]]
 id = "no_harness"
 effort = "low"
-[[formation.slot]]
+[[step.slot]]
 id = "hermes"
 harness = "hermes"
 effort = "low"
-[[formation.slot]]
+[[step.slot]]
 id = "spaced"
 harness = "pi"
 model = "anthropic/claude opus"
 effort = "low"
-[[formation.slot]]
+[[step.slot]]
 id = "no_effort"
 harness = "claude-code"
 model = "opus"
-[[formation.slot]]
+[[step.slot]]
 id = "too_much"
 harness = "claude-code"
 effort = "ultra"
-[[formation.slot]]
+[[step.slot]]
 id = "retired"
 agent_id = "critic"
 harness = "claude-code"
 effort = "xhigh"
-[[formation.slot]]
+[[step.slot]]
 id = "unknown"
 agent_id = "oracle"
 harness = "claude-code"
 effort = "xhigh"
-[[formation.slot]]
+[[step.slot]]
 id = "bad_role"
 agent_id = "Critic"
 harness = "claude-code"
 effort = "xhigh"
-[[formation.slot]]
+[[step.slot]]
 id = "builtin"
 agent_id = "builder"
 harness = "claude-code"
 effort = "medium"
-[[formation.slot]]
+[[step.slot]]
 id = "_hidden"
 label = "Hidden"
 harness = "claude-code"
 effort = "low"
-[[formation.slot]]
+[[step.slot]]
 id = "worker_1"
 harness = "claude-code"
 effort = "low"
-[[formation.slot]]
+[[step.slot]]
 id = "harness_only"
 harness = "pi"

@@ -1,6 +1,6 @@
 # Parity fixture: a Limit card that picks the best attempt, with and
 # without a gate that can pick.
-schema = 2
+schema = 3
 id = "msn_best"
 slug = "best"
 title = "Best"
@@ -10,42 +10,42 @@ rev = 1
 id = "inp"
 title = "Start"
 
-[[formation]]
+[[step]]
 id = "fmn_draft"
-type = "solo"
+formation = "solo"
 title = "Draft"
-[[formation.input]]
+[[step.input]]
 id = "in"
-[[formation.output]]
+[[step.output]]
 id = "out"
-[[formation.slot]]
+[[step.slot]]
 id = "draft"
 harness = "claude-code"
 effort = "low"
 
-[[formation]]
+[[step]]
 id = "fmn_judge"
-type = "solo"
+formation = "solo"
 title = "Judge"
-[[formation.input]]
+[[step.input]]
 id = "in"
-[[formation.output]]
+[[step.output]]
 id = "out"
-[[formation.slot]]
+[[step.slot]]
 id = "judge"
 agent_id = "judge"
 harness = "claude-code"
 effort = "xhigh"
 
-[[formation]]
+[[step]]
 id = "fmn_twice"
-type = "solo"
+formation = "solo"
 title = "Twice judged"
-[[formation.input]]
+[[step.input]]
 id = "in"
-[[formation.output]]
+[[step.output]]
 id = "out"
-[[formation.slot]]
+[[step.slot]]
 id = "twice"
 harness = "claude-code"
 effort = "low"
@@ -53,7 +53,7 @@ effort = "low"
 [[gate]]
 id = "gate_judged"
 title = "Judged"
-kinds = ["formation"]
+kinds = ["step"]
 
 [[gate]]
 id = "gate_one"

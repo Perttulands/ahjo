@@ -36,7 +36,7 @@ fn assert_error(error: anyhow::Error, status: StatusCode, code: &str) {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn http_restores_a_deleted_formation_and_fences_notes_and_layout() {
+async fn http_restores_a_deleted_step_and_fences_notes_and_layout() {
     let (node, c) = start().await;
     let (_, tag) = send(
         &c,
@@ -50,30 +50,30 @@ async fn http_restores_a_deleted_formation_and_fences_notes_and_layout() {
         &c,
         Method::PATCH,
         "/api/missions/demo",
-        json!({"expected_rev":1,"create_formation":{"type":"solo","title":"Work"}}),
+        json!({"expected_rev":1,"create_step":{"formation":"solo","title":"Work"}}),
         Some(&tag),
     )
     .await;
-    let formation = made["formation"].clone();
-    let id = formation["id"].as_str().unwrap();
+    let step = made["step"].clone();
+    let id = step["id"].as_str().unwrap();
     let (deleted, tag) = send(
         &c,
         Method::PATCH,
         "/api/missions/demo",
-        json!({"expected_rev":2,"delete_formation":{"id":id}}),
+        json!({"expected_rev":2,"delete_step":{"id":id}}),
         Some(&tag),
     )
     .await;
-    assert_eq!(deleted["mission"]["formation"], json!([]));
+    assert_eq!(deleted["mission"]["step"], json!([]));
     let (restored, _) = send(
         &c,
         Method::PATCH,
         "/api/missions/demo",
-        json!({"expected_rev":3,"restore_node":{"formation":formation,"x":112,"y":112}}),
+        json!({"expected_rev":3,"restore_node":{"step":step,"x":112,"y":112}}),
         Some(&tag),
     )
     .await;
-    assert_eq!(restored["mission"]["formation"][0]["id"], id);
+    assert_eq!(restored["mission"]["step"][0]["id"], id);
     let (_, notes_tag) = c
         .request(Method::GET, "/api/missions/demo/notes", None, None)
         .await
@@ -296,13 +296,13 @@ async fn http_patch_uses_the_same_schema_and_stages_a_batch() {
         &client,
         Method::PATCH,
         path,
-        json!({"rev":1,"changes":[{"create_formation":{"title":"Work"}},{"title":"Changed"}]}),
+        json!({"rev":1,"changes":[{"create_step":{"title":"Work"}},{"title":"Changed"}]}),
         Some(&tag),
     )
     .await;
     assert_eq!(after["mission"]["rev"], 2);
     assert_eq!(after["mission"]["title"], "Changed");
-    assert_eq!(after["mission"]["formation"][0]["title"], "Work");
+    assert_eq!(after["mission"]["step"][0]["title"], "Work");
     assert_eq!(after["layout"]["mission_rev"], 2);
     node.stop().await;
 }

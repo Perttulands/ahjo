@@ -1,5 +1,5 @@
 # Parity fixture: End nodes, node ids and Limit cards.
-schema = 2
+schema = 3
 id = "msn_limits"
 slug = "limits"
 title = "Limits"
@@ -9,41 +9,41 @@ rev = 1
 id = "inp"
 title = "Start"
 
-[[formation]]
+[[step]]
 id = "fmn_a"
-type = "solo"
+formation = "solo"
 title = "Draft"
-[[formation.input]]
+[[step.input]]
 id = "in"
-[[formation.output]]
+[[step.output]]
 id = "out"
-[[formation.slot]]
+[[step.slot]]
 id = "a"
 harness = "claude-code"
 effort = "low"
 
-[[formation]]
+[[step]]
 id = "fmn_b"
-type = "solo"
+formation = "solo"
 title = "Build"
-[[formation.input]]
+[[step.input]]
 id = "in"
-[[formation.output]]
+[[step.output]]
 id = "out"
-[[formation.slot]]
+[[step.slot]]
 id = "b"
 harness = "claude-code"
 effort = "low"
 
-[[formation]]
+[[step]]
 id = "fmn_c"
-type = "solo"
+formation = "solo"
 title = "Check"
-[[formation.input]]
+[[step.input]]
 id = "in"
-[[formation.output]]
+[[step.output]]
 id = "out"
-[[formation.slot]]
+[[step.slot]]
 id = "c"
 harness = "claude-code"
 effort = "low"

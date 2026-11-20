@@ -1,7 +1,7 @@
-//! Formation types, their slot shapes, and slot ids.
+//! Step types, their slot shapes, and slot ids.
 
 use super::possessive;
-use ahjo_mission_model::{Code, Finding, Formation, Mission, ORCHESTRATED, PEER, SOLO};
+use ahjo_mission_model::{Code, Finding, Mission, ORCHESTRATED, PEER, SOLO, Step};
 
 /// What a slot id may be, for messages: its seat's session is named after
 /// it, and a relayed verdict names it.
@@ -28,16 +28,16 @@ pub fn valid_device(device: &str) -> bool {
 /// device alone could mean either of a Windows machine's two.
 pub fn device_findings(mission: &Mission) -> Vec<Finding> {
     mission
-        .formations
+        .steps
         .iter()
-        .filter(|formation| !formation.device.is_empty() && !valid_device(&formation.device))
-        .map(|formation| {
+        .filter(|step| !step.device.is_empty() && !valid_device(&step.device))
+        .map(|step| {
             Finding::new(
                 Code::UnknownDevice,
-                &formation.id,
+                &step.id,
                 format!(
-                    "formation {:?} runs on {:?}; name an environment as <device>/<linux|wsl|windows>, or clear it to run on the coordinator",
-                    formation.id, formation.device
+                    "step {:?} runs on {:?}; name an environment as <device>/<linux|wsl|windows>, or clear it to run on the coordinator",
+                    step.id, step.device
                 ),
             )
         })
@@ -46,28 +46,28 @@ pub fn device_findings(mission: &Mission) -> Vec<Finding> {
 
 pub fn shape_findings(mission: &Mission) -> Vec<Finding> {
     let mut findings = Vec::new();
-    for formation in &mission.formations {
-        if formation.kind == PEER {
+    for step in &mission.steps {
+        if step.formation == PEER {
             findings.push(Finding::new(
-                Code::UnsupportedFormation,
-                &formation.id,
+                Code::UnsupportedStep,
+                &step.id,
                 format!(
-                    "peer formation {:?} is not supported; use solo or orchestrated",
-                    formation.id
+                    "peer step {:?} is not supported; use solo or orchestrated",
+                    step.id
                 ),
             ));
         }
-        if ![SOLO, PEER, ORCHESTRATED].contains(&formation.kind.as_str()) {
+        if ![SOLO, PEER, ORCHESTRATED].contains(&step.formation.as_str()) {
             findings.push(Finding::new(
-                Code::InvalidFormationType,
-                &formation.id,
+                Code::InvalidStepFormation,
+                &step.id,
                 format!(
-                    "formation {:?} has unsupported type {:?}; change it to solo, peer or orchestrated, or delete it",
-                    formation.id, formation.kind
+                    "step {:?} has unsupported type {:?}; change it to solo, peer or orchestrated, or delete it",
+                    step.id, step.formation
                 ),
             ));
         } else {
-            findings.extend(slot_shape_finding(formation));
+            findings.extend(slot_shape_finding(step));
         }
     }
     findings
@@ -75,41 +75,37 @@ pub fn shape_findings(mission: &Mission) -> Vec<Finding> {
 
 /// Solo has one slot; peer has two or more and no controller; orchestrated
 /// has one controller and a worker beside it.
-fn slot_shape_finding(formation: &Formation) -> Option<Finding> {
-    let id = &formation.id;
+fn slot_shape_finding(step: &Step) -> Option<Finding> {
+    let id = &step.id;
     let problem = |code, message| Some(Finding::new(code, id, message));
-    let slots = formation.slots.len();
+    let slots = step.slots.len();
     if slots == 0 {
         return problem(
-            Code::FormationWithoutSlots,
-            format!("formation {id:?} has no slots; add a slot and staff it"),
+            Code::StepWithoutSlots,
+            format!("step {id:?} has no slots; add a slot and staff it"),
         );
     }
-    let controllers = formation
-        .slots
-        .iter()
-        .filter(|slot| slot.controller)
-        .count();
-    match formation.kind.as_str() {
+    let controllers = step.slots.iter().filter(|slot| slot.controller).count();
+    match step.formation.as_str() {
         SOLO if slots != 1 => problem(
-            Code::InvalidFormationShape,
-            format!("solo formation {id:?} needs exactly one slot; it has {slots}"),
+            Code::InvalidStepShape,
+            format!("solo step {id:?} needs exactly one slot; it has {slots}"),
         ),
         PEER if slots < 2 || controllers != 0 => problem(
-            Code::InvalidFormationShape,
+            Code::InvalidStepShape,
             format!(
-                "peer formation {id:?} needs at least two slots and no controllers; it has {slots} slots and {controllers} controllers"
+                "peer step {id:?} needs at least two slots and no controllers; it has {slots} slots and {controllers} controllers"
             ),
         ),
         ORCHESTRATED if controllers != 1 => problem(
             Code::OrchestratedController,
             format!(
-                "orchestrated formation {id:?} needs exactly one controller slot; it has {controllers}"
+                "orchestrated step {id:?} needs exactly one controller slot; it has {controllers}"
             ),
         ),
         ORCHESTRATED if slots < 2 => problem(
             Code::OrchestratedController,
-            format!("orchestrated formation {id:?} needs a worker slot beside its controller"),
+            format!("orchestrated step {id:?} needs a worker slot beside its controller"),
         ),
         _ => None,
     }
@@ -120,30 +116,27 @@ fn slot_shape_finding(formation: &Formation) -> Option<Finding> {
 /// relayed by that slot would name neither.
 pub fn slot_id_findings(mission: &Mission) -> Vec<Finding> {
     let mut holders: Vec<(&str, Vec<&str>)> = Vec::new();
-    for formation in &mission.formations {
-        for slot in mission_slots(formation) {
+    for step in &mission.steps {
+        for slot in mission_slots(step) {
             match holders.iter_mut().find(|(id, _)| *id == slot) {
-                Some((_, formations)) => formations.push(&formation.id),
-                None => holders.push((slot, vec![&formation.id])),
+                Some((_, steps)) => steps.push(&step.id),
+                None => holders.push((slot, vec![&step.id])),
             }
         }
     }
     let mut findings = Vec::new();
-    for (slot, formations) in holders
-        .iter()
-        .filter(|(_, formations)| formations.len() > 1)
-    {
+    for (slot, steps) in holders.iter().filter(|(_, steps)| steps.len() > 1) {
         let mut nodes: Vec<&str> = Vec::new();
-        for node in formations {
+        for node in steps {
             if !nodes.contains(node) {
                 nodes.push(node);
             }
         }
         let described = match nodes.as_slice() {
-            [only] => format!("{} slots of formation {only:?}", formations.len()),
+            [only] => format!("{} slots of step {only:?}", steps.len()),
             _ => {
                 let quoted: Vec<_> = nodes.iter().map(|node| format!("{node:?}")).collect();
-                format!("formations {}", quoted.join(" and "))
+                format!("steps {}", quoted.join(" and "))
             }
         };
         for node in &nodes {
@@ -154,14 +147,14 @@ pub fn slot_id_findings(mission: &Mission) -> Vec<Finding> {
             ));
         }
     }
-    for formation in &mission.formations {
-        for slot in mission_slots(formation).filter(|slot| !valid_slot_id(slot)) {
+    for step in &mission.steps {
+        for slot in mission_slots(step).filter(|slot| !valid_slot_id(slot)) {
             findings.push(Finding::new(
                 Code::InvalidSlotId,
-                &formation.id,
+                &step.id,
                 format!(
                     "{} slot id {slot:?} is not a slot id Ahjo can use: {SLOT_ID_RULE}; rename it in the mission file",
-                    possessive(mission.node_name(&formation.id))
+                    possessive(mission.node_name(&step.id))
                 ),
             ));
         }
@@ -169,10 +162,9 @@ pub fn slot_id_findings(mission: &Mission) -> Vec<Finding> {
     findings
 }
 
-/// A formation's non-blank slot ids.
-fn mission_slots(formation: &Formation) -> impl Iterator<Item = &str> {
-    formation
-        .slots
+/// A step's non-blank slot ids.
+fn mission_slots(step: &Step) -> impl Iterator<Item = &str> {
+    step.slots
         .iter()
         .map(|slot| slot.id.as_str())
         .filter(|id| !id.is_empty())

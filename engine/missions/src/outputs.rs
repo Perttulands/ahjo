@@ -46,7 +46,7 @@ fn resolve_events(events: &[RunEvent], mission: &Mission) -> Result<Resolved, Mi
         .gates
         .iter()
         .flat_map(|gate| crate::graph::judge_chain(mission, &gate.id))
-        .map(|formation| formation.id.as_str())
+        .map(|step| step.id.as_str())
         .collect();
     let mut inputs: HashMap<Key, Vec<RoutedInput>> = HashMap::new();
     let mut produced = HashMap::new();
@@ -226,7 +226,7 @@ fn resolve_events(events: &[RunEvent], mission: &Mission) -> Result<Resolved, Mi
                 continue;
             }
             let name = mission
-                .formations
+                .steps
                 .iter()
                 .find(|f| f.id == node)
                 .map_or(node.clone(), |f| f.title.clone());
@@ -415,7 +415,7 @@ mod tests {
     #[test]
     fn a_mission_without_declared_outputs_shows_what_reached_its_end() {
         let mission = Mission {
-            formations: vec![ahjo_mission_model::Formation {
+            steps: vec![ahjo_mission_model::Step {
                 id: "write".into(),
                 title: "Write the plan".into(),
                 ..Default::default()

@@ -3,8 +3,7 @@
 //! Archon's precedence against declared inputs; and a brief's own work
 //! item beside the run's.
 use ahjo_mission_engine::{
-    Coordinator, ExecutionSink, Executor, FormationExecution, FormationResult, LabExecutor,
-    RunSettings,
+    Coordinator, ExecutionSink, Executor, LabExecutor, RunSettings, StepExecution, StepResult,
 };
 use ahjo_mission_model::RunStart;
 use std::{
@@ -20,7 +19,7 @@ const ISSUE: &str = "gh:example/project#180";
 /// optionally its own; `inputs` declares the Input card's inputs.
 fn mission(inputs: &str, brief_work: &str) -> String {
     format!(
-        r#"schema = 2
+        r#"schema = 3
 id = "msn_work"
 slug = "work"
 title = "Work"
@@ -32,20 +31,20 @@ title = "Work"
 goal = "Carry the work item"
 {inputs}
 
-[[formation]]
+[[step]]
 id = "fmn_work"
-type = "solo"
+formation = "solo"
 title = "Work"
-[formation.brief]
+[step.brief]
 goal = "bead={{bead}} issue={{issue}} literal={{{{bead}}}}"
 {brief_work}
-[[formation.input]]
+[[step.input]]
 id = "port_in"
 label = "Input"
-[[formation.output]]
+[[step.output]]
 id = "port_out"
 label = "Result"
-[[formation.slot]]
+[[step.slot]]
 id = "slot_work"
 label = "Worker"
 harness = "openai-codex"
@@ -90,17 +89,17 @@ impl Drop for Scratch {
 
 /// The lab executor, keeping each step's execution as the seat would get it.
 #[derive(Clone, Default)]
-struct Recording(Arc<Mutex<Vec<FormationExecution>>>);
+struct Recording(Arc<Mutex<Vec<StepExecution>>>);
 impl Executor for Recording {
-    fn execute_formation(
+    fn execute_step(
         &self,
-        execution: FormationExecution,
+        execution: StepExecution,
         events: ExecutionSink,
-    ) -> Result<FormationResult, ahjo_mission_engine::Error> {
+    ) -> Result<StepResult, ahjo_mission_engine::Error> {
         {
             self.0.lock().unwrap().push(execution.clone());
             LabExecutor
-                .execute_formation(execution, events)
+                .execute_step(execution, events)
                 .map_err(|error| error.message)
         }
         .map_err(|message: String| ahjo_mission_engine::Error::new("executor_error", message))
@@ -113,11 +112,7 @@ fn run(
     mission: &str,
     work: &str,
     inputs: &[(&str, &str)],
-) -> (
-    FormationExecution,
-    ahjo_mission_model::RunProjection,
-    String,
-) {
+) -> (StepExecution, ahjo_mission_model::RunProjection, String) {
     let dir = Scratch::new(mission);
     let recording = Recording::default();
     let c = Coordinator::open(&dir.0, RunSettings::default(), Box::new(recording.clone())).unwrap();
@@ -152,7 +147,7 @@ fn a_bead_on_the_run_fills_bead_and_issue_and_is_projected() {
     assert_eq!((projection.work.as_str(), listed.as_str()), (BEAD, BEAD));
     assert_eq!(execution.work, BEAD);
     assert_eq!(
-        execution.formation.brief.unwrap().goal,
+        execution.step.brief.unwrap().goal,
         "bead=ctx-12 issue=ctx-12 literal={bead}"
     );
 }
@@ -162,7 +157,7 @@ fn a_github_issue_on_the_run_fills_the_same_placeholders() {
     let (execution, projection, _) = run(&mission("", ""), ISSUE, &[("brief", "go")]);
     assert_eq!(projection.work, ISSUE);
     assert_eq!(
-        execution.formation.brief.unwrap().goal,
+        execution.step.brief.unwrap().goal,
         "bead=example/project#180 issue=example/project#180 literal={bead}"
     );
 }
@@ -172,7 +167,7 @@ fn without_a_work_item_the_placeholders_are_empty() {
     let (execution, projection, _) = run(&mission("", ""), "", &[("brief", "go")]);
     assert_eq!(projection.work, "");
     assert_eq!(
-        execution.formation.brief.unwrap().goal,
+        execution.step.brief.unwrap().goal,
         "bead= issue= literal={bead}"
     );
 }
@@ -183,18 +178,18 @@ fn a_declared_bead_input_wins_even_when_omitted() {
         r#"inputs = [{ name = "bead", kind = "text" }, { name = "topic", kind = "text" }]"#;
     let (execution, _, _) = run(&mission(declared, ""), BEAD, &[("bead", "chosen")]);
     assert_eq!(
-        execution.formation.brief.unwrap().goal,
+        execution.step.brief.unwrap().goal,
         "bead=chosen issue=ctx-12 literal={bead}"
     );
     let (execution, _, _) = run(&mission(declared, ""), BEAD, &[("topic", "x")]);
     assert_eq!(
-        execution.formation.brief.unwrap().goal,
+        execution.step.brief.unwrap().goal,
         "bead=(not supplied) issue=ctx-12 literal={bead}"
     );
     let declared = r#"inputs = [{ name = "issue", kind = "text" }]"#;
     let (execution, _, _) = run(&mission(declared, ""), ISSUE, &[]);
     assert_eq!(
-        execution.formation.brief.unwrap().goal,
+        execution.step.brief.unwrap().goal,
         "bead=example/project#180 issue=(not supplied) literal={bead}"
     );
 }
@@ -205,7 +200,7 @@ fn a_brief_names_its_own_work_item_beside_the_runs() {
         let line = format!("work = \"{brief_work}\"");
         let (execution, _, _) = run(&mission("", &line), BEAD, &[("brief", "go")]);
         assert_eq!(execution.work, BEAD);
-        assert_eq!(execution.formation.brief.unwrap().work, brief_work);
+        assert_eq!(execution.step.brief.unwrap().work, brief_work);
     }
 }
 
@@ -237,17 +232,17 @@ fn admission_refuses_a_work_item_it_cannot_place() {
 #[derive(Clone, Default)]
 struct FailOnce(Recording, Arc<Mutex<bool>>);
 impl Executor for FailOnce {
-    fn execute_formation(
+    fn execute_step(
         &self,
-        execution: FormationExecution,
+        execution: StepExecution,
         events: ExecutionSink,
-    ) -> Result<FormationResult, ahjo_mission_engine::Error> {
-        (|| -> Result<FormationResult, String> {
+    ) -> Result<StepResult, ahjo_mission_engine::Error> {
+        (|| -> Result<StepResult, String> {
             if !std::mem::replace(&mut *self.1.lock().unwrap(), true) {
                 return Err("seat lost".into());
             }
             self.0
-                .execute_formation(execution, events)
+                .execute_step(execution, events)
                 .map_err(|error| error.message)
         })()
         .map_err(|message: String| ahjo_mission_engine::Error::new("executor_error", message))
@@ -335,7 +330,7 @@ fn an_old_ledgers_issue_survives_the_upgrade_and_a_resume() {
     let execution = executor.0.0.lock().unwrap().last().unwrap().clone();
     assert_eq!(execution.work, ISSUE);
     assert_eq!(
-        execution.formation.brief.unwrap().goal,
+        execution.step.brief.unwrap().goal,
         "bead=example/project#180 issue=example/project#180 literal={bead}"
     );
 }

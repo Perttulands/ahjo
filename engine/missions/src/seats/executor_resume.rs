@@ -4,7 +4,7 @@ use crate::{
     AgentSeat, Dispatch, DispatchResult, Executor, OpenDispatch, PublishedTurn, SeatEvent,
     SeatExecutor, SeatFuture, SeatId, SeatSide, TurnWorkspace,
 };
-use ahjo_mission_model::{Formation, Slot};
+use ahjo_mission_model::{Slot, Step};
 use std::{
     collections::{HashMap, VecDeque},
     path::PathBuf,
@@ -116,9 +116,9 @@ fn open() -> OpenDispatch {
         node_id: "fmn_answer".into(),
         slot_id: "slot_1".into(),
         attempt: 1,
-        formation: Formation {
+        step: Step {
             id: "fmn_answer".into(),
-            kind: "solo".into(),
+            formation: "solo".into(),
             slots: vec![Slot {
                 id: "slot_1".into(),
                 ..Default::default()

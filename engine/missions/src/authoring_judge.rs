@@ -4,7 +4,7 @@ use ahjo_mission_model::{Mission, MissionChange};
 use std::collections::BTreeSet;
 use toml_edit::{DocumentMut, Item, value};
 fn missing() -> Error {
-    Error::new("not_found", "gate or judge formation")
+    Error::new("not_found", "gate or judge step")
 }
 pub(crate) fn apply(
     doc: &mut DocumentMut,
@@ -24,14 +24,14 @@ pub(crate) fn apply(
         if chain.is_empty() {
             return Err(missing());
         }
-        if !kinds.iter().any(|k| k == "formation") {
-            kinds.push("formation".into());
+        if !kinds.iter().any(|k| k == "step") {
+            kinds.push("step".into());
         }
         let mut previous = endpoint.clone();
         for id in &chain {
-            let formation = mission.formation(id).ok_or_else(missing)?;
-            let input = formation.inputs.first().ok_or_else(missing)?;
-            let output = formation.outputs.first().ok_or_else(missing)?;
+            let step = mission.step(id).ok_or_else(missing)?;
+            let input = step.inputs.first().ok_or_else(missing)?;
+            let output = step.outputs.first().ok_or_else(missing)?;
             pairs.push((previous, format!("{id}:{}", input.id)));
             previous = format!("{id}:{}", output.id);
         }
@@ -59,7 +59,7 @@ pub(crate) fn apply(
             return Ok(false);
         }
     } else {
-        kinds.retain(|k| k != "formation");
+        kinds.retain(|k| k != "step");
         if kinds.is_empty() {
             kinds.push("human".into());
         }

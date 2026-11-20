@@ -546,7 +546,7 @@ impl MissionsPage {
             );
             let selector = format!("run-step-{}-{}", step.id, word.replace(' ', "-"));
             let who = mission
-                .formations
+                .steps
                 .iter()
                 .find(|f| f.id == step.id)
                 .map(|f| {
@@ -557,7 +557,7 @@ impl MissionsPage {
                         .join(", ")
                 })
                 .unwrap_or_else(|| match &step.kind {
-                    flow::StepKind::Gate { .. } => "gate".into(),
+                    flow::FlowStepKind::Gate { .. } => "gate".into(),
                     _ => String::new(),
                 });
             let mut name =
@@ -1112,8 +1112,8 @@ impl MissionsPage {
             let mut reject_label = "Send back".to_owned();
             let mut routes = Vec::new();
             if let Some(mission) = mission
-                && let Some(flow::Step {
-                    kind: flow::StepKind::Gate { pass, fail, .. },
+                && let Some(flow::FlowStep {
+                    kind: flow::FlowStepKind::Gate { pass, fail, .. },
                     ..
                 }) = flow::build(mission)
                     .sections

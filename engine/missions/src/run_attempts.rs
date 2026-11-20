@@ -79,7 +79,7 @@ impl Walk<'_> {
     }
 
     fn started(&mut self, event: &RunEvent) {
-        let Some(formation) = self.mission.formation(&event.node_id) else {
+        let Some(step) = self.mission.step(&event.node_id) else {
             return;
         };
         if let Some(previous) = self.current(&event.node_id)
@@ -95,16 +95,16 @@ impl Walk<'_> {
                 .filter(|g| {
                     crate::graph::judge_chain(self.mission, &g.id)
                         .iter()
-                        .any(|f| f.id == formation.id)
+                        .any(|f| f.id == step.id)
                 })
                 .map(|g| g.id.clone())
                 .collect();
             self.index.insert(event.node_id.clone(), self.steps.len());
             self.steps.push(StepAttempts {
-                node_id: formation.id.clone(),
-                title: formation.title.clone(),
+                node_id: step.id.clone(),
+                title: step.title.clone(),
                 judge_of,
-                outputs: (formation.outputs.iter())
+                outputs: (step.outputs.iter())
                     .map(|p| StepPort {
                         id: p.id.clone(),
                         label: p.label.clone(),
@@ -459,7 +459,7 @@ impl crate::Coordinator {
             let events = self.ledger(id)?.read().map_err(crate::error::to_io)?;
             let mission = self.frozen_mission(id).map_err(crate::error::to_io)?;
             if let Some(step) = only
-                && mission.formation(step).is_none()
+                && mission.step(step).is_none()
             {
                 return Err(std::io::Error::new(
                     std::io::ErrorKind::NotFound,

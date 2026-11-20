@@ -1,5 +1,5 @@
 # Parity fixture: wires, gates and routes.
-schema = 2
+schema = 3
 id = "msn_wiring"
 slug = "wiring"
 title = "Wiring"
@@ -10,49 +10,49 @@ id = "inp"
 title = "Start"
 goal = "Exercise wiring findings"
 
-[[formation]]
+[[step]]
 id = "fmn_a"
-type = "solo"
+formation = "solo"
 title = "Work"
-[formation.brief]
+[step.brief]
 goal = "Work on {brief}."
-[[formation.input]]
+[[step.input]]
 id = "in"
 label = "Input"
-[[formation.output]]
+[[step.output]]
 id = "out"
 label = "Result"
-[[formation.output]]
+[[step.output]]
 id = "extra"
 label = "Extra"
-[[formation.slot]]
+[[step.slot]]
 id = "a"
 harness = "claude-code"
 effort = "low"
 
-[[formation]]
+[[step]]
 id = "fmn_b"
-type = "solo"
+formation = "solo"
 title = "Second"
-[[formation.input]]
+[[step.input]]
 id = "in"
 label = "Input"
-[[formation.output]]
+[[step.output]]
 id = "out"
 label = "Result"
-[[formation.slot]]
+[[step.slot]]
 id = "b"
 harness = "claude-code"
 effort = "low"
 
-[[formation]]
+[[step]]
 id = "fmn_island"
-type = "solo"
-[[formation.input]]
+formation = "solo"
+[[step.input]]
 id = "in"
-[[formation.output]]
+[[step.output]]
 id = "out"
-[[formation.slot]]
+[[step.slot]]
 id = "island"
 harness = "pi"
 effort = "high"
@@ -64,7 +64,7 @@ title = "No kind"
 [[gate]]
 id = "gate_mixed"
 title = "Mixed"
-kinds = ["code", "formation", "vibes", "code"]
+kinds = ["code", "step", "vibes", "code"]
 
 [[gate]]
 id = "gate_check"

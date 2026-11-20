@@ -38,13 +38,13 @@ pub(crate) fn publish(
     control: &Control,
     output: RunEvent,
 ) -> io::Result<()> {
-    let Some(formation) = mission.formation(&output.node_id) else {
+    let Some(step) = mission.step(&output.node_id) else {
         return crate::run_workspace::publish_output(c, id, req, workspace, control, output);
     };
-    if !formation.outputs.iter().any(|p| p.kind() != "text") {
+    if !step.outputs.iter().any(|p| p.kind() != "text") {
         return crate::run_workspace::publish_output(c, id, req, workspace, control, output);
     }
-    validate_refs(formation, &output)?;
+    validate_refs(step, &output)?;
     let mut pending = output.clone();
     pending.kind = "output_capture_pending".into();
     if !append_live(c, id, control, pending)? {
@@ -53,13 +53,13 @@ pub(crate) fn publish(
     accept(c, id, mission, req, workspace, control, output)
 }
 
-fn validate_refs(formation: &ahjo_mission_model::Formation, output: &RunEvent) -> io::Result<()> {
+fn validate_refs(step: &ahjo_mission_model::Step, output: &RunEvent) -> io::Result<()> {
     let payloads = output
         .data
         .get("outputs")
         .and_then(|v| v.as_object())
         .ok_or_else(|| io::Error::other("invalid_output_payloads"))?;
-    for port in formation.outputs.iter().filter(|p| p.kind() != "text") {
+    for port in step.outputs.iter().filter(|p| p.kind() != "text") {
         let value = payloads
             .get(&port.id)
             .and_then(|v| v.get("ref"))
@@ -103,10 +103,10 @@ fn accept(
     control: &Control,
     mut output: RunEvent,
 ) -> io::Result<()> {
-    let formation = mission
-        .formation(&output.node_id)
-        .ok_or_else(|| io::Error::other("missing formation"))?;
-    validate_refs(formation, &output)?;
+    let step = mission
+        .step(&output.node_id)
+        .ok_or_else(|| io::Error::other("missing step"))?;
+    validate_refs(step, &output)?;
     let attempt = attempt_dir(c, id, &output.node_id, output.attempt)?;
     fs::create_dir_all(&attempt).map_err(|e| io::Error::other(format!("output_not_kept: {e}")))?;
     let target = attempt.join("outputs");
@@ -144,7 +144,7 @@ fn accept(
             .get_mut("outputs")
             .and_then(|v| v.as_object_mut())
             .ok_or_else(|| io::Error::other("invalid_output_payloads"))?;
-        for port in &formation.outputs {
+        for port in &step.outputs {
             let kind = port.kind();
             if kind == "text" {
                 continue;

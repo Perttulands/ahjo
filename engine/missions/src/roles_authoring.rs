@@ -289,10 +289,10 @@ impl RoleStore {
                             } else {
                                 &usage.mission_title
                             },
-                            if usage.formation_title.is_empty() {
-                                &usage.formation_id
+                            if usage.step_title.is_empty() {
+                                &usage.step_id
                             } else {
-                                &usage.formation_title
+                                &usage.step_title
                             },
                             if usage.slot_label.is_empty() {
                                 &usage.slot_id

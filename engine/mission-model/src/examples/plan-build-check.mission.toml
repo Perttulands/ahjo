@@ -1,4 +1,4 @@
-schema = 2
+schema = 3
 id = "msn_example"
 slug = "plan-build-check"
 title = "Plan, build, check"
@@ -13,57 +13,57 @@ inputs = [
 ]
 outputs = [{ name = "result", description = "What the builder changed, once the checks pass.", kind = "text", required = false, from = "fmn_build:port_build_out" }]
 
-[[formation]]
+[[step]]
 id = "fmn_plan"
-type = "solo"
+formation = "solo"
 title = "Plan"
-[formation.brief]
+[step.brief]
 goal = "Plan this change in the run's folder:\n\n{brief}\n\nRead the code it touches. Write plan.md: the steps, the files, and the checks that prove it works. Change no code. Return the plan's path and a short summary on your output."
-[[formation.input]]
+[[step.input]]
 id = "port_plan_in"
 label = "Change"
-[[formation.output]]
+[[step.output]]
 id = "port_plan_out"
 label = "Plan"
-[[formation.slot]]
+[[step.slot]]
 id = "slot_plan"
 label = "Planner"
 agent = "planner"
 harness = "claude-code"
 effort = "high"
 
-[[formation]]
+[[step]]
 id = "fmn_build"
-type = "solo"
+formation = "solo"
 title = "Build"
-[formation.brief]
+[step.brief]
 goal = "Carry out the plan on your input for this change:\n\n{brief}\n\nWhen the checker sent it back, its findings arrive on your input: fix them. Return what you changed on your output."
-[[formation.input]]
+[[step.input]]
 id = "port_build_in"
 label = "Plan"
-[[formation.output]]
+[[step.output]]
 id = "port_build_out"
 label = "Change"
-[[formation.slot]]
+[[step.slot]]
 id = "slot_build"
 label = "Builder"
 agent = "builder"
 harness = "claude-code"
 effort = "medium"
 
-[[formation]]
+[[step]]
 id = "fmn_check"
-type = "solo"
+formation = "solo"
 title = "Check"
-[formation.brief]
+[step.brief]
 goal = "Run the checks plan.md names, and the project's own tests, against the change on your input. Pass it only when they all pass; fail it with what failed and the output that shows it."
-[[formation.input]]
+[[step.input]]
 id = "port_check_in"
 label = "Change"
-[[formation.output]]
+[[step.output]]
 id = "port_check_out"
 label = "Verdict"
-[[formation.slot]]
+[[step.slot]]
 id = "slot_check"
 label = "Checker"
 agent = "checker"
@@ -73,7 +73,7 @@ effort = "medium"
 [[gate]]
 id = "gate_checks"
 title = "Checks pass"
-kinds = ["formation"]
+kinds = ["step"]
 criterion = "The checks the plan names and the project's tests all pass."
 
 [[limit]]

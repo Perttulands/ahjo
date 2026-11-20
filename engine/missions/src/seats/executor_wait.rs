@@ -3,10 +3,10 @@
 //! exists and while it works.
 use crate::{
     AgentSeat, BindingsSnapshot, Dispatch, DispatchResult, ExecutionEvent, ExecutionSink, Executor,
-    FormationExecution, PublishedTurn, SeatEvent, SeatExecutor, SeatFuture, SeatId, SeatSide,
+    PublishedTurn, SeatEvent, SeatExecutor, SeatFuture, SeatId, SeatSide, StepExecution,
     TurnWorkspace, executor::PendingEvent,
 };
-use ahjo_mission_model::{Formation, Slot};
+use ahjo_mission_model::{Slot, Step};
 use serde_json::json;
 use std::{
     path::PathBuf,
@@ -97,14 +97,14 @@ impl SeatSide for Away {
     }
 }
 
-fn execution(turn: Option<TurnWorkspace>, canceled: Arc<AtomicBool>) -> FormationExecution {
-    FormationExecution {
+fn execution(turn: Option<TurnWorkspace>, canceled: Arc<AtomicBool>) -> StepExecution {
+    StepExecution {
         run_id: "run_1".into(),
         prefix: String::new(),
         run_number: 0,
-        formation: Formation {
+        step: Step {
             id: "fmn_build".into(),
-            kind: "solo".into(),
+            formation: "solo".into(),
             device: "box/windows".into(),
             slots: vec![Slot {
                 id: "slot_1".into(),
@@ -138,7 +138,7 @@ fn execution(turn: Option<TurnWorkspace>, canceled: Arc<AtomicBool>) -> Formatio
     }
 }
 
-/// Runs a formation against `seats`, and stops it at the event of `kind`.
+/// Runs a step against `seats`, and stops it at the event of `kind`.
 fn stop_at(
     seats: Away,
     turn: Option<TurnWorkspace>,
@@ -151,7 +151,7 @@ fn stop_at(
     let (sender, received) = mpsc::channel::<PendingEvent>();
     let (done, finished) = mpsc::channel();
     std::thread::spawn(move || {
-        let result = executor.execute_formation(request, ExecutionSink { sender });
+        let result = executor.execute_step(request, ExecutionSink { sender });
         let _ = done.send(result.map(|_| ()));
     });
     let mut events = Vec::new();

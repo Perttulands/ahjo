@@ -242,11 +242,53 @@ async fn role_routes_and_commands_keep_versions_and_usage() {
             .code,
         "conflict"
     );
+    let state = ahjo_mission_engine::Store::root_in(node.dir());
+    let mission = state.join("missions/draft.mission.toml");
+    std::fs::create_dir_all(mission.parent().unwrap()).unwrap();
+    std::fs::write(
+        &mission,
+        r#"schema = 3
+id = "mis_draft"
+slug = "draft"
+title = "Draft"
+rev = 1
+
+[[step]]
+id = "step_write"
+formation = "solo"
+title = "Write"
+
+[[step.slot]]
+id = "slot_writer"
+label = "Writer"
+agent_id = "writer"
+"#,
+    )
+    .unwrap();
     let (usage, _) = client
         .request(Method::GET, "/api/roles/writer/usage", None, None)
         .await
         .unwrap();
     assert_eq!(usage["complete"], true);
+    assert_eq!(
+        usage["usage"],
+        json!([{
+            "mission_id": "mis_draft",
+            "mission_slug": "draft",
+            "mission_title": "Draft",
+            "step_id": "step_write",
+            "step_title": "Write",
+            "slot_id": "slot_writer",
+            "slot_label": "Writer"
+        }])
+    );
+    let called = node
+        .call("role_usage", json!({"role":"writer"}))
+        .await
+        .unwrap();
+    assert_eq!(called["usage"], usage["usage"]);
+    assert_eq!(called["complete"], true);
+    std::fs::remove_file(mission).unwrap();
     let (retired, next) = client
         .request(
             Method::PATCH,
@@ -282,7 +324,7 @@ async fn role_routes_and_commands_keep_versions_and_usage() {
         .await
         .unwrap();
     assert_eq!(deleted["deleted"], "writer");
-    assert!(!root.join("roles/writer.toml").exists());
+    assert!(!state.join("roles/writer.toml").exists());
     let names = [
         "role_list",
         "role_inspect",

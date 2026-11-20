@@ -4,16 +4,16 @@
 //! value of the wrong type or a field the schema does not have refuses the
 //! whole file with `invalid_definition_source`. Tools, which never ran in
 //! Archon, are such a field. Everything else a hand edit can get wrong, such
-//! as a broken wire or an unknown formation type, still loads, so validation
+//! as a broken wire or an unknown step formation, still loads, so validation
 //! can name it.
 
 use serde::{Deserialize, Serialize};
 
-use crate::nodes::{Connection, End, Formation, Gate, InputCard, Limit};
+use crate::nodes::{Connection, End, Gate, InputCard, Limit, Step};
 use ahjo_core::Error;
 
 /// The only mission file schema Ahjo reads.
-pub const MISSION_SCHEMA: i64 = 2;
+pub const MISSION_SCHEMA: i64 = 3;
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq, schemars::JsonSchema)]
 #[serde(default, deny_unknown_fields, rename_all = "snake_case")]
@@ -35,8 +35,8 @@ pub struct Mission {
     /// validation names it (`several_input_cards`).
     #[serde(rename = "input_card")]
     pub input_cards: Vec<InputCard>,
-    #[serde(rename = "formation")]
-    pub formations: Vec<Formation>,
+    #[serde(rename = "step")]
+    pub steps: Vec<Step>,
     #[serde(rename = "gate")]
     pub gates: Vec<Gate>,
     #[serde(rename = "end")]
@@ -69,8 +69,8 @@ impl Mission {
         self.input_cards.first()
     }
 
-    pub fn formation(&self, id: &str) -> Option<&Formation> {
-        self.formations.iter().find(|formation| formation.id == id)
+    pub fn step(&self, id: &str) -> Option<&Step> {
+        self.steps.iter().find(|step| step.id == id)
     }
 
     pub fn gate(&self, id: &str) -> Option<&Gate> {
@@ -87,7 +87,7 @@ impl Mission {
 
     /// The title of the node with this id, or "" when it has none.
     pub fn node_title(&self, id: &str) -> &str {
-        let titles = (self.formations.iter().map(|n| (&n.id, &n.title)))
+        let titles = (self.steps.iter().map(|n| (&n.id, &n.title)))
             .chain(self.gates.iter().map(|n| (&n.id, &n.title)))
             .chain(self.input_cards.iter().map(|n| (&n.id, &n.title)))
             .chain(self.ends.iter().map(|n| (&n.id, &n.title)))

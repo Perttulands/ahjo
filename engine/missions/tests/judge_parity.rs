@@ -14,7 +14,7 @@ fn lab_judge_routes_a_synthetic_verdict() {
     let root = Scratch::new();
     let solo = include_str!("parity/runs/missions/solo-lab.mission.toml");
     let judge = solo
-        .split("[[formation]]")
+        .split("[[step]]")
         .nth(1)
         .unwrap()
         .split("[[end]]")
@@ -24,7 +24,7 @@ fn lab_judge_routes_a_synthetic_verdict() {
         .replace("slot_work", "slot_judge");
     let mission = solo.replace("to = \"end_done:in\"", "to = \"gate_review:in\"");
     let mission = format!(
-        "{mission}\n[[formation]]{judge}\n[[gate]]\nid = \"gate_review\"\ntitle = \"Review\"\nkinds = [\"formation\"]\n\n[[end]]\nid = \"end_rejected\"\ntitle = \"Rejected\"\noutcome = \"rejected\"\n\n[[connection]]\nid = \"edge_pass\"\nfrom = \"gate_review:pass\"\nto = \"end_done:in\"\n\n[[connection]]\nid = \"edge_fail\"\nfrom = \"gate_review:fail\"\nto = \"end_rejected:in\"\n\n[[connection]]\nid = \"edge_judge\"\nfrom = \"gate_review:judge\"\nto = \"fmn_judge:port_in\"\n\n[[connection]]\nid = \"edge_return\"\nfrom = \"fmn_judge:port_out\"\nto = \"gate_review:judge\"\n"
+        "{mission}\n[[step]]{judge}\n[[gate]]\nid = \"gate_review\"\ntitle = \"Review\"\nkinds = [\"step\"]\n\n[[end]]\nid = \"end_rejected\"\ntitle = \"Rejected\"\noutcome = \"rejected\"\n\n[[connection]]\nid = \"edge_pass\"\nfrom = \"gate_review:pass\"\nto = \"end_done:in\"\n\n[[connection]]\nid = \"edge_fail\"\nfrom = \"gate_review:fail\"\nto = \"end_rejected:in\"\n\n[[connection]]\nid = \"edge_judge\"\nfrom = \"gate_review:judge\"\nto = \"fmn_judge:port_in\"\n\n[[connection]]\nid = \"edge_return\"\nfrom = \"fmn_judge:port_out\"\nto = \"gate_review:judge\"\n"
     );
     std::fs::write(root.0.join("missions/hello.mission.toml"), mission).unwrap();
     let c = Coordinator::open(&root.0, RunSettings::default(), Box::new(LabExecutor)).unwrap();
@@ -129,20 +129,20 @@ fn lab_judge_routes_a_synthetic_verdict() {
 
 struct ScriptedLab(std::sync::Arc<std::sync::Mutex<Vec<(String, i64, String)>>>);
 impl ahjo_mission_engine::Executor for ScriptedLab {
-    fn execute_formation(
+    fn execute_step(
         &self,
-        request: ahjo_mission_engine::FormationExecution,
+        request: ahjo_mission_engine::StepExecution,
         events: ahjo_mission_engine::ExecutionSink,
-    ) -> Result<ahjo_mission_engine::FormationResult, ahjo_mission_engine::Error> {
-        (|| -> Result<ahjo_mission_engine::FormationResult, String> {
-        let node = request.formation.id.clone();
+    ) -> Result<ahjo_mission_engine::StepResult, ahjo_mission_engine::Error> {
+        (|| -> Result<ahjo_mission_engine::StepResult, String> {
+        let node = request.step.id.clone();
         let attempt = request.attempt;
         self.0
             .lock()
             .unwrap()
             .push((node.clone(), attempt, request.input_text.clone()));
         let mut result =
-            ahjo_mission_engine::Executor::execute_formation(&LabExecutor, request, events).map_err(|error| error.message)?;
+            ahjo_mission_engine::Executor::execute_step(&LabExecutor, request, events).map_err(|error| error.message)?;
         let text = if node == "fmn_judge2" {
             if attempt == 1 {
                 "```ahjo-verdict\n{invalid}\n```"
@@ -173,12 +173,12 @@ impl ahjo_mission_engine::Executor for ScriptedLab {
 
 struct CorrectingLab(std::sync::Arc<std::sync::Mutex<Vec<(String, i64)>>>);
 impl ahjo_mission_engine::Executor for CorrectingLab {
-    fn execute_formation(
+    fn execute_step(
         &self,
-        request: ahjo_mission_engine::FormationExecution,
+        request: ahjo_mission_engine::StepExecution,
         events: ahjo_mission_engine::ExecutionSink,
-    ) -> Result<ahjo_mission_engine::FormationResult, ahjo_mission_engine::Error> {
-        ahjo_mission_engine::Executor::execute_formation(&LabExecutor, request, events)
+    ) -> Result<ahjo_mission_engine::StepResult, ahjo_mission_engine::Error> {
+        ahjo_mission_engine::Executor::execute_step(&LabExecutor, request, events)
             .map_err(|error| error.message)
             .map_err(|message: String| ahjo_mission_engine::Error::new("executor_error", message))
     }
@@ -203,7 +203,7 @@ fn judge_gets_one_correction_on_its_existing_attempt() {
     let root = Scratch::new();
     let solo = include_str!("parity/runs/missions/solo-lab.mission.toml");
     let judge = solo
-        .split("[[formation]]")
+        .split("[[step]]")
         .nth(1)
         .unwrap()
         .split("[[end]]")
@@ -212,8 +212,8 @@ fn judge_gets_one_correction_on_its_existing_attempt() {
         .replace("fmn_work", "fmn_judge")
         .replace("slot_work", "slot_judge");
     let mission = format!(
-        "{}\n[[formation]]{judge}\n[[connection]]\nid = \"edge_judge\"\nfrom = \"gate_review:judge\"\nto = \"fmn_judge:port_in\"\n[[connection]]\nid = \"edge_return\"\nfrom = \"fmn_judge:port_out\"\nto = \"gate_review:judge\"\n",
-        gated_mission("kinds = [\"formation\"]")
+        "{}\n[[step]]{judge}\n[[connection]]\nid = \"edge_judge\"\nfrom = \"gate_review:judge\"\nto = \"fmn_judge:port_in\"\n[[connection]]\nid = \"edge_return\"\nfrom = \"fmn_judge:port_out\"\nto = \"gate_review:judge\"\n",
+        gated_mission("kinds = [\"step\"]")
     );
     std::fs::write(root.0.join("missions/hello.mission.toml"), mission).unwrap();
     let corrections = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
@@ -257,7 +257,7 @@ fn resuming_invalid_final_judge_keeps_the_earlier_review() {
     let root = Scratch::new();
     let solo = include_str!("parity/runs/missions/solo-lab.mission.toml");
     let judge = solo
-        .split("[[formation]]")
+        .split("[[step]]")
         .nth(1)
         .unwrap()
         .split("[[end]]")
@@ -270,8 +270,8 @@ fn resuming_invalid_final_judge_keeps_the_earlier_review() {
         .replace("fmn_work", "fmn_judge2")
         .replace("slot_work", "slot_judge2");
     let mission = format!(
-        "{}\n[[formation]]{j1}\n[[formation]]{j2}\n[[connection]]\nid = \"edge_judge\"\nfrom = \"gate_review:judge\"\nto = \"fmn_judge1:port_in\"\n[[connection]]\nid = \"edge_chain\"\nfrom = \"fmn_judge1:port_out\"\nto = \"fmn_judge2:port_in\"\n[[connection]]\nid = \"edge_return\"\nfrom = \"fmn_judge2:port_out\"\nto = \"gate_review:judge\"\n",
-        gated_mission("kinds = [\"formation\"]")
+        "{}\n[[step]]{j1}\n[[step]]{j2}\n[[connection]]\nid = \"edge_judge\"\nfrom = \"gate_review:judge\"\nto = \"fmn_judge1:port_in\"\n[[connection]]\nid = \"edge_chain\"\nfrom = \"fmn_judge1:port_out\"\nto = \"fmn_judge2:port_in\"\n[[connection]]\nid = \"edge_return\"\nfrom = \"fmn_judge2:port_out\"\nto = \"gate_review:judge\"\n",
+        gated_mission("kinds = [\"step\"]")
     );
     std::fs::write(root.0.join("missions/hello.mission.toml"), mission).unwrap();
     let calls = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
@@ -342,7 +342,7 @@ fn judge_fail_pushes_back_typed_feedback_before_a_later_pass() {
     let root = Scratch::new();
     let solo = include_str!("parity/runs/missions/solo-lab.mission.toml");
     let judge = solo
-        .split("[[formation]]")
+        .split("[[step]]")
         .nth(1)
         .unwrap()
         .split("[[end]]")
@@ -350,10 +350,10 @@ fn judge_fail_pushes_back_typed_feedback_before_a_later_pass() {
         .unwrap()
         .replace("fmn_work", "fmn_judge")
         .replace("slot_work", "slot_judge");
-    let mission = gated_mission("kinds = [\"formation\"]")
+    let mission = gated_mission("kinds = [\"step\"]")
         .replace("to = \"end_rejected:in\"", "to = \"fmn_work:port_in\"");
     let mission = format!(
-        "{mission}\n[[formation]]{judge}\n[[connection]]\nid = \"edge_judge\"\nfrom = \"gate_review:judge\"\nto = \"fmn_judge:port_in\"\n[[connection]]\nid = \"edge_return\"\nfrom = \"fmn_judge:port_out\"\nto = \"gate_review:judge\"\n"
+        "{mission}\n[[step]]{judge}\n[[connection]]\nid = \"edge_judge\"\nfrom = \"gate_review:judge\"\nto = \"fmn_judge:port_in\"\n[[connection]]\nid = \"edge_return\"\nfrom = \"fmn_judge:port_out\"\nto = \"gate_review:judge\"\n"
     );
     std::fs::write(root.0.join("missions/hello.mission.toml"), mission).unwrap();
     let calls = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
@@ -464,20 +464,20 @@ fn delivery_example_reaches_its_end_with_a_simulated_judge() {
 
 #[test]
 fn concurrent_judge_and_step_publish_only_their_own_files() {
-    use ahjo_mission_engine::{ExecutionSink, Executor, FormationExecution, FormationResult};
+    use ahjo_mission_engine::{ExecutionSink, Executor, StepExecution, StepResult};
     use std::sync::{
         Arc,
         atomic::{AtomicUsize, Ordering},
     };
     struct Writing(Arc<AtomicUsize>);
     impl Executor for Writing {
-        fn execute_formation(
+        fn execute_step(
             &self,
-            req: FormationExecution,
+            req: StepExecution,
             sink: ExecutionSink,
-        ) -> Result<FormationResult, ahjo_mission_engine::Error> {
-            (|| -> Result<FormationResult, String> {
-                let node = req.formation.id.clone();
+        ) -> Result<StepResult, ahjo_mission_engine::Error> {
+            (|| -> Result<StepResult, String> {
+                let node = req.step.id.clone();
                 if node == "fmn_other" || node == "fmn_judge" {
                     std::fs::write(req.cwd.join(&node), format!("{node} partial"))
                         .map_err(|e| e.to_string())?;
@@ -496,7 +496,7 @@ fn concurrent_judge_and_step_publish_only_their_own_files() {
                         .map_err(|e| e.to_string())?;
                 }
                 LabExecutor
-                    .execute_formation(req, sink)
+                    .execute_step(req, sink)
                     .map_err(|error| error.message)
             })()
             .map_err(|message: String| ahjo_mission_engine::Error::new("executor_error", message))
@@ -525,22 +525,22 @@ fn concurrent_judge_and_step_publish_only_their_own_files() {
     git(&checkout, &["add", "base"]);
     git(&checkout, &["commit", "-m", "base"]);
     let solo = include_str!("parity/runs/missions/solo-lab.mission.toml");
-    let formation = solo
-        .split("[[formation]]")
+    let step = solo
+        .split("[[step]]")
         .nth(1)
         .unwrap()
         .split("[[end]]")
         .next()
         .unwrap();
-    let judge = formation
+    let judge = step
         .replace("fmn_work", "fmn_judge")
         .replace("slot_work", "slot_judge");
-    let other = formation
+    let other = step
         .replace("fmn_work", "fmn_other")
         .replace("slot_work", "slot_other");
-    let mission = gated_mission("kinds = [\"formation\"]")
+    let mission = gated_mission("kinds = [\"step\"]")
         + &format!(
-            "\n[[formation]]{judge}\n[[formation]]{other}\n[[connection]]\nid = \"edge_judge\"\nfrom = \"gate_review:judge\"\nto = \"fmn_judge:port_in\"\n[[connection]]\nid = \"edge_return\"\nfrom = \"fmn_judge:port_out\"\nto = \"gate_review:judge\"\n[[connection]]\nid = \"edge_other\"\nfrom = \"inp_hello:out\"\nto = \"fmn_other:port_in\"\n[[connection]]\nid = \"edge_other_end\"\nfrom = \"fmn_other:port_out\"\nto = \"end_done:in\"\n"
+            "\n[[step]]{judge}\n[[step]]{other}\n[[connection]]\nid = \"edge_judge\"\nfrom = \"gate_review:judge\"\nto = \"fmn_judge:port_in\"\n[[connection]]\nid = \"edge_return\"\nfrom = \"fmn_judge:port_out\"\nto = \"gate_review:judge\"\n[[connection]]\nid = \"edge_other\"\nfrom = \"inp_hello:out\"\nto = \"fmn_other:port_in\"\n[[connection]]\nid = \"edge_other_end\"\nfrom = \"fmn_other:port_out\"\nto = \"end_done:in\"\n"
         );
     std::fs::write(root.0.join("missions/hello.mission.toml"), mission).unwrap();
     let settings = RunSettings {

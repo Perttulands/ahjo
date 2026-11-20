@@ -36,14 +36,14 @@ fn start() -> Running {
                 let folder = node.dir().join("missions/missions");
                 std::fs::create_dir_all(&folder).unwrap();
                 let original = include_str!("fixtures/solo-lab.mission.toml");
-                let (prefix, rest) = original.split_once("[[formation]]").unwrap();
-                let (formation, suffix) = rest.split_once("[[end]]").unwrap();
+                let (prefix, rest) = original.split_once("[[step]]").unwrap();
+                let (step, suffix) = rest.split_once("[[end]]").unwrap();
                 let mut mission = prefix.to_owned();
                 for n in 1..=5 {
-                    let formation = formation.replace("fmn_work", &format!("fmn_{n}"))
+                    let step = step.replace("fmn_work", &format!("fmn_{n}"))
                         .replace("slot_work", &format!("slot_{n}_opaque"))
                         .replace("title = \"Work\"", &format!("title = \"Step {n}\""));
-                    mission.push_str("[[formation]]"); mission.push_str(&formation);
+                    mission.push_str("[[step]]"); mission.push_str(&step);
                 }
                 mission.push_str("[[end]]");
                 mission.push_str(&suffix.replace("fmn_work", "fmn_1"));

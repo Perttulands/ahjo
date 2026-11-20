@@ -1,4 +1,4 @@
-schema = 2
+schema = 3
 id = "msn_bad"
 slug = "admission-findings"
 title = "Admission findings"
@@ -9,49 +9,49 @@ id = "inp"
 title = "Start"
 inputs = [{ name = "topic", kind = "text", required = true }, { name = "sketch", kind = "file" }]
 
-[[formation]]
+[[step]]
 id = "empty"
-type = "solo"
+formation = "solo"
 title = "Empty"
-[[formation.input]]
+[[step.input]]
 id = "in"
-[[formation.output]]
+[[step.output]]
 id = "out"
 
-[[formation]]
+[[step]]
 id = "staff"
-type = "peer"
+formation = "peer"
 title = "Staff"
-[[formation.input]]
+[[step.input]]
 id = "in"
-[[formation.output]]
+[[step.output]]
 id = "out"
-[[formation.slot]]
+[[step.slot]]
 id = "open"
-[[formation.slot]]
+[[step.slot]]
 id = "invalid"
 harness = "wrong"
 effort = "low"
-[[formation.slot]]
+[[step.slot]]
 id = "unavailable"
 harness = "claude-code"
 effort = "low"
 agent_id = "unknown"
-[[formation.slot]]
+[[step.slot]]
 id = "retired"
 harness = "claude-code"
 effort = "low"
 agent_id = "critic"
 
-[[formation]]
+[[step]]
 id = "orchestration"
-type = "orchestrated"
+formation = "orchestrated"
 title = "Orchestration"
-[[formation.input]]
+[[step.input]]
 id = "in"
-[[formation.output]]
+[[step.output]]
 id = "out"
-[[formation.slot]]
+[[step.slot]]
 id = "worker"
 harness = "claude-code"
 effort = "low"

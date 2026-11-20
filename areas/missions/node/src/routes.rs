@@ -230,7 +230,7 @@ async fn edit(
         use ahjo_missions_contract::commands::AddedCard;
         let (key, value) = match card {
             AddedCard::InputCard(card) => ("input_card", json!(card)),
-            AddedCard::Formation(card) => ("formation", json!(card)),
+            AddedCard::Step(card) => ("step", json!(card)),
             AddedCard::Gate(card) => ("gate", json!(card)),
             AddedCard::End(card) => ("end", json!(card)),
             AddedCard::Limit(card) => ("limit", json!(card)),
@@ -238,7 +238,7 @@ async fn edit(
         changed.insert(key.into(), value);
     }
     for (op, key) in [
-        ("delete_formation", "formation_id"),
+        ("delete_step", "step_id"),
         ("delete_gate", "gate_id"),
         ("delete_end", "end_id"),
         ("delete_limit", "limit_id"),

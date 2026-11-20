@@ -1,5 +1,5 @@
 //! Materialize text-port refs without blocking on a special file.
-use ahjo_mission_model::Formation;
+use ahjo_mission_model::Step;
 use serde_json::{Map, Value};
 use std::{
     fs::OpenOptions,
@@ -7,15 +7,8 @@ use std::{
     path::Path,
 };
 
-pub(crate) fn materialize(
-    formation: &Formation,
-    outputs: &mut Map<String, Value>,
-) -> io::Result<()> {
-    for port in formation
-        .outputs
-        .iter()
-        .filter(|port| port.kind() == "text")
-    {
+pub(crate) fn materialize(step: &Step, outputs: &mut Map<String, Value>) -> io::Result<()> {
+    for port in step.outputs.iter().filter(|port| port.kind() == "text") {
         let Some(payload) = outputs.get_mut(&port.id).and_then(Value::as_object_mut) else {
             continue;
         };
@@ -79,7 +72,7 @@ mod tests {
         std::fs::create_dir(&root).unwrap();
         let path = root.join("output");
         std::fs::write(&path, "one\ntwo").unwrap();
-        let formation = Formation {
+        let step = Step {
             outputs: vec![Port {
                 id: "out".into(),
                 ..Default::default()
@@ -90,18 +83,18 @@ mod tests {
             .as_object()
             .unwrap()
             .clone();
-        materialize(&formation, &mut payloads).unwrap();
+        materialize(&step, &mut payloads).unwrap();
         assert_eq!(payloads["out"]["text"], "one\ntwo");
         std::fs::write(&path, vec![b'x'; 8193]).unwrap();
         assert!(
-            materialize(&formation, &mut payloads)
+            materialize(&step, &mut payloads)
                 .unwrap_err()
                 .to_string()
                 .contains("oversized_output_ref")
         );
         payloads.get_mut("out").unwrap()["ref"] = json!("relative");
         assert!(
-            materialize(&formation, &mut payloads)
+            materialize(&step, &mut payloads)
                 .unwrap_err()
                 .to_string()
                 .contains("invalid_output_ref")

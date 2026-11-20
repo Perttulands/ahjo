@@ -102,7 +102,7 @@ pub(crate) fn advance(
             e.seq > anchor
                 && e.kind == "gate_kind_result"
                 && e.gate_id == gate.id
-                && e.data.get("kind").and_then(|v| v.as_str()) == Some("formation")
+                && e.data.get("kind").and_then(|v| v.as_str()) == Some("step")
         });
         let result = if gate.kinds.iter().any(|kind| kind == "code") {
             let checked = (|| -> Result<(crate::JudgeVerdict, serde_json::Value), String> {
@@ -145,7 +145,7 @@ pub(crate) fn advance(
             None
         };
         if result.as_ref().is_none_or(|r| r.verdict != "fail")
-            && gate.kinds.iter().any(|k| k == "formation")
+            && gate.kinds.iter().any(|k| k == "step")
         {
             if prior_judge.is_none()
                 && let Some(resumed) = events.iter().rev().find(|event| {
@@ -184,7 +184,7 @@ pub(crate) fn advance(
                     "gate_kind_result",
                     &gate.id,
                     0,
-                    json!({"kind":"formation","verdict":"fail","reason":result.reason,"evidence":[],"input_ref":input}),
+                    json!({"kind":"step","verdict":"fail","reason":result.reason,"evidence":[],"input_ref":input}),
                 );
                 kind.gate_id = gate.id.clone();
                 append(c, id, control, kind)?;
@@ -383,7 +383,7 @@ pub(crate) fn settle_gate(
             .into();
     } else {
         let mut failed = false;
-        for name in ["code", "formation", "human"] {
+        for name in ["code", "step", "human"] {
             if !gate.kinds.iter().any(|kind| kind == name) {
                 continue;
             }

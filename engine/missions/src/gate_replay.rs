@@ -24,7 +24,7 @@ pub(crate) fn validate(events: &[RunEvent]) -> io::Result<()> {
                     .get("kind")
                     .and_then(|value| value.as_str())
                     .unwrap_or("");
-                if !["code", "formation"].contains(&kind) || !kinds.insert(kind) {
+                if !["code", "step"].contains(&kind) || !kinds.insert(kind) {
                     return Err(invalid(
                         "a gate kind was recorded more than once or is unknown",
                     ));

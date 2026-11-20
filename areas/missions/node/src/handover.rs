@@ -3,13 +3,13 @@
 use std::collections::BTreeSet;
 
 use ahjo_missions_contract::{
-    Finding, Formation, MISSION_THREAD, Mission, Notes, Slot, agent_session,
+    Finding, MISSION_THREAD, Mission, Notes, Slot, Step, agent_session,
     commands::{
         HandoverEnd, HandoverInput, HandoverJudge, HandoverLimit, HandoverNote, HandoverSlot,
         HandoverStep, HandoverStepDetail, HandoverWire, HandoverWorker, MissionHandover,
         RemovedThread,
     },
-    flow::{self, Decider, StepKind, Target},
+    flow::{self, Decider, FlowStepKind, Target},
 };
 
 use crate::commands::shell_word;
@@ -94,8 +94,8 @@ pub fn handover(
         for step in &section.steps {
             placed.insert(step.id.as_str());
             let detail = match &step.kind {
-                StepKind::Formation { next } => {
-                    let Some(formation) = mission.formation(&step.id) else {
+                FlowStepKind::Step { next } => {
+                    let Some(work_step) = mission.step(&step.id) else {
                         continue;
                     };
                     let alongside = (step.parallel.len() > 1).then(|| {
@@ -106,13 +106,13 @@ pub fn handover(
                             .collect::<Vec<_>>()
                             .join(", ")
                     });
-                    HandoverStepDetail::Formation {
-                        worker: worker(&prefix, formation, true),
+                    HandoverStepDetail::Step {
+                        worker: worker(&prefix, work_step, true),
                         next: Some(or_nothing(targets(next))),
                         alongside,
                     }
                 }
-                StepKind::Gate {
+                FlowStepKind::Gate {
                     deciders,
                     judges,
                     pass,
@@ -132,11 +132,11 @@ pub fn handover(
                     let judges = judges
                         .iter()
                         .filter_map(|judge| {
-                            let formation = mission.formation(judge)?;
+                            let step = mission.step(judge)?;
                             placed.insert(judge.as_str());
                             Some(HandoverJudge {
                                 id: judge.clone(),
-                                worker: worker(&prefix, formation, true),
+                                worker: worker(&prefix, step, true),
                                 notes: thread(notes, judge),
                             })
                         })
@@ -167,18 +167,18 @@ pub fn handover(
         }
     }
     // A step no wire reaches and no gate judges.
-    for formation in &mission.formations {
-        if placed.insert(formation.id.as_str()) {
+    for step in &mission.steps {
+        if placed.insert(step.id.as_str()) {
             steps.push(HandoverStep {
                 n: None,
-                id: formation.id.clone(),
+                id: step.id.clone(),
                 unreached: true,
-                detail: HandoverStepDetail::Formation {
-                    worker: worker(&prefix, formation, false),
+                detail: HandoverStepDetail::Step {
+                    worker: worker(&prefix, step, false),
                     next: None,
                     alongside: None,
                 },
-                notes: thread(notes, &formation.id),
+                notes: thread(notes, &step.id),
             });
         }
     }
@@ -320,22 +320,21 @@ fn kind(kind: &str) -> &str {
 
 /// The named session each seat asks for. A fresh step gets a run- and
 /// attempt-specific session when it executes.
-fn worker(prefix: &str, formation: &Formation, include_brief: bool) -> HandoverWorker {
+fn worker(prefix: &str, step: &Step, include_brief: bool) -> HandoverWorker {
     HandoverWorker {
-        step: formation.title.clone(),
-        who: who(&formation.slots),
-        slots: formation
+        step: step.title.clone(),
+        who: who(&step.slots),
+        slots: step
             .slots
             .iter()
             .map(|slot| HandoverSlot {
                 id: slot.id.clone(),
-                session: agent_session(prefix, &formation.agent_of(slot)),
+                session: agent_session(prefix, &step.agent_of(slot)),
             })
             .collect(),
-        fresh: formation.fresh,
+        fresh: step.fresh,
         brief: include_brief.then(|| {
-            formation
-                .brief
+            step.brief
                 .as_ref()
                 .map_or("", |brief| brief.goal.trim())
                 .into()

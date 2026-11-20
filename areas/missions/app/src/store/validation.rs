@@ -9,9 +9,9 @@ use std::collections::HashMap;
 /// form keep the node's own words, with names for ids.
 pub fn todo_line(mission: &Mission, finding: &ahjo_missions_contract::Finding) -> String {
     let name = mission.node_name(&finding.node_id);
-    let step = mission.formations.iter().any(|f| f.id == finding.node_id);
+    let step = mission.steps.iter().any(|f| f.id == finding.node_id);
     match finding.code {
-        Code::UnstaffedSlot | Code::FormationWithoutSlots => format!("Choose who works {name}"),
+        Code::UnstaffedSlot | Code::StepWithoutSlots => format!("Choose who works {name}"),
         Code::InvalidSlotSettings if finding.message.contains("needs an effort") => {
             format!("Choose an effort for {name}")
         }
@@ -69,7 +69,7 @@ pub fn readable_message(mission: &Mission, message: &str) -> String {
     for node in &mission.input_cards {
         add(&mut names, &node.id, &node.title);
     }
-    for node in &mission.formations {
+    for node in &mission.steps {
         add(&mut names, &node.id, &node.title);
         for port in node.inputs.iter().chain(&node.outputs) {
             add(&mut names, &port.id, &port.label);
@@ -254,7 +254,7 @@ mod tests {
         );
     }
     fn toml_fixture() -> Mission {
-        serde_json::from_value(serde_json::json!({"input_card":[{"id":"inp_1","title":"Start"}],"formation":[{"id":"fmn_10","title":"Build","input":[{"id":"port_1","label":"Input"}],"slot":[{"id":"slot_1","label":"Worker"}]}],"connection":[{"id":"edge_1","from":"inp_1:out","to":"fmn_10:port_1"}]})).unwrap()
+        serde_json::from_value(serde_json::json!({"input_card":[{"id":"inp_1","title":"Start"}],"step":[{"id":"fmn_10","title":"Build","input":[{"id":"port_1","label":"Input"}],"slot":[{"id":"slot_1","label":"Worker"}]}],"connection":[{"id":"edge_1","from":"inp_1:out","to":"fmn_10:port_1"}]})).unwrap()
     }
     fn key(rev: i64) -> Key {
         Key {

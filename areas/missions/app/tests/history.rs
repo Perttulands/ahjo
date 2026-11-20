@@ -31,8 +31,8 @@ impl Drop for Running {
 fn mission() -> String {
     let source = include_str!("fixtures/solo-lab.mission.toml")
         .replace(
-            "[[formation.output]]",
-            "[[formation.input]]\nid = \"port_second\"\nlabel = \"Second\"\n[[formation.output]]",
+            "[[step.output]]",
+            "[[step.input]]\nid = \"port_second\"\nlabel = \"Second\"\n[[step.output]]",
         )
         .replace("to = \"end_done:in\"", "to = \"gate_review:in\"");
     format!(

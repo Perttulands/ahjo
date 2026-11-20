@@ -6,7 +6,7 @@ use std::path::PathBuf;
 use ahjo_mission_engine::{Error, Store};
 use ahjo_mission_model::Mission;
 
-const HELLO: &str = r#"schema = 2
+const HELLO: &str = r#"schema = 3
 id = "msn_hello"
 slug = "hello"
 title = "Hello"
@@ -17,20 +17,20 @@ id = "inp_hello"
 title = "Hello"
 goal = "Return the supplied input"
 
-[[formation]]
+[[step]]
 id = "fmn_work"
-type = "solo"
+formation = "solo"
 title = "Work"
 device = "rig-wsl"
-[formation.brief]
+[step.brief]
 goal = "Return a short result using the supplied output contract."
-[[formation.input]]
+[[step.input]]
 id = "port_in"
 label = "Input"
-[[formation.output]]
+[[step.output]]
 id = "port_out"
 label = "Result"
-[[formation.slot]]
+[[step.slot]]
 id = "slot_work"
 label = "Worker"
 agent_id = "builder"
@@ -89,8 +89,8 @@ fn code(result: Result<Mission, Error>) -> String {
 #[test]
 fn the_contracts_minimal_mission_loads_with_a_device() {
     let mission = Mission::parse(HELLO).unwrap();
-    assert_eq!(mission.formations[0].device, "rig-wsl");
-    assert_eq!(mission.formations[0].slots[0].agent_id, "builder");
+    assert_eq!(mission.steps[0].device, "rig-wsl");
+    assert_eq!(mission.steps[0].slots[0].agent_id, "builder");
     assert_eq!(mission.node_name("fmn_work"), "Work");
 }
 
@@ -113,11 +113,11 @@ fn a_mission_is_read_only_as_strict_toml_of_schema_one() {
         "invalid_definition_source"
     );
     assert_eq!(
-        code(Mission::parse(&HELLO.replace("schema = 2", "schema = 99"))),
+        code(Mission::parse(&HELLO.replace("schema = 3", "schema = 99"))),
         "unsupported_schema"
     );
     assert_eq!(
-        code(Mission::parse(&HELLO.replace("schema = 2\n", ""))),
+        code(Mission::parse(&HELLO.replace("schema = 3\n", ""))),
         "unsupported_schema"
     );
 }
@@ -126,7 +126,7 @@ fn a_mission_is_read_only_as_strict_toml_of_schema_one() {
 fn one_unreadable_mission_never_hides_the_rest() {
     let scratch = Scratch::new("broken");
     scratch.write("missions/hello.mission.toml", HELLO);
-    scratch.write("missions/bad.mission.toml", "schema = 2\nschema = 2\n");
+    scratch.write("missions/bad.mission.toml", "schema = 3\nschema = 3\n");
     scratch.write("missions/README.md", "not a mission");
     #[cfg(unix)]
     std::os::unix::fs::symlink(

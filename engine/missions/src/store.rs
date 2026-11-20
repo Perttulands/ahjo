@@ -56,7 +56,7 @@ impl Store {
             .into_iter()
             .map(|slug| match self.read_mission(&slug) {
                 Ok(mission) => MissionListing {
-                    steps: mission.formations.len() + mission.gates.len(),
+                    steps: mission.steps.len() + mission.gates.len(),
                     id: mission.id,
                     title: mission.title,
                     rev: Some(mission.rev),

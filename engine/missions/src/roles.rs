@@ -331,8 +331,8 @@ pub struct RoleUse {
     pub mission_id: String,
     pub mission_slug: String,
     pub mission_title: String,
-    pub formation_id: String,
-    pub formation_title: String,
+    pub step_id: String,
+    pub step_title: String,
     pub slot_id: String,
     pub slot_label: String,
 }
@@ -376,15 +376,15 @@ impl RoleStore {
                     continue;
                 }
             };
-            for formation in &mission.formations {
-                for slot in &formation.slots {
+            for step in &mission.steps {
+                for slot in &step.slots {
                     if slot.agent_id == id {
                         report.usage.push(RoleUse {
                             mission_id: mission.id.clone(),
                             mission_slug: listing.slug.clone(),
                             mission_title: mission.title.clone(),
-                            formation_id: formation.id.clone(),
-                            formation_title: formation.title.clone(),
+                            step_id: step.id.clone(),
+                            step_title: step.title.clone(),
                             slot_id: slot.id.clone(),
                             slot_label: slot.label.clone(),
                         });

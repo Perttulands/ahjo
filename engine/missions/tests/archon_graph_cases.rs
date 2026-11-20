@@ -26,11 +26,11 @@ fn pre(edit: &ahjo_mission_model::Edit) -> Precondition {
     }
 }
 
-// Ported from formation_shape_test.go: both type restoration and node restore
-// reject every invalid shape before touching either file.
+// Both formation restoration and node restore reject invalid shapes before
+// touching either file.
 #[test]
-fn invalid_formation_shapes_are_refused_by_both_restore_paths() {
-    use ahjo_mission_model::{Formation, RestoredNode, Slot};
+fn invalid_step_shapes_are_refused_by_both_restore_paths() {
+    use ahjo_mission_model::{RestoredNode, Slot, Step};
     let dir = Scratch::new();
     let store = Store::new(&dir.0);
     let edit = store.create_mission("shape", "Shape", "").unwrap();
@@ -38,8 +38,8 @@ fn invalid_formation_shapes_are_refused_by_both_restore_paths() {
         .patch(
             "shape",
             pre(&edit),
-            MissionChange::CreateFormation {
-                kind: "solo".into(),
+            MissionChange::CreateStep {
+                formation: "solo".into(),
                 title: "Work".into(),
                 x: 3,
                 y: 4,
@@ -47,7 +47,7 @@ fn invalid_formation_shapes_are_refused_by_both_restore_paths() {
             "",
         )
         .unwrap();
-    let id = edit.mission.formations[0].id.clone();
+    let id = edit.mission.steps[0].id.clone();
     let mission_path = dir.0.join("missions/shape.mission.toml");
     let layout_path = dir.0.join("layout/shape.layout.toml");
     let mission_before = std::fs::read(&mission_path).unwrap();
@@ -79,9 +79,9 @@ fn invalid_formation_shapes_are_refused_by_both_restore_paths() {
             .patch(
                 "shape",
                 pre(&edit),
-                MissionChange::SetFormationType {
+                MissionChange::SetStepFormation {
                     id: id.clone(),
-                    kind: kind.into(),
+                    formation: kind.into(),
                     keep_slot_id: "".into(),
                     slots: Some(slots.clone()),
                 },
@@ -98,9 +98,9 @@ fn invalid_formation_shapes_are_refused_by_both_restore_paths() {
                 "shape",
                 pre(&edit),
                 MissionChange::RestoreNode {
-                    node: RestoredNode::Formation(Formation {
+                    node: RestoredNode::Step(Step {
                         id: "fmn_bad".into(),
-                        kind: kind.into(),
+                        formation: kind.into(),
                         slots: slots.clone(),
                         ..Default::default()
                     }),
@@ -135,8 +135,8 @@ fn restore_each_input_and_output_port_at_its_original_index() {
                 .patch(
                     "ports",
                     pre(&edit),
-                    MissionChange::CreateFormation {
-                        kind: "solo".into(),
+                    MissionChange::CreateStep {
+                        formation: "solo".into(),
                         title: title.into(),
                         x: 0,
                         y: 0,
@@ -145,8 +145,8 @@ fn restore_each_input_and_output_port_at_its_original_index() {
                 )
                 .unwrap();
         }
-        let source = edit.mission.formations[0].id.clone();
-        let target = edit.mission.formations[1].id.clone();
+        let source = edit.mission.steps[0].id.clone();
+        let target = edit.mission.steps[1].id.clone();
         let edited_id = if direction == "input" {
             &target
         } else {
@@ -157,7 +157,7 @@ fn restore_each_input_and_output_port_at_its_original_index() {
                 "ports",
                 pre(&edit),
                 MissionChange::AddPort {
-                    formation_id: edited_id.clone(),
+                    step_id: edited_id.clone(),
                     direction: direction.into(),
                     label: "Second".into(),
                     kind: "".into(),
@@ -167,7 +167,7 @@ fn restore_each_input_and_output_port_at_its_original_index() {
             .unwrap();
         let before = edit
             .mission
-            .formations
+            .steps
             .iter()
             .find(|f| &f.id == edited_id)
             .unwrap()
@@ -180,12 +180,12 @@ fn restore_each_input_and_output_port_at_its_original_index() {
         let from_port = if direction == "output" {
             &port
         } else {
-            &edit.mission.formations[0].outputs[0]
+            &edit.mission.steps[0].outputs[0]
         };
         let to_port = if direction == "input" {
             &port
         } else {
-            &edit.mission.formations[1].inputs[0]
+            &edit.mission.steps[1].inputs[0]
         };
         edit = store
             .patch(
@@ -207,7 +207,7 @@ fn restore_each_input_and_output_port_at_its_original_index() {
                 "ports",
                 pre(&edit),
                 MissionChange::RemovePort {
-                    formation_id: edited_id.clone(),
+                    step_id: edited_id.clone(),
                     port_id: port.id.clone(),
                 },
                 "",
@@ -219,7 +219,7 @@ fn restore_each_input_and_output_port_at_its_original_index() {
                 "ports",
                 pre(&edit),
                 MissionChange::RestorePort {
-                    formation_id: edited_id.clone(),
+                    step_id: edited_id.clone(),
                     direction: direction.into(),
                     port: port.clone(),
                     index: Some(index),
@@ -231,7 +231,7 @@ fn restore_each_input_and_output_port_at_its_original_index() {
         assert_eq!(edit.mission.rev, rev + 2);
         assert_eq!(
             edit.mission
-                .formations
+                .steps
                 .iter()
                 .find(|f| &f.id == edited_id)
                 .unwrap(),
@@ -244,7 +244,7 @@ fn restore_each_input_and_output_port_at_its_original_index() {
                     "ports",
                     pre(&edit),
                     MissionChange::RestorePort {
-                        formation_id: edited_id.clone(),
+                        step_id: edited_id.clone(),
                         direction: direction.into(),
                         port,
                         index: Some(index),
@@ -260,9 +260,9 @@ fn restore_each_input_and_output_port_at_its_original_index() {
     }
 }
 
-// Ported from formation_type_test.go: exact slot snapshots are undo data.
+// Exact slot snapshots are undo data.
 #[test]
-fn formation_type_restores_exact_slot_snapshot_and_rejects_bad_choices() {
+fn step_formation_restores_exact_slot_snapshot_and_rejects_bad_choices() {
     let dir = Scratch::new();
     let store = Store::new(&dir.0);
     let edit = store.create_mission("type", "Type", "").unwrap();
@@ -270,8 +270,8 @@ fn formation_type_restores_exact_slot_snapshot_and_rejects_bad_choices() {
         .patch(
             "type",
             pre(&edit),
-            MissionChange::CreateFormation {
-                kind: "orchestrated".into(),
+            MissionChange::CreateStep {
+                formation: "orchestrated".into(),
                 title: "Desk".into(),
                 x: 0,
                 y: 0,
@@ -279,15 +279,15 @@ fn formation_type_restores_exact_slot_snapshot_and_rejects_bad_choices() {
             "",
         )
         .unwrap();
-    let formation = edit.mission.formations[0].clone();
-    let snapshot = formation.slots.clone();
+    let step = edit.mission.steps[0].clone();
+    let snapshot = step.slots.clone();
     edit = store
         .patch(
             "type",
             pre(&edit),
-            MissionChange::SetFormationType {
-                id: formation.id.clone(),
-                kind: "solo".into(),
+            MissionChange::SetStepFormation {
+                id: step.id.clone(),
+                formation: "solo".into(),
                 keep_slot_id: snapshot[1].id.clone(),
                 slots: None,
             },
@@ -298,50 +298,50 @@ fn formation_type_restores_exact_slot_snapshot_and_rejects_bad_choices() {
         .patch(
             "type",
             pre(&edit),
-            MissionChange::SetFormationType {
-                id: formation.id.clone(),
-                kind: "orchestrated".into(),
+            MissionChange::SetStepFormation {
+                id: step.id.clone(),
+                formation: "orchestrated".into(),
                 keep_slot_id: "".into(),
                 slots: Some(snapshot.clone()),
             },
             "",
         )
         .unwrap();
-    assert_eq!(edit.mission.formations[0].slots, snapshot);
+    assert_eq!(edit.mission.steps[0].slots, snapshot);
     let path = dir.0.join("missions/type.mission.toml");
     let before = std::fs::read(&path).unwrap();
     let duplicate = vec![snapshot[0].clone(), snapshot[0].clone()];
     for (id, kind, keep, slots, code) in [
         (
-            formation.id.as_str(),
+            step.id.as_str(),
             "flow",
             "",
             None,
-            "unsupported_formation_type",
+            "unsupported_step_formation",
         ),
         (
-            formation.id.as_str(),
+            step.id.as_str(),
             "swarm",
             "",
             None,
-            "unsupported_formation_type",
+            "unsupported_step_formation",
         ),
         (
-            formation.id.as_str(),
+            step.id.as_str(),
             "peer",
             snapshot[0].id.as_str(),
             None,
             "invalid_type_change",
         ),
         (
-            formation.id.as_str(),
+            step.id.as_str(),
             "solo",
             "slot_missing",
             None,
             "invalid_type_change",
         ),
         (
-            formation.id.as_str(),
+            step.id.as_str(),
             "peer",
             "",
             Some(duplicate),
@@ -354,9 +354,9 @@ fn formation_type_restores_exact_slot_snapshot_and_rejects_bad_choices() {
                 .patch(
                     "type",
                     pre(&edit),
-                    MissionChange::SetFormationType {
+                    MissionChange::SetStepFormation {
                         id: id.into(),
-                        kind: kind.into(),
+                        formation: kind.into(),
                         keep_slot_id: keep.into(),
                         slots
                     },
@@ -371,7 +371,7 @@ fn formation_type_restores_exact_slot_snapshot_and_rejects_bad_choices() {
     }
 }
 
-// Ported from gate_update_test.go: dropping formation removes only judge wires.
+// Ported from gate_update_test.go: dropping step removes only judge wires.
 #[test]
 fn changing_gate_kinds_detaches_judge_without_touching_layout() {
     let dir = Scratch::new();
@@ -381,8 +381,8 @@ fn changing_gate_kinds_detaches_judge_without_touching_layout() {
         .patch(
             "judge",
             pre(&edit),
-            MissionChange::CreateFormation {
-                kind: "solo".into(),
+            MissionChange::CreateStep {
+                formation: "solo".into(),
                 title: "Reviewer".into(),
                 x: 0,
                 y: 0,
@@ -396,7 +396,7 @@ fn changing_gate_kinds_detaches_judge_without_touching_layout() {
             pre(&edit),
             MissionChange::CreateGate {
                 title: "Gate".into(),
-                kinds: vec!["code".into(), "formation".into()],
+                kinds: vec!["code".into(), "step".into()],
                 criterion: "Review".into(),
                 check: "output_contains".into(),
                 check_version: "1".into(),
@@ -408,7 +408,7 @@ fn changing_gate_kinds_detaches_judge_without_touching_layout() {
             "",
         )
         .unwrap();
-    let judge = edit.mission.formations[0].id.clone();
+    let judge = edit.mission.steps[0].id.clone();
     let gate = edit.mission.gates[0].id.clone();
     edit = store
         .patch(
@@ -447,7 +447,7 @@ fn changing_gate_kinds_detaches_judge_without_touching_layout() {
             pre(&edit),
             MissionChange::UpdateGate(ahjo_mission_model::GateUpdate {
                 id: gate,
-                kinds: Some(vec!["human".into(), "formation".into()]),
+                kinds: Some(vec!["human".into(), "step".into()]),
                 ..Default::default()
             }),
             "",
@@ -457,7 +457,7 @@ fn changing_gate_kinds_detaches_judge_without_touching_layout() {
     assert_eq!(edit.mission.gates[0].check_value, "");
 }
 
-// Ported from formation_join_test.go: gates never grow another input and
+// Gates never grow another input and
 // stale callers are rejected even when the current input is occupied.
 #[test]
 fn join_keeps_gate_single_feed_and_rejects_stale_writes() {
@@ -469,8 +469,8 @@ fn join_keeps_gate_single_feed_and_rejects_stale_writes() {
             .patch(
                 "join-gate",
                 pre(&edit),
-                MissionChange::CreateFormation {
-                    kind: "solo".into(),
+                MissionChange::CreateStep {
+                    formation: "solo".into(),
                     title: title.into(),
                     x: 0,
                     y: 0,
@@ -500,7 +500,7 @@ fn join_keeps_gate_single_feed_and_rejects_stale_writes() {
     let from = |i: usize| {
         format!(
             "{}:{}",
-            edit.mission.formations[i].id, edit.mission.formations[i].outputs[0].id
+            edit.mission.steps[i].id, edit.mission.steps[i].outputs[0].id
         )
     };
     let first = from(0);
@@ -535,7 +535,7 @@ fn join_keeps_gate_single_feed_and_rejects_stale_writes() {
     assert_eq!(store.mission_edit("join-gate").unwrap().etag, edit.etag);
 }
 
-// Ported from formation_join_test.go: feedback may share an occupied input
+// Feedback may share an occupied input
 // during rewire and undo without introducing a required extra port.
 #[test]
 fn feedback_rewire_and_join_undo_preserve_pushback_exception() {
@@ -547,8 +547,8 @@ fn feedback_rewire_and_join_undo_preserve_pushback_exception() {
             .patch(
                 "feedback",
                 pre(&edit),
-                MissionChange::CreateFormation {
-                    kind: "solo".into(),
+                MissionChange::CreateStep {
+                    formation: "solo".into(),
                     title: title.into(),
                     x: 0,
                     y: 0,
@@ -576,7 +576,7 @@ fn feedback_rewire_and_join_undo_preserve_pushback_exception() {
         )
         .unwrap();
     let endpoint = |i: usize, output: bool| {
-        let f = &edit.mission.formations[i];
+        let f = &edit.mission.steps[i];
         format!(
             "{}:{}",
             f.id,
@@ -620,7 +620,7 @@ fn feedback_rewire_and_join_undo_preserve_pushback_exception() {
             "",
         )
         .unwrap();
-    assert_eq!(edit.mission.formations[2].inputs.len(), 1);
+    assert_eq!(edit.mission.steps[2].inputs.len(), 1);
     assert!(
         edit.mission
             .connections
@@ -652,7 +652,7 @@ fn feedback_rewire_and_join_undo_preserve_pushback_exception() {
         .unwrap()
         .to
         .clone();
-    assert_eq!(edit.mission.formations[1].inputs.len(), 2);
+    assert_eq!(edit.mission.steps[1].inputs.len(), 2);
     edit = store
         .patch(
             "feedback",
@@ -667,7 +667,7 @@ fn feedback_rewire_and_join_undo_preserve_pushback_exception() {
             "",
         )
         .unwrap();
-    assert_eq!(edit.mission.formations[1].inputs.len(), 1);
+    assert_eq!(edit.mission.steps[1].inputs.len(), 1);
     assert!(
         edit.mission
             .connections
@@ -685,7 +685,7 @@ fn feedback_rewire_and_join_undo_preserve_pushback_exception() {
 // Ported from node_restore_test.go: failed undo does not publish either file.
 #[test]
 fn restore_refuses_missing_foreign_and_occupied_connections_and_bad_nodes() {
-    use ahjo_mission_model::{Connection, Formation, Gate, RestoredNode};
+    use ahjo_mission_model::{Connection, Gate, RestoredNode, Step};
     let dir = Scratch::new();
     let store = Store::new(&dir.0);
     let mut edit = store.create_mission("restore", "Restore", "").unwrap();
@@ -694,8 +694,8 @@ fn restore_refuses_missing_foreign_and_occupied_connections_and_bad_nodes() {
             .patch(
                 "restore",
                 pre(&edit),
-                MissionChange::CreateFormation {
-                    kind: "solo".into(),
+                MissionChange::CreateStep {
+                    formation: "solo".into(),
                     title: title.into(),
                     x: 0,
                     y: 0,
@@ -704,11 +704,11 @@ fn restore_refuses_missing_foreign_and_occupied_connections_and_bad_nodes() {
             )
             .unwrap();
     }
-    let build = edit.mission.formations[0].clone();
-    let other = edit.mission.formations[1].clone();
-    let target = edit.mission.formations[2].clone();
-    let output = |f: &Formation| format!("{}:{}", f.id, f.outputs[0].id);
-    let input = |f: &Formation| format!("{}:{}", f.id, f.inputs[0].id);
+    let build = edit.mission.steps[0].clone();
+    let other = edit.mission.steps[1].clone();
+    let target = edit.mission.steps[2].clone();
+    let output = |f: &Step| format!("{}:{}", f.id, f.outputs[0].id);
+    let input = |f: &Step| format!("{}:{}", f.id, f.inputs[0].id);
     edit = store
         .patch(
             "restore",
@@ -726,7 +726,7 @@ fn restore_refuses_missing_foreign_and_occupied_connections_and_bad_nodes() {
         .patch(
             "restore",
             pre(&edit),
-            MissionChange::DeleteFormation {
+            MissionChange::DeleteStep {
                 id: build.id.clone(),
             },
             "",
@@ -743,33 +743,33 @@ fn restore_refuses_missing_foreign_and_occupied_connections_and_bad_nodes() {
     };
     let cases = vec![
         (
-            RestoredNode::Formation(other.clone()),
+            RestoredNode::Step(other.clone()),
             vec![],
             "invalid_node_restore",
         ),
         (
-            RestoredNode::Formation(build.clone()),
+            RestoredNode::Step(build.clone()),
             vec![connection(output(&build), "gate_missing:in".into())],
             "invalid_node_restore",
         ),
         (
-            RestoredNode::Formation(build.clone()),
+            RestoredNode::Step(build.clone()),
             vec![connection(output(&other), input(&target))],
             "invalid_node_restore",
         ),
         (
-            RestoredNode::Formation(build.clone()),
+            RestoredNode::Step(build.clone()),
             vec![connection(output(&build), input(&target))],
             "invalid_node_restore",
         ),
         (
-            RestoredNode::Formation(Formation {
+            RestoredNode::Step(Step {
                 id: "fmn_old".into(),
-                kind: "flow".into(),
+                formation: "flow".into(),
                 ..Default::default()
             }),
             vec![],
-            "unsupported_formation_type",
+            "unsupported_step_formation",
         ),
         (
             RestoredNode::Gate(Gate {
@@ -790,9 +790,9 @@ fn restore_refuses_missing_foreign_and_occupied_connections_and_bad_nodes() {
             "invalid_code_gate_profile",
         ),
         (
-            RestoredNode::Formation(Formation {
+            RestoredNode::Step(Step {
                 id: "fmn_copy".into(),
-                kind: "solo".into(),
+                formation: "solo".into(),
                 slots: other.slots.clone(),
                 ..Default::default()
             }),
@@ -833,8 +833,8 @@ fn judge_chain_extends_its_return_and_refuses_occupied_inputs() {
             .patch(
                 "chain",
                 pre(&edit),
-                MissionChange::CreateFormation {
-                    kind: "solo".into(),
+                MissionChange::CreateStep {
+                    formation: "solo".into(),
                     title: title.into(),
                     x: 0,
                     y: 0,
@@ -861,10 +861,10 @@ fn judge_chain_extends_its_return_and_refuses_occupied_inputs() {
             "",
         )
         .unwrap();
-    let formations = edit.mission.formations.clone();
+    let steps = edit.mission.steps.clone();
     let gate = edit.mission.gates[0].id.clone();
     let endpoint = |i: usize, output: bool| {
-        let f = &formations[i];
+        let f = &steps[i];
         format!(
             "{}:{}",
             f.id,
@@ -890,11 +890,7 @@ fn judge_chain_extends_its_return_and_refuses_occupied_inputs() {
         .unwrap();
     let chain = |count: usize| MissionChange::SetGateJudge {
         gate_id: gate.clone(),
-        chain: formations
-            .iter()
-            .take(count)
-            .map(|f| f.id.clone())
-            .collect(),
+        chain: steps.iter().take(count).map(|f| f.id.clone()).collect(),
     };
     assert_eq!(
         store
@@ -961,8 +957,8 @@ fn refused_rewire_retains_original_and_occupied_connections() {
             .patch(
                 "rewire",
                 pre(&edit),
-                MissionChange::CreateFormation {
-                    kind: "solo".into(),
+                MissionChange::CreateStep {
+                    formation: "solo".into(),
                     title: title.into(),
                     x: 0,
                     y: 0,
@@ -972,7 +968,7 @@ fn refused_rewire_retains_original_and_occupied_connections() {
             .unwrap();
     }
     let endpoint = |i: usize, output: bool| {
-        let f = &edit.mission.formations[i];
+        let f = &edit.mission.steps[i];
         format!(
             "{}:{}",
             f.id,
@@ -1036,8 +1032,8 @@ fn removing_a_dynamic_port_prunes_only_its_connections() {
             .patch(
                 "ports",
                 pre(&edit),
-                MissionChange::CreateFormation {
-                    kind: "solo".into(),
+                MissionChange::CreateStep {
+                    formation: "solo".into(),
                     title: title.into(),
                     x: 0,
                     y: 0,
@@ -1046,13 +1042,13 @@ fn removing_a_dynamic_port_prunes_only_its_connections() {
             )
             .unwrap();
     }
-    let target = edit.mission.formations[2].id.clone();
+    let target = edit.mission.steps[2].id.clone();
     edit = store
         .patch(
             "ports",
             pre(&edit),
             MissionChange::AddPort {
-                formation_id: target.clone(),
+                step_id: target.clone(),
                 direction: "input".into(),
                 label: "Second".into(),
                 kind: "".into(),
@@ -1060,10 +1056,10 @@ fn removing_a_dynamic_port_prunes_only_its_connections() {
             "",
         )
         .unwrap();
-    let ports = edit.mission.formations[2].inputs.clone();
+    let ports = edit.mission.steps[2].inputs.clone();
     assert!(ports[1].id.starts_with("port_"));
     assert_ne!(ports[0].id, ports[1].id);
-    let sources: Vec<_> = edit.mission.formations[..2]
+    let sources: Vec<_> = edit.mission.steps[..2]
         .iter()
         .map(|f| format!("{}:{}", f.id, f.outputs[0].id))
         .collect();
@@ -1087,13 +1083,13 @@ fn removing_a_dynamic_port_prunes_only_its_connections() {
             "ports",
             pre(&edit),
             MissionChange::RemovePort {
-                formation_id: target,
+                step_id: target,
                 port_id: ports[1].id.clone(),
             },
             "",
         )
         .unwrap();
-    assert_eq!(edit.mission.formations[2].inputs, vec![ports[0].clone()]);
+    assert_eq!(edit.mission.steps[2].inputs, vec![ports[0].clone()]);
     assert_eq!(edit.mission.connections.len(), 1);
     assert_eq!(edit.mission.connections[0].id, "edge_0");
 }
@@ -1108,8 +1104,8 @@ fn orchestrated_snapshot_cannot_silently_remove_a_staffed_seat() {
         .patch(
             "peer",
             pre(&edit),
-            MissionChange::CreateFormation {
-                kind: "orchestrated".into(),
+            MissionChange::CreateStep {
+                formation: "orchestrated".into(),
                 title: "Team".into(),
                 x: 0,
                 y: 0,
@@ -1117,13 +1113,13 @@ fn orchestrated_snapshot_cannot_silently_remove_a_staffed_seat() {
             "",
         )
         .unwrap();
-    let team = edit.mission.formations[0].clone();
+    let team = edit.mission.steps[0].clone();
     edit = store
         .patch(
             "peer",
             pre(&edit),
             MissionChange::AssignSlot {
-                formation_id: team.id.clone(),
+                step_id: team.id.clone(),
                 slot_id: team.slots[1].id.clone(),
                 agent_id: "builder".into(),
                 harness: "claude-code".into(),
@@ -1134,7 +1130,7 @@ fn orchestrated_snapshot_cannot_silently_remove_a_staffed_seat() {
         )
         .unwrap();
     // Keep a controller and enough workers when removing the staffed slot.
-    let mut three = edit.mission.formations[0].slots.clone();
+    let mut three = edit.mission.steps[0].slots.clone();
     three.push(ahjo_mission_model::Slot {
         id: "slot_third".into(),
         label: "Third".into(),
@@ -1144,9 +1140,9 @@ fn orchestrated_snapshot_cannot_silently_remove_a_staffed_seat() {
         .patch(
             "peer",
             pre(&edit),
-            MissionChange::SetFormationType {
+            MissionChange::SetStepFormation {
                 id: team.id.clone(),
-                kind: "orchestrated".into(),
+                formation: "orchestrated".into(),
                 keep_slot_id: "".into(),
                 slots: Some(three.clone()),
             },
@@ -1163,9 +1159,9 @@ fn orchestrated_snapshot_cannot_silently_remove_a_staffed_seat() {
         .patch(
             "peer",
             pre(&edit),
-            MissionChange::SetFormationType {
+            MissionChange::SetStepFormation {
                 id: team.id.clone(),
-                kind: "orchestrated".into(),
+                formation: "orchestrated".into(),
                 keep_slot_id: "".into(),
                 slots: Some(remaining.clone()),
             },
@@ -1179,7 +1175,7 @@ fn orchestrated_snapshot_cannot_silently_remove_a_staffed_seat() {
             "peer",
             pre(&edit),
             MissionChange::AssignSlot {
-                formation_id: team.id.clone(),
+                step_id: team.id.clone(),
                 slot_id: team.slots[1].id.clone(),
                 agent_id: "".into(),
                 harness: "".into(),
@@ -1193,14 +1189,14 @@ fn orchestrated_snapshot_cannot_silently_remove_a_staffed_seat() {
         .patch(
             "peer",
             pre(&edit),
-            MissionChange::SetFormationType {
+            MissionChange::SetStepFormation {
                 id: team.id,
-                kind: "orchestrated".into(),
+                formation: "orchestrated".into(),
                 keep_slot_id: "".into(),
                 slots: Some(remaining.clone()),
             },
             "",
         )
         .unwrap();
-    assert_eq!(edit.mission.formations[0].slots, remaining);
+    assert_eq!(edit.mission.steps[0].slots, remaining);
 }

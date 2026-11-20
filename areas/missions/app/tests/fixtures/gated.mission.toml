@@ -1,4 +1,4 @@
-schema = 2
+schema = 3
 id = "msn_gated"
 slug = "gated"
 title = "Gated"
@@ -11,19 +11,19 @@ goal = "Deliver the brief"
 name = "result"
 kind = "text"
 from = "fmn_work:port_out"
-[[formation]]
+[[step]]
 id = "fmn_work"
-type = "solo"
+formation = "solo"
 title = "Work"
-[formation.brief]
+[step.brief]
 goal = "Do the work"
-[[formation.input]]
+[[step.input]]
 id = "port_in"
 label = "Input"
-[[formation.output]]
+[[step.output]]
 id = "port_out"
 label = "Result"
-[[formation.slot]]
+[[step.slot]]
 id = "slot_work"
 label = "Worker"
 harness = "openai-codex"

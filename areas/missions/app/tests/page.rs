@@ -124,7 +124,7 @@ fn opens_a_fixture_mission_on_the_canvas(cx: &mut TestAppContext) {
             .await
             .unwrap();
         assert_eq!(
-            doc["mission"]["formation"][0]["brief"]["goal"],
+            doc["mission"]["step"][0]["brief"]["goal"],
             "Deliver the result"
         );
     });
@@ -171,13 +171,13 @@ fn opens_a_fixture_mission_on_the_canvas(cx: &mut TestAppContext) {
             .await
             .unwrap();
         assert_eq!(doc["mission"]["title"], "Changed elsewhere");
-        let formation = doc["mission"]["formation"]
+        let step = doc["mission"]["step"]
             .as_array()
             .unwrap()
             .iter()
             .find(|f| f["id"] == "fmn_work")
             .unwrap();
-        assert_eq!(formation["brief"]["goal"], "Keep this draft");
+        assert_eq!(step["brief"]["goal"], "Keep this draft");
     });
     let _ = std::fs::remove_dir_all(settings.parent().unwrap());
 }
@@ -225,8 +225,8 @@ fn cli_authored_graph_and_layout_open_on_the_canvas(cx: &mut TestAppContext) {
                 .to_owned();
         let mut steps = Vec::new();
         for title in ["Draft", "Polish", "Judge"] {
-            let step = edit(u, json!({"create_formation":{"type":"solo","title":title}})).await;
-            let step = &step["formation"];
+            let step = edit(u, json!({"create_step":{"formation":"solo","title":title}})).await;
+            let step = &step["step"];
             let id = step["id"].as_str().unwrap().to_owned();
             let input = format!("{id}:{}", step["input"][0]["id"].as_str().unwrap());
             let output = format!("{id}:{}", step["output"][0]["id"].as_str().unwrap());
@@ -234,7 +234,7 @@ fn cli_authored_graph_and_layout_open_on_the_canvas(cx: &mut TestAppContext) {
         }
         let judge = edit(
             u,
-            json!({"create_gate":{"title":"Judge gate","kinds":["formation"]}}),
+            json!({"create_gate":{"title":"Judge gate","kinds":["step"]}}),
         )
         .await["gate"]["id"]
             .as_str()
@@ -426,10 +426,10 @@ fn opens_a_mission_layout_notes_and_run_written_before_the_wire_upgrade(cx: &mut
     });
 
     for (path, schema, field) in [
-        ("missions/hello.mission.toml", 2, "input_card"),
+        ("missions/hello.mission.toml", 3, "input_card"),
         ("layout/hello.layout.toml", 2, "mission_id"),
         ("notes/hello.notes.toml", 3, "created_at"),
-        ("runs/run_legacy.snapshot.toml", 2, "input_card"),
+        ("runs/run_legacy.snapshot.toml", 3, "input_card"),
         ("runs/run_legacy.bindings.toml", 3, "slot_id"),
     ] {
         let text = std::fs::read_to_string(state.join(path)).unwrap();

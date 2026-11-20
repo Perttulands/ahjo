@@ -76,7 +76,7 @@ pub fn gate_findings(mission: &Mission) -> Vec<Finding> {
 /// What a gate still needs before a run can route through it.
 fn route_gaps(mission: &Mission, gate: &Gate) -> Vec<String> {
     if gate.kinds.is_empty() {
-        return vec!["a kind: code, formation or human".to_owned()];
+        return vec!["a kind: code, step or human".to_owned()];
     }
     let mut gaps = Vec::new();
     let mut seen = HashSet::new();
@@ -86,15 +86,14 @@ fn route_gaps(mission: &Mission, gate: &Gate) -> Vec<String> {
         }
         match kind.as_str() {
             "code" => gaps.extend(code_check_gap(gate)),
-            "formation" if graph::judge_chain(mission, &gate.id).is_empty() => {
+            "step" if graph::judge_chain(mission, &gate.id).is_empty() => {
                 gaps.push(
-                    "a judge chain wired from its judge port through a formation and back"
-                        .to_owned(),
+                    "a judge chain wired from its judge port through a step and back".to_owned(),
                 );
             }
-            "formation" | "human" => {}
+            "step" | "human" => {}
             other => gaps.push(format!(
-                "a supported kind in place of {other:?} (code, formation or human)"
+                "a supported kind in place of {other:?} (code, step or human)"
             )),
         }
     }
@@ -145,15 +144,15 @@ pub fn route_findings(mission: &Mission) -> Vec<Finding> {
             ),
         ));
     };
-    for formation in &mission.formations {
-        for port in &formation.outputs {
-            if !wired.contains(format!("{}:{}", formation.id, port.id).as_str()) {
-                let route = if formation.outputs.len() > 1 {
+    for step in &mission.steps {
+        for port in &step.outputs {
+            if !wired.contains(format!("{}:{}", step.id, port.id).as_str()) {
+                let route = if step.outputs.len() > 1 {
                     format!("{:?} output", port.name())
                 } else {
                     "output".to_owned()
                 };
-                add(&formation.id, route);
+                add(&step.id, route);
             }
         }
     }
@@ -176,20 +175,16 @@ pub fn unfed_input_findings(mission: &Mission) -> Vec<Finding> {
         .flat_map(|card| graph::reachable(mission, &card.id))
         .collect();
     let mut findings = Vec::new();
-    for formation in mission
-        .formations
-        .iter()
-        .filter(|f| reached.contains(&f.id))
-    {
-        for port in &formation.inputs {
-            if !fed.contains(format!("{}:{}", formation.id, port.id).as_str()) {
+    for step in mission.steps.iter().filter(|f| reached.contains(&f.id)) {
+        for port in &step.inputs {
+            if !fed.contains(format!("{}:{}", step.id, port.id).as_str()) {
                 findings.push(Finding::new(
                     Code::InputWithoutProducer,
-                    &formation.id,
+                    &step.id,
                     format!(
                         "{} input {:?} ({}) has no wire into it, so a run that reaches the step \
                          waits there and stops; wire an earlier step's output to it or remove the input",
-                        possessive(mission.node_name(&formation.id)),
+                        possessive(mission.node_name(&step.id)),
                         port.name(),
                         port.id
                     ),
@@ -281,7 +276,7 @@ pub fn unreachable_findings(mission: &Mission) -> Vec<Finding> {
     let reached: HashSet<String> = (mission.input_cards.iter())
         .flat_map(|card| graph::reachable(mission, &card.id))
         .collect();
-    let nodes = (mission.formations.iter().map(|n| (&n.id, "step")))
+    let nodes = (mission.steps.iter().map(|n| (&n.id, "step")))
         .chain(mission.gates.iter().map(|n| (&n.id, "gate")))
         .chain(mission.ends.iter().map(|n| (&n.id, "End node")));
     nodes

@@ -37,14 +37,14 @@ fn requests_and_responses_round_trip() {
 fn mission_layout_and_edit_responses_carry_the_stored_shapes() {
     let mission = Mission::parse(
         r#"
-schema = 2
+schema = 3
 id = "m"
 slug = "demo"
 rev = 2
-[[formation]]
+[[step]]
 id = "f"
-type = "solo"
-[[formation.slot]]
+formation = "solo"
+[[step.slot]]
 id = "s"
 label = "Writer"
 "#,

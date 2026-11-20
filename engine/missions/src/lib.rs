@@ -100,8 +100,8 @@ pub use contract_outputs::{OutputPayload, parse_outputs};
 pub use contract_verdict::{JudgeVerdict, parse_verdict};
 pub use coordinator::{AdmissionFailure, Coordinator, OnBlock, RunSettings};
 pub use executor::{
-    ExecutionEvent, ExecutionSink, Executor, FormationExecution, FormationResult, JudgeCorrection,
-    LabExecutor, LeftSeat, OpenDispatch, UnavailableExecutor,
+    ExecutionEvent, ExecutionSink, Executor, JudgeCorrection, LabExecutor, LeftSeat, OpenDispatch,
+    StepExecution, StepResult, UnavailableExecutor,
 };
 pub use harness::{
     Claude, Codex, HarnessAdapter, Harnesses, Keys, Launch, Pi, Pointer, Shell, SlotBinding,

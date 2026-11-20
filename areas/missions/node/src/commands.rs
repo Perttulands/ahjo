@@ -164,7 +164,7 @@ fn create(m: &Missions, args: MissionCreate) -> Result<MissionCreated, Error> {
         title: mission.title,
         rev: mission.rev,
         steps: mission
-            .formations
+            .steps
             .into_iter()
             .map(|step| SketchStep {
                 id: step.id,
@@ -466,7 +466,7 @@ fn note_target(mission: &wire::Mission, target: &str) -> Result<String, Error> {
         return Ok(wire::MISSION_THREAD.into());
     }
     let cards = (mission.input_cards.iter().map(|n| (&n.id, &n.title)))
-        .chain(mission.formations.iter().map(|n| (&n.id, &n.title)))
+        .chain(mission.steps.iter().map(|n| (&n.id, &n.title)))
         .chain(mission.gates.iter().map(|n| (&n.id, &n.title)))
         .chain(mission.ends.iter().map(|n| (&n.id, &n.title)))
         .chain(mission.limits.iter().map(|n| (&n.id, &n.title)))
@@ -676,10 +676,10 @@ async fn start_run(m: Missions, args: MissionRun) -> Result<MissionStarted, Erro
     }
     let from_step = args.from.is_some();
     if from_step {
-        request.formation_id = pick(
+        request.step_id = pick(
             "step",
             mission
-                .formations
+                .steps
                 .iter()
                 .map(|f| (f.id.as_str(), f.title.as_str()))
                 .collect(),
@@ -699,7 +699,7 @@ async fn start_run(m: Missions, args: MissionRun) -> Result<MissionStarted, Erro
     let coordinator = m.coordinator.clone();
     let run_id = blocking(move || {
         if from_step {
-            coordinator.start_formation(request)
+            coordinator.start_step(request)
         } else {
             coordinator.start_mission(request)
         }

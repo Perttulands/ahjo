@@ -211,9 +211,9 @@ async fn controller_output_reaches_gate_and_lost_workers_are_reported() {
     let root = ahjo_testkit::fresh_dir("orchestrated-seats");
     std::fs::create_dir_all(root.join("missions")).unwrap();
     let mission = include_str!("parity/runs/missions/solo-lab.mission.toml")
-        .replace("type = \"solo\"", "type = \"orchestrated\"")
+        .replace("formation = \"solo\"", "formation = \"orchestrated\"")
         .replace("id = \"slot_work\"", "id = \"slot_lead\"\ncontroller = true")
-        .replace("[[end]]", "[[formation.slot]]\nid = \"slot_a\"\nlabel = \"Worker A\"\nharness = \"openai-codex\"\neffort = \"medium\"\n[[formation.slot]]\nid = \"slot_b\"\nlabel = \"Worker B\"\nharness = \"claude-code\"\neffort = \"medium\"\n\n[[end]]");
+        .replace("[[end]]", "[[step.slot]]\nid = \"slot_a\"\nlabel = \"Worker A\"\nharness = \"openai-codex\"\neffort = \"medium\"\n[[step.slot]]\nid = \"slot_b\"\nlabel = \"Worker B\"\nharness = \"claude-code\"\neffort = \"medium\"\n\n[[end]]");
     let mission = mission.replace("to = \"end_done:in\"", "to = \"gate_review:in\"");
     let mission = format!(
         "{mission}\n[[gate]]\nid = \"gate_review\"\ntitle = \"Review\"\nkinds = [\"code\"]\ncheck = \"output_contains\"\ncheck_version = \"1\"\ncheck_value = \"controller-result\"\n[[end]]\nid = \"end_rejected\"\ntitle = \"Rejected\"\noutcome = \"rejected\"\n[[connection]]\nid = \"edge_pass\"\nfrom = \"gate_review:pass\"\nto = \"end_done:in\"\n[[connection]]\nid = \"edge_fail\"\nfrom = \"gate_review:fail\"\nto = \"end_rejected:in\"\n"
@@ -431,13 +431,13 @@ async fn controller_output_reaches_gate_and_lost_workers_are_reported() {
 static CLI_SEATS: Mutex<Option<Arc<LabSeats>>> = Mutex::new(None);
 struct CliSeatExecutor(tokio::runtime::Handle);
 impl ahjo_mission_engine::Executor for CliSeatExecutor {
-    fn execute_formation(
+    fn execute_step(
         &self,
-        execution: ahjo_mission_engine::FormationExecution,
+        execution: ahjo_mission_engine::StepExecution,
         sink: ahjo_mission_engine::ExecutionSink,
-    ) -> Result<ahjo_mission_engine::FormationResult, ahjo_mission_engine::Error> {
+    ) -> Result<ahjo_mission_engine::StepResult, ahjo_mission_engine::Error> {
         let seats = CLI_SEATS.lock().unwrap().as_ref().unwrap().clone();
-        ahjo_mission_engine::Executor::execute_formation(
+        ahjo_mission_engine::Executor::execute_step(
             &SeatExecutor::new(seats, self.0.clone()),
             execution,
             sink,
@@ -482,9 +482,9 @@ async fn cli_runs_orchestration_to_end_with_controller_and_worker_seats() {
     });
     *CLI_SEATS.lock().unwrap() = Some(seats.clone());
     let mission = include_str!("parity/runs/missions/solo-lab.mission.toml")
-        .replace("type = \"solo\"", "type = \"orchestrated\"")
+        .replace("formation = \"solo\"", "formation = \"orchestrated\"")
         .replace("id = \"slot_work\"", "id = \"slot_lead\"\ncontroller = true")
-        .replace("[[end]]", "[[formation.slot]]\nid = \"slot_worker\"\nlabel = \"Worker\"\nharness = \"openai-codex\"\neffort = \"medium\"\n\n[[end]]");
+        .replace("[[end]]", "[[step.slot]]\nid = \"slot_worker\"\nlabel = \"Worker\"\nharness = \"openai-codex\"\neffort = \"medium\"\n\n[[end]]");
     std::fs::create_dir_all(root.join("missions")).unwrap();
     std::fs::write(root.join("missions/hello.mission.toml"), mission).unwrap();
     let inspect = cli(&node, "mission", &["show", "hello"]).await;

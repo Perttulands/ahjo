@@ -1,15 +1,15 @@
-//! Formation titles, staffing and controller selection.
+//! Step titles, staffing and controller selection.
 use crate::Error;
 use ahjo_mission_model::{Mission, MissionChange};
 use toml_edit::{DocumentMut, Item, TableLike, Value, value};
 fn not_found() -> Error {
-    Error::new("not_found", "formation or slot")
+    Error::new("not_found", "step or slot")
 }
-pub(crate) fn formation_table<'a>(
+pub(crate) fn step_table<'a>(
     doc: &'a mut DocumentMut,
     id: &str,
 ) -> Result<&'a mut toml_edit::Table, Error> {
-    doc["formation"]
+    doc["step"]
         .as_array_of_tables_mut()
         .and_then(|arr| {
             arr.iter_mut()
@@ -56,7 +56,7 @@ pub(crate) fn apply(
 ) -> Result<bool, Error> {
     match patch {
         MissionChange::SetBrief {
-            formation_id,
+            step_id,
             goal,
             repository,
             work,
@@ -72,23 +72,23 @@ pub(crate) fn apply(
             };
             crate::authoring_create::file_refs(&mut brief.files)?;
             check_work(&brief.work)?;
-            let formation = mission.formation(&formation_id).ok_or_else(not_found)?;
-            if formation.brief.as_ref() == Some(&brief) {
+            let step = mission.step(&step_id).ok_or_else(not_found)?;
+            if step.brief.as_ref() == Some(&brief) {
                 return Ok(false);
             }
             let next = toml_edit::ser::to_document(&brief)
                 .map_err(|e| Error::new("invalid_definition", e.to_string()))?
                 .into_table();
-            formation_table(doc, &formation_id)?["brief"] = Item::Table(next);
+            step_table(doc, &step_id)?["brief"] = Item::Table(next);
         }
-        MissionChange::ClearBrief { formation_id } => {
-            let formation = mission.formation(&formation_id).ok_or_else(not_found)?;
-            if formation.brief.is_none() {
+        MissionChange::ClearBrief { step_id } => {
+            let step = mission.step(&step_id).ok_or_else(not_found)?;
+            if step.brief.is_none() {
                 return Err(not_found());
             }
-            formation_table(doc, &formation_id)?.remove("brief");
+            step_table(doc, &step_id)?.remove("brief");
         }
-        MissionChange::EditFormation {
+        MissionChange::EditStep {
             id,
             title,
             mut brief,
@@ -97,11 +97,11 @@ pub(crate) fn apply(
                 crate::authoring_create::file_refs(&mut brief.files)?;
                 check_work(&brief.work)?;
             }
-            let formation = mission.formation(&id).ok_or_else(not_found)?;
-            if formation.title == title && formation.brief == brief {
+            let step = mission.step(&id).ok_or_else(not_found)?;
+            if step.title == title && step.brief == brief {
                 return Ok(false);
             }
-            let table = formation_table(doc, &id)?;
+            let table = step_table(doc, &id)?;
             crate::write::set(table, "title", value(title));
             if let Some(brief) = brief {
                 let next = toml_edit::ser::to_document(&brief)
@@ -112,22 +112,22 @@ pub(crate) fn apply(
                 table.remove("brief");
             }
         }
-        MissionChange::UpdateFormation {
+        MissionChange::UpdateStep {
             id,
             title,
             device,
             fresh,
         } => {
-            let formation = mission.formation(&id).ok_or_else(not_found)?;
-            let title = title.filter(|t| *t != formation.title);
+            let step = mission.step(&id).ok_or_else(not_found)?;
+            let title = title.filter(|t| *t != step.title);
             let device = device
                 .map(|d| d.trim().to_string())
-                .filter(|d| *d != formation.device);
-            let fresh = fresh.filter(|f| *f != formation.fresh);
+                .filter(|d| *d != step.device);
+            let fresh = fresh.filter(|f| *f != step.fresh);
             if title.is_none() && device.is_none() && fresh.is_none() {
                 return Ok(false);
             }
-            let table = formation_table(doc, &id)?;
+            let table = step_table(doc, &id)?;
             if let Some(title) = title {
                 // An empty title is an explicit value, not an absent field.
                 crate::write::set(table, "title", value(title));
@@ -148,12 +148,12 @@ pub(crate) fn apply(
             }
         }
         MissionChange::NameAgent {
-            formation_id,
+            step_id,
             slot_id,
             agent,
         } => {
-            let formation = mission.formation(&formation_id).ok_or_else(not_found)?;
-            let slot = formation
+            let step = mission.step(&step_id).ok_or_else(not_found)?;
+            let slot = step
                 .slots
                 .iter()
                 .find(|s| s.id == slot_id)
@@ -168,20 +168,20 @@ pub(crate) fn apply(
             if slot.agent == agent {
                 return Ok(false);
             }
-            let table = formation_table(doc, &formation_id)?;
+            let table = step_table(doc, &step_id)?;
             let item = table.get_mut("slot").ok_or_else(not_found)?;
             set(slot_table(item, &slot_id)?, "agent", agent);
         }
         MissionChange::AssignSlot {
-            formation_id,
+            step_id,
             slot_id,
             agent_id,
             harness,
             model,
             effort,
         } => {
-            let formation = mission.formation(&formation_id).ok_or_else(not_found)?;
-            let slot = formation
+            let step = mission.step(&step_id).ok_or_else(not_found)?;
+            let slot = step
                 .slots
                 .iter()
                 .find(|s| s.id == slot_id)
@@ -213,7 +213,7 @@ pub(crate) fn apply(
             {
                 return Ok(false);
             }
-            let table = formation_table(doc, &formation_id)?;
+            let table = step_table(doc, &step_id)?;
             let item = table.get_mut("slot").ok_or_else(not_found)?;
             let slot = slot_table(item, &slot_id)?;
             for (key, val) in [
@@ -226,19 +226,19 @@ pub(crate) fn apply(
             }
         }
         MissionChange::SwapSlots {
-            from_formation,
+            from_step,
             from_slot,
-            to_formation,
+            to_step,
             to_slot,
         } => {
-            let find = |formation: &str, slot: &str| {
+            let find = |step: &str, slot: &str| {
                 mission
-                    .formation(formation)
+                    .step(step)
                     .and_then(|f| f.slots.iter().find(|s| s.id == slot))
                     .ok_or_else(not_found)
             };
-            let from = find(&from_formation, &from_slot)?;
-            let to = find(&to_formation, &to_slot)?;
+            let from = find(&from_step, &from_slot)?;
+            let to = find(&to_step, &to_slot)?;
             let settings = |s: &ahjo_mission_model::Slot| {
                 [
                     s.agent_id.clone(),
@@ -252,11 +252,11 @@ pub(crate) fn apply(
             if first == second {
                 return Ok(false);
             }
-            for (formation, id, values) in [
-                (&from_formation, &from_slot, &second),
-                (&to_formation, &to_slot, &first),
+            for (step, id, values) in [
+                (&from_step, &from_slot, &second),
+                (&to_step, &to_slot, &first),
             ] {
-                let table = formation_table(doc, formation)?;
+                let table = step_table(doc, step)?;
                 let slot = slot_table(table.get_mut("slot").ok_or_else(not_found)?, id)?;
                 for (key, value) in ["agent_id", "harness", "model", "effort"]
                     .iter()
@@ -266,30 +266,23 @@ pub(crate) fn apply(
                 }
             }
         }
-        MissionChange::MakeController {
-            formation_id,
-            slot_id,
-        } => {
-            let formation = mission.formation(&formation_id).ok_or_else(not_found)?;
-            if formation.kind != "orchestrated" {
+        MissionChange::MakeController { step_id, slot_id } => {
+            let step = mission.step(&step_id).ok_or_else(not_found)?;
+            if step.formation != "orchestrated" {
                 return Err(Error::new(
                     "invalid_controller_role",
-                    "formation is not orchestrated",
+                    "step is not orchestrated",
                 ));
             }
-            if !formation.slots.iter().any(|s| s.id == slot_id) {
+            if !step.slots.iter().any(|s| s.id == slot_id) {
                 return Err(not_found());
             }
-            if formation
-                .slots
-                .iter()
-                .all(|s| s.controller == (s.id == slot_id))
-            {
+            if step.slots.iter().all(|s| s.controller == (s.id == slot_id)) {
                 return Ok(false);
             }
-            let table = formation_table(doc, &formation_id)?;
+            let table = step_table(doc, &step_id)?;
             let item = table.get_mut("slot").ok_or_else(not_found)?;
-            for slot in &formation.slots {
+            for slot in &step.slots {
                 crate::write::set(
                     slot_table(item, &slot.id)?,
                     "controller",

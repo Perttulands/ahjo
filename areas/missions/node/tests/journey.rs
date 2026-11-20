@@ -1,8 +1,6 @@
 //! A two-step mission authored and driven through the same CLI as an operator.
 #![cfg(unix)]
-use ahjo_mission_engine::{
-    ExecutionSink, Executor, FormationExecution, FormationResult, LabExecutor,
-};
+use ahjo_mission_engine::{ExecutionSink, Executor, LabExecutor, StepExecution, StepResult};
 use ahjo_node_kit::{Built, Listing, Setup};
 use ahjo_term::Sessions;
 use ahjo_testkit::{
@@ -20,12 +18,12 @@ struct FakeSeatLab {
     runtime: tokio::runtime::Handle,
 }
 impl Executor for FakeSeatLab {
-    fn execute_formation(
+    fn execute_step(
         &self,
-        execution: FormationExecution,
+        execution: StepExecution,
         sink: ExecutionSink,
-    ) -> Result<FormationResult, ahjo_core::Error> {
-        if execution.formation.title == "Break" {
+    ) -> Result<StepResult, ahjo_core::Error> {
+        if execution.step.title == "Break" {
             return Err(ahjo_core::Error::new("test_failure", "test block"));
         }
         let sessions = FAKE
@@ -33,7 +31,7 @@ impl Executor for FakeSeatLab {
             .unwrap()
             .clone()
             .ok_or_else(|| ahjo_core::Error::new("test", "fake Sessions unavailable"))?;
-        let id = sessions.add(&format!("seat-{}", execution.formation.id));
+        let id = sessions.add(&format!("seat-{}", execution.step.id));
         self.runtime
             .block_on(async {
                 let pane = sessions.active_pane(&id).await?;
@@ -43,8 +41,8 @@ impl Executor for FakeSeatLab {
                 Ok::<_, anyhow::Error>(())
             })
             .map_err(|e| ahjo_core::Error::new("test", e.to_string()))?;
-        let judge = execution.formation.title == "Judge";
-        let mut result = LabExecutor.execute_formation(execution, sink)?;
+        let judge = execution.step.title == "Judge";
+        let mut result = LabExecutor.execute_step(execution, sink)?;
         if judge {
             let verdict =
                 "```ahjo-verdict\n{\"verdict\":\"pass\",\"reason\":\"ready\",\"evidence\":[]}\n```";
@@ -118,20 +116,20 @@ async fn cli_authors_two_steps_answers_gate_and_finishes_with_fake_sessions() {
     for title in ["Draft", "Polish", "Judge"] {
         let result = edit(
             &node,
-            json!({"create_formation":{"type":"solo","title":title}}),
+            json!({"create_step":{"formation":"solo","title":title}}),
         )
         .await;
-        let step = &result["formation"];
+        let step = &result["step"];
         let id = step["id"].as_str().unwrap().to_owned();
         let slot = step["slot"][0]["id"].as_str().unwrap();
         edit(
             &node,
             json!({"assign_slot":{
-                "formation_id":id, "slot_id":slot, "harness":"openai-codex", "effort":"medium"
+                "step_id":id, "slot_id":slot, "harness":"openai-codex", "effort":"medium"
             }}),
         )
         .await;
-        edit(&node, json!({"set_brief":{"formation_id":id,"goal":title}})).await;
+        edit(&node, json!({"set_brief":{"step_id":id,"goal":title}})).await;
         steps.push((
             format!("{id}:{}", step["input"][0]["id"].as_str().unwrap()),
             format!("{id}:{}", step["output"][0]["id"].as_str().unwrap()),
@@ -140,7 +138,7 @@ async fn cli_authors_two_steps_answers_gate_and_finishes_with_fake_sessions() {
     }
     let judge_gate = edit(
         &node,
-        json!({"create_gate":{"title":"Judge review","kinds":["formation"]}}),
+        json!({"create_gate":{"title":"Judge review","kinds":["step"]}}),
     )
     .await["gate"]["id"]
         .as_str()

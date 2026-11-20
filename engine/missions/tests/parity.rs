@@ -60,7 +60,7 @@ fn findings_match_archons_on_every_parity_mission() {
                 .map(|c| &mut c.files)
                 .chain(
                     mission
-                        .formations
+                        .steps
                         .iter_mut()
                         .filter_map(|f| f.brief.as_mut().map(|b| &mut b.files)),
                 )
@@ -81,18 +81,18 @@ fn findings_match_archons_on_every_parity_mission() {
         let report = validate(&mission, &store.roles(), &harnesses);
         let mut sorted = archon.errors.clone();
         sorted.sort();
-        // Ahjo deliberately refuses peer formations that Archon accepts.
+        // Ahjo deliberately refuses peer steps that Archon accepts.
         let (unsupported, comparable): (Vec<_>, Vec<_>) = report
             .errors
             .iter()
             .cloned()
-            .partition(|f| f.code == ahjo_mission_model::Code::UnsupportedFormation);
-        if slug == "formations" {
+            .partition(|f| f.code == ahjo_mission_model::Code::UnsupportedStep);
+        if slug == "steps" {
             assert_eq!(
                 located(&unsupported),
                 [
-                    ("unsupported_formation".into(), "fmn_peer".into()),
-                    ("unsupported_formation".into(), "fmn_staff".into())
+                    ("unsupported_step".into(), "fmn_peer".into()),
+                    ("unsupported_step".into(), "fmn_staff".into())
                 ]
             );
         } else {

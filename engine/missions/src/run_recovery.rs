@@ -75,16 +75,16 @@ impl Coordinator {
             )?)
             .map_err(io::Error::other)?;
             let events = self.ledger(id)?.read().map_err(crate::error::to_io)?;
-            let formation_id = events[0]
+            let step_id = events[0]
                 .data
-                .get("formation_id")
+                .get("step_id")
                 .and_then(|v| v.as_str())
                 .unwrap_or("")
                 .to_owned();
             let start = RunStart {
                 mission: projection.mission_slug,
                 input_card_id: projection.input_card_id,
-                formation_id,
+                step_id,
                 expected_rev: projection.mission_rev,
                 cwd: projection.cwd.clone(),
                 repository: projection.repository.clone(),
@@ -219,8 +219,8 @@ pub(crate) fn only_waiting(
             })
     });
     let ready = replay.ports.iter().any(|(node, ports)| {
-        mission.formation(node).is_some_and(|formation| {
-            formation.inputs.iter().all(|p| ports.contains_key(&p.id))
+        mission.step(node).is_some_and(|step| {
+            step.inputs.iter().all(|p| ports.contains_key(&p.id))
                 && ports.values().any(|(_, unread)| *unread)
         })
     });

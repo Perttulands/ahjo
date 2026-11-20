@@ -3,8 +3,8 @@
 #[allow(dead_code)]
 mod run_support;
 use ahjo_mission_engine::{
-    Coordinator, ExecutionEvent, ExecutionSink, Executor, FormationExecution, FormationResult,
-    LabExecutor, OpenDispatch, RunSettings,
+    Coordinator, ExecutionEvent, ExecutionSink, Executor, LabExecutor, OpenDispatch, RunSettings,
+    StepExecution, StepResult,
 };
 use ahjo_mission_model::{HumanPick, HumanVerdict, ResumeRequest, RunProjection, RunStart};
 use run_support::Scratch;
@@ -40,13 +40,13 @@ impl FolderExecutor {
 }
 
 impl Executor for FolderExecutor {
-    fn execute_formation(
+    fn execute_step(
         &self,
-        request: FormationExecution,
+        request: StepExecution,
         events: ExecutionSink,
-    ) -> Result<FormationResult, ahjo_mission_engine::Error> {
-        let run = || -> Result<FormationResult, String> {
-            let node = request.formation.id.as_str();
+    ) -> Result<StepResult, ahjo_mission_engine::Error> {
+        let run = || -> Result<StepResult, String> {
+            let node = request.step.id.as_str();
             self.calls.lock().unwrap().push((
                 node.to_owned(),
                 request.attempt,
@@ -141,7 +141,7 @@ impl Executor for FolderExecutor {
                 _ => return Err(format!("unexpected step {node}")),
             };
             let mut result = LabExecutor
-                .execute_formation(request, events)
+                .execute_step(request, events)
                 .map_err(|e| e.message)?;
             result.text.clone_from(&text);
             for output in result.outputs.values_mut() {
@@ -164,7 +164,7 @@ fn folder_run(conflict: bool, pass_retry: bool) -> (Run, FolderExecutor, PathBuf
     } else {
         work_card("rounds = 2\nwhen_spent = \"best\"")
     };
-    let mission = pick_mission("[\"formation\"]", "Draft.", &card);
+    let mission = pick_mission("[\"step\"]", "Draft.", &card);
     std::fs::write(root.0.join("missions/hello.mission.toml"), mission).unwrap();
     let lab = FolderExecutor::new(workspace.clone(), conflict, pass_retry);
     let c = Coordinator::open(&root.0, RunSettings::default(), Box::new(lab.clone())).unwrap();
@@ -302,9 +302,9 @@ fn folder_retry_that_passes_publishes_that_attempt() {
     );
 }
 
-fn formation(id: &str, title: &str, goal: &str) -> String {
+fn step(id: &str, title: &str, goal: &str) -> String {
     format!(
-        "[[formation]]\nid = \"{id}\"\ntype = \"solo\"\ntitle = \"{title}\"\n[formation.brief]\ngoal = \"{goal}\"\n[[formation.input]]\nid = \"port_in\"\nlabel = \"Input\"\n[[formation.output]]\nid = \"port_out\"\nlabel = \"Result\"\n[[formation.slot]]\nid = \"slot_{id}\"\nlabel = \"Seat\"\nagent_id = \"builder\"\nharness = \"openai-codex\"\nmodel = \"\"\neffort = \"medium\"\n\n"
+        "[[step]]\nid = \"{id}\"\nformation = \"solo\"\ntitle = \"{title}\"\n[step.brief]\ngoal = \"{goal}\"\n[[step.input]]\nid = \"port_in\"\nlabel = \"Input\"\n[[step.output]]\nid = \"port_out\"\nlabel = \"Result\"\n[[step.slot]]\nid = \"slot_{id}\"\nlabel = \"Seat\"\nagent_id = \"builder\"\nharness = \"openai-codex\"\nmodel = \"\"\neffort = \"medium\"\n\n"
     )
 }
 
@@ -313,18 +313,18 @@ fn connection(id: &str, from: &str, to: &str) -> String {
 }
 
 /// Input -> Work -> Review (pass Ship -> Done, fail back to Work), Review
-/// judged by the chain Judge 1 -> Judge 2 when its kinds hold formation,
+/// judged by the chain Judge 1 -> Judge 2 when its kinds hold step,
 /// with the given Limit cards.
 fn pick_mission(kinds: &str, work_goal: &str, cards: &str) -> String {
     let mut mission = String::from(
-        "schema = 2\nid = \"msn_pick\"\nslug = \"hello\"\ntitle = \"Pick\"\nrev = 1\n\n[[input_card]]\nid = \"inp_hello\"\ntitle = \"Hello\"\ngoal = \"Return the supplied input\"\n\n",
+        "schema = 3\nid = \"msn_pick\"\nslug = \"hello\"\ntitle = \"Pick\"\nrev = 1\n\n[[input_card]]\nid = \"inp_hello\"\ntitle = \"Hello\"\ngoal = \"Return the supplied input\"\n\n",
     );
-    mission += &formation("fmn_work", "Work", work_goal);
-    mission += &formation("fmn_ship", "Ship", "Ship it.");
-    let judged = kinds.contains("formation");
+    mission += &step("fmn_work", "Work", work_goal);
+    mission += &step("fmn_ship", "Ship", "Ship it.");
+    let judged = kinds.contains("step");
     if judged {
-        mission += &formation("fmn_j1", "Judge 1", "Review the work.");
-        mission += &formation("fmn_j2", "Judge 2", "Decide.");
+        mission += &step("fmn_j1", "Judge 1", "Review the work.");
+        mission += &step("fmn_j2", "Judge 2", "Decide.");
     }
     mission += &format!(
         "[[gate]]\nid = \"gate_review\"\ntitle = \"Review\"\nkinds = {kinds}\ncriterion = \"Judge the work\"\n\n[[end]]\nid = \"end_done\"\ntitle = \"Done\"\noutcome = \"done\"\n\n"
@@ -387,13 +387,13 @@ struct Scripted {
     stall: Option<(&'static str, i64)>,
 }
 impl Executor for Scripted {
-    fn execute_formation(
+    fn execute_step(
         &self,
-        request: FormationExecution,
+        request: StepExecution,
         events: ExecutionSink,
-    ) -> Result<FormationResult, ahjo_mission_engine::Error> {
-        (|| -> Result<FormationResult, String> {
-            let node = request.formation.id.clone();
+    ) -> Result<StepResult, ahjo_mission_engine::Error> {
+        (|| -> Result<StepResult, String> {
+            let node = request.step.id.clone();
             let attempt = request.attempt;
             self.calls.lock().unwrap().push(Call {
                 node: node.clone(),
@@ -414,7 +414,7 @@ impl Executor for Scripted {
             let text = (self.responses.lock().unwrap().get(node.as_str()))
                 .and_then(|script| script.get(&attempt).cloned());
             let mut result = LabExecutor
-                .execute_formation(request, events)
+                .execute_step(request, events)
                 .map_err(|error| error.message)?;
             if let Some(text) = text {
                 result.text.clone_from(&text);
@@ -577,7 +577,7 @@ fn refused(result: Result<RunProjection, ahjo_mission_engine::Error>, words: &st
 fn a_step_limit_stops_at_its_rounds_and_a_grant_gives_one_more() {
     let lab = Scripted::new(three_failed_drafts(""));
     let run = Run::start(
-        &pick_mission("[\"formation\"]", "Draft.", &work_card("rounds = 2")),
+        &pick_mission("[\"step\"]", "Draft.", &work_card("rounds = 2")),
         lab.clone(),
     );
     let p = run.settle();
@@ -633,10 +633,7 @@ fn a_step_limit_stops_at_its_rounds_and_a_grant_gives_one_more() {
 fn a_mission_limit_stops_the_whole_run_at_its_rounds() {
     let lab = Scripted::new(three_failed_drafts(""));
     let card = "[[limit]]\nid = \"lim_all\"\ntitle = \"All\"\ntarget = \"inp_hello\"\nrounds = 4\n";
-    let run = Run::start(
-        &pick_mission("[\"formation\"]", "Draft.", card),
-        lab.clone(),
-    );
+    let run = Run::start(&pick_mission("[\"step\"]", "Draft.", card), lab.clone());
     let p = run.settle();
     assert_eq!(
         (p.block_code.as_str(), p.resume_policy.as_str()),
@@ -661,7 +658,7 @@ fn a_grant_resumes_only_a_spent_limit() {
         .unwrap()
         .insert(1, "```ahjo-verdict\n{invalid}\n```".into());
     let run = Run::start(
-        &pick_mission("[\"formation\"]", "Draft.", &work_card("rounds = 3")),
+        &pick_mission("[\"step\"]", "Draft.", &work_card("rounds = 3")),
         Scripted::new(responses),
     );
     let p = run.settle();
@@ -675,7 +672,7 @@ fn a_fail_limit_keeps_the_judged_attempts_without_blocking() {
     let lab = Scripted::new(three_failed_drafts(""));
     let run = Run::start(
         &pick_mission(
-            "[\"formation\"]",
+            "[\"step\"]",
             "Draft.",
             &work_card("rounds = 2\nwhen_spent = \"fail\""),
         ),
@@ -705,7 +702,7 @@ fn a_fail_limit_keeps_the_judged_attempts_without_blocking() {
 fn a_fail_token_limit_cuts_off_the_working_attempt() {
     let run = Run::start(
         &pick_mission(
-            "[\"formation\"]",
+            "[\"step\"]",
             "Draft. archon-lab-tokens: 150",
             &work_card("tokens = 100\nwhen_spent = \"fail\""),
         ),
@@ -738,7 +735,7 @@ fn a_fail_token_limit_cuts_off_the_working_attempt() {
 fn a_fail_time_limit_warns_then_cuts_off_the_working_attempt() {
     let run = Run::start(
         &pick_mission(
-            "[\"formation\"]",
+            "[\"step\"]",
             "Draft. archon-lab-work: 6s",
             &work_card("seconds = 2\nwarn_seconds = 1\nwhen_spent = \"fail\""),
         ),
@@ -764,7 +761,7 @@ fn a_best_card_picks_the_best_judged_attempt_and_goes_on() {
     )));
     let run = Run::start(
         &pick_mission(
-            "[\"formation\"]",
+            "[\"step\"]",
             "Draft.",
             &work_card("rounds = 3\nwhen_spent = \"best\""),
         ),
@@ -854,7 +851,7 @@ fn a_best_card_picks_the_best_judged_attempt_and_goes_on() {
     assert_eq!(verdict["reason"], "the only draft whose tests pass");
     assert_eq!(
         verdict["evidence"],
-        json!([{"kind":"formation","text":"draft two: retry covered"}])
+        json!([{"kind":"step","text":"draft two: retry covered"}])
     );
     assert_eq!(
         (pick["attempt"].as_i64(), pick["decided_by"].as_str()),
@@ -949,7 +946,7 @@ fn a_human_gate_quotes_its_input_and_the_attempts_keep_each_answer() {
         let fail = &details.routes[1];
         let target = &fail.targets[0];
         assert_eq!(target.node_id, "fmn_work");
-        let Some(ahjo_mission_model::DecisionTargetKind::Formation { limits, .. }) = &target.detail
+        let Some(ahjo_mission_model::DecisionTargetKind::Step { limits, .. }) = &target.detail
         else {
             panic!("expected a step target")
         };
@@ -1039,7 +1036,7 @@ fn pick_best_resumes_a_spent_limit_block() {
         .insert(3, pick_block(1, "smaller diff", &[]));
     let lab = Scripted::new(responses);
     let run = Run::start(
-        &pick_mission("[\"formation\"]", "Draft.", &work_card("rounds = 2")),
+        &pick_mission("[\"step\"]", "Draft.", &work_card("rounds = 2")),
         lab.clone(),
     );
     let p = run.settle();
@@ -1084,7 +1081,7 @@ fn the_only_judged_attempt_is_taken_without_a_picker() {
     let lab = Scripted::new(three_failed_drafts(""));
     let run = Run::start(
         &pick_mission(
-            "[\"formation\"]",
+            "[\"step\"]",
             "Draft.",
             &work_card("rounds = 1\nwhen_spent = \"best\""),
         ),
@@ -1117,7 +1114,7 @@ fn an_attempt_the_limit_cut_is_never_a_candidate() {
     };
     let run = Run::start(
         &pick_mission(
-            "[\"formation\"]",
+            "[\"step\"]",
             "Draft.",
             &work_card("seconds = 2\nwhen_spent = \"best\""),
         ),
@@ -1233,7 +1230,7 @@ fn a_malformed_judge_pick_blocks_and_a_resume_asks_again() {
     let lab = Scripted::new(responses);
     let run = Run::start(
         &pick_mission(
-            "[\"formation\"]",
+            "[\"step\"]",
             "Draft.",
             &work_card("rounds = 3\nwhen_spent = \"best\""),
         ),
@@ -1282,18 +1279,18 @@ struct Lost {
     cut_after: Arc<Mutex<Option<Duration>>>,
 }
 impl Executor for Lost {
-    fn execute_formation(
+    fn execute_step(
         &self,
-        request: FormationExecution,
+        request: StepExecution,
         events: ExecutionSink,
-    ) -> Result<FormationResult, ahjo_mission_engine::Error> {
-        (|| -> Result<FormationResult, String> {
-            if request.formation.id != "fmn_work" || request.attempt != 1 {
+    ) -> Result<StepResult, ahjo_mission_engine::Error> {
+        (|| -> Result<StepResult, String> {
+            if request.step.id != "fmn_work" || request.attempt != 1 {
                 return LabExecutor
-                    .execute_formation(request, events)
+                    .execute_step(request, events)
                     .map_err(|error| error.message);
             }
-            let slot = request.formation.slots[0].id.clone();
+            let slot = request.step.slots[0].id.clone();
             events
                 .emit(ExecutionEvent {
                     kind: "slot_dispatch".into(),
@@ -1308,11 +1305,8 @@ impl Executor for Lost {
         })()
         .map_err(|message: String| ahjo_mission_engine::Error::new("executor_error", message))
     }
-    fn reattach(
-        &self,
-        dispatch: OpenDispatch,
-    ) -> Result<FormationResult, ahjo_mission_engine::Error> {
-        (|| -> Result<FormationResult, String> {
+    fn reattach(&self, dispatch: OpenDispatch) -> Result<StepResult, ahjo_mission_engine::Error> {
+        (|| -> Result<StepResult, String> {
             let began = Instant::now();
             if self.tokens > 0 {
                 dispatch
@@ -1392,7 +1386,7 @@ fn a_seat_reattached_after_a_restart_is_cut_off_by_the_time_it_worked_before() {
     let lost = Lost::default();
     let run = restarted_at_dispatch(
         &pick_mission(
-            "[\"formation\"]",
+            "[\"step\"]",
             "Draft.",
             &work_card("seconds = 5\nwhen_spent = \"fail\""),
         ),
@@ -1426,7 +1420,7 @@ fn a_seat_reattached_after_a_restart_is_cut_off_by_the_time_it_worked_before() {
 #[test]
 fn a_seat_reattached_after_a_restart_is_cut_off_at_its_tokens() {
     let run = restarted_at_dispatch(
-        &pick_mission("[\"formation\"]", "Draft.", &work_card("tokens = 100")),
+        &pick_mission("[\"step\"]", "Draft.", &work_card("tokens = 100")),
         Lost {
             tokens: 150,
             ..Default::default()

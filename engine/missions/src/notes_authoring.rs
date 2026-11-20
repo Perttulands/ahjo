@@ -92,7 +92,7 @@ impl Store {
         // A note goes on the mission, a card, or a wire.
         if target != "mission"
             && !mission.input_cards.iter().any(|n| n.id == target)
-            && mission.formation(target).is_none()
+            && mission.step(target).is_none()
             && mission.gate(target).is_none()
             && mission.end(target).is_none()
             && !mission.limits.iter().any(|n| n.id == target)

@@ -59,11 +59,10 @@ pub struct MissionOutput {
 /// A step: the team of agents that does it.
 #[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq, schemars::JsonSchema)]
 #[serde(default, deny_unknown_fields)]
-pub struct Formation {
+pub struct Step {
     pub id: String,
     /// `solo`, `peer` or `orchestrated`.
-    #[serde(rename = "type")]
-    pub kind: String,
+    pub formation: String,
     pub title: String,
     /// The environment the step runs on; blank runs it on the coordinator.
     #[serde(skip_serializing_if = "String::is_empty")]
@@ -131,7 +130,7 @@ impl Port {
     }
 }
 
-/// A position in a formation, owning what its seat runs.
+/// A position in a step, owning what its seat runs.
 #[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq, schemars::JsonSchema)]
 #[serde(default, deny_unknown_fields, rename_all = "snake_case")]
 pub struct Slot {
@@ -179,7 +178,7 @@ impl Slot {
 pub struct Gate {
     pub id: String,
     pub title: String,
-    /// `code`, `formation` or `human`.
+    /// `code`, `step` or `human`.
     pub kinds: Vec<String>,
     /// Free-text intent, never run as a step.
     pub criterion: String,

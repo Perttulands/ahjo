@@ -1,31 +1,31 @@
 //! Render the complete, private instructions a seat reads by pointer.
-use crate::FormationExecution;
+use crate::StepExecution;
 use ahjo_mission_model::Slot;
 use std::fmt::Write;
 
-pub(super) fn render(request: &FormationExecution, slot: &Slot) -> String {
+pub(super) fn render(request: &StepExecution, slot: &Slot) -> String {
     render_for(request, slot, true)
 }
 
 /// A worker has the same context, but the controller owns the final output.
-pub(super) fn render_worker(request: &FormationExecution, slot: &Slot) -> String {
+pub(super) fn render_worker(request: &StepExecution, slot: &Slot) -> String {
     let mut brief = render_for(request, slot, false);
     let _ = writeln!(
         brief,
-        "You are a worker on this team. Work on the controller's assigned task, save your output in the attempt directory as worker-{}.md, and report its path and findings to the controller. The controller owns the formation's final output.",
+        "You are a worker on this team. Work on the controller's assigned task, save your output in the attempt directory as worker-{}.md, and report its path and findings to the controller. The controller owns the step's final output.",
         slot.id
     );
     brief
 }
 
-fn render_for(request: &FormationExecution, slot: &Slot, final_output: bool) -> String {
+fn render_for(request: &StepExecution, slot: &Slot, final_output: bool) -> String {
     let mut brief = String::new();
     let _ = writeln!(
         brief,
         "Run: {}\nStep: {} ({})\nSlot: {}\nAgent: {}\nHarness: {}\nWorking directory: {}\nAttempt directory: {}\n",
         request.run_id,
-        request.formation.title,
-        request.formation.id,
+        request.step.title,
+        request.step.id,
         slot.id,
         if slot.agent_id.is_empty() {
             "vanilla (no role)"
@@ -60,7 +60,7 @@ fn render_for(request: &FormationExecution, slot: &Slot, final_output: bool) -> 
     if let Ok(work) = ahjo_work_ref::parse(&request.work) {
         let _ = writeln!(brief, "Mission {}: {}", work.noun(), work.describe());
     }
-    if let Some(details) = &request.formation.brief {
+    if let Some(details) = &request.step.brief {
         let _ = writeln!(brief, "Goal:\n{}\n", details.goal);
         if let Ok(work) = ahjo_work_ref::parse(&details.work) {
             let _ = writeln!(brief, "Brief {}: {}", work.noun(), work.describe());
@@ -76,7 +76,7 @@ fn render_for(request: &FormationExecution, slot: &Slot, final_output: bool) -> 
         .bindings
         .bindings
         .iter()
-        .find(|binding| binding.node_id == request.formation.id && binding.slot_id == slot.id)
+        .find(|binding| binding.node_id == request.step.id && binding.slot_id == slot.id)
         && !binding.card_toml.is_empty()
     {
         let _ = writeln!(brief, "\nRole card:\n{}", binding.card_toml);
@@ -89,13 +89,13 @@ fn render_for(request: &FormationExecution, slot: &Slot, final_output: bool) -> 
         "\nRouted input and feedback:\n{}\n",
         request.input_text
     );
-    if final_output && !request.formation.outputs.is_empty() {
+    if final_output && !request.step.outputs.is_empty() {
         brief.push_str("Return all and only these output ports in one fenced `ahjo-outputs` JSON block. Each port maps to an object with `text`; file and folder outputs must also carry an absolute `ref` path.\n");
-        for port in &request.formation.outputs {
+        for port in &request.step.outputs {
             let _ = writeln!(brief, "- {} ({})", port.id, port.kind());
         }
         let example: serde_json::Map<String, serde_json::Value> = request
-            .formation
+            .step
             .outputs
             .iter()
             .map(|port| {
@@ -133,14 +133,14 @@ fn render_for(request: &FormationExecution, slot: &Slot, final_output: bool) -> 
 mod tests {
     use super::*;
     use crate::BindingsSnapshot;
-    use ahjo_mission_model::{Brief, Formation};
+    use ahjo_mission_model::{Brief, Step};
 
-    fn execution(run_work: &str, brief_work: &str) -> FormationExecution {
-        FormationExecution {
+    fn execution(run_work: &str, brief_work: &str) -> StepExecution {
+        StepExecution {
             run_id: "run_1".into(),
             prefix: String::new(),
             run_number: 0,
-            formation: Formation {
+            step: Step {
                 id: "fmn_work".into(),
                 title: "Work".into(),
                 brief: Some(Brief {
@@ -148,7 +148,7 @@ mod tests {
                     work: brief_work.into(),
                     ..Brief::default()
                 }),
-                ..Formation::default()
+                ..Step::default()
             },
             bindings: BindingsSnapshot {
                 schema: 1,

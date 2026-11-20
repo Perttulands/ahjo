@@ -12,7 +12,7 @@ use std::{
 };
 
 pub(crate) enum Finished {
-    Step(String, i64, io::Result<crate::FormationResult>),
+    Step(String, i64, io::Result<crate::StepResult>),
     Judge(
         Box<ahjo_mission_model::Gate>,
         i64,
@@ -180,13 +180,13 @@ pub(crate) fn schedule(
                             let evidence: Vec<_> = result
                                 .evidence
                                 .iter()
-                                .map(|text| json!({"kind":"formation","text":text}))
+                                .map(|text| json!({"kind":"step","text":text}))
                                 .collect();
                             let mut kind = event(
                                 "gate_kind_result",
                                 &gate.id,
                                 0,
-                                json!({"kind":"formation","verdict":result.verdict,"reason":result.reason,"evidence":evidence,"input_ref":input}),
+                                json!({"kind":"step","verdict":result.verdict,"reason":result.reason,"evidence":evidence,"input_ref":input}),
                             );
                             kind.gate_id = gate.id.clone();
                             append(c, id, control, kind)?;
@@ -418,21 +418,21 @@ pub(crate) fn schedule(
                     });
                 }
                 let starved: Vec<_> = mission
-                    .formations
+                    .steps
                     .iter()
-                    .filter_map(|formation| {
-                        let ports = replay.ports.get(&formation.id)?;
+                    .filter_map(|step| {
+                        let ports = replay.ports.get(&step.id)?;
                         if !ports.values().any(|(_, unread)| *unread) {
                             return None;
                         }
-                        let missing: Vec<_> = formation
+                        let missing: Vec<_> = step
                             .inputs
                             .iter()
                             .filter(|port| !ports.contains_key(&port.id))
                             .map(|port| port.id.clone())
                             .collect();
                         (!missing.is_empty())
-                            .then(|| (formation.id.clone(), formation.title.clone(), missing))
+                            .then(|| (step.id.clone(), step.title.clone(), missing))
                     })
                     .collect();
                 if !starved.is_empty() {

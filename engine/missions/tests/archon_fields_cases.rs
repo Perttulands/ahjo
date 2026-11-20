@@ -28,7 +28,7 @@ fn pre(edit: &ahjo_mission_model::Edit) -> Precondition {
 
 // Ported from node_update_test.go: partial updates retain all other fields.
 #[test]
-fn input_and_formation_titles_and_hint_can_be_set_and_cleared() {
+fn input_and_step_titles_and_hint_can_be_set_and_cleared() {
     let dir = Scratch::new();
     let store = Store::new(&dir.0);
     let mut edit = store.create_mission("updates", "Updates", "").unwrap();
@@ -51,8 +51,8 @@ fn input_and_formation_titles_and_hint_can_be_set_and_cleared() {
         .patch(
             "updates",
             pre(&edit),
-            MissionChange::CreateFormation {
-                kind: "solo".into(),
+            MissionChange::CreateStep {
+                formation: "solo".into(),
                 title: "Map".into(),
                 x: 1,
                 y: 2,
@@ -61,7 +61,7 @@ fn input_and_formation_titles_and_hint_can_be_set_and_cleared() {
         )
         .unwrap();
     let input = edit.mission.input_cards[0].id.clone();
-    let formation = edit.mission.formations[0].id.clone();
+    let step = edit.mission.steps[0].id.clone();
     let layout_path = dir.0.join("layout/updates.layout.toml");
     let layout = std::fs::read(&layout_path).unwrap();
     for (title, goal, hint) in [
@@ -98,8 +98,8 @@ fn input_and_formation_titles_and_hint_can_be_set_and_cleared() {
             .patch(
                 "updates",
                 pre(&edit),
-                MissionChange::UpdateFormation {
-                    id: formation.clone(),
+                MissionChange::UpdateStep {
+                    id: step.clone(),
                     title: Some(title.into()),
                     device: None,
                     fresh: None,
@@ -107,9 +107,9 @@ fn input_and_formation_titles_and_hint_can_be_set_and_cleared() {
                 "",
             )
             .unwrap();
-        assert_eq!(edit.mission.formations[0].title, title);
-        assert_eq!(edit.mission.formations[0].id, formation);
-        assert_eq!(edit.mission.formations[0].slots.len(), 1);
+        assert_eq!(edit.mission.steps[0].title, title);
+        assert_eq!(edit.mission.steps[0].id, step);
+        assert_eq!(edit.mission.steps[0].slots.len(), 1);
     }
     let noop = store
         .patch(
@@ -255,8 +255,8 @@ fn slot_settings_round_trip_and_invalid_assignments_write_nothing() {
         .patch(
             "seat",
             pre(&edit),
-            MissionChange::CreateFormation {
-                kind: "solo".into(),
+            MissionChange::CreateStep {
+                formation: "solo".into(),
                 title: "Worker".into(),
                 x: 0,
                 y: 0,
@@ -264,8 +264,8 @@ fn slot_settings_round_trip_and_invalid_assignments_write_nothing() {
             "",
         )
         .unwrap();
-    let formation = edit.mission.formations[0].id.clone();
-    let slot = edit.mission.formations[0].slots[0].id.clone();
+    let step = edit.mission.steps[0].id.clone();
+    let slot = edit.mission.steps[0].slots[0].id.clone();
     let path = dir.0.join("missions/seat.mission.toml");
     let before = std::fs::read(&path).unwrap();
     for (agent, harness, model, effort) in [
@@ -278,7 +278,7 @@ fn slot_settings_round_trip_and_invalid_assignments_write_nothing() {
         ("reviewer", "openai-codex", "", ""),
     ] {
         let patch = MissionChange::AssignSlot {
-            formation_id: formation.clone(),
+            step_id: step.clone(),
             slot_id: slot.clone(),
             agent_id: agent.into(),
             harness: harness.into(),
@@ -305,7 +305,7 @@ fn slot_settings_round_trip_and_invalid_assignments_write_nothing() {
                 "seat",
                 pre(&edit),
                 MissionChange::AssignSlot {
-                    formation_id: formation.clone(),
+                    step_id: step.clone(),
                     slot_id: slot.clone(),
                     agent_id: agent.into(),
                     harness: harness.into(),
@@ -315,7 +315,7 @@ fn slot_settings_round_trip_and_invalid_assignments_write_nothing() {
                 "",
             )
             .unwrap();
-        let actual = &store.mission_edit("seat").unwrap().mission.formations[0].slots[0];
+        let actual = &store.mission_edit("seat").unwrap().mission.steps[0].slots[0];
         assert_eq!(
             (
                 &*actual.agent_id,
@@ -354,8 +354,8 @@ fn repeated_node_type_port_and_judge_edits_keep_bytes_and_check_etags() {
         .patch(
             "same",
             pre(&edit),
-            MissionChange::CreateFormation {
-                kind: "solo".into(),
+            MissionChange::CreateStep {
+                formation: "solo".into(),
                 title: "Worker".into(),
                 x: 0,
                 y: 0,
@@ -381,7 +381,7 @@ fn repeated_node_type_port_and_judge_edits_keep_bytes_and_check_etags() {
             "",
         )
         .unwrap();
-    let f = edit.mission.formations[0].clone();
+    let f = edit.mission.steps[0].clone();
     let input = edit.mission.input_cards[0].id.clone();
     let gate = edit.mission.gates[0].id.clone();
     let changes = vec![
@@ -391,20 +391,20 @@ fn repeated_node_type_port_and_judge_edits_keep_bytes_and_check_etags() {
             goal: Some("New goal".into()),
             ..Default::default()
         }),
-        MissionChange::UpdateFormation {
+        MissionChange::UpdateStep {
             id: f.id.clone(),
             title: Some("Renamed".into()),
             device: None,
             fresh: None,
         },
-        MissionChange::SetFormationType {
+        MissionChange::SetStepFormation {
             id: f.id.clone(),
-            kind: "orchestrated".into(),
+            formation: "orchestrated".into(),
             keep_slot_id: "".into(),
             slots: None,
         },
         MissionChange::UpdatePort {
-            formation_id: f.id.clone(),
+            step_id: f.id.clone(),
             port_id: f.inputs[0].id.clone(),
             label: Some("Updated".into()),
             kind: None,
@@ -438,7 +438,7 @@ fn repeated_node_type_port_and_judge_edits_keep_bytes_and_check_etags() {
     }
 }
 
-// Port of TestS3FormationBriefRejectsUnsafeNonEmptyBeadID. Ahjo's `work`
+// Port of TestS3StepBriefRejectsUnsafeNonEmptyBeadID. Ahjo's `work`
 // takes any written work reference (docs/missions.md).
 #[test]
 fn brief_rejects_unsafe_work_references_without_writing() {
@@ -449,8 +449,8 @@ fn brief_rejects_unsafe_work_references_without_writing() {
         .patch(
             "brief",
             pre(&edit),
-            MissionChange::CreateFormation {
-                kind: "solo".into(),
+            MissionChange::CreateStep {
+                formation: "solo".into(),
                 title: "Ship".into(),
                 x: 0,
                 y: 0,
@@ -458,7 +458,7 @@ fn brief_rejects_unsafe_work_references_without_writing() {
             "",
         )
         .unwrap();
-    let id = edit.mission.formations[0].id.clone();
+    let id = edit.mission.steps[0].id.clone();
     let path = dir.0.join("missions/brief.mission.toml");
     let before = std::fs::read(&path).unwrap();
     for work in [
@@ -475,7 +475,7 @@ fn brief_rejects_unsafe_work_references_without_writing() {
                 "brief",
                 pre(&edit),
                 MissionChange::SetBrief {
-                    formation_id: id.clone(),
+                    step_id: id.clone(),
                     goal: "Ship".into(),
                     work: work.into(),
                     repository: String::new(),
@@ -493,7 +493,7 @@ fn brief_rejects_unsafe_work_references_without_writing() {
             "brief",
             pre(&edit),
             MissionChange::SetBrief {
-                formation_id: id,
+                step_id: id,
                 goal: "Ship".into(),
                 repository: String::new(),
                 work: "srv-abc.2".into(),
@@ -504,7 +504,7 @@ fn brief_rejects_unsafe_work_references_without_writing() {
         )
         .unwrap();
     assert_eq!(
-        saved.mission.formations[0].brief.as_ref().unwrap().work,
+        saved.mission.steps[0].brief.as_ref().unwrap().work,
         "srv-abc.2"
     );
     let mut latest = saved;
@@ -514,7 +514,7 @@ fn brief_rejects_unsafe_work_references_without_writing() {
                 "brief",
                 pre(&latest),
                 MissionChange::SetBrief {
-                    formation_id: latest.mission.formations[0].id.clone(),
+                    step_id: latest.mission.steps[0].id.clone(),
                     goal: "Ship".into(),
                     work: work.into(),
                     repository: String::new(),
@@ -537,8 +537,8 @@ fn slots_share_a_role_but_keep_settings_and_exactly_one_controller() {
         .patch(
             "team",
             pre(&edit),
-            MissionChange::CreateFormation {
-                kind: "orchestrated".into(),
+            MissionChange::CreateStep {
+                formation: "orchestrated".into(),
                 title: "Team".into(),
                 x: 0,
                 y: 0,
@@ -546,7 +546,7 @@ fn slots_share_a_role_but_keep_settings_and_exactly_one_controller() {
             "",
         )
         .unwrap();
-    let team = edit.mission.formations[0].clone();
+    let team = edit.mission.steps[0].clone();
     for (slot, harness, model, effort) in [
         (&team.slots[0], "openai-codex", "", "medium"),
         (&team.slots[1], "claude-code", "opus", "low"),
@@ -556,7 +556,7 @@ fn slots_share_a_role_but_keep_settings_and_exactly_one_controller() {
                 "team",
                 pre(&edit),
                 MissionChange::AssignSlot {
-                    formation_id: team.id.clone(),
+                    step_id: team.id.clone(),
                     slot_id: slot.id.clone(),
                     agent_id: "builder".into(),
                     harness: harness.into(),
@@ -572,13 +572,13 @@ fn slots_share_a_role_but_keep_settings_and_exactly_one_controller() {
             "team",
             pre(&edit),
             MissionChange::MakeController {
-                formation_id: team.id,
+                step_id: team.id,
                 slot_id: team.slots[1].id.clone(),
             },
             "",
         )
         .unwrap();
-    let slots = &edit.mission.formations[0].slots;
+    let slots = &edit.mission.steps[0].slots;
     assert_eq!(slots[0].agent_id, "builder");
     assert_eq!(slots[1].agent_id, "builder");
     assert_eq!(

@@ -406,11 +406,11 @@ fn accept_editor_operation(
 ) {
     let mut accept = |range| base.accept_fields(submitted, range);
     match patch {
-        MissionChange::EditFormation { .. } => {
+        MissionChange::EditStep { .. } => {
             accept(0..2);
             accept(3..7);
         }
-        MissionChange::UpdateFormation {
+        MissionChange::UpdateStep {
             device: Some(_), ..
         } => accept(2..3),
         MissionChange::AssignSlot { .. } => accept(10..14),
@@ -450,7 +450,7 @@ pub(super) fn board_body(patch: &MissionChange, rev: i64) -> SingleEdit<'_> {
 }
 
 pub(super) fn session_patch(id: &str, fresh: bool) -> MissionChange {
-    MissionChange::UpdateFormation {
+    MissionChange::UpdateStep {
         id: id.into(),
         title: None,
         device: None,
@@ -465,22 +465,22 @@ pub(super) fn port_patch(
     label: &str,
     kind: &str,
 ) -> Option<MissionChange> {
-    let formation_id = id.into();
+    let step_id = id.into();
     Some(match op {
         "input" | "output" => MissionChange::AddPort {
-            formation_id,
+            step_id,
             direction: op.into(),
             label: label.into(),
             kind: kind.into(),
         },
         "update" => MissionChange::UpdatePort {
-            formation_id,
+            step_id,
             port_id: port.unwrap_or_default().into(),
             label: Some(label.into()),
             kind: Some(kind.into()),
         },
         "remove" => MissionChange::RemovePort {
-            formation_id,
+            step_id,
             port_id: port.unwrap_or_default().into(),
         },
         _ => return None,
@@ -532,10 +532,10 @@ pub(super) fn update_limit_patch(
     }))
 }
 
-pub(super) fn formation_type_patch(id: &str, kind: &str, slot: &str) -> MissionChange {
-    MissionChange::SetFormationType {
+pub(super) fn step_formation_patch(id: &str, kind: &str, slot: &str) -> MissionChange {
+    MissionChange::SetStepFormation {
         id: id.into(),
-        kind: kind.into(),
+        formation: kind.into(),
         keep_slot_id: slot.into(),
         slots: None,
     }
@@ -543,14 +543,14 @@ pub(super) fn formation_type_patch(id: &str, kind: &str, slot: &str) -> MissionC
 
 pub(super) fn name_agent_patch(id: &str, slot: &str, agent: &str) -> MissionChange {
     MissionChange::NameAgent {
-        formation_id: id.into(),
+        step_id: id.into(),
         slot_id: slot.into(),
         agent: agent.into(),
     }
 }
 
 pub(super) fn device_patch(id: &str, device: &str) -> MissionChange {
-    MissionChange::UpdateFormation {
+    MissionChange::UpdateStep {
         id: id.into(),
         title: None,
         device: Some(device.into()),
@@ -561,7 +561,7 @@ pub(super) fn device_patch(id: &str, device: &str) -> MissionChange {
 pub(super) fn delete_card_patch(kind: EditKind, id: &str) -> MissionChange {
     let id = id.to_owned();
     match kind {
-        EditKind::Step => MissionChange::DeleteFormation { id },
+        EditKind::Step => MissionChange::DeleteStep { id },
         EditKind::Input => MissionChange::DeleteInputCard { id },
         EditKind::Gate => MissionChange::DeleteGate { id },
         EditKind::End => MissionChange::DeleteEnd { id },
@@ -576,7 +576,7 @@ mod tests {
     fn immediate_board_edits_decode() {
         for patch in [
             session_patch("step", true),
-            formation_type_patch("step", "peer", "slot"),
+            step_formation_patch("step", "peer", "slot"),
             name_agent_patch("step", "slot", "writer"),
             device_patch("step", "node/environment"),
             crate::store::staffing::Staffing {
@@ -618,7 +618,7 @@ mod tests {
         accept_editor_operation(
             &mut base,
             &submitted,
-            &MissionChange::EditFormation {
+            &MissionChange::EditStep {
                 id: "step".into(),
                 title: String::new(),
                 brief: None,

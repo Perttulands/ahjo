@@ -1,14 +1,14 @@
 use ahjo_mission_engine::{Harnesses, RoleStore, run_admission, validate};
-use ahjo_mission_model::{Formation, Mission, Port, Slot};
+use ahjo_mission_model::{Mission, Port, Slot, Step};
 use std::collections::BTreeMap;
 
 #[test]
 fn admission_checks_inputs_and_frozen_staffing_across_the_mission() {
     let mut mission =
         Mission::parse(include_str!("parity/runs/missions/solo-lab.mission.toml")).unwrap();
-    mission.formations.push(Formation {
+    mission.steps.push(Step {
         id: "unreachable".into(),
-        kind: "solo".into(),
+        formation: "solo".into(),
         slots: vec![Slot {
             id: "bad".into(),
             harness: "unknown".into(),
@@ -17,9 +17,9 @@ fn admission_checks_inputs_and_frozen_staffing_across_the_mission() {
         }],
         ..Default::default()
     });
-    mission.formations.push(Formation {
+    mission.steps.push(Step {
         id: "unreachable_unstaffed".into(),
-        kind: "solo".into(),
+        formation: "solo".into(),
         slots: vec![Slot {
             id: "empty".into(),
             ..Default::default()
@@ -84,7 +84,7 @@ fn a_reached_step_with_an_input_nothing_feeds_is_refused_before_the_run() {
             .collect::<Vec<_>>()
     };
     assert_eq!(unfed(&admit(&mission, "inp_hello", false)), vec![]);
-    mission.formations[0].inputs.push(Port {
+    mission.steps[0].inputs.push(Port {
         id: "port_more".into(),
         label: "More".into(),
         ..Default::default()

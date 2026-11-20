@@ -43,7 +43,7 @@ pub(crate) fn apply(
 ) -> Result<LayoutNode, Error> {
     let id = match &node {
         RestoredNode::InputCard(n) => &n.id,
-        RestoredNode::Formation(n) => &n.id,
+        RestoredNode::Step(n) => &n.id,
         RestoredNode::Gate(n) => &n.id,
         RestoredNode::End(n) => &n.id,
         RestoredNode::Limit(n) => &n.id,
@@ -51,7 +51,7 @@ pub(crate) fn apply(
     .clone();
     if !valid_id(&id)
         || mission.input_cards.iter().any(|n| n.id == id)
-        || mission.formation(&id).is_some()
+        || mission.step(&id).is_some()
         || mission.gate(&id).is_some()
         || mission.end(&id).is_some()
         || mission.limits.iter().any(|n| n.id == id)
@@ -75,11 +75,11 @@ pub(crate) fn apply(
                 },
             )?;
         }
-        RestoredNode::Formation(n) => {
-            if !["solo", "peer", "orchestrated"].contains(&n.kind.as_str()) {
+        RestoredNode::Step(n) => {
+            if !["solo", "peer", "orchestrated"].contains(&n.formation.as_str()) {
                 return Err(Error::new(
-                    "unsupported_formation_type",
-                    "invalid formation type",
+                    "unsupported_step_formation",
+                    "invalid step formation",
                 ));
             }
             let mut ports = HashSet::new();
@@ -103,12 +103,12 @@ pub(crate) fn apply(
                 }
             }
             let controllers = n.slots.iter().filter(|s| s.controller).count();
-            if match n.kind.as_str() {
+            if match n.formation.as_str() {
                 "solo" => n.slots.len() != 1,
                 "peer" => n.slots.len() < 2 || controllers != 0,
                 _ => n.slots.len() < 2 || controllers != 1,
             } {
-                return Err(invalid("invalid formation shape"));
+                return Err(invalid("invalid step shape"));
             }
             let mut seen = HashSet::new();
             for slot in &n.slots {
@@ -121,7 +121,7 @@ pub(crate) fn apply(
                         .all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-')
                     || !seen.insert(&slot.id)
                     || mission
-                        .formations
+                        .steps
                         .iter()
                         .any(|f| f.slots.iter().any(|s| s.id == slot.id))
                 {
@@ -132,7 +132,7 @@ pub(crate) fn apply(
                 crate::authoring_create::file_refs(&mut brief.files)?;
                 crate::authoring_staff::check_work(&brief.work)?;
             }
-            put(doc, "formation", n, index)?;
+            put(doc, "step", n, index)?;
         }
         RestoredNode::Gate(n) => {
             crate::authoring_controls::check_gate(n)?;

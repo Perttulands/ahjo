@@ -260,7 +260,7 @@ fn designs_a_multi_gate_mission_and_shows_findings_on_the_canvas(cx: &mut TestAp
     click(cx, &next);
     until(cx, "next step wired", |_| {
         let m = read();
-        m["formation"].as_array().unwrap().len() == 1
+        m["step"].as_array().unwrap().len() == 1
             && m["connection"]
                 .as_array()
                 .unwrap()
@@ -270,10 +270,7 @@ fn designs_a_multi_gate_mission_and_shows_findings_on_the_canvas(cx: &mut TestAp
     until(cx, "next step open", |cx| has(cx, "step-title"));
     // Once something follows the Input, its + is gone: no wire runs past it.
     until(cx, "+ gone once wired", |cx| !has(cx, &next));
-    for (button, field, count) in [
-        ("new-step", "formation", 2),
-        ("menu-label-Add gate", "gate", 1),
-    ] {
+    for (button, field, count) in [("new-step", "step", 2), ("menu-label-Add gate", "gate", 1)] {
         until(cx, "board ready for edit", |cx| has(cx, "board-ready"));
         if button != "new-step" {
             click(cx, "edit-more");
@@ -314,10 +311,10 @@ fn designs_a_multi_gate_mission_and_shows_findings_on_the_canvas(cx: &mut TestAp
     until(cx, "gate editor", |cx| has(cx, "step-extra"));
     click(cx, "step-extra");
     cx.simulate_keystrokes("ctrl-a");
-    cx.simulate_input("formation");
+    cx.simulate_input("step");
     click(cx, "step-save");
     until(cx, "judge gate saved", |cx| !has(cx, "step-extra"));
-    assert_eq!(read()["gate"][0]["kinds"][0], "formation");
+    assert_eq!(read()["gate"][0]["kinds"][0], "step");
     for (button, field, count) in [
         ("menu-label-Add gate", "gate", 2),
         ("menu-label-Add end", "end", 1),
@@ -334,9 +331,6 @@ fn designs_a_multi_gate_mission_and_shows_findings_on_the_canvas(cx: &mut TestAp
     }
     let doc = read();
     assert_eq!(doc["gate"][1]["kinds"][0], "human");
-    let selector = format!(
-        "validation-card-{}",
-        doc["formation"][0]["id"].as_str().unwrap()
-    );
+    let selector = format!("validation-card-{}", doc["step"][0]["id"].as_str().unwrap());
     until(cx, "finding on a step card", |cx| has(cx, &selector));
 }

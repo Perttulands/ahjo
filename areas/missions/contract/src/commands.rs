@@ -8,8 +8,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::document_commands::{AppliedMission, ApplyMission, ExportMission, ExportedMission};
 use crate::{
-    EditLayout, End, Finding, Formation, Gate, InputCard, Layout, Limit, Mission, MissionArchive,
-    MissionDeletion, MissionListing, document::NotesDocument, patch::EditRequest,
+    EditLayout, End, Finding, Gate, InputCard, Layout, Limit, Mission, MissionArchive,
+    MissionDeletion, MissionListing, Step, document::NotesDocument, patch::EditRequest,
 };
 
 /// List the missions on this node.
@@ -299,7 +299,7 @@ pub struct HandoverStep {
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(untagged)]
 pub enum HandoverStepDetail {
-    Formation {
+    Step {
         #[serde(flatten)]
         worker: HandoverWorker,
         #[serde(skip_serializing_if = "Option::is_none")]
@@ -398,7 +398,7 @@ pub struct MissionEdited {
 #[serde(rename_all = "snake_case")]
 pub enum AddedCard {
     InputCard(InputCard),
-    Formation(Formation),
+    Step(Step),
     Gate(Gate),
     End(End),
     Limit(Limit),

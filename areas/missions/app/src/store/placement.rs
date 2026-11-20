@@ -1,4 +1,4 @@
-//! Where a step runs (#124, #231): a formation's `device` names an
+//! Where a step runs (#124, #231): a step's `device` names an
 //! environment as `<device>/<environment>`, exactly as the node validates and
 //! places it, and blank runs it on the run's coordinator.
 

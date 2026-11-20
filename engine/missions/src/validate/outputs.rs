@@ -15,30 +15,26 @@ const KINDS: [&str; 3] = [KIND_TEXT, KIND_FILE, KIND_FOLDER];
 /// Only output ports carry a kind, and it is text, file or folder.
 pub fn port_kind_findings(mission: &Mission) -> Vec<Finding> {
     let mut findings = Vec::new();
-    for formation in &mission.formations {
-        let owner = possessive(mission.node_name(&formation.id));
-        for port in formation
-            .inputs
-            .iter()
-            .filter(|port| port.kind() != KIND_TEXT)
-        {
+    for step in &mission.steps {
+        let owner = possessive(mission.node_name(&step.id));
+        for port in step.inputs.iter().filter(|port| port.kind() != KIND_TEXT) {
             findings.push(Finding::new(
                 Code::InvalidPortKind,
-                &formation.id,
+                &step.id,
                 format!(
                     "{owner} input {} has kind {:?}; only output ports carry a kind",
                     port.id, port.kind
                 ),
             ));
         }
-        for port in formation
+        for port in step
             .outputs
             .iter()
             .filter(|port| !KINDS.contains(&port.kind()))
         {
             findings.push(Finding::new(
                 Code::InvalidPortKind,
-                &formation.id,
+                &step.id,
                 format!(
                     "{owner} output {} has kind {:?}; use text, file or folder",
                     port.id, port.kind
@@ -134,10 +130,7 @@ fn declaration_problem(output: &MissionOutput, seen: &HashSet<&str>) -> Option<S
 /// The step and output port a mission output's `from` names.
 fn bound_port<'a>(mission: &'a Mission, from: &str) -> Option<(&'a str, &'a Port)> {
     let (step, port) = split_endpoint(from)?;
-    let formation = mission.formation(step)?;
-    let port = formation
-        .outputs
-        .iter()
-        .find(|candidate| candidate.id == port)?;
-    Some((&formation.id, port))
+    let step = mission.step(step)?;
+    let port = step.outputs.iter().find(|candidate| candidate.id == port)?;
+    Some((&step.id, port))
 }

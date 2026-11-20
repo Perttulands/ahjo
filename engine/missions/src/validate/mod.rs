@@ -6,12 +6,12 @@
 //! own file; this one runs them and sorts the report.
 
 mod files;
-mod formations;
 pub(crate) mod inputs;
 mod limits;
 mod nodes;
 mod outputs;
 mod staffing;
+mod steps;
 mod wiring;
 
 use crate::harness::Harnesses;
@@ -25,9 +25,9 @@ pub fn validate(mission: &Mission, roles: &RoleStore, harnesses: &Harnesses) -> 
     let errors = &mut report.errors;
     errors.extend(wiring::connection_findings(mission));
     errors.extend(wiring::gate_findings(mission));
-    errors.extend(formations::shape_findings(mission));
-    errors.extend(formations::slot_id_findings(mission));
-    errors.extend(formations::device_findings(mission));
+    errors.extend(steps::shape_findings(mission));
+    errors.extend(steps::slot_id_findings(mission));
+    errors.extend(steps::device_findings(mission));
     errors.extend(nodes::findings(mission));
     let (limit_errors, limit_warnings) = limits::findings(mission);
     errors.extend(limit_errors);
@@ -60,9 +60,9 @@ fn possessive(name: &str) -> String {
 
 /// Capabilities the runtime cannot execute, independent of incomplete drafts.
 pub(crate) fn unsupported(mission: &Mission) -> Vec<ahjo_mission_model::Finding> {
-    let mut findings: Vec<_> = formations::shape_findings(mission)
+    let mut findings: Vec<_> = steps::shape_findings(mission)
         .into_iter()
-        .filter(|finding| finding.code == ahjo_mission_model::Code::UnsupportedFormation)
+        .filter(|finding| finding.code == ahjo_mission_model::Code::UnsupportedStep)
         .collect();
     findings.extend(wiring::unsupported_human_channels(mission));
     findings

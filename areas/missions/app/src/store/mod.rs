@@ -232,7 +232,7 @@ mod tests {
 pub(crate) mod flow_tests {
     use ahjo_missions_contract::{
         Mission,
-        flow::{Decider, StepKind, Target, build},
+        flow::{Decider, FlowStepKind, Target, build},
     };
 
     /// Archon's delivery mission, as the node serves it.
@@ -262,7 +262,7 @@ pub(crate) mod flow_tests {
             ]
         );
         assert_eq!(flow.judge_of["fmn_beads_reviewer"], "gate_beads_review");
-        let StepKind::Gate {
+        let FlowStepKind::Gate {
             deciders,
             judges,
             fail,
@@ -281,8 +281,8 @@ pub(crate) mod flow_tests {
                 ..
             }
         ));
-        let StepKind::Formation { next } = &flow.sections[0].steps[4].kind else {
-            panic!("a formation")
+        let FlowStepKind::Step { next } = &flow.sections[0].steps[4].kind else {
+            panic!("a step")
         };
         assert!(matches!(&next[0], Target::End { outcome, .. } if outcome == "done"));
     }

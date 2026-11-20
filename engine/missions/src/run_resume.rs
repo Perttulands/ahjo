@@ -126,9 +126,9 @@ impl Coordinator {
         let start = RunStart {
             mission: projection.mission_slug,
             input_card_id: projection.input_card_id,
-            formation_id: events[0]
+            step_id: events[0]
                 .data
-                .get("formation_id")
+                .get("step_id")
                 .and_then(|v| v.as_str())
                 .unwrap_or("")
                 .into(),

@@ -102,7 +102,7 @@ fn editing_decoded_multiline_toml_keeps_unrelated_values() {
     let dir = Scratch::new();
     std::fs::create_dir_all(dir.0.join("missions")).unwrap();
     let path = dir.0.join("missions/quoted.mission.toml");
-    let raw = r###"schema = 2
+    let raw = r###"schema = 3
 id = 'msn_quoted'
 slug = 'quoted'
 "ti\u0074le" = """
@@ -266,8 +266,8 @@ fn invalid_layout_blocks_every_paired_node_create_and_delete() {
         .patch(
             "paired",
             pre(&edit),
-            MissionChange::CreateFormation {
-                kind: "solo".into(),
+            MissionChange::CreateStep {
+                formation: "solo".into(),
                 title: "Worker".into(),
                 x: 0,
                 y: 0,
@@ -310,8 +310,8 @@ fn invalid_layout_blocks_every_paired_node_create_and_delete() {
             x: 0,
             y: 0,
         },
-        MissionChange::CreateFormation {
-            kind: "solo".into(),
+        MissionChange::CreateStep {
+            formation: "solo".into(),
             title: "New".into(),
             x: 0,
             y: 0,
@@ -330,8 +330,8 @@ fn invalid_layout_blocks_every_paired_node_create_and_delete() {
         MissionChange::DeleteInputCard {
             id: edit.mission.input_cards[0].id.clone(),
         },
-        MissionChange::DeleteFormation {
-            id: edit.mission.formations[0].id.clone(),
+        MissionChange::DeleteStep {
+            id: edit.mission.steps[0].id.clone(),
         },
         MissionChange::DeleteGate {
             id: edit.mission.gates[0].id.clone(),
@@ -355,8 +355,8 @@ fn note_threads_allow_only_the_author_to_edit_or_delete() {
         .patch(
             "thread",
             pre(&edit),
-            MissionChange::CreateFormation {
-                kind: "solo".into(),
+            MissionChange::CreateStep {
+                formation: "solo".into(),
                 title: "Work".into(),
                 x: 0,
                 y: 0,
@@ -364,7 +364,7 @@ fn note_threads_allow_only_the_author_to_edit_or_delete() {
             "",
         )
         .unwrap();
-    let target = edit.mission.formations[0].id.clone();
+    let target = edit.mission.steps[0].id.clone();
     let first = store
         .patch_notes(
             "thread",
@@ -515,14 +515,14 @@ fn empty_and_populated_inline_node_arrays_are_editable() {
     store.create_mission("inline", "Inline", "").unwrap();
     let path = dir.0.join("missions/inline.mission.toml");
     let raw = std::fs::read_to_string(&path).unwrap();
-    std::fs::write(&path, format!("{raw}formation = []\ngate = [{{ id = 'gate_existing', title = 'Review', kinds = ['human'] }}]\nconnection = []\n")).unwrap();
+    std::fs::write(&path, format!("{raw}step = []\ngate = [{{ id = 'gate_existing', title = 'Review', kinds = ['human'] }}]\nconnection = []\n")).unwrap();
     let edit = store.mission_edit("inline").unwrap();
     let edit = store
         .patch(
             "inline",
             pre(&edit),
-            MissionChange::CreateFormation {
-                kind: "solo".into(),
+            MissionChange::CreateStep {
+                formation: "solo".into(),
                 title: "Worker".into(),
                 x: 4,
                 y: 5,
@@ -530,13 +530,13 @@ fn empty_and_populated_inline_node_arrays_are_editable() {
             "",
         )
         .unwrap();
-    let formation = edit.mission.formations[0].id.clone();
+    let step = edit.mission.steps[0].id.clone();
     let edit = store
         .patch(
             "inline",
             pre(&edit),
-            MissionChange::UpdateFormation {
-                id: formation.clone(),
+            MissionChange::UpdateStep {
+                id: step.clone(),
                 title: Some("Renamed".into()),
                 device: None,
                 fresh: None,
@@ -544,7 +544,7 @@ fn empty_and_populated_inline_node_arrays_are_editable() {
             "",
         )
         .unwrap();
-    assert_eq!(edit.mission.formations[0].title, "Renamed");
+    assert_eq!(edit.mission.steps[0].title, "Renamed");
     let edit = store
         .patch(
             "inline",
@@ -562,11 +562,11 @@ fn empty_and_populated_inline_node_arrays_are_editable() {
         .patch(
             "inline",
             pre(&edit),
-            MissionChange::DeleteFormation { id: formation },
+            MissionChange::DeleteStep { id: step },
             "",
         )
         .unwrap();
-    assert!(edit.mission.formations.is_empty());
+    assert!(edit.mission.steps.is_empty());
     let edit = store
         .patch(
             "inline",
@@ -581,19 +581,19 @@ fn empty_and_populated_inline_node_arrays_are_editable() {
 }
 
 #[test]
-fn populated_inline_formations_and_connections_can_be_updated_and_deleted() {
+fn populated_inline_steps_and_connections_can_be_updated_and_deleted() {
     let dir = Scratch::new();
     let store = Store::new(&dir.0);
     store.create_mission("inline", "Inline", "").unwrap();
     let path = dir.0.join("missions/inline.mission.toml");
     let raw = std::fs::read_to_string(&path).unwrap();
-    std::fs::write(&path, format!("{raw}formation = [{{ id = 'fmn_a', type = 'solo', title = 'A', slot = [{{ id = 'slot_a', label = 'Worker' }}], output = [{{ id = 'port_out', label = 'Out' }}] }}, {{ id = 'fmn_b', type = 'solo', title = 'B', slot = [{{ id = 'slot_b', label = 'Worker' }}], input = [{{ id = 'port_in', label = 'In' }}] }}]\nconnection = [{{ id = 'edge_a', from = 'fmn_a:port_out', to = 'fmn_b:port_in' }}]\n")).unwrap();
+    std::fs::write(&path, format!("{raw}step = [{{ id = 'fmn_a', formation = 'solo', title = 'A', slot = [{{ id = 'slot_a', label = 'Worker' }}], output = [{{ id = 'port_out', label = 'Out' }}] }}, {{ id = 'fmn_b', formation = 'solo', title = 'B', slot = [{{ id = 'slot_b', label = 'Worker' }}], input = [{{ id = 'port_in', label = 'In' }}] }}]\nconnection = [{{ id = 'edge_a', from = 'fmn_a:port_out', to = 'fmn_b:port_in' }}]\n")).unwrap();
     let edit = store.mission_edit("inline").unwrap();
     let edit = store
         .patch(
             "inline",
             pre(&edit),
-            MissionChange::UpdateFormation {
+            MissionChange::UpdateStep {
                 id: "fmn_a".into(),
                 title: Some("Updated".into()),
                 device: None,
@@ -602,14 +602,14 @@ fn populated_inline_formations_and_connections_can_be_updated_and_deleted() {
             "",
         )
         .unwrap();
-    assert_eq!(edit.mission.formations[0].title, "Updated");
+    assert_eq!(edit.mission.steps[0].title, "Updated");
     // A step is placed on an environment and back on the coordinator (#124).
     let place = |edit: &ahjo_mission_model::Edit, device: &str| {
         store
             .patch(
                 "inline",
                 pre(edit),
-                MissionChange::UpdateFormation {
+                MissionChange::UpdateStep {
                     id: "fmn_a".into(),
                     title: None,
                     device: Some(device.into()),
@@ -620,19 +620,19 @@ fn populated_inline_formations_and_connections_can_be_updated_and_deleted() {
             .unwrap()
     };
     let edit = place(&edit, " landmass/windows ");
-    assert_eq!(edit.mission.formations[0].device, "landmass/windows");
+    assert_eq!(edit.mission.steps[0].device, "landmass/windows");
     let edit = place(&edit, "");
-    assert_eq!(edit.mission.formations[0].device, "");
+    assert_eq!(edit.mission.steps[0].device, "");
     assert!(!std::fs::read_to_string(&path).unwrap().contains("device"));
     let edit = store
         .patch(
             "inline",
             pre(&edit),
-            MissionChange::DeleteFormation { id: "fmn_a".into() },
+            MissionChange::DeleteStep { id: "fmn_a".into() },
             "",
         )
         .unwrap();
-    assert_eq!(edit.mission.formations.len(), 1);
+    assert_eq!(edit.mission.steps.len(), 1);
     assert!(edit.mission.connections.is_empty());
 }
 

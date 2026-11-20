@@ -1,5 +1,5 @@
 //! Where a run is, read from its ledger events: each step's state, the
-//! places it is now (Archon's `formationsRunState.ts`, ported as it is), and
+//! places it is now (Archon's `stepsRunState.ts`, ported as it is), and
 //! the run bar's words for them.
 
 use ahjo_missions_contract::{PublicEvent as RunEvent, RunProjection as Run};

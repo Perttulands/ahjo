@@ -1,6 +1,5 @@
 use ahjo_mission_engine::{
-    Coordinator, ExecutionSink, Executor, FormationExecution, FormationResult, LabExecutor,
-    RunSettings,
+    Coordinator, ExecutionSink, Executor, LabExecutor, RunSettings, StepExecution, StepResult,
 };
 use ahjo_mission_model::RunStart;
 use std::{
@@ -25,6 +24,18 @@ impl Scratch {
         )
         .unwrap();
         Self(p)
+    }
+
+    fn lock_state(&self) -> std::fs::File {
+        // A finished worker can still hold the coordinator while publishing
+        // its last update. Acquire the writer lock before rewriting run files.
+        let lock = std::fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(self.0.join("coordinator.lock"))
+            .unwrap();
+        lock.lock().unwrap();
+        lock
     }
 }
 impl Drop for Scratch {
@@ -62,6 +73,7 @@ fn a_legacy_dispatch_is_migrated_and_the_run_still_replays() {
         .unwrap();
     let before = c.run(&id).unwrap();
     drop(c);
+    let state_lock = dir.lock_state();
 
     let path = dir.0.join("runs").join(format!("{id}.ndjson"));
     let mut old = String::new();
@@ -82,6 +94,7 @@ fn a_legacy_dispatch_is_migrated_and_the_run_still_replays() {
     assert!(replaced);
     std::fs::write(&path, old).unwrap();
 
+    drop(state_lock);
     let c = Coordinator::open(&dir.0, RunSettings::default(), Box::new(LabExecutor)).unwrap();
     let after = c.run(&id).unwrap();
     assert!(after.r#final);
@@ -106,13 +119,13 @@ fn a_legacy_dispatch_is_migrated_and_the_run_still_replays() {
 fn shutdown_block_with_completed_evidence_never_schedules_on_open() {
     struct CompletedOnly;
     impl Executor for CompletedOnly {
-        fn execute_formation(
+        fn execute_step(
             &self,
-            request: FormationExecution,
+            request: StepExecution,
             sink: ExecutionSink,
-        ) -> Result<FormationResult, ahjo_mission_engine::Error> {
+        ) -> Result<StepResult, ahjo_mission_engine::Error> {
             LabExecutor
-                .execute_formation(request, sink)
+                .execute_step(request, sink)
                 .map_err(|error| error.message)
                 .map_err(|message: String| {
                     ahjo_mission_engine::Error::new("executor_error", message)
@@ -121,7 +134,7 @@ fn shutdown_block_with_completed_evidence_never_schedules_on_open() {
         fn recover_completed(
             &self,
             dispatch: ahjo_mission_engine::OpenDispatch,
-        ) -> Option<FormationResult> {
+        ) -> Option<StepResult> {
             LabExecutor.recover_completed(dispatch)
         }
     }
@@ -586,11 +599,11 @@ fn shutdown_fences_work_and_leaves_active_run_resumable() {
 fn shutdown_timeout_keeps_the_writer_lock_until_worker_exits() {
     struct Stubborn(Arc<AtomicUsize>);
     impl Executor for Stubborn {
-        fn execute_formation(
+        fn execute_step(
             &self,
-            _: FormationExecution,
+            _: StepExecution,
             _: ExecutionSink,
-        ) -> Result<FormationResult, ahjo_mission_engine::Error> {
+        ) -> Result<StepResult, ahjo_mission_engine::Error> {
             {
                 self.0.store(1, Ordering::Release);
                 std::thread::sleep(Duration::from_millis(400));
@@ -635,13 +648,13 @@ fn shutdown_timeout_keeps_the_writer_lock_until_worker_exits() {
 fn detached_seat_is_ended_before_a_new_attempt() {
     struct Seats(Arc<std::sync::Mutex<Vec<String>>>);
     impl Executor for Seats {
-        fn execute_formation(
+        fn execute_step(
             &self,
-            req: FormationExecution,
+            req: StepExecution,
             sink: ExecutionSink,
-        ) -> Result<FormationResult, ahjo_mission_engine::Error> {
+        ) -> Result<StepResult, ahjo_mission_engine::Error> {
             LabExecutor
-                .execute_formation(req, sink)
+                .execute_step(req, sink)
                 .map_err(|error| error.message)
                 .map_err(|message: String| {
                     ahjo_mission_engine::Error::new("executor_error", message)
@@ -721,13 +734,13 @@ fn detached_seat_is_ended_before_a_new_attempt() {
 fn aborting_a_blocked_run_ends_the_detached_seat() {
     struct Seats(Arc<std::sync::Mutex<Vec<String>>>);
     impl Executor for Seats {
-        fn execute_formation(
+        fn execute_step(
             &self,
-            req: FormationExecution,
+            req: StepExecution,
             sink: ExecutionSink,
-        ) -> Result<FormationResult, ahjo_mission_engine::Error> {
+        ) -> Result<StepResult, ahjo_mission_engine::Error> {
             LabExecutor
-                .execute_formation(req, sink)
+                .execute_step(req, sink)
                 .map_err(|error| error.message)
                 .map_err(|message: String| {
                     ahjo_mission_engine::Error::new("executor_error", message)
@@ -821,13 +834,13 @@ fn restart_at_each_ledger_cut_reaches_the_same_output() {
     type Artifacts = Vec<(String, Vec<u8>)>;
     struct CutLab(Arc<Mutex<Vec<Artifacts>>>);
     impl Executor for CutLab {
-        fn execute_formation(
+        fn execute_step(
             &self,
-            req: FormationExecution,
+            req: StepExecution,
             sink: ExecutionSink,
-        ) -> Result<FormationResult, ahjo_mission_engine::Error> {
-            (|| -> Result<FormationResult, String> {
-            let slot = &req.formation.slots[0];
+        ) -> Result<StepResult, ahjo_mission_engine::Error> {
+            (|| -> Result<StepResult, String> {
+            let slot = &req.step.slots[0];
             let dispatch = format!("dsp_{}_{}_{}", req.run_id, slot.id, req.attempt);
             std::fs::create_dir_all(&req.artifact_dir).map_err(|e| e.to_string())?;
             std::fs::write(req.artifact_dir.join("brief.md"), b"brief")
@@ -844,13 +857,13 @@ fn restart_at_each_ledger_cut_reaches_the_same_output() {
                     })
                     .collect()
             };
-            sink.emit(ahjo_mission_engine::ExecutionEvent { kind:"slot_dispatch".into(), slot_id:slot.id.clone(), data:serde_json::json!({"dispatch_id":dispatch,"node_id":req.formation.id,"slot_id":slot.id}).as_object().unwrap().clone() }).map_err(|error| error.message)?;
+            sink.emit(ahjo_mission_engine::ExecutionEvent { kind:"slot_dispatch".into(), slot_id:slot.id.clone(), data:serde_json::json!({"dispatch_id":dispatch,"node_id":req.step.id,"slot_id":slot.id}).as_object().unwrap().clone() }).map_err(|error| error.message)?;
             self.0.lock().unwrap().push(snapshot()?);
-            let result = FormationResult {
+            let result = StepResult {
                 status: "done".into(),
                 text: "stable output".into(),
                 outputs: req
-                    .formation
+                    .step
                     .outputs
                     .iter()
                     .map(|port| (port.id.clone(), serde_json::json!({"text":"stable output"})))
@@ -869,7 +882,7 @@ fn restart_at_each_ledger_cut_reaches_the_same_output() {
         fn reattach(
             &self,
             dispatch: ahjo_mission_engine::OpenDispatch,
-        ) -> Result<FormationResult, ahjo_mission_engine::Error> {
+        ) -> Result<StepResult, ahjo_mission_engine::Error> {
             LabExecutor
                 .reattach(dispatch)
                 .map_err(|error| error.message)
@@ -880,7 +893,7 @@ fn restart_at_each_ledger_cut_reaches_the_same_output() {
         fn recover_completed(
             &self,
             dispatch: ahjo_mission_engine::OpenDispatch,
-        ) -> Option<FormationResult> {
+        ) -> Option<StepResult> {
             LabExecutor.recover_completed(dispatch)
         }
     }
@@ -1136,11 +1149,11 @@ fn lab_run_completes_with_archon_sequence_and_lock_excludes_other_owners() {
 }
 struct Waiter(Arc<AtomicUsize>);
 impl Executor for Waiter {
-    fn execute_formation(
+    fn execute_step(
         &self,
-        r: FormationExecution,
+        r: StepExecution,
         _events: ExecutionSink,
-    ) -> Result<FormationResult, ahjo_mission_engine::Error> {
+    ) -> Result<StepResult, ahjo_mission_engine::Error> {
         {
             self.0.fetch_add(1, Ordering::SeqCst);
             while !r.canceled.load(Ordering::Acquire) {
@@ -1311,17 +1324,82 @@ fn a_step_placed_elsewhere_needs_a_repository_and_a_well_formed_place() {
     assert_eq!(c.run(&id).unwrap().status, "succeeded");
 }
 #[test]
-fn selected_formation_runs_without_replaying_the_input_card() {
+fn selected_step_runs_without_replaying_the_input_card() {
     let dir = Scratch::new();
     let c = Coordinator::open(&dir.0, RunSettings::default(), Box::new(LabExecutor)).unwrap();
     let mut req = request();
     req.input_card_id.clear();
-    req.formation_id = "fmn_work".into();
-    let id = c.start_formation(req).unwrap();
+    req.step_id = "fmn_work".into();
+    let id = c.start_step(req).unwrap();
     wait_final(&c, &id);
     let p = c.run(&id).unwrap();
     assert_eq!(p.status, "succeeded");
     assert!(!p.events.iter().any(|e| e.node_id == "inp_hello"));
+}
+
+#[test]
+fn a_schema_two_frozen_mission_and_selected_step_run_replay_after_upgrade() {
+    let dir = Scratch::new();
+    let c = Coordinator::open(&dir.0, RunSettings::default(), Box::new(LabExecutor)).unwrap();
+    let mut req = request();
+    req.input_card_id.clear();
+    req.step_id = "fmn_work".into();
+    let id = c.start_step(req).unwrap();
+    wait_final(&c, &id);
+    let before = c.run(&id).unwrap();
+    let mission = c.frozen_mission(&id).unwrap();
+    c.shutdown(Instant::now() + Duration::from_secs(10))
+        .unwrap();
+    drop(c);
+    let state_lock = dir.lock_state();
+
+    let runs = dir.0.join("runs");
+    let snapshot = runs.join(format!("{id}.snapshot.toml"));
+    let canonical = std::fs::read_to_string(&snapshot).unwrap();
+    let old = canonical
+        .replace("schema = 3", "schema = 2")
+        .replace("[[step", "[[formation")
+        .replace("[step.", "[formation.")
+        .replace("\nformation = ", "\ntype = ");
+    std::fs::write(&snapshot, old).unwrap();
+
+    let ledger_path = runs.join(format!("{id}.ndjson"));
+    let mut legacy = String::new();
+    let mut changed = false;
+    for line in std::fs::read_to_string(&ledger_path).unwrap().lines() {
+        let mut event: serde_json::Value = serde_json::from_str(line).unwrap();
+        if event["type"] == "run_started" {
+            let data = event["data"].as_object_mut().unwrap();
+            assert_eq!(data.remove("step_id").unwrap(), "fmn_work");
+            data.insert("formation_id".into(), "fmn_work".into());
+            changed = true;
+        } else if event["type"] == "node_started" && event["data"]["node_kind"] == "step" {
+            event["data"]["node_kind"] = "formation".into();
+        }
+        legacy.push_str(&serde_json::to_string(&event).unwrap());
+        legacy.push('\n');
+    }
+    assert!(changed);
+    std::fs::write(&ledger_path, legacy).unwrap();
+
+    drop(state_lock);
+    let c = Coordinator::open(&dir.0, RunSettings::default(), Box::new(LabExecutor)).unwrap();
+    let after = c.run(&id).unwrap();
+    assert_eq!(
+        serde_json::to_value(after).unwrap(),
+        serde_json::to_value(before).unwrap()
+    );
+    assert_eq!(c.frozen_mission(&id).unwrap(), mission);
+    assert!(
+        std::fs::read_to_string(&snapshot)
+            .unwrap()
+            .contains("schema = 3")
+    );
+    let ledger = ahjo_mission_engine::Ledger::new(&ledger_path, &id)
+        .read()
+        .unwrap();
+    assert_eq!(ledger[0].data["step_id"], "fmn_work");
+    assert!(!ledger[0].data.contains_key("formation_id"));
 }
 
 #[test]
@@ -1375,15 +1453,15 @@ struct VerifyLease {
     recorded: Arc<std::sync::atomic::AtomicBool>,
 }
 impl Executor for VerifyLease {
-    fn execute_formation(
+    fn execute_step(
         &self,
-        request: FormationExecution,
+        request: StepExecution,
         events: ExecutionSink,
-    ) -> Result<FormationResult, ahjo_mission_engine::Error> {
-        (|| -> Result<FormationResult, String> {
+    ) -> Result<StepResult, ahjo_mission_engine::Error> {
+        (|| -> Result<StepResult, String> {
         let dispatch = ahjo_mission_engine::ExecutionEvent {
             kind: "slot_dispatch".into(),
-            slot_id: request.formation.slots[0].id.clone(),
+            slot_id: request.step.slots[0].id.clone(),
             data: serde_json::json!({"dispatch_id":"dsp_test"})
                 .as_object()
                 .unwrap()
@@ -1402,14 +1480,14 @@ impl Executor for VerifyLease {
             .last()
             .is_some_and(|event| event.kind == "slot_dispatch");
         self.recorded.store(recorded, Ordering::Release);
-        events.emit(ahjo_mission_engine::ExecutionEvent { kind:"slot_result".into(),slot_id:request.formation.slots[0].id.clone(),data:serde_json::json!({"dispatch_id":"dsp_test","sentinel":{"run_id":request.run_id,"status":"ok"}}).as_object().unwrap().clone() }).map_err(|error| error.message)?;
+        events.emit(ahjo_mission_engine::ExecutionEvent { kind:"slot_result".into(),slot_id:request.step.slots[0].id.clone(),data:serde_json::json!({"dispatch_id":"dsp_test","sentinel":{"run_id":request.run_id,"status":"ok"}}).as_object().unwrap().clone() }).map_err(|error| error.message)?;
         let outputs = request
-            .formation
+            .step
             .outputs
             .iter()
             .map(|port| (port.id.clone(), serde_json::json!({"text":"done"})))
             .collect();
-        Ok(FormationResult {
+        Ok(StepResult {
             status: "done".into(),
             text: "done".into(),
             outputs,
@@ -1433,13 +1511,13 @@ fn executor_cannot_send_work_until_dispatch_is_durable() {
 
 struct MissingOutput;
 impl Executor for MissingOutput {
-    fn execute_formation(
+    fn execute_step(
         &self,
-        request: FormationExecution,
+        request: StepExecution,
         events: ExecutionSink,
-    ) -> Result<FormationResult, ahjo_mission_engine::Error> {
-        (|| -> Result<FormationResult, String> {
-        let slot_id = request.formation.slots[0].id.clone();
+    ) -> Result<StepResult, ahjo_mission_engine::Error> {
+        (|| -> Result<StepResult, String> {
+        let slot_id = request.step.slots[0].id.clone();
         events.emit(ahjo_mission_engine::ExecutionEvent {
             kind: "slot_dispatch".into(),
             slot_id: slot_id.clone(),
@@ -1449,7 +1527,7 @@ impl Executor for MissingOutput {
                 .clone(),
         }).map_err(|error| error.message)?;
         events.emit(ahjo_mission_engine::ExecutionEvent{kind:"slot_result".into(),slot_id,data:serde_json::json!({"dispatch_id":"dsp_missing_output","sentinel":{"run_id":request.run_id,"status":"ok"}}).as_object().unwrap().clone()}).map_err(|error| error.message)?;
-        Ok(FormationResult {
+        Ok(StepResult {
             status: "done".into(),
             text: "incomplete".into(),
             outputs: serde_json::Map::new(),
@@ -1458,7 +1536,7 @@ impl Executor for MissingOutput {
     }
 }
 #[test]
-fn a_formation_cannot_succeed_without_its_declared_outputs() {
+fn a_step_cannot_succeed_without_its_declared_outputs() {
     let dir = Scratch::new();
     let c = Coordinator::open(&dir.0, RunSettings::default(), Box::new(MissingOutput)).unwrap();
     let id = c.start_mission(request()).unwrap();
@@ -1513,13 +1591,13 @@ fn a_run_that_blocks_is_told_once_with_its_mission_and_why() {
 
 struct UnknownDispatch;
 impl Executor for UnknownDispatch {
-    fn execute_formation(
+    fn execute_step(
         &self,
-        request: FormationExecution,
+        request: StepExecution,
         events: ExecutionSink,
-    ) -> Result<FormationResult, ahjo_mission_engine::Error> {
-        (|| -> Result<FormationResult, String> {
-        events.emit(ahjo_mission_engine::ExecutionEvent{kind:"slot_result".into(),slot_id:request.formation.slots[0].id.clone(),data:serde_json::json!({"dispatch_id":"missing","sentinel":{"run_id":request.run_id,"status":"ok"}}).as_object().unwrap().clone()}).map_err(|error| error.message)?;
+    ) -> Result<StepResult, ahjo_mission_engine::Error> {
+        (|| -> Result<StepResult, String> {
+        events.emit(ahjo_mission_engine::ExecutionEvent{kind:"slot_result".into(),slot_id:request.step.slots[0].id.clone(),data:serde_json::json!({"dispatch_id":"missing","sentinel":{"run_id":request.run_id,"status":"ok"}}).as_object().unwrap().clone()}).map_err(|error| error.message)?;
         unreachable!()
      })().map_err(|message: String| ahjo_mission_engine::Error::new("executor_error", message))
     }
@@ -1548,13 +1626,13 @@ fn orphan_results_are_rejected_without_recording_a_slot_result() {
 
 struct WrongRunSentinel;
 impl Executor for WrongRunSentinel {
-    fn execute_formation(
+    fn execute_step(
         &self,
-        request: FormationExecution,
+        request: StepExecution,
         events: ExecutionSink,
-    ) -> Result<FormationResult, ahjo_mission_engine::Error> {
-        (|| -> Result<FormationResult, String> {
-        let slot_id = request.formation.slots[0].id.clone();
+    ) -> Result<StepResult, ahjo_mission_engine::Error> {
+        (|| -> Result<StepResult, String> {
+        let slot_id = request.step.slots[0].id.clone();
         events.emit(ahjo_mission_engine::ExecutionEvent {
             kind: "slot_dispatch".into(),
             slot_id: slot_id.clone(),
@@ -1607,16 +1685,16 @@ fn repository_runs_isolate_commit_and_land() {
     }
     struct WritingLab;
     impl Executor for WritingLab {
-        fn execute_formation(
+        fn execute_step(
             &self,
-            req: FormationExecution,
+            req: StepExecution,
             sink: ExecutionSink,
-        ) -> Result<FormationResult, ahjo_mission_engine::Error> {
-            (|| -> Result<FormationResult, String> {
-                std::fs::write(req.cwd.join(&req.formation.id), &req.run_id)
+        ) -> Result<StepResult, ahjo_mission_engine::Error> {
+            (|| -> Result<StepResult, String> {
+                std::fs::write(req.cwd.join(&req.step.id), &req.run_id)
                     .map_err(|e| e.to_string())?;
                 LabExecutor
-                    .execute_formation(req, sink)
+                    .execute_step(req, sink)
                     .map_err(|error| error.message)
             })()
             .map_err(|message: String| ahjo_mission_engine::Error::new("executor_error", message))
@@ -1625,17 +1703,16 @@ fn repository_runs_isolate_commit_and_land() {
     let dir = Scratch::new();
     let mission_path = dir.0.join("missions/hello.mission.toml");
     let mission = std::fs::read_to_string(&mission_path).unwrap();
-    let formation = mission
-        .split("[[formation]]")
+    let step = mission
+        .split("[[step]]")
         .nth(1)
         .unwrap()
         .split("[[end]]")
         .next()
         .unwrap();
     let second = format!(
-        "[[formation]]{}",
-        formation
-            .replace("fmn_work", "fmn_second")
+        "[[step]]{}",
+        step.replace("fmn_work", "fmn_second")
             .replace("slot_work", "slot_second")
     );
     let mission = mission
@@ -1735,16 +1812,16 @@ fn recovery_publishes_an_output_recorded_before_its_commit() {
     }
     struct Writing;
     impl Executor for Writing {
-        fn execute_formation(
+        fn execute_step(
             &self,
-            req: FormationExecution,
+            req: StepExecution,
             sink: ExecutionSink,
-        ) -> Result<FormationResult, ahjo_mission_engine::Error> {
-            (|| -> Result<FormationResult, String> {
+        ) -> Result<StepResult, ahjo_mission_engine::Error> {
+            (|| -> Result<StepResult, String> {
                 std::fs::write(req.cwd.join("turn-file"), "accepted turn")
                     .map_err(|e| e.to_string())?;
                 LabExecutor
-                    .execute_formation(req, sink)
+                    .execute_step(req, sink)
                     .map_err(|error| error.message)
             })()
             .map_err(|message: String| ahjo_mission_engine::Error::new("executor_error", message))
@@ -1870,17 +1947,17 @@ async fn wait_reports_a_human_gate_once_and_wakes_concurrent_drivers() {
     use std::sync::Condvar;
     struct HeldLab(Arc<(std::sync::Mutex<bool>, Condvar)>);
     impl Executor for HeldLab {
-        fn execute_formation(
+        fn execute_step(
             &self,
-            execution: FormationExecution,
+            execution: StepExecution,
             sink: ExecutionSink,
-        ) -> Result<FormationResult, ahjo_mission_engine::Error> {
+        ) -> Result<StepResult, ahjo_mission_engine::Error> {
             let (lock, signal) = &*self.0;
             let mut released = lock.lock().unwrap();
             while !*released {
                 released = signal.wait(released).unwrap();
             }
-            LabExecutor.execute_formation(execution, sink)
+            LabExecutor.execute_step(execution, sink)
         }
     }
     let dir = Scratch::new();

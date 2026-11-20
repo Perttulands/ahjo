@@ -12,10 +12,10 @@ fn request(
     dispatch: &RunEvent,
     control: Option<&Control>,
 ) -> Result<OpenDispatch, String> {
-    let formation = mission
-        .formation(&dispatch.node_id)
+    let step = mission
+        .step(&dispatch.node_id)
         .cloned()
-        .ok_or_else(|| "formation missing from snapshot".to_owned())?;
+        .ok_or_else(|| "step missing from snapshot".to_owned())?;
     Ok(OpenDispatch {
         run_id: id.into(),
         dispatch_id: dispatch
@@ -27,7 +27,7 @@ fn request(
         node_id: dispatch.node_id.clone(),
         slot_id: dispatch.slot_id.clone(),
         attempt: dispatch.attempt,
-        formation,
+        step,
         dispatch_data: dispatch.data.clone(),
         artifact_dir: crate::run_capture::attempt_dir(c, id, &dispatch.node_id, dispatch.attempt)
             .map_err(|e| e.to_string())?,
@@ -46,7 +46,7 @@ fn request(
 pub(crate) fn stage_completed(c: &Coordinator, id: &str, mission: &Mission, dispatch: &RunEvent) {
     if let Ok(request) = request(c, id, mission, dispatch, None)
         && let Some(result) = c.inner.executor.recover_completed(request.clone())
-        && valid(&request.formation, &result)
+        && valid(&request.step, &result)
     {
         c.inner
             .recovered
@@ -71,23 +71,23 @@ pub(crate) fn recover_completed(
     let Some(result) = c.inner.executor.recover_completed(request.clone()) else {
         return Ok(false);
     };
-    if !valid(&request.formation, &result) {
+    if !valid(&request.step, &result) {
         return Ok(false);
     }
     keep(c, id, mission, req, workspace, control, dispatch, result)?;
     Ok(true)
 }
 
-fn valid(formation: &ahjo_mission_model::Formation, result: &crate::FormationResult) -> bool {
+fn valid(step: &ahjo_mission_model::Step, result: &crate::StepResult) -> bool {
     result.status == "done"
-        && formation
+        && step
             .outputs
             .iter()
             .all(|p| result.outputs.contains_key(&p.id))
         && result
             .outputs
             .keys()
-            .all(|id| formation.outputs.iter().any(|p| &p.id == id))
+            .all(|id| step.outputs.iter().any(|p| &p.id == id))
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -99,7 +99,7 @@ fn keep(
     workspace: &Path,
     control: &Control,
     dispatch: &RunEvent,
-    result: crate::FormationResult,
+    result: crate::StepResult,
 ) -> io::Result<()> {
     let dispatch_id = dispatch
         .data
@@ -324,8 +324,8 @@ pub(crate) fn resolve(
                         .map_err(|error| error.message)?
                 }
             };
-            if !valid(&request.formation, &result) {
-                return Err("reattached formation returned invalid outputs".into());
+            if !valid(&request.step, &result) {
+                return Err("reattached step returned invalid outputs".into());
             }
             Ok(result)
         });

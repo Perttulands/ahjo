@@ -46,7 +46,7 @@ pub mod error {
     pub const RELATIVE_FILE_REFERENCE: &str = "relative_file_reference";
     pub const SELF_WIRE: &str = "self_wire";
     pub const SLOT_CHOICE_REQUIRED: &str = "slot_choice_required";
-    pub const UNSUPPORTED_FORMATION_TYPE: &str = "unsupported_formation_type";
+    pub const UNSUPPORTED_STEP_FORMATION: &str = "unsupported_step_formation";
     pub const UNSUPPORTED_SCHEMA: &str = "unsupported_schema";
     pub const INVALID_DEFINITION_SOURCE: &str = "invalid_definition_source";
 }

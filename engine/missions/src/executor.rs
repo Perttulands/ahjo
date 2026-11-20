@@ -1,7 +1,7 @@
-//! Formation-level execution boundary. Executors report events; they never
+//! Step-level execution boundary. Executors report events; they never
 //! write a run ledger, so this boundary can later be placed on another node.
 use crate::BindingsSnapshot;
-use ahjo_mission_model::{Formation, RunInput, Slot, agent_session, fresh_session};
+use ahjo_mission_model::{RunInput, Slot, Step, agent_session, fresh_session};
 use serde_json::{Map, Value, json};
 use sha2::{Digest, Sha256};
 use std::path::PathBuf;
@@ -12,7 +12,7 @@ use std::sync::{
 };
 
 #[derive(Clone, Debug)]
-pub struct FormationExecution {
+pub struct StepExecution {
     pub run_id: String,
     /// What the mission's agent sessions are named under
     /// ([`ahjo_mission_model::agent_session`]); blank names seats by ids.
@@ -20,7 +20,7 @@ pub struct FormationExecution {
     /// The run's number as the Missions list shows it, naming a fresh
     /// attempt's sessions.
     pub run_number: u64,
-    pub formation: Formation,
+    pub step: Step,
     pub bindings: BindingsSnapshot,
     pub cwd: PathBuf,
     /// For a repository run's step placed on another environment, the turn
@@ -43,14 +43,14 @@ pub struct FormationExecution {
     pub stopping: Arc<AtomicBool>,
     pub limits: crate::AttemptLimits,
 }
-impl FormationExecution {
+impl StepExecution {
     /// The session name the seat requests and whether it stays for later runs.
     pub(crate) fn seat_session(&self, slot: &Slot) -> (String, bool) {
         if self.prefix.is_empty() {
             return (String::new(), false);
         }
-        let agent = self.formation.agent_of(slot);
-        if self.formation.fresh {
+        let agent = self.step.agent_of(slot);
+        if self.step.fresh {
             (
                 fresh_session(&self.prefix, &agent, self.run_number, self.attempt),
                 false,
@@ -90,7 +90,7 @@ impl ExecutionSink {
     }
 }
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
-pub struct FormationResult {
+pub struct StepResult {
     pub status: String,
     pub text: String,
     pub outputs: Map<String, Value>,
@@ -105,7 +105,7 @@ pub struct JudgeCorrection {
     pub error: String,
 }
 
-/// Identity and formation of a durable dispatch to observe again without sending it.
+/// Identity and step of a durable dispatch to observe again without sending it.
 #[derive(Clone, Debug)]
 pub struct OpenDispatch {
     pub run_id: String,
@@ -113,7 +113,7 @@ pub struct OpenDispatch {
     pub node_id: String,
     pub slot_id: String,
     pub attempt: i64,
-    pub formation: Formation,
+    pub step: Step,
     pub artifact_dir: PathBuf,
     pub dispatch_data: Map<String, Value>,
     pub canceled: Option<Arc<AtomicBool>>,
@@ -138,17 +138,17 @@ pub trait Executor: Send + Sync + 'static {
     fn seats(&self, _: &str) -> Result<Vec<crate::AgentSeat>, crate::Error> {
         Ok(Vec::new())
     }
-    fn execute_formation(
+    fn execute_step(
         &self,
-        execution: FormationExecution,
+        execution: StepExecution,
         events: ExecutionSink,
-    ) -> Result<FormationResult, crate::Error>;
-    fn reattach(&self, _: OpenDispatch) -> Result<FormationResult, crate::Error> {
+    ) -> Result<StepResult, crate::Error>;
+    fn reattach(&self, _: OpenDispatch) -> Result<StepResult, crate::Error> {
         Err("executor cannot reattach this dispatch".into())
             .map_err(|message: String| crate::Error::new("executor_error", message))
     }
     /// Non-blocking recovery of already completed evidence at startup.
-    fn recover_completed(&self, _: OpenDispatch) -> Option<FormationResult> {
+    fn recover_completed(&self, _: OpenDispatch) -> Option<StepResult> {
         None
     }
     /// Replay seat events saved while the coordinator was disconnected.
@@ -172,11 +172,7 @@ pub trait Executor: Send + Sync + 'static {
 /// Until seats are available, a real execution cannot be dispatched.
 pub struct UnavailableExecutor;
 impl Executor for UnavailableExecutor {
-    fn execute_formation(
-        &self,
-        _: FormationExecution,
-        _: ExecutionSink,
-    ) -> Result<FormationResult, crate::Error> {
+    fn execute_step(&self, _: StepExecution, _: ExecutionSink) -> Result<StepResult, crate::Error> {
         Err("seat executor is not available".into())
             .map_err(|message: String| crate::Error::new("executor_error", message))
     }
@@ -186,16 +182,16 @@ impl Executor for UnavailableExecutor {
 #[derive(Default)]
 pub struct LabExecutor;
 impl Executor for LabExecutor {
-    fn execute_formation(
+    fn execute_step(
         &self,
-        request: FormationExecution,
+        request: StepExecution,
         events: ExecutionSink,
-    ) -> Result<FormationResult, crate::Error> {
-        (|| -> Result<FormationResult, String> {
+    ) -> Result<StepResult, crate::Error> {
+        (|| -> Result<StepResult, String> {
         if !request.cwd.is_dir() {
             return Err("run cwd is unavailable".into());
         }
-        if let Some(goal) = request.formation.brief.as_ref().map(|b| b.goal.as_str())
+        if let Some(goal) = request.step.brief.as_ref().map(|b| b.goal.as_str())
             && let Some(duration) = goal
                 .split("archon-lab-work:")
                 .nth(1)
@@ -227,7 +223,7 @@ impl Executor for LabExecutor {
                         continue;
                     }
                     *sent = true;
-                    for slot in &request.formation.slots {
+                    for slot in &request.step.slots {
                         // A refused warning is one this seat already had.
                         let _ = events.emit(ExecutionEvent {
                             kind: "limit_warning".into(),
@@ -247,7 +243,7 @@ impl Executor for LabExecutor {
         }
         spend_lab_tokens(&request, &events)?;
         let result = lab_result(&request)?;
-        for slot in &request.formation.slots {
+        for slot in &request.step.slots {
             if request.canceled.load(Ordering::Acquire) {
                 return Err("canceled".into());
             }
@@ -263,12 +259,12 @@ impl Executor for LabExecutor {
             let mut brief = format!(
                 "run: {}\nnode: {}\nslot: {}\nharness: {}\ncwd: {}\ngoal: {}\ninput: {}\ncontext paths: {}\n",
                 request.run_id,
-                request.formation.id,
+                request.step.id,
                 slot.id,
                 slot.harness,
                 request.cwd.display(),
                 request
-                    .formation
+                    .step
                     .brief
                     .as_ref()
                     .map(|b| b.goal.as_str())
@@ -285,7 +281,7 @@ impl Executor for LabExecutor {
                 "attempt artifact directory: {}\noutput capture budget: 32 MiB per run\n",
                 request.artifact_dir.display()
             ));
-            for port in &request.formation.outputs {
+            for port in &request.step.outputs {
                 brief.push_str(&format!("output port: {} kind: {}\n", port.id, port.kind()));
                 if port.kind() != "text" {
                     brief.push_str(
@@ -294,14 +290,14 @@ impl Executor for LabExecutor {
                 }
             }
             if let Some(binding) = request.bindings.bindings.iter().find(|binding| {
-                binding.node_id == request.formation.id && binding.slot_id == slot.id
+                binding.node_id == request.step.id && binding.slot_id == slot.id
             }) && !binding.card_toml.is_empty()
             {
                 brief.push_str("role card:\n");
                 brief.push_str(&binding.card_toml);
                 brief.push('\n');
             }
-            if let Some(details) = &request.formation.brief {
+            if let Some(details) = &request.step.brief {
                 for path in &details.files {
                     brief.push_str(&format!("reference file: {path}\n"));
                 }
@@ -326,7 +322,7 @@ impl Executor for LabExecutor {
             let digest = hex::encode(Sha256::digest(brief.as_bytes()));
             send(
                 "slot_dispatch",
-                json!({"dispatch_id":dispatch_id,"node_id":request.formation.id,"slot_id":slot.id,"agent_id":slot.agent_id,"harness":slot.harness,"session":session,"session_ref":format!("lab:{session}"),"brief_path":brief_path,"prompt_sha256":digest,"prompt_ref":"","phase":"","recorded_before_send":true,"native_ack":false}),
+                json!({"dispatch_id":dispatch_id,"node_id":request.step.id,"slot_id":slot.id,"agent_id":slot.agent_id,"harness":slot.harness,"session":session,"session_ref":format!("lab:{session}"),"brief_path":brief_path,"prompt_sha256":digest,"prompt_ref":"","phase":"","recorded_before_send":true,"native_ack":false}),
             )?;
             let evidence = serde_json::to_vec(&result).map_err(|e| e.to_string())?;
             let path = request.artifact_dir.join("lab-completed.json");
@@ -343,17 +339,17 @@ impl Executor for LabExecutor {
                 .map_err(|e| e.to_string())?;
             send(
                 "slot_result",
-                json!({"dispatch_id":dispatch_id,"node_id":request.formation.id,"slot_id":slot.id,"status":"ok","sentinel":{"run_id":request.run_id,"status":"ok","artifact":format!("lab-{}.md",slot.id)}}),
+                json!({"dispatch_id":dispatch_id,"node_id":request.step.id,"slot_id":slot.id,"status":"ok","sentinel":{"run_id":request.run_id,"status":"ok","artifact":format!("lab-{}.md",slot.id)}}),
             )?;
         }
         Ok(result)
      })().map_err(|message: String| crate::Error::new("executor_error", message))
     }
 
-    fn reattach(&self, dispatch: OpenDispatch) -> Result<FormationResult, crate::Error> {
-        (|| -> Result<FormationResult, String> {
-            if dispatch.formation.slots.len() != 1 {
-                return Err("lab evidence cannot recover a multi-slot formation".into());
+    fn reattach(&self, dispatch: OpenDispatch) -> Result<StepResult, crate::Error> {
+        (|| -> Result<StepResult, String> {
+            if dispatch.step.slots.len() != 1 {
+                return Err("lab evidence cannot recover a multi-slot step".into());
             }
             let path = dispatch.artifact_dir.join("lab-completed.json");
             let bytes = std::fs::read(path).map_err(|e| e.to_string())?;
@@ -361,7 +357,7 @@ impl Executor for LabExecutor {
         })()
         .map_err(|message: String| crate::Error::new("executor_error", message))
     }
-    fn recover_completed(&self, dispatch: OpenDispatch) -> Option<FormationResult> {
+    fn recover_completed(&self, dispatch: OpenDispatch) -> Option<StepResult> {
         self.reattach(dispatch).ok()
     }
 }
@@ -370,12 +366,8 @@ impl Executor for LabExecutor {
 /// its goal. Where a Limit card counts the step's tokens they are recorded,
 /// as a seat's transcript would count them, and the step stops when they
 /// reach what its cards allow.
-fn spend_lab_tokens(request: &FormationExecution, events: &ExecutionSink) -> Result<(), String> {
-    let goal = request
-        .formation
-        .brief
-        .as_ref()
-        .map_or("", |b| b.goal.as_str());
+fn spend_lab_tokens(request: &StepExecution, events: &ExecutionSink) -> Result<(), String> {
+    let goal = request.step.brief.as_ref().map_or("", |b| b.goal.as_str());
     let Some(count) = goal
         .split("archon-lab-tokens:")
         .nth(1)
@@ -392,12 +384,12 @@ fn spend_lab_tokens(request: &FormationExecution, events: &ExecutionSink) -> Res
         .filter(|n| *n > 0)
         .ok_or_else(|| format!("lab tokens {count:?} is not a positive whole number"))?;
     let slot = request
-        .formation
+        .step
         .slots
         .first()
         .map(|s| s.id.clone())
         .unwrap_or_default();
-    let dispatch = format!("{}/{}/{slot}", request.formation.id, request.attempt);
+    let dispatch = format!("{}/{}/{slot}", request.step.id, request.attempt);
     events.emit(ExecutionEvent {
         kind: "token_usage".into(),
         slot_id: slot,
@@ -413,9 +405,9 @@ fn spend_lab_tokens(request: &FormationExecution, events: &ExecutionSink) -> Res
     Ok(())
 }
 
-fn lab_result(request: &FormationExecution) -> Result<FormationResult, String> {
+fn lab_result(request: &StepExecution) -> Result<StepResult, String> {
     let lines: Vec<_> = request
-        .formation
+        .step
         .slots
         .iter()
         .map(|slot| {
@@ -427,7 +419,7 @@ fn lab_result(request: &FormationExecution) -> Result<FormationResult, String> {
                     &slot.agent_id
                 },
                 slot.harness,
-                request.formation.title,
+                request.step.title,
                 slot.id,
                 if request.input_text.starts_with("```") {
                     "\n"
@@ -445,8 +437,8 @@ fn lab_result(request: &FormationExecution) -> Result<FormationResult, String> {
     let end = text.floor_char_boundary(text.len().min(8192));
     let text = text[..end].to_owned();
     let mut outputs = Map::new();
-    for (index, port) in request.formation.outputs.iter().enumerate() {
-        let output = if request.formation.outputs.len() > 1 {
+    for (index, port) in request.step.outputs.iter().enumerate() {
+        let output = if request.step.outputs.len() > 1 {
             format!("{text}\noutput-port: {}", port.id)
         } else {
             text.clone()
@@ -466,7 +458,7 @@ fn lab_result(request: &FormationExecution) -> Result<FormationResult, String> {
         }
         outputs.insert(port.id.clone(), payload);
     }
-    Ok(FormationResult {
+    Ok(StepResult {
         status: "done".into(),
         text,
         outputs,

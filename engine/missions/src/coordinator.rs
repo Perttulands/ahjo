@@ -90,7 +90,7 @@ pub(crate) struct Inner {
     pub folder_workspace: Mutex<()>,
     pub shutting_down: AtomicBool,
     pub controls: Mutex<BTreeMap<String, Arc<Control>>>,
-    pub recovered: Mutex<BTreeMap<(String, String), crate::FormationResult>>,
+    pub recovered: Mutex<BTreeMap<(String, String), crate::StepResult>>,
     /// Runs whose old ledgers could not be migrated, with why: each refuses
     /// to open, and nothing else does (ledger_migrate.rs).
     pub unmigrated: BTreeMap<String, String>,
@@ -401,7 +401,7 @@ impl Coordinator {
     pub fn start_mission(&self, request: RunStart) -> Result<String, AdmissionFailure> {
         self.start(request, false)
     }
-    pub fn start_formation(&self, request: RunStart) -> Result<String, AdmissionFailure> {
+    pub fn start_step(&self, request: RunStart) -> Result<String, AdmissionFailure> {
         self.start(request, true)
     }
     fn start(&self, mut request: RunStart, single: bool) -> Result<String, AdmissionFailure> {
@@ -438,15 +438,15 @@ impl Coordinator {
             .input_card()
             .ok_or_else(|| AdmissionFailure::NotFound("input card not found".into()))?;
         if single {
-            if mission.formation(&request.formation_id).is_none() {
-                return Err(AdmissionFailure::NotFound("formation not found".into()));
+            if mission.step(&request.step_id).is_none() {
+                return Err(AdmissionFailure::NotFound("step not found".into()));
             }
             request.input_card_id = card.id.clone();
         } else if card.id != request.input_card_id {
             return Err(AdmissionFailure::NotFound("input card not found".into()));
         }
         let root = if single {
-            &request.formation_id
+            &request.step_id
         } else {
             &request.input_card_id
         };
@@ -466,11 +466,11 @@ impl Coordinator {
         if !request.repository.is_empty() {
             repositories.insert(request.repository.clone());
         }
-        for formation in &mission.formations {
-            if single && formation.id != request.formation_id {
+        for step in &mission.steps {
+            if single && step.id != request.step_id {
                 continue;
             }
-            if let Some(brief) = &formation.brief
+            if let Some(brief) = &step.brief
                 && !brief.repository.is_empty()
             {
                 repositories.insert(brief.repository.clone());
@@ -510,9 +510,9 @@ impl Coordinator {
             request.repository = repositories.into_iter().next().unwrap_or_default();
         }
         let unknown: Vec<_> = mission
-            .formations
+            .steps
             .iter()
-            .filter(|f| !single || f.id == request.formation_id)
+            .filter(|f| !single || f.id == request.step_id)
             .filter(|f| !f.device.is_empty() && f.device != self.inner.settings.environment)
             .filter(|f| {
                 let device = f.device.split('/').next().unwrap_or("");
@@ -525,7 +525,7 @@ impl Coordinator {
                     ahjo_mission_model::Code::UnknownDevice,
                     &f.id,
                     format!(
-                        "formation {:?} runs on {}, a device this node does not know; name one of the fleet's devices or clear it",
+                        "step {:?} runs on {}, a device this node does not know; name one of the fleet's devices or clear it",
                         f.id, f.device
                     ),
                 )
@@ -537,9 +537,9 @@ impl Coordinator {
         // A step placed on another environment reaches it through the run
         // branch, so a run without a repository cannot place one.
         let unplaceable: Vec<_> = mission
-            .formations
+            .steps
             .iter()
-            .filter(|f| !single || f.id == request.formation_id)
+            .filter(|f| !single || f.id == request.step_id)
             .filter(|f| !f.device.is_empty() && f.device != self.inner.settings.environment)
             .filter(|_| request.repository.is_empty())
             .map(|f| {
@@ -547,7 +547,7 @@ impl Coordinator {
                     ahjo_mission_model::Code::PlacementWithoutRepository,
                     &f.id,
                     format!(
-                        "formation {:?} runs on {}, which reaches the run's work only through a repository; give the run a repository or clear the device",
+                        "step {:?} runs on {}, which reaches the run's work only through a repository; give the run a repository or clear the device",
                         f.id, f.device
                     ),
                 )

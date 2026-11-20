@@ -89,7 +89,7 @@ pub fn findings(mission: &Mission) -> (Vec<Finding>, Vec<Finding>) {
 }
 
 fn covers_step_or_input_card(mission: &Mission, target: &str) -> bool {
-    mission.formation(target).is_some() || mission.has_input_card(target)
+    mission.step(target).is_some() || mission.has_input_card(target)
 }
 
 /// "Limit Beads cap", without repeating a default-titled card's kind.
@@ -118,7 +118,7 @@ fn when_spent_problem(mission: &Mission, limit: &Limit, name: &str) -> Option<St
             "{name} picks the best attempt when spent, but it covers the whole mission: only a step's card can pick; set it to stop or fail"
         ));
     }
-    mission.formation(&limit.target)?;
+    mission.step(&limit.target)?;
     let problem = graph::selecting_gate(mission, &limit.target).err()?;
     Some(format!(
         "{name} picks the best attempt of {} when spent, but {problem}",

@@ -94,7 +94,7 @@ fn keep(
     if head == base {
         return Ok(None);
     }
-    let step = (mission.formation(node).map(|f| f.title.as_str()))
+    let step = (mission.step(node).map(|f| f.title.as_str()))
         .or_else(|| mission.gate(node).map(|g| g.title.as_str()))
         .filter(|title| !title.is_empty())
         .unwrap_or(node);

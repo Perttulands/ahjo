@@ -3,7 +3,7 @@ use ahjo_missions_contract::{Mission, MissionChange, commands::AddedCard};
 #[derive(Clone, Copy)]
 pub(crate) enum CreatedCard {
     InputCard,
-    Formation,
+    Step,
     Gate,
     End,
     Limit,
@@ -13,7 +13,7 @@ impl CreatedCard {
     pub(crate) fn from_change(change: &MissionChange) -> Option<Self> {
         Some(match change {
             MissionChange::CreateInputCard { .. } => Self::InputCard,
-            MissionChange::CreateFormation { .. } => Self::Formation,
+            MissionChange::CreateStep { .. } => Self::Step,
             MissionChange::CreateGate { .. } => Self::Gate,
             MissionChange::CreateEnd { .. } => Self::End,
             MissionChange::CreateLimit { .. } => Self::Limit,
@@ -32,9 +32,9 @@ impl CreatedCard {
             Self::InputCard => first(&before.input_cards, &after.input_cards, |n| &n.id)
                 .cloned()
                 .map(AddedCard::InputCard),
-            Self::Formation => first(&before.formations, &after.formations, |n| &n.id)
+            Self::Step => first(&before.steps, &after.steps, |n| &n.id)
                 .cloned()
-                .map(AddedCard::Formation),
+                .map(AddedCard::Step),
             Self::Gate => first(&before.gates, &after.gates, |n| &n.id)
                 .cloned()
                 .map(AddedCard::Gate),

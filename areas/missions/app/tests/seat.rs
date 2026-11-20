@@ -2,7 +2,7 @@
 use ahjo_app_kit::{Ask, Host, Mounted, Page, ask::Answers, mount};
 use ahjo_core::NodeId;
 use ahjo_mission_engine::{
-    ExecutionEvent, ExecutionSink, Executor, FormationExecution, FormationResult, LabExecutor,
+    ExecutionEvent, ExecutionSink, Executor, LabExecutor, StepExecution, StepResult,
 };
 use ahjo_node_kit::{Built, Listing, Setup};
 use ahjo_testkit::{
@@ -42,15 +42,15 @@ fn terminal(host: Host, window: &mut Window, cx: &mut App) -> Mounted {
 }
 struct SeatLab;
 impl Executor for SeatLab {
-    fn execute_formation(
+    fn execute_step(
         &self,
-        request: FormationExecution,
+        request: StepExecution,
         sink: ExecutionSink,
-    ) -> Result<FormationResult, ahjo_core::Error> {
+    ) -> Result<StepResult, ahjo_core::Error> {
         let sessions = SESSIONS.lock().unwrap().clone().unwrap();
-        let name = format!("seat-{}", request.formation.id);
+        let name = format!("seat-{}", request.step.id);
         let session = sessions.add(&name);
-        let slot = request.formation.slots[0].id.clone();
+        let slot = request.step.slots[0].id.clone();
         let node = NODE.lock().unwrap().clone();
         sink.emit(ExecutionEvent {
             kind: "seat_created".into(),
@@ -65,7 +65,7 @@ impl Executor for SeatLab {
         receiver
             .recv_timeout(Duration::from_secs(120))
             .map_err(|e| ahjo_core::Error::new("test", e.to_string()))?;
-        let result = LabExecutor.execute_formation(request, sink.clone())?;
+        let result = LabExecutor.execute_step(request, sink.clone())?;
         sink.emit(ExecutionEvent {
             kind: "seat_cleanup".into(),
             slot_id: slot,

@@ -1,4 +1,4 @@
-schema = 2
+schema = 3
 id = "msn_hello"
 slug = "hello"
 title = "Hello"
@@ -9,19 +9,19 @@ id = "inp_hello"
 title = "Hello"
 goal = "Return the supplied input"
 
-[[formation]]
+[[step]]
 id = "fmn_work"
-type = "solo"
+formation = "solo"
 title = "Work"
-[formation.brief]
+[step.brief]
 goal = "Return a short result using the supplied output contract."
-[[formation.input]]
+[[step.input]]
 id = "port_in"
 label = "Input"
-[[formation.output]]
+[[step.output]]
 id = "port_out"
 label = "Result"
-[[formation.slot]]
+[[step.slot]]
 id = "slot_work"
 label = "Worker"
 agent_id = "builder"

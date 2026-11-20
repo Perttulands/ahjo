@@ -12,11 +12,11 @@
         "goal": ""
       }
     ],
-    "formations": [
+    "steps": [
       {
         "id": "judge-b",
         "title": "judge-b",
-        "type": "solo",
+        "formation": "solo",
         "slots": [],
         "inputs": [],
         "outputs": []
@@ -24,7 +24,7 @@
       {
         "id": "unreached",
         "title": "unreached",
-        "type": "solo",
+        "formation": "solo",
         "slots": [],
         "inputs": [],
         "outputs": []
@@ -32,7 +32,7 @@
       {
         "id": "work",
         "title": "work",
-        "type": "solo",
+        "formation": "solo",
         "slots": [],
         "inputs": [],
         "outputs": []
@@ -40,7 +40,7 @@
       {
         "id": "judge-a",
         "title": "judge-a",
-        "type": "solo",
+        "formation": "solo",
         "slots": [],
         "inputs": [],
         "outputs": []
@@ -48,7 +48,7 @@
       {
         "id": "finish",
         "title": "finish",
-        "type": "solo",
+        "formation": "solo",
         "slots": [],
         "inputs": [],
         "outputs": []
@@ -59,7 +59,7 @@
         "id": "gate",
         "title": "Review",
         "kinds": [
-          "formation"
+          "step"
         ],
         "criterion": ""
       }

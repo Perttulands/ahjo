@@ -79,7 +79,7 @@ pub struct DecisionTarget {
     rename_all_fields = "snake_case"
 )]
 pub enum DecisionTargetKind {
-    Formation {
+    Step {
         title: String,
         limits: Vec<DecisionLimit>,
         waits_for_inputs: bool,

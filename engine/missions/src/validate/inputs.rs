@@ -39,8 +39,8 @@ pub fn findings(mission: &Mission) -> Vec<Finding> {
         }
     }
     let declared = run_input_names(mission);
-    for formation in &mission.formations {
-        let Some(brief) = &formation.brief else {
+    for step in &mission.steps {
+        let Some(brief) = &step.brief else {
             continue;
         };
         let mut reported = HashSet::new();
@@ -53,10 +53,10 @@ pub fn findings(mission: &Mission) -> Vec<Finding> {
             }
             findings.push(Finding::new(
                 Code::UnknownInputReference,
-                &formation.id,
+                &step.id,
                 format!(
                     "{} brief references {{{name}}}, but the mission has no input named {name}; its inputs are {}",
-                    possessive(mission.node_name(&formation.id)),
+                    possessive(mission.node_name(&step.id)),
                     declared.join(", ")
                 ),
             ));

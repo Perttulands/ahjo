@@ -47,8 +47,8 @@ impl BindingsSnapshot {
     ) -> Result<Self, crate::Error> {
         (|| -> Result<Self, String> {
             let mut bindings = Vec::new();
-            for formation in &mission.formations {
-                for slot in &formation.slots {
+            for step in &mission.steps {
+                for slot in &step.slots {
                     if !slot.staffed() {
                         continue;
                     }
@@ -66,7 +66,7 @@ impl BindingsSnapshot {
                         hash(&card_toml)
                     };
                     bindings.push(RunBinding {
-                        node_id: formation.id.clone(),
+                        node_id: step.id.clone(),
                         slot_id: slot.id.clone(),
                         agent_id: slot.agent_id.clone(),
                         harness: slot.harness.clone(),

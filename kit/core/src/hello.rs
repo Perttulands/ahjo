@@ -8,7 +8,7 @@ use serde::Deserialize;
 use crate::frame::HELLO;
 
 /// The protocol version. Bump it with any change to the `/ws` frames.
-pub const PROTOCOL: u32 = 17;
+pub const PROTOCOL: u32 = 18;
 
 /// A hello as a node sent it.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
@@ -41,7 +41,7 @@ mod tests {
     fn reads_a_hello_and_nothing_else() {
         let mut f = vec![HELLO];
         f.extend_from_slice(
-            br#"{"node":"n","device":"rig","environment":"wsl","version":"1","protocol":17,"off":["dark"]}"#,
+            br#"{"node":"n","device":"rig","environment":"wsl","version":"1","protocol":18,"off":["dark"]}"#,
         );
         let h = Hello::decode(&f).unwrap();
         assert_eq!(

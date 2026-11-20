@@ -90,7 +90,7 @@ fn operations(
     }
     match kind {
         EditKind::Step => {
-            let Some(f) = now.formations.iter().find(|f| f.id == id) else {
+            let Some(f) = now.steps.iter().find(|f| f.id == id) else {
                 return Err(vec!["The step is gone: it was deleted elsewhere.".into()]);
             };
             let original = f.brief.clone().unwrap_or_default();
@@ -118,7 +118,7 @@ fn operations(
                 brief_changed = true;
             }
             if title_changed || brief_changed {
-                ops.push(undo::Step::board(MissionChange::EditFormation {
+                ops.push(undo::Step::board(MissionChange::EditStep {
                     id: id.into(),
                     title: if title_changed {
                         draft.fields[0].clone()
@@ -162,7 +162,7 @@ fn operations(
                 let kind = drafted!(15, "The port kind", &current.kind);
                 if label.is_some() || kind.is_some() {
                     ops.push(undo::Step::board(MissionChange::UpdatePort {
-                        formation_id: id.into(),
+                        step_id: id.into(),
                         port_id: port.into(),
                         label,
                         kind,
@@ -394,13 +394,13 @@ mod tests {
     use super::*;
     #[test]
     fn every_editor_save_patch_decodes() {
-        use ahjo_missions_contract::{End, Formation, Gate, InputCard, Limit, Port, Slot};
+        use ahjo_missions_contract::{End, Gate, InputCard, Limit, Port, Slot, Step};
         let mission = Mission {
             input_cards: vec![InputCard {
                 id: "input".into(),
                 ..Default::default()
             }],
-            formations: vec![Formation {
+            steps: vec![Step {
                 id: "step".into(),
                 inputs: vec![Port {
                     id: "port".into(),
@@ -456,8 +456,8 @@ mod tests {
                     (21, "stop"),
                 ][..],
                 &[
-                    "edit_formation",
-                    "update_formation",
+                    "edit_step",
+                    "update_step",
                     "assign_slot",
                     "update_port",
                     "update_limit",
@@ -520,8 +520,8 @@ mod tests {
                     panic!("expected board edit")
                 };
                 let is_operation = match patch.as_ref() {
-                    MissionChange::EditFormation { .. } => "edit_formation",
-                    MissionChange::UpdateFormation { .. } => "update_formation",
+                    MissionChange::EditStep { .. } => "edit_step",
+                    MissionChange::UpdateStep { .. } => "update_step",
                     MissionChange::AssignSlot { .. } => "assign_slot",
                     MissionChange::UpdatePort { .. } => "update_port",
                     MissionChange::UpdateLimit(_) => "update_limit",
@@ -554,7 +554,7 @@ mod tests {
         let mut draft = base.clone();
         draft.fields[1] = "My goal".into();
         let mut mission = Mission::default();
-        mission.formations.push(ahjo_missions_contract::Formation {
+        mission.steps.push(ahjo_missions_contract::Step {
             id: "work".into(),
             title: "Concurrent title".into(),
             brief: Some(ahjo_missions_contract::Brief {
@@ -578,7 +578,7 @@ mod tests {
         let undo::Step::Board(patch) = &ops[0] else {
             panic!("board edit")
         };
-        let MissionChange::EditFormation {
+        let MissionChange::EditStep {
             title,
             brief: Some(brief),
             ..
@@ -589,7 +589,7 @@ mod tests {
         assert_eq!(title, "Concurrent title");
         assert_eq!(brief.repository, "kept elsewhere");
         assert_eq!(brief.goal, "My goal");
-        mission.formations[0].brief.as_mut().unwrap().goal = "Other goal".into();
+        mission.steps[0].brief.as_mut().unwrap().goal = "Other goal".into();
         assert!(
             operations(
                 EditKind::Step,

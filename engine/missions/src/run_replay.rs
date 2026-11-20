@@ -31,7 +31,7 @@ impl Replay {
         for event in events {
             match event.kind.as_str() {
                 "node_started"
-                    if mission.formation(&event.node_id).is_some()
+                    if mission.step(&event.node_id).is_some()
                         && !judges.contains(event.node_id.as_str()) =>
                 {
                     state.attempts.insert(event.node_id.clone(), event.attempt);
@@ -49,12 +49,12 @@ impl Replay {
                     if judges.contains(event.node_id.as_str()) {
                         continue;
                     }
-                    if let Some(formation) = mission.formation(&event.node_id) {
+                    if let Some(step) = mission.step(&event.node_id) {
                         let outputs = event
                             .data
                             .get("outputs")
                             .and_then(|value| value.as_object());
-                        if formation.outputs.iter().any(|port| {
+                        if step.outputs.iter().any(|port| {
                             !outputs.is_some_and(|outputs| outputs.contains_key(&port.id))
                         }) {
                             state.unfinished.insert(event.node_id.clone());
@@ -255,7 +255,7 @@ impl Replay {
                 },
                 event.actor.clone(),
             ));
-        } else if mission.formation(node).is_some() {
+        } else if mission.step(node).is_some() {
             let port = endpoint_port(endpoint).to_owned();
             let ports = self.ports.entry(node.into()).or_default();
             let next = match ports.remove(&port) {
@@ -263,8 +263,8 @@ impl Replay {
                 _ => input,
             };
             ports.insert(port, (next, true));
-            if let Some(formation) = mission.formation(node)
-                && formation
+            if let Some(step) = mission.step(node)
+                && step
                     .inputs
                     .iter()
                     .any(|input| !ports.contains_key(&input.id))
@@ -303,13 +303,13 @@ pub(crate) fn note_waiting(
         .filter(|(seq, _)| **seq > range.0 && **seq <= range.1)
     {
         for node in nodes {
-            let Some(formation) = mission.formation(node) else {
+            let Some(step) = mission.step(node) else {
                 continue;
             };
             let Some(ports) = replay.ports.get(node) else {
                 continue;
             };
-            let missing: Vec<_> = formation
+            let missing: Vec<_> = step
                 .inputs
                 .iter()
                 .filter(|p| !ports.contains_key(&p.id))
@@ -326,7 +326,7 @@ pub(crate) fn note_waiting(
                     "node_waiting",
                     node,
                     0,
-                    json!({"needed_inputs":missing.len(),"ready_inputs":ports.len(),"total_inputs":formation.inputs.len(),"waiting_for":missing}),
+                    json!({"needed_inputs":missing.len(),"ready_inputs":ports.len(),"total_inputs":step.inputs.len(),"waiting_for":missing}),
                 ),
             )?;
             noted_waiting = true;
@@ -338,7 +338,7 @@ pub(crate) fn note_waiting(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ahjo_mission_model::{Connection, Formation, Gate, Port};
+    use ahjo_mission_model::{Connection, Gate, Port, Step};
     use serde_json::json;
     fn ev(seq: u64, kind: &str, node: &str, data: serde_json::Value) -> RunEvent {
         RunEvent {
@@ -353,7 +353,7 @@ mod tests {
     #[test]
     fn a_delivery_during_work_stays_unread_after_its_output() {
         let mission = Mission {
-            formations: vec![Formation {
+            steps: vec![Step {
                 id: "work".into(),
                 inputs: vec![Port {
                     id: "in".into(),
@@ -402,9 +402,9 @@ mod tests {
                 id: "gate".into(),
                 ..Default::default()
             }],
-            formations: ["a", "b"]
+            steps: ["a", "b"]
                 .into_iter()
-                .map(|id| Formation {
+                .map(|id| Step {
                     id: id.into(),
                     inputs: vec![Port {
                         id: "in".into(),
@@ -474,7 +474,7 @@ mod tests {
                 id: "gate".into(),
                 ..Default::default()
             }],
-            formations: vec![Formation {
+            steps: vec![Step {
                 id: "work".into(),
                 inputs: vec![Port {
                     id: "in".into(),

@@ -461,7 +461,7 @@ impl MissionsPage {
                 layer = layer.child(self.canvas_next(t, card, &view, cx));
             }
         }
-        if !running && mission.input_cards.is_empty() && mission.formations.is_empty() {
+        if !running && mission.input_cards.is_empty() && mission.steps.is_empty() {
             // Top left, clear of the notes card that fitting centres.
             layer = layer.child(
                 div()
@@ -805,7 +805,7 @@ impl MissionsPage {
         let rendered = if running && let Some(count) = attempts.filter(|n| *n > 0) {
             let step = card.id.clone();
             let offset = mission
-                .formations
+                .steps
                 .iter()
                 .find(|f| f.id == step)
                 .map(|f| {
@@ -1263,8 +1263,8 @@ fn card_face(
             .child(text)
     };
     match card.kind {
-        board::Kind::Formation => {
-            let Some(f) = mission.formations.iter().find(|f| f.id == card.id) else {
+        board::Kind::Step => {
+            let Some(f) = mission.steps.iter().find(|f| f.id == card.id) else {
                 return div();
             };
             let mut face = div().size_full().flex().flex_col();
@@ -1378,20 +1378,22 @@ fn card_face(
                         .items_end()
                         .gap(px(CHIP_PAD * z))
                         // A step is worked by one agent unless it says otherwise.
-                        .when(f.kind != "solo", |d| d.child(chip(z, &f.kind, t.text2)))
+                        .when(f.formation != "solo", |d| {
+                            d.child(chip(z, &f.formation, t.text2))
+                        })
                         // Each attempt in sessions of its own.
                         .when(f.fresh, |d| d.child(chip(z, "fresh", t.text2))),
                 );
             face = face.child(head);
             let mut body = div()
-                .h(px(board::body_h(&f.kind, f.slots.len()) * z))
+                .h(px(board::body_h(&f.formation, f.slots.len()) * z))
                 .flex_none()
                 .px(px(SLOT_PAD * z))
                 .py(px(board::BODY_PAD * z))
                 .flex()
                 .flex_col()
                 .gap(px(board::SLOT_GAP * z));
-            if board::pooled(&f.kind) {
+            if board::pooled(&f.formation) {
                 for slot in f.slots.iter().filter(|slot| slot.controller) {
                     body = body.child(slot_row(t, mission, f, slot, z));
                 }
@@ -1409,7 +1411,12 @@ fn card_face(
                     .rounded(px(GAP * z))
                     .child(
                         label(
-                            if f.kind == "peer" { "PEERS" } else { "WORKERS" }.into(),
+                            if f.formation == "peer" {
+                                "PEERS"
+                            } else {
+                                "WORKERS"
+                            }
+                            .into(),
                             t.dim,
                         )
                         .absolute()
@@ -1576,7 +1583,7 @@ fn card_face(
                                 .gap(px(size::RADIUS * z))
                                 .children(g.kinds.iter().map(|kind| {
                                     let word = match kind.as_str() {
-                                        "formation" => "judge",
+                                        "step" => "judge",
                                         "human" => "you",
                                         other => other,
                                     };
@@ -1703,7 +1710,7 @@ fn chip(z: f32, text: &str, colour: Hsla) -> Div {
 fn slot_row(
     t: &ahjo_app_kit::theme::Theme,
     mission: &Mission,
-    f: &ahjo_missions_contract::Formation,
+    f: &ahjo_missions_contract::Step,
     slot: &ahjo_missions_contract::Slot,
     z: f32,
 ) -> Div {
@@ -1842,12 +1849,12 @@ impl MissionsPage {
     pub(super) fn add_card(&mut self, kind: board::Kind, cx: &mut Context<Self>) {
         let editing = self.editor.as_ref().map(|e| e.id.as_str());
         let after = match (kind, self.state.mission.as_ref()) {
-            (board::Kind::Formation, Some(m)) => step_after(m, editing),
+            (board::Kind::Step, Some(m)) => step_after(m, editing),
             // A Limit caps the step being edited, else the last step.
             (board::Kind::Limit, Some(m)) => editing
-                .filter(|id| m.formations.iter().any(|f| f.id == *id))
+                .filter(|id| m.steps.iter().any(|f| f.id == *id))
                 .map(str::to_owned)
-                .or_else(|| m.formations.last().map(|f| f.id.clone())),
+                .or_else(|| m.steps.last().map(|f| f.id.clone())),
             _ => None,
         };
         self.place_card(kind, after.as_deref(), cx);
@@ -1855,7 +1862,7 @@ impl MissionsPage {
 
     /// Add the step that comes after `card`, to its right, wired from it.
     fn next_step(&mut self, card: &str, cx: &mut Context<Self>) {
-        self.place_card(board::Kind::Formation, Some(card), cx);
+        self.place_card(board::Kind::Step, Some(card), cx);
     }
 
     fn place_card(&mut self, kind: board::Kind, after: Option<&str>, cx: &mut Context<Self>) {
@@ -1893,7 +1900,7 @@ impl MissionsPage {
         self.canvas.show((spot.0, spot.1, size.0, size.1));
         let (x, y) = (spot.0 as i64, spot.1 as i64);
         let patch = place_patch(kind, after, x, y);
-        if matches!(kind, board::Kind::Formation | board::Kind::End) {
+        if matches!(kind, board::Kind::Step | board::Kind::End) {
             self.new_step = Some((kind, beside.and_then(|c| leaving_port(&mission, &c.id))));
         }
         self.write_board(patch, WriteMode::Edit, cx);
@@ -1921,9 +1928,9 @@ impl MissionsPage {
             return;
         }
         let Some(step) = self.state.mission.as_ref().and_then(|m| {
-            m.formations
+            m.steps
                 .iter()
-                .find(|f| !before.formations.iter().any(|b| b.id == f.id))
+                .find(|f| !before.steps.iter().any(|b| b.id == f.id))
                 .cloned()
         }) else {
             return;
@@ -2017,7 +2024,7 @@ fn step_after(m: &Mission, editing: Option<&str>) -> Option<String> {
         .filter(|id| leaving_port(m, id).is_some())
         .map(str::to_owned)
         .or_else(|| {
-            m.formations
+            m.steps
                 .iter()
                 .rev()
                 .find(|f| open(&f.id))
@@ -2035,7 +2042,7 @@ fn leaving_port(m: &Mission, card: &str) -> Option<String> {
     if m.input_cards.iter().any(|c| c.id == card) {
         return Some(format!("{card}:out"));
     }
-    if let Some(f) = m.formations.iter().find(|f| f.id == card) {
+    if let Some(f) = m.steps.iter().find(|f| f.id == card) {
         return f.outputs.first().map(|p| format!("{card}:{}", p.id));
     }
     m.gates
@@ -2078,13 +2085,13 @@ fn new_card_items(
         ("canvas-new-input", "Input card", new_input(x, y)),
         (
             "canvas-new-solo",
-            "Solo formation",
-            new_formation("solo", "New formation", x, y),
+            "Solo step",
+            new_step("solo", "New step", x, y),
         ),
         (
             "canvas-new-orch",
-            "Orchestrated formation",
-            new_formation("orchestrated", "New formation", x, y),
+            "Orchestrated step",
+            new_step("orchestrated", "New step", x, y),
         ),
         ("canvas-new-gate", "Gate", new_gate("Review gate", x, y)),
         ("canvas-new-limit", "Limit", new_limit("", x, y)),
@@ -2106,7 +2113,7 @@ fn new_card_items(
 fn place_patch(kind: board::Kind, after: Option<&str>, x: i64, y: i64) -> MissionChange {
     match kind {
         board::Kind::Input => new_input(x, y),
-        board::Kind::Formation => new_formation("solo", "New step", x, y),
+        board::Kind::Step => new_step("solo", "New step", x, y),
         board::Kind::Gate => new_gate("New gate", x, y),
         board::Kind::End => new_end("End", "done", x, y),
         board::Kind::Limit => new_limit(after.unwrap_or_default(), x, y),
@@ -2124,9 +2131,9 @@ fn new_input(x: i64, y: i64) -> MissionChange {
     }
 }
 
-fn new_formation(kind: &str, title: &str, x: i64, y: i64) -> MissionChange {
-    MissionChange::CreateFormation {
-        kind: kind.into(),
+fn new_step(kind: &str, title: &str, x: i64, y: i64) -> MissionChange {
+    MissionChange::CreateStep {
+        formation: kind.into(),
         title: title.into(),
         x,
         y,
@@ -2184,7 +2191,7 @@ mod tests {
         }
         for kind in [
             board::Kind::Input,
-            board::Kind::Formation,
+            board::Kind::Step,
             board::Kind::Gate,
             board::Kind::End,
             board::Kind::Limit,
@@ -2204,7 +2211,7 @@ mod tests {
     fn a_new_step_follows_the_edited_card_else_the_open_end_of_the_flow() {
         let mission: Mission = serde_json::from_value(json!({
             "input_card": [{"id": "inp"}],
-            "formation": [
+            "step": [
                 {"id": "a", "input": [{"id": "in"}], "output": [{"id": "out"}]},
                 {"id": "b", "input": [{"id": "in"}], "output": [{"id": "out"}]}
             ],

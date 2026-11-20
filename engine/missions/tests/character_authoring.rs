@@ -109,11 +109,11 @@ id = "msn_work"
 slug = "work"
 title = "Work"
 rev = 1
-[[formation]]
+[[step]]
 id = "fmn_work"
-type = "solo"
+formation = "solo"
 title = "Step"
-[[formation.slot]]
+[[step.slot]]
 id = "slot_work"
 label = "Worker"
 agent_id = "builder"
@@ -144,11 +144,11 @@ id = "msn_work"
 slug = "work"
 title = "Work"
 rev = 1
-[[formation]]
+[[step]]
 id = "fmn_work"
-type = "solo"
+formation = "solo"
 title = "Step"
-[[formation.slot]]
+[[step.slot]]
 id = "slot_work"
 label = "Worker"
 agent_id = "critic"
@@ -326,8 +326,8 @@ fn role_usage_reports_every_slot_in_every_mission() {
                     rev: edit.mission.rev,
                     etag: edit.etag.clone(),
                 },
-                ahjo_mission_model::MissionChange::CreateFormation {
-                    kind: "orchestrated".into(),
+                ahjo_mission_model::MissionChange::CreateStep {
+                    formation: "orchestrated".into(),
                     title: "Pair".into(),
                     x: 0,
                     y: 0,
@@ -335,8 +335,8 @@ fn role_usage_reports_every_slot_in_every_mission() {
                 "",
             )
             .unwrap();
-        let formation = edit.mission.formations[0].clone();
-        for slot in formation.slots {
+        let step = edit.mission.steps[0].clone();
+        for slot in step.slots {
             edit = store
                 .patch(
                     slug,
@@ -345,7 +345,7 @@ fn role_usage_reports_every_slot_in_every_mission() {
                         etag: edit.etag.clone(),
                     },
                     ahjo_mission_model::MissionChange::AssignSlot {
-                        formation_id: formation.id.clone(),
+                        step_id: step.id.clone(),
                         slot_id: slot.id,
                         agent_id: "builder".into(),
                         harness: "claude-code".into(),
@@ -376,7 +376,7 @@ fn role_usage_reports_every_slot_in_every_mission() {
             .count(),
         3
     );
-    assert!(report.usage.iter().all(|u| u.formation_title == "Pair"));
+    assert!(report.usage.iter().all(|u| u.step_title == "Pair"));
     assert!(store.roles().usage("judge").unwrap().usage.is_empty());
 }
 

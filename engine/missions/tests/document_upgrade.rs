@@ -29,7 +29,7 @@ agentId = "writer"
 [[gate]]
 id = "gate_review"
 title = "Review"
-kinds = ["human"]
+kinds = ["human", "formation"]
 checkVersion = "1"
 checkValue = "hello"
 
@@ -101,13 +101,14 @@ fn old_documents_keep_data_comments_and_backups_until_their_next_save() {
     let mission = store.mission_edit("old").unwrap();
     let layout = store.layout_edit("old").unwrap();
     let notes = store.notes_edit("old").unwrap();
-    assert_eq!(mission.mission.schema, 2);
+    assert_eq!(mission.mission.schema, 3);
     assert_eq!(
         mission.mission.input_cards[0].input_hint,
         "The inputCard text is a value"
     );
-    assert_eq!(mission.mission.formations[0].slots[0].agent_id, "writer");
+    assert_eq!(mission.mission.steps[0].slots[0].agent_id, "writer");
     assert_eq!(mission.mission.gates[0].check_value, "hello");
+    assert_eq!(mission.mission.gates[0].kinds, ["human", "step"]);
     assert_eq!(mission.mission.limits[0].warn_seconds, Some(10));
     assert_eq!(layout.layout.schema, 2);
     assert_eq!(layout.layout.nodes[0].x, 42);
@@ -186,6 +187,61 @@ fn old_documents_keep_data_comments_and_backups_until_their_next_save() {
 }
 
 #[test]
+fn second_upgrade_keeps_the_original_schema_one_backup() {
+    use sha2::{Digest, Sha256};
+    let (root, store) = fixture();
+    let path = root.join("missions/old.mission.toml");
+    let schema_two = r#"# An original comment
+schema = 2
+id = "msn_old"
+slug = "old"
+title = "formation is the topic"
+rev = 3
+input_card = [{ id = "inp_start", title = "formation" }]
+formation = [{ id = "fmn_work", type = "solo", title = "formation", brief = { goal = "formation" } }]
+gate = [{ id = "gate_review", kinds = ["human", "formation"], criterion = "formation" }]
+end = [{ id = "end_done", outcome = "done" }]
+connection = [{ id = "edge", from = "fmn_work:out", to = "end_done:in" }]
+"#;
+    std::fs::write(&path, schema_two).unwrap();
+    std::fs::write(backup(&path), MISSION).unwrap();
+    let mut marker = backup(&path).into_os_string();
+    marker.push(".ahjo-migration");
+    std::fs::write(&marker, hex::encode(Sha256::digest(MISSION.as_bytes()))).unwrap();
+
+    let mission = store.mission_edit("old").unwrap();
+    assert_eq!(mission.mission.schema, 3);
+    assert_eq!(mission.mission.steps[0].id, "fmn_work");
+    assert_eq!(mission.mission.steps[0].formation, "solo");
+    assert_eq!(mission.mission.steps[0].title, "formation");
+    assert_eq!(
+        mission.mission.steps[0].brief.as_ref().unwrap().goal,
+        "formation"
+    );
+    assert_eq!(mission.mission.gates[0].kinds, ["human", "step"]);
+    assert_eq!(mission.mission.gates[0].criterion, "formation");
+    assert_eq!(std::fs::read_to_string(backup(&path)).unwrap(), MISSION);
+    let migrated = std::fs::read_to_string(&path).unwrap();
+    assert!(migrated.contains("# An original comment"), "{migrated}");
+    assert!(migrated.contains("step ="), "{migrated}");
+
+    store
+        .patch(
+            "old",
+            Precondition {
+                rev: mission.mission.rev,
+                etag: mission.etag,
+            },
+            MissionChange::Title("Saved".into()),
+            "agent:test",
+        )
+        .unwrap();
+    assert!(!backup(&path).exists());
+    assert!(!std::path::Path::new(&marker).exists());
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
 fn concurrent_readers_upgrade_once_and_keep_the_original_backup() {
     let (root, store) = fixture();
     let path = root.join("missions/old.mission.toml");
@@ -202,7 +258,7 @@ fn concurrent_readers_upgrade_once_and_keep_the_original_backup() {
         }
         for worker in workers {
             let mission = worker.join().unwrap();
-            assert_eq!(mission.schema, 2);
+            assert_eq!(mission.schema, 3);
             assert_eq!(mission.id, "msn_old");
         }
     });
@@ -210,7 +266,7 @@ fn concurrent_readers_upgrade_once_and_keep_the_original_backup() {
     assert!(
         std::fs::read_to_string(path)
             .unwrap()
-            .contains("schema = 2")
+            .contains("schema = 3")
     );
     std::fs::remove_dir_all(root).unwrap();
 }
@@ -230,6 +286,17 @@ fn invalid_or_ambiguous_old_data_never_overwrites_the_original() {
     assert!(!backup(&path).exists());
 
     let original = MISSION.replace("humanChannel = \"notify\"", "unknownField = \"lost\"");
+    std::fs::write(&path, &original).unwrap();
+    assert_eq!(
+        store.read_mission("old").unwrap_err().code,
+        "invalid_definition_source"
+    );
+    assert_eq!(std::fs::read_to_string(&path).unwrap(), original);
+    assert!(!backup(&path).exists());
+    let original = MISSION.replace(
+        r#"kinds = ["human", "formation"]"#,
+        r#"kinds = ["human", "formation", "step"]"#,
+    );
     std::fs::write(&path, &original).unwrap();
     assert_eq!(
         store.read_mission("old").unwrap_err().code,

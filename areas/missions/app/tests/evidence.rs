@@ -1,9 +1,7 @@
 #![cfg(unix)]
 use ahjo_app_kit::{Ask, Host, Mounted, Page, ask::Answers, mount};
 use ahjo_core::NodeId;
-use ahjo_mission_engine::{
-    ExecutionSink, Executor, FormationExecution, FormationResult, LabExecutor,
-};
+use ahjo_mission_engine::{ExecutionSink, Executor, LabExecutor, StepExecution, StepResult};
 use ahjo_node_kit::{Built, Listing, Setup};
 use ahjo_testkit::{node::Node, sessions};
 use gpui::{
@@ -48,15 +46,15 @@ fn toy_files(host: Host, window: &mut Window, cx: &mut App) -> Mounted {
 }
 struct Scripted;
 impl Executor for Scripted {
-    fn execute_formation(
+    fn execute_step(
         &self,
-        request: FormationExecution,
+        request: StepExecution,
         sink: ExecutionSink,
-    ) -> Result<FormationResult, ahjo_core::Error> {
-        let judge = request.formation.id == "fmn_judge";
+    ) -> Result<StepResult, ahjo_core::Error> {
+        let judge = request.step.id == "fmn_judge";
         let attempt = request.attempt;
         let path = request.artifact_dir.join("result.png");
-        let mut result = LabExecutor.execute_formation(request, sink)?;
+        let mut result = LabExecutor.execute_step(request, sink)?;
         if judge {
             let verdict = if attempt == 1 { "fail" } else { "pass" };
             let reason = if attempt == 1 {
@@ -89,7 +87,7 @@ const MISSIONS: Listing = Listing {
 fn mission() -> String {
     let solo = include_str!("fixtures/solo-lab.mission.toml");
     let judge = solo
-        .split("[[formation]]")
+        .split("[[step]]")
         .nth(1)
         .unwrap()
         .split("[[end]]")
@@ -101,7 +99,7 @@ fn mission() -> String {
         .replace("label = \"Result\"", "label = \"Result\"\nkind = \"file\"")
         .replace("to = \"end_done:in\"", "to = \"gate_review:in\"");
     format!(
-        "{work}\n[[formation]]{judge}\n[[gate]]\nid = \"gate_review\"\ntitle = \"Review\"\nkinds = [\"formation\"]\n[[connection]]\nid = \"edge_pass\"\nfrom = \"gate_review:pass\"\nto = \"end_done:in\"\n[[connection]]\nid = \"edge_fail\"\nfrom = \"gate_review:fail\"\nto = \"fmn_work:port_in\"\n[[connection]]\nid = \"edge_judge\"\nfrom = \"gate_review:judge\"\nto = \"fmn_judge:port_in\"\n[[connection]]\nid = \"edge_return\"\nfrom = \"fmn_judge:port_out\"\nto = \"gate_review:judge\"\n"
+        "{work}\n[[step]]{judge}\n[[gate]]\nid = \"gate_review\"\ntitle = \"Review\"\nkinds = [\"step\"]\n[[connection]]\nid = \"edge_pass\"\nfrom = \"gate_review:pass\"\nto = \"end_done:in\"\n[[connection]]\nid = \"edge_fail\"\nfrom = \"gate_review:fail\"\nto = \"fmn_work:port_in\"\n[[connection]]\nid = \"edge_judge\"\nfrom = \"gate_review:judge\"\nto = \"fmn_judge:port_in\"\n[[connection]]\nid = \"edge_return\"\nfrom = \"fmn_judge:port_out\"\nto = \"gate_review:judge\"\n"
     )
 }
 struct Running {

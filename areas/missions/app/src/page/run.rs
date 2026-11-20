@@ -691,7 +691,7 @@ impl MissionsPage {
         let start = RunStart {
             mission: slug,
             input_card_id,
-            formation_id: target.unwrap_or_default(),
+            step_id: target.unwrap_or_default(),
             expected_rev: m.rev,
             inputs: values,
             actor: "human:operator".into(),
@@ -753,7 +753,7 @@ impl MissionsPage {
                                     page.state
                                         .mission
                                         .as_ref()
-                                        .and_then(|m| m.formations.iter().find(|f| f.id == id))
+                                        .and_then(|m| m.steps.iter().find(|f| f.id == id))
                                         .map_or(id.to_owned(), |f| f.title.clone())
                                 };
                                 page.run.findings = rejection

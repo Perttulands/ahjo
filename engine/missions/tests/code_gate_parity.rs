@@ -180,7 +180,7 @@ fn starved_join_blocks_without_allowing_resume() {
     let root = Scratch::new();
     let solo = include_str!("parity/runs/missions/solo-lab.mission.toml");
     let join = solo
-        .split("[[formation]]")
+        .split("[[step]]")
         .nth(1)
         .unwrap()
         .split("[[end]]")
@@ -189,12 +189,12 @@ fn starved_join_blocks_without_allowing_resume() {
         .replace("fmn_work", "fmn_join")
         .replace("slot_work", "slot_join")
         .replace(
-            "[[formation.output]]",
-            "[[formation.input]]\nid = \"port_second\"\nlabel = \"Second\"\n[[formation.output]]",
+            "[[step.output]]",
+            "[[step.input]]\nid = \"port_second\"\nlabel = \"Second\"\n[[step.output]]",
         );
     let mission = gated_mission("kinds = [\"code\"]\ncheck = \"output_contains\"\ncheck_version = \"1\"\ncheck_value = \"hello\"").replace("to = \"end_rejected:in\"", "to = \"fmn_join:port_second\"");
     let mission = format!(
-        "{mission}\n[[formation]]{join}\n[[connection]]\nid = \"edge_join_input\"\nfrom = \"fmn_work:port_out\"\nto = \"fmn_join:port_in\"\n[[connection]]\nid = \"edge_join_done\"\nfrom = \"fmn_join:port_out\"\nto = \"end_done:in\"\n"
+        "{mission}\n[[step]]{join}\n[[connection]]\nid = \"edge_join_input\"\nfrom = \"fmn_work:port_out\"\nto = \"fmn_join:port_in\"\n[[connection]]\nid = \"edge_join_done\"\nfrom = \"fmn_join:port_out\"\nto = \"end_done:in\"\n"
     );
     std::fs::write(root.0.join("missions/hello.mission.toml"), mission).unwrap();
     let c = Coordinator::open(&root.0, RunSettings::default(), Box::new(LabExecutor)).unwrap();

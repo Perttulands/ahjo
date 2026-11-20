@@ -9,7 +9,7 @@
 //! step that always starts fresh gets a session of its own for each
 //! attempt, `<prefix>-<agent>-<run>-<attempt>`, which ends with the attempt.
 
-use crate::{Formation, Mission, Slot};
+use crate::{Mission, Slot, Step};
 
 /// The longest a prefix or an agent's name grows.
 const MOST: usize = 24;
@@ -64,7 +64,7 @@ impl Mission {
     }
 }
 
-impl Formation {
+impl Step {
     /// The agent a slot of this step names: the slot's own name, else the
     /// step's title (with the slot's label when the step has several).
     pub fn agent_of(&self, slot: &Slot) -> String {
@@ -108,8 +108,8 @@ pub fn fresh_session(prefix: &str, agent: &str, run: u64, attempt: i64) -> Strin
 mod tests {
     use super::*;
 
-    fn step(title: &str, slots: &[(&str, &str)]) -> Formation {
-        Formation {
+    fn step(title: &str, slots: &[(&str, &str)]) -> Step {
+        Step {
             id: "fmn_a".into(),
             title: title.into(),
             slots: slots
@@ -121,7 +121,7 @@ mod tests {
                     ..Slot::default()
                 })
                 .collect(),
-            ..Formation::default()
+            ..Step::default()
         }
     }
 

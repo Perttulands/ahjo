@@ -171,13 +171,13 @@ pub mod roles {
         pub usage: String,
     }
     #[derive(Clone, Debug, Default, Deserialize, Serialize)]
-    #[serde(default, rename_all = "camelCase")]
+    #[serde(default)]
     pub struct Use {
         pub mission_id: String,
         pub mission_slug: String,
         pub mission_title: String,
-        pub formation_id: String,
-        pub formation_title: String,
+        pub step_id: String,
+        pub step_title: String,
         pub slot_id: String,
         pub slot_label: String,
     }

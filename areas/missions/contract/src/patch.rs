@@ -378,11 +378,8 @@ mod tests {
                 assert!(!error.contains("unknown operation"), "{op}: {error}");
             }
         }
-        let error = decode(&json!({"add_formation": {}})).unwrap_err();
-        assert!(
-            error.contains("create_formation, update_formation"),
-            "{error}"
-        );
+        let error = decode(&json!({"add_step": {}})).unwrap_err();
+        assert!(error.contains("create_step, update_step"), "{error}");
     }
     #[test]
     fn every_operation_rejects_unknown_fields_even_if_null() {
@@ -411,14 +408,14 @@ mod tests {
         let error = decode(&json!({"assign_slot": {"device": "local"}})).unwrap_err();
         assert_eq!(
             error,
-            "assign_slot: unknown field device; accepted fields: formation_id, slot_id, agent_id, harness, model, effort",
+            "assign_slot: unknown field device; accepted fields: step_id, slot_id, agent_id, harness, model, effort",
         );
     }
 
     #[test]
     fn malformed_operation_fields_are_not_silently_dropped() {
         assert!(decode(&json!({"create_end":{"outcome":42}})).is_err());
-        assert!(decode(&json!({"create_formation":{"x":"100"}})).is_err());
+        assert!(decode(&json!({"create_step":{"x":"100"}})).is_err());
         assert!(decode(&json!({"wire_connection":{"join_if_occupied":"yes"}})).is_err());
     }
     #[test]
@@ -431,17 +428,17 @@ mod tests {
         assert_eq!(kinds, ["human"]);
     }
     #[test]
-    fn restore_formation_reads_the_stored_shape() {
-        let body = json!({"restore_node":{"gate":null,"formation":{"id":"f","type":"solo","title":"Work","input":[{"id":"in","label":"Input"}],"output":[],"slot":[{"id":"s","label":"Agent","controller":false}]}}});
+    fn restore_step_reads_the_stored_shape() {
+        let body = json!({"restore_node":{"gate":null,"step":{"id":"f","formation":"solo","title":"Work","input":[{"id":"in","label":"Input"}],"output":[],"slot":[{"id":"s","label":"Agent","controller":false}]}}});
         let MissionChange::RestoreNode {
-            node: crate::RestoredNode::Formation(formation),
+            node: crate::RestoredNode::Step(step),
             ..
         } = decode(&body).unwrap()
         else {
-            panic!("expected a formation restore")
+            panic!("expected a step restore")
         };
-        assert_eq!(formation.inputs[0].id, "in");
-        assert_eq!(formation.slots[0].id, "s");
+        assert_eq!(step.inputs[0].id, "in");
+        assert_eq!(step.slots[0].id, "s");
         let mut invalid = body;
         invalid["restore_node"]["gate"] = json!({"id":"g"});
         assert!(decode(&invalid).is_err());

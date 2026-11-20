@@ -1,4 +1,4 @@
-//! Change a formation's shape without silently discarding staffed slots.
+//! Change a step's shape without silently discarding staffed slots.
 use crate::Error;
 use ahjo_mission_model::{Mission, MissionChange, Slot};
 use std::collections::HashSet;
@@ -26,40 +26,40 @@ pub(crate) fn apply(
     mission: &Mission,
     patch: MissionChange,
 ) -> Result<bool, Error> {
-    let MissionChange::SetFormationType {
+    let MissionChange::SetStepFormation {
         id,
-        kind,
+        formation,
         keep_slot_id,
         slots,
     } = patch
     else {
         unreachable!()
     };
-    if !["solo", "peer", "orchestrated"].contains(&kind.as_str()) {
+    if !["solo", "peer", "orchestrated"].contains(&formation.as_str()) {
         return Err(Error::new(
-            "unsupported_formation_type",
+            "unsupported_step_formation",
             "use solo, peer or orchestrated",
         ));
     }
-    if !keep_slot_id.is_empty() && kind != "solo" {
+    if !keep_slot_id.is_empty() && formation != "solo" {
         return Err(invalid("keep_slot_id applies only to solo"));
     }
     let current = mission
-        .formation(&id)
-        .ok_or_else(|| Error::new("not_found", "formation"))?;
+        .step(&id)
+        .ok_or_else(|| Error::new("not_found", "step"))?;
     let next = if let Some(snapshot) = slots {
         let mut seen = HashSet::new();
         let controllers = snapshot.iter().filter(|s| s.controller).count();
         if snapshot
             .iter()
             .any(|s| !valid_id(&s.id) || !seen.insert(s.id.clone()))
-            || match kind.as_str() {
+            || match formation.as_str() {
                 "solo" => snapshot.len() != 1,
                 "peer" => snapshot.len() < 2 || controllers != 0,
                 _ => snapshot.len() < 2 || controllers != 1,
             }
         {
-            return Err(invalid("slot snapshot does not fit formation type"));
+            return Err(invalid("slot snapshot does not fit step formation"));
         }
         if !keep_slot_id.is_empty()
             && (!current.slots.iter().any(|s| s.id == keep_slot_id)
@@ -79,7 +79,7 @@ pub(crate) fn apply(
             ));
         }
         if mission
-            .formations
+            .steps
             .iter()
             .any(|f| f.id != id && f.slots.iter().any(|s| seen.contains(&s.id)))
         {
@@ -91,7 +91,7 @@ pub(crate) fn apply(
         if !keep_slot_id.is_empty() && !slots.iter().any(|s| s.id == keep_slot_id) {
             return Err(invalid("slot to keep does not exist"));
         }
-        match kind.as_str() {
+        match formation.as_str() {
             "solo" => {
                 if slots.is_empty() {
                     slots.push(new_slot("Agent", false)?);
@@ -150,17 +150,17 @@ pub(crate) fn apply(
             }
         }
     };
-    if current.kind == kind && current.slots == next {
+    if current.formation == formation && current.slots == next {
         return Ok(false);
     }
-    let table = doc["formation"]
+    let table = doc["step"]
         .as_array_of_tables_mut()
         .and_then(|a| {
             a.iter_mut()
                 .find(|t| t.get("id").and_then(Item::as_str) == Some(id.as_str()))
         })
-        .ok_or_else(|| invalid("formation source"))?;
-    crate::write::set(table, "type", value(kind));
+        .ok_or_else(|| invalid("step source"))?;
+    crate::write::set(table, "formation", value(formation));
     // Retain the source table of each kept slot, including its comments.
     let old = table.remove("slot");
     let mut source = std::collections::HashMap::new();

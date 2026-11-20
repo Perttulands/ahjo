@@ -1,5 +1,5 @@
 //! Undo and redo of mission edits, as Archon's cockpit keeps them
-//! (formationsUndo.ts, formationsRedo.ts). An edit is one or more steps,
+//! (stepsUndo.ts, stepsRedo.ts). An edit is one or more steps,
 //! each a mission patch or a layout patch. Before a step is written, the
 //! step that reverses it is worked out from the mission as it is then; an
 //! entry keeps those reverses, newest first, so undo never needs the
@@ -117,7 +117,7 @@ impl History {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum CardKind {
     Input,
-    Formation,
+    Step,
     Gate,
     End,
     Limit,
@@ -135,7 +135,7 @@ fn card(mission: &Mission, id: &str) -> Option<(RestoredNode, usize)> {
         };
     }
     find!(input_cards, InputCard)
-        .or_else(|| find!(formations, Formation))
+        .or_else(|| find!(steps, Step))
         .or_else(|| find!(gates, Gate))
         .or_else(|| find!(ends, End))
         .or_else(|| find!(limits, Limit))
@@ -190,13 +190,13 @@ pub fn inverse_change(
     let reverse = match change {
         Title(_) => Title(mission.title.clone()),
         CreateInputCard { .. }
-        | CreateFormation { .. }
+        | CreateStep { .. }
         | CreateGate { .. }
         | CreateEnd { .. }
         | CreateLimit { .. }
         | RemovePort { .. } => return Ok(vec![]),
         DeleteInputCard { id }
-        | DeleteFormation { id }
+        | DeleteStep { id }
         | DeleteGate { id }
         | DeleteEnd { id }
         | DeleteLimit { id } => {
@@ -211,23 +211,23 @@ pub fn inverse_change(
         }
         RestoreNode { node, .. } => match node {
             RestoredNode::InputCard(card) => delete(CardKind::Input, &card.id),
-            RestoredNode::Formation(card) => delete(CardKind::Formation, &card.id),
+            RestoredNode::Step(card) => delete(CardKind::Step, &card.id),
             RestoredNode::Gate(card) => delete(CardKind::Gate, &card.id),
             RestoredNode::End(card) => delete(CardKind::End, &card.id),
             RestoredNode::Limit(card) => delete(CardKind::Limit, &card.id),
         },
         UpdatePort {
-            formation_id,
+            step_id,
             port_id,
             label,
             kind,
         } => {
             let port = mission
-                .formation(formation_id)
+                .step(step_id)
                 .and_then(|f| f.inputs.iter().chain(&f.outputs).find(|p| p.id == *port_id))
                 .ok_or("the edited port no longer exists")?;
             UpdatePort {
-                formation_id: formation_id.clone(),
+                step_id: step_id.clone(),
                 port_id: port_id.clone(),
                 label: previous(label, &port.label),
                 kind: previous(kind, &port.kind),
@@ -250,23 +250,23 @@ pub fn inverse_change(
                 outputs: previous(&update.outputs, &input.outputs),
             })
         }
-        UpdateFormation {
+        UpdateStep {
             id,
             title,
             device,
             fresh,
         } => {
-            let step = mission.formation(id).ok_or(missing)?;
-            UpdateFormation {
+            let step = mission.step(id).ok_or(missing)?;
+            UpdateStep {
                 id: id.clone(),
                 title: previous(title, &step.title),
                 device: previous(device, &step.device),
                 fresh: previous(fresh, &step.fresh),
             }
         }
-        EditFormation { id, .. } => {
-            let step = mission.formation(id).ok_or(missing)?;
-            EditFormation {
+        EditStep { id, .. } => {
+            let step = mission.step(id).ok_or(missing)?;
+            EditStep {
                 id: id.clone(),
                 title: step.title.clone(),
                 brief: Some(step.brief.clone().unwrap_or_default()),
@@ -313,26 +313,22 @@ pub fn inverse_change(
             })
         }
         NameAgent {
-            formation_id,
-            slot_id,
-            ..
+            step_id, slot_id, ..
         } => {
-            let slot = find_slot(mission, formation_id, slot_id)
-                .ok_or("the named slot no longer exists")?;
+            let slot =
+                find_slot(mission, step_id, slot_id).ok_or("the named slot no longer exists")?;
             NameAgent {
-                formation_id: formation_id.clone(),
+                step_id: step_id.clone(),
                 slot_id: slot_id.clone(),
                 agent: slot.agent.clone(),
             }
         }
         AssignSlot {
-            formation_id,
-            slot_id,
-            ..
+            step_id, slot_id, ..
         } => {
-            let slot = find_slot(mission, formation_id, slot_id)
-                .ok_or("the staffed slot no longer exists")?;
-            Staffing::from(slot).assign(formation_id, slot_id)
+            let slot =
+                find_slot(mission, step_id, slot_id).ok_or("the staffed slot no longer exists")?;
+            Staffing::from(slot).assign(step_id, slot_id)
         }
         WireConnection {
             join_if_occupied: true,
@@ -376,12 +372,8 @@ pub fn inverse_change(
     Ok(vec![Step::board(reverse)])
 }
 
-fn find_slot<'a>(mission: &'a Mission, formation: &str, slot: &str) -> Option<&'a Slot> {
-    mission
-        .formation(formation)?
-        .slots
-        .iter()
-        .find(|s| s.id == slot)
+fn find_slot<'a>(mission: &'a Mission, step: &str, slot: &str) -> Option<&'a Slot> {
+    mission.step(step)?.slots.iter().find(|s| s.id == slot)
 }
 
 /// Reverse a change whose result identifies the node or wire it added.
@@ -403,9 +395,9 @@ pub fn answered(change: &MissionChange, before: &Mission, after: &Mission) -> Ve
                 }
             } else {
                 // The joined wire goes with the extra port it created.
-                let (formation, port) = added.to.split_once(':').unwrap_or((&added.to, ""));
+                let (step, port) = added.to.split_once(':').unwrap_or((&added.to, ""));
                 RemovePort {
-                    formation_id: formation.into(),
+                    step_id: step.into(),
                     port_id: port.into(),
                 }
             };
@@ -435,20 +427,17 @@ pub fn answered(change: &MissionChange, before: &Mission, after: &Mission) -> Ve
                 remove_previous_input: landed.to != *to,
             })]
         }
-        RemovePort {
-            formation_id,
-            port_id,
-        } => {
+        RemovePort { step_id, port_id } => {
             // An undone join is redone by wiring to an input of the same step.
-            let removed = format!("{formation_id}:{port_id}");
+            let removed = format!("{step_id}:{port_id}");
             let Some(to) = after
                 .connections
                 .iter()
-                .find(|c| c.to.split_once(':').is_some_and(|(f, _)| f == formation_id))
+                .find(|c| c.to.split_once(':').is_some_and(|(f, _)| f == step_id))
                 .map(|c| c.to.clone())
                 .or_else(|| {
-                    let first = after.formation(formation_id)?.inputs.first()?;
-                    Some(format!("{formation_id}:{}", first.id))
+                    let first = after.step(step_id)?.inputs.first()?;
+                    Some(format!("{step_id}:{}", first.id))
                 })
             else {
                 return vec![];
@@ -482,10 +471,7 @@ fn created<'a>(before: &Mission, after: &'a Mission) -> Option<(&'a str, CardKin
     }
     added(&before.input_cards, &after.input_cards, |n| &n.id)
         .map(|id| (id, CardKind::Input))
-        .or_else(|| {
-            added(&before.formations, &after.formations, |n| &n.id)
-                .map(|id| (id, CardKind::Formation))
-        })
+        .or_else(|| added(&before.steps, &after.steps, |n| &n.id).map(|id| (id, CardKind::Step)))
         .or_else(|| added(&before.gates, &after.gates, |n| &n.id).map(|id| (id, CardKind::Gate)))
         .or_else(|| added(&before.ends, &after.ends, |n| &n.id).map(|id| (id, CardKind::End)))
         .or_else(|| added(&before.limits, &after.limits, |n| &n.id).map(|id| (id, CardKind::Limit)))
@@ -495,7 +481,7 @@ fn delete(kind: CardKind, id: &str) -> MissionChange {
     let id = id.to_owned();
     match kind {
         CardKind::Input => MissionChange::DeleteInputCard { id },
-        CardKind::Formation => MissionChange::DeleteFormation { id },
+        CardKind::Step => MissionChange::DeleteStep { id },
         CardKind::Gate => MissionChange::DeleteGate { id },
         CardKind::End => MissionChange::DeleteEnd { id },
         CardKind::Limit => MissionChange::DeleteLimit { id },
@@ -506,7 +492,7 @@ fn delete(kind: CardKind, id: &str) -> MissionChange {
 mod tests {
     use super::*;
     use MissionChange::*;
-    use ahjo_missions_contract::{Brief, Connection, End, Formation, Gate, InputCard, Limit, Port};
+    use ahjo_missions_contract::{Brief, Connection, End, Gate, InputCard, Limit, Port};
 
     fn check_patches(steps: Vec<Step>) -> Vec<Step> {
         for step in &steps {
@@ -541,11 +527,11 @@ mod tests {
     fn mission() -> Mission {
         Mission {
             title: "Delivery".into(),
-            formations: vec![
-                Formation {
+            steps: vec![
+                ahjo_missions_contract::Step {
                     id: "fmn_plan".into(),
                     title: "Plan".into(),
-                    kind: "solo".into(),
+                    formation: "solo".into(),
                     slots: vec![Slot {
                         id: "s1".into(),
                         agent_id: "planner".into(),
@@ -555,17 +541,17 @@ mod tests {
                     }],
                     ..Default::default()
                 },
-                Formation {
+                ahjo_missions_contract::Step {
                     id: "fmn_beads".into(),
                     title: "Beads".into(),
-                    kind: "solo".into(),
+                    formation: "solo".into(),
                     ..Default::default()
                 },
             ],
             gates: vec![Gate {
                 id: "gate_r".into(),
                 title: "Review".into(),
-                kinds: vec!["formation".into()],
+                kinds: vec!["step".into()],
                 criterion: "ok".into(),
                 ..Default::default()
             }],
@@ -585,7 +571,7 @@ mod tests {
             x: 420,
             y: 80,
         }];
-        let del = Step::board(DeleteFormation {
+        let del = Step::board(DeleteStep {
             id: "fmn_beads".into(),
         });
         let inv = inverse(&m, &at, &del).unwrap();
@@ -593,14 +579,14 @@ mod tests {
             panic!("expected restore")
         };
         let RestoreNode {
-            node: RestoredNode::Formation(card),
+            node: RestoredNode::Step(card),
             connections,
             x,
             y,
             index,
         } = change.as_ref()
         else {
-            panic!("expected formation restore");
+            panic!("expected step restore");
         };
         assert_eq!(card.title, "Beads");
         assert_eq!(connections.len(), 2);
@@ -631,7 +617,7 @@ mod tests {
         assert_eq!(
             undo_staff,
             vec![Step::board(AssignSlot {
-                formation_id: "fmn_plan".into(),
+                step_id: "fmn_plan".into(),
                 slot_id: "s1".into(),
                 agent_id: "planner".into(),
                 harness: "claude-code".into(),
@@ -642,14 +628,14 @@ mod tests {
 
         let name = |agent: &str| {
             Step::board(NameAgent {
-                formation_id: "fmn_plan".into(),
+                step_id: "fmn_plan".into(),
                 slot_id: "s1".into(),
                 agent: agent.into(),
             })
         };
         assert_eq!(inverse(&m, &[], &name("writer")).unwrap(), vec![name("")]);
         let fresh = |fresh| {
-            Step::board(UpdateFormation {
+            Step::board(UpdateStep {
                 id: "fmn_plan".into(),
                 title: None,
                 device: None,
@@ -662,7 +648,7 @@ mod tests {
     #[test]
     fn undo_of_a_staffing_change_restores_every_staffing_field() {
         let mut mission = mission();
-        let seat = &mut mission.formations[0].slots[0];
+        let seat = &mut mission.steps[0].slots[0];
         seat.model = "opus".into();
         let before = Staffing::from(&*seat);
         let edited = Staffing {
@@ -704,24 +690,24 @@ mod tests {
             vec![Step::Layout(at.to_vec())]
         );
         let mut after = m.clone();
-        after.formations.push(Formation {
+        after.steps.push(ahjo_missions_contract::Step {
             id: "fmn_new".into(),
             title: "New".into(),
             ..Default::default()
         });
-        assert_eq!(created(&m, &after), Some(("fmn_new", CardKind::Formation)));
+        assert_eq!(created(&m, &after), Some(("fmn_new", CardKind::Step)));
         assert_eq!(
             answered(
-                &CreateFormation {
+                &CreateStep {
                     title: "New".into(),
-                    kind: "solo".into(),
+                    formation: "solo".into(),
                     x: 0,
                     y: 0
                 },
                 &m,
                 &after
             ),
-            vec![Step::board(DeleteFormation {
+            vec![Step::board(DeleteStep {
                 id: "fmn_new".into()
             })],
         );
@@ -734,7 +720,7 @@ mod tests {
                 id: "input".into(),
                 ..Default::default()
             }],
-            formations: vec![Formation {
+            steps: vec![ahjo_missions_contract::Step {
                 id: "step".into(),
                 brief: Some(Brief {
                     work: "ahjo-2".into(),
@@ -758,7 +744,7 @@ mod tests {
         };
         for (kind, id) in [
             (CardKind::Input, "input"),
-            (CardKind::Formation, "step"),
+            (CardKind::Step, "step"),
             (CardKind::Gate, "gate"),
             (CardKind::End, "end"),
             (CardKind::Limit, "limit"),
@@ -828,7 +814,7 @@ mod tests {
         let mut h = History::default();
         let rename = Entry {
             label: "the title".into(),
-            steps: vec![Step::board(UpdateFormation {
+            steps: vec![Step::board(UpdateStep {
                 id: "fmn_plan".into(),
                 title: Some("A".into()),
                 device: None,
@@ -879,7 +865,7 @@ mod tests {
         assert_eq!(
             answered(&joining, &before, &after),
             vec![Step::board(RemovePort {
-                formation_id: "fmn_beads".into(),
+                step_id: "fmn_beads".into(),
                 port_id: "in_2".into()
             })],
         );
@@ -898,7 +884,7 @@ mod tests {
             .connections
             .push(connection("c3", "gate_r:pass", "fmn_beads:in_2"));
         let remove = RemovePort {
-            formation_id: "fmn_beads".into(),
+            step_id: "fmn_beads".into(),
             port_id: "in_2".into(),
         };
         assert!(
@@ -915,14 +901,14 @@ mod tests {
     #[test]
     fn a_port_edit_reverses_only_its_changed_fields() {
         let mut m = mission();
-        m.formations[0].inputs = vec![Port {
+        m.steps[0].inputs = vec![Port {
             id: "in".into(),
             label: "Original".into(),
             kind: "text".into(),
         }];
         let update = |label: &str| {
             Step::board(UpdatePort {
-                formation_id: "fmn_plan".into(),
+                step_id: "fmn_plan".into(),
                 port_id: "in".into(),
                 label: Some(label.into()),
                 kind: None,

@@ -99,17 +99,6 @@ fn upgrade_bindings(text: &str) -> Result<Option<String>, crate::Error> {
 }
 
 fn upgrade_ledger(text: &str) -> io::Result<Option<String>> {
-    if ![
-        "\"runId\"",
-        "\"issue\"",
-        "\"sessionStem\"",
-        "\"sessionRef\"",
-    ]
-    .iter()
-    .any(|key| text.contains(key))
-    {
-        return Ok(None);
-    }
     let mut changed = false;
     let mut out = String::with_capacity(text.len());
     for line in text.lines() {
@@ -130,10 +119,86 @@ fn upgrade_ledger(text: &str) -> io::Result<Option<String>> {
         if legacy_wire {
             changed |= rename_json_keys(&mut event)?;
         }
+        changed |= rename_step_event(&mut event)?;
         out.push_str(&serde_json::to_string(&event)?);
         out.push('\n');
     }
     Ok(changed.then_some(out))
+}
+
+/// Change only protocol fields, keeping IDs, inputs, outputs and prose exactly
+/// as the recorded run wrote them.
+fn rename_step_event(event: &mut Value) -> io::Result<bool> {
+    let kind = event
+        .get("type")
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .to_owned();
+    let Some(data) = event.get_mut("data").and_then(Value::as_object_mut) else {
+        return Ok(false);
+    };
+    let mut changed = false;
+    if kind == "run_started"
+        && let Some(step) = data.remove("formation_id")
+    {
+        if data.contains_key("step_id") {
+            return Err(invalid("run_started has both formation_id and step_id"));
+        }
+        data.insert("step_id".into(), step);
+        changed = true;
+    }
+    if kind == "node_started"
+        && data
+            .get("node_kind")
+            .is_some_and(|value| value == "formation")
+    {
+        data.insert("node_kind".into(), Value::String("step".into()));
+        changed = true;
+    }
+    if kind == "gate_kind_result" && data.get("kind").is_some_and(|value| value == "formation") {
+        data.insert("kind".into(), Value::String("step".into()));
+        changed = true;
+    }
+    if matches!(
+        kind.as_str(),
+        "gate_kind_result" | "gate_verdict" | "human_input_requested"
+    ) {
+        changed |= rename_evidence(data.get_mut("evidence"));
+        for field in ["kind_result_seqs", "per_kind"] {
+            if let Some(kinds) = data.get_mut(field).and_then(Value::as_object_mut)
+                && let Some(previous) = kinds.remove("formation")
+            {
+                if kinds.contains_key("step") {
+                    return Err(invalid(&format!("{field} has both formation and step")));
+                }
+                kinds.insert("step".into(), previous);
+                changed = true;
+            }
+        }
+        if let Some(recommendation) = data
+            .get_mut("pick")
+            .and_then(Value::as_object_mut)
+            .and_then(|pick| pick.get_mut("recommendation"))
+            .and_then(Value::as_object_mut)
+        {
+            changed |= rename_evidence(recommendation.get_mut("evidence"));
+        }
+    }
+    Ok(changed)
+}
+
+fn rename_evidence(evidence: Option<&mut Value>) -> bool {
+    let Some(items) = evidence.and_then(Value::as_array_mut) else {
+        return false;
+    };
+    let mut changed = false;
+    for item in items.iter_mut().filter_map(Value::as_object_mut) {
+        if item.get("kind").is_some_and(|value| value == "formation") {
+            item.insert("kind".into(), Value::String("step".into()));
+            changed = true;
+        }
+    }
+    changed
 }
 
 /// Upgrade a protocol JSON object, retaining dictionary keys that name
@@ -296,5 +361,48 @@ mod tests {
         assert_eq!(mode, 0o600);
         assert_eq!(text, "{\"type\":\"run_started\",\"work\":\"gh:o/r#1\"}\n");
         assert!(!stale.exists());
+    }
+    #[test]
+    fn formation_ledger_fields_upgrade_without_changing_authored_values() {
+        let original = concat!(
+            r#"{"type":"run_started","data":{"formation_id":"fmn_keep","inputs":{"formation_id":"formation","note":"formation"},"reason":"formation"}}"#,
+            "\n",
+            r#"{"type":"node_started","node_id":"fmn_keep","data":{"node_kind":"formation","brief":{"goal":"formation"}}}"#,
+            "\n",
+            r#"{"type":"gate_kind_result","data":{"kind":"formation","evidence":[{"kind":"formation","text":"formation"}]}}"#,
+            "\n",
+            r#"{"type":"human_input_requested","data":{"kind_result_seqs":{"formation":4},"per_kind":{"formation":"pass"},"pick":{"recommendation":{"evidence":[{"kind":"formation","text":"formation"}]}}}}"#,
+            "\n",
+        );
+        let updated = upgrade_ledger(original).unwrap().unwrap();
+        let events: Vec<Value> = updated
+            .lines()
+            .map(|line| serde_json::from_str(line).unwrap())
+            .collect();
+        assert_eq!(events[0]["data"]["step_id"], "fmn_keep");
+        assert_eq!(events[0]["data"]["inputs"]["formation_id"], "formation");
+        assert_eq!(events[0]["data"]["reason"], "formation");
+        assert_eq!(events[1]["data"]["node_kind"], "step");
+        assert_eq!(events[1]["data"]["brief"]["goal"], "formation");
+        assert_eq!(events[2]["data"]["kind"], "step");
+        assert_eq!(events[2]["data"]["evidence"][0]["kind"], "step");
+        assert_eq!(events[2]["data"]["evidence"][0]["text"], "formation");
+        assert_eq!(events[3]["data"]["kind_result_seqs"]["step"], 4);
+        assert_eq!(events[3]["data"]["per_kind"]["step"], "pass");
+        assert_eq!(
+            events[3]["data"]["pick"]["recommendation"]["evidence"][0]["kind"],
+            "step"
+        );
+        assert_eq!(
+            events[3]["data"]["pick"]["recommendation"]["evidence"][0]["text"],
+            "formation"
+        );
+        assert!(upgrade_ledger(&updated).unwrap().is_none());
+    }
+
+    #[test]
+    fn conflicting_ledger_fields_are_refused() {
+        let original = r#"{"type":"run_started","data":{"formation_id":"a","step_id":"b"}}"#;
+        assert!(upgrade_ledger(original).is_err());
     }
 }

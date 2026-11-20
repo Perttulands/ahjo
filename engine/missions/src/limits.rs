@@ -147,7 +147,7 @@ fn rounds_use(mission: &Mission, events: &[RunEvent], limit: &Limit) -> Option<L
     let used = (events.iter().enumerate())
         .filter(|(_, event)| {
             event.kind == "node_started"
-                && text(event, "node_kind") == "formation"
+                && text(event, "node_kind") == "step"
                 && (whole || event.node_id == limit.target)
         })
         .filter(|(index, _)| !cut_short_by_restart(events, *index))
@@ -193,7 +193,7 @@ fn time_used(mission: &Mission, events: &[RunEvent], limit: &Limit, now: OffsetD
         match event.kind.as_str() {
             "node_started"
                 if (whole || event.node_id == limit.target)
-                    && text(event, "node_kind") == "formation" =>
+                    && text(event, "node_kind") == "step" =>
             {
                 open.insert(event.node_id.clone());
             }
@@ -463,7 +463,7 @@ mod tests {
 
     fn mission(cards: &str) -> Mission {
         Mission::parse(&format!(
-            "schema = 2\nid = \"m\"\nslug = \"m\"\ntitle = \"M\"\nrev = 1\n[[input_card]]\nid = \"inp\"\ntitle = \"In\"\n[[formation]]\nid = \"work\"\ntype = \"solo\"\ntitle = \"Review\"\n{cards}"
+            "schema = 3\nid = \"m\"\nslug = \"m\"\ntitle = \"M\"\nrev = 1\n[[input_card]]\nid = \"inp\"\ntitle = \"In\"\n[[step]]\nid = \"work\"\nformation = \"solo\"\ntitle = \"Review\"\n{cards}"
         ))
         .unwrap()
     }
@@ -522,7 +522,7 @@ mod tests {
         let m =
             mission("[[limit]]\nid = \"lim\"\ntitle = \"Cap\"\ntarget = \"work\"\nrounds = 2\n");
         let t = "2026-01-01T00:00:00Z";
-        let started = json!({"node_kind":"formation"});
+        let started = json!({"node_kind":"step"});
         let mut events = vec![
             event(1, t, "node_started", "work", started.clone()),
             event(2, t, "error", "", json!({"code":"coordinator_interrupted"})),
@@ -555,7 +555,7 @@ mod tests {
                 "2026-01-01T00:00:00Z",
                 "node_started",
                 "work",
-                json!({"node_kind":"formation"}),
+                json!({"node_kind":"step"}),
             ),
             event(2, "2026-01-01T00:00:20Z", "node_output", "work", json!({})),
             event(
@@ -563,7 +563,7 @@ mod tests {
                 "2026-01-01T00:05:00Z",
                 "node_started",
                 "work",
-                json!({"node_kind":"formation"}),
+                json!({"node_kind":"step"}),
             ),
             event(4, "2026-01-01T00:05:10Z", "run_blocked", "", json!({})),
             event(5, "2026-01-01T00:09:00Z", "run_resumed", "", json!({})),

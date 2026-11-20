@@ -184,7 +184,7 @@ fn card_ids(m: &Mission) -> impl Iterator<Item = &str> {
     m.input_cards
         .iter()
         .map(|card| card.id.as_str())
-        .chain(m.formations.iter().map(|card| card.id.as_str()))
+        .chain(m.steps.iter().map(|card| card.id.as_str()))
         .chain(m.gates.iter().map(|card| card.id.as_str()))
         .chain(m.ends.iter().map(|card| card.id.as_str()))
         .chain(m.limits.iter().map(|card| card.id.as_str()))
@@ -193,7 +193,7 @@ fn card_ids(m: &Mission) -> impl Iterator<Item = &str> {
 fn all_ids(m: &Mission) -> impl Iterator<Item = &str> {
     card_ids(m)
         .chain(m.connections.iter().map(|wire| wire.id.as_str()))
-        .chain(m.formations.iter().flat_map(|step| {
+        .chain(m.steps.iter().flat_map(|step| {
             step.inputs
                 .iter()
                 .chain(&step.outputs)
@@ -261,14 +261,14 @@ fn fill_ids(doc: &mut dyn TableLike, used: &mut HashSet<String>, assigned: &mut 
     };
     for (key, kind) in [
         ("input_card", "inp"),
-        ("formation", "fmn"),
+        ("step", "fmn"),
         ("gate", "gate"),
         ("end", "end"),
         ("limit", "lim"),
     ] {
         each(doc, key, |card| {
             assign(card, kind, "title");
-            if key == "formation" {
+            if key == "step" {
                 each(card, "input", |port| assign(port, "port", "label"));
                 each(card, "output", |port| assign(port, "port", "label"));
                 each(card, "slot", |slot| assign(slot, "slot", "label"));
@@ -307,7 +307,7 @@ fn changes(before: &Mission, after: &Mission, existed: bool) -> DocumentChanges 
         };
     }
     compare!(input_cards);
-    compare!(formations);
+    compare!(steps);
     compare!(gates);
     compare!(ends);
     compare!(limits);

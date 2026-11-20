@@ -129,15 +129,23 @@ pub(crate) fn publish_upgrade(path: &Path, original: &[u8], upgraded: &[u8]) -> 
     let backup = backup_path(path)?;
     let marker = marker_path(&backup);
     let fingerprint = digest(original);
-    let marker_exists = match std::fs::symlink_metadata(&marker) {
-        Ok(metadata) if metadata.file_type().is_file() => {
-            if std::fs::read_to_string(&marker)? != fingerprint {
+    let marker_hash = match std::fs::symlink_metadata(&marker) {
+        Ok(metadata) if metadata.file_type().is_file() => Some(std::fs::read_to_string(&marker)?),
+        Ok(_) => {
+            return Err(io::Error::new(
+                io::ErrorKind::AlreadyExists,
+                format!("{} is not a regular migration marker", marker.display()),
+            ));
+        }
+        Err(error) if error.kind() == io::ErrorKind::NotFound => None,
+        Err(error) => return Err(error),
+    };
+    let backup_exists = match std::fs::symlink_metadata(&backup) {
+        Ok(metadata) if marker_hash.is_some() && metadata.file_type().is_file() => {
+            if digest(&std::fs::read(&backup)?) != marker_hash.as_deref().unwrap_or_default() {
                 return Err(io::Error::new(
                     io::ErrorKind::AlreadyExists,
-                    format!(
-                        "{} is an existing, different migration marker",
-                        marker.display()
-                    ),
+                    format!("{} does not match its migration marker", backup.display()),
                 ));
             }
             true
@@ -145,38 +153,30 @@ pub(crate) fn publish_upgrade(path: &Path, original: &[u8], upgraded: &[u8]) -> 
         Ok(_) => {
             return Err(io::Error::new(
                 io::ErrorKind::AlreadyExists,
-                format!("{} is not a regular migration marker", marker.display()),
+                format!("{} is an existing, unowned backup", backup.display()),
             ));
         }
         Err(error) if error.kind() == io::ErrorKind::NotFound => false,
         Err(error) => return Err(error),
     };
-    match std::fs::symlink_metadata(&backup) {
-        Ok(metadata) if marker_exists && metadata.file_type().is_file() => {
-            if std::fs::read(&backup)? != original {
-                return Err(io::Error::new(
-                    io::ErrorKind::AlreadyExists,
-                    format!(
-                        "{} is an existing, different migration backup",
-                        backup.display()
-                    ),
-                ));
-            }
-        }
-        Ok(_) => {
-            return Err(io::Error::new(
-                io::ErrorKind::AlreadyExists,
-                format!("{} is an existing, unowned backup", backup.display()),
-            ));
-        }
-        Err(error) if error.kind() == io::ErrorKind::NotFound => (),
-        Err(error) => return Err(error),
+    if !backup_exists
+        && marker_hash
+            .as_deref()
+            .is_some_and(|hash| hash != fingerprint)
+    {
+        return Err(io::Error::new(
+            io::ErrorKind::AlreadyExists,
+            format!(
+                "{} does not match the source for its missing backup",
+                marker.display()
+            ),
+        ));
     }
-    if !marker_exists {
+    if marker_hash.is_none() {
         let staged = prepare(&marker, fingerprint.as_bytes())?;
         std::fs::hard_link(&staged.temp, &marker)?;
     }
-    if !backup.exists() {
+    if !backup_exists {
         let staged = prepare(&backup, original)?;
         std::fs::hard_link(&staged.temp, &backup)?;
     }

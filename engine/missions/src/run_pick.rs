@@ -58,7 +58,7 @@ pub(crate) struct Choice {
 impl Choice {
     fn data(&self) -> Value {
         let evidence: Vec<_> = (self.evidence.iter())
-            .map(|text| json!({"kind":"formation","text":text}))
+            .map(|text| json!({"kind":"step","text":text}))
             .collect();
         json!({"attempt":self.attempt,"reason":self.reason,"evidence":evidence,"decided_by":self.decided_by})
     }
@@ -200,7 +200,7 @@ pub(crate) fn start(
     trigger: &str,
 ) -> io::Result<()> {
     let mut data = json!({"node_id":step,"gate_id":pick.gate.id,"trigger":trigger,"limit":use_,"candidates":pick.candidates});
-    if pick.gate.kinds.iter().any(|kind| kind == "formation") {
+    if pick.gate.kinds.iter().any(|kind| kind == "step") {
         let chain: Vec<_> = (crate::graph::judge_chain(mission, &pick.gate.id).into_iter())
             .map(|judge| judge.id.clone())
             .collect();
@@ -475,7 +475,7 @@ fn resolve(
     let attempts: Vec<_> = details.iter().map(|detail| detail.attempt).collect();
     let mut pick = json!({"node_id":started.node_id,"attempt":choice.attempt,"pick_seq":started.seq,"candidates":attempts,"decided_by":choice.decided_by,"trigger":text(&Value::Object(started.data.clone()), "trigger")});
     let evidence: Vec<_> = (choice.evidence.iter())
-        .map(|text| json!({"kind":"formation","text":text}))
+        .map(|text| json!({"kind":"step","text":text}))
         .collect();
     let routes: Vec<_> = crate::graph::outgoing_from_port(mission, &started.gate_id, "pass")
         .map(|edge| edge.id.clone())
@@ -576,7 +576,7 @@ pub(crate) fn advance(
         }
         let input = pick_input(id, mission, gate, started, &details);
         let attempts: Vec<_> = details.iter().map(|detail| detail.attempt).collect();
-        if gate.kinds.iter().any(|kind| kind == "formation") {
+        if gate.kinds.iter().any(|kind| kind == "step") {
             if crate::graph::judge_chain(mission, &gate.id).is_empty() {
                 return Err(invalid(&format!("gate {:?} has no judge chain", gate.id)));
             }
@@ -703,7 +703,7 @@ impl Judging<'_> {
                     .max()
                     .unwrap_or(0)
                     + 1;
-                let result = crate::run_job::execute_formation(
+                let result = crate::run_job::execute_step(
                     c,
                     id,
                     mission,

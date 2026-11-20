@@ -16,23 +16,18 @@ fn reports_unsupported_capabilities_on_the_nodes_and_refuses_admission() {
     let solo = validate(&mission, &store.roles(), &Harnesses::default());
     assert!(!solo.errors.iter().any(|f| matches!(
         f.code,
-        Code::UnsupportedFormation | Code::UnsupportedHumanChannel
+        Code::UnsupportedStep | Code::UnsupportedHumanChannel
     )));
-    let formation = &mut mission.formations[0];
-    formation.kind = "peer".into();
-    let mut slot = formation.slots[0].clone();
+    let step = &mut mission.steps[0];
+    step.formation = "peer".into();
+    let mut slot = step.slots[0].clone();
     slot.id = "second".into();
-    formation.slots.push(slot);
+    step.slots.push(slot);
     mission.input_cards[0].human_channel = "session".into();
     let report = validate(&mission, &store.roles(), &Harnesses::default());
-    assert!(
-        report
-            .errors
-            .iter()
-            .any(|f| f.code == Code::UnsupportedFormation
-                && f.node_id == mission.formations[0].id
-                && f.message.contains("not supported"))
-    );
+    assert!(report.errors.iter().any(|f| f.code == Code::UnsupportedStep
+        && f.node_id == mission.steps[0].id
+        && f.message.contains("not supported")));
     assert!(
         report
             .errors
@@ -53,7 +48,7 @@ fn reports_unsupported_capabilities_on_the_nodes_and_refuses_admission() {
         admitted
             .errors
             .iter()
-            .any(|f| f.code == Code::UnsupportedFormation)
+            .any(|f| f.code == Code::UnsupportedStep)
     );
     assert!(
         admitted
@@ -62,12 +57,12 @@ fn reports_unsupported_capabilities_on_the_nodes_and_refuses_admission() {
             .any(|f| f.code == Code::UnsupportedHumanChannel)
     );
     mission.input_cards[0].human_channel.clear();
-    mission.formations[0].kind = "orchestrated".into();
-    mission.formations[0].slots[0].controller = true;
+    mission.steps[0].formation = "orchestrated".into();
+    mission.steps[0].slots[0].controller = true;
     let report = validate(&mission, &store.roles(), &Harnesses::default());
     assert!(!report.errors.iter().any(|f| matches!(
         f.code,
-        Code::UnsupportedFormation | Code::UnsupportedHumanChannel | Code::OrchestratedController
+        Code::UnsupportedStep | Code::UnsupportedHumanChannel | Code::OrchestratedController
     )));
     mission.input_cards[0].human_channel = "session".into();
     mission.connections.clear();
@@ -89,7 +84,7 @@ fn legacy_missions_can_be_repaired_without_allowing_unrelated_saves() {
     let folder = root.join("missions");
     std::fs::create_dir_all(&folder).unwrap();
     let source = include_str!("../../../areas/missions/app/tests/fixtures/gated.mission.toml")
-        .replace("type = \"solo\"", "type = \"peer\"")
+        .replace("formation = \"solo\"", "formation = \"peer\"")
         .replace(
             "id = \"inp_start\"",
             "id = \"inp_start\"\nhuman_channel = \"session\"",
@@ -102,7 +97,7 @@ fn legacy_missions_can_be_repaired_without_allowing_unrelated_saves() {
         findings
             .errors
             .iter()
-            .any(|f| f.code == Code::UnsupportedFormation)
+            .any(|f| f.code == Code::UnsupportedStep)
     );
     assert!(
         findings
@@ -122,10 +117,10 @@ fn legacy_missions_can_be_repaired_without_allowing_unrelated_saves() {
             "",
         )
         .unwrap_err();
-    assert_eq!(denied.code, "unsupported_formation");
+    assert_eq!(denied.code, "unsupported_step");
     assert_eq!(store.mission_edit("gated").unwrap().etag, current.etag);
     let card = current.mission.input_cards[0].id.clone();
-    let formation = current.mission.formations[0].id.clone();
+    let step = current.mission.steps[0].id.clone();
     let repaired = store
         .patch(
             "gated",
@@ -142,16 +137,16 @@ fn legacy_missions_can_be_repaired_without_allowing_unrelated_saves() {
         .patch(
             "gated",
             pre(&repaired),
-            MissionChange::SetFormationType {
-                id: formation,
-                kind: "solo".into(),
+            MissionChange::SetStepFormation {
+                id: step,
+                formation: "solo".into(),
                 keep_slot_id: "".into(),
                 slots: None,
             },
             "",
         )
         .unwrap();
-    assert_eq!(repaired.mission.formations[0].kind, "solo");
+    assert_eq!(repaired.mission.steps[0].formation, "solo");
     store
         .patch(
             "gated",
@@ -171,7 +166,7 @@ const LAB: ahjo_node_kit::Listing = ahjo_node_kit::Listing {
     ..ahjo_missions::LISTING
 };
 #[tokio::test(flavor = "multi_thread")]
-async fn cli_refuses_to_save_unsupported_formation_and_channel() {
+async fn cli_refuses_to_save_unsupported_step_and_channel() {
     use ahjo_testkit::{node::Node, sessions};
     use serde_json::json;
     let node = Node::start(&[sessions::LISTING, ahjo_work::LISTING, LAB], "")
@@ -187,8 +182,8 @@ async fn cli_refuses_to_save_unsupported_formation_and_channel() {
     let before = std::fs::read(folder.join("gated.mission.toml")).unwrap();
     for (operation, code) in [
         (
-            json!({"create_formation":{"type":"peer"}}),
-            "unsupported_formation",
+            json!({"create_step":{"formation":"peer"}}),
+            "unsupported_step",
         ),
         (
             json!({"update_input_card":{"id":"inp_start","human_channel":"session"}}),

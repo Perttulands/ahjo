@@ -11,12 +11,9 @@ pub fn findings(mission: &Mission) -> Vec<Finding> {
         .input_cards
         .iter()
         .map(|n| (n.id.as_str(), "Mission"));
-    let formations = mission
-        .formations
-        .iter()
-        .map(|n| (n.id.as_str(), "Formation"));
+    let steps = mission.steps.iter().map(|n| (n.id.as_str(), "Step"));
     let gates = mission.gates.iter().map(|n| (n.id.as_str(), "Gate"));
-    seen.extend(cards.chain(formations).chain(gates));
+    seen.extend(cards.chain(steps).chain(gates));
 
     let mut findings = Vec::new();
     for end in &mission.ends {

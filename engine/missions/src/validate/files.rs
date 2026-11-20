@@ -12,12 +12,8 @@ pub fn findings(mission: &Mission) -> Vec<Finding> {
         .input_cards
         .iter()
         .map(|card| (&card.id, &card.files));
-    let briefs = (mission.formations.iter()).filter_map(|formation| {
-        formation
-            .brief
-            .as_ref()
-            .map(|brief| (&formation.id, &brief.files))
-    });
+    let briefs = (mission.steps.iter())
+        .filter_map(|step| step.brief.as_ref().map(|brief| (&step.id, &brief.files)));
     let gates = mission.gates.iter().map(|gate| (&gate.id, &gate.files));
     let mut findings = Vec::new();
     for (node, files) in cards.chain(briefs).chain(gates) {

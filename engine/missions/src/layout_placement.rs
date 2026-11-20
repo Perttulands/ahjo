@@ -21,7 +21,7 @@ pub fn free_layout_position(
         .input_cards
         .iter()
         .map(|n| &n.id)
-        .chain(mission.formations.iter().map(|n| &n.id))
+        .chain(mission.steps.iter().map(|n| &n.id))
         .chain(mission.gates.iter().map(|n| &n.id))
         .chain(mission.ends.iter().map(|n| &n.id))
         .chain(mission.limits.iter().map(|n| &n.id));

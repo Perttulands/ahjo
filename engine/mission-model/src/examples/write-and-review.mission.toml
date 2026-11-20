@@ -1,4 +1,4 @@
-schema = 2
+schema = 3
 id = "msn_example"
 slug = "write-and-review"
 title = "Write and review"
@@ -13,38 +13,38 @@ inputs = [
 ]
 outputs = [{ name = "result", description = "The work the reviewer passed.", kind = "text", required = false, from = "fmn_write:port_write_out" }]
 
-[[formation]]
+[[step]]
 id = "fmn_write"
-type = "solo"
+formation = "solo"
 title = "Write"
-[formation.brief]
+[step.brief]
 goal = "Do this work in the run's folder:\n\n{brief}\n\nWhen the reviewer sent it back, its reason arrives on your input: fix that. Return what you changed and where on your output."
-[[formation.input]]
+[[step.input]]
 id = "port_write_in"
 label = "Brief"
-[[formation.output]]
+[[step.output]]
 id = "port_write_out"
 label = "Draft"
-[[formation.slot]]
+[[step.slot]]
 id = "slot_write"
 label = "Writer"
 agent = "writer"
 harness = "claude-code"
 effort = "medium"
 
-[[formation]]
+[[step]]
 id = "fmn_review"
-type = "solo"
+formation = "solo"
 title = "Review"
-[formation.brief]
+[step.brief]
 goal = "Review the draft on your input against this work:\n\n{brief}\n\nRead what changed. Pass it when it is correct and clear; fail it with the specific changes it needs."
-[[formation.input]]
+[[step.input]]
 id = "port_review_in"
 label = "Draft"
-[[formation.output]]
+[[step.output]]
 id = "port_review_out"
 label = "Verdict"
-[[formation.slot]]
+[[step.slot]]
 id = "slot_review"
 label = "Reviewer"
 agent = "reviewer"
@@ -54,7 +54,7 @@ effort = "high"
 [[gate]]
 id = "gate_review"
 title = "Reviewed"
-kinds = ["formation"]
+kinds = ["step"]
 criterion = "The draft does what the brief asks, correctly and clearly."
 
 [[limit]]

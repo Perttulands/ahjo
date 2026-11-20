@@ -13,10 +13,10 @@
         "goal": "Improve a subject against a target."
       }
     ],
-    "formations": [
+    "steps": [
       {
         "id": "fmn_01M4RTE1YYXSV1QRX2KDQTCZAC",
-        "type": "solo",
+        "formation": "solo",
         "title": "Gap analysis",
         "inputs": [
           {
@@ -46,7 +46,7 @@
       },
       {
         "id": "fmn_01M4RTE214TRV96XVXN0JXWDBQ",
-        "type": "solo",
+        "formation": "solo",
         "title": "Attempt",
         "inputs": [
           {
@@ -76,7 +76,7 @@
       },
       {
         "id": "fmn_01M4RTE24D36BW2BAMFJCDRW50",
-        "type": "solo",
+        "formation": "solo",
         "title": "Rubric judge",
         "inputs": [
           {
@@ -106,7 +106,7 @@
       },
       {
         "id": "fmn_01M4RTE28KMT304BAVTJW60S2H",
-        "type": "solo",
+        "formation": "solo",
         "title": "Hand to the lead",
         "inputs": [
           {
@@ -136,7 +136,7 @@
       },
       {
         "id": "fmn_01M54RDKKQSDVSZ6CDWHBYJHMY",
-        "type": "solo",
+        "formation": "solo",
         "title": "Prepare blind packet",
         "inputs": [
           {
@@ -166,7 +166,7 @@
       },
       {
         "id": "fmn_01M54RDKQ9E594727KBBDQCRN3",
-        "type": "solo",
+        "formation": "solo",
         "title": "Resolve comparison and stopping",
         "inputs": [
           {

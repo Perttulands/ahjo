@@ -634,7 +634,7 @@ impl HarnessPage {
                             .mx_0()
                             .child(pane::cell(format!(
                                 "{} / {} / {}",
-                                u.mission_title, u.formation_title, u.slot_label
+                                u.mission_title, u.step_title, u.slot_label
                             )))
                             .tooltip(kit::tip("Show it in Missions"))
                             .on_click(cx.listener(move |s, _, _, cx| {

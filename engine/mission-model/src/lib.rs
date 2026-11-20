@@ -31,9 +31,9 @@ pub use finding::{Code, Finding, Report};
 pub use layout::{LAYOUT_SCHEMA, Layout, LayoutEdge, LayoutNode};
 pub use mission::{MISSION_SCHEMA, Mission, MissionArchive, MissionListing};
 pub use nodes::{
-    Brief, Connection, DONE, END_IN, End, Formation, GATE_FAIL, GATE_IN, GATE_JUDGE, GATE_PASS,
-    Gate, INPUT_CARD_OUT, InputCard, KIND_FILE, KIND_FOLDER, KIND_TEXT, Limit, MissionInput,
-    MissionOutput, ORCHESTRATED, PEER, Port, REJECTED, SOLO, Slot,
+    Brief, Connection, DONE, END_IN, End, GATE_FAIL, GATE_IN, GATE_JUDGE, GATE_PASS, Gate,
+    INPUT_CARD_OUT, InputCard, KIND_FILE, KIND_FOLDER, KIND_TEXT, Limit, MissionInput,
+    MissionOutput, ORCHESTRATED, PEER, Port, REJECTED, SOLO, Slot, Step,
 };
 pub use notes::{MISSION_THREAD, NOTES_SCHEMA, NoteEntry, Notes, valid_author};
 pub use run::{

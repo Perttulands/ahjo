@@ -85,7 +85,7 @@ fn findings_read_back_by_their_codes() {
 #[test]
 fn requests_read_back_whole() {
     let start = reads_back::<RunStart>(json!({
-        "mission": "hello", "input_card_id": "inp_a", "formation_id": "",
+        "mission": "hello", "input_card_id": "inp_a", "step_id": "",
         "expected_rev": 2, "expected_etag": "abc", "cwd": "/work", "repository": "",
         "base": "", "context_paths": [], "work": "", "actor": "human:operator",
         "inputs": {"brief": "hi"}, "request_id": "req_1"

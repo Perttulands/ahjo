@@ -44,16 +44,16 @@ fn editable_arrays(patch: &MissionChange) -> &'static [&'static str] {
         MissionChange::UpdateInputCard(_) | MissionChange::CreateInputCard { .. } => {
             &["input_card"]
         }
-        MissionChange::CreateFormation { .. }
+        MissionChange::CreateStep { .. }
         | MissionChange::SetBrief { .. }
         | MissionChange::ClearBrief { .. }
-        | MissionChange::UpdateFormation { .. }
-        | MissionChange::EditFormation { .. }
+        | MissionChange::UpdateStep { .. }
+        | MissionChange::EditStep { .. }
         | MissionChange::AssignSlot { .. }
         | MissionChange::NameAgent { .. }
         | MissionChange::SwapSlots { .. }
         | MissionChange::MakeController { .. }
-        | MissionChange::SetFormationType { .. } => &["formation"],
+        | MissionChange::SetStepFormation { .. } => &["step"],
         MissionChange::CreateGate { .. } => &["gate"],
         MissionChange::CreateEnd { .. } | MissionChange::UpdateEnd(_) => &["end"],
         MissionChange::CreateLimit { .. } | MissionChange::UpdateLimit(_) => &["limit"],
@@ -66,20 +66,15 @@ fn editable_arrays(patch: &MissionChange) -> &'static [&'static str] {
         | MissionChange::RestorePort { .. }
         | MissionChange::WireConnection { .. }
         | MissionChange::RewireConnection { .. }
-        | MissionChange::UnwireConnection { .. } => &["formation", "connection"],
+        | MissionChange::UnwireConnection { .. } => &["step", "connection"],
         MissionChange::DeleteInputCard { .. } => &["input_card", "connection"],
-        MissionChange::DeleteFormation { .. } => &["formation", "limit", "connection"],
+        MissionChange::DeleteStep { .. } => &["step", "limit", "connection"],
         MissionChange::DeleteGate { .. } => &["gate", "connection"],
         MissionChange::DeleteEnd { .. } => &["end", "connection"],
         MissionChange::DeleteLimit { .. } => &["limit", "connection"],
-        MissionChange::RestoreNode { .. } => &[
-            "input_card",
-            "formation",
-            "gate",
-            "end",
-            "limit",
-            "connection",
-        ],
+        MissionChange::RestoreNode { .. } => {
+            &["input_card", "step", "gate", "end", "limit", "connection"]
+        }
     }
 }
 pub(crate) fn edit(raw: &str) -> Result<Edit, Error> {
@@ -385,8 +380,8 @@ fn apply_change(
             }
             ChangeEffect::Changed
         }
-        patch @ (MissionChange::UpdateFormation { .. }
-        | MissionChange::EditFormation { .. }
+        patch @ (MissionChange::UpdateStep { .. }
+        | MissionChange::EditStep { .. }
         | MissionChange::AssignSlot { .. }
         | MissionChange::NameAgent { .. }
         | MissionChange::SwapSlots { .. }
@@ -398,7 +393,7 @@ fn apply_change(
             }
             ChangeEffect::Changed
         }
-        patch @ MissionChange::SetFormationType { .. } => {
+        patch @ MissionChange::SetStepFormation { .. } => {
             if !crate::authoring_type::apply(doc, mission, patch)? {
                 return Ok(ChangeEffect::Unchanged);
             }
@@ -411,7 +406,7 @@ fn apply_change(
             ChangeEffect::Changed
         }
         patch @ (MissionChange::DeleteInputCard { .. }
-        | MissionChange::DeleteFormation { .. }
+        | MissionChange::DeleteStep { .. }
         | MissionChange::DeleteGate { .. }
         | MissionChange::DeleteEnd { .. }
         | MissionChange::DeleteLimit { .. }) => {

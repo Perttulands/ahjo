@@ -7,16 +7,16 @@ use ahjo_mission_model::{Code, Finding, Mission};
 
 pub fn findings(mission: &Mission, roles: &RoleStore, harnesses: &Harnesses) -> Vec<Finding> {
     let mut findings = Vec::new();
-    for formation in &mission.formations {
-        let id = &formation.id;
+    for step in &mission.steps {
+        let id = &step.id;
         let mut add = |code, message| findings.push(Finding::new(code, id, message));
-        for slot in &formation.slots {
+        for slot in &step.slots {
             let name = slot.name();
             if !slot.staffed() {
                 add(
                     Code::UnstaffedSlot,
                     format!(
-                        "formation {id:?} slot {name} needs a harness and effort, and optionally a role"
+                        "step {id:?} slot {name} needs a harness and effort, and optionally a role"
                     ),
                 );
                 continue;
@@ -29,7 +29,7 @@ pub fn findings(mission: &Mission, roles: &RoleStore, harnesses: &Harnesses) -> 
             {
                 add(
                     Code::InvalidSlotSettings,
-                    format!("formation {id:?} {}", problem.message),
+                    format!("step {id:?} {}", problem.message),
                 );
                 continue;
             }
@@ -41,17 +41,17 @@ pub fn findings(mission: &Mission, roles: &RoleStore, harnesses: &Harnesses) -> 
                 Ok(card) if card.status == RETIRED => add(
                     Code::RetiredPersona,
                     format!(
-                        "formation {id:?} slot {name} uses retired role {role:?}; staff it with another role or none, or bring the role back"
+                        "step {id:?} slot {name} uses retired role {role:?}; staff it with another role or none, or bring the role back"
                     ),
                 ),
                 Ok(_) => {}
                 Err(error) if error.code == "not_found" => add(
                     Code::UnavailablePersona,
-                    format!("formation {id:?} slot {name} names unknown role {role:?}"),
+                    format!("step {id:?} slot {name} names unknown role {role:?}"),
                 ),
                 Err(err) => add(
                     Code::UnavailablePersona,
-                    format!("formation {id:?} slot {name} cannot read role {role:?}: {err}"),
+                    format!("step {id:?} slot {name} cannot read role {role:?}: {err}"),
                 ),
             }
         }

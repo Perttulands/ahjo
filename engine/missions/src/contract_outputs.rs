@@ -65,7 +65,7 @@ fn decode(text: &str) -> Result<BTreeMap<String, OutputPayload>, String> {
 }
 
 /// Return display text and the routed payloads. Port validation and ref
-/// materialization are performed by the caller against its formation.
+/// materialization are performed by the caller against its step.
 pub fn parse_outputs(
     text: &str,
 ) -> Result<(String, BTreeMap<String, OutputPayload>), crate::Error> {

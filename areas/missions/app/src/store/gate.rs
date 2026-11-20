@@ -108,13 +108,13 @@ mod tests {
     #[test]
     fn a_gate_quote_names_the_feeding_card_or_a_plain_fallback() {
         let mission = ahjo_missions_contract::Mission {
-            formations: vec![
-                ahjo_missions_contract::Formation {
+            steps: vec![
+                ahjo_missions_contract::Step {
                     id: "named".into(),
                     title: "Plan".into(),
                     ..Default::default()
                 },
-                ahjo_missions_contract::Formation {
+                ahjo_missions_contract::Step {
                     id: "untitled".into(),
                     ..Default::default()
                 },

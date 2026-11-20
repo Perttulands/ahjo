@@ -1,5 +1,5 @@
 use ahjo_mission_engine::{BindingsSnapshot, RoleStore};
-use ahjo_mission_model::{Formation, Mission, Slot};
+use ahjo_mission_model::{Mission, Slot, Step};
 #[test]
 fn frozen_bindings_reject_mutated_settings_and_roles() {
     let slot = Slot {
@@ -13,7 +13,7 @@ fn frozen_bindings_reject_mutated_settings_and_roles() {
         id: "mission".into(),
         slug: "demo".into(),
         rev: 1,
-        formations: vec![Formation {
+        steps: vec![Step {
             id: "step".into(),
             slots: vec![slot.clone()],
             ..Default::default()

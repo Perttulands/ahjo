@@ -1,6 +1,5 @@
 use ahjo_mission_engine::{
-    Coordinator, ExecutionEvent, ExecutionSink, Executor, FormationExecution, FormationResult,
-    RunSettings,
+    Coordinator, ExecutionEvent, ExecutionSink, Executor, RunSettings, StepExecution, StepResult,
 };
 use ahjo_mission_model::{ResumeRequest, RunStart};
 use serde_json::json;
@@ -63,14 +62,14 @@ struct Output {
     count: Arc<AtomicUsize>,
 }
 impl Executor for Output {
-    fn execute_formation(
+    fn execute_step(
         &self,
-        req: FormationExecution,
+        req: StepExecution,
         sink: ExecutionSink,
-    ) -> Result<FormationResult, ahjo_mission_engine::Error> {
-        (|| -> Result<FormationResult, String> {
+    ) -> Result<StepResult, ahjo_mission_engine::Error> {
+        (|| -> Result<StepResult, String> {
             self.count.fetch_add(1, Ordering::SeqCst);
-            let slot = req.formation.slots[0].id.clone();
+            let slot = req.step.slots[0].id.clone();
             for (kind, data) in [
                 ("slot_dispatch", json!({"dispatch_id":"test"})),
                 (
@@ -85,7 +84,7 @@ impl Executor for Output {
                 })
                 .map_err(|error| error.message)?;
             }
-            Ok(FormationResult {
+            Ok(StepResult {
                 status: "done".into(),
                 text: "done".into(),
                 outputs: json!({"port_work_out":{"text":"done","ref":self.source}})
@@ -99,8 +98,8 @@ impl Executor for Output {
     fn reattach(
         &self,
         _: ahjo_mission_engine::OpenDispatch,
-    ) -> Result<FormationResult, ahjo_mission_engine::Error> {
-        Ok(FormationResult {
+    ) -> Result<StepResult, ahjo_mission_engine::Error> {
+        Ok(StepResult {
             status: "done".into(),
             text: "done".into(),
             outputs: json!({"port_work_out":{"text":"done","ref":self.source}})
@@ -400,15 +399,15 @@ fn file_refs_must_be_absolute_existing_regular_files() {
 
 struct InvalidOnce(Output);
 impl Executor for InvalidOnce {
-    fn execute_formation(
+    fn execute_step(
         &self,
-        req: FormationExecution,
+        req: StepExecution,
         sink: ExecutionSink,
-    ) -> Result<FormationResult, ahjo_mission_engine::Error> {
-        (|| -> Result<FormationResult, String> {
+    ) -> Result<StepResult, ahjo_mission_engine::Error> {
+        (|| -> Result<StepResult, String> {
             let mut result = self
                 .0
-                .execute_formation(req, sink)
+                .execute_step(req, sink)
                 .map_err(|error| error.message)?;
             if self.0.count.load(Ordering::SeqCst) == 1 {
                 result.outputs["port_work_out"]["ref"] = json!("relative");

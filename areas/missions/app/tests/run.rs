@@ -1,9 +1,7 @@
 #![cfg(unix)]
 use ahjo_app_kit::{Ask, Host, Mounted, Page, link::client::LinkState, mount};
 use ahjo_core::NodeId;
-use ahjo_mission_engine::{
-    ExecutionSink, Executor, FormationExecution, FormationResult, LabExecutor,
-};
+use ahjo_mission_engine::{ExecutionSink, Executor, LabExecutor, StepExecution, StepResult};
 use ahjo_node_kit::{Built, Listing, NodeClient, Setup};
 use ahjo_term::Sessions;
 use ahjo_testkit::{
@@ -81,13 +79,13 @@ struct FakeSeatLab {
     runtime: tokio::runtime::Handle,
 }
 impl Executor for FakeSeatLab {
-    fn execute_formation(
+    fn execute_step(
         &self,
-        execution: FormationExecution,
+        execution: StepExecution,
         sink: ExecutionSink,
-    ) -> Result<FormationResult, ahjo_core::Error> {
+    ) -> Result<StepResult, ahjo_core::Error> {
         let sessions = FAKE.lock().unwrap().clone().expect("fake Sessions");
-        let id = sessions.add(&format!("seat-{}", execution.formation.id));
+        let id = sessions.add(&format!("seat-{}", execution.step.id));
         self.runtime
             .block_on(async {
                 let pane = sessions.active_pane(&id).await?;
@@ -101,7 +99,7 @@ impl Executor for FakeSeatLab {
         receiver
             .recv_timeout(Duration::from_secs(20))
             .expect("test releases step");
-        LabExecutor.execute_formation(execution, sink)
+        LabExecutor.execute_step(execution, sink)
     }
 }
 fn build(setup: &Setup) -> anyhow::Result<Built> {
@@ -332,7 +330,7 @@ fn starts_a_run_sees_active_step_answers_gate_and_shows_admission_findings(
             .await
             .unwrap();
         assert_eq!(
-            mission["mission"]["formation"][0]["brief"]["goal"],
+            mission["mission"]["step"][0]["brief"]["goal"],
             "Deliver reviewed work"
         );
     });
@@ -656,7 +654,7 @@ fn starts_a_run_sees_active_step_answers_gate_and_shows_admission_findings(
         let (mission, etag) = client.request(http::Method::GET, "/api/missions/admission-findings", None, None).await.unwrap();
         let error = client.request(http::Method::POST, "/api/runs", Some(json!({"mission":"admission-findings", "input_card_id":"inp", "expected_rev":mission["mission"]["rev"], "inputs":{"topic":"A topic"}})), Some(&etag)).await.unwrap_err();
         // Each finding reads as a sentence, named by its step's title.
-        let title = |id: &str| mission["mission"]["formation"].as_array().unwrap().iter().find(|f| f["id"] == id).map_or(id.to_owned(), |f| f["title"].as_str().unwrap().to_owned());
+        let title = |id: &str| mission["mission"]["step"].as_array().unwrap().iter().find(|f| f["id"] == id).map_or(id.to_owned(), |f| f["title"].as_str().unwrap().to_owned());
         error.downcast_ref::<ahjo_node_kit::NodeError>().unwrap().findings.as_ref().unwrap().as_array().unwrap().iter().map(|f| match f["node_id"].as_str().unwrap() { "" => f["message"].as_str().unwrap().to_owned(), id => format!("{}: {}", title(id), f["message"].as_str().unwrap()) }).collect::<Vec<_>>()
     });
     assert!(expected.len() > 1);
