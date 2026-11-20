@@ -19,9 +19,8 @@ const READABLE: f32 = 0.8;
 const DRAG_SLOP: f32 = 3.;
 const CURVE_REACH: f32 = 40.;
 const CURVE_DOWN: f32 = 60.;
-const DASH_SHORT: f32 = 3.;
 const DASH_LONG: f32 = 5.;
-const TITLE_SIZE: f32 = 16.;
+const TITLE_SIZE: f32 = 14.;
 /// A card's words at world size: at the zoom a board opens at, never below
 /// 0.8, its small words still read and its text reads at the page's size.
 pub(super) const CARD_SMALL: f32 = 11.5;
@@ -36,21 +35,21 @@ const DOT_SIZE: f32 = 1.5;
 /// The zoom controls' stack in the board's corner, and what Fit keeps clear.
 const ZOOM_BUTTON: (f32, f32) = (76., 32.);
 const WIRE: f32 = 1.5;
-const RING_SIZE: f32 = 26.;
 /// A card's inner padding across and down, at Archon's density.
 const CARD_PAD: f32 = 12.;
 const HEAD_PAD: f32 = 8.;
 /// A step's number in its ring.
-const NUMBER: f32 = 18.;
 const GAP: f32 = 8.;
 /// A finding's mark beside a control's size.
 const BADGE_SCALE: f32 = 0.75;
 const SLOT_PAD: f32 = 10.;
-const POOL_LABEL: f32 = 14.;
-const CHIP_PAD: f32 = 6.;
-const GATE_MARK: f32 = 40.;
-const END_MARK: f32 = 18.;
-const CHIP_ALPHA: f32 = 0.14;
+const END_MARK: f32 = 14.;
+/// The dot a fork's line splits at.
+const FORK_DOT_SIZE: f32 = 9.;
+/// A seat's mark: a harness's, or an empty seat's ring.
+const SEAT: f32 = 16.;
+/// The room a loop's words are centred in, along its lane.
+const LOOP_WORDS: f32 = 320.;
 #[derive(Clone, Debug)]
 enum Drag {
     Pan(Point<Pixels>, (f32, f32)),
@@ -75,6 +74,8 @@ pub(super) struct View {
     drag: Option<Drag>,
     menu: Option<(f32, f32)>,
     bounds: Rc<Cell<(f32, f32, f32, f32)>>,
+    /// The window's size when the board was last drawn.
+    window: Rc<Cell<(f32, f32)>>,
     fitted: bool,
     /// Panned or zoomed by hand: the board is framed again only by Fit.
     touched: bool,
@@ -91,6 +92,7 @@ impl Default for View {
             drag: None,
             menu: None,
             bounds: Rc::new(Cell::new((0., 0., 0., 0.))),
+            window: Rc::new(Cell::new((0., 0.))),
             fitted: false,
             touched: false,
             follow: None,
@@ -258,11 +260,11 @@ impl View {
     }
 }
 
-/// What a fit frames: the board, and under its lowest cards the room
-/// their notes and the mission's paper hang in.
+/// What a fit frames: the board, and under its lowest cards the room a
+/// loop's words or the start's take.
 fn shown_extent(board: &board::Board) -> (f32, f32, f32, f32) {
     let (x, y, w, h) = board::extent(board);
-    (x, y, w, h + board::NOTE_ROOM)
+    (x, y, w, h + board::START_WORDS)
 }
 
 impl MissionsPage {
@@ -310,18 +312,18 @@ impl MissionsPage {
         }
         board::board(mission, &flow, &layout, running)
     }
-    /// The mission in reading rows for the board's room, with room under
-    /// each card that has notes: how it opens until arranged, and Arrange.
+    /// The mission in reading rows for the board's room: how it opens
+    /// until arranged, and Arrange.
     pub(super) fn shaped_layout(&self, mission: &Mission) -> Vec<LayoutNode> {
-        let noted = self.noted_cards();
+        // The start keeps room under it for what a run takes.
         board::shaped(
             mission,
             &flow::build(mission),
             self.canvas.room(),
             READABLE,
             &|id| {
-                if noted.contains(id) {
-                    board::NOTE_ROOM
+                if mission.input_cards.iter().any(|c| c.id == id) {
+                    board::START_WORDS
                 } else {
                     0.
                 }
@@ -465,6 +467,7 @@ impl MissionsPage {
         layer = layer.child(wires(
             t,
             &board,
+            painted(mission, &board),
             view.clone(),
             cx.weak_entity(),
             self.generation,
@@ -481,26 +484,57 @@ impl MissionsPage {
                 running,
             },
         ));
-        // A loop back says where it returns to, beside its first turn.
+        // A loop back says, along its lane, how often it goes round and
+        // what then.
         for w in board.wires.iter().filter(|w| w.back) {
-            let Some(label) = w.label else { continue };
+            let (Some(label), Some(words)) = (w.label, loop_words(mission, w)) else {
+                continue;
+            };
             let z = view.zoom;
             let (x, y) = view.position(label.0, label.1);
-            let colour = if w.route == "fail" { t.fail } else { t.wire };
             let selector = format!("canvas-loop-{}", w.id);
             layer = layer.child(
                 div()
                     .absolute()
-                    .left(px(x + GAP * z))
-                    .top(px(y + CHIP_PAD * z))
+                    .left(px(x - LOOP_WORDS / 2. * z))
+                    .w(px(LOOP_WORDS * z))
+                    .top(px(y + TAB_GAP * z))
+                    .flex()
+                    .justify_center()
                     .debug_selector(move || selector.clone())
                     .text_size(px(CARD_SMALL * z))
-                    .text_color(colour)
+                    .text_color(t.text2)
                     .whitespace_nowrap()
-                    .child(format!(
-                        "↺ {}",
-                        mission.node_name(&w.to_node).to_uppercase()
-                    )),
+                    .child(words),
+            );
+        }
+        // Under the start: what a run takes, and the mission's cap.
+        for card in board.cards.iter().filter(|c| c.kind == board::Kind::Input) {
+            let Some(c) = mission.input_cards.iter().find(|c| c.id == card.id) else {
+                continue;
+            };
+            let z = view.zoom;
+            let (x, y) = view.position(card.x, card.y + card.h);
+            let names: Vec<_> = c.inputs.iter().map(|i| i.name.clone()).collect();
+            let id = card.id.clone();
+            layer = layer.child(
+                div()
+                    .id(SharedString::from(format!("canvas-start-{id}")))
+                    .absolute()
+                    .left(px(x))
+                    .top(px(y + TAB_GAP * z))
+                    .flex()
+                    .flex_col()
+                    .text_size(px(CARD_SMALL * z))
+                    .text_color(t.text2)
+                    .whitespace_nowrap()
+                    .cursor_pointer()
+                    .children(names)
+                    .children(cap_of(mission, &card.id))
+                    .when(!running, |d| {
+                        d.on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                            .on_click(cx.listener(move |p, _, _, cx| p.edit_step(&id, cx)))
+                    }),
             );
         }
         for card in &board.cards {
@@ -515,7 +549,9 @@ impl MissionsPage {
             layer = layer.child(self.canvas_card(
                 t, mission, card, &view, running, state, attempts, &findings, cx,
             ));
-            layer = layer.children(self.card_badge(t, mission, card, &view, &findings));
+            if self.todo_open {
+                layer = layer.children(self.card_badge(t, mission, card, &view, &findings));
+            }
         }
         if !running {
             // "+" offers what comes next, so only where nothing does yet; a
@@ -551,7 +587,7 @@ impl MissionsPage {
                 layer = layer.child(self.canvas_port(t, mission, port, &view, cx));
             }
         }
-        for edge in &mission.connections {
+        for edge in mission.connections.iter().filter(|_| self.todo_open) {
             let matching: Vec<_> = findings
                 .iter()
                 .filter(|(finding, _)| finding.node_id == edge.id)
@@ -617,40 +653,56 @@ impl MissionsPage {
             layer = layer.child(self.canvas_menu(t, mission, at, &view, cx));
         }
         let fit = board.clone();
-        // The board's own controls, Archon's stack in its corner: zoom in
-        // and out, Arrange and Fit, the zoom beside them.
-        let (bw, bh) = ZOOM_BUTTON;
+        // The board's own controls, in one quiet row in its corner: out,
+        // the zoom, in, and Fit.
+        let (_, bh) = ZOOM_BUTTON;
         let button =
             |id: &'static str, selector: &'static str, text: &'static str, tip: &'static str| {
                 div()
                     .id(id)
                     .debug_selector(move || selector.into())
-                    .w(px(bw))
                     .h(px(bh))
+                    .px(px(GAP + EDGE))
                     .flex()
                     .items_center()
                     .justify_center()
-                    .text_size(px(if text.len() > 2 {
-                        size::SMALL - 2.
-                    } else {
-                        size::TEXT + 2.
-                    }))
+                    .text_size(px(size::SMALL))
                     .text_color(t.text2)
-                    .bg(t.surface)
                     .cursor_pointer()
                     .hover(|d| d.bg(t.raised).text_color(t.text))
                     .tooltip(kit::tip(tip))
                     .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
                     .child(text)
             };
-        let mut stack = div()
+        let controls = div()
+            .absolute()
+            .right(px(PAD))
+            .bottom(px(PAD))
             .flex()
-            .flex_col()
+            .items_center()
             .border_1()
             .border_color(t.divider)
             .rounded(px(size::RADIUS))
             .overflow_hidden()
-            .shadow_md()
+            .bg(t.surface)
+            .child(
+                button("canvas-out", "canvas-out", "−", "Zoom out (Ctrl+-)").on_click(cx.listener(
+                    |p, _, _, cx| {
+                        p.canvas.step(false);
+                        cx.notify();
+                    },
+                )),
+            )
+            .child(
+                div()
+                    .debug_selector(|| "canvas-zoom".into())
+                    .w(px(ZOOM_BUTTON.0 / 1.5))
+                    .flex()
+                    .justify_center()
+                    .text_size(px(size::SMALL))
+                    .text_color(t.dim)
+                    .child(format!("{:.0}%", view.zoom * 100.)),
+            )
             .child(
                 button("canvas-in", "canvas-in", "+", "Zoom in (Ctrl+=)").on_click(cx.listener(
                     |p, _, _, cx| {
@@ -660,68 +712,23 @@ impl MissionsPage {
                 )),
             )
             .child(
-                button("canvas-out", "canvas-out", "−", "Zoom out (Ctrl+-)")
-                    .border_t_1()
-                    .border_color(t.divider)
-                    .on_click(cx.listener(|p, _, _, cx| {
-                        p.canvas.step(false);
-                        cx.notify();
-                    })),
-            );
-        if !running {
-            stack = stack.child(
                 button(
-                    "canvas-arrange",
-                    "arrange",
-                    "ARRANGE",
-                    "Lay the cards out in run order",
+                    "canvas-fit",
+                    "canvas-fit",
+                    "Fit",
+                    "Show the whole mission (Ctrl+0: back to how it opened)",
                 )
-                .border_t_1()
+                .border_l_1()
                 .border_color(t.divider)
-                .on_click(cx.listener(|p, _, _, cx| p.arrange(cx))),
+                .on_click(cx.listener(move |p, _, _, cx| {
+                    // The view is the operator's again: it stops following an
+                    // edited card and frames each change.
+                    p.canvas.follow = None;
+                    p.canvas.touched = false;
+                    p.canvas.fit(&fit);
+                    cx.notify();
+                })),
             );
-        }
-        stack = stack.child(
-            button(
-                "canvas-fit",
-                "canvas-fit",
-                "FIT",
-                "Show the whole mission (Ctrl+0: back to how it opened)",
-            )
-            .border_t_1()
-            .border_color(t.divider)
-            .on_click(cx.listener(move |p, _, _, cx| {
-                // The view is the operator's again: it stops following an
-                // edited card and frames each change.
-                p.canvas.follow = None;
-                p.canvas.touched = false;
-                p.canvas.fit(&fit);
-                cx.notify();
-            })),
-        );
-        let controls = div()
-            .absolute()
-            .right(px(PAD))
-            .bottom(px(PAD))
-            .flex()
-            .items_end()
-            .gap(px(GAP))
-            .child(
-                div()
-                    .debug_selector(|| "canvas-zoom".into())
-                    .px(px(GAP))
-                    .h(px(bh))
-                    .flex()
-                    .items_center()
-                    .border_1()
-                    .border_color(t.divider)
-                    .rounded(px(size::RADIUS))
-                    .bg(t.surface)
-                    .text_size(px(size::SMALL))
-                    .text_color(t.text2)
-                    .child(format!("{:.0}%", view.zoom * 100.)),
-            )
-            .child(stack);
         if let Some(id) = &self.reveal_card {
             let selector = format!("mission-reveal-{id}");
             layer = layer.child(
@@ -769,9 +776,9 @@ impl MissionsPage {
                 .id(SharedString::from(selector.clone()))
                 .debug_selector(move || selector.clone())
                 .absolute()
-                // Above the card's far corner: clear of its ports and
-                // header, whichever part the finding is about.
-                .left(px(x + card.w * z - side))
+                // Above the card's near corner: clear of its ports, its
+                // header and the note marker on its far corner.
+                .left(px(x))
                 .top(px(y - side - EDGE * z))
                 .size(px(side))
                 .rounded_full()
@@ -813,7 +820,24 @@ impl MissionsPage {
         let id = card.id.clone();
         let from = (card.x, card.y);
         let selector = format!("mission-card-{id}");
-        let face = card_face(t, mission, card, z, running, state);
+        // A gate's judge has no card of its own: its seat on the gate opens
+        // it.
+        let judge = (!running && card.kind == board::Kind::Gate)
+            .then(|| {
+                flow::build(mission)
+                    .judge_of
+                    .into_iter()
+                    .find(|(_, of)| *of == id)
+                    .map(|(judge, _)| judge)
+            })
+            .flatten()
+            .map(|judge| -> OnJudge {
+                Rc::new(cx.listener(move |p, _: &gpui::ClickEvent, _, cx| {
+                    cx.stop_propagation();
+                    p.edit_step(&judge, cx);
+                }))
+            });
+        let face = card_face(t, mission, card, z, running, state, judge);
         let issues: Vec<_> = findings
             .iter()
             .filter(|(finding, _)| finding.node_id == id)
@@ -840,6 +864,28 @@ impl MissionsPage {
             }
             _ => t.divider,
         };
+        // A step with a gate on its exit and the gate are one card, in the
+        // exit look: the step square at its foot, the gate at its head.
+        let flow = flow::build(mission);
+        let banded = mission
+            .gates
+            .iter()
+            .any(|g| board::exit_of(mission, &flow, &g.id).as_deref() == Some(id.as_str()));
+        let exit = card.kind == board::Kind::Gate && board::exit_of(mission, &flow, &id).is_some();
+        // Only a step, an exit and the start are drawn as cards; a fork and
+        // a tag are painted with the wires, an end is its mark.
+        let boxed = card.kind == board::Kind::Formation || exit;
+        let marked = self.reveal_card.as_deref() == Some(&id)
+            || self.flow_focus.as_deref() == Some(&id)
+            || self.activity_marks.contains(&id);
+        let edge = if !issues.is_empty() && self.todo_open {
+            issue_color
+        } else if marked {
+            t.accent
+        } else {
+            color
+        };
+        let r = px(size::RADIUS * z);
         let rendered = div()
             .id(SharedString::from(format!("card-{id}")))
             .absolute()
@@ -848,31 +894,24 @@ impl MissionsPage {
             .w(px(card.w * z))
             .h(px(card.h * z))
             .overflow_hidden()
-            .border_1()
-            // The step chosen in Flow, or last opened here, stands out.
-            .when(self.flow_focus.as_deref() == Some(&id), |d| d.border_2())
-            .border_color(if !issues.is_empty() && self.run_tried {
-                issue_color
-            } else if self.reveal_card.as_deref() == Some(&id)
-                || card.kind == board::Kind::Input
-                || self.flow_focus.as_deref() == Some(&id)
-            {
-                t.accent
-            } else {
-                color
+            .when(boxed, |d| {
+                d.border_1()
+                    .border_color(edge)
+                    .bg(if exit { t.raised } else { t.surface })
+                    .shadow_sm()
+                    .rounded(r)
             })
-            .bg(if card.kind == board::Kind::Limit {
-                t.raised
-            } else {
-                t.surface
-            })
-            .shadow_md()
-            .when(card.kind == board::Kind::End, |d| {
-                d.rounded(px(board::END_H * z / 2.))
-            })
-            .when(card.kind != board::Kind::End, |d| {
-                d.rounded(px(size::RADIUS * z))
-            })
+            .when(marked && boxed, |d| d.border_2())
+            .when(banded, |d| d.rounded_b_none())
+            .when(exit, |d| d.border_t_0().rounded_t_none())
+            .when(
+                exit && mission
+                    .gates
+                    .iter()
+                    .any(|g| g.id == id && g.kinds.iter().any(|k| k == "human")),
+                |d| d.border_l_2().border_color(t.needs),
+            )
+            .when(card.kind == board::Kind::Input, |d| d.rounded_full())
             .cursor_pointer()
             .debug_selector(move || selector.clone())
             .child(face);
@@ -886,17 +925,22 @@ impl MissionsPage {
                         let card_id = card_id.clone();
                         move || format!("canvas-play-{card_id}")
                     })
-                    .absolute()
-                    .top(px(PAD * z))
-                    .right(px(PAD * z))
-                    .size(px(RING_SIZE * z))
-                    .rounded(px(size::RADIUS * z))
-                    .bg(if runnable { t.accent } else { t.raised })
-                    .text_color(if runnable { t.on_accent() } else { t.dim })
+                    .size_full()
+                    .rounded_full()
+                    .border_1()
+                    .border_color(if runnable { t.accent } else { t.divider })
+                    .bg(if runnable { t.accent } else { t.surface })
+                    .text_color(if runnable { t.on_accent() } else { t.text2 })
+                    .text_size(px(CARD_TEXT * z))
                     .flex()
                     .items_center()
                     .justify_center()
                     .cursor_pointer()
+                    .tooltip(kit::tip(if runnable {
+                        "Start a run"
+                    } else {
+                        "Start a run (it needs work first)"
+                    }))
                     .child("▶")
                     .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
                     .on_click(cx.listener(move |page, _, _, cx| {
@@ -913,10 +957,7 @@ impl MissionsPage {
                 .formations
                 .iter()
                 .find(|f| f.id == step)
-                .map(|f| {
-                    f.inputs.len() as f32 * board::IO_ROW + board::step_head(f, true)
-                        - size::CONTROL
-                })
+                .map(|_| board::STEP_H - size::CONTROL)
                 .unwrap_or(0.);
             rendered.child(
                 div()
@@ -1229,9 +1270,43 @@ struct Fitting {
     running: bool,
 }
 
+/// A gate the wires' layer paints: a fork's line and dot, or a tag's
+/// shape. Its card, whether it waits on the operator, and whether its pass
+/// and fail are wired.
+#[derive(Clone)]
+struct Painted {
+    card: board::Card,
+    human: bool,
+    pass: bool,
+    fail: bool,
+}
+
+fn painted(mission: &Mission, board: &board::Board) -> Vec<Painted> {
+    if crate::look::gate() == crate::look::Gate::Exit {
+        return vec![];
+    }
+    let wired = |e: String| mission.connections.iter().any(|c| c.from == e);
+    board
+        .cards
+        .iter()
+        .filter(|c| c.kind == board::Kind::Gate)
+        .map(|c| Painted {
+            card: c.clone(),
+            human: mission
+                .gates
+                .iter()
+                .any(|g| g.id == c.id && g.kinds.iter().any(|k| k == "human")),
+            pass: wired(format!("{}:pass", c.id)),
+            fail: wired(format!("{}:fail", c.id)),
+        })
+        .collect()
+}
+
+#[allow(clippy::too_many_arguments)]
 fn wires(
     t: &ahjo_app_kit::theme::Theme,
     board: &board::Board,
+    gates: Vec<Painted>,
     view: View,
     entity: gpui::WeakEntity<MissionsPage>,
     generation: u64,
@@ -1251,6 +1326,7 @@ fn wires(
         .collect();
     let accent = t.accent;
     let (work, pass, fail, quiet, error) = (t.wire, t.pass, t.fail, t.dim, t.error);
+    let (surface, divider, needs, mark) = (t.surface, t.divider, t.needs, t.text2);
     let grid = (
         ahjo_app_kit::theme::alpha(t.text, DOT_ALPHA),
         ahjo_app_kit::theme::alpha(t.text, GRID_ALPHA),
@@ -1276,9 +1352,13 @@ fn wires(
             // when the panel closes.
             let resized = (before.2, before.3) != (bounds.get().2, bounds.get().3);
             // A board nobody placed is laid out for the room it has, so a
-            // new size lays it out and frames it again. Placed, it stays
-            // put.
-            if resized && before.2 > 0. && !placed {
+            // new window size lays it out and frames it again. Placed, it
+            // stays put; and what comes and goes around the board in the
+            // same window (a panel, the to-do under it) moves no card.
+            let size = window.viewport_size();
+            let now = (f32::from(size.width), f32::from(size.height));
+            let was = view.window.replace(now);
+            if was != now && was.0 > 0. && !placed {
                 let entity = entity.clone();
                 cx.defer(move |cx| {
                     let _ = entity.update(cx, |page, cx| {
@@ -1319,23 +1399,30 @@ fn wires(
                 )
             };
             paint_grid(window, b, &view, grid);
+            for g in &gates {
+                paint_gate(
+                    window,
+                    g,
+                    &at,
+                    z,
+                    (work, pass, fail, quiet),
+                    (surface, divider, needs, mark),
+                );
+            }
             for w in &list {
                 let colour = if errors.contains(&w.id) {
                     error
                 } else {
+                    // A fail is red all the way, back or out; a pass is
+                    // green where the gate splits, and the way on after.
                     match w.route.as_str() {
-                        "pass" => pass,
                         "fail" => fail,
-                        "judge" | "limit" => quiet,
                         _ => work,
                     }
                 };
                 let mut path = PathBuilder::stroke(px(WIRE));
-                // A judge's question and answer, and a Limit card's tether,
-                // are dotted; a loop back is dashed.
-                if matches!(w.route.as_str(), "judge" | "limit") {
-                    path = path.dash_array(&[px(DASH_SHORT), px(DASH_LONG)]);
-                } else if w.back {
+                // A loop back is dashed.
+                if w.back {
                     path = path.dash_array(&[px(DASH_LONG * 1.2), px(DASH_LONG)]);
                 }
                 let points: Vec<_> = w.points.iter().map(|p| at(*p)).collect();
@@ -1360,6 +1447,78 @@ fn wires(
     .absolute()
     .inset_0()
     .size_full()
+}
+
+/// A fork: the line through it, splitting at its dot into the pass going on
+/// and the fail dropping; the dot amber when the operator answers. A tag: a
+/// small card whose right end points the way on, its edge amber when the
+/// operator answers.
+fn paint_gate(
+    window: &mut Window,
+    g: &Painted,
+    at: &dyn Fn((f32, f32)) -> Point<Pixels>,
+    z: f32,
+    (work, pass, fail, quiet): (Hsla, Hsla, Hsla, Hsla),
+    (surface, divider, needs, mark): (Hsla, Hsla, Hsla, Hsla),
+) {
+    let c = &g.card;
+    let line = |points: &[(f32, f32)], colour: Hsla, window: &mut Window| {
+        let mut path = PathBuilder::stroke(px(WIRE));
+        let points: Vec<_> = points.iter().map(|p| at(*p)).collect();
+        rounded(&mut path, &points, px(0.));
+        if let Ok(path) = path.build() {
+            window.paint_path(path, colour);
+        }
+    };
+    match crate::look::gate() {
+        crate::look::Gate::Fork => {
+            let y = c.y + board::FORK_LINE;
+            let dot = c.x + board::FORK_DOT;
+            line(&[(c.x, y), (dot, y)], work, window);
+            line(
+                &[(dot, y), (c.x + c.w, y)],
+                if g.pass { pass } else { quiet },
+                window,
+            );
+            if g.fail {
+                line(&[(dot, y), (dot, c.y + c.h)], fail, window);
+            }
+            let r = FORK_DOT_SIZE / 2. * z;
+            let centre = at((dot, y));
+            window.paint_quad(
+                gpui::fill(
+                    Bounds::new(
+                        point(centre.x - px(r), centre.y - px(r)),
+                        gpui::size(px(2. * r), px(2. * r)),
+                    ),
+                    if g.human { needs } else { mark },
+                )
+                .corner_radii(px(r)),
+            );
+        }
+        crate::look::Gate::Tag => {
+            let p = board::TAG_POINT;
+            let corners = [
+                (c.x, c.y),
+                (c.x + c.w - p, c.y),
+                (c.x + c.w, c.y + c.h / 2.),
+                (c.x + c.w - p, c.y + c.h),
+                (c.x, c.y + c.h),
+            ];
+            let points: Vec<_> = corners.iter().map(|p| at(*p)).collect();
+            let mut shape = PathBuilder::fill();
+            shape.add_polygon(&points, true);
+            if let Ok(shape) = shape.build() {
+                window.paint_path(shape, surface);
+            }
+            let mut edge = PathBuilder::stroke(px(if g.human { EDGE } else { 1. }));
+            edge.add_polygon(&points, true);
+            if let Ok(edge) = edge.build() {
+                window.paint_path(edge, if g.human { needs } else { divider });
+            }
+        }
+        crate::look::Gate::Exit => {}
+    }
 }
 
 /// A course of straight runs, its corners rounded to `radius` (less where a
@@ -1443,6 +1602,12 @@ fn paint_grid(window: &mut Window, b: Bounds<Pixels>, view: &View, (dot, line): 
     }
 }
 
+/// What a card says. A step: its number, its name, and who works it. The
+/// start: a play control. A gate, in the look being tried: its question,
+/// what it asks, and who answers. An end: its name.
+/// What choosing a gate's judge does.
+type OnJudge = Rc<dyn Fn(&gpui::ClickEvent, &mut Window, &mut gpui::App)>;
+
 fn card_face(
     t: &ahjo_app_kit::theme::Theme,
     mission: &Mission,
@@ -1450,437 +1615,438 @@ fn card_face(
     z: f32,
     running: bool,
     state: Option<crate::store::run_state::NodeState>,
+    on_judge: Option<OnJudge>,
 ) -> Div {
-    let label = |text: String, colour: Hsla| {
-        div()
-            .text_size(px(CARD_SMALL * z))
-            .text_color(colour)
-            .truncate()
-            .child(text)
-    };
     match card.kind {
         board::Kind::Formation => {
             let Some(f) = mission.formations.iter().find(|f| f.id == card.id) else {
                 return div();
             };
-            let mut face = div().size_full().flex().flex_col();
-            for p in &f.inputs {
-                let to = format!("{}:{}", f.id, p.id);
-                let from: Vec<String> = mission
-                    .connections
-                    .iter()
-                    .filter(|c| c.to == to)
-                    .map(|c| {
-                        let (id, port) = c.from.split_once(':').unwrap_or((&c.from, ""));
-                        if matches!(port, "pass" | "fail" | "judge") {
-                            format!("{} ({port})", mission.node_name(id))
-                        } else {
-                            mission.node_name(id).into()
-                        }
-                    })
-                    .collect();
-                let source = if from.is_empty() {
-                    "nothing wired".into()
-                } else {
-                    format!("from {}", from.join(", "))
-                };
-                face = face.child(
-                    div()
-                        .h(px(board::IO_ROW * z))
-                        .flex_none()
-                        .px(px(CARD_PAD * z))
-                        .flex()
-                        .items_center()
-                        .gap(px(GAP * z))
-                        .border_b_1()
-                        .border_color(t.divider)
-                        .child(label("IN".into(), t.dim))
-                        .child(label(source, t.text2)),
-                );
-            }
-            let number = flow::build(mission).numbers.get(&f.id).copied();
-            let brief = f
-                .brief
-                .as_ref()
-                .map(|b| b.goal.trim())
-                .filter(|s| !s.is_empty());
-            let mut titles = div()
-                .flex_1()
-                .min_w_0()
-                .flex()
-                .flex_col()
-                .gap(px(EDGE * z))
-                .child(
-                    div()
-                        .flex()
-                        .items_center()
-                        .gap(px(GAP * z))
-                        .when_some(number, |d, n| {
-                            d.child(
-                                div()
-                                    .flex_none()
-                                    .size(px(NUMBER * z))
-                                    .rounded_full()
-                                    .border_1()
-                                    .border_color(t.dim)
-                                    .flex()
-                                    .items_center()
-                                    .justify_center()
-                                    .text_size(px(CARD_SMALL * z))
-                                    .text_color(t.text2)
-                                    .child(n.to_string()),
-                            )
-                        })
-                        .child(
-                            div()
-                                .min_w_0()
-                                .truncate()
-                                .text_size(px(TITLE_SIZE * z))
-                                .font_weight(FontWeight::BOLD)
-                                .text_color(t.text)
-                                .child(f.title.clone()),
-                        ),
-                )
-                .when_some(brief, |d, brief| {
-                    d.child(
-                        div()
-                            .text_size(px(CARD_SMALL * z))
-                            .text_color(t.text2)
-                            .min_w_0()
-                            .line_clamp(2)
-                            .text_ellipsis()
-                            .child(brief.to_owned()),
-                    )
-                });
-            if running {
-                let (word, colour) = state_words(t, state);
-                // Its own width, with the attempts count at the row's other end.
-                titles = titles.child(div().flex().child(chip(z, word, colour)));
-            }
-            let head = div()
-                .h(px(board::step_head(f, running) * z))
-                .flex_none()
-                .px(px(CARD_PAD * z))
-                .py(px(HEAD_PAD * z))
-                .border_b_1()
-                .border_color(t.divider)
-                .flex()
-                .gap(px(SLOT_PAD * z))
-                .child(titles)
-                .child(
-                    div()
-                        .flex()
-                        .flex_col()
-                        .items_end()
-                        .gap(px(CHIP_PAD * z))
-                        // A step is worked by one agent unless it says otherwise.
-                        .when(f.kind != "solo", |d| d.child(chip(z, &f.kind, t.text2)))
-                        // Each attempt in sessions of its own.
-                        .when(f.fresh, |d| d.child(chip(z, "fresh", t.text2))),
-                );
-            face = face.child(head);
-            let mut body = div()
-                .h(px(board::body_h(&f.kind, f.slots.len()) * z))
-                .flex_none()
-                .px(px(GAP * z))
-                .py(px(board::BODY_PAD * z))
-                .flex()
-                .flex_col()
-                .gap(px(board::SLOT_GAP * z));
-            if board::pooled(&f.kind) {
-                for slot in f.slots.iter().filter(|slot| slot.controller) {
-                    body = body.child(slot_row(t, mission, f, slot, z));
-                }
-                let mut pool = div()
-                    .relative()
-                    .flex()
-                    .flex_col()
-                    .gap(px(board::SLOT_GAP * z))
-                    .pt(px(POOL_LABEL * z))
-                    .pb(px((board::POOL_PAD - POOL_LABEL) * z))
-                    .px(px(size::RADIUS * z))
-                    .border_1()
-                    .border_dashed()
-                    .border_color(t.divider)
-                    .rounded(px(GAP * z))
-                    .child(
-                        label(
-                            {
-                                let n = f.slots.iter().filter(|s| !s.controller).count();
-                                if f.kind == "peer" {
-                                    format!("PEERS · {n} TOGETHER")
-                                } else {
-                                    format!("WORKERS · {n} AT ONCE")
-                                }
-                            },
-                            t.dim,
-                        )
-                        .absolute()
-                        .top(px(-GAP * z))
-                        .left(px(POOL_LABEL * z))
-                        .px(px(CHIP_PAD * z))
-                        .bg(t.surface),
-                    );
-                for slot in f.slots.iter().filter(|slot| !slot.controller) {
-                    pool = pool.child(slot_row(t, mission, f, slot, z));
-                }
-                body = body.child(pool);
-            } else {
-                for slot in &f.slots {
-                    body = body.child(slot_row(t, mission, f, slot, z));
-                }
-            }
-            if f.slots.is_empty() {
-                body = body.child(label("No slots".into(), t.dim));
-            }
-            face = face.child(body);
-            for p in &f.outputs {
-                let output = match state {
-                    Some(crate::store::run_state::NodeState::Done) => "output ready",
-                    Some(crate::store::run_state::NodeState::Running) => "running",
-                    Some(crate::store::run_state::NodeState::Waiting) => "needs you",
-                    Some(
-                        crate::store::run_state::NodeState::Blocked
-                        | crate::store::run_state::NodeState::Failed,
-                    ) => "blocked",
-                    _ => "no output yet",
-                };
-                face = face.child(
-                    div()
-                        .h(px(board::IO_ROW * z))
-                        .flex_none()
-                        .px(px(CARD_PAD * z))
-                        .flex()
-                        .items_center()
-                        .gap(px(GAP * z))
-                        .border_t_1()
-                        .border_color(t.divider)
-                        .child(label("OUT".into(), t.dim))
-                        .child(
-                            label(
-                                if p.label.is_empty() {
-                                    p.id.clone()
-                                } else {
-                                    p.label.clone()
-                                },
-                                t.text2,
-                            )
-                            .flex_1(),
-                        )
-                        // A step's output has a state only while a run is shown.
-                        .when(state.is_some(), |d| {
-                            d.child(chip(z, output, state_words(t, state).1))
-                        }),
-                );
-            }
-            face
+            step_face(t, mission, f, z, running, state)
         }
-        board::Kind::Input => {
-            let Some(c) = mission.input_cards.iter().find(|c| c.id == card.id) else {
-                return div();
-            };
-            let names: Vec<_> = c.inputs.iter().map(|i| i.name.as_str()).collect();
-            let line = |text: String, colour: Hsla| {
-                div()
-                    .h(px(board::INPUT_LINE * z))
-                    .px(px(CARD_PAD * z))
-                    .flex()
-                    .items_center()
-                    .text_size(px(CARD_SMALL * z))
-                    .text_color(colour)
-                    .child(div().truncate().child(text))
-            };
-            div()
-                .size_full()
-                .flex()
-                .flex_col()
-                .child(
-                    div()
-                        .h(px(board::INPUT_HEAD * z))
-                        .px(px(CARD_PAD * z))
-                        .pt(px(CARD_PAD * z))
-                        .flex()
-                        .flex_col()
-                        .gap(px(EDGE * z))
-                        .child(label("◆ INPUT".into(), t.accent))
-                        .child(
-                            div()
-                                .font_weight(FontWeight::BOLD)
-                                .text_size(px(TITLE_SIZE * z))
-                                .truncate()
-                                .child(c.title.clone()),
-                        ),
-                )
-                .child(
-                    div()
-                        .h(px(board::INPUT_GOAL * z))
-                        .min_w_0()
-                        .px(px(CARD_PAD * z))
-                        .overflow_hidden()
-                        .line_clamp(2)
-                        .text_ellipsis()
-                        .text_size(px(CARD_SMALL * z))
-                        .text_color(t.text2)
-                        .child(c.goal.clone()),
-                )
-                .when(!names.is_empty(), |d| {
-                    d.child(line(format!("Inputs · {}", names.join(" · ")), t.text2))
-                })
-                .when(asks_you(mission), |d| {
-                    d.child(line("Human gates · notify me".into(), t.dim))
-                })
-        }
+        // The start is its play control, drawn by the card itself.
+        board::Kind::Input | board::Kind::Limit => div(),
         board::Kind::Gate => {
             let Some(g) = mission.gates.iter().find(|g| g.id == card.id) else {
                 return div();
             };
-            let who = g
-                .kinds
-                .iter()
-                .map(|kind| match kind.as_str() {
-                    "formation" => "JUDGE".to_owned(),
-                    "human" => "YOU".to_owned(),
-                    other => other.to_uppercase(),
-                })
-                .collect::<Vec<_>>()
-                .join(" + ");
-            let number = flow::build(mission).numbers.get(&g.id).copied();
-            // A judge sending a step back that a limit caps at its best
-            // attempt: the best of so many.
-            let eyebrow = match (number, best_of(mission, &g.id)) {
-                (Some(n), Some(k)) => format!("{n} · BEST OF {k}"),
-                (None, Some(k)) => format!("BEST OF {k}"),
-                (Some(n), None) => format!("{n} · GATE · {who}"),
-                (None, None) => format!("GATE · {who}"),
-            };
-            // Each word beside its port, the ports close by the middle.
-            let beside_port =
-                |text: &'static str, colour: Hsla, dy: f32, selector: &'static str| {
-                    label(text.into(), colour)
-                        .debug_selector(move || selector.into())
-                        .absolute()
-                        .right(px(CARD_PAD * z))
-                        .top(px((card.h / 2. + dy - CARD_SMALL * 0.7) * z))
-                };
-            div()
-                .size_full()
-                .relative()
-                .flex()
-                .items_center()
-                .gap(px(CARD_PAD * z))
-                .pl(px(CARD_PAD * z))
-                .pr(px((CARD_PAD + 40.) * z))
-                .child(
-                    div()
-                        .size(px(GATE_MARK * z))
-                        .flex_none()
-                        .rounded_full()
-                        .border_2()
-                        .border_color(state_words(t, state).1)
-                        .bg(t.raised)
-                        .flex()
-                        .items_center()
-                        .justify_center()
-                        .text_size(px(TITLE_SIZE * z))
-                        .child("⛩"),
-                )
-                .child(
-                    div()
-                        .flex_1()
-                        .min_w_0()
-                        .flex()
-                        .flex_col()
-                        .child(label(eyebrow, t.dim))
-                        .child(
-                            div()
-                                .font_weight(FontWeight::BOLD)
-                                .text_size(px(CARD_TEXT * z))
-                                .truncate()
-                                .child(g.title.clone()),
-                        )
-                        .child(
-                            div()
-                                .min_w_0()
-                                .line_clamp(2)
-                                .text_ellipsis()
-                                .text_size(px(CARD_SMALL * z))
-                                .text_color(t.text2)
-                                .child(g.criterion.clone()),
-                        ),
-                )
-                .child(beside_port(
-                    "PASS",
-                    t.pass,
-                    -board::GATE_PORTS,
-                    "canvas-gate-pass-label",
-                ))
-                .child(beside_port(
-                    "FAIL",
-                    t.fail,
-                    board::GATE_PORTS,
-                    "canvas-gate-fail-label",
-                ))
-        }
-        board::Kind::Limit => {
-            let Some(l) = mission.limits.iter().find(|l| l.id == card.id) else {
-                return div();
-            };
-            div()
-                .size_full()
-                .flex()
-                .flex_col()
-                .justify_center()
-                .px(px(CARD_PAD * z))
-                .child(label("⏱ LIMIT".into(), t.dim))
-                .child(
-                    div()
-                        .font_weight(FontWeight::BOLD)
-                        .text_size(px(CARD_TEXT * z))
-                        .truncate()
-                        .child(l.title.clone()),
-                )
-                .child(label(crate::store::words::limit_line(l), t.text2))
+            gate_face(t, mission, g, card, z, on_judge)
         }
         board::Kind::End => {
             let Some(e) = mission.ends.iter().find(|e| e.id == card.id) else {
                 return div();
             };
             let colour = if e.outcome == "rejected" {
-                t.error
+                t.fail
             } else {
-                t.done
+                t.pass
             };
             div()
                 .size_full()
                 .flex()
                 .items_center()
                 .gap(px(GAP * z))
-                .px(px(CARD_PAD * 1.5 * z))
+                .pl(px(board::PORT * z))
                 .child(
                     div()
                         .size(px(END_MARK * z))
                         .flex_none()
                         .rounded_full()
                         .border_2()
-                        .border_color(colour)
-                        .flex()
-                        .items_center()
-                        .justify_center()
-                        .child(div().size(px(GAP * z)).rounded_full().bg(colour)),
+                        .border_color(colour),
                 )
                 .child(
                     div()
-                        .flex()
-                        .flex_col()
-                        .child(label(format!("END · {}", e.outcome), colour))
-                        .child(
-                            div()
-                                .font_weight(FontWeight::BOLD)
-                                .text_size(px(CARD_TEXT * z))
-                                .child(e.title.clone()),
-                        ),
+                        .text_size(px(CARD_TEXT * z))
+                        .text_color(t.text)
+                        .truncate()
+                        .child(e.title.clone()),
                 )
         }
+    }
+}
+
+fn step_face(
+    t: &ahjo_app_kit::theme::Theme,
+    mission: &Mission,
+    f: &ahjo_missions_contract::Formation,
+    z: f32,
+    running: bool,
+    state: Option<crate::store::run_state::NodeState>,
+) -> Div {
+    let number = flow::build(mission).numbers.get(&f.id).copied();
+    let top = div()
+        .flex()
+        .items_baseline()
+        .gap(px(GAP * z))
+        .when_some(number, |d, n| {
+            d.child(
+                div()
+                    .flex_none()
+                    .text_size(px(CARD_SMALL * z))
+                    .text_color(t.dim)
+                    .child(n.to_string()),
+            )
+        })
+        .child(
+            div()
+                .flex_1()
+                .min_w_0()
+                .truncate()
+                .text_size(px(TITLE_SIZE * z))
+                .font_weight(FontWeight::SEMIBOLD)
+                .text_color(t.text)
+                .child(f.title.clone()),
+        )
+        .children(cap_of(mission, &f.id).map(|cap| {
+            div()
+                .flex_none()
+                .text_size(px(CARD_SMALL * z))
+                .text_color(t.text2)
+                .child(cap)
+        }));
+    // An orchestrated step's lead over its workers; peers all on one row.
+    let lead: Vec<_> = match f.kind.as_str() {
+        "orchestrated" => f.slots.iter().filter(|s| s.controller).collect(),
+        "peer" => vec![],
+        _ => f.slots.iter().collect(),
+    };
+    let mut who = div().flex().items_center().gap(px(SLOT_PAD * z)).min_w_0();
+    for slot in &lead {
+        who = who.child(seat(t, slot, z));
+    }
+    if lead.is_empty() && f.kind != "peer" {
+        who = who.child(empty_seat(t, z));
+    }
+    let mut face = div()
+        .size_full()
+        .flex()
+        .flex_col()
+        .justify_center()
+        .gap(px(HEAD_PAD * z))
+        .px(px(CARD_PAD * z))
+        .child(top)
+        .child(who);
+    if board::pooled(&f.kind) {
+        let crew: Vec<_> = f.slots.iter().filter(|s| !s.controller).collect();
+        face = face.child(crew_row(t, &crew, &f.kind, z));
+    }
+    if running {
+        let (word, colour) = state_words(t, state);
+        face = face.child(
+            div()
+                .flex()
+                .items_center()
+                .gap(px(TAB_GAP * z))
+                .text_size(px(CARD_SMALL * z))
+                .text_color(colour)
+                .child(div().size(px(TAB_GAP * z)).rounded_full().bg(colour))
+                .child(word),
+        );
+    }
+    face
+}
+
+/// One seat: its harness's mark, the agent's name, and its effort where it
+/// is not the usual.
+fn seat(t: &ahjo_app_kit::theme::Theme, slot: &ahjo_missions_contract::Slot, z: f32) -> Div {
+    if slot.harness.trim().is_empty() {
+        return empty_seat(t, z);
+    }
+    let selector = format!(
+        "canvas-seat-{}-{}-{}",
+        crate::store::words::slot_label(slot),
+        crate::store::words::role_name(&slot.agent_id),
+        crate::store::words::harness_name(&slot.harness)
+    );
+    div()
+        .debug_selector(move || selector.clone())
+        .flex()
+        .items_center()
+        .gap(px(TAB_GAP * z))
+        .min_w_0()
+        .text_size(px(CARD_SMALL * z))
+        .text_color(t.text2)
+        .children(harness_mark(&slot.harness, t.text, t.text2, z))
+        .child(div().truncate().child(seat_name(slot)))
+        .when(!matches!(slot.effort.as_str(), "" | "medium"), |d| {
+            d.child(
+                div()
+                    .flex_none()
+                    .text_color(t.dim)
+                    .child(slot.effort.clone()),
+            )
+        })
+}
+
+fn seat_name(slot: &ahjo_missions_contract::Slot) -> String {
+    let agent = if slot.agent_id.is_empty() {
+        &slot.agent
+    } else {
+        &slot.agent_id
+    };
+    if agent.trim().is_empty() {
+        crate::store::words::slot_label(slot).to_owned()
+    } else {
+        crate::store::words::role_name(agent)
+    }
+}
+
+/// A seat nobody works yet: Archon's dashed ring with a plus.
+fn empty_seat(t: &ahjo_app_kit::theme::Theme, z: f32) -> Div {
+    div()
+        .size(px(SEAT * z))
+        .flex_none()
+        .rounded_full()
+        .border_1()
+        .border_dashed()
+        .border_color(t.dim)
+        .flex()
+        .items_center()
+        .justify_center()
+        .text_size(px(CARD_SMALL * z))
+        .text_color(t.dim)
+        .child("+")
+}
+
+/// An orchestrated step's workers, under its lead: their marks stacked, and
+/// who they are.
+fn crew_row(
+    t: &ahjo_app_kit::theme::Theme,
+    crew: &[&ahjo_missions_contract::Slot],
+    kind: &str,
+    z: f32,
+) -> Div {
+    let mut marks = div().flex().items_center();
+    for (i, slot) in crew.iter().enumerate() {
+        let mark = if slot.harness.trim().is_empty() {
+            empty_seat(t, z)
+        } else {
+            div()
+                .size(px(SEAT * z))
+                .flex_none()
+                .rounded_full()
+                .bg(t.raised)
+                .border_1()
+                .border_color(t.surface)
+                .flex()
+                .items_center()
+                .justify_center()
+                .children(harness_mark(
+                    &slot.harness,
+                    t.text,
+                    t.text2,
+                    z * BADGE_SCALE,
+                ))
+        };
+        marks = marks.child(mark.when(i > 0, |d| d.ml(px(-SEAT / 3. * z))));
+    }
+    let names: Vec<String> = crew.iter().map(|s| seat_name(s)).collect();
+    let same = names.windows(2).all(|w| w[0] == w[1]);
+    let words = match (names.first(), same) {
+        (Some(name), true) if names.len() > 1 => format!("{} × {name}", names.len()),
+        _ => names.join(", "),
+    };
+    div()
+        .flex()
+        .items_center()
+        .gap(px(TAB_GAP * z))
+        .pl(px(if kind == "peer" { 0. } else { CARD_PAD * z }))
+        .text_size(px(CARD_SMALL * z))
+        .text_color(t.text2)
+        .child(marks)
+        .child(div().truncate().child(words))
+}
+
+/// A step's or a gate's cap in time or tokens, said where it applies.
+fn cap_of(mission: &Mission, id: &str) -> Option<String> {
+    let caps: Vec<String> = mission
+        .limits
+        .iter()
+        .filter(|l| l.target == id)
+        .flat_map(|l| {
+            l.seconds
+                .map(|s| format!("⏱ {}", crate::store::words::span(s)))
+                .into_iter()
+                .chain(l.tokens.map(|n| format!("{}k tokens", n / 1000)))
+        })
+        .collect();
+    (!caps.is_empty()).then(|| caps.join(" · "))
+}
+
+/// Who answers a gate: its judge's seat, or You.
+fn answerer(
+    t: &ahjo_app_kit::theme::Theme,
+    mission: &Mission,
+    gate: &str,
+    z: f32,
+    on_judge: Option<OnJudge>,
+) -> Div {
+    let flow = flow::build(mission);
+    let g = mission.gates.iter().find(|g| g.id == gate);
+    let judge = flow
+        .judge_of
+        .iter()
+        .find(|(_, of)| of.as_str() == gate)
+        .and_then(|(judge, _)| mission.formations.iter().find(|f| f.id == *judge));
+    let mut who = div().flex().items_center().gap(px(SLOT_PAD * z)).min_w_0();
+    let judged = match judge.and_then(|f| f.slots.first()) {
+        Some(slot) => Some(seat(t, slot, z)),
+        None if g.is_some_and(|g| g.kinds.iter().any(|k| k == "formation")) => {
+            Some(empty_seat(t, z))
+        }
+        None => None,
+    };
+    if let Some(judged) = judged {
+        who = match on_judge {
+            Some(open) => {
+                let selector = format!("canvas-judge-{gate}");
+                who.child(
+                    div()
+                        .id(SharedString::from(selector.clone()))
+                        .debug_selector(move || selector.clone())
+                        .min_w_0()
+                        .cursor_pointer()
+                        .rounded(px(size::RADIUS * z))
+                        .hover(|d| d.bg(t.raised))
+                        .tooltip(kit::tip("Edit the judge"))
+                        .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                        .on_click(move |e, window, cx| open(e, window, cx))
+                        .child(judged),
+                )
+            }
+            None => who.child(judged),
+        };
+    }
+    if g.is_some_and(|g| g.kinds.iter().any(|k| k == "code")) {
+        who = who.child(
+            div()
+                .text_size(px(CARD_SMALL * z))
+                .text_color(t.text2)
+                .child(">_ check"),
+        );
+    }
+    if g.is_some_and(|g| g.kinds.iter().any(|k| k == "human")) {
+        who = who.child(
+            div()
+                .flex()
+                .items_center()
+                .gap(px(TAB_GAP * z))
+                .text_size(px(CARD_SMALL * z))
+                .text_color(t.needs)
+                .child(
+                    div()
+                        .size(px(SEAT * z * BADGE_SCALE))
+                        .rounded_full()
+                        .border_2()
+                        .border_color(t.needs),
+                )
+                .child("You"),
+        );
+    }
+    if let Some(cap) = cap_of(mission, gate) {
+        who = who.child(
+            div()
+                .text_size(px(CARD_SMALL * z))
+                .text_color(t.text2)
+                .child(cap),
+        );
+    }
+    who
+}
+
+fn gate_face(
+    t: &ahjo_app_kit::theme::Theme,
+    mission: &Mission,
+    g: &ahjo_missions_contract::Gate,
+    card: &board::Card,
+    z: f32,
+    on_judge: Option<OnJudge>,
+) -> Div {
+    // Numbered like the steps, so the count has no gap where a gate is.
+    let number = flow::build(mission).numbers.get(&g.id).copied();
+    let title = div()
+        .min_w_0()
+        .flex()
+        .items_baseline()
+        .gap(px(GAP * z))
+        .when_some(number, |d, n| {
+            d.child(
+                div()
+                    .flex_none()
+                    .text_size(px(CARD_SMALL * z))
+                    .text_color(t.dim)
+                    .child(n.to_string()),
+            )
+        })
+        .child(
+            div()
+                .min_w_0()
+                .truncate()
+                .text_size(px(CARD_TEXT * z))
+                .font_weight(FontWeight::SEMIBOLD)
+                .text_color(t.text)
+                .child(g.title.clone()),
+        );
+    let criterion = |lines: usize| {
+        div()
+            .min_w_0()
+            .line_clamp(lines)
+            .text_ellipsis()
+            .text_size(px(CARD_SMALL * z))
+            .text_color(t.text2)
+            .child(g.criterion.clone())
+    };
+    match crate::look::gate() {
+        crate::look::Gate::Fork => div()
+            .size_full()
+            .relative()
+            .child(
+                div()
+                    .absolute()
+                    .left(px(board::FORK_DOT * z))
+                    .right_0()
+                    .bottom(px((card.h - board::FORK_LINE + GAP) * z))
+                    .flex()
+                    .flex_col()
+                    .gap(px(EDGE * z))
+                    .child(title)
+                    .child(criterion(2)),
+            )
+            .child(
+                answerer(t, mission, &g.id, z, on_judge)
+                    .absolute()
+                    .left(px((board::FORK_DOT + CARD_PAD) * z))
+                    .right_0()
+                    .top(px((board::FORK_LINE + GAP) * z)),
+            ),
+        crate::look::Gate::Exit => div()
+            .size_full()
+            .flex()
+            .flex_col()
+            .justify_center()
+            .gap(px(EDGE * z))
+            .px(px(CARD_PAD * z))
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .gap(px(GAP * z))
+                    .child(title.flex_1())
+                    .child(answerer(t, mission, &g.id, z, on_judge).flex_none()),
+            )
+            .child(criterion(1)),
+        crate::look::Gate::Tag => div()
+            .size_full()
+            .flex()
+            .flex_col()
+            .justify_center()
+            .gap(px(EDGE * z))
+            .pl(px(CARD_PAD * z))
+            .pr(px(board::TAG_POINT * z))
+            .child(title)
+            .child(criterion(1))
+            .child(answerer(t, mission, &g.id, z, on_judge)),
     }
 }
 
@@ -1899,101 +2065,32 @@ fn state_words(
         None => ("not reached", t.dim),
     }
 }
-fn chip(z: f32, text: &str, colour: Hsla) -> Div {
-    div()
-        .flex_none()
-        .px(px(GAP * z))
-        .py(px(EDGE * z))
-        .rounded(px(size::RADIUS * z))
-        .bg(ahjo_app_kit::theme::alpha(colour, CHIP_ALPHA))
-        .text_size(px(CARD_SMALL * z))
-        .text_color(colour)
-        .child(text.to_uppercase())
-}
 
-fn slot_row(
-    t: &ahjo_app_kit::theme::Theme,
-    mission: &Mission,
-    f: &ahjo_missions_contract::Formation,
-    slot: &ahjo_missions_contract::Slot,
-    z: f32,
-) -> Div {
-    let role = (!slot.agent_id.is_empty()).then(|| crate::store::words::role_name(&slot.agent_id));
-    let session = crate::store::words::session_of(mission, f, slot);
-    let mark = harness_mark(&slot.harness, t.text, t.text2, z);
-    let selector = format!(
-        "canvas-seat-{}-{}-{}",
-        crate::store::words::slot_label(slot),
-        crate::store::words::role_name(&slot.agent_id),
-        crate::store::words::harness_name(&slot.harness)
-    );
-    // A slot no agent works yet: Archon's dashed ring with a plus.
-    let empty = slot.harness.trim().is_empty();
-    let ring = div()
-        .size(px(RING_SIZE * z))
-        .flex_none()
-        .rounded_full()
-        .border_1()
-        .when(empty, |d| d.border_dashed())
-        .border_color(if slot.controller {
-            ahjo_app_kit::theme::rgb(t.ansi[3])
-        } else if empty {
-            t.dim
-        } else {
-            t.text2
-        })
-        .bg(t.raised)
-        .flex()
-        .items_center()
-        .justify_center()
-        .text_color(t.dim)
-        .when(empty, |d| d.child("+"))
-        .children(mark);
-    let label = crate::store::words::slot_label(slot).to_uppercase();
-    let what = if empty {
-        "No agent yet".to_owned()
-    } else {
-        crate::store::words::slot_line(slot)
-    };
-    div()
-        .h(px(board::SLOT_H * z))
-        .debug_selector(move || selector.clone())
-        .flex_none()
-        .flex()
-        .items_center()
-        .gap(px(GAP * z))
-        .px(px(size::RADIUS * z))
-        .child(ring)
-        .child(
-            div()
-                .flex_1()
-                .min_w_0()
-                .flex()
-                .flex_col()
-                // The agent by the session it works in, as the session list
-                // shows it.
-                .child(
-                    div()
-                        .text_size(px(CARD_TEXT * z))
-                        .font_weight(FontWeight::BOLD)
-                        .truncate()
-                        .debug_selector({
-                            let session = session.clone();
-                            move || format!("canvas-session-{session}")
-                        })
-                        .child(session),
-                )
-                .child(
-                    div()
-                        .text_size(px(CARD_SMALL * z))
-                        .text_color(t.text2)
-                        .truncate()
-                        .child(match role {
-                            Some(role) => format!("{label} · {role} · {what}"),
-                            None => format!("{label} · {what}"),
-                        }),
-                ),
-        )
+/// What a loop back says along its lane: how often it goes round, and
+/// what happens when that is spent.
+fn loop_words(mission: &Mission, wire: &board::Wire) -> Option<String> {
+    if wire.route != "fail" {
+        return None;
+    }
+    let step = mission.formations.iter().find(|f| f.id == wire.to_node);
+    let fresh = step.is_some_and(|f| f.fresh);
+    let limit = mission
+        .limits
+        .iter()
+        .find(|l| (l.target == wire.to_node || l.target == wire.from_node) && l.rounds.is_some());
+    Some(match limit.and_then(|l| l.rounds.map(|r| (r, l))) {
+        Some((r, l)) => {
+            let tries = format!("{r}{} tries", if fresh { " fresh" } else { "" });
+            let then = match l.when_spent.as_str() {
+                "best" => "then the best goes on",
+                "fail" => "then it fails",
+                _ => "then it waits for you",
+            };
+            format!("up to {tries} · {then}")
+        }
+        None if fresh => "again, fresh, until it passes".into(),
+        None => "again until it passes".into(),
+    })
 }
 
 const CLAUDE: &str = "M20.998 10.949H24v3.102h-3v3.028h-1.487V20H18v-2.921h-1.487V20H15v-2.921H9V20H7.488v-2.921H6V20H4.487v-2.921H3V14.05H0V10.95h3V5h17.998v5.949zM6 10.949h1.488V8.102H6v2.847zm10.51 0H18V8.102h-1.49v2.847z";
@@ -2084,7 +2181,7 @@ impl MissionsPage {
         let b = board::board(&mission, &flow::build(&mission), &layout, false);
         let size = board::new_size(kind);
         let beside = after.and_then(|id| b.cards.iter().find(|c| c.id == id));
-        let room = super::notes::STICKY_ROOM;
+        let room = 0.;
         let spot = beside
             .and_then(|c| {
                 let region = (c.x + c.w, c.y - size.1, size.0 * 3., size.1 * 3. + c.h);
@@ -2382,22 +2479,6 @@ fn new_limit(target: &str, x: i64, y: i64) -> MissionChange {
         x,
         y,
     }
-}
-
-fn best_of(mission: &Mission, gate: &str) -> Option<i64> {
-    let back = format!("{gate}:{}", ahjo_missions_contract::GATE_FAIL);
-    mission
-        .connections
-        .iter()
-        .filter(|c| c.from == back)
-        .filter_map(|c| c.to.split(':').next())
-        .find_map(|step| {
-            mission
-                .limits
-                .iter()
-                .find(|l| l.target == step && l.when_spent == "best")
-                .and_then(|l| l.rounds)
-        })
 }
 
 #[cfg(test)]

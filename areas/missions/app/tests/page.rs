@@ -71,6 +71,19 @@ fn until(
         std::thread::sleep(Duration::from_millis(20));
     }
 }
+/// Show Flow in the panel, from the mission's "…" menu.
+fn show_flow(cx: &mut VisualTestContext) {
+    until(cx, "the mission's menu", |cx| {
+        cx.debug_bounds("mission-more").is_some()
+    });
+    let more = cx.debug_bounds("mission-more").unwrap().center();
+    cx.simulate_click(more, Modifiers::none());
+    until(cx, "Show Flow", |cx| {
+        cx.debug_bounds("menu-label-Show Flow").is_some()
+    });
+    let show = cx.debug_bounds("menu-label-Show Flow").unwrap().center();
+    cx.simulate_click(show, Modifiers::none());
+}
 #[gpui::test]
 fn opens_a_fixture_mission_on_the_canvas(cx: &mut TestAppContext) {
     let running = start();
@@ -101,6 +114,7 @@ fn opens_a_fixture_mission_on_the_canvas(cx: &mut TestAppContext) {
     });
     let at = cx.debug_bounds(selector).unwrap().center();
     cx.simulate_click(at, Modifiers::none());
+    show_flow(cx);
     until(cx, "step in flow", |cx| {
         cx.debug_bounds("flow-step-fmn_work").is_some()
     });
@@ -288,8 +302,10 @@ fn cli_authored_graph_and_layout_open_on_the_canvas(cx: &mut TestAppContext) {
     });
     let at = cx.debug_bounds(selector).unwrap().center();
     cx.simulate_click(at, Modifiers::none());
+    // Every card it authored is on the board, but the judge: a judge is
+    // its seat on the gate it answers, which opens it.
     for id in std::iter::once(&input)
-        .chain(steps.iter().map(|s| &s.0))
+        .chain(steps[..2].iter().map(|s| &s.0))
         .chain([&judge, &human, &end])
     {
         let selector = Box::leak(format!("mission-card-{id}").into_boxed_str());
@@ -297,6 +313,18 @@ fn cli_authored_graph_and_layout_open_on_the_canvas(cx: &mut TestAppContext) {
             cx.debug_bounds(selector).is_some()
         });
     }
+    assert!(
+        cx.debug_bounds(Box::leak(
+            format!("mission-card-{}", steps[2].0).into_boxed_str()
+        ))
+        .is_none()
+    );
+    let seat = Box::leak(format!("canvas-judge-{judge}").into_boxed_str());
+    let at = cx.debug_bounds(seat).expect("the judge's seat").center();
+    cx.simulate_click(at, Modifiers::none());
+    until(cx, "the judge's editor", |cx| {
+        cx.debug_bounds("step-title").is_some()
+    });
     let client = NodeClient::new(Some(&format!("{}/", running.url))).unwrap();
     let layout = rt
         .block_on(client.request(
@@ -400,16 +428,14 @@ fn opens_a_mission_layout_notes_and_run_written_before_the_wire_upgrade(cx: &mut
     });
     let mission = cx.debug_bounds(selector).unwrap().center();
     cx.simulate_click(mission, Modifiers::none());
+    show_flow(cx);
     until(cx, "migrated mission flow", |cx| {
         cx.debug_bounds("flow-step-fmn_work").is_some()
     });
-    let canvas = cx.debug_bounds("mission-mode-canvas").unwrap().center();
-    cx.simulate_click(canvas, Modifiers::none());
+    // On its board, with Flow beside it.
     until(cx, "migrated canvas card", |cx| {
         cx.debug_bounds("mission-card-fmn_work").is_some()
     });
-    let flow = cx.debug_bounds("mission-mode-flow").unwrap().center();
-    cx.simulate_click(flow, Modifiers::none());
     until(cx, "recorded run", |cx| {
         cx.debug_bounds("mission-run-run_legacy").is_some()
     });

@@ -116,7 +116,7 @@ fn a_long_mission_opens_on_its_board_beside_flow_and_follows_the_choice(cx: &mut
         )
     });
     // A short window: ten steps cannot all show there at a readable size.
-    cx.simulate_resize(gpui::size(px(1920.), px(560.)));
+    cx.simulate_resize(gpui::size(px(1920.), px(420.)));
     until(cx, "link", |cx| {
         shell.read_with(cx, |s, cx| {
             s.hub().read(cx).fleet.here().state == LinkState::Open
@@ -129,16 +129,28 @@ fn a_long_mission_opens_on_its_board_beside_flow_and_follows_the_choice(cx: &mut
     let row = at(cx, listing).unwrap().center();
     cx.simulate_click(row, Modifiers::none());
     let first = running.steps[0].clone();
-    until(cx, "the board beside Flow", |cx| {
+    until(cx, "the board beside its panel", |cx| {
         cx.debug_bounds("missions-board").is_some()
             && cx.debug_bounds("missions-flow").is_some()
             && at(cx, format!("mission-card-{first}")).is_some()
     });
+    // Flow, the mission in words, takes Activity's place from the menu.
+    let more = cx.debug_bounds("mission-more").unwrap().center();
+    cx.simulate_click(more, Modifiers::none());
+    until(cx, "Show Flow", |cx| {
+        cx.debug_bounds("menu-label-Show Flow").is_some()
+    });
+    let show = cx.debug_bounds("menu-label-Show Flow").unwrap().center();
+    cx.simulate_click(show, Modifiers::none());
+    until(cx, "Flow beside the board", |cx| {
+        at(cx, format!("flow-title-{first}")).is_some()
+    });
     let pane = cx.debug_bounds("missions-board").unwrap();
     // It opens on its start, a card drawn no smaller than its words read
-    // at (a step card is 300 wide on the board).
+    // at (four fifths of a step card's width on the board).
     let card = at(cx, format!("mission-card-{first}")).unwrap();
-    assert!(card.size.width >= px(300. * 0.8), "{card:?}");
+    let readable = ahjo_missions_app::store::canvas::STEP_W * 0.8;
+    assert!(card.size.width >= px(readable), "{card:?}");
     assert!(inside(card, pane));
     // Too long to show whole at that size: the last step is out of view
     // (not drawn, or drawn past the pane's edge) until it is chosen in

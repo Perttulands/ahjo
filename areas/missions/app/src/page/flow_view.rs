@@ -206,8 +206,13 @@ impl MissionsPage {
         } else {
             let todo = self.todo(mission).len();
             if complete && todo > 0 && !empty {
-                pane::meta(t, format!("{todo} to do before it can run"), None)
+                // The list itself only when asked for: the count says enough.
+                pane::act(t, "mission-todo", format!("{todo} to do before it can run"))
                     .debug_selector(|| "mission-todo".into())
+                    .on_click(cx.listener(|p, _, _, cx| {
+                        p.todo_open = !p.todo_open;
+                        cx.notify();
+                    }))
                     .into_any_element()
             } else {
                 div().into_any_element()
@@ -283,10 +288,14 @@ impl MissionsPage {
                 pane::act(
                     t,
                     "mission-flow",
-                    if flow_shown { "Hide Flow" } else { "Flow" },
+                    if flow_shown {
+                        "Hide activity"
+                    } else {
+                        "Activity"
+                    },
                 )
                 .debug_selector(|| "mission-flow".into())
-                .tooltip(kit::tip("The mission in words, beside its board"))
+                .tooltip(kit::tip("What it is for, who changed what, and the notes"))
                 .on_click(cx.listener(move |p, _, _, cx| {
                     p.flow_open = Some(!flow_shown);
                     p.canvas.room_changed();
@@ -318,11 +327,33 @@ impl MissionsPage {
                             add("Add limit", board::Kind::Limit),
                             add("Add end", board::Kind::End),
                         ];
+                        let arrange = page.clone();
+                        rows.push(MenuRow::new("Arrange", move |_, cx| {
+                            let _ = arrange.update(cx, |p, cx| p.arrange(cx));
+                        }));
+                        let words = page.clone();
+                        let flow_words = p.flow_words;
+                        rows.push(MenuRow::new(
+                            if flow_words {
+                                "Show activity"
+                            } else {
+                                "Show Flow"
+                            },
+                            move |_, cx| {
+                                let _ = words.update(cx, |p, cx| {
+                                    p.flow_words = !flow_words;
+                                    // Shown if hidden; otherwise the panel
+                                    // keeps following the window's room.
+                                    if !flow_shown {
+                                        p.flow_open = Some(true);
+                                    }
+                                    cx.notify();
+                                });
+                            },
+                        ));
                         let note = page.clone();
                         rows.push(MenuRow::new("Note on the mission", move |window, cx| {
-                            let _ = note.update(cx, |p, cx| {
-                                p.open_canvas_note(MISSION_THREAD.into(), window, cx)
-                            });
+                            let _ = note.update(cx, |p, cx| p.write_mission_note(window, cx));
                         }));
                         if failed {
                             let page = page.clone();
@@ -603,7 +634,7 @@ impl MissionsPage {
     }
 
     /// The mission's runs, newest first; each opens.
-    fn mission_runs(&self, t: &Theme, cx: &mut Context<Self>) -> Option<Div> {
+    pub(super) fn mission_runs(&self, t: &Theme, cx: &mut Context<Self>) -> Option<Div> {
         const COLS: [Col; 4] = [
             Col::fixed("Run", RUN_NO_W),
             Col::fill("Given"),

@@ -105,6 +105,13 @@ fn canvas_shows_exact_findings_on_cards_and_edges_and_clears_them(cx: &mut TestA
     });
     let position = cx.debug_bounds(invalid).unwrap().center();
     cx.simulate_click(position, Modifiers::none());
+    // The head counts what it lacks; asked, the board marks each card and
+    // wire it is about and lists it under the board.
+    until(cx, "the count of what it lacks", |cx| {
+        cx.debug_bounds("mission-todo").is_some()
+    });
+    let todo = cx.debug_bounds("mission-todo").unwrap().center();
+    cx.simulate_click(todo, Modifiers::none());
     until(cx, "step, gate and edge marks", |cx| {
         cx.debug_bounds("validation-card-step_work").is_some()
             && cx.debug_bounds("validation-card-gate_review").is_some()
@@ -114,20 +121,22 @@ fn canvas_shows_exact_findings_on_cards_and_edges_and_clears_them(cx: &mut TestA
     until(cx, "gate note control", |cx| {
         cx.debug_bounds("canvas-note-pin-gate_review").is_some()
     });
-    let gate = cx.debug_bounds("mission-card-gate_review").unwrap();
+    // The gate's finding mark and its note mark cover neither each other
+    // nor the gate's ports.
     let pin = cx.debug_bounds("canvas-note-pin-gate_review").unwrap();
-    let pass = cx.debug_bounds("canvas-gate-pass-label").unwrap();
-    let fail = cx.debug_bounds("canvas-gate-fail-label").unwrap();
-    assert!(pin.origin.x >= gate.origin.x && pin.origin.y >= gate.origin.y);
-    assert!(pin.origin.x + pin.size.width <= gate.origin.x + gate.size.width);
-    assert!(pin.origin.y + pin.size.height <= gate.origin.y + gate.size.height);
-    for label in [pass, fail] {
-        assert!(
-            pin.origin.x + pin.size.width <= label.origin.x
-                || label.origin.x + label.size.width <= pin.origin.x
-                || pin.origin.y + pin.size.height <= label.origin.y
-                || label.origin.y + label.size.height <= pin.origin.y
-        );
+    let mark = cx.debug_bounds("validation-card-gate_review").unwrap();
+    let apart = |a: gpui::Bounds<gpui::Pixels>, b: gpui::Bounds<gpui::Pixels>| {
+        a.origin.x + a.size.width <= b.origin.x
+            || b.origin.x + b.size.width <= a.origin.x
+            || a.origin.y + a.size.height <= b.origin.y
+            || b.origin.y + b.size.height <= a.origin.y
+    };
+    assert!(apart(pin, mark), "{pin:?} {mark:?}");
+    for port in ["in", "pass", "fail"] {
+        let selector = Box::leak(format!("mission-port-gate_review:{port}").into_boxed_str());
+        if let Some(port) = cx.debug_bounds(selector) {
+            assert!(apart(pin, port) && apart(mark, port), "{selector}");
+        }
     }
     // What the mission lacks is listed below the canvas, never over a card.
     until(cx, "findings list", |cx| {

@@ -379,7 +379,9 @@ impl MissionsPage {
     /// Start at the Input card whose play control was used.
     pub(super) fn prepare_card_run(&mut self, id: &str, cx: &mut Context<Self>) {
         if !self.mission_input_runnable(id) {
+            // What it lacks, listed under the board and marked on it.
             self.run_tried = true;
+            self.todo_open = true;
         }
         if self.unsaved(cx).is_some() {
             self.state.error = Some("Save or discard the current draft first.".into());

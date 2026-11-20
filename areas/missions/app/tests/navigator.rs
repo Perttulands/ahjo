@@ -130,15 +130,14 @@ fn the_list_opens_the_latest_run_and_reaches_every_run_of_a_mission(cx: &mut Tes
     });
     click(cx, &title);
     until(cx, "mission opened by its name", |cx| {
-        selector(cx, "flow-step-fmn_work")
+        selector(cx, "mission-card-fmn_work")
     });
-    // The mission lists all its runs; the oldest opens from there.
+    // The mission's panel lists all its runs; the oldest opens from there.
     let listed = format!("mission-run-{}", running.oldest);
     until(cx, "the mission's runs", |cx| selector(cx, &listed));
     click(cx, &listed);
     until(cx, "older run", |cx| {
-        selector(cx, &format!("run-detail-{}", running.oldest))
-            && !selector(cx, "flow-step-fmn_work")
+        selector(cx, &format!("run-detail-{}", running.oldest)) && !selector(cx, "activity-write")
     });
     click(cx, "mission-filter");
     cx.simulate_input(&running.oldest);

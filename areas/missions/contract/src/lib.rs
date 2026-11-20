@@ -172,6 +172,12 @@ pub struct LayoutResponse {
     pub layout: Layout,
     pub etag: String,
 }
+/// Every saved revision of a mission, oldest first (prototype,
+/// proto/board-v3).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct HistoryResponse {
+    pub revisions: Vec<Mission>,
+}
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct NotesResponse {
     pub notes: document::NotesDocument,

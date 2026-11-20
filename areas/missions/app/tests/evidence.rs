@@ -235,10 +235,7 @@ fn evidence_links_and_attempt_images(cx: &mut TestAppContext) {
             )
             .unwrap();
     });
-    until(cx, "mission flow", |cx| {
-        cx.debug_bounds("flow-step-fmn_work").is_some()
-    });
-    until(cx, "mission", |cx| {
+    until(cx, "mission on its board", |cx| {
         cx.debug_bounds("mission-card-fmn_work").is_some()
     });
     shell.update(cx, |shell, cx| {

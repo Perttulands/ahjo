@@ -99,7 +99,7 @@ fn run_is_only_emphasized_for_a_current_runnable_mission(cx: &mut TestAppContext
     // the only mission, without a click.
     let selector = Box::leak(format!("mission-{}-hello", running.id).into_boxed_str());
     until(cx, "the mission opened on its own", |cx| {
-        cx.debug_bounds(selector).is_some() && cx.debug_bounds("flow-input-inp_hello").is_some()
+        cx.debug_bounds(selector).is_some() && cx.debug_bounds("mission-card-inp_hello").is_some()
     });
     let rt = tokio::runtime::Runtime::new().unwrap();
     let client = NodeClient::new(Some(&format!("{}/", running.url))).unwrap();
@@ -130,7 +130,13 @@ fn run_is_only_emphasized_for_a_current_runnable_mission(cx: &mut TestAppContext
     assert_eq!(rail.size.width, gpui::px(ahjo_app_kit::theme::size::LIST));
     // It opened on its board.
     assert!(cx.debug_bounds("mission-canvas").is_some());
-    // The board says what stands between the mission and a run.
+    // The head counts what stands between the mission and a run, and
+    // lists it under the board when asked.
+    until(cx, "the count of what it lacks", |cx| {
+        cx.debug_bounds("mission-todo").is_some()
+    });
+    let todo = cx.debug_bounds("mission-todo").unwrap().center();
+    cx.simulate_click(todo, gpui::Modifiers::none());
     until(cx, "the unwired Input listed as to do", |cx| {
         cx.debug_bounds("canvas-findings").is_some()
     });

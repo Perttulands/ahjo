@@ -285,7 +285,10 @@ fn designs_a_multi_gate_mission_and_shows_findings_on_the_canvas(cx: &mut TestAp
     }
     let gate_id = read()["gate"][0]["id"].as_str().unwrap().to_owned();
     until(cx, "board ready to arrange", |cx| has(cx, "board-ready"));
-    click(cx, "arrange");
+    // Arrange waits in the mission head's "…" menu.
+    click(cx, "mission-more");
+    until(cx, "the arrange row", |cx| has(cx, "menu-label-Arrange"));
+    click(cx, "menu-label-Arrange");
     until(cx, "arranged layout saved", |_| {
         let layout = rt
             .block_on(client.request(
@@ -302,6 +305,12 @@ fn designs_a_multi_gate_mission_and_shows_findings_on_the_canvas(cx: &mut TestAp
             .iter()
             .any(|node| node["id"] == gate_id && (node["x"] != 200 || node["y"] != 200))
     });
+    // What it lacks is counted in the head and listed under the board when
+    // asked for.
+    until(cx, "the count of what it lacks", |cx| {
+        has(cx, "mission-todo")
+    });
+    click(cx, "mission-todo");
     until(cx, "arranged canvas", |cx| {
         has(cx, "canvas-fit") && has(cx, "canvas-findings")
     });

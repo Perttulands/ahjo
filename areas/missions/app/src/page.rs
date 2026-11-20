@@ -1,3 +1,4 @@
+mod activity;
 mod canvas;
 mod editor_diff;
 mod edits;
@@ -59,6 +60,13 @@ pub struct MissionsPage {
     /// Flow beside the board, as the operator last left it; until then,
     /// open when the detail is wide enough for both.
     flow_open: Option<bool>,
+    /// The panel shows Flow, the mission in words, instead of Activity.
+    flow_words: bool,
+    activity: activity::ActivityUi,
+    /// The cards the change chosen in Activity touched, marked on the board.
+    activity_marks: Vec<String>,
+    /// The list of what a mission still lacks, under its board.
+    todo_open: bool,
     /// The step chosen in Flow or on the board, marked on both.
     flow_focus: Option<String>,
     flow_scroll: gpui::ScrollHandle,
@@ -183,6 +191,10 @@ impl MissionsPage {
             manage: manage::Manage::default(),
             canvas: canvas::View::default(),
             flow_open: None,
+            flow_words: false,
+            activity: activity::ActivityUi::default(),
+            activity_marks: vec![],
+            todo_open: false,
             editor_more: false,
             note_paper: notes::NotesUi::default(),
             run: run::RunUi::new(cx),
@@ -552,6 +564,7 @@ impl MissionsPage {
             self.canvas = canvas::View::default();
             self.flow_focus = None;
             self.run_tried = false;
+            self.todo_open = false;
         }
         self.reveal_card = None;
         self.generation += 1;
@@ -570,6 +583,8 @@ impl MissionsPage {
         self.note_base.clear();
         self.note_etag = None;
         self.note_paper = notes::NotesUi::default();
+        self.activity = activity::ActivityUi::default();
+        self.activity_marks.clear();
         self.note.update(cx, |field, cx| field.set("", false, cx));
         self.state.error = None;
         // Encode a path segment, including non-ASCII bytes.
@@ -584,6 +599,7 @@ impl MissionsPage {
             })
             .collect();
         self.load_canvas_notes(node.clone(), slug.clone(), cx);
+        self.load_history(node.clone(), slug.clone(), cx);
         for layout in [false, true] {
             let path = format!(
                 "/api/missions/{encoded}{}",
@@ -1629,7 +1645,7 @@ impl Render for MissionsPage {
             let flow_shown =
                 self.editor.is_none() && self.flow_open.unwrap_or(room >= FLOW_AT && !empty);
             let head = self.mission_head(&t, &m, flow_shown, cx);
-            let todo = self.todo_band(&t, &m);
+            let todo = self.todo_band(&t, &m).filter(|_| self.todo_open);
             let board = div()
                 .flex_1()
                 .min_w_0()
@@ -1650,7 +1666,11 @@ impl Render for MissionsPage {
                 .children(error.map(|e| div().flex_none().px(px(PAD)).py(px(TAB_GAP)).child(e)))
                 .children(todo);
             let flow = flow_shown.then(|| {
-                let body = self.mission_flow(&t, &m, cx);
+                let body = if self.flow_words {
+                    self.mission_flow(&t, &m, cx)
+                } else {
+                    self.mission_activity(&t, &m, cx)
+                };
                 div()
                     .id(gpui::SharedString::from(format!(
                         "missions-detail-{}",

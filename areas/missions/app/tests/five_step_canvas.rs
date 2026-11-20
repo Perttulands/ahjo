@@ -211,8 +211,9 @@ fn a_long_board_opens_readable_at_its_start(cx: &mut TestAppContext) {
             cx,
         )
     });
-    // Low enough that five steps cannot all be read at once, wrapped or not.
-    cx.simulate_resize(gpui::size(px(1280.), px(480.)));
+    // Low enough that five steps cannot all be read at once, wrapped or not
+    // (a step card is 62 high, so it takes much less than it once did).
+    cx.simulate_resize(gpui::size(px(1280.), px(300.)));
     until(cx, "link", |cx| {
         shell.read_with(cx, |s, cx| {
             s.hub().read(cx).fleet.here().state == LinkState::Open

@@ -169,6 +169,7 @@ impl Store {
         crate::write::set(doc.as_table_mut(), "updated_at", toml_edit::value(now()?));
         let raw = doc.to_string();
         let result = edit(&raw)?;
+        crate::mission_history::record(self.root(), slug, &raw)?;
         crate::write::atomic(&target, raw.as_bytes()).map_err(crate::error::io)?;
         Ok(result)
     }
@@ -273,6 +274,7 @@ impl Store {
         crate::write::set(doc.as_table_mut(), "updated_at", toml_edit::value(now()?));
         let raw = doc.to_string();
         let updated = edit(&raw)?;
+        crate::mission_history::record(self.root(), &updated.mission.slug, &raw)?;
         if let Some(mut layout) = layout {
             crate::write::set(
                 layout.as_table_mut(),
@@ -526,6 +528,13 @@ impl Store {
             Ok(_) => moves.push((layout, archived_layout)),
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => (),
             Err(e) => return Err(crate::error::io(e)),
+        }
+        // Its history goes with it, so a new mission of the same name starts
+        // its own.
+        for kept in crate::mission_history::files(self.root(), &slug)? {
+            let name = kept.file_name().unwrap_or_default().to_string_lossy();
+            let archived = kept.with_file_name(format!("{name}.deleted-{archive_id}"));
+            moves.push((kept, archived));
         }
         moves.push((target, archived_mission));
         crate::mission_archives::move_archives(moves)?;

@@ -3,6 +3,7 @@ pub mod attempts;
 pub mod canvas;
 pub mod evidence;
 pub mod gate;
+pub mod history;
 pub mod navigator;
 pub mod placement;
 pub mod run_state;

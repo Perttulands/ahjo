@@ -1,62 +1,59 @@
-//! A mission on its canvas (Archon's board): where each card sits, how big
-//! it is, where its ports are, and the wires between them, in canvas units
-//! before zoom. A mission with no saved layout reads in rows, in run order,
-//! shaped for the room it is shown in, until it is arranged.
+//! A mission on its canvas: where each card sits, how big it is, where its
+//! ports are, and the wires between them, in canvas units before zoom. A
+//! mission with no saved layout reads in rows, in run order, shaped for the
+//! room it is shown in, until it is arranged.
+//!
+//! The board draws only what a person reads the flow by: the start, the
+//! steps, the gates and the ends. A gate's judge is drawn in its gate, and
+//! a limit on what it caps (a loop's rounds along the loop), so neither is
+//! a card of its own.
 
+use crate::look::{self, Gate as GateLook};
 use ahjo_missions_contract::flow::Flow;
 use ahjo_missions_contract::{LayoutNode, Mission};
 use std::collections::HashMap;
 
-/// Archon's card shapes, at its density: a step card is its IN rows, its
-/// head, its slots and its OUT rows; ports sit on the rows.
-pub const STEP_W: f32 = 300.;
-/// A peer or orchestrated step is a little wider.
-pub const WIDE_W: f32 = 316.;
-pub const INPUT_W: f32 = 240.;
-pub const GATE_W: f32 = 260.;
-pub const GATE_H: f32 = 84.;
-pub const END_W: f32 = 176.;
-pub const END_H: f32 = 52.;
-/// A Limit card: a small card under the card it caps.
-pub const LIMIT_W: f32 = 200.;
-pub const LIMIT_H: f32 = 58.;
-/// How far under its target a Limit card sits until it is placed.
-const LIMIT_GAP: f32 = 28.;
-/// An IN or OUT row.
-pub const IO_ROW: f32 = 30.;
-/// A step's head: number, title, two lines of brief; a run adds its chips.
-pub const STEP_HEAD: f32 = 80.;
-/// Without a brief the head only needs room for the title.
-pub const STEP_HEAD_EMPTY: f32 = 46.;
-pub const RUN_CHIPS: f32 = 26.;
-/// The slots' body: its padding, each slot and the gap between them.
-pub const BODY_PAD: f32 = 8.;
-pub const SLOT_H: f32 = 40.;
-pub const SLOT_GAP: f32 = 4.;
-/// The dashed box holding an orchestrated step's workers or a peer group.
-pub const POOL_PAD: f32 = 22.;
-/// An Input card: eyebrow and title, goal, then one line for each fact.
-pub const INPUT_HEAD: f32 = 52.;
-pub const INPUT_GOAL: f32 = 38.;
-pub const INPUT_LINE: f32 = 18.;
-pub const INPUT_FOOT: f32 = 10.;
+/// A step: its name over who works it.
+pub const STEP_W: f32 = 216.;
+pub const STEP_H: f32 = 62.;
+/// The row of an orchestrated step's workers, under its lead.
+pub const CREW_ROW: f32 = 22.;
+/// The row a run's state takes on a step.
+pub const RUN_ROW: f32 = 22.;
+/// The start: a round play control.
+pub const START: f32 = 36.;
+/// The room under the start for what a run takes and the mission's cap.
+pub const START_WORDS: f32 = 60.;
+/// An end: its mark and its name.
+pub const END_W: f32 = 132.;
+pub const END_H: f32 = 28.;
+/// A fork: the question over the line, which splits at a dot.
+pub const FORK_W: f32 = 210.;
+pub const FORK_H: f32 = 100.;
+/// Where the line runs through a fork, from its top.
+pub const FORK_LINE: f32 = 70.;
+/// Where the fork's dot sits, from its left.
+pub const FORK_DOT: f32 = 14.;
+/// An exit: the band under the step it checks.
+pub const BAND_H: f32 = 52.;
+/// A tag: a small card whose right side points the way on.
+pub const TAG_W: f32 = 222.;
+pub const TAG_H: f32 = 70.;
+pub const TAG_POINT: f32 = 18.;
+/// Where an exit's or a tag's fail port leaves its foot, from its left.
+pub const FAIL_X: f32 = 28.;
 /// A port's dot, and how near a drop must land to take it.
-pub const PORT: f32 = 14.;
+pub const PORT: f32 = 9.;
 pub const PORT_REACH: f32 = 16.;
-/// How far apart a gate's pass and fail ports stand, each from its middle.
-pub const GATE_PORTS: f32 = 13.;
-/// The room a card's notes take under it: a closed sticky of a few lines.
-pub const NOTE_ROOM: f32 = 92.;
-const GAP_X: f32 = 72.;
-const GAP_Y: f32 = 32.;
+const GAP_X: f32 = 64.;
+const GAP_Y: f32 = 28.;
 const MARGIN: f32 = 40.;
 /// The room between two rows of a wrapped board, for the wires that run
-/// from the end of one row to the start of the next and the loops back.
-const ROW_GAP: f32 = 76.;
+/// from the end of one row to the start of the next and the loops under.
+const ROW_GAP: f32 = 92.;
 
-/// Archon's router: a wire leaves its port straight for a stub, turns at
-/// right angles with rounded corners, and keeps a lane's clearance from
-/// the cards it passes.
+/// A wire leaves its port straight for a stub, turns at right angles with
+/// rounded corners, and keeps a lane's clearance from the cards it passes.
 const STUB: f32 = 24.;
 const LANE_CLEARANCE: f32 = 30.;
 const SPAN_PAD: f32 = 14.;
@@ -64,10 +61,6 @@ const OBSTACLE_PAD: f32 = 6.;
 const LEVEL: f32 = 6.;
 /// Loops over the same span stand this far apart, the wider outside.
 const CHANNEL_GAP: f32 = 12.;
-/// A judge's wires leave the gate's foot this far down, and pass its card
-/// this far out.
-const JUDGE_DROP: f32 = 18.;
-const JUDGE_SIDE: f32 = 26.;
 /// The radius a wire's corner is drawn with.
 pub const CORNER: f32 = 10.;
 
@@ -100,15 +93,14 @@ pub struct Wire {
     /// Its course, port to port: straight runs meeting at right angles,
     /// clear of the cards between.
     pub points: Vec<P>,
-    /// `pass`, `fail`, `judge`, `limit` (a Limit card to what it caps),
-    /// or blank for work.
+    /// `pass`, `fail`, or blank for work.
     pub route: String,
     pub from_node: String,
     pub to_node: String,
     /// It returns to a step the run met already (Flow's loop), whichever
-    /// way the cards stand: drawn dashed, labelled with where it returns.
+    /// way the cards stand: drawn dashed.
     pub back: bool,
-    /// Where a loop says where it returns to: the start of its lane.
+    /// Where a loop's words go: the middle of its run under the cards.
     pub label: Option<P>,
 }
 
@@ -119,7 +111,7 @@ impl Wire {
     pub fn to(&self) -> P {
         self.points[self.points.len() - 1]
     }
-    /// The middle of its longest run: where a note pin or a mark sits on it.
+    /// The middle of its longest run: where a mark sits on it.
     pub fn middle(&self) -> P {
         self.points
             .windows(2)
@@ -139,57 +131,74 @@ pub struct Board {
     pub wires: Vec<Wire>,
 }
 
-/// Whether a step's workers or peers sit in a pool under its controller.
+/// Whether a step's workers or peers work under its controller.
 pub fn pooled(kind: &str) -> bool {
     matches!(kind, "orchestrated" | "peer")
 }
 
-/// The height of the slots' body for `slots` slots.
-pub fn body_h(kind: &str, slots: usize) -> f32 {
-    let n = slots.max(1) as f32;
-    BODY_PAD * 2. + n * SLOT_H + (n - 1.) * SLOT_GAP + if pooled(kind) { POOL_PAD } else { 0. }
+/// A judge step: drawn in the gate it judges, not as a card.
+pub fn folded(flow: &Flow, id: &str) -> bool {
+    flow.judge_of.contains_key(id)
 }
 
-/// The face and the board must agree on the head height so ports meet rows.
-pub fn step_head(f: &ahjo_missions_contract::Formation, running: bool) -> f32 {
-    let has_brief = f.brief.as_ref().is_some_and(|b| !b.goal.trim().is_empty());
-    (if has_brief {
-        STEP_HEAD
-    } else {
-        STEP_HEAD_EMPTY
-    }) + if running { RUN_CHIPS } else { 0. }
+/// The step whose exit a gate is, in the exit look: the gate's one way in
+/// comes from a step whose one way out is the gate.
+pub fn exit_of(m: &Mission, flow: &Flow, gate: &str) -> Option<String> {
+    if look::gate() != GateLook::Exit {
+        return None;
+    }
+    let into: Vec<_> = m
+        .connections
+        .iter()
+        .filter(|c| port_of(&c.to) == (gate, "in"))
+        .collect();
+    let [c] = into.as_slice() else { return None };
+    let source = port_of(&c.from).0;
+    if !m.formations.iter().any(|f| f.id == source) || folded(flow, source) {
+        return None;
+    }
+    let out = m
+        .connections
+        .iter()
+        .filter(|o| port_of(&o.from).0 == source)
+        .count();
+    (out == 1).then(|| source.to_owned())
 }
 
-fn input_lines(c: &ahjo_missions_contract::InputCard) -> f32 {
-    // Inputs, and the human-gate channel.
-    1. + f32::from(u8::from(!c.inputs.is_empty()))
+/// A wire the board does not draw: a step into the gate that is its exit.
+fn hidden(m: &Mission, flow: &Flow, from: &str, to: &str) -> bool {
+    m.gates.iter().any(|g| g.id == to) && exit_of(m, flow, to).as_deref() == Some(from)
 }
 
-fn size(m: &Mission, id: &str, running: bool) -> Option<(Kind, f32, f32)> {
-    if let Some(c) = m.input_cards.iter().find(|c| c.id == id) {
-        let h = INPUT_HEAD + INPUT_GOAL + INPUT_LINE * input_lines(c) + INPUT_FOOT;
-        return Some((Kind::Input, INPUT_W, h));
+fn size(m: &Mission, flow: &Flow, id: &str, running: bool) -> Option<(Kind, f32, f32)> {
+    if m.input_cards.iter().any(|c| c.id == id) {
+        return Some((Kind::Input, START, START));
     }
     if let Some(f) = m.formations.iter().find(|f| f.id == id) {
-        let w = if pooled(&f.kind) { WIDE_W } else { STEP_W };
-        let rows = (f.inputs.len() + f.outputs.len()) as f32;
-        let head = step_head(f, running);
-        return Some((
-            Kind::Formation,
-            w,
-            rows * IO_ROW + head + body_h(&f.kind, f.slots.len()),
-        ));
+        if folded(flow, id) {
+            return None;
+        }
+        let h = STEP_H
+            + if pooled(&f.kind) { CREW_ROW } else { 0. }
+            + if running { RUN_ROW } else { 0. };
+        return Some((Kind::Formation, STEP_W, h));
     }
     if m.gates.iter().any(|g| g.id == id) {
-        return Some((Kind::Gate, GATE_W, GATE_H));
+        let (w, h) = gate_size();
+        return Some((Kind::Gate, w, h));
     }
     if m.ends.iter().any(|e| e.id == id) {
         return Some((Kind::End, END_W, END_H));
     }
-    if m.limits.iter().any(|l| l.id == id) {
-        return Some((Kind::Limit, LIMIT_W, LIMIT_H));
-    }
     None
+}
+
+fn gate_size() -> (f32, f32) {
+    match look::gate() {
+        GateLook::Fork => (FORK_W, FORK_H),
+        GateLook::Exit => (STEP_W, BAND_H),
+        GateLook::Tag => (TAG_W, TAG_H),
+    }
 }
 
 /// Run order, left to right in one row: what a card the layout misses
@@ -199,8 +208,16 @@ pub fn arranged(m: &Mission, flow: &Flow) -> Vec<LayoutNode> {
 }
 
 /// The run-order columns, each top to bottom: Input cards, each numbered
-/// step (siblings stacked, a gate's judges under it), Ends.
+/// step (siblings stacked; in the exit look a gate under the step whose
+/// exit it is), Ends, then the cards wired to nothing yet, so one just
+/// added moves none of the rest.
 fn columns(m: &Mission, flow: &Flow) -> Vec<Vec<String>> {
+    let wired = |id: &str| {
+        m.connections
+            .iter()
+            .any(|c| port_of(&c.from).0 == id || port_of(&c.to).0 == id)
+    };
+    let mut loose = vec![];
     let mut columns: Vec<Vec<String>> = vec![m.input_cards.iter().map(|c| c.id.clone()).collect()];
     let mut by_number: Vec<(usize, String)> = flow
         .numbers
@@ -208,28 +225,84 @@ fn columns(m: &Mission, flow: &Flow) -> Vec<Vec<String>> {
         .map(|(id, n)| (*n, id.clone()))
         .collect();
     by_number.sort();
+    let exits: HashMap<String, String> = m
+        .gates
+        .iter()
+        .filter_map(|g| exit_of(m, flow, &g.id).map(|s| (s, g.id.clone())))
+        .collect();
+    let attached: Vec<&String> = exits.values().collect();
+    let dropped = dropped_ends(m);
     for (n, id) in by_number {
+        if attached.contains(&&id) {
+            continue;
+        }
+        if !wired(&id) && !m.ends.iter().any(|e| e.id == id) {
+            loose.push(id);
+            continue;
+        }
         while columns.len() <= n {
             columns.push(vec![]);
         }
         columns[n].push(id.clone());
-        // A gate's judges sit under it, in a stable order.
-        let mut judges: Vec<&String> = flow
-            .judge_of
-            .iter()
-            .filter(|(_, gate)| **gate == id)
-            .map(|(judge, _)| judge)
-            .collect();
-        judges.sort();
-        columns[n].extend(judges.into_iter().cloned());
+        if let Some(gate) = exits.get(&id) {
+            columns[n].push(gate.clone());
+        }
+        for (end, gate) in &dropped {
+            if *gate == id || exits.get(&id) == Some(gate) {
+                columns[n].push(end.clone());
+            }
+        }
     }
-    columns.push(m.ends.iter().map(|e| e.id.clone()).collect());
+    columns.push(
+        m.ends
+            .iter()
+            .filter(|e| !dropped.contains_key(&e.id))
+            .map(|e| e.id.clone())
+            .collect(),
+    );
+    columns.push(loose);
     columns.retain(|c| !c.is_empty());
     columns
 }
 
-/// A column's cards with where each sits in it, then its width and height.
-type Column = (Vec<(String, f32)>, f32, f32);
+/// The ends only a gate's fail reaches, each with its gate: they stand
+/// under the gate, so the fail drops straight into them.
+fn dropped_ends(m: &Mission) -> HashMap<String, String> {
+    m.ends
+        .iter()
+        .filter_map(|e| {
+            let into: Vec<_> = m
+                .connections
+                .iter()
+                .filter(|c| port_of(&c.to).0 == e.id)
+                .collect();
+            match into.as_slice() {
+                [c] if port_of(&c.from).1 == "fail" => {
+                    Some((e.id.clone(), port_of(&c.from).0.to_owned()))
+                }
+                _ => None,
+            }
+        })
+        .collect()
+}
+
+/// A column's cards with where each sits in it (across, down), then its
+/// width and height.
+type Column = (Vec<(String, P)>, f32, f32);
+
+/// Where a port is on a card of this kind standing at the origin.
+fn port_offset(m: &Mission, flow: &Flow, id: &str, port: &str, out: bool) -> Option<P> {
+    let (kind, w, h) = size(m, flow, id, false)?;
+    let card = Card {
+        id: id.into(),
+        kind,
+        x: 0.,
+        y: 0.,
+        w,
+        h,
+    };
+    Some(port_at(m, &card, port, out))
+}
 
 /// The mission laid out in reading rows for a view of `room` (width,
 /// height, in pixels): its run-order columns wrapped into the rows that
@@ -237,7 +310,8 @@ type Column = (Vec<(String, f32)>, f32, f32);
 /// a wide one a single row. When even the best wrap draws them smaller
 /// than `floor`, the rows are as wide as still fit across at `floor`, and
 /// the board runs down past the view. Each card keeps the room `under`
-/// gives it beneath (for its notes), and its Limit cards stand under it.
+/// gives it beneath. Within a row the ways in stand on one line, so the
+/// wires along it run straight.
 pub fn shaped(
     m: &Mission,
     flow: &Flow,
@@ -246,24 +320,50 @@ pub fn shaped(
     under: &dyn Fn(&str) -> f32,
 ) -> Vec<LayoutNode> {
     let room = (room.0.max(1.), room.1.max(1.));
+    let attached: Vec<String> = m
+        .gates
+        .iter()
+        .filter(|g| exit_of(m, flow, &g.id).is_some())
+        .map(|g| g.id.clone())
+        .collect();
+    // The way into a column: its first card's first input port.
+    let way_in = |id: &str| -> f32 {
+        let port = if m.formations.iter().any(|f| f.id == id) {
+            m.formations
+                .iter()
+                .find(|f| f.id == id)
+                .and_then(|f| f.inputs.first())
+                .map(|p| p.id.clone())
+                .unwrap_or_default()
+        } else {
+            "in".into()
+        };
+        let out = m.input_cards.iter().any(|c| c.id == id);
+        port_offset(m, flow, id, if out { "out" } else { &port }, out).map_or(0., |p| p.1)
+    };
+    let dropped = dropped_ends(m);
     let columns: Vec<Column> = columns(m, flow)
         .into_iter()
         .map(|ids| {
             let (mut y, mut w) = (0f32, 0f32);
             let mut placed = vec![];
             for id in ids {
-                let Some((_, cw, ch)) = size(m, &id, false) else {
+                let Some((_, cw, ch)) = size(m, flow, &id, false) else {
                     continue;
                 };
-                placed.push((id.clone(), y));
-                y += ch + under(&id);
-                for limit in m.limits.iter().filter(|l| l.target == id) {
-                    y += LIMIT_GAP;
-                    placed.push((limit.id.clone(), y));
-                    y += LIMIT_H + under(&limit.id);
+                // An exit hangs on its step with no gap.
+                if attached.contains(&id) {
+                    y -= GAP_Y;
                 }
-                y += GAP_Y;
-                w = w.max(cw);
+                // An end under its gate stands right of the gate's fail,
+                // which turns into it.
+                let dx = dropped
+                    .get(&id)
+                    .and_then(|gate| port_offset(m, flow, gate, "fail", true))
+                    .map_or(0., |p| p.0 + STUB);
+                placed.push((id.clone(), (dx, y)));
+                y += ch + under(&id) + GAP_Y;
+                w = w.max(cw + dx);
             }
             (placed, w, (y - GAP_Y).max(0.))
         })
@@ -271,6 +371,39 @@ pub fn shaped(
         .collect();
     if columns.is_empty() {
         return vec![];
+    }
+    // How far each column drops so its way in is on the row's line, or
+    // level with the pass of a gate in the column before it. Only wired
+    // cards set the line: a card just added, wired to nothing, must not
+    // move the rest.
+    let wired = |id: &str| {
+        m.connections
+            .iter()
+            .any(|c| port_of(&c.from).0 == id || port_of(&c.to).0 == id)
+    };
+    let baseline = columns
+        .iter()
+        .map(|c| &c.0[0].0)
+        .filter(|id| wired(id))
+        .map(|id| way_in(id))
+        .fold(0., f32::max);
+    let mut drops = vec![0f32; columns.len()];
+    for (i, column) in columns.iter().enumerate() {
+        let first = &column.0[0].0;
+        let mut drop = baseline - way_in(first);
+        if i > 0 {
+            let prev = &columns[i - 1];
+            for (id, (_, dy)) in &prev.0 {
+                let passes = m.connections.iter().any(|c| {
+                    c.from == format!("{id}:{}", ahjo_missions_contract::GATE_PASS)
+                        && port_of(&c.to).0 == first
+                });
+                if passes && let Some(pass) = port_offset(m, flow, id, "pass", true) {
+                    drop = drop.max(drops[i - 1] + dy + pass.1 - way_in(first));
+                }
+            }
+        }
+        drops[i] = drop.max(0.);
     }
     let extent = |n: usize| {
         let rows: Vec<_> = columns.chunks(n).collect();
@@ -280,7 +413,13 @@ pub fn shaped(
             .fold(0., f32::max);
         let h = rows
             .iter()
-            .map(|r| r.iter().map(|c| c.2).fold(0., f32::max))
+            .enumerate()
+            .map(|(k, r)| {
+                r.iter()
+                    .enumerate()
+                    .map(|(j, c)| c.2 + drops[k * n + j])
+                    .fold(0., f32::max)
+            })
             .sum::<f32>()
             + ROW_GAP * (rows.len() - 1) as f32;
         (w + 2. * MARGIN, h + 2. * MARGIN)
@@ -290,12 +429,35 @@ pub fn shaped(
         (room.0 / w).min(room.1 / h).min(1.)
     };
     let all = columns.len();
+    // A wire back to an earlier column, a loop, reads only when its two
+    // ends share a row: wrapped between rows it crosses the wire that
+    // wraps.
+    let column_of = |id: &str| {
+        columns
+            .iter()
+            .position(|c| c.0.iter().any(|(p, _)| p == id))
+    };
+    let back: Vec<(usize, usize)> = m
+        .connections
+        .iter()
+        .filter_map(|c| {
+            let from = column_of(port_of(&c.from).0)?;
+            let to = column_of(port_of(&c.to).0)?;
+            (to <= from).then_some((from, to))
+        })
+        .collect();
+    let whole_loops = |n: usize| back.iter().all(|(a, b)| a / n == b / n);
     // The fewest rows among those that draw it largest (the last of
-    // equals wins).
-    let best = (1..=all)
-        .max_by(|a, b| zoom(*a).total_cmp(&zoom(*b)))
-        .unwrap_or(all);
-    let per_row = if zoom(best) >= floor {
+    // equals wins), keeping loops whole where that still reads.
+    let largest = |fits: &dyn Fn(usize) -> bool| {
+        (1..=all)
+            .filter(|n| fits(*n))
+            .max_by(|a, b| zoom(*a).total_cmp(&zoom(*b)))
+    };
+    let best = largest(&|_| true).unwrap_or(all);
+    let per_row = if let Some(n) = largest(&whole_loops).filter(|n| zoom(*n) >= floor) {
+        n
+    } else if zoom(best) >= floor {
         best
     } else {
         (1..=all)
@@ -303,51 +465,22 @@ pub fn shaped(
             .find(|n| room.0 / extent(*n).0 >= floor)
             .unwrap_or(1)
     };
-    // A gate's pass port stands level with the way in of the card it
-    // passes to, so the wire between them runs straight.
-    let level = |gate: &str, next: &str| -> f32 {
-        let passes = m.connections.iter().any(|c| {
-            c.from == format!("{gate}:{}", ahjo_missions_contract::GATE_PASS)
-                && port_of(&c.to).0 == next
-        });
-        let (Some((Kind::Gate, _, h)), Some((kind, _, nh))) =
-            (size(m, gate, false), size(m, next, false))
-        else {
-            return 0.;
-        };
-        let way_in = if kind == Kind::Formation {
-            IO_ROW / 2.
-        } else {
-            nh / 2.
-        };
-        if passes {
-            (h / 2. - GATE_PORTS - way_in).max(0.)
-        } else {
-            0.
-        }
-    };
     let mut out = vec![];
     let mut y = MARGIN;
-    for row in columns.chunks(per_row) {
+    for (k, row) in columns.chunks(per_row).enumerate() {
         let mut x = MARGIN;
         let mut tallest = 0f32;
-        let mut before: Option<&str> = None;
-        for (placed, w, h) in row {
-            let first = placed.first().map(|(id, _)| id.as_str());
-            let drop = match (before, first) {
-                (Some(gate), Some(next)) => level(gate, next),
-                _ => 0.,
-            };
-            for (id, dy) in placed {
+        for (j, (placed, w, h)) in row.iter().enumerate() {
+            let drop = drops[k * per_row + j];
+            for (id, (dx, dy)) in placed {
                 out.push(LayoutNode {
                     id: id.clone(),
-                    x: x as i64,
+                    x: (x + dx) as i64,
                     y: (y + drop + dy) as i64,
                 });
             }
             x += w + GAP_X;
             tallest = tallest.max(h + drop);
-            before = first;
         }
         y += tallest + ROW_GAP;
     }
@@ -358,31 +491,29 @@ fn port_of(endpoint: &str) -> (&str, &str) {
     endpoint.split_once(':').unwrap_or((endpoint, ""))
 }
 
-/// Where a port is: inputs on the left on their IN rows, outputs on the
-/// right on their OUT rows, a gate's pass over its fail on its right and
-/// its judge port at its foot.
+/// Where a port is: inputs on the left, outputs on the right, spread over
+/// a step's name and who works it; a gate's pass on the way on and its
+/// fail at its foot.
 fn port_at(m: &Mission, c: &Card, port: &str, out: bool) -> P {
     let side = if out { c.x + c.w } else { c.x };
     match c.kind {
-        Kind::Gate => match port {
-            "pass" => (side, c.y + c.h / 2. - GATE_PORTS),
-            "fail" => (side, c.y + c.h / 2. + GATE_PORTS),
-            "judge" => (c.x + c.w / 2., c.y + c.h),
-            _ => (side, c.y + c.h / 2.),
+        Kind::Gate => match (look::gate(), port) {
+            (GateLook::Fork, "pass") => (c.x + c.w, c.y + FORK_LINE),
+            (GateLook::Fork, "fail") => (c.x + FORK_DOT, c.y + c.h),
+            (GateLook::Fork, _) => (c.x, c.y + FORK_LINE),
+            (GateLook::Exit, "in") => (c.x + c.w / 2., c.y),
+            (_, "pass") => (c.x + c.w, c.y + c.h / 2.),
+            (_, "fail") => (c.x + FAIL_X, c.y + c.h),
+            _ => (c.x, c.y + c.h / 2.),
         },
         Kind::Formation => {
             let f = m.formations.iter().find(|f| f.id == c.id);
             let ports = f.map(|f| if out { &f.outputs } else { &f.inputs });
-            let n = ports.map(|p| p.len()).unwrap_or(0);
+            let n = ports.map(|p| p.len()).unwrap_or(0).max(1);
             let i = ports
                 .and_then(|p| p.iter().position(|p| p.id == port))
                 .unwrap_or(0);
-            let row = if out {
-                c.h - IO_ROW * (n - i) as f32
-            } else {
-                IO_ROW * i as f32
-            };
-            (side, c.y + row + IO_ROW / 2.)
+            (side, c.y + STEP_H * (i + 1) as f32 / (n + 1) as f32)
         }
         _ => (side, c.y + c.h / 2.),
     }
@@ -398,13 +529,21 @@ pub struct Port {
     pub wired: bool,
 }
 
-/// Every port on the board. A gate's judge port is both: its question
-/// leaves it and the verdict returns to it.
+/// Every port on the board but those of a wire it does not draw.
 pub fn ports(m: &Mission, b: &Board) -> Vec<Port> {
+    let flow = ahjo_missions_contract::flow::build(m);
     let mut out = vec![];
     let wired = |e: &str| m.connections.iter().any(|c| c.from == e || c.to == e);
+    let unseen = |e: &str| {
+        m.connections.iter().any(|c| {
+            (c.from == e || c.to == e) && hidden(m, &flow, port_of(&c.from).0, port_of(&c.to).0)
+        })
+    };
     let mut add = |c: &Card, port: &str, leaves: bool| {
         let endpoint = format!("{}:{port}", c.id);
+        if unseen(&endpoint) {
+            return;
+        }
         out.push(Port {
             at: port_at(m, c, port, leaves),
             out: leaves,
@@ -429,7 +568,6 @@ pub fn ports(m: &Mission, b: &Board) -> Vec<Port> {
                 add(c, "in", false);
                 add(c, "pass", true);
                 add(c, "fail", true);
-                add(c, "judge", true);
             }
             Kind::End => add(c, "in", false),
             Kind::Limit => {}
@@ -439,15 +577,12 @@ pub fn ports(m: &Mission, b: &Board) -> Vec<Port> {
 }
 
 /// The port a drop at `at` lands on: the nearest within reach that takes
-/// a wire from `from` (an input for an output; the judge port takes
-/// either way), never on the card the wire leaves.
+/// a wire from `from`, never on the card the wire leaves.
 pub fn drop_target<'a>(ports: &'a [Port], from: &str, at: P) -> Option<&'a Port> {
     let node = from.split(':').next().unwrap_or("");
     ports
         .iter()
-        .filter(|p| {
-            (!p.out || p.endpoint.ends_with(":judge")) && p.endpoint.split(':').next() != Some(node)
-        })
+        .filter(|p| !p.out && p.endpoint.split(':').next() != Some(node))
         .map(|p| (p, (p.at.0 - at.0).hypot(p.at.1 - at.1)))
         .filter(|(_, d)| *d <= PORT_REACH)
         .min_by(|a, b| a.1.total_cmp(&b.1))
@@ -456,12 +591,11 @@ pub fn drop_target<'a>(ports: &'a [Port], from: &str, at: P) -> Option<&'a Port>
 
 /// The board for a mission at these places; a card the layout misses is
 /// placed where the run-order arrangement puts it.
-/// `running` gives step cards room for their run chips.
+/// `running` gives step cards room for their run state.
 pub fn board(m: &Mission, flow: &Flow, layout: &[LayoutNode], running: bool) -> Board {
     let fallback = arranged(m, flow);
     let mut at: HashMap<&str, P> = fallback
         .iter()
-        .filter(|p| !m.limits.iter().any(|l| l.id == p.id))
         .map(|p| (p.id.as_str(), (p.x as f32, p.y as f32)))
         .collect();
     for p in layout {
@@ -476,7 +610,7 @@ pub fn board(m: &Mission, flow: &Flow, layout: &[LayoutNode], running: bool) -> 
         .chain(m.ends.iter().map(|e| &e.id));
     let mut cards: Vec<Card> = ids
         .filter_map(|id| {
-            let (kind, w, h) = size(m, id, running)?;
+            let (kind, w, h) = size(m, flow, id, running)?;
             let (x, y) = at.get(id.as_str()).copied().unwrap_or((MARGIN, MARGIN));
             Some(Card {
                 id: id.clone(),
@@ -488,79 +622,70 @@ pub fn board(m: &Mission, flow: &Flow, layout: &[LayoutNode], running: bool) -> 
             })
         })
         .collect();
-    // A Limit card not yet placed sits under the card it caps, after any
-    // other limit there.
-    for l in &m.limits {
-        let under = cards.iter().find(|c| c.id == l.target).map(|c| {
-            let below = c.y + c.h + LIMIT_GAP;
-            let taken = cards
-                .iter()
-                .filter(|o| o.kind == Kind::Limit && o.x == c.x && o.y >= below)
-                .count() as f32;
-            (c.x, below + taken * (LIMIT_H + GAP_Y / 2.))
-        });
-        let (x, y) = at
-            .get(l.id.as_str())
-            .copied()
-            .or(under)
-            .unwrap_or((MARGIN, MARGIN));
-        cards.push(Card {
-            id: l.id.clone(),
-            kind: Kind::Limit,
-            x,
-            y,
-            w: LIMIT_W,
-            h: LIMIT_H,
-        });
+    // An exit hangs on its step wherever the step stands.
+    for g in &m.gates {
+        let Some(step) = exit_of(m, flow, &g.id) else {
+            continue;
+        };
+        let Some((x, y, w)) = cards
+            .iter()
+            .find(|c| c.id == step)
+            .map(|c| (c.x, c.y + c.h, c.w))
+        else {
+            continue;
+        };
+        if let Some(gate) = cards.iter_mut().find(|c| c.id == g.id) {
+            (gate.x, gate.y, gate.w) = (x, y, w);
+        }
     }
     let card = |id: &str| cards.iter().find(|c| c.id == id);
     let number = |id: &str| flow.numbers.get(id).copied();
     let mut wires = vec![];
     let mut loops = vec![];
+    let mut under = vec![];
     for c in &m.connections {
         let (from_node, from_port) = port_of(&c.from);
         let (to_node, to_port) = port_of(&c.to);
         let (Some(a), Some(b)) = (card(from_node), card(to_node)) else {
             continue;
         };
-        // A judge's verdict returns to the gate's judge port from below.
-        let returning = to_port == "judge";
-        let route = match (from_port, returning) {
-            ("pass" | "fail" | "judge", _) => from_port.to_string(),
-            (_, true) => "judge".into(),
+        if hidden(m, flow, from_node, to_node) {
+            continue;
+        }
+        let route = match from_port {
+            "pass" | "fail" => from_port.to_string(),
             _ => String::new(),
         };
         let from = port_at(m, a, from_port, true);
-        let to = if returning {
-            (b.x + b.w / 2., b.y + b.h)
-        } else {
-            port_at(m, b, to_port, false)
-        };
+        let to = port_at(m, b, to_port, false);
         // Back is told by the run's order, not by where the cards stand:
         // a chain wrapped onto a second row still reads forward.
-        let back = route != "judge"
-            && matches!((number(from_node), number(to_node)), (Some(a), Some(b)) if b <= a);
+        let back = matches!((number(from_node), number(to_node)), (Some(a), Some(b)) if b <= a)
+            || (from_node == to_node);
         let others: Vec<&Card> = cards
             .iter()
             .filter(|o| o.id != a.id && o.id != b.id)
             .collect();
-        let points = if from_port == "judge" {
-            // The question goes down from the gate's foot to just over the
-            // judge, and in at its left; with the verdict's way back, it
-            // brackets the foot.
-            let (x, y) = (b.x - JUDGE_SIDE, b.y - JUDGE_DROP);
-            vec![from, (from.0, y), (x, y), (x, to.1), to]
-        } else if returning {
-            // The verdict leaves the judge's right, rises to just over it
-            // and comes in at the foot.
-            let (x, y) = (a.x + a.w + JUDGE_SIDE, a.y - JUDGE_DROP);
-            vec![from, (x, from.1), (x, y), (to.0, y), to]
+        let all: Vec<&Card> = cards.iter().collect();
+        let points = if from_port == "fail" && back {
+            under.push(wires.len());
+            vec![from, to]
+        } else if from_port == "fail" {
+            // Down from the foot, then on into what it fails to.
+            let corner = (from.0, to.1);
+            if to.1 > from.1 + STUB && to.0 > from.0 && clear(&[from, corner, to], &others) {
+                vec![from, corner, to]
+            } else {
+                let drop = (from.0, from.1 + STUB);
+                let mut rest = route_wire(drop, to, b.y - LANE_CLEARANCE, &others);
+                rest[0] = from;
+                rest
+            }
         } else if back {
             loops.push(wires.len());
             vec![from, to]
         } else {
             let points = route_wire(from, to, b.y - LANE_CLEARANCE, &others);
-            let all: Vec<&Card> = cards.iter().collect();
             if clear(&points[1..points.len() - 1], &all) {
                 points
             } else {
@@ -577,33 +702,42 @@ pub fn board(m: &Mission, flow: &Flow, layout: &[LayoutNode], running: bool) -> 
             to_node: to_node.to_string(),
         });
     }
+    // A loop that finds no clear way under goes over, as other loops do.
+    loops.extend(route_under(&mut wires, &under, &cards));
     route_loops(&mut wires, &loops, &cards);
-    for l in &m.limits {
-        let (Some(a), Some(b)) = (card(&l.id), card(&l.target)) else {
-            continue;
-        };
-        // From the card's top edge to the nearest edge of what it caps,
-        // straight up where the card stands under it.
-        let below = b.y + b.h <= a.y;
-        let middle = a.x + a.w / 2.;
-        let x = middle.clamp(b.x + CORNER, b.x + b.w - CORNER);
-        let straight = (a.x..=a.x + a.w).contains(&x);
-        let from = (
-            if straight { x } else { middle },
-            if below { a.y } else { a.y + a.h },
-        );
-        let to = (x, if below { b.y + b.h } else { b.y });
-        wires.push(Wire {
-            id: l.id.clone(),
-            points: vec![from, to],
-            route: "limit".into(),
-            from_node: l.id.clone(),
-            to_node: l.target.clone(),
-            back: false,
-            label: None,
-        });
-    }
     Board { cards, wires }
+}
+
+/// A gate's fail back to a step it met already: down from the gate's
+/// foot, back along a lane under the cards between, and up into the step
+/// from its left. Its words go along that lane. The loops it finds no
+/// clear way for are returned.
+fn route_under(wires: &mut [Wire], loops: &[usize], cards: &[Card]) -> Vec<usize> {
+    let mut stuck = vec![];
+    let mut taken = 0.;
+    for &i in loops {
+        let (from, to) = (wires[i].from(), wires[i].to());
+        let back = to.0 - STUB - taken;
+        let (left, right) = (back.min(from.0), back.max(from.0));
+        let lane = cards
+            .iter()
+            .filter(|c| c.x < right + SPAN_PAD && c.x + c.w > left - SPAN_PAD)
+            .filter(|c| c.y < from.1 && c.y + c.h > to.1.min(from.1) - 1.)
+            .map(|c| c.y + c.h)
+            .fold(from.1, f32::max)
+            + LANE_CLEARANCE
+            + taken;
+        let points = vec![from, (from.0, lane), (back, lane), (back, to.1), to];
+        let all: Vec<&Card> = cards.iter().collect();
+        if back > from.0 || !clear(&points[1..points.len() - 1], &all) {
+            stuck.push(i);
+            continue;
+        }
+        wires[i].label = Some(((from.0 + back) / 2., lane));
+        wires[i].points = points;
+        taken += CHANNEL_GAP;
+    }
+    stuck
 }
 
 /// Whether the segment a to b crosses `c` grown by `margin` (Liang-Barsky).
@@ -750,7 +884,15 @@ fn route_loops(wires: &mut [Wire], loops: &[usize], cards: &[Card]) {
         let (Some(a), Some(b)) = (card(&wires[i].from_node), card(&wires[i].to_node)) else {
             continue;
         };
-        let (out, back) = (from.0 + STUB, to.0 - STUB);
+        // A fail leaves its gate's foot: down a stub, then out past the
+        // gate's right before it rises.
+        let drops = wires[i].route == "fail";
+        let out = if drops {
+            (a.x + a.w).max(from.0) + STUB
+        } else {
+            from.0 + STUB
+        };
+        let back = to.0 - STUB;
         let (left, right) = (out.min(back), out.max(back));
         let spans = |c: &&Card| c.x < right + SPAN_PAD && c.x + c.w > left - SPAN_PAD;
         // Over the cards it spans in its own row; a loop to a row above
@@ -776,7 +918,20 @@ fn route_loops(wires: &mut [Wire], loops: &[usize], cards: &[Card]) {
                 back - channel * CHANNEL_GAP,
                 base - channel * CHANNEL_GAP,
             );
-            vec![from, (out, from.1), (out, y), (back, y), (back, to.1), to]
+            if drops {
+                let foot = from.1 + STUB + channel * CHANNEL_GAP;
+                vec![
+                    from,
+                    (from.0, foot),
+                    (out, foot),
+                    (out, y),
+                    (back, y),
+                    (back, to.1),
+                    to,
+                ]
+            } else {
+                vec![from, (out, from.1), (out, y), (back, y), (back, to.1), to]
+            }
         };
         let legs = |points: &[P]| -> Vec<(P, P)> {
             points[1..points.len() - 1]
@@ -946,15 +1101,14 @@ fn shares((a1, a2): (P, P), (b1, b2): (P, P)) -> bool {
     false
 }
 
-/// How big a card of this kind is when it is new: one port each way, one
-/// slot, no brief.
+/// How big a card of this kind is when it is new.
 pub fn new_size(kind: Kind) -> (f32, f32) {
     match kind {
-        Kind::Input => (INPUT_W, INPUT_HEAD + INPUT_GOAL + INPUT_LINE + INPUT_FOOT),
-        Kind::Formation => (STEP_W, 2. * IO_ROW + STEP_HEAD_EMPTY + body_h("solo", 1)),
-        Kind::Gate => (GATE_W, GATE_H),
+        Kind::Input => (START, START),
+        Kind::Formation => (STEP_W, STEP_H),
+        Kind::Gate => gate_size(),
         Kind::End => (END_W, END_H),
-        Kind::Limit => (LIMIT_W, LIMIT_H),
+        Kind::Limit => (0., 0.),
     }
 }
 
@@ -1035,34 +1189,32 @@ mod tests {
         assert!(x("fmn_plan") < x("fmn_beads"));
         assert!(x("fmn_execution") < x("fmn_final_review"));
         assert!(x("fmn_final_review") < x("end_delivered"));
-        // The judge sits under its gate.
-        let gate = b
-            .cards
+        // The judge is drawn in its gate, not as a card, and its wires
+        // with it.
+        assert!(!b.cards.iter().any(|c| c.id == "fmn_beads_reviewer"));
+        let drawn = m
+            .connections
             .iter()
-            .find(|c| c.id == "gate_beads_review")
-            .unwrap();
-        let judge = b
-            .cards
-            .iter()
-            .find(|c| c.id == "fmn_beads_reviewer")
-            .unwrap();
-        assert_eq!(gate.x, judge.x);
-        assert!(judge.y > gate.y + gate.h);
-        assert_eq!(b.wires.len(), m.connections.len());
+            .filter(|c| !c.from.contains("reviewer") && !c.to.contains("reviewer"))
+            .filter(|c| !c.from.ends_with(":judge") && !c.to.ends_with(":judge"))
+            .count();
+        assert_eq!(b.wires.len(), drawn);
         let fail = b.wires.iter().find(|w| w.route == "fail").unwrap();
         assert_eq!(fail.to_node, "fmn_beads");
-        // Sent back, it loops just over the cards it spans, not over the
-        // whole board, and dashed and named where it returns.
+        // Sent back, it drops from the gate and runs back under the cards
+        // it spans, just under them, dashed and saying how often along
+        // its lane.
         assert!(fail.back && fail.label.is_some());
-        let lane = fail.points.iter().map(|p| p.1).fold(f32::MAX, f32::min);
+        let lane = fail.points.iter().map(|p| p.1).fold(f32::MIN, f32::max);
         let (left, right) = (fail.to().0, fail.from().0);
         let spanned: Vec<&Card> = b
             .cards
             .iter()
             .filter(|c| c.x < right && c.x + c.w > left)
             .collect();
-        assert!(spanned.iter().all(|c| lane < c.y), "{lane}");
-        assert!(lane > spanned.iter().map(|c| c.y).fold(f32::MAX, f32::min) - 60.);
+        let foot = spanned.iter().map(|c| c.y + c.h).fold(f32::MIN, f32::max);
+        assert!(lane > foot && lane < foot + 2. * LANE_CLEARANCE, "{lane}");
+        assert_eq!(fail.label.unwrap().1, lane);
         let pass = b.wires.iter().find(|w| w.route == "pass").unwrap();
         assert!(!pass.back && pass.label.is_none());
         assert_eq!(crossing(&b), Vec::<String>::new());
@@ -1196,21 +1348,64 @@ mod tests {
         // and the board runs down instead.
         let (_, b) = rows((500., 300.), 0.6);
         assert!(extent(&b).2 * 0.6 <= 500.);
-        // A card with notes keeps room for them under it: its judge stands
-        // that much lower.
-        let at = |layout: &[LayoutNode], id: &str| layout.iter().find(|p| p.id == id).unwrap().y;
-        let plain = shaped(&m, &flow, (4000., 900.), 0., &|_| 0.);
-        let noted = shaped(&m, &flow, (4000., 900.), 0., &|id| {
-            if id == "gate_beads_review" {
-                NOTE_ROOM
-            } else {
-                0.
-            }
+        // A card keeps the room it asks for under it: a step beside it in
+        // run order stands that much lower.
+        let mut m = delivery();
+        let mut twin = m.formations[0].clone();
+        twin.id = "fmn_twin".into();
+        let into = format!("{}:{}", twin.id, twin.inputs[0].id);
+        let from = m
+            .connections
+            .iter()
+            .find(|c| c.to.starts_with(&format!("{}:", m.formations[0].id)))
+            .unwrap()
+            .from
+            .clone();
+        m.formations.push(twin);
+        m.connections.push(ahjo_missions_contract::Connection {
+            id: "edge_twin".into(),
+            from,
+            to: into,
         });
-        assert_eq!(
-            at(&noted, "fmn_beads_reviewer") - at(&plain, "fmn_beads_reviewer"),
-            NOTE_ROOM as i64
-        );
+        let flow = build(&m);
+        let at = |layout: &[LayoutNode], id: &str| layout.iter().find(|p| p.id == id).unwrap().y;
+        let upper = m.formations[0].id.clone();
+        let plain = shaped(&m, &flow, (4000., 900.), 0., &|_| 0.);
+        let roomy = shaped(&m, &flow, (4000., 900.), 0., &|id| {
+            if id == upper { 50. } else { 0. }
+        });
+        assert!(at(&plain, "fmn_twin") > at(&plain, &upper));
+        assert_eq!(at(&roomy, "fmn_twin") - at(&plain, "fmn_twin"), 50);
+    }
+
+    #[test]
+    fn a_loop_is_never_wrapped_between_rows_when_a_whole_one_reads() {
+        let m = delivery();
+        let flow = build(&m);
+        for width in [700., 900., 1100., 1300., 1600.] {
+            let layout = shaped(&m, &flow, (width, 2000.), 0.8, &|_| 0.);
+            let y = |id: &str| layout.iter().find(|p| p.id == id).unwrap().y;
+            let (step, gate) = (y("fmn_beads"), y("gate_beads_review"));
+            assert!(
+                (step - gate).abs() < ROW_GAP as i64,
+                "at {width} the loop's ends are on two rows: {step} and {gate}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_card_wired_to_nothing_leaves_the_others_where_they_were() {
+        let mut m = delivery();
+        let before = shaped(&m, &build(&m), (4000., 900.), 0., &|_| 0.);
+        // A gate just added: its way in sits lower than a step's.
+        let mut gate = m.gates[0].clone();
+        gate.id = "gate_new".into();
+        m.gates.push(gate);
+        let after = shaped(&m, &build(&m), (4000., 900.), 0., &|_| 0.);
+        for p in &before {
+            let now = after.iter().find(|q| q.id == p.id).unwrap();
+            assert_eq!((now.x, now.y), (p.x, p.y), "{} moved", p.id);
+        }
     }
 
     #[test]
@@ -1245,12 +1440,12 @@ mod tests {
             );
         }
         // A gate sending work back still loops back, wherever it stands,
-        // over the gate's row and clear of the card it returns to.
+        // under the gate and clear of the card it returns to.
         let fail = b.wires.iter().find(|w| w.route == "fail").unwrap();
         assert!(fail.back);
         let (gate, to) = (card(&fail.from_node), card(&fail.to_node));
-        let lane = fail.points[2].1;
-        assert!(lane < gate.y && (lane < to.y || lane > to.y + to.h));
+        let lane = fail.points[1].1;
+        assert!(lane > gate.y + gate.h && (lane < to.y || lane > to.y + to.h));
         assert_eq!(crossing(&b), Vec::<String>::new());
     }
 
@@ -1260,8 +1455,14 @@ mod tests {
         assert!(mission.formations.len() >= 5);
         let board = board(&mission, &build(&mission), &[], false);
         let ports = ports(&mission, &board);
-        assert_eq!(board.wires.len(), mission.connections.len());
-        for connection in &mission.connections {
+        // All but a judge's, which is drawn in its gate.
+        let drawn: Vec<_> = mission
+            .connections
+            .iter()
+            .filter(|c| !c.from.ends_with(":judge") && !c.to.ends_with(":judge"))
+            .collect();
+        assert_eq!(board.wires.len(), drawn.len());
+        for connection in drawn {
             let wire = board
                 .wires
                 .iter()
@@ -1322,7 +1523,7 @@ mod tests {
     }
 
     #[test]
-    fn empty_briefs_leave_no_band_and_outputs_follow_the_card() {
+    fn a_step_is_its_name_and_who_works_it_whatever_its_brief() {
         let mut m = delivery();
         let id = m.formations[0].id.clone();
         m.formations[0].brief = Some(ahjo_missions_contract::Brief {
@@ -1332,26 +1533,13 @@ mod tests {
         let full = board(&m, &build(&m), &[], false);
         m.formations[0].brief.as_mut().unwrap().goal = " \n ".into();
         let compact = board(&m, &build(&m), &[], false);
+        let running = board(&m, &build(&m), &[], true);
         let card = |b: &Board| b.cards.iter().find(|c| c.id == id).unwrap().clone();
-        assert_eq!(
-            card(&full).h - card(&compact).h,
-            STEP_HEAD - STEP_HEAD_EMPTY
-        );
-        let full_ports = ports(&m, &full);
-        let compact_ports = ports(&m, &compact);
-        let output = compact_ports
-            .iter()
-            .find(|p| p.out && p.endpoint.starts_with(&format!("{id}:")))
-            .unwrap();
-        let old = full_ports
-            .iter()
-            .find(|p| p.endpoint == output.endpoint)
-            .unwrap();
-        assert_eq!(old.at.1 - output.at.1, STEP_HEAD - STEP_HEAD_EMPTY);
-        assert_eq!(
-            step_head(&m.formations[0], true),
-            STEP_HEAD_EMPTY + RUN_CHIPS
-        );
+        // A step is its name and who works it: its brief is read where it
+        // is edited, and only a run adds a row, for its state.
+        assert_eq!(card(&full).h, card(&compact).h);
+        assert_eq!(card(&running).h - card(&compact).h, RUN_ROW);
+        assert_eq!(ports(&m, &full), ports(&m, &compact));
     }
 
     #[test]
@@ -1365,8 +1553,8 @@ mod tests {
             .unwrap();
         assert!(!into_beads.out && into_beads.wired);
         let beads = b.cards.iter().find(|c| c.id == "fmn_beads").unwrap();
-        // On the card's left edge, on its IN row.
-        assert_eq!(into_beads.at, (beads.x, beads.y + IO_ROW / 2.));
+        // On the card's left edge, level with its name and who works it.
+        assert_eq!(into_beads.at, (beads.x, beads.y + STEP_H / 2.));
         let near = (into_beads.at.0 + 5., into_beads.at.1 - 5.);
         let hit = drop_target(&ports, "fmn_plan:port_plan_out", near).unwrap();
         assert_eq!(hit.endpoint, "fmn_beads:port_beads_in");
@@ -1377,19 +1565,11 @@ mod tests {
             .find(|p| p.endpoint == "fmn_plan:port_plan_out")
             .unwrap();
         assert!(drop_target(&ports, "mis_delivery:out", out.at).is_none());
-        // A gate's judge port takes the judge's verdict.
-        let judge = ports
-            .iter()
-            .find(|p| p.endpoint == "gate_beads_review:judge")
-            .unwrap();
-        let hit = drop_target(
-            &ports,
-            "fmn_beads_reviewer:port_beads_reviewer_out",
-            judge.at,
-        );
-        assert_eq!(
-            hit.map(|p| p.endpoint.as_str()),
-            Some("gate_beads_review:judge")
+        // A gate's judge is drawn in it: no port to wire one by hand.
+        assert!(
+            !ports
+                .iter()
+                .any(|p| p.endpoint == "gate_beads_review:judge")
         );
     }
 }

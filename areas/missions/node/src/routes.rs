@@ -25,6 +25,7 @@ pub fn routes(m: Missions) -> Router {
         .route("/api/missions/{id}", get(read).patch(edit).delete(delete))
         .route("/api/missions/{id}/validation", get(validation))
         .route("/api/missions/{id}/notes", get(notes).patch(edit_notes))
+        .route("/api/missions/{id}/history", get(history))
         .route("/api/missions/{id}/layout", get(layout).patch(edit_layout))
         .with_state(m)
 }
@@ -296,6 +297,12 @@ fn notes_value(notes: ahjo_missions_contract::Notes, etag: &str) -> Value {
         etag.into(),
     ))
     .expect("notes serialize")
+}
+async fn history(State(m): State<Missions>, Path(id): Path<String>) -> ResultResponse {
+    let revisions = m.store.mission_history(&id)?;
+    Ok(ok(json!(ahjo_missions_contract::HistoryResponse {
+        revisions
+    })))
 }
 async fn notes(State(m): State<Missions>, Path(id): Path<String>) -> ResultResponse {
     let e = m.store.notes_edit(&id)?;
