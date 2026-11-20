@@ -34,7 +34,8 @@ pub fn decode_request(body: &Value) -> Result<EditRequest, String> {
             .iter()
             .enumerate()
             .map(|(index, change)| {
-                decode(change).map_err(|error| format!("change at index {index}: {error}"))
+                decode_operation(change)
+                    .map_err(|error| format!("change at index {index}: {error}"))
             })
             .collect::<Result<_, _>>()?;
         return Ok(EditRequest {
@@ -44,12 +45,29 @@ pub fn decode_request(body: &Value) -> Result<EditRequest, String> {
         });
     }
 
-    #[derive(Deserialize)]
-    #[serde(rename_all = "camelCase")]
-    struct Metadata {
-        expected_rev: Option<i64>,
-        updated_by: Option<String>,
-    }
+    let (change, metadata) = decode_single(map)?;
+    Ok(EditRequest {
+        rev: metadata.expected_rev,
+        updated_by: metadata.updated_by.unwrap_or_default(),
+        changes: Changes::Single(Box::new(change)),
+    })
+}
+
+/// Deserialize one operation, with or without its single-edit metadata.
+pub fn decode(body: &Value) -> Result<MissionChange, String> {
+    let map = body.as_object().ok_or("expected an object")?;
+    let (change, _) = decode_single(map)?;
+    Ok(change)
+}
+
+#[derive(Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct Metadata {
+    expected_rev: Option<i64>,
+    updated_by: Option<String>,
+}
+
+fn decode_single(map: &Map<String, Value>) -> Result<(MissionChange, Metadata), String> {
     fn metadata(map: &mut Map<String, Value>) -> Result<Metadata, String> {
         let metadata = ["expectedRev", "updatedBy"]
             .into_iter()
@@ -67,23 +85,22 @@ pub fn decode_request(body: &Value) -> Result<EditRequest, String> {
             .and_then(Value::as_object_mut)
             .map(metadata)
             .transpose()?
+            .unwrap_or_default()
     } else {
-        None
+        Metadata::default()
     };
-    let updated_by = outer.updated_by.filter(|actor| !actor.is_empty());
-    Ok(EditRequest {
-        rev: outer
-            .expected_rev
-            .or_else(|| inner.as_ref().and_then(|inner| inner.expected_rev)),
-        updated_by: updated_by
-            .or_else(|| inner.and_then(|inner| inner.updated_by))
-            .unwrap_or_default(),
-        changes: Changes::Single(Box::new(decode(&Value::Object(change))?)),
-    })
+    let metadata = Metadata {
+        expected_rev: outer.expected_rev.or(inner.expected_rev),
+        updated_by: outer
+            .updated_by
+            .filter(|actor| !actor.is_empty())
+            .or(inner.updated_by),
+    };
+    Ok((decode_operation(&Value::Object(change))?, metadata))
 }
 
-/// Deserialize one operation, explaining an unknown field with the same schema as help.
-pub fn decode(body: &Value) -> Result<MissionChange, String> {
+/// Explain an unknown field with the same schema as help.
+fn decode_operation(body: &Value) -> Result<MissionChange, String> {
     serde_json::from_value(body.clone()).map_err(|error| {
         let Some(map) = body.as_object() else {
             return "expected an object".into();
@@ -248,6 +265,24 @@ impl<'de> serde::Deserialize<'de> for UniquePatch {
 mod tests {
     use super::*;
     use serde_json::json;
+    #[test]
+    fn a_single_edit_decodes_with_metadata_at_either_level() {
+        for body in [
+            json!({"expectedRev":7,"updatedBy":"human:operator","createGate":{"title":"Review"}}),
+            json!({"createGate":{"expectedRev":7,"updatedBy":"human:operator","title":"Review"}}),
+        ] {
+            assert!(
+                matches!(decode(&body).unwrap(), MissionChange::CreateGate { title, .. } if title == "Review")
+            );
+            let request = decode_request(&body).unwrap();
+            assert_eq!(request.rev, Some(7));
+            assert_eq!(request.updated_by, "human:operator");
+            assert!(
+                matches!(request.changes, Changes::Single(change) if matches!(change.as_ref(), MissionChange::CreateGate { title, .. } if title == "Review"))
+            );
+        }
+    }
+
     #[test]
     fn every_operation_described_is_one_decode_takes() {
         for operation in operations() {
