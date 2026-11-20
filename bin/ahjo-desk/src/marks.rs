@@ -95,6 +95,28 @@ pub fn drawn(
     })
 }
 
+/// A note on the whole of what is shown (a picture, a clip's frame, a
+/// page) rather than on a point of it: in the store's terms a region over
+/// all of it, so the web desk and the agents read it unchanged.
+pub fn whole(id: String, media: &str, at: Option<(f64, u64)>) -> Mark {
+    Mark {
+        id,
+        kind: "region".into(),
+        media: Some(media.into()),
+        points: WHOLE.to_vec(),
+        time: at.map(|a| (a.0 * 1000.).round() / 1000.),
+        frame: at.map(|a| a.1),
+        ..Default::default()
+    }
+}
+
+const WHOLE: [[f64; 2]; 2] = [[0., 0.], [1., 1.]];
+
+/// Whether a mark is a note on the whole of its media.
+pub fn is_whole(m: &Mark) -> bool {
+    m.kind == "region" && m.points == WHOLE
+}
+
 /// A page's element he clicked: where on the page, and which element.
 pub fn on_page(id: String, media: &str, selector: &str, quote: &str, x: f64, y: f64) -> Mark {
     Mark {
@@ -145,6 +167,7 @@ pub fn what(m: &Mark, doc: Option<&str>) -> String {
         return format!("“{}”", clip(&quote.unwrap_or_default(), 60));
     }
     let mut w = match m.kind.as_str() {
+        _ if is_whole(m) => "Note",
         "pin" => "Pin",
         "box" | "region" => "Box",
         "arrow" => "Arrow",
@@ -279,6 +302,21 @@ mod tests {
         assert_eq!((pen.kind.as_str(), pen.points.len()), ("pen", 3));
         assert!(shows_on(&b, "m3", Some(33)) && !shows_on(&b, "m3", Some(34)));
         assert!(shows_on(&pin, "m1", None) && !shows_on(&pin, "m2", None));
+    }
+
+    #[test]
+    fn a_note_covers_the_whole_and_reads_as_a_note() {
+        let n = whole("d1".into(), "m2", Some((2.00049, 60)));
+        // As the store takes a media mark: a kind it knows and points on it.
+        assert_eq!(n.kind, "region");
+        assert_eq!(n.points, vec![[0., 0.], [1., 1.]]);
+        assert_eq!((n.time, n.frame), (Some(2.0), Some(60)));
+        assert!(is_whole(&n) && shows_on(&n, "m2", Some(60)));
+        assert_eq!(what(&n, None), "Note at 0:02.0");
+        // A box he drew over part of it is not a note.
+        let b = drawn("d2".into(), Tool::Box, "m2", &[[0., 0.], [0.5, 1.]], None).unwrap();
+        assert!(!is_whole(&b));
+        assert_eq!(what(&b, None), "Box");
     }
 
     #[test]
