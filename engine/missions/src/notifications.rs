@@ -1,5 +1,6 @@
 //! Needs-you messages projected from the durable run ledger.
 use crate::{Coordinator, Error, RunEvent};
+use ahjo_mission_model::{RunProjection, WaitingGate};
 use serde_json::{Value, json};
 
 fn field<'a>(event: &'a RunEvent, name: &str) -> &'a str {
@@ -36,30 +37,12 @@ impl Coordinator {
                         .and_then(Value::as_str)
                         .unwrap_or("");
                     let input = &input[..input.floor_char_boundary(input.len().min(64 * 1024))];
-                    let (severity, commands) = if gate.pick.is_some() {
-                        let attempt = gate
-                            .pick
-                            .as_ref()
-                            .and_then(|p| p["candidates"].as_array())
-                            .and_then(|a| a.first())
-                            .and_then(Value::as_i64)
-                            .unwrap_or(1);
-                        (
-                            "pick",
-                            format!(
-                                "ahjo gate pick {id} {} --requested-seq {} --attempt {attempt}",
-                                gate.gate_id, gate.requested_seq
-                            ),
-                        )
+                    let severity = if gate.pick.is_some() {
+                        "pick"
                     } else {
-                        (
-                            "verdict",
-                            format!(
-                                "ahjo gate approve {id} {} --requested-seq {}\nahjo gate reject {id} {} --requested-seq {}",
-                                gate.gate_id, gate.requested_seq, gate.gate_id, gate.requested_seq
-                            ),
-                        )
+                        "verdict"
                     };
+                    let commands = gate_commands(id, gate).join("\n");
                     let subject = format!("Ahjo needs your answer: {title} ({})", mission.title);
                     let body = format!(
                         "{} is waiting at {title}.\n\nCriterion: {criterion}\n\nInput:\n{input}\n\n{commands}\n\nRun: {id}\nMission: {}\n",
@@ -117,16 +100,10 @@ impl Coordinator {
             {
                 let reason = field(event, "reason");
                 let subject = format!("Ahjo run blocked: {}", mission.title);
-                let commands = if !run.resume_allowed {
-                    "Inspect the run and start a new one.".to_owned()
+                let commands = if run.resume_allowed {
+                    resume_commands(&run).join("\n")
                 } else {
-                    match run.resume_policy.as_str() {
-                        "grant" => format!("ahjo run resume {id} --grant"),
-                        "grant_or_pick" => format!(
-                            "ahjo run resume {id} --grant\nahjo run resume {id} --pick-best"
-                        ),
-                        _ => format!("ahjo run resume {id}"),
-                    }
+                    "Inspect the run and start a new one.".to_owned()
                 };
                 let body = format!("Run {id} is blocked: {reason}\n\n{commands}\n");
                 asks.push(message(
@@ -187,4 +164,61 @@ fn message(
     body: String,
 ) -> Value {
     json!({"runId":run.run_id,"missionSlug":run.mission_slug,"missionTitle":mission,"seq":event.seq,"kind":kind,"runStatus":run.status,"nodeId":event.node_id,"gateId":event.gate_id,"gateTitle":gate_title,"ask":ask,"severity":severity,"blocks":blocks,"text":subject,"subject":subject,"body":body})
+}
+
+/// The commands that answer a pending gate at its current sequence.
+pub fn gate_commands(run: &str, gate: &WaitingGate) -> Vec<String> {
+    let run = shell_word(run);
+    let gate_arg = shell_word(&gate.gate_id);
+    let seq = gate.requested_seq;
+    if let Some(pick) = &gate.pick {
+        pick["candidates"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(|candidate| {
+                candidate
+                    .as_i64()
+                    .or_else(|| candidate["attempt"].as_i64())
+                    .map(|attempt| {
+                        format!("ahjo run pick {run} {gate_arg} --seq {seq} --attempt {attempt}")
+                    })
+            })
+            .collect()
+    } else {
+        ["approve", "reject"]
+            .map(|verb| format!("ahjo run {verb} {run} {gate_arg} --seq {seq}"))
+            .to_vec()
+    }
+}
+
+/// The supported ways to resume a blocked run.
+pub fn resume_commands(run: &RunProjection) -> Vec<String> {
+    if !run.resume_allowed {
+        return Vec::new();
+    }
+    let id = shell_word(&run.run_id);
+    match (run.resume_policy.as_str(), run.block_code.as_str()) {
+        ("grant", _) => vec![format!("ahjo run resume {id} --grant --reason '<reason>'")],
+        ("grant_or_pick", _) => vec![
+            format!("ahjo run resume {id} --grant --reason '<reason>'"),
+            format!("ahjo run resume {id} --pick-best --reason '<reason>'"),
+        ],
+        (_, "seat_gone") => vec![format!(
+            "ahjo run resume {id} --mode redispatch --reason '<reason>'"
+        )],
+        _ => vec![format!("ahjo run resume {id}")],
+    }
+}
+
+pub fn shell_word(value: &str) -> String {
+    if value
+        .bytes()
+        .all(|b| b.is_ascii_alphanumeric() || b"_-./".contains(&b))
+        && !value.is_empty()
+    {
+        value.to_owned()
+    } else {
+        format!("'{}'", value.replace('\'', "'\\''"))
+    }
 }

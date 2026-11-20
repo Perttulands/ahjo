@@ -86,24 +86,27 @@ async fn seats(State(c): State<Coordinator>, Path(id): Path<String>) -> ResultRe
     let seats = off(c, move |c| c.seats(&id))
         .await??
         .into_iter()
-        .map(|seat| contract::AgentSeat {
-            dispatch_id: seat.dispatch_id,
-            slot_id: seat.slot_id,
-            node: seat.node,
-            session: seat.session,
-            pane: seat.pane,
-            session_name: seat.session_name,
-            outcome: seat.outcome,
-            available: seat.available,
-            waiting: seat.waiting.map(|wait| contract::SeatWait {
-                state: wait.state,
-                detail: wait.detail,
-                since: wait.since,
-                seq: wait.seq,
-            }),
-        })
+        .map(seat_wire)
         .collect::<Vec<_>>();
     Ok(Json(seats).into_response())
+}
+pub(super) fn seat_wire(seat: ahjo_mission_engine::AgentSeat) -> contract::AgentSeat {
+    contract::AgentSeat {
+        dispatch_id: seat.dispatch_id,
+        slot_id: seat.slot_id,
+        node: seat.node,
+        session: seat.session,
+        pane: seat.pane,
+        session_name: seat.session_name,
+        outcome: seat.outcome,
+        available: seat.available,
+        waiting: seat.waiting.map(|wait| contract::SeatWait {
+            state: wait.state,
+            detail: wait.detail,
+            since: wait.since,
+            seq: wait.seq,
+        }),
+    }
 }
 async fn evidence(
     State(c): State<Coordinator>,

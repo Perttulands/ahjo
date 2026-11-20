@@ -14,10 +14,6 @@ These are the commands advertised by the enabled areas. Run `ahjo <noun> <verb> 
 
 `ahjo file copy`, `ahjo file delete`, `ahjo file diff`, `ahjo file list`, `ahjo file locate`, `ahjo file mkdir`, `ahjo file move`, `ahjo file read`, `ahjo file recent`, `ahjo file resume`, `ahjo file search`, `ahjo file stat`, `ahjo file status`, `ahjo file transfer`, `ahjo file write`.
 
-## gate
-
-`ahjo gate approve`, `ahjo gate pick`, `ahjo gate reject`, `ahjo gate request`.
-
 ## handoff
 
 `ahjo handoff reply`, `ahjo handoff start`, `ahjo handoff status`.
@@ -48,7 +44,7 @@ These are the commands advertised by the enabled areas. Run `ahjo <noun> <verb> 
 
 ## run
 
-`ahjo run abort`, `ahjo run attempts`, `ahjo run delete`, `ahjo run evidence`, `ahjo run gates`, `ahjo run land`, `ahjo run list`, `ahjo run logs`, `ahjo run resume`, `ahjo run seats`, `ahjo run status`, `ahjo run wait`.
+`ahjo run abort`, `ahjo run approve`, `ahjo run delete`, `ahjo run land`, `ahjo run list`, `ahjo run pick`, `ahjo run reject`, `ahjo run resume`, `ahjo run show`, `ahjo run wait`.
 
 ## scheduled
 

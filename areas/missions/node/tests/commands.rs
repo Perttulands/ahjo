@@ -30,21 +30,15 @@ const EXPECTED: &[&str] = &[
     "mission_arrange",
     "mission_delete",
     "run_list",
-    "run_status",
+    "run_show",
     "run_wait",
-    "run_evidence",
-    "run_attempts",
-    "run_gates",
-    "run_seats",
-    "run_logs",
-    "run_abort",
+    "run_approve",
+    "run_reject",
+    "run_pick",
     "run_resume",
+    "run_abort",
     "run_land",
     "run_delete",
-    "gate_request",
-    "gate_approve",
-    "gate_reject",
-    "gate_pick",
 ];
 
 #[tokio::test(flavor = "multi_thread")]
@@ -82,13 +76,12 @@ async fn command_list_and_coded_failures() {
             _ => json!({}),
         };
         let error = node.call(command, args).await.unwrap_err();
-        if (command.starts_with("mission_") || command.starts_with("layout_"))
-            && command != "mission_export"
-        {
-            assert_eq!(error.code, "invalid_argument", "{command}: {error}");
+        let code = if command == "mission_export" {
+            "bad_request"
         } else {
-            assert_eq!(error.code, "bad_request", "{command}: {error}");
-        }
+            "invalid_argument"
+        };
+        assert_eq!(error.code, code, "{command}: {error}");
     }
     node.stop().await;
 }
@@ -110,7 +103,7 @@ async fn mission_command_schemas_and_cli_help_match_the_document_surface() {
         .unwrap();
     let tools = answer["result"]["tools"].as_array().unwrap();
     assert_eq!(tools.len(), EXPECTED.len());
-    for name in ahjo_missions_contract::commands::NAMES {
+    for name in EXPECTED {
         let tool = tools.iter().find(|tool| tool["name"] == *name).unwrap();
         assert_eq!(tool["inputSchema"]["additionalProperties"], false, "{name}");
         assert!(tool["outputSchema"].is_object(), "{tool}");
@@ -144,6 +137,27 @@ async fn mission_command_schemas_and_cli_help_match_the_document_surface() {
             "{help}"
         );
     }
+    let index = ahjo_node_kit::cli::index(Some(&address)).await.unwrap();
+    assert!(
+        !index
+            .lines()
+            .any(|line| line.split_whitespace().next() == Some("gate")),
+        "{index}"
+    );
+    let run_verbs: Vec<_> = index
+        .lines()
+        .find_map(|line| {
+            let mut words = line.split_whitespace();
+            (words.next() == Some("run")).then(|| words.collect())
+        })
+        .unwrap();
+    assert_eq!(
+        run_verbs,
+        [
+            "list", "show", "wait", "approve", "reject", "pick", "resume", "abort", "land",
+            "delete"
+        ]
+    );
     for (noun, verb) in [
         ("mission", "new"),
         ("mission", "inspect"),
@@ -152,6 +166,9 @@ async fn mission_command_schemas_and_cli_help_match_the_document_surface() {
         ("end", "create"),
         ("limit", "create"),
         ("gate", "create"),
+        ("gate", "approve"),
+        ("gate", "request"),
+        ("run", "status"),
     ] {
         let args = [
             verb.into(),
@@ -381,10 +398,13 @@ async fn author_and_run_with_tools() {
     assert_eq!(waited["outcome"], "final");
     assert!(waited["outputs"].is_array());
     assert_eq!(
-        node.call("run_status", json!({"run":run})).await.unwrap()["runId"],
+        node.call("run_show", json!({"run":run})).await.unwrap()["state"]["run_id"],
         run
     );
-    let logs = node.call("run_logs", json!({"run":run})).await.unwrap();
+    let logs = node
+        .call("run_show", json!({"run":run,"events":true}))
+        .await
+        .unwrap();
     let step_event = logs["events"]
         .as_array()
         .unwrap()
@@ -403,7 +423,12 @@ async fn author_and_run_with_tools() {
         (&valid["valid"], &valid["summary"]),
         (&json!(true), &json!("valid"))
     );
-    assert!(node.call("run_seats", json!({"run":run})).await.unwrap()["seats"].is_array());
+    assert!(
+        node.call("run_show", json!({"run":run,"seats":true}))
+            .await
+            .unwrap()["seats"]
+            .is_array()
+    );
     // A durable, resumable run: copy the engine's actual snapshots from the
     // completed run, then record a shutdown block for a fresh run id.
     let runs = node.dir().join("missions/runs");
@@ -434,7 +459,7 @@ async fn author_and_run_with_tools() {
         .call("run_resume", json!({"run":resumed}))
         .await
         .unwrap();
-    assert_eq!(response["run"]["runId"], resumed);
+    assert_eq!(response["run"]["run_id"], resumed);
     assert!(
         ledger
             .read()
@@ -511,7 +536,7 @@ async fn gate_and_abort_commands_act_on_pending_runs() {
                 .clone();
         }
         ledger.append(request).unwrap();
-        let mut args: Vec<String> = [verb, run, "review", "--requested-seq", "3"]
+        let mut args: Vec<String> = [verb, run, "review", "--seq", "3"]
             .into_iter()
             .map(str::to_owned)
             .collect();
@@ -524,14 +549,14 @@ async fn gate_and_abort_commands_act_on_pending_runs() {
         args.extend(["--node".into(), format!("{}/", node.url()), "--json".into()]);
         let mut output = Vec::new();
         assert_eq!(
-            ahjo_node_kit::cli::run("gate", &args, &mut output)
+            ahjo_node_kit::cli::run("run", &args, &mut output)
                 .await
                 .unwrap(),
             0,
             "{args:?}"
         );
         assert_eq!(
-            serde_json::from_slice::<serde_json::Value>(&output).unwrap()["runId"],
+            serde_json::from_slice::<serde_json::Value>(&output).unwrap()["run_id"],
             run
         );
         let events = ledger.read().unwrap();
@@ -622,7 +647,7 @@ async fn a_repository_run_can_be_landed() {
         true
     );
     node.call("run_delete", json!({"run":run})).await.unwrap();
-    assert!(node.call("run_status", json!({"run":run})).await.is_err());
+    assert!(node.call("run_show", json!({"run":run})).await.is_err());
     assert!(
         node.call("run_list", json!({})).await.unwrap()["runs"]
             .as_array()

@@ -2,12 +2,13 @@
 //! attempt with what it output, the verdicts that judged it and the pick
 //! that took it.
 
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 /// One served text's cap (Archon's `EvidenceTextMaxBytes`).
 const TEXT_MAX: usize = 64 << 10;
 
-#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, JsonSchema)]
 pub struct EvidenceText {
     pub text: String,
     pub bytes: usize,
@@ -36,7 +37,7 @@ impl EvidenceText {
     }
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct RunAttempts {
     pub run_id: String,
@@ -44,7 +45,7 @@ pub struct RunAttempts {
 }
 
 /// One step and its attempts, oldest first.
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct StepAttempts {
     pub node_id: String,
@@ -56,14 +57,14 @@ pub struct StepAttempts {
     pub attempts: Vec<StepAttempt>,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, JsonSchema)]
 pub struct StepPort {
     pub id: String,
     pub label: String,
     pub kind: String,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct StepAttempt {
     pub attempt: i64,
@@ -90,7 +91,7 @@ fn is_zero(n: &u64) -> bool {
 
 /// One output port's accepted payload; `path` is a file or folder output's
 /// absolute path.
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct AttemptOutput {
     pub port_id: String,
@@ -105,7 +106,7 @@ pub struct AttemptOutput {
 /// One gate evaluation of the attempt's output and the verdict it reached,
 /// or `pending` while it waits. `superseded` marks a human request a later
 /// evaluation replaced before anyone answered it.
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct AttemptVerdict {
     pub gate_id: String,
@@ -126,7 +127,7 @@ pub struct AttemptVerdict {
     pub decided_by: String,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, JsonSchema)]
 pub struct EvidenceItem {
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub kind: String,
@@ -135,7 +136,7 @@ pub struct EvidenceItem {
 
 /// The pick that took an attempt: its gate, the verdict's seq, why and who,
 /// the attempts it chose from and what started it (`whenSpent` or `resume`).
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct AttemptPick {
     pub gate_id: String,

@@ -133,12 +133,13 @@ fn start() -> Running {
         let id = result["run_id"].as_str().unwrap().to_owned();
         let deadline = Instant::now() + Duration::from_secs(15);
         loop {
-            let state = node.call("run_status", json!({"run":id})).await.unwrap();
+            let answer = node.call("run_show", json!({"run":id})).await.unwrap();
+                let state = &answer["state"];
             if state["final"] == true || state["status"] == "blocked" { assert_eq!(state["status"], "succeeded", "{state}"); break; }
             assert!(Instant::now() < deadline);
             tokio::time::sleep(Duration::from_millis(10)).await;
         }
-        let evidence = node.call("run_evidence", json!({"run":id})).await.unwrap();
+        let evidence = node.call("run_show", json!({"run":id,"evidence":true})).await.unwrap();
         tx.send((node.url(), node.id(), id, evidence)).unwrap();
         while stopped.try_recv().is_err() { tokio::time::sleep(Duration::from_millis(20)).await; }
         node.stop().await;

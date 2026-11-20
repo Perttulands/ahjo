@@ -946,13 +946,18 @@ fn a_human_gate_quotes_its_input_and_the_attempts_keep_each_answer() {
             ("fmn_work", "port_out", draft, false)
         );
         let details = run.c.gate_driver_request(&run.id, "gate_review").unwrap();
-        let fail = &details["routes"][1];
-        assert_eq!(fail["targets"][0]["nodeId"], "fmn_work");
-        assert_eq!(fail["targets"][0]["limits"][0]["used"], n);
-        assert_eq!(fail["targets"][0]["limits"][0]["max"], 2);
-        assert_eq!(fail["targets"][0]["limits"][0]["left"], 2 - n);
+        let fail = &details.routes[1];
+        let target = &fail.targets[0];
+        assert_eq!(target.node_id, "fmn_work");
+        let Some(ahjo_mission_model::DecisionTargetKind::Formation { limits, .. }) = &target.detail
+        else {
+            panic!("expected a step target")
+        };
+        assert_eq!(limits[0].used as usize, n);
+        assert_eq!(limits[0].max, 2);
+        assert_eq!(limits[0].left as usize, 2 - n);
         if n == 2 {
-            assert_eq!(fail["picksBest"], true);
+            assert!(fail.picks_best);
         }
         let work = &run.c.attempts(&run.id, Some("fmn_work")).unwrap().steps[0];
         let asked = &work.attempts[n - 1].verdicts[0];
@@ -974,8 +979,8 @@ fn a_human_gate_quotes_its_input_and_the_attempts_keep_each_answer() {
     let request = run.c.gate_request(&run.id, "gate_review").unwrap();
     assert!(request.pick.is_some(), "the pick request is served");
     let details = run.c.gate_driver_request(&run.id, "gate_review").unwrap();
-    assert_eq!(details["picksBest"], true);
-    assert_eq!(details["routes"].as_array().unwrap().len(), 1);
+    assert!(details.picks_best);
+    assert_eq!(details.routes.len(), 1);
     run.c
         .record_pick(
             &run.id,
@@ -1183,7 +1188,7 @@ fn an_operator_picks_at_a_human_gate() {
                 ..Default::default()
             },
         ),
-        "answer it with gate pick",
+        "answer it with ahjo run pick",
     );
     refused(
         run.c.record_pick(

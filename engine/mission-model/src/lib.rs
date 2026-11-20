@@ -16,6 +16,8 @@ mod nodes;
 mod notes;
 mod run;
 mod run_attempts;
+mod run_evidence;
+mod run_gates;
 mod run_projection;
 mod sessions;
 
@@ -41,6 +43,11 @@ pub use run::{
 pub use run_attempts::{
     AttemptOutput, AttemptPick, AttemptVerdict, EvidenceItem, EvidenceText, RunAttempts,
     StepAttempt, StepAttempts, StepPort,
+};
+pub use run_evidence::{RunArtifact, RunBrief, RunEvidence, RunProblem, WrittenFile};
+pub use run_gates::{
+    DecisionInput, DecisionLimit, DecisionRoute, DecisionTarget, DecisionTargetKind, GateDecision,
+    GateState, RunGate,
 };
 pub use run_projection::{
     Escalation, GateInput, GateRequest, PublicEvent, PublicInputRef, PublicOrigin, RunProjection,

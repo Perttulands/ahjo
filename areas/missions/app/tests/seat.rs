@@ -122,7 +122,7 @@ fn start() -> Running {
         let run = start["run_id"].as_str().unwrap().to_owned();
         let deadline = Instant::now() + Duration::from_secs(15);
         let (seq, session) = loop {
-            let status = node.call("run_status", json!({"run":run})).await.unwrap();
+            let status = node.call("run_show", json!({"run":run,"events":true})).await.unwrap();
             if let Some(event) = status["events"].as_array().unwrap().iter().find(|event| event["type"] == "seat_created") {
                 break (event["seq"].as_u64().unwrap(), event["sessionId"].as_str().unwrap().to_owned());
             }

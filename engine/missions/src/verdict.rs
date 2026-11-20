@@ -68,7 +68,7 @@ impl Coordinator {
             }) {
                 return Err(io::Error::new(
                     io::ErrorKind::InvalidInput,
-                    "this gate waits for the operator to pick the best attempt, not for a verdict: answer it with gate pick",
+                    "this gate waits for the operator to pick the best attempt, not for a verdict: answer it with ahjo run pick",
                 ));
             }
             Ok(())

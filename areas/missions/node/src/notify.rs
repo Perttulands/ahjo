@@ -302,7 +302,7 @@ mod tests {
             payload["body"]
                 .as_str()
                 .unwrap()
-                .contains("ahjo gate approve run_live review --requested-seq 3")
+                .contains("ahjo run approve run_live review --seq 3")
         );
         assert!(
             log.listen()

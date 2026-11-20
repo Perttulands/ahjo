@@ -1,11 +1,13 @@
 //! Paths and problems recorded by one run, without reading artifact contents.
 use crate::{Coordinator, RunEvent};
-use ahjo_mission_model::EvidenceText;
-use serde_json::{Value, json};
+use ahjo_mission_model::{
+    EvidenceText, RunArtifact, RunBrief, RunEvidence, RunProblem, WrittenFile,
+};
+use serde_json::Value;
 use std::{fs, io, path::Path};
 
 impl Coordinator {
-    pub fn evidence(&self, id: &str, only: Option<&str>) -> Result<Value, crate::Error> {
+    pub fn evidence(&self, id: &str, only: Option<&str>) -> Result<RunEvidence, crate::Error> {
         let events = self
             .ledger(id)
             .map_err(|error| {
@@ -70,7 +72,13 @@ impl Coordinator {
                     .and_then(Value::as_str)
                     .filter(|p| Path::new(p).is_absolute())
                 {
-                    briefs.push(json!({"nodeId":event.node_id,"slotId":event.slot_id,"attempt":event.attempt,"dispatchSeq":event.seq,"path":path}));
+                    briefs.push(RunBrief {
+                        node_id: event.node_id.clone(),
+                        slot_id: event.slot_id.clone(),
+                        attempt: event.attempt,
+                        dispatch_seq: event.seq,
+                        path: path.into(),
+                    });
                 }
             } else if problem(event) {
                 let reason = ["reason", "detail", "message"]
@@ -83,7 +91,25 @@ impl Coordinator {
                             .filter(|s| !s.is_empty())
                     })
                     .unwrap_or("");
-                problems.push(json!({"seq":event.seq,"type":event.kind,"nodeId":if !origin.is_empty() {origin} else if !event.node_id.is_empty() {&event.node_id} else {blocked},"gateId":event.gate_id,"code":event.data.get("code"),"reason":EvidenceText::of(reason)}));
+                problems.push(RunProblem {
+                    seq: event.seq,
+                    kind: event.kind.clone(),
+                    node_id: if !origin.is_empty() {
+                        origin
+                    } else if !event.node_id.is_empty() {
+                        &event.node_id
+                    } else {
+                        blocked
+                    }
+                    .into(),
+                    gate_id: event.gate_id.clone(),
+                    code: event
+                        .data
+                        .get("code")
+                        .and_then(Value::as_str)
+                        .map(str::to_owned),
+                    reason: EvidenceText::of(reason),
+                });
             }
         }
         let mut files = Vec::new();
@@ -134,9 +160,14 @@ impl Coordinator {
                 .map(|at| std::time::SystemTime::from(at) + SETTLE);
             changed(Path::new(cwd), started.into(), ended, 0, &mut written);
         }
-        Ok(
-            json!({"runId":id,"problems":problems,"briefs":briefs,"files":files,"written":written,"truncated":truncated}),
-        )
+        Ok(RunEvidence {
+            run_id: id.into(),
+            problems,
+            briefs,
+            files,
+            written,
+            truncated,
+        })
     }
 }
 fn problem(event: &RunEvent) -> bool {
@@ -164,7 +195,7 @@ fn changed(
     since: std::time::SystemTime,
     until: Option<std::time::SystemTime>,
     depth: usize,
-    out: &mut Vec<Value>,
+    out: &mut Vec<WrittenFile>,
 ) {
     const MOST: usize = 200;
     if depth > 4 || out.len() >= MOST {
@@ -190,7 +221,10 @@ fn changed(
                 .modified()
                 .is_ok_and(|m| m >= since && until.is_none_or(|end| m <= end))
         {
-            out.push(json!({"path":entry.path(),"size":meta.len()}));
+            out.push(WrittenFile {
+                path: entry.path().to_string_lossy().into_owned(),
+                size: meta.len(),
+            });
         }
     }
 }
@@ -198,7 +232,7 @@ fn walk(
     dir: &Path,
     node: &str,
     depth: usize,
-    files: &mut Vec<Value>,
+    files: &mut Vec<RunArtifact>,
     truncated: &mut bool,
 ) -> io::Result<()> {
     if depth > 16 {
@@ -236,7 +270,11 @@ fn walk(
             walk(&entry.path(), node, depth + 1, files, truncated)?;
         } else if metadata.is_file() {
             let path = entry.path().canonicalize()?;
-            files.push(json!({"nodeId":node,"path":path,"size":metadata.len()}));
+            files.push(RunArtifact {
+                node_id: node.into(),
+                path: path.to_string_lossy().into_owned(),
+                size: metadata.len(),
+            });
         }
     }
     Ok(())
@@ -258,10 +296,7 @@ mod tests {
         let started = SystemTime::now() - Duration::from_secs(60);
         let mut written = Vec::new();
         changed(&dir, started, None, 0, &mut written);
-        let paths: Vec<_> = written
-            .iter()
-            .map(|w| w["path"].as_str().unwrap())
-            .collect();
+        let paths: Vec<_> = written.iter().map(|w| w.path.as_str()).collect();
         assert_eq!(
             paths,
             [

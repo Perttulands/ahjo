@@ -133,7 +133,7 @@ pub struct Landed {
     pub landed: bool,
     pub notes: Vec<String>,
 }
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct AgentSeat {
     pub dispatch_id: String,
@@ -148,7 +148,7 @@ pub struct AgentSeat {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub waiting: Option<SeatWait>,
 }
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct SeatWait {
     pub state: String,
     pub detail: String,
@@ -159,6 +159,7 @@ pub struct SeatWait {
 pub mod commands;
 pub mod document;
 pub mod document_commands;
+pub mod run_commands;
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct MissionResponse {

@@ -87,10 +87,10 @@ async fn cli(node: &Node, args: &[&str]) -> Value {
     );
     serde_json::from_slice(&out).unwrap()
 }
-async fn run(node: &Node, best: bool) -> String {
+async fn start(node: &Node, mission: String) -> String {
     let root = node.dir().join("missions/missions");
     std::fs::create_dir_all(&root).unwrap();
-    std::fs::write(root.join("hello.mission.toml"), mission(best)).unwrap();
+    std::fs::write(root.join("hello.mission.toml"), mission).unwrap();
     let answer = node
         .call(
             "mission_run",
@@ -98,10 +98,15 @@ async fn run(node: &Node, best: bool) -> String {
         )
         .await
         .unwrap();
-    let id = answer["run_id"].as_str().unwrap().to_owned();
+    answer["run_id"].as_str().unwrap().to_owned()
+}
+
+async fn run(node: &Node, best: bool) -> String {
+    let id = start(node, mission(best)).await;
     tokio::time::timeout(Duration::from_secs(10), async {
         loop {
-            let status = node.call("run_status", json!({"run":id})).await.unwrap();
+            let answer = node.call("run_show", json!({"run":id})).await.unwrap();
+            let status = &answer["state"];
             if status["final"] == true || status["status"] == "blocked" {
                 assert!(
                     status["status"] == "succeeded" || status["status"] == "picked",
@@ -122,7 +127,7 @@ async fn cli_and_http_report_problems_briefs_files_and_picked_attempts() {
         .await
         .unwrap();
     let id = run(&node, false).await;
-    let evidence = cli(&node, &["evidence", &id]).await;
+    let evidence = cli(&node, &["show", &id, "--evidence"]).await;
     let evidence = &evidence["evidence"];
     assert!(
         evidence["problems"]
@@ -147,7 +152,7 @@ async fn cli_and_http_report_problems_briefs_files_and_picked_attempts() {
             && path.is_absolute()
             && path.metadata().unwrap().len() == f["size"].as_u64().unwrap()
     }));
-    let filtered = cli(&node, &["evidence", &id, "--step", "fmn_judge"]).await;
+    let filtered = cli(&node, &["show", &id, "--evidence", "--step", "fmn_judge"]).await;
     assert!(
         filtered["evidence"]["briefs"]
             .as_array()
@@ -172,16 +177,17 @@ async fn cli_and_http_report_problems_briefs_files_and_picked_attempts() {
         )
         .await
         .unwrap();
-    assert_eq!(http, filtered);
+    assert_eq!(http["evidence"], filtered["evidence"]);
     let missing = node
-        .call("run_evidence", json!({"run":"run_missing"}))
+        .call("run_show", json!({"run":"run_missing","evidence":true}))
         .await
         .unwrap_err();
     assert_eq!(missing.code, "unknown_run");
     let mut out = Vec::new();
     let args = vec![
-        "evidence".into(),
+        "show".into(),
         "run_missing".into(),
+        "--evidence".into(),
         "--node".into(),
         format!("{}/", node.url()),
         "--json".into(),
@@ -193,7 +199,7 @@ async fn cli_and_http_report_problems_briefs_files_and_picked_attempts() {
         1
     );
     let pick = run(&node, true).await;
-    let attempts = cli(&node, &["attempts", &pick, "--step", "fmn_work"]).await;
+    let attempts = cli(&node, &["show", &pick, "--attempts", "--step", "fmn_work"]).await;
     let steps = attempts["attempts"]["steps"].as_array().unwrap();
     assert_eq!(steps.len(), 1);
     let attempts = steps[0]["attempts"].as_array().unwrap();
@@ -205,5 +211,53 @@ async fn cli_and_http_report_problems_briefs_files_and_picked_attempts() {
     );
     assert!(attempts[0]["picked"].is_null());
     assert_eq!(attempts[1]["picked"]["trigger"], "whenSpent");
+    node.stop().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn show_puts_a_spent_limit_and_its_resume_command_first() {
+    let node = Node::start(&[sessions::LISTING, ahjo_work::LISTING, LAB], "")
+        .await
+        .unwrap();
+    let draft = format!(
+        "{}\n[[limit]]\nid = \"lim_stop\"\ntitle = \"Try once\"\ntarget = \"fmn_work\"\nrounds = 1\n",
+        mission(false)
+    );
+    let id = start(&node, draft).await;
+    let waiting = cli(&node, &["wait", &id, "--timeout", "10"]).await;
+    assert_eq!(waiting["status"], "blocked", "{waiting}");
+    let shown = cli(&node, &["show", &id]).await;
+    assert_eq!(shown["state"]["block_code"], "limit_reached");
+    assert_eq!(shown["next"], waiting["next"]);
+    let reason = shown["why"].as_str().unwrap();
+    assert!(reason.contains("round"), "{shown}");
+    let address = format!("{}/", node.url());
+    let expected = format!("ahjo run resume --node {address} {id} --grant --reason '<reason>'");
+    assert_eq!(shown["next"][0], expected);
+    let args = ["show", &id, "--node", &address].map(str::to_owned);
+    let mut output = Vec::new();
+    assert_eq!(
+        ahjo_node_kit::cli::run("run", &args, &mut output)
+            .await
+            .unwrap(),
+        0
+    );
+    let output = String::from_utf8(output).unwrap();
+    assert_eq!(
+        output.lines().next(),
+        Some(format!("why: {reason}").as_str())
+    );
+    assert!(
+        output.find(&expected).unwrap() < output.find("state").unwrap(),
+        "{output}"
+    );
+    let resumed = cli(
+        &node,
+        &["resume", &id, "--grant", "--reason", "one more review"],
+    )
+    .await;
+    assert_eq!(resumed["run"]["run_id"], id);
+    let finished = cli(&node, &["wait", &id, "--until", "final", "--timeout", "10"]).await;
+    assert_eq!(finished["status"], "succeeded", "{finished}");
     node.stop().await;
 }

@@ -2,12 +2,13 @@
 //! and a pending human gate's request. The engine projects them from the
 //! run's private ledger.
 
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::RunInput;
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct PublicEvent {
     pub seq: u64,
@@ -53,7 +54,7 @@ pub struct PublicEvent {
     pub input_refs: Vec<PublicInputRef>,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct PublicInputRef {
     pub edge_id: String,
@@ -63,7 +64,7 @@ pub struct PublicInputRef {
     pub origin: Option<PublicOrigin>,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct PublicOrigin {
     pub node_id: String,
@@ -79,7 +80,7 @@ fn is_zero_u64(n: &u64) -> bool {
     *n == 0
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct WaitingGate {
     pub gate_id: String,
@@ -91,7 +92,7 @@ pub struct WaitingGate {
     pub pick: Option<serde_json::Value>,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct RunProjection {
     pub run_id: String,

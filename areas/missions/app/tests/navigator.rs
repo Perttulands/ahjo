@@ -46,10 +46,11 @@ fn start() -> Running {
             let id = answer["run_id"].as_str().unwrap().to_owned();
             let deadline = Instant::now() + Duration::from_secs(15);
             loop {
-                let state = node.call("run_status", json!({"run":id})).await.unwrap();
+                let answer = node.call("run_show", json!({"run":id})).await.unwrap();
+                let state = &answer["state"];
                 if state["final"] == true || state["status"] == "blocked" {
                     assert_eq!(state["status"], "succeeded", "{state}");
-                    runs.push((state["startedAt"].as_str().unwrap().to_owned(), id));
+                    runs.push((state["started_at"].as_str().unwrap().to_owned(), id));
                     break;
                 }
                 assert!(Instant::now() < deadline);

@@ -188,8 +188,8 @@ async fn cli_authors_two_steps_answers_gate_and_finishes_with_fake_sessions() {
     let waiting = cli(&node, "run", &["wait", run, "--timeout", "10"]).await;
     assert_eq!(waiting["outcome"], "needs-you", "{waiting}");
     assert_eq!(waiting["asks"][0]["gate"], gate);
-    let gates = cli(&node, "run", &["gates", run]).await;
-    let human_gate = gates["gates"]
+    let shown = cli(&node, "run", &["show", run]).await;
+    let human_gate = shown["gates"]
         .as_array()
         .unwrap()
         .iter()
@@ -197,21 +197,32 @@ async fn cli_authors_two_steps_answers_gate_and_finishes_with_fake_sessions() {
         .unwrap();
     assert_eq!(human_gate["state"], "waiting");
     assert!(
-        gates["gates"]
+        shown["gates"]
             .as_array()
             .unwrap()
             .iter()
             .any(|g| g["gate"] == judge_gate && g["state"] == "answered")
     );
-    let request = cli(&node, "gate", &["request", run, &gate]).await;
+    let request = &shown["asks"][0]["request"];
+    assert_eq!(shown["asks"][0]["seq"], request["requested_seq"]);
+    assert_eq!(shown["next"], waiting["next"]);
+    assert!(
+        shown["why"]
+            .as_str()
+            .unwrap()
+            .contains("waits for approval")
+    );
+    for section in ["events", "seats", "attempts", "evidence"] {
+        assert!(shown.get(section).is_none(), "{shown}");
+    }
     assert_eq!(request["criterion"], "Is this ready?");
-    assert_eq!(request["inputs"][0]["fromNodeId"], steps[0].2);
-    assert_eq!(request["routes"][0]["targets"][0]["nodeId"], steps[1].2);
-    assert_eq!(request["routes"][0]["endsRun"], false);
-    assert_eq!(request["routes"][1]["targets"][0]["nodeId"], rejected);
-    assert_eq!(request["routes"][1]["endsRun"], true);
-    assert_eq!(request["endsRun"], true);
-    assert_eq!(request["picksBest"], false);
+    assert_eq!(request["inputs"][0]["from_node_id"], steps[0].2);
+    assert_eq!(request["routes"][0]["targets"][0]["node_id"], steps[1].2);
+    assert_eq!(request["routes"][0]["ends_run"], false);
+    assert_eq!(request["routes"][1]["targets"][0]["node_id"], rejected);
+    assert_eq!(request["routes"][1]["ends_run"], true);
+    assert_eq!(request["ends_run"], true);
+    assert_eq!(request["picks_best"], false);
     let message = tokio::time::timeout(std::time::Duration::from_secs(5), async {
         loop {
             if let Ok(text) = std::fs::read_to_string(&output)
@@ -241,11 +252,10 @@ async fn cli_authors_two_steps_answers_gate_and_finishes_with_fake_sessions() {
             .any(|event| event.text.starts_with("run needs you:"))
     );
     let cursor = waiting["cursor"].as_u64().unwrap();
-    let status = cli(&node, "run", &["status", run]).await;
-    let seq = status["waitingGates"][0]["requestedSeq"].as_u64().unwrap();
+    let seq = request["requested_seq"].as_u64().unwrap();
     // The suggestion reaches the node the command named.
     let expected = format!(
-        "ahjo gate approve --node {}/ {run} {gate} --requested-seq {seq}",
+        "ahjo run approve --node {}/ {run} {gate} --seq {seq}",
         node.url()
     );
     assert!(
@@ -290,13 +300,13 @@ async fn cli_authors_two_steps_answers_gate_and_finishes_with_fake_sessions() {
     let address = format!("{}/", node.url());
     let args = ["approve", "--help", "--node", &address].map(str::to_owned);
     assert_eq!(
-        ahjo_node_kit::cli::run("gate", &args, &mut help)
+        ahjo_node_kit::cli::run("run", &args, &mut help)
             .await
             .unwrap(),
         0
     );
     let help = String::from_utf8(help).unwrap();
-    assert!(help.contains("--reason"), "{help}");
+    assert!(help.contains("--reason") && help.contains("seq"), "{help}");
     assert!(!help.contains("--response"), "{help}");
     let args = [
         "approve",
@@ -309,7 +319,7 @@ async fn cli_authors_two_steps_answers_gate_and_finishes_with_fake_sessions() {
         &address,
     ]
     .map(str::to_owned);
-    let error = ahjo_node_kit::cli::run("gate", &args, &mut Vec::new())
+    let error = ahjo_node_kit::cli::run("run", &args, &mut Vec::new())
         .await
         .unwrap_err();
     assert!(
@@ -319,11 +329,12 @@ async fn cli_authors_two_steps_answers_gate_and_finishes_with_fake_sessions() {
 
     cli(
         &node,
-        "gate",
+        "run",
         &[
             "approve",
             run,
             &gate,
+            "--seq",
             &seq.to_string(),
             "--reason",
             "approved",
@@ -332,8 +343,8 @@ async fn cli_authors_two_steps_answers_gate_and_finishes_with_fake_sessions() {
         ],
     )
     .await;
-    let gates = cli(&node, "run", &["gates", run]).await;
-    let human_gate = gates["gates"]
+    let shown = cli(&node, "run", &["show", run]).await;
+    let human_gate = shown["gates"]
         .as_array()
         .unwrap()
         .iter()
@@ -353,26 +364,18 @@ async fn cli_authors_two_steps_answers_gate_and_finishes_with_fake_sessions() {
         .unwrap();
     assert_eq!(verdict.data["reason"], "approved");
     assert_eq!(human_gate["by"], "agent:journey");
-    let error = node
-        .call("gate_request", serde_json::json!({"run":run,"gate":gate}))
+    assert!(
+        shown["asks"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|ask| ask["gate"] != gate)
+    );
+    let stale = node
+        .call("run_approve", json!({"run":run,"gate":gate,"seq":seq}))
         .await
         .unwrap_err();
-    assert_eq!(error.code, "gate_not_waiting");
-    let mut output = Vec::new();
-    let args = vec![
-        "request".into(),
-        run.into(),
-        gate.clone(),
-        "--node".into(),
-        format!("{}/", node.url()),
-        "--json".into(),
-    ];
-    assert_eq!(
-        ahjo_node_kit::cli::run("gate", &args, &mut output)
-            .await
-            .unwrap(),
-        1
-    );
+    assert_eq!(stale.code, "conflict");
     let finished = cli(
         &node,
         "run",
@@ -388,7 +391,7 @@ async fn cli_authors_two_steps_answers_gate_and_finishes_with_fake_sessions() {
     )
     .await;
     assert_eq!(again["outcome"], "final");
-    let status = cli(&node, "run", &["status", run]).await;
+    let status = cli(&node, "run", &["show", run, "--events"]).await;
     for (_, _, id) in &steps {
         assert!(
             status["events"]

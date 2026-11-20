@@ -1,6 +1,7 @@
 //! Mission authoring commands use the same store as the HTTP routes.
 
 use ahjo_core::{Error, TypedCommand};
+pub(crate) use ahjo_mission_engine::shell_word;
 use ahjo_mission_engine::{AdmissionFailure, Harnesses, validate};
 use ahjo_missions_contract::{
     self as wire, LayoutPatch, NotePatch, Precondition, RunStart,
@@ -32,7 +33,7 @@ pub const NAMES: &[&str] = &{
     names
 };
 
-fn command<C>(
+pub(super) fn command<C>(
     m: &Missions,
     effect: Effect,
     handler: fn(&Missions, C) -> Result<C::Output, Error>,
@@ -441,7 +442,7 @@ pub(crate) fn bad(error: impl std::fmt::Display) -> Error {
     Error::new("bad_request", error.to_string())
 }
 
-fn required<'a>(value: &'a str, field: &str) -> Result<&'a str, Error> {
+pub(super) fn required<'a>(value: &'a str, field: &str) -> Result<&'a str, Error> {
     if value.is_empty() {
         Err(bad(format!("{field} is required")))
     } else {
@@ -567,17 +568,6 @@ fn admission(e: AdmissionFailure) -> Error {
                 serde_json::to_string(&findings).unwrap_or_default()
             ),
         ),
-    }
-}
-pub(crate) fn shell_word(value: &str) -> String {
-    if value
-        .bytes()
-        .all(|b| b.is_ascii_alphanumeric() || b"_-./".contains(&b))
-        && !value.is_empty()
-    {
-        value.to_owned()
-    } else {
-        format!("'{}'", value.replace('\'', "'\\''"))
     }
 }
 /// The command that starts a run of a valid mission, with each input it

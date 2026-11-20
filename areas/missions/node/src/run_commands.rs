@@ -1,374 +1,272 @@
-//! Run commands and gate decisions.
+//! The same decision prompts guide a driver in run show and run wait.
 
 use std::time::Duration;
 
 use ahjo_core::Error;
-use ahjo_missions_contract as wire;
-use ahjo_node_kit::{
-    Command, Effect,
-    args::{flag, maybe_text, object, text},
+use ahjo_mission_engine::{WaitUntil, gate_commands, resume_commands};
+use ahjo_missions_contract::{
+    HumanPick, HumanVerdict, ResumeRequest, RunProjection, plain_reason, run_commands::*,
 };
-use serde_json::{Value, json};
+use ahjo_node_kit::{Command, Effect};
 
 use crate::{
     Missions,
-    commands::{bad, blocking, shell_word},
+    commands::{bad, command, required},
+    run_routes::seat_wire,
 };
 
-// The run and gate verbs keep their existing surface until the run commands
-// move under one noun.
-const DEFINITIONS: [(&str, Effect, &str); 16] = [
-    (
-        "run_list",
-        Effect::Reads,
-        "List runs, optionally by mission.",
-    ),
-    (
-        "run_status",
-        Effect::Reads,
-        "Read a run and its current events.",
-    ),
-    (
-        "run_wait",
-        Effect::Reads,
-        "Wait for a run to need its driver, finish, or change.",
-    ),
-    (
-        "run_evidence",
-        Effect::Reads,
-        "Read a run’s problems, briefs and files.",
-    ),
-    (
-        "run_attempts",
-        Effect::Reads,
-        "Read a run’s step attempts, verdicts and picks.",
-    ),
-    (
-        "run_gates",
-        Effect::Reads,
-        "List a run’s gates and their state.",
-    ),
-    (
-        "run_seats",
-        Effect::Reads,
-        "Read the seats belonging to a run.",
-    ),
-    (
-        "run_logs",
-        Effect::Reads,
-        "Read the public events of a run.",
-    ),
-    ("run_abort", Effect::Destroys, "Abort a run."),
-    ("run_resume", Effect::Writes, "Resume a blocked run."),
-    (
-        "run_land",
-        Effect::Writes,
-        "Land a finished repository run.",
-    ),
-    (
-        "run_delete",
-        Effect::Destroys,
-        "Delete a finished run, its kept outputs, the branches a failed step's work was kept on and the folder Ahjo made for it; land a repository run first.",
-    ),
-    (
-        "gate_request",
-        Effect::Reads,
-        "Read a waiting gate’s request and routes.",
-    ),
-    (
-        "gate_approve",
-        Effect::Writes,
-        "Approve a pending human gate.",
-    ),
-    (
-        "gate_reject",
-        Effect::Writes,
-        "Reject a pending human gate.",
-    ),
-    (
-        "gate_pick",
-        Effect::Writes,
-        "Pick an attempt at a pending human gate.",
-    ),
-];
+pub use ahjo_missions_contract::run_commands::NAMES;
 
-pub const NAMES: [&str; DEFINITIONS.len()] = {
-    let mut names = [""; DEFINITIONS.len()];
-    let mut i = 0;
-    while i < names.len() {
-        names[i] = DEFINITIONS[i].0;
-        i += 1;
-    }
-    names
-};
-
-pub fn commands(missions: &Missions) -> impl Iterator<Item = Command> + '_ {
-    DEFINITIONS.into_iter().map(|(name, effect, description)| {
-        let missions = missions.clone();
-        Command::new(
-            name,
-            effect,
-            description,
-            move || schema(name),
-            move |args| {
-                let missions = missions.clone();
-                async move { call(missions, name, args).await }
-            },
-        )
-    })
-}
-
-fn schema(name: &str) -> Value {
-    let s = json!({"type":"string"});
-    let i = json!({"type":"integer"});
-    let b = json!({"type":"boolean"});
-    match name {
-        "run_list" => object(json!({"mission":s}), &[]),
-        "run_evidence" | "run_attempts" => object(json!({"run":s,"step":s}), &["run"]),
-        "run_wait" => object(
-            json!({"run":s,
-                "until":{"type":"string","description":"needs-you (the default: a gate waits or the run ends), final, or any-change."},
-                "since":{"type":"integer","description":"Count only what happened after this cursor, as an earlier answer gave it."},
-                "timeout":{"type":"integer","description":"Seconds to wait at most (default 3600)."}}),
-            &["run"],
-        ),
-        "run_abort" => object(json!({"run":s,"reason":s,"actor":s}), &["run"]),
-        "run_resume" => object(
-            json!({"run":s,"mode":s,"take_fail":b,"grant":b,"pick_best":b,"reason":s,"actor":s}),
-            &["run"],
-        ),
-        "run_land" => object(json!({"run":s,"force":b}), &["run"]),
-        "gate_request" => object(json!({"run":s,"gate":s}), &["run", "gate"]),
-        "gate_approve" | "gate_reject" => object(
-            json!({"run":s,"gate":s,"requested_seq":i,"reason":s,"relayed_by":s,"actor":s}),
-            &["run", "gate", "requested_seq"],
-        ),
-        "gate_pick" => object(
-            json!({"run":s,"gate":s,"requested_seq":i,"attempt":i,"reason":s,"relayed_by":s,"actor":s}),
-            &["run", "gate", "requested_seq", "attempt"],
-        ),
-        _ => object(json!({"run":s}), &["run"]),
-    }
-}
-fn required<'a>(a: &'a Value, key: &str) -> Result<&'a str, Error> {
-    text(a, key).map_err(bad).and_then(|v| {
-        if v.is_empty() {
-            Err(bad(format!("{key} is required")))
-        } else {
-            Ok(v)
-        }
-    })
-}
-fn optional<'a>(a: &'a Value, key: &str, default: &'a str) -> Result<&'a str, Error> {
-    Ok(maybe_text(a, key).map_err(bad)?.unwrap_or(default))
-}
-fn command_actor(a: &Value) -> Result<String, Error> {
-    let actor = optional(a, "actor", "agent:ahjo")?.trim();
-    Ok(if actor.is_empty() {
-        "agent:ahjo"
-    } else {
-        actor
-    }
-    .into())
-}
-fn boolean(a: &Value, key: &str) -> Result<bool, Error> {
-    flag(a, key, false).map_err(bad)
-}
-fn positive(a: &Value, key: &str) -> Result<u64, Error> {
-    a.get(key)
-        .and_then(Value::as_u64)
-        .filter(|n| *n > 0)
-        .ok_or_else(|| bad(format!("{key} must be positive")))
-}
-fn value<T: serde::Serialize>(v: T) -> Result<Value, Error> {
-    serde_json::to_value(v).map_err(|e| Error::new("internal", e.to_string()))
-}
-
-async fn call(m: Missions, name: &str, a: Value) -> Result<Value, Error> {
-    let node = &m.node;
-    match name {
-        "run_list" => Ok(
-            json!({"node":node,"runs":m.coordinator.list(maybe_text(&a,"mission").map_err(bad)?,false)?}),
-        ),
-        "run_status" => {
-            let run = m.coordinator.run(required(&a, "run")?)?;
-            let mut v = value(run)?;
-            v["node"] = json!(node);
-            Ok(v)
-        }
-        "run_wait" => wait(m, &a).await,
-        "run_evidence" => Ok(
-            json!({"evidence":m.coordinator.evidence(required(&a,"run")?, maybe_text(&a,"step").map_err(bad)?)?}),
-        ),
-        "run_attempts" => {
-            let id = required(&a, "run")?;
-            // Give both evidence commands the same unknown-run error.
-            m.coordinator.run(id).map_err(|error| {
-                if error.code == "not_found" || error.code == "invalid_input" {
-                    Error::new("unknown_run", format!("run {id:?} not found"))
-                } else {
-                    error
-                }
-            })?;
-            Ok(json!({"attempts":m.coordinator.attempts(id, maybe_text(&a,"step").map_err(bad)?)?}))
-        }
-        "run_gates" => Ok(json!({"gates":m.coordinator.gates(required(&a,"run")?)?})),
-        "gate_request" => m
-            .coordinator
-            .gate_driver_request(required(&a, "run")?, required(&a, "gate")?),
-        "run_seats" => {
-            let id = required(&a, "run")?.to_owned();
-            let coordinator = m.coordinator.clone();
-            let seats = blocking(move || coordinator.seats(&id)).await?;
-            Ok(json!({"node":node,"seats":seats}))
-        }
-        "run_logs" => {
-            let id = required(&a, "run")?;
-            let mission = m.coordinator.frozen_mission(id).ok();
-            let events = m.coordinator.events(id)?;
-            let events: Vec<Value> = events
-                .into_iter()
-                .map(|event| {
-                    let step = [&event.node_id, &event.gate_id]
-                        .into_iter()
-                        .find(|id| !id.is_empty())
-                        .and_then(|id| mission.as_ref().map(|m| m.node_name(id).to_owned()))
-                        .unwrap_or_default();
-                    let mut v = value(event)?;
-                    if !step.is_empty() {
-                        v["step"] = json!(step);
-                    }
-                    Ok(v)
-                })
-                .collect::<Result<_, Error>>()?;
-            Ok(json!({"node":node,"events":events}))
-        }
-        "run_abort" => {
-            let id = required(&a, "run")?.to_owned();
-            let actor = optional(&a, "actor", "agent:ahjo")?.to_owned();
-            let reason = optional(&a, "reason", "operator abort")?.to_owned();
-            let coordinator = m.coordinator.clone();
-            let run = blocking(move || coordinator.abort(&id, &actor, &reason)).await?;
-            Ok(json!({"node":node,"run":run}))
-        }
-        "run_resume" => {
-            let request = wire::ResumeRequest {
-                mode: serde_json::from_value(json!(optional(&a, "mode", "reattach")?))
-                    .map_err(bad)?,
-                take_fail: boolean(&a, "take_fail")?,
-                grant: boolean(&a, "grant")?,
-                pick_best: boolean(&a, "pick_best")?,
-                reason: optional(&a, "reason", "")?.into(),
-                actor: optional(&a, "actor", "")?.into(),
-            };
-            let id = required(&a, "run")?.to_owned();
-            let coordinator = m.coordinator.clone();
-            let run = blocking(move || coordinator.resume(&id, request)).await?;
-            Ok(json!({"node":node,"run":run}))
-        }
-        "run_delete" => {
-            let id = required(&a, "run")?.to_owned();
-            let coordinator = m.coordinator.clone();
-            let gone = id.clone();
-            blocking(move || coordinator.delete_run(&id)).await?;
+pub fn commands(m: &Missions) -> Vec<Command> {
+    use Effect::*;
+    let wait_on = m.clone();
+    vec![
+        command(m, Reads, |m, args: RunList| {
+            Ok(RunsListed {
+                node: m.node.clone(),
+                runs: m.coordinator.list(args.mission.as_deref(), false)?,
+            })
+        }),
+        command(m, Reads, show),
+        Command::for_request(Reads, move |args: RunWait| wait(wait_on.clone(), args)),
+        command(m, Writes, |m, args: RunApprove| {
+            verdict(
+                m,
+                &args.run,
+                &args.gate,
+                HumanVerdict {
+                    requested_seq: args.seq,
+                    verdict: "pass".into(),
+                    reason: args.reason.unwrap_or_default(),
+                    relayed_by: args.relayed_by.unwrap_or_default(),
+                    actor: decision_actor(args.actor),
+                },
+            )
+        }),
+        command(m, Writes, |m, args: RunReject| {
+            verdict(
+                m,
+                &args.run,
+                &args.gate,
+                HumanVerdict {
+                    requested_seq: args.seq,
+                    verdict: "fail".into(),
+                    reason: args.reason.unwrap_or_default(),
+                    relayed_by: args.relayed_by.unwrap_or_default(),
+                    actor: decision_actor(args.actor),
+                },
+            )
+        }),
+        command(m, Writes, pick),
+        command(m, Writes, resume),
+        command(m, Destroys, abort),
+        command(m, Writes, |m, args: RunLand| {
+            Ok(RunLanded {
+                node: m.node.clone(),
+                landed: true,
+                notes: m
+                    .coordinator
+                    .land(required(&args.run, "run")?, args.force)?,
+            })
+        }),
+        command(m, Destroys, |m, args: RunDelete| {
+            m.coordinator.delete_run(required(&args.run, "run")?)?;
             m.changed();
-            Ok(json!({"node":node,"deleted":gone}))
+            Ok(RunDeleted {
+                node: m.node.clone(),
+                deleted: args.run,
+            })
+        }),
+    ]
+}
+
+fn show(m: &Missions, args: RunShow) -> Result<RunShown, Error> {
+    let id = required(&args.run, "run")?;
+    let run = m.coordinator.run(id).map_err(|error| {
+        if error.code == "not_found" || error.code == "invalid_input" {
+            Error::new("unknown_run", format!("run {id:?} not found"))
+        } else {
+            error
         }
-        "run_land" => {
-            let id = required(&a, "run")?.to_owned();
-            let force = boolean(&a, "force")?;
-            let coordinator = m.coordinator.clone();
-            let notes = blocking(move || coordinator.land(&id, force)).await?;
-            Ok(json!({"node":node,"landed":true,"notes":notes}))
+    })?;
+    let mut asks = asks(&run);
+    for ask in &mut asks {
+        if let Some(gate) = &ask.gate {
+            match m.coordinator.gate_driver_request(id, gate) {
+                Ok(request) if Some(request.requested_seq) == ask.seq => {
+                    ask.request = Some(request);
+                }
+                // A newer request or its decision can arrive after the snapshot.
+                Ok(_) => (),
+                Err(error) if error.code == "gate_not_waiting" => (),
+                Err(error) => return Err(error),
+            }
         }
-        "gate_approve" | "gate_reject" => {
-            let id = required(&a, "run")?;
-            let gate = required(&a, "gate")?;
-            m.coordinator.record_verdict(
-                id,
-                gate,
-                wire::HumanVerdict {
-                    requested_seq: positive(&a, "requested_seq")?,
-                    verdict: if name == "gate_approve" {
-                        "pass"
-                    } else {
-                        "fail"
-                    }
-                    .into(),
-                    reason: optional(&a, "reason", "")?.into(),
-                    relayed_by: optional(&a, "relayed_by", "")?.into(),
-                    actor: command_actor(&a)?,
-                },
-            )?;
-            Ok(json!({"node":node,"runId":id}))
-        }
-        "gate_pick" => {
-            let id = required(&a, "run")?;
-            let gate = required(&a, "gate")?;
-            let attempt = i64::try_from(positive(&a, "attempt")?).map_err(bad)?;
-            m.coordinator.record_pick(
-                id,
-                gate,
-                wire::HumanPick {
-                    requested_seq: positive(&a, "requested_seq")?,
-                    attempt,
-                    reason: optional(&a, "reason", "")?.into(),
-                    relayed_by: optional(&a, "relayed_by", "")?.into(),
-                    actor: command_actor(&a)?,
-                },
-            )?;
-            Ok(json!({"node":node,"runId":id}))
-        }
-        _ => Err(bad(format!("unknown run command {name}"))),
+    }
+    let why = match asks.first() {
+        Some(ask) => ask.why.as_deref().unwrap_or(&ask.what).to_owned(),
+        None => ended_reason(&run)
+            .unwrap_or_else(|| format!("Run is {}.", run.status.replace('_', " "))),
+    };
+    let next = next(&asks);
+    let gates = m.coordinator.gates(id)?;
+    let state = state(&run);
+    let events = args.events.then(|| {
+        let mission = m.coordinator.frozen_mission(id).ok();
+        run.events
+            .into_iter()
+            .map(|event| {
+                let step = [&event.node_id, &event.gate_id]
+                    .into_iter()
+                    .find(|id| !id.is_empty())
+                    .and_then(|id| {
+                        mission
+                            .as_ref()
+                            .map(|mission| mission.node_name(id).to_owned())
+                    });
+                RunLogEvent { event, step }
+            })
+            .collect()
+    });
+    let seats = args
+        .seats
+        .then(|| {
+            m.coordinator
+                .seats(id)
+                .map(|seats| seats.into_iter().map(seat_wire).collect())
+        })
+        .transpose()?;
+    let attempts = args
+        .attempts
+        .then(|| m.coordinator.attempts(id, args.step.as_deref()))
+        .transpose()?;
+    let evidence = args
+        .evidence
+        .then(|| m.coordinator.evidence(id, args.step.as_deref()))
+        .transpose()?;
+    Ok(RunShown {
+        why,
+        next,
+        state,
+        outputs: run.outputs,
+        asks,
+        gates,
+        events,
+        seats,
+        attempts,
+        evidence,
+        node: m.node.clone(),
+    })
+}
+
+fn ended_reason(run: &RunProjection) -> Option<String> {
+    if !run.r#final {
+        return None;
+    }
+    run.events
+        .iter()
+        .rev()
+        .find(|event| {
+            matches!(
+                event.kind.as_str(),
+                "run_succeeded" | "run_failed" | "run_picked" | "run_canceled"
+            )
+        })
+        .map(|event| plain_reason(&event.detail))
+        .filter(|why| !why.is_empty())
+}
+
+fn state(run: &RunProjection) -> RunState {
+    RunState {
+        run_id: run.run_id.clone(),
+        status: run.status.clone(),
+        r#final: run.r#final,
+        resume_allowed: run.resume_allowed,
+        epoch: run.epoch,
+        resume_policy: run.resume_policy.clone(),
+        block_code: run.block_code.clone(),
+        mission_slug: run.mission_slug.clone(),
+        mission_id: run.mission_id.clone(),
+        mission_rev: run.mission_rev,
+        input_card_id: run.input_card_id.clone(),
+        work: run.work.clone(),
+        cwd: run.cwd.clone(),
+        repository: run.repository.clone(),
+        base: run.base.clone(),
+        request_id: run.request_id.clone(),
+        context_paths: run.context_paths.clone(),
+        inputs: run.inputs.clone(),
+        event_count: run.event_count,
+        started_by: run.started_by.clone(),
+        started_at: run.started_at.clone(),
+        updated_at: run.updated_at.clone(),
+        ended_by: run.ended_by.clone(),
     }
 }
-async fn wait(m: Missions, a: &Value) -> Result<Value, Error> {
-    use ahjo_mission_engine::WaitUntil;
-    let id = required(a, "run")?;
-    let until = match optional(a, "until", "needs-you")? {
-        "needs-you" => WaitUntil::NeedsYou,
-        "final" => WaitUntil::Final,
-        "any-change" => WaitUntil::AnyChange,
-        _ => return Err(bad("until must be needs-you, final or any-change")),
+
+async fn wait(m: Missions, args: RunWait) -> Result<RunWaited, Error> {
+    let id = required(&args.run, "run")?;
+    let until = match args.until {
+        WaitFor::NeedsYou => WaitUntil::NeedsYou,
+        WaitFor::Final => WaitUntil::Final,
+        WaitFor::AnyChange => WaitUntil::AnyChange,
     };
-    let number = |key: &str| -> Result<Option<u64>, Error> {
-        match a.get(key) {
-            None | Some(Value::Null) => Ok(None),
-            Some(v) => v
-                .as_u64()
-                .map(Some)
-                .ok_or_else(|| bad(format!("{key} must be a non-negative integer"))),
-        }
-    };
-    let since = number("since")?;
-    let timeout = number("timeout")?.unwrap_or(3600);
     let answer = m
         .coordinator
-        .wait_run(id, until, since, Duration::from_secs(timeout))
+        .wait_run(
+            id,
+            until,
+            args.since,
+            Duration::from_secs(args.timeout.unwrap_or(3600)),
+        )
         .await?;
-    let run = &answer.run;
-    let mut asks = Vec::new();
-    let run_arg = shell_word(id);
-    for gate in &run.waiting_gates {
-        let gate_arg = shell_word(&gate.gate_id);
-        let prefix = "ahjo gate";
-        let commands: Vec<String> = if let Some(pick) = &gate.pick {
-            pick["candidates"].as_array().into_iter().flatten().filter_map(|candidate| {
-                candidate.as_i64().or_else(|| candidate["attempt"].as_i64()).map(|attempt| format!("{prefix} pick {run_arg} {gate_arg} --requested-seq {} --attempt {attempt}", gate.requested_seq))
-            }).collect()
-        } else {
-            ["approve", "reject"]
-                .into_iter()
-                .map(|verb| {
-                    format!(
-                        "{prefix} {verb} {run_arg} {gate_arg} --requested-seq {}",
-                        gate.requested_seq
-                    )
-                })
-                .collect()
-        };
-        asks.push(json!({"gate":gate.gate_id,"what":if gate.pick.is_some() {"Pick an attempt"} else {"Approve or reject"},"commands":commands}));
-    }
+    let asks = asks(&answer.run);
+    Ok(RunWaited {
+        outcome: answer.outcome.into(),
+        status: answer.run.status,
+        cursor: answer.cursor,
+        next: next(&asks),
+        asks,
+        outputs: answer
+            .run
+            .outputs
+            .into_iter()
+            .map(|output| RunResult {
+                name: output.name,
+                kind: output.kind,
+                value: output.value,
+            })
+            .collect(),
+    })
+}
+
+fn asks(run: &RunProjection) -> Vec<RunAsk> {
+    let mut asks: Vec<_> = run
+        .waiting_gates
+        .iter()
+        .map(|gate| {
+            let (what, why) = if gate.pick.is_some() {
+                (
+                    "Pick an attempt",
+                    format!("Gate {} waits for an attempt to be picked.", gate.gate_id),
+                )
+            } else {
+                (
+                    "Approve or reject",
+                    format!("Gate {} waits for approval or rejection.", gate.gate_id),
+                )
+            };
+            RunAsk {
+                gate: Some(gate.gate_id.clone()),
+                seq: Some(gate.requested_seq),
+                step: None,
+                what: what.into(),
+                why: Some(why),
+                commands: gate_commands(&run.run_id, gate),
+                request: None,
+            }
+        })
+        .collect();
     if run.status == "blocked"
         && let Some(event) = run
             .events
@@ -376,36 +274,108 @@ async fn wait(m: Missions, a: &Value) -> Result<Value, Error> {
             .rev()
             .find(|event| event.kind == "run_blocked")
     {
-        let mut commands = Vec::new();
-        if run.resume_allowed {
-            let extra = if run.resume_policy == "grant" || run.resume_policy == "grant_or_pick" {
-                " --grant"
-            } else {
-                ""
-            };
-            commands.push(format!("ahjo run resume {run_arg}{extra}"));
-            if run.resume_policy == "grant_or_pick" {
-                commands.push(format!("ahjo run resume {run_arg} --pick-best"));
-            }
-        }
-        let why = match wire::plain_reason(&event.detail) {
+        let why = match plain_reason(&event.detail) {
             why if why.is_empty() => run.block_code.replace('_', " "),
             why => why,
         };
-        asks.push(
-            json!({"step":event.node_id,"what":run.block_code,"why":why,"commands":commands}),
+        asks.insert(
+            0,
+            RunAsk {
+                gate: None,
+                seq: None,
+                step: Some(event.node_id.clone()),
+                what: run.block_code.clone(),
+                why: Some(why),
+                commands: resume_commands(run),
+                request: None,
+            },
         );
     }
-    let next: Vec<_> = asks
-        .iter()
-        .flat_map(|ask| ask["commands"].as_array().into_iter().flatten().cloned())
-        .collect();
-    let outputs: Vec<Value> = run
-        .outputs
-        .iter()
-        .map(|o| json!({"name":o.name,"kind":o.kind,"value":o.value}))
-        .collect();
-    Ok(
-        json!({"outcome":answer.outcome,"status":run.status,"cursor":answer.cursor,"asks":asks,"next":next,"outputs":outputs}),
-    )
+    asks
+}
+
+fn next(asks: &[RunAsk]) -> Vec<String> {
+    asks.iter()
+        .flat_map(|ask| ask.commands.iter().cloned())
+        .collect()
+}
+
+fn verdict(
+    m: &Missions,
+    id: &str,
+    gate: &str,
+    verdict: HumanVerdict,
+) -> Result<DecisionRecorded, Error> {
+    if verdict.requested_seq == 0 {
+        return Err(bad("seq must be positive"));
+    }
+    m.coordinator
+        .record_verdict(required(id, "run")?, required(gate, "gate")?, verdict)?;
+    Ok(DecisionRecorded {
+        node: m.node.clone(),
+        run_id: id.into(),
+    })
+}
+
+fn pick(m: &Missions, args: RunPick) -> Result<DecisionRecorded, Error> {
+    if args.seq == 0 {
+        return Err(bad("seq must be positive"));
+    }
+    if args.attempt <= 0 {
+        return Err(bad("attempt must be positive"));
+    }
+    let id = required(&args.run, "run")?;
+    let gate = required(&args.gate, "gate")?;
+    m.coordinator.record_pick(
+        id,
+        gate,
+        HumanPick {
+            requested_seq: args.seq,
+            attempt: args.attempt,
+            reason: args.reason.unwrap_or_default(),
+            relayed_by: args.relayed_by.unwrap_or_default(),
+            actor: decision_actor(args.actor),
+        },
+    )?;
+    Ok(DecisionRecorded {
+        node: m.node.clone(),
+        run_id: args.run,
+    })
+}
+
+fn decision_actor(actor: Option<String>) -> String {
+    match actor.as_deref().unwrap_or_default().trim() {
+        "" => "agent:ahjo".into(),
+        actor => actor.into(),
+    }
+}
+
+fn resume(m: &Missions, args: RunResume) -> Result<RunChanged, Error> {
+    let id = required(&args.run, "run")?;
+    let run = m.coordinator.resume(
+        id,
+        ResumeRequest {
+            mode: args.mode,
+            take_fail: args.take_fail,
+            grant: args.grant,
+            pick_best: args.pick_best,
+            reason: args.reason.unwrap_or_default(),
+            actor: args.actor.unwrap_or_default(),
+        },
+    )?;
+    Ok(RunChanged {
+        node: m.node.clone(),
+        run: state(&run),
+    })
+}
+
+fn abort(m: &Missions, args: RunAbort) -> Result<RunChanged, Error> {
+    let id = required(&args.run, "run")?;
+    let actor = args.actor.as_deref().unwrap_or("agent:ahjo");
+    let reason = args.reason.as_deref().unwrap_or("operator abort");
+    let run = m.coordinator.abort(id, actor, reason)?;
+    Ok(RunChanged {
+        node: m.node.clone(),
+        run: state(&run),
+    })
 }

@@ -921,7 +921,7 @@ impl Coordinator {
             let Some(candidates) = request_candidates(request) else {
                 return Err(io::Error::new(
                     io::ErrorKind::InvalidInput,
-                    "this gate waits for a verdict, not a pick: answer it with gate approve or gate reject",
+                    "this gate waits for a verdict, not a pick: answer it with ahjo run approve or ahjo run reject",
                 ));
             };
             if !candidates.contains(&pick.attempt) {
