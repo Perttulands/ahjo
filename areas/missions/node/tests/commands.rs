@@ -123,6 +123,106 @@ async fn command_list_and_coded_failures() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn mission_edit_rejects_an_unknown_role_and_uses_work_in_both_brief_operations() {
+    let node = Node::start(&[sessions::LISTING, ahjo_work::LISTING, LAB], "")
+        .await
+        .unwrap();
+    node.call(
+        "mission_new",
+        json!({"slug":"pair","example":"write-and-review"}),
+    )
+    .await
+    .unwrap();
+    let inspect = || node.call("mission_inspect", json!({"mission":"pair","full":true}));
+    let before = inspect().await.unwrap();
+    let step = &before["mission"]["formations"][0];
+    let id = &step["id"];
+    let change = json!({"assignSlot":{
+        "formationId": id, "slotId": step["slots"][0]["id"],
+        "role": "planner", "harness": "claude-code", "effort": "high"
+    }});
+    let error = node
+        .call("mission_edit", json!({"mission":"pair","change":change}))
+        .await
+        .unwrap_err();
+    assert_eq!(error.code, "bad_request");
+    assert_eq!(
+        error.message,
+        "assignSlot: unknown field role; accepted fields: formationId, slotId, agentId, harness, model, effort",
+    );
+    let args = vec![
+        "edit".into(),
+        "pair".into(),
+        "--change".into(),
+        change.to_string(),
+        "--node".into(),
+        format!("{}/", node.url()),
+        "--json".into(),
+    ];
+    let mut output = Vec::new();
+    let exit = ahjo_node_kit::cli::run("mission", &args, &mut output)
+        .await
+        .unwrap();
+    assert_eq!(exit, 1);
+    assert!(output.is_empty());
+    assert_eq!(inspect().await.unwrap(), before);
+
+    for (change, work) in [
+        (
+            json!({"setBrief":{"formationId":id,"work":"ahjo-2"}}),
+            "ahjo-2",
+        ),
+        (
+            json!({"editFormation":{"id":id,"title":step["title"],"brief":{"work":"ahjo-3"}}}),
+            "ahjo-3",
+        ),
+    ] {
+        node.call("mission_edit", json!({"mission":"pair","change":change}))
+            .await
+            .unwrap();
+        assert_eq!(
+            inspect().await.unwrap()["mission"]["formations"][0]["brief"]["work"],
+            work
+        );
+    }
+    for change in [
+        json!({"setBrief":{"formationId":id,"beadId":"ahjo-2"}}),
+        json!({"editFormation":{"id":id,"title":step["title"],"brief":{"beadId":"ahjo-2"}}}),
+    ] {
+        let error = node
+            .call("mission_edit", json!({"mission":"pair","change":change}))
+            .await
+            .unwrap_err();
+        assert_eq!(error.code, "bad_request");
+        assert!(
+            error.message.contains("beadId") && error.message.contains("work"),
+            "{error}"
+        );
+    }
+    let mut help = Vec::new();
+    let args = vec![
+        "edit".into(),
+        "--help".into(),
+        "--node".into(),
+        format!("{}/", node.url()),
+    ];
+    assert_eq!(
+        ahjo_node_kit::cli::run("mission", &args, &mut help)
+            .await
+            .unwrap(),
+        0,
+    );
+    let help = String::from_utf8(help).unwrap();
+    assert!(
+        help.contains("editFormation {id, title, brief{goal, repository, work, files[], links[]}}")
+    );
+    assert!(help.contains("setBrief {formationId, goal, repository, work, files[], links[]}"));
+    assert!(!help.contains("beadId"));
+
+    node.stop().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn author_and_run_with_tools() {
     let node = Node::start(&[sessions::LISTING, ahjo_work::LISTING, LAB], "")
         .await
@@ -828,12 +928,14 @@ async fn specialized_authoring_commands_build_and_edit_a_graph() {
     )
     .await
     .unwrap();
-    node.call(
-        "formation_set_brief",
-        json!({"mission":"board","formation":step_id,"goal":"Do the work"}),
-    )
-    .await
-    .unwrap();
+    let brief = node
+        .call(
+            "formation_set_brief",
+            json!({"mission":"board","formation":step_id,"goal":"Do the work","bead":"ahjo-2"}),
+        )
+        .await
+        .unwrap();
+    assert_eq!(brief["changed"][0]["brief"]["work"], "ahjo-2");
     let with_input = node
         .call(
             "formation_add_input",

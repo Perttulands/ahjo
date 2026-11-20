@@ -275,7 +275,7 @@ impl MissionsPage {
                 ..
             } => Request::new("PATCH", NodeId(node.clone()), mission_path(slug))
                 .header("If-Match", etag.clone())
-                .json(&json!({"title":title,"expectedRev":rev,"updatedBy":"human:operator"})),
+                .json(&edits::board_body(rename_patch(&title), *rev)),
             Doing::Archive {
                 node,
                 slug,
@@ -318,7 +318,7 @@ impl MissionsPage {
                         Doing::Rename { title: old_title, .. } => match serde_json::from_slice::<EditResponse>(&answer.body) {
                             Ok(result) => {
                                 page.history.wrote(undo::Version { rev:result.mission.mission.rev, layout:Some(result.layout.etag.clone()) });
-                                page.history.record(undo::Entry { label:"mission name".into(), steps:vec![undo::Step::Board(json!({"title":old_title}))] });
+                                page.history.record(undo::Entry { label:"mission name".into(), steps:vec![undo::Step::Board(rename_patch(old_title))] });
                                 page.state.mission_etag = result.mission.etag;
                                 page.state.mission = Some(result.mission.mission);
                                 page.state.layout_etag = Some(result.layout.etag);
@@ -514,5 +514,20 @@ impl MissionsPage {
                         ),
                 ),
         )
+    }
+}
+
+fn rename_patch(title: &str) -> serde_json::Value {
+    json!({"title": title})
+}
+
+#[cfg(test)]
+mod patch_tests {
+    use super::*;
+
+    #[test]
+    fn rename_and_its_undo_decode() {
+        assert_patch_decodes(&edits::board_body(rename_patch("New mission title"), 7));
+        assert_patch_decodes(&rename_patch("Previous title"));
     }
 }

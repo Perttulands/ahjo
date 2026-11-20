@@ -113,9 +113,7 @@ fn operations(
                 ops.push(undo::Step::Board(json!({"editFormation":{"id":id,"title":if title_changed {&draft.fields[0]} else {&f.title},"brief":brief}})));
             }
             if compare!(2, "Where the step is placed", &f.device) {
-                ops.push(undo::Step::Board(
-                    json!({"updateFormation":{"id":id,"device":draft.fields[2]}}),
-                ));
+                ops.push(undo::Step::Board(edits::device_patch(id, &draft.fields[2])));
             }
             if let Some(slot) = slot.filter(|_| base.fields[10..14] != draft.fields[10..14]) {
                 let Some(current) = f.slots.iter().find(|s| s.id == slot) else {
@@ -148,7 +146,11 @@ fn operations(
                             }
                         })
                         .collect();
-                    ops.push(undo::Step::Board(json!({"assignSlot":{"formationId":id,"slotId":slot,"agentId":result[0],"harness":result[1],"model":result[2],"effort":result[3]}})));
+                    ops.push(undo::Step::Board(edits::staffing_patch(
+                        id,
+                        slot,
+                        [&result[0], &result[1], &result[2], &result[3]],
+                    )));
                 }
             }
             if let Some(port) = port.filter(|_| base.fields[14..16] != draft.fields[14..16]) {
@@ -438,6 +440,126 @@ impl MissionsPage {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn every_editor_save_patch_decodes() {
+        let mission: Mission = serde_json::from_value(json!({
+            "inputCard": [{"id":"input"}],
+            "formation": [{"id":"step","input":[{"id":"port"}],"slot":[{"id":"slot"}]}],
+            "gate": [{"id":"gate"}],
+            "end": [{"id":"end"}],
+            "limit": [{"id":"limit"}],
+        }))
+        .unwrap();
+        let before = serde_json::to_value(ahjo_missions_contract::document::MissionDocument {
+            mission: mission.clone(),
+            etag: None,
+        })
+        .unwrap();
+        let base = EditorSnapshot {
+            fields: vec![String::new(); 22],
+            outputs: vec![],
+        };
+        for (kind, id, values, expected) in [
+            (
+                EditKind::Step,
+                "step",
+                &[
+                    (0, "Build"),
+                    (1, "Implement the task"),
+                    (2, "node/environment"),
+                    (3, "/srv/project"),
+                    (4, "ahjo-2"),
+                    (5, "README.md"),
+                    (6, "https://example.com"),
+                    (10, "builder"),
+                    (11, "claude-code"),
+                    (12, "opus"),
+                    (13, "high"),
+                    (14, "Input"),
+                    (15, "text"),
+                    (16, "Cap"),
+                    (17, "3"),
+                    (18, "90"),
+                    (19, "60"),
+                    (20, "200"),
+                    (21, "stop"),
+                ][..],
+                &[
+                    "editFormation",
+                    "updateFormation",
+                    "assignSlot",
+                    "updatePort",
+                    "updateLimit",
+                ][..],
+            ),
+            (
+                EditKind::Input,
+                "input",
+                &[(0, "Request"), (1, "Build"), (2, "notify")],
+                &["updateInputCard"],
+            ),
+            (
+                EditKind::Gate,
+                "gate",
+                &[
+                    (0, "Review"),
+                    (1, "Tests pass"),
+                    (2, "code,human"),
+                    (5, "README.md"),
+                    (7, "tests"),
+                    (8, "1"),
+                    (9, "passing"),
+                ],
+                &["updateGate"],
+            ),
+            (
+                EditKind::End,
+                "end",
+                &[(0, "Done"), (2, "done")],
+                &["updateEnd"],
+            ),
+        ] {
+            let mut draft = base.clone();
+            for &(index, value) in values {
+                draft.fields[index] = value.into();
+            }
+            if matches!(kind, EditKind::Input) {
+                draft.outputs.push((
+                    "result".into(),
+                    "The result".into(),
+                    "text".into(),
+                    true,
+                    "step:out".into(),
+                ));
+            }
+            let steps = operations(
+                kind,
+                id,
+                Some("slot"),
+                Some("port"),
+                Some("limit"),
+                &base,
+                &draft,
+                &mission,
+            )
+            .unwrap();
+            assert_eq!(steps.len(), expected.len());
+            for (step, name) in steps.iter().zip(expected) {
+                let undo::Step::Board(patch) = step else {
+                    panic!("expected board edit")
+                };
+                assert!(patch.get(*name).is_some(), "{patch}");
+                assert_patch_decodes(patch);
+                let reverse = undo::inverse(&before, &[], step).unwrap();
+                assert_eq!(reverse.len(), 1);
+                let undo::Step::Board(patch) = &reverse[0] else {
+                    panic!("expected reverse board edit")
+                };
+                assert_patch_decodes(patch);
+            }
+        }
+    }
+
     #[test]
     fn edits_merge_untouched_fields_and_refuse_the_same_field() {
         let base = EditorSnapshot {

@@ -942,18 +942,9 @@ impl MissionsPage {
         to: Option<String>,
         cx: &mut Context<Self>,
     ) {
-        let patch = match (lifted, to) {
-            (None, None) => return,
-            (Some(old), Some(to)) if old == to => return,
-            (None, Some(to)) => {
-                json!({"wireConnection":{"from":from,"to":to,"joinIfOccupied":true}})
-            }
-            (Some(old), Some(to)) => {
-                json!({"rewireConnection":{"from":from,"previousTo":old,"to":to,"joinIfOccupied":true}})
-            }
-            (Some(old), None) => json!({"unwireConnection":{"from":from,"to":old}}),
-        };
-        self.write_board(patch, WriteMode::Edit, cx);
+        if let Some(patch) = wire_patch(&from, lifted.as_deref(), to.as_deref()) {
+            self.write_board(patch, WriteMode::Edit, cx);
+        }
     }
     fn canvas_move(&mut self, id: &str, from: (f32, f32), to: (f32, f32), cx: &mut Context<Self>) {
         let before = LayoutNode {
@@ -1061,14 +1052,22 @@ impl MissionsPage {
         };
         let x = at.0.round() as i64;
         let y = at.1.round() as i64;
-        div().absolute().occlude().left(px(at.0*view.zoom+view.pan.0)).top(px(at.1*view.zoom+view.pan.1)).w(px(size::MENU)).bg(t.raised).border_1().border_color(t.divider).rounded(px(size::RADIUS)).shadow_lg().child(kit::label(t,"New"))
-            .when(mission.input_cards.is_empty(),|d| d.child(item("canvas-new-input","Input card",json!({"createInputCard":{"title":"Input","goal":"","x":x,"y":y}}))))
-            .child(item("canvas-new-solo","Solo formation",json!({"createFormation":{"type":"solo","title":"New formation","x":x,"y":y}})))
-            .child(item("canvas-new-orch","Orchestrated formation",json!({"createFormation":{"type":"orchestrated","title":"New formation","x":x,"y":y}})))
-            .child(item("canvas-new-gate","Gate",json!({"createGate":{"title":"Review gate","kinds":["human"],"criterion":"","x":x,"y":y}})))
-            .child(item("canvas-new-limit","Limit",json!({"createLimit":{"title":"Limit","target":"","rounds":3,"x":x,"y":y}})))
-            .child(item("canvas-new-done","End · done",json!({"createEnd":{"outcome":"done","title":"Done","x":x,"y":y}})))
-            .child(item("canvas-new-rejected","End · rejected",json!({"createEnd":{"outcome":"rejected","title":"Rejected","x":x,"y":y}})))
+        div()
+            .absolute()
+            .occlude()
+            .left(px(at.0 * view.zoom + view.pan.0))
+            .top(px(at.1 * view.zoom + view.pan.1))
+            .w(px(size::MENU))
+            .bg(t.raised)
+            .border_1()
+            .border_color(t.divider)
+            .rounded(px(size::RADIUS))
+            .shadow_lg()
+            .child(kit::label(t, "New"))
+            .children(
+                new_card_items(x, y, mission.input_cards.is_empty())
+                    .map(|(id, label, patch)| item(id, label, patch)),
+            )
     }
 }
 
@@ -1882,25 +1881,7 @@ impl MissionsPage {
             });
         self.canvas.show((spot.0, spot.1, size.0, size.1));
         let (x, y) = (spot.0 as i64, spot.1 as i64);
-        let patch = match kind {
-            board::Kind::Input => {
-                json!({"createInputCard":{"title":"Input","goal":"","x":x,"y":y}})
-            }
-            board::Kind::Formation => {
-                json!({"createFormation":{"type":"solo","title":"New step","x":x,"y":y}})
-            }
-            board::Kind::Gate => {
-                json!({"createGate":{"title":"New gate","kinds":["human"],"x":x,"y":y}})
-            }
-            board::Kind::End => {
-                json!({"createEnd":{"title":"End","outcome":"done","x":x,"y":y}})
-            }
-            // A cap on the card it is added after, three rounds to start.
-            board::Kind::Limit => {
-                let target = after.unwrap_or_default();
-                json!({"createLimit":{"title":"Limit","target":target,"rounds":3,"x":x,"y":y}})
-            }
-        };
+        let patch = place_patch(kind, after, x, y);
         if matches!(kind, board::Kind::Formation | board::Kind::End) {
             self.new_step = Some((kind, beside.and_then(|c| leaving_port(&mission, &c.id))));
         }
@@ -1924,11 +1905,7 @@ impl MissionsPage {
                     .map(|e| e.id.clone())
             });
             if let (Some(from), Some(end)) = (from, end) {
-                self.write_board(
-                    json!({"wireConnection":{"from":from,"to":format!("{end}:in"),"joinIfOccupied":true}}),
-                    WriteMode::Edit,
-                    cx,
-                );
+                self.canvas_wire(from, None, Some(format!("{end}:in")), cx);
             }
             return;
         }
@@ -1944,11 +1921,7 @@ impl MissionsPage {
         self.edit_step(&step.id, cx);
         if let (Some(from), Some(port)) = (from, step.inputs.first()) {
             let to = format!("{}:{}", step.id, port.id);
-            self.write_board(
-                json!({"wireConnection":{"from":from,"to":to,"joinIfOccupied":true}}),
-                WriteMode::Edit,
-                cx,
-            );
+            self.canvas_wire(from, None, Some(to), cx);
         }
     }
 
@@ -2060,9 +2033,88 @@ fn leaving_port(m: &Mission, card: &str) -> Option<String> {
         .then(|| format!("{card}:pass"))
 }
 
+fn wire_patch(from: &str, lifted: Option<&str>, to: Option<&str>) -> Option<serde_json::Value> {
+    Some(match (lifted, to) {
+        (None, None) => return None,
+        (Some(old), Some(to)) if old == to => return None,
+        (None, Some(to)) => {
+            json!({"wireConnection":{"from":from,"to":to,"joinIfOccupied":true}})
+        }
+        (Some(old), Some(to)) => {
+            json!({"rewireConnection":{"from":from,"previousTo":old,"to":to,"joinIfOccupied":true}})
+        }
+        (Some(old), None) => json!({"unwireConnection":{"from":from,"to":old}}),
+    })
+}
+
+fn new_card_items(
+    x: i64,
+    y: i64,
+    show_input: bool,
+) -> impl Iterator<Item = (&'static str, &'static str, serde_json::Value)> {
+    [
+        ("canvas-new-input", "Input card", json!({"createInputCard":{"title":"Input","goal":"","x":x,"y":y}})),
+        ("canvas-new-solo", "Solo formation", json!({"createFormation":{"type":"solo","title":"New formation","x":x,"y":y}})),
+        ("canvas-new-orch", "Orchestrated formation", json!({"createFormation":{"type":"orchestrated","title":"New formation","x":x,"y":y}})),
+        ("canvas-new-gate", "Gate", json!({"createGate":{"title":"Review gate","kinds":["human"],"criterion":"","x":x,"y":y}})),
+        ("canvas-new-limit", "Limit", json!({"createLimit":{"title":"Limit","target":"","rounds":3,"x":x,"y":y}})),
+        ("canvas-new-done", "End · done", json!({"createEnd":{"outcome":"done","title":"Done","x":x,"y":y}})),
+        ("canvas-new-rejected", "End · rejected", json!({"createEnd":{"outcome":"rejected","title":"Rejected","x":x,"y":y}})),
+    ]
+    .into_iter()
+    .skip(usize::from(!show_input))
+}
+
+fn place_patch(kind: board::Kind, after: Option<&str>, x: i64, y: i64) -> serde_json::Value {
+    match kind {
+        board::Kind::Input => {
+            json!({"createInputCard":{"title":"Input","goal":"","x":x,"y":y}})
+        }
+        board::Kind::Formation => {
+            json!({"createFormation":{"type":"solo","title":"New step","x":x,"y":y}})
+        }
+        board::Kind::Gate => {
+            json!({"createGate":{"title":"New gate","kinds":["human"],"x":x,"y":y}})
+        }
+        board::Kind::End => {
+            json!({"createEnd":{"title":"End","outcome":"done","x":x,"y":y}})
+        }
+        // A cap on the card it is added after, three rounds to start.
+        board::Kind::Limit => {
+            let target = after.unwrap_or_default();
+            json!({"createLimit":{"title":"Limit","target":target,"rounds":3,"x":x,"y":y}})
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn canvas_card_and_wire_patches_decode() {
+        let menu: Vec<_> = new_card_items(10, 20, true).collect();
+        assert_eq!(menu.len(), 7);
+        for (_, _, patch) in menu {
+            super::super::assert_patch_decodes(&patch);
+        }
+        for kind in [
+            board::Kind::Input,
+            board::Kind::Formation,
+            board::Kind::Gate,
+            board::Kind::End,
+            board::Kind::Limit,
+        ] {
+            super::super::assert_patch_decodes(&place_patch(kind, Some("step"), 10, 20));
+        }
+        for (lifted, to) in [
+            (None, Some("step:in")),
+            (Some("step:in"), Some("end:in")),
+            (Some("step:in"), None),
+        ] {
+            super::super::assert_patch_decodes(&wire_patch("input:out", lifted, to).unwrap());
+        }
+    }
 
     #[test]
     fn a_new_step_follows_the_edited_card_else_the_open_end_of_the_flow() {

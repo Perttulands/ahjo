@@ -420,6 +420,24 @@ pub fn uncreate(id: &str, kind: &str) -> Step {
 mod tests {
     use super::*;
 
+    fn check_patches(steps: Vec<Step>) -> Vec<Step> {
+        for step in &steps {
+            if let Step::Board(patch) = step {
+                ahjo_missions_contract::patch::decode(patch)
+                    .unwrap_or_else(|error| panic!("{patch}: {error}"));
+            }
+        }
+        steps
+    }
+
+    fn inverse(m: &Value, layout: &[Placed], step: &Step) -> Result<Vec<Step>, String> {
+        super::inverse(m, layout, step).map(check_patches)
+    }
+
+    fn answered(patch: &Value, before: &Value, after: &Value) -> Vec<Step> {
+        check_patches(super::answered(patch, before, after))
+    }
+
     fn mission() -> Value {
         json!({
             "title": "Delivery",
@@ -529,6 +547,52 @@ mod tests {
             uncreate("fmn_new", "formation"),
             Step::Board(json!({"deleteFormation": {"id": "fmn_new"}}))
         );
+    }
+
+    #[test]
+    fn undo_and_redo_patches_decode_for_each_card_kind() {
+        let m = json!({
+            "inputCards": [{"id":"input"}],
+            "formations": [{"id":"step","brief":{"work":"ahjo-2"},"inputs":[],"outputs":[],"slots":[]}],
+            "gates": [{"id":"gate"}],
+            "ends": [{"id":"end"}],
+            "limits": [{"id":"limit"}],
+        });
+        for (op, id, kind) in [
+            ("deleteInputCard", "input", "inputCard"),
+            ("deleteFormation", "step", "formation"),
+            ("deleteGate", "gate", "gate"),
+            ("deleteEnd", "end", "end"),
+            ("deleteLimit", "limit", "limit"),
+        ] {
+            let delete = Step::Board(json!({op: {"id": id}}));
+            let restore = inverse(&m, &[], &delete).unwrap();
+            assert_eq!(restore.len(), 1);
+            assert_eq!(inverse(&m, &[], &restore[0]).unwrap(), vec![delete.clone()]);
+            assert_eq!(check_patches(vec![uncreate(id, kind)]), vec![delete]);
+        }
+    }
+
+    #[test]
+    fn title_and_wire_inverses_decode() {
+        let before = mission();
+        for patch in [
+            json!({"title":"Other"}),
+            json!({"wireConnection":{"from":"fmn_plan:out","to":"fmn_beads:in"}}),
+            json!({"rewireConnection":{"from":"fmn_plan:out","previousTo":"fmn_beads:in","to":"gate_r:in"}}),
+        ] {
+            assert_eq!(inverse(&before, &[], &Step::Board(patch)).unwrap().len(), 1);
+        }
+        let patch = json!({"rewireConnection":{
+            "from":"fmn_plan:out","previousTo":"fmn_beads:in","to":"gate_r:in","joinIfOccupied":true,
+        }});
+        let mut after = before.clone();
+        after["connections"][0]["to"] = json!("gate_r:in_2");
+        let steps = answered(&patch, &before, &after);
+        let Step::Board(reverse) = &steps[0] else {
+            panic!("expected board edit")
+        };
+        assert_eq!(reverse["rewireConnection"]["removePreviousInput"], true);
     }
 
     #[test]

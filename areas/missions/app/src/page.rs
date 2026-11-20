@@ -885,11 +885,7 @@ impl MissionsPage {
             )
             .debug_selector(move || selector.into())
             .on_click(cx.listener(move |p, _, _, cx| {
-                p.write_board(
-                    json!({"updateFormation":{"id":id,"fresh":fresh}}),
-                    WriteMode::Edit,
-                    cx,
-                )
+                p.write_board(edits::session_patch(&id, fresh), WriteMode::Edit, cx)
             }))
         };
         div()
@@ -996,9 +992,7 @@ impl MissionsPage {
                 .and_then(|v| v.as_str())
                 .map(str::to_owned)
         });
-        let mut body = patch.clone();
-        body["expectedRev"] = json!(mission.rev);
-        body["updatedBy"] = json!("human:operator");
+        let body = edits::board_body(patch.clone(), mission.rev);
         let request = Request::new("PATCH", NodeId(node), mission_path(&slug))
             .header("If-Match", etag)
             .json(&body);
@@ -1283,20 +1277,15 @@ impl MissionsPage {
         let Some(ed) = &self.editor else {
             return;
         };
-        let id = ed.id.clone();
-        let label = self.port_label.read(cx).text.clone();
-        let kind = self.port_kind.read(cx).text.clone();
-        let patch = match op {
-            "input" | "output" => {
-                json!({"addPort":{"formationId":id,"direction":op,"label":label,"kind":kind}})
-            }
-            "update" => {
-                json!({"updatePort":{"formationId":id,"portId":self.port,"label":label,"kind":kind}})
-            }
-            "remove" => json!({"removePort":{"formationId":id,"portId":self.port}}),
-            _ => return,
-        };
-        self.write_board(patch, WriteMode::Edit, cx);
+        if let Some(patch) = edits::port_patch(
+            op,
+            &ed.id,
+            self.port.as_deref(),
+            &self.port_label.read(cx).text,
+            &self.port_kind.read(cx).text,
+        ) {
+            self.write_board(patch, WriteMode::Edit, cx);
+        }
     }
     fn select_limit(&mut self, id: &str, cx: &mut Context<Self>) {
         if self.group_is_dirty(16..22, cx) {
@@ -1334,36 +1323,35 @@ impl MissionsPage {
             return;
         };
         if action == "create" {
-            self.write_board(json!({"createLimit":{"title":"Limit","target":ed.id,"rounds":3,"whenSpent":"stop","x":0,"y":0}}), WriteMode::Edit, cx);
+            self.write_board(edits::add_limit_patch(&ed.id), WriteMode::Edit, cx);
             return;
         }
         let Some(id) = self.limit.clone() else {
             return;
         };
         if action == "delete" {
-            self.write_board(json!({"deleteLimit":{"id":id}}), WriteMode::Edit, cx);
+            self.write_board(edits::delete_limit_patch(&id), WriteMode::Edit, cx);
             self.limit = None;
             return;
         }
-        let mut value = json!({"id":id, "title":self.limit_title.read(cx).text, "whenSpent":self.limit_spent.read(cx).text});
-        for (key, field) in [
-            ("rounds", &self.limit_rounds),
-            ("seconds", &self.limit_seconds),
-            ("warnSeconds", &self.limit_warn),
-            ("tokens", &self.limit_tokens),
-        ] {
-            let text = &field.read(cx).text;
-            if text.trim().is_empty() {
-                value[key] = json!(0);
-            } else if let Ok(n) = text.trim().parse::<i64>() {
-                value[key] = json!(n);
-            } else {
-                self.state.error = Some(format!("{key} must be a whole number"));
+        let patch = edits::update_limit_patch(
+            &id,
+            &self.limit_title.read(cx).text,
+            &self.limit_spent.read(cx).text,
+            [
+                &self.limit_rounds.read(cx).text,
+                &self.limit_seconds.read(cx).text,
+                &self.limit_warn.read(cx).text,
+                &self.limit_tokens.read(cx).text,
+            ],
+        );
+        match patch {
+            Ok(patch) => self.write_board(patch, WriteMode::Edit, cx),
+            Err(error) => {
+                self.state.error = Some(error);
                 cx.notify();
-                return;
             }
         }
-        self.write_board(json!({"updateLimit":value}), WriteMode::Edit, cx);
     }
     fn add_output(&mut self, cx: &mut Context<Self>) {
         let name = cx.new(|cx| TextField::new(cx, "Output name"));
@@ -1392,30 +1380,38 @@ impl MissionsPage {
         let Some(ed) = &self.editor else {
             return;
         };
-        let patch = json!({"setFormationType": {"id":ed.id, "type":kind, "keepSlotId":self.slot.clone().unwrap_or_default()}});
+        let patch =
+            edits::formation_type_patch(&ed.id, kind, self.slot.as_deref().unwrap_or_default());
         self.write_board(patch, WriteMode::Edit, cx);
     }
     fn name_agent(&mut self, cx: &mut Context<Self>) {
         let (Some(ed), Some(slot)) = (&self.editor, &self.slot) else {
             return;
         };
-        let patch = json!({"nameAgent":{"formationId":ed.id,"slotId":slot,"agent":self.agent_name.read(cx).text.trim()}});
+        let patch = edits::name_agent_patch(&ed.id, slot, self.agent_name.read(cx).text.trim());
         self.write_board(patch, WriteMode::Edit, cx);
     }
     fn set_device(&mut self, cx: &mut Context<Self>) {
         let Some(ed) = &self.editor else {
             return;
         };
-        let patch = json!({"updateFormation":{"id":ed.id,"device":self.extra.read(cx).text}});
+        let patch = edits::device_patch(&ed.id, &self.extra.read(cx).text);
         self.write_board(patch, WriteMode::Edit, cx);
     }
     pub(super) fn assign_slot(&mut self, cx: &mut Context<Self>) {
         let (Some(ed), Some(slot)) = (&self.editor, &self.slot) else {
             return;
         };
-        let patch = json!({"assignSlot": {"formationId": ed.id, "slotId": slot,
-            "agentId":self.role.read(cx).text, "harness":self.harness.read(cx).text,
-            "model":self.model.read(cx).text, "effort":self.effort.read(cx).text}});
+        let patch = edits::staffing_patch(
+            &ed.id,
+            slot,
+            [
+                &self.role.read(cx).text,
+                &self.harness.read(cx).text,
+                &self.model.read(cx).text,
+                &self.effort.read(cx).text,
+            ],
+        );
         self.write_board(patch, WriteMode::Edit, cx);
     }
     fn arrange(&mut self, cx: &mut Context<Self>) {
@@ -1473,13 +1469,7 @@ impl MissionsPage {
             cx.notify();
             return;
         }
-        let key = match ed.kind {
-            EditKind::Step => "deleteFormation",
-            EditKind::Input => "deleteInputCard",
-            EditKind::Gate => "deleteGate",
-            EditKind::End => "deleteEnd",
-        };
-        let patch = json!({key: {"id": ed.id}});
+        let patch = edits::delete_card_patch(ed.kind, &ed.id);
         self.write_board(patch, WriteMode::Edit, cx);
     }
     fn save_step(&mut self, cx: &mut Context<Self>) {
@@ -2048,6 +2038,11 @@ impl Render for MissionsPage {
 /// A control held at its own width on the left of the step editor.
 fn left(control: impl IntoElement) -> Div {
     div().flex().child(control)
+}
+
+#[cfg(test)]
+fn assert_patch_decodes(patch: &serde_json::Value) {
+    ahjo_missions_contract::patch::decode(patch).unwrap_or_else(|error| panic!("{patch}: {error}"));
 }
 
 #[cfg(test)]

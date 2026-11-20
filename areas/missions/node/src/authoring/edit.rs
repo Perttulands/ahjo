@@ -197,7 +197,7 @@ pub(super) fn operation<'a>(
             }
             v["formationId"] = json!(node("formations")?);
             if let Some(bead) = a.flag("bead") {
-                v["beadId"] = json!(bead);
+                v["work"] = json!(bead);
             }
             if let Some(links) = a.flags.get("link") {
                 v["links"] = json!(links);

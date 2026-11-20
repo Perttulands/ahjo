@@ -28,8 +28,16 @@ fn strings(v: &Value, k: &str) -> Result<Vec<String>, String> {
     }
 }
 
-fn fields_are_typed(v: &Value) -> Result<(), String> {
+// HTTP callers may send this metadata alongside the operation or inside it.
+const PATCH_METADATA: &[&str] = &["expectedRev", "updatedBy"];
+
+fn validate_fields(op: &str, v: &Value, accepted: &[&str]) -> Result<(), String> {
     let fields = v.as_object().ok_or("operation must be an object")?;
+    for key in fields.keys() {
+        if !accepted.contains(&key.as_str()) && !PATCH_METADATA.contains(&key.as_str()) {
+            return Err(unknown_field(op, key, &accepted.join(", ")));
+        }
+    }
     for (key, value) in fields {
         if value.is_null() {
             continue;
@@ -48,7 +56,7 @@ fn fields_are_typed(v: &Value) -> Result<(), String> {
             "harness",
             "model",
             "effort",
-            "beadId",
+            "work",
             "direction",
             "label",
             "kind",
@@ -88,95 +96,78 @@ fn fields_are_typed(v: &Value) -> Result<(), String> {
     Ok(())
 }
 
-/// Every operation `decode` takes, each with the fields it reads; a field
-/// left out keeps its default or, in an update, what was there. A node is
-/// named by its id, a wire's end as `<node-id>:<port-id>`. `mission edit`
-/// shows this list.
-pub const OPERATIONS: &[(&str, &str)] = &[
-    ("title", "\"<the mission's new title>\", a string"),
-    ("prefix", "\"<the run branches' prefix>\", a string"),
+fn unknown_field(op: &str, key: &str, accepted: &str) -> String {
+    format!("{op}: unknown field {key}; accepted fields: {accepted}")
+}
+
+// Keep the help and the decoder's accepted keys in the same table.
+macro_rules! operations {
     (
-        "createInputCard",
-        "title, goal, files[], humanChannel (notify|session), x, y",
-    ),
-    (
-        "updateInputCard",
-        "id, title, goal, files[], inputHint, humanChannel, inputs[], outputs[]",
-    ),
-    ("deleteInputCard", "id"),
-    (
-        "createFormation",
-        "type (solo|peer|orchestrated), title, x, y",
-    ),
-    ("updateFormation", "id, title, device, fresh"),
-    (
-        "editFormation",
-        "id, title, brief{goal, repository, beadId, files[], links[]}",
-    ),
-    ("setFormationType", "id, type, keepSlotId, slots[]"),
-    ("deleteFormation", "id"),
-    (
-        "assignSlot",
-        "formationId, slotId, agentId, harness, model, effort",
-    ),
-    ("nameAgent", "formationId, slotId, agent"),
-    ("swapSlots", "fromFormation, fromSlot, toFormation, toSlot"),
-    ("makeController", "formationId, slotId"),
-    (
-        "setBrief",
-        "formationId, goal, repository, beadId, files[], links[]",
-    ),
-    ("clearBrief", "formationId"),
-    (
-        "addPort",
-        "formationId, direction (input|output), label, kind (text|file|folder)",
-    ),
-    ("updatePort", "formationId, portId, label, kind"),
-    ("removePort", "formationId, portId"),
-    (
-        "restorePort",
-        "formationId, direction, port{}, index, connections[]",
-    ),
-    ("wireConnection", "from, to, id, joinIfOccupied"),
-    ("unwireConnection", "from, to"),
-    (
-        "rewireConnection",
-        "from, previousTo, to, joinIfOccupied, removePreviousInput",
-    ),
-    (
-        "createGate",
-        "title, kinds[] (code|formation|human, default human), criterion, check, checkVersion, checkValue, files[], x, y",
-    ),
-    (
-        "updateGate",
-        "id, title, kinds[], criterion, check, checkVersion, checkValue, files[]",
-    ),
-    ("setGateJudge", "gateId, chain[] (step ids)"),
-    ("detachGateJudge", "gateId"),
-    ("deleteGate", "id"),
-    ("createEnd", "title, outcome (done|rejected), x, y"),
-    ("updateEnd", "id, title, outcome"),
-    ("deleteEnd", "id"),
-    (
-        "createLimit",
-        "title, target, rounds, seconds, warnSeconds, tokens, whenSpent, x, y",
-    ),
-    (
-        "updateLimit",
-        "id, title, target, rounds, seconds, warnSeconds, tokens, whenSpent",
-    ),
-    ("deleteLimit", "id"),
-    (
-        "restoreNode",
-        "inputCard{} or formation{} or gate{} or end{} or limit{}, connections[], index, x, y",
-    ),
-];
+        scalars { $($scalar:literal => $description:literal,)* }
+        $($op:literal => [$first:literal $(=> $first_hint:literal)?
+            $(, $field:literal $(=> $hint:literal)?)*],)*
+    ) => {
+        /// Every operation `decode` takes, with the fields `mission edit` shows.
+        pub const OPERATIONS: &[(&str, &str)] = &[
+            $(($scalar, $description),)*
+            $(($op, concat!($first $(, $first_hint)? $(, ", ", $field $(, $hint)?)*)),)*
+        ];
+
+        fn accepted_fields(op: &str) -> Option<&'static [&'static str]> {
+            match op {
+                $($scalar => Some(&[]),)*
+                $($op => Some(&[$first $(, $field)*]),)*
+                _ => None,
+            }
+        }
+    };
+}
+
+operations! {
+    scalars {
+        "title" => "\"<the mission's new title>\", a string",
+        "prefix" => "\"<the run branches' prefix>\", a string",
+    }
+    "createInputCard" => ["title", "goal", "files" => "[]", "humanChannel" => " (notify|session)", "x", "y"],
+    "updateInputCard" => ["id", "title", "goal", "files" => "[]", "inputHint", "humanChannel", "inputs" => "[]", "outputs" => "[]"],
+    "deleteInputCard" => ["id"],
+    "createFormation" => ["type" => " (solo|peer|orchestrated)", "title", "x", "y"],
+    "updateFormation" => ["id", "title", "device", "fresh"],
+    "editFormation" => ["id", "title", "brief" => "{goal, repository, work, files[], links[]}"],
+    "setFormationType" => ["id", "type", "keepSlotId", "slots" => "[]"],
+    "deleteFormation" => ["id"],
+    "assignSlot" => ["formationId", "slotId", "agentId", "harness", "model", "effort"],
+    "nameAgent" => ["formationId", "slotId", "agent"],
+    "swapSlots" => ["fromFormation", "fromSlot", "toFormation", "toSlot"],
+    "makeController" => ["formationId", "slotId"],
+    "setBrief" => ["formationId", "goal", "repository", "work", "files" => "[]", "links" => "[]"],
+    "clearBrief" => ["formationId"],
+    "addPort" => ["formationId", "direction" => " (input|output)", "label", "kind" => " (text|file|folder)"],
+    "updatePort" => ["formationId", "portId", "label", "kind"],
+    "removePort" => ["formationId", "portId"],
+    "restorePort" => ["formationId", "direction", "port" => "{}", "index", "connections" => "[]"],
+    "wireConnection" => ["from", "to", "id", "joinIfOccupied"],
+    "unwireConnection" => ["from", "to"],
+    "rewireConnection" => ["from", "previousTo", "to", "joinIfOccupied", "removePreviousInput"],
+    "createGate" => ["title", "kinds" => "[] (code|formation|human, default human)", "criterion", "check", "checkVersion", "checkValue", "files" => "[]", "x", "y"],
+    "updateGate" => ["id", "title", "kinds" => "[]", "criterion", "check", "checkVersion", "checkValue", "files" => "[]"],
+    "setGateJudge" => ["gateId", "chain" => "[] (step ids)"],
+    "detachGateJudge" => ["gateId"],
+    "deleteGate" => ["id"],
+    "createEnd" => ["title", "outcome" => " (done|rejected)", "x", "y"],
+    "updateEnd" => ["id", "title", "outcome"],
+    "deleteEnd" => ["id"],
+    "createLimit" => ["title", "target", "rounds", "seconds", "warnSeconds", "tokens", "whenSpent", "x", "y"],
+    "updateLimit" => ["id", "title", "target", "rounds", "seconds", "warnSeconds", "tokens", "whenSpent"],
+    "deleteLimit" => ["id"],
+    "restoreNode" => ["inputCard" => "{}", "formation" => "{}", "gate" => "{}", "end" => "{}", "limit" => "{} (choose one node)", "connections" => "[]", "index", "x", "y"],
+}
 
 pub fn decode(body: &Value) -> Result<Patch, String> {
     let map = body.as_object().ok_or("expected an object")?;
     let ops: Vec<_> = map
         .keys()
-        .filter(|k| !["expectedRev", "updatedBy"].contains(&k.as_str()))
+        .filter(|k| !PATCH_METADATA.contains(&k.as_str()))
         .collect();
     if ops.len() != 1 {
         let names: Vec<_> = ops.iter().map(|x| x.as_str()).collect();
@@ -196,8 +187,17 @@ pub fn decode(body: &Value) -> Result<Patch, String> {
     }
     let op = ops[0].as_str();
     let v = &body[op];
-    if op != "title" && op != "prefix" {
-        fields_are_typed(v)?;
+    let Some(accepted) = accepted_fields(op) else {
+        let known: Vec<_> = OPERATIONS.iter().map(|(name, _)| *name).collect();
+        return Err(format!(
+            "unknown operation {op}; the operations are {}",
+            known.join(", ")
+        ));
+    };
+    if !accepted.is_empty() {
+        validate_fields(op, v, accepted)?;
+    } else if let Some(key) = v.as_object().and_then(|fields| fields.keys().next()) {
+        return Err(unknown_field(op, key, "none (expects a string)"));
     }
     let id = || s(v, "id");
     let fid = || s(v, "formationId");
@@ -282,7 +282,7 @@ pub fn decode(body: &Value) -> Result<Patch, String> {
             brief: Brief {
                 repository: s(v, "repository"),
                 goal: s(v, "goal"),
-                work: s(v, "beadId"),
+                work: s(v, "work"),
                 files: strings(v, "files")?,
                 links: strings(v, "links")?,
             },
@@ -455,13 +455,7 @@ pub fn decode(body: &Value) -> Result<Patch, String> {
                 y,
             }
         }
-        _ => {
-            let known: Vec<&str> = OPERATIONS.iter().map(|(name, _)| *name).collect();
-            return Err(format!(
-                "unknown operation {op}; the operations are {}",
-                known.join(", ")
-            ));
-        }
+        _ => unreachable!(),
     })
 }
 fn strings_or<T: DeserializeOwned>(v: &Value, k: &str) -> Result<Vec<T>, String> {
@@ -527,6 +521,36 @@ mod tests {
             "{error}"
         );
     }
+    #[test]
+    fn every_operation_rejects_unknown_fields_even_if_null() {
+        for &(op, _) in OPERATIONS {
+            let error = decode(&json!({op: {"unexpected": null}})).unwrap_err();
+            assert!(
+                error.contains(&format!("{op}: unknown field unexpected")),
+                "{error}"
+            );
+            let fields = accepted_fields(op).unwrap();
+            let expected = if fields.is_empty() {
+                "none (expects a string)".to_owned()
+            } else {
+                fields.join(", ")
+            };
+            assert!(
+                error.ends_with(&format!("accepted fields: {expected}")),
+                "{error}"
+            );
+        }
+    }
+
+    #[test]
+    fn fields_from_other_operations_are_rejected() {
+        let error = decode(&json!({"assignSlot": {"device": "local"}})).unwrap_err();
+        assert_eq!(
+            error,
+            "assignSlot: unknown field device; accepted fields: formationId, slotId, agentId, harness, model, effort",
+        );
+    }
+
     #[test]
     fn malformed_operation_fields_are_not_silently_dropped() {
         assert!(decode(&json!({"createEnd":{"outcome":42}})).is_err());

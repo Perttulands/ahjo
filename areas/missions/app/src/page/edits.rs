@@ -145,9 +145,7 @@ impl MissionsPage {
                     );
                     return;
                 };
-                let mut body = patch.clone();
-                body["expectedRev"] = json!(mission.rev);
-                body["updatedBy"] = json!("human:operator");
+                let body = board_body(patch.clone(), mission.rev);
                 Request::new("PATCH", NodeId(pending.node.clone()), path)
                     .header("If-Match", etag)
                     .json(&body)
@@ -441,9 +439,130 @@ fn accept_editor_operation(
     }
 }
 
+pub(super) fn board_body(mut patch: serde_json::Value, rev: i64) -> serde_json::Value {
+    patch["expectedRev"] = json!(rev);
+    patch["updatedBy"] = json!("human:operator");
+    patch
+}
+
+pub(super) fn session_patch(id: &str, fresh: bool) -> serde_json::Value {
+    json!({"updateFormation":{"id":id,"fresh":fresh}})
+}
+
+pub(super) fn port_patch(
+    op: &str,
+    id: &str,
+    port: Option<&str>,
+    label: &str,
+    kind: &str,
+) -> Option<serde_json::Value> {
+    Some(match op {
+        "input" | "output" => {
+            json!({"addPort":{"formationId":id,"direction":op,"label":label,"kind":kind}})
+        }
+        "update" => {
+            json!({"updatePort":{"formationId":id,"portId":port,"label":label,"kind":kind}})
+        }
+        "remove" => json!({"removePort":{"formationId":id,"portId":port}}),
+        _ => return None,
+    })
+}
+
+pub(super) fn add_limit_patch(target: &str) -> serde_json::Value {
+    json!({"createLimit":{"title":"Limit","target":target,"rounds":3,"whenSpent":"stop","x":0,"y":0}})
+}
+
+pub(super) fn delete_limit_patch(id: &str) -> serde_json::Value {
+    json!({"deleteLimit":{"id":id}})
+}
+
+pub(super) fn update_limit_patch(
+    id: &str,
+    title: &str,
+    when_spent: &str,
+    [rounds, seconds, warn_seconds, tokens]: [&str; 4],
+) -> Result<serde_json::Value, String> {
+    let mut fields = json!({"id":id, "title":title, "whenSpent":when_spent});
+    for (key, text) in [
+        ("rounds", rounds),
+        ("seconds", seconds),
+        ("warnSeconds", warn_seconds),
+        ("tokens", tokens),
+    ] {
+        let text = text.trim();
+        let value = if text.is_empty() {
+            0
+        } else {
+            text.parse::<i64>()
+                .map_err(|_| format!("{key} must be a whole number"))?
+        };
+        fields[key] = json!(value);
+    }
+    Ok(json!({"updateLimit":fields}))
+}
+
+pub(super) fn formation_type_patch(id: &str, kind: &str, slot: &str) -> serde_json::Value {
+    json!({"setFormationType":{"id":id,"type":kind,"keepSlotId":slot}})
+}
+
+pub(super) fn name_agent_patch(id: &str, slot: &str, agent: &str) -> serde_json::Value {
+    json!({"nameAgent":{"formationId":id,"slotId":slot,"agent":agent}})
+}
+
+pub(super) fn device_patch(id: &str, device: &str) -> serde_json::Value {
+    json!({"updateFormation":{"id":id,"device":device}})
+}
+
+pub(super) fn staffing_patch(
+    id: &str,
+    slot: &str,
+    [agent_id, harness, model, effort]: [&str; 4],
+) -> serde_json::Value {
+    json!({"assignSlot":{"formationId":id,"slotId":slot,
+        "agentId":agent_id,"harness":harness,"model":model,"effort":effort}})
+}
+
+pub(super) fn delete_card_patch(kind: EditKind, id: &str) -> serde_json::Value {
+    let op = match kind {
+        EditKind::Step => "deleteFormation",
+        EditKind::Input => "deleteInputCard",
+        EditKind::Gate => "deleteGate",
+        EditKind::End => "deleteEnd",
+    };
+    json!({op: {"id": id}})
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn immediate_board_edits_decode() {
+        for patch in [
+            session_patch("step", true),
+            formation_type_patch("step", "peer", "slot"),
+            name_agent_patch("step", "slot", "writer"),
+            device_patch("step", "node/environment"),
+            staffing_patch("step", "slot", ["planner", "claude-code", "opus", "high"]),
+            add_limit_patch("step"),
+            delete_limit_patch("limit"),
+            update_limit_patch("limit", "Cap", "stop", ["3", "90", "", "200"]).unwrap(),
+        ] {
+            assert_patch_decodes(&board_body(patch, 7));
+        }
+        for op in ["input", "output", "update", "remove"] {
+            assert_patch_decodes(&port_patch(op, "step", Some("port"), "Result", "text").unwrap());
+        }
+        for kind in [
+            EditKind::Step,
+            EditKind::Input,
+            EditKind::Gate,
+            EditKind::End,
+        ] {
+            assert_patch_decodes(&delete_card_patch(kind, "card"));
+        }
+    }
+
     #[test]
     fn partial_editor_save_accepts_only_the_operation_that_landed() {
         let mut base = EditorSnapshot {
