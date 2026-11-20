@@ -19,12 +19,6 @@ use serde_json::{Value, json};
 pub fn routes(m: Missions) -> Router {
     Router::new()
         .route("/api/missions", get(list).post(create))
-        .route("/api/characters", get(characters).post(create_character))
-        .route(
-            "/api/characters/{id}",
-            axum::routing::put(put_character).delete(delete_character),
-        )
-        .route("/api/gate-profiles", get(gate_profiles))
         .route("/api/repositories", get(repositories))
         .route("/api/missions/{id}", get(read).patch(edit).delete(delete))
         .route("/api/missions/{id}/validation", get(validation))
@@ -34,19 +28,6 @@ pub fn routes(m: Missions) -> Router {
 }
 type ResultResponse = Result<Response, ApiError>;
 type JsonBody<T> = Result<Json<T>, JsonRejection>;
-fn body<T>(input: JsonBody<T>, code: &str) -> Result<T, ApiError> {
-    input.map(|Json(value)| value).map_err(|error| {
-        ApiError(
-            if code == "invalid_character" {
-                StatusCode::UNPROCESSABLE_ENTITY
-            } else {
-                StatusCode::BAD_REQUEST
-            },
-            code.into(),
-            error.body_text(),
-        )
-    })
-}
 
 pub(crate) struct ApiError(StatusCode, String, String);
 impl IntoResponse for ApiError {
@@ -71,11 +52,9 @@ impl From<ahjo_core::Error> for ApiError {
             | "input_occupied"
             | "duplicate_connection"
             | "not_pending"
-            | "character_exists"
             | "slot_choice_required" => StatusCode::CONFLICT,
             "precondition_required" => StatusCode::PRECONDITION_REQUIRED,
-            "invalid_character"
-            | "invalid_code_gate_profile"
+            "invalid_code_gate_profile"
             | "invalid_slot_settings"
             | "invalid_definition_source"
             | "unsupported_schema"
@@ -150,7 +129,7 @@ fn slug_from_title(title: &str) -> String {
     slug.trim_matches('-').to_owned()
 }
 async fn create(State(m): State<Missions>, input: JsonBody<Value>) -> ResultResponse {
-    let v = body(input, "bad_request")?;
+    let Json(v) = input.map_err(|error| bad(error.body_text()))?;
     let title = s(&v, "title").trim();
     let given_slug = s(&v, "slug").trim();
     let unnamed = title.is_empty() && given_slug.is_empty();
@@ -299,7 +278,7 @@ async fn delete(
     h: HeaderMap,
     input: JsonBody<Value>,
 ) -> ResultResponse {
-    let v = body(input, "bad_request")?;
+    let Json(v) = input.map_err(|error| bad(error.body_text()))?;
     let e = m.store.delete_mission(
         &id,
         Precondition {
@@ -344,7 +323,7 @@ async fn edit_notes(
     h: HeaderMap,
     input: JsonBody<Value>,
 ) -> ResultResponse {
-    let v = body(input, "bad_request")?;
+    let Json(v) = input.map_err(|error| bad(error.body_text()))?;
     let target = s(&v, "target").into();
     let author = if s(&v, "author").is_empty() {
         "human:ui".into()
@@ -398,7 +377,7 @@ async fn edit_layout(
     h: HeaderMap,
     input: JsonBody<Value>,
 ) -> ResultResponse {
-    let v = body(input, "bad_request")?;
+    let Json(v) = input.map_err(|error| bad(error.body_text()))?;
     let p = if v["arrange"].as_bool() == Some(true) {
         let e = m.store.mission_edit(&id)?;
         let l = m.store.layout_edit(&id)?;
@@ -418,81 +397,9 @@ async fn edit_layout(
     ))
 }
 
-fn character_store(m: &Missions) -> ahjo_mission_engine::CharacterStore {
-    ahjo_mission_engine::CharacterStore::new(m.store.roles().dir())
-}
-fn engine_character(c: ahjo_missions_contract::Character) -> ahjo_mission_engine::Character {
-    ahjo_mission_engine::Character {
-        id: c.id,
-        name: c.name,
-        description: c.description,
-        picture: c.picture,
-        agent_id: c.agent_id,
-        harness: c.harness,
-        model: c.model,
-        effort: c.effort,
-    }
-}
-fn wire_character(c: ahjo_mission_engine::Character) -> ahjo_missions_contract::Character {
-    ahjo_missions_contract::Character {
-        id: c.id,
-        name: c.name,
-        description: c.description,
-        picture: c.picture,
-        agent_id: c.agent_id,
-        harness: c.harness,
-        model: c.model,
-        effort: c.effort,
-    }
-}
-async fn characters(State(m): State<Missions>) -> ResultResponse {
-    let characters = character_store(&m)
-        .list()?
-        .into_iter()
-        .map(wire_character)
-        .collect();
-    Ok(Json(ahjo_missions_contract::Characters { characters }).into_response())
-}
-async fn create_character(
-    State(m): State<Missions>,
-    input: JsonBody<ahjo_missions_contract::Character>,
-) -> ResultResponse {
-    let c = engine_character(body(input, "invalid_character")?);
-    let c = wire_character(character_store(&m).create(c)?);
-    m.changed();
-    Ok((StatusCode::CREATED, Json(c)).into_response())
-}
-async fn put_character(
-    State(m): State<Missions>,
-    Path(id): Path<String>,
-    input: JsonBody<ahjo_missions_contract::Character>,
-) -> ResultResponse {
-    let mut c = body(input, "invalid_character")?;
-    if !c.id.is_empty() && c.id != id {
-        return Err(ApiError(
-            StatusCode::UNPROCESSABLE_ENTITY,
-            "invalid_character".into(),
-            "character id does not match the path".into(),
-        ));
-    }
-    c.id = id;
-    let c = wire_character(character_store(&m).put(engine_character(c))?);
-    m.changed();
-    Ok(Json(c).into_response())
-}
-async fn delete_character(State(m): State<Missions>, Path(id): Path<String>) -> ResultResponse {
-    character_store(&m).delete(&id)?;
-    m.changed();
-    Ok(Json(ahjo_missions_contract::Deleted { deleted: id }).into_response())
-}
 /// The repositories a step may name, as configured on this node.
 async fn repositories(State(m): State<Missions>) -> Response {
     Json(json!({"repositories": m.coordinator.repositories()})).into_response()
-}
-async fn gate_profiles() -> Response {
-    let profiles: ahjo_missions_contract::GateProfiles =
-        serde_json::from_str(include_str!("gate_profiles.json")).expect("gate profiles are valid");
-    Json(profiles).into_response()
 }
 
 #[cfg(test)]

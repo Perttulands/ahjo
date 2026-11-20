@@ -58,41 +58,6 @@ async fn mission_routes_on_a_node_with_fake_sessions() {
         .await
         .unwrap();
     assert!(validation["errors"].is_array());
-    let (profiles, _) = client
-        .request(Method::GET, "/api/gate-profiles", None, None)
-        .await
-        .unwrap();
-    assert!(!profiles["profiles"].as_array().unwrap().is_empty());
-    let (characters, _) = client
-        .request(Method::GET, "/api/characters", None, None)
-        .await
-        .unwrap();
-    assert!(characters["characters"].is_array());
-    let (character, _) = client
-        .request(
-            Method::POST,
-            "/api/characters",
-            Some(json!({"name":"Reviewer","harness":"claude-code","effort":"medium"})),
-            None,
-        )
-        .await
-        .unwrap();
-    assert_eq!(character["id"], "reviewer");
-    let (updated, _) = client
-        .request(
-            Method::PUT,
-            "/api/characters/reviewer",
-            Some(json!({"name":"Reviewer","harness":"claude-code","effort":"high"})),
-            None,
-        )
-        .await
-        .unwrap();
-    assert_eq!(updated["effort"], "high");
-    let (removed, _) = client
-        .request(Method::DELETE, "/api/characters/reviewer", None, None)
-        .await
-        .unwrap();
-    assert_eq!(removed["deleted"], "reviewer");
     let (layout, layout_etag) = client
         .request(Method::GET, "/api/missions/example/layout", None, None)
         .await
@@ -380,14 +345,7 @@ async fn run_changes_arrive_on_the_socket_through_completion() {
         .await
         .unwrap();
     let _: Vec<ahjo_missions_contract::RunSummary> = serde_json::from_value(listed).unwrap();
-    for suffix in [
-        "",
-        "/events",
-        "/mission",
-        "/seats",
-        "/escalations",
-        "/evidence/attempts",
-    ] {
+    for suffix in ["", "/events", "/mission", "/seats", "/evidence/attempts"] {
         client
             .request(Method::GET, &format!("/api/runs/{id}{suffix}"), None, None)
             .await

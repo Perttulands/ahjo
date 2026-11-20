@@ -27,7 +27,6 @@ pub fn routes(missions: Missions) -> Router {
         .route("/api/runs/{id}/events", get(events))
         .route("/api/runs/{id}/mission", get(frozen))
         .route("/api/runs/{id}/seats", get(seats))
-        .route("/api/runs/{id}/escalations", get(escalations))
         .route("/api/runs/{id}/evidence", get(evidence))
         .route("/api/runs/{id}/evidence/attempts", get(attempts))
         .route("/api/runs/{id}/gates/{gate}/request", get(gate_request))
@@ -107,9 +106,6 @@ async fn seats(State(c): State<Coordinator>, Path(id): Path<String>) -> ResultRe
         })
         .collect::<Vec<_>>();
     Ok(Json(seats).into_response())
-}
-async fn escalations(State(c): State<Coordinator>, Path(id): Path<String>) -> ResultResponse {
-    response(c.escalations(&id))
 }
 async fn evidence(
     State(c): State<Coordinator>,

@@ -904,15 +904,14 @@ async fn specialized_authoring_commands_build_and_edit_a_graph() {
     .await
     .unwrap();
     node.call("formation_assign",json!({"mission":"board","formation":step_id,"slot":"seat","harness":"claude-code","effort":"medium"})).await.unwrap();
-    let client = ahjo_node_kit::NodeClient::new(Some(&format!("{}/", node.url()))).unwrap();
-    client
-        .request(
-            axum::http::Method::POST,
-            "/api/characters",
-            Some(json!({"name":"Test stamp","harness":"claude-code","effort":"high"})),
-            None,
-        )
-        .await
+    let store = ahjo_mission_engine::Store::new(ahjo_mission_engine::Store::root_in(node.dir()));
+    ahjo_mission_engine::CharacterStore::new(store.roles().dir())
+        .create(ahjo_mission_engine::Character {
+            name: "Test stamp".into(),
+            harness: "claude-code".into(),
+            effort: "high".into(),
+            ..Default::default()
+        })
         .unwrap();
     let stamped = node
         .call(

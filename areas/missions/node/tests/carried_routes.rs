@@ -172,22 +172,6 @@ async fn default_gate_is_human_and_a_code_check_requires_code_kind() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn malformed_character_has_the_documented_error_envelope() {
-    let (node, c) = start().await;
-    let bad = c
-        .request(
-            Method::POST,
-            "/api/characters",
-            Some(json!({"name":"A","extra":true})),
-            None,
-        )
-        .await
-        .unwrap_err();
-    assert_error(bad, StatusCode::UNPROCESSABLE_ENTITY, "invalid_character");
-    node.stop().await;
-}
-
-#[tokio::test(flavor = "multi_thread")]
 async fn edits_are_checked_and_pushed_to_subscribers() {
     use futures_util::{SinkExt, StreamExt};
     use tokio_tungstenite::{connect_async, tungstenite::Message};
