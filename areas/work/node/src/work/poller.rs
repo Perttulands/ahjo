@@ -544,6 +544,15 @@ pub(super) mod tests {
             fake
         }
 
+        fn with_held_github(test: &str, gh: &str, bd: &str) -> Fake {
+            let gate = r#"while [ ! -f "${0%/*}/release-gh" ]; do sleep 0.01; done"#;
+            Fake::new(test, &format!("{gate}\n{gh}"), bd)
+        }
+
+        fn release_github(&self) {
+            std::fs::write(self.dir.join("release-gh"), "").unwrap();
+        }
+
         /// Writes the store's manifest, as a write through bd would.
         pub fn touch(&self, manifest: &str) {
             std::fs::write(
@@ -670,7 +679,7 @@ pub(super) mod tests {
 
     #[tokio::test]
     async fn reads_only_while_watched() {
-        let fake = Fake::new("watched", &fixture("ahjo.json"), &fixture("beads.json"));
+        let fake = Fake::with_held_github("watched", &fixture("ahjo.json"), &fixture("beads.json"));
         let work = fake.work(vec![
             ahjo(),
             Project::Beads(Store {
@@ -688,8 +697,14 @@ pub(super) mod tests {
         assert_eq!(repo(&first, 0).checkout.as_deref(), Some("~/ahjo"));
         assert_eq!(store(&first, 1).items, None);
         let mut read = watching.next().await;
-        // The two reads run at once and either may land first.
-        while store(&read, 1).items.is_none() || repo(&read, 0).synced.is_none() {
+        // The store can publish on its own while the repo is still reading.
+        // Exercise that order every time.
+        while store(&read, 1).items.is_none() {
+            read = watching.next().await;
+        }
+        assert_eq!(repo(&read, 0).synced, None);
+        fake.release_github();
+        while repo(&read, 0).synced.is_none() {
             read = watching.next().await;
         }
         assert_eq!(fake.runs("gh"), vec!["owner=example-owner name=ahjo"]);
@@ -831,10 +846,9 @@ pub(super) mod tests {
 
     #[tokio::test]
     async fn a_failed_read_keeps_what_was_read_and_says_why() {
-        let fake = Fake::new(
+        let fake = Fake::with_held_github(
             "failed",
-            r#"while [ ! -f "${0%/*}/release-gh" ]; do sleep 0.01; done
-echo 'gh: HTTP 504' >&2; exit 1"#,
+            "echo 'gh: HTTP 504' >&2; exit 1",
             "echo 'Error: database locked' >&2; exit 1",
         );
         let work = fake.work(vec![
@@ -855,7 +869,7 @@ echo 'gh: HTTP 504' >&2; exit 1"#,
         .await
         .expect("the Beads error is published while GitHub is still reading");
         assert_eq!(repo(&read, 0).error, None);
-        std::fs::write(fake.dir.join("release-gh"), "").unwrap();
+        fake.release_github();
         while repo(&read, 0).error.is_none() {
             read = watching.next().await;
         }

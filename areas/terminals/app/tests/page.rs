@@ -2186,11 +2186,17 @@ fn late_launch_success_does_not_replace_a_newer_failure(cx: &mut TestAppContext)
     };
     let (shell, cx, settings) = open_with_alpha(&running, "launch-status-order", cx);
     let gate_shell = running.fixture.join("gate-shell");
+    let gate_ready = running.fixture.join("gate-ready");
+    let plain_shell = tmux(&running, &["show-options", "-gv", "default-shell"]);
     let tmux_program = std::env::var_os("AHJO_TMUX").unwrap_or_else(|| "tmux".into());
+    // Preserve tmux's -c invocation of the node's launch gate. Starting
+    // bash before the engine attaches can lose its initial
+    // bracketed-paste signal, which a capture of the screen cannot recover.
     ahjo_testkit::tmux::write_script(
         &gate_shell,
         format!(
-            "#!/bin/sh\n'{}' -S '{}' wait-for launch-status-release\nexec /bin/bash --noprofile --norc -i\n",
+            "#!/bin/sh\nif [ \"$1\" = -c ]; then exec '{plain_shell}' \"$@\"; fi\nprintf '%s\\n' \"$1\" > '{}'\n'{}' -S '{}' wait-for launch-status-release || exit\nexec '{plain_shell}' \"$@\"\n",
+            gate_ready.display(),
             std::path::PathBuf::from(tmux_program).display(),
             running.socket.display()
         ),
@@ -2224,15 +2230,20 @@ fn late_launch_success_does_not_replace_a_newer_failure(cx: &mut TestAppContext)
         )
     })
     .unwrap();
-    until(cx, "first launch listed but unanswered", |cx| {
-        page.read_with(cx, |p, _| {
-            !p.launches.is_empty()
-                && p.fleet
-                    .all
-                    .iter()
-                    .any(|s| s.node == running.node && s.name == "alpha-2")
-        })
-    });
+    until(
+        cx,
+        "first launch listed and waiting to start its shell",
+        |cx| {
+            std::fs::read_to_string(&gate_ready).is_ok_and(|args| args == "-l\n")
+                && page.read_with(cx, |p, _| {
+                    !p.launches.is_empty()
+                        && p.fleet
+                            .all
+                            .iter()
+                            .any(|s| s.node == running.node && s.name == "alpha-2")
+                })
+        },
+    );
     cx.update(|_, cx| {
         toy.ask(
             Ask::Launch {
@@ -2255,6 +2266,10 @@ fn late_launch_success_does_not_replace_a_newer_failure(cx: &mut TestAppContext)
     tmux(&running, &["wait-for", "-S", "launch-status-release"]);
     until(cx, "first launch answered", |cx| {
         page.read_with(cx, |p, _| p.launches.is_empty())
+    });
+    until(cx, "the first launch's harness ran", |_| {
+        std::fs::read_to_string(running.fixture.join("runs"))
+            .is_ok_and(|runs| runs.lines().count() == 1)
     });
     let status = shell.read_with(cx, |s, cx| s.hub().read(cx).status.clone());
     assert_eq!(
