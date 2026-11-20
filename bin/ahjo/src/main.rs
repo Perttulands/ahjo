@@ -67,7 +67,8 @@ it serves every one. Over HTTP the same are /mcp/<area>[,<area>...] and /mcp.
         "version" => format!(
             "{VERSION_USAGE}
 Print this build's version and the version of the node that answers. Exits 3
-when no node answers. ahjo --version prints only this build's.
+when no node answers, and 1 when one answers with an error. ahjo --version
+prints only this build's.
 
   --json  the same as JSON: version, and node (id, address, version) or null
   --node  addr:port: the node to ask (default: this machine's)"
@@ -330,7 +331,13 @@ async fn version(args: &[String]) -> Result<i32> {
         });
         let answer = serde_json::json!({ "version": ahjo_node_kit::VERSION, "node": answering });
         println!("{}", serde_json::to_string_pretty(&answer)?);
-        return Ok(if health.is_ok() { 0 } else { 3 });
+        // No node answering is exit 3; a node that answered with an error
+        // is a failure like any other command's, exit 1 with its error.
+        return Ok(match health {
+            Ok(_) => 0,
+            Err(error) if error.is::<Unreachable>() => 3,
+            Err(error) => failed(&error, true),
+        });
     }
     println!("ahjo {}", ahjo_node_kit::VERSION);
     match health {

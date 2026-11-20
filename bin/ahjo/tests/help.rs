@@ -200,3 +200,36 @@ fn a_node_that_is_not_running_is_said_in_one_line_and_exits_3() {
     assert_eq!(version["version"], ahjo_node_kit::VERSION);
     assert!(version["node"].is_null(), "{version}");
 }
+
+/// A node that answers with an error is not a node that is not there: both
+/// ways of asking exit 1, not 3, and with --json say why in the error shape.
+#[test]
+fn a_node_answering_with_an_error_exits_1_in_either_format() {
+    use std::io::{Read, Write};
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let node = listener.local_addr().unwrap().to_string();
+    let server = std::thread::spawn(move || {
+        let body = r#"{"error":{"code":"broken","message":"it broke"}}"#;
+        for stream in listener.incoming().take(2) {
+            let mut stream = stream.unwrap();
+            let mut request = [0_u8; 4096];
+            let _ = stream.read(&mut request).unwrap();
+            write!(
+                stream,
+                "HTTP/1.1 500 Internal Server Error\r\ncontent-type: application/json\r\n\
+                 content-length: {}\r\nconnection: close\r\n\r\n{body}",
+                body.len()
+            )
+            .unwrap();
+        }
+    });
+    let plain = ahjo(&["version", "--node", &node]);
+    assert_eq!(plain.status.code(), Some(1), "{plain:?}");
+    let json = ahjo(&["version", "--json", "--node", &node]);
+    assert_eq!(json.status.code(), Some(1), "{json:?}");
+    let version: serde_json::Value = serde_json::from_slice(&json.stdout).unwrap();
+    assert_eq!(version["version"], ahjo_node_kit::VERSION);
+    let error: serde_json::Value = serde_json::from_slice(&json.stderr).unwrap();
+    assert!(error["error"]["code"].is_string(), "{error}");
+    server.join().unwrap();
+}
