@@ -110,13 +110,6 @@ fn saving_merges_untouched_concurrent_fields_and_refuses_a_same_field_change(
             )
             .unwrap()
     });
-    until(cx, "mission view", |cx| {
-        cx.debug_bounds("mission-mode-canvas").is_some()
-            || cx.debug_bounds("mission-card-fmn_work").is_some()
-    });
-    if let Some(bounds) = cx.debug_bounds("mission-mode-canvas") {
-        cx.simulate_click(bounds.center(), Modifiers::none());
-    }
     until(cx, "step", |cx| {
         cx.debug_bounds("mission-card-fmn_work").is_some()
     });

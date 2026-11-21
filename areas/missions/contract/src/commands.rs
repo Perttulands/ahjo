@@ -90,6 +90,14 @@ pub struct MissionNotes {
     pub mission: String,
 }
 
+/// Read every saved revision of a mission, oldest first: what changed, when
+/// and by whom.
+#[derive(Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct MissionHistory {
+    pub mission: String,
+}
+
 /// Write a note on a mission, card or wire, or change a note of your own.
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -437,6 +445,12 @@ pub struct MissionNotesListed {
 }
 
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
+pub struct MissionHistoryListed {
+    pub node: String,
+    pub revisions: Vec<Mission>,
+}
+
+#[derive(Debug, Deserialize, Serialize, JsonSchema)]
 pub struct MissionNoteReceipt {
     pub node: String,
     pub document: NotesDocument,
@@ -512,6 +526,7 @@ commands! {
     ApplyMission => "mission_apply", AppliedMission;
     MissionEdit => "mission_edit", MissionEdited;
     MissionNotes => "mission_notes", MissionNotesListed;
+    MissionHistory => "mission_history", MissionHistoryListed;
     MissionNote => "mission_note", MissionNoteReceipt;
     MissionReply => "mission_reply", MissionNoteReceipt;
     MissionResolve => "mission_resolve", MissionNoteReceipt;

@@ -3,6 +3,9 @@ use super::*;
 use crate::store::validation::Key;
 use ahjo_missions_contract::{Mission, commands::MissionValidate};
 
+/// How many rows' height the to-do list under the board takes at most.
+const TODO_ROWS: f32 = 4.;
+
 impl MissionsPage {
     fn validation_key(&self) -> Option<Key> {
         let (node, slug) = self.state.selected.as_ref()?;
@@ -85,8 +88,13 @@ impl MissionsPage {
             lines.len(),
             if self.run_tried { "to fix" } else { "to do" }
         );
+        // A long list scrolls inside a few lines' height, so the board
+        // above keeps its room.
         let mut list = div()
+            .id("canvas-findings-list")
             .debug_selector(|| "canvas-findings-list".into())
+            .max_h(px(size::ROW * TODO_ROWS))
+            .overflow_y_scroll()
             .flex()
             .flex_col();
         for (line, found) in lines {

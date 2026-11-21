@@ -22,6 +22,7 @@ const EXPECTED: &[&str] = &[
     "mission_apply",
     "mission_edit",
     "mission_notes",
+    "mission_history",
     "mission_note",
     "mission_reply",
     "mission_resolve",

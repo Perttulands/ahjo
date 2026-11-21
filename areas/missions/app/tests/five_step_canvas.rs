@@ -119,10 +119,6 @@ fn five_step_canvas_can_pan_zoom_and_connect_visible_ports(cx: &mut TestAppConte
             .is_some()
     });
     click(cx, &mission);
-    until(cx, "mode", |cx| {
-        cx.debug_bounds("mission-mode-canvas").is_some()
-    });
-    click(cx, "mission-mode-canvas");
     until(cx, "five step canvas", |cx| {
         cx.debug_bounds("mission-card-fmn_5").is_some()
     });
@@ -219,7 +215,9 @@ fn a_long_board_opens_readable_at_its_start(cx: &mut TestAppContext) {
             cx,
         )
     });
-    cx.simulate_resize(gpui::size(px(1280.), px(900.)));
+    // Low enough that five steps cannot all be read at once, wrapped or not
+    // (a step card is 62 high, so it takes much less than it once did).
+    cx.simulate_resize(gpui::size(px(1280.), px(300.)));
     until(cx, "link", |cx| {
         shell.read_with(cx, |s, cx| {
             s.hub().read(cx).fleet.here().state == LinkState::Open
@@ -235,13 +233,18 @@ fn a_long_board_opens_readable_at_its_start(cx: &mut TestAppContext) {
     let mission = format!("mission-{}-hello", running.id);
     until(cx, "mission", |cx| bounds(cx, &mission).is_some());
     click(cx, &mission);
-    until(cx, "mode", |cx| bounds(cx, "mission-mode-canvas").is_some());
-    click(cx, "mission-mode-canvas");
     until(cx, "board", |cx| bounds(cx, "mission-card-fmn_1").is_some());
     let canvas = bounds(cx, "mission-canvas").unwrap();
-    let right = canvas.origin.x + canvas.size.width;
+    // Shown when it lies wholly on the board: a board laid out for its
+    // room wraps into rows, so the end may be further down rather than on.
+    let (right, bottom) = (
+        canvas.origin.x + canvas.size.width,
+        canvas.origin.y + canvas.size.height,
+    );
     let shown = |cx: &mut VisualTestContext, id: &str| {
-        bounds(cx, id).is_some_and(|card| card.origin.x + card.size.width <= right)
+        bounds(cx, id).is_some_and(|card| {
+            card.origin.x + card.size.width <= right && card.origin.y + card.size.height <= bottom
+        })
     };
     let opened = bounds(cx, "mission-card-fmn_1").unwrap().size.width;
     assert!(shown(cx, "mission-card-fmn_1"), "the start is in view");

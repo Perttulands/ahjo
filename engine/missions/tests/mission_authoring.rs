@@ -204,6 +204,38 @@ fn create_nodes_with_default_shapes() {
 }
 
 #[test]
+fn every_save_is_kept_and_a_deleted_mission_takes_its_history_along() {
+    let dir = Scratch::new();
+    let store = Store::new(&dir.0);
+    let made = store.create_mission("work", "Work", "human:ui").unwrap();
+    let edit = store
+        .patch(
+            "work",
+            pre(&made),
+            MissionChange::CreateEnd {
+                title: String::new(),
+                outcome: ahjo_mission_model::EndOutcome::Unset,
+                x: 1,
+                y: 2,
+            },
+            "agent:planner",
+        )
+        .unwrap();
+    let history = store.mission_history("work").unwrap();
+    let revs: Vec<_> = history.iter().map(|m| m.rev).collect();
+    assert_eq!(revs, vec![made.mission.rev, edit.mission.rev]);
+    assert_eq!(history[1].updated_by, "agent:planner");
+    assert!(history[0].ends.is_empty() && history[1].ends.len() == 1);
+    store.delete_mission("work", pre(&edit)).unwrap();
+    store
+        .create_mission("work", "Work again", "human:ui")
+        .unwrap();
+    let again = store.mission_history("work").unwrap();
+    assert_eq!(again.len(), 1);
+    assert_eq!(again[0].title, "Work again");
+}
+
+#[test]
 fn delete_archives_mission_layout_and_its_own_notes() {
     let dir = Scratch::new();
     let store = Store::new(&dir.0);

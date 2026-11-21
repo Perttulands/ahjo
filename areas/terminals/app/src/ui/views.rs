@@ -237,11 +237,11 @@ impl Terminals {
                     ),
             );
         }
-        let word = if self.settings.workspace.views.is_empty() {
-            "Views"
-        } else {
-            "…"
-        };
+        // With no views saved there is nothing to recall; saving the
+        // first is in the tab's menu, so no word stands here for it.
+        if self.settings.workspace.views.is_empty() {
+            return strip.into_any_element();
+        }
         strip
             .child(
                 div()
@@ -258,7 +258,7 @@ impl Terminals {
                     .hover(|d| d.text_color(t.text))
                     // No tooltip: it would land over the menu a quick
                     // click opens, and the menu names the keys itself.
-                    .child(word)
+                    .child("…")
                     .on_click(cx.listener(|s, e: &gpui::ClickEvent, window, cx| {
                         let rows = views_menu(&s.settings.workspace);
                         s.menu(rows, e.position(), window, cx);

@@ -106,6 +106,14 @@ pub fn commands(m: &Missions) -> Vec<Command> {
                 notes: NotesDocument::from_notes(current.notes, current.etag),
             })
         }),
+        command(m, Reads, |m, args: MissionHistory| {
+            Ok(MissionHistoryListed {
+                node: m.node.clone(),
+                revisions: m
+                    .store
+                    .mission_history(required(&args.mission, "mission")?)?,
+            })
+        }),
         command(m, Destroys, note),
         command(m, Writes, |m, args: MissionReply| {
             reply(

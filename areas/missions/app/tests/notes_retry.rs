@@ -108,8 +108,6 @@ fn failed_note_read_can_be_retried(cx: &mut TestAppContext) {
     let mission = format!("mission-{}-hello", running.node);
     until(cx, "mission", |cx| has(cx, &mission));
     click(cx, &mission);
-    until(cx, "canvas mode", |cx| has(cx, "mission-mode-canvas"));
-    click(cx, "mission-mode-canvas");
     until(cx, "notes read failure", |cx| {
         has(cx, "canvas-notes-error") && has(cx, "canvas-notes-retry")
     });

@@ -143,6 +143,7 @@ impl Store {
             .join(format!("{slug}.layout.toml"));
         let layout = stage_layout(&layout_path, &after, &added, &removed)?;
         if !dry_run {
+            crate::mission_history::record(self.root(), slug, &raw)?;
             if let Some(layout) = layout {
                 crate::write::pair((&path, raw.as_bytes()), (&layout_path, layout.as_bytes()))
                     .map_err(crate::error::io)?;

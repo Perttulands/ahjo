@@ -167,7 +167,6 @@ impl MissionsPage {
             self.open(node.clone(), slug.clone(), cx);
         }
         if self.state.selected.as_ref() == Some(&(node, slug)) {
-            self.mission_canvas_mode = false;
             self.show_run(id, cx);
         }
     }

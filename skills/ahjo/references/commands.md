@@ -36,7 +36,7 @@ These are the commands advertised by the enabled areas. Run `ahjo <noun> <verb> 
 
 ## mission
 
-`ahjo mission apply`, `ahjo mission archives`, `ahjo mission arrange`, `ahjo mission create`, `ahjo mission delete`, `ahjo mission edit`, `ahjo mission examples`, `ahjo mission export`, `ahjo mission list`, `ahjo mission note`, `ahjo mission notes`, `ahjo mission purge`, `ahjo mission reply`, `ahjo mission repositories`, `ahjo mission resolve`, `ahjo mission run`, `ahjo mission show`, `ahjo mission validate`.
+`ahjo mission apply`, `ahjo mission archives`, `ahjo mission arrange`, `ahjo mission create`, `ahjo mission delete`, `ahjo mission edit`, `ahjo mission examples`, `ahjo mission export`, `ahjo mission history`, `ahjo mission list`, `ahjo mission note`, `ahjo mission notes`, `ahjo mission purge`, `ahjo mission reply`, `ahjo mission repositories`, `ahjo mission resolve`, `ahjo mission run`, `ahjo mission show`, `ahjo mission validate`.
 
 ## project
 

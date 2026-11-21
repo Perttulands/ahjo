@@ -46,6 +46,7 @@ mod limits;
 mod links;
 mod mission_archives;
 mod mission_documents;
+mod mission_history;
 mod notes_authoring;
 mod notifications;
 mod output_refs;

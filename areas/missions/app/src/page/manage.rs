@@ -357,8 +357,7 @@ impl MissionsPage {
                         page.state.selected = None;
                         page.state.mission = None;
                         page.state.mission_etag = None;
-                        page.state.layout = None;
-                        page.state.layout_etag = None;
+                        page.state.clear_layout();
                         page.notes = None;
                         page.editor = None;
                         page.history = undo::History::default();
@@ -375,8 +374,7 @@ impl MissionsPage {
                         });
                         page.state.mission_etag = Some(edit.definition.etag);
                         page.state.mission = Some(edit.definition.mission);
-                        page.state.layout_etag = Some(edit.layout_etag);
-                        page.state.layout = Some(edit.layout);
+                        page.state.set_layout(edit.layout, edit.layout_etag, true);
                         page.manage.form = None;
                     }
                     Err(error) if matches!(error.code.as_str(), "unanswered" | "invalid_response") => {
