@@ -35,10 +35,11 @@ pub const ICON_BUTTON: f32 = 32.;
 
 /// The three columns: the list of asks, the answer, and the surface,
 /// in that order. The list and the answer stand at these until he drags
-/// their edges; then at what he dragged them to.
+/// their edges; then at what he dragged them to. At its narrowest the
+/// list's head still reads whole: Waiting, Answered and its two buttons.
 pub const LIST: f32 = 340.;
 pub const LIST_SHARE: f32 = 0.18;
-pub const LIST_MIN: f32 = 240.;
+pub const LIST_MIN: f32 = 256.;
 pub const LIST_MAX: f32 = 560.;
 pub const TALK: f32 = 680.;
 pub const TALK_SHARE: f32 = 0.34;
@@ -51,6 +52,10 @@ pub const GRIP_HIT: f32 = 10.;
 pub const WINDOW_MIN: (f32, f32) = (880., 560.);
 /// Under this width a list row drops its picture: its words need the room.
 pub const LIST_THUMBS: f32 = 280.;
+/// The room around the list's rows, which stand as cards (half of it
+/// between them), and the most of his marks a row shows by number.
+pub const LIST_PAD: f32 = 6.;
+pub const LIST_MARKS: usize = 5;
 /// The settings menu.
 pub const MENU_W: f32 = 300.;
 /// A mark's words written over the surface, with it alone in the window.
@@ -86,11 +91,37 @@ pub const TRACK_H: f32 = 6.;
 pub const TICK_W: f32 = 3.;
 /// A key cap's height; a chip stands a little taller, so a pointer finds it.
 pub const CAP: f32 = 22.;
-/// The most of an option's name a "Lean to" chip shows: the chips wrap,
-/// so a name reads whole unless it is a sentence.
-pub const LEAN_WORDS: usize = 72;
-/// The accent rule beside a recommendation.
-pub const RULE_W: f32 = 3.;
+/// The answer panel's measures. Its column stands in by `COLUMN_PAD`;
+/// the question breathes before its options (`BEFORE_OPTIONS`) and his
+/// answer after them (`BEFORE_ANSWER`).
+pub const COLUMN_PAD: f32 = 24.;
+pub const COLUMN_TOP: f32 = 20.;
+pub const BETWEEN_TURNS: f32 = 28.;
+pub const META_TO_TITLE: f32 = 6.;
+pub const TITLE_LEADING: f32 = 1.3;
+pub const TITLE_TO_QUESTION: f32 = 6.;
+pub const BEFORE_OPTIONS: f32 = 20.;
+pub const BETWEEN_QUESTIONS: f32 = 36.;
+pub const BEFORE_ANSWER: f32 = 20.;
+/// An option's card: its corner, its padding, the space between cards
+/// and between its lines, and the gutter its letter hangs in.
+pub const CARD_RADIUS: f32 = 8.;
+pub const CARD_PAD_X: f32 = 16.;
+pub const CARD_PAD_Y: f32 = 12.;
+pub const CARD_GAP: f32 = 8.;
+pub const CARD_LINES: f32 = 2.;
+pub const HANG: f32 = 24.;
+/// The agent's reason stands a little apart from the option's own why.
+pub const BEFORE_REASON: f32 = 6.;
+/// His answer's card: the room around his words, its foot, and Send.
+pub const FIELD_PAD_Y: f32 = 8.;
+pub const FOOT_PAD: f32 = 8.;
+pub const SEND_H: f32 = 34.;
+/// How far a scrolled column fades at an edge with more beyond it.
+pub const FADE: f32 = 40.;
+/// A mark's row at the head of his answer.
+pub const MARK_GAP: f32 = 10.;
+pub const MARK_PAD_Y: f32 = 4.;
 /// How far a picture fits up: never past twice its size, so a small one
 /// is big enough to judge and still reads as itself.
 pub const FIT_MAX: f32 = 2.;

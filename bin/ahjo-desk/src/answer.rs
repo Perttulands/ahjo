@@ -76,6 +76,90 @@ impl Draft {
     }
 }
 
+/// What he has said on an ask, as its row in the list shows it: the
+/// options he chose, in his order, his words, and his marks' inks.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Gist {
+    pub picks: Vec<String>,
+    pub words: String,
+    pub marks: Vec<Option<String>>,
+}
+
+impl Gist {
+    pub fn is_empty(&self) -> bool {
+        self.picks.is_empty() && self.words.is_empty() && self.marks.is_empty()
+    }
+
+    /// A draft's: on a grill, each question's pick, and the round's words or
+    /// else the first question's he wrote on.
+    pub fn of_draft(d: &Draft, ask: &Ask) -> Gist {
+        let names = |options: &[crate::model::Choice], i: Option<usize>| {
+            i.filter(|&i| i < options.len())
+                .map(|i| crate::model::label(options, i))
+        };
+        let (picks, first): (Vec<String>, Option<String>) = if ask.form() == Form::Grill {
+            let said: Vec<(Said, &Question)> =
+                ask.questions.iter().map(|q| (d.said(q), q)).collect();
+            (
+                said.iter()
+                    .filter_map(|(s, q)| names(&q.options, s.pick))
+                    .collect(),
+                said.iter()
+                    .map(|(s, _)| s.words.trim().to_string())
+                    .find(|w| !w.is_empty()),
+            )
+        } else {
+            (names(&ask.options, d.pick).into_iter().collect(), None)
+        };
+        let words = Some(d.words.trim().to_string())
+            .filter(|w| !w.is_empty())
+            .or(first)
+            .unwrap_or_default();
+        Gist {
+            picks,
+            words,
+            marks: d.marks(ask).iter().map(|m| m.color.clone()).collect(),
+        }
+    }
+
+    /// An answer's, as the desk keeps it.
+    pub fn of_answer(a: &crate::model::Answer, ask: &Ask) -> Gist {
+        // A chosen name as its option shows it, without the letter.
+        let shown = |options: &[crate::model::Choice], name: &str| {
+            options
+                .iter()
+                .position(|o| o.name == name)
+                .map_or_else(|| name.to_string(), |i| crate::model::label(options, i))
+        };
+        let picks = if a.answers.is_empty() {
+            a.options.iter().map(|n| shown(&ask.options, n)).collect()
+        } else {
+            ask.questions
+                .iter()
+                .filter_map(|q| {
+                    let g = a.answers.get(&q.id)?;
+                    g.pick.as_deref().map(|n| shown(&q.options, n))
+                })
+                .collect()
+        };
+        let words = Some(a.comment.trim().to_string())
+            .filter(|w| !w.is_empty())
+            .or_else(|| {
+                ask.questions
+                    .iter()
+                    .filter_map(|q| a.answers.get(&q.id))
+                    .map(|g| g.comment.trim().to_string())
+                    .find(|w| !w.is_empty())
+            })
+            .unwrap_or_default();
+        Gist {
+            picks,
+            words,
+            marks: ask.marks.iter().map(|m| m.color.clone()).collect(),
+        }
+    }
+}
+
 /// Which draft: the desk (where it listens, which outlives the window's
 /// order of desks), the ask and its round.
 pub type DraftKey = (String, String, u32);
@@ -405,5 +489,54 @@ mod tests {
         assert_eq!(p["answers"]["q1"]["pick"], "Ember", "a pick stands");
         assert!(p["answers"].get("q4").is_none(), "no recommendation: left");
         assert!(payload(&a, &d, Verdict::LooksGood, 0).is_err());
+    }
+
+    #[test]
+    fn a_row_shows_what_he_said_not_a_label() {
+        let decide = ask(
+            r#"{"id":"AQ1","kind":"decide","status":"open","options":[{"name":"B: Inter"},{"name":"Quattro"}]}"#,
+        );
+        assert!(Gist::of_draft(&Draft::default(), &decide).is_empty());
+        let d = Draft {
+            pick: Some(0),
+            words: "  Inter, with more leading ".into(),
+            ..Draft::default()
+        };
+        let g = Gist::of_draft(&d, &decide);
+        assert_eq!(
+            g.picks,
+            vec!["Inter".to_string()],
+            "the name, not its letter"
+        );
+        assert_eq!(g.words, "Inter, with more leading");
+        let grill = ask(r#"{"id":"AQ5","kind":"grill","status":"open","questions":[
+                {"id":"q1","title":"Lay","options":[{"name":"Point"},{"name":"Carry"}]},
+                {"id":"q2","title":"Fall","options":[{"name":"Tumble"},{"name":"Puff"}]}]}"#);
+        let mut d = Draft::default();
+        d.grill.insert(
+            "q2".into(),
+            Said {
+                pick: Some(1),
+                words: "softly".into(),
+                ..Said::default()
+            },
+        );
+        d.grill.insert(
+            "q1".into(),
+            Said {
+                pick: Some(0),
+                ..Said::default()
+            },
+        );
+        let g = Gist::of_draft(&d, &grill);
+        assert_eq!(
+            g.picks,
+            vec!["Point".to_string(), "Puff".to_string()],
+            "in the questions' order"
+        );
+        assert_eq!(
+            g.words, "softly",
+            "the round has no words: the first question's he wrote on"
+        );
     }
 }

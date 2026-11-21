@@ -14,6 +14,7 @@ pub mod icons;
 pub mod marks;
 pub mod model;
 pub mod page;
+pub mod panel;
 pub mod player;
 pub mod settings;
 pub mod stage;

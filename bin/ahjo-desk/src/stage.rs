@@ -134,10 +134,30 @@ impl DeskApp {
                     .w_full()
                     .relative()
                     .child(body)
+                    .children(zoom.map(|z| {
+                        div()
+                            .absolute()
+                            .right(px(GAP))
+                            .bottom(px(GAP))
+                            .rounded(px(tokens::RADIUS))
+                            .bg(alpha(t.bg, 0.85))
+                            .child(
+                                button(&t, "zoom", z, Kind::Quiet)
+                                    .tooltip(kit::tip(
+                                        "Click to fit · wheel zooms at the pointer · drag or the middle button moves · Z fits · 0 is 1:1",
+                                    ))
+                                    .on_click(cx.listener(|app, _: &ClickEvent, _, cx| {
+                                        app.view.fit = true;
+                                        app.view.scale = 1.;
+                                        app.view.pan = (0., 0.);
+                                        cx.notify();
+                                    })),
+                            )
+                    }))
                     .children(card),
             )
             .when(video, |d| d.child(self.transport(&t, &shown_item, cx)))
-            .child(self.film(&t, &ask, key.0, &items, &slots, rec, zoom, cx))
+            .children(self.film(&t, &ask, key.0, &items, &slots, rec, cx))
             .into_any_element()
     }
 
@@ -372,7 +392,16 @@ impl DeskApp {
                                         })),
                                 ),
                         )
-                        .child(self.mark_note.clone()),
+                        .child(
+                            div()
+                                .px(px(8.))
+                                .py(px(6.))
+                                .bg(t.bg)
+                                .border_1()
+                                .border_color(t.divider)
+                                .rounded(px(tokens::RADIUS))
+                                .child(self.mark_note.clone()),
+                        ),
                 )
                 .into_any_element(),
         )
@@ -487,14 +516,11 @@ impl DeskApp {
         }
         let shown_natural = natural;
         let natural = natural.unwrap_or((1., 1.));
-        let zoom = shown_natural.map(|n| {
-            let pct = (self.scale_now(n, window) * 100.).round();
-            if self.view.fit {
-                format!("Fit · {pct}%")
-            } else {
-                format!("{pct}%")
-            }
-        });
+        // Fitted, the picture says its own size; zoomed, the size is
+        // worth a word, and a click on it fits again.
+        let zoom = shown_natural
+            .filter(|_| !self.view.fit)
+            .map(|n| format!("{}%", (self.scale_now(n, window) * 100.).round()));
         let drawing = self.tool != Tool::Look && shown_natural.is_some();
         let stage = div()
             .id("stage")
@@ -1006,13 +1032,20 @@ impl DeskApp {
         items: &[Item],
         slots: &[usize],
         rec: Option<usize>,
-        zoom: Option<String>,
         cx: &mut Context<Self>,
-    ) -> AnyElement {
+    ) -> Option<AnyElement> {
+        // One thing shown has nothing to choose between: no strip.
+        if items.len() < 2 {
+            return None;
+        }
+        let comparable = items
+            .iter()
+            .filter(|i| matches!(i.kind(), Some(MediaKind::Image | MediaKind::Video)))
+            .count()
+            > 1;
         let mut thumbs = Vec::new();
-        let many = items.len() > 1;
         let marked: Vec<String> = self.marks().into_iter().filter_map(|m| m.media).collect();
-        for (i, item) in items.iter().enumerate().filter(|_| many) {
+        for (i, item) in items.iter().enumerate() {
             let pic = match item.kind() {
                 Some(MediaKind::Image) => match self.picture(desk, ask, &item.media, cx) {
                     Some(Pic::Ready { image, .. }) => Some(image.clone()),
@@ -1097,17 +1130,9 @@ impl DeskApp {
             );
         }
         let side = self.view.side;
-        let comparable = items
-            .iter()
-            .filter(|i| matches!(i.kind(), Some(MediaKind::Image | MediaKind::Video)))
-            .count()
-            > 1;
+        Some(
         div()
-            .h(px(if many {
-                tokens::STRIP_H + 2. * GAP_SMALL
-            } else {
-                tokens::TRANSPORT
-            }))
+            .h(px(tokens::STRIP_H + 2. * GAP_SMALL))
             .flex_none()
             .px(px(GAP))
             .py(px(GAP_SMALL))
@@ -1135,21 +1160,6 @@ impl DeskApp {
                     .flex()
                     .items_center()
                     .gap(px(GAP))
-                    .children(zoom.map(|z| {
-                        let fit = self.view.fit;
-                        button(t, "zoom", z, Kind::Quiet)
-                            .tooltip(kit::tip(if fit {
-                                "Click for 1:1 · wheel zooms at the pointer · drag or the middle button moves · Z fits · 0 is 1:1"
-                            } else {
-                                "Click to fit · wheel zooms at the pointer · drag or the middle button moves · Z fits · 0 is 1:1"
-                            }))
-                            .on_click(cx.listener(move |app, _: &ClickEvent, _, cx| {
-                                app.view.fit = !fit;
-                                app.view.scale = 1.;
-                                app.view.pan = (0., 0.);
-                                cx.notify();
-                            }))
-                    }))
                     .when(comparable, |d| {
                         d.child(
                             button(
@@ -1168,7 +1178,8 @@ impl DeskApp {
                         )
                     }),
             )
-            .into_any_element()
+            .into_any_element(),
+        )
     }
 }
 
