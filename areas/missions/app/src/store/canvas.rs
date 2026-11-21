@@ -44,7 +44,8 @@ pub const CRITERION_LINE: f32 = 17.;
 pub const CRITERION_MOST: usize = 10;
 /// How wide a gate's condition runs: the fork, past its dot.
 pub const CRITERION_W: f32 = FORK_W - FORK_DOT;
-const GLYPH: f32 = 0.62;
+/// A glyph's width for its size, roughly, for guessing how text wraps.
+pub const GLYPH: f32 = 0.62;
 /// A port's dot, and how near a drop must land to take it.
 pub const PORT: f32 = 9.;
 pub const PORT_REACH: f32 = 16.;

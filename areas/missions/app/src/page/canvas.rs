@@ -53,6 +53,8 @@ const FORK_DOT_SIZE: f32 = 9.;
 const SEAT: f32 = 16.;
 /// The room a loop's words are centred in, along its lane.
 const LOOP_WORDS: f32 = 320.;
+/// A line of a loop's words, for keeping one loop's off another's.
+const LOOP_LINE: f32 = 17.;
 #[derive(Clone, Debug)]
 enum Drag {
     Pan(Point<Pixels>, (f32, f32)),
@@ -489,13 +491,18 @@ impl MissionsPage {
         ));
         // A loop back says, along its lane, how often it goes round and
         // what then.
-        for w in board.wires.iter().filter(|w| w.back) {
-            let (Some(label), Some(words)) = (w.label, loop_words(mission, w)) else {
-                continue;
-            };
+        let said = loop_places(
+            board
+                .wires
+                .iter()
+                .filter(|w| w.back)
+                .filter_map(|w| Some((w.id.clone(), loop_words(mission, w)?, w.label?)))
+                .collect(),
+        );
+        for (id, words, label) in said {
             let z = view.zoom;
             let (x, y) = view.position(label.0, label.1);
-            let selector = format!("canvas-loop-{}", w.id);
+            let selector = format!("canvas-loop-{id}");
             layer = layer.child(
                 div()
                     .absolute()
@@ -2001,6 +2008,36 @@ fn state_words(
     }
 }
 
+/// Where each loop's words go, given where each would say them: two
+/// loops held by one limit say the same thing near each other, and it is
+/// said once; words that would still overprint others step down a line.
+fn loop_places(wanted: Vec<(String, String, (f32, f32))>) -> Vec<(String, String, (f32, f32))> {
+    let mut said: Vec<(String, String, (f32, f32))> = Vec::new();
+    let span = |words: &str, x: f32| {
+        let half = words.chars().count() as f32 * CARD_SMALL * board::GLYPH / 2.;
+        (x - half, x + half)
+    };
+    for (id, words, (x, mut y)) in wanted {
+        let (a, b) = span(&words, x);
+        let clash = |y: f32, said: &[(String, String, (f32, f32))]| {
+            said.iter()
+                .find(|(_, w, (sx, sy))| {
+                    let (sa, sb) = span(w, *sx);
+                    a < sb && sa < b && (y - sy).abs() < LOOP_LINE
+                })
+                .map(|(_, w, _)| w.clone())
+        };
+        if clash(y, &said).is_some_and(|w| w == words) {
+            continue;
+        }
+        while clash(y, &said).is_some() {
+            y += LOOP_LINE;
+        }
+        said.push((id, words, (x, y)));
+    }
+    said
+}
+
 /// What a loop back says along its lane: how often it goes round, and
 /// what happens when that is spent.
 fn loop_words(mission: &Mission, wire: &board::Wire) -> Option<String> {
@@ -2463,5 +2500,21 @@ mod tests {
         let fresh: Mission =
             serde_json::from_value(serde_json::json!({"input_card": [{"id": "inp"}]})).unwrap();
         assert_eq!(step_after(&fresh, None).as_deref(), Some("inp"));
+    }
+
+    #[test]
+    fn loops_held_by_one_limit_say_it_once_and_others_keep_clear() {
+        let words = "up to 3 tries · then it fails".to_string();
+        let near = |id: &str, w: &str, at| (id.to_string(), w.to_string(), at);
+        let placed = loop_places(vec![
+            near("a", &words, (720., 490.)),
+            near("b", &words, (850., 502.)),
+            near("c", "again until it passes", (800., 490.)),
+            near("d", &words, (2000., 490.)),
+        ]);
+        let ids: Vec<_> = placed.iter().map(|(id, ..)| id.as_str()).collect();
+        assert_eq!(ids, ["a", "c", "d"]);
+        let (_, _, c) = &placed[1];
+        assert!(c.1 >= 490. + LOOP_LINE, "{c:?}");
     }
 }
