@@ -358,40 +358,48 @@ pub fn shaped(
     if columns.is_empty() {
         return vec![];
     }
-    // How far each column drops so its way in is on the row's line, or
-    // level with the pass of a gate in the column before it. Only wired
-    // cards set the line: a card just added, wired to nothing, must not
-    // move the rest.
+    // How far each column drops, wrapped `n` to a row, so its way in is
+    // on its row's line, or level with the pass of a gate in the column
+    // before it on that row. A column that starts a row follows nothing.
+    // Only wired cards set the line: a card just added, wired to nothing,
+    // must not move the rest.
     let wired = |id: &str| {
         m.connections
             .iter()
             .any(|c| port_of(&c.from).0 == id || port_of(&c.to).0 == id)
     };
-    let baseline = columns
-        .iter()
-        .map(|c| &c.0[0].0)
-        .filter(|id| wired(id))
-        .map(|id| way_in(id))
-        .fold(0., f32::max);
-    let mut drops = vec![0f32; columns.len()];
-    for (i, column) in columns.iter().enumerate() {
-        let first = &column.0[0].0;
-        let mut drop = baseline - way_in(first);
-        if i > 0 {
-            let prev = &columns[i - 1];
-            for (id, (_, dy)) in &prev.0 {
-                let passes = m.connections.iter().any(|c| {
-                    c.from == format!("{id}:{}", ahjo_missions_contract::GATE_PASS)
-                        && port_of(&c.to).0 == first
-                });
-                if passes && let Some(pass) = port_offset(m, flow, id, "pass", true) {
-                    drop = drop.max(drops[i - 1] + dy + pass.1 - way_in(first));
+    let drops_for = |n: usize| {
+        let mut drops = vec![0f32; columns.len()];
+        for (k, row) in columns.chunks(n).enumerate() {
+            let baseline = row
+                .iter()
+                .map(|c| &c.0[0].0)
+                .filter(|id| wired(id))
+                .map(|id| way_in(id))
+                .fold(0., f32::max);
+            for (j, column) in row.iter().enumerate() {
+                let i = k * n + j;
+                let first = &column.0[0].0;
+                let mut drop = baseline - way_in(first);
+                if j > 0 {
+                    let prev = &columns[i - 1];
+                    for (id, (_, dy)) in &prev.0 {
+                        let passes = m.connections.iter().any(|c| {
+                            c.from == format!("{id}:{}", ahjo_missions_contract::GATE_PASS)
+                                && port_of(&c.to).0 == first
+                        });
+                        if passes && let Some(pass) = port_offset(m, flow, id, "pass", true) {
+                            drop = drop.max(drops[i - 1] + dy + pass.1 - way_in(first));
+                        }
+                    }
                 }
+                drops[i] = drop.max(0.);
             }
         }
-        drops[i] = drop.max(0.);
-    }
+        drops
+    };
     let extent = |n: usize| {
+        let drops = drops_for(n);
         let rows: Vec<_> = columns.chunks(n).collect();
         let w = rows
             .iter()
@@ -451,6 +459,7 @@ pub fn shaped(
             .find(|n| room.0 / extent(*n).0 >= floor)
             .unwrap_or(1)
     };
+    let drops = drops_for(per_row);
     let mut out = vec![];
     let mut y = MARGIN;
     for (k, row) in columns.chunks(per_row).enumerate() {
@@ -1384,6 +1393,39 @@ mod tests {
             let now = after.iter().find(|q| q.id == p.id).unwrap();
             assert_eq!((now.x, now.y), (p.x, p.y), "{} moved", p.id);
         }
+    }
+
+    #[test]
+    fn every_wrapped_row_starts_a_row_gap_under_the_one_above() {
+        // A column that starts a row stands on that row's line, not lower
+        // to follow a gate's pass in the row above.
+        let m = delivery();
+        let flow = build(&m);
+        let mut wrapped = 0;
+        for width in (300..=2400).step_by(50) {
+            let b = board(
+                &m,
+                &flow,
+                &shaped(&m, &flow, (width as f32, 4000.), 0.8, &|_| 0.),
+                false,
+            );
+            let mut cards: Vec<&Card> = b.cards.iter().collect();
+            cards.sort_by(|p, q| p.y.total_cmp(&q.y));
+            let mut bottom = cards[0].y + cards[0].h;
+            for c in &cards[1..] {
+                let gap = c.y - bottom;
+                if gap >= ROW_GAP - 1. {
+                    wrapped += 1;
+                    assert!(
+                        (gap - ROW_GAP).abs() < 1.,
+                        "{width}: {} starts its row {gap} under the row above",
+                        c.id
+                    );
+                }
+                bottom = bottom.max(c.y + c.h);
+            }
+        }
+        assert!(wrapped > 0, "some width wraps the mission");
     }
 
     #[test]
