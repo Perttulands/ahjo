@@ -53,9 +53,8 @@ pub const WINDOW_MIN: (f32, f32) = (880., 560.);
 /// Under this width a list row drops its picture: its words need the room.
 pub const LIST_THUMBS: f32 = 280.;
 /// The room around the list's rows, which stand as cards (half of it
-/// between them), and the most of his marks a row shows by number.
+/// between them).
 pub const LIST_PAD: f32 = 6.;
-pub const LIST_MARKS: usize = 5;
 /// The settings menu.
 pub const MENU_W: f32 = 300.;
 /// A mark's words written over the surface, with it alone in the window.

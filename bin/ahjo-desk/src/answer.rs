@@ -77,17 +77,17 @@ impl Draft {
 }
 
 /// What he has said on an ask, as its row in the list shows it: the
-/// options he chose, in his order, his words, and his marks' inks.
+/// options he chose, in his order, his words, and how many marks he made.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Gist {
     pub picks: Vec<String>,
     pub words: String,
-    pub marks: Vec<Option<String>>,
+    pub marks: usize,
 }
 
 impl Gist {
     pub fn is_empty(&self) -> bool {
-        self.picks.is_empty() && self.words.is_empty() && self.marks.is_empty()
+        self.picks.is_empty() && self.words.is_empty() && self.marks == 0
     }
 
     /// A draft's: on a grill, each question's pick, and the round's words or
@@ -118,7 +118,7 @@ impl Gist {
         Gist {
             picks,
             words,
-            marks: d.marks(ask).iter().map(|m| m.color.clone()).collect(),
+            marks: d.marks(ask).len(),
         }
     }
 
@@ -155,7 +155,7 @@ impl Gist {
         Gist {
             picks,
             words,
-            marks: ask.marks.iter().map(|m| m.color.clone()).collect(),
+            marks: ask.marks.len(),
         }
     }
 }

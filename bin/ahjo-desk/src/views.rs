@@ -550,24 +550,32 @@ impl DeskApp {
                 meta.push("clip".into());
             }
             // What he has said on it, drawn as the panel draws it: the
-            // options he chose lifted, his words in quotes.
-            let gist = match &ask.answer {
+            // options he chose lifted, his words in quotes. His marks are
+            // counted in words; their numbered pins belong on the picture,
+            // where they point at something (AH14: no little circles).
+            let (gist, when) = match &ask.answer {
                 Some(a) if answered_list => {
                     if a.verdict != "pick" && a.verdict != "marks" {
                         meta.push(verdict_words(a, &ask));
                     }
-                    meta.push(age(&a.at));
-                    Gist::of_answer(a, &ask)
+                    (Gist::of_answer(a, &ask), age(&a.at))
                 }
                 _ => {
-                    meta.push(age(&ask.created_at));
                     let at = (self.desks[k.0].place.url.clone(), k.1.clone(), ask.round());
-                    self.drafts
+                    let gist = self
+                        .drafts
                         .get(&at)
                         .map(|d| Gist::of_draft(d, &ask))
-                        .unwrap_or_default()
+                        .unwrap_or_default();
+                    (gist, age(&ask.created_at))
                 }
             };
+            match gist.marks {
+                0 => {}
+                1 => meta.push("1 mark".into()),
+                n => meta.push(format!("{n} marks")),
+            }
+            meta.push(when);
             let key = k.clone();
             let thumb = thumb.filter(|_| width >= tokens::LIST_THUMBS);
             rows.push(
@@ -627,7 +635,10 @@ impl DeskApp {
                                 )
                             }),
                     )
-                    .children((!gist.is_empty()).then(|| said_line(t, &gist)))
+                    .children(
+                        (!gist.picks.is_empty() || !gist.words.is_empty())
+                            .then(|| said_line(t, &gist)),
+                    )
                     .child(
                         div()
                             .text_size(px(CAP_TEXT))
@@ -1454,7 +1465,7 @@ fn fades(scroll: &gpui::ScrollHandle, ground: Hsla) -> Vec<Div> {
 }
 
 /// What he said on an ask, in its row: the options he chose lifted as
-/// their cards are, his marks by their numbers, his words in quotes.
+/// their cards are, his words in quotes.
 fn said_line(t: &Theme, g: &Gist) -> Div {
     div()
         .flex()
@@ -1472,13 +1483,6 @@ fn said_line(t: &Theme, g: &Gist) -> Div {
                 .text_color(t.text)
                 .child(name.clone())
         }))
-        .children(
-            g.marks
-                .iter()
-                .take(tokens::LIST_MARKS)
-                .enumerate()
-                .map(|(n, ink)| number(t, n + 1, rgb(tokens::ink(ink.as_deref())))),
-        )
         .children((!g.words.is_empty()).then(|| {
             div()
                 .min_w_0()
