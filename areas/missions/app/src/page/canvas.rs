@@ -2010,7 +2010,8 @@ fn state_words(
 
 /// Where each loop's words go, given where each would say them: two
 /// loops held by one limit say the same thing near each other, and it is
-/// said once; words that would still overprint others step down a line.
+/// said once, under the lower lane; words that would still overprint
+/// others step down a line.
 fn loop_places(wanted: Vec<(String, String, (f32, f32))>) -> Vec<(String, String, (f32, f32))> {
     let mut said: Vec<(String, String, (f32, f32))> = Vec::new();
     let span = |words: &str, x: f32| {
@@ -2028,6 +2029,14 @@ fn loop_places(wanted: Vec<(String, String, (f32, f32))>) -> Vec<(String, String
                 .map(|(_, w, _)| w.clone())
         };
         if clash(y, &said).is_some_and(|w| w == words) {
+            // Said under the lowest of the lanes it speaks for, clear of
+            // them all.
+            if let Some((.., at)) = said.iter_mut().find(|(_, w, (sx, sy))| {
+                let (sa, sb) = span(w, *sx);
+                *w == words && a < sb && sa < b && (y - sy).abs() < LOOP_LINE
+            }) {
+                at.1 = at.1.max(y);
+            }
             continue;
         }
         while clash(y, &said).is_some() {
@@ -2514,6 +2523,8 @@ mod tests {
         ]);
         let ids: Vec<_> = placed.iter().map(|(id, ..)| id.as_str()).collect();
         assert_eq!(ids, ["a", "c", "d"]);
+        // Under the lower of the two lanes it speaks for.
+        assert_eq!(placed[0].2, (720., 502.));
         let (_, _, c) = &placed[1];
         assert!(c.1 >= 490. + LOOP_LINE, "{c:?}");
     }
