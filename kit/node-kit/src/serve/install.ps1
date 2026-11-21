@@ -9,8 +9,9 @@
 # from the node (Update, at the top of each window).
 #
 # For a trial run elsewhere, AHJO_INSTALL_DIR (the apps), AHJO_CONFIG_DIR
-# (their settings, %APPDATA%\Ahjo) and AHJO_START_MENU (the shortcuts) move
-# what it writes, and then it opens nothing.
+# (their settings, %APPDATA%\Ahjo, with Brain's in its ahjo-brain folder)
+# and AHJO_START_MENU (the shortcuts) move what it writes, and then it
+# opens nothing.
 #
 # This file is ASCII on purpose: Windows PowerShell reads a script without a
 # byte-order mark in the ANSI code page.
@@ -86,6 +87,21 @@ if ($settings.node -ne $node) {
   Write-Text $app ($settings | ConvertTo-Json -Depth 32)
 }
 
+# Ahjo Brain reads the brain through the same node. It is kept in Brain's
+# settings, not on its shortcut, so a taskbar pin of the bare exe starts the
+# same app as the Start menu.
+$brainDir = if ($env:AHJO_CONFIG_DIR) { Join-Path $config 'ahjo-brain' } else { Join-Path $env:APPDATA 'ahjo-brain' }
+New-Item -ItemType Directory -Force -Path $brainDir | Out-Null
+$brainJson = Join-Path $brainDir 'settings.json'
+if (Test-Path -LiteralPath $brainJson) {
+  try { $brain = [IO.File]::ReadAllText($brainJson) | ConvertFrom-Json }
+  catch { throw "The apps are installed, but $brainJson does not read as JSON; fix or remove it and run the line again." }
+} else { $brain = New-Object PSObject }
+if ($brain.from -ne $node) {
+  $brain | Add-Member -Force -NotePropertyName from -NotePropertyValue $node
+  Write-Text $brainJson ($brain | ConvertTo-Json -Depth 32)
+}
+
 # Ahjo Desk's first desk, unless it already has its own.
 $deskJson = Join-Path $config 'desk.json'
 if ($desk -and -not (Test-Path -LiteralPath $deskJson)) {
@@ -93,17 +109,19 @@ if ($desk -and -not (Test-Path -LiteralPath $deskJson)) {
 }
 
 $shell = New-Object -ComObject WScript.Shell
+# Each shortcut is the bare exe: everything an app needs is in its settings,
+# so pinning a running window to the taskbar pins the same app.
 $links = @(
-  @{ name = 'Ahjo Swarm'; exe = 'ahjo-swarm.exe'; args = '' },
-  @{ name = 'Ahjo Brain'; exe = 'ahjo-brain.exe'; args = "--from $node" },
-  @{ name = 'Ahjo Desk'; exe = 'ahjo-desk.exe'; args = '' }
+  @{ name = 'Ahjo Swarm'; exe = 'ahjo-swarm.exe' },
+  @{ name = 'Ahjo Brain'; exe = 'ahjo-brain.exe' },
+  @{ name = 'Ahjo Desk'; exe = 'ahjo-desk.exe' }
 )
 foreach ($l in $links) {
   $exe = Join-Path $dir $l.exe
   if (-not (Test-Path -LiteralPath $exe)) { continue }
   $link = $shell.CreateShortcut((Join-Path $menu "$($l.name).lnk"))
   $link.TargetPath = $exe
-  $link.Arguments = $l.args
+  $link.Arguments = ''
   $link.WorkingDirectory = $dir
   $link.Description = $l.name
   $link.Save()

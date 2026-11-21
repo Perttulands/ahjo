@@ -1,6 +1,7 @@
 //! What every Ahjo page is made of: the theme and widgets, the link to
 //! the nodes, and the [`Host`] and [`Page`] that join a page to the app.
 
+pub mod app_log;
 pub mod ask;
 pub mod chords;
 pub mod clock;

@@ -41,9 +41,15 @@ pub fn run() {
         println!("{USAGE}");
         return;
     }
+    let path = source::settings_path();
+    let (settings, broken) = match path.as_deref().map(source::read_settings) {
+        Some(Ok(s)) => (s, None),
+        Some(Err(e)) => (source::Settings::default(), Some(e)),
+        None => (source::Settings::default(), None),
+    };
     if args.iter().any(|a| a == "--where") {
         let here = source::find(&args);
-        let place = match source::asked_from(&args) {
+        let place = match source::asked_from(&args, &settings) {
             Some(remote) => here.reading(remote),
             None => here,
         };
@@ -66,17 +72,15 @@ pub fn run() {
         },
         None => None,
     };
+    ahjo_app_kit::app_log::install(
+        "ahjo-brain",
+        path.as_ref().map(|p| p.with_file_name("app.log")),
+    );
     // The theme: as asked, else as chosen here, else as chosen in Ahjo Swarm.
-    let path = source::settings_path();
-    let (settings, broken) = match path.as_deref().map(source::read_settings) {
-        Some(Ok(s)) => (s, None),
-        Some(Err(e)) => (source::Settings::default(), Some(e)),
-        None => (source::Settings::default(), None),
-    };
     let direction = flag.or_else(|| Direction::from_key(&settings.theme));
     let start = Start {
         place: source::find(&args),
-        from: source::asked_from(&args),
+        from: source::asked_from(&args, &settings),
         settings: (path, settings, broken),
         query: value(&args, "--search"),
         open: value(&args, "--open"),

@@ -4,9 +4,10 @@
 //! - The brain's files: `--brain <dir>` or `BRAIN_ROOT`; otherwise
 //!   `/srv/data/context` on Linux, and on Windows the first WSL distribution
 //!   that has it, through `\\wsl.localhost\<distro>\srv\data\context`.
-//! - Another machine's brain: `--from <node url>` (`BRAIN_FROM`), or one of
-//!   Ahjo Swarm's places chosen in the app, read through its node into a
-//!   copy kept in the cache (`mirror`), read only.
+//! - Another machine's brain: `--from <node url>` (`BRAIN_FROM`, `from` in
+//!   the settings, which the Windows installer writes), or one of Ahjo
+//!   Swarm's places chosen in the app, read through its node into a copy
+//!   kept in the cache (`mirror`), read only.
 //! - Context Citadel, for ranked search: `--citadel <url>` or
 //!   `BRAIN_CITADEL`; otherwise `http://127.0.0.1:3200`, which on Windows
 //!   reaches a WSL service bound to loopback through WSL's localhost
@@ -79,10 +80,14 @@ pub fn find(args: &[String]) -> Where {
     }
 }
 
-/// The other machine asked for at launch: `--from <node url>` or
-/// `BRAIN_FROM`, named by its host: `rig` for `http://rig.tail1.ts.net:7300`.
-pub fn asked_from(args: &[String]) -> Option<Remote> {
-    let url = arg(args, "--from").or_else(|| std::env::var("BRAIN_FROM").ok())?;
+/// The other machine asked for: `--from <node url>`, else `BRAIN_FROM`,
+/// else the settings' `from`, named by its host: `rig` for
+/// `http://rig.tail1.ts.net:7300`. Kept in the settings, it holds however
+/// the app is started, from a shortcut or a taskbar pin of the bare exe.
+pub fn asked_from(args: &[String], settings: &Settings) -> Option<Remote> {
+    let url = arg(args, "--from")
+        .or_else(|| std::env::var("BRAIN_FROM").ok())
+        .or_else(|| settings.from.clone())?;
     Some(Remote {
         name: host_name(&url),
         url,
@@ -230,6 +235,10 @@ pub struct Settings {
     /// none opens at Ahjo Swarm's.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub app_size: Option<u16>,
+    /// The other machine's node the brain is read from on every start;
+    /// none is this one's brain.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub from: Option<String>,
     #[serde(flatten)]
     pub rest: serde_json::Map<String, serde_json::Value>,
 }
@@ -291,6 +300,25 @@ mod tests {
         assert_eq!(host_name("http://rig.tail1.ts.net:7300"), "rig");
         assert_eq!(host_name("http://100.64.0.2:7300"), "100.64.0.2");
         assert_eq!(host_name("rig:7300"), "rig");
+    }
+
+    #[test]
+    fn the_settings_name_the_other_machine_when_the_launch_does_not() {
+        let kept = Settings {
+            from: Some("http://rig.tail1.ts.net:7300".into()),
+            ..Settings::default()
+        };
+        let args = |a: &[&str]| a.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        if std::env::var_os("BRAIN_FROM").is_none() {
+            let bare = asked_from(&args(&["ahjo-brain"]), &kept).unwrap();
+            assert_eq!(
+                (bare.name.as_str(), bare.url.as_str()),
+                ("rig", "http://rig.tail1.ts.net:7300")
+            );
+            assert!(asked_from(&args(&["ahjo-brain"]), &Settings::default()).is_none());
+        }
+        let asked = asked_from(&args(&["ahjo-brain", "--from", "http://box:7300"]), &kept).unwrap();
+        assert_eq!(asked.url, "http://box:7300");
     }
 
     #[test]

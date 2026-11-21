@@ -1,8 +1,6 @@
 //! Ahjo Swarm's native app: the shell (`ahjo-app-shell`) in a window, holding
 //! the pages listed here. Each area's page is listed here, and nowhere else.
 
-mod app_log;
-
 use ahjo_app_kit::Build;
 use ahjo_app_shell::start;
 use gpui::{App, AppContext, Bounds, WindowBounds, WindowOptions, point, px, size};
@@ -75,8 +73,11 @@ pub fn run() {
             .position(|a| a == "--node")
             .and_then(|i| args.get(i + 1).cloned())
     };
-    app_log::install();
     let settings = ahjo_app_kit::settings::path();
+    ahjo_app_kit::app_log::install(
+        "ahjo-swarm",
+        settings.as_ref().map(|p| p.with_file_name("app.log")),
+    );
     if let Some(path) = settings.as_deref()
         && let Err(error) = migrate_page_preferences(path)
     {

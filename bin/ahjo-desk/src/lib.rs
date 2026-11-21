@@ -42,6 +42,10 @@ fn bounds(cx: &App) -> Bounds<gpui::Pixels> {
 
 /// The app: `ahjo-desk [--desk [Name=]http://127.0.0.1:8774]...`.
 pub fn run() {
+    ahjo_app_kit::app_log::install(
+        "ahjo-desk",
+        desk::config_path().map(|p| p.with_file_name("desk.log")),
+    );
     let args: Vec<String> = std::env::args().skip(1).collect();
     let loaded = desk::load(&args);
     gpui_platform::application()

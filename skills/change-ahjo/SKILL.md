@@ -163,17 +163,21 @@ cd /mnt/c/Users/pertt/ahjo-build && git pull --ff-only
 heavy run --memory 8 -- /mnt/c/Users/pertt/.cargo/bin/cargo.exe build --release -p ahjo-app-swarm
 ```
 
-It runs from `C:\Users\pertt\Ahjo` through `Ahjo.cmd` (the Start-menu entry
-Ahjo Swarm), which points `AHJO_SWARM_CONFIG` at `app.json` beside it and the app at
-`http://127.0.0.1:7310`. Replacing it closes the operator's window, so do it
-when he asked for the new app. A node whose protocol changed (`protocol` in
+The apps run from `C:\Users\pertt\Ahjo`, each started bare, as the install
+script starts them, so the Start menu, a taskbar pin and `Ahjo.cmd` start the
+same app the same way. Their settings are in `%APPDATA%\Ahjo`: `app.json`
+(Swarm, naming the node `http://127.0.0.1:7310`) and `desk.json` (Desk);
+Brain's are in `%APPDATA%\ahjo-brain\settings.json`. Each app keeps its log
+beside its settings (`app.log`, `desk.log`), with every panic's message,
+place and backtrace; the `.pdb` beside each exe names the frames. Replacing
+an app closes its window, so do it when he asked for the new app. A node whose protocol changed (`protocol` in
 `/api/health`) needs the app built from the same commit.
 
 Windows programs are not on this host's `PATH`; `W=/mnt/c/Windows/System32`.
 
 ```sh
 $W/taskkill.exe /F /IM ahjo-swarm.exe
-cp /mnt/c/Users/pertt/ahjo-build/target/release/ahjo-swarm.exe /mnt/c/Users/pertt/Ahjo/
+cp /mnt/c/Users/pertt/ahjo-build/target/release/{ahjo-swarm.exe,ahjo_swarm.pdb} /mnt/c/Users/pertt/Ahjo/
 ```
 
 WSL runs in Windows session 0, where a started window never shows. Start the
