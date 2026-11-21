@@ -30,6 +30,7 @@ async fn a_message_is_not_pasted_into_a_pane_the_seat_no_longer_owns() {
         brief: "brief".into(),
         reuse_dispatch: None,
         keep: false,
+        run_owned: false,
         environment: String::new(),
         turn: None,
     };

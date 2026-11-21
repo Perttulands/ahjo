@@ -93,6 +93,33 @@ fn backup(path: &Path) -> std::path::PathBuf {
 }
 
 #[test]
+fn removes_obsolete_fresh_setting_from_saved_missions() {
+    let (root, store) = fixture();
+    let path = root.join("missions/old.mission.toml");
+    let saved = r#"schema = 5
+id = "msn_old"
+slug = "old"
+title = "Old"
+rev = 3
+
+[[step]]
+id = "fmn_work"
+formation = "solo"
+title = "Work" # preserved
+fresh = true
+"#;
+    std::fs::write(&path, saved).unwrap();
+    let mission = store.mission_edit("old").unwrap();
+    assert_eq!(mission.mission.steps[0].title, "Work");
+    let upgraded = std::fs::read_to_string(&path).unwrap();
+    assert!(!upgraded.contains("fresh"));
+    assert!(upgraded.contains("# preserved"));
+    assert_eq!(std::fs::read_to_string(backup(&path)).unwrap(), saved);
+    store.mission_edit("old").unwrap();
+    assert_eq!(std::fs::read_to_string(&path).unwrap(), upgraded);
+}
+
+#[test]
 fn old_documents_keep_data_comments_and_backups_until_their_next_save() {
     let (root, store) = fixture();
     let mission_path = root.join("missions/old.mission.toml");

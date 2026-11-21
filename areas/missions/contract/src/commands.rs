@@ -182,6 +182,9 @@ pub struct MissionRun {
     pub repository: Option<String>,
     /// The branch the run starts from.
     pub base: Option<String>,
+    /// Leave this run's seat sessions and working directories after it ends.
+    #[serde(default)]
+    pub keep_sessions: bool,
     #[serde(default)]
     pub context_paths: Vec<String>,
     pub actor: Option<String>,
@@ -344,8 +347,6 @@ pub struct HandoverWorker {
     pub step: String,
     pub who: String,
     pub seats: Vec<HandoverSeat>,
-    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
-    pub fresh: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub brief: Option<String>,
 }
@@ -357,8 +358,6 @@ pub struct HandoverSeat {
     pub harness: crate::Harness,
     pub model: String,
     pub effort: crate::Effort,
-    /// The base session name. Fresh attempts receive their own suffix.
-    pub session: String,
 }
 
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]

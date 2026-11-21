@@ -28,6 +28,7 @@ pub(super) struct RunUi {
     pub(super) base: Entity<TextField>,
     pub(super) issue: Entity<TextField>,
     pub(super) paths: Entity<TextField>,
+    keep_sessions: bool,
     pub(super) busy: bool,
     pub(super) abort_armed: bool,
     pub(super) stop_reason: Entity<TextField>,
@@ -79,6 +80,7 @@ impl RunUi {
             base: cx.new(|cx| TextField::new(cx, "Base")),
             issue: cx.new(|cx| TextField::new(cx, "Issue reference")),
             paths: cx.new(|cx| TextField::new(cx, "Context paths, one per line").prose()),
+            keep_sessions: false,
             busy: false,
             abort_armed: false,
             stop_reason: cx.new(|cx| TextField::new(cx, "Why (optional)")),
@@ -112,6 +114,7 @@ impl MissionsPage {
                 .values()
                 .any(|f| !f.read(cx).text.is_empty())
                 || self.run.cwd.read(cx).text != self.last_folder().unwrap_or_default()
+                || self.run.keep_sessions
                 || [
                     &self.run.repository,
                     &self.run.base,
@@ -299,6 +302,7 @@ impl MissionsPage {
         .detach();
     }
     fn clear_start_context(&mut self, cx: &mut Context<Self>) {
+        self.run.keep_sessions = false;
         for field in [
             &self.run.repository,
             &self.run.base,
@@ -703,6 +707,7 @@ impl MissionsPage {
             cwd: Some(self.run.cwd.read(cx).text.clone()),
             repository: Some(self.run.repository.read(cx).text.clone()),
             base: Some(self.run.base.read(cx).text.clone()),
+            keep_sessions: self.run.keep_sessions,
             issue: Some(self.run.issue.read(cx).text.clone()),
             context_paths: self
                 .run
@@ -1314,6 +1319,7 @@ impl MissionsPage {
             // What few runs need waits behind one line, open once any of it
             // holds something.
             let more = self.run.start_more
+                || self.run.keep_sessions
                 || !self.run.repository.read(cx).text.trim().is_empty()
                 || !self.run.issue.read(cx).text.trim().is_empty()
                 || !self.run.paths.read(cx).text.trim().is_empty();
@@ -1356,6 +1362,23 @@ impl MissionsPage {
                         div()
                             .debug_selector(|| "run-context-paths".into())
                             .child(self.run.paths.clone()),
+                    )
+                    .child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .gap(px(TAB_GAP))
+                            .child(
+                                kit::toggle(t, "run-keep-sessions", self.run.keep_sessions)
+                                    .debug_selector(|| "run-keep-sessions".into())
+                                    .on_click(cx.listener(|p, _, _, cx| {
+                                        if !p.run.busy && p.run.uncertain.is_none() {
+                                            p.run.keep_sessions = !p.run.keep_sessions;
+                                            cx.notify();
+                                        }
+                                    })),
+                            )
+                            .child(kit::label(t, "Keep seat sessions after the run")),
                     );
             }
             if self.run.uncertain.is_some() && !self.run.busy {
@@ -1473,7 +1496,7 @@ impl MissionsPage {
                 let title = mission
                     .map(|mission| mission.card_name(&point.card))
                     .unwrap_or(&point.card);
-                body = body.child(format!("The agents working on {title} are interrupted."));
+                body = body.child(format!("The run stops working on {title}."));
             }
         }
         for gate in &run.waiting_gates {

@@ -117,7 +117,6 @@ pub(crate) fn apply(
             id,
             title,
             environment,
-            fresh,
         } => {
             let step = mission.step(&id).ok_or_else(not_found)?;
             let title = title.filter(|t| *t != step.title);
@@ -127,8 +126,7 @@ pub(crate) fn apply(
                     value => value.to_owned(),
                 })
                 .filter(|environment| *environment != step.environment);
-            let fresh = fresh.filter(|f| *f != step.fresh);
-            if title.is_none() && environment.is_none() && fresh.is_none() {
+            if title.is_none() && environment.is_none() {
                 return Ok(false);
             }
             let table = step_table(doc, &id)?;
@@ -141,13 +139,6 @@ pub(crate) fn apply(
                     table.remove("environment");
                 }
                 Some(d) => crate::write::set(table, "environment", value(d)),
-                None => {}
-            }
-            match fresh {
-                Some(true) => crate::write::set(table, "fresh", value(true)),
-                Some(false) => {
-                    table.remove("fresh");
-                }
                 None => {}
             }
         }

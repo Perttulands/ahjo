@@ -45,7 +45,11 @@ pub(crate) fn upgrade_text(
         .and_then(Item::as_integer)
         .ok_or_else(|| Error::new("unsupported_schema", "document has no schema"))?;
     let current = kind.current_schema();
-    if schema == current {
+    let mut removed_fresh = false;
+    if matches!(kind, DocumentKind::Mission) && schema == current {
+        removed_fresh = remove_fresh(document.as_table_mut())?;
+    }
+    if schema == current && !removed_fresh {
         return Ok(None);
     }
     let mut version = schema;
@@ -98,6 +102,9 @@ pub(crate) fn upgrade_text(
             .get_mut("schema")
             .expect("schema exists") = Item::Value(replacement);
     }
+    if matches!(kind, DocumentKind::Mission) && schema != current {
+        remove_fresh(document.as_table_mut())?;
+    }
     if version != current {
         return Err(Error::new(
             "unsupported_schema",
@@ -107,6 +114,17 @@ pub(crate) fn upgrade_text(
     let upgraded = document.to_string();
     kind.validate(&upgraded)?;
     Ok(Some(upgraded))
+}
+
+fn remove_fresh(mission: &mut dyn TableLike) -> Result<bool, Error> {
+    let mut removed = false;
+    if let Some(steps) = mission.get_mut("step") {
+        for_table_array(steps, &mut |step| {
+            removed |= step.remove("fresh").is_some();
+            Ok(())
+        })?;
+    }
+    Ok(removed)
 }
 
 /// Upgrade the graph's unit of work while retaining titles, ids and prose.

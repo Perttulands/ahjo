@@ -27,16 +27,18 @@ pub struct Dispatch {
     pub brief: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reuse_dispatch: Option<String>,
-    /// The session is an agent's own, named `name` exactly: a live one is
-    /// used, and it outlives the run for the next one to use.
+    /// Retain the session after the run ends.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub keep: bool,
+    /// A run owns this seat between dispatches. Older dispatches carried only keep.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub run_owned: bool,
     /// The environment the seat runs on, `<device>/<environment>`; blank is
     /// the coordinator's own.
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub environment: String,
-    /// The turn worktree a placed seat works in, kept so a coordinator that
-    /// restarts can still publish the turn once the seat has ended.
+    /// The turn worktree a placed seat works in, kept so the coordinator
+    /// can still snapshot the attempt after a restart.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub turn: Option<crate::TurnWorkspace>,
 }
@@ -230,6 +232,36 @@ impl SeatRecords {
             .map(|(_, _, id)| id)
             .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "unknown seat"))
     }
+    /// A retry can bind a session whose identity an earlier dispatch owns.
+    pub(super) fn has_other_run_dispatch(
+        &self,
+        dispatch: &Dispatch,
+        seat: &SeatId,
+    ) -> io::Result<bool> {
+        for entry in fs::read_dir(&self.root)? {
+            let entry = entry?;
+            let Some(id) = entry.file_name().to_str().map(str::to_owned) else {
+                continue;
+            };
+            if id == dispatch.id {
+                continue;
+            }
+            match self.with_record(&id, |record| {
+                Ok(record.dispatch.run_id == dispatch.run_id
+                    && record.seat.as_ref().is_some_and(|other| other.same(seat)))
+            }) {
+                Ok(true) => return Ok(true),
+                Ok(false) => {}
+                Err(error)
+                    if matches!(
+                        error.kind(),
+                        io::ErrorKind::NotFound | io::ErrorKind::InvalidInput
+                    ) => {}
+                Err(error) => return Err(error),
+            }
+        }
+        Ok(false)
+    }
     pub fn seats(&self, run_id: &str) -> Result<Vec<AgentSeat>, crate::Error> {
         (|| -> io::Result<Vec<AgentSeat>> {
             let entries = match fs::read_dir(&self.root) {
@@ -307,7 +339,7 @@ impl SeatRecords {
                         pane: Some(seat.session.pane_id),
                         session_name: seat.session_name.clone(),
                         outcome: outcome.into(),
-                        available: outcome.is_empty() || outcome == "left_shutdown",
+                        available: matches!(outcome, "" | "left_shutdown" | "released" | "kept"),
                         waiting,
                     }))
                 });
@@ -581,6 +613,7 @@ mod tests {
             brief: "private brief".into(),
             reuse_dispatch: None,
             keep: false,
+            run_owned: false,
             environment: String::new(),
             turn: None,
         }

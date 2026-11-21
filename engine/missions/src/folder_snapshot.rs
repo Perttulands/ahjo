@@ -54,6 +54,35 @@ pub(crate) fn prepare(
     result
 }
 
+/// Copy a tree as a snapshot, refusing a source that changed during the copy.
+pub(crate) fn snapshot(source: &Path, destination: &Path, excluded: &[PathBuf]) -> io::Result<()> {
+    let source = fs::canonicalize(source)?;
+    let excluded = relative_exclusions(&source, excluded);
+    if fs::symlink_metadata(destination).is_ok() {
+        return Err(io::Error::new(
+            io::ErrorKind::AlreadyExists,
+            "snapshot already exists",
+        ));
+    }
+    let result = (|| {
+        copy_entry(&source, destination, Path::new(""), &excluded)?;
+        let changed = differences(&scan(destination, &[])?, &scan(&source, &excluded)?);
+        if !changed.is_empty() {
+            return Err(changed_error(&changed));
+        }
+        Ok(())
+    })();
+    if result.is_err() {
+        let _ = crate::kept_copy::remove_tree(destination);
+    }
+    result
+}
+
+/// Whether two snapshots have identical entries and permissions.
+pub(crate) fn same(first: &Path, second: &Path) -> io::Result<bool> {
+    Ok(scan(first, &[])? == scan(second, &[])?)
+}
+
 /// Publish the selected attempt, refusing before publication when the run
 /// folder has changed since this attempt started. Replacements are staged in
 /// the run folder so renames stay on the same filesystem. A failed replacement
@@ -63,6 +92,26 @@ pub(crate) fn publish(
     attempt: &Path,
     baseline: &Path,
     excluded: &[PathBuf],
+) -> io::Result<()> {
+    publish_inner(source, attempt, baseline, excluded, true)
+}
+
+/// Publish only this attempt's changes, retaining concurrent disjoint edits.
+pub(crate) fn publish_changes(
+    source: &Path,
+    attempt: &Path,
+    baseline: &Path,
+    excluded: &[PathBuf],
+) -> io::Result<()> {
+    publish_inner(source, attempt, baseline, excluded, false)
+}
+
+fn publish_inner(
+    source: &Path,
+    attempt: &Path,
+    baseline: &Path,
+    excluded: &[PathBuf],
+    strict: bool,
 ) -> io::Result<()> {
     let source = fs::canonicalize(source)?;
     let mut excluded = relative_exclusions(&source, excluded);
@@ -84,14 +133,18 @@ pub(crate) fn publish(
     }
     if journal.exists() {
         verify_scratch_ownership(&scratch, &journal)?;
-    } else {
+    } else if strict {
         let changed = differences(&initial, &scan(&source, &excluded)?);
         if !changed.is_empty() {
             return Err(changed_error(&changed));
         }
     }
     excluded.push(scratch_relative);
-    let operations = plan(&initial, &chosen, &excluded);
+    let operations = if strict {
+        plan(&initial, &chosen, &excluded)
+    } else {
+        plan_changes(&initial, &chosen, &excluded)
+    };
 
     if journal.join("done").exists() {
         crate::kept_copy::remove_tree(&scratch)?;
@@ -101,9 +154,11 @@ pub(crate) fn publish(
         recover(&source, &scratch, &journal, &initial, &chosen, &operations)?;
     }
     let actual = scan(&source, &excluded)?;
-    let changed = differences(&initial, &actual);
-    if !changed.is_empty() {
-        return Err(changed_error(&changed));
+    if strict {
+        let changed = differences(&initial, &actual);
+        if !changed.is_empty() {
+            return Err(changed_error(&changed));
+        }
     }
     fs::create_dir(&journal)?;
     if let Err(error) = fs::create_dir(&scratch) {
@@ -131,9 +186,11 @@ pub(crate) fn publish(
             )));
         }
         let actual = scan(&source, &excluded)?;
-        let changed = differences(&initial, &actual);
-        if !changed.is_empty() {
-            return Err(changed_error(&changed));
+        if strict {
+            let changed = differences(&initial, &actual);
+            if !changed.is_empty() {
+                return Err(changed_error(&changed));
+            }
         }
         fs::create_dir(scratch.join("backup"))?;
         for (index, path) in operations.iter().enumerate() {
@@ -179,6 +236,26 @@ pub(crate) fn abandon(
     attempt: &Path,
     excluded: &[PathBuf],
 ) -> io::Result<()> {
+    abandon_inner(source, baseline, attempt, excluded, true)
+}
+
+/// Roll back an interrupted publication of only changed paths.
+pub(crate) fn abandon_changes(
+    source: &Path,
+    baseline: &Path,
+    attempt: &Path,
+    excluded: &[PathBuf],
+) -> io::Result<()> {
+    abandon_inner(source, baseline, attempt, excluded, false)
+}
+
+fn abandon_inner(
+    source: &Path,
+    baseline: &Path,
+    attempt: &Path,
+    excluded: &[PathBuf],
+    strict: bool,
+) -> io::Result<()> {
     if !baseline.with_extension("publication").exists() {
         return Ok(());
     }
@@ -198,7 +275,11 @@ pub(crate) fn abandon(
             .expect("scratch is inside source")
             .to_owned(),
     );
-    let operations = plan(&initial, &chosen, &excluded);
+    let operations = if strict {
+        plan(&initial, &chosen, &excluded)
+    } else {
+        plan_changes(&initial, &chosen, &excluded)
+    };
     recover(&source, &scratch, &journal, &initial, &chosen, &operations)
 }
 
@@ -323,6 +404,32 @@ fn plan(
         })
         .collect::<BTreeSet<_>>()
         .into_iter()
+        .collect()
+}
+
+fn plan_changes(
+    baseline: &BTreeMap<PathBuf, Entry>,
+    chosen: &BTreeMap<PathBuf, Entry>,
+    excluded: &[PathBuf],
+) -> Vec<PathBuf> {
+    let changed: BTreeSet<_> = differences(baseline, chosen)
+        .into_iter()
+        .filter(|path| !excluded.iter().any(|entry| path.starts_with(entry)))
+        .collect();
+    changed
+        .iter()
+        .filter(|path| {
+            !path.ancestors().skip(1).any(|parent| {
+                changed.contains(parent)
+                    && (baseline
+                        .get(parent)
+                        .is_some_and(|entry| entry.kind == Kind::Directory)
+                        || chosen
+                            .get(parent)
+                            .is_some_and(|entry| entry.kind == Kind::Directory))
+            })
+        })
+        .cloned()
         .collect()
 }
 
@@ -614,6 +721,58 @@ mod tests {
         fs::write(workspace.join("edit"), "after").unwrap();
         publish(&workspace, &one, &base1, &[]).unwrap();
         assert_eq!(fs::read_to_string(workspace.join("edit")).unwrap(), "after");
+        crate::kept_copy::remove_tree(&root).unwrap();
+    }
+
+    #[test]
+    fn reconcile_preserves_local_work_and_applies_disjoint_upstream_changes() {
+        let root = scratch();
+        let workspace = root.join("workspace");
+        let upstream = root.join("upstream");
+        let checkpoint = root.join("checkpoint");
+        fs::create_dir(&workspace).unwrap();
+        fs::write(workspace.join("shared"), "old").unwrap();
+        fs::write(workspace.join("local"), "old").unwrap();
+        prepare(&workspace, &upstream, &checkpoint, &[]).unwrap();
+        fs::write(upstream.join("shared"), "new upstream").unwrap();
+        fs::write(workspace.join("local"), "new local").unwrap();
+
+        publish_changes(&workspace, &upstream, &checkpoint, &[]).unwrap();
+        assert_eq!(
+            fs::read_to_string(workspace.join("shared")).unwrap(),
+            "new upstream"
+        );
+        assert_eq!(
+            fs::read_to_string(workspace.join("local")).unwrap(),
+            "new local"
+        );
+
+        crate::kept_copy::remove_tree(&root).unwrap();
+    }
+
+    #[test]
+    fn reconcile_refuses_overlapping_changes() {
+        let root = scratch();
+        let workspace = root.join("workspace");
+        let upstream = root.join("upstream");
+        let checkpoint = root.join("checkpoint");
+        fs::create_dir(&workspace).unwrap();
+        fs::write(workspace.join("shared"), "old").unwrap();
+        prepare(&workspace, &upstream, &checkpoint, &[]).unwrap();
+        fs::write(upstream.join("shared"), "new upstream").unwrap();
+        fs::write(workspace.join("shared"), "new local").unwrap();
+
+        assert_eq!(
+            publish_changes(&workspace, &upstream, &checkpoint, &[])
+                .unwrap_err()
+                .kind(),
+            io::ErrorKind::AlreadyExists
+        );
+        assert_eq!(
+            fs::read_to_string(workspace.join("shared")).unwrap(),
+            "new local"
+        );
+
         crate::kept_copy::remove_tree(&root).unwrap();
     }
 

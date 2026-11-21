@@ -66,10 +66,6 @@ pub struct Step {
     /// The environment the step runs on; blank runs it on the coordinator.
     #[serde(skip_serializing_if = "String::is_empty")]
     pub environment: String,
-    /// Each attempt starts its agents in sessions of their own, ended with
-    /// the attempt, instead of using the agents' live sessions.
-    #[serde(skip_serializing_if = "is_false")]
-    pub fresh: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub brief: Option<Brief>,
     #[serde(rename = "input")]
@@ -261,10 +257,6 @@ pub struct Connection {
     pub id: String,
     pub from: String,
     pub to: String,
-}
-
-fn is_false(value: &bool) -> bool {
-    !value
 }
 
 /// An Input card's only port.

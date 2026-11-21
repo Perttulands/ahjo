@@ -61,7 +61,7 @@ pub fn seats(run: &RunProjection) -> Vec<Seat> {
                         "ended" | "gone" => State::Ended,
                         // A stopping coordinator leaves the seat running for
                         // the run to reattach, as the engine counts it.
-                        "left_shutdown" => State::Live,
+                        "left_shutdown" | "released" | "kept" => State::Live,
                         _ => State::Unavailable,
                     };
                 }
@@ -72,7 +72,18 @@ pub fn seats(run: &RunProjection) -> Vec<Seat> {
     // A final run without a cleanup record cannot prove its seat still exists.
     if run.r#final {
         for seat in &mut seats {
-            if seat.state == State::Live {
+            let kept = run
+                .events
+                .iter()
+                .rev()
+                .find(|event| {
+                    event.kind == "seat_cleanup"
+                        && event.card_id == seat.step
+                        && event.seat_id == seat.seat
+                        && event.session_name == seat.name
+                })
+                .is_some_and(|event| event.outcome == "kept");
+            if seat.state == State::Live && !kept {
                 seat.state = State::Unavailable;
             }
         }

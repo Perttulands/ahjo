@@ -657,8 +657,10 @@ impl Coordinator {
         reason: &str,
     ) -> Result<RunProjection, crate::Error> {
         (|| -> io::Result<RunProjection> {
+            let admission = self.inner.admission.lock().unwrap();
             let control = self.inner.controls.lock().unwrap().get(id).cloned();
             if let Some(control) = control {
+                drop(admission);
                 let mut done = control.done.lock().unwrap();
                 if *done || control.canceled.load(Ordering::Acquire) {
                     return Err(io::Error::new(
@@ -684,10 +686,12 @@ impl Coordinator {
                 if projection.r#final {
                     return Err(io::Error::new(io::ErrorKind::AlreadyExists, "run is final"));
                 } else {
-                    crate::run_left_seats::end(self, id, None, "run_final")?;
-                    crate::run_folder::discard_run(self, id)?;
-                    self.append(
+                    let events = self.ledger(id)?.read().map_err(crate::error::to_io)?;
+                    crate::run_worker::finalize(
+                        self,
                         id,
+                        std::path::Path::new(&projection.cwd),
+                        crate::run_left_seats::keep_sessions(&events),
                         RunEvent {
                             kind: "run_canceled".into(),
                             actor: if actor.is_empty() {

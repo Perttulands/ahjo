@@ -180,14 +180,14 @@ impl SeatExecutor {
         sink: &ExecutionSink,
     ) -> Result<(SeatId, String), String> {
         let id = dispatch_id(request, definition, phase);
-        let (name, keep) = request.seat_session(definition);
         let dispatch = Dispatch {
             id: id.clone(),
             run_id: request.run_id.clone(),
             step_id: request.step.id.clone(),
             seat_id: definition.id.clone(),
-            name,
-            keep,
+            name: request.seat_session(definition),
+            keep: request.keep_sessions,
+            run_owned: true,
             harness: definition.harness.as_str().to_owned(),
             model: definition.model.clone(),
             effort: definition.effort.as_str().to_owned(),
@@ -197,8 +197,14 @@ impl SeatExecutor {
             environment: request.step.environment.clone(),
             turn: request.turn.clone(),
         };
-        self.reach(request, &definition.id, sink, self.seats.dispatch(dispatch))
-            .await?;
+        self.reach(
+            request,
+            &definition.id,
+            sink,
+            self.seats.dispatch(dispatch),
+            true,
+        )
+        .await?;
         let mut events = self.seats.events(&id, 0).map_err(|error| error.message)?;
         let mut created = None;
         loop {
@@ -237,7 +243,7 @@ impl SeatExecutor {
                 if let Some(event) = created
                     && let Err(error) = report_event(sink, &definition.id, event)
                 {
-                    let _ = self.seats.end_seat(&seat, "run_final").await;
+                    let _ = self.seats.end_seat(&seat, "unrecorded").await;
                     return Err(error);
                 }
                 return Ok((seat, path));
@@ -254,20 +260,23 @@ impl SeatExecutor {
         definition: &str,
         sink: &ExecutionSink,
         mut call: SeatFuture<'_, T>,
+        finish_preparation: bool,
     ) -> Result<T, String> {
         let environment = &request.step.environment;
         let mut waiting = false;
         loop {
             tokio::select! {
                 answer = &mut call => {
-                    if waiting && answer.is_ok() {
+                    if waiting && answer.is_ok() && !request.canceled.load(Ordering::Acquire) {
                         environment_state(sink, definition, "working", &format!("{environment} answers again"))?;
                     }
                     return answer.map_err(|error| error.message);
                 }
                 () = tokio::time::sleep(Duration::from_millis(250)) => {}
             }
-            if request.canceled.load(Ordering::Acquire) {
+            if request.canceled.load(Ordering::Acquire)
+                && (!finish_preparation || self.seats.away(environment).is_some())
+            {
                 return Err(if request.stopping.load(Ordering::Acquire) {
                     "coordinator shutdown".into()
                 } else {
@@ -428,7 +437,7 @@ impl SeatExecutor {
             && let (_, Some((seat, _))) = self.replay(request, &request.dispatch_id).await?
         {
             self.seats
-                .end_seat(&seat, "run_final")
+                .end_seat(&seat, "attempt_finished")
                 .await
                 .map_err(|error| error.message)?;
         }
@@ -543,7 +552,7 @@ impl SeatExecutor {
         self.runtime.block_on(async {
             let outcome = self
                 .seats
-                .end_seat(seat, "run_final")
+                .end_seat(seat, "attempt_finished")
                 .await
                 .map_err(|error| error.message)?;
             let mut events = self.seats.events(id, 0).map_err(|error| error.message)?;
@@ -558,14 +567,13 @@ impl SeatExecutor {
                     break;
                 }
             }
-            if !["ended", "gone", "kept"].contains(&outcome.as_str()) {
+            if !["ended", "gone", "kept", "released"].contains(&outcome.as_str()) {
                 return Err(format!("seat_cleanup: {outcome}"));
             }
             Ok(())
         })
     }
-    /// Publishes a placed turn's work once its seat has ended, since a
-    /// worktree cannot be removed under a running process on Windows.
+    /// Snapshots a placed turn after its seats have finished the attempt.
     fn publish(
         &self,
         dispatch: &str,
@@ -723,7 +731,7 @@ impl SeatExecutor {
                 {
                     let _ = self
                         .runtime
-                        .block_on(self.seats.end_seat(&controller_seat, "run_final"));
+                        .block_on(self.seats.end_seat(&controller_seat, "attempt_finished"));
                 }
                 Err(error)
             }
@@ -742,7 +750,7 @@ impl SeatExecutor {
                     .block_on(self.detach(id, seat, &definition.id, sink))
             } else if request.canceled.load(Ordering::Acquire) {
                 self.runtime
-                    .block_on(self.seats.end_seat(seat, "run_final"))
+                    .block_on(self.seats.end_seat(seat, "attempt_finished"))
                     .map(|_| ())
                     .map_err(|e| e.message)
             } else {
@@ -806,7 +814,7 @@ impl Executor for SeatExecutor {
                 self.runtime.block_on(async {
                     if let Some(seat) = self.seat_of(&request.dispatch_id).await? {
                         self.seats
-                            .end_seat(&seat, "run_final")
+                            .end_seat(&seat, "attempt_finished")
                             .await
                             .map_err(|error| error.message)?;
                     }
@@ -875,7 +883,7 @@ impl Executor for SeatExecutor {
                 let invalid_judge = request.final_judge && self.seats.result(&answer).map_err(|error| error.message)?.is_some_and(|result| parse_verdict(&result.text).is_err());
                 if invalid_judge {
                     let execution = StepExecution {
-                        run_id: request.run_id.clone(), prefix: String::new(), run_number: 0, step: request.step.clone(),
+                        run_id: request.run_id.clone(), prefix: String::new(), keep_sessions: original.keep, step: request.step.clone(),
                         bindings: crate::BindingsSnapshot { schema: 1, run_id: request.run_id.clone(), mission_id: String::new(), mission_slug: String::new(), mission_rev: 0, input_card_id: String::new(), bindings: Vec::new(), gate_bindings: Vec::new() },
                         cwd: original.cwd, turn: original.turn, artifact_dir: request.artifact_dir.clone(), context_paths: Vec::new(), issue: String::new(), inputs: Vec::new(), input_text: String::new(), attempt: request.attempt, judge: true, pick_attempts: Vec::new(),
                         canceled: request.canceled.clone().unwrap_or_default(), stopping: request.stopping.clone().unwrap_or_default(), limits: Default::default(),
@@ -883,11 +891,11 @@ impl Executor for SeatExecutor {
                     self.judges.lock().map_err(|e| e.to_string())?.insert((request.run_id.clone(), request.step_id.clone(), request.attempt), HeldJudge { request: execution, definition, original: original.reuse_dispatch.unwrap_or_else(|| request.dispatch_id.clone()), seat, prompt: original.brief });
                     return Ok(replay);
                 }
-                let outcome = self.seats.end_seat(&seat, "run_final").await.map_err(|error| error.message)?;
-                if !["ended", "gone", "kept"].contains(&outcome.as_str()) {
+                let outcome = self.seats.end_seat(&seat, "attempt_finished").await.map_err(|error| error.message)?;
+                if !["ended", "gone", "kept", "released"].contains(&outcome.as_str()) {
                     return Err(format!("seat_cleanup: {outcome}"));
                 }
-                let data = json!({"dispatch_id":request.dispatch_id,"session_name":seat.session_name,"outcome":outcome,"cause":"run_final"});
+                let data = json!({"dispatch_id":request.dispatch_id,"session_name":seat.session_name,"outcome":outcome,"cause":"attempt_finished"});
                 replay.push(ExecutionEvent { kind: "seat_cleanup".into(), seat_id: request.seat_id.clone(), data: data.as_object().cloned().unwrap_or_default() });
             }
             // A placed turn is published once its seat has ended, also when
@@ -898,6 +906,14 @@ impl Executor for SeatExecutor {
             }
             Ok(replay)
         }).map_err(|message: String| crate::Error::new("executor_error", message))
+    }
+    fn release_turn(
+        &self,
+        environment: &str,
+        turn: &crate::TurnWorkspace,
+    ) -> Result<(), crate::Error> {
+        self.runtime
+            .block_on(self.seats.release_turn(environment, turn))
     }
     fn end_left_seat(&self, left: LeftSeat) -> Result<String, crate::Error> {
         (|| -> Result<String, String> {
@@ -965,6 +981,7 @@ impl Executor for SeatExecutor {
                     &definition.id,
                     &sink,
                     self.seats.prepare_turn(environment, turn),
+                    false,
                 ))?;
                 let data = json!({"environment":environment,"commit":turn.commit,"cwd":cwd});
                 sink.emit(ExecutionEvent {

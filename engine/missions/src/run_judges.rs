@@ -32,7 +32,7 @@ pub(crate) fn run_judges(
     let mut final_ports = Vec::new();
     let mut final_output: Option<crate::StepResult> = None;
     let ledger = c.ledger(id)?.read().map_err(crate::error::to_io)?;
-    let reviewed = crate::run_folder::reviewed_path(c, id, &ledger, input.origin.as_ref());
+    let reviewed = crate::run_workspace::reviewed_path(c, id, &ledger, input.origin.as_ref());
     let anchor = ledger
         .iter()
         .rev()

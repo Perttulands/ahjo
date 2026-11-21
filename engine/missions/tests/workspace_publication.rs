@@ -163,11 +163,10 @@ impl Executor for Failure {
         .map_err(|message: String| ahjo_mission_engine::Error::new("executor_error", message))
     }
 }
-/// A step that fails, is stopped or asks for help leaves no checkout behind,
-/// but what it wrote is kept on a branch of its own, said where the run
-/// stopped, until the run is deleted.
+/// A blocked step keeps its live checkout. Its partial work also gets a
+/// branch of its own, visible at the point where the run stopped.
 #[test]
-fn error_cancel_and_escalation_keep_their_work_and_remove_their_turn_worktrees() {
+fn blocked_or_canceled_attempts_preserve_their_work_and_only_canceled_removes_the_checkout() {
     for mode in ["error", "cancel", "escalate"] {
         let root = Scratch::new();
         let settings = setup(&root);
@@ -199,8 +198,9 @@ fn error_cancel_and_escalation_keep_their_work_and_remove_their_turn_worktrees()
                 "blocked"
             }
         );
-        assert!(
-            turns(&root, &id).is_empty(),
+        assert_eq!(
+            turns(&root, &id).len(),
+            usize::from(mode != "cancel"),
             "{mode}: {:?}",
             turns(&root, &id)
         );
@@ -306,6 +306,8 @@ fn failed_publication_does_not_request_a_human_verdict() {
         assert!(!p.r#final && p.status != "blocked" && Instant::now() < deadline);
         std::thread::sleep(Duration::from_millis(5));
     }
+    assert_eq!(turns(&root, &id).len(), 1);
+    c.abort(&id, "human:test", "stop").unwrap();
     assert!(turns(&root, &id).is_empty());
 }
 
@@ -386,7 +388,7 @@ fn recovery_removes_a_turn_left_after_settlement() {
 }
 
 #[test]
-fn recovery_discards_an_interrupted_attempt_before_retrying() {
+fn recovery_keeps_an_interrupted_stable_workspace_for_retry() {
     use sha2::{Digest, Sha256};
     let root = Scratch::new();
     let settings = setup(&root);
@@ -451,7 +453,10 @@ fn recovery_discards_an_interrupted_attempt_before_retrying() {
     );
     assert!(!turn.exists());
     assert!(turns(&root, &id).is_empty());
-    assert!(!primary.join("partial").exists());
+    assert_eq!(
+        std::fs::read_to_string(primary.join("partial")).unwrap(),
+        "interrupted"
+    );
 }
 
 #[test]
@@ -650,4 +655,199 @@ fn recovery_unregisters_a_turn_whose_directory_was_already_removed() {
         !git(&primary, &["worktree", "list", "--porcelain"])
             .contains(&turn.to_string_lossy().to_string())
     );
+}
+
+fn step(id: &str, title: &str, goal: &str) -> String {
+    format!(
+        "[[step]]\nid = \"{id}\"\nformation = \"solo\"\ntitle = \"{title}\"\n[step.brief]\ngoal = \"{goal}\"\n[[step.input]]\nid = \"port_in\"\nlabel = \"Input\"\n[[step.output]]\nid = \"port_out\"\nlabel = \"Result\"\n[[step.seat]]\nid = \"seat_{id}\"\nlabel = \"Seat\"\nagent = \"builder\"\nharness = \"openai-codex\"\nmodel = \"\"\neffort = \"medium\"\n\n"
+    )
+}
+
+fn connection(id: &str, from: &str, to: &str) -> String {
+    format!("[[connection]]\nid = \"{id}\"\nfrom = \"{from}\"\nto = \"{to}\"\n\n")
+}
+
+/// Input -> Work -> Review (pass Ship -> Done, fail back to Work), Review
+/// judged by the chain Judge 1 -> Judge 2 when its kinds hold step,
+/// with the given Limit cards.
+fn pick_mission(kinds: &str, work_goal: &str, cards: &str) -> String {
+    let mut mission = String::from(
+        "schema = 5\nid = \"msn_pick\"\nslug = \"hello\"\ntitle = \"Pick\"\nrev = 1\n\n[[input_card]]\nid = \"inp_hello\"\ntitle = \"Hello\"\ngoal = \"Return the supplied input\"\n\n",
+    );
+    mission += &step("fmn_work", "Work", work_goal);
+    mission += &step("fmn_ship", "Ship", "Ship it.");
+    let judged = kinds.contains("step");
+    if judged {
+        mission += &step("fmn_j1", "Judge 1", "Review the work.");
+        mission += &step("fmn_j2", "Judge 2", "Decide.");
+    }
+    mission += &format!(
+        "[[gate]]\nid = \"gate_review\"\ntitle = \"Review\"\nkinds = {kinds}\ncriterion = \"Judge the work\"\n\n[[end]]\nid = \"end_done\"\ntitle = \"Done\"\noutcome = \"done\"\n\n"
+    );
+    mission += &connection("edge_start", "inp_hello:out", "fmn_work:port_in");
+    mission += &connection("edge_review", "fmn_work:port_out", "gate_review:in");
+    mission += &connection("edge_pass", "gate_review:pass", "fmn_ship:port_in");
+    mission += &connection("edge_fail", "gate_review:fail", "fmn_work:port_in");
+    mission += &connection("edge_done", "fmn_ship:port_out", "end_done:in");
+    if judged {
+        mission += &connection("edge_judge", "gate_review:judge", "fmn_j1:port_in");
+        mission += &connection("edge_chain", "fmn_j1:port_out", "fmn_j2:port_in");
+        mission += &connection("edge_return", "fmn_j2:port_out", "gate_review:judge");
+    }
+    mission + cards
+}
+
+fn work_card(knobs: &str) -> String {
+    format!("[[limit]]\nid = \"lim_cap\"\ntitle = \"Cap\"\nscope = \"fmn_work\"\n{knobs}\n")
+}
+
+fn verdict(verdict: &str, reason: &str) -> String {
+    format!(
+        "```ahjo-verdict\n{}\n```",
+        serde_json::json!({"verdict":verdict,"reason":reason,"evidence":[]})
+    )
+}
+
+fn pick_block(attempt: i64, reason: &str, evidence: &[&str]) -> String {
+    format!(
+        "```ahjo-pick\n{}\n```",
+        serde_json::json!({"attempt":attempt,"reason":reason,"evidence":evidence})
+    )
+}
+
+#[derive(Clone)]
+struct RetryGit {
+    paths: Arc<std::sync::Mutex<Vec<std::path::PathBuf>>>,
+    selected: i64,
+}
+
+impl Executor for RetryGit {
+    fn execute_step(
+        &self,
+        request: StepExecution,
+        events: ExecutionSink,
+    ) -> Result<StepResult, ahjo_mission_engine::Error> {
+        let run = || -> Result<StepResult, String> {
+            let text = match request.step.id.as_str() {
+                "fmn_work" => {
+                    self.paths.lock().unwrap().push(request.cwd.clone());
+                    let previous = std::fs::read_to_string(request.cwd.join("draft.txt"))
+                        .map_err(|e| e.to_string())?;
+                    let expected = if request.attempt == 1 {
+                        "original"
+                    } else {
+                        "attempt 1"
+                    };
+                    if previous != expected {
+                        return Err(format!("retry read {previous:?}, expected {expected:?}"));
+                    }
+                    std::fs::write(
+                        request.cwd.join("draft.txt"),
+                        format!("attempt {}", request.attempt),
+                    )
+                    .map_err(|e| e.to_string())?;
+                    format!("draft {}", request.attempt)
+                }
+                "fmn_j1" => "review".into(),
+                "fmn_j2" if !request.pick_attempts.is_empty() => {
+                    let snapshots: Vec<_> = request
+                        .input_text
+                        .lines()
+                        .filter_map(|line| line.strip_prefix("attempt workspace: "))
+                        .collect();
+                    if snapshots.len() != 2 {
+                        return Err(format!("picker got {} snapshots", snapshots.len()));
+                    }
+                    for (index, path) in snapshots.iter().enumerate() {
+                        let text =
+                            std::fs::read_to_string(std::path::Path::new(path).join("draft.txt"))
+                                .map_err(|e| e.to_string())?;
+                        if text != format!("attempt {}", index + 1) {
+                            return Err(format!("wrong snapshot {text:?}"));
+                        }
+                    }
+                    pick_block(self.selected, "selected", &[])
+                }
+                "fmn_j2" => verdict("fail", "try again"),
+                "fmn_ship" => {
+                    let text = std::fs::read_to_string(request.cwd.join("draft.txt"))
+                        .map_err(|e| e.to_string())?;
+                    if text != format!("attempt {}", self.selected) {
+                        return Err(format!("ship saw {text:?}"));
+                    }
+                    "shipped".into()
+                }
+                other => return Err(format!("unexpected step {other}")),
+            };
+            let mut result = LabExecutor
+                .execute_step(request, events)
+                .map_err(|e| e.message)?;
+            result.text.clone_from(&text);
+            for value in result.outputs.values_mut() {
+                value["text"] = text.clone().into();
+            }
+            Ok(result)
+        };
+        run().map_err(|message| ahjo_mission_engine::Error::new("executor_error", message))
+    }
+}
+
+#[test]
+fn git_retry_uses_one_workspace_and_publishes_the_picked_snapshot() {
+    for selected in [1, 2] {
+        for keep_sessions in [false, true] {
+            let root = Scratch::new();
+            let settings = setup(&root);
+            let checkout = root.0.join("checkout");
+            std::fs::write(checkout.join("draft.txt"), "original").unwrap();
+            git(&checkout, &["add", "draft.txt"]);
+            git(&checkout, &["commit", "-m", "draft"]);
+            let mission = pick_mission(
+                "[\"step\"]",
+                "Draft.",
+                &work_card("rounds = 2\nwhen_spent = \"best\""),
+            );
+            std::fs::write(root.0.join("missions/hello.mission.toml"), mission).unwrap();
+            let paths = Arc::new(std::sync::Mutex::new(Vec::new()));
+            let c = Coordinator::open(
+                &root.0,
+                settings,
+                Box::new(RetryGit {
+                    paths: paths.clone(),
+                    selected,
+                }),
+            )
+            .unwrap();
+            let id = c
+                .start_mission(RunStart {
+                    keep_sessions,
+                    ..request()
+                })
+                .unwrap();
+            let result = wait(&c, &id);
+            assert_eq!(
+                result.status,
+                "picked",
+                "{}",
+                std::fs::read_to_string(root.0.join("runs").join(format!("{id}.ndjson"))).unwrap()
+            );
+            let paths = paths.lock().unwrap();
+            assert_eq!(paths.len(), 2);
+            assert_eq!(paths[0], paths[1]);
+            assert_eq!(
+                std::fs::read_to_string(root.0.join("worktrees").join(&id).join("draft.txt"))
+                    .unwrap(),
+                format!("attempt {selected}")
+            );
+            if keep_sessions {
+                assert_eq!(
+                    std::fs::read_to_string(paths[0].join("draft.txt")).unwrap(),
+                    "attempt 2"
+                );
+                std::fs::write(paths[0].join("after-run.txt"), "usable").unwrap();
+            } else {
+                assert!(!paths[0].exists());
+            }
+        }
+    }
 }

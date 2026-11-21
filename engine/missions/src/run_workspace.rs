@@ -2,7 +2,7 @@
 use crate::coordinator::Control;
 use crate::run_worker::{append_live, event};
 use crate::{Coordinator, RunEvent, Workspaces, Worktree};
-use ahjo_mission_model::RunStart;
+use ahjo_mission_model::{Mission, RunStart};
 use serde_json::json;
 use sha2::{Digest, Sha256};
 use std::{
@@ -19,10 +19,238 @@ pub(crate) fn turn_path(c: &Coordinator, id: &str, node: &str, attempt: i64) -> 
     ))
 }
 
-pub(crate) fn prepare_turn(
+/// One checkout belongs to the step for the life of its run. Each attempt
+/// records its own commit while the harness continues in this directory.
+pub(crate) fn stable_path(c: &Coordinator, id: &str, node: &str) -> PathBuf {
+    c.inner.root.join("worktrees").join(format!(
+        ".turn-{id}-{}-1",
+        hex::encode(Sha256::digest(node.as_bytes()))
+    ))
+}
+
+pub(crate) fn snapshot_path(c: &Coordinator, id: &str, node: &str, attempt: i64) -> PathBuf {
+    c.inner.root.join("worktrees").join(format!(
+        ".snapshot-{id}-{}-{attempt}",
+        hex::encode(Sha256::digest(node.as_bytes()))
+    ))
+}
+
+pub(crate) fn recorded_path(
+    c: &Coordinator,
+    id: &str,
+    node: &str,
+    attempt: i64,
+    events: &[RunEvent],
+) -> PathBuf {
+    if events.iter().any(|event| {
+        event.kind == "workspace_started"
+            && event.card_id == node
+            && event.attempt == attempt
+            && event.data.get("stable").and_then(|v| v.as_bool()) == Some(true)
+    }) {
+        stable_path(c, id, node)
+    } else {
+        turn_path(c, id, node, attempt)
+    }
+}
+
+/// A pending review starts each retry from the same recorded base. Once
+/// the step publishes, a later visit starts from the current run branch.
+fn retry_base(c: &Coordinator, id: &str, node: &str) -> io::Result<Option<String>> {
+    let events = c.ledger(id)?.read().map_err(crate::error::to_io)?;
+    Ok(events
+        .iter()
+        .rev()
+        .find(|event| {
+            event.card_id == node
+                && (event.kind == "workspace_settled"
+                    || (event.kind == "workspace_started"
+                        && event.data.get("stable").and_then(|v| v.as_bool()) == Some(true)))
+        })
+        .filter(|event| event.kind == "workspace_started")
+        .and_then(|event| event.data.get("base"))
+        .and_then(|base| base.as_str())
+        .map(str::to_owned))
+}
+
+pub(crate) fn review_gates(mission: &Mission, node: &str) -> Vec<String> {
+    use crate::graph::{endpoint_card, endpoint_port, outgoing, outgoing_from_port};
+    let only_one = mission.limits.iter().any(|card| {
+        (card.scope == node || mission.has_input_card(&card.scope))
+            && card.rounds == Some(1)
+            && card.when_spent == ahjo_mission_model::WhenSpent::Fail
+    });
+    if only_one {
+        return Vec::new();
+    }
+    outgoing(mission, node)
+        .filter_map(|wire| {
+            let gate = endpoint_card(&wire.to);
+            (endpoint_port(&wire.to) == ahjo_mission_model::GATE_IN
+                && mission.gate(gate).is_some()
+                && outgoing_from_port(mission, gate, ahjo_mission_model::GATE_FAIL)
+                    .any(|wire| endpoint_card(&wire.to) == node))
+            .then(|| gate.to_owned())
+        })
+        .collect()
+}
+
+/// Save a pass or pick until the selected attempt has reached the run branch.
+pub(crate) fn record_verdict(
+    c: &Coordinator,
+    id: &str,
+    control: &Control,
+    events: &[RunEvent],
+    mut verdict: RunEvent,
+) -> io::Result<()> {
+    if verdict.kind == "gate_verdict"
+        && verdict.data.get("route_port").and_then(|v| v.as_str()) == Some("pass")
+    {
+        let reference = verdict
+            .data
+            .get("pick")
+            .map(|pick| (pick, "step_id"))
+            .or_else(|| {
+                verdict
+                    .data
+                    .get("input_ref")
+                    .and_then(|input| input.get("origin"))
+                    .map(|origin| (origin, "card_id"))
+            });
+        if let Some((reference, identity)) = reference
+            && let Some(node) = reference.get(identity).and_then(|v| v.as_str())
+            && let Some(attempt) = reference.get("attempt").and_then(|v| v.as_i64())
+            && let Some(start) = events.iter().find(|e| {
+                e.kind == "workspace_started"
+                    && e.card_id == node
+                    && e.attempt == attempt
+                    && e.data
+                        .get("review_gates")
+                        .and_then(|v| v.as_array())
+                        .is_some_and(|gates| {
+                            gates
+                                .iter()
+                                .any(|gate| gate.as_str() == Some(&verdict.gate_id))
+                        })
+            })
+        {
+            verdict.kind = "workspace_verdict_pending".into();
+            verdict.data.insert("workspace_step_id".into(), node.into());
+            verdict
+                .data
+                .insert("workspace_attempt".into(), attempt.into());
+            verdict
+                .data
+                .insert("workspace_start_seq".into(), start.seq.into());
+            return append_workspace(c, id, control, verdict);
+        }
+    }
+    crate::run_folder::record_verdict(c, id, control, events, verdict)
+}
+
+pub(crate) fn pending(events: &[RunEvent]) -> Option<&RunEvent> {
+    events.iter().find(|pending| {
+        pending.kind == "workspace_verdict_pending"
+            && !events.iter().any(|event| {
+                event.kind == "gate_verdict"
+                    && event
+                        .data
+                        .get("workspace_verdict_seq")
+                        .and_then(|v| v.as_u64())
+                        == Some(pending.seq)
+            })
+    })
+}
+
+pub(crate) fn settle(
     c: &Coordinator,
     id: &str,
     req: &RunStart,
+    workspace: &Path,
+    control: &Control,
+    events: &[RunEvent],
+    pending: &RunEvent,
+) -> io::Result<()> {
+    let node = pending
+        .data
+        .get("workspace_step_id")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| io::Error::other("selected step missing"))?;
+    let attempt = pending
+        .data
+        .get("workspace_attempt")
+        .and_then(|v| v.as_i64())
+        .ok_or_else(|| io::Error::other("selected attempt missing"))?;
+    let start_seq = pending
+        .data
+        .get("workspace_start_seq")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(0);
+    if events.iter().any(|event| {
+        event.kind == "workspace_selection"
+            && event.card_id == node
+            && event.attempt != attempt
+            && event.seq > start_seq
+    }) {
+        return Err(io::Error::other(format!(
+            "workspace_conflict: another gate selected a different attempt of {node}"
+        )));
+    }
+    if !events.iter().any(|event| {
+        event.kind == "workspace_selection" && event.card_id == node && event.attempt == attempt
+    }) {
+        append_workspace(
+            c,
+            id,
+            control,
+            event(
+                "workspace_selection",
+                node,
+                attempt,
+                json!({"verdict_seq":pending.seq}),
+            ),
+        )?;
+    }
+    commit_turn(c, id, req, workspace, control, node, attempt)?;
+    let mut verdict = pending.clone();
+    verdict.seq = 0;
+    verdict.kind = "gate_verdict".into();
+    verdict
+        .data
+        .insert("workspace_verdict_seq".into(), pending.seq.into());
+    append_workspace(c, id, control, verdict)
+}
+
+pub(crate) fn attempt_path(
+    c: &Coordinator,
+    id: &str,
+    events: &[RunEvent],
+    node: &str,
+    attempt: i64,
+) -> Option<PathBuf> {
+    let path = snapshot_path(c, id, node, attempt);
+    (path.exists()
+        && events
+            .iter()
+            .any(|e| e.kind == "workspace_snapshot" && e.card_id == node && e.attempt == attempt))
+    .then_some(path)
+}
+
+pub(crate) fn reviewed_path(
+    c: &Coordinator,
+    id: &str,
+    events: &[RunEvent],
+    origin: Option<&ahjo_mission_model::PublicOrigin>,
+) -> Option<PathBuf> {
+    let origin = origin?;
+    attempt_path(c, id, events, &origin.card_id, origin.attempt)
+        .or_else(|| crate::run_folder::reviewed_path(c, id, events, Some(origin)))
+}
+
+pub(crate) fn prepare_turn(
+    c: &Coordinator,
+    id: &str,
+    (mission, req, review): (&Mission, &RunStart, bool),
     workspace: &Path,
     control: &Control,
     node: &str,
@@ -35,24 +263,43 @@ pub(crate) fn prepare_turn(
     if control.canceled.load(std::sync::atomic::Ordering::Acquire) {
         return Err(io::Error::new(io::ErrorKind::Interrupted, "run canceled"));
     }
-    let path = turn_path(c, id, node, attempt);
-    let base = git(workspace, &["rev-parse".as_ref(), "HEAD".as_ref()])?;
+    let path = stable_path(c, id, node);
+    let retry = retry_base(c, id, node)?;
+    let base = match retry.as_ref() {
+        Some(base) => base.clone(),
+        None => git(workspace, &["rev-parse".as_ref(), "HEAD".as_ref()])?,
+    };
+    if retry.is_none() && path.exists() {
+        git(&path, &["reset".as_ref(), "--keep".as_ref(), base.as_ref()])?;
+    }
+    let gates = if review {
+        review_gates(mission, node)
+    } else {
+        Vec::new()
+    };
     append_workspace(
         c,
         id,
         control,
-        event("workspace_started", node, attempt, json!({"base":base})),
+        event(
+            "workspace_started",
+            node,
+            attempt,
+            json!({"base":base,"stable":true,"review_gates":gates}),
+        ),
     )?;
-    git(
-        workspace,
-        &[
-            "worktree".as_ref(),
-            "add".as_ref(),
-            "--detach".as_ref(),
-            path.as_os_str(),
-            base.as_ref(),
-        ],
-    )?;
+    if !path.exists() {
+        git(
+            workspace,
+            &[
+                "worktree".as_ref(),
+                "add".as_ref(),
+                "--detach".as_ref(),
+                path.as_os_str(),
+                base.as_ref(),
+            ],
+        )?;
+    }
     Ok(path)
 }
 
@@ -61,7 +308,7 @@ pub(crate) fn prepare_turn(
 pub(crate) fn prepare_placed_turn(
     c: &Coordinator,
     id: &str,
-    req: &RunStart,
+    (mission, req, review): (&Mission, &RunStart, bool),
     workspace: &Path,
     control: &Control,
     (node, environment): (&str, &str),
@@ -76,7 +323,16 @@ pub(crate) fn prepare_placed_turn(
     if control.canceled.load(std::sync::atomic::Ordering::Acquire) {
         return Err(io::Error::new(io::ErrorKind::Interrupted, "run canceled"));
     }
-    let base = git(workspace, &["rev-parse".as_ref(), "HEAD".as_ref()])?;
+    let retry = retry_base(c, id, node)?;
+    let base = match retry.as_ref() {
+        Some(base) => base.clone(),
+        None => git(workspace, &["rev-parse".as_ref(), "HEAD".as_ref()])?,
+    };
+    let gates = if review {
+        review_gates(mission, node)
+    } else {
+        Vec::new()
+    };
     append_workspace(
         c,
         id,
@@ -85,7 +341,7 @@ pub(crate) fn prepare_placed_turn(
             "workspace_started",
             node,
             attempt,
-            json!({"base":base,"environment":environment}),
+            json!({"base":base,"environment":environment,"stable":true,"placed":true,"review_gates":gates}),
         ),
     )?;
     let branch = ahjo_mission_model::run_branch(id);
@@ -169,8 +425,8 @@ fn placed_commits(
     .collect())
 }
 
-/// Save the output before publication, but do not expose it to routing until
-/// its commits and worktree removal are durable.
+/// Keep changed outputs before publishing them so a restart can finish the
+/// same attempt without asking the seat to do the work again.
 pub(crate) fn publish_output(
     c: &Coordinator,
     id: &str,
@@ -179,30 +435,42 @@ pub(crate) fn publish_output(
     control: &Control,
     mut output: RunEvent,
 ) -> io::Result<()> {
+    let needs_publication = if req.repository.is_empty() {
+        crate::run_folder::snapshot(c, id, control, &output.card_id, output.attempt)?;
+        crate::run_folder::unreviewed(c, id, &output.card_id, output.attempt)?
+    } else {
+        true
+    };
+    if needs_publication {
+        output.kind = "card_output_pending".into();
+        append_workspace(c, id, control, output.clone())?;
+        settle_output(c, id, req, workspace, control, &output)?;
+        output.kind = "card_output".into();
+    }
+    append_workspace(c, id, control, output)
+}
+
+pub(crate) fn settle_output(
+    c: &Coordinator,
+    id: &str,
+    req: &RunStart,
+    workspace: &Path,
+    control: &Control,
+    output: &RunEvent,
+) -> io::Result<()> {
     if req.repository.is_empty() {
-        if append_live(c, id, control, output)? {
-            return Ok(());
-        }
-        return Err(io::Error::new(io::ErrorKind::Interrupted, "run canceled"));
+        crate::run_folder::publish_unreviewed(c, id, control, &output.card_id, output.attempt)
+    } else {
+        commit_turn(
+            c,
+            id,
+            req,
+            workspace,
+            control,
+            &output.card_id,
+            output.attempt,
+        )
     }
-    output.kind = "card_output_pending".into();
-    if !append_live(c, id, control, output.clone())? {
-        return Err(io::Error::new(io::ErrorKind::Interrupted, "run canceled"));
-    }
-    commit_turn(
-        c,
-        id,
-        req,
-        workspace,
-        control,
-        &output.card_id,
-        output.attempt,
-    )?;
-    output.kind = "card_output".into();
-    if !append_live(c, id, control, output)? {
-        return Err(io::Error::new(io::ErrorKind::Interrupted, "run canceled"));
-    }
-    Ok(())
 }
 
 pub(crate) fn commit_turn(
@@ -227,9 +495,17 @@ pub(crate) fn commit_turn(
             .iter()
             .find(|e| e.kind == kind && e.card_id == node && e.attempt == attempt)
     };
-    let path = turn_path(c, id, node, attempt);
+    let path = recorded_path(c, id, node, attempt, &events);
+    let stable = turn("workspace_started")
+        .and_then(|e| e.data.get("stable"))
+        .and_then(|v| v.as_bool())
+        == Some(true);
     if turn("workspace_settled").is_some() {
-        return remove(workspace, &path);
+        return if stable {
+            Ok(())
+        } else {
+            remove(workspace, &path)
+        };
     }
     let first = &events[0];
     let field = |name: &str| {
@@ -315,6 +591,33 @@ pub(crate) fn commit_turn(
             )?;
             commits
         };
+        let reviewed = turn("workspace_started")
+            .and_then(|e| e.data.get("review_gates"))
+            .and_then(|v| v.as_array())
+            .is_some_and(|gates| !gates.is_empty());
+        if reviewed {
+            let snapshot = snapshot_path(c, id, node, attempt);
+            if !snapshot.exists() {
+                let base = turn("workspace_started")
+                    .and_then(|e| e.data.get("base"))
+                    .and_then(|v| v.as_str())
+                    .ok_or_else(|| io::Error::other("turn base is missing"))?;
+                let head = commits.last().map(String::as_str).unwrap_or(base);
+                git(
+                    workspace,
+                    &[
+                        "worktree".as_ref(),
+                        "add".as_ref(),
+                        "--detach".as_ref(),
+                        snapshot.as_os_str(),
+                        head.as_ref(),
+                    ],
+                )?;
+            }
+            if turn("workspace_selection").is_none() {
+                return Ok(());
+            }
+        }
         for source in commits {
             let prior = events.iter().any(|e| {
                 e.kind == "workspace_commit"
@@ -364,7 +667,9 @@ pub(crate) fn commit_turn(
         )?;
         published = Some(head);
     }
-    remove(workspace, &path)?;
+    if !stable {
+        remove(workspace, &path)?;
+    }
     append_workspace(
         c,
         id,

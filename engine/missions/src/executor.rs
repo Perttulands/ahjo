@@ -1,7 +1,7 @@
 //! Step-level execution boundary. Executors report events; they never
 //! write a run ledger, so this boundary can later be placed on another node.
 use crate::BindingsSnapshot;
-use ahjo_mission_model::{RunInput, Seat, Step, fresh_session, seat_session};
+use ahjo_mission_model::{RunInput, Seat, Step};
 use serde_json::{Map, Value, json};
 use sha2::{Digest, Sha256};
 use std::path::PathBuf;
@@ -14,12 +14,9 @@ use std::sync::{
 #[derive(Clone, Debug)]
 pub struct StepExecution {
     pub run_id: String,
-    /// What the mission's agent sessions are named under
-    /// ([`ahjo_mission_model::seat_session`]); blank names seats by ids.
+    /// Names the mission's group of seat sessions.
     pub prefix: String,
-    /// The run's number as the Missions list shows it, naming a fresh
-    /// attempt's sessions.
-    pub run_number: u64,
+    pub keep_sessions: bool,
     pub step: Step,
     pub bindings: BindingsSnapshot,
     pub cwd: PathBuf,
@@ -44,20 +41,15 @@ pub struct StepExecution {
     pub limits: crate::AttemptLimits,
 }
 impl StepExecution {
-    /// The session name the seat requests and whether it stays for later runs.
-    pub(crate) fn seat_session(&self, seat: &Seat) -> (String, bool) {
-        if self.prefix.is_empty() {
-            return (String::new(), false);
+    /// A seat keeps its name across attempts and has a distinct name in each run.
+    pub(crate) fn seat_session(&self, seat: &Seat) -> String {
+        let mut identity = Sha256::new();
+        for part in [&self.run_id, &self.step.id, &seat.id] {
+            identity.update(part.as_bytes());
+            identity.update([0]);
         }
-        let agent = self.step.session_part(seat);
-        if self.step.fresh {
-            (
-                fresh_session(&self.prefix, &agent, self.run_number, self.attempt),
-                false,
-            )
-        } else {
-            (seat_session(&self.prefix, &agent), true)
-        }
+        let suffix = hex::encode(&identity.finalize()[..8]);
+        format!("{}-{}-{suffix}", self.prefix, self.step.session_part(seat))
     }
 }
 
@@ -155,10 +147,17 @@ pub trait Executor: Send + Sync + 'static {
     fn completed_events(&self, _: &OpenDispatch) -> Result<Vec<ExecutionEvent>, crate::Error> {
         Ok(Vec::new()).map_err(|message: String| crate::Error::new("executor_error", message))
     }
-    /// End a previously detached seat by its recorded backend identity.
+    /// Finalize a seat by its recorded backend identity.
     fn end_left_seat(&self, _: LeftSeat) -> Result<String, crate::Error> {
         Err("executor cannot end a detached seat".into())
             .map_err(|message: String| crate::Error::new("executor_error", message))
+    }
+    /// Release a placed workspace after the run's seats are finalized.
+    fn release_turn(&self, _: &str, _: &crate::TurnWorkspace) -> Result<(), crate::Error> {
+        Err(crate::Error::new(
+            "executor_error",
+            "executor cannot release a placed workspace",
+        ))
     }
     fn correct_judge(
         &self,
@@ -254,7 +253,7 @@ impl Executor for LabExecutor {
                     data: data.as_object().unwrap().clone(),
                 }).map_err(|error| error.message)
             };
-            let (session, _) = request.seat_session(seat);
+            let session = request.seat_session(seat);
             let dispatch_id = format!("dsp_{}_{}_{}", request.run_id, seat.id, request.attempt);
             let mut brief = format!(
                 "run: {}\nnode: {}\nseat: {}\nharness: {}\ncwd: {}\ngoal: {}\ninput: {}\ncontext paths: {}\n",

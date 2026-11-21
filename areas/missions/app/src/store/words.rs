@@ -98,21 +98,6 @@ pub fn agent_name(agent: &str) -> String {
         .unwrap_or_default()
 }
 
-/// The session a seat's agent works in, as the session list shows it: the
-/// agent's own, or for a step that starts fresh, one per attempt.
-pub fn session_of(
-    m: &ahjo_missions_contract::Mission,
-    f: &ahjo_missions_contract::Step,
-    seat: &Seat,
-) -> String {
-    let session = ahjo_missions_contract::seat_session(&m.session_prefix(), &f.session_part(seat));
-    if f.fresh {
-        format!("{session}-*")
-    } else {
-        session
-    }
-}
-
 /// What a Limit card caps and what happens when it is spent:
 /// `3 rounds · then the best`.
 pub fn limit_line(l: &ahjo_missions_contract::Limit) -> String {

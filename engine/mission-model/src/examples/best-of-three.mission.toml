@@ -7,7 +7,7 @@ rev = 1
 [[input_card]]
 id = "inp_task"
 title = "Task"
-goal = "Three fresh attempts at one piece of work; a judge passes the first that meets the bar, and when none does the best of the three goes on."
+goal = "Three attempts at one piece of work; a judge passes the first that meets the bar, and when none does the best of the three goes on."
 inputs = [
   { name = "brief", kind = "text", required = true, description = "The work to do, and what a good result looks like." },
 ]
@@ -17,7 +17,6 @@ outputs = [{ name = "result", description = "The attempt the judge passed, or th
 id = "fmn_attempt"
 formation = "solo"
 title = "Attempt"
-fresh = true
 [step.brief]
 goal = "Do this work in the run's folder, starting from nothing:\n\n{brief}\n\nWhen the judge sent an earlier attempt back, its reason arrives on your input: do better on that point, without copying the earlier attempt. Return what you made and where it is on your output."
 [[step.input]]

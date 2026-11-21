@@ -292,6 +292,24 @@ pub(crate) fn schedule(
             wake_rx.recv().map_err(io::Error::other)?;
             continue;
         }
+        if let Some(pending) = crate::run_workspace::pending(&events) {
+            if running.is_empty() {
+                if let Err(error) =
+                    crate::run_workspace::settle(c, id, req, &workspace, control, &events, pending)
+                {
+                    let node = pending
+                        .data
+                        .get("workspace_step_id")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or_default();
+                    record_error(c, id, control, node, &error)?;
+                    return Err(error);
+                }
+            } else {
+                wake_rx.recv().map_err(io::Error::other)?;
+            }
+            continue;
+        }
         if let Some(pending) = crate::run_folder::pending(&events) {
             if running.is_empty() {
                 if let Err(error) =

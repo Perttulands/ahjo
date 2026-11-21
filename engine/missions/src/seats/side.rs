@@ -29,6 +29,15 @@ pub trait SeatSide: Send + Sync + 'static {
         environment: &str,
         turn: &TurnWorkspace,
     ) -> SeatFuture<'_, PublishedTurn>;
+    /// Release a placed seat's workspace after its session ends.
+    fn release_turn(&self, _environment: &str, _turn: &TurnWorkspace) -> SeatFuture<'_, ()> {
+        Box::pin(async {
+            Err(crate::Error::new(
+                "seat_unavailable",
+                "this seat side cannot release a workspace",
+            ))
+        })
+    }
     /// Why the node of `environment` does not answer, while calls to it wait for
     /// it; `None` once it answers, and always for this node's own seats.
     fn away(&self, _place: &str) -> Option<String> {

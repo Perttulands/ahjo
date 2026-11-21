@@ -254,14 +254,12 @@ pub fn inverse_change(
             id,
             title,
             environment,
-            fresh,
         } => {
             let step = mission.step(id).ok_or(missing)?;
             UpdateStep {
                 id: id.clone(),
                 title: previous(title, &step.title),
                 environment: previous(environment, &step.environment),
-                fresh: previous(fresh, &step.fresh),
             }
         }
         EditStep { id, .. } => {
@@ -614,16 +612,6 @@ mod tests {
                 effort: ahjo_missions_contract::Effort::Xhigh,
             })]
         );
-
-        let fresh = |fresh| {
-            Step::board(UpdateStep {
-                id: "fmn_plan".into(),
-                title: None,
-                environment: None,
-                fresh: Some(fresh),
-            })
-        };
-        assert_eq!(inverse(&m, &[], &fresh(true)).unwrap(), vec![fresh(false)]);
     }
 
     #[test]
@@ -799,7 +787,6 @@ mod tests {
                 id: "fmn_plan".into(),
                 title: Some("A".into()),
                 environment: None,
-                fresh: None,
             })],
         };
         h.record(rename.clone());

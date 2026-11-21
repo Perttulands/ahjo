@@ -142,7 +142,7 @@ mod tests {
         StepExecution {
             run_id: "run_1".into(),
             prefix: String::new(),
-            run_number: 0,
+            keep_sessions: false,
             step: Step {
                 id: "fmn_work".into(),
                 title: "Work".into(),

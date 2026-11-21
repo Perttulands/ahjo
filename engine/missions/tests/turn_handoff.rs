@@ -93,25 +93,90 @@ fn a_placed_turn_is_published_once_and_landing_deletes_its_remote_refs() {
         (a.join().unwrap(), b.join().unwrap())
     });
     assert_eq!(first, second);
-    assert!(!path.exists());
+    assert!(path.exists());
     let remote = scratch.0.join("remote.git");
     assert_eq!(git(&remote, &["rev-parse", &first.reference]), first.commit);
 
-    // A publish that recorded its answer but stopped before removing the
-    // worktree removes it when asked again.
-    let path = turns.prepare(&turn(2)).unwrap();
-    let marker = path.with_extension("published");
-    std::fs::write(&marker, serde_json::to_string(&first).unwrap()).unwrap();
-    assert_eq!(turns.publish(&turn(2)).unwrap(), first);
+    // A retry keeps its cwd, and each attempt's ref retains its own state.
+    let retry_path = turns.prepare(&turn(2)).unwrap();
+    assert_eq!(path, retry_path);
+    assert_eq!(
+        std::fs::read_to_string(path.join("port.txt")).unwrap(),
+        "ported\n"
+    );
+    std::fs::write(path.join("port.txt"), "corrected\n").unwrap();
+    let second = turns.publish(&turn(2)).unwrap();
+    assert_eq!(turns.publish(&turn(2)).unwrap(), second);
+    assert_eq!(
+        git(&remote, &["show", &format!("{}:port.txt", first.reference)]),
+        "ported"
+    );
+    assert_eq!(
+        git(
+            &remote,
+            &["show", &format!("{}:port.txt", second.reference)]
+        ),
+        "corrected"
+    );
+    assert!(path.exists());
+    turns.release(&turn(2)).unwrap();
+    turns.release(&turn(2)).unwrap();
     assert!(!path.exists());
 
-    let published = BTreeMap::from([(first.reference.clone(), first.commit.clone())]);
+    let published = BTreeMap::from([
+        (first.reference.clone(), first.commit.clone()),
+        (second.reference.clone(), second.commit.clone()),
+    ]);
     let notes = workspaces.remove(&tree, true, &published).unwrap();
     assert!(notes.is_empty(), "{notes:?}");
     let left = git(&remote, &["for-each-ref", "--format=%(refname)"]);
     assert_eq!(
         left, "refs/heads/main",
         "landing leaves only main on the remote"
+    );
+}
+
+#[test]
+fn an_old_placed_turn_can_finish_publication_after_upgrade() {
+    use sha2::{Digest, Sha256};
+    let scratch = Scratch::new();
+    let checkout = scratch.side("seat");
+    git(&checkout, &["fetch", "--quiet", "origin", "main"]);
+    let commit = git(&checkout, &["rev-parse", "origin/main"]);
+    let turn = TurnWorkspace {
+        run_id: "run_legacy".into(),
+        step_id: "fmn_work".into(),
+        attempt: 3,
+        repository: "owner/repo".into(),
+        commit: commit.clone(),
+    };
+    let root = scratch.0.join("turns");
+    std::fs::create_dir_all(root.join("run_legacy")).unwrap();
+    let digest = hex::encode(Sha256::digest(b"fmn_work"));
+    let path = root
+        .join("run_legacy")
+        .join(format!("turn-{}-3", &digest[..12]));
+    git(
+        &checkout,
+        &[
+            "worktree",
+            "add",
+            "--detach",
+            path.to_str().unwrap(),
+            &commit,
+        ],
+    );
+    std::fs::write(path.join("legacy.txt"), "preserved").unwrap();
+    let turns = TurnWorktrees::new(root, BTreeMap::from([("owner/repo".into(), checkout)]));
+    let published = turns.publish(&turn).unwrap();
+    assert!(!path.exists());
+    assert_eq!(turns.publish(&turn).unwrap(), published);
+    assert_eq!(
+        git(
+            &scratch.0.join("remote.git"),
+            &["show", &format!("{}:legacy.txt", published.reference)]
+        ),
+        "preserved"
     );
 }
 

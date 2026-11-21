@@ -58,7 +58,7 @@ pub use run_projection::{
     Escalation, GateInput, GateRequest, PublicEvent, PublicInputRef, PublicOrigin, RunProjection,
     RunSendBack, WaitingGate, plain_reason,
 };
-pub use sessions::{fresh_session, seat_session, valid_prefix};
+pub use sessions::valid_prefix;
 pub use vocabulary::{
     Effort, EndOutcome, Formation, GateKind, Harness, HumanChannel, PortKind, WhenSpent,
 };

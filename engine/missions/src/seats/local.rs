@@ -19,7 +19,8 @@ pub struct LocalSeats {
     /// Each kept session in use, by name, and the dispatch using it.
     kept: Arc<std::sync::Mutex<std::collections::HashMap<String, String>>>,
     pub(super) turns: crate::TurnWorktrees,
-    pub(super) running: Arc<std::sync::Mutex<std::collections::HashSet<String>>>,
+    pub(super) running:
+        Arc<std::sync::Mutex<std::collections::HashMap<String, tokio::task::AbortHandle>>>,
     pub(super) runtime: tokio::runtime::Handle,
 }
 impl LocalSeats {
@@ -38,7 +39,7 @@ impl LocalSeats {
             roots,
             creation: Arc::new(Mutex::new(())),
             kept: Default::default(),
-            running: Arc::new(std::sync::Mutex::new(std::collections::HashSet::new())),
+            running: Default::default(),
             runtime: tokio::runtime::Handle::current(),
         }
     }
@@ -57,10 +58,7 @@ impl LocalSeats {
     pub fn roots(&self) -> &TranscriptRoots {
         &self.roots
     }
-    /// Create once, or verify the identity of the existing owned seat. A
-    /// kept seat is the agent's own session, one a run started: a live one
-    /// is used as it is, unless another dispatch holds it, when this one
-    /// gets its own.
+    /// Create a session or reattach to its verified backend identity.
     pub async fn dispatch(&self, request: Dispatch) -> Result<String, crate::Error> {
         let id = request.id.clone();
         let answer = self.dispatch_held(request).await;
@@ -77,7 +75,7 @@ impl LocalSeats {
                 // A retry is the dispatch as first recorded.
                 Ok(recorded) => recorded,
                 Err(_) => match self.own_name(request, &hash[..4]).await? {
-                    request if request.keep => self.hold(request, &hash[..4]),
+                    request if request.keep && !request.run_owned => self.hold(request, &hash[..4]),
                     request => request,
                 },
             };
@@ -131,7 +129,7 @@ impl LocalSeats {
                 request.name.clone()
             };
             if let Some(session) = self.engine.seat(&name).await.map_err(|e| e.to_string())? {
-                let cwd = if request.keep {
+                let cwd = if request.keep || request.run_owned {
                     self.folder(&session).await
                 } else {
                     None
@@ -175,8 +173,12 @@ impl LocalSeats {
         if seat.map_err(|e| e.to_string())?.is_none() {
             let other = self.engine.find(&request.name).await;
             if other.map_err(|e| e.to_string())?.is_some() {
-                request.name = format!("{}-{tag}", request.name);
-                request.keep = false;
+                if request.run_owned {
+                    request.name.push_str("-seat");
+                } else {
+                    request.name = format!("{}-{tag}", request.name);
+                    request.keep = false;
+                }
             }
         }
         Ok(request)
@@ -241,7 +243,10 @@ impl LocalSeats {
     }
     fn record_created(&self, id: &str, seat: &SeatId) -> Result<(), String> {
         let dispatch = self.records.dispatch(id).map_err(|e| e.to_string())?;
-        let data = json!({"dispatch_id":id,"node":seat.node,"session_name":seat.session_name,"session_id":seat.session.session_id,"pane_id":seat.session.pane_id,"generation":seat.session.generation,"harness":dispatch.harness,"model":dispatch.model,"effort":dispatch.effort});
+        let mut data = json!({"dispatch_id":id,"node":seat.node,"session_name":seat.session_name,"session_id":seat.session.session_id,"pane_id":seat.session.pane_id,"generation":seat.session.generation,"harness":dispatch.harness,"model":dispatch.model,"effort":dispatch.effort});
+        if dispatch.run_owned {
+            data["run_owned"] = true.into();
+        }
         self.records
             .append(
                 id,
@@ -279,12 +284,19 @@ impl LocalSeats {
         (async {
         let _creation = self.creation.lock().await;
         let _guard = self.creation_guard(dispatch_id).await?;
+        let dispatch = self.records.dispatch(dispatch_id).map_err(|e| e.to_string())?;
+        let release = dispatch.run_owned && cause == "attempt_finished";
+        let key = if dispatch.run_owned && !release {
+            "seat-finalized"
+        } else {
+            "seat-cleanup"
+        };
         if let Some(event) = self
             .records
             .events(dispatch_id, 0)
             .map_err(|e| e.to_string())?
             .into_iter()
-            .find(|event| event.key == "seat-cleanup")
+            .find(|event| event.key == key)
         {
             return Ok(event
                 .data
@@ -298,29 +310,41 @@ impl LocalSeats {
             .seat(dispatch_id)
             .map_err(|e| e.to_string())?
             .ok_or("dispatch has no seat")?;
-        let keep = self.records.dispatch(dispatch_id).is_ok_and(|d| d.keep);
-        let found = self.engine.find(&seat.session_name).await;
+        let previously_owned = cause == "unrecorded"
+            && dispatch.run_owned
+            && self.records.has_other_run_dispatch(&dispatch, &seat).map_err(|e| e.to_string())?;
+        if previously_owned {
+            self.release(dispatch_id);
+            return Ok("released".into());
+        }
+        let mut found = self.engine.find(&seat.session_name).await;
+        if dispatch.run_owned && found.as_ref().is_ok_and(|current| current.as_ref() != Some(&seat.session)) {
+            // A rename or a replacement name cannot change the identity the run owns.
+            found = match self.engine.verify(&seat.session).await {
+                Ok(()) => Ok(Some(seat.session.clone())),
+                Err(error) if seat_gone(&error.to_string()) => Ok(None),
+                Err(error) => Err(error),
+            };
+        }
         let (outcome, detail) = match found {
-            // The agent's own session stays for the next run.
-            Ok(Some(_)) if keep => ("kept", String::new()),
             Ok(None) => ("gone", String::new()),
             Ok(Some(current)) if current != seat.session => ("left_socket_changed", "seat identity changed".into()),
             Err(error) => ("left_cleanup_failed", error.to_string()),
+            Ok(Some(_)) if release => ("released", String::new()),
+            Ok(Some(_)) if dispatch.keep && cause != "unrecorded" => ("kept", String::new()),
             Ok(Some(_)) => match self.engine.kill(&seat.session).await {
                 Ok(()) => ("ended", String::new()),
+                Err(error) if dispatch.run_owned && seat_gone(&error.to_string()) => ("gone", String::new()),
                 Err(error) if error.to_string().contains("generation") => ("left_socket_changed", error.to_string()),
                 Err(error) => ("left_cleanup_failed", error.to_string()),
             },
         };
         let data = json!({"dispatch_id":dispatch_id,"outcome":outcome,"cause":cause,"detail":detail,"session_name":seat.session_name});
-        self.records
-            .append(
-                dispatch_id,
-                "seat-cleanup",
-                "seat_cleanup",
-                data.as_object().cloned().unwrap_or_default(),
-            )
-            .map_err(|e| e.to_string())?;
+        if matches!(outcome, "ended" | "gone" | "kept" | "released") {
+            self.records
+                .append(dispatch_id, key, "seat_cleanup", data.as_object().cloned().unwrap_or_default())
+                .map_err(|e| e.to_string())?;
+        }
         self.release(dispatch_id);
         Ok(outcome.into())
      }).await.map_err(|message: String| crate::Error::new("seat_error", message))
@@ -351,6 +375,16 @@ impl LocalSeats {
             .map_err(|error| error.to_string())
     }
 }
+fn seat_gone(error: &str) -> bool {
+    let error = error.trim();
+    error == "owned seat identity or server generation changed"
+        || error == "server generation changed"
+        || error.starts_with("can't find session: ")
+        || error.starts_with("no server running on ")
+        || (error.starts_with("error connecting to ")
+            && error.ends_with(" (No such file or directory)"))
+}
+
 /// The folder a process stands in, from what the system says of it. Linux
 /// names a removed one with ` (deleted)` after it, as an agent's is once
 /// the checkout its first attempt worked in is gone; its harness still

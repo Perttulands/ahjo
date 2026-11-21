@@ -378,7 +378,7 @@ pub(crate) fn settle_gate(
         data["card_id"] = gate.id.clone().into();
         data["gate_id"] = gate.id.clone().into();
         data["requested_by"] = gate.id.clone().into();
-        data["prompt"] = crate::run_folder::reviewed_path(c, id, &events, input.origin.as_ref())
+        data["prompt"] = crate::run_workspace::reviewed_path(c, id, &events, input.origin.as_ref())
             .map(|path| format!("Attempt workspace: {}", path.display()))
             .unwrap_or_default()
             .into();
@@ -411,7 +411,7 @@ pub(crate) fn settle_gate(
         data,
     );
     e.gate_id = gate.id.clone();
-    crate::run_folder::record_verdict(c, id, control, &events, e)
+    crate::run_workspace::record_verdict(c, id, control, &events, e)
 }
 
 fn append(c: &Coordinator, id: &str, control: &Control, event: crate::RunEvent) -> io::Result<()> {

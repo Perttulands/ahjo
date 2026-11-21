@@ -46,30 +46,13 @@ pub fn execute(
         .as_ref()
         .map(|kept| kept.join(" "))
         .unwrap_or_default();
-    let mut result = match (result, cleanup) {
+    let result = match (result, cleanup) {
         (Ok(outcome), Ok(_)) => Ok(outcome),
         (Err(error), Ok(_)) | (Ok(_), Err(error)) => Err(error),
         (Err(error), Err(cleanup)) => Err(io::Error::other(format!(
             "{error}; workspace cleanup failed: {cleanup}"
         ))),
     };
-    if !control.stopping.load(Ordering::Acquire)
-        && (control.canceled.load(Ordering::Acquire)
-            || matches!(result, Ok(Outcome::Succeeded(_) | Outcome::Rejected { .. })))
-        && let Err(error) = crate::run_left_seats::end(&c, &id, None, "run_final")
-    {
-        result = Err(error);
-        control.canceled.store(false, Ordering::Release);
-    }
-    if !control.stopping.load(Ordering::Acquire)
-        && (control.canceled.load(Ordering::Acquire)
-            || matches!(result, Ok(Outcome::Succeeded(_) | Outcome::Rejected { .. }))
-            || matches!(&result, Ok(Outcome::Limit(stop)) if stop.fail))
-        && let Err(error) = crate::run_folder::discard_run(&c, &id)
-    {
-        result = Err(error);
-        control.canceled.store(false, Ordering::Release);
-    }
     let mut done = control.done.lock().unwrap();
     let canceled = control.canceled.load(Ordering::Acquire);
     let stopping = control.stopping.load(Ordering::Acquire);
@@ -215,7 +198,15 @@ pub fn execute(
             }
         }
     }
-    if let Err(e) = c.append(&id, event) {
+    let written = if matches!(
+        event.kind.as_str(),
+        "run_canceled" | "run_succeeded" | "run_picked" | "run_failed"
+    ) {
+        finalize(&c, &id, &workspace, req.keep_sessions, event)
+    } else {
+        c.append(&id, event)
+    };
+    if let Err(e) = written {
         eprintln!("ahjo: cannot record run {id} outcome: {e}");
     }
     *done = true;
@@ -226,6 +217,72 @@ pub fn execute(
         c.changed(&id, run.event_count as u64);
     }
 }
+fn finalization_path(c: &Coordinator, id: &str) -> PathBuf {
+    c.inner
+        .root
+        .join("runs")
+        .join(format!("{id}.finishing.json"))
+}
+
+pub(crate) fn pending_finalization(c: &Coordinator, id: &str) -> io::Result<Option<RunEvent>> {
+    match std::fs::read(finalization_path(c, id)) {
+        Ok(bytes) => serde_json::from_slice(&bytes)
+            .map(Some)
+            .map_err(io::Error::other),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(None),
+        Err(error) => Err(error),
+    }
+}
+
+/// Save the exact outcome before any cleanup can make the run non-resumable.
+pub(crate) fn finalize(
+    c: &Coordinator,
+    id: &str,
+    workspace: &std::path::Path,
+    keep_sessions: bool,
+    event: RunEvent,
+) -> io::Result<()> {
+    let path = finalization_path(c, id);
+    crate::write::atomic(
+        &path,
+        &serde_json::to_vec(&event).map_err(io::Error::other)?,
+    )?;
+    if let Err(error) = finish(c, id, workspace, keep_sessions) {
+        // Aborting an already blocked run leaves its retryable block in place.
+        if c.run(id).is_ok_and(|run| run.status != "blocked") {
+            c.append(id, finalization_block(error.to_string()))?;
+        }
+        return Err(error);
+    }
+    c.append(id, event)?;
+    let _ = std::fs::remove_file(path);
+    Ok(())
+}
+
+pub(crate) fn finalization_block(reason: String) -> RunEvent {
+    RunEvent {
+        kind: "run_blocked".into(),
+        timestamp: now(),
+        data: json!({"code":"run_finalization_interrupted","reason":reason,"resume_allowed":true,"resume_policy":"explicit"})
+            .as_object()
+            .unwrap()
+            .clone(),
+        ..Default::default()
+    }
+}
+
+/// Retire session identities before removing any directory a seat can still use.
+pub(crate) fn finish(
+    c: &Coordinator,
+    id: &str,
+    workspace: &std::path::Path,
+    keep_sessions: bool,
+) -> io::Result<()> {
+    crate::run_left_seats::end(c, id, None, "run_final")?;
+    crate::run_workspace_recovery::release(c, id, workspace, keep_sessions)?;
+    crate::run_folder::discard_run(c, id, keep_sessions)
+}
+
 fn success_event(end_ids: Vec<String>, resolved: crate::outputs::Resolved) -> RunEvent {
     RunEvent {
         kind: if resolved.picks.is_empty() {

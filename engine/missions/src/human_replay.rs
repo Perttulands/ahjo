@@ -190,7 +190,7 @@ pub(crate) fn route(
         );
         e.gate_id = answer.gate_id.clone();
         e.actor = answer.actor.clone();
-        crate::run_folder::record_verdict(c, id, control, events, e)?;
+        crate::run_workspace::record_verdict(c, id, control, events, e)?;
         return Ok(true);
     }
     Ok(false)

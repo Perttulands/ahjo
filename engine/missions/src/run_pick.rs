@@ -291,7 +291,16 @@ fn details(
                 events,
                 &started.card_id,
                 candidate.attempt,
-            ),
+            )
+            .or_else(|| {
+                crate::run_workspace::attempt_path(
+                    c,
+                    id,
+                    events,
+                    &started.card_id,
+                    candidate.attempt,
+                )
+            }),
             verdict: text(&Value::Object(verdict.data.clone()), "verdict").into(),
             reason: text(&Value::Object(verdict.data.clone()), "reason").into(),
             input: verdict.data.get("input_ref").cloned().unwrap_or_default(),
@@ -506,7 +515,7 @@ fn resolve(
     );
     verdict.gate_id.clone_from(&started.gate_id);
     verdict.actor = actor;
-    crate::run_folder::record_verdict(c, id, control, &events, verdict)
+    crate::run_workspace::record_verdict(c, id, control, &events, verdict)
 }
 
 /// Ask the operator to pick the best attempt, with the judge's pick as a

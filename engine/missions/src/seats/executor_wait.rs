@@ -20,6 +20,8 @@ use tokio::sync::mpsc as stream;
 #[derive(Default)]
 struct Away {
     seated: bool,
+    started: Option<mpsc::Sender<()>>,
+    proceed: Option<Arc<tokio::sync::Notify>>,
     streams: Mutex<Vec<stream::Sender<Result<SeatEvent, crate::Error>>>>,
 }
 
@@ -29,6 +31,13 @@ fn never<'a, T: 'a>() -> SeatFuture<'a, T> {
 
 impl SeatSide for Away {
     fn dispatch(&self, dispatch: Dispatch) -> SeatFuture<'_, String> {
+        if let Some(proceed) = &self.proceed {
+            return Box::pin(async move {
+                self.started.as_ref().unwrap().send(()).unwrap();
+                proceed.notified().await;
+                Ok(dispatch.id)
+            });
+        }
         if !self.seated {
             return never();
         }
@@ -54,6 +63,17 @@ impl SeatSide for Away {
             cwd: None,
         };
         let prepared = json!({"seat":seat,"brief_path":"brief.md"});
+        if self.proceed.is_some() {
+            let created = json!({"node":seat.node,"session_name":seat.session_name,"session_id":seat.session.session_id,"pane_id":seat.session.pane_id,"generation":seat.session.generation,"run_owned":true});
+            sender
+                .try_send(Ok(SeatEvent {
+                    key: "seat-created".into(),
+                    seq: 1,
+                    kind: "seat_created".into(),
+                    data: created.as_object().unwrap().clone(),
+                }))
+                .unwrap();
+        }
         sender
             .try_send(Ok(SeatEvent {
                 key: "seat-prepared".into(),
@@ -91,17 +111,62 @@ impl SeatSide for Away {
         never()
     }
     fn away(&self, environment: &str) -> Option<String> {
+        if self.proceed.is_some() {
+            return None;
+        }
         Some(format!(
             "{environment} does not answer: no node of {environment} is known"
         ))
     }
 }
 
+#[test]
+fn cancellation_waits_for_inflight_creation_and_reports_the_seat() {
+    let runtime = tokio::runtime::Runtime::new().unwrap();
+    let (started, creation_started) = mpsc::channel();
+    let proceed = Arc::new(tokio::sync::Notify::new());
+    let seats = Away {
+        started: Some(started),
+        proceed: Some(proceed.clone()),
+        ..Default::default()
+    };
+    let executor = SeatExecutor::new(Arc::new(seats), runtime.handle().clone());
+    let canceled = Arc::new(AtomicBool::new(false));
+    let request = execution(None, canceled.clone());
+    let (sender, received) = mpsc::channel::<PendingEvent>();
+    let (done, finished) = mpsc::channel();
+    std::thread::spawn(move || {
+        let _ = done.send(executor.execute_step(request, ExecutionSink { sender }));
+    });
+    creation_started
+        .recv_timeout(Duration::from_secs(10))
+        .unwrap();
+    canceled.store(true, Ordering::Release);
+    assert!(matches!(
+        finished.recv_timeout(Duration::from_millis(600)),
+        Err(mpsc::RecvTimeoutError::Timeout)
+    ));
+    proceed.notify_one();
+    let created = received.recv_timeout(Duration::from_secs(10)).unwrap();
+    assert_eq!(created.event.kind, "seat_created");
+    assert_eq!(created.event.data["session_id"], "$1");
+    created.ack.send(Ok(())).unwrap();
+    let dispatch = received.recv_timeout(Duration::from_secs(10)).unwrap();
+    assert_eq!(dispatch.event.kind, "seat_dispatch");
+    dispatch.ack.send(Err("run canceled".into())).unwrap();
+    assert!(
+        finished
+            .recv_timeout(Duration::from_secs(10))
+            .unwrap()
+            .is_err()
+    );
+}
+
 fn execution(turn: Option<TurnWorkspace>, canceled: Arc<AtomicBool>) -> StepExecution {
     StepExecution {
         run_id: "run_1".into(),
         prefix: String::new(),
-        run_number: 0,
+        keep_sessions: false,
         step: Step {
             id: "fmn_build".into(),
             formation: ahjo_mission_model::Formation::Solo,

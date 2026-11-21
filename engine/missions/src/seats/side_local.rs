@@ -105,11 +105,9 @@ impl SeatSide for LocalSeats {
                 {
                     return Ok(());
                 }
-                {
-                    let mut running = self.running.lock().map_err(|e| e.to_string())?;
-                    if !running.insert(id.clone()) {
-                        return Ok(());
-                    }
+                let mut running = self.running.lock().map_err(|e| e.to_string())?;
+                if running.contains_key(&id) {
+                    return Ok(());
                 }
                 let owner = self.clone();
                 let worker_owner = owner.clone();
@@ -119,11 +117,14 @@ impl SeatSide for LocalSeats {
                         .run(&worker_id, &AtomicBool::new(false), |_| Ok(()))
                         .await
                 });
+                running.insert(id.clone(), worker.abort_handle());
+                drop(running);
                 self.runtime.spawn(async move {
-                    let result = worker
-                        .await
-                        .map_err(|error| format!("seat worker failed: {error}"))
-                        .and_then(|result| result.map_err(|error| error.message));
+                    let result = match worker.await {
+                        Ok(result) => result.map(|_| ()).map_err(|error| error.message),
+                        Err(error) if error.is_cancelled() => Ok(()),
+                        Err(error) => Err(format!("seat worker failed: {error}")),
+                    };
                     if let Err(error) = result {
                         let data = json!({"dispatch_id":id,"detail":error});
                         let _ = owner.records().append(
@@ -232,6 +233,9 @@ impl SeatSide for LocalSeats {
                 if cause == "shutdown" {
                     return self.detach(&id);
                 }
+                if let Some(worker) = self.running.lock().map_err(|e| e.to_string())?.get(&id) {
+                    worker.abort();
+                }
                 LocalSeats::end_seat(self, &id, &cause)
                     .await
                     .map_err(|error| error.message)
@@ -266,6 +270,15 @@ impl SeatSide for LocalSeats {
             })
             .await
             .map_err(|message: String| crate::Error::new("seat_error", message))
+        })
+    }
+    fn release_turn(&self, _: &str, turn: &TurnWorkspace) -> SeatFuture<'_, ()> {
+        let turns = self.turns.clone();
+        let turn = turn.clone();
+        Box::pin(async move {
+            tokio::task::spawn_blocking(move || turns.release(&turn))
+                .await
+                .map_err(|error| crate::Error::new("seat_error", error.to_string()))?
         })
     }
     fn seats(&self, run_id: &str) -> Result<Vec<AgentSeat>, crate::Error> {

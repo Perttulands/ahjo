@@ -18,7 +18,10 @@ pub struct RunStart {
     pub repository: String,
     pub base: String,
     pub context_paths: Vec<String>,
-    /// The run's issue as a canonical reference (`docs/work.md`), or
+    /// Leave this run's seat sessions and their working directories available.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub keep_sessions: bool,
+    /// The run's issue as a canonical reference (`docs/issues.md`), or
     /// empty. The node resolves what was written before admission.
     pub issue: String,
     pub actor: String,

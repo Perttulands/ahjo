@@ -20,7 +20,7 @@ use std::{
 #[serde(rename_all = "snake_case")]
 pub struct TurnWorkspace {
     pub run_id: String,
-    /// The step (step) the turn belongs to.
+    /// The step the turn belongs to.
     pub step_id: String,
     pub attempt: i64,
     /// The repository, as named in `missions.repositories`.
@@ -74,8 +74,8 @@ impl TurnWorkspace {
 pub struct TurnWorktrees {
     root: PathBuf,
     repositories: BTreeMap<String, PathBuf>,
-    /// One lock per turn: a retried call (after its HTTP request timed out)
-    /// waits for the first instead of running git beside it.
+    /// A step shares a checkout across attempts, so prepare, publish and
+    /// release must all serialize on the same lock.
     busy: Arc<Mutex<HashMap<PathBuf, Arc<Mutex<()>>>>>,
 }
 
@@ -96,20 +96,38 @@ impl TurnWorktrees {
     }
 
     fn path(&self, turn: &TurnWorkspace) -> PathBuf {
-        self.root.join(&turn.run_id).join(format!(
+        let legacy = self.root.join(&turn.run_id).join(format!(
             "turn-{}-{}",
             &step_hash(&turn.step_id)[..12],
             turn.attempt
-        ))
+        ));
+        if legacy.exists() || legacy.with_extension("published").exists() {
+            return legacy;
+        }
+        self.root
+            .join(&turn.run_id)
+            .join(format!("step-{}", &step_hash(&turn.step_id)[..12]))
     }
 
     fn lock(&self, turn: &TurnWorkspace) -> Arc<Mutex<()>> {
         let mut busy = self.busy.lock().unwrap_or_else(|e| e.into_inner());
-        busy.entry(self.path(turn)).or_default().clone()
+        let path = self
+            .root
+            .join(&turn.run_id)
+            .join(format!("step-{}", &step_hash(&turn.step_id)[..12]));
+        busy.entry(path).or_default().clone()
     }
 
     fn published_path(&self, turn: &TurnWorkspace) -> PathBuf {
-        self.path(turn).with_extension("published")
+        let path = self.path(turn);
+        if path
+            .file_name()
+            .is_some_and(|name| name.to_string_lossy().starts_with("turn-"))
+        {
+            path.with_extension("published")
+        } else {
+            path.with_extension(format!("{}.published", turn.attempt))
+        }
     }
 
     /// The turn's worktree, detached at the named commit after fetching the
@@ -123,7 +141,13 @@ impl TurnWorktrees {
             if self.published_path(turn).exists() {
                 return Err(io::Error::other("turn workspace is already published"));
             }
-            if path.exists() {
+            let legacy = path
+                .file_name()
+                .is_some_and(|name| name.to_string_lossy().starts_with("turn-"));
+            let base = path.with_extension("base");
+            if path.exists()
+                && (legacy || fs::read_to_string(&base).is_ok_and(|base| base == turn.commit))
+            {
                 return Ok(path);
             }
             let checkout = self.repositories.get(&turn.repository).ok_or_else(|| {
@@ -145,25 +169,29 @@ impl TurnWorktrees {
                 checkout,
                 ["cat-file", "-e", &format!("{}^{{commit}}", turn.commit)],
             )?;
-            fs::create_dir_all(path.parent().unwrap_or(&self.root))?;
-            git(
-                checkout,
-                [
-                    OsStr::new("worktree"),
-                    OsStr::new("add"),
-                    OsStr::new("--detach"),
-                    path.as_os_str(),
-                    OsStr::new(&turn.commit),
-                ],
-            )?;
+            if path.exists() {
+                git(&path, ["reset", "--keep", &turn.commit])?;
+            } else {
+                fs::create_dir_all(path.parent().unwrap_or(&self.root))?;
+                git(
+                    checkout,
+                    [
+                        OsStr::new("worktree"),
+                        OsStr::new("add"),
+                        OsStr::new("--detach"),
+                        path.as_os_str(),
+                        OsStr::new(&turn.commit),
+                    ],
+                )?;
+            }
+            crate::write::atomic(&base, turn.commit.as_bytes())?;
             Ok(path)
         })()
         .map_err(crate::error::io)
     }
 
-    /// Commits what the turn changed, pushes it to the turn's ref and
-    /// removes the worktree. Publishing again returns the first answer, and
-    /// removes the worktree if an earlier call stopped before it could.
+    /// Snapshot what the attempt changed and push its commit to its own ref.
+    /// Publishing the same attempt again returns its original snapshot.
     pub fn publish(&self, turn: &TurnWorkspace) -> Result<PublishedTurn, crate::Error> {
         (|| -> io::Result<PublishedTurn> {
             turn.check()?;
@@ -173,7 +201,12 @@ impl TurnWorktrees {
             let path = self.path(turn);
             if let Ok(text) = fs::read_to_string(&marker) {
                 let published = serde_json::from_str(&text).map_err(io::Error::other)?;
-                self.remove(turn, &path)?;
+                if path
+                    .file_name()
+                    .is_some_and(|name| name.to_string_lossy().starts_with("turn-"))
+                {
+                    self.remove(turn, &path)?;
+                }
                 return Ok(published);
             }
             if !path.exists() {
@@ -214,8 +247,24 @@ impl TurnWorktrees {
             )?;
             let text = serde_json::to_string(&published).map_err(io::Error::other)?;
             crate::write::atomic(&marker, text.as_bytes())?;
-            self.remove(turn, &path)?;
+            if path
+                .file_name()
+                .is_some_and(|name| name.to_string_lossy().starts_with("turn-"))
+            {
+                self.remove(turn, &path)?;
+            }
             Ok(published)
+        })()
+        .map_err(crate::error::io)
+    }
+
+    /// Release a step's working directory after its sessions have ended.
+    pub fn release(&self, turn: &TurnWorkspace) -> Result<(), crate::Error> {
+        (|| -> io::Result<()> {
+            turn.check()?;
+            let lock = self.lock(turn);
+            let _turn = lock.lock().unwrap_or_else(|e| e.into_inner());
+            self.remove(turn, &self.path(turn))
         })()
         .map_err(crate::error::io)
     }

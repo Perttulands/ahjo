@@ -13,7 +13,7 @@ pub const EXAMPLES: &[Example] = &[
     Example {
         name: "best-of-three",
         title: "Best of three",
-        about: "Three fresh attempts; a judge passes the first good one, else the best goes on.",
+        about: "Three attempts; a judge passes the first good one, else the best goes on.",
         definition: include_str!("examples/best-of-three.mission.toml"),
     },
     Example {

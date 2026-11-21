@@ -248,12 +248,14 @@ async fn controller_output_reaches_gate_and_lost_workers_are_reported() {
         )),
     )
     .unwrap();
+    let workspace = root.join("workspace");
+    std::fs::create_dir(&workspace).unwrap();
     let run = coordinator
         .start_mission(RunStart {
             mission: "hello".into(),
             input_card_id: "inp_hello".into(),
             expected_rev: 1,
-            cwd: root.to_string_lossy().into(),
+            cwd: workspace.to_string_lossy().into(),
             inputs: BTreeMap::from([("brief".into(), "ship".into())]),
             ..Default::default()
         })
@@ -566,8 +568,8 @@ async fn cli_runs_orchestration_to_end_with_controller_and_worker_seats() {
                 .iter()
                 .find(|seat| seat["id"] == entry.dispatch.seat_id)
                 .unwrap();
-            assert_eq!(seat["session"], entry.dispatch.name);
-            assert_eq!(seat["session"], entry.seat.session_name);
+            assert!(seat.get("session").is_none());
+            assert_eq!(entry.dispatch.name, entry.seat.session_name);
         }
         let lead = entries
             .values_mut()

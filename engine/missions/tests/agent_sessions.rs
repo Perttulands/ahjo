@@ -1,9 +1,8 @@
-//! A step's agent works in its own session, named under the mission's
-//! prefix: one a run started is used where it runs and outlives the run; a
-//! dispatch that wants it while another holds it gets a session of its
-//! own, ended with it. A session nobody's run started is never taken over,
-//! whatever its name.
-use ahjo_mission_engine::{Dispatch, LocalSeats, TranscriptRoots};
+//! Exercise session ownership and finalization on an isolated tmux server.
+use ahjo_mission_engine::{
+    Coordinator, Dispatch, Error, ExecutionEvent, ExecutionSink, Executor, LabExecutor, LeftSeat,
+    LocalSeats, RunSettings, StepExecution, StepResult, TranscriptRoots,
+};
 use ahjo_testkit::{
     node::Node,
     tmux::{Server, eventually, stubbed_path, write_script},
@@ -27,6 +26,7 @@ fn dispatch_in(id: &str, name: &str, keep: bool, cwd: impl Into<std::path::PathB
         brief: "Write.".into(),
         reuse_dispatch: None,
         keep,
+        run_owned: false,
         environment: String::new(),
         turn: None,
     }
@@ -183,5 +183,185 @@ async fn an_agents_session_is_used_again_and_a_namesake_is_left_alone() {
     assert_ne!(seat("dsp_5").session.session_id, theirs);
     assert!(seat("dsp_5").session_name.starts_with("demo-reviewer-"));
     assert_eq!(seats.end_seat("dsp_5", "run_final").await.unwrap(), "ended");
+
+    // A run owns one live session across attempts. A retry rejected before
+    // its creation event reaches the ledger must not kill the first attempt's
+    // already recorded session.
+    let mut first = dispatch("dsp_run_1", "demo-owned", false);
+    first.run_owned = true;
+    seats.dispatch(first).await.unwrap();
+    let original = seat("dsp_run_1");
+    assert_eq!(
+        seats
+            .end_seat("dsp_run_1", "attempt_finished")
+            .await
+            .unwrap(),
+        "released"
+    );
+    let mut retry = dispatch("dsp_run_2", "demo-owned", false);
+    retry.run_owned = true;
+    seats.dispatch(retry).await.unwrap();
+    assert_eq!(seat("dsp_run_2").session, original.session);
+    assert_eq!(
+        seats.end_seat("dsp_run_2", "unrecorded").await.unwrap(),
+        "released"
+    );
+    assert!(live(&server, "demo-owned"));
+    assert_eq!(
+        seats.end_seat("dsp_run_2", "run_final").await.unwrap(),
+        "ended"
+    );
+    assert!(!live(&server, "demo-owned"));
+
+    let mut renamed = dispatch("dsp_renamed", "demo-renamed", false);
+    renamed.run_owned = true;
+    seats.dispatch(renamed).await.unwrap();
+    server.run(&["rename-session", "-t", "demo-renamed", "demo-renamed-live"]);
+    server.run(&["new-session", "-d", "-s", "demo-renamed"]);
+    assert_eq!(
+        seats.end_seat("dsp_renamed", "run_final").await.unwrap(),
+        "ended"
+    );
+    assert!(!live(&server, "demo-renamed-live"));
+    assert!(live(&server, "demo-renamed"));
+
+    // An entirely new seat with no recorded creation must be cleaned up.
+    let mut unrecorded = dispatch("dsp_unrecorded", "demo-unrecorded", true);
+    unrecorded.run_owned = true;
+    seats.dispatch(unrecorded).await.unwrap();
+    assert_eq!(
+        seats
+            .end_seat("dsp_unrecorded", "unrecorded")
+            .await
+            .unwrap(),
+        "ended"
+    );
+    assert!(!live(&server, "demo-unrecorded"));
+
+    let mut kept = dispatch("dsp_run_kept", "demo-kept", true);
+    kept.run_owned = true;
+    seats.dispatch(kept).await.unwrap();
+    assert_eq!(
+        seats
+            .end_seat("dsp_run_kept", "attempt_finished")
+            .await
+            .unwrap(),
+        "released"
+    );
+    assert_eq!(
+        seats.end_seat("dsp_run_kept", "run_final").await.unwrap(),
+        "kept"
+    );
+    assert!(live(&server, "demo-kept"));
+    run_owned_seats_end_with_the_run(&server, &node, theirs).await;
     node.stop().await;
+}
+
+struct TmuxLab {
+    seats: LocalSeats,
+    runtime: tokio::runtime::Handle,
+}
+
+impl Executor for TmuxLab {
+    fn execute_step(
+        &self,
+        request: StepExecution,
+        sink: ExecutionSink,
+    ) -> Result<StepResult, Error> {
+        let name = format!("lab-{}", request.run_id);
+        let id = format!("dsp_{}", request.run_id);
+        let mut dispatch = dispatch_in(&id, &name, request.keep_sessions, &request.cwd);
+        dispatch.run_id.clone_from(&request.run_id);
+        dispatch.step_id.clone_from(&request.step.id);
+        dispatch.seat_id.clone_from(&request.step.seats[0].id);
+        dispatch.run_owned = true;
+        self.runtime.block_on(self.seats.dispatch(dispatch))?;
+        let created = self
+            .seats
+            .records()
+            .events(&id, 0)?
+            .into_iter()
+            .find(|event| event.kind == "seat_created")
+            .expect("local seats record their real tmux identity");
+        sink.emit(ExecutionEvent {
+            kind: created.kind,
+            seat_id: request.step.seats[0].id.clone(),
+            data: created.data,
+        })?;
+        LabExecutor.execute_step(request, sink)
+    }
+
+    fn end_left_seat(&self, seat: LeftSeat) -> Result<String, Error> {
+        let id = seat.identity["dispatch_id"].as_str().unwrap();
+        assert_eq!(
+            self.seats.records().seat(id)?.unwrap().session.session_id,
+            seat.identity["session_id"]
+        );
+        self.runtime.block_on(self.seats.end_seat(id, &seat.cause))
+    }
+}
+
+async fn run_owned_seats_end_with_the_run(server: &Server, node: &Node, operator_id: String) {
+    let root = server.dir().join("coordinator");
+    std::fs::create_dir_all(root.join("missions")).unwrap();
+    std::fs::write(
+        root.join("missions/hello.mission.toml"),
+        include_str!("parity/runs/missions/solo-lab.mission.toml"),
+    )
+    .unwrap();
+    let coordinator = Coordinator::open(
+        &root,
+        RunSettings::default(),
+        Box::new(TmuxLab {
+            seats: LocalSeats::new(
+                node.sessions(),
+                &root,
+                "local".into(),
+                TranscriptRoots::from_host(),
+            ),
+            runtime: tokio::runtime::Handle::current(),
+        }),
+    )
+    .unwrap();
+    for keep_sessions in [false, true] {
+        let id = coordinator
+            .start_mission(ahjo_mission_model::RunStart {
+                mission: "hello".into(),
+                input_card_id: "inp_hello".into(),
+                expected_rev: 1,
+                inputs: std::collections::BTreeMap::from([(
+                    "brief".into(),
+                    "Exercise seats.".into(),
+                )]),
+                keep_sessions,
+                ..Default::default()
+            })
+            .unwrap();
+        let run = eventually("run to settle", || {
+            let projection = coordinator.run(&id).unwrap();
+            (projection.r#final || projection.status == "blocked").then_some(projection)
+        })
+        .await;
+        assert_eq!(run.status, "succeeded", "{run:?}");
+        let name = format!("lab-{id}");
+        assert_eq!(live(server, &name), keep_sessions);
+        let cleanup = run
+            .events
+            .iter()
+            .find(|event| event.kind == "seat_cleanup")
+            .unwrap();
+        assert_eq!(
+            cleanup.outcome,
+            if keep_sessions { "kept" } else { "ended" }
+        );
+        let owner = coordinator.clone();
+        tokio::task::spawn_blocking(move || owner.delete_run(&id).unwrap())
+            .await
+            .unwrap();
+        assert_eq!(live(server, &name), keep_sessions);
+    }
+    assert_eq!(
+        server.display("demo-reviewer", "#{session_id}").trim(),
+        operator_id
+    );
 }

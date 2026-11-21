@@ -763,6 +763,7 @@ async fn start_run(m: Missions, args: MissionRun) -> Result<MissionStarted, Erro
         cwd: args.cwd.unwrap_or_default(),
         repository: args.repository.unwrap_or_default(),
         base: args.base.unwrap_or_default(),
+        keep_sessions: args.keep_sessions,
         request_id: args.request_id.unwrap_or_default(),
         known_machines: Some(vec![]),
         inputs: args.inputs,

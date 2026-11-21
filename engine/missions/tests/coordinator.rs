@@ -82,8 +82,12 @@ fn a_legacy_dispatch_is_migrated_and_the_run_still_replays() {
         let mut event: serde_json::Value = serde_json::from_str(line).unwrap();
         if event["type"] == "seat_dispatch" {
             let dispatch = event["data"].as_object_mut().unwrap();
-            assert_eq!(dispatch.remove("session").unwrap(), "hello-work");
-            assert_eq!(dispatch.remove("session_ref").unwrap(), "lab:hello-work");
+            let name = dispatch.remove("session").unwrap();
+            assert!(name.as_str().unwrap().starts_with("hello-work-"));
+            assert_eq!(
+                dispatch.remove("session_ref").unwrap(),
+                format!("lab:{}", name.as_str().unwrap())
+            );
             dispatch.insert("sessionStem".into(), "seat_work".into());
             dispatch.insert("sessionRef".into(), "terminal:hello-work".into());
             replaced = true;

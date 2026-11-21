@@ -149,7 +149,6 @@ pub(crate) fn final_event(
 ) -> io::Result<RunEvent> {
     let reason = limits::reason(mission, &stop.use_);
     if stop.fail {
-        crate::run_left_seats::end(c, id, None, "run_final")?;
         return Ok(RunEvent {
             kind: "run_failed".into(),
             actor: "archond".into(),

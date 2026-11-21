@@ -85,7 +85,7 @@ pub enum MissionChange {
         #[serde(default, deserialize_with = "default_on_null")]
         y: i64,
     },
-    /// Change a step’s title, environment or session reuse.
+    /// Change a step’s title or environment.
     UpdateStep {
         /// The id of the card or wire.
         #[serde(default, deserialize_with = "default_on_null")]
@@ -96,9 +96,6 @@ pub enum MissionChange {
         /// Where the step runs. Blank uses the coordinator.
         #[serde(skip_serializing_if = "Option::is_none")]
         environment: Option<String>,
-        /// Whether each attempt starts fresh sessions.
-        #[serde(skip_serializing_if = "Option::is_none")]
-        fresh: Option<bool>,
     },
     /// Replace a step’s title and brief.
     EditStep {

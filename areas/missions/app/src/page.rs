@@ -819,60 +819,6 @@ impl MissionsPage {
         }
         cx.notify();
     }
-    /// Where a step's agents work, written as soon as it is chosen: each
-    /// in its own session, used again run after run, or in fresh sessions
-    /// for every attempt (a best-of-n step).
-    fn session_choice(
-        &self,
-        t: &ahjo_app_kit::theme::Theme,
-        f: &ahjo_missions_contract::Step,
-        cx: &mut Context<Self>,
-    ) -> Div {
-        let Some(m) = self.state.mission.as_ref() else {
-            return div();
-        };
-        let names: Vec<String> = f
-            .seats
-            .iter()
-            .map(|seat| crate::store::words::session_of(m, f, seat))
-            .collect();
-        let pick = |selector: &'static str, text: &'static str, fresh: bool| {
-            let id = f.id.clone();
-            kit::button(
-                t,
-                selector,
-                text,
-                if f.fresh == fresh {
-                    Kind::Plain
-                } else {
-                    Kind::Quiet
-                },
-            )
-            .debug_selector(move || selector.into())
-            .on_click(cx.listener(move |p, _, _, cx| {
-                p.write_board(edits::session_patch(&id, fresh), WriteMode::Edit, cx)
-            }))
-        };
-        div()
-            .flex()
-            .flex_col()
-            .gap(px(size::RADIUS))
-            .child(kit::label(t, "Sessions"))
-            .child(
-                div()
-                    .flex()
-                    .gap(px(TAB_GAP))
-                    .child(pick("step-sessions-kept", "Agent's own", false))
-                    .child(pick("step-sessions-fresh", "Fresh each attempt", true)),
-            )
-            .child(
-                div()
-                    .debug_selector(|| "step-session-names".into())
-                    .text_size(px(size::SMALL))
-                    .text_color(t.text2)
-                    .child(names.join(", ")),
-            )
-    }
     fn write_board(&mut self, patch: MissionChange, mode: WriteMode, cx: &mut Context<Self>) {
         if self.writing || self.editor.as_ref().is_some_and(|e| e.busy) {
             return;
@@ -1843,7 +1789,6 @@ impl Render for MissionsPage {
                                     let id = seat.id.clone(); let selected = id.clone(); let selector = format!("seat-{id}");
                                     d = d.child(left(kit::button(&t, gpui::SharedString::from(format!("seat-{id}")), crate::store::words::seat_label(seat), Kind::Quiet).debug_selector(move || selector.clone()).on_click(cx.listener(move |p, _, _, cx| p.select_seat(&selected, cx)))));
                                 }
-                                d = d.child(self.session_choice(&t, f, cx));
                             }
                             d
                         })

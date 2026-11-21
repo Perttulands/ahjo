@@ -1372,9 +1372,7 @@ fn card_face(
                         // A step is worked by one agent unless it says otherwise.
                         .when(f.formation != Formation::Solo, |d| {
                             d.child(chip(z, f.formation.as_str(), t.text2))
-                        })
-                        // Each attempt in sessions of its own.
-                        .when(f.fresh, |d| d.child(chip(z, "fresh", t.text2))),
+                        }),
                 );
             face = face.child(head);
             let mut body = div()
@@ -1387,7 +1385,7 @@ fn card_face(
                 .gap(px(board::SEAT_GAP * z));
             if board::pooled(f.formation) {
                 for seat in f.seats.iter().filter(|seat| seat.controller) {
-                    body = body.child(seat_row(t, mission, f, seat, z, catalog));
+                    body = body.child(seat_row(t, seat, z, catalog));
                 }
                 let mut pool = div()
                     .relative()
@@ -1418,12 +1416,12 @@ fn card_face(
                         .bg(t.surface),
                     );
                 for seat in f.seats.iter().filter(|seat| !seat.controller) {
-                    pool = pool.child(seat_row(t, mission, f, seat, z, catalog));
+                    pool = pool.child(seat_row(t, seat, z, catalog));
                 }
                 body = body.child(pool);
             } else {
                 for seat in &f.seats {
-                    body = body.child(seat_row(t, mission, f, seat, z, catalog));
+                    body = body.child(seat_row(t, seat, z, catalog));
                 }
             }
             if f.seats.is_empty() {
@@ -1701,8 +1699,6 @@ fn chip(z: f32, text: &str, colour: Hsla) -> Div {
 
 fn seat_row(
     t: &ahjo_app_kit::theme::Theme,
-    mission: &Mission,
-    f: &ahjo_missions_contract::Step,
     seat: &ahjo_missions_contract::Seat,
     z: f32,
     catalog: Option<&ahjo_harness_contract::agents::ListedAgents>,
@@ -1710,7 +1706,6 @@ fn seat_row(
     let resolved =
         catalog.and_then(|catalog| catalog.agents.iter().find(|agent| agent.id == seat.agent));
     let agent = (!seat.agent.is_empty()).then(|| crate::store::words::agent_name(&seat.agent));
-    let session = crate::store::words::session_of(mission, f, seat);
     let harness = seat.settings(resolved).harness;
     let mark = harness_mark(harness.as_str(), t.text, t.text2, z);
     let selector = format!(
@@ -1762,19 +1757,6 @@ fn seat_row(
                             ),
                             None => crate::store::words::seat_label(seat).to_uppercase(),
                         }),
-                )
-                // The agent by the session it works in, as the session list
-                // shows it.
-                .child(
-                    div()
-                        .text_size(px(CARD_TEXT * z))
-                        .font_weight(FontWeight::BOLD)
-                        .truncate()
-                        .debug_selector({
-                            let session = session.clone();
-                            move || format!("canvas-session-{session}")
-                        })
-                        .child(session),
                 )
                 .child(
                     div()

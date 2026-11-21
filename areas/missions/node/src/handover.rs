@@ -10,7 +10,6 @@ use ahjo_missions_contract::{
         RemovedThread,
     },
     flow::{self, Decider, FlowStepKind, Target},
-    seat_session,
 };
 
 use crate::commands::shell_word;
@@ -24,7 +23,6 @@ pub fn handover(
     warnings: &[Finding],
 ) -> MissionHandover {
     let flow = flow::build(mission);
-    let prefix = mission.session_prefix();
     let slug = shell_word(&mission.slug);
     let changed = (!mission.updated_at.is_empty())
         .then(|| format!("{} by {}", minute(&mission.updated_at), mission.updated_by));
@@ -109,7 +107,7 @@ pub fn handover(
                             .join(", ")
                     });
                     HandoverStepDetail::Step {
-                        worker: worker(&prefix, work_step, agents, true),
+                        worker: worker(work_step, agents, true),
                         next: Some(or_nothing(targets(next))),
                         alongside,
                     }
@@ -138,7 +136,7 @@ pub fn handover(
                             placed.insert(judge.as_str());
                             Some(HandoverJudge {
                                 id: judge.clone(),
-                                worker: worker(&prefix, step, agents, true),
+                                worker: worker(step, agents, true),
                                 notes: thread(notes, judge),
                             })
                         })
@@ -176,7 +174,7 @@ pub fn handover(
                 id: step.id.clone(),
                 unreached: true,
                 detail: HandoverStepDetail::Step {
-                    worker: worker(&prefix, step, agents, false),
+                    worker: worker(step, agents, false),
                     next: None,
                     alongside: None,
                 },
@@ -316,10 +314,7 @@ fn minute(at: &str) -> String {
     at.chars().take(16).collect::<String>().replace('T', " ")
 }
 
-/// The named session each seat asks for. A fresh step gets a run- and
-/// attempt-specific session when it executes.
 fn worker(
-    prefix: &str,
     step: &Step,
     agents: &ahjo_mission_engine::AgentStore,
     include_brief: bool,
@@ -339,11 +334,9 @@ fn worker(
                     harness: settings.harness,
                     model: settings.model,
                     effort: settings.effort,
-                    session: seat_session(prefix, &step.session_part(seat)),
                 }
             })
             .collect(),
-        fresh: step.fresh,
         brief: include_brief.then(|| {
             step.brief
                 .as_ref()

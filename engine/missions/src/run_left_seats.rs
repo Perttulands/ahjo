@@ -1,12 +1,42 @@
-//! End seats detached at shutdown only by their recorded backend identity.
+//! Finalize run-owned or detached seats by their recorded backend identity.
 use crate::{Coordinator, LeftSeat, RunEvent};
 use serde_json::json;
 use std::{collections::BTreeMap, io};
 
+pub(crate) fn keep_sessions(events: &[RunEvent]) -> bool {
+    events
+        .first()
+        .and_then(|e| e.data.get("keep_sessions"))
+        .and_then(serde_json::Value::as_bool)
+        == Some(true)
+}
+
+fn run_owned(seat: &RunEvent) -> bool {
+    seat.data
+        .get("run_owned")
+        .and_then(serde_json::Value::as_bool)
+        == Some(true)
+}
+
+fn identity(event: &RunEvent) -> String {
+    json!([
+        event.data.get("node"),
+        event.data.get("session_id"),
+        event.data.get("generation")
+    ])
+    .to_string()
+}
+
 pub(crate) fn end(c: &Coordinator, id: &str, node: Option<&str>, cause: &str) -> io::Result<()> {
     let events = c.ledger(id)?.read().map_err(crate::error::to_io)?;
+    let finalized = events.last().is_some_and(|event| {
+        matches!(
+            event.kind.as_str(),
+            "run_canceled" | "run_failed" | "run_picked" | "run_succeeded"
+        )
+    });
     let mut created = BTreeMap::<(String, String, String), RunEvent>::new();
-    let mut left = BTreeMap::<(String, String, String), RunEvent>::new();
+    let mut left = BTreeMap::new();
     for event in events {
         let name = event
             .data
@@ -22,17 +52,27 @@ pub(crate) fn end(c: &Coordinator, id: &str, node: Option<&str>, cause: &str) ->
             name.to_owned(),
         );
         if event.kind == "seat_created" {
+            if run_owned(&event) {
+                left.insert((key.clone(), identity(&event)), event.clone());
+            }
             created.insert(key, event);
         } else if event.kind == "seat_cleanup" {
-            if event.data.get("outcome").and_then(|v| v.as_str()) == Some("left_shutdown") {
-                if let Some(seat) = created.get(&key) {
-                    left.insert(key, seat.clone());
+            let Some(seat) = created.get(&key) else {
+                continue;
+            };
+            match event.data.get("outcome").and_then(|v| v.as_str()) {
+                Some("left_shutdown") => {
+                    left.insert((key, identity(seat)), seat.clone());
                 }
-            } else if matches!(
-                event.data.get("outcome").and_then(|v| v.as_str()),
-                Some("ended" | "gone" | "kept")
-            ) {
-                left.remove(&key);
+                Some("ended" | "gone" | "kept") => {
+                    let recorded = if event.data.contains_key("session_id") {
+                        &event
+                    } else {
+                        seat
+                    };
+                    left.remove(&(key, identity(recorded)));
+                }
+                _ => {}
             }
         }
     }
@@ -40,6 +80,7 @@ pub(crate) fn end(c: &Coordinator, id: &str, node: Option<&str>, cause: &str) ->
     for (_, seat) in left
         .into_iter()
         .filter(|(_, seat)| node.is_none_or(|node| seat.card_id == node))
+        .filter(|(_, seat)| cause == "run_final" || !run_owned(seat))
     {
         let name = seat
             .data
@@ -54,7 +95,7 @@ pub(crate) fn end(c: &Coordinator, id: &str, node: Option<&str>, cause: &str) ->
         {
             Err(crate::Error::new(
                 "invalid_seat",
-                "detached seat has no immutable session id",
+                "seat has no immutable session id",
             ))
         } else {
             c.inner.executor.end_left_seat(LeftSeat {
@@ -69,14 +110,24 @@ pub(crate) fn end(c: &Coordinator, id: &str, node: Option<&str>, cause: &str) ->
             Ok(outcome) => (outcome, String::new()),
             Err(error) => ("left_cleanup_failed".into(), error.to_string()),
         };
-        let mut event = crate::run_worker::event(
-            "seat_cleanup",
-            &seat.card_id,
-            seat.attempt,
-            json!({"session_name":name,"outcome":outcome,"cause":cause,"detail":detail}),
-        );
-        event.seat_id = seat.seat_id;
-        c.append(id, event)?;
+        if !finalized {
+            let mut event = crate::run_worker::event(
+                "seat_cleanup",
+                &seat.card_id,
+                seat.attempt,
+                json!({
+                    "session_name":name,
+                    "session_id":seat.data.get("session_id"),
+                    "node":seat.data.get("node"),
+                    "generation":seat.data.get("generation"),
+                    "outcome":outcome,
+                    "cause":cause,
+                    "detail":detail,
+                }),
+            );
+            event.seat_id = seat.seat_id;
+            c.append(id, event)?;
+        }
         if !["ended", "gone", "kept"].contains(&outcome.as_str()) {
             failures.push(format!("seat cleanup {outcome}: {detail}"));
         }

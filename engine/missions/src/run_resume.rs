@@ -49,6 +49,24 @@ impl Coordinator {
         ) {
             return Err(io::Error::new(io::ErrorKind::InvalidInput, refusal));
         }
+        if let Some(event) = crate::run_worker::pending_finalization(self, id)? {
+            let actor = if request.actor.is_empty() { "human:operator" } else { &request.actor };
+            self.append(id, RunEvent {
+                kind: "run_resumed".into(),
+                actor: actor.into(),
+                timestamp: crate::run_storage::now(),
+                data: serde_json::json!({"resumed_from_seq":events.last().map(|event| event.seq)}).as_object().unwrap().clone(),
+                ..Default::default()
+            })?;
+            crate::run_worker::finalize(
+                self,
+                id,
+                std::path::Path::new(&projection.cwd),
+                crate::run_left_seats::keep_sessions(&events),
+                event,
+            )?;
+            return self.run(id).map_err(crate::error::to_io);
+        }
         let runs = self.inner.root.join("runs");
         let mission = ahjo_mission_model::Mission::parse(&std::fs::read_to_string(
             runs.join(format!("{id}.snapshot.toml")),
@@ -136,6 +154,7 @@ impl Coordinator {
             cwd: projection.cwd.clone(),
             repository: projection.repository.clone(),
             base: projection.base.clone(),
+            keep_sessions: crate::run_left_seats::keep_sessions(&events),
             context_paths: projection.context_paths,
             issue: projection.issue,
             actor: projection.started_by,

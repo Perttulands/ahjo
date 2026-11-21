@@ -74,6 +74,7 @@ impl SeatSide for Kept {
                 brief: "Answer.".into(),
                 reuse_dispatch: None,
                 keep: false,
+                run_owned: false,
                 environment: String::new(),
                 turn: None,
             });

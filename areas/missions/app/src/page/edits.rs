@@ -475,15 +475,6 @@ pub(super) fn assert_board_edit_decodes(patch: MissionChange) {
     assert_eq!(serde_json::to_value(received).unwrap(), expected);
 }
 
-pub(super) fn session_patch(id: &str, fresh: bool) -> MissionChange {
-    MissionChange::UpdateStep {
-        id: id.into(),
-        title: None,
-        environment: None,
-        fresh: Some(fresh),
-    }
-}
-
 pub(super) fn port_patch(
     op: &str,
     id: &str,
@@ -572,7 +563,6 @@ pub(super) fn environment_patch(id: &str, environment: &str) -> MissionChange {
         id: id.into(),
         title: None,
         environment: Some(environment.into()),
-        fresh: None,
     }
 }
 
@@ -593,7 +583,6 @@ mod tests {
     #[test]
     fn immediate_board_edits_decode() {
         for patch in [
-            session_patch("step", true),
             step_formation_patch("step", Formation::Peer, "seat"),
             environment_patch("step", "node/environment"),
             crate::store::staffing::Staffing {

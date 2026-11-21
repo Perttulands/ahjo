@@ -22,6 +22,15 @@ impl Coordinator {
             if projection.r#final {
                 continue;
             }
+            if crate::run_worker::pending_finalization(self, id)?.is_some() {
+                if projection.status != "blocked" {
+                    self.append(id, crate::run_worker::finalization_block(
+                        "Ahjo stopped while closing the run's seats and workspaces; resume to finish cleanup".into(),
+                    ))?;
+                }
+                interrupted.push(id.to_owned());
+                continue;
+            }
             if projection.status == "blocked" {
                 // A blocked epoch cannot accept completion events. Leave the
                 // evidence staged for explicit resume to reconcile.
@@ -89,6 +98,7 @@ impl Coordinator {
                 cwd: projection.cwd.clone(),
                 repository: projection.repository.clone(),
                 base: projection.base.clone(),
+                keep_sessions: crate::run_left_seats::keep_sessions(&events),
                 context_paths: projection.context_paths,
                 issue: projection.issue,
                 actor: projection.started_by,
@@ -226,6 +236,7 @@ pub(crate) fn only_waiting(
     });
     !projection.waiting_gates.is_empty()
         && crate::run_folder::pending(events).is_none()
+        && crate::run_workspace::pending(events).is_none()
         && replay.open.is_empty()
         && replay.evaluating.is_empty()
         && replay.queue.values().all(|q| q.is_empty())

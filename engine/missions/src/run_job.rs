@@ -93,29 +93,45 @@ pub(crate) fn execute_step(
     }
     let (limits, _timer) = attempt_limits(c, id, mission, control, &node)?;
     let placed = !step.environment.is_empty() && step.environment != c.inner.settings.environment;
+    let review = req.step_id.is_empty() && reason != "judge";
     let (turn_workspace, turn) = if placed {
         let turn = crate::run_workspace::prepare_placed_turn(
             c,
             id,
-            req,
+            (mission, req, review),
             workspace,
             control,
             (node.as_str(), step.environment.as_str()),
             attempt,
         )?;
         (workspace.to_path_buf(), Some(turn))
-    } else if req.repository.is_empty() && req.step_id.is_empty() && reason != "judge" {
-        let path = crate::run_folder::prepare(c, id, mission, workspace, control, &node, attempt)?;
+    } else if req.repository.is_empty() {
+        let path = crate::run_folder::prepare(
+            c,
+            id,
+            (mission, review),
+            workspace,
+            control,
+            &node,
+            attempt,
+        )?;
         (path, None)
     } else {
-        let path =
-            crate::run_workspace::prepare_turn(c, id, req, workspace, control, &node, attempt)?;
+        let path = crate::run_workspace::prepare_turn(
+            c,
+            id,
+            (mission, req, review),
+            workspace,
+            control,
+            &node,
+            attempt,
+        )?;
         (path, None)
     };
     let call = StepExecution {
         run_id: id.into(),
         prefix: mission.session_prefix(),
-        run_number: run_number(c, id, mission),
+        keep_sessions: req.keep_sessions,
         step: step.clone(),
         bindings,
         cwd: turn_workspace,
@@ -143,10 +159,13 @@ pub(crate) fn execute_step(
     let mut completed = std::collections::HashSet::new();
     for pending in rx {
         let evt = pending.event;
-        if evt.kind == "seat_cleanup"
-            && control.stopping.load(Ordering::Acquire)
-            && evt.data.get("outcome").and_then(|v| v.as_str()) == Some("left_shutdown")
+        if evt.kind == "seat_created"
+            || (evt.kind == "seat_cleanup"
+                && control.stopping.load(Ordering::Acquire)
+                && evt.data.get("outcome").and_then(|v| v.as_str()) == Some("left_shutdown"))
         {
+            // A seat can finish preparing concurrently with abort. Record its
+            // identity so finalization can stop or retain that exact session.
             let mut record = event(
                 &evt.kind,
                 &node,
@@ -556,13 +575,4 @@ pub(crate) fn start_ready(
         return Ok(true);
     }
     Ok(false)
-}
-
-/// The run's number as the Missions list shows it.
-fn run_number(c: &Coordinator, id: &str, mission: &Mission) -> u64 {
-    c.list(Some(&mission.slug), false)
-        .ok()
-        .and_then(|runs| runs.into_iter().find(|run| run.run_id == id))
-        .map(|run| run.number as u64)
-        .unwrap_or_default()
 }

@@ -27,6 +27,10 @@ impl Coordinator {
             // The branches a failed or stopped attempt's work was kept on
             // go with the run, each only while it is where Ahjo left it.
             let events = self.ledger(id)?.read().map_err(crate::error::to_io)?;
+            let keep_sessions = crate::run_left_seats::keep_sessions(&events);
+            if !keep_sessions {
+                crate::run_worker::finish(self, id, std::path::Path::new(&run.cwd), false)?;
+            }
             let checkout = events[0].data.get("checkout").and_then(|v| v.as_str());
             if let Some(checkout) = checkout.filter(|c| std::path::Path::new(c).exists()) {
                 for kept in events.iter().filter(|e| e.kind == "workspace_kept") {
@@ -50,16 +54,16 @@ impl Coordinator {
                 .unwrap_or_else(|| root.join("workspaces"))
                 .join(id);
             // Kept outputs are sealed read-only, so plain removal would fail.
-            for dir in [root.join("artifacts").join(id), made] {
-                crate::kept_copy::remove_tree(&dir)?;
+            crate::kept_copy::remove_tree(&root.join("artifacts").join(id))?;
+            if !keep_sessions {
+                crate::kept_copy::remove_tree(&made)?;
             }
-            crate::run_folder::discard_run(self, id)?;
             crate::SeatRecords::new(root)
                 .forget_run(id)
                 .map_err(crate::error::to_io)?;
             // The record goes last: until then the run still lists and a
             // failed delete can be tried again.
-            for end in ["bindings.toml", "snapshot.toml", "ndjson"] {
+            for end in ["bindings.toml", "snapshot.toml", "finishing.json", "ndjson"] {
                 match std::fs::remove_file(root.join("runs").join(format!("{id}.{end}"))) {
                     Err(e) if e.kind() != io::ErrorKind::NotFound => return Err(e),
                     _ => {}

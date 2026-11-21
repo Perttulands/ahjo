@@ -539,7 +539,6 @@ fn empty_and_populated_inline_node_arrays_are_editable() {
                 id: step.clone(),
                 title: Some("Renamed".into()),
                 environment: None,
-                fresh: None,
             },
             "",
         )
@@ -597,7 +596,6 @@ fn populated_inline_steps_and_connections_can_be_updated_and_deleted() {
                 id: "fmn_a".into(),
                 title: Some("Updated".into()),
                 environment: None,
-                fresh: None,
             },
             "",
         )
@@ -613,7 +611,6 @@ fn populated_inline_steps_and_connections_can_be_updated_and_deleted() {
                     id: "fmn_a".into(),
                     title: None,
                     environment: Some(environment.into()),
-                    fresh: None,
                 },
                 "",
             )

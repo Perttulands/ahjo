@@ -56,11 +56,16 @@ impl Executor for FolderExecutor {
                 "fmn_work" => {
                     let seed = std::fs::read_to_string(request.cwd.join("draft.txt"))
                         .map_err(|e| e.to_string())?;
-                    if seed != "original" {
+                    let expected = if request.attempt == 1 {
+                        "original"
+                    } else {
+                        "attempt 1"
+                    };
+                    if seed != expected {
                         return Err(format!("attempt {} saw {seed:?}", request.attempt));
                     }
-                    if !request.cwd.join("delete.txt").exists() {
-                        return Err("the second attempt inherited the first deletion".into());
+                    if request.cwd.join("delete.txt").exists() != (request.attempt == 1) {
+                        return Err("the retry did not retain the first attempt's deletion".into());
                     }
                     std::fs::write(
                         request.cwd.join("draft.txt"),
@@ -120,8 +125,8 @@ impl Executor for FolderExecutor {
                     }
                 }
                 "fmn_ship" => {
-                    if request.cwd != self.workspace {
-                        return Err("one-attempt step did not use the run folder".into());
+                    if request.cwd == self.workspace {
+                        return Err("shipping step was not isolated from the run folder".into());
                     }
                     let draft = std::fs::read_to_string(request.cwd.join("draft.txt"))
                         .map_err(|e| e.to_string())?;
@@ -154,6 +159,14 @@ impl Executor for FolderExecutor {
 }
 
 fn folder_run(conflict: bool, pass_retry: bool) -> (Run, FolderExecutor, PathBuf) {
+    folder_run_with_keep(conflict, pass_retry, false)
+}
+
+fn folder_run_with_keep(
+    conflict: bool,
+    pass_retry: bool,
+    keep_sessions: bool,
+) -> (Run, FolderExecutor, PathBuf) {
     let root = Scratch::new();
     let workspace = root.0.join("chosen folder");
     std::fs::create_dir(&workspace).unwrap();
@@ -174,6 +187,7 @@ fn folder_run(conflict: bool, pass_retry: bool) -> (Run, FolderExecutor, PathBuf
             input_card_id: "inp_hello".into(),
             expected_rev: 1,
             cwd: workspace.to_string_lossy().into_owned(),
+            keep_sessions,
             inputs: BTreeMap::from([("brief".into(), "the task".into())]),
             ..Default::default()
         })
@@ -198,19 +212,18 @@ fn folder_pick_compares_own_files_and_publishes_the_winners_deletion() {
     assert_eq!(projection.status, "picked", "{}", run.ledger_text());
     let paths = workspaces(&lab);
     assert_eq!(paths.len(), 2);
-    assert_ne!(paths[0], paths[1]);
+    assert_eq!(paths[0], paths[1]);
     assert!(
         paths
             .iter()
             .all(|path| path != &workspace && !path.exists())
     );
-    assert_eq!(
-        *lab.compared.lock().unwrap(),
-        [
-            (paths[0].clone(), "attempt 1".into()),
-            (paths[1].clone(), "attempt 2".into())
-        ]
-    );
+    let compared = lab.compared.lock().unwrap();
+    assert_eq!(compared.len(), 2);
+    assert_ne!(compared[0].0, compared[1].0);
+    assert_ne!(compared[0].0, paths[0]);
+    assert_eq!(compared[0].1, "attempt 1");
+    assert_eq!(compared[1].1, "attempt 2");
     assert_eq!(
         std::fs::read_to_string(workspace.join("draft.txt")).unwrap(),
         "attempt 1"
@@ -286,7 +299,7 @@ fn folder_retry_that_passes_publishes_that_attempt() {
     assert_eq!(run.settle().status, "succeeded", "{}", run.ledger_text());
     let paths = workspaces(&lab);
     assert_eq!(paths.len(), 2);
-    assert_ne!(paths[0], paths[1]);
+    assert_eq!(paths[0], paths[1]);
     assert!(
         paths
             .iter()
@@ -296,9 +309,25 @@ fn folder_retry_that_passes_publishes_that_attempt() {
         std::fs::read_to_string(workspace.join("draft.txt")).unwrap(),
         "attempt 2"
     );
+    assert!(!workspace.join("delete.txt").exists());
+}
+
+#[test]
+fn keeping_a_run_keeps_the_live_retry_workspace() {
+    let (run, lab, workspace) = folder_run_with_keep(false, true, true);
+    assert_eq!(run.settle().status, "succeeded", "{}", run.ledger_text());
+    let paths = workspaces(&lab);
+    assert_eq!(paths.len(), 2);
+    assert_eq!(paths[0], paths[1]);
+    assert_ne!(paths[0], workspace);
     assert_eq!(
-        std::fs::read_to_string(workspace.join("delete.txt")).unwrap(),
-        "keep until picked"
+        std::fs::read_to_string(paths[0].join("draft.txt")).unwrap(),
+        "attempt 2"
+    );
+    std::fs::write(paths[0].join("after-run.txt"), "still usable").unwrap();
+    assert_eq!(
+        std::fs::read_to_string(paths[0].join("after-run.txt")).unwrap(),
+        "still usable"
     );
 }
 

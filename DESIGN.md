@@ -30,8 +30,10 @@ edits lightly where he reads.
   (an agent, code or the operator), and where each answer leads.
 - An **agent** is a named, reusable setup that is made good and keeps getting
   better; what it has learned is written down beside it.
-- A **run** is one time a mission is carried out; its agents work in ordinary
-  sessions, and the operator can talk to them while it runs.
+- A **run** is one time a mission is carried out. Its agents work in ordinary
+  sessions, and the operator can talk to them while it runs. A step's seats
+  share a workspace across retries. The run closes its sessions unless the
+  operator starts it with the option to keep them.
 - A **note** is a thought put on the wall by a person or an agent, about a
   mission or one of its steps.
 - A **desk ask** is something real put in front of the operator (pictures, a

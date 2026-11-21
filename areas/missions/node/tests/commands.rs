@@ -1469,7 +1469,7 @@ async fn mission_show_resolves_seat_settings_and_names_the_session() {
     assert_eq!(seat["harness"], "claude-code");
     assert_eq!(seat["model"], "");
     assert_eq!(seat["effort"], "medium");
-    assert_eq!(seat["session"], "seatdemo-write");
+    assert!(seat.get("session").is_none());
 
     let mut stdout = Vec::new();
     let args = vec![
@@ -1497,12 +1497,14 @@ async fn mission_show_resolves_seat_settings_and_names_the_session() {
     )
     .await
     .unwrap();
-    node.call(
-        "mission_edit",
-        json!({"mission":"seat-demo","change":{"update_step":{"id":"fmn_write","fresh":true}}}),
-    )
-    .await
-    .unwrap();
+    let error = node
+        .call(
+            "mission_edit",
+            json!({"mission":"seat-demo","change":{"update_step":{"id":"fmn_write","fresh":true}}}),
+        )
+        .await
+        .unwrap_err();
+    assert!(error.to_string().contains("fresh"));
     let summary = node
         .call("mission_show", json!({"mission":"seat-demo"}))
         .await
@@ -1513,10 +1515,10 @@ async fn mission_show_resolves_seat_settings_and_names_the_session() {
         .iter()
         .find(|step| step["id"] == "fmn_write")
         .unwrap();
-    assert_eq!(step["fresh"], true);
+    assert!(step.get("fresh").is_none());
     assert_eq!(step["seats"][0]["agent"], "builder");
     assert_eq!(step["seats"][0]["harness"], "openai-codex");
     assert_eq!(step["seats"][0]["effort"], "ultra");
-    assert_eq!(step["seats"][0]["session"], "seatdemo-write");
+    assert!(step["seats"][0].get("session").is_none());
     node.stop().await;
 }

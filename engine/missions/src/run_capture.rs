@@ -38,6 +38,7 @@ pub(crate) fn publish(
     control: &Control,
     output: RunEvent,
 ) -> io::Result<()> {
+    crate::run_folder::snapshot(c, id, control, &output.card_id, output.attempt)?;
     let Some(step) = mission.step(&output.card_id) else {
         return crate::run_workspace::publish_output(c, id, req, workspace, control, output);
     };
