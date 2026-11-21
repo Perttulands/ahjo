@@ -1,5 +1,7 @@
 //! Mission canvas interaction, adapted from the original Missions page.
 use super::*;
+use crate::store::gate_art;
+use crate::store::run_state::CardState;
 use ahjo_app_kit::widgets::boundary;
 use ahjo_missions_contract::{
     Effort, EndOutcome, Formation, GateKind, HumanChannel, LayoutCard, Mission, SeatSettings,
@@ -49,6 +51,9 @@ const SEAT_PAD: f32 = 10.;
 const END_MARK: f32 = 14.;
 /// The dot a fork's line splits at.
 const FORK_DOT_SIZE: f32 = 9.;
+/// A drawn gate's picture is made this many times its size, sharp when
+/// the board is zoomed in.
+const GATE_ART_SCALE: f32 = 3.;
 /// A seat's mark: a harness's, or an empty seat's ring.
 const SEAT: f32 = 16.;
 /// The room a loop's words are centred in, along its lane.
@@ -1381,8 +1386,11 @@ fn wires(
                 )
             };
             paint_grid(window, b, &view, grid);
-            for g in &gates {
-                paint_gate(window, g, &at, z, (work, pass, fail, quiet), (needs, mark));
+            // A gate drawn as a gate brings its own lines through it.
+            if gate_art::look().is_none() {
+                for g in &gates {
+                    paint_gate(window, g, &at, z, (work, pass, fail, quiet), (needs, mark));
+                }
             }
             for w in &list {
                 let colour = if errors.contains(&w.id) {
@@ -1584,7 +1592,17 @@ fn card_face(
             let Some(g) = mission.gates.iter().find(|g| g.id == card.id) else {
                 return div();
             };
-            gate_face(t, mission, g, card, z, on_judge, catalog)
+            match gate_art::look() {
+                Some(look) => drawn_gate_face(
+                    t,
+                    mission,
+                    g,
+                    (look, run),
+                    z,
+                    answerer(t, mission, &g.id, z, on_judge, catalog),
+                ),
+                None => gate_face(t, mission, g, card, z, on_judge, catalog),
+            }
         }
         board::Kind::End => {
             let Some(e) = mission.ends.iter().find(|e| e.id == card.id) else {
@@ -1927,47 +1945,10 @@ fn gate_face(
     on_judge: Option<OnJudge>,
     catalog: Catalog,
 ) -> Div {
-    // Numbered like the steps, so the count has no gap where a gate is.
-    let number = flow::build(mission).numbers.get(&g.id).copied();
-    let title = div()
-        .min_w_0()
-        .flex()
-        .items_baseline()
-        .gap(px(GAP * z))
-        .when_some(number, |d, n| {
-            d.child(
-                div()
-                    .flex_none()
-                    .text_size(px(CARD_SMALL * z))
-                    .text_color(t.dim)
-                    .child(n.to_string()),
-            )
-        })
-        .child(
-            div()
-                .min_w_0()
-                .truncate()
-                .text_size(px(CARD_TEXT * z))
-                .font_weight(FontWeight::SEMIBOLD)
-                .text_color(t.text)
-                .child(g.title.clone()),
-        );
+    let title = gate_title(t, mission, g, z);
     // The condition is the decision: it shows whole, the gate sized to
     // it, and only one past all reason is cut, whole on hover.
-    let cut = board::wrapped_lines(&g.criterion, board::CRITERION_W) > board::CRITERION_MOST;
-    let whole = g.criterion.clone();
-    let criterion = || {
-        div()
-            .id(SharedString::from(format!("canvas-criterion-{}", g.id)))
-            .min_w_0()
-            .line_clamp(board::CRITERION_MOST)
-            .text_ellipsis()
-            .text_size(px(board::CRITERION_SIZE * z))
-            .line_height(px(board::CRITERION_LINE * z))
-            .text_color(t.text2)
-            .when(cut, |d| d.tooltip(kit::tip(whole.clone())))
-            .child(g.criterion.clone())
-    };
+    let criterion = || gate_criterion(t, g, board::CRITERION_W, z);
     div()
         .size_full()
         .relative()
@@ -1989,6 +1970,151 @@ fn gate_face(
                 .left(px((board::FORK_DOT + CARD_PAD) * z))
                 .right_0()
                 .top(px((board::fork_line(card.h) + GAP) * z)),
+        )
+}
+
+/// A gate's number and title, numbered like the steps so the count has
+/// no gap where a gate is.
+fn gate_title(
+    t: &ahjo_app_kit::theme::Theme,
+    mission: &Mission,
+    g: &ahjo_missions_contract::Gate,
+    z: f32,
+) -> Div {
+    let number = flow::build(mission).numbers.get(&g.id).copied();
+    div()
+        .min_w_0()
+        .flex()
+        .items_baseline()
+        .gap(px(GAP * z))
+        .when_some(number, |d, n| {
+            d.child(
+                div()
+                    .flex_none()
+                    .text_size(px(CARD_SMALL * z))
+                    .text_color(t.dim)
+                    .child(n.to_string()),
+            )
+        })
+        .child(
+            div()
+                .min_w_0()
+                .truncate()
+                .text_size(px(CARD_TEXT * z))
+                .font_weight(FontWeight::SEMIBOLD)
+                .text_color(t.text)
+                .child(g.title.clone()),
+        )
+}
+
+/// A gate's condition, whole at `width` up to `CRITERION_MOST` lines; one
+/// past all reason is cut, and whole on hover.
+fn gate_criterion(
+    t: &ahjo_app_kit::theme::Theme,
+    g: &ahjo_missions_contract::Gate,
+    width: f32,
+    z: f32,
+) -> Stateful<Div> {
+    let cut = board::wrapped_lines(&g.criterion, width) > board::CRITERION_MOST;
+    let whole = g.criterion.clone();
+    div()
+        .id(SharedString::from(format!("canvas-criterion-{}", g.id)))
+        .min_w_0()
+        .line_clamp(board::CRITERION_MOST)
+        .text_ellipsis()
+        .text_size(px(board::CRITERION_SIZE * z))
+        .line_height(px(board::CRITERION_LINE * z))
+        .text_color(t.text2)
+        .when(cut, |d| d.tooltip(kit::tip(whole)))
+        .child(g.criterion.clone())
+}
+
+thread_local! {
+    /// Each gate's picture, by what it shows.
+    static GATE_ART: std::cell::RefCell<std::collections::HashMap<String, std::sync::Arc<gpui::Image>>> =
+        Default::default();
+}
+
+/// A colour as 0xRRGGBB, for drawn art.
+fn rgb(c: Hsla) -> u32 {
+    let c = gpui::Rgba::from(c);
+    let b = |v: f32| (v.clamp(0., 1.) * 255.).round() as u32;
+    (b(c.r) << 16) | (b(c.g) << 8) | b(c.b)
+}
+
+/// A gate drawn as a gate: its picture, the question on its sign and who
+/// answers under it, shut, deciding, open or barred as the run has it.
+fn drawn_gate_face(
+    t: &ahjo_app_kit::theme::Theme,
+    mission: &Mission,
+    g: &ahjo_missions_contract::Gate,
+    (look, run): (gate_art::Look, Option<Option<CardState>>),
+    z: f32,
+    who: Div,
+) -> Div {
+    let Some(f) = board::drawn_gate(&g.criterion) else {
+        return div();
+    };
+    let moment = gate_art::staged(&g.id).unwrap_or(match run.flatten() {
+        Some(CardState::Done) => gate_art::Moment::Passed,
+        Some(CardState::Failed) => gate_art::Moment::Failed,
+        Some(CardState::Running | CardState::Waiting) => gate_art::Moment::Deciding,
+        _ => gate_art::Moment::Plan,
+    });
+    let wired = |port: &str| {
+        let from = format!("{}:{port}", g.id);
+        mission.connections.iter().any(|c| c.from == from)
+    };
+    let wiring = gate_art::Wiring {
+        pass: wired("pass"),
+        fail: wired("fail"),
+        human: g.kinds.contains(&GateKind::Human),
+    };
+    let ink = gate_art::Ink {
+        bg: rgb(t.bg),
+        text: rgb(t.text),
+        wire: rgb(t.wire),
+        quiet: rgb(t.dim),
+        pass: rgb(t.pass),
+        fail: rgb(t.fail),
+        needs: rgb(t.needs),
+        running: rgb(t.running),
+    };
+    let key = format!("{look:?} {moment:?} {wiring:?} {ink:?} {}", f.h);
+    let image = GATE_ART.with(|art| {
+        art.borrow_mut()
+            .entry(key)
+            .or_insert_with(|| {
+                let svg = gate_art::svg(look, ink, &f, wiring, moment, GATE_ART_SCALE);
+                std::sync::Arc::new(gpui::Image::from_bytes(
+                    gpui::ImageFormat::Svg,
+                    svg.into_bytes(),
+                ))
+            })
+            .clone()
+    });
+    let w = f.words;
+    div()
+        .size_full()
+        .relative()
+        .child(gpui::img(image).absolute().top_0().left_0().size_full())
+        .child(
+            div()
+                .absolute()
+                .left(px(w.x * z))
+                .top(px(w.y * z))
+                .w(px(w.w * z))
+                .h(px(w.h * z))
+                .flex()
+                .flex_col()
+                .child(
+                    gate_title(t, mission, g, z)
+                        .h(px(gate_art::TITLE_H * z))
+                        .flex_none(),
+                )
+                .child(gate_criterion(t, g, gate_art::measure_width(look), z))
+                .child(div().flex_1())
+                .child(who.h(px(gate_art::WHO_H * z)).flex_none()),
         )
 }
 

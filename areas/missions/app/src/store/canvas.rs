@@ -174,11 +174,21 @@ fn size(m: &Mission, flow: &Flow, id: &str, running: bool) -> Option<(Kind, f32,
 /// A fork grows up with its condition, which it shows whole past the two
 /// lines it has room for at its least.
 fn gate_size(criterion: &str) -> (f32, f32) {
+    if let Some(f) = drawn_gate(criterion) {
+        return (f.w, f.h);
+    }
     let lines = criterion_lines(criterion, CRITERION_W);
     (
         FORK_W,
         FORK_H + lines.saturating_sub(2) as f32 * CRITERION_LINE,
     )
+}
+
+/// A gate drawn as a gate (`gate_art`): its frame for this condition.
+pub fn drawn_gate(criterion: &str) -> Option<super::gate_art::Frame> {
+    let look = super::gate_art::look()?;
+    let lines = criterion_lines(criterion, super::gate_art::measure_width(look));
+    Some(super::gate_art::frame(look, lines))
 }
 
 /// The lines `text` wraps to at `width`, word by word, at most
@@ -492,11 +502,22 @@ fn port_of(endpoint: &str) -> (&str, &str) {
 fn port_at(m: &Mission, c: &Card, port: &str, out: bool) -> P {
     let side = if out { c.x + c.w } else { c.x };
     match c.kind {
-        Kind::Gate => match port {
-            "pass" => (c.x + c.w, c.y + fork_line(c.h)),
-            "fail" => (c.x + FORK_DOT, c.y + c.h),
-            _ => (c.x, c.y + fork_line(c.h)),
-        },
+        Kind::Gate => {
+            let drawn = m
+                .gates
+                .iter()
+                .find(|g| g.id == c.id)
+                .and_then(|g| drawn_gate(&g.criterion));
+            let (line, fail) = match drawn {
+                Some(f) => (f.line_y, f.fail_x),
+                None => (fork_line(c.h), FORK_DOT),
+            };
+            match port {
+                "pass" => (c.x + c.w, c.y + line),
+                "fail" => (c.x + fail, c.y + c.h),
+                _ => (c.x, c.y + line),
+            }
+        }
         Kind::Step => {
             let f = m.steps.iter().find(|f| f.id == c.id);
             let ports = f.map(|f| if out { &f.outputs } else { &f.inputs });
