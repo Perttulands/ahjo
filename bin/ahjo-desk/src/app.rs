@@ -31,6 +31,10 @@ use std::time::Duration;
 pub enum Reach {
     Loading,
     Ok,
+    /// Nothing answered: the desk is not running. Not an error while
+    /// another desk answers; the settings button says it quietly.
+    Away(String),
+    /// The desk answered wrongly: an error he sees.
     Failed(String),
 }
 
@@ -50,7 +54,7 @@ pub fn reached<'a>(each: impl Iterator<Item = &'a Reach>) -> Reached {
         match r {
             Reach::Ok => return Reached::Some,
             Reach::Loading => waiting = true,
-            Reach::Failed(_) => {}
+            Reach::Away(_) | Reach::Failed(_) => {}
         }
     }
     if waiting {
@@ -1693,8 +1697,12 @@ impl DeskApp {
     fn refresh(&mut self, d: usize, cx: &mut Context<Self>) {
         let base = self.desks[d].place.url.clone();
         // A desk that did not answer is being asked again: say so, or
-        // trying again looks like nothing happened until it times out.
-        if matches!(self.desks[d].reach, Reach::Failed(_)) {
+        // trying again looks like nothing happened until it times out. A
+        // desk away while others answer stays quiet.
+        let away = matches!(self.desks[d].reach, Reach::Away(_));
+        if matches!(self.desks[d].reach, Reach::Failed(_))
+            || (away && self.reached() != Reached::Some)
+        {
             self.desks[d].reach = Reach::Loading;
             cx.notify();
         }
@@ -1702,7 +1710,7 @@ impl DeskApp {
             let got = desk::runtime()
                 .spawn(desk::asks(base))
                 .await
-                .unwrap_or_else(|e| Err(e.to_string()));
+                .unwrap_or_else(|e| Err(desk::Unread::Wrong(e.to_string())));
             let _ = this.update(cx, |app, cx| {
                 match got {
                     Ok(asks) => {
@@ -1721,7 +1729,8 @@ impl DeskApp {
                         app.drafts_changed |= app.drafts.len() != before;
                         app.checked(d, cx);
                     }
-                    Err(e) => app.desks[d].reach = Reach::Failed(e),
+                    Err(desk::Unread::Away(e)) => app.desks[d].reach = Reach::Away(e),
+                    Err(desk::Unread::Wrong(e)) => app.desks[d].reach = Reach::Failed(e),
                 }
                 // The first answerable ask opens by itself; an ask answered
                 // elsewhere (the phone) lets the next one in.

@@ -210,6 +210,7 @@ impl DeskApp {
                 Reach::Ok if n == 0 => (t.done, "nothing waiting".to_string(), t.dim),
                 Reach::Ok => (t.needs, format!("{n} waiting"), t.text2),
                 Reach::Loading => (t.dim, "reaching…".to_string(), t.dim),
+                Reach::Away(_) => (t.dim, "not running".to_string(), t.dim),
                 Reach::Failed(e) => (t.error, e.clone(), t.error),
             };
             card = card.child(
@@ -295,13 +296,39 @@ impl DeskApp {
         )
     }
 
-    /// The button that opens the settings menu where it is.
+    /// The button that opens the settings menu where it is. A desk that
+    /// is not running while another answers is a small dot on it, named
+    /// in its tip and in the menu, not an error.
     fn menu_button(&self, t: &Theme, cx: &mut Context<Self>) -> Stateful<Div> {
+        let away: Vec<String> = self
+            .desks
+            .iter()
+            .filter(|d| matches!(d.reach, Reach::Away(_)))
+            .map(|d| d.name())
+            .collect();
+        let tip = match away.as_slice() {
+            [] => "Desks, order and settings".to_string(),
+            [one] => format!("Desks, order and settings · {one} is not running"),
+            [rest @ .., last] => format!(
+                "Desks, order and settings · {} and {last} are not running",
+                rest.join(", ")
+            ),
+        };
         icon_button(t, "menu-open", Icon::Settings, self.menu.is_some())
-            // Not over the menu it opened.
-            .when(self.menu.is_none(), |d| {
-                d.tooltip(kit::tip("Desks, order and settings"))
+            .relative()
+            .when(!away.is_empty() && self.menu.is_none(), |d| {
+                d.child(
+                    div()
+                        .absolute()
+                        .top(px(3.))
+                        .right(px(3.))
+                        .size(px(tokens::DOT))
+                        .rounded_full()
+                        .bg(t.dim),
+                )
             })
+            // Not over the menu it opened.
+            .when(self.menu.is_none(), |d| d.tooltip(kit::tip(tip)))
             .on_click(cx.listener(|app, e: &ClickEvent, _, cx| {
                 let at = if app.menu.is_some() {
                     None
@@ -423,13 +450,16 @@ impl DeskApp {
     }
 
     /// Nothing to answer: every desk read and none waiting, the desks
-    /// still being reached, or none of them answering.
+    /// still being reached, or none of them answering. A desk away while
+    /// another answers is left to the settings button.
     fn all_clear(&self, t: &Theme, cx: &mut Context<Self>) -> AnyElement {
+        let none_answer = self.reached() == Reached::None;
         let failed: Vec<String> = self
             .desks
             .iter()
             .filter_map(|d| match &d.reach {
                 Reach::Failed(e) => Some(format!("{}: {e}", d.name())),
+                Reach::Away(e) if none_answer => Some(format!("{}: {e}", d.name())),
                 _ => None,
             })
             .collect();

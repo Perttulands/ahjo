@@ -212,6 +212,7 @@ impl DeskApp {
             let (dot, state) = match &d.reach {
                 Reach::Ok => (t.done, "answering".to_string()),
                 Reach::Loading => (t.dim, "reaching…".to_string()),
+                Reach::Away(_) => (t.dim, "not running".to_string()),
                 Reach::Failed(e) => (t.error, e.clone()),
             };
             list = list.child(

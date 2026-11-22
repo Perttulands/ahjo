@@ -294,9 +294,30 @@ async fn request(
     }
 }
 
-pub async fn asks(base: String) -> Result<Vec<Ask>, String> {
-    let bytes = request(&base, "GET", "/api/asks", None, Duration::from_secs(10)).await?;
-    serde_json::from_slice(&bytes).map_err(|e| format!("the asks do not read: {e}"))
+/// Why a desk's asks were not read.
+#[derive(Clone, Debug, PartialEq)]
+pub enum Unread {
+    /// Nothing answered: the desk is not running or not reachable from here.
+    Away(String),
+    /// The desk answered, but not with its asks.
+    Wrong(String),
+}
+
+pub async fn asks(base: String) -> Result<Vec<Ask>, Unread> {
+    let (status, bytes) = http::send(
+        &base,
+        "GET",
+        "/api/asks",
+        &[],
+        None,
+        Duration::from_secs(10),
+    )
+    .await
+    .map_err(|e| Unread::Away(e.to_string()))?;
+    if !(200..300).contains(&status) {
+        return Err(Unread::Wrong(http::error_text(status, &bytes)));
+    }
+    serde_json::from_slice(&bytes).map_err(|e| Unread::Wrong(format!("the asks do not read: {e}")))
 }
 
 /// A desk on another project, as `/api/desks` names it.
@@ -635,5 +656,32 @@ mod size_tests {
         std::fs::write(&path, "{not json").unwrap();
         assert!(read_size(&path).is_err());
         std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// A desk that is not running is away, which the app keeps quiet; one
+    /// that answers wrongly is an error he sees.
+    #[test]
+    fn a_desk_that_does_not_answer_is_away_and_one_that_answers_wrongly_is_an_error() {
+        use std::io::{Read, Write};
+        let serve = |reply: &'static str| {
+            let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+            let url = format!("http://{}", listener.local_addr().unwrap());
+            std::thread::spawn(move || {
+                let (mut s, _) = listener.accept().unwrap();
+                let mut buf = [0u8; 1024];
+                let _ = s.read(&mut buf);
+                let _ = s.write_all(reply.as_bytes());
+            });
+            url
+        };
+        let read = |url: String| runtime().block_on(asks(url));
+        // Accepted and closed without a word: nothing answered.
+        assert!(matches!(read(serve("")), Err(Unread::Away(_))));
+        let broken = "HTTP/1.1 500 Internal Server Error\r\ncontent-length: 4\r\nconnection: close\r\n\r\nboom";
+        assert!(matches!(read(serve(broken)), Err(Unread::Wrong(_))));
+        let garbled = "HTTP/1.1 200 OK\r\ncontent-length: 3\r\nconnection: close\r\n\r\n{x}";
+        assert!(matches!(read(serve(garbled)), Err(Unread::Wrong(_))));
+        let fine = "HTTP/1.1 200 OK\r\ncontent-length: 2\r\nconnection: close\r\n\r\n[]";
+        assert_eq!(read(serve(fine)).unwrap().len(), 0);
     }
 }
