@@ -146,6 +146,7 @@ fn persisted(id: &str, every: i64, next: Option<&str>) -> Task {
         audit: vec![],
         held: String::new(),
         attempt: None,
+        replaced: vec![],
     }
 }
 

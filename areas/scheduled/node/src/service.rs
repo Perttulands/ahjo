@@ -342,6 +342,40 @@ impl Scheduled {
         self.get_task(id).map(|t| self.said(t))
     }
 
+    /// Says, on each task, which targets' names another session has now
+    /// ([`Task::replaced`]), as a run would find them. Each tied target's
+    /// session is looked up for this ask, so only a reader pays for it.
+    pub async fn with_replaced(&self, tasks: &mut [Task]) {
+        if !self.validate_targets {
+            return;
+        }
+        let gate = Semaphore::new(CONCURRENT_DELIVERIES);
+        let checks = tasks
+            .iter()
+            .enumerate()
+            .flat_map(|(i, task)| {
+                task.targets.iter().filter_map(move |target| {
+                    let kept = task.session_ids.get(&target.label())?;
+                    Some((i, target, kept))
+                })
+            })
+            .map(|(i, target, kept)| {
+                let gate = &gate;
+                async move {
+                    let _turn = gate.acquire().await;
+                    let now = self.validate(target).await.ok()?;
+                    (tie(kept, &now) == Tie::Other).then(|| (i, target.label()))
+                }
+            });
+        for (i, label) in futures_util::future::join_all(checks)
+            .await
+            .into_iter()
+            .flatten()
+        {
+            tasks[i].replaced.push(label);
+        }
+    }
+
     /// Points every target that named `from` on `user`'s server ("" for the
     /// node's own) at `to`, so a renamed session keeps its tasks (#237).
     /// A task mid-run is rewritten once its run gives it back. Answers the
@@ -452,6 +486,7 @@ impl Scheduled {
             audit: vec![],
             held: String::new(),
             attempt: None,
+            replaced: vec![],
         };
         self.prepare(&mut task, true, now).await?;
         audit(&mut task, now, &updated_by, "created", "");
@@ -1020,6 +1055,7 @@ fn unreadable(id: String, e: &anyhow::Error) -> Task {
         audit: vec![],
         held: unreadable_reason(e),
         attempt: None,
+        replaced: vec![],
     }
 }
 

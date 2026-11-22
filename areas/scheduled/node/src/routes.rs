@@ -126,14 +126,22 @@ fn bad(message: String) -> Response {
 
 async fn list(State(s): State<Arc<Scheduled>>) -> Response {
     match s.list() {
-        Ok(tasks) => success(json!({ "tasks": tasks })),
+        Ok(mut tasks) => {
+            s.with_replaced(&mut tasks).await;
+            success(json!({ "tasks": tasks }))
+        }
         Err(e) => failed(e),
     }
 }
 
 async fn read(State(s): State<Arc<Scheduled>>, Path(id): Path<String>) -> Response {
     match s.get(&id) {
-        Ok(task) => success(json!({ "task": task })),
+        Ok(task) => {
+            let mut said = [task];
+            s.with_replaced(&mut said).await;
+            let [task] = said;
+            success(json!({ "task": task }))
+        }
         Err(e) => failed(e),
     }
 }

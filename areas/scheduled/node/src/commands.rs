@@ -58,7 +58,9 @@ pub(crate) fn commands(ctx: &Arc<Ctx>) -> Vec<Command> {
             "scheduled_show",
             Effect::Reads,
             |ctx, args: ScheduledShow| async move {
-                let task = ctx.scheduled.get(&task_id(&ctx, &args.id)?)?;
+                let mut said = [ctx.scheduled.get(&task_id(&ctx, &args.id)?)?];
+                ctx.scheduled.with_replaced(&mut said).await;
+                let [task] = said;
                 Ok(ScheduledTask {
                     node: ctx.node.clone(),
                     task,

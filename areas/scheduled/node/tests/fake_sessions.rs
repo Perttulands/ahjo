@@ -362,6 +362,67 @@ async fn a_task_follows_its_session_onto_a_restarted_server() {
     node.stop().await;
 }
 
+/// The node says which targets' names another session has now, so the
+/// Scheduled page marks only those (ahjo-yde): after tmux restarts, the
+/// session that has the name on the new server is the one the next run
+/// sends to and is not marked; on the same server a newcomer is.
+#[tokio::test(flavor = "multi_thread")]
+async fn the_node_says_which_targets_another_session_has_taken() {
+    let node = Node::start(AREAS, "").await.unwrap();
+    let fake = node.fake_sessions();
+    fake.add("ops");
+    fake.add("logs");
+    let made = node
+        .call(
+            "scheduled_create",
+            json!({ "name": "nudge", "prompt": "morning", "sessions": ["ops", "logs"], "every": 60 }),
+        )
+        .await
+        .unwrap();
+    let id = made["task"]["id"].as_str().unwrap().to_owned();
+    let ops = made["task"]["targets"][0].clone();
+    let ops = serde_json::from_value::<ahjo_scheduled_contract::Target>(ops)
+        .unwrap()
+        .label();
+    let listed = || async {
+        let client = NodeClient::new(Some(&node.url())).unwrap();
+        let (body, _) = client
+            .request(Method::GET, ahjo_scheduled_contract::PATH, None, None)
+            .await
+            .unwrap();
+        body["data"]["tasks"][0]["replaced"].clone()
+    };
+    assert_eq!(listed().await, Value::Null, "nothing replaced yet");
+
+    fake.restart();
+    fake.add("ops");
+    fake.add("logs");
+    assert_eq!(
+        listed().await,
+        Value::Null,
+        "a restarted server's ops is ours"
+    );
+    let shown = node
+        .call("scheduled_show", json!({ "id": id }))
+        .await
+        .unwrap();
+    assert!(shown["task"].get("replaced").is_none(), "{shown}");
+
+    // Tied to the new server at the run; then another ops takes the name.
+    node.call("scheduled_run", json!({ "id": id }))
+        .await
+        .unwrap();
+    fake.close("ops");
+    fake.add("ops");
+    assert_eq!(listed().await, json!([ops]));
+    let shown = node
+        .call("scheduled_show", json!({ "id": id }))
+        .await
+        .unwrap();
+    assert_eq!(shown["task"]["replaced"], json!([ops]), "{shown}");
+    node.stop().await;
+}
+
 /// The list's order does not matter: scheduled listed first still reaches
 /// the sessions; with no area providing them it is refused, saying so.
 #[tokio::test(flavor = "multi_thread")]

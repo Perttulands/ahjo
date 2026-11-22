@@ -190,6 +190,14 @@ pub struct Task {
     /// Not CHROTE's; said by the API, never written to the file.
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub held: String,
+    /// The targets, by label, whose name another session has now on the
+    /// server the task was tied on, so a run would not send to them until
+    /// the task is saved again ([`Task::session_ids`]). Said by the API as
+    /// the sessions stand when it is asked, never written to the file. A
+    /// session that has the name on a restarted server is the one meant
+    /// and is not here. Not CHROTE's.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub replaced: Vec<String>,
     /// A run begun and not yet recorded, written before anything is sent:
     /// found on a task as the node starts, it means the node stopped
     /// mid-run, and the task is held rather than sent again. Not CHROTE's;

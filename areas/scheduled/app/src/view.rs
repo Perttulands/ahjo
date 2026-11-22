@@ -9,7 +9,7 @@ use ahjo_app_kit::theme::{Theme, size, theme};
 use ahjo_app_kit::widgets::kit::{self, Kind};
 use ahjo_app_kit::widgets::pane::{self, Col};
 use ahjo_core::NodeId;
-use ahjo_scheduled_contract::{SUCCESS, Target, Task, tied_session};
+use ahjo_scheduled_contract::{SUCCESS, Target, Task};
 use gpui::{
     AnyElement, App, ClickEvent, Context, Div, FontWeight, KeyDownEvent, SharedString, Window, div,
     prelude::*, px,
@@ -611,10 +611,13 @@ impl ScheduledPage {
         let running = self.sessions_on(node, cx);
         for target in &task.targets {
             let now = running.iter().find(|s| s.target() == *target);
-            let trouble = match (now, task.session_ids.get(&target.label())) {
+            // Whether a session of the name is the task's, the node says:
+            // only it knows when tmux restarted, after which the session
+            // that has the name is the one the next run sends to.
+            let trouble = match now {
                 _ if running.is_empty() => None,
-                (None, _) => Some(("not running", "No session of this name is running")),
-                (Some(s), Some(tie)) if !s.id.is_empty() && s.id != tied_session(tie) => Some((
+                None => Some(("not running", "No session of this name is running")),
+                Some(_) if task.replaced.contains(&target.label()) => Some((
                     "another session",
                     "The session this task was made for was closed or renamed, and another \
                      has its name now. Edit and save the task to send to it.",
