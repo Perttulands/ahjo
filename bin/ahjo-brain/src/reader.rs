@@ -715,6 +715,7 @@ impl Render for Reader {
             .child(
                 div()
                     .flex()
+                    .flex_wrap()
                     .items_center()
                     .gap(px(8.))
                     .font_family(FAMILY)
