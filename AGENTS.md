@@ -38,6 +38,29 @@ is good.
 - Land a rename or reshape whole: no shims, aliases or dead code.
 - Errors carry a code and a message in the one shape `kit/core` defines.
 
+## Names
+
+`ARCHITECTURE.md` (Words) is the vocabulary. Names follow these rules:
+
+1. One meaning per domain word on every layer; only casing changes. Before:
+   `--role` was stored as `agentId` and shown as role. After: a seat's `agent`
+   is an agent in the CLI, the file and the board.
+2. Name an id after what it identifies: `step_id` for a step, `card_id` where
+   it may be a gate or end, never `node_id`.
+3. A name states only what is true: a value that is something else is renamed
+   or removed (`session_stem` held a role id; the real session name replaced it).
+4. Output carries derived values: a seat shows its session's name, so no
+   reader needs the rule that builds it.
+5. A boolean reads as a question or names its effect: `is_open`, not `open`;
+   `install_completion_hooks`, not `notify`.
+6. Shared types carry their domain: `ScheduledTarget`, `LimitScope`, not
+   `Target` in a contract or engine crate; a page's private type may be short.
+7. A name that lives through a long function is a word (`mission`, not `m`);
+   one letter is for a closure or a few lines, plus `cx` and `t: &Theme`.
+   Rename when you touch the code, not as a campaign.
+8. One verb per action across nouns: `list`, `show`, `create`, `edit`,
+   `delete` (not `new`, `inspect`, `retire`).
+
 ## Checks
 
 Before pushing: `cargo fmt --check`, then `cargo clippy -- -D warnings` and

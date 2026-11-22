@@ -58,6 +58,33 @@ length and edited, and its node side serves the `ahjo brain` commands and the
 panel. Launching sessions and agent events live in terminals. Settings is not
 an area: the shell's Settings page lists what pages declare.
 
+## Words
+
+One word for one thing, the same from the CLI and the stored file to the
+screen; only the casing changes (`issue_id`, `--issue-id`). `DESIGN.md` says
+what each is for the operator; this is what each word may name in code.
+
+| Word | Names only | Not |
+| --- | --- | --- |
+| mission | a plan of steps, gates, limits and ends, saved as one TOML document | board, flow |
+| step | one piece of a mission's work, done by the agents in its seats | formation (as the unit), node |
+| formation | how a step's seats work together: solo, peer or orchestrated | type |
+| seat | a place in a step; an agent sits in it, with its harness, model and effort | slot |
+| agent | a named, reusable setup (instructions, harness, model, effort, notes on how it has done) | role, character |
+| session | a tmux session; where a seat's agent runs during a run | session stem |
+| harness | the program an agent runs in (Claude Code, Codex), and what shapes it in a folder | |
+| card | anything on the mission board: input, step, gate, limit, end | node |
+| node | an Ahjo machine, and nothing else | device |
+| environment | where a step runs | device, place, home |
+| issue | a Beads or GitHub issue: what a step works on, what the Issues page lists | work, work item, task |
+| scheduled prompt | a prompt sent into sessions on a timer (the noun `scheduled`) | task (alone) |
+| run | one time a mission is carried out | |
+| reason | the operator's words given with an approval, pick, abort or resume | response |
+
+Words in the Not column are retired. Leftovers in the code are renamed whole
+when touched; new code, schema fields and command names use only the left
+column.
+
 ## Rules the compiler holds
 
 1. **One contract per area.** Both sides of an area use the same `contract`
