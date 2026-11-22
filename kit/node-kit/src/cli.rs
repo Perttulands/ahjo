@@ -758,7 +758,7 @@ fn read(schema: &Value, args: &[String]) -> Result<Line> {
             line.help = true;
             continue;
         }
-        let Some(flag) = a.strip_prefix("--") else {
+        let Some(flag) = a.strip_prefix("--").filter(|_| flag_like(a)) else {
             positional.push(a.clone());
             continue;
         };
@@ -896,15 +896,23 @@ fn read(schema: &Value, args: &[String]) -> Result<Line> {
     Ok(line)
 }
 
-/// Why `word`, read where a flag stands, is not one: the flag it was likely
-/// meant as, or, when it reads as a value (front matter, a dash, text), how
-/// to give it as the value `slot` it would have been.
+/// Whether `word` could be a flag: `--` then a name (letters, digits, - and
+/// _) and perhaps `=value`. Any other word, such as a page's front matter
+/// `---` or text with spaces, can only be a value.
+fn flag_like(word: &str) -> bool {
+    word.strip_prefix("--")
+        .and_then(|flag| flag.split('=').next())
+        .is_some_and(|k| {
+            k.starts_with(|c: char| c.is_ascii_alphanumeric())
+                && k.bytes()
+                    .all(|b| b.is_ascii_alphanumeric() || b"-_".contains(&b))
+        })
+}
+
+/// Why `word`, a flag this command does not take, is refused: the flag it
+/// was likely meant as, or how to give it as the value `slot` it would have
+/// been.
 fn unknown_flag(word: &str, props: &[(String, Value)], slot: Option<&str>) -> String {
-    let flag_like = word[2..].split('=').next().is_some_and(|k| {
-        k.starts_with(|c: char| c.is_ascii_alphanumeric())
-            && k.bytes()
-                .all(|b| b.is_ascii_alphanumeric() || b"-_".contains(&b))
-    });
     let shown: String = match word.lines().next().unwrap_or("") {
         first if first.chars().count() > 30 || first.len() < word.len() => {
             format!("{}…", first.chars().take(30).collect::<String>())
@@ -917,22 +925,16 @@ fn unknown_flag(word: &str, props: &[(String, Value)], slot: Option<&str>) -> St
             slot.replace('_', "-")
         )
     });
-    if flag_like {
-        let key = word[2..].split('=').next().unwrap_or("").replace('-', "_");
-        if let Some(near) = nearest(&key, props.iter().map(|(key, _)| key.as_str())) {
-            return format!(
-                "unknown flag {shown} (did you mean --{}?)",
-                near.replace('_', "-")
-            );
-        }
-        return match as_value {
-            Some(hint) => format!("unknown flag {shown}; {hint}"),
-            None => format!("unknown flag {shown}"),
-        };
+    let key = word[2..].split('=').next().unwrap_or("").replace('-', "_");
+    if let Some(near) = nearest(&key, props.iter().map(|(key, _)| key.as_str())) {
+        return format!(
+            "unknown flag {shown} (did you mean --{}?)",
+            near.replace('_', "-")
+        );
     }
     match as_value {
-        Some(hint) => format!("{shown:?} reads as a flag; {hint}"),
-        None => format!("{shown:?} reads as a flag; a value that starts with - goes after --"),
+        Some(hint) => format!("unknown flag {shown}; {hint}"),
+        None => format!("unknown flag {shown}"),
     }
 }
 
@@ -1566,7 +1568,7 @@ mod tests {
     }
 
     #[test]
-    fn after_a_double_dash_every_word_is_a_value() {
+    fn after_a_double_dash_every_word_is_a_value_and_no_flag_looks_like_front_matter() {
         let line = read(
             &write_schema(),
             &args(&["--new", "--", "notes.md", "---\ntitle: x\n---\n"]),
@@ -1576,8 +1578,14 @@ mod tests {
             line.arguments,
             json!({"path": "notes.md", "text": "---\ntitle: x\n---\n", "new": true})
         );
-        // Without it, the error says how to give such a value.
-        let error = read(&write_schema(), &args(&["notes.md", "---\ntitle: x"]))
+        // A word no flag looks like is a value without it: front matter,
+        // or text with spaces.
+        for text in ["---\ntitle: x\n---\n", "-- not a flag"] {
+            let line = read(&write_schema(), &args(&["notes.md", text])).unwrap();
+            assert_eq!(line.arguments, json!({"path": "notes.md", "text": text}));
+        }
+        // A word that reads as a flag is refused, saying how to give it as a value.
+        let error = read(&write_schema(), &args(&["notes.md", "--verbose"]))
             .unwrap_err()
             .to_string();
         assert!(error.contains("after --"), "{error}");

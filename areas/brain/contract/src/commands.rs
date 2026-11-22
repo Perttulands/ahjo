@@ -22,7 +22,7 @@ pub struct BrainRead {
     pub path: String,
 }
 
-/// Save a page as a commit. Pass the last commit hash from brain read to guard the edit.
+/// Save a page as a commit. Pass the page's newest commit hash (the first in brain read's history) as base to guard the edit.
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct BrainSave {
@@ -32,7 +32,7 @@ pub struct BrainSave {
     pub text: String,
     /// Commit message. Omit it to use the page's path in the message.
     pub summary: Option<String>,
-    /// Last commit hash of the page. Use an empty string for an uncommitted page.
+    /// The page's newest commit hash: the first in brain read's history. An empty string for an uncommitted page.
     pub base: Option<String>,
 }
 

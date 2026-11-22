@@ -71,16 +71,59 @@ mod reference_lock_tests {
     }
 }
 
-/// Replace a TOML value while retaining its spacing and inline comment.
+/// Replace a TOML value while retaining its spacing and inline comment. A
+/// new key goes last and takes the closing space the last value had (the
+/// space before an inline table's `}`), so no space is left before its comma.
 pub(crate) fn set(table: &mut dyn toml_edit::TableLike, key: &str, mut item: toml_edit::Item) {
     let decor = table
         .get(key)
         .and_then(toml_edit::Item::as_value)
         .map(|v| v.decor().clone());
-    if let (Some(decor), Some(value)) = (decor, item.as_value_mut()) {
-        *value.decor_mut() = decor;
+    match (decor, item.as_value_mut()) {
+        (Some(decor), Some(value)) => *value.decor_mut() = decor,
+        (None, Some(value)) => {
+            let last = table
+                .iter_mut()
+                .last()
+                .and_then(|(_, last)| last.as_value_mut());
+            if let Some(last) = last {
+                let closing = last
+                    .decor()
+                    .suffix()
+                    .and_then(|s| s.as_str())
+                    .map(str::to_owned);
+                if let Some(closing) = closing.filter(|s| !s.is_empty() && s.trim().is_empty()) {
+                    last.decor_mut().set_suffix("");
+                    value.decor_mut().set_suffix(closing);
+                }
+            }
+        }
+        _ => {}
     }
     table.insert(key, item);
+}
+
+#[cfg(test)]
+mod set_tests {
+    #[test]
+    fn a_key_added_to_an_inline_table_leaves_no_space_before_its_comma() {
+        let mut doc: toml_edit::DocumentMut = "seat = [{ id = \"s\", controller = false }]\n"
+            .parse()
+            .unwrap();
+        let seat = doc["seat"]
+            .as_array_mut()
+            .unwrap()
+            .get_mut(0)
+            .unwrap()
+            .as_inline_table_mut()
+            .unwrap();
+        super::set(seat, "harness", toml_edit::value("claude-code"));
+        super::set(seat, "controller", toml_edit::value(true));
+        assert_eq!(
+            doc.to_string(),
+            "seat = [{ id = \"s\", controller = true, harness = \"claude-code\" }]\n"
+        );
+    }
 }
 
 /// Make top-level inline table arrays editable by the graph authoring paths.

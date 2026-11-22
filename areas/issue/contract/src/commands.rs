@@ -12,6 +12,10 @@ pub struct ListIssues {
     /// Include closed items.
     #[serde(default)]
     pub all: bool,
+    /// Only this project: its name as the list shows it, or the last part of
+    /// that name (ahjo for /srv/ahjo).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub project: Option<String>,
 }
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
 pub struct IssuesListed {
@@ -55,6 +59,8 @@ pub struct IssueShown {
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct CreateIssue {
+    /// The project: its name as the list shows it, or the last part of that
+    /// name (ahjo for /srv/ahjo).
     pub project: String,
     pub title: String,
     pub description: String,

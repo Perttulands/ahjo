@@ -132,6 +132,57 @@ impl Issues {
         }))
     }
 
+    /// The configured project `written` names: its full name as `ahjo issue
+    /// list` shows it (a store's folder, `owner/name`), or the last part of
+    /// that name when only one project ends so (`ahjo` for `/srv/ahjo`).
+    pub fn project(&self, written: &str) -> Result<&Project, ahjo_core::Error> {
+        use ahjo_core::Error;
+        let projects = &self.0.config.projects;
+        if let Some(project) = projects.iter().find(|p| p.name() == written) {
+            return Ok(project);
+        }
+        let last = |name: &str| {
+            name.trim_end_matches('/')
+                .rsplit('/')
+                .next()
+                .map(str::to_owned)
+        };
+        let ending: Vec<_> = projects
+            .iter()
+            .filter(|p| last(p.name()).as_deref() == Some(written.trim_end_matches('/')))
+            .collect();
+        let names = |projects: &[&Project]| {
+            projects
+                .iter()
+                .map(|p| p.name())
+                .collect::<Vec<_>>()
+                .join(", ")
+        };
+        match ending.as_slice() {
+            [project] => Ok(project),
+            [] => {
+                let all: Vec<_> = projects.iter().collect();
+                let known = if all.is_empty() {
+                    format!("this node has no projects; {}", super::config::ADDING)
+                } else {
+                    format!("the projects are: {}", names(&all))
+                };
+                Err(Error::new(
+                    "unknown_project",
+                    format!("unknown project: {written}; {known}"),
+                ))
+            }
+            several => Err(Error::new(
+                "ambiguous_project",
+                format!(
+                    "{written} names {} projects; give the full name: {}",
+                    several.len(),
+                    names(several)
+                ),
+            )),
+        }
+    }
+
     /// File an item and return its canonical reference.
     pub async fn create(
         &self,
@@ -144,26 +195,7 @@ impl Issues {
                 "type must be bug, task or feature",
             ));
         }
-        let project = self
-            .0
-            .config
-            .projects
-            .iter()
-            .find(|p| p.name() == request.project)
-            .ok_or_else(|| {
-                let names: Vec<_> = self.0.config.projects.iter().map(Project::name).collect();
-                let known = match names.as_slice() {
-                    [] => format!("this node has no projects; {}", super::config::ADDING),
-                    names => format!(
-                        "a project is named as ahjo issue list shows it: {}",
-                        names.join(", ")
-                    ),
-                };
-                Error::new(
-                    "unknown_project",
-                    format!("unknown project: {}; {known}", request.project),
-                )
-            })?;
+        let project = self.project(&request.project)?;
         let reference = match project {
             Project::Beads(store) => self
                 .0
@@ -1039,5 +1071,42 @@ mod create_tests {
         let error = work.create(&request).await.unwrap_err();
         assert_eq!(error.code, "tracker_error");
         assert!(error.message.contains("database-broken"));
+    }
+
+    #[test]
+    fn a_project_is_found_by_its_name_or_an_unambiguous_last_part() {
+        let fake = Fake::new("project-names", "exit 1", "exit 1");
+        let beads = |folder: &str| {
+            Project::Beads(super::super::config::Store {
+                folder: folder.into(),
+            })
+        };
+        let github = |name: &str| {
+            Project::GitHub(Repo {
+                name: name.into(),
+                checkout: None,
+            })
+        };
+        let work = fake.work(vec![
+            beads("/srv/ahjo"),
+            beads("/srv/games/korpi"),
+            beads("/srv/korpi-old/korpi"),
+            github("o/r"),
+        ]);
+        let found = |written: &str| work.project(written).map(|p| p.name().to_owned());
+        assert_eq!(found("/srv/ahjo").unwrap(), "/srv/ahjo");
+        assert_eq!(found("ahjo").unwrap(), "/srv/ahjo");
+        assert_eq!(found("ahjo/").unwrap(), "/srv/ahjo");
+        assert_eq!(found("r").unwrap(), "o/r");
+        assert_eq!(found("/srv/games/korpi").unwrap(), "/srv/games/korpi");
+        let ambiguous = found("korpi").unwrap_err();
+        assert_eq!(ambiguous.code, "ambiguous_project");
+        assert!(
+            ambiguous.message.contains("/srv/korpi-old/korpi"),
+            "{ambiguous}"
+        );
+        let unknown = found("hj").unwrap_err();
+        assert_eq!(unknown.code, "unknown_project");
+        assert!(unknown.message.contains("/srv/ahjo, "), "{unknown}");
     }
 }

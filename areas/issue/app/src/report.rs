@@ -80,9 +80,14 @@ impl Report {
         let nodes = self.host.nodes(cx);
         self.pending_projects = nodes.len();
         for node in nodes {
-            let task = self
-                .host
-                .call(node.id.clone(), ListIssues { all: false }, cx);
+            let task = self.host.call(
+                node.id.clone(),
+                ListIssues {
+                    all: false,
+                    project: None,
+                },
+                cx,
+            );
             cx.spawn(async move |this, cx| {
                 let result = task.await;
                 let _ = this.update(cx, |report, cx| {

@@ -107,10 +107,17 @@ impl Area for WorkArea {
         let list = Command::typed("issue_list", Effect::Reads, move |args: ListIssues| {
             let (work, node) = (work.clone(), node.clone());
             async move {
+                let only = match &args.project {
+                    Some(written) => Some(work.project(written)?.name().to_owned()),
+                    None => None,
+                };
                 let _watching = work.subscribe();
                 let requested = work.refresh();
                 let read = async {
-                    let list = List::of(work.refreshed(requested).await.as_ref(), args.all);
+                    let mut list = List::of(work.refreshed(requested).await.as_ref(), args.all);
+                    if let Some(only) = &only {
+                        list.projects.retain(|listed| &listed.project == only);
+                    }
                     let none = list.projects.is_empty().then(|| {
                         format!(
                             "this node reads no projects; to read one, {}",
