@@ -3562,6 +3562,93 @@ fn send_goes_to_every_session_marked(cx: &mut TestAppContext) {
     let _ = std::fs::remove_dir_all(settings.parent().unwrap());
 }
 
+/// Send asked from a view beside the terminals (the Brain panel, a file
+/// beside) gives the keyboard back to that view when it closes, sent or
+/// dismissed, not to the terminal the view lies over (ahjo-4y1).
+#[gpui::test]
+fn send_from_a_view_beside_gives_the_keyboard_back_to_it(cx: &mut TestAppContext) {
+    let Some(running) = start("terminals-send-beside") else {
+        return;
+    };
+    let (shell, cx, settings) = open_with_alpha(&running, "send-beside", cx);
+    let page = PAGE.with(|p| p.borrow().clone()).unwrap();
+    let toy = shell.read_with(cx, |s, _| Host::new(s.hub()).for_page("toy", &[]));
+    let note = cx.update(|_, cx| cx.new(|cx| Note(cx.focus_handle())));
+    cx.update(|_, cx| toy.show_beside("sessions", note.clone().into(), cx));
+    cx.run_until_parked();
+    let note_focused =
+        |cx: &mut VisualTestContext| cx.update(|window, cx| note.read(cx).0.is_focused(window));
+    let ask = |cx: &mut VisualTestContext, reference: &str| {
+        cx.update(|window, cx| window.focus(&note.read(cx).0.clone(), cx));
+        cx.run_until_parked();
+        assert!(note_focused(cx), "the view beside has the keyboard");
+        cx.update(|_, cx| {
+            toy.ask(
+                Ask::Send {
+                    reference: reference.into(),
+                    target: None,
+                },
+                cx,
+            )
+        })
+        .unwrap();
+        until(cx, "the Send drawer", |cx| {
+            cx.debug_bounds("send-go").is_some()
+        });
+    };
+    // Dismissed with Esc.
+    ask(cx, "echo beside-esc");
+    cx.simulate_keystrokes("escape");
+    until(cx, "the drawer closed", |cx| {
+        cx.debug_bounds("send-drawer").is_none()
+    });
+    assert!(
+        cx.debug_bounds("terminals-beside").is_some(),
+        "still beside"
+    );
+    assert!(
+        note_focused(cx),
+        "Esc gives the view beside the keyboard back"
+    );
+    // Sent: the drawer closes once it arrived.
+    ask(cx, "echo beside-$((40+2))");
+    click(cx, "send-go".into());
+    until(cx, "alpha ran it", |_| {
+        tmux(&running, &["capture-pane", "-p", "-t", "alpha"])
+            .lines()
+            .any(|l| l.trim() == "beside-42")
+    });
+    until(cx, "the drawer closed", |cx| {
+        cx.debug_bounds("send-drawer").is_none()
+    });
+    assert!(
+        note_focused(cx),
+        "a send gives the view beside the keyboard back"
+    );
+    // Once the view is gone, the terminal takes the keyboard.
+    cx.update(|_, cx| toy.close_beside("sessions", cx));
+    cx.run_until_parked();
+    cx.update(|_, cx| {
+        toy.ask(
+            Ask::Send {
+                reference: "echo after".into(),
+                target: None,
+            },
+            cx,
+        )
+    })
+    .unwrap();
+    until(cx, "the Send drawer", |cx| {
+        cx.debug_bounds("send-go").is_some()
+    });
+    cx.simulate_keystrokes("escape");
+    until(cx, "the drawer closed", |cx| {
+        cx.debug_bounds("send-drawer").is_none()
+    });
+    assert!(cx.update(|window, cx| page.read(cx).term_focus.is_focused(window)));
+    let _ = std::fs::remove_dir_all(settings.parent().unwrap());
+}
+
 /// A shell would run the line naming a session as a command, so it is left
 /// out for one, said so, and Send anyway sends it all the same.
 #[gpui::test]

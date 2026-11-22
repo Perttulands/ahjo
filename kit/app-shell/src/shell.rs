@@ -302,7 +302,7 @@ impl Shell {
         }
         self.sync_channels(i, cx);
         self.pages[i].shown(true, window, cx);
-        self.refocus(window, cx);
+        self.refocus(false, window, cx);
         cx.notify();
     }
 
@@ -393,6 +393,7 @@ impl Shell {
                 }
             }
             HubEvent::Layers { closed } => {
+                let before = window.focused(cx);
                 for s in closed {
                     if let Surface::Layer(Layer {
                         dismiss: Some(run), ..
@@ -401,7 +402,8 @@ impl Shell {
                         run(window, cx);
                     }
                 }
-                self.refocus(window, cx);
+                let moved = window.focused(cx) != before;
+                self.refocus(moved, window, cx);
             }
             HubEvent::Link { node, state } => {
                 for p in &self.pages {
@@ -443,11 +445,18 @@ impl Shell {
     }
 
     /// The keyboard goes to the top layer that takes it, or to the page.
-    fn refocus(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    /// Gives the keyboard to the top layer that takes it, else to the shown
+    /// page. A closed layer's dismiss that `moved` the keyboard itself (Send
+    /// handing it back to the view beside it came from) keeps it there
+    /// while no layer is left to take it.
+    fn refocus(&mut self, moved: bool, window: &mut Window, cx: &mut Context<Self>) {
         let top = self.hub.read(cx).stack.iter().rev().find_map(|s| match s {
             Surface::Layer(l) => l.focus.clone(),
             Surface::Menu(_) => None,
         });
+        if top.is_none() && moved {
+            return;
+        }
         let page = || {
             self.shown
                 .and_then(|i| self.pages[i].focus(cx))

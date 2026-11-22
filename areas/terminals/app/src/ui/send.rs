@@ -88,6 +88,9 @@ pub struct Draft {
     pub launch_grid: Option<super::page::Grid>,
     /// The inner edge is being dragged: from where, and the width then.
     pub resizing: Option<(f32, f32)>,
+    /// What had the keyboard as the drawer opened, given it back on close
+    /// while it is still drawn in the view beside.
+    pub back: Option<gpui::WeakFocusHandle>,
 }
 
 /// A local file or a clipboard image kept in memory until sent.
@@ -219,6 +222,7 @@ impl Terminals {
             source,
             names_a_session,
             launch_grid,
+            back: window.focused(cx).map(|f| f.downgrade()),
             ..Default::default()
         };
         self.send_targets = target.into_iter().collect();
@@ -227,12 +231,21 @@ impl Terminals {
         self.open(Surface::Send, window, cx);
     }
 
-    /// The drawer closed: the keyboard goes back to the terminal, whichever
-    /// view Send came from.
+    /// The drawer closed: the keyboard goes back to the view beside the
+    /// terminals that had it as Send opened (the Brain panel's field, a
+    /// file beside) while that view is still drawn; otherwise to the
+    /// terminal, whichever page Send came from.
     pub(super) fn send_closed(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if self.surfaces.is_empty() {
-            window.focus(&self.term_focus, cx);
+        if !self.surfaces.is_empty() {
+            return;
         }
+        let back = self
+            .send
+            .back
+            .take()
+            .and_then(|f| f.upgrade())
+            .filter(|f| self.beside_focus.contains(f, window));
+        window.focus(back.as_ref().unwrap_or(&self.term_focus), cx);
     }
 
     /// What the finder heard: a session taken goes alone unless others are
