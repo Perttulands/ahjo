@@ -430,7 +430,8 @@ pub fn contrast(a: Hsla, b: Hsla) -> f32 {
     (la.max(lb) + 0.05) / (la.min(lb) + 0.05)
 }
 
-/// Code's colours: the four kinds `widgets::syntax` tells apart.
+/// Code's colours: the four kinds `widgets::syntax` tells apart (a link in
+/// prose, its fifth, is drawn in the accent).
 #[derive(Clone, Copy, Debug)]
 pub struct Syntax {
     pub comment: Hsla,

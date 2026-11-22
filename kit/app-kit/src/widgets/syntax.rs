@@ -29,6 +29,8 @@ pub enum Token {
     String,
     Number,
     Keyword,
+    /// A link in prose (Markdown): drawn as the app draws links.
+    Link,
 }
 
 /// What a line starts inside.
@@ -528,12 +530,12 @@ fn markdown_spans(line: &str, carry: Carry) -> (Vec<(Range<usize>, Token)>, Carr
         let found = if rest.starts_with('`') {
             close(1, "`").map(|n| (n, Token::String))
         } else if rest.starts_with("[[") {
-            close(2, "]]").map(|n| (n, Token::String))
+            close(2, "]]").map(|n| (n, Token::Link))
         } else if rest.starts_with('[') {
             // `[words](address)`: the words as a link, the address dim.
             close(1, "](").and_then(|mid| {
                 close(mid, ")").map(|end| {
-                    out.push((at..at + mid - 1, Token::String));
+                    out.push((at..at + mid - 1, Token::Link));
                     out.push((at + mid - 1..at + end, Token::Comment));
                     (end, Token::Comment)
                 })
@@ -773,6 +775,7 @@ pub fn colour(t: &crate::theme::Theme, token: Token) -> gpui::Hsla {
         Token::String => t.syntax.string,
         Token::Number => t.syntax.number,
         Token::Keyword => t.syntax.keyword,
+        Token::Link => t.accent,
     }
 }
 
@@ -816,7 +819,7 @@ mod tests {
             tokens(md, "- [ ] see [[sky-map]] and `code`"),
             [
                 ("- [ ] ", Token::Number),
-                ("[[sky-map]]", Token::String),
+                ("[[sky-map]]", Token::Link),
                 ("`code`", Token::String)
             ]
         );
@@ -824,7 +827,7 @@ mod tests {
             tokens(md, "12. a [site](http://x) **bold**"),
             [
                 ("12. ", Token::Number),
-                ("[site]", Token::String),
+                ("[site]", Token::Link),
                 ("(http://x)", Token::Comment),
                 ("**", Token::Comment),
                 ("**", Token::Comment)
@@ -857,6 +860,17 @@ mod tests {
         );
         // Other languages are unchanged by it.
         assert!(lang("notes.md").is_none());
+    }
+
+    /// A link in a page's source is drawn as the app draws links, in the
+    /// accent, which reads apart from the text in every theme; the string
+    /// colour does not (github-light's is a navy near its text).
+    #[test]
+    fn links_are_drawn_in_the_accent() {
+        for d in crate::theme::Direction::ALL {
+            let t = crate::theme::Theme::new(d);
+            assert_eq!(colour(&t, Token::Link), t.accent, "{}", d.label());
+        }
     }
 
     #[test]
