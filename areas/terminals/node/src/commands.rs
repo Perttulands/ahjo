@@ -57,34 +57,34 @@ fn failed(error: anyhow::Error) -> Error {
 
 pub(crate) fn commands(ctx: &Arc<Ctx>) -> Vec<Command> {
     vec![
-        session_launch_flags(ctx),
-        session_folders(),
+        session_list_launch_flags(ctx),
+        session_list_folders(),
         project_list(ctx),
-        session_windows(ctx),
+        session_list_windows(ctx),
         command(ctx, "session_list", Effect::Reads, list_sessions),
         command(ctx, "session_read", Effect::Reads, read),
         command(ctx, "session_send", Effect::Writes, send_text),
         command(ctx, "session_launch", Effect::Writes, launch_agent),
         command(ctx, "session_copy", Effect::Writes, copy),
         command(ctx, "session_search", Effect::Reads, search),
-        command(ctx, "session_keys", Effect::Writes, keys),
-        command(ctx, "session_rename", Effect::Sets, rename),
-        command(ctx, "session_kill", Effect::Destroys, kill),
-        command(ctx, "session_mouse", Effect::Sets, mouse),
-        command(ctx, "session_seen", Effect::Sets, seen),
-        command(ctx, "project_find", Effect::Reads, handoff::find_project),
-        command(ctx, "handoff_start", Effect::Writes, handoff::start),
-        command(ctx, "handoff_status", Effect::Reads, handoff::status),
+        command(ctx, "session_send_keys", Effect::Writes, keys),
+        command(ctx, "session_edit", Effect::Sets, rename),
+        command(ctx, "session_delete", Effect::Destroys, kill),
+        command(ctx, "session_edit_mouse", Effect::Sets, mouse),
+        command(ctx, "session_mark_seen", Effect::Sets, seen),
+        command(ctx, "project_search", Effect::Reads, handoff::find_project),
+        command(ctx, "handoff_launch", Effect::Writes, handoff::start),
+        command(ctx, "handoff_show", Effect::Reads, handoff::status),
         command(ctx, "handoff_reply", Effect::Writes, handoff::reply),
     ]
 }
 
-fn session_launch_flags(ctx: &Arc<Ctx>) -> Command {
+fn session_list_launch_flags(ctx: &Arc<Ctx>) -> Command {
     let catalogue = ctx.flags.clone();
     Command::typed(
-        "session_launch_flags",
+        "session_list_launch_flags",
         Effect::Reads,
-        move |args: SessionLaunchFlags| {
+        move |args: SessionListLaunchFlags| {
             let catalogue = catalogue.clone();
             async move {
                 crate::flags::get_flags(&catalogue, &args.harness)
@@ -95,11 +95,11 @@ fn session_launch_flags(ctx: &Arc<Ctx>) -> Command {
     )
 }
 
-fn session_folders() -> Command {
+fn session_list_folders() -> Command {
     Command::typed(
-        "session_folders",
+        "session_list_folders",
         Effect::Reads,
-        |args: SessionFolders| async move {
+        |args: SessionListFolders| async move {
             let path = std::path::PathBuf::from(args.path);
             if !path.is_absolute() {
                 return Err(Error::new(COMMAND_FAILED, "An absolute folder is required"));
@@ -143,12 +143,12 @@ fn project_list(ctx: &Arc<Ctx>) -> Command {
     })
 }
 
-fn session_windows(ctx: &Arc<Ctx>) -> Command {
+fn session_list_windows(ctx: &Arc<Ctx>) -> Command {
     let ctx = ctx.clone();
     Command::typed(
-        "session_windows",
+        "session_list_windows",
         Effect::Reads,
-        move |args: SessionWindows| {
+        move |args: SessionListWindows| {
             let ctx = ctx.clone();
             async move {
                 let session = find(&ctx, &args.session)
@@ -420,7 +420,7 @@ async fn search(ctx: Arc<Ctx>, args: SessionSearch) -> Result<SessionsSearched> 
     })
 }
 
-async fn keys(ctx: Arc<Ctx>, args: SessionKeys) -> Result<SessionSent> {
+async fn keys(ctx: Arc<Ctx>, args: SessionSendKeys) -> Result<SessionSent> {
     let (session, pane) = target(&ctx, &args.session, args.pane).await?;
     let bytes: Vec<_> = args.keys.iter().flat_map(|key| key_bytes(key)).collect();
     if bytes.len() > MAX_SEND {
@@ -435,7 +435,7 @@ async fn keys(ctx: Arc<Ctx>, args: SessionKeys) -> Result<SessionSent> {
     })
 }
 
-async fn kill(ctx: Arc<Ctx>, args: SessionKill) -> Result<SessionKilled> {
+async fn kill(ctx: Arc<Ctx>, args: SessionDelete) -> Result<SessionKilled> {
     let session = find(&ctx, &args.session)?;
     let (server, id) = ctx.hub.session(&session.id)?;
     crate::launch::delete(server.backend(), id).await?;
@@ -446,7 +446,7 @@ async fn kill(ctx: Arc<Ctx>, args: SessionKill) -> Result<SessionKilled> {
     })
 }
 
-async fn rename(ctx: Arc<Ctx>, args: SessionRename) -> Result<SessionRenamed> {
+async fn rename(ctx: Arc<Ctx>, args: SessionEdit) -> Result<SessionRenamed> {
     let session = find(&ctx, &args.session)?;
     ctx.hub.rename(&session.id, &args.name).await?;
     Ok(SessionRenamed {
@@ -456,7 +456,7 @@ async fn rename(ctx: Arc<Ctx>, args: SessionRename) -> Result<SessionRenamed> {
     })
 }
 
-async fn mouse(ctx: Arc<Ctx>, args: SessionMouse) -> Result<MouseSet> {
+async fn mouse(ctx: Arc<Ctx>, args: SessionEditMouse) -> Result<MouseSet> {
     let on = matches!(args.mouse, MouseMode::On);
     let mouse = ctx.hub.mouse(on).await;
     let applied = mouse.applied();
@@ -472,7 +472,7 @@ async fn mouse(ctx: Arc<Ctx>, args: SessionMouse) -> Result<MouseSet> {
     })
 }
 
-async fn seen(ctx: Arc<Ctx>, args: SessionSeen) -> Result<SessionSeenResult> {
+async fn seen(ctx: Arc<Ctx>, args: SessionMarkSeen) -> Result<SessionSeenResult> {
     let session = find(&ctx, &args.session)?;
     let reports = ctx.hub.events(&ctx.hub.sessions());
     if let Some(report) = reports.get(&session.id) {

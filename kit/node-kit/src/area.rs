@@ -141,35 +141,12 @@ pub struct Command {
     /// The arguments' JSON Schema, asked for each time the tools are listed,
     /// so it may offer what the node has now.
     pub schema: Arc<dyn Fn() -> Value + Send + Sync>,
-    pub output_schema: Option<Arc<Value>>,
+    pub output_schema: Arc<Value>,
     pub call: Arc<Call>,
     pub(crate) error_status: fn(&Error) -> Option<StatusCode>,
 }
 
 impl Command {
-    pub fn new<F, Fut>(
-        name: &'static str,
-        effect: Effect,
-        description: &'static str,
-        schema: impl Fn() -> Value + Send + Sync + 'static,
-        call: F,
-    ) -> Self
-    where
-        F: Fn(Value) -> Fut + Send + Sync + 'static,
-        Fut: Future<Output = Result<Value, Error>> + Send + 'static,
-    {
-        Self {
-            name,
-            effect,
-            open_world: false,
-            description: Cow::Borrowed(description),
-            schema: Arc::new(schema),
-            output_schema: None,
-            call: Arc::new(move |args| Box::pin(call(args))),
-            error_status: |_| None,
-        }
-    }
-
     /// Derives the tool schemas from its request and response types. The
     /// request is an object, with its first doc line naming what it does.
     pub fn typed<Input, Output, F, Fut>(name: &'static str, effect: Effect, handler: F) -> Self
@@ -209,7 +186,7 @@ impl Command {
             open_world: false,
             description: Cow::Owned(description),
             schema: Arc::new(move || input.clone()),
-            output_schema: Some(Arc::new(output.into())),
+            output_schema: Arc::new(output.into()),
             call: Arc::new(move |args| {
                 let pending = typed_arguments(args, &fields).map(&handler);
                 Box::pin(async move {

@@ -40,9 +40,13 @@ async fn schedules_a_prompt_runs_it_now_and_manages_it() {
         )
         .await
         .unwrap();
-    let id = made["task"]["id"].as_str().unwrap().to_owned();
+    let id = made["scheduled_prompt"]["id"].as_str().unwrap().to_owned();
     let listed = node.call("scheduled_list", json!({})).await.unwrap();
-    assert_eq!(listed["tasks"][0]["sessions"], json!(["alpha"]), "{listed}");
+    assert_eq!(
+        listed["scheduled_prompts"][0]["sessions"],
+        json!(["alpha"]),
+        "{listed}"
+    );
 
     node.call("scheduled_run", json!({ "id": id }))
         .await
@@ -62,24 +66,27 @@ async fn schedules_a_prompt_runs_it_now_and_manages_it() {
         )
         .await
         .unwrap();
-    assert_eq!(edited["task"]["schedule"]["type"], "cron");
+    assert_eq!(edited["scheduled_prompt"]["schedule"]["type"], "cron");
     let paused = node
         .call("scheduled_pause", json!({ "id": id }))
         .await
         .unwrap();
-    assert_eq!(paused["task"]["paused"], true);
+    assert_eq!(paused["scheduled_prompt"]["paused"], true);
     let copy = node
         .call("scheduled_copy", json!({ "id": id }))
         .await
         .unwrap();
-    assert_eq!(copy["task"]["name"], "nudge (copy)");
-    assert_eq!(copy["task"]["paused"], true);
+    assert_eq!(copy["scheduled_prompt"]["name"], "nudge (copy)");
+    assert_eq!(copy["scheduled_prompt"]["paused"], true);
     // A task is found by a name no other task has, as list shows it.
     let by_name = node
         .call("scheduled_show", json!({ "id": "nudge (copy)" }))
         .await
         .unwrap();
-    assert_eq!(by_name["task"]["id"], copy["task"]["id"]);
+    assert_eq!(
+        by_name["scheduled_prompt"]["id"],
+        copy["scheduled_prompt"]["id"]
+    );
     node.call("scheduled_delete", json!({ "id": id }))
         .await
         .unwrap();
@@ -138,7 +145,7 @@ async fn the_cli_and_the_http_route_see_the_same_tasks() {
     .await;
     assert_eq!(code, 0, "{made}");
     let made: Value = serde_json::from_str(&made).unwrap();
-    let id = made["task"]["id"].as_str().unwrap();
+    let id = made["scheduled_prompt"]["id"].as_str().unwrap();
 
     let client = NodeClient::new(Some(&url)).unwrap();
     let (tasks, _) = client
@@ -162,18 +169,18 @@ async fn the_cli_and_the_http_route_see_the_same_tasks() {
         let (code, answer) = run(&[verb, id, "--json"]).await;
         assert_eq!(code, 0, "{answer}");
         let answer: Value = serde_json::from_str(&answer).unwrap();
-        assert_eq!(answer["task"]["paused"], verb == "pause");
+        assert_eq!(answer["scheduled_prompt"]["paused"], verb == "pause");
     }
     let (code, edited) = run(&["edit", id, "--name", "changed", "--json"]).await;
     assert_eq!(code, 0, "{edited}");
     assert_eq!(
-        serde_json::from_str::<Value>(&edited).unwrap()["task"]["name"],
+        serde_json::from_str::<Value>(&edited).unwrap()["scheduled_prompt"]["name"],
         "changed"
     );
     let (code, copy) = run(&["copy", id, "--json"]).await;
     assert_eq!(code, 0, "{copy}");
     let copy: Value = serde_json::from_str(&copy).unwrap();
-    assert!(copy["task"]["id"].as_str().unwrap() != id);
+    assert!(copy["scheduled_prompt"]["id"].as_str().unwrap() != id);
     let (code, cron) = run(&[
         "create",
         "--name",
@@ -189,11 +196,11 @@ async fn the_cli_and_the_http_route_see_the_same_tasks() {
     .await;
     assert_eq!(code, 0, "{cron}");
     let cron: Value = serde_json::from_str(&cron).unwrap();
-    assert_eq!(cron["task"]["schedule"]["type"], "cron");
+    assert_eq!(cron["scheduled_prompt"]["schedule"]["type"], "cron");
     for task_id in [
         id,
-        copy["task"]["id"].as_str().unwrap(),
-        cron["task"]["id"].as_str().unwrap(),
+        copy["scheduled_prompt"]["id"].as_str().unwrap(),
+        cron["scheduled_prompt"]["id"].as_str().unwrap(),
     ] {
         let (code, answer) = run(&["delete", task_id, "--json"]).await;
         assert_eq!(code, 0, "{answer}");
@@ -201,7 +208,7 @@ async fn the_cli_and_the_http_route_see_the_same_tasks() {
     let (code, listed) = run(&["list", "--json"]).await;
     assert_eq!(code, 0);
     assert!(
-        serde_json::from_str::<Value>(&listed).unwrap()["tasks"]
+        serde_json::from_str::<Value>(&listed).unwrap()["scheduled_prompts"]
             .as_array()
             .unwrap()
             .is_empty()
@@ -247,7 +254,7 @@ async fn a_task_follows_its_session_across_a_tmux_restart_but_not_to_a_newcomer(
         )
         .await
         .unwrap();
-    let id = made["task"]["id"].as_str().unwrap().to_owned();
+    let id = made["scheduled_prompt"]["id"].as_str().unwrap().to_owned();
 
     tmux.kill();
     for name in ["spare", "alpha", "ops"] {

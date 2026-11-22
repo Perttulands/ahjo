@@ -25,7 +25,7 @@ pub struct BrainRead {
 /// Save a page as a commit. Pass the page's newest commit hash (the first in brain read's history) as base to guard the edit.
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
-pub struct BrainSave {
+pub struct BrainWrite {
     /// Page path relative to the corpus.
     pub path: String,
     /// The page's full text, including its front matter.
@@ -39,12 +39,12 @@ pub struct BrainSave {
 /// List the brain's collections and page counts.
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
-pub struct BrainCollections {}
+pub struct BrainListCollections {}
 
 /// List recent commits, newest first, with their pages.
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
-pub struct BrainChanges {
+pub struct BrainListChanges {
     /// Maximum commits to read. Defaults to 30 and is capped at 200.
     #[schemars(range(min = 1))]
     pub limit: Option<usize>,
@@ -112,12 +112,12 @@ pub struct BrainSent {
 /// List the page files of this node's brain.
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
-pub struct BrainFiles {}
+pub struct BrainListFiles {}
 
 /// Read the full text of selected page files.
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
-pub struct BrainTexts {
+pub struct BrainReadTexts {
     /// Corpus-relative page paths.
     pub paths: Vec<String>,
 }
@@ -125,7 +125,7 @@ pub struct BrainTexts {
 /// List the pages in one collection and their latest changes.
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
-pub struct BrainCollection {
+pub struct BrainListCollection {
     /// Collection name.
     pub name: String,
 }
@@ -161,11 +161,11 @@ macro_rules! typed_commands {
 typed_commands! {
     BrainSearch => ("brain_search", BrainSearchResults),
     BrainRead => ("brain_read", BrainPage),
-    BrainSave => ("brain_save", BrainSaved),
-    BrainCollections => ("brain_collections", BrainCollectionsResult),
-    BrainChanges => ("brain_changes", BrainChangesResult),
+    BrainWrite => ("brain_write", BrainSaved),
+    BrainListCollections => ("brain_list_collections", BrainCollectionsResult),
+    BrainListChanges => ("brain_list_changes", BrainChangesResult),
     BrainSend => ("brain_send", BrainSent),
-    BrainFiles => ("brain_files", BrainFilesResult),
-    BrainTexts => ("brain_texts", BrainTextsResult),
-    BrainCollection => ("brain_collection", BrainCollectionResult),
+    BrainListFiles => ("brain_list_files", BrainFilesResult),
+    BrainReadTexts => ("brain_read_texts", BrainTextsResult),
+    BrainListCollection => ("brain_list_collection", BrainCollectionResult),
 }

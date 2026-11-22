@@ -14,7 +14,7 @@ use ahjo_app_kit::host::Host;
 use ahjo_app_kit::widgets::field::{FieldEvent, TextField};
 use ahjo_app_kit::widgets::kit::{self, Kind};
 use ahjo_core::NodeId;
-use ahjo_terminals_contract::{Launch, commands::SessionLaunchFlags};
+use ahjo_terminals_contract::{Launch, commands::SessionListLaunchFlags};
 use gpui::{Context, Entity, FocusHandle, ScrollHandle, WeakEntity, Window, div, prelude::*, px};
 
 /// The launcher in the Send drawer, after the windows': its session is
@@ -232,7 +232,7 @@ impl Launcher {
         self.editing = None;
         let task = self.host.call(
             NodeId(key.0.clone()),
-            SessionLaunchFlags {
+            SessionListLaunchFlags {
                 harness: key.1.clone(),
             },
             cx,

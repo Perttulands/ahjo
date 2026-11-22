@@ -34,12 +34,12 @@ async fn configured_help_and_timeout() {
     .await
     .unwrap();
     let answer = node
-        .call("session_launch_flags", json!({"harness":"fast"}))
+        .call("session_list_launch_flags", json!({"harness":"fast"}))
         .await
         .unwrap();
     assert_eq!(answer["flags"][0]["name"], "--verbose");
     assert_eq!(answer["flags"][0]["description"], "Verbose output");
-    node.call("session_launch_flags", json!({"harness":"fast"}))
+    node.call("session_list_launch_flags", json!({"harness":"fast"}))
         .await
         .unwrap();
     assert_eq!(std::fs::read_to_string(&calls).unwrap().lines().count(), 1);
@@ -50,19 +50,19 @@ async fn configured_help_and_timeout() {
                 .set_modified(std::time::SystemTime::UNIX_EPOCH + Duration::from_secs(100)),
         )
         .unwrap();
-    node.call("session_launch_flags", json!({"harness":"fast"}))
+    node.call("session_list_launch_flags", json!({"harness":"fast"}))
         .await
         .unwrap();
     assert_eq!(std::fs::read_to_string(&calls).unwrap().lines().count(), 2);
 
     let error = node
-        .call("session_launch_flags", json!({"harness":"unknown"}))
+        .call("session_list_launch_flags", json!({"harness":"unknown"}))
         .await
         .unwrap_err();
     assert_eq!(error.code, "unknown_harness");
     let started = Instant::now();
     let error = node
-        .call("session_launch_flags", json!({"harness":"slow"}))
+        .call("session_list_launch_flags", json!({"harness":"slow"}))
         .await
         .unwrap_err();
     assert_eq!(error.code, "harness_help_timeout");

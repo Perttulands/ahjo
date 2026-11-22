@@ -7,7 +7,7 @@
 //! its own machine, so what changed lately reads as it does there.
 
 use crate::citadel::{self, Hit};
-use ahjo_brain_contract::commands::{BrainFiles, BrainSearch, BrainTexts};
+use ahjo_brain_contract::commands::{BrainListFiles, BrainReadTexts, BrainSearch};
 use ahjo_brain_contract::{File, TypedCommand};
 use serde::Deserialize;
 use std::collections::BTreeMap;
@@ -68,7 +68,7 @@ impl Synced {
 /// Brings the copy in `home` up to the node at `url`. Blocking: run it off
 /// the UI.
 pub fn sync(url: &str, home: &Path) -> Result<Synced, String> {
-    let listed = call(url, BrainFiles {})?;
+    let listed = call(url, BrainListFiles {})?;
     let root = pages(home);
     std::fs::create_dir_all(&root).map_err(|e| format!("{}: {e}", root.display()))?;
     let mut kept = read_manifest(home);
@@ -97,7 +97,7 @@ pub fn sync(url: &str, home: &Path) -> Result<Synced, String> {
     for batch in batches(&stale) {
         let read = call(
             url,
-            BrainTexts {
+            BrainReadTexts {
                 paths: batch.iter().map(|f| f.path.clone()).collect(),
             },
         )?;
@@ -272,13 +272,13 @@ mod tests {
                 let mut body = vec![0; length];
                 reader.read_exact(&mut body).unwrap();
                 let pages = pages.lock().unwrap().clone();
-                let answer = if line.starts_with("POST /api/call/brain_files") {
+                let answer = if line.starts_with("POST /api/call/brain_list_files") {
                     let files: Vec<_> = pages
                         .iter()
                         .map(|(p, t, m)| serde_json::json!({"path": p, "size": t.len(), "modified": m}))
                         .collect();
                     serde_json::json!({ "node":"n", "files": files })
-                } else if line.starts_with("POST /api/call/brain_texts") {
+                } else if line.starts_with("POST /api/call/brain_read_texts") {
                     let asked_for: serde_json::Value = serde_json::from_slice(&body).unwrap();
                     let paths = asked_for["paths"].as_array().unwrap();
                     *asked.lock().unwrap() += paths.len();

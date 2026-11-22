@@ -2672,7 +2672,7 @@ fn hook_reports_mark_session_and_tab_until_cli_seen(cx: &mut TestAppContext) {
                 .iter()
                 .any(|line| line.contains(&format!("tone {event} not played")))
         });
-        let args = ["seen", "alpha", "--node", &running.url].map(str::to_owned);
+        let args = ["mark-seen", "alpha", "--node", &running.url].map(str::to_owned);
         let runtime = tokio::runtime::Runtime::new().unwrap();
         assert_eq!(
             runtime

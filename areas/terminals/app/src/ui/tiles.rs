@@ -18,7 +18,7 @@ use ahjo_app_kit::Ask;
 use ahjo_app_kit::widgets::kit::{self, Kind};
 use ahjo_app_kit::zoom::{self, Zoom};
 use ahjo_core::NodeId;
-use ahjo_terminals_contract::commands::SessionWindows;
+use ahjo_terminals_contract::commands::SessionListWindows;
 use alacritty_terminal::index::{Column, Line, Point as GridPoint, Side};
 use alacritty_terminal::selection::{Selection, SelectionType};
 use alacritty_terminal::term::TermMode;
@@ -1309,7 +1309,7 @@ impl Terminals {
             .map(|p| p.pane);
         let task = self.host.call(
             NodeId(key.node.clone()),
-            SessionWindows {
+            SessionListWindows {
                 session: session_id,
             },
             cx,
@@ -2289,7 +2289,7 @@ impl Terminals {
                     let node = NodeId(pane.node.clone());
                     let task = self
                         .host
-                        .call(node.clone(), SessionWindows { session: id }, cx);
+                        .call(node.clone(), SessionListWindows { session: id }, cx);
                     cx.spawn(async move |this, cx| {
                         let folder = task
                             .await

@@ -64,7 +64,7 @@ pub fn read(roots: &Roots, dir: &str, harness: &str) -> Result<Shape, Error> {
     };
     shape.dir = dir.to_string_lossy().into_owned();
     shape.harness = harness.to_owned();
-    shape.home = roots.home.dir.to_string_lossy().into_owned();
+    shape.home_dir = roots.home.dir.to_string_lossy().into_owned();
     Ok(shape)
 }
 

@@ -4,24 +4,36 @@
 use ahjo_node_kit::{Area, Built, Command, Config, Listing, Options, Running, Setup, cli};
 use serde_json::{Value, json};
 
+/// Save a note.
+#[derive(serde::Deserialize, serde::Serialize, schemars::JsonSchema)]
+struct Save {
+    path: String,
+    text: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    new: Option<bool>,
+}
+
+#[derive(serde::Serialize, schemars::JsonSchema)]
+struct Saved {
+    ran_on: &'static str,
+    given: Save,
+}
+
 /// `note save <path> <text> [--new]`, answering what it was given and
 /// which node it ran on.
 struct Echo(&'static str);
 impl Area for Echo {
     fn commands(&self) -> Vec<Command> {
         let node = self.0;
-        vec![Command::new(
+        vec![Command::typed(
             "note_save",
             ahjo_node_kit::Effect::Writes,
-            "Save a note.",
-            || {
-                json!({"type": "object", "properties": {
-                    "path": {"type": "string"},
-                    "text": {"type": "string"},
-                    "new": {"type": "boolean", "default": false},
-                }, "required": ["path", "text"]})
+            move |given: Save| async move {
+                Ok(Saved {
+                    ran_on: node,
+                    given,
+                })
             },
-            move |arguments| async move { Ok(json!({"ran_on": node, "given": arguments})) },
         )]
     }
 }

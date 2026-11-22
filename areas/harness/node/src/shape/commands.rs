@@ -4,7 +4,8 @@ use super::{Roots, edit};
 use ahjo_core::Error;
 use ahjo_harness_contract::FAILED;
 use ahjo_harness_contract::commands::{
-    AddHook, AtNode, HookEdited, ReadFile, ReadShape, RemoveHook, SetHook, SetSetting, SwitchHook,
+    AtNode, CreateHook, DeleteHook, EditHook, EditSetting, HookEdited, ReadFile, ShowShape,
+    SwitchHook,
 };
 use ahjo_harness_contract::shape::{
     HookAt, HookChange, HookEdit, HookSpec, INVALID, NOT_FOUND, STALE, SettingEdit, Write,
@@ -37,7 +38,7 @@ fn failure_status(error: &Error) -> Option<StatusCode> {
 pub fn commands(roots: Option<Arc<Roots>>, node: String) -> Vec<Command> {
     let cx = CommandContext { roots, node };
     vec![
-        cx.command("harness_shape", Effect::Reads, |r, a: ReadShape| {
+        cx.command("harness_show_shape", Effect::Reads, |r, a: ShowShape| {
             super::read(r, &a.dir, a.harness.as_deref().unwrap_or("claude"))
         }),
         cx.command("harness_read", Effect::Reads, |r, a: ReadFile| {
@@ -46,7 +47,7 @@ pub fn commands(roots: Option<Arc<Roots>>, node: String) -> Vec<Command> {
         cx.command("harness_write", Effect::Destroys, |r, a: Write| {
             edit::write_text(r, &a)
         }),
-        cx.command("harness_hook_add", Effect::Writes, |r, a: AddHook| {
+        cx.command("harness_create_hook", Effect::Writes, |r, a: CreateHook| {
             change_hook(
                 r,
                 a.harness,
@@ -61,7 +62,7 @@ pub fn commands(roots: Option<Arc<Roots>>, node: String) -> Vec<Command> {
                 },
             )
         }),
-        cx.command("harness_hook_set", Effect::Sets, |r, a: SetHook| {
+        cx.command("harness_edit_hook", Effect::Sets, |r, a: EditHook| {
             change_hook(
                 r,
                 a.harness,
@@ -84,9 +85,9 @@ pub fn commands(roots: Option<Arc<Roots>>, node: String) -> Vec<Command> {
             )
         }),
         cx.command(
-            "harness_hook_remove",
+            "harness_delete_hook",
             Effect::Destroys,
-            |r, a: RemoveHook| {
+            |r, a: DeleteHook| {
                 change_hook(
                     r,
                     a.harness,
@@ -103,7 +104,7 @@ pub fn commands(roots: Option<Arc<Roots>>, node: String) -> Vec<Command> {
                 )
             },
         ),
-        cx.command("harness_hook_switch", Effect::Sets, |r, a: SwitchHook| {
+        cx.command("harness_switch_hook", Effect::Sets, |r, a: SwitchHook| {
             change_hook(
                 r,
                 a.harness,
@@ -120,7 +121,7 @@ pub fn commands(roots: Option<Arc<Roots>>, node: String) -> Vec<Command> {
                 },
             )
         }),
-        cx.command("harness_setting_set", Effect::Sets, |r, a: SetSetting| {
+        cx.command("harness_edit_setting", Effect::Sets, |r, a: EditSetting| {
             let value = if a.unset.unwrap_or_default() {
                 Value::Null
             } else {

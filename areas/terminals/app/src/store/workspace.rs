@@ -755,7 +755,7 @@ pub fn tab_label(tab: &Tab, index: usize) -> String {
 pub type Reach<'a> = (&'a [Session], LinkState, bool);
 
 /// What a window shows. Until the node has listed its sessions on this link,
-/// a missing session isn't evidence of an ended one. A session seen to end
+/// a missing session isn't evidence of an ended one. A session mark-seen to end
 /// stays ended when the connection drops.
 pub fn tile_state<'a>(binding: Option<&'a Binding>, node: Option<Reach<'a>>) -> TileState<'a> {
     let Some(b) = binding else {

@@ -66,7 +66,7 @@ pub fn start(files: Arc<Files>, request: Start) -> Result<(), FilesError> {
             Err(error) => {
                 status.state = "failed".into();
                 events.record(
-                    "file_transfer",
+                    "file_show_transfer",
                     true,
                     format!("Sending {what} failed: {error}"),
                 );

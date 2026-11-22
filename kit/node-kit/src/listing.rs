@@ -74,7 +74,7 @@ pub fn check(areas: &[Listing]) -> Result<(), Error> {
 }
 
 /// Whether a command's name reads as `noun_verb`: a noun, then a verb of
-/// one or more words (`harness_hook_set` is `ahjo harness hook-set`),
+/// one or more words (`harness_edit_hook` is `ahjo harness edit-hook`),
 /// lowercase letters and digits between single underscores.
 pub fn well_named(name: &str) -> bool {
     let word = |w: &str| {
@@ -169,7 +169,7 @@ mod tests {
             assert!(!well_named(bad), "{bad}");
         }
         assert!(well_named("thing_list"));
-        assert!(well_named("harness_hook_set"));
+        assert!(well_named("harness_edit_hook"));
     }
 
     #[test]

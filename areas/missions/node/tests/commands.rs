@@ -11,18 +11,18 @@ const LAB: Listing = Listing {
 };
 const EXPECTED: &[&str] = &[
     "mission_list",
-    "mission_repositories",
-    "mission_archives",
-    "mission_purge",
+    "mission_list_repositories",
+    "mission_list_archives",
+    "mission_delete_archive",
     "mission_show",
     "mission_validate",
     "mission_create",
-    "mission_examples",
+    "mission_list_examples",
     "mission_export",
     "mission_apply",
     "mission_edit",
     "mission_notes",
-    "mission_history",
+    "mission_list_history",
     "mission_note",
     "mission_reply",
     "mission_resolve",
@@ -207,7 +207,10 @@ async fn command_list_and_coded_failures() {
         .unwrap();
     for &command in EXPECTED {
         let args = match command {
-            "mission_list" | "mission_repositories" | "mission_archives" | "mission_examples" => {
+            "mission_list"
+            | "mission_list_repositories"
+            | "mission_list_archives"
+            | "mission_list_examples" => {
                 json!({"unexpected":true})
             }
             "run_list" => json!({"mission":9}),
@@ -319,7 +322,14 @@ async fn mission_command_schemas_and_cli_help_match_the_document_surface() {
         0
     );
     let help = String::from_utf8(output).unwrap();
-    for verb in ["create", "show", "edit", "export", "apply", "purge"] {
+    for verb in [
+        "create",
+        "show",
+        "edit",
+        "export",
+        "apply",
+        "delete-archive",
+    ] {
         assert!(
             help.lines().any(|line| line
                 .split_whitespace()
@@ -992,7 +1002,10 @@ async fn cli_lists_and_removes_deleted_mission_archives() {
         0
     );
     let help = String::from_utf8(help).unwrap();
-    assert!(help.contains("archive") && help.contains("purge"), "{help}");
+    assert!(
+        help.contains("archive") && help.contains("delete-archive"),
+        "{help}"
+    );
     let deletion = cli(&node, &["delete", "archived"]).await;
     let archive = deletion["deletion"]["archive_id"].as_str().unwrap();
     assert!(
@@ -1001,7 +1014,7 @@ async fn cli_lists_and_removes_deleted_mission_archives() {
             .unwrap()
             .is_empty()
     );
-    let listed = cli(&node, &["archives"]).await;
+    let listed = cli(&node, &["list-archives"]).await;
     let record = listed["archives"]
         .as_array()
         .unwrap()
@@ -1032,10 +1045,10 @@ async fn cli_lists_and_removes_deleted_mission_archives() {
     let run_dir = node.dir().join("missions/runs");
     std::fs::create_dir_all(&run_dir).unwrap();
     std::fs::write(run_dir.join("keep-history"), "unrelated run").unwrap();
-    let removed = cli(&node, &["purge", "archived", archive]).await;
+    let removed = cli(&node, &["delete-archive", "archived", archive]).await;
     assert_eq!(removed["removed"]["archive_id"], archive);
     assert!(
-        cli(&node, &["archives"]).await["archives"]
+        cli(&node, &["list-archives"]).await["archives"]
             .as_array()
             .unwrap()
             .is_empty()
@@ -1303,7 +1316,7 @@ async fn a_failed_sketch_leaves_no_mission() {
         .await
         .unwrap_err();
     assert_eq!(missing.code, "not_found");
-    let archives = node.call("mission_archives", json!({})).await.unwrap();
+    let archives = node.call("mission_list_archives", json!({})).await.unwrap();
     assert_eq!(archives["archives"], json!([]), "{archives}");
     // The name is free again.
     node.call("mission_create", json!({"slug":"half","steps":"Collect"}))

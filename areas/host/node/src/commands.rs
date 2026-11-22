@@ -6,7 +6,7 @@ use ahjo_core::{Error, TypedCommand};
 use ahjo_host_contract::{
     Outcome, SERVICE_FAILED, SERVICE_UNCONFIRMED,
     commands::{
-        HostShow, ServiceActed, ServiceList, ServiceLog, ServiceLogged, ServiceRestart,
+        HostShow, ServiceActed, ServiceList, ServiceLogged, ServiceRead, ServiceRestart,
         ServiceShow, ServiceShown, ServiceStart, ServiceStop, ServicesListed,
     },
 };
@@ -78,7 +78,7 @@ pub(crate) fn commands(services: Arc<Services>, events: Arc<Log>, node: String) 
             act(ctx, args.id, "restart")
         })
         .with_error_status(action_status),
-        command(&ctx, Effect::Reads, |ctx, args: ServiceLog| async move {
+        command(&ctx, Effect::Reads, |ctx, args: ServiceRead| async move {
             let log = ctx
                 .services
                 .log(&args.id, args.lines.unwrap_or(LOG_LINES))

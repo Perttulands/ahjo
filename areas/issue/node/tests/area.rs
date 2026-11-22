@@ -28,8 +28,8 @@ fn commands_are_registered_for_cli_and_mcp() {
             "issue_search",
             "issue_show",
             "issue_create",
-            "issue_snapshot_text",
-            "issue_snapshot_search"
+            "issue_read_snapshot",
+            "issue_search_snapshot"
         ]
     );
 }

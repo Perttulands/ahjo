@@ -5,7 +5,6 @@
 
 pub mod address;
 mod area;
-pub mod args;
 pub mod cli;
 mod client;
 pub mod config;

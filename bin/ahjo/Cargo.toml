@@ -30,6 +30,8 @@ ahjo-files = { path = "../../areas/files/node" }
 ahjo-missions = { path = "../../areas/missions/node" }
 
 [dev-dependencies]
+schemars.workspace = true
+serde = { version = "1", features = ["derive"] }
 ahjo-testkit = { path = "../../kit/testkit" }
 jiff = "0.2"
 toml = { version = "1", default-features = false, features = ["parse", "std"] }

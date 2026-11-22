@@ -5,10 +5,10 @@ use ahjo_core::{Error, TypedCommand};
 use ahjo_files_contract::{
     Diff, IO_ERROR, Matches, NOT_FOUND, RepoStatus,
     commands::{
-        FileCopy, FileDelete, FileDeleted, FileDiff, FileList, FileListed, FileLocate, FileMkdir,
-        FileMove, FilePath, FileRead, FileReadResult, FileRecent, FileResume, FileSearch,
-        FileSearched, FileStat, FileStated, FileStatus, FileTransfer, FileTransferResult,
-        FileWrite, FileWritten, ListContent, ReadContent,
+        FileCopy, FileCreateFolder, FileDelete, FileDeleted, FileDiff, FileList, FileListChanges,
+        FileListRecent, FileListed, FileMove, FilePath, FileRead, FileReadResult, FileResume,
+        FileSearch, FileSearchPaths, FileSearched, FileShowTransfer, FileStat, FileStated,
+        FileTransferResult, FileWrite, FileWritten, ListContent, ReadContent,
     },
 };
 use ahjo_node_kit::{Command, Effect};
@@ -64,12 +64,12 @@ pub fn commands(files: Arc<Files>) -> Vec<Command> {
                 Ok::<Diff, Error>(files.diff(at, args.whole.unwrap_or_default())?)
             })
         }),
-        blocking(&files, Effect::Reads, |files, args: FileStatus| {
+        blocking(&files, Effect::Reads, |files, args: FileListChanges| {
             on_path(files, &args.path, |at| {
                 Ok::<RepoStatus, Error>(files.status(at)?)
             })
         }),
-        blocking(&files, Effect::Reads, |files, args: FileRecent| {
+        blocking(&files, Effect::Reads, |files, args: FileListRecent| {
             let under = args
                 .path
                 .as_deref()
@@ -78,7 +78,7 @@ pub fn commands(files: Arc<Files>) -> Vec<Command> {
             Ok(files.recent(under.as_deref())?)
         }),
         blocking(&files, Effect::Destroys, write),
-        blocking(&files, Effect::Sets, |files, args: FileMkdir| {
+        blocking(&files, Effect::Sets, |files, args: FileCreateFolder| {
             on_path(files, &args.path, |at| {
                 files.create_folder(at)?;
                 Ok(FilePath {
@@ -143,7 +143,7 @@ pub fn commands(files: Arc<Files>) -> Vec<Command> {
                 wait(&files, args.id).await
             }
         }),
-        Command::for_request(Effect::Reads, move |args: FileTransfer| {
+        Command::for_request(Effect::Reads, move |args: FileShowTransfer| {
             let files = tracking.clone();
             async move { transfer(&files, args.id) }
         }),
@@ -254,7 +254,7 @@ fn write(files: &Files, args: FileWrite) -> Result<FileWritten, Error> {
     })
 }
 
-fn locate(files: &Files, args: FileLocate) -> Result<Matches, Error> {
+fn locate(files: &Files, args: FileSearchPaths) -> Result<Matches, Error> {
     let beside = args.beside.unwrap_or_default();
     if let Some(under) = args.under {
         if args.near.is_some() || beside {

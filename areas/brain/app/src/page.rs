@@ -9,7 +9,7 @@ use ahjo_app_kit::{
     link::client::LinkState,
     widgets::field::{self, FieldEvent, TextField},
 };
-use ahjo_brain_contract::commands::{BrainChanges, BrainRead, BrainSearch};
+use ahjo_brain_contract::commands::{BrainListChanges, BrainRead, BrainSearch};
 use ahjo_core::{Error, NodeId, TypedCommand};
 use gpui::{
     App, AppContext, Context, Entity, FocusHandle, IntoElement, Render, ScrollHandle, WeakEntity,
@@ -175,7 +175,7 @@ impl Panel {
     /// typed: each time the panel opens.
     pub(crate) fn read_arrivals(&mut self, cx: &mut Context<Self>) {
         self.call(
-            BrainChanges { limit: None },
+            BrainListChanges { limit: None },
             |panel, result, _| {
                 panel.state.changes_read(result);
             },

@@ -1167,7 +1167,7 @@ mod tests {
     fn help_names_each_noun_once_with_its_verbs() {
         let tools: Vec<Value> = [
             "session_list",
-            "harness_hook_add",
+            "harness_create_hook",
             "session_read",
             "harness_show",
         ]
@@ -1176,7 +1176,7 @@ mod tests {
         .collect();
         assert_eq!(
             noun_index(&tools),
-            "  session  list read\n  harness  hook-add show"
+            "  session  list read\n  harness  create-hook show"
         );
     }
 
@@ -1610,7 +1610,7 @@ mod tests {
         let answer = json!({
             "node": "local", "warning": null, "empty": "", "none": [],
             "host": {"cpu": {"percent": 0}, "gpu": {"reason": "unavailable"}},
-            "tasks": [
+            "scheduled_prompts": [
                 {"name": "check", "targets": [{"name": "agent", "paused": false}]},
                 {"name": "review", "schedule": {"every": 15}},
                 null, {}, []
@@ -1623,7 +1623,7 @@ mod tests {
                 "node: local\n",
                 "none: none\n",
                 "host:\n  cpu:\n    percent: 0\n  gpu:\n    reason: unavailable\n",
-                "tasks:\n  name=check\n    targets:\n      name=agent\tpaused=false\n",
+                "scheduled_prompts:\n  name=check\n    targets:\n      name=agent\tpaused=false\n",
                 "  name=review\n    schedule:\n      every: 15\n",
             )
         );
@@ -1659,7 +1659,7 @@ mod tests {
         let answer = json!({
             "host": {"at": ms, "started": ms, "updated": ms, "modified": ms,
                      "synced": ms, "created_at": ms, "count": ms},
-            "tasks": [{"finished_at": ms, "next_run": "2026-11-12T12:00:00Z"}],
+            "scheduled_prompts": [{"finished_at": ms, "next_run": "2026-11-12T12:00:00Z"}],
             "invalid": {"at": u64::MAX, "started": 9223372036854775807_i64,
                         "updated": 1.5, "modified": "not a timestamp"}
         });

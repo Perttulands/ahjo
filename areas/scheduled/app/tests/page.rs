@@ -92,7 +92,7 @@ fn start() -> Option<Running> {
                 .expect("the CLI ran");
             assert_eq!(code, 0, "the CLI made the task");
             let listed = node.call("scheduled_list", json!({})).await.expect("list");
-            let id = listed["tasks"]
+            let id = listed["scheduled_prompts"]
                 .as_array()
                 .unwrap()
                 .iter()
@@ -227,7 +227,10 @@ fn the_page_lists_a_task_made_through_the_cli(cx: &mut TestAppContext) {
             .is_some()
     });
     let copied = cli_call(&running.url, &["copy", task]);
-    let copy = format!("task-{node}-{}", copied["task"]["id"].as_str().unwrap());
+    let copy = format!(
+        "task-{node}-{}",
+        copied["scheduled_prompt"]["id"].as_str().unwrap()
+    );
     until(cx, "CLI copy on the open page", |cx| {
         cx.debug_bounds(Box::leak(copy.clone().into_boxed_str()))
             .is_some()
@@ -292,7 +295,7 @@ fn the_page_lists_a_task_made_through_the_cli(cx: &mut TestAppContext) {
             let mut output = Vec::new();
             assert_eq!(cli::run("scheduled", &args, &mut output).await.unwrap(), 0);
             let list: serde_json::Value = serde_json::from_slice(&output).unwrap();
-            let task = list["tasks"]
+            let task = list["scheduled_prompts"]
                 .as_array()
                 .unwrap()
                 .iter()
@@ -307,7 +310,7 @@ fn the_page_lists_a_task_made_through_the_cli(cx: &mut TestAppContext) {
     })
     .join()
     .unwrap();
-    let created = &saved["task"];
+    let created = &saved["scheduled_prompt"];
     assert_eq!(created["prompt"], "echo journey-42");
     assert_eq!(created["schedule"]["type"], "interval");
     let targets = created["targets"].as_array().unwrap();
@@ -371,7 +374,7 @@ fn the_page_lists_a_task_made_through_the_cli(cx: &mut TestAppContext) {
                 let mut output = Vec::new();
                 assert_eq!(cli::run("scheduled", &args, &mut output).await.unwrap(), 0);
                 let listed: serde_json::Value = serde_json::from_slice(&output).unwrap();
-                listed["tasks"]
+                listed["scheduled_prompts"]
                     .as_array()
                     .unwrap()
                     .iter()
@@ -424,7 +427,7 @@ fn the_page_lists_a_task_made_through_the_cli(cx: &mut TestAppContext) {
         cx.debug_bounds("scheduled-prompt").is_none()
     });
     // The arrows walk the list: both tasks known here get their turn.
-    let copied_id = copied["task"]["id"].as_str().unwrap();
+    let copied_id = copied["scheduled_prompt"]["id"].as_str().unwrap();
     let first: &'static str = Box::leak(format!("scheduled-chosen-{task}").into_boxed_str());
     let second: &'static str = Box::leak(format!("scheduled-chosen-{copied_id}").into_boxed_str());
     cx.simulate_keystrokes("home");

@@ -120,7 +120,7 @@ async fn services_and_commands_use_the_same_catalog_and_coded_errors() {
             "service_start",
             "service_stop",
             "service_restart",
-            "service_log"
+            "service_read"
         ]
     );
     // `node` is taken by every tool but listed by none: an MCP client names
@@ -179,13 +179,13 @@ async fn services_and_commands_use_the_same_catalog_and_coded_errors() {
     );
     // A probe has no log; a unit whose journal does not read says why.
     let log = node
-        .call("service_log", json!({"id":"fixture"}))
+        .call("service_read", json!({"id":"fixture"}))
         .await
         .unwrap();
     assert_eq!(log["lines"], json!([]));
     assert_eq!(log["errors"], json!([]));
     let log = node
-        .call("service_log", json!({"id":"failing", "lines": 5}))
+        .call("service_read", json!({"id":"failing", "lines": 5}))
         .await
         .unwrap();
     assert_eq!(log["errors"].as_array().unwrap().len(), 1, "{log}");

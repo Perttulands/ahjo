@@ -104,14 +104,11 @@ async fn call(
     }
     let caller = caller(&parts, "api");
     let reach = mcp.everything();
-    let Some(command) = mcp
-        .command(&reach, &name)
-        .filter(|command| command.output_schema.is_some())
-    else {
+    let Some(command) = mcp.command(&reach, &name) else {
         call_log::record(&caller, "<unknown>", mcp.node.as_str(), "unknown");
         return Err(Failure(
             StatusCode::NOT_FOUND,
-            Error::new("unknown_command", format!("Unknown typed command: {name}")),
+            Error::new("unknown_command", format!("Unknown command: {name}")),
         ));
     };
     let body = axum::body::to_bytes(body, MAX_COMMAND_ARGS)

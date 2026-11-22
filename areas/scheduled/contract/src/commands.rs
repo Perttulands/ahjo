@@ -16,7 +16,7 @@ pub struct ScheduledList {}
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ScheduledShow {
-    /// The task's id, or its name where no other task has it.
+    /// The scheduled prompt’s id, or its name if unique.
     pub id: String,
 }
 
@@ -47,7 +47,7 @@ pub struct ScheduledCreate {
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ScheduledEdit {
-    /// The task's id, or its name where no other task has it.
+    /// The scheduled prompt’s id, or its name if unique.
     pub id: String,
     /// The new name of the scheduled prompt.
     pub name: Option<String>,
@@ -68,7 +68,7 @@ pub struct ScheduledEdit {
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ScheduledCopy {
-    /// The task's id, or its name where no other task has it.
+    /// The scheduled prompt’s id, or its name if unique.
     pub id: String,
     /// The copy's name. Defaults to the original name with (copy) appended.
     pub name: Option<String>,
@@ -78,7 +78,7 @@ pub struct ScheduledCopy {
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ScheduledPause {
-    /// The task's id, or its name where no other task has it.
+    /// The scheduled prompt’s id, or its name if unique.
     pub id: String,
 }
 
@@ -86,7 +86,7 @@ pub struct ScheduledPause {
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ScheduledResume {
-    /// The task's id, or its name where no other task has it.
+    /// The scheduled prompt’s id, or its name if unique.
     pub id: String,
 }
 
@@ -94,7 +94,7 @@ pub struct ScheduledResume {
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ScheduledRun {
-    /// The task's id, or its name where no other task has it.
+    /// The scheduled prompt’s id, or its name if unique.
     pub id: String,
 }
 
@@ -102,7 +102,7 @@ pub struct ScheduledRun {
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ScheduledDelete {
-    /// The task's id, or its name where no other task has it.
+    /// The scheduled prompt’s id, or its name if unique.
     pub id: String,
 }
 
@@ -110,7 +110,7 @@ pub struct ScheduledDelete {
 pub struct ScheduledListed {
     #[schemars(with = "String")]
     pub node: NodeId,
-    pub tasks: Vec<ScheduledSummary>,
+    pub scheduled_prompts: Vec<ScheduledSummary>,
 }
 
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
@@ -127,15 +127,15 @@ pub struct ScheduledSummary {
 }
 
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
-pub struct ScheduledTask {
+pub struct ScheduledPromptResult {
     #[schemars(with = "String")]
     pub node: NodeId,
-    pub task: Task,
+    pub scheduled_prompt: Task,
 }
 
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
 pub struct ScheduledRan {
-    pub task: Task,
+    pub scheduled_prompt: Task,
     pub run: RunEntry,
     #[schemars(with = "String")]
     pub node: NodeId,

@@ -82,7 +82,7 @@ pub struct SessionSearch {
 /// Press named keys or type literal text into a session's pane.
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
-pub struct SessionKeys {
+pub struct SessionSendKeys {
     /// A session id or name.
     pub session: String,
     /// Enter, Tab, Escape, BSpace, Space, arrows, Home, End, PageUp, PageDown, Delete, C-<letter>, or literal text.
@@ -94,7 +94,7 @@ pub struct SessionKeys {
 /// Rename a session after checking that its tmux server has no session with that name.
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
-pub struct SessionRename {
+pub struct SessionEdit {
     /// A session id or name.
     pub session: String,
     /// The new name with letters, digits, _ and -, at most 50.
@@ -104,7 +104,7 @@ pub struct SessionRename {
 /// End a session and everything running in it.
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
-pub struct SessionKill {
+pub struct SessionDelete {
     /// A session id or name.
     pub session: String,
 }
@@ -112,7 +112,7 @@ pub struct SessionKill {
 /// Set mouse mode on all tmux servers this node follows.
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
-pub struct SessionMouse {
+pub struct SessionEditMouse {
     /// On lets tmux scroll and select. Off passes the wheel and clicks to the program.
     pub mouse: MouseMode,
 }
@@ -127,7 +127,7 @@ pub enum MouseMode {
 /// Mark a session's last report as seen.
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
-pub struct SessionSeen {
+pub struct SessionMarkSeen {
     /// A session id or name.
     pub session: String,
 }
@@ -135,7 +135,7 @@ pub struct SessionSeen {
 /// Find project folders on this node by name or path, best match first.
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
-pub struct ProjectFind {
+pub struct ProjectSearch {
     /// A fragment of the project's name or words in its path.
     pub query: String,
 }
@@ -143,8 +143,8 @@ pub struct ProjectFind {
 /// Start a coding agent in a project with a brief, and wait up to a minute for it to begin.
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
-pub struct HandoffStart {
-    /// The project's absolute folder or a fragment as project find takes it.
+pub struct HandoffLaunch {
+    /// The project's absolute folder or a fragment as project search takes it.
     pub project: String,
     /// The first message. Include the goal, decisions, constraints, what counts as done and links.
     pub brief: String,
@@ -152,14 +152,14 @@ pub struct HandoffStart {
     pub harness: Option<String>,
     /// Letters, digits, _ and -. Defaults to a free name based on the folder.
     pub name: Option<String>,
-    /// A work item the agent should own, added at the end of the brief.
-    pub work: Option<String>,
+    /// An issue the agent should own, added at the end of the brief.
+    pub issue: Option<String>,
 }
 
 /// Show a handoff session's state, question or last report, and the bottom of its screen.
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
-pub struct HandoffStatus {
+pub struct HandoffShow {
     /// A session id or name.
     pub session: String,
     /// Wait up to this many seconds while the agent works. Defaults to zero and is capped at 90.
@@ -414,14 +414,14 @@ pub enum ReplyKind {
 /// List a harness's available launch flags from its help output.
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
-pub struct SessionLaunchFlags {
+pub struct SessionListLaunchFlags {
     pub harness: String,
 }
 
 /// List child folders of an absolute directory.
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
-pub struct SessionFolders {
+pub struct SessionListFolders {
     pub path: String,
 }
 
@@ -433,7 +433,7 @@ pub struct ListProjects {}
 /// List the windows and active panes of a session.
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
-pub struct SessionWindows {
+pub struct SessionListWindows {
     /// A session name or id from session list.
     pub session: String,
 }
@@ -463,19 +463,19 @@ pub struct SessionWindowsListed {
     pub windows: Vec<TerminalWindow>,
 }
 
-impl ahjo_core::TypedCommand for SessionLaunchFlags {
-    const NAME: &'static str = "session_launch_flags";
+impl ahjo_core::TypedCommand for SessionListLaunchFlags {
+    const NAME: &'static str = "session_list_launch_flags";
     type Output = SessionLaunchFlagsListed;
 }
-impl ahjo_core::TypedCommand for SessionFolders {
-    const NAME: &'static str = "session_folders";
+impl ahjo_core::TypedCommand for SessionListFolders {
+    const NAME: &'static str = "session_list_folders";
     type Output = SessionFoldersListed;
 }
 impl ahjo_core::TypedCommand for ListProjects {
     const NAME: &'static str = "project_list";
     type Output = ProjectsListed;
 }
-impl ahjo_core::TypedCommand for SessionWindows {
-    const NAME: &'static str = "session_windows";
+impl ahjo_core::TypedCommand for SessionListWindows {
+    const NAME: &'static str = "session_list_windows";
     type Output = SessionWindowsListed;
 }

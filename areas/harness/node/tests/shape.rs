@@ -148,7 +148,7 @@ async fn each_harness_reads_its_own_files_in_its_own_order() {
 
     let claude = node
         .call(
-            "harness_shape",
+            "harness_show_shape",
             json!({"dir": p(&w.dir), "harness": "claude"}),
         )
         .await
@@ -234,7 +234,7 @@ async fn each_harness_reads_its_own_files_in_its_own_order() {
     put(&under.join("AGENTS.md"), "Garden.\n");
     let at_home = node
         .call(
-            "harness_shape",
+            "harness_show_shape",
             json!({"dir": p(&under), "harness": "claude"}),
         )
         .await
@@ -263,7 +263,7 @@ async fn each_harness_reads_its_own_files_in_its_own_order() {
 
     let codex = node
         .call(
-            "harness_shape",
+            "harness_show_shape",
             json!({"dir": p(&w.dir), "harness": "codex"}),
         )
         .await
@@ -383,14 +383,14 @@ async fn edits_land_in_the_file_they_came_from() {
     // change and remove.
     let shape = || async {
         node.call(
-            "harness_shape",
+            "harness_show_shape",
             json!({"dir": p(&w.dir), "harness": "claude"}),
         )
         .await
         .unwrap()
     };
     node.call(
-        "harness_hook_add",
+        "harness_create_hook",
         json!({"harness": "claude", "file": settings, "event": "Stop", "command": "say done"}),
     )
     .await
@@ -401,7 +401,7 @@ async fn edits_land_in_the_file_they_came_from() {
     let at = json!({"harness": "claude", "file": settings, "event": "Stop", "group": 0, "index": 0, "was": "say done"});
     let mut off = at.clone();
     off["on"] = json!(false);
-    node.call("harness_hook_switch", off).await.unwrap();
+    node.call("harness_switch_hook", off).await.unwrap();
     let saved: Value = serde_json::from_str(&std::fs::read_to_string(&settings).unwrap()).unwrap();
     assert!(saved["hooks"].get("Stop").is_none());
     let s = shape().await;
@@ -420,11 +420,11 @@ async fn edits_land_in_the_file_they_came_from() {
     on["on"] = json!(true);
     on["parked"] = json!(true);
     on["index"] = parked["at"]["index"].clone();
-    node.call("harness_hook_switch", on).await.unwrap();
+    node.call("harness_switch_hook", on).await.unwrap();
     let mut set = at.clone();
     set["new_command"] = json!("say finished");
     set["new_matcher"] = json!("");
-    node.call("harness_hook_set", set).await.unwrap();
+    node.call("harness_edit_hook", set).await.unwrap();
     let saved: Value = serde_json::from_str(&std::fs::read_to_string(&settings).unwrap()).unwrap();
     assert_eq!(
         saved["hooks"]["Stop"][0]["hooks"][0]["command"],
@@ -433,7 +433,7 @@ async fn edits_land_in_the_file_they_came_from() {
     let mut gone = at.clone();
     gone["was"] = json!("say done");
     assert_eq!(
-        node.call("harness_hook_remove", gone)
+        node.call("harness_delete_hook", gone)
             .await
             .unwrap_err()
             .code,
@@ -442,11 +442,11 @@ async fn edits_land_in_the_file_they_came_from() {
     );
     let mut gone = at.clone();
     gone["was"] = json!("say finished");
-    node.call("harness_hook_remove", gone).await.unwrap();
+    node.call("harness_delete_hook", gone).await.unwrap();
 
     // A setting, set and taken out.
     node.call(
-        "harness_setting_set",
+        "harness_edit_setting",
         json!({"harness": "claude", "file": settings, "key": "env.FOO", "value": "bar"}),
     )
     .await
@@ -456,7 +456,7 @@ async fn edits_land_in_the_file_they_came_from() {
     // The page encodes JSON text before calling the same command, keeping
     // string values that happen to look like JSON from changing type.
     node.call(
-        "harness_setting_set",
+        "harness_edit_setting",
         json!({"harness": "claude", "file": settings, "key": "env.FOO", "value": "\"true\""}),
     )
     .await
@@ -464,7 +464,7 @@ async fn edits_land_in_the_file_they_came_from() {
     let saved: Value = serde_json::from_str(&std::fs::read_to_string(&settings).unwrap()).unwrap();
     assert_eq!(saved["env"]["FOO"], "true");
     node.call(
-        "harness_setting_set",
+        "harness_edit_setting",
         json!({"harness": "claude", "file": settings, "key": "env.FOO", "unset": true}),
     )
     .await
@@ -477,7 +477,7 @@ async fn edits_land_in_the_file_they_came_from() {
     let hooks_json = p(&w.home.join(".codex/hooks.json"));
     let config_toml = w.home.join(".codex/config.toml");
     node.call(
-        "harness_hook_switch",
+        "harness_switch_hook",
         json!({"harness": "codex", "file": hooks_json, "event": "SessionStart", "group": 0, "index": 1, "was": "second", "on": false}),
     )
     .await
@@ -489,7 +489,7 @@ async fn edits_land_in_the_file_they_came_from() {
         "{text}"
     );
     node.call(
-        "harness_hook_remove",
+        "harness_delete_hook",
         json!({"harness": "codex", "file": hooks_json, "event": "SessionStart", "group": 0, "index": 0, "was": "first"}),
     )
     .await
@@ -502,7 +502,7 @@ async fn edits_land_in_the_file_they_came_from() {
     assert!(!text.contains(":session_start:0:1"), "{text}");
     let codex = node
         .call(
-            "harness_shape",
+            "harness_show_shape",
             json!({"dir": p(&w.dir), "harness": "codex"}),
         )
         .await
@@ -510,7 +510,7 @@ async fn edits_land_in_the_file_they_came_from() {
     assert_eq!(codex["hooks"][0]["run"], "second");
     assert_eq!(codex["hooks"][0]["on"], false);
     node.call(
-        "harness_setting_set",
+        "harness_edit_setting",
         json!({"harness": "codex", "file": p(&config_toml), "key": "model_reasoning_effort", "value": "high"}),
     )
     .await

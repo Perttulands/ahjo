@@ -157,7 +157,7 @@ async fn create_save_list_read_rename_delete() {
     let file = folder.join("notes.md");
 
     assert_eq!(
-        command(&scratch.0, "file_mkdir", json!({"path":folder}))
+        command(&scratch.0, "file_create_folder", json!({"path":folder}))
             .await
             .0,
         StatusCode::OK
@@ -350,7 +350,10 @@ async fn find_and_content_search_report_an_unreadable_chosen_folder() {
 
     let mut responses = Vec::new();
     for (name, arguments) in [
-        ("file_locate", json!({"under":locked,"query":"needle"})),
+        (
+            "file_search_paths",
+            json!({"under":locked,"query":"needle"}),
+        ),
         ("file_search", json!({"path":locked,"query":"needle"})),
     ] {
         responses.push(command(&scratch.0, name, arguments).await);
@@ -470,8 +473,12 @@ async fn status_names_every_file_that_differs_from_head_and_a_whole_diff_has_eve
     std::fs::write(repo.join("docs/new.md"), "new\n").unwrap();
     git(&["config", "status.renames", "false"]);
     git(&["mv", "docs/old name.md", "renamed.md"]);
-    let (status, body, _) =
-        command(&scratch.0, "file_status", json!({"path":repo.join("docs")})).await;
+    let (status, body, _) = command(
+        &scratch.0,
+        "file_list_changes",
+        json!({"path":repo.join("docs")}),
+    )
+    .await;
     assert_eq!(status, StatusCode::OK);
     let result: ahjo_files_contract::RepoStatus = serde_json::from_slice(&body).unwrap();
     assert_eq!(result.repository, repo.to_str().unwrap());
@@ -512,7 +519,7 @@ async fn status_names_every_file_that_differs_from_head_and_a_whole_diff_has_eve
     );
     let (status, body, _) = command(
         &scratch.0,
-        "file_status",
+        "file_list_changes",
         json!({"path":repo.join("missing/parent")}),
     )
     .await;
@@ -552,7 +559,7 @@ async fn status_names_every_file_that_differs_from_head_and_a_whole_diff_has_eve
     let climbing = scratch.0.join("gone/../../../etc/passwd");
     let (status, _, _) = command(&scratch.0, "file_diff", json!({"path":climbing})).await;
     assert_eq!(status, StatusCode::FORBIDDEN);
-    let (_, body, _) = command(&scratch.0, "file_status", json!({"path":plain})).await;
+    let (_, body, _) = command(&scratch.0, "file_list_changes", json!({"path":plain})).await;
     let none: ahjo_files_contract::RepoStatus = serde_json::from_slice(&body).unwrap();
     assert_eq!(none, Default::default());
 }

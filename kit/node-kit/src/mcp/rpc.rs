@@ -87,12 +87,12 @@ async fn call(mcp: &Mcp, reach: &Reach, caller: &Caller, params: &Value) -> Answ
     };
     let args = params.get("arguments").cloned().unwrap_or(json!({}));
     let outcome = mcp.invoke(caller, command, args).await;
-    Ok(content(outcome, command.output_schema.is_some()))
+    Ok(content(outcome))
 }
 
 /// A tool's outcome as JSON text, plus the matching structured value when
-/// the tool advertised an output schema.
-fn content(outcome: Result<Value, Error>, structured: bool) -> Value {
+/// the call succeeded.
+fn content(outcome: Result<Value, Error>) -> Value {
     let (text, failed) = match &outcome {
         Ok(value) => (value.to_string(), false),
         Err(error) => (
@@ -101,7 +101,7 @@ fn content(outcome: Result<Value, Error>, structured: bool) -> Value {
         ),
     };
     let mut result = json!({ "content": [{ "type": "text", "text": text }], "isError": failed });
-    if structured && let Ok(value) = outcome {
+    if let Ok(value) = outcome {
         result["structuredContent"] = value;
     }
     result

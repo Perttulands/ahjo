@@ -105,7 +105,7 @@ async fn a_brief_is_handed_to_an_agent_followed_and_answered() {
 
     // A fragment finds the project; its own name comes first.
     let found = h
-        .call("project_find", json!({ "query": "korpi" }))
+        .call("project_search", json!({ "query": "korpi" }))
         .await
         .unwrap();
     let paths: Vec<&str> = found["projects"]
@@ -121,12 +121,12 @@ async fn a_brief_is_handed_to_an_agent_followed_and_answered() {
     );
     assert_eq!(found["projects"][0]["git"], true);
     let none = h
-        .call("project_find", json!({ "query": "nowhere" }))
+        .call("project_search", json!({ "query": "nowhere" }))
         .await
         .unwrap();
     assert!(none["none"].as_str().unwrap().contains("absolute path"));
     let fragment = h
-        .call("project_find", json!({ "query": "kor" }))
+        .call("project_search", json!({ "query": "kor" }))
         .await
         .unwrap();
     assert_eq!(
@@ -138,7 +138,7 @@ async fn a_brief_is_handed_to_an_agent_followed_and_answered() {
     // A fragment two projects answer as well is refused, naming both.
     let tied = h
         .call(
-            "handoff_start",
+            "handoff_launch",
             json!({ "project": "kor", "brief": "Fix the build." }),
         )
         .await
@@ -151,8 +151,8 @@ async fn a_brief_is_handed_to_an_agent_followed_and_answered() {
     // The agent starts in the project, takes the brief and works on it.
     let started = h
         .call(
-            "handoff_start",
-            json!({ "project": "korpi", "brief": "Fix the build.", "work": "korpi-7" }),
+            "handoff_launch",
+            json!({ "project": "korpi", "brief": "Fix the build.", "issue": "korpi-7" }),
         )
         .await
         .unwrap();
@@ -176,18 +176,18 @@ async fn a_brief_is_handed_to_an_agent_followed_and_answered() {
     // The long poll answers once the agent stops working, not at its end.
     let begun = Instant::now();
     let done = h
-        .call("handoff_status", json!({ "session": "korpi", "wait": 60 }))
+        .call("handoff_show", json!({ "session": "korpi", "wait": 60 }))
         .await
         .unwrap();
     assert_eq!(done["state"], "idle", "{done}");
     assert!(
-        screen(&done).contains("done: Your work item: korpi-7"),
-        "the work item ends the brief: {done}"
+        screen(&done).contains("done: Your issue: korpi-7"),
+        "the issue ends the brief: {done}"
     );
     assert!(begun.elapsed() < Duration::from_secs(30), "{done}");
     let quick = Instant::now();
     let again = h
-        .call("handoff_status", json!({ "session": "korpi", "wait": 60 }))
+        .call("handoff_show", json!({ "session": "korpi", "wait": 60 }))
         .await
         .unwrap();
     assert_eq!(again["state"], "idle");
@@ -206,7 +206,7 @@ async fn a_brief_is_handed_to_an_agent_followed_and_answered() {
         .unwrap();
     assert_eq!(replied["sent"], "text");
     let asked = h
-        .call("handoff_status", json!({ "session": "korpi", "wait": 30 }))
+        .call("handoff_show", json!({ "session": "korpi", "wait": 30 }))
         .await
         .unwrap();
     assert_eq!(asked["state"], "needs-input", "{asked}");
@@ -227,7 +227,7 @@ async fn a_brief_is_handed_to_an_agent_followed_and_answered() {
         .unwrap();
     assert_eq!(picked["sent"], "key");
     let after = h
-        .call("handoff_status", json!({ "session": "korpi", "wait": 30 }))
+        .call("handoff_show", json!({ "session": "korpi", "wait": 30 }))
         .await
         .unwrap();
     assert_eq!(after["state"], "idle", "{after}");
@@ -236,7 +236,7 @@ async fn a_brief_is_handed_to_an_agent_followed_and_answered() {
     // A second handoff to the project gets a session of its own.
     let second = h
         .call(
-            "handoff_start",
+            "handoff_launch",
             json!({ "project": h.project("games/korpi"), "brief": "Write the notes." }),
         )
         .await
@@ -244,11 +244,11 @@ async fn a_brief_is_handed_to_an_agent_followed_and_answered() {
     assert_eq!(second["name"], "korpi-2", "{second}");
 
     // A session that ended is gone, not an error.
-    h.call("session_kill", json!({ "session": "korpi-2" }))
+    h.call("session_delete", json!({ "session": "korpi-2" }))
         .await
         .unwrap();
     let gone = h
-        .call("handoff_status", json!({ "session": "korpi-2" }))
+        .call("handoff_show", json!({ "session": "korpi-2" }))
         .await
         .unwrap();
     assert_eq!(gone["state"], "gone");
@@ -265,7 +265,7 @@ async fn a_brief_waits_for_no_question_and_says_so() {
     let begun = Instant::now();
     let started = h
         .call(
-            "handoff_start",
+            "handoff_launch",
             json!({ "project": "kauri", "brief": "Tidy the island.", "harness": "asker", "name": "kauri-ask" }),
         )
         .await
@@ -291,7 +291,7 @@ async fn a_brief_waits_for_no_question_and_says_so() {
     .await
     .unwrap();
     let ready = h
-        .call("handoff_status", json!({ "session": "kauri-ask" }))
+        .call("handoff_show", json!({ "session": "kauri-ask" }))
         .await
         .unwrap();
     assert_ne!(ready["state"], "needs-input", "{ready}");
@@ -303,7 +303,7 @@ async fn a_brief_waits_for_no_question_and_says_so() {
     .unwrap();
     let done = h
         .call(
-            "handoff_status",
+            "handoff_show",
             json!({ "session": "kauri-ask", "wait": 30 }),
         )
         .await

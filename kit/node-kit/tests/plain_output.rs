@@ -2,6 +2,10 @@
 use ahjo_node_kit::{Area, Built, Command, Config, Listing, Options, Setup, cli};
 use serde_json::{Value, json};
 
+/// Test response.
+#[derive(serde::Deserialize, schemars::JsonSchema)]
+struct Show {}
+
 struct Responses;
 
 fn answer(name: &str) -> Value {
@@ -13,7 +17,7 @@ fn answer(name: &str) -> Value {
             json!({"item": {"id": "work-1", "title": "Fix it", "children": [{"id": "work-2", "status": "open"}]}, "warning": null})
         }
         "scheduled_list" => {
-            json!({"tasks": [{"id": "task-1", "next_run": "2026-11-12T12:00:00Z", "sessions": ["worker"], "schedule": {"type": "interval", "every_minutes": 15}, "paused": false}]})
+            json!({"scheduled_prompts": [{"id": "task-1", "next_run": "2026-11-12T12:00:00Z", "sessions": ["worker"], "schedule": {"type": "interval", "every_minutes": 15}, "paused": false}]})
         }
         "session_launch" => {
             json!({"node": "n1", "session": "worker", "warning": null, "pane": 3})
@@ -26,12 +30,10 @@ impl Area for Responses {
         NAMES
             .iter()
             .map(|&name| {
-                Command::new(
+                Command::typed(
                     name,
                     ahjo_node_kit::Effect::Reads,
-                    "Test response",
-                    || json!({"type":"object","properties":{}}),
-                    move |_| async move { Ok(answer(name)) },
+                    move |_: Show| async move { Ok(answer(name)) },
                 )
             })
             .collect()

@@ -579,7 +579,7 @@ mod tests {
 
     fn report() -> Report {
         serde_json::from_str(
-            r#"{"home":"~",
+            r#"{"home_dir":"~",
  "folders":[{"id":"claude","path":"~/.claude/skills"},{"id":"agents","path":"~/.agents/skills"}],
  "tools":[{"id":"claude","name":"Claude Code","command":"claude","path":"~/.local/bin/claude",
            "version":"2.1.318","skills":"claude","signed_in":true,"credentials_present":true,

@@ -77,7 +77,7 @@ pub struct Shape {
     pub harness: String,
     /// The project root the harness finds for the folder, if any.
     pub root: Option<String>,
-    pub home: String,
+    pub home_dir: String,
     pub instructions: Vec<Instruction>,
     pub skills: Vec<SeenSkill>,
     pub hooks: Vec<Hook>,

@@ -15,7 +15,7 @@ use ahjo_app_kit::widgets::field::{FieldEvent, TextField};
 use ahjo_app_kit::widgets::finder::marked_letters;
 use ahjo_app_kit::widgets::kit;
 use ahjo_core::NodeId;
-use ahjo_terminals_contract::commands::{ListProjects, SessionFolders};
+use ahjo_terminals_contract::commands::{ListProjects, SessionListFolders};
 use gpui::{Context, Entity, EventEmitter, Window, div, prelude::*, px};
 
 /// Rows the list shows at once, at most.
@@ -308,7 +308,7 @@ impl FolderField {
         self.reading.push(at.clone());
         let task = self.host.call(
             NodeId(at.0.clone()),
-            SessionFolders { path: at.1.clone() },
+            SessionListFolders { path: at.1.clone() },
             cx,
         );
         cx.spawn(async move |this, cx| {

@@ -148,24 +148,24 @@ async fn speaks_the_mcp_lifecycle_and_offers_every_session_tool() {
     assert_eq!(
         names,
         [
-            "session_launch_flags",
-            "session_folders",
+            "session_list_launch_flags",
+            "session_list_folders",
             "project_list",
-            "session_windows",
+            "session_list_windows",
             "session_list",
             "session_read",
             "session_send",
             "session_launch",
             "session_copy",
             "session_search",
-            "session_keys",
-            "session_rename",
-            "session_kill",
-            "session_mouse",
-            "session_seen",
-            "project_find",
-            "handoff_start",
-            "handoff_status",
+            "session_send_keys",
+            "session_edit",
+            "session_delete",
+            "session_edit_mouse",
+            "session_mark_seen",
+            "project_search",
+            "handoff_launch",
+            "handoff_show",
             "handoff_reply",
         ]
     );
@@ -231,18 +231,18 @@ async fn lists_sessions_and_reads_a_screen() {
     assert_eq!(alpha["panes"][0]["cols"], 100);
     assert_eq!(alpha["panes"][0]["rows"], 30);
     let windows = node
-        .call("session_windows", json!({"session":alpha["id"]}))
+        .call("session_list_windows", json!({"session":alpha["id"]}))
         .await
         .unwrap();
     let by_name = node
-        .call("session_windows", json!({"session":"alpha"}))
+        .call("session_list_windows", json!({"session":"alpha"}))
         .await
         .unwrap();
     assert_eq!(by_name, windows);
     assert_eq!(windows["windows"][0]["pane"], alpha["panes"][0]["id"]);
     assert!(!windows["windows"][0]["cwd"].as_str().unwrap().is_empty());
     assert!(
-        node.call("session_windows", json!({"session":"missing"}))
+        node.call("session_list_windows", json!({"session":"missing"}))
             .await
             .is_err()
     );
@@ -464,11 +464,11 @@ async fn a_send_without_a_pane_goes_to_the_active_one() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn presses_keys_reads_history_searches_and_kills() {
-    let Some(node) = Node::start("keys").await else {
+    let Some(node) = Node::start("send-keys").await else {
         return;
     };
     node.call(
-        "session_keys",
+        "session_send_keys",
         json!({ "session": "alpha", "keys": ["echo ", "keyed-$((6*7))", "Enter"] }),
     )
     .await
@@ -497,7 +497,7 @@ async fn presses_keys_reads_history_searches_and_kills() {
 
     // The explicit limit cuts a long scrollback to 200 lines and explains the cut.
     node.call(
-        "session_keys",
+        "session_send_keys",
         json!({ "session": "alpha", "keys": ["seq 1000 1300", "Enter"] }),
     )
     .await
@@ -574,13 +574,13 @@ async fn presses_keys_reads_history_searches_and_kills() {
     let alpha = &session_named(&listed, "alpha")["id"];
 
     let seen = node
-        .call("session_seen", json!({ "session": "alpha" }))
+        .call("session_mark_seen", json!({ "session": "alpha" }))
         .await
         .unwrap();
     assert_eq!(seen["report"], false, "alpha has made no report");
 
     let killed = node
-        .call("session_kill", json!({ "session": "alpha" }))
+        .call("session_delete", json!({ "session": "alpha" }))
         .await
         .unwrap();
     assert_eq!(&killed["session"], alpha);
@@ -602,7 +602,7 @@ async fn presses_keys_reads_history_searches_and_kills() {
 /// session the node does not hold.
 #[tokio::test(flavor = "multi_thread")]
 async fn renames_a_session_unless_the_name_is_taken() {
-    let Some(node) = Node::start("rename").await else {
+    let Some(node) = Node::start("edit").await else {
         return;
     };
     let sessions = node.node.sessions();
@@ -624,7 +624,7 @@ async fn renames_a_session_unless_the_name_is_taken() {
 
     let renamed = node
         .call(
-            "session_rename",
+            "session_edit",
             json!({ "session": "alpha", "name": "omega" }),
         )
         .await
@@ -659,7 +659,7 @@ async fn renames_a_session_unless_the_name_is_taken() {
     let names = || node.tmux.run(&["list-sessions", "-F", "#{session_name}"]);
     let taken = node
         .call(
-            "session_rename",
+            "session_edit",
             json!({ "session": "omega", "name": "taken" }),
         )
         .await
@@ -667,17 +667,14 @@ async fn renames_a_session_unless_the_name_is_taken() {
     assert!(taken.contains("duplicate session"), "{taken}");
     let unknown = node
         .call(
-            "session_rename",
+            "session_edit",
             json!({ "session": "nobody", "name": "free" }),
         )
         .await
         .unwrap_err();
     assert!(unknown.contains("no session named nobody"), "{unknown}");
     let bad = node
-        .call(
-            "session_rename",
-            json!({ "session": "omega", "name": "a:b" }),
-        )
+        .call("session_edit", json!({ "session": "omega", "name": "a:b" }))
         .await
         .unwrap_err();
     assert!(bad.contains("letters, digits"), "{bad}");
@@ -702,7 +699,7 @@ async fn turns_the_mouse_on_and_off_for_the_whole_server() {
     assert!(menu().contains("MouseDown3Pane"));
 
     let on = node
-        .call("session_mouse", json!({ "mouse": "on" }))
+        .call("session_edit_mouse", json!({ "mouse": "on" }))
         .await
         .unwrap();
     assert_eq!(
@@ -712,13 +709,13 @@ async fn turns_the_mouse_on_and_off_for_the_whole_server() {
     assert_eq!(mouse().trim(), "on");
     assert!(!menu().contains("MouseDown3Pane"), "{}", menu());
 
-    node.call("session_mouse", json!({ "mouse": "off" }))
+    node.call("session_edit_mouse", json!({ "mouse": "off" }))
         .await
         .unwrap();
     assert_eq!(mouse().trim(), "off");
     let bad = node
         .node
-        .call("session_mouse", json!({ "mouse": "maybe" }))
+        .call("session_edit_mouse", json!({ "mouse": "maybe" }))
         .await
         .unwrap_err();
     assert_eq!(bad.code, "invalid_argument");
@@ -949,13 +946,13 @@ async fn cli_manages_and_reads_a_session_on_the_test_node() {
     let listed = run(vec!["list".into()]).await;
     assert_eq!(session_named(&listed, "cli-journey")["name"], "cli-journey");
     run(vec![
-        "rename".into(),
+        "edit".into(),
         "cli-journey".into(),
         "renamed-cli".into(),
     ])
     .await;
-    run(vec!["seen".into(), "renamed-cli".into()]).await;
-    run(vec!["kill".into(), "renamed-cli".into()]).await;
+    run(vec!["mark-seen".into(), "renamed-cli".into()]).await;
+    run(vec!["delete".into(), "renamed-cli".into()]).await;
     eventually("CLI killed session", || {
         (!node
             .tmux
@@ -1040,7 +1037,7 @@ async fn launcher_lists_accessible_folders_and_explains_missing_ones() {
     );
 
     let answer = node
-        .call("session_folders", json!({"path":node.other}))
+        .call("session_list_folders", json!({"path":node.other}))
         .await
         .unwrap();
     assert!(
@@ -1052,14 +1049,14 @@ async fn launcher_lists_accessible_folders_and_explains_missing_ones() {
     );
     let error = node
         .call(
-            "session_folders",
+            "session_list_folders",
             json!({"path":node.other.join("missing")}),
         )
         .await
         .unwrap_err();
     assert!(error.contains("Cannot list"), "{error}");
     let error = node
-        .call("session_folders", json!({"path":"relative"}))
+        .call("session_list_folders", json!({"path":"relative"}))
         .await
         .unwrap_err();
     assert!(error.contains("absolute"), "{error}");

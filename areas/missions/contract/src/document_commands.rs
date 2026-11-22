@@ -10,7 +10,7 @@ pub struct ExportMission {
     /// The mission's slug or id.
     #[schemars(extend("x-ahjo-cli-positional" = true))]
     pub mission: Option<String>,
-    /// The name of an example from mission examples.
+    /// The name of an example from mission list-examples.
     pub example: Option<String>,
 }
 

@@ -6,8 +6,8 @@
 //! send that waits for a fresh pane to be ready, the screen's waiting
 //! question and the agents' reports.
 //!
-//! Nothing runs between calls. `handoff start` and `handoff reply` wait a
-//! bounded time to see the agent take what they sent, and `handoff status`
+//! Nothing runs between calls. `handoff launch` and `handoff reply` wait a
+//! bounded time to see the agent take what they sent, and `handoff show`
 //! waits only when asked, at most [`MAX_WAIT`]: each well under the 120 s a
 //! ChatGPT tunnel request may take.
 
@@ -31,23 +31,23 @@ use crate::commands::{Ctx, find, target, visible};
 use crate::launch::{Launch, SHELL, check_name};
 use crate::projects;
 
-/// How long `handoff start` waits in all for the agent to take its brief.
+/// How long `handoff launch` waits in all for the agent to take its brief.
 const START_WAIT: Duration = Duration::from_secs(60);
 
-/// The longest `handoff status` waits while the agent works.
+/// The longest `handoff show` waits while the agent works.
 const MAX_WAIT: u64 = 90;
 
 /// How long `handoff reply` waits to see the agent take the reply.
 const REPLY_WAIT: Duration = Duration::from_secs(20);
 
 /// How long a question must stay on a starting agent's screen before
-/// `handoff start` stops waiting to send the brief and says so.
+/// `handoff launch` stops waiting to send the brief and says so.
 const ASKS_FOR: Duration = Duration::from_millis(1500);
 
 /// How many lines of the screen a status shows, from the bottom.
 const TAIL: usize = 40;
 
-/// The most projects `project find` lists.
+/// The most projects `project search` lists.
 const FOUND: usize = 12;
 
 /// How often a wait looks again, besides when the sessions change.
@@ -227,8 +227,8 @@ fn detail(info: &SessionInfo, look: &Look, lines: usize) -> HandoffDetail {
     }
 }
 
-/// `project find`: the project folders a fragment names.
-pub async fn find_project(ctx: Arc<Ctx>, args: ProjectFind) -> Result<ProjectsFound> {
+/// `project search`: the project folders a fragment names.
+pub async fn find_project(ctx: Arc<Ctx>, args: ProjectSearch) -> Result<ProjectsFound> {
     let query = &args.query;
     let projects = ctx.projects.list().await;
     let found = projects::matching(&projects, query);
@@ -275,7 +275,7 @@ async fn folder(ctx: &Ctx, project: &str) -> Result<String> {
     let projects = ctx.projects.list().await;
     let found = projects::matching(&projects, project);
     match found.as_slice() {
-        [] => bail!("no project matches {project:?}; project find lists them, or give its path"),
+        [] => bail!("no project matches {project:?}; project search lists them, or give its path"),
         [(best, path), rest @ ..] if rest.first().is_none_or(|(next, _)| next > best) => {
             Ok((*path).to_owned())
         }
@@ -327,17 +327,17 @@ fn session_name(ctx: &Ctx, folder: &str) -> String {
     }
 }
 
-/// `handoff start`: a coding agent in a session of its own, in the
+/// `handoff launch`: a coding agent in a session of its own, in the
 /// project's folder, given the brief as its first message.
-pub async fn start(ctx: Arc<Ctx>, args: HandoffStart) -> Result<HandoffStarted> {
+pub async fn start(ctx: Arc<Ctx>, args: HandoffLaunch) -> Result<HandoffStarted> {
     let begun = Instant::now();
     let deadline = begun + START_WAIT;
     let brief = args.brief.trim();
     if brief.is_empty() {
         bail!("brief is empty: say what the agent is to do");
     }
-    let brief = match args.work.as_deref() {
-        Some(work) => format!("{brief}\n\nYour work item: {}", work.trim()),
+    let brief = match args.issue.as_deref() {
+        Some(issue) => format!("{brief}\n\nYour issue: {}", issue.trim()),
         None => brief.to_owned(),
     };
     if brief.len() > MAX_SEND {
@@ -421,8 +421,8 @@ pub async fn start(ctx: Arc<Ctx>, args: HandoffStart) -> Result<HandoffStarted> 
         }
     }
     let follow = format!(
-        "Follow it with handoff_status (session {}, wait up to {MAX_WAIT} seconds while it works) \
-         and answer it with handoff_reply; from a shell, ahjo handoff status {} --wait 60.",
+        "Follow it with handoff_show (session {}, wait up to {MAX_WAIT} seconds while it works) \
+         and answer it with handoff_reply; from a shell, ahjo handoff show {} --wait 60.",
         info.name, info.name
     );
     let said = match (&sent, &now.state) {
@@ -473,9 +473,9 @@ fn harness_choice(id: &str, agents: &[&crate::launch::Harness]) -> String {
     )
 }
 
-/// `handoff status`: where the agent is; with `wait`, once it stops
+/// `handoff show`: where the agent is; with `wait`, once it stops
 /// working or the wait ends.
-pub async fn status(ctx: Arc<Ctx>, args: HandoffStatus) -> Result<HandoffStatusResult> {
+pub async fn status(ctx: Arc<Ctx>, args: HandoffShow) -> Result<HandoffStatusResult> {
     let wait = args.wait.unwrap_or_default().min(MAX_WAIT);
     let lines = args.lines.map_or(TAIL, |lines| lines.get());
     let wanted = args.session;
@@ -535,7 +535,7 @@ pub async fn reply(ctx: Arc<Ctx>, args: HandoffReply) -> Result<HandoffReplied> 
             if !(key.len() == 1 && key.bytes().all(|b| b.is_ascii_alphanumeric())) {
                 bail!(
                     "{} asks {question:?} and waits on its menu: reply with the number of an \
-                     option, as handoff_status shows the screen",
+                     option, as handoff_show shows the screen",
                     info.name
                 );
             }

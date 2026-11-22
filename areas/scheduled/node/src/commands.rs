@@ -9,8 +9,8 @@ use ahjo_core::{Error, NodeId};
 use ahjo_node_kit::{Command, Effect};
 use ahjo_scheduled_contract::commands::{
     ScheduledCopy, ScheduledCreate, ScheduledDelete, ScheduledDeleted, ScheduledEdit,
-    ScheduledList, ScheduledListed, ScheduledPause, ScheduledRan, ScheduledResume, ScheduledRun,
-    ScheduledShow, ScheduledSummary, ScheduledTask,
+    ScheduledList, ScheduledListed, ScheduledPause, ScheduledPromptResult, ScheduledRan,
+    ScheduledResume, ScheduledRun, ScheduledShow, ScheduledSummary,
 };
 use ahjo_scheduled_contract::{BAD_REQUEST, NOT_FOUND, Schedule, Target};
 use schemars::JsonSchema;
@@ -58,12 +58,12 @@ pub(crate) fn commands(ctx: &Arc<Ctx>) -> Vec<Command> {
             "scheduled_show",
             Effect::Reads,
             |ctx, args: ScheduledShow| async move {
-                let mut said = [ctx.scheduled.get(&task_id(&ctx, &args.id)?)?];
-                ctx.scheduled.with_replaced(&mut said).await;
-                let [task] = said;
-                Ok(ScheduledTask {
+                let mut prompts = [ctx.scheduled.get(&task_id(&ctx, &args.id)?)?];
+                ctx.scheduled.with_replaced(&mut prompts).await;
+                let [scheduled_prompt] = prompts;
+                Ok(ScheduledPromptResult {
                     node: ctx.node.clone(),
-                    task,
+                    scheduled_prompt,
                 })
             },
         ),
@@ -76,9 +76,9 @@ pub(crate) fn commands(ctx: &Arc<Ctx>) -> Vec<Command> {
             Effect::Sets,
             |ctx, args: ScheduledPause| async move {
                 let task = ctx.scheduled.pause(&task_id(&ctx, &args.id)?, ACTOR)?;
-                Ok(ScheduledTask {
+                Ok(ScheduledPromptResult {
                     node: ctx.node.clone(),
-                    task,
+                    scheduled_prompt: task,
                 })
             },
         ),
@@ -91,9 +91,9 @@ pub(crate) fn commands(ctx: &Arc<Ctx>) -> Vec<Command> {
                     .scheduled
                     .resume(&task_id(&ctx, &args.id)?, ACTOR)
                     .await?;
-                Ok(ScheduledTask {
+                Ok(ScheduledPromptResult {
                     node: ctx.node.clone(),
-                    task,
+                    scheduled_prompt: task,
                 })
             },
         ),
@@ -107,7 +107,7 @@ pub(crate) fn commands(ctx: &Arc<Ctx>) -> Vec<Command> {
                     .run_now(&task_id(&ctx, &args.id)?, ACTOR)
                     .await?;
                 Ok(ScheduledRan {
-                    task,
+                    scheduled_prompt: task,
                     run,
                     node: ctx.node.clone(),
                 })
@@ -147,7 +147,7 @@ fn list(ctx: &Ctx) -> Result<ScheduledListed, Error> {
         .collect();
     Ok(ScheduledListed {
         node: ctx.node.clone(),
-        tasks,
+        scheduled_prompts: tasks,
     })
 }
 
@@ -182,7 +182,7 @@ fn task_id(ctx: &Ctx, given: &str) -> Result<String, Error> {
     }
 }
 
-async fn create(ctx: Arc<Ctx>, args: ScheduledCreate) -> Result<ScheduledTask, Error> {
+async fn create(ctx: Arc<Ctx>, args: ScheduledCreate) -> Result<ScheduledPromptResult, Error> {
     let create = Create {
         name: args.name,
         prompt: args.prompt,
@@ -195,13 +195,13 @@ async fn create(ctx: Arc<Ctx>, args: ScheduledCreate) -> Result<ScheduledTask, E
         updated_by: ACTOR.into(),
     };
     let task = ctx.scheduled.create(create).await?;
-    Ok(ScheduledTask {
+    Ok(ScheduledPromptResult {
         node: ctx.node.clone(),
-        task,
+        scheduled_prompt: task,
     })
 }
 
-async fn edit(ctx: Arc<Ctx>, args: ScheduledEdit) -> Result<ScheduledTask, Error> {
+async fn edit(ctx: Arc<Ctx>, args: ScheduledEdit) -> Result<ScheduledPromptResult, Error> {
     let id = task_id(&ctx, &args.id)?;
     let patch = Patch {
         name: args.name,
@@ -212,13 +212,13 @@ async fn edit(ctx: Arc<Ctx>, args: ScheduledEdit) -> Result<ScheduledTask, Error
         ..Default::default()
     };
     let task = ctx.scheduled.patch(&id, patch).await?;
-    Ok(ScheduledTask {
+    Ok(ScheduledPromptResult {
         node: ctx.node.clone(),
-        task,
+        scheduled_prompt: task,
     })
 }
 
-async fn copy(ctx: Arc<Ctx>, args: ScheduledCopy) -> Result<ScheduledTask, Error> {
+async fn copy(ctx: Arc<Ctx>, args: ScheduledCopy) -> Result<ScheduledPromptResult, Error> {
     let from = ctx.scheduled.get(&task_id(&ctx, &args.id)?)?;
     let create = Create {
         name: args.name.unwrap_or_else(|| format!("{} (copy)", from.name)),
@@ -231,9 +231,9 @@ async fn copy(ctx: Arc<Ctx>, args: ScheduledCopy) -> Result<ScheduledTask, Error
         updated_by: ACTOR.into(),
     };
     let task = ctx.scheduled.create(create).await?;
-    Ok(ScheduledTask {
+    Ok(ScheduledPromptResult {
         node: ctx.node.clone(),
-        task,
+        scheduled_prompt: task,
     })
 }
 

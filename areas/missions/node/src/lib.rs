@@ -30,6 +30,9 @@ pub const LISTING: Listing = Listing {
     build,
 };
 
+/// Existing note actions used by the Missions app.
+pub const NOTE_VERBS: &[&str] = &["note", "notes"];
+
 #[derive(Default, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 struct Section {

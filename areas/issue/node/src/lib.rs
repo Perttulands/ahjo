@@ -21,8 +21,8 @@ pub const LISTING: Listing = Listing {
         "issue_search",
         "issue_show",
         "issue_create",
-        "issue_snapshot_text",
-        "issue_snapshot_search",
+        "issue_read_snapshot",
+        "issue_search_snapshot",
     ],
     build,
 };
@@ -203,7 +203,7 @@ impl Area for WorkArea {
             }
         });
         let work = self.work.clone();
-        let text = Command::for_request(Effect::Reads, move |args: SnapshotText| {
+        let text = Command::for_request(Effect::Reads, move |args: ReadSnapshot| {
             let work = work.clone();
             async move {
                 if let Some(text) = work.last().text(&args.reference) {
@@ -223,7 +223,7 @@ impl Area for WorkArea {
             }
         });
         let work = self.work.clone();
-        let snapshot_search = Command::for_request(Effect::Reads, move |args: SnapshotSearch| {
+        let snapshot_search = Command::for_request(Effect::Reads, move |args: SearchSnapshot| {
             let snapshot = work.last();
             async move {
                 let terms = ahjo_issue_contract::text::terms(&args.query);

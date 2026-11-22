@@ -2,7 +2,7 @@
 //! when the item shows, and searched on the nodes when the search changes.
 use crate::Issue;
 use ahjo_core::NodeId;
-use ahjo_issue_contract::commands::{SnapshotSearch, SnapshotText};
+use ahjo_issue_contract::commands::{ReadSnapshot, SearchSnapshot};
 use gpui::Context;
 use std::collections::HashSet;
 
@@ -38,7 +38,7 @@ impl Issue {
             .insert(reference.clone(), (updated, Text::Reading(older)));
         let task = self.host.call(
             NodeId(node),
-            SnapshotText {
+            ReadSnapshot {
                 reference: reference.clone(),
             },
             cx,
@@ -97,7 +97,7 @@ impl Issue {
         for node in self.snapshots.keys() {
             let task = self.host.call(
                 NodeId(node.clone()),
-                SnapshotSearch {
+                SearchSnapshot {
                     query: query.clone(),
                 },
                 cx,

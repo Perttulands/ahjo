@@ -13,7 +13,7 @@ use ahjo_app_kit::link::client::LinkState;
 use ahjo_host_contract::{
     self as wire, Component, Facts, Gpu, Heavy, LogLine, Point, Reading, ReadingFrame, Service,
     State, Usage,
-    commands::{ServiceList, ServiceLog, ServiceLogged, ServiceRestart, ServicesListed},
+    commands::{ServiceList, ServiceLogged, ServiceRead, ServiceRestart, ServicesListed},
 };
 use ahjo_node_kit::{Area, BoxFuture, Built, Channel, Client, Command, Effect, Listing, Setup};
 use ahjo_testkit::node::Node;
@@ -35,7 +35,7 @@ static CONTROL: OnceLock<Arc<Control>> = OnceLock::new();
 const FAKE: Listing = Listing {
     name: "host",
     kinds: &[wire::HOST..=wire::HOST_EVENT],
-    commands: &["service_list", "service_log", "service_restart"],
+    commands: &["service_list", "service_read", "service_restart"],
     build,
 };
 fn build(setup: &Setup) -> anyhow::Result<Built> {
@@ -98,7 +98,7 @@ impl Area for FakeArea {
                     })
                 }
             }),
-            Command::typed("service_log", Effect::Reads, move |args: ServiceLog| {
+            Command::typed("service_read", Effect::Reads, move |args: ServiceRead| {
                 let node = log_node.clone();
                 async move {
                     Ok(ServiceLogged {

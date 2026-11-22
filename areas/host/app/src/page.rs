@@ -15,7 +15,7 @@ use ahjo_app_kit::{
 };
 use ahjo_core::{Error, NodeId, TypedCommand};
 use ahjo_host_contract::commands::{
-    ServiceActed, ServiceList, ServiceLog, ServiceRestart, ServiceShow, ServiceStart, ServiceStop,
+    ServiceActed, ServiceList, ServiceRead, ServiceRestart, ServiceShow, ServiceStart, ServiceStop,
 };
 use ahjo_host_contract::{HOST, HOST_EVENT, HOST_STATE};
 use ahjo_terminals_contract::SessionList;
@@ -170,7 +170,7 @@ impl HostPage {
         let (node, id) = (node.to_owned(), id.to_owned());
         self.ask(
             NodeId(node.clone()),
-            ServiceLog {
+            ServiceRead {
                 id: id.clone(),
                 lines: Some(crate::tokens::LOG_LINES),
             },

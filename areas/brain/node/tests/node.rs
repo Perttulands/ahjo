@@ -78,23 +78,23 @@ async fn node_serves_brain_routes_commands_and_coded_errors() {
     let page = call(&client, "brain_read", json!({"path":"notes/first.md"})).await;
     assert_eq!(page["links"][0]["page"]["path"], "notes/second.md");
     assert_eq!(
-        call(&client, "brain_collections", json!({})).await["collections"][0]["name"],
+        call(&client, "brain_list_collections", json!({})).await["collections"][0]["name"],
         "notes"
     );
     assert_eq!(
-        call(&client, "brain_collection", json!({"name":"notes"})).await["pages"]
+        call(&client, "brain_list_collection", json!({"name":"notes"})).await["pages"]
             .as_array()
             .unwrap()
             .len(),
         2
     );
     assert_eq!(
-        call(&client, "brain_changes", json!({"limit":1})).await["changes"][0]["message"],
+        call(&client, "brain_list_changes", json!({"limit":1})).await["changes"][0]["message"],
         "Initial pages"
     );
     let save =
         json!({"path":"notes/first.md", "text":"# First\n\nUpdated.\n", "summary":"Update first"});
-    let saved = call(&client, "brain_save", save).await;
+    let saved = call(&client, "brain_write", save).await;
     assert_eq!(saved["commit"]["message"], "Update first");
     assert!(
         call(&client, "brain_read", json!({"path":"notes/first.md"})).await["body"]
@@ -145,12 +145,12 @@ async fn node_serves_brain_routes_commands_and_coded_errors() {
         [
             "brain_search",
             "brain_read",
-            "brain_save",
-            "brain_collections",
-            "brain_changes",
-            "brain_files",
-            "brain_texts",
-            "brain_collection",
+            "brain_write",
+            "brain_list_collections",
+            "brain_list_changes",
+            "brain_list_files",
+            "brain_read_texts",
+            "brain_list_collection",
             "brain_send"
         ]
     );

@@ -34,12 +34,12 @@ async fn brain_commands_save_and_read_changes() {
         &[
             "brain_search",
             "brain_read",
-            "brain_save",
-            "brain_collections",
-            "brain_changes",
-            "brain_files",
-            "brain_texts",
-            "brain_collection",
+            "brain_write",
+            "brain_list_collections",
+            "brain_list_changes",
+            "brain_list_files",
+            "brain_read_texts",
+            "brain_list_collection",
             "brain_send"
         ]
     );
@@ -86,13 +86,13 @@ async fn brain_commands_save_and_read_changes() {
     for (name, output_field) in [
         ("brain_search", "results"),
         ("brain_read", "body"),
-        ("brain_save", "commit"),
-        ("brain_collections", "collections"),
-        ("brain_changes", "changes"),
+        ("brain_write", "commit"),
+        ("brain_list_collections", "collections"),
+        ("brain_list_changes", "changes"),
         ("brain_send", "sent"),
-        ("brain_files", "files"),
-        ("brain_texts", "texts"),
-        ("brain_collection", "pages"),
+        ("brain_list_files", "files"),
+        ("brain_read_texts", "texts"),
+        ("brain_list_collection", "pages"),
     ] {
         let tool = tools.iter().find(|tool| tool["name"] == name).unwrap();
         assert_eq!(tool["inputSchema"]["additionalProperties"], false, "{name}");
@@ -111,7 +111,14 @@ async fn brain_commands_save_and_read_changes() {
         assert!(error.message.contains("unknown_input"), "{name}: {error}");
     }
     let (_, help) = run(&node, &[]).await;
-    for verb in ["search", "read", "save", "collections", "changes", "send"] {
+    for verb in [
+        "search",
+        "read",
+        "write",
+        "list-collections",
+        "list-changes",
+        "send",
+    ] {
         assert!(help.contains(&format!("ahjo brain {verb}")), "{help}");
     }
     let (status, search) = run(&node, &["search", "First"]).await;
@@ -159,7 +166,7 @@ async fn brain_commands_save_and_read_changes() {
     let (status, output) = run(
         &node,
         &[
-            "save",
+            "write",
             "notes/page.md",
             "--text",
             "# Updated\n",
@@ -179,7 +186,7 @@ async fn brain_commands_save_and_read_changes() {
     let (status, _) = run(
         &node,
         &[
-            "save",
+            "write",
             "notes/page.md",
             "--text",
             "# Stale\n",
@@ -191,7 +198,7 @@ async fn brain_commands_save_and_read_changes() {
     assert_eq!(status, 1);
     let conflict = node
         .call(
-            "brain_save",
+            "brain_write",
             json!({"path":"notes/page.md", "text":"# Stale\n", "base":base}),
         )
         .await
@@ -201,21 +208,21 @@ async fn brain_commands_save_and_read_changes() {
         std::fs::read_to_string(root.join("notes/page.md")).unwrap(),
         "# Updated\n"
     );
-    let (status, collections) = run(&node, &["collections"]).await;
+    let (status, collections) = run(&node, &["list-collections"]).await;
     assert_eq!(status, 0);
     assert!(
         collections.contains("name=notes") && collections.contains("pages=1"),
         "{collections}"
     );
     assert!(collections.contains("name=other"), "{collections}");
-    let (status, changes) = run(&node, &["changes", "--limit", "2"]).await;
+    let (status, changes) = run(&node, &["list-changes", "--limit", "2"]).await;
     assert_eq!(status, 0);
     assert!(
         changes.find("notes/page.md").unwrap() < changes.find("other/older.md").unwrap(),
         "{changes}"
     );
     assert_eq!(
-        node.call("brain_changes", json!({"limit": 0}))
+        node.call("brain_list_changes", json!({"limit": 0}))
             .await
             .unwrap_err()
             .code,

@@ -7,7 +7,7 @@
 //! The three exist only in a set: on the command line and on `/mcp`
 //! every command is already its own verb or tool.
 //!
-//! - `swarm_commands` finds commands by words, with what each does.
+//! - `swarm_search` finds commands by words, with what each does.
 //! - `swarm_read` runs one that only reads, so a client need not ask the
 //!   operator first; it refuses one that changes anything.
 //! - `swarm_run` runs one that changes something, and is marked as a tool
@@ -20,11 +20,11 @@
 
 use std::sync::Arc;
 
-use ahjo_core::{Error, NodeId};
-use serde_json::{Value, json};
-
-use crate::args::object;
 use crate::{Command, Effect, Listing};
+use ahjo_core::{Error, NodeId};
+use schemars::JsonSchema;
+use serde::{Deserialize, Serialize};
+use serde_json::{Map, Value};
 
 /// A tool set as a binary lists it.
 #[derive(Clone, Copy)]
@@ -38,14 +38,14 @@ pub struct ToolSet {
     pub instructions: &'static str,
 }
 
-pub const COMMANDS: &str = "swarm_commands";
+pub const SEARCH: &str = "swarm_search";
 pub const READ: &str = "swarm_read";
 pub const RUN: &str = "swarm_run";
 
 /// The tools a set may name that are not commands.
-pub const SET_TOOLS: &[&str] = &[COMMANDS, READ, RUN];
+pub const SET_TOOLS: &[&str] = &[SEARCH, READ, RUN];
 
-/// How many commands `swarm_commands` answers with at most.
+/// How many commands `swarm_search` answers with at most.
 const FOUND: usize = 12;
 
 /// Refuses sets that share a name with each other, an area or the node's
@@ -83,106 +83,99 @@ pub fn check(sets: &[ToolSet], areas: &[Listing]) -> Result<(), Error> {
     Ok(())
 }
 
-/// The set's own tool `name`, reaching `every` command; `None` for a
-/// command's name.
+/// Find Swarm commands by words and see how to call them through this server.
+#[derive(Deserialize, JsonSchema)]
+struct SearchCommands {
+    /// Words for what you want to do, e.g. "approve gate" or "scheduled prompts". Omit to list every command.
+    query: Option<String>,
+    /// Full adds each command's input schema. Defaults to brief.
+    detail: Option<SearchDetail>,
+}
+
+#[derive(Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+enum SearchDetail {
+    Brief,
+    Full,
+}
+
+#[derive(Serialize, JsonSchema)]
+struct CommandsFound {
+    commands: Vec<CommandMatch>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    hint: Option<&'static str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    more: Option<usize>,
+}
+
+#[derive(Serialize, JsonSchema)]
+#[serde(untagged)]
+enum CommandMatch {
+    Name(&'static str),
+    Match {
+        name: &'static str,
+        does: &'static str,
+        run_with: &'static str,
+        description: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        input_schema: Option<Value>,
+    },
+}
+
+#[derive(Deserialize, JsonSchema)]
+struct Relay {
+    /// The command's name, e.g. run_show.
+    command: String,
+    /// Its arguments by name, as swarm_search with detail full lists them.
+    arguments: Option<Map<String, Value>>,
+}
+
+/// Run a Swarm command that only reads, as swarm_search names it. Use swarm_run for commands that change something.
+#[derive(Deserialize, JsonSchema)]
+struct ReadCommand {
+    #[serde(flatten)]
+    relay: Relay,
+}
+
+/// Run a Swarm command that changes something, as swarm_search names it. Use swarm_read for commands that only read.
+#[derive(Deserialize, JsonSchema)]
+struct RunCommand {
+    #[serde(flatten)]
+    relay: Relay,
+}
+
+/// The set's own tool, if the name is one of its relays or its search.
 pub(super) fn own(name: &str, every: &Arc<[Command]>, node: &NodeId) -> Option<Command> {
-    let every = every.clone();
+    let (every, node) = (every.clone(), node.clone());
     Some(match name {
-        COMMANDS => Command::new(
-            COMMANDS,
-            Effect::Reads,
-            "Find the Swarm commands this server has no tool of its own for: missions and \
-             their runs and gates, scheduled prompts, sessions, files, services, roles, harness \
-             settings and more. Use this when the user asks for something none of the other \
-             tools does. Answers each command's name, what it does, and whether to run it \
-             with swarm_read (it only reads) or swarm_run (it changes something); detail \
-             full adds the arguments it takes. With no query, names every command.",
-            || {
-                object(
-                    json!({
-                        "query": {
-                            "type": "string",
-                            "description": "Words for what you want to do, e.g. \"approve gate\" or \"scheduled prompts\".",
-                        },
-                        "detail": {
-                            "type": "string",
-                            "enum": ["brief", "full"],
-                            "default": "brief",
-                            "description": "full adds each command's input schema.",
-                        },
-                    }),
-                    &[],
-                )
-            },
-            move |args: Value| {
-                let answer = find(&every, &args);
-                async move { answer }
-            },
-        ),
-        READ | RUN => {
-            let reads = name == READ;
-            let node = node.clone();
-            let (name, effect, description) = if reads {
-                (
-                    READ,
-                    Effect::Reads,
-                    "Run a Swarm command that only reads, as swarm_commands names it, with its \
-                     arguments. Refused for a command that changes anything: run that with \
-                     swarm_run.",
-                )
-            } else {
-                (
-                    RUN,
-                    Effect::Destroys,
-                    "Run a Swarm command that changes something (starts, edits, sends, \
-                     deletes), as swarm_commands names it, with its arguments. Refused for a \
-                     command that only reads: run that with swarm_read.",
-                )
-            };
-            Command::new(
-                name,
-                effect,
-                description,
-                || {
-                    object(
-                        json!({
-                            "command": {
-                                "type": "string",
-                                "description": "Its name, e.g. run_status.",
-                            },
-                            "arguments": {
-                                "type": "object",
-                                "description": "Its arguments by name, as swarm_commands with detail full lists them.",
-                            },
-                        }),
-                        &["command"],
-                    )
-                },
-                move |args: Value| {
-                    let (every, node) = (every.clone(), node.clone());
-                    async move { run(&every, &node, reads, args).await }
-                },
-            )
-        }
+        SEARCH => Command::typed(SEARCH, Effect::Reads, move |args: SearchCommands| {
+            let found = find(&every, args);
+            async move { Ok(found) }
+        }),
+        READ => Command::typed(READ, Effect::Reads, move |args: ReadCommand| {
+            let (every, node) = (every.clone(), node.clone());
+            async move { run(&every, &node, true, args.relay).await }
+        }),
+        RUN => Command::typed(RUN, Effect::Destroys, move |args: RunCommand| {
+            let (every, node) = (every.clone(), node.clone());
+            async move { run(&every, &node, false, args.relay).await }
+        }),
         _ => return None,
     })
 }
 
-fn invalid(message: impl Into<String>) -> Error {
-    Error::new("invalid_argument", message)
-}
-
-/// `swarm_read` and `swarm_run`: the command `args` names, run as
-/// `tools/call` would run it, if it does what the tool is for.
-async fn run(every: &[Command], node: &NodeId, reads: bool, args: Value) -> Result<Value, Error> {
-    let name = args
-        .get("command")
-        .and_then(Value::as_str)
-        .ok_or_else(|| invalid("command is required, as a string"))?;
+/// Run the named command as tools/call would, if its effect matches the relay.
+async fn run(
+    every: &[Command],
+    node: &NodeId,
+    reads: bool,
+    args: Relay,
+) -> Result<Map<String, Value>, Error> {
+    let name = args.command.as_str();
     let command = every.iter().find(|c| c.name == name).ok_or_else(|| {
         Error::new(
             "unknown_command",
-            format!("no command {name} on this node; swarm_commands finds them"),
+            format!("no command {name} on this node; swarm_search finds them"),
         )
     })?;
     match (reads, command.effect.reads()) {
@@ -207,11 +200,7 @@ async fn run(every: &[Command], node: &NodeId, reads: bool, args: Value) -> Resu
         }
         _ => {}
     }
-    let mut inner = match args.get("arguments") {
-        None | Some(Value::Null) => json!({}),
-        Some(given @ Value::Object(_)) => given.clone(),
-        Some(_) => return Err(invalid("arguments is an object of the command's arguments")),
-    };
+    let mut inner = Value::Object(args.arguments.unwrap_or_default());
     super::target(node, &mut inner)?;
     let outcome = (command.call)(inner).await;
     super::call_log::relayed(
@@ -220,31 +209,30 @@ async fn run(every: &[Command], node: &NodeId, reads: bool, args: Value) -> Resu
         node.as_str(),
         if outcome.is_ok() { "ok" } else { "failed" },
     );
-    outcome
+    outcome.map(|value| match value {
+        Value::Object(fields) => fields,
+        // MCP structured results are objects. Preserve the command's value inside one.
+        other => Map::from_iter([("result".into(), other)]),
+    })
 }
 
-/// `swarm_commands`: the commands whose name or description holds the
+/// `swarm_search`: the commands whose name or description holds the
 /// query's words, best first; every name with no query.
-fn find(every: &[Command], args: &Value) -> Result<Value, Error> {
-    let query = match args.get("query") {
-        None | Some(Value::Null) => "",
-        Some(Value::String(query)) => query.as_str(),
-        Some(_) => return Err(invalid("query is a string")),
-    };
-    let full = match args.get("detail") {
-        None | Some(Value::Null) => false,
-        Some(Value::String(detail)) if detail == "brief" => false,
-        Some(Value::String(detail)) if detail == "full" => true,
-        Some(_) => return Err(invalid("detail is brief or full")),
-    };
-    let words = words(query);
+fn find(every: &[Command], args: SearchCommands) -> CommandsFound {
+    let words = words(args.query.as_deref().unwrap_or_default());
     if words.is_empty() {
-        let names: Vec<&str> = every.iter().map(|c| c.name).collect();
-        return Ok(json!({
-            "commands": names,
-            "hint": "Ask again with words for what you want, to see what each does and how to run it.",
-        }));
+        return CommandsFound {
+            commands: every
+                .iter()
+                .map(|command| CommandMatch::Name(command.name))
+                .collect(),
+            hint: Some(
+                "Ask again with words for what you want, to see what each does and how to run it.",
+            ),
+            more: None,
+        };
     }
+    let full = matches!(args.detail, Some(SearchDetail::Full));
     let mut scored: Vec<(usize, usize, &Command)> = every
         .iter()
         .enumerate()
@@ -268,23 +256,22 @@ fn find(every: &[Command], args: &Value) -> Result<Value, Error> {
         .collect();
     scored.sort_by(|a, b| b.0.cmp(&a.0).then(a.1.cmp(&b.1)));
     let more = scored.len().saturating_sub(FOUND);
-    let commands: Vec<Value> = scored
+    let commands = scored
         .iter()
         .take(FOUND)
-        .map(|(_, _, command)| {
-            let mut found = json!({
-                "name": command.name,
-                "does": command.effect.word(),
-                "run_with": if command.effect.reads() { READ } else { RUN },
-                "description": command.description,
-            });
-            if full {
-                found["inputSchema"] = (command.schema)();
-            }
-            found
+        .map(|(_, _, command)| CommandMatch::Match {
+            name: command.name,
+            does: command.effect.word(),
+            run_with: if command.effect.reads() { READ } else { RUN },
+            description: command.description.to_string(),
+            input_schema: full.then(|| (command.schema)()),
         })
         .collect();
-    Ok(json!({ "commands": commands, "more": more }))
+    CommandsFound {
+        commands,
+        hint: None,
+        more: Some(more),
+    }
 }
 
 /// The words a query looks for: lowercase, without the short ones that
@@ -311,15 +298,19 @@ fn found(text: &str, word: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde_json::json;
 
     fn command(name: &'static str, effect: Effect, description: &'static str) -> Command {
-        Command::new(
-            name,
-            effect,
-            description,
-            || json!({ "type": "object" }),
-            |args: Value| async move { Ok(args) },
-        )
+        #[derive(Deserialize, JsonSchema)]
+        struct Empty {}
+
+        let mut command = Command::typed(name, effect, |_: Empty| async { Ok(json!({})) });
+        command.description = description.into();
+        command
+    }
+
+    fn search(every: &[Command], args: Value) -> Value {
+        json!(find(every, serde_json::from_value(args).unwrap()))
     }
 
     #[test]
@@ -333,7 +324,7 @@ mod tests {
             ),
             command("mission_list", Effect::Reads, "List the missions."),
         ];
-        let found = find(&every, &json!({ "query": "approve a gate" })).unwrap();
+        let found = search(&every, json!({ "query": "approve a gate" }));
         let names: Vec<&str> = found["commands"]
             .as_array()
             .unwrap()
@@ -343,15 +334,15 @@ mod tests {
         assert_eq!(names, ["gate_approve", "run_status"]);
         assert_eq!(found["commands"][0]["run_with"], "swarm_run");
         assert_eq!(found["commands"][1]["run_with"], "swarm_read");
-        assert!(found["commands"][0].get("inputSchema").is_none());
-        let full = find(&every, &json!({ "query": "missions", "detail": "full" })).unwrap();
+        assert!(found["commands"][0].get("input_schema").is_none());
+        let full = search(&every, json!({ "query": "missions", "detail": "full" }));
         assert_eq!(full["commands"][0]["name"], "mission_list");
-        assert_eq!(full["commands"][0]["inputSchema"]["type"], "object");
-        let all = find(&every, &json!({})).unwrap();
+        assert_eq!(full["commands"][0]["input_schema"]["type"], "object");
+        let all = search(&every, json!({}));
         assert_eq!(
             all["commands"],
             json!(["run_status", "gate_approve", "mission_list"])
         );
-        assert!(find(&every, &json!({ "detail": "most" })).is_err());
+        assert!(serde_json::from_value::<SearchCommands>(json!({ "detail": "most" })).is_err());
     }
 }

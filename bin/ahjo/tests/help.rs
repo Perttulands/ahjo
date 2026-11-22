@@ -4,15 +4,17 @@ use ahjo_node_kit::{Area, Built, Command, Listing, Setup};
 use ahjo_testkit::node::Node;
 use serde_json::json;
 
+/// A test command.
+#[derive(serde::Deserialize, schemars::JsonSchema)]
+struct Show {}
+
 struct One(&'static str);
 impl Area for One {
     fn commands(&self) -> Vec<Command> {
-        vec![Command::new(
+        vec![Command::typed(
             self.0,
             ahjo_node_kit::Effect::Reads,
-            "A test command.",
-            || json!({"type":"object","properties":{}}),
-            |_| async { Ok(json!({})) },
+            |_: Show| async { Ok(json!({})) },
         )]
     }
 }

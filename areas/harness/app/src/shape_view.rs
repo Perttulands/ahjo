@@ -13,7 +13,8 @@ use ahjo_app_kit::widgets::field::{FieldEvent, TextField};
 use ahjo_app_kit::widgets::kit::{self, Kind};
 use ahjo_app_kit::widgets::{markdown, pane, syntax};
 use ahjo_harness_contract::commands::{
-    AddHook, AtNode, HookEdited, ReadFile, ReadShape, RemoveHook, SetHook, SetSetting, SwitchHook,
+    AtNode, CreateHook, DeleteHook, EditHook, EditSetting, HookEdited, ReadFile, ShowShape,
+    SwitchHook,
 };
 use gpui::{
     AnyElement, AppContext, Context, Div, Entity, Hsla, SharedString, Stateful, Window, div,
@@ -170,7 +171,7 @@ impl HarnessPage {
         }
         let asked = (v.dir.clone(), v.harness.clone());
         v.asking = Some(asked.clone());
-        let input = ReadShape {
+        let input = ShowShape {
             dir: asked.0.clone(),
             harness: Some(asked.1.clone()),
         };
@@ -346,7 +347,7 @@ impl HarnessPage {
                 Ok(answer) => {
                     let text = answer.result;
                     let shown = match &page.shape.shape {
-                        Some(sp) => sh::short(&text.path, sp.root.as_deref(), &sp.home),
+                        Some(sp) => sh::short(&text.path, sp.root.as_deref(), &sp.home_dir),
                         None => text.path.clone(),
                     };
                     page.host.toast(&format!("Saved {shown}"), cx);
@@ -385,7 +386,7 @@ impl HarnessPage {
         match change {
             sh::HookChange::Add { hook } => self.harness_call(
                 &node,
-                AddHook {
+                CreateHook {
                     harness,
                     file,
                     event: hook.event,
@@ -398,7 +399,7 @@ impl HarnessPage {
             ),
             sh::HookChange::Set { at, was, hook } => self.harness_call(
                 &node,
-                SetHook {
+                EditHook {
                     harness,
                     file,
                     event: at.event,
@@ -416,7 +417,7 @@ impl HarnessPage {
             ),
             sh::HookChange::Remove { at, was } => self.harness_call(
                 &node,
-                RemoveHook {
+                DeleteHook {
                     harness,
                     file,
                     event: at.event,
@@ -497,7 +498,7 @@ impl HarnessPage {
         // The command accepts JSON text for CLI callers. Encode even strings
         // so words like "true" remain strings rather than changing type.
         let value = (!unset).then(|| Value::String(value.to_string()));
-        let edit = SetSetting {
+        let edit = EditSetting {
             harness: self.shape.harness.clone(),
             file,
             key,
@@ -564,7 +565,7 @@ impl HarnessPage {
             .shape
             .shape
             .as_ref()
-            .map(|s| s.home.clone())
+            .map(|s| s.home_dir.clone())
             .unwrap_or_default();
         let folder_row = |page: &Self,
                           d: &str,
@@ -624,7 +625,7 @@ impl HarnessPage {
         let v = &self.shape;
         let mut head = pane::head(t).px(px(size::PAD));
         let title = match &v.shape {
-            Some(s) => sh::short(&s.dir, None, &s.home),
+            Some(s) => sh::short(&s.dir, None, &s.home_dir),
             None if !v.dir.is_empty() => v.dir.clone(),
             None => "What an agent gets".into(),
         };
@@ -896,7 +897,7 @@ impl HarnessPage {
                         .min_w_0()
                         .flex()
                         .flex_col()
-                        .child(pane::cell(sh::short(&i.path, root, &shape.home)))
+                        .child(pane::cell(sh::short(&i.path, root, &shape.home_dir)))
                         .children(i.why.clone().map(|w| {
                             div()
                                 .text_size(px(size::SMALL))
@@ -1049,10 +1050,9 @@ impl HarnessPage {
                                     .child(pane::cell(h.run.clone())),
                             )
                             .child(
-                                div()
-                                    .text_size(px(size::SMALL))
-                                    .text_color(t.dim)
-                                    .child(sh::short(&h.file, shape.root.as_deref(), &shape.home)),
+                                div().text_size(px(size::SMALL)).text_color(t.dim).child(
+                                    sh::short(&h.file, shape.root.as_deref(), &shape.home_dir),
+                                ),
                             )
                             .children(h.note.clone().map(|n| {
                                 div()
@@ -1234,7 +1234,7 @@ impl HarnessPage {
                     )
                 })
         };
-        let short = |p: &str| sh::short(p, shape.root.as_deref(), &shape.home);
+        let short = |p: &str| sh::short(p, shape.root.as_deref(), &shape.home_dir);
         match v.pick.clone() {
             Pick::None => div().size_full().child(pane::vacant(
                 t,
@@ -1485,7 +1485,7 @@ impl HarnessPage {
                 kit::button(
                     t,
                     SharedString::from(format!("shape-into-{n}")),
-                    sh::short(f, shape.root.as_deref(), &shape.home),
+                    sh::short(f, shape.root.as_deref(), &shape.home_dir),
                     Kind::Quiet,
                 )
                 .when(on, |b| b.text_color(t.accent).border_color(t.divider))

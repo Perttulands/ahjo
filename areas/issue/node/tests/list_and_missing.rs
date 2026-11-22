@@ -151,12 +151,12 @@ async fn list_filters_closed_without_changing_the_page_and_missing_is_not_found(
         .as_str()
         .unwrap();
     let text = node
-        .call("issue_snapshot_text", json!({"reference": reference}))
+        .call("issue_read_snapshot", json!({"reference": reference}))
         .await
         .unwrap();
     assert_eq!(text["text"], "Run bd list in the store folder.");
     let matches = node
-        .call("issue_snapshot_search", json!({"query":"store folder"}))
+        .call("issue_search_snapshot", json!({"query":"store folder"}))
         .await
         .unwrap();
     assert!(
@@ -180,7 +180,7 @@ async fn list_filters_closed_without_changing_the_page_and_missing_is_not_found(
     assert_eq!(error.code, "not_found");
     assert!(error.message.contains("tst-missing"));
     let missing_text = node
-        .call("issue_snapshot_text", json!({"reference":"tst-missing"}))
+        .call("issue_read_snapshot", json!({"reference":"tst-missing"}))
         .await
         .unwrap_err();
     assert_eq!(missing_text.code, "not_found");

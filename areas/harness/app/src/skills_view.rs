@@ -102,7 +102,7 @@ impl HarnessPage {
         self.catalog.shapes.clear();
         let node = self.shape.node.clone();
         for (harness, _) in sh::HARNESSES {
-            let input = ahjo_harness_contract::commands::ReadShape {
+            let input = ahjo_harness_contract::commands::ShowShape {
                 dir: dir.clone(),
                 harness: Some((*harness).into()),
             };
@@ -206,7 +206,7 @@ impl HarnessPage {
             .catalog
             .shapes
             .first()
-            .map(|s| s.home.clone())
+            .map(|s| s.home_dir.clone())
             .unwrap_or_default();
         let v = &self.shape;
         let mut head = pane::head(t)

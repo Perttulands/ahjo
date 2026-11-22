@@ -124,8 +124,10 @@ real list, and `ahjo kinds` prints who owns which kinds.
 
 - **Frames.** The first byte of a `/ws` frame is its kind. A client's frame
   goes to the channel of the area owning its kind; each channel pushes its own.
-- **Commands.** A command is a `noun_verb` name (the verb may be several words: `harness_hook_set` is `ahjo harness hook-set`), a description, an input
-  schema and a call answering JSON or the error shape. `node-kit` serves it as
+- **Commands.** A command is a `noun_verb` name (the verb may be several words: `harness_edit_hook` is `ahjo harness edit-hook`), a typed request and
+  response, and a handler answering the response or the error shape. The
+  request supplies the description and input schema, and the response supplies
+  the output schema. `node-kit` serves it as
   an MCP tool and as the CLI verb `ahjo noun verb`. A `node` argument names
   where it runs; MCP's lists leave it out while only this node can. Each
   command declares its effect (reads, writes, sets, destroys), which its
@@ -142,7 +144,7 @@ real list, and `ahjo kinds` prints who owns which kinds.
 - **Tool sets.** A binary may name tool sets (`ahjo`'s `TOOL_SETS`), each an
   MCP server at `/mcp/<set>` of chosen commands from any area, shaped for one
   client: `chatgpt` holds the handoff, issue and host tools. A set may add
-  `swarm_commands`, which finds every other command by words, and
+  `swarm_search`, which finds every other command by words, and
   `swarm_read` and `swarm_run`, which run one through the same call and
   `node` check as `tools/call`, each only for its kind: a read never needs
   confirming, a change always does. So the client carries a dozen tools'

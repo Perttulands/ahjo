@@ -2,10 +2,10 @@ use crate::brain::{Brain, Refusal, refusal_code};
 use ahjo_brain_contract::{
     BAD_REQUEST, BRAIN_ERROR, NOT_FOUND, UNAVAILABLE,
     commands::{
-        BrainChange, BrainChanges, BrainChangesResult, BrainCollection, BrainCollectionResult,
-        BrainCollections, BrainCollectionsResult, BrainFiles, BrainFilesResult, BrainPage,
-        BrainRead, BrainSave, BrainSaved, BrainSearch, BrainSearchResults, BrainSend, BrainSent,
-        BrainTexts, BrainTextsResult,
+        BrainChange, BrainChangesResult, BrainCollectionResult, BrainCollectionsResult,
+        BrainFilesResult, BrainListChanges, BrainListCollection, BrainListCollections,
+        BrainListFiles, BrainPage, BrainRead, BrainReadTexts, BrainSaved, BrainSearch,
+        BrainSearchResults, BrainSend, BrainSent, BrainTextsResult, BrainWrite,
     },
 };
 use ahjo_core::{Error, TypedCommand};
@@ -64,30 +64,38 @@ pub fn commands(
             })
         }),
         command(&ctx, Effect::Writes, save),
-        command(&ctx, Effect::Reads, |ctx, _: BrainCollections| async move {
-            let collections = ctx.brain.collections().await.map_err(refused)?;
-            Ok(BrainCollectionsResult {
-                node: ctx.node.clone(),
-                collections,
-            })
-        }),
+        command(
+            &ctx,
+            Effect::Reads,
+            |ctx, _: BrainListCollections| async move {
+                let collections = ctx.brain.collections().await.map_err(refused)?;
+                Ok(BrainCollectionsResult {
+                    node: ctx.node.clone(),
+                    collections,
+                })
+            },
+        ),
         command(&ctx, Effect::Reads, changes),
-        command(&ctx, Effect::Reads, |ctx, _: BrainFiles| async move {
+        command(&ctx, Effect::Reads, |ctx, _: BrainListFiles| async move {
             Ok(BrainFilesResult {
                 node: ctx.node.clone(),
                 files: ctx.brain.files().await.map_err(refused)?,
             })
         }),
-        command(&ctx, Effect::Reads, |ctx, args: BrainTexts| async move {
-            Ok(BrainTextsResult {
-                node: ctx.node.clone(),
-                texts: ctx.brain.texts(args.paths).await.map_err(refused)?,
-            })
-        }),
         command(
             &ctx,
             Effect::Reads,
-            |ctx, args: BrainCollection| async move {
+            |ctx, args: BrainReadTexts| async move {
+                Ok(BrainTextsResult {
+                    node: ctx.node.clone(),
+                    texts: ctx.brain.texts(args.paths).await.map_err(refused)?,
+                })
+            },
+        ),
+        command(
+            &ctx,
+            Effect::Reads,
+            |ctx, args: BrainListCollection| async move {
                 let read = ctx.brain.collection(&args.name).await.map_err(refused)?;
                 Ok(BrainCollectionResult {
                     node: ctx.node.clone(),
@@ -100,7 +108,7 @@ pub fn commands(
     ]
 }
 
-async fn save(ctx: Arc<Ctx>, args: BrainSave) -> Result<BrainSaved, Error> {
+async fn save(ctx: Arc<Ctx>, args: BrainWrite) -> Result<BrainSaved, Error> {
     // Finish the page save and commit even if the caller stops waiting.
     let brain = ctx.brain.clone();
     let task = tokio::spawn(async move {
@@ -123,7 +131,7 @@ async fn save(ctx: Arc<Ctx>, args: BrainSave) -> Result<BrainSaved, Error> {
     })
 }
 
-async fn changes(ctx: Arc<Ctx>, args: BrainChanges) -> Result<BrainChangesResult, Error> {
+async fn changes(ctx: Arc<Ctx>, args: BrainListChanges) -> Result<BrainChangesResult, Error> {
     if args.limit == Some(0) {
         return Err(Error::new(
             BAD_REQUEST,

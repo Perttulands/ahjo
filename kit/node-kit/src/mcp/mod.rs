@@ -255,17 +255,14 @@ fn tool(command: &Command) -> Value {
         annotations["idempotentHint"] = json!(true);
     }
     annotations["openWorldHint"] = json!(command.open_world);
-    let mut tool = json!({
+    json!({
         "name": command.name,
         "title": command.title(),
         "description": command.description,
         "inputSchema": schema,
+        "outputSchema": command.output_schema.as_ref(),
         "annotations": annotations,
-    });
-    if let Some(output) = &command.output_schema {
-        tool["outputSchema"] = output.as_ref().clone();
-    }
-    tool
+    })
 }
 
 /// Takes `node` out of a call's arguments: this node unless they name

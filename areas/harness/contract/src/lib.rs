@@ -111,7 +111,7 @@ pub struct Folder {
 #[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq, JsonSchema)]
 pub struct Report {
     #[serde(default)]
-    pub home: String,
+    pub home_dir: String,
     #[serde(default)]
     pub folders: Vec<Folder>,
     #[serde(default)]

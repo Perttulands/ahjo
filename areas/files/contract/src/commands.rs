@@ -38,7 +38,7 @@ pub struct FileDiff {
 /// List files in the repository that differ from HEAD.
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
-pub struct FileStatus {
+pub struct FileListChanges {
     /// Folder or file in the repository.
     pub path: String,
 }
@@ -46,7 +46,7 @@ pub struct FileStatus {
 /// List what changed most recently under the roots or in one folder.
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
-pub struct FileRecent {
+pub struct FileListRecent {
     /// Folder to scope the list to. Its files are listed individually.
     pub path: Option<String>,
 }
@@ -74,7 +74,7 @@ pub struct FileWrite {
 /// Create a folder.
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
-pub struct FileMkdir {
+pub struct FileCreateFolder {
     /// Folder to create.
     pub path: String,
 }
@@ -100,7 +100,7 @@ pub struct FileDelete {
 /// Find files by path or words, across the roots or under one folder.
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
-pub struct FileLocate {
+pub struct FileSearchPaths {
     /// Path or words to find. With --under, match this text in names and paths.
     pub query: String,
     /// Search only under this folder. Can include hidden folders when named explicitly.
@@ -144,7 +144,7 @@ pub struct FileResume {
 /// Read local copy progress.
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
-pub struct FileTransfer {
+pub struct FileShowTransfer {
     /// Id of the transfer to read.
     pub id: String,
 }
@@ -244,15 +244,15 @@ macro_rules! command {
 command!(FileList, "file_list", FileListed);
 command!(FileRead, "file_read", FileReadResult);
 command!(FileDiff, "file_diff", Diff);
-command!(FileStatus, "file_status", RepoStatus);
-command!(FileRecent, "file_recent", Recent);
+command!(FileListChanges, "file_list_changes", RepoStatus);
+command!(FileListRecent, "file_list_recent", Recent);
 command!(FileWrite, "file_write", FileWritten);
-command!(FileMkdir, "file_mkdir", FilePath);
+command!(FileCreateFolder, "file_create_folder", FilePath);
 command!(FileMove, "file_move", FilePath);
 command!(FileDelete, "file_delete", FileDeleted);
-command!(FileLocate, "file_locate", Matches);
+command!(FileSearchPaths, "file_search_paths", Matches);
 command!(FileSearch, "file_search", FileSearched);
-command!(FileTransfer, "file_transfer", FileTransferResult);
+command!(FileShowTransfer, "file_show_transfer", FileTransferResult);
 command!(FileStat, "file_stat", FileStated);
 
 impl TypedCommand for FileCopy {

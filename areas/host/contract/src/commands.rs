@@ -119,15 +119,15 @@ pub struct ServiceActed {
 /// Read the last lines a service's units logged, oldest first.
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
-pub struct ServiceLog {
+pub struct ServiceRead {
     /// The service id.
     pub id: String,
     /// How many lines to read. Defaults to 40 and is capped at 200 per unit.
     pub lines: Option<usize>,
 }
 
-impl TypedCommand for ServiceLog {
-    const NAME: &'static str = "service_log";
+impl TypedCommand for ServiceRead {
+    const NAME: &'static str = "service_read";
     type Output = ServiceLogged;
 }
 

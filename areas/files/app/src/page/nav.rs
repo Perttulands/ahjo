@@ -973,7 +973,7 @@ impl FilesPage {
         let node = self.tree.node.clone();
         self.call(
             NodeId(node.clone()),
-            FileStatus {
+            FileListChanges {
                 path: folder.clone(),
             },
             move |p, answer, cx| {

@@ -125,7 +125,7 @@ async fn mission_commands_on_a_node_with_fake_sessions() {
             .code,
         "not_found"
     );
-    let archives = node.call("mission_archives", json!({})).await.unwrap();
+    let archives = node.call("mission_list_archives", json!({})).await.unwrap();
     let entry = archives["archives"]
         .as_array()
         .unwrap()
@@ -136,14 +136,14 @@ async fn mission_commands_on_a_node_with_fake_sessions() {
     assert_eq!(entry["mission"], true);
     let removed = node
         .call(
-            "mission_purge",
+            "mission_delete_archive",
             json!({"slug":"example", "archive_id":archive}),
         )
         .await
         .unwrap();
     assert_eq!(removed["removed"]["archive_id"], archive);
     assert!(
-        node.call("mission_archives", json!({})).await.unwrap()["archives"]
+        node.call("mission_list_archives", json!({})).await.unwrap()["archives"]
             .as_array()
             .unwrap()
             .is_empty()
@@ -391,7 +391,10 @@ async fn lists_the_repositories_a_step_may_name() {
     let node = Node::start(AREAS, "[missions]\nrepositories = { app = \"/tmp\" }\n")
         .await
         .unwrap();
-    let listed = node.call("mission_repositories", json!({})).await.unwrap();
+    let listed = node
+        .call("mission_list_repositories", json!({}))
+        .await
+        .unwrap();
     assert_eq!(listed["repositories"], json!(["app"]));
     node.stop().await;
 }

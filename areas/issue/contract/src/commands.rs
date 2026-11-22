@@ -92,7 +92,7 @@ pub struct IssueCreated {
 /// Read one item's text from the last snapshot, falling back to its tracker.
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
-pub struct SnapshotText {
+pub struct ReadSnapshot {
     pub reference: String,
 }
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
@@ -102,7 +102,7 @@ pub struct SnapshotTextRead {
 /// Search the last snapshot without refreshing it, including its private text.
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
-pub struct SnapshotSearch {
+pub struct SearchSnapshot {
     pub query: String,
 }
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
@@ -122,5 +122,5 @@ typed!(ListIssues, IssuesListed, "issue_list", 35);
 typed!(SearchIssues, IssuesFound, "issue_search", 35);
 typed!(ShowIssue, IssueShown, "issue_show", 95);
 typed!(CreateIssue, IssueCreated, "issue_create", 95);
-typed!(SnapshotText, SnapshotTextRead, "issue_snapshot_text", 30);
-typed!(SnapshotSearch, SnapshotMatches, "issue_snapshot_search", 30);
+typed!(ReadSnapshot, SnapshotTextRead, "issue_read_snapshot", 30);
+typed!(SearchSnapshot, SnapshotMatches, "issue_search_snapshot", 30);

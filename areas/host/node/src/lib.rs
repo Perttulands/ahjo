@@ -3,7 +3,7 @@ mod commands;
 pub mod host;
 use ahjo_core::TypedCommand;
 use ahjo_host_contract::commands::{
-    HostShow, ServiceList, ServiceLog, ServiceRestart, ServiceShow, ServiceStart, ServiceStop,
+    HostShow, ServiceList, ServiceRead, ServiceRestart, ServiceShow, ServiceStart, ServiceStop,
 };
 use ahjo_node_kit::{Area, BoxFuture, Built, Channel, Client, Command, Listing, Setup};
 use serde::Deserialize;
@@ -20,7 +20,7 @@ pub const LISTING: Listing = Listing {
         ServiceStart::NAME,
         ServiceStop::NAME,
         ServiceRestart::NAME,
-        ServiceLog::NAME,
+        ServiceRead::NAME,
     ],
     build,
 };

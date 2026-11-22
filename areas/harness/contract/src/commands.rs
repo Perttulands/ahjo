@@ -27,7 +27,7 @@ pub struct Link {
 /// Show a folder’s instructions, skills, hooks, settings and servers in the harness that reads them.
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
-pub struct ReadShape {
+pub struct ShowShape {
     /// The folder the agent starts in.
     pub dir: String,
     /// The harness id. Defaults to claude.
@@ -38,17 +38,17 @@ pub struct ReadShape {
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ReadFile {
-    /// The file path listed by harness shape.
+    /// The file path listed by harness show-shape.
     pub path: String,
 }
 
 /// Add a hook to a harness settings file.
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
-pub struct AddHook {
+pub struct CreateHook {
     /// The harness id, claude or codex.
     pub harness: String,
-    /// The file listed by harness shape.
+    /// The file listed by harness show-shape.
     pub file: String,
     /// The event that triggers the hook.
     pub event: String,
@@ -63,10 +63,10 @@ pub struct AddHook {
 /// Change an existing hook.
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
-pub struct SetHook {
+pub struct EditHook {
     /// The harness id, claude or codex.
     pub harness: String,
-    /// The file listed by harness shape.
+    /// The file listed by harness show-shape.
     pub file: String,
     /// The hook’s current event.
     pub event: String,
@@ -91,10 +91,10 @@ pub struct SetHook {
 /// Remove a hook.
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
-pub struct RemoveHook {
+pub struct DeleteHook {
     /// The harness id, claude or codex.
     pub harness: String,
-    /// The file listed by harness shape.
+    /// The file listed by harness show-shape.
     pub file: String,
     /// The hook’s current event.
     pub event: String,
@@ -114,7 +114,7 @@ pub struct RemoveHook {
 pub struct SwitchHook {
     /// The harness id, claude or codex.
     pub harness: String,
-    /// The file listed by harness shape.
+    /// The file listed by harness show-shape.
     pub file: String,
     /// The hook’s current event.
     pub event: String,
@@ -133,10 +133,10 @@ pub struct SwitchHook {
 /// Set or unset a harness setting.
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
-pub struct SetSetting {
+pub struct EditSetting {
     /// The harness id, claude or codex.
     pub harness: String,
-    /// The file listed by harness shape.
+    /// The file listed by harness show-shape.
     pub file: String,
     /// The dotted setting key.
     pub key: String,
@@ -184,8 +184,8 @@ pub struct SettingEdited {
     pub key: String,
 }
 
-impl ahjo_core::TypedCommand for ReadShape {
-    const NAME: &'static str = "harness_shape";
+impl ahjo_core::TypedCommand for ShowShape {
+    const NAME: &'static str = "harness_show_shape";
     type Output = AtNode<crate::shape::Shape>;
 }
 impl ahjo_core::TypedCommand for ReadFile {
@@ -196,23 +196,23 @@ impl ahjo_core::TypedCommand for crate::shape::Write {
     const NAME: &'static str = "harness_write";
     type Output = AtNode<crate::shape::Text>;
 }
-impl ahjo_core::TypedCommand for AddHook {
-    const NAME: &'static str = "harness_hook_add";
+impl ahjo_core::TypedCommand for CreateHook {
+    const NAME: &'static str = "harness_create_hook";
     type Output = AtNode<HookEdited>;
 }
-impl ahjo_core::TypedCommand for SetHook {
-    const NAME: &'static str = "harness_hook_set";
+impl ahjo_core::TypedCommand for EditHook {
+    const NAME: &'static str = "harness_edit_hook";
     type Output = AtNode<HookEdited>;
 }
-impl ahjo_core::TypedCommand for RemoveHook {
-    const NAME: &'static str = "harness_hook_remove";
+impl ahjo_core::TypedCommand for DeleteHook {
+    const NAME: &'static str = "harness_delete_hook";
     type Output = AtNode<HookEdited>;
 }
 impl ahjo_core::TypedCommand for SwitchHook {
-    const NAME: &'static str = "harness_hook_switch";
+    const NAME: &'static str = "harness_switch_hook";
     type Output = AtNode<HookEdited>;
 }
-impl ahjo_core::TypedCommand for SetSetting {
-    const NAME: &'static str = "harness_setting_set";
+impl ahjo_core::TypedCommand for EditSetting {
+    const NAME: &'static str = "harness_edit_setting";
     type Output = AtNode<SettingEdited>;
 }

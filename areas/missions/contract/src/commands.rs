@@ -41,7 +41,7 @@ pub struct MissionPurge {
 pub struct MissionCreate {
     pub slug: String,
     pub title: Option<String>,
-    /// Copy a staffed, wired example from mission examples.
+    /// Copy a staffed, wired example from mission list-examples.
     pub example: Option<String>,
     /// Rough steps, one per line or separated by semicolons, chained from Input to Done.
     pub steps: Option<String>,
@@ -162,7 +162,7 @@ pub struct MissionArrange {
 }
 
 /// Archive the definition, layout and notes. Run history remains.
-/// Use mission archives to see them and mission purge to remove one.
+/// Use mission list-archives to see them and mission delete-archive to remove one.
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct MissionDelete {
@@ -515,18 +515,18 @@ macro_rules! commands {
 
 commands! {
     MissionList => "mission_list", MissionsListed;
-    MissionRepositories => "mission_repositories", MissionRepositoriesListed;
-    MissionArchives => "mission_archives", MissionArchivesListed;
-    MissionPurge => "mission_purge", MissionPurged;
+    MissionRepositories => "mission_list_repositories", MissionRepositoriesListed;
+    MissionArchives => "mission_list_archives", MissionArchivesListed;
+    MissionPurge => "mission_delete_archive", MissionPurged;
     MissionShow => "mission_show", MissionShown;
     MissionValidate => "mission_validate", MissionValidated;
     MissionCreate => "mission_create", MissionCreated;
-    MissionExamples => "mission_examples", MissionExamplesListed;
+    MissionExamples => "mission_list_examples", MissionExamplesListed;
     ExportMission => "mission_export", ExportedMission;
     ApplyMission => "mission_apply", AppliedMission;
     MissionEdit => "mission_edit", MissionEdited;
     MissionNotes => "mission_notes", MissionNotesListed;
-    MissionHistory => "mission_history", MissionHistoryListed;
+    MissionHistory => "mission_list_history", MissionHistoryListed;
     MissionNote => "mission_note", MissionNoteReceipt;
     MissionReply => "mission_reply", MissionNoteReceipt;
     MissionResolve => "mission_resolve", MissionNoteReceipt;

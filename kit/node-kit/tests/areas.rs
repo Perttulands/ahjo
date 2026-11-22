@@ -47,6 +47,17 @@ const fn listed(
     }
 }
 
+/// Switch the lights. Answers with how bright they are.
+#[derive(serde::Deserialize, schemars::JsonSchema)]
+struct SwitchLights {
+    level: Option<u64>,
+}
+
+#[derive(serde::Serialize, schemars::JsonSchema)]
+struct LightLevel {
+    level: u64,
+}
+
 impl Area for Lights {
     fn routes(&self) -> Router {
         Router::new().route(
@@ -56,14 +67,12 @@ impl Area for Lights {
     }
 
     fn commands(&self) -> Vec<Command> {
-        vec![Command::new(
+        vec![Command::typed(
             self.command,
-            ahjo_node_kit::Effect::Sets,
-            "Switch the lights. Answers with how bright they are.",
-            || json!({ "type": "object", "properties": { "level": { "type": "integer" } } }),
-            |args: Value| async move {
-                match args["level"].as_u64() {
-                    Some(level) => Ok(json!({ "level": level })),
+            Effect::Sets,
+            |args: SwitchLights| async move {
+                match args.level {
+                    Some(level) => Ok(LightLevel { level }),
                     None => Err(Error::new("no_level", "level is required")),
                 }
             },
@@ -334,12 +343,14 @@ struct Said {
 impl Area for Said {
     fn commands(&self) -> Vec<Command> {
         let word = self.word;
-        vec![Command::new(
+        /// Says the word the lights offer.
+        #[derive(serde::Deserialize, schemars::JsonSchema)]
+        struct Say {}
+
+        vec![Command::typed(
             "lamps_say",
-            ahjo_node_kit::Effect::Reads,
-            "Says the word the lights offer.",
-            || json!({ "type": "object" }),
-            move |_| async move { Ok(json!(word)) },
+            Effect::Reads,
+            move |_: Say| async move { Ok(word) },
         )]
     }
 }
@@ -558,12 +569,14 @@ struct Shades;
 
 impl Area for Shades {
     fn commands(&self) -> Vec<Command> {
-        vec![Command::new(
+        /// Close the shades.
+        #[derive(serde::Deserialize, schemars::JsonSchema)]
+        struct Close {}
+
+        vec![Command::typed(
             "shades_close",
-            ahjo_node_kit::Effect::Sets,
-            "Close the shades.",
-            || json!({ "type": "object", "properties": {}, "required": [] }),
-            |_| async { Ok(json!("closed")) },
+            Effect::Sets,
+            |_: Close| async { Ok("closed") },
         )]
     }
 }
@@ -687,7 +700,8 @@ async fn typed_calls_share_mcp_authority_arguments_and_execution() {
             "unknown_node"
         );
     }
-    for name in ["vault_absent", "lights_switch"] {
+    {
+        let name = "vault_absent";
         let (status, body) = post(&node, &format!("/api/call/{name}"), json!({}), "").await;
         assert_eq!(status, 404, "{body}");
         let refusal: Value = serde_json::from_str(&body).unwrap();
@@ -813,22 +827,19 @@ struct Clock;
 
 impl Area for Clock {
     fn commands(&self) -> Vec<Command> {
-        let empty = || json!({ "type": "object", "properties": {} });
+        /// Read the clock's time.
+        #[derive(serde::Deserialize, schemars::JsonSchema)]
+        struct Read {}
+
+        /// Reset the clock, losing its time.
+        #[derive(serde::Deserialize, schemars::JsonSchema)]
+        struct Reset {}
+
         vec![
-            Command::new(
-                "clock_read",
-                Effect::Reads,
-                "Read the clock's time.",
-                empty,
-                |_| async { Ok(json!("noon")) },
-            ),
-            Command::new(
-                "clock_reset",
-                Effect::Destroys,
-                "Reset the clock, losing its time.",
-                empty,
-                |_| async { Ok(json!("reset")) },
-            ),
+            Command::typed("clock_read", Effect::Reads, |_: Read| async { Ok("noon") }),
+            Command::typed("clock_reset", Effect::Destroys, |_: Reset| async {
+                Ok("reset")
+            }),
         ]
     }
 }
@@ -842,7 +853,7 @@ const CLOCK_LISTED: Listing = listed("clock", &[], &["clock_read", "clock_reset"
 /// A set for a client that wants the clock and to reach the rest.
 const HOME: ToolSet = ToolSet {
     name: "home",
-    tools: &["clock_read", "swarm_commands", "swarm_read", "swarm_run"],
+    tools: &["clock_read", "swarm_search", "swarm_read", "swarm_run"],
     instructions: "The home: read the clock, find the rest.",
 };
 
@@ -906,7 +917,7 @@ async fn a_tool_set_serves_its_commands_and_reaches_the_rest_as_they_are() {
     assert_eq!(status, 200, "{body}");
     assert_eq!(
         tool_names(&body),
-        ["clock_read", "swarm_commands", "swarm_read", "swarm_run"]
+        ["clock_read", "swarm_search", "swarm_read", "swarm_run"]
     );
     let answer: Value = serde_json::from_str(&body).unwrap();
     let annotations = |at: usize| answer["result"]["tools"][at]["annotations"].clone();
@@ -946,7 +957,7 @@ async fn a_tool_set_serves_its_commands_and_reaches_the_rest_as_they_are() {
     let found = called(
         &node,
         "/mcp/home",
-        "swarm_commands",
+        "swarm_search",
         json!({ "query": "reset clock" }),
     )
     .await
@@ -966,7 +977,7 @@ async fn a_tool_set_serves_its_commands_and_reaches_the_rest_as_they_are() {
     };
     assert_eq!(
         read("swarm_read", "clock_read", json!({})).await,
-        Ok(json!("noon"))
+        Ok(json!({"result": "noon"}))
     );
     assert_eq!(
         read("swarm_read", "clock_reset", json!({})).await,
@@ -1049,7 +1060,7 @@ async fn a_tool_set_naming_what_is_not_there_refuses_to_start() {
     let (_, body) = rpc(&node, "/mcp/home", list).await;
     assert_eq!(
         tool_names(&body),
-        ["swarm_commands", "swarm_read", "swarm_run"]
+        ["swarm_search", "swarm_read", "swarm_run"]
     );
     assert_eq!(
         called(

@@ -83,7 +83,7 @@ impl Report {
     /// Converts local paths and probe results into the shared wire contract.
     pub fn wire(&self, home: &Home) -> wire::Report {
         wire::Report {
-            home: home.show(&home.dir),
+            home_dir: home.show(&home.dir),
             folders: FOLDERS
                 .iter()
                 .map(|(id, path)| wire::Folder {

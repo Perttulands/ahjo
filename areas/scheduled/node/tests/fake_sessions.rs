@@ -26,13 +26,13 @@ async fn mcp_lists_derived_scheduled_schemas_and_returns_the_structured_result()
     let (answer, _) = rpc("tools/list", json!({})).await.unwrap();
     let tools = answer["result"]["tools"].as_array().unwrap();
     let expected = [
-        ("list", "tasks"),
-        ("show", "task"),
-        ("create", "task"),
-        ("edit", "task"),
-        ("copy", "task"),
-        ("pause", "task"),
-        ("resume", "task"),
+        ("list", "scheduled_prompts"),
+        ("show", "scheduled_prompt"),
+        ("create", "scheduled_prompt"),
+        ("edit", "scheduled_prompt"),
+        ("copy", "scheduled_prompt"),
+        ("pause", "scheduled_prompt"),
+        ("resume", "scheduled_prompt"),
         ("run", "run"),
         ("delete", "deleted"),
     ];
@@ -67,7 +67,7 @@ async fn mcp_lists_derived_scheduled_schemas_and_returns_the_structured_result()
         .unwrap();
     let result = &answer["result"];
     assert_eq!(result["isError"], false);
-    assert_eq!(result["structuredContent"]["tasks"], json!([]));
+    assert_eq!(result["structuredContent"]["scheduled_prompts"], json!([]));
     let text: Value = serde_json::from_str(result["content"][0]["text"].as_str().unwrap()).unwrap();
     assert_eq!(result["structuredContent"], text);
     node.stop().await;
@@ -125,7 +125,7 @@ async fn scheduled_create_help_and_argument_validation_come_from_the_request_typ
     );
     assert!(error.message.contains("accepted fields:"), "{error}");
     assert_eq!(
-        node.call("scheduled_list", json!({})).await.unwrap()["tasks"],
+        node.call("scheduled_list", json!({})).await.unwrap()["scheduled_prompts"],
         json!([])
     );
 
@@ -171,7 +171,7 @@ async fn scheduled_create_help_and_argument_validation_come_from_the_request_typ
         0
     );
     let made: Value = serde_json::from_slice(&out).unwrap();
-    let task = &made["task"];
+    let task = &made["scheduled_prompt"];
     assert_eq!(task["targets"][0]["session_name"], "alpha");
     assert_eq!(task["targets"][1]["session_name"], "beta");
     assert_eq!(task["schedule"]["every_minutes"], 60);
@@ -192,7 +192,7 @@ async fn a_run_is_delivered_to_the_session_a_task_names() {
         )
         .await
         .unwrap();
-    let id = made["task"]["id"].as_str().unwrap();
+    let id = made["scheduled_prompt"]["id"].as_str().unwrap();
     node.call("scheduled_run", json!({ "id": id }))
         .await
         .unwrap();
@@ -241,18 +241,22 @@ async fn a_renamed_session_keeps_its_tasks_and_a_refusal_is_reported() {
         )
         .await
         .unwrap();
-    let id = made["task"]["id"].as_str().unwrap().to_owned();
+    let id = made["scheduled_prompt"]["id"].as_str().unwrap().to_owned();
 
     fake.rename("alpha", "beta");
     let mut shown = json!(null);
     for _ in 0..100 {
         shown = node.call("scheduled_list", json!({})).await.unwrap();
-        if shown["tasks"][0]["sessions"] == json!(["beta"]) {
+        if shown["scheduled_prompts"][0]["sessions"] == json!(["beta"]) {
             break;
         }
         tokio::time::sleep(std::time::Duration::from_millis(20)).await;
     }
-    assert_eq!(shown["tasks"][0]["sessions"], json!(["beta"]), "{shown}");
+    assert_eq!(
+        shown["scheduled_prompts"][0]["sessions"],
+        json!(["beta"]),
+        "{shown}"
+    );
 
     fake.refuse("beta");
     node.call("scheduled_run", json!({ "id": id }))
@@ -264,7 +268,9 @@ async fn a_renamed_session_keeps_its_tasks_and_a_refusal_is_reported() {
         .await
         .unwrap();
     assert!(
-        task["task"]["recent_runs"].to_string().contains("refused"),
+        task["scheduled_prompt"]["recent_runs"]
+            .to_string()
+            .contains("refused"),
         "{task}"
     );
     node.stop().await;
@@ -285,7 +291,7 @@ async fn a_task_never_types_into_another_session_that_took_its_name() {
         )
         .await
         .unwrap();
-    let id = made["task"]["id"].as_str().unwrap().to_owned();
+    let id = made["scheduled_prompt"]["id"].as_str().unwrap().to_owned();
 
     fake.close("ops");
     fake.add("ops");
@@ -294,7 +300,7 @@ async fn a_task_never_types_into_another_session_that_took_its_name() {
     let why = refused.unwrap_err().message;
     assert!(why.contains("ops is another session"), "{why}");
     let listed = node.call("scheduled_list", json!({})).await.unwrap();
-    let held = listed["tasks"][0]["held"].as_str().unwrap();
+    let held = listed["scheduled_prompts"][0]["held"].as_str().unwrap();
     assert!(held.contains("Edit the task"), "{listed}");
 
     node.call("scheduled_edit", json!({ "id": id, "sessions": ["ops"] }))
@@ -304,7 +310,7 @@ async fn a_task_never_types_into_another_session_that_took_its_name() {
         .call("scheduled_show", json!({ "id": id }))
         .await
         .unwrap();
-    assert!(shown["task"].get("held").is_none(), "{shown}");
+    assert!(shown["scheduled_prompt"].get("held").is_none(), "{shown}");
     node.call("scheduled_run", json!({ "id": id }))
         .await
         .unwrap();
@@ -332,7 +338,7 @@ async fn a_task_follows_its_session_onto_a_restarted_server() {
         )
         .await
         .unwrap();
-    let id = made["task"]["id"].as_str().unwrap().to_owned();
+    let id = made["scheduled_prompt"]["id"].as_str().unwrap().to_owned();
 
     fake.restart();
     let after = fake.add("ops");
@@ -345,7 +351,7 @@ async fn a_task_follows_its_session_onto_a_restarted_server() {
         .call("scheduled_show", json!({ "id": id }))
         .await
         .unwrap();
-    assert!(shown["task"].get("held").is_none(), "{shown}");
+    assert!(shown["scheduled_prompt"].get("held").is_none(), "{shown}");
 
     // Tied to the new ops now: another session taking its name on this
     // same server is still not typed into.
@@ -379,8 +385,8 @@ async fn the_node_says_which_targets_another_session_has_taken() {
         )
         .await
         .unwrap();
-    let id = made["task"]["id"].as_str().unwrap().to_owned();
-    let ops = made["task"]["targets"][0].clone();
+    let id = made["scheduled_prompt"]["id"].as_str().unwrap().to_owned();
+    let ops = made["scheduled_prompt"]["targets"][0].clone();
     let ops = serde_json::from_value::<ahjo_scheduled_contract::Target>(ops)
         .unwrap()
         .label();
@@ -406,7 +412,10 @@ async fn the_node_says_which_targets_another_session_has_taken() {
         .call("scheduled_show", json!({ "id": id }))
         .await
         .unwrap();
-    assert!(shown["task"].get("replaced").is_none(), "{shown}");
+    assert!(
+        shown["scheduled_prompt"].get("replaced").is_none(),
+        "{shown}"
+    );
 
     // Tied to the new server at the run; then another ops takes the name.
     node.call("scheduled_run", json!({ "id": id }))
@@ -419,7 +428,11 @@ async fn the_node_says_which_targets_another_session_has_taken() {
         .call("scheduled_show", json!({ "id": id }))
         .await
         .unwrap();
-    assert_eq!(shown["task"]["replaced"], json!([ops]), "{shown}");
+    assert_eq!(
+        shown["scheduled_prompt"]["replaced"],
+        json!([ops]),
+        "{shown}"
+    );
     node.stop().await;
 }
 
@@ -437,7 +450,7 @@ async fn scheduled_finds_the_sessions_wherever_they_are_listed_and_says_when_non
         )
         .await
         .unwrap();
-    let id = made["task"]["id"].as_str().unwrap();
+    let id = made["scheduled_prompt"]["id"].as_str().unwrap();
     node.call("scheduled_run", json!({ "id": id }))
         .await
         .unwrap();

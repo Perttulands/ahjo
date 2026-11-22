@@ -19,8 +19,8 @@ use ahjo_core::{Error, NodeId, TypedCommand};
 use ahjo_files_contract::{
     Changed, FILE_BYTES_PATH, Matches,
     commands::{
-        FileDelete, FileDiff, FileList, FileLocate, FileMkdir, FileMove, FileRecent, FileSearch,
-        FileStat, FileStatus, FileWrite, ListContent,
+        FileCreateFolder, FileDelete, FileDiff, FileList, FileListChanges, FileListRecent,
+        FileMove, FileSearch, FileSearchPaths, FileStat, FileWrite, ListContent,
     },
 };
 use gpui::{
@@ -1036,7 +1036,7 @@ impl FilesPage {
         let node = self.tree.node.clone();
         self.call(
             NodeId(node.clone()),
-            FileRecent { path: None },
+            FileListRecent { path: None },
             move |p, answer, cx| {
                 p.recent_asked = false;
                 if p.tree.node != node {
@@ -1068,7 +1068,7 @@ impl FilesPage {
         let node = self.tree.node.clone();
         self.call(
             NodeId(node.clone()),
-            FileRecent {
+            FileListRecent {
                 path: Some(folder.clone()),
             },
             move |p, answer, cx| {
@@ -1273,7 +1273,7 @@ impl FilesPage {
                     if let Some(near) = near.clone() {
                         let beside = page.host.call(
                             NodeId(node.clone()),
-                            FileLocate {
+                            FileSearchPaths {
                                 query: query.clone(),
                                 near: Some(near),
                                 beside: Some(true),
@@ -1285,7 +1285,7 @@ impl FilesPage {
                     }
                     let names = page.host.call(
                         NodeId(node),
-                        FileLocate {
+                        FileSearchPaths {
                             query,
                             near,
                             beside: None,
@@ -2304,7 +2304,9 @@ impl FilesPage {
                     },
                     cx,
                 ),
-                _ => self.host.call(target, FileMkdir { path: made.clone() }, cx),
+                _ => self
+                    .host
+                    .call(target, FileCreateFolder { path: made.clone() }, cx),
             };
             cx.background_executor()
                 .spawn(async move { answer.await.map(drop) })
@@ -3126,7 +3128,7 @@ impl FilesPage {
         let node = self.tree.node.clone();
         self.call(
             NodeId(node.clone()),
-            FileRecent {
+            FileListRecent {
                 path: Some(folder.clone()),
             },
             move |p, answer, cx| {

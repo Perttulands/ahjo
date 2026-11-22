@@ -76,7 +76,9 @@ async fn node_routes_and_local_copy_stream() {
     let dest = root.join("dest");
     let file = folder.join("note.txt");
     for dir in [&folder, &dest] {
-        node.call("file_mkdir", json!({"path":dir})).await.unwrap();
+        node.call("file_create_folder", json!({"path":dir}))
+            .await
+            .unwrap();
     }
     assert_eq!(
         request(&node, "POST", &at("file", &file), "hello", false)
@@ -98,7 +100,10 @@ async fn node_routes_and_local_copy_stream() {
     );
     for (command, arguments) in [
         ("file_list", json!({"path": folder})),
-        ("file_locate", json!({"under": folder, "query": "hello"})),
+        (
+            "file_search_paths",
+            json!({"under": folder, "query": "hello"}),
+        ),
         ("file_search", json!({"path": folder, "query": "hello"})),
         ("file_diff", json!({"path": file})),
     ] {
@@ -205,17 +210,17 @@ async fn exact_commands_are_exposed_to_mcp_and_cli_and_operate_on_files() {
         "file_list",
         "file_read",
         "file_diff",
-        "file_status",
-        "file_recent",
+        "file_list_changes",
+        "file_list_recent",
         "file_write",
-        "file_mkdir",
+        "file_create_folder",
         "file_move",
         "file_delete",
-        "file_locate",
+        "file_search_paths",
         "file_search",
         "file_copy",
         "file_resume",
-        "file_transfer",
+        "file_show_transfer",
         "file_stat",
     ];
     expected.sort();
@@ -244,7 +249,7 @@ async fn exact_commands_are_exposed_to_mcp_and_cli_and_operate_on_files() {
         assert!(
             verbs.contains(&format!(
                 "ahjo file {}",
-                name.strip_prefix("file_").unwrap()
+                name.strip_prefix("file_").unwrap().replace('_', "-")
             )),
             "{name}: {verbs}"
         );
@@ -274,7 +279,7 @@ async fn exact_commands_are_exposed_to_mcp_and_cli_and_operate_on_files() {
     assert_eq!(stats["times"][2], Value::Null);
     assert_eq!(node.call("file_stat", input).await.unwrap(), stats);
     let found = node
-        .call("file_locate", json!({"under":root,"query":"note"}))
+        .call("file_search_paths", json!({"under":root,"query":"note"}))
         .await
         .unwrap();
     assert_eq!(found["matches"][0]["name"], "note.txt");
@@ -358,7 +363,7 @@ async fn file_diff_command_matches_cli_and_prints_unified_lines() {
     let client = NodeClient::new(Some(&node.url())).unwrap();
     for (command, args) in [
         ("file_diff", json!({"path": file, "whole": true})),
-        ("file_status", json!({"path": repo})),
+        ("file_list_changes", json!({"path": repo})),
     ] {
         let (routed, _) = client
             .request(
@@ -372,7 +377,7 @@ async fn file_diff_command_matches_cli_and_prints_unified_lines() {
         assert_eq!(node.call(command, args).await.unwrap(), routed, "{command}");
     }
     let marks = node
-        .call("file_status", json!({"path": repo}))
+        .call("file_list_changes", json!({"path": repo}))
         .await
         .unwrap();
     assert!(marks.to_string().contains("note.txt"), "{marks}");
@@ -443,7 +448,7 @@ async fn files_cli_browses_finds_edits_and_deletes() {
     let folder_text = folder.to_str().unwrap();
     let file_text = file.to_str().unwrap();
     let renamed_text = renamed.to_str().unwrap();
-    run(&node, &["mkdir", folder_text]).await;
+    run(&node, &["create-folder", folder_text]).await;
     run(&node, &["write", file_text, "hello needle"]).await;
     assert_eq!(
         run(&node, &["read", file_text]).await["text"],
@@ -454,7 +459,7 @@ async fn files_cli_browses_finds_edits_and_deletes() {
         "note.txt"
     );
     assert_eq!(
-        run(&node, &["locate", "note", "--under", root_text]).await["matches"][0]["name"],
+        run(&node, &["search-paths", "note", "--under", root_text]).await["matches"][0]["name"],
         "note.txt"
     );
     assert_eq!(
@@ -462,7 +467,7 @@ async fn files_cli_browses_finds_edits_and_deletes() {
         1
     );
     let destination = root.join("copy-destination");
-    run(&node, &["mkdir", destination.to_str().unwrap()]).await;
+    run(&node, &["create-folder", destination.to_str().unwrap()]).await;
     let copied = run(&node, &["copy", file_text, destination.to_str().unwrap()]).await;
     assert_eq!(copied["transfer"]["state"], "done");
     assert_eq!(
@@ -494,7 +499,7 @@ async fn files_cli_finds_recent_changes_and_names_and_round_trips_binary() {
         cli::run(
             "file",
             &[
-                "recent".into(),
+                "list-recent".into(),
                 "--json".into(),
                 "--node".into(),
                 node.url()
@@ -518,7 +523,7 @@ async fn files_cli_finds_recent_changes_and_names_and_round_trips_binary() {
         cli::run(
             "file",
             &[
-                "locate".into(),
+                "search-paths".into(),
                 "read".into(),
                 "--json".into(),
                 "--node".into(),
@@ -538,7 +543,7 @@ async fn files_cli_finds_recent_changes_and_names_and_round_trips_binary() {
         cli::run(
             "file",
             &[
-                "locate".into(),
+                "search-paths".into(),
                 "read".into(),
                 "--under".into(),
                 project.to_str().unwrap().into(),
@@ -733,7 +738,7 @@ async fn files_work_as_the_files_view_does_under_the_roots() {
         .await;
     assert!(taken.unwrap_err().message.contains("already"));
 
-    node.call("file_mkdir", json!({ "path": folder.join("made") }))
+    node.call("file_create_folder", json!({ "path": folder.join("made") }))
         .await
         .unwrap();
     node.call(
@@ -745,7 +750,10 @@ async fn files_work_as_the_files_view_does_under_the_roots() {
     assert!(!notes.exists() && folder.join("made/notes.md").exists());
 
     let found = node
-        .call("file_locate", json!({ "under": folder, "query": "NOTES" }))
+        .call(
+            "file_search_paths",
+            json!({ "under": folder, "query": "NOTES" }),
+        )
         .await
         .unwrap();
     assert_eq!(found["matches"][0]["name"], "notes.md", "{found}");
@@ -784,7 +792,7 @@ async fn files_work_as_the_files_view_does_under_the_roots() {
     let carried = std::fs::read_to_string(folder.join("into/carried.txt")).unwrap();
     assert_eq!(carried, "carried");
     let followed = node
-        .call("file_transfer", json!({ "id": copied["id"] }))
+        .call("file_show_transfer", json!({ "id": copied["id"] }))
         .await
         .unwrap();
     assert_eq!(followed["transfer"]["state"], "done");
