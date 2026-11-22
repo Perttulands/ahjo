@@ -3562,6 +3562,61 @@ fn send_goes_to_every_session_marked(cx: &mut TestAppContext) {
     let _ = std::fs::remove_dir_all(settings.parent().unwrap());
 }
 
+/// A tab rename open over Peek keeps what was typed when Attach in Peek
+/// closes both, as it would on blur (ahjo-dee); Esc still drops it.
+#[gpui::test]
+fn a_tab_rename_over_peek_is_kept_when_peek_attaches(cx: &mut TestAppContext) {
+    let Some(running) = start("terminals-rename-peek") else {
+        return;
+    };
+    let (_shell, cx, settings) = open_with_alpha(&running, "rename-peek", cx);
+    let page = PAGE.with(|p| p.borrow().clone()).unwrap();
+    let row = format!("row-{}::beta", running.node);
+    let leaked: &'static str = Box::leak(row.clone().into_boxed_str());
+    until(cx, "beta in the rail", |cx| {
+        cx.debug_bounds(leaked).is_some()
+    });
+    let rename = |cx: &mut VisualTestContext, typed: &str| {
+        click(cx, row.clone());
+        until(cx, "the peek", |cx| {
+            cx.debug_bounds("peek-attach").is_some()
+        });
+        let act = page.read_with(cx, |p, _| {
+            p.tab_menu(0)
+                .into_iter()
+                .find(|r| r.label == "Rename tab")
+                .unwrap()
+                .act
+                .unwrap()
+        });
+        cx.update(|window, cx| page.update(cx, |p, cx| p.act(act, window, cx)));
+        cx.run_until_parked();
+        cx.simulate_keystrokes("ctrl-a");
+        cx.simulate_input(typed);
+    };
+    let name = |cx: &mut VisualTestContext| {
+        page.read_with(cx, |p, _| p.settings.workspace.tabs[0].name.clone())
+    };
+    // Esc closes the rename first, keeping the old name.
+    rename(cx, "Dropped");
+    cx.simulate_keystrokes("escape");
+    cx.run_until_parked();
+    assert_eq!(name(cx), None, "Esc keeps the old name");
+    click(cx, "peek-attach".into());
+    until(cx, "peek closed", |cx| {
+        cx.debug_bounds("peek-attach").is_none()
+    });
+    assert_eq!(name(cx), None);
+    // Attach with the rename open over Peek keeps what was typed.
+    rename(cx, "Ops");
+    click(cx, "peek-attach".into());
+    until(cx, "peek closed", |cx| {
+        cx.debug_bounds("peek-attach").is_none()
+    });
+    assert_eq!(name(cx).as_deref(), Some("Ops"), "the typed name is kept");
+    let _ = std::fs::remove_dir_all(settings.parent().unwrap());
+}
+
 /// Send asked from a view beside the terminals (the Brain panel, a file
 /// beside) gives the keyboard back to that view when it closes, sent or
 /// dismissed, not to the terminal the view lies over (ahjo-4y1).

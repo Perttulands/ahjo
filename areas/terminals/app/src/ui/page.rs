@@ -622,41 +622,37 @@ impl Terminals {
             cx.notify();
         })
         .detach();
-        cx.subscribe_in(
-            &self.rename_field.clone(),
-            window,
-            |s, _, ev, window, cx| {
-                if !matches!(ev, FieldEvent::Submit) {
-                    return;
+        cx.subscribe_in(&self.rename_field.clone(), window, |s, _, ev, _, cx| {
+            if !matches!(ev, FieldEvent::Submit) {
+                return;
+            }
+            let name = s.rename_field.read(cx).text.clone();
+            match s.surfaces.last().cloned() {
+                Some(Surface::RenameTab(_)) => s.keep_tab_name(cx),
+                Some(Surface::RenameSession(k)) => {
+                    s.close(surface::RENAME_SESSION, cx);
+                    s.rename_session(k, name.trim());
                 }
-                let name = s.rename_field.read(cx).text.clone();
-                match s.surfaces.last().cloned() {
-                    Some(Surface::RenameTab(_)) => s.commit_tab_name(window, cx),
-                    Some(Surface::RenameSession(k)) => {
-                        s.close(surface::RENAME_SESSION, cx);
-                        s.rename_session(k, name.trim());
+                Some(Surface::ViewName(_, key, rename)) => {
+                    s.close(surface::VIEW_NAME, cx);
+                    if rename {
+                        s.settings.workspace.rename_view(key, &name);
+                        s.save(cx);
+                        cx.notify();
+                    } else {
+                        s.keep_view(key, Some(&name), cx);
                     }
-                    Some(Surface::ViewName(_, key, rename)) => {
-                        s.close(surface::VIEW_NAME, cx);
-                        if rename {
-                            s.settings.workspace.rename_view(key, &name);
-                            s.save(cx);
-                            cx.notify();
-                        } else {
-                            s.keep_view(key, Some(&name), cx);
-                        }
-                    }
-                    _ => {}
                 }
-            },
-        )
+                _ => {}
+            }
+        })
         .detach();
         // A tab's name is kept when its field loses focus, as CHROTE's input
         // commits on blur; Escape closes it first, keeping the old name.
         let rename_focus = self.rename_field.read(cx).focus_handle(cx);
-        cx.on_blur(&rename_focus, window, |s, window, cx| {
+        cx.on_blur(&rename_focus, window, |s, _, cx| {
             if matches!(s.surfaces.last(), Some(Surface::RenameTab(_))) {
-                s.commit_tab_name(window, cx);
+                s.keep_tab_name(cx);
             }
         })
         .detach();
@@ -1128,8 +1124,16 @@ impl Terminals {
         cx.notify();
     }
 
-    /// Closes the surface named `name`, and whatever opened above it.
+    /// Closes the surface named `name`, and whatever opened above it. A tab
+    /// rename open above it keeps what was typed, as on blur; only Esc,
+    /// which closes the rename itself, drops it.
     pub fn close(&mut self, name: &'static str, cx: &mut Context<Self>) {
+        if name != surface::RENAME_TAB
+            && self.is_open(name)
+            && matches!(self.surfaces.last(), Some(Surface::RenameTab(_)))
+        {
+            self.keep_tab_name(cx);
+        }
         self.host.close_layer(name, cx);
     }
 
@@ -1465,7 +1469,7 @@ impl Terminals {
     }
 
     /// Keeps the name typed in the tab bar for the tab being renamed.
-    fn commit_tab_name(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
+    fn keep_tab_name(&mut self, cx: &mut Context<Self>) {
         if let Some(Surface::RenameTab(i)) = self.surfaces.last().cloned() {
             let name = self.rename_field.read(cx).text.clone();
             self.settings.workspace.rename_tab(i, &name);
