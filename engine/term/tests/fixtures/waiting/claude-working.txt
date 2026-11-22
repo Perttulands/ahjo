@@ -1,0 +1,11 @@
+● Bash(cd /srv/ahjo-worktrees/term-3bugs && export AHJO_REQUIRE_TMUX=1 AHJO_TMUX=/home/linuxbrew/.linuxbrew/bin/tmux PKG_CONFIG=/usr/bin/pkg-config && heavy run --memo…)
+  ⎿  Running… (1m 3s · timeout 10m)
+     (ctrl+b ctrl+b (twice) to run in background)
+
+· Philosophizing… (8m 18s · ↓ 26.1k tokens)
+
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+❯ 
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  Opus 5.5 · medium · ctx 12% · 5h 8%
+  ⏵⏵ bypass permissions on (shift+tab to cycle) · esc to interrupt

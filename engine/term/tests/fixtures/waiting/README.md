@@ -7,6 +7,10 @@ comes from:
   - `claude-trust.txt`: Claude Code 2.1.174's folder-trust prompt.
   - `top.txt`, `vim.txt`, `shell.txt` and `man-page.txt`: programs that never wait.
   - `codex-update.txt`: Codex 0.167's update menu at start, at 94x43.
+  - `codex-update-wide.txt`: Codex 0.170's update menu, met by `ahjo handoff start --harness codex`, its first option on one row.
+- **Captured mid-turn**, for `src/waiting/harness.rs`'s `working()`:
+  - `claude-working.txt`: Claude Code on its `·` spinner frame, 8 minutes into a turn.
+  - `codex-working.txt`: Codex 0.170 working, its status without a leading bullet and a `└ Tip:` row under it.
 - **Codex's own snapshot tests**, codex-rs `tui/src/bottom_pane/approval_overlay`. Codex 0.134 doesn't start in WSL here, so these weren't captured:
   - `codex-network.txt` is the `network_exec_prompt` snapshot.
   - `codex-narrow.txt` is the 40x7 clipped exec approval, where the question is cut off.

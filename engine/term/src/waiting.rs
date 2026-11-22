@@ -22,13 +22,26 @@ const QUESTION_WITHIN: usize = 8;
 /// The longest question kept, in characters.
 const MAX_QUESTION: usize = 200;
 
-/// The question a waiting screen asks, or `None` if it isn't waiting. The
-/// question is empty if it isn't on screen, as when a narrow pane cuts it.
+/// The question a waiting screen asks, or `None` if it isn't waiting. A
+/// menu that asks no question (Codex's update menu) is asked by its heading:
+/// the first row of the block just above its options, set apart by blank
+/// rows above and below it. The question is empty if neither is on screen,
+/// as when a narrow pane cuts it.
 pub fn waiting<'a>(rows: impl IntoIterator<Item = &'a str>) -> Option<String> {
+    // The rows with text, each with whether a blank row came before it.
+    let mut blank = false;
+    let mut heads = vec![];
     let rows: Vec<&str> = rows
         .into_iter()
         .map(unframe)
-        .filter(|row| !row.is_empty())
+        .filter(|row| {
+            let empty = row.is_empty();
+            if !empty {
+                heads.push(blank);
+            }
+            blank = empty;
+            !empty
+        })
         .collect();
     let bottom = rows.len().saturating_sub(MARK_WITHIN);
     let marked = (bottom..rows.len())
@@ -53,9 +66,13 @@ pub fn waiting<'a>(rows: impl IntoIterator<Item = &'a str>) -> Option<String> {
     while first > 0 && option_text(rows[first - 1]).is_some() {
         first -= 1;
     }
-    Some(question(
-        &rows[first.saturating_sub(QUESTION_WITHIN)..first],
-    ))
+    let above = first.saturating_sub(QUESTION_WITHIN);
+    let asked = question(&rows[above..first]);
+    if !asked.is_empty() || !heads[first] {
+        return Some(asked);
+    }
+    let heading = (above..first).rev().find(|&i| heads[i]);
+    Some(heading.map_or(asked, |i| clip(rows[i].to_owned())))
 }
 
 /// A row without a box's side borders, trimmed.
@@ -104,6 +121,11 @@ fn question(rows: &[&str]) -> String {
             text = rest.to_owned();
         }
     }
+    clip(text)
+}
+
+/// At most [`MAX_QUESTION`] characters of `text`.
+fn clip(text: String) -> String {
     match text.char_indices().nth(MAX_QUESTION) {
         Some((cut, _)) => format!("{}…", &text[..cut]),
         None => text,
@@ -151,8 +173,16 @@ mod tests {
         );
         // Cut off by a narrow pane: still waiting, with no question.
         assert_eq!(fixture("codex-narrow.txt").as_deref(), Some(""));
-        // Its update menu at start asks nothing, but waits all the same.
-        assert_eq!(fixture("codex-update.txt").as_deref(), Some(""));
+        // Its update menu at start asks no question: its heading says what
+        // it asks (ahjo-ufz), wrapped option or not.
+        assert_eq!(
+            fixture("codex-update.txt").as_deref(),
+            Some("Update available · 0.167.0 → 0.167.2")
+        );
+        assert_eq!(
+            fixture("codex-update-wide.txt").as_deref(),
+            Some("Update available · 0.170.0 → 0.171.0")
+        );
     }
 
     #[test]

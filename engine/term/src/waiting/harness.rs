@@ -46,13 +46,18 @@ fn prompt_row(harness: Harness, rows: &[String]) -> Option<usize> {
 }
 
 /// The active status is the nearest nonempty row above the editor, ignoring
-/// the horizontal rule Claude draws around it.
+/// the horizontal rule Claude draws around it and the `└ Tip: …` row Codex
+/// puts under its status.
 fn status_above(rows: &[String], editor: usize) -> Option<&str> {
     rows[editor.saturating_sub(5)..editor]
         .iter()
         .rev()
         .map(|line| line.trim())
-        .find(|line| !line.is_empty() && !line.chars().all(|c| c == '─' || c == '━'))
+        .find(|line| {
+            !line.is_empty()
+                && !line.chars().all(|c| c == '─' || c == '━')
+                && !line.starts_with("└ Tip:")
+        })
 }
 
 /// Whether the harness is currently running a turn.
@@ -74,14 +79,13 @@ pub fn working(harness: Harness, screen: &Screen) -> bool {
 fn working_line(harness: Harness, line: &str) -> bool {
     let line = line.trim_start();
     match harness {
-        Harness::Codex => {
-            line.starts_with('•')
-                && line
-                    .split_once(" (")
-                    .is_some_and(|(_, detail)| detail.contains(" • esc to interrupt)"))
-        }
+        // `• Working (8s • esc to interrupt)`, or since 0.170 without the
+        // leading bullet.
+        Harness::Codex => line
+            .split_once(" (")
+            .is_some_and(|(_, detail)| detail.contains(" • esc to interrupt)")),
         Harness::Claude => {
-            let spinner = line.starts_with(['✶', '✢', '✻', '✽', '✳', '✱', '✦', '✧', '⎿']);
+            let spinner = line.starts_with(['·', '✶', '✢', '✻', '✽', '✳', '✱', '✦', '✧', '⎿']);
             spinner
                 && (line.contains("esc to interrupt")
                     || line.split('…').skip(1).any(|tail| {
@@ -310,6 +314,29 @@ mod tests {
         let busy = screen("answer\n── Working ──\n\n────────\n/work");
         assert!(!ready(Harness::Pi, &busy));
         assert!(working(Harness::Pi, &busy));
+    }
+    /// A screen captured from a real pane, in `tests/fixtures/waiting`.
+    fn fixture(name: &str) -> Screen {
+        let path = format!(
+            "{}/tests/fixtures/waiting/{name}",
+            env!("CARGO_MANIFEST_DIR")
+        );
+        let text = std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("{path}: {e}"));
+        let rows = text.lines().count() as u16;
+        let mut p = vt100::Parser::new(rows.try_into().unwrap(), 240_u16.try_into().unwrap(), 0);
+        p.process(text.trim_end_matches('\n').replace('\n', "\r\n").as_bytes());
+        Screen::from_vt(p.screen())
+    }
+    #[test]
+    fn agents_mid_turn_are_working() {
+        // Claude Code's `·` spinner frame, 8 minutes into a turn.
+        let claude = fixture("claude-working.txt");
+        assert!(working(Harness::Claude, &claude));
+        assert!(!ready(Harness::Claude, &claude));
+        // Codex 0.170: no bullet before Working, and a tip under it.
+        let codex = fixture("codex-working.txt");
+        assert!(working(Harness::Codex, &codex));
+        assert!(!ready(Harness::Codex, &codex));
     }
     #[test]
     fn trust_dialog_is_not_quoted_text_above_operator_input() {
