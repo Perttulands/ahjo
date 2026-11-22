@@ -450,6 +450,8 @@ pub mod chrome {
     pub const INSET: f32 = 16.;
     /// The line of counts along the bottom.
     pub const FOOT: f32 = 22.;
+    /// Between the things along the bottom.
+    pub const FOOT_GAP: f32 = 8.;
     /// The chrome's words (counts, the theme, the replay, notices): at
     /// the theme's title size, as the reader is read from a distance.
     pub const TEXT: f32 = super::ty::TITLE;

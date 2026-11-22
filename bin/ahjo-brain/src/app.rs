@@ -2285,6 +2285,51 @@ fn reader_size(s: &source::Settings) -> f32 {
 /// How wide the ranked results stand beside the orbit of a page read in a
 /// window `w` wide, or none when the orbit would not keep its room. The
 /// orbit grows with the window first; the list widens only past that.
+/// Replay's words, and the fewer it says when the foot is narrow.
+const REPLAY: [&str; 2] = ["Replay the brain's history", "Replay"];
+
+/// How wide the chrome's words are: its type is monospaced.
+fn words_width(words: &str) -> f32 {
+    words.chars().count() as f32 * search::MONO_ADVANCE * chrome::TEXT
+}
+
+/// What the sky's foot shows.
+#[derive(Debug, PartialEq)]
+struct Foot {
+    counts: bool,
+    replay: Option<&'static str>,
+}
+
+/// The foot, `room` wide from the window's left inset to where Replay ends:
+/// the counts, then the pills that act (whose brain, Update) at the left,
+/// Replay at the right when it is `offered`. When they do not all fit the
+/// counts go first, then Replay says less, then Replay goes; the pills stay.
+fn foot(room: f32, counts: Option<&str>, pills: &[f32], offered: bool) -> Foot {
+    let pill = |words: &str| words_width(words) + chrome::SWITCH_PAD_X * 2.;
+    let fits = |show_counts: bool, replay: Option<&str>| {
+        let widths: Vec<f32> = counts
+            .filter(|_| show_counts)
+            .map(words_width)
+            .into_iter()
+            .chain(pills.iter().copied())
+            .collect();
+        let left =
+            widths.iter().sum::<f32>() + chrome::FOOT_GAP * widths.len().saturating_sub(1) as f32;
+        left + replay.map_or(0., |r| chrome::INSET + pill(r)) <= room
+    };
+    let replay = offered.then_some(REPLAY[0]);
+    let choices = [
+        (true, replay),
+        (false, replay),
+        (false, offered.then_some(REPLAY[1])),
+    ];
+    let (counts, replay) = choices
+        .into_iter()
+        .find(|&(c, r)| fits(c, r))
+        .unwrap_or((false, None));
+    Foot { counts, replay }
+}
+
 fn rail_beside_orbit(w: f32, k: f32) -> Option<f32> {
     let room = w - reader::sheet_width(w, k) - chrome::INSET * 2.;
     (room - search::ASIDE >= search::ORBIT_LEAST)
@@ -3468,6 +3513,25 @@ impl Render for BrainApp {
             });
         let switch = self.place.from.is_some() || !self.others.is_empty();
         let update = self.update_pill(&t, cx);
+        // Another machine's copy has no history of its own to replay.
+        let replay = self.status.is_none() && self.data.is_some() && self.place.from.is_none();
+        let pill = |words: &str| words_width(words) + chrome::SWITCH_PAD_X * 2.;
+        let mut pills = vec![];
+        if switch {
+            // The warning dot beside the words, when that machine is away.
+            let dot = if self.away_from.is_some() { 15. } else { 0. };
+            pills.push(pill(&self.source_label()) + dot);
+        }
+        if let Some(b) = self.updates.read(cx).badge() {
+            pills.push(pill(b.words));
+        }
+        let fitted = foot(
+            self.size.0 - chrome::INSET - self.replay_right(),
+            counts.as_deref(),
+            &pills,
+            replay && self.replay.is_none(),
+        );
+        let counts = counts.filter(|_| fitted.counts);
         if counts.is_some() || switch || update.is_some() {
             root = root.child(
                 div()
@@ -3479,7 +3543,7 @@ impl Render for BrainApp {
                     .h(px(chrome::SWITCH_HEIGHT))
                     .flex()
                     .items_center()
-                    .gap(px(8.))
+                    .gap(px(chrome::FOOT_GAP))
                     .text_size(px(chrome::TEXT))
                     .text_color(t.dim)
                     .children(counts)
@@ -3487,9 +3551,8 @@ impl Render for BrainApp {
                     .children(update),
             );
         }
-        // Another machine's copy has no history of its own to replay.
-        if self.status.is_none() && self.data.is_some() && self.place.from.is_none() {
-            root = root.child(self.replay_bar(&t, cx));
+        if replay && let Some(bar) = self.replay_bar(&t, fitted.replay, cx) {
+            root = root.child(bar);
         }
 
         if let Some(chip) = self.evidence_chip(&t, cx) {
@@ -3849,12 +3912,24 @@ impl BrainApp {
 
     /// The replay's button, or the replay itself: the day it stands on, the
     /// days worked on as a strip to pick from, and play and pause.
-    fn replay_bar(&self, t: &Theme, cx: &mut Context<Self>) -> AnyElement {
-        let right = if self.reading.is_some() {
+    /// How far from the window's right Replay ends: beside the sheet while
+    /// a page is read.
+    fn replay_right(&self) -> f32 {
+        if self.reading.is_some() {
             reader::sheet_width(self.size.0, self.reader_k()) + chrome::INSET
         } else {
             chrome::INSET
-        };
+        }
+    }
+
+    /// Replay's button says `words`, or is left out when there is no room.
+    fn replay_bar(
+        &self,
+        t: &Theme,
+        words: Option<&'static str>,
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
+        let right = self.replay_right();
         let button = |id: &'static str, words: String| {
             div()
                 .id(id)
@@ -3871,18 +3946,22 @@ impl BrainApp {
                 .child(words)
         };
         let Some(state) = &self.replay else {
-            return div()
-                .absolute()
-                .right(px(right))
-                .bottom(px(chrome::INSET - 6.))
-                .rounded(px(chrome::RADIUS))
-                .bg(veil(t, chrome::PANEL_ALPHA))
-                .occlude()
-                .child(
-                    button("replay", "Replay the brain's history".into())
-                        .on_click(cx.listener(|me, _, _, cx| me.toggle_replay(cx))),
-                )
-                .into_any_element();
+            let words = words?;
+            return Some(
+                div()
+                    .absolute()
+                    .right(px(right))
+                    .bottom(px(chrome::INSET - 6.))
+                    .rounded(px(chrome::RADIUS))
+                    .bg(veil(t, chrome::PANEL_ALPHA))
+                    .occlude()
+                    .child(
+                        button("replay", words.into())
+                            .when(words != REPLAY[0], |b| b.tooltip(kit::tip(REPLAY[0])))
+                            .on_click(cx.listener(|me, _, _, cx| me.toggle_replay(cx))),
+                    )
+                    .into_any_element(),
+            );
         };
         let close = button("end-replay", "×".into())
             .on_click(cx.listener(|me, _, _, cx| me.toggle_replay(cx)));
@@ -3900,8 +3979,8 @@ impl BrainApp {
             .occlude();
         let r = match state {
             Replaying::Reading => {
-                return bar
-                    .child(
+                return Some(
+                    bar.child(
                         div()
                             .flex()
                             .justify_between()
@@ -3910,11 +3989,12 @@ impl BrainApp {
                             .child("Reading the brain's history…")
                             .child(close),
                     )
-                    .into_any_element();
+                    .into_any_element(),
+                );
             }
             Replaying::Failed(e) => {
-                return bar
-                    .child(
+                return Some(
+                    bar.child(
                         div()
                             .flex()
                             .justify_between()
@@ -3923,13 +4003,14 @@ impl BrainApp {
                             .child(div().text_color(t.error).child(e.clone()))
                             .child(close),
                     )
-                    .into_any_element();
+                    .into_any_element(),
+                );
             }
             Replaying::Ready(r) => r,
         };
         let Some(&(today, ref pages)) = r.days.get(r.at.floor() as usize) else {
-            return bar
-                .child(
+            return Some(
+                bar.child(
                     div()
                         .flex()
                         .justify_between()
@@ -3938,7 +4019,8 @@ impl BrainApp {
                         .child("The brain's history names none of its pages.")
                         .child(close),
                 )
-                .into_any_element();
+                .into_any_element(),
+            );
         };
         let most = r.days.iter().map(|d| d.1.len()).max().unwrap_or(1).max(1) as f32;
         let now = r.at.floor() as usize;
@@ -3996,43 +4078,45 @@ impl BrainApp {
                 if r.reshuffles == 1 { "" } else { "s" }
             ));
         }
-        bar.child(
-            div()
-                .flex()
-                .items_end()
-                .gap(px(16.))
-                .child(
-                    div()
-                        .font_family(t.ty.display)
-                        .font_weight(t.ty.display_weight)
-                        .text_size(px(ty::GLANCE))
-                        .line_height(px(ty::GLANCE * 1.1))
-                        .text_color(t.text)
-                        .child(date(today)),
-                )
-                .child(
-                    div()
-                        .flex_1()
-                        .pb(px(4.))
-                        .text_size(px(chrome::TEXT))
-                        .text_color(t.text2)
-                        .child(note),
-                )
-                .child(play)
-                .child(close),
+        Some(
+            bar.child(
+                div()
+                    .flex()
+                    .items_end()
+                    .gap(px(16.))
+                    .child(
+                        div()
+                            .font_family(t.ty.display)
+                            .font_weight(t.ty.display_weight)
+                            .text_size(px(ty::GLANCE))
+                            .line_height(px(ty::GLANCE * 1.1))
+                            .text_color(t.text)
+                            .child(date(today)),
+                    )
+                    .child(
+                        div()
+                            .flex_1()
+                            .pb(px(4.))
+                            .text_size(px(chrome::TEXT))
+                            .text_color(t.text2)
+                            .child(note),
+                    )
+                    .child(play)
+                    .child(close),
+            )
+            .child(strip)
+            .child(
+                div()
+                    .flex()
+                    .justify_between()
+                    .text_size(px(chrome::TEXT))
+                    .text_color(t.dim)
+                    .child(date(first))
+                    .child(format!("{} days worked on", r.days.len()))
+                    .child(date(last)),
+            )
+            .into_any_element(),
         )
-        .child(strip)
-        .child(
-            div()
-                .flex()
-                .justify_between()
-                .text_size(px(chrome::TEXT))
-                .text_color(t.dim)
-                .child(date(first))
-                .child(format!("{} days worked on", r.days.len()))
-                .child(date(last)),
-        )
-        .into_any_element()
     }
 
     /// In a page's orbit, its evidence: how much there is, folded out of
@@ -4078,15 +4162,19 @@ impl BrainApp {
         )
     }
 
-    /// The theme's mark: the direction shown, and a click to the next.
-    /// Whose brain is read, at the foot of the search column: this
-    /// machine's, or one of the others Ahjo Swarm knows, in a list it opens.
-    fn source_switch(&self, t: &Theme, cx: &mut Context<Self>) -> impl IntoElement {
-        let label = match (&self.place.from, &self.away_from) {
+    /// Whose brain is read, as the switch says it.
+    fn source_label(&self) -> String {
+        match (&self.place.from, &self.away_from) {
             (Some(r), Some(_)) => format!("{}'s brain, as last copied", r.name),
             (Some(r), None) => format!("{}'s brain", r.name),
             (None, _) => "This machine's brain".to_string(),
-        };
+        }
+    }
+
+    /// Whose brain is read, at the foot of the search column: this
+    /// machine's, or one of the others Ahjo Swarm knows, in a list it opens.
+    fn source_switch(&self, t: &Theme, cx: &mut Context<Self>) -> impl IntoElement {
+        let label = self.source_label();
         let tip = match &self.away_from {
             Some(e) => format!("{e}. Read another machine's brain"),
             None => "Read another machine's brain".to_string(),
@@ -4818,7 +4906,7 @@ fn window_bounds(cx: &App) -> gpui::Bounds<gpui::Pixels> {
 
 #[cfg(test)]
 mod tests {
-    use super::{name_lines, rail_beside_orbit};
+    use super::{Foot, REPLAY, foot, name_lines, rail_beside_orbit, words_width};
     use crate::arrange;
     use crate::corpus::parse;
     use crate::sky::{Placement, Rect, layout};
@@ -4883,5 +4971,82 @@ mod tests {
         let cut = name_lines("Synchronisation-without-networks", 120., measure);
         assert_eq!(cut.len(), 1);
         assert!(measure(&cut[0]) <= 120.);
+    }
+
+    /// The foot's room at window width `w`: between the window's inset and
+    /// Replay's right, which stands beside the sheet while a page is read.
+    fn foot_room(w: f32, reading: bool) -> f32 {
+        let right = if reading {
+            crate::reader::sheet_width(w, 1.) + chrome::INSET
+        } else {
+            chrome::INSET
+        };
+        w - chrome::INSET - right
+    }
+
+    #[test]
+    fn the_foot_never_overlaps_replay() {
+        let counts = "1234 pages · 345 subjects · 6789 links";
+        let switch = words_width("This machine's brain") + chrome::SWITCH_PAD_X * 2.;
+        let update = words_width("Update") + chrome::SWITCH_PAD_X * 2.;
+        let all = Foot {
+            counts: true,
+            replay: Some(REPLAY[0]),
+        };
+        // A wide window has room for everything, reading or not.
+        assert_eq!(
+            foot(foot_room(1920., true), Some(counts), &[switch], true),
+            all
+        );
+        assert_eq!(
+            foot(foot_room(1024., false), Some(counts), &[switch], true),
+            all
+        );
+        // A page read in a narrower window: the counts go first, then
+        // Replay says less, and the pills that act stay.
+        let no_counts = foot(foot_room(1280., true), Some(counts), &[switch], true);
+        assert_eq!(
+            no_counts,
+            Foot {
+                counts: false,
+                replay: Some(REPLAY[0])
+            }
+        );
+        let short = foot(
+            foot_room(1024., true),
+            Some(counts),
+            &[switch, update],
+            true,
+        );
+        assert_eq!(
+            short,
+            Foot {
+                counts: false,
+                replay: Some(REPLAY[1])
+            }
+        );
+        // No room even for that (the sheet takes the window): no Replay.
+        assert_eq!(
+            foot(foot_room(800., true), Some(counts), &[switch], true),
+            Foot {
+                counts: false,
+                replay: None
+            }
+        );
+        // Whatever is chosen fits, at every width from 1024 up.
+        for w in (1024..=2560).step_by(8) {
+            for reading in [false, true] {
+                let room = foot_room(w as f32, reading);
+                let f = foot(room, Some(counts), &[switch, update], true);
+                let need = f.counts as u8 as f32 * (words_width(counts) + 8.)
+                    + switch
+                    + 8.
+                    + update
+                    + f.replay.map_or(0., |r| {
+                        chrome::INSET + words_width(r) + chrome::SWITCH_PAD_X * 2.
+                    });
+                assert!(need <= room, "{need} in {room} at {w}, reading {reading}");
+            }
+        }
     }
 }
