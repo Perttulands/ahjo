@@ -372,11 +372,12 @@ fn opens_a_mission_layout_notes_and_run_written_before_the_wire_upgrade(cx: &mut
         ("runs/run_legacy.snapshot.toml", 6, "input_card"),
         ("runs/run_legacy.bindings.toml", 6, "seat_id"),
     ] {
-        let text = std::fs::read_to_string(state.join(path)).unwrap();
-        assert!(
-            text.contains(&format!("schema = {schema}")) && text.contains(field),
-            "{path}: {text}"
-        );
+        // The layout and notes are upgraded as the app reads them, which
+        // may finish after the board and the run show.
+        until(cx, &format!("{path} at schema {schema}"), |_| {
+            let text = std::fs::read_to_string(state.join(path)).unwrap();
+            text.contains(&format!("schema = {schema}")) && text.contains(field)
+        });
     }
     let replayed = std::fs::read_to_string(state.join("runs/run_legacy.ndjson")).unwrap();
     assert!(replayed.contains("\"run_id\":\"run_legacy\"") && !replayed.contains("runId"));
