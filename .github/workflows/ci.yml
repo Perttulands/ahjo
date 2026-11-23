@@ -11,6 +11,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@1.99.1
         with:
           components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
       - run: sudo apt-get update && sudo apt-get install -y tmux
       - run: cargo fmt --check
       # The app crates (the kit's ahjo-app-kit and ahjo-app-shell, the apps
@@ -31,10 +32,12 @@ jobs:
           components: clippy
       - uses: Swatinem/rust-cache@v2
       # gpui's X11 platform and its font stack; the tests draw on gpui's
-      # test platform and need no display.
+      # test platform and need no display. The page tests drive tmux.
       - run: >
-          sudo apt-get update && sudo apt-get install -y pkg-config
+          sudo apt-get update && sudo apt-get install -y tmux pkg-config
           libxcb1-dev libx11-xcb-dev libxkbcommon-dev libxkbcommon-x11-dev
           libwayland-dev libfontconfig1-dev libfreetype-dev
       - run: cargo clippy -p 'ahjo-app*' -p 'ahjo-*-app' --all-targets -- -D warnings
       - run: cargo test -p 'ahjo-app*' -p 'ahjo-*-app'
+        env:
+          AHJO_REQUIRE_TMUX: "1"
