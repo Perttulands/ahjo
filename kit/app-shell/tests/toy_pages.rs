@@ -746,6 +746,40 @@ fn a_section_lent_for_the_other_pages_gives_way_on_its_own(cx: &mut TestAppConte
 }
 
 #[gpui::test]
+fn a_panel_lent_for_its_own_page_stands_only_there_until_taken_back(cx: &mut TestAppContext) {
+    use ahjo_app_kit::hub::{Edge, SideOn};
+    let node = fake_node(Arc::new(Mutex::new(vec![])));
+    let settings = settings_path("own-panel");
+    cx.executor().allow_parking();
+    cx.update(ahjo_app_shell::prepare);
+    let path = settings.clone();
+    let (shell, cx) = cx.add_window_view(move |window, cx| {
+        ahjo_app_shell::start(PAGES, Some(node), Some(path), window, cx)
+    });
+    let alpha = shell.read_with(cx, |s, _| Host::new(s.hub()).for_page("toy-a", &[]));
+    cx.update(|_, cx| {
+        alpha.lend_panel(
+            cx.new(|_| Section("panel-a")).into(),
+            SideOn::OwnPage,
+            Edge::Right,
+            cx,
+        );
+        alpha.set_panel_open(true, cx);
+    });
+    cx.run_until_parked();
+    let drawn = |cx: &mut VisualTestContext, name| cx.debug_bounds(name).is_some();
+    assert!(drawn(cx, "panel-a"), "on Alpha, its own page");
+    click(cx, "tab-toy-b");
+    assert!(!drawn(cx, "panel-a"), "not on Beta");
+    click(cx, "tab-toy-a");
+    assert!(drawn(cx, "panel-a"), "back on Alpha");
+    cx.update(|_, cx| alpha.take_panel(cx));
+    cx.run_until_parked();
+    assert!(!drawn(cx, "panel-a"), "taken back");
+    let _ = std::fs::remove_dir_all(settings.parent().expect("its folder"));
+}
+
+#[gpui::test]
 fn with_no_pages_the_shell_connects_to_its_node(cx: &mut TestAppContext) {
     let node = fake_node(Arc::new(Mutex::new(vec![])));
     let settings = settings_path("no-pages");

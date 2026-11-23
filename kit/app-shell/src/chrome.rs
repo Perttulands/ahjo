@@ -628,11 +628,14 @@ impl Shell {
         let sections: Vec<gpui::AnyView> = self
             .pages
             .iter()
-            .enumerate()
-            .filter(|(_, p)| !p.meta.area.is_some_and(|a| off.iter().any(|o| o == a)))
-            .filter_map(|(i, p)| match hub.side(p.meta.id)? {
-                (_, SideOn::OtherPages) if self.shown == Some(i) => None,
-                (view, _) => Some(view),
+            .filter(|p| !p.meta.area.is_some_and(|a| off.iter().any(|o| o == a)))
+            .filter_map(|p| {
+                let (view, on) = hub.side(p.meta.id)?;
+                let stands = match self.shown {
+                    Some(shown) => on.stands(p.meta.id, self.pages[shown].meta.id),
+                    None => on != SideOn::OwnPage,
+                };
+                stands.then_some(view)
             })
             .collect();
         if sections.is_empty() {

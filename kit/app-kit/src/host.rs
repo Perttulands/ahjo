@@ -651,6 +651,14 @@ impl Host {
         self.update(cx, |h, cx| h.set_panel(page, Some(panel), cx));
     }
 
+    /// Takes this page's panel back: the column it stood in goes, and
+    /// the page beside gets its room.
+    pub fn take_panel(&self, cx: &mut App) {
+        let page = self.page;
+        assert!(!page.is_empty(), "a panel is lent by a page's own host");
+        self.update(cx, |h, cx| h.set_panel(page, None, cx));
+    }
+
     /// Whether the panels are open.
     pub fn panel_open(&self, cx: &App) -> bool {
         self.read(cx, |h| h.settings.panel_open).unwrap_or(true)

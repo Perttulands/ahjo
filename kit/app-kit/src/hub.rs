@@ -73,6 +73,20 @@ pub enum SideOn {
     /// Every other page: on its own the lender shows the same thing itself,
     /// so the panel would only show it twice.
     OtherPages,
+    /// Only the lender's own page: what it shows is about that page, such
+    /// as the card a board has open.
+    OwnPage,
+}
+
+impl SideOn {
+    /// Whether what page `lender` lent stands while page `shown` shows.
+    pub fn stands(self, lender: &str, shown: &str) -> bool {
+        match self {
+            SideOn::EveryPage => true,
+            SideOn::OtherPages => lender != shown,
+            SideOn::OwnPage => lender == shown,
+        }
+    }
 }
 
 /// Which edge of the window a page's panel stands at.
@@ -805,7 +819,7 @@ impl Hub {
         let mut on: Vec<(&'static str, Panel)> = self
             .panels
             .iter()
-            .filter(|(page, p)| !(p.on == SideOn::OtherPages && **page == shown))
+            .filter(|(page, p)| p.on.stands(page, shown))
             .map(|(page, p)| (*page, p.clone()))
             .collect();
         on.sort_by_key(|(page, _)| *page);
