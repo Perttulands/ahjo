@@ -664,9 +664,12 @@ impl MissionsPage {
         .detach();
         cx.notify();
     }
+    /// A newer version listed reloads the mission, unless a draft is open
+    /// over it: a rename being saved brings its own version back.
     fn refresh_selected_if_newer(&mut self, cx: &mut Context<Self>) {
         if self.editor.is_none()
             && !self.writing
+            && self.unsaved(cx).is_none()
             && !self.is_showing_run()
             && let Some((node, slug)) = self.state.selected.clone()
             && let Some(mission) = &self.state.mission
@@ -2405,7 +2408,7 @@ impl Render for MissionsPage {
                     // What is open in place on the page; what opened over
                     // it is the shell's to close.
                     if page.is_renaming() {
-                        page.cancel_manage(cx);
+                        page.cancel_rename(cx);
                     } else if page.note_paper.open.is_some() {
                         page.close_canvas_note(cx);
                     } else if page.is_card_panel_open() {

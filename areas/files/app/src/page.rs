@@ -12,6 +12,7 @@ use ahjo_app_kit::{
     widgets::{
         code::{Code, CodeEvent},
         field::{FieldEvent, TextField},
+        inline_edit::{InlineEdit, InlineEditEvent},
         syntax,
     },
 };
@@ -147,7 +148,10 @@ pub struct FilesPage {
     pub naming_in: Option<RenameIn>,
     /// What the menu open now was opened from.
     menu_from: Option<RenameIn>,
+    /// A new file's or folder's name.
     pub name_field: Entity<TextField>,
+    /// A name renamed where it is shown.
+    pub name_edit: Entity<InlineEdit>,
     pub confirm_discard: bool,
     pub conflict: bool,
     copy_ordinal: usize,
@@ -551,6 +555,7 @@ impl FilesPage {
         )
         .detach();
         let name_field = cx.new(|cx| TextField::new(cx, "New name"));
+        let name_edit = cx.new(|cx| InlineEdit::new("New name", window, cx));
         cx.subscribe_in(
             &code,
             window,
@@ -584,13 +589,15 @@ impl FilesPage {
             }
         })
         .detach();
-        // A rename in its row is let go by a click elsewhere, keeping the
-        // name; the keyboard stays where that click put it.
-        let name_focus = gpui::Focusable::focus_handle(name_field.read(cx), cx);
-        cx.on_blur(&name_focus, window, |page, _, cx| {
-            if matches!(page.naming, Some(Naming::Rename(_))) {
-                page.naming = None;
-                cx.notify();
+        // A rename keeps what was typed on Enter and on a click elsewhere
+        // (the keyboard stays where that click put it); Esc lets it go.
+        cx.subscribe_in(&name_edit, window, |page, _, event, window, cx| {
+            if !matches!(page.naming, Some(Naming::Rename(_))) {
+                return;
+            }
+            match event {
+                InlineEditEvent::Committed(name) => page.give_name(name.trim(), window, cx),
+                InlineEditEvent::Reverted => page.stop_naming(window, cx),
             }
         })
         .detach();
@@ -631,6 +638,7 @@ impl FilesPage {
             naming_in: None,
             menu_from: None,
             name_field,
+            name_edit: name_edit.clone(),
             confirm_discard: false,
             conflict: false,
             copy_ordinal: 1,
@@ -2156,12 +2164,18 @@ impl FilesPage {
             Naming::Rename(path) => paths::base_name(path).to_owned(),
             _ => String::new(),
         };
-        self.name_field.update(cx, |field, cx| {
-            field.set_placeholder(naming.placeholder());
-            field.set(&text, true, cx)
-        });
+        if matches!(naming, Naming::Rename(_)) {
+            self.name_edit
+                .update(cx, |edit, cx| edit.start(&text, window, cx));
+        } else {
+            self.name_edit.update(cx, |edit, cx| edit.revert(cx));
+            self.name_field.update(cx, |field, cx| {
+                field.set_placeholder(naming.placeholder());
+                field.set(&text, true, cx)
+            });
+            ahjo_app_kit::widgets::field::focus(&self.name_field, window, cx);
+        }
         self.naming = Some(naming);
-        ahjo_app_kit::widgets::field::focus(&self.name_field, window, cx);
         cx.notify();
     }
     pub fn start_rename(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -2184,20 +2198,50 @@ impl FilesPage {
         self.naming_in = place;
         self.start_naming(Naming::Rename(path), window, cx);
     }
+    /// A rename the node or the name refused goes on as typed.
+    fn resume_rename(&mut self, naming: &Naming, cx: &mut Context<Self>) {
+        if matches!(naming, Naming::Rename(_)) && self.naming.as_ref() == Some(naming) {
+            self.name_edit.update(cx, |edit, cx| edit.resume(cx));
+        }
+    }
     pub fn stop_naming(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.naming = None;
+        self.name_edit.update(cx, |edit, cx| edit.revert(cx));
         self.name_field
             .update(cx, |field, cx| field.set("", false, cx));
         window.focus(&self.focus, cx);
         cx.notify();
     }
+    /// Gives the name typed: a rename ends as Enter ends it.
     pub fn apply_naming(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        match self.naming {
+            Some(Naming::Rename(_)) => self.name_edit.update(cx, |edit, cx| edit.commit(cx)),
+            Some(_) => {
+                let name = self.name_field.read(cx).text.trim().to_owned();
+                self.give_name(&name, window, cx);
+            }
+            None => {}
+        }
+    }
+
+    /// Makes the new file or folder, or renames, under `name`. A rename
+    /// to its own name, or to none, changes nothing; a name the node
+    /// refuses keeps the rename open, saying why.
+    fn give_name(&mut self, name: &str, window: &mut Window, cx: &mut Context<Self>) {
         let Some(naming) = self.naming.clone() else {
             return;
         };
-        let name = self.name_field.read(cx).text.trim().to_owned();
+        let name = name.to_owned();
+        if let Naming::Rename(from) = &naming
+            && (name.is_empty() || name == paths::base_name(from))
+        {
+            self.naming = None;
+            cx.notify();
+            return;
+        }
         if let Some(reason) = paths::bad_name(&name) {
             self.fail(reason.into(), cx);
+            self.resume_rename(&naming, cx);
             return;
         }
         let node = self.tree.node.clone();
@@ -2245,6 +2289,7 @@ impl FilesPage {
             let _ = this.update_in(cx, |p, window, cx| {
                 if let Err(error) = answer {
                     p.fail(error.message, cx);
+                    p.resume_rename(&naming, cx);
                     cx.notify();
                     return;
                 }

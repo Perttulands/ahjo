@@ -86,6 +86,18 @@ fn creates_and_renames_a_mission_with_cancel_and_conflict_guard(cx: &mut TestApp
     cx.simulate_keystrokes("escape");
     until(cx, "rename let go", |cx| !has(cx, "mission-form-name"));
     until(cx, "name kept", |cx| has(cx, "pane-title-Release"));
+    // A click elsewhere renames it, as Enter does. Focus leaving a field
+    // is seen only in a window drawn active with the field focused.
+    menu(cx, "Rename…");
+    until(cx, "rename in the head", |cx| has(cx, "mission-form-name"));
+    cx.update(|window, _| window.activate_window());
+    cx.update(|window, _| window.refresh());
+    cx.run_until_parked();
+    cx.simulate_input("Clicked");
+    click(cx, "mission-filter");
+    until(cx, "renamed by a click elsewhere", |cx| {
+        !has(cx, "mission-form-name") && has(cx, "pane-title-Clicked")
+    });
     menu(cx, "Rename…");
     until(cx, "rename in the head again", |cx| {
         has(cx, "mission-form-name")

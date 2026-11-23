@@ -2,6 +2,7 @@ pub mod boundary;
 pub mod code;
 pub mod field;
 pub mod finder;
+pub mod inline_edit;
 pub mod kit;
 pub mod markdown;
 pub mod pane;

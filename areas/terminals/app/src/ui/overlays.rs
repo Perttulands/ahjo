@@ -76,7 +76,7 @@ impl Terminals {
                         .w(px(size::TAB_FIELD))
                         .flex()
                         .items_center()
-                        .child(self.rename_field.clone()),
+                        .child(self.name_edit.clone()),
                 );
                 continue;
             }
@@ -224,7 +224,7 @@ impl Terminals {
             .w(px(size::TAB_FIELD))
             .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
             .on_click(|_, _, cx| cx.stop_propagation())
-            .child(self.rename_field.clone())
+            .child(self.name_edit.clone())
     }
 
     pub(super) fn render_overview(

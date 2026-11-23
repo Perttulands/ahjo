@@ -884,11 +884,16 @@ impl FilesPage {
         })
     }
 
-    /// The field a name is given in: Enter keeps it, Esc lets it go.
+    /// The field a name is given in: Enter keeps it, Esc lets it go, and
+    /// a rename is also kept by a click elsewhere.
     fn name_field(&self, cx: &mut Context<Self>) -> gpui::Stateful<Div> {
-        div()
+        let field = div()
             .id("files-name")
-            .debug_selector(|| "files-name".into())
+            .debug_selector(|| "files-name".into());
+        if matches!(self.naming, Some(Naming::Rename(_))) {
+            return field.child(self.name_edit.clone());
+        }
+        field
             .on_key_down(cx.listener(|page, e: &gpui::KeyDownEvent, w, cx| {
                 if e.keystroke.key == "escape" {
                     page.stop_naming(w, cx);

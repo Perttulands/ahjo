@@ -1968,7 +1968,7 @@ fn create_rename_delete_and_diff_in_the_files_page(cx: &mut TestAppContext) {
             && cx.debug_bounds("files-name").is_none()
     });
     // From the viewer's "…", the open file's name is edited over it; Esc
-    // keeps it.
+    // keeps it, and a click elsewhere renames it as Enter does.
     click(cx, "files-more");
     until(cx, "file menu", |cx| {
         cx.debug_bounds("menu-label-Rename").is_some()
@@ -1983,11 +1983,35 @@ fn create_rename_delete_and_diff_in_the_files_page(cx: &mut TestAppContext) {
         viewer.contains(&field.center()),
         "{field:?} over the viewer {viewer:?}"
     );
+    cx.simulate_input("dropped.txt");
     cx.simulate_keystrokes("escape");
     until(cx, "rename let go", |cx| {
         cx.debug_bounds("files-name").is_none()
     });
+    cx.run_until_parked();
     assert!(root.join("renamed.txt").is_file());
+    assert!(!root.join("dropped.txt").exists());
+    click(cx, "files-more");
+    until(cx, "file menu", |cx| {
+        cx.debug_bounds("menu-label-Rename").is_some()
+    });
+    menu(cx, "Rename");
+    until(cx, "the name's field", |cx| {
+        cx.debug_bounds("files-name").is_some()
+    });
+    cx.simulate_input("clicked.txt");
+    // Focus leaving a field is seen only in an active window, drawn
+    // active with the field focused.
+    cx.update(|window, _| window.activate_window());
+    cx.update(|window, _| window.refresh());
+    cx.run_until_parked();
+    let away = cx.debug_bounds("files-search").unwrap().center();
+    cx.simulate_click(away, Modifiers::none());
+    until(cx, "a click elsewhere renames it", |cx| {
+        root.join("clicked.txt").is_file()
+            && cx.debug_bounds("file-view-clicked.txt").is_some()
+            && cx.debug_bounds("files-name").is_none()
+    });
     click(cx, "files-new");
     menu(cx, "New file");
     cx.simulate_input("new.txt");

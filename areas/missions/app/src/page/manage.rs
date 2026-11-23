@@ -6,35 +6,14 @@ use ahjo_app_kit::menu::MenuRow;
 use ahjo_app_kit::popup::{self, Outside, Popup, PopupId};
 use ahjo_app_kit::theme::Theme;
 use ahjo_app_kit::theme::theme;
+use ahjo_app_kit::widgets::inline_edit::{InlineEdit, InlineEditEvent};
 use ahjo_missions_contract::commands::{MissionCreate, MissionDelete, MissionEdited};
 use gpui::{AnyElement, Focusable, FontWeight, SharedString};
 
-enum Receipt {
-    Created {
-        node: String,
-        slug: String,
-    },
-    Renamed {
-        previous_title: String,
-        edit: Box<MissionEdited>,
-    },
-}
-
-#[derive(Clone)]
-enum Doing {
-    Create {
-        node: String,
-    },
-    Rename {
-        node: String,
-        slug: String,
-        title: String,
-        rev: i64,
-        etag: String,
-    },
-}
+/// New's form, in its popup.
 struct Form {
-    doing: Doing,
+    /// The node the mission is made on.
+    node: String,
     name: Entity<TextField>,
     /// What a new mission is for, kept as its note.
     intent: Entity<TextField>,
@@ -44,36 +23,48 @@ struct Form {
     example: Option<&'static ahjo_missions_contract::Example>,
     problem: Option<String>,
     busy: bool,
-    /// New's popup; a rename is drawn in the head.
     popup: Option<PopupId>,
-    /// A rename closes when its field loses focus, as a click outside a
-    /// form closes it.
-    _blur: Option<gpui::Subscription>,
+}
+/// The mission's name, edited in its head.
+struct Rename {
+    node: String,
+    slug: String,
+    title: String,
+    rev: i64,
+    etag: String,
+    edit: Entity<InlineEdit>,
+    problem: Option<String>,
+    busy: bool,
+    _edit: gpui::Subscription,
 }
 #[derive(Default)]
 pub(super) struct Manage {
     form: Option<Form>,
+    rename: Option<Rename>,
 }
 impl MissionsPage {
     pub(super) fn manage_unsaved(&self, cx: &gpui::App) -> Option<String> {
+        if let Some(rename) = &self.manage.rename {
+            if rename.busy {
+                return Some("Saving mission".into());
+            }
+            if rename.edit.read(cx).text(cx) != rename.title {
+                return Some("Mission name".into());
+            }
+        }
         let form = self.manage.form.as_ref()?;
         if form.busy {
             return Some("Saving mission".into());
         }
-        let baseline = match &form.doing {
-            Doing::Create { .. } => "",
-            Doing::Rename { title, .. } => title.as_str(),
-        };
-        if form.name.read(cx).text != baseline {
+        if !form.name.read(cx).text.is_empty() {
             return Some("Mission name".into());
         }
-        (matches!(form.doing, Doing::Create { .. })
-            && !(form.intent.read(cx).text.trim().is_empty()
-                && form.steps.read(cx).text.trim().is_empty()))
+        (!(form.intent.read(cx).text.trim().is_empty()
+            && form.steps.read(cx).text.trim().is_empty()))
         .then(|| "New mission".into())
     }
     pub(super) fn open_mission_create(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let at = Some(Spot::here(window, cx));
+        let at = Spot::here(window, cx);
         if self.unsaved(cx).is_some() {
             self.state.error = Some("Save or discard the current draft first.".into());
             cx.notify();
@@ -84,7 +75,7 @@ impl MissionsPage {
             cx.notify();
             return;
         };
-        self.open_manage(Doing::Create { node }, "", at, window, cx);
+        self.open_manage(node, at, window, cx);
     }
     pub(super) fn open_mission_rename(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if self.unsaved(cx).is_some() {
@@ -101,20 +92,116 @@ impl MissionsPage {
             cx.notify();
             return;
         };
-        let title = mission.title.clone();
-        self.open_manage(
-            Doing::Rename {
-                node,
-                slug,
-                title: title.clone(),
-                rev: mission.rev,
-                etag,
-            },
-            &title,
-            None,
-            window,
+        let (title, rev) = (mission.title.clone(), mission.rev);
+        let edit =
+            cx.new(|cx| InlineEdit::new("What it does, such as Write the changelog", window, cx));
+        // Enter or a click elsewhere renames it; Esc keeps the name.
+        let subscription = cx.subscribe(&edit, |page, _, event, cx| match event {
+            InlineEditEvent::Committed(name) => page.submit_rename(name.trim(), cx),
+            InlineEditEvent::Reverted => page.end_rename(cx),
+        });
+        edit.update(cx, |edit, cx| edit.start(&title, window, cx));
+        self.manage.rename = Some(Rename {
+            node,
+            slug,
+            title,
+            rev,
+            etag,
+            edit,
+            problem: None,
+            busy: false,
+            _edit: subscription,
+        });
+        self.state.error = None;
+        cx.notify();
+    }
+    /// Esc, or the rename asked of the node done: the head shows the name.
+    fn end_rename(&mut self, cx: &mut Context<Self>) {
+        if self.manage.rename.take().is_some() {
+            self.resolve_wanted(cx);
+            cx.notify();
+        }
+    }
+    /// Escape on the page while the rename stands in the head, its field
+    /// not holding the keyboard: the name stays as it was.
+    pub(super) fn cancel_rename(&mut self, cx: &mut Context<Self>) {
+        if let Some(rename) = self.manage.rename.as_ref().filter(|r| !r.busy) {
+            let edit = rename.edit.clone();
+            edit.update(cx, |edit, cx| edit.revert(cx));
+            self.end_rename(cx);
+        }
+    }
+    /// Renames the mission `title`. Its own name changes nothing; none,
+    /// or one the node refuses, keeps the rename open, saying why.
+    fn submit_rename(&mut self, title: &str, cx: &mut Context<Self>) {
+        let Some(rename) = self.manage.rename.as_mut() else {
+            return;
+        };
+        if title == rename.title {
+            self.end_rename(cx);
+            return;
+        }
+        if title.is_empty() {
+            rename.problem = Some("A mission needs a name.".into());
+            rename.edit.update(cx, |edit, cx| edit.resume(cx));
+            cx.notify();
+            return;
+        }
+        rename.busy = true;
+        rename.problem = None;
+        let previous_title = rename.title.clone();
+        let asked = self.host.call(
+            NodeId(rename.node.clone()),
+            edits::board_edit(
+                rename.slug.clone(),
+                rename_patch(title),
+                rename.rev,
+                rename.etag.clone(),
+            ),
             cx,
         );
+        let generation = self.generation;
+        cx.spawn(async move |this, cx| {
+            let result: Result<MissionEdited, _> = asked.await;
+            let _ = this.update(cx, |page, cx| {
+                if page.generation != generation {
+                    return;
+                }
+                let Some(rename) = page.manage.rename.as_mut() else {
+                    return;
+                };
+                rename.busy = false;
+                match result {
+                    Ok(edit) => {
+                        page.history.wrote(undo::Version {
+                            rev: edit.definition.mission.rev,
+                            layout: Some(edit.layout_etag.clone()),
+                        });
+                        page.history.record(undo::Entry {
+                            label: "mission name".into(),
+                            steps: vec![undo::Step::board(rename_patch(&previous_title))],
+                        });
+                        page.state.mission_etag = Some(edit.definition.etag);
+                        page.state.mission = Some(edit.definition.mission);
+                        page.state.set_layout(edit.layout, edit.layout_etag, true);
+                        page.end_rename(cx);
+                    }
+                    Err(error) => {
+                        rename.problem = Some(match error.code.as_str() {
+                            "unanswered" | "invalid_response" => format!(
+                                "{}. The write may have succeeded; check the mission list before retrying.",
+                                error.message
+                            ),
+                            _ => error.message,
+                        });
+                        rename.edit.update(cx, |edit, cx| edit.resume(cx));
+                    }
+                }
+                cx.notify();
+            });
+        })
+        .detach();
+        cx.notify();
     }
     /// Asks to delete the mission, beside `at`, the button its menu came
     /// from.
@@ -196,19 +283,8 @@ impl MissionsPage {
         })
         .detach();
     }
-    fn open_manage(
-        &mut self,
-        doing: Doing,
-        title: &str,
-        at: Option<Spot>,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        let name = cx.new(|cx| {
-            let mut field = TextField::new(cx, "What it does, such as Write the changelog");
-            field.set(title, true, cx);
-            field
-        });
+    fn open_manage(&mut self, node: String, at: Spot, window: &mut Window, cx: &mut Context<Self>) {
+        let name = cx.new(|cx| TextField::new(cx, "What it does, such as Write the changelog"));
         let intent = cx.new(|cx| {
             TextField::new(
                 cx,
@@ -236,12 +312,9 @@ impl MissionsPage {
                     };
                     // Enter in the name, and Ctrl+Enter anywhere, creates it;
                     // Tab goes to the next field shown.
-                    let mut order = vec![form.name.clone()];
-                    if matches!(form.doing, Doing::Create { .. }) {
-                        order.push(form.intent.clone());
-                        if form.example.is_none() {
-                            order.push(form.steps.clone());
-                        }
+                    let mut order = vec![form.name.clone(), form.intent.clone()];
+                    if form.example.is_none() {
+                        order.push(form.steps.clone());
                     }
                     let at = order.iter().position(|f| f == field);
                     match event {
@@ -257,39 +330,24 @@ impl MissionsPage {
             )
             .detach();
         }
-        let renaming = matches!(doing, Doing::Rename { .. });
-        let blur = renaming.then(|| {
-            let focus = name.read(cx).focus_handle(cx);
-            cx.on_blur(&focus, window, |page, _, cx| page.cancel_manage(cx))
-        });
-        // A rename takes the keyboard where it stands; New's popup is
-        // given it by the shell.
-        let popup = match at {
-            Some(at) if !renaming => {
-                let view = popup::drawn(&cx.entity(), |p: &mut Self, _, cx| p.mission_form(cx), cx);
-                let (asked, closed) = (cx.entity().downgrade(), cx.entity().downgrade());
-                self.host.popup(
-                    Popup::beside(at, view)
-                        .focus(name.read(cx).focus_handle(cx))
-                        .outside(Outside::Keep)
-                        .may_close(move |_, cx| {
-                            asked
-                                .update(cx, |p, cx| p.manage_may_close(cx))
-                                .unwrap_or(true)
-                        })
-                        .on_dismiss(move |_, cx| {
-                            let _ = closed.update(cx, |p, cx| p.manage_closed(cx));
-                        }),
-                    cx,
-                )
-            }
-            _ => {
-                ahjo_app_kit::widgets::field::focus(&name, window, cx);
-                None
-            }
-        };
+        let view = popup::drawn(&cx.entity(), |p: &mut Self, _, cx| p.mission_form(cx), cx);
+        let (asked, closed) = (cx.entity().downgrade(), cx.entity().downgrade());
+        let popup = self.host.popup(
+            Popup::beside(at, view)
+                .focus(name.read(cx).focus_handle(cx))
+                .outside(Outside::Keep)
+                .may_close(move |_, cx| {
+                    asked
+                        .update(cx, |p, cx| p.manage_may_close(cx))
+                        .unwrap_or(true)
+                })
+                .on_dismiss(move |_, cx| {
+                    let _ = closed.update(cx, |p, cx| p.manage_closed(cx));
+                }),
+            cx,
+        );
         self.manage.form = Some(Form {
-            doing,
+            node,
             name,
             intent,
             steps,
@@ -297,20 +355,16 @@ impl MissionsPage {
             problem: None,
             busy: false,
             popup,
-            _blur: blur,
         });
         self.state.error = None;
         cx.notify();
     }
     pub(super) fn manage_is_open(&self) -> bool {
-        self.manage.form.is_some()
+        self.manage.form.is_some() || self.manage.rename.is_some()
     }
     /// The rename in the head is open: Escape lets it go.
     pub(super) fn is_renaming(&self) -> bool {
-        self.manage
-            .form
-            .as_ref()
-            .is_some_and(|f| matches!(f.doing, Doing::Rename { .. }))
+        self.manage.rename.is_some()
     }
     /// Escape or a press outside New's popup: a draft in it stays and
     /// says so, as does a mission being created.
@@ -338,8 +392,7 @@ impl MissionsPage {
             cx.notify();
         }
     }
-    /// Cancel, Escape in a rename or its field losing the keyboard: the
-    /// form goes, its popup with it, keeping the name as it was.
+    /// Cancel: the form goes, its popup with it.
     pub(super) fn cancel_manage(&mut self, cx: &mut Context<Self>) {
         let Some(form) = self.manage.form.as_ref() else {
             return;
@@ -370,7 +423,7 @@ impl MissionsPage {
             return;
         }
         let title = form.name.read(cx).text.trim().to_owned();
-        let doing = form.doing.clone();
+        let node = form.node.clone();
         let example = form.example;
         let intent = form.intent.read(cx).text.clone();
         let steps = if example.is_none() {
@@ -383,69 +436,26 @@ impl MissionsPage {
             Some(e) if title.is_empty() => e.title.to_owned(),
             _ => title,
         };
-        if matches!(doing, Doing::Create { .. }) && title.is_empty() {
-            self.manage.form.as_mut().unwrap().problem = Some("A mission needs a name.".into());
+        let form = self.manage.form.as_mut().unwrap();
+        if title.is_empty() {
+            form.problem = Some("A mission needs a name.".into());
             cx.notify();
             return;
         }
-        if let Doing::Rename {
-            title: original, ..
-        } = &doing
-        {
-            if title.is_empty() {
-                self.manage.form.as_mut().unwrap().problem = Some("A mission needs a name.".into());
-                cx.notify();
-                return;
-            }
-            if &title == original {
-                self.cancel_manage(cx);
-                return;
-            }
-        }
-        let form = self.manage.form.as_mut().unwrap();
         form.busy = true;
         form.problem = None;
-        let asked = match doing {
-            Doing::Create { node } => {
-                let asked = self.host.call(
-                    NodeId(node.clone()),
-                    MissionCreate {
-                        slug: String::new(),
-                        title: Some(title),
-                        example: example.map(|e| e.name.to_owned()),
-                        note: Some(intent),
-                        steps: Some(steps),
-                        updated_by: Some("human:operator".into()),
-                    },
-                    cx,
-                );
-                cx.background_executor().spawn(async move {
-                    asked.await.map(|v| Receipt::Created {
-                        node,
-                        slug: v.created,
-                    })
-                })
-            }
-            Doing::Rename {
-                node,
-                slug,
-                title: previous_title,
-                rev,
-                etag,
-            } => {
-                let asked = self.host.call(
-                    NodeId(node),
-                    edits::board_edit(slug, rename_patch(&title), rev, etag),
-                    cx,
-                );
-                cx.background_executor().spawn(async move {
-                    asked.await.map(|edit| Receipt::Renamed {
-                        previous_title,
-                        edit: Box::new(edit),
-                    })
-                })
-            }
-        };
+        let asked = self.host.call(
+            NodeId(node.clone()),
+            MissionCreate {
+                slug: String::new(),
+                title: Some(title),
+                example: example.map(|e| e.name.to_owned()),
+                note: Some(intent),
+                steps: Some(steps),
+                updated_by: Some("human:operator".into()),
+            },
+            cx,
+        );
         let generation = self.generation;
         cx.spawn(async move |this, cx| {
             let result = asked.await;
@@ -454,23 +464,9 @@ impl MissionsPage {
                 let Some(form) = page.manage.form.as_mut() else { return; };
                 form.busy = false;
                 match result {
-                    Ok(Receipt::Created { node, slug }) => {
+                    Ok(created) => {
                         page.end_manage(cx);
-                        page.open(node, slug, cx);
-                    }
-                    Ok(Receipt::Renamed { previous_title, edit }) => {
-                        page.history.wrote(undo::Version {
-                            rev: edit.definition.mission.rev,
-                            layout: Some(edit.layout_etag.clone()),
-                        });
-                        page.history.record(undo::Entry {
-                            label: "mission name".into(),
-                            steps: vec![undo::Step::board(rename_patch(&previous_title))],
-                        });
-                        page.state.mission_etag = Some(edit.definition.etag);
-                        page.state.mission = Some(edit.definition.mission);
-                        page.state.set_layout(edit.layout, edit.layout_etag, true);
-                        page.end_manage(cx);
+                        page.open(node, created.created, cx);
                     }
                     Err(error) if matches!(error.code.as_str(), "unanswered" | "invalid_response") => {
                         form.problem = Some(format!("{}. The write may have succeeded; check the mission list before retrying.", error.message));
@@ -540,9 +536,6 @@ impl MissionsPage {
     fn mission_form(&mut self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let t = &theme(cx).clone();
         let form = self.manage.form.as_ref()?;
-        let Doing::Create { .. } = &form.doing else {
-            return None;
-        };
         let mut go = kit::button(
             t,
             "mission-form-submit",
@@ -625,12 +618,7 @@ impl MissionsPage {
 
     /// The mission's name in its head, or the field it is renamed in there.
     pub(super) fn mission_title(&self, t: &Theme, title: String) -> Div {
-        let Some(form) = self
-            .manage
-            .form
-            .as_ref()
-            .filter(|f| matches!(f.doing, Doing::Rename { .. }))
-        else {
+        let Some(rename) = self.manage.rename.as_ref() else {
             return pane::title(t, title);
         };
         div()
@@ -645,9 +633,9 @@ impl MissionsPage {
                     .w(px(size::NOTICE))
                     .flex_shrink_1()
                     .min_w_0()
-                    .child(form.name.clone()),
+                    .child(rename.edit.clone()),
             )
-            .when_some(form.problem.clone(), |d, problem| {
+            .when_some(rename.problem.clone(), |d, problem| {
                 d.child(
                     div()
                         .debug_selector(|| "mission-form-error".into())

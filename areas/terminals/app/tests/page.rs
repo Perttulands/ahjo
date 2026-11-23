@@ -3170,11 +3170,7 @@ fn arrange_tabs_view_drag_and_sizing_on_a_live_node(cx: &mut TestAppContext) {
         "{popup:?} beside the tab's menu at {tab:?}"
     );
     assert!(
-        cx.update(|window, cx| page
-            .read(cx)
-            .rename_field
-            .focus_handle(cx)
-            .is_focused(window)),
+        cx.update(|window, cx| page.read(cx).view_name.focus_handle(cx).is_focused(window)),
         "the popup has the keys"
     );
     cx.simulate_keystrokes("x escape");
@@ -4535,8 +4531,9 @@ fn ctrl_wheel_zooms_the_terminal_under_it_and_peek_is_typed_into(cx: &mut TestAp
 }
 
 /// A session's name is edited where it was asked for: in its window's tag
-/// from the window's menu, in its rail row from the row's. Esc and a click
-/// elsewhere keep the name; Enter renames it.
+/// from the window's menu, in its rail row from the row's, by the one
+/// rule of a rename in place: Esc keeps the name, and a click elsewhere
+/// renames it as Enter does.
 #[gpui::test]
 fn a_session_is_renamed_where_its_name_is_shown(cx: &mut TestAppContext) {
     let Some(running) = start("terminals-rename-in-place") else {
@@ -4586,35 +4583,61 @@ fn a_session_is_renamed_where_its_name_is_shown(cx: &mut TestAppContext) {
         "{field:?} in the head"
     );
     assert!(!rail_row.intersects(&field), "not in the rail");
+    cx.simulate_input("dropped");
     cx.simulate_keystrokes("escape");
     until(cx, "Esc closes it", |cx| {
         cx.debug_bounds("session-name-field").is_none()
     });
+    cx.run_until_parked();
+    assert!(
+        page.read_with(cx, |p, _| p.renames.is_empty()
+            && p.fleet.session(&key).is_some()),
+        "Esc keeps the name"
+    );
 
-    // From the rail row's menu: in the row. A click elsewhere keeps the name.
+    // From the rail row's menu: in the row. A click elsewhere renames it.
     let field = rename(cx, true);
     let rail_row = cx.debug_bounds(row).expect("alpha's row");
     assert!(
         rail_row.contains(&field.center()),
         "{field:?} in {rail_row:?}"
     );
-    cx.simulate_input("lost");
+    cx.simulate_input("kept");
     cx.simulate_click(window.center(), Modifiers::none());
     until(cx, "a click elsewhere closes it", |cx| {
         cx.debug_bounds("session-name-field").is_none()
     });
-    assert!(page.read_with(cx, |p, _| p.fleet.session(&key).is_some()));
+    let kept = Key {
+        name: "kept".into(),
+        ..key.clone()
+    };
+    until(cx, "alpha renamed kept", |cx| {
+        page.read_with(cx, |p, _| p.fleet.session(&kept).is_some())
+    });
 
     // Enter renames it.
-    rename(cx, true);
-    cx.simulate_keystrokes("ctrl-a");
+    let kept_row: &'static str = Box::leak(format!("row-{}::kept", running.node).into_boxed_str());
+    until(cx, "kept in the rail", |cx| {
+        cx.debug_bounds(kept_row).is_some()
+    });
+    let act = page.read_with(cx, |p, _| {
+        p.row_menu(&kept)
+            .into_iter()
+            .find(|r| r.label.starts_with("Rename"))
+            .and_then(|r| r.act)
+            .expect("the menu renames")
+    });
+    cx.update(|window, cx| page.update(cx, |p, cx| p.act(act, window, cx)));
+    until(cx, "the name's field", |cx| {
+        cx.debug_bounds("session-name-field").is_some()
+    });
     cx.simulate_input("omega");
     cx.simulate_keystrokes("enter");
     let renamed = Key {
         name: "omega".into(),
         ..key.clone()
     };
-    until(cx, "alpha renamed omega", |cx| {
+    until(cx, "kept renamed omega", |cx| {
         page.read_with(cx, |p, _| p.fleet.session(&renamed).is_some())
     });
     let _ = std::fs::remove_dir_all(settings.parent().unwrap());

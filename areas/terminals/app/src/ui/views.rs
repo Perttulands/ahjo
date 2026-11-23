@@ -289,7 +289,7 @@ impl Terminals {
                 .flex_col()
                 .gap(px(6.))
                 .child(kit::label(&t, format!("View {key}")))
-                .child(self.rename_field.clone())
+                .child(self.view_name.clone())
                 .child(kit::note(&t, note, Some(t.dim)))
                 .into_any_element(),
         )

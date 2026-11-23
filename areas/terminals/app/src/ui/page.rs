@@ -19,6 +19,7 @@ use ahjo_app_kit::menu::MenuRow;
 use ahjo_app_kit::popup::{self, Popup, Spot};
 use ahjo_app_kit::settings::Place;
 use ahjo_app_kit::widgets::field::{self, FieldEvent, TextField};
+use ahjo_app_kit::widgets::inline_edit::{InlineEdit, InlineEditEvent};
 use ahjo_app_kit::{Answers, Ask, Page, Setting};
 use ahjo_core::NodeId;
 use ahjo_core::frame::Kinds;
@@ -344,7 +345,10 @@ pub struct Terminals {
     pub find_cursor: usize,
     /// The hit last opened, which Enter steps on from.
     pub find_shown: Option<usize>,
-    pub rename_field: Entity<TextField>,
+    /// A tab's or a session's name, edited where it is shown.
+    pub name_edit: Entity<InlineEdit>,
+    /// A view's name, in its popup.
+    pub view_name: Entity<TextField>,
     pub overview_cursor: usize,
     /// Number of overview cards fitting in the last painted row.
     pub overview_columns: Rc<Cell<usize>>,
@@ -446,7 +450,8 @@ impl Terminals {
                 .rows(crate::theme::size::SEND_TARGET_ROWS as usize)
         });
         let find_query = field(cx, "Search every session's output…");
-        let rename_field = field(cx, "Name");
+        let name_edit = cx.new(|cx| InlineEdit::new("Name", window, cx));
+        let view_name = field(cx, "Name");
         let weak = cx.weak_entity();
         // One per window, and the Send drawer's last.
         let launchers = (0..=super::launcher::SEND)
@@ -506,7 +511,8 @@ impl Terminals {
             find_query,
             find_cursor: 0,
             find_shown: None,
-            rename_field,
+            name_edit,
+            view_name,
             overview_cursor: 0,
             overview_columns: Rc::new(Cell::new(1)),
             overview_room: Default::default(),
@@ -622,42 +628,49 @@ impl Terminals {
             cx.notify();
         })
         .detach();
-        cx.subscribe_in(&self.rename_field.clone(), window, |s, _, ev, _, cx| {
+        cx.subscribe_in(&self.view_name.clone(), window, |s, _, ev, _, cx| {
             if !matches!(ev, FieldEvent::Submit) {
                 return;
             }
-            let name = s.rename_field.read(cx).text.clone();
-            match s.naming.clone() {
-                Some(Naming::Tab(_)) => s.keep_tab_name(cx),
-                Some(Naming::Session(k, _)) => {
-                    s.naming = None;
-                    s.close(surface::RENAME_SESSION, cx);
-                    s.rename_session(k, name.trim());
-                }
-                Some(Naming::View { popup, key, rename }) => {
-                    s.naming = None;
-                    s.host.close_popup(popup, cx);
-                    if rename {
-                        s.settings.workspace.rename_view(key, &name);
-                        s.save(cx);
-                        cx.notify();
-                    } else {
-                        s.keep_view(key, Some(&name), cx);
-                    }
-                }
-                _ => {}
+            let Some(Naming::View { popup, key, rename }) = s.naming.clone() else {
+                return;
+            };
+            let name = s.view_name.read(cx).text.clone();
+            s.naming = None;
+            s.host.close_popup(popup, cx);
+            if rename {
+                s.settings.workspace.rename_view(key, &name);
+                s.save(cx);
+                cx.notify();
+            } else {
+                s.keep_view(key, Some(&name), cx);
             }
         })
         .detach();
-        // A tab's name is kept when its field loses focus, as CHROTE's input
-        // commits on blur; Escape closes it first, keeping the old name.
-        let rename_focus = self.rename_field.read(cx).focus_handle(cx);
-        // A session's name is kept only by Enter: a click elsewhere leaves
-        // it as it was.
-        cx.on_blur(&rename_focus, window, |s, _, cx| match s.naming {
-            Some(Naming::Tab(_)) => s.keep_tab_name(cx),
-            Some(Naming::Session(..)) => s.close(surface::RENAME_SESSION, cx),
-            _ => {}
+        cx.subscribe(&self.name_edit.clone(), |s, _, ev: &InlineEditEvent, cx| {
+            let naming = match s.naming {
+                Some(Naming::Tab(_) | Naming::Session(..)) => s.naming.take(),
+                _ => None,
+            };
+            match (naming, ev) {
+                (Some(Naming::Tab(i)), InlineEditEvent::Committed(name)) => {
+                    s.settings.workspace.rename_tab(i, name);
+                    s.close(surface::RENAME_TAB, cx);
+                    s.save(cx);
+                }
+                (Some(Naming::Session(k, _)), InlineEditEvent::Committed(name)) => {
+                    s.close(surface::RENAME_SESSION, cx);
+                    s.rename_session(k, name.trim());
+                }
+                (Some(Naming::Tab(_)), InlineEditEvent::Reverted) => {
+                    s.close(surface::RENAME_TAB, cx);
+                }
+                (Some(Naming::Session(..)), InlineEditEvent::Reverted) => {
+                    s.close(surface::RENAME_SESSION, cx);
+                }
+                _ => {}
+            }
+            cx.notify();
         })
         .detach();
     }
@@ -1097,11 +1110,11 @@ impl Terminals {
             Surface::Peek => self.peek_focus.clone(),
             Surface::RenameTab(i) => {
                 self.name_in_field(Naming::Tab(*i), cx);
-                self.rename_field.focus_handle(cx)
+                self.name_edit.focus_handle(cx)
             }
             Surface::RenameSession(key, at) => {
                 self.name_in_field(Naming::Session(key.clone(), *at), cx);
-                self.rename_field.focus_handle(cx)
+                self.name_edit.focus_handle(cx)
             }
         };
         let view = surface::view(self.me.clone(), name, cx);
@@ -1139,7 +1152,7 @@ impl Terminals {
         let page = self.me.clone();
         let Some(id) = self.host.popup(
             Popup::beside(Spot::at(self.menu_at, cx), view)
-                .focus(self.rename_field.focus_handle(cx))
+                .focus(self.view_name.focus_handle(cx))
                 .on_dismiss(move |_, cx| {
                     let _ = page.update(cx, |p, cx| {
                         if matches!(p.naming, Some(Naming::View { key: k, .. }) if k == key) {
@@ -1228,11 +1241,12 @@ impl Terminals {
                 self.chips.borrow_mut()[PEEK_SLOT].clear();
                 self.sync(cx);
             }
+            // Escape closed the rename: the name stays as it was.
             surface::RENAME_TAB if matches!(self.naming, Some(Naming::Tab(_))) => {
-                self.naming = None;
+                self.name_edit.update(cx, |e, cx| e.revert(cx));
             }
             surface::RENAME_SESSION if matches!(self.naming, Some(Naming::Session(..))) => {
-                self.naming = None;
+                self.name_edit.update(cx, |e, cx| e.revert(cx));
             }
             _ => {}
         }
@@ -1263,8 +1277,9 @@ impl Terminals {
                     .get(i)
                     .and_then(|t| t.name.clone())
                     .unwrap_or_default();
-                self.rename_field.update(cx, |f, cx| f.set(&name, true, cx));
                 self.open(Surface::RenameTab(i), window, cx);
+                self.name_edit
+                    .update(cx, |e, cx| e.start(&name, window, cx));
                 return;
             }
             Act::Windows(tab, n) => {
@@ -1299,7 +1314,7 @@ impl Terminals {
                     Some(v) => v.name.clone(),
                     None => ws.view_name(),
                 };
-                self.rename_field.update(cx, |f, cx| f.set(&name, true, cx));
+                self.view_name.update(cx, |f, cx| f.set(&name, true, cx));
                 self.open_view_name(key, rename, cx);
                 return;
             }
@@ -1419,9 +1434,10 @@ impl Terminals {
                 }
             }
             Act::Rename(k, at) => {
-                self.rename_field
-                    .update(cx, |f, cx| f.set(&k.name, true, cx));
+                let name = k.name.clone();
                 self.open(Surface::RenameSession(k, at), window, cx);
+                self.name_edit
+                    .update(cx, |e, cx| e.start(&name, window, cx));
                 return;
             }
             Act::Copy(k) => self.copy_session(&k),
@@ -1541,12 +1557,8 @@ impl Terminals {
 
     /// Keeps the name typed in the tab bar for the tab being renamed.
     fn keep_tab_name(&mut self, cx: &mut Context<Self>) {
-        if let Some(Naming::Tab(i)) = self.naming {
-            self.naming = None;
-            let name = self.rename_field.read(cx).text.clone();
-            self.settings.workspace.rename_tab(i, &name);
-            self.close(surface::RENAME_TAB, cx);
-            self.save(cx);
+        if matches!(self.naming, Some(Naming::Tab(_))) {
+            self.name_edit.update(cx, |e, cx| e.commit(cx));
         }
     }
 

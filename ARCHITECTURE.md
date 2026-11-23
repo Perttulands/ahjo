@@ -293,6 +293,11 @@ reserves, or whose `everywhere` chords share a key, naming both;
   (the close guard), per DESIGN.md's Act where it is. Layers are the
   stack's other kind: Overview and Peek, which cover the page, and a
   rename in place while it holds the keyboard.
+- **Renames in place.** Every name renamed where it is shown is an
+  `InlineEdit`, with one rule: Enter and the keyboard going elsewhere keep
+  what was typed, Escape puts the name back. It tells its page once,
+  `Committed(name)` or `Reverted`; a name the page or node refuses goes on
+  being edited (`resume`) beside the reason.
 - **Scroll areas.** Everything that scrolls is `pane::scroll` (down),
   `scroll_x` (a strip) or `scroll_both` (a picture, a board): a column
   that gives way in its parent and draws its own thumb, keeping its place
