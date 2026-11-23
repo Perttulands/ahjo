@@ -317,7 +317,7 @@ const HAND_ROLLED: &[HandRolled] = &[
     },
     HandRolled {
         what: "a virtualized list built by hand",
-        finds: |line| line.contains("uniform_list("),
+        finds: |line| line.contains("uniform_list(") || line.contains("uniform_list::<"),
         home: &["kit/app-kit/src/widgets/pane.rs"],
         instead: "pane::long_list",
     },
