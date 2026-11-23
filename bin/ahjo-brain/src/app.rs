@@ -1065,6 +1065,14 @@ impl BrainApp {
         Direction::from_key(&self.settings.theme)
     }
 
+    /// The theme drawn now, as the picker starts at it: the one kept,
+    /// else one `--theme` asked for, else Swarm's.
+    fn theme_drawn(&self, cx: &App) -> theme_picker::Choice {
+        let drawn = theme(cx).direction;
+        self.theme_kept()
+            .or_else(|| (drawn != theme_picker::drawn(None).direction).then_some(drawn))
+    }
+
     /// Opens the theme picker beside `spot`: Up and Down try a theme on
     /// the whole app, the sky with it; Enter or a click keeps it.
     fn pick_theme(&mut self, spot: Spot, window: &mut Window, cx: &mut Context<Self>) {
@@ -1073,7 +1081,7 @@ impl BrainApp {
             &self.frame,
             OWNER,
             spot,
-            Picker::new(self.theme_kept(), true),
+            Picker::new(self.theme_drawn(cx), true),
             move |choice, _, cx| {
                 let _ = me.update(cx, |me, cx| {
                     me.settings.theme = choice.map_or("", |d| d.key()).into();

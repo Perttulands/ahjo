@@ -107,6 +107,23 @@ fn escape_closes_only_the_top(cx: &mut TestAppContext) {
     let _ = std::fs::remove_dir_all(dir);
 }
 
+/// Started in a theme asked for (`--theme`) with none kept, the picker
+/// closed without a choice leaves the app in that theme, not Swarm's.
+#[gpui::test]
+fn the_picker_closed_keeps_the_theme_asked_for(cx: &mut TestAppContext) {
+    let dir = scratch("theme-asked");
+    let (_app, cx) = open(&dir, 1920., None, cx);
+    let swarms = theme_picker::drawn(None).direction;
+    let asked = *Direction::ALL.iter().find(|d| **d != swarms).unwrap();
+    cx.update(|_, cx| cx.set_global(Theme::new(asked)));
+    cx.simulate_keystrokes("ctrl-t");
+    shown(cx, "theme-picker");
+    cx.simulate_keystrokes("escape");
+    gone(cx, "theme-picker");
+    assert_eq!(cx.update(|_, cx| theme(cx).direction), asked);
+    let _ = std::fs::remove_dir_all(dir);
+}
+
 /// However wide the window, with a page read or not, the actions at the
 /// top and what they open stand clear of the search.
 #[gpui::test]
