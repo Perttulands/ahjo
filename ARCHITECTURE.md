@@ -81,7 +81,7 @@ what each is for the operator; this is what each word may name in code.
 | run | one time a mission is carried out | |
 | reason | the operator's words given with an approval, pick, abort or resume | response |
 | panel | the shell's one column at the window's edge, where what a page opens beside another stands (`Host::show_panel`, a `PanelView`) | dock, beside view, view beside, beside panel, edge panel, drawer, side panel |
-| side section | a page's part of the shell's left column, lent on every page (`Host::lend_side`), as Sessions lends its rail | side panel |
+| side section | a page's part of the shell's left column, which stands on every page; the section shows on the pages its `SideOn` says (`Host::lend_side`): Sessions' rail on every page | side panel |
 | popup | a menu, confirm or small form on the dismissal stack, standing beside what was clicked (`Host::popup`) | popover |
 | layer | a page-wide surface on the dismissal stack, over the page or the window (Overview, Peek, a rename holding the keyboard) | overlay |
 | Peek | a session's terminal over the page, used as in a window, without sizing the session | |
@@ -243,13 +243,13 @@ reserves, or whose `everywhere` chords share a key, naming both;
   beside ask (Send, open a path beside, or a reveal marked `beside`, as an
   issue named in a terminal opens its card) leaves the asker shown: the
   answering page shows its answer in the window's panel (below).
-- **Side panel.** The column at the window's left is the shell's, on every
-  page: each page may lend it one section (`Host::lend_side`), and the
+- **Side sections.** The column at the window's left is the shell's, on
+  every page: each page may lend it one side section (`Host::lend_side`), and the
   operator puts it away to a narrow edge and back (`Host::set_side_open`,
   kept in `app.json`). Sessions lends its rail, on every page. On the
   Sessions page that column is the rail that was always there; on other
   pages it narrows the page. A lent section keeps its page's channels on
-  while the panel is open, and acts through its page (a session goes to
+  while the column is open, and acts through its page (a session goes to
   Sessions), so a page's own lists stay its own. A section says where it
   shows (`SideOn`).
 - **The panel.** Everything a page opens beside another, asked or not,
