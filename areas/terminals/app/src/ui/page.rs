@@ -1124,9 +1124,12 @@ impl Terminals {
             .on_dismiss(move |_, cx| {
                 let _ = page.update(cx, |p, cx| p.closed(name, cx));
             });
-        // Peek is a terminal: Escape is its program's.
-        if matches!(s, Surface::Peek) {
-            layer = layer.keeps_escape();
+        // Peek is a terminal: Escape is its program's. A rename is an
+        // edit in its own field, which Enter and Escape settle.
+        match s {
+            Surface::Peek => layer = layer.keeps_escape(),
+            Surface::RenameTab(_) | Surface::RenameSession(..) => layer = layer.in_place(),
+            Surface::Overview => {}
         }
         self.host.layer(layer, cx);
         if matches!(s, Surface::Overview) {

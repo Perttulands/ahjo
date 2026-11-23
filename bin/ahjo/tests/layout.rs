@@ -398,9 +398,10 @@ const ALLOWED: &[(&str, &str, &str)] = &[
     (
         "areas/files/app/src/view/tabs.rs",
         "a close control drawn by hand (a × glyph or a Close word)",
-        "a file's tab shows its unsaved dot where its × stands, one control \
-         in two states that appears on hover, as an editor's tab does; \
-         kit::cross has no second state",
+        "a file tab's × closes a tab, not a surface that opened, so it is \
+         not the surfaces' close control (the lead, 2026-11-24, on the \
+         ahjo-6yx review); it shows the unsaved dot where the × stands, \
+         one control in two states, as an editor's tab does",
     ),
     (
         "areas/terminals/app/src/ui/tiles.rs",

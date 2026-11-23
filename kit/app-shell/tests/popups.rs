@@ -3,7 +3,9 @@
 //! screen, Escape closes only the top one, a press outside closes it or
 //! not as it declares and never reaches the page under it, and when it
 //! closes the keyboard goes back where it was: to a terminal, which then
-//! gets its keys again. A toy page, made here, with a stand-in terminal.
+//! gets its keys again. A layer's close control, which the shell draws as
+//! it draws a popup's, closes that layer alone in the same way. A toy page,
+//! made here, with a stand-in terminal.
 
 use ahjo_app_kit::popup::{self, Outside, Popup, PopupId, Spot};
 use ahjo_app_kit::{Build, Host, Mounted, Page, mount};
@@ -56,6 +58,8 @@ struct Pad {
     forms: Vec<(PopupId, Entity<Form>)>,
     /// What a popup asks before Escape or a press outside closes it.
     may_close: Rc<Cell<bool>>,
+    /// Unsaved work that holds the window open.
+    dirty: Option<String>,
 }
 
 thread_local! {
@@ -191,6 +195,7 @@ impl Render for Pad {
 fn pad(host: Host, window: &mut Window, cx: &mut App) -> Mounted {
     mount(host, window, cx, |host, _, cx| {
         PAD.with(|p| *p.borrow_mut() = Some(cx.entity()));
+        host.guard_close(&cx.entity(), |p: &Pad, _| p.dirty.clone(), cx);
         Pad {
             host,
             term: cx.focus_handle(),
@@ -198,6 +203,7 @@ fn pad(host: Host, window: &mut Window, cx: &mut App) -> Mounted {
             presses: 0,
             forms: vec![],
             may_close: Rc::new(Cell::new(true)),
+            dirty: None,
         }
     })
 }
@@ -491,5 +497,63 @@ fn its_close_control_closes_that_popup_only_and_the_keys_go_back(cx: &mut TestAp
     click(cx, "popup-close");
     assert!(drawn(cx, "menu-label-Do it").is_none(), "its × closed it");
     assert!(!ran.get(), "and ran nothing");
+    assert!(cx.update(|window, _| term.is_focused(window)));
+}
+
+/// A layer's close control closes that layer alone, as Escape does. The
+/// path picker opened from a popup: its × closes the picker, the popup
+/// stays and gets the next key. The close guard: its × keeps the window
+/// open, and the next key goes back to the terminal.
+#[gpui::test]
+fn a_layers_close_control_closes_that_layer_only_and_the_keys_go_back(cx: &mut TestAppContext) {
+    let (_, cx, pad) = start(cx);
+    let term = pad.read_with(cx, |p, _| p.term.clone());
+
+    click(cx, "open-near");
+    pad.update_in(cx, |p, window, cx| {
+        ahjo_app_kit::widgets::path_picker::field(
+            p.host.clone(),
+            "Attach",
+            window,
+            cx,
+            |_, _, _| {},
+        )
+    });
+    let card = drawn(cx, "path-picker-card").expect("the picker in the shell's card");
+    let close = drawn(cx, "path-picker-close").expect("its ×");
+    assert!(
+        close.right() <= card.right()
+            && close.left() > card.center().x
+            && close.top() <= card.top() + px(8.),
+        "{close:?} at the top right of {card:?}"
+    );
+    click(cx, "path-picker-close");
+    assert!(drawn(cx, "path-picker").is_none(), "the picker closed");
+    assert!(
+        drawn(cx, "form").is_some(),
+        "the popup it was opened from stays"
+    );
+    cx.simulate_keystrokes("a");
+    assert_eq!(
+        pad.read_with(cx, |p, cx| p.keys_of("form", cx)),
+        1,
+        "the keys went back to the popup"
+    );
+    cx.simulate_keystrokes("escape");
+    assert!(drawn(cx, "form").is_none());
+
+    pad.update(cx, |p, _| p.dirty = Some("draft.md".into()));
+    assert!(!cx.simulate_close(), "unsaved work holds the window");
+    assert!(drawn(cx, "close-guard").is_some(), "and the guard asks");
+    click(cx, "close-guard-close");
+    assert!(drawn(cx, "close-guard").is_none(), "its × keeps editing");
+    assert_eq!(cx.windows().len(), 1, "the window stays");
+    let before = pad.read_with(cx, |p, _| p.term_keys);
+    cx.simulate_keystrokes("b");
+    assert_eq!(
+        pad.read_with(cx, |p, _| p.term_keys),
+        before + 1,
+        "the next key reaches the terminal"
+    );
     assert!(cx.update(|window, _| term.is_focused(window)));
 }

@@ -2655,7 +2655,7 @@ fn overview_keyboard_dismisses_selects_and_routes_leader(cx: &mut TestAppContext
     until(cx, "overview reopened for its close control", |cx| {
         cx.debug_bounds("overview-grid").is_some()
     });
-    click(cx, "ov-close".into());
+    click(cx, "overview-close".into());
     until(cx, "its × closes overview", |cx| {
         cx.debug_bounds("overview-grid").is_none()
     });

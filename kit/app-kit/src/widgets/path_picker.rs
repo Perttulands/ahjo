@@ -36,6 +36,23 @@ pub fn pick_folder<T: 'static>(
     pick_paths(host, prompt, true, window, cx, selected)
 }
 
+/// The path field straight away, without the native picker first: what
+/// [`pick`] falls back to when that picker fails. A test's platform never
+/// fails one, so a test opens the field this way.
+pub fn field<T: 'static>(
+    host: Host,
+    prompt: &'static str,
+    window: &mut Window,
+    cx: &mut Context<T>,
+    selected: impl FnOnce(&mut T, Vec<PathBuf>, &mut Context<T>) + 'static,
+) {
+    let page = cx.weak_entity();
+    let callback: Picked = Box::new(move |paths, cx| {
+        let _ = page.update(cx, |page, cx| selected(page, paths, cx));
+    });
+    open(host, prompt, false, callback, window, cx);
+}
+
 fn pick_paths<T: 'static>(
     host: Host,
     prompt: &'static str,
@@ -95,6 +112,7 @@ fn open(
     let focus = view.read(cx).field.focus_handle(cx);
     host.layer(
         Layer::new(LAYER, view)
+            .card()
             .focus(focus.clone())
             .on_dismiss(move |window, cx| {
                 if let Some(opener) = &opener {
@@ -231,12 +249,8 @@ fn complete(input: &str) -> Option<String> {
 impl Render for Picker {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let t = theme(cx).clone();
+        // In the shell's card, which draws its frame and close control.
         div()
-            .size_full()
-            .flex()
-            .justify_center()
-            .items_start()
-            .pt(px(board::PAD))
             .on_drop(cx.listener(|picker, paths: &ExternalPaths, _, cx| {
                 picker.finish(paths.paths().to_vec(), cx)
             }))
@@ -246,21 +260,10 @@ impl Render for Picker {
                     .debug_selector(|| "path-picker".into())
                     .w(px(size::KEYS))
                     .p(px(board::PAD))
-                    .bg(t.surface)
-                    .border_1()
-                    .border_color(t.divider)
                     .flex()
                     .flex_col()
                     .gap(px(board::GAP))
-                    .child(
-                        div()
-                            .flex()
-                            .items_center()
-                            .child(kit::label(&t, self.title).flex_1())
-                            .child(kit::close(&t, "path-picker-close", Some("Esc")).on_click(
-                                cx.listener(|picker, _, _, cx| picker.host.close_layer(LAYER, cx)),
-                            )),
-                    )
+                    .child(kit::label(&t, self.title))
                     .child(kit::note(
                         &t,
                         if self.folders {

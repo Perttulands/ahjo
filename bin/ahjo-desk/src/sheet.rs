@@ -190,6 +190,13 @@ impl DeskApp {
         self.aim(Aim::Pen, cx);
     }
 
+    /// The pen lifts without putting anything down, as Escape lifts it:
+    /// the passage stays chosen and the keys go back to the paper.
+    pub fn lift_pen(&mut self, cx: &mut Context<Self>) {
+        self.grading.writing = None;
+        self.aim(Aim::Surface, cx);
+    }
+
     /// What the pen wrote goes on the passage: a rewrite left as it was,
     /// or emptied, is a cut; an empty note takes the note away.
     pub fn put_pen_down(&mut self, cx: &mut Context<Self>) {
@@ -747,6 +754,12 @@ impl DeskApp {
                 .child(
                     pen_button(t, k, "pen-done", "Done", Some("Enter"), true)
                         .on_click(cx.listener(|app, _: &ClickEvent, _, cx| app.put_pen_down(cx))),
+                )
+                // The writing is a surface of its own: its close lifts the
+                // pen and keeps the paper open.
+                .child(
+                    kit::close(&on_paper(t, k), "pen-writing-close", Some("Esc"))
+                        .on_click(cx.listener(|app, _: &ClickEvent, _, cx| app.lift_pen(cx))),
                 );
         }
         let mut tray = tray;

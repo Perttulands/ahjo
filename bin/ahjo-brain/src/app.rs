@@ -282,14 +282,13 @@ impl Render for Over {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let note = self
             .app
-            .update(cx, |me, cx| {
-                let t = theme(cx).clone();
+            .update(cx, |me, _| {
                 let ed = me.note.clone()?;
-                Some(me.note_pane(&t, &ed, cx).into_any_element())
+                Some(me.note_pane(&ed).into_any_element())
             })
             .ok()
             .flatten();
-        div().size_full().children(note)
+        div().children(note)
     }
 }
 
@@ -1698,13 +1697,18 @@ impl BrainApp {
         ahjo_app_kit::widgets::code::Code::focus(&code, window, cx);
         self.note = Some(ed);
         // Over the whole window, on the stack: a popup opened from it
-        // stands over it. Escape is the note's own (it closes a list of
-        // links first, then the note).
+        // stands over it. The kit draws its card and close, and a press
+        // beside the card closes it; the sky under it is veiled (`render`).
+        // Escape is the note's own (it closes a list of links first, then
+        // the note).
         let me = cx.entity();
         let over = cx.new(|cx| Over::new(&me, cx));
         let weak = me.downgrade();
         let layer = Layer::new(NOTE, over)
             .cover(Cover::Window)
+            .card()
+            .middle()
+            .closes_outside()
             .keeps_escape()
             .on_dismiss(move |window, cx| {
                 let _ = weak.update(cx, |me, cx| me.leave_note(window, cx));
@@ -2781,6 +2785,9 @@ impl Render for BrainApp {
             if let Some(ed) = &self.editing {
                 root = root.child(self.source_pane(ed));
             }
+        }
+        if self.note.is_some() {
+            root = root.child(self.note_veil(&t));
         }
         root = root
             .children(frame::stack(&self.frame, Cover::Window, window, cx))

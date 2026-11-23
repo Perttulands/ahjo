@@ -161,3 +161,41 @@ fn nothing_covers_the_search(cx: &mut TestAppContext) {
     );
     let _ = std::fs::remove_dir_all(dir);
 }
+
+/// A note shows the close every surface shows, at its card's top right
+/// beside its head: it closes the note and only the note, as a press
+/// beside the card does, and the page read stays.
+#[gpui::test]
+fn a_notes_close_closes_the_note_only(cx: &mut TestAppContext) {
+    let dir = scratch("note-close");
+    let (app, cx) = open(&dir, 1440., Some("knowledge/sea/tides.md"), cx);
+    let state = |cx: &mut VisualTestContext| {
+        app.read_with(cx, |a, _| (a.note.is_some(), a.reading.is_some()))
+    };
+    for by_close in [true, false] {
+        cx.simulate_keystrokes("ctrl-n");
+        let card = shown(cx, "note-card");
+        let close = shown(cx, "note-close");
+        assert!(
+            card.contains(&close.center()) && close.center().x > card.center().x,
+            "the close stands in the note's card, on its right: {close:?} in {card:?}"
+        );
+        assert!(
+            close.origin.y - card.origin.y < close.size.height,
+            "the close stands at the card's top, beside the head"
+        );
+        if by_close {
+            click(cx, "note-close");
+        } else {
+            let beside = card.origin - gpui::point(px(10.), px(10.));
+            cx.simulate_click(beside, gpui::Modifiers::default());
+        }
+        gone(cx, "note-card");
+        assert_eq!(
+            state(cx),
+            (false, true),
+            "the note closes and the page read stays"
+        );
+    }
+    let _ = std::fs::remove_dir_all(dir);
+}

@@ -500,82 +500,59 @@ impl Render for Report {
                     })),
             );
         }
-        div()
-            .size_full()
-            .flex()
-            .justify_center()
-            .items_start()
-            .pt(px(SPACE_4XL))
-            .child(
-                div()
-                    .id("report-box")
-                    .debug_selector(|| "report-box".into())
-                    .w(px(CARD_W))
-                    .p(px(SPACE_4XL))
-                    .bg(t.surface)
-                    .border_1()
-                    .border_color(t.divider)
-                    .font_family(FAMILY)
-                    .flex()
-                    .flex_col()
-                    .gap(px(SPACE_XL))
-                    .child(
+        // In the shell's card, which draws its frame and close control.
+        div().child(
+            div()
+                .id("report-box")
+                .debug_selector(|| "report-box".into())
+                .w(px(CARD_W))
+                .p(px(SPACE_4XL))
+                .font_family(FAMILY)
+                .flex()
+                .flex_col()
+                .gap(px(SPACE_XL))
+                .child(kit::label(&t, "Report"))
+                .child(
+                    div()
+                        .debug_selector(|| "report-field".into())
+                        .child(self.field.clone()),
+                )
+                .child(projects)
+                .when_some(self.evidence.as_ref().map(summary), |d, summary| {
+                    d.child(
                         div()
+                            .debug_selector(|| "report-evidence".into())
                             .flex()
-                            .items_center()
-                            .child(kit::label(&t, "Report").flex_1())
-                            .child(kit::close(&t, "report-close", Some("Esc")).on_click(
-                                cx.listener(|report, _, _, cx| report.host.close_layer(LAYER, cx)),
-                            )),
-                    )
-                    .child(
-                        div()
-                            .debug_selector(|| "report-field".into())
-                            .child(self.field.clone()),
-                    )
-                    .child(projects)
-                    .when_some(self.evidence.as_ref().map(summary), |d, summary| {
-                        d.child(
-                            div()
-                                .debug_selector(|| "report-evidence".into())
-                                .flex()
-                                .items_start()
-                                .gap(px(SPACE_XS))
-                                .child(kit::note(&t, summary, None).flex_1().min_w_0())
-                                .child(
-                                    kit::button(
-                                        &t,
-                                        "report-evidence-remove",
-                                        "Remove",
-                                        Kind::Quiet,
-                                    )
+                            .items_start()
+                            .gap(px(SPACE_XS))
+                            .child(kit::note(&t, summary, None).flex_1().min_w_0())
+                            .child(
+                                kit::button(&t, "report-evidence-remove", "Remove", Kind::Quiet)
                                     .debug_selector(|| "report-evidence-remove".into())
-                                    .on_click(cx.listener(
-                                        |report, _, _, cx| {
-                                            report.evidence = None;
-                                            cx.notify();
-                                        },
-                                    )),
-                                ),
-                        )
-                    })
-                    .when_some(self.error.clone(), |d, error| {
-                        d.child(kit::note(&t, error, Some(t.error)))
-                    })
-                    .child(
-                        kit::button(
-                            &t,
-                            "report-file",
-                            if self.filing {
-                                "Filing…"
-                            } else {
-                                "File report"
-                            },
-                            Kind::Primary,
-                        )
-                        .on_click(cx.listener(|report, _, _, cx| report.file(cx))),
-                    ),
-            )
+                                    .on_click(cx.listener(|report, _, _, cx| {
+                                        report.evidence = None;
+                                        cx.notify();
+                                    })),
+                            ),
+                    )
+                })
+                .when_some(self.error.clone(), |d, error| {
+                    d.child(kit::note(&t, error, Some(t.error)))
+                })
+                .child(
+                    kit::button(
+                        &t,
+                        "report-file",
+                        if self.filing {
+                            "Filing…"
+                        } else {
+                            "File report"
+                        },
+                        Kind::Primary,
+                    )
+                    .on_click(cx.listener(|report, _, _, cx| report.file(cx))),
+                ),
+        )
     }
 }
 
@@ -596,6 +573,7 @@ impl Issue {
         let opener = window.focused(cx);
         self.host.layer(
             Layer::new(LAYER, report)
+                .card()
                 .focus(focus.clone())
                 .on_dismiss(move |window, cx| {
                     if let Some(opener) = &opener {

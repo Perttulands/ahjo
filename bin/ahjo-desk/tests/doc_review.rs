@@ -145,6 +145,41 @@ fn a_note_on_a_passage_goes_back_as_the_web_sends_it(cx: &mut gpui::TestAppConte
     let _ = std::fs::remove_dir_all(dir);
 }
 
+/// The close on a note being written lifts the pen as Escape does: nothing
+/// goes on the passage, the passage stays chosen, and the next key is the
+/// paper's again (N starts another note).
+#[gpui::test]
+fn the_close_on_a_note_being_written_lifts_the_pen(cx: &mut gpui::TestAppContext) {
+    let text = "# Gates\n\nThe gate is fine. It **opens** the next step.\n";
+    let desk = FakeDesk::start(vec![doc_ask("AH1", text)]);
+    let dir = scratch("lift");
+    let (app, cx) = open(&desk, &dir, cx);
+    app.update(cx, |a, cx| {
+        a.press_text(at(text, "opens"), cx);
+        a.release_text(cx);
+    });
+    let chosen = app.read_with(cx, |a, _| a.grading.chosen.clone());
+    cx.simulate_keystrokes("n");
+    cx.run_until_parked();
+    cx.simulate_input("Not this");
+    cx.run_until_parked();
+    assert_eq!(app.read_with(cx, |a, _| a.grading.writing), Some("note"));
+    click(cx, "pen-writing-close");
+    app.read_with(cx, |a, _| {
+        assert_eq!(a.grading.writing, None, "the pen is lifted");
+        assert!(a.marks().is_empty(), "nothing went on the passage");
+        assert_eq!(a.grading.chosen, chosen, "the passage stays chosen");
+    });
+    cx.simulate_keystrokes("n");
+    cx.run_until_parked();
+    assert_eq!(
+        app.read_with(cx, |a, _| a.grading.writing),
+        Some("note"),
+        "the next key reaches the paper"
+    );
+    let _ = std::fs::remove_dir_all(dir);
+}
+
 /// A rewrite goes to the desk as the words instead of a passage, and the
 /// mark the desk keeps writes them in after that passage on the page.
 #[gpui::test]

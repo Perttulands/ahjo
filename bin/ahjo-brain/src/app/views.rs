@@ -379,11 +379,18 @@ impl BrainApp {
                     bar.child(
                         div()
                             .flex()
-                            .justify_between()
-                            .items_center()
+                            .items_start()
                             .gap(px(12.))
-                            .child(div().text_color(t.error).child(e.message.clone()))
-                            .child(close),
+                            // However long the error, it wraps in the bar
+                            // and leaves the close control in reach.
+                            .child(
+                                div()
+                                    .flex_1()
+                                    .min_w_0()
+                                    .text_color(t.error)
+                                    .child(e.message.clone()),
+                            )
+                            .child(close.flex_none()),
                     )
                     .into_any_element(),
                 );
@@ -978,12 +985,12 @@ impl BrainApp {
     pub(super) fn sheet(&self, t: &Theme, cx: &mut Context<Self>) -> impl IntoElement {
         let w = reader::sheet_width(self.size.0, self.reader_k());
         let back = !self.back.is_empty();
-        // Back and close: drawn marks a pointer finds, on targets it can
-        // hit. The font's arrow and cross draw at a third of its size.
+        // Back: a drawn arrow a pointer finds, on a target it can hit. The
+        // font's arrow draws at a third of its size. Close is the kit's.
         let (ink, raised) = (t.text2, t.raised);
-        let glyph = move |id: &'static str, back: bool, tip: &'static str| {
+        let back_arrow = move || {
             div()
-                .id(id)
+                .id("back")
                 .size(px(size::CONTROL))
                 .flex()
                 .items_center()
@@ -991,7 +998,7 @@ impl BrainApp {
                 .rounded(px(size::RADIUS))
                 .cursor_pointer()
                 .hover(move |s| s.bg(raised))
-                .tooltip(kit::tip(tip))
+                .tooltip(kit::tip("Back (Alt+Left)"))
                 .child(
                     canvas(
                         |_, _, _| {},
@@ -1000,18 +1007,11 @@ impl BrainApp {
                             let at = |x: f32, y: f32| point(o.x + px(x), o.y + px(y));
                             let g = chrome::GLYPH;
                             let mut path = PathBuilder::stroke(px(chrome::GLYPH_LINE));
-                            if back {
-                                path.move_to(at(g, g / 2.));
-                                path.line_to(at(0., g / 2.));
-                                path.move_to(at(g / 2.2, g * 0.08));
-                                path.line_to(at(0., g / 2.));
-                                path.line_to(at(g / 2.2, g * 0.92));
-                            } else {
-                                path.move_to(at(0., 0.));
-                                path.line_to(at(g, g));
-                                path.move_to(at(g, 0.));
-                                path.line_to(at(0., g));
-                            }
+                            path.move_to(at(g, g / 2.));
+                            path.line_to(at(0., g / 2.));
+                            path.move_to(at(g / 2.2, g * 0.08));
+                            path.line_to(at(0., g / 2.));
+                            path.line_to(at(g / 2.2, g * 0.92));
                             if let Ok(path) = path.build() {
                                 window.paint_path(path, ink);
                             }
@@ -1039,10 +1039,7 @@ impl BrainApp {
                 )
             })
             .when(back, |d| {
-                d.child(
-                    glyph("back", true, "Back (Alt+Left)")
-                        .on_click(cx.listener(|me, _, _, cx| me.go_back(cx))),
-                )
+                d.child(back_arrow().on_click(cx.listener(|me, _, _, cx| me.go_back(cx))))
             })
             .child(
                 kit::close(t, "close", Some("Esc"))
@@ -1086,52 +1083,32 @@ impl BrainApp {
 }
 
 impl BrainApp {
-    /// A note over the sky at a reading measure; a click beside it closes
-    /// it, filing what was written.
-    pub(super) fn note_pane(
-        &self,
-        t: &Theme,
-        ed: &Entity<Editor>,
-        cx: &mut Context<Self>,
-    ) -> impl IntoElement {
-        let w = (self.size.0 - 2. * chrome::INSET).min(tokens::editor::NOTE_W);
+    /// A note at a reading measure, in the card the kit draws for its
+    /// layer with the close beside its head; a click beside the card
+    /// closes it, filing what was written.
+    pub(super) fn note_pane(&self, ed: &Entity<Editor>) -> impl IntoElement {
+        let w = (self.size.0 - 2. * chrome::INSET - ahjo_app_kit::theme::size::CLOSE)
+            .min(tokens::editor::NOTE_W);
         let h = (self.size.1 - 2. * chrome::INSET).min(tokens::editor::NOTE_H);
+        div()
+            .w(px(w))
+            .h(px(h))
+            .rounded(px(chrome::RADIUS))
+            .overflow_hidden()
+            .child(ed.clone())
+    }
+
+    /// The sky dimmed under an open note, and kept from the pointer: it
+    /// neither hovers nor scrolls while the note is up.
+    pub(super) fn note_veil(&self, t: &Theme) -> impl IntoElement {
         div()
             .absolute()
             .inset_0()
-            .flex()
-            .items_center()
-            .justify_center()
             .bg(veil(t, chrome::PANEL_ALPHA))
             .occlude()
             .on_mouse_move(|_, _, cx| cx.stop_propagation())
             .on_scroll(|_, _, cx| cx.stop_propagation())
-            .on_mouse_down(
-                MouseButton::Left,
-                cx.listener(|me, _, window, cx| {
-                    cx.stop_propagation();
-                    me.leave_note(window, cx);
-                }),
-            )
             .on_mouse_up(MouseButton::Left, |_, _, cx| cx.stop_propagation())
-            .child(
-                div()
-                    .w(px(w))
-                    .h(px(h))
-                    .rounded(px(chrome::RADIUS))
-                    .border_1()
-                    .border_color(t.divider)
-                    .overflow_hidden()
-                    .shadow(vec![gpui::BoxShadow {
-                        color: t.shadow(),
-                        offset: gpui::point(px(0.), px(12.)),
-                        blur_radius: px(40.),
-                        spread_radius: px(0.),
-                        inset: false,
-                    }])
-                    .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
-                    .child(ed.clone()),
-            )
     }
 
     /// The page's source, left of the page it makes; the whole window when

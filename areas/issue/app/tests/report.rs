@@ -4,7 +4,12 @@ use ahjo_app_kit::{Host, Mounted, Page, mount};
 use ahjo_node_kit::{Built, Listing, Setup};
 use ahjo_testkit::app::until;
 use ahjo_testkit::node::Node;
-use gpui::{App, Context, IntoElement, Render, TestAppContext, Window, div, prelude::*};
+use gpui::{
+    App, Context, FocusHandle, IntoElement, KeyDownEvent, Modifiers, Render, TestAppContext,
+    Window, div, prelude::*,
+};
+use std::cell::{Cell, RefCell};
+use std::rc::Rc;
 use std::sync::{OnceLock, mpsc};
 static GH: OnceLock<String> = OnceLock::new();
 static BD: OnceLock<String> = OnceLock::new();
@@ -21,18 +26,40 @@ const WORK: Listing = Listing {
 };
 use std::time::Duration;
 
-struct Toy;
+/// A page that has the keyboard, counting the keys it gets.
+struct Toy {
+    focus: FocusHandle,
+    keys: Rc<Cell<usize>>,
+}
+thread_local! {
+    static TOY: RefCell<Option<(FocusHandle, Rc<Cell<usize>>)>> = const { RefCell::new(None) };
+}
 impl Page for Toy {
     const ID: &'static str = "toy";
     const TITLE: &'static str = "Toy";
+    fn focus(&self, _: &App) -> Option<FocusHandle> {
+        Some(self.focus.clone())
+    }
 }
 impl Render for Toy {
     fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
-        div().size_full().child("Toy")
+        let keys = self.keys.clone();
+        div()
+            .size_full()
+            .track_focus(&self.focus)
+            .on_key_down(move |_: &KeyDownEvent, _, _| keys.set(keys.get() + 1))
+            .child("Toy")
     }
 }
 fn toy(host: Host, window: &mut Window, cx: &mut App) -> Mounted {
-    mount(host, window, cx, |_, _, _| Toy)
+    mount(host, window, cx, |_, _, cx| {
+        let toy = Toy {
+            focus: cx.focus_handle(),
+            keys: Rc::new(Cell::new(0)),
+        };
+        TOY.with(|t| *t.borrow_mut() = Some((toy.focus.clone(), toy.keys.clone())));
+        toy
+    })
 }
 
 #[gpui::test]
@@ -215,6 +242,24 @@ fn reports_file_to_beads_and_github_with_context_and_escape_discards(cx: &mut Te
     until(cx, "report closed", |cx| {
         cx.debug_bounds("report-box").is_none()
     });
+    // Its close control does as Escape: nothing is filed, the page it was
+    // opened over stays, and the next key reaches that page.
+    let (page, keys) = TOY.with(|t| t.borrow().clone()).expect("Toy was made");
+    cx.update(|window, cx| window.focus(&page, cx));
+    cx.simulate_keystrokes("alt-r");
+    until(cx, "report reopened for its close", |cx| {
+        cx.debug_bounds("report-box").is_some()
+    });
+    cx.simulate_input("Discard me too");
+    let close = cx.debug_bounds("report-close").expect("its ×").center();
+    cx.simulate_click(close, Modifiers::none());
+    until(cx, "report closed by its ×", |cx| {
+        cx.debug_bounds("report-box").is_none()
+    });
+    assert_eq!(shell.read_with(cx, |s, _| s.shown_page()), Some("toy"));
+    let before = keys.get();
+    cx.simulate_keystrokes("x");
+    assert_eq!(keys.get(), before + 1, "the next key reaches the page");
     assert_eq!(
         std::fs::read_to_string(dir.join(".beads/count")).unwrap(),
         "1"

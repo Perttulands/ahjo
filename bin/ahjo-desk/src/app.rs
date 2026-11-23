@@ -2535,10 +2535,7 @@ impl DeskApp {
         }
         if self.typing(window, cx) {
             if key == "escape" {
-                if self.grading.writing.is_some() {
-                    self.grading.writing = None;
-                }
-                self.aim(Aim::Surface, cx);
+                self.lift_pen(cx);
             }
             return;
         }

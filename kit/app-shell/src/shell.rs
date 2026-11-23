@@ -475,6 +475,9 @@ impl Shell {
         let focus = guard.read(cx).focus();
         let layer = Layer::new(close::LAYER, guard)
             .cover(Cover::Window)
+            .card()
+            .middle()
+            .closes_outside()
             .focus(focus);
         self.host.layer(layer, cx);
         false
@@ -567,6 +570,8 @@ impl Shell {
         });
         let layer = Layer::new(crate::keys::LAYER, self.keys.clone())
             .cover(Cover::Window)
+            .card()
+            .closes_outside()
             .focus(focus);
         self.host.layer(layer, cx);
     }

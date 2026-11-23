@@ -427,15 +427,12 @@ impl Terminals {
                     .items_center()
                     .border_b_1()
                     .border_color(t.divider)
+                    // The shell draws the close control at this bar's right.
                     .child(
                         div()
                             .flex_1()
                             .font_weight(FontWeight::SEMIBOLD)
                             .child(format!("Overview · {} sessions", list.len())),
-                    )
-                    .child(
-                        kit::close(&t, "ov-close", Some("Esc"))
-                            .on_click(cx.listener(|s, _, _, cx| s.close(surface::OVERVIEW, cx))),
                     ),
             )
             .child(

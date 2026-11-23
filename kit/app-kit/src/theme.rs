@@ -55,6 +55,8 @@ pub mod size {
     pub const POPUP_EDGE: f32 = 8.;
     /// The close control every surface shows ([`crate::widgets::kit::close`]):
     /// the square a pointer hits, the cross drawn in it, and its stroke.
+    /// A layer's card below the top of the room it stands in.
+    pub const CARD_TOP: f32 = 24.;
     pub const CLOSE: f32 = 24.;
     pub const CLOSE_GLYPH: f32 = 9.;
     pub const CLOSE_LINE: f32 = 1.5;

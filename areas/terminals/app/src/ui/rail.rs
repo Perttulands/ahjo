@@ -629,23 +629,14 @@ impl Terminals {
                 )),
             )
             // Escape is the program's here, unlike every other layer, so
-            // the way out says its key where it is seen.
+            // the way out says its key where it is seen. The shell draws
+            // the close control at the page's top right.
             .child(
                 div()
-                    .flex()
-                    .items_center()
-                    .gap(px(6.))
-                    .child(
-                        div()
-                            .flex_none()
-                            .text_size(px(size::SMALL))
-                            .text_color(t.dim)
-                            .child("Shift+Esc"),
-                    )
-                    .child(
-                        kit::close(&t, "peek-close", Some("Shift+Esc, or a click outside"))
-                            .on_click(cx.listener(|s, _, _, cx| s.close(super::surface::PEEK, cx))),
-                    ),
+                    .flex_none()
+                    .text_size(px(size::SMALL))
+                    .text_color(t.dim)
+                    .child("Shift+Esc"),
             );
         let live = match (&session, pane) {
             (Some(s), Some(pane)) if away.is_none() => self.source(PEEK_SLOT, pane, s),

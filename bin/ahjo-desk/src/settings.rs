@@ -65,18 +65,8 @@ impl DeskApp {
             .gap(px(tokens::SECTION_GAP))
             .py(px(tokens::SECTION_GAP))
             .px(px(PAD))
-            .child(
-                div()
-                    .flex()
-                    .items_center()
-                    .child(kit::page_title(t, "Settings"))
-                    .child(div().flex_1())
-                    .child(
-                        kit::close(t, "settings-done", Some("Esc")).on_click(cx.listener(
-                            |app, _: &ClickEvent, window, cx| app.toggle_settings(window, cx),
-                        )),
-                    ),
-            )
+            // The shell draws the close control at the window's top right.
+            .child(kit::page_title(t, "Settings"))
             .child(self.reading(t, cx))
             .child(self.answering(t, cx))
             .child(self.telling(t, cx))

@@ -82,6 +82,23 @@ pub enum Cover {
     Window,
 }
 
+/// How a layer stands over its room, and so where the shell draws its
+/// close control: every layer shows one unless it is an edit in place.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Shape {
+    /// Its view fills the room and draws its own head along the room's
+    /// top; the close control stands at the room's top right, on that head.
+    Cover,
+    /// The shell draws a card (as it draws a popup's frame) at the top of
+    /// the room, or in its middle; the view draws only what is in it, and
+    /// the close control stands at the card's top right. A press outside
+    /// the card closes the layer when `closes_outside`.
+    Card { middle: bool, closes_outside: bool },
+    /// An edit made in place, such as a rename in its own field: Enter and
+    /// Escape settle it, and a close control there would be clutter.
+    InPlace,
+}
+
 /// A layer on the dismissal stack: what it draws, what has the keyboard
 /// while it is on top, and what closing it does.
 #[derive(Clone)]
@@ -89,6 +106,7 @@ pub struct Layer {
     pub name: String,
     pub view: AnyView,
     pub cover: Cover,
+    pub shape: Shape,
     pub focus: Option<FocusHandle>,
     pub dismiss: Option<Run>,
     /// Escape is its content's (a terminal's program), so it does not
@@ -102,6 +120,7 @@ impl Layer {
             name: name.into(),
             view: view.into(),
             cover: Cover::Page,
+            shape: Shape::Cover,
             focus: None,
             dismiss: None,
             keeps_escape: false,
@@ -120,6 +139,38 @@ impl Layer {
 
     pub fn cover(mut self, cover: Cover) -> Self {
         self.cover = cover;
+        self
+    }
+
+    /// Drawn in a card of the shell's at the top of its room
+    /// ([`Shape::Card`]).
+    pub fn card(mut self) -> Self {
+        self.shape = Shape::Card {
+            middle: false,
+            closes_outside: false,
+        };
+        self
+    }
+
+    /// Its card stands in the middle of its room.
+    pub fn middle(mut self) -> Self {
+        if let Shape::Card { middle, .. } = &mut self.shape {
+            *middle = true;
+        }
+        self
+    }
+
+    /// A press outside its card closes it.
+    pub fn closes_outside(mut self) -> Self {
+        if let Shape::Card { closes_outside, .. } = &mut self.shape {
+            *closes_outside = true;
+        }
+        self
+    }
+
+    /// An edit in place: no close control ([`Shape::InPlace`]).
+    pub fn in_place(mut self) -> Self {
+        self.shape = Shape::InPlace;
         self
     }
 
@@ -683,9 +734,10 @@ pub fn stack(
         match s {
             Surface::Layer(l) if l.cover == cover => {
                 let id = l.view.entity_id().as_u64() as usize;
+                let layer = render_layer(frame, l, cx);
                 out.push(
                     deferred(
-                        div().absolute().inset_0().child(l.view).with_animation(
+                        div().absolute().inset_0().child(layer).with_animation(
                             ("layer-in", id),
                             Animation::new(Duration::from_millis(motion::PANEL_IN))
                                 .with_easing(ease_out_quint()),
@@ -703,6 +755,71 @@ pub fn stack(
         }
     }
     out
+}
+
+/// A layer as its [`Shape`] says, with the close control the shell draws
+/// on it. The control closes it through the stack, as Escape does, so its
+/// dismiss runs and the keyboard settles the same way.
+fn render_layer(frame: &Entity<AppFrame>, l: Layer, cx: &mut App) -> AnyElement {
+    let t = theme(cx).clone();
+    // Named as its page names it: `peek-close` for `terminals/peek`.
+    let short = l.name.rsplit('/').next().unwrap_or(&l.name).to_string();
+    let close = {
+        let frame = frame.clone();
+        let name = l.name.clone();
+        kit::close(&t, format!("{short}-close"), None)
+            .on_click(move |_, _, cx| frame.update(cx, |f, cx| f.close(&name, cx)))
+    };
+    match l.shape {
+        Shape::InPlace => l.view.into_any_element(),
+        Shape::Cover => div()
+            .absolute()
+            .inset_0()
+            .child(l.view)
+            .child(
+                close
+                    .absolute()
+                    .top(px(COVER_CLOSE_INSET))
+                    .right(px(COVER_CLOSE_INSET)),
+            )
+            .into_any_element(),
+        Shape::Card {
+            middle,
+            closes_outside,
+        } => {
+            let top = match l.cover {
+                Cover::Page => size::CARD_TOP,
+                // Clear of a window's own bar.
+                Cover::Window => size::TAB_BAR + size::CARD_TOP,
+            };
+            let mut room = div()
+                .absolute()
+                .inset_0()
+                .flex()
+                .justify_center()
+                .when(middle, |d| d.items_center())
+                .when(!middle, |d| d.items_start().pt(px(top)));
+            if closes_outside {
+                let frame = frame.clone();
+                let name = l.name.clone();
+                room = room.on_mouse_down(MouseButton::Left, move |_, _, cx| {
+                    frame.update(cx, |f, cx| f.close(&name, cx))
+                });
+            }
+            room.child(
+                kit::panel(&t)
+                    .id(ElementId::Name(format!("{short}-card").into()))
+                    .debug_selector(move || format!("{short}-card"))
+                    .occlude()
+                    .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                    .flex()
+                    .items_start()
+                    .child(div().min_w_0().child(l.view))
+                    .child(close.m(px(CLOSE_INSET))),
+            )
+            .into_any_element()
+        }
+    }
 }
 
 /// A popup beside what it was opened from ([`popup::beside`]), over a
@@ -782,6 +899,9 @@ fn render_popup(
 
 /// The room between a popup's close control and its frame's corner.
 const CLOSE_INSET: f32 = 2.;
+/// A covering layer's close control, centred in a bar as tall as a tab bar
+/// along the room's top, where its head is.
+const COVER_CLOSE_INSET: f32 = (size::TAB_BAR - size::CLOSE) / 2.;
 
 /// A menu's rows.
 fn render_menu(frame: &Entity<AppFrame>, depth: usize, menu: &Menu, cx: &mut App) -> AnyElement {

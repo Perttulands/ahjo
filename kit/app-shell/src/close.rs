@@ -7,10 +7,10 @@ use crate::shell::Shell;
 use ahjo_app_kit::Host;
 use ahjo_app_kit::theme::{board, size, theme};
 use ahjo_app_kit::widgets::kit::{self, Kind};
-use gpui::{Context, FocusHandle, MouseButton, WeakEntity, Window, div, prelude::*, px};
+use gpui::{Context, FocusHandle, WeakEntity, Window, div, prelude::*, px};
 
 /// The guard's layer on the stack.
-pub const LAYER: &str = "close";
+pub const LAYER: &str = "close-guard";
 
 /// What it asks: leave the unsaved work, or keep editing.
 pub struct CloseGuard {
@@ -49,41 +49,21 @@ impl Render for CloseGuard {
             all => format!("{} things are not saved.", all.len()),
         };
         let loses = format!("Closing Ahjo Swarm now loses: {}.", self.unsaved.join(", "));
-        let outside = self.host.clone();
         let stay = self.host.clone();
-        let shut = self.host.clone();
         let shell = self.shell.clone();
+        // In the shell's card, which draws its frame and close control.
         div()
             .id("close-guard")
             .debug_selector(|| "close-guard".into())
             .track_focus(&self.focus)
-            .absolute()
-            .inset_0()
-            .flex()
-            .justify_center()
-            .items_center()
-            .on_mouse_down(MouseButton::Left, move |_, _, cx| {
-                outside.close_layer(LAYER, cx)
-            })
             .child(
-                kit::panel(&t)
+                div()
                     .w(px(size::NOTICE))
                     .p(px(board::GAP))
                     .flex()
                     .flex_col()
                     .gap(px(board::GAP))
-                    .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
-                    .child(
-                        div()
-                            .flex()
-                            .items_start()
-                            .gap(px(board::GAP))
-                            .child(div().flex_1().child(title))
-                            .child(
-                                kit::close(&t, "close-guard-close", Some("Esc: keep editing"))
-                                    .on_click(move |_, _, cx| shut.close_layer(LAYER, cx)),
-                            ),
-                    )
+                    .child(title)
                     .child(kit::note(&t, loses, None))
                     .child(
                         div()

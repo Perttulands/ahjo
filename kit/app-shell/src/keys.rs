@@ -8,8 +8,7 @@ use ahjo_app_kit::theme::{size, theme};
 use ahjo_app_kit::widgets::field::{FieldEvent, TextField};
 use ahjo_app_kit::widgets::{kit, pane};
 use gpui::{
-    AnyElement, Context, Entity, FocusHandle, Focusable, MouseButton, Subscription, Window, div,
-    prelude::*, px,
+    AnyElement, Context, Entity, FocusHandle, Focusable, Subscription, Window, div, prelude::*, px,
 };
 
 /// The panel's layer on the stack.
@@ -139,7 +138,8 @@ impl KeysPanel {
 impl Render for KeysPanel {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let t = theme(cx).clone();
-        let top = px(size::TAB_BAR * 2.);
+        // Where the shell's card stands over the window.
+        let top = px(size::TAB_BAR + size::CARD_TOP);
         let tallest = window.viewport_size().height - top - px(size::TAB_BAR);
         let rows = self.rows(cx);
         let cursor = self.cursor.min(rows.len().saturating_sub(1));
@@ -176,52 +176,28 @@ impl Render for KeysPanel {
                     .flex_none()
                     .child(format!("After {}", chords::LEADER_LABEL)),
             );
-        let host = self.host.clone();
-        div()
-            .id("keys-panel")
-            .absolute()
-            .inset_0()
-            .flex()
-            .justify_center()
-            .items_start()
-            .pt(top)
-            .on_mouse_down(MouseButton::Left, move |_, _, cx| {
-                host.close_layer(LAYER, cx)
-            })
-            .child(
-                kit::panel(&t)
-                    .w(px(PANEL_W))
-                    .max_h(tallest)
-                    .flex()
-                    .flex_col()
-                    .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
-                    .child(
-                        div()
-                            .p(px(size::HEAD_PAD))
-                            .flex()
-                            .items_center()
-                            .gap(px(size::HEAD_GAP))
-                            .child(div().flex_1().min_w_0().child(self.search.clone()))
-                            .child({
-                                let host = self.host.clone();
-                                kit::close(&t, "keys-close", Some("Esc"))
-                                    .on_click(move |_, _, cx| host.close_layer(LAYER, cx))
-                            }),
-                    )
-                    .child(kit::rule(&t))
-                    .child(head)
-                    .child(list)
-                    // Zoom is no chord but the same everywhere it applies.
-                    .child(kit::rule(&t))
-                    .child(
-                        div()
-                            .debug_selector(|| "keys-zoom".into())
-                            .px(px(size::ROW_PAD))
-                            .py(px(size::HEAD_GAP))
-                            .text_size(px(size::SMALL))
-                            .text_color(t.dim)
-                            .child(ahjo_app_kit::zoom::HINT),
-                    ),
-            )
+        // In the shell's card, which draws its frame and close control.
+        div().id("keys-panel").child(
+            div()
+                .w(px(PANEL_W))
+                .max_h(tallest)
+                .flex()
+                .flex_col()
+                .child(div().p(px(size::HEAD_PAD)).child(self.search.clone()))
+                .child(kit::rule(&t))
+                .child(head)
+                .child(list)
+                // Zoom is no chord but the same everywhere it applies.
+                .child(kit::rule(&t))
+                .child(
+                    div()
+                        .debug_selector(|| "keys-zoom".into())
+                        .px(px(size::ROW_PAD))
+                        .py(px(size::HEAD_GAP))
+                        .text_size(px(size::SMALL))
+                        .text_color(t.dim)
+                        .child(ahjo_app_kit::zoom::HINT),
+                ),
+        )
     }
 }

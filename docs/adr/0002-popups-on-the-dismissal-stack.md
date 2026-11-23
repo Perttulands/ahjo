@@ -16,14 +16,24 @@ stays the page's. Only a decision about the whole window is centred.
   its content (`Layer::keeps_escape`) does not close on it. Peek is that layer:
   plain Escape goes to the session's program, and Shift+Escape closes Peek.
 - **The close control.** Every surface that opens shows the same small ×
-  (`kit::close`, with a "Close" tip naming its keys), so Escape is not the
-  only way to close it. The shell draws it on every popup (menus and
-  confirms among them) at the frame's top right, on the panel's header and
-  on the status line; a layer, and what opens in place, put it at their
-  head. A click on it closes that surface as Escape does, a popup's
-  `may_close` included, and the keyboard settles as below. No page draws a
-  close button of its own; a × that takes something away without closing
-  a surface is the same drawing (`kit::cross`) with its own tip.
+  (`kit::close`), so Escape is not the only way to close it. Its tip says
+  Close; the panel's, and one a page draws on what opens in place, add the
+  surface's key after it where the code drawing it passes one. The shell
+  draws it on every popup (menus and confirms among them) at the frame's
+  top right; on every layer, at the top right of the card it draws a
+  layer in (`Layer::card`) or of the room a covering layer fills
+  (`Shape::Cover`, the layer's own head running along that top); on the
+  panel's header; and on the status line. What opens in place in a page,
+  such as Brain's reading sheet or Desk's pen, puts it at its head. A
+  click on it closes that surface as Escape does, a popup's `may_close`
+  included, and the keyboard settles as below. A layer that is an edit in
+  place, such as a rename in its own field (`Layer::in_place`), has none:
+  Enter and Escape settle it, and a × beside a text field is clutter
+  (the lead, 2026-11-24). Notices that stay until they are closed (the
+  status line's) show it; a toast, which fades in about two seconds and
+  takes no action, does not. No page draws a close button of its own; a ×
+  that takes something away without closing a surface is the same drawing
+  (`kit::cross`) with its own tip.
 - **A press outside** either closes the popup or leaves it, as the popup
   declares (`Outside`). Either way it reaches nothing underneath. A popup may
   refuse to close (`may_close`).
