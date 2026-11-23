@@ -426,7 +426,8 @@ fn placed_commits(
 }
 
 /// Keep changed outputs before publishing them so a restart can finish the
-/// same attempt without asking the seat to do the work again.
+/// same attempt without asking the seat to do the work again. A judge's
+/// files in a run folder are its own and are not published.
 pub(crate) fn publish_output(
     c: &Coordinator,
     id: &str,
@@ -435,7 +436,11 @@ pub(crate) fn publish_output(
     control: &Control,
     mut output: RunEvent,
 ) -> io::Result<()> {
-    let needs_publication = if req.repository.is_empty() {
+    let is_judge = output.data.get("reason").and_then(|v| v.as_str()) == Some("judge");
+    let needs_publication = if req.repository.is_empty() && is_judge {
+        crate::run_folder::keep_judge_files(c, id, &output.card_id, output.attempt)?;
+        false
+    } else if req.repository.is_empty() {
         crate::run_folder::snapshot(c, id, control, &output.card_id, output.attempt)?;
         crate::run_folder::unreviewed(c, id, &output.card_id, output.attempt)?
     } else {

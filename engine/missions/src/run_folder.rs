@@ -189,6 +189,33 @@ pub(crate) fn snapshot(
     Ok(())
 }
 
+/// A judge's folder is its own: what it wrote there (a critic's notes and
+/// frames) is never published, so it can neither reach the run folder nor
+/// block publishing the attempt it reviewed. The run folder as the judge's
+/// attempt found it becomes its checkpoint, so the judge's next visit brings
+/// in what the run folder gained since and keeps the judge's own files.
+pub(crate) fn keep_judge_files(
+    c: &Coordinator,
+    id: &str,
+    node: &str,
+    attempt: i64,
+) -> io::Result<()> {
+    let _workspace = c.inner.folder_workspace.lock().unwrap();
+    let step = step_dir(c, id, node);
+    let dir = attempt_dir(c, id, node, attempt);
+    let found = dir.join("base");
+    if !step.join("work").exists() || !found.exists() {
+        // Already kept, or a run started before stable workspaces.
+        return Ok(());
+    }
+    let checkpoint = step.join("checkpoint");
+    crate::kept_copy::remove_tree(&checkpoint.with_extension("publication"))?;
+    crate::kept_copy::remove_tree(&checkpoint)?;
+    fs::rename(found, &checkpoint)?;
+    crate::kept_copy::remove_tree(&step.join("base"))?;
+    crate::kept_copy::remove_tree(&dir)
+}
+
 /// Whether this attempt has a durable unreviewed publication to finish.
 pub(crate) fn unreviewed(c: &Coordinator, id: &str, node: &str, attempt: i64) -> io::Result<bool> {
     let events = c.ledger(id)?.read().map_err(crate::error::to_io)?;
