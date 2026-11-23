@@ -6,6 +6,13 @@
 #   start <app> <exe> [args...]  start the app with the run's scratch settings,
 #                                its window placed off every screen
 #   shot <app> <png>             capture the app's window, wherever it is
+#   click <app> <x> <y>          a left click at the screenshot's pixel x, y
+#   type <app> <text>            the text, as typed characters
+#   key <app> <key>              one key without modifiers (enter, escape...)
+#
+# Clicks and keys are posted to the app's own window, so it need not be in
+# front and nothing else on the desktop sees them. A posted key carries no
+# Alt or Ctrl: Windows reads those from the keyboard itself.
 #   stop                         stop every app this run started
 param([string]$Run)
 $ErrorActionPreference = "Stop"
@@ -22,7 +29,10 @@ public static class Win {
   [DllImport("user32.dll")] public static extern bool SetWindowPos(IntPtr h, IntPtr after, int x, int y, int cx, int cy, uint flags);
   [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
   [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr h, out uint pid);
+  [DllImport("user32.dll")] public static extern bool PostMessage(IntPtr h, uint msg, IntPtr w, IntPtr l);
+  [DllImport("user32.dll")] public static extern bool ScreenToClient(IntPtr h, ref POINT p);
   public struct RECT { public int L, T, R, B; }
+  public struct POINT { public int X, Y; }
 }
 "@
     [Win]::SetProcessDPIAware() | Out-Null
@@ -88,6 +98,42 @@ public static class Win {
             $g.ReleaseHdc($dc); $g.Dispose()
             if (-not $ok) { throw "PrintWindow refused $app's window" }
             $b.Save($png, [System.Drawing.Imaging.ImageFormat]::Png); $b.Dispose()
+        }
+        "click" {
+            $app, $x, $y = $words[1], [int]$words[2], [int]$words[3]
+            $h = Window-Of ([int]((Get-Content -LiteralPath (Join-Path $Run "$app.pid"))[0]))
+            # A screenshot is the whole window: its pixel is the window's
+            # corner plus x, y on the screen, made the client area's.
+            $r = New-Object Win+RECT; [Win]::GetWindowRect($h, [ref]$r) | Out-Null
+            $p = New-Object Win+POINT; $p.X = $r.L + $x; $p.Y = $r.T + $y
+            [Win]::ScreenToClient($h, [ref]$p) | Out-Null
+            $at = [IntPtr](($p.Y -shl 16) -bor ($p.X -band 0xffff))
+            [Win]::PostMessage($h, 0x0200, [IntPtr]::Zero, $at) | Out-Null  # WM_MOUSEMOVE
+            Start-Sleep -Milliseconds 150
+            [Win]::PostMessage($h, 0x0201, [IntPtr]1, $at) | Out-Null       # WM_LBUTTONDOWN
+            Start-Sleep -Milliseconds 80
+            [Win]::PostMessage($h, 0x0202, [IntPtr]::Zero, $at) | Out-Null  # WM_LBUTTONUP
+            Start-Sleep -Milliseconds 700
+        }
+        "type" {
+            $app, $text = $words[1], ($words[2..($words.Count - 1)] -join " ")
+            $h = Window-Of ([int]((Get-Content -LiteralPath (Join-Path $Run "$app.pid"))[0]))
+            foreach ($c in $text.ToCharArray()) {
+                [Win]::PostMessage($h, 0x0102, [IntPtr][int]$c, [IntPtr]1) | Out-Null  # WM_CHAR
+                Start-Sleep -Milliseconds 20
+            }
+            Start-Sleep -Milliseconds 300
+        }
+        "key" {
+            $app, $name = $words[1], $words[2]
+            $vk = @{ enter = 0x0D; escape = 0x1B; tab = 0x09; backspace = 0x08;
+                     left = 0x25; up = 0x26; right = 0x27; down = 0x28 }[$name]
+            if (-not $vk) { throw "no key '$name'" }
+            $h = Window-Of ([int]((Get-Content -LiteralPath (Join-Path $Run "$app.pid"))[0]))
+            [Win]::PostMessage($h, 0x0100, [IntPtr]$vk, [IntPtr]1) | Out-Null           # WM_KEYDOWN
+            Start-Sleep -Milliseconds 50
+            [Win]::PostMessage($h, 0x0101, [IntPtr]$vk, [IntPtr]0xC0000001) | Out-Null  # WM_KEYUP
+            Start-Sleep -Milliseconds 500
         }
         "stop" {
             foreach ($f in Get-ChildItem -LiteralPath $Run -Filter "*.pid") {

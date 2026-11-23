@@ -120,6 +120,20 @@ with the build and node logs. It stops only what it started, by process
 id, on any exit. A try takes about a minute when the try builds are warm;
 a commit far from the last one tried adds its compile time.
 
+A journey is walked with `--step`s, run in Swarm in order after the
+pages: `open` (as `--page`), `click <x> <y>` at the pixels of the last
+screenshot, `type <text>`, `key enter|escape|tab|...` and `shot <name>`
+(`swarm-<name>.png`). Clicks and keys are posted to the scratch window
+alone, never through his keyboard or mouse. They carry no Alt or Ctrl, so
+a chord runs from the Keys panel: click Keys at the tab bar's right, then
+its row. Take a first try's screenshot to find the coordinates:
+
+```sh
+skills/change-ahjo/try-windows <commit> --app swarm --page 'sessions --session agent' \
+  --step 'click 1419 55' --step 'shot keys' --step 'click 424 521' \
+  --step 'type This panel will not close' --step 'shot report' --step 'key escape'
+```
+
 His desktop sees little: each window shows on his main screen for about
 30 ms before it is moved right of every screen, without taking focus, and
 has a taskbar button while the try runs. A second Swarm beside his is

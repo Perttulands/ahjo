@@ -9,13 +9,22 @@ set -euo pipefail
 
 usage() {
   cat <<'EOF'
-usage: try-windows [<commit>] [--page <page>]... [--app swarm|desk|brain]... [--out <dir>]
+usage: try-windows [<commit>] [--page <page>]... [--step <step>]... [--app swarm|desk|brain]... [--out <dir>]
 
   <commit>  any commit /srv/ahjo knows (default origin/main, fetched first)
   --page    a Swarm page to capture, as `ahjo view open` takes it: the page
             (sessions, files, harness, agents, issue, missions, scheduled,
             host, settings) and what to reveal on it, e.g.
             --page 'files --path README.md' (default 'sessions --session agent')
+  --step    one step of a journey in Swarm, run in order after the pages:
+              open <page> [...]  what `ahjo view open` takes, as --page
+              click <x> <y>      a left click at the last screenshot's pixels
+              type <text>        typed into what has the keyboard
+              key <key>          enter, escape, tab, backspace, up, down,
+                                 left or right
+              shot <name>        captured as swarm-<name>.png
+            Keys with Alt or Ctrl cannot be sent to a window that is not in
+            front: run a chord from the Keys panel (click Keys, then its row).
   --app     which apps to start (default all three)
   --out     where the screenshots go (default
             ~/.cache/ahjo-dev/try-shots/<commit>-<time>)
@@ -25,10 +34,11 @@ logs and the node's log.
 EOF
 }
 
-commit=origin/main pages=() apps=() out=""
+commit=origin/main pages=() walk=() apps=() out=""
 while [ $# -gt 0 ]; do
   case $1 in
     --page) pages+=("$2"); shift 2 ;;
+    --step) walk+=("$2"); shift 2 ;;
     --app) apps+=("$2"); shift 2 ;;
     --out) out=$2; shift 2 ;;
     -h|--help) usage; exit 0 ;;
@@ -275,6 +285,24 @@ if wants swarm; then
     sleep 2
     step shot swarm "$RUNW\\$name.png"
     mv "$RUN/$name.png" "$out/"
+  done
+  for walked in "${walk[@]}"; do
+    read -r verb rest <<< "$walked"
+    case $verb in
+      open)
+        read -ra words <<< "$rest"
+        for i in "${!words[@]}"; do
+          [ "${words[$i]}" = --path ] && [ "${words[$((i + 1))]:0:1}" != / ] && words[$((i + 1))]=$S/files/${words[$((i + 1))]}
+        done
+        "$AHJO" view open "${words[@]}" --node $node >/dev/null || die "step '$walked' refused"
+        sleep 1 ;;
+      click) step click swarm $rest ;;
+      type|key) step "$verb" swarm "$rest" ;;
+      shot)
+        step shot swarm "$RUNW\\swarm-$rest.png"
+        mv "$RUN/swarm-$rest.png" "$out/" ;;
+      *) die "unknown step '$walked'" ;;
+    esac
   done
 fi
 # The Desk and Brain have been loading while Swarm was captured.
