@@ -95,7 +95,9 @@ pub fn run() {
                     };
                     window.set_ui_scale(scale, cx);
                     let notice = match own {
-                        Some(Err(e)) => Some(notice.map_or(e.clone(), |n| format!("{n} · {e}"))),
+                        Some(Err(e)) => Some(
+                            notice.map_or(e.message.clone(), |n| format!("{n} · {}", e.message)),
+                        ),
                         _ => notice,
                     };
                     cx.new(|cx| app::DeskApp::new(loaded, notice, window, cx))

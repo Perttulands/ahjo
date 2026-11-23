@@ -6,11 +6,17 @@
 //! from the start; the player keeps what it decoded, so stepping back
 //! within a group costs one decode of it.
 
+use ahjo_app_kit::Error;
 use openh264::OpenH264API;
 use openh264::decoder::{DecodedYUV, Decoder, DecoderConfig, Flush};
 use openh264::formats::YUVSource;
 use std::collections::VecDeque;
 use std::io::Cursor;
+
+/// The clip does not read here; the caller offers the system's player.
+fn unreadable(words: String) -> Error {
+    Error::new("clip_unreadable", words)
+}
 
 pub struct Clip {
     samples: Vec<Sample>,
@@ -49,14 +55,14 @@ pub struct Frame {
 impl Clip {
     /// Reads an MP4's first H.264 track. Another codec is refused with
     /// words saying so, and the caller offers the system's player.
-    pub fn open(bytes: &[u8]) -> Result<Self, String> {
+    pub fn open(bytes: &[u8]) -> Result<Self, Error> {
         let mut mp4 = mp4::Mp4Reader::read_header(Cursor::new(bytes), bytes.len() as u64)
-            .map_err(|e| format!("not an MP4 that reads: {e}"))?;
+            .map_err(|e| unreadable(format!("not an MP4 that reads: {e}")))?;
         let track = mp4
             .tracks()
             .values()
             .find(|t| matches!(t.media_type(), Ok(mp4::MediaType::H264)))
-            .ok_or("no H.264 video in it")?;
+            .ok_or_else(|| unreadable("no H.264 video in it".into()))?;
         let id = track.track_id();
         let avcc = &track
             .trak
@@ -66,7 +72,7 @@ impl Clip {
             .stsd
             .avc1
             .as_ref()
-            .ok_or("no H.264 settings in the track")?
+            .ok_or_else(|| unreadable("no H.264 settings in the track".into()))?
             .avcc;
         let mut headers = Vec::new();
         for set in avcc
@@ -88,7 +94,7 @@ impl Clip {
         for n in 1..=count {
             let Some(s) = mp4
                 .read_sample(id, n)
-                .map_err(|e| format!("sample {n} does not read: {e}"))?
+                .map_err(|e| unreadable(format!("sample {n} does not read: {e}")))?
             else {
                 continue;
             };
@@ -102,7 +108,7 @@ impl Clip {
             });
         }
         if samples.is_empty() {
-            return Err("the clip has no frames".into());
+            return Err(unreadable("the clip has no frames".into()));
         }
         // Showing order: each sample's place among all by presentation time.
         shown_at.sort();
@@ -182,7 +188,7 @@ pub struct Decoding<'a> {
 
 impl<'a> Decoding<'a> {
     /// Ready to decode from the start of the group holding `index`.
-    pub fn at(clip: &'a Clip, index: usize) -> Result<Self, String> {
+    pub fn at(clip: &'a Clip, index: usize) -> Result<Self, Error> {
         let group = clip.group_of(index);
         Ok(Self {
             clip,
@@ -196,7 +202,7 @@ impl<'a> Decoding<'a> {
     }
 
     /// The next frame in showing order, or `None` past the clip's end.
-    pub fn next_frame(&mut self) -> Result<Option<Frame>, String> {
+    pub fn next_frame(&mut self) -> Result<Option<Frame>, Error> {
         loop {
             if let Some(f) = self.pending.pop_front() {
                 return Ok(Some(f));
@@ -209,7 +215,7 @@ impl<'a> Decoding<'a> {
                 let decoded = self
                     .decoder
                     .decode(&self.buf)
-                    .map_err(|e| format!("frame {at} does not decode: {e}"))?;
+                    .map_err(|e| unreadable(format!("frame {at} does not decode: {e}")))?;
                 if let Some(yuv) = decoded {
                     let index = g.first_shown + self.produced;
                     self.produced += 1;
@@ -222,7 +228,7 @@ impl<'a> Decoding<'a> {
             let held = self
                 .decoder
                 .flush_remaining()
-                .map_err(|e| format!("the clip's last frames do not decode: {e}"))?;
+                .map_err(|e| unreadable(format!("the clip's last frames do not decode: {e}")))?;
             for yuv in held {
                 let index = g.first_shown + self.produced;
                 self.produced += 1;
@@ -259,12 +265,12 @@ impl<'a> Decoding<'a> {
     }
 }
 
-fn fresh() -> Result<Decoder, String> {
+fn fresh() -> Result<Decoder, Error> {
     Decoder::with_api_config(
         OpenH264API::from_source(),
         DecoderConfig::new().flush_after_decode(Flush::NoFlush),
     )
-    .map_err(|e| format!("the H.264 decoder did not start: {e}"))
+    .map_err(|e| unreadable(format!("the H.264 decoder did not start: {e}")))
 }
 
 /// The decoder's picture as BGRA, the order the GPU takes.

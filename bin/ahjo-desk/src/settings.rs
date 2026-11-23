@@ -189,7 +189,7 @@ impl DeskApp {
         let check = match &self.node_check {
             None => None,
             Some(Ok(w)) => Some((w.clone(), t.done)),
-            Some(Err(e)) => Some((e.clone(), t.error)),
+            Some(Err(e)) => Some((e.message.clone(), t.error)),
         };
         section(t, "Telling the agent", None)
             .child(row(
@@ -239,7 +239,7 @@ impl DeskApp {
                 Reach::Ok => (t.done, "answering".to_string()),
                 Reach::Loading => (t.dim, "reaching…".to_string()),
                 Reach::Away(_) => (t.dim, "not running".to_string()),
-                Reach::Failed(e) => (t.error, e.clone()),
+                Reach::Failed(e) => (t.error, e.message.clone()),
             };
             list = list.child(
                 div()

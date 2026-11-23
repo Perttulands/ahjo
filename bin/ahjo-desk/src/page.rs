@@ -88,7 +88,7 @@ mod inside {
             window: &Window,
             url: &str,
             message: impl Fn(String) + 'static,
-        ) -> Result<Self, String> {
+        ) -> Result<Self, ahjo_app_kit::Error> {
             let dir = std::env::var_os("LOCALAPPDATA")
                 .map(|d| std::path::PathBuf::from(d).join("Ahjo").join("desk-web"));
             let mut context = WebContext::new(dir);
@@ -98,7 +98,12 @@ mod inside {
                 .with_ipc_handler(move |req| message(req.into_body()))
                 .with_visible(false)
                 .build_as_child(window)
-                .map_err(|e| format!("the page view did not open: {e}"))?;
+                .map_err(|e| {
+                    ahjo_app_kit::Error::new(
+                        "page_view_unopened",
+                        format!("the page view did not open: {e}"),
+                    )
+                })?;
             Ok(Self {
                 view,
                 _context: context,

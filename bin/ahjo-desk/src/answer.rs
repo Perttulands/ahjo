@@ -4,6 +4,7 @@
 //! wants. Pure, so each payload is tested here and nowhere needs a server.
 
 use crate::model::{Ask, Form, Mark, Question};
+use ahjo_app_kit::Error;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::collections::{BTreeMap, HashMap};
@@ -191,8 +192,9 @@ pub fn keep(drafts: &HashMap<DraftKey, Draft>) -> String {
 }
 
 /// The drafts a file kept.
-pub fn kept(text: &str) -> Result<HashMap<DraftKey, Draft>, String> {
-    let kept: Vec<Kept> = serde_json::from_str(text).map_err(|e| e.to_string())?;
+pub fn kept(text: &str) -> Result<HashMap<DraftKey, Draft>, Error> {
+    let kept: Vec<Kept> =
+        serde_json::from_str(text).map_err(|e| Error::new("drafts_unreadable", e.to_string()))?;
     Ok(kept
         .into_iter()
         .map(|k| ((k.desk, k.ask, k.round), k.draft))
@@ -217,7 +219,8 @@ pub enum Verdict {
 
 /// The answer's JSON for the desk, or the words saying what is missing.
 /// `marks` is how many marks go with it (already on the desk).
-pub fn payload(ask: &Ask, draft: &Draft, verdict: Verdict, marks: usize) -> Result<Value, String> {
+pub fn payload(ask: &Ask, draft: &Draft, verdict: Verdict, marks: usize) -> Result<Value, Error> {
+    let missing = |words: &str| Err(Error::new("answer_incomplete", words));
     let words = draft.words.trim();
     let round = ask.round();
     let pictures = &draft.pictures;
@@ -236,7 +239,7 @@ pub fn payload(ask: &Ask, draft: &Draft, verdict: Verdict, marks: usize) -> Resu
     match ask.form() {
         Form::Grill => {
             if verdict == Verdict::LooksGood {
-                return Err("A grilling round is answered question by question".into());
+                return missing("A grilling round is answered question by question");
             }
             let mut answers = serde_json::Map::new();
             for q in &ask.questions {
@@ -264,7 +267,7 @@ pub fn payload(ask: &Ask, draft: &Draft, verdict: Verdict, marks: usize) -> Resu
                 answers.insert(q.id.clone(), a);
             }
             if answers.is_empty() && words.is_empty() && marks == 0 {
-                return Err("Answer a question, mark something or write a word first".into());
+                return missing("Answer a question, mark something or write a word first");
             }
             let mut p = with("grill", vec![]);
             p["answers"] = Value::Object(answers);
@@ -275,9 +278,9 @@ pub fn payload(ask: &Ask, draft: &Draft, verdict: Verdict, marks: usize) -> Resu
                 Ok(with("send back", vec![]))
             }
             Verdict::Send => {
-                Err("Press Done once out/ holds the work, or say what stops the job".into())
+                missing("Press Done once out/ holds the work, or say what stops the job")
             }
-            _ => Err("A job for your hands is done with Done: the desk checks out/".into()),
+            _ => missing("A job for your hands is done with Done: the desk checks out/"),
         },
         Form::Open => match verdict {
             Verdict::LooksGood => Ok(with("accept", vec![])),
@@ -285,12 +288,12 @@ pub fn payload(ask: &Ask, draft: &Draft, verdict: Verdict, marks: usize) -> Resu
             // marked on it, as the web desk sends it.
             Verdict::SendBack if !words.is_empty() || marks > 0 => Ok(with("send back", vec![])),
             Verdict::SendBack => {
-                Err("Mark the page or write a word, then press Another round again".into())
+                missing("Mark the page or write a word, then press Another round again")
             }
             _ => match draft.pick.and_then(|i| ask.options.get(i)) {
                 Some(o) => Ok(with("pick", vec![o.name.clone()])),
                 None if !words.is_empty() || marks > 0 => Ok(with("marks", vec![])),
-                None => Err("Write what you think, or mark something, first".into()),
+                None => missing("Write what you think, or mark something, first"),
             },
         },
     }

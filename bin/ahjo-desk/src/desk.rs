@@ -147,21 +147,28 @@ pub fn drafts_path() -> Option<PathBuf> {
     config_path().map(|p| p.with_file_name("desk-drafts.json"))
 }
 
+/// A file of the Desk's own at `path` that could not be read or written.
+fn file_error(code: &str, path: &std::path::Path, e: impl std::fmt::Display) -> Error {
+    Error::new(code, format!("{}: {e}", path.display()))
+}
+
 /// The drafts kept at `path`; none when it was never written.
 pub fn read_drafts(
     path: &std::path::Path,
-) -> Result<std::collections::HashMap<crate::answer::DraftKey, crate::answer::Draft>, String> {
+) -> Result<std::collections::HashMap<crate::answer::DraftKey, crate::answer::Draft>, Error> {
     match std::fs::read_to_string(path) {
-        Ok(text) => crate::answer::kept(&text).map_err(|e| format!("{}: {e}", path.display())),
+        Ok(text) => {
+            crate::answer::kept(&text).map_err(|e| file_error("drafts_unreadable", path, e.message))
+        }
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(Default::default()),
-        Err(e) => Err(format!("{}: {e}", path.display())),
+        Err(e) => Err(file_error("drafts_unreadable", path, e)),
     }
 }
 
 /// Writes the drafts whole, so a window closed mid-write leaves the last
 /// whole file rather than half of one.
-pub fn write_drafts(path: &std::path::Path, text: &str) -> Result<(), String> {
-    let fail = |e: std::io::Error| format!("{}: {e}", path.display());
+pub fn write_drafts(path: &std::path::Path, text: &str) -> Result<(), Error> {
+    let fail = |e: std::io::Error| file_error("file_unwritable", path, e);
     if let Some(dir) = path.parent() {
         std::fs::create_dir_all(dir).map_err(fail)?;
     }
@@ -182,20 +189,19 @@ struct Kept {
 }
 
 /// The size kept at `path`; none when it was never written.
-pub fn read_size(path: &std::path::Path) -> Result<Option<u16>, String> {
+pub fn read_size(path: &std::path::Path) -> Result<Option<u16>, Error> {
     match std::fs::read_to_string(path) {
         Ok(text) => serde_json::from_str::<Kept>(&text)
             .map(|k| k.size)
-            .map_err(|e| format!("{}: {e}", path.display())),
+            .map_err(|e| file_error("size_unreadable", path, e)),
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
-        Err(e) => Err(format!("{}: {e}", path.display())),
+        Err(e) => Err(file_error("size_unreadable", path, e)),
     }
 }
 
 /// Keeps `size` at `path`, whole.
-pub fn write_size(path: &std::path::Path, size: u16) -> Result<(), String> {
-    let text = serde_json::to_string(&Kept { size: Some(size) }).map_err(|e| e.to_string())?;
-    write_drafts(path, &text)
+pub fn write_size(path: &std::path::Path, size: u16) -> Result<(), Error> {
+    write_drafts(path, &json(&Kept { size: Some(size) }))
 }
 
 /// What the Desk starts from: its settings as `desk.json` keeps them (a
@@ -246,38 +252,72 @@ pub fn runtime() -> &'static tokio::runtime::Runtime {
     })
 }
 
-/// A request's answer: its body, or the server's words for why not.
+/// Runs `work` on the network runtime, off the UI thread.
+pub async fn off<T: Send + 'static>(
+    work: impl std::future::Future<Output = Result<T, Error>> + Send + 'static,
+) -> Result<T, Error> {
+    runtime()
+        .spawn(work)
+        .await
+        .unwrap_or_else(|e| Err(Error::new("task_failed", e.to_string())))
+}
+
+/// `value` as the JSON a request carries: plain data always writes.
+fn json(value: &impl Serialize) -> String {
+    serde_json::to_string(value).expect("plain data writes as JSON")
+}
+
+/// What `who` answered did not read as `what`.
+fn unreadable(who: &str, what: &str, e: impl std::fmt::Display) -> Error {
+    Error::new(
+        "answer_unreadable",
+        format!("{who}'s {what} does not read: {e}"),
+    )
+}
+
+/// Nothing answered from `who` ("the desk", "the node"): it may have
+/// heard, when the request had gone out.
+fn no_answer(who: &str, e: &http::NoAnswer) -> Error {
+    if e.maybe_done {
+        Error::new(
+            "maybe_sent",
+            format!("{e}; it may have reached {who}, so look before answering again"),
+        )
+    } else {
+        Error::new("no_answer", format!("{who} did not answer: {e}"))
+    }
+}
+
+/// A request to `who` at `base`: its body, or the server's words for why
+/// not.
 async fn request(
+    who: &str,
     base: &str,
     method: &str,
     path: &str,
-    body: Option<Vec<u8>>,
+    body: Option<String>,
     within: Duration,
-) -> Result<Vec<u8>, String> {
-    let body_ref = body.as_ref().map(|b| ("application/json", b.as_slice()));
+) -> Result<Vec<u8>, Error> {
+    let body_ref = body.as_ref().map(|b| ("application/json", b.as_bytes()));
     let (status, bytes) = http::send(base, method, path, &[], body_ref, within)
         .await
-        .map_err(|e| {
-            if e.maybe_done {
-                format!("{e}; it may have reached the desk, so look before answering again")
-            } else {
-                format!("the desk did not answer: {e}")
-            }
-        })?;
+        .map_err(|e| no_answer(who, &e))?;
     if (200..300).contains(&status) {
         Ok(bytes)
     } else {
-        Err(http::error_text(status, &bytes))
+        Err(Error::new("refused", http::error_text(status, &bytes)))
     }
 }
+
+const DESK: &str = "the desk";
 
 /// Why a desk's asks were not read.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Unread {
     /// Nothing answered: the desk is not running or not reachable from here.
-    Away(String),
+    Away(Error),
     /// The desk answered, but not with its asks.
-    Wrong(String),
+    Wrong(Error),
 }
 
 pub async fn asks(base: String) -> Result<Vec<Ask>, Unread> {
@@ -290,11 +330,12 @@ pub async fn asks(base: String) -> Result<Vec<Ask>, Unread> {
         Duration::from_secs(10),
     )
     .await
-    .map_err(|e| Unread::Away(e.to_string()))?;
+    .map_err(|e| Unread::Away(no_answer(DESK, &e)))?;
     if !(200..300).contains(&status) {
-        return Err(Unread::Wrong(http::error_text(status, &bytes)));
+        let refused = Error::new("refused", http::error_text(status, &bytes));
+        return Err(Unread::Wrong(refused));
     }
-    serde_json::from_slice(&bytes).map_err(|e| Unread::Wrong(format!("the asks do not read: {e}")))
+    serde_json::from_slice(&bytes).map_err(|e| Unread::Wrong(unreadable(DESK, "asks", e)))
 }
 
 /// A desk on another project, as `/api/desks` names it.
@@ -305,9 +346,17 @@ pub struct Listed {
     pub port: u16,
 }
 
-pub async fn desks(base: String) -> Result<Vec<Listed>, String> {
-    let bytes = request(&base, "GET", "/api/desks", None, Duration::from_secs(10)).await?;
-    serde_json::from_slice(&bytes).map_err(|e| format!("the desks do not read: {e}"))
+pub async fn desks(base: String) -> Result<Vec<Listed>, Error> {
+    let bytes = request(
+        DESK,
+        &base,
+        "GET",
+        "/api/desks",
+        None,
+        Duration::from_secs(10),
+    )
+    .await?;
+    serde_json::from_slice(&bytes).map_err(|e| unreadable(DESK, "list of desks", e))
 }
 
 /// The listed desks as places on the host `base` is on: the app reaches
@@ -341,13 +390,14 @@ pub fn same_place(a: &str, b: &str) -> bool {
 
 /// Done on a hands job: the desk runs its check on `out/`; a pass
 /// answers the ask, and the change feed says how it came out.
-pub async fn done(base: String, id: String, round: u32, words: String) -> Result<(), String> {
+pub async fn done(base: String, id: String, round: u32, words: String) -> Result<(), Error> {
     let body = serde_json::json!({"round": round, "comment": words});
     request(
+        DESK,
         &base,
         "POST",
         &format!("/api/asks/{id}/done"),
-        Some(serde_json::to_vec(&body).map_err(|e| e.to_string())?),
+        Some(json(&body)),
         Duration::from_secs(20),
     )
     .await
@@ -360,7 +410,7 @@ pub async fn attach(
     base: String,
     id: String,
     bytes: Vec<u8>,
-) -> Result<crate::model::Attached, String> {
+) -> Result<crate::model::Attached, Error> {
     let (status, body) = http::send(
         &base,
         "POST",
@@ -370,13 +420,15 @@ pub async fn attach(
         Duration::from_secs(60),
     )
     .await
-    .map_err(|e| format!("the desk did not answer: {e}"))?;
+    .map_err(|e| no_answer(DESK, &e))?;
     match status {
-        200..=299 => serde_json::from_slice(&body)
-            .map_err(|e| format!("the desk's answer does not read: {e}")),
+        200..=299 => serde_json::from_slice(&body).map_err(|e| unreadable(DESK, "answer", e)),
         // A desk server from before pictures: it says so in its own way.
-        404 => Err("this desk takes no pictures yet: it needs restarting (desk@<project>)".into()),
-        s => Err(http::error_text(s, &body)),
+        404 => Err(Error::new(
+            "no_pictures",
+            "this desk takes no pictures yet: it needs restarting (desk@<project>)",
+        )),
+        s => Err(Error::new("refused", http::error_text(s, &body))),
     }
 }
 
@@ -386,53 +438,54 @@ pub fn attachment_path(ask: &str, id: &str) -> String {
 
 /// Types `note` into session `session` through the node at `node` and
 /// presses Enter (the node's `session_send`).
-pub async fn tell(node: String, session: String, note: String) -> Result<(), String> {
+pub async fn tell(node: String, session: String, note: String) -> Result<(), Error> {
+    const NODE: &str = "Ahjo Swarm's node";
     let body = serde_json::json!({
         "jsonrpc": "2.0", "id": 1, "method": "tools/call",
         "params": {"name": "session_send", "arguments": {"session": session, "text": note, "enter": true}},
     });
     let bytes = request(
+        NODE,
         &node,
         "POST",
         "/mcp",
-        Some(serde_json::to_vec(&body).map_err(|e| e.to_string())?),
+        Some(json(&body)),
         Duration::from_secs(10),
     )
-    .await
-    .map_err(|e| {
-        e.replace(
-            "the desk did not answer",
-            "Ahjo Swarm's node did not answer",
-        )
-    })?;
-    let v: serde_json::Value = serde_json::from_slice(&bytes)
-        .map_err(|e| format!("the node's answer does not read: {e}"))?;
+    .await?;
+    let v: serde_json::Value =
+        serde_json::from_slice(&bytes).map_err(|e| unreadable(NODE, "answer", e))?;
     if let Some(e) = v.get("error") {
-        return Err(e["message"]
-            .as_str()
-            .unwrap_or("the node refused")
-            .to_string());
+        let words = e["message"].as_str().unwrap_or("the node refused");
+        return Err(Error::new("refused", words));
     }
     // A tool that failed answers with its words as the result.
     if v["result"]["isError"].as_bool() == Some(true) {
         let words = v["result"]["content"][0]["text"]
             .as_str()
             .unwrap_or("the send failed");
-        return Err(words.to_string());
+        return Err(Error::new("not_told", words));
     }
     Ok(())
 }
 
 /// Whether the node at `node` is there: the device it runs on.
-pub async fn node_health(node: String) -> Result<String, String> {
-    let bytes = request(&node, "GET", "/api/health", None, Duration::from_secs(5))
-        .await
-        .map_err(|e| e.replace("the desk did not answer", "the node did not answer"))?;
-    let v: serde_json::Value = serde_json::from_slice(&bytes)
-        .map_err(|e| format!("the node's answer does not read: {e}"))?;
+pub async fn node_health(node: String) -> Result<String, Error> {
+    const NODE: &str = "the node";
+    let bytes = request(
+        NODE,
+        &node,
+        "GET",
+        "/api/health",
+        None,
+        Duration::from_secs(5),
+    )
+    .await?;
+    let v: serde_json::Value =
+        serde_json::from_slice(&bytes).map_err(|e| unreadable(NODE, "answer", e))?;
     match v["status"].as_str() {
         Some("ok") => Ok(v["device"].as_str().unwrap_or("").to_string()),
-        _ => Err("that is not an Ahjo node".into()),
+        _ => Err(Error::new("not_a_node", "that is not an Ahjo node")),
     }
 }
 
@@ -468,10 +521,10 @@ pub async fn save_marks(
     id: String,
     marks: &[crate::model::Mark],
     revision: u64,
-) -> Result<Ask, String> {
-    let body = serde_json::to_vec(&serde_json::json!({"marks": marks, "revision": revision}))
-        .map_err(|e| e.to_string())?;
+) -> Result<Ask, Error> {
+    let body = json(&serde_json::json!({"marks": marks, "revision": revision}));
     let bytes = request(
+        DESK,
         &base,
         "POST",
         &format!("/api/asks/{id}/marks"),
@@ -479,13 +532,13 @@ pub async fn save_marks(
         Duration::from_secs(15),
     )
     .await?;
-    serde_json::from_slice(&bytes).map_err(|e| format!("the desk's answer does not read: {e}"))
+    serde_json::from_slice(&bytes).map_err(|e| unreadable(DESK, "answer", e))
 }
 
 /// The bytes of one of an ask's media, whole (`/media/`) or as the desk's
 /// JPEG preview (`/thumb/`, pictures only).
-pub async fn media(base: String, path: String) -> Result<Vec<u8>, String> {
-    request(&base, "GET", &path, None, Duration::from_secs(120)).await
+pub async fn media(base: String, path: String) -> Result<Vec<u8>, Error> {
+    request(DESK, &base, "GET", &path, None, Duration::from_secs(120)).await
 }
 
 pub fn media_path(ask: &str, round: u32, media: &str, thumb: bool) -> String {
@@ -496,9 +549,10 @@ pub fn media_path(ask: &str, round: u32, media: &str, thumb: bool) -> String {
 }
 
 /// Answers an ask; the desk answers with the ask as it now is.
-pub async fn answer(base: String, id: String, payload: serde_json::Value) -> Result<Ask, String> {
-    let body = serde_json::to_vec(&payload).map_err(|e| e.to_string())?;
+pub async fn answer(base: String, id: String, payload: serde_json::Value) -> Result<Ask, Error> {
+    let body = json(&payload);
     let bytes = request(
+        DESK,
         &base,
         "POST",
         &format!("/api/asks/{id}/answer"),
@@ -506,7 +560,7 @@ pub async fn answer(base: String, id: String, payload: serde_json::Value) -> Res
         Duration::from_secs(15),
     )
     .await?;
-    serde_json::from_slice(&bytes).map_err(|e| format!("the desk's answer does not read: {e}"))
+    serde_json::from_slice(&bytes).map_err(|e| unreadable(DESK, "answer", e))
 }
 
 /// Follows a desk's `/events` while `live` holds `generation`: each change

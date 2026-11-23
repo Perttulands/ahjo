@@ -828,7 +828,7 @@ impl DeskApp {
                             Ok(p) => *slot = Some(p),
                             Err(e) => {
                                 log::error!("{e}");
-                                *failed.borrow_mut() = Some(e);
+                                *failed.borrow_mut() = Some(e.message);
                                 return;
                             }
                         }

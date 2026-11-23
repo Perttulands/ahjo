@@ -37,9 +37,9 @@ pub enum Reach {
     Ok,
     /// Nothing answered: the desk is not running. Not an error while
     /// another desk answers; the settings button says it quietly.
-    Away(String),
+    Away(Error),
     /// The desk answered wrongly: an error he sees.
-    Failed(String),
+    Failed(Error),
 }
 
 /// How the desks stand together: at least one read, none read while some
@@ -252,7 +252,7 @@ pub struct DeskApp {
     /// Settings' field for the node that reaches sessions.
     pub node_field: Entity<TextField>,
     /// What the node said when last checked from Settings.
-    pub node_check: Option<Result<String, String>>,
+    pub node_check: Option<Result<String, Error>>,
     /// Pictures he pasted still on their way to the desk.
     pub pasting: usize,
     /// Hands jobs he pressed Done on, until their check comes out.
@@ -409,7 +409,8 @@ impl DeskApp {
                     HashMap::new(),
                     None,
                     Some(format!(
-                        "Your unsent answers did not read, and are left as they were: {e}"
+                        "Your unsent answers did not read, and are left as they were: {}",
+                        e.message
                     )),
                 ),
             },
@@ -635,7 +636,7 @@ impl DeskApp {
         desk::write_drafts(path, &answer::keep(&self.drafts)).map_err(|e| {
             Error::new(
                 "drafts_unwritable",
-                format!("Your unsent answers could not be kept: {e}"),
+                format!("Your unsent answers could not be kept: {}", e.message),
             )
         })
     }
@@ -1134,9 +1135,7 @@ impl DeskApp {
             let format = image_format(&m.path);
             cx.spawn(async move |this, cx| {
                 let svg = cx.update(|cx| cx.svg_renderer());
-                if let Ok(Ok(bytes)) = desk::runtime()
-                    .spawn(desk::media(base.clone(), thumb))
-                    .await
+                if let Ok(bytes) = desk::off(desk::media(base.clone(), thumb)).await
                     && let Some((image, w, h)) =
                         decode(cx, ImageFormat::Jpeg, bytes, svg.clone()).await
                 {
@@ -1152,8 +1151,8 @@ impl DeskApp {
                         },
                     );
                 }
-                let got = match desk::runtime().spawn(desk::media(base, full)).await {
-                    Ok(Ok(bytes)) => match decode(cx, format, bytes, svg).await {
+                let got = match desk::off(desk::media(base, full)).await {
+                    Ok(bytes) => match decode(cx, format, bytes, svg).await {
                         Some((image, w, h)) => Pic::Ready {
                             image,
                             w,
@@ -1162,8 +1161,7 @@ impl DeskApp {
                         },
                         None => Pic::Failed("The picture does not decode".into()),
                     },
-                    Ok(Err(e)) => Pic::Failed(e),
-                    Err(e) => Pic::Failed(e.to_string()),
+                    Err(e) => Pic::Failed(e.message),
                 };
                 Self::put(&this, cx, &slot, got);
             })
@@ -1241,10 +1239,9 @@ impl DeskApp {
         let base = self.desks[key.0].place.url.clone();
         let path = desk::media_path(&ask.id, ask.round(), &item.media.id, false);
         cx.spawn(async move |this, cx| {
-            let bytes = match desk::runtime().spawn(desk::media(base, path)).await {
-                Ok(Ok(b)) => b,
-                Ok(Err(e)) => return Self::clip_failed(&this, cx, &mkey, e),
-                Err(e) => return Self::clip_failed(&this, cx, &mkey, e.to_string()),
+            let bytes = match desk::off(desk::media(base, path)).await {
+                Ok(b) => b,
+                Err(e) => return Self::clip_failed(&this, cx, &mkey, e),
             };
             let opened = cx
                 .background_executor()
@@ -1281,7 +1278,7 @@ impl DeskApp {
                                 cx.drop_image(gone, None);
                             }
                         }
-                        Out::Failed(e) => p.failed = Some(e),
+                        Out::Failed(e) => p.failed = Some(e.message),
                     }
                     cx.notify();
                     true
@@ -1294,10 +1291,10 @@ impl DeskApp {
         .detach();
     }
 
-    fn clip_failed(this: &WeakEntity<Self>, cx: &mut AsyncApp, key: &str, why: String) {
+    fn clip_failed(this: &WeakEntity<Self>, cx: &mut AsyncApp, key: &str, why: Error) {
         let _ = this.update(cx, |app, cx| {
             app.clip_loading = None;
-            app.clip_failed.insert(key.to_string(), why);
+            app.clip_failed.insert(key.to_string(), why.message);
             cx.notify();
         });
     }
@@ -1726,7 +1723,7 @@ impl DeskApp {
         let marks = draft.marks(&ask).to_vec();
         let payload = match answer::payload(&ask, &draft, verdict, marks.len()) {
             Ok(p) => p,
-            Err(why) => return self.fail(why, cx),
+            Err(why) => return self.fail(why.message, cx),
         };
         let queue = self.queue();
         let next = queue
@@ -1808,15 +1805,13 @@ impl DeskApp {
         let base = self.desks[key.0].place.url.clone();
         cx.spawn(async move |this, cx| {
             let id = key.1.clone();
-            let sent = desk::runtime()
-                .spawn(async move {
-                    if changed {
-                        desk::save_marks(base.clone(), id.clone(), &marks, revision).await?;
-                    }
-                    desk::answer(base, id, payload).await
-                })
-                .await
-                .unwrap_or_else(|e| Err(e.to_string()));
+            let sent = desk::off(async move {
+                if changed {
+                    desk::save_marks(base.clone(), id.clone(), &marks, revision).await?;
+                }
+                desk::answer(base, id, payload).await
+            })
+            .await;
             let _ = this.update(cx, |app, cx| {
                 app.sending = false;
                 match sent {
@@ -1835,7 +1830,7 @@ impl DeskApp {
                             app.open(next.filter(|n| app.ask(n).is_some_and(|a| a.is_open())), cx);
                         }
                     }
-                    Err(e) => app.fail(format!("Not sent: {e}"), cx),
+                    Err(e) => app.fail(format!("Not sent: {}", e.message), cx),
                 }
             });
         })
@@ -1859,7 +1854,7 @@ impl DeskApp {
         self.app_size = to;
         window.set_ui_scale(app::scale(to), cx);
         match desk::size_path().map(|p| desk::write_size(&p, to)) {
-            Some(Err(e)) => self.fail(format!("{} · not kept: {e}", app::words(to)), cx),
+            Some(Err(e)) => self.fail(format!("{} · not kept: {}", app::words(to), e.message), cx),
             _ => self.toast(app::words(to), cx),
         }
     }
@@ -1906,7 +1901,10 @@ impl DeskApp {
             let got = desk::runtime()
                 .spawn(desk::asks(base))
                 .await
-                .unwrap_or_else(|e| Err(desk::Unread::Wrong(e.to_string())));
+                .unwrap_or_else(|e| {
+                    let failed = Error::new("task_failed", e.to_string());
+                    Err(desk::Unread::Wrong(failed))
+                });
             let _ = this.update(cx, |app, cx| {
                 match got {
                     Ok(asks) => {
@@ -2011,10 +2009,7 @@ impl DeskApp {
                     .spawn(async move { p.ready() })
                     .await;
                 let got = match ready {
-                    Ok(bytes) => desk::runtime()
-                        .spawn(desk::attach(base.clone(), id.clone(), bytes))
-                        .await
-                        .unwrap_or_else(|e| Err(e.to_string())),
+                    Ok(bytes) => desk::off(desk::attach(base.clone(), id.clone(), bytes)).await,
                     Err(e) => Err(e),
                 };
                 let _ = this.update(cx, |app, cx| {
@@ -2028,7 +2023,7 @@ impl DeskApp {
                                 .push(a.id);
                             app.drafts_changed = true;
                         }
-                        Err(e) => app.fail(format!("The picture did not go: {e}"), cx),
+                        Err(e) => app.fail(format!("The picture did not go: {}", e.message), cx),
                     }
                     cx.notify();
                 });
@@ -2067,8 +2062,8 @@ impl DeskApp {
             );
             cx.spawn(async move |this, cx| {
                 let svg = cx.update(|cx| cx.svg_renderer());
-                let got = match desk::runtime().spawn(desk::media(base, path)).await {
-                    Ok(Ok(bytes)) => match decode(cx, format, bytes, svg).await {
+                let got = match desk::off(desk::media(base, path)).await {
+                    Ok(bytes) => match decode(cx, format, bytes, svg).await {
                         Some((image, w, h)) => Pic::Ready {
                             image,
                             w,
@@ -2077,8 +2072,7 @@ impl DeskApp {
                         },
                         None => Pic::Failed("The picture does not decode".into()),
                     },
-                    Ok(Err(e)) => Pic::Failed(e),
-                    Err(e) => Pic::Failed(e.to_string()),
+                    Err(e) => Pic::Failed(e.message),
                 };
                 Self::put(&this, cx, &slot, got);
             })
@@ -2105,14 +2099,11 @@ impl DeskApp {
         let words = self.draft().words.trim().to_string();
         self.checking.insert(key.clone());
         cx.spawn(async move |this, cx| {
-            let got = desk::runtime()
-                .spawn(desk::done(base, ask.id.clone(), ask.round(), words))
-                .await
-                .unwrap_or_else(|e| Err(e.to_string()));
+            let got = desk::off(desk::done(base, ask.id.clone(), ask.round(), words)).await;
             let _ = this.update(cx, |app, cx| {
                 if let Err(e) = got {
                     app.checking.remove(&key);
-                    app.fail(format!("The check did not start: {e}"), cx);
+                    app.fail(format!("The check did not start: {}", e.message), cx);
                 }
                 app.refresh(key.0, cx);
             });
@@ -2157,10 +2148,7 @@ impl DeskApp {
         }
         let (node, session, note) = (self.config.node(), ask.session.clone(), desk::note(ask));
         cx.spawn(async move |this, cx| {
-            let got = desk::runtime()
-                .spawn(desk::tell(node, session.clone(), note))
-                .await
-                .unwrap_or_else(|e| Err(e.to_string()));
+            let got = desk::off(desk::tell(node, session.clone(), note)).await;
             let _ = this.update(cx, |app, cx| match got {
                 Ok(()) => {
                     let said = app.frame.read(cx).toast.as_ref().map(|t| t.text.clone());
@@ -2168,7 +2156,10 @@ impl DeskApp {
                         app.toast(format!("{words} · {session} told"), cx);
                     }
                 }
-                Err(e) => app.fail(format!("Sent, but {session} was not told: {e}"), cx),
+                Err(e) => {
+                    let words = format!("Sent, but {session} was not told: {}", e.message);
+                    app.fail(words, cx)
+                }
             });
         })
         .detach();
@@ -2365,7 +2356,7 @@ impl DeskApp {
             };
             let row = MenuRow::note(d.name()).chord(&state);
             rows.push(match &d.reach {
-                Reach::Failed(e) => row.hint(e.clone()),
+                Reach::Failed(e) => row.hint(e.message.clone()),
                 _ => row.hint(d.place.url.clone()),
             });
         }
@@ -2418,10 +2409,7 @@ impl DeskApp {
         let node = self.config.node();
         self.node_check = None;
         cx.spawn(async move |this, cx| {
-            let got = desk::runtime()
-                .spawn(desk::node_health(node))
-                .await
-                .unwrap_or_else(|e| Err(e.to_string()));
+            let got = desk::off(desk::node_health(node)).await;
             let _ = this.update(cx, |app, cx| {
                 app.node_check = Some(got.map(|device| match device.as_str() {
                     "" => "Reached".to_string(),
@@ -2440,10 +2428,7 @@ impl DeskApp {
         let given: Vec<String> = self.desks.iter().map(|d| d.place.url.clone()).collect();
         for base in given {
             cx.spawn(async move |this, cx| {
-                let got = desk::runtime()
-                    .spawn(desk::desks(base.clone()))
-                    .await
-                    .unwrap_or_else(|e| Err(e.to_string()));
+                let got = desk::off(desk::desks(base.clone())).await;
                 let Ok(found) = got else {
                     // An older desk has no list: the configured ones stand.
                     return;
@@ -2758,7 +2743,8 @@ enum Pasted {
 impl Pasted {
     /// The picture as the desk takes it: PNG, JPEG, GIF or WebP as they
     /// are, any other picture (a bitmap from a Windows screenshot) as PNG.
-    fn ready(self) -> Result<Vec<u8>, String> {
+    fn ready(self) -> Result<Vec<u8>, Error> {
+        let refused = |words: String| Error::new("picture_unready", words);
         let (format, bytes) = match self {
             Pasted::Bytes(f, b) => (f, b),
             Pasted::File(path) => {
@@ -2771,9 +2757,9 @@ impl Pasted {
                     ext.as_str(),
                     "png" | "jpg" | "jpeg" | "gif" | "webp" | "bmp" | "tif" | "tiff"
                 ) {
-                    return Err(format!("{name} is not a picture"));
+                    return Err(refused(format!("{name} is not a picture")));
                 }
-                let bytes = std::fs::read(&path).map_err(|e| format!("{name}: {e}"))?;
+                let bytes = std::fs::read(&path).map_err(|e| refused(format!("{name}: {e}")))?;
                 (image_format(&name), bytes)
             }
         };
@@ -2781,14 +2767,14 @@ impl Pasted {
             ImageFormat::Png | ImageFormat::Jpeg | ImageFormat::Gif | ImageFormat::Webp => {
                 Ok(bytes)
             }
-            ImageFormat::Svg => Err("a drawing (SVG) does not go as a picture".into()),
+            ImageFormat::Svg => Err(refused("a drawing (SVG) does not go as a picture".into())),
             _ => {
                 let picture = image::load_from_memory(&bytes)
-                    .map_err(|e| format!("the picture does not read: {e}"))?;
+                    .map_err(|e| refused(format!("the picture does not read: {e}")))?;
                 let mut png = std::io::Cursor::new(vec![]);
                 picture
                     .write_to(&mut png, image::ImageFormat::Png)
-                    .map_err(|e| format!("the picture does not turn to PNG: {e}"))?;
+                    .map_err(|e| refused(format!("the picture does not turn to PNG: {e}")))?;
                 Ok(png.into_inner())
             }
         }

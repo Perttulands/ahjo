@@ -307,8 +307,8 @@ impl DeskApp {
             .desks
             .iter()
             .filter_map(|d| match &d.reach {
-                Reach::Failed(e) => Some(format!("{}: {e}", d.name())),
-                Reach::Away(e) if none_answer => Some(format!("{}: {e}", d.name())),
+                Reach::Failed(e) => Some(format!("{}: {}", d.name(), e.message)),
+                Reach::Away(e) if none_answer => Some(format!("{}: {}", d.name(), e.message)),
                 _ => None,
             })
             .collect();
@@ -533,7 +533,7 @@ impl DeskApp {
             .desks
             .iter()
             .filter_map(|d| match &d.reach {
-                Reach::Failed(e) => Some((d.name(), e.clone())),
+                Reach::Failed(e) => Some((d.name(), e.message.clone())),
                 _ => None,
             })
             .collect();

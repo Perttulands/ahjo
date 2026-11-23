@@ -21,7 +21,7 @@ pub enum Want {
 
 pub enum Out {
     Frame(usize, Arc<RenderImage>),
-    Failed(String),
+    Failed(ahjo_app_kit::Error),
 }
 
 pub struct Player {
