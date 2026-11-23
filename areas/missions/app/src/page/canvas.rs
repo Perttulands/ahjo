@@ -40,6 +40,8 @@ const DOT_SIZE: f32 = 1.5;
 /// The zoom controls' stack in the board's corner, and what Fit keeps clear.
 const ZOOM_BUTTON: (f32, f32) = (76., 32.);
 const WIRE: f32 = 1.5;
+/// How near a wire, on screen, a click picks it.
+const WIRE_REACH: f32 = 6.;
 /// A card's inner padding across and down, at Archon's density.
 const CARD_PAD: f32 = board::CARD_PAD;
 const HEAD_PAD: f32 = 8.;
@@ -89,6 +91,8 @@ pub(super) struct View {
     follow: Option<String>,
     /// Ctrl+wheel as zoom steps, a touchpad's pixels adding up to one.
     wheel: ahjo_app_kit::zoom::Wheel,
+    /// The wire whose panel is open, drawn picked out.
+    pub(super) wire: Option<String>,
 }
 impl Default for View {
     fn default() -> Self {
@@ -103,6 +107,7 @@ impl Default for View {
             touched: false,
             follow: None,
             wheel: Default::default(),
+            wire: None,
         }
     }
 }
@@ -363,6 +368,7 @@ impl MissionsPage {
         };
         let view = self.canvas.clone();
         let drag_ports = ports.clone();
+        let wires_here = board.wires.clone();
         let mut layer = div()
             .id("mission-canvas")
             .debug_selector(|| "mission-canvas".into())
@@ -443,6 +449,17 @@ impl MissionsPage {
                                 .map(|port| port.endpoint.clone());
                             p.canvas_wire(from, lifted, target, cx);
                         }
+                        // A click on the board, not a pan: a wire under it
+                        // opens its panel.
+                        Some(Drag::Pan(down, _)) => {
+                            let d = e.position - down;
+                            let reach = WIRE_REACH / p.canvas.zoom;
+                            if f32::from(d.x).hypot(f32::from(d.y)) <= DRAG_SLOP
+                                && let Some(wire) = board::wire_at(&wires_here, at, reach)
+                            {
+                                p.open_wire(wire.id.clone(), cx);
+                            }
+                        }
                         _ => (),
                     }
                     cx.notify();
@@ -501,6 +518,10 @@ impl MissionsPage {
             layer = layer.child(
                 div()
                     .id(SharedString::from(format!("canvas-start-{id}")))
+                    .debug_selector({
+                        let selector = format!("canvas-start-{id}");
+                        move || selector
+                    })
                     .absolute()
                     .left(px(x))
                     .top(px(y + TAB_GAP * z))
@@ -1386,7 +1407,10 @@ fn wires(
             };
             paint_grid(window, b, &view, grid);
             for w in &list {
-                let colour = if errors.contains(&w.id) {
+                let picked = view.wire.as_ref() == Some(&w.id);
+                let colour = if picked {
+                    accent
+                } else if errors.contains(&w.id) {
                     error
                 } else {
                     // A fail is red all the way, back or out; a pass is
@@ -1396,7 +1420,7 @@ fn wires(
                         _ => work,
                     }
                 };
-                let mut path = PathBuilder::stroke(px(WIRE));
+                let mut path = PathBuilder::stroke(px(if picked { WIRE * 2. } else { WIRE }));
                 // A loop back is dashed.
                 if w.back {
                     path = path.dash_array(&[px(DASH_LONG * 1.2), px(DASH_LONG)]);

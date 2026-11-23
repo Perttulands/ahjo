@@ -114,6 +114,31 @@ impl Wire {
     }
 }
 
+/// The wire nearest `p` within `reach` of it: what a click there picks.
+pub fn wire_at(wires: &[Wire], p: P, reach: f32) -> Option<&Wire> {
+    wires
+        .iter()
+        .map(|w| {
+            let near = w.points.windows(2).map(|s| to_run(p, s[0], s[1]));
+            (w, near.fold(f32::INFINITY, f32::min))
+        })
+        .filter(|(_, d)| *d <= reach)
+        .min_by(|a, b| a.1.total_cmp(&b.1))
+        .map(|(w, _)| w)
+}
+
+/// How far `p` is from the run `a` to `b`.
+fn to_run(p: P, a: P, b: P) -> f32 {
+    let (dx, dy) = (b.0 - a.0, b.1 - a.1);
+    let length = dx * dx + dy * dy;
+    let t = if length == 0. {
+        0.
+    } else {
+        (((p.0 - a.0) * dx + (p.1 - a.1) * dy) / length).clamp(0., 1.)
+    };
+    (a.0 + t * dx - p.0).hypot(a.1 + t * dy - p.1)
+}
+
 fn span(a: P, b: P) -> f32 {
     (a.0 - b.0).abs() + (a.1 - b.1).abs()
 }
@@ -1725,5 +1750,27 @@ mod tests {
                 .iter()
                 .any(|p| p.endpoint == "gate_beads_review:judge")
         );
+    }
+
+    #[test]
+    fn a_click_picks_the_nearest_wire_within_reach() {
+        let wire = |id: &str, points: Vec<P>| Wire {
+            id: id.into(),
+            points,
+            route: String::new(),
+            from_card: String::new(),
+            to_card: String::new(),
+            back: false,
+        };
+        let wires = [
+            wire("low", vec![(0., 100.), (200., 100.)]),
+            wire("bent", vec![(0., 0.), (100., 0.), (100., 90.)]),
+        ];
+        let at = |p| wire_at(&wires, p, 6.).map(|w| w.id.as_str());
+        assert_eq!(at((50., 3.)), Some("bent"));
+        assert_eq!(at((104., 50.)), Some("bent"), "its second run");
+        assert_eq!(at((100., 97.)), Some("low"), "the nearer of the two");
+        assert_eq!(at((150., 50.)), None, "out of reach of both");
+        assert_eq!(at((210., 100.)), None, "past a wire's end");
     }
 }

@@ -3,7 +3,7 @@
 use super::*;
 use crate::store::staffing::Staffing;
 use ahjo_missions_contract::{
-    EndUpdate, GateUpdate, InputCardUpdate, LimitUpdate, Mission, MissionOutput,
+    EndUpdate, GateUpdate, InputCardUpdate, LimitUpdate, Mission, MissionInput, MissionOutput,
 };
 
 fn changed<T: PartialEq>(
@@ -54,6 +54,19 @@ fn enum_value<T: std::str::FromStr<Err = String>>(
             None
         }
     }
+}
+fn input_values(inputs: &[MissionInput]) -> Vec<(String, String, String, bool)> {
+    inputs
+        .iter()
+        .map(|i| {
+            (
+                i.name.clone(),
+                i.description.clone(),
+                i.kind.as_str().to_owned(),
+                i.required,
+            )
+        })
+        .collect()
 }
 fn output_values(outputs: &[MissionOutput]) -> Vec<(String, String, String, bool, String)> {
     outputs
@@ -199,9 +212,30 @@ fn operations(
             let mut update = InputCardUpdate {
                 title: drafted!(0, "The title", &card.title),
                 goal: drafted!(1, "The goal", &card.goal),
-                human_channel: drafted_enum!(2, "The human channel", &card.human_channel),
                 ..Default::default()
             };
+            if draft.inputs.iter().any(|i| i.0.trim().is_empty()) {
+                problems.push("Every input needs a name.".into());
+            }
+            if changed(
+                "What a run takes",
+                &base.inputs,
+                &draft.inputs,
+                &input_values(&card.inputs),
+                &mut problems,
+            ) {
+                let inputs: Vec<_> = (draft.inputs.iter())
+                    .filter_map(|(name, description, kind, required)| {
+                        Some(MissionInput {
+                            name: name.trim().to_owned(),
+                            description: description.clone(),
+                            kind: enum_value(kind, &mut problems)?,
+                            required: *required,
+                        })
+                    })
+                    .collect();
+                update.inputs = Some(inputs);
+            }
             if draft.outputs.iter().any(|o| o.0.trim().is_empty()) {
                 problems.push("Every output needs a name.".into());
             }
@@ -256,7 +290,6 @@ fn operations(
             };
             let mut update = EndUpdate {
                 title: drafted!(0, "The title", &end.title),
-                outcome: drafted_enum!(2, "The outcome", &end.outcome),
                 ..Default::default()
             };
             if update != EndUpdate::default() {
@@ -432,6 +465,7 @@ mod tests {
         };
         let base = EditorSnapshot {
             fields: vec![String::new(); 22],
+            inputs: vec![],
             outputs: vec![],
         };
         for (kind, id, values, expected) in [
@@ -470,7 +504,7 @@ mod tests {
             (
                 EditKind::Input,
                 "input",
-                &[(0, "Request"), (1, "Build"), (2, "notify")],
+                &[(0, "Request"), (1, "Build")],
                 &["update_input_card"],
             ),
             (
@@ -479,7 +513,6 @@ mod tests {
                 &[
                     (0, "Review"),
                     (1, "Tests pass"),
-                    (2, "code,human"),
                     (5, "README.md"),
                     (7, "tests"),
                     (8, "1"),
@@ -487,18 +520,16 @@ mod tests {
                 ],
                 &["update_gate"],
             ),
-            (
-                EditKind::End,
-                "end",
-                &[(0, "Done"), (2, "done")],
-                &["update_end"],
-            ),
+            (EditKind::End, "end", &[(0, "Done")], &["update_end"]),
         ] {
             let mut draft = base.clone();
             for &(index, value) in values {
                 draft.fields[index] = value.into();
             }
             if matches!(kind, EditKind::Input) {
+                draft
+                    .inputs
+                    .push(("report".into(), String::new(), "text".into(), true));
                 draft.outputs.push((
                     "result".into(),
                     "The result".into(),
@@ -550,6 +581,7 @@ mod tests {
     fn edits_merge_untouched_fields_and_refuse_the_same_field() {
         let base = EditorSnapshot {
             fields: vec![String::new(); 22],
+            inputs: vec![],
             outputs: vec![],
         };
         let mut base = base;

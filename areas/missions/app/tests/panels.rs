@@ -1,8 +1,10 @@
 #![cfg(unix)]
-//! A gate is one element on the board: a click opens its panel, where its
-//! loop's tries are set, and in a run it says which try the work is on.
+//! Every element on the board opens its panel in the window's edge panel:
+//! a gate's sets its loop's tries and, in a run, says which try the work
+//! is on; an end's says how a run ends there; an input's starts a run; a
+//! wire's names its two cards and takes it off the board.
 use ahjo_node_kit::{Built, Listing, Setup};
-use ahjo_testkit::app::{Served, Started, click, serve, until};
+use ahjo_testkit::app::{Served, Started, bounds, click, serve, until};
 use ahjo_testkit::{node::Node, sessions};
 use gpui::{TestAppContext, VisualTestContext};
 use serde_json::json;
@@ -141,7 +143,15 @@ fn open<'a>(cx: &'a mut TestAppContext, running: &Served<Fixture>) -> &'a mut Vi
 }
 
 fn has(cx: &mut VisualTestContext, selector: &str) -> bool {
-    ahjo_testkit::app::bounds(cx, selector).is_some()
+    bounds(cx, selector).is_some()
+}
+
+/// Opens the fixture's mission on the board.
+fn open_mission(cx: &mut VisualTestContext, running: &Served<Fixture>) {
+    let title = format!("mission-{}-fix", running.id);
+    until(cx, "the mission listed", |cx| has(cx, &title));
+    click(cx, &title);
+    until(cx, "the board", |cx| has(cx, "mission-card-end_done"));
 }
 
 /// Whether the mission as saved holds `line`.
@@ -214,4 +224,73 @@ fn a_runs_gate_says_which_try_the_work_is_on(cx: &mut TestAppContext) {
     until(cx, "the second try", |cx| {
         has(cx, "gate-tries-gate_review: ↺ try 2 of 3")
     });
+}
+
+#[gpui::test]
+fn an_ends_panel_says_how_a_run_ends_there(cx: &mut TestAppContext) {
+    let running = start(false);
+    let cx = open(cx, &running);
+    open_mission(cx, &running);
+    click(cx, "mission-card-end_done");
+    until(cx, "the end's panel", |cx| has(cx, "outcome-rejected"));
+    assert!(
+        !has(cx, "step-goal"),
+        "an end has no words beyond its title"
+    );
+    click(cx, "outcome-rejected");
+    until(cx, "rejected saved", |_| {
+        saved(&running, r#"outcome = "rejected""#)
+    });
+}
+
+#[gpui::test]
+fn an_inputs_panel_starts_a_run(cx: &mut TestAppContext) {
+    let running = start(false);
+    let cx = open(cx, &running);
+    open_mission(cx, &running);
+    // The ▶ starts a run; the names under it open the card's panel.
+    click(cx, "canvas-start-inp_bug");
+    until(cx, "the input's panel", |cx| has(cx, "input-start"));
+    // What a run takes is the card's own: one more, named and saved.
+    assert!(has(cx, "run-input-0") && !has(cx, "run-input-1"));
+    click(cx, "add-input");
+    until(cx, "a blank input", |cx| has(cx, "input-name-1"));
+    click(cx, "input-name-1");
+    cx.simulate_input("severity");
+    click(cx, "step-save");
+    until(cx, "the input saved", |_| {
+        std::fs::read_to_string(&running.mission)
+            .unwrap()
+            .contains(r#"name = "severity""#)
+    });
+    // A notification, the default, is the only way to ask about a gate
+    // he decides: no choice is offered.
+    click(cx, "canvas-start-inp_bug");
+    until(cx, "the panel again", |cx| has(cx, "input-start"));
+    assert!(!has(cx, "channel-session"));
+    click(cx, "input-start");
+    until(cx, "the start form", |cx| has(cx, "run-start-actions"));
+}
+
+#[gpui::test]
+fn a_click_on_a_wire_opens_its_panel_where_it_comes_off(cx: &mut TestAppContext) {
+    let running = start(false);
+    let cx = open(cx, &running);
+    open_mission(cx, &running);
+    // Just short of the end's way in, on the wire from the gate's pass.
+    let port = bounds(cx, "mission-port-end_done:in").unwrap();
+    let on_wire = gpui::point(port.left() - gpui::px(8.), port.center().y);
+    cx.simulate_click(on_wire, gpui::Modifiers::none());
+    until(cx, "the wire's panel", |cx| has(cx, "wire-from"));
+    assert!(has(cx, "wire-to"));
+    // Each end opens its card's panel in its place.
+    click(cx, "wire-from");
+    until(cx, "the gate's panel", |cx| has(cx, "decider-human"));
+    cx.simulate_click(on_wire, gpui::Modifiers::none());
+    until(cx, "the wire's panel again", |cx| has(cx, "wire-delete"));
+    click(cx, "wire-delete");
+    until(cx, "the wire gone", |_| {
+        !saved(&running, r#"id = "edge_done""#)
+    });
+    until(cx, "its panel put away", |cx| !has(cx, "card-panel"));
 }

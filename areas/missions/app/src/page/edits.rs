@@ -426,6 +426,7 @@ fn accept_editor_operation(
         MissionChange::UpdateLimit(_) => accept(16..22),
         MissionChange::UpdateInputCard(_) => {
             accept(0..3);
+            base.inputs = submitted.inputs.clone();
             base.outputs = submitted.outputs.clone();
         }
         MissionChange::UpdateGate(_) => {
@@ -618,10 +619,12 @@ mod tests {
     fn partial_editor_save_accepts_only_the_operation_that_landed() {
         let mut base = EditorSnapshot {
             fields: vec!["before".into(); 22],
+            inputs: vec![],
             outputs: vec![],
         };
         let submitted = EditorSnapshot {
             fields: vec!["after".into(); 22],
+            inputs: vec![],
             outputs: vec![],
         };
         accept_editor_operation(

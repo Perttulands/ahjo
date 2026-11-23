@@ -1,4 +1,4 @@
-//! A gate's panel (AH13 prototype): what the gate on the board stands for,
+//! A gate's panel: what the gate on the board stands for,
 //! one click away. In a run, how its tries went; then what it lets
 //! through, who decides, and what happens when it fails, with the loop's
 //! number of tries set right here.

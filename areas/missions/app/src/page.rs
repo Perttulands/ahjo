@@ -3,6 +3,7 @@ mod canvas;
 mod card_panel;
 mod editor_diff;
 mod edits;
+mod end_wire_panel;
 mod flow_view;
 mod gate_panel;
 mod manage;
@@ -143,6 +144,13 @@ enum EditKind {
 enum WriteMode {
     Edit,
 }
+/// A value each run supplies, as an input's panel edits it.
+struct InputDraft {
+    name: Entity<TextField>,
+    description: Entity<TextField>,
+    kind: Entity<TextField>,
+    required: bool,
+}
 struct OutputDraft {
     name: Entity<TextField>,
     description: Entity<TextField>,
@@ -160,6 +168,7 @@ struct Wanted {
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct EditorSnapshot {
     fields: Vec<String>,
+    inputs: Vec<(String, String, String, bool)>,
     outputs: Vec<(String, String, String, bool, String)>,
 }
 impl EditorSnapshot {
@@ -176,6 +185,7 @@ struct Editor {
     error: Option<String>,
     deleting: bool,
     baseline: Option<EditorSnapshot>,
+    inputs: Vec<InputDraft>,
     outputs: Vec<OutputDraft>,
     /// The save under way applies an edit and leaves the drawer open.
     keep_open: bool,
@@ -505,7 +515,23 @@ impl MissionsPage {
                 )
             })
             .collect();
-        EditorSnapshot { fields, outputs }
+        let inputs = editor
+            .inputs
+            .iter()
+            .map(|i| {
+                (
+                    i.name.read(cx).text.clone(),
+                    i.description.read(cx).text.clone(),
+                    i.kind.read(cx).text.clone(),
+                    i.required,
+                )
+            })
+            .collect();
+        EditorSnapshot {
+            fields,
+            inputs,
+            outputs,
+        }
     }
     fn resolve_wanted(&mut self, cx: &mut Context<Self>) {
         let Some(wanted) = self.wanted.clone() else {
@@ -665,6 +691,7 @@ impl MissionsPage {
             cx.notify();
             return;
         }
+        self.canvas.wire = None;
         if self.note_paper.open.is_some() {
             self.note_paper = notes::NotesUi::default();
             self.note_id = None;
@@ -693,7 +720,9 @@ impl MissionsPage {
                 EditKind::Input,
                 c.title.clone(),
                 c.goal.clone(),
-                c.human_channel.as_str().to_owned(),
+                // How a run asks the operator is chosen on the panel and
+                // saved as chosen; no field holds it.
+                String::new(),
                 Default::default(),
             )
         } else if let Some(g) = m.gates.iter().find(|g| g.id == id) {
@@ -711,7 +740,9 @@ impl MissionsPage {
                 EditKind::End,
                 e.title.clone(),
                 String::new(),
-                e.outcome.as_str().to_owned(),
+                // Done or rejected is chosen on the end's panel and saved
+                // as chosen; no field holds it.
+                String::new(),
                 Default::default(),
             )
         } else {
@@ -741,6 +772,26 @@ impl MissionsPage {
                 field.update(cx, |f, cx| f.set(&value, false, cx));
             }
         }
+        let inputs = m
+            .input_cards
+            .iter()
+            .find(|c| c.id == id)
+            .map(|c| {
+                c.inputs
+                    .iter()
+                    .map(|i| {
+                        let draft = Self::input_draft(cx);
+                        draft.name.update(cx, |f, cx| f.set(&i.name, false, cx));
+                        (draft.description).update(cx, |f, cx| f.set(&i.description, false, cx));
+                        (draft.kind).update(cx, |f, cx| f.set(i.kind.as_str(), false, cx));
+                        InputDraft {
+                            required: i.required,
+                            ..draft
+                        }
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
         let outputs = m
             .input_cards
             .iter()
@@ -792,6 +843,7 @@ impl MissionsPage {
             error: None,
             deleting: false,
             baseline: None,
+            inputs,
             outputs,
             keep_open: false,
             edits: 0,
@@ -1207,6 +1259,32 @@ impl MissionsPage {
             }
         }
     }
+    /// A blank value a run supplies, its fields watched as the editor's.
+    fn input_draft(cx: &mut Context<Self>) -> InputDraft {
+        let name = cx.new(|cx| TextField::new(cx, "Name"));
+        let description = cx.new(|cx| TextField::new(cx, "What it is"));
+        let kind = cx.new(|cx| {
+            let mut f = TextField::new(cx, "text, file, or folder");
+            f.set("text", false, cx);
+            f
+        });
+        for field in [&name, &description, &kind] {
+            Self::watch_editor_field(field, cx);
+        }
+        InputDraft {
+            name,
+            description,
+            kind,
+            required: true,
+        }
+    }
+    fn add_input(&mut self, cx: &mut Context<Self>) {
+        let draft = Self::input_draft(cx);
+        if let Some(ed) = &mut self.editor {
+            ed.inputs.push(draft);
+        }
+        cx.notify();
+    }
     fn add_output(&mut self, cx: &mut Context<Self>) {
         let name = cx.new(|cx| TextField::new(cx, "Output name"));
         let description = cx.new(|cx| TextField::new(cx, "Description"));
@@ -1298,6 +1376,9 @@ impl MissionsPage {
     /// The open card's panel, the page's column of the window's edge
     /// panel: one header with its title, Delete, Done and Close.
     pub(crate) fn editor_column(&mut self, cx: &mut Context<Self>) -> Option<gpui::AnyElement> {
+        if let Some(wire) = self.canvas.wire.clone() {
+            return self.wire_column(&wire, cx);
+        }
         let t = theme(cx).clone();
         let ed = self.editor.as_ref()?;
         let header = div()
@@ -1314,10 +1395,10 @@ impl MissionsPage {
                     .flex_1()
                     .font_weight(FontWeight::SEMIBOLD)
                     .child(match ed.kind {
-                        EditKind::Step => "Edit step",
-                        EditKind::Input => "Edit input",
+                        EditKind::Step => "Step",
+                        EditKind::Input => "Input",
                         EditKind::Gate => "Gate",
-                        EditKind::End => "Edit end",
+                        EditKind::End => "End",
                     }),
             )
             .when(!ed.deleting, |d| {
@@ -1367,6 +1448,24 @@ impl MissionsPage {
                         )),
                 )
             })
+            // An input's panel starts a run from it, as its ▶ does.
+            .when(matches!(ed.kind, EditKind::Input), |d| {
+                let id = ed.id.clone();
+                let runnable = self.mission_input_runnable(&id);
+                d.child(left(
+                    kit::button(
+                        &t,
+                        "input-start",
+                        "Start",
+                        if runnable { Kind::Primary } else { Kind::Quiet },
+                    )
+                    .debug_selector(|| "input-start".into())
+                    .on_click(cx.listener(move |p, _, window, cx| {
+                        p.run.start_at = Some(Spot::here(window, cx));
+                        p.prepare_card_run(&id, cx)
+                    })),
+                ))
+            })
             .when(matches!(ed.kind, EditKind::Step), |d| {
                 let id = ed.id.clone();
                 d.child(left(
@@ -1407,20 +1506,92 @@ impl MissionsPage {
                     .debug_selector(|| "step-title".into())
                     .child(self.title.clone()),
             )
-            .child(kit::label(
-                &t,
-                match ed.kind {
-                    EditKind::Step => "Brief",
-                    EditKind::Input => "Goal",
-                    EditKind::Gate => "Lets through when",
-                    EditKind::End => "Description",
-                },
-            ))
-            .child(
-                div()
-                    .debug_selector(|| "step-goal".into())
-                    .child(self.goal.clone()),
+            // An end has no words of its own beyond its title.
+            .when(!matches!(ed.kind, EditKind::End), |d| {
+                d.child(kit::label(
+                    &t,
+                    match ed.kind {
+                        EditKind::Input => "Goal",
+                        EditKind::Gate => "Lets through when",
+                        _ => "Brief",
+                    },
+                ))
+                .child(
+                    div()
+                        .debug_selector(|| "step-goal".into())
+                        .child(self.goal.clone()),
+                )
+            })
+            .children(
+                matches!(ed.kind, EditKind::End)
+                    .then(|| self.end_outcome_part(&t, &ed.id, cx))
+                    .flatten(),
             )
+            // What a run takes: the names under the ▶ on the board.
+            .when(matches!(ed.kind, EditKind::Input), |mut d| {
+                d = d.child(kit::label(&t, "A run takes"));
+                for (i, input) in ed.inputs.iter().enumerate() {
+                    d = d.child(
+                        div()
+                            .flex()
+                            .flex_col()
+                            .gap(px(TAB_GAP))
+                            .pb(px(TAB_GAP))
+                            .debug_selector(move || format!("run-input-{i}"))
+                            .child(
+                                div()
+                                    .debug_selector(move || format!("input-name-{i}"))
+                                    .child(input.name.clone()),
+                            )
+                            .child(div().child(input.description.clone()))
+                            .child(div().child(input.kind.clone()))
+                            .child(
+                                div()
+                                    .flex()
+                                    .gap(px(TAB_GAP))
+                                    .child(
+                                        kit::button(
+                                            &t,
+                                            ("input-required", i),
+                                            if input.required {
+                                                "Required"
+                                            } else {
+                                                "Optional"
+                                            },
+                                            Kind::Quiet,
+                                        )
+                                        .debug_selector(move || format!("input-required-{i}"))
+                                        .on_click(
+                                            cx.listener(move |p, _, _, cx| {
+                                                if let Some(e) = &mut p.editor
+                                                    && let Some(input) = e.inputs.get_mut(i)
+                                                {
+                                                    input.required = !input.required;
+                                                }
+                                                cx.notify();
+                                            }),
+                                        ),
+                                    )
+                                    .child(
+                                        kit::button(&t, ("input-remove", i), "Remove", Kind::Quiet)
+                                            .on_click(cx.listener(move |p, _, _, cx| {
+                                                if let Some(e) = &mut p.editor
+                                                    && i < e.inputs.len()
+                                                {
+                                                    e.inputs.remove(i);
+                                                }
+                                                cx.notify();
+                                            })),
+                                    ),
+                            ),
+                    );
+                }
+                d.child(left(
+                    kit::button(&t, "add-input", "Add an input", Kind::Quiet)
+                        .debug_selector(|| "add-input".into())
+                        .on_click(cx.listener(|p, _, _, cx| p.add_input(cx))),
+                ))
+            })
             .children(
                 matches!(ed.kind, EditKind::Gate)
                     .then(|| self.gate_decider_part(&t, &ed.id, cx))
@@ -1535,21 +1706,11 @@ impl MissionsPage {
                     .child(kit::label(&t, "Links"))
                     .child(div().child(self.links.clone()))
             })
-            .when(!matches!(ed.kind, EditKind::Step | EditKind::Gate), |d| {
-                d.child(kit::label(
-                    &t,
-                    match ed.kind {
-                        EditKind::Input => "Human channel",
-                        EditKind::End => "Outcome",
-                        _ => "",
-                    },
-                ))
-                .child(
-                    div()
-                        .debug_selector(|| "step-extra".into())
-                        .child(self.extra.clone()),
-                )
-            })
+            .children(
+                matches!(ed.kind, EditKind::Input)
+                    .then(|| self.input_channel_part(&t, &ed.id, cx))
+                    .flatten(),
+            )
             .when(
                 matches!(ed.kind, EditKind::Step) && self.editor_more,
                 |mut d| {
@@ -1811,7 +1972,7 @@ impl MissionsPage {
     /// Lends the open card's panel to the window's edge panel while a card
     /// is open, opening the edge panel for it, and takes it back after.
     fn lend_card_panel(&mut self, cx: &mut Context<Self>) {
-        let is_open = self.editor.is_some();
+        let is_open = self.editor.is_some() || self.canvas.wire.is_some();
         if is_open == self.is_panel_lent {
             return;
         }
@@ -1842,6 +2003,7 @@ impl MissionsPage {
     pub(crate) fn close_editor(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if self.unsaved(cx).is_none() {
             self.editor = None;
+            self.canvas.wire = None;
             self.resolve_wanted(cx);
             window.focus(&self.focus, cx);
         } else {
@@ -2071,10 +2233,11 @@ impl Render for MissionsPage {
         } else if let Some(m) = self.state.mission.clone() {
             // A mission opens on its board; Flow, the mission in words,
             // stands beside it when there is room, or behind its toggle.
-            // One panel at a time: an open step's editor takes its place.
+            // One panel at a time: an open card's or wire's takes its place.
             let empty = m.input_cards.is_empty() && m.steps.is_empty();
-            let flow_shown =
-                self.editor.is_none() && self.flow_open.unwrap_or(room >= FLOW_AT && !empty);
+            let flow_shown = self.editor.is_none()
+                && self.canvas.wire.is_none()
+                && self.flow_open.unwrap_or(room >= FLOW_AT && !empty);
             let head = self.mission_head(&t, &m, flow_shown, cx);
             let todo = self.todo_band(&t, &m).filter(|_| self.todo_open);
             let board = div()
@@ -2229,7 +2392,7 @@ impl Render for MissionsPage {
                     } else if page.note_paper.open.is_some() {
                         page.close_canvas_note(cx);
                     } else if page.escape_run(cx) {
-                    } else if page.editor.is_some() {
+                    } else if page.editor.is_some() || page.canvas.wire.is_some() {
                         page.close_editor(window, cx);
                     }
                     cx.stop_propagation();
@@ -2277,6 +2440,7 @@ mod tests {
     fn saving_staffing_keeps_other_and_later_drafts_unsaved() {
         let mut baseline = super::EditorSnapshot {
             fields: vec![String::new(); 22],
+            inputs: vec![],
             outputs: vec![],
         };
         let mut submitted = baseline.clone();
