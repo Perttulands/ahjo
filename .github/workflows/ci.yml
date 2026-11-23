@@ -41,3 +41,16 @@ jobs:
       - run: cargo test -p 'ahjo-app*' -p 'ahjo-*-app'
         env:
           AHJO_REQUIRE_TMUX: "1"
+
+  # The Windows session holder: its tests are `#![cfg(windows)]` and run only
+  # here. PowerShell 7 is on the runner image.
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@1.99.1
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo clippy -p ahjo-holder --all-targets -- -D warnings
+      - run: cargo test -p ahjo-holder
