@@ -6,7 +6,7 @@
 //! unless `AHJO_REQUIRE_TMUX=1`.
 #![cfg(target_os = "linux")]
 
-use std::net::TcpListener;
+use std::net::{Ipv4Addr, SocketAddr, TcpListener};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 
@@ -60,7 +60,30 @@ esac
 /// install root, HOME and the config. Its node is stopped when it drops.
 struct Machine {
     dir: PathBuf,
-    port: u16,
+    listen: SocketAddr,
+}
+
+/// An address for a machine's node that nothing else listens on. The port
+/// is free when chosen but nothing holds it until the node starts, and on
+/// 127.0.0.1 another test's node could take it meanwhile; then this node
+/// fails to listen while that one, at the same version, passes install's
+/// health check. So each test process listens on a loopback address of its
+/// own, from its process id (Linux routes all of 127.0.0.0/8 to loopback),
+/// and its machines never share a port.
+fn own_address() -> SocketAddr {
+    static GIVEN: std::sync::Mutex<Vec<u16>> = std::sync::Mutex::new(Vec::new());
+    let [_, high, mid, low] = std::process::id().to_be_bytes();
+    // pid_max is at most 2^22, so the second octet stays within 1..=64 and
+    // never names 127.0.0.1.
+    let ip = Ipv4Addr::new(127, 1 + high, mid, low);
+    let mut given = GIVEN.lock().unwrap();
+    loop {
+        let address = TcpListener::bind((ip, 0)).unwrap().local_addr().unwrap();
+        if !given.contains(&address.port()) {
+            given.push(address.port());
+            return address;
+        }
+    }
 }
 
 impl Machine {
@@ -78,12 +101,10 @@ impl Machine {
             ),
         )
         .unwrap();
-        let port = TcpListener::bind("127.0.0.1:0")
-            .unwrap()
-            .local_addr()
-            .unwrap()
-            .port();
-        Machine { dir, port }
+        Machine {
+            dir,
+            listen: own_address(),
+        }
     }
 
     /// A build of ahjo at `builds/<name>/ahjo`: a copy of this one.
@@ -99,7 +120,7 @@ impl Machine {
     }
 
     fn listen(&self) -> String {
-        format!("127.0.0.1:{}", self.port)
+        self.listen.to_string()
     }
 
     fn installed(&self) -> PathBuf {
