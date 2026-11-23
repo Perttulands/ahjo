@@ -79,8 +79,7 @@ impl Terminals {
                             .flex()
                             .items_center()
                             .child(
-                                kit::button(&t, "rail-search-clear", "×", Kind::Quiet)
-                                    .debug_selector(|| "rail-search-clear".into())
+                                kit::cross(&t, "rail-search-clear")
                                     .tooltip(kit::tip("Clear  Esc"))
                                     .on_click(cx.listener(|s, _, window, cx| {
                                         s.clear_rail_search(cx);
@@ -637,19 +636,15 @@ impl Terminals {
                     .items_center()
                     .gap(px(6.))
                     .child(
-                        kit::button(&t, "peek-close", "Close", Kind::Quiet)
-                            .debug_selector(|| "peek-close".into())
-                            .tooltip(kit::tip(
-                                "Shift+Esc, or a click outside. Esc goes to the session.",
-                            ))
-                            .on_click(cx.listener(|s, _, _, cx| s.close(super::surface::PEEK, cx))),
-                    )
-                    .child(
                         div()
                             .flex_none()
                             .text_size(px(size::SMALL))
                             .text_color(t.dim)
                             .child("Shift+Esc"),
+                    )
+                    .child(
+                        kit::close(&t, "peek-close", Some("Shift+Esc, or a click outside"))
+                            .on_click(cx.listener(|s, _, _, cx| s.close(super::surface::PEEK, cx))),
                     ),
             );
         let live = match (&session, pane) {

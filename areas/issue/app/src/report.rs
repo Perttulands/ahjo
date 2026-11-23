@@ -519,7 +519,15 @@ impl Render for Report {
                     .flex()
                     .flex_col()
                     .gap(px(SPACE_XL))
-                    .child(kit::label(&t, "Report"))
+                    .child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .child(kit::label(&t, "Report").flex_1())
+                            .child(kit::close(&t, "report-close", Some("Esc")).on_click(
+                                cx.listener(|report, _, _, cx| report.host.close_layer(LAYER, cx)),
+                            )),
+                    )
                     .child(
                         div()
                             .debug_selector(|| "report-field".into())

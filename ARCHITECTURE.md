@@ -259,12 +259,12 @@ reserves, or whose `everywhere` chords share a key, naming both;
   Brain (Alt+L), Send, the output search, a diagram, a mission's open card.
   A page shows its content there with `Host::show_panel`, a `PanelView`
   that says its head; the shell draws the one header around it (Back
-  where it applies, the head, Close) and its edge. One content shows at a
+  where it applies, the head, its close control) and its edge. One content shows at a
   time; what it opened over waits under it, and Back, or its page taking
   it out (`Host::close_panel`, as a send that arrived does), brings it
   back; content opened while the panel is put away starts it over, so
   Back leads only to what showed. Content says where it stands (`SideOn`): Files not on Files, which
-  holds the same, a mission's card only on Missions. Close, Escape with
+  holds the same, a mission's card only on Missions. Its ×, Escape with
   the keyboard in it, Ctrl+B and the content's own chord put the panel
   away, once the content lets it (`PanelView::may_close`: unsaved edits are
   asked about first); Ctrl+B brings it back. It never holds the keyboard:
@@ -278,7 +278,7 @@ reserves, or whose `everywhere` chords share a key, naming both;
   size what it edges (the panel, Issues' list) is `kit::grip`: one hit
   width, the release caught by the window rather than a cover over it,
   and a double click back to the first width. The panel's column (head,
-  Back, Close, grip, slide) is `panel::EdgeColumn`, which Desk's list of
+  Back, ×, grip, slide) is `panel::EdgeColumn`, which Desk's list of
   asks uses too. Only Peek still opens
   over the page, a glance that any click outside closes. Why one panel:
   [ADR 0001](docs/adr/0001-one-panel-beside-the-page.md).
@@ -295,7 +295,10 @@ reserves, or whose `everywhere` chords share a key, naming both;
   draft), its page closing it is never asked. It takes the keyboard into
   its declared focus, and when it closes with the keyboard in it the
   keyboard goes back where it was when it opened, a terminal included, or
-  to the page when that was only the window. A menu is a popup of rows
+  to the page when that was only the window. The shell draws its frame
+  and, at the frame's top right, the close control every surface shows
+  (`kit::close`): a click on it closes the popup as Escape does, asking
+  `may_close`. Its content draws no frame or close of its own. A menu is a popup of rows
   (`MenuRow`) that the shell draws and steps through with the keys;
   anything else opening closes it. A danger confirm is a one-row menu,
   already armed (`Host::confirm`). Its content is a view; a page draws it
@@ -368,9 +371,10 @@ is `widgets::pane`.
 | Menu | a list of acts, with keys, rules, submenus and refused rows (`MenuRow`) | `Host::menu`, `menu_keyed`, `menu_armed`; `menu` |
 | Confirm | a danger asked about before it runs: one armed row beside the button | `Host::confirm` |
 | Layer | a page-wide surface over the page or window (Overview, Peek); `keeps_escape` when Escape is its content's | `Host::layer`, `frame::Layer` |
+| Close control | the small × every surface that opens shows, with a "Close" tip naming its keys: the shell draws it on popups, the panel and the status line; a layer, or what opens in place, puts it at its head wired to close itself (ADR 0002). A × that takes something away without closing a surface is `kit::cross` with its own tip | `kit::close`, `kit::cross` |
 | Escape and the stack | Escape closes only the top popup, menu or layer; an app's own Escape is for its own modes, when the stack is empty | `frame::key`, `frame::dismiss_top` |
 | Panel | content opened beside the page (a file, a card, Send): a `PanelView` with its head, Back and `may_close` | `Host::show_panel`, `panel::Panel`, `panel::PanelView` |
-| Edge column | a column at the window's edge in an app without the shell (Desk's asks): head, Close, grip, slide | `panel::EdgeColumn` |
+| Edge column | a column at the window's edge in an app without the shell (Desk's asks): head, ×, grip, slide | `panel::EdgeColumn` |
 | Side section | a page's part of the shell's left column, shown on the pages its `SideOn` names | `Host::lend_side` |
 | Grip | an edge dragged to size what it edges; double click puts the first width back | `kit::grip` |
 | Scroll area | content scrolling down, across, or both (a picture, a board) | `pane::scroll`, `pane::scroll_x`, `pane::scroll_both` |
@@ -400,7 +404,7 @@ is `widgets::pane`.
 `bin/ahjo/tests/layout.rs` refuses the hand-rolled forms outside the kit:
 a scroll area or scrollbar of a page's own, a popup placed with
 `anchored`, something drawn over the page with `deferred`, a press outside
-caught with `on_mouse_down_out`, and a type size, corner or colour written
+caught with `on_mouse_down_out`, a × or Close button of a page's own, and a type size, corner or colour written
 as a number. Its failure names the element to use. What it allows is
 listed in it, each with its reason, and only shrinks.
 

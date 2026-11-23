@@ -488,9 +488,9 @@ pub fn dismiss_top(frame: &Entity<AppFrame>, window: &mut Window, cx: &mut App) 
     frame.update(cx, |f, cx| f.dismiss(cx))
 }
 
-/// A press outside popup `id` that closes it, unless it keeps itself open
-/// now.
-pub fn press_outside(frame: &Entity<AppFrame>, id: PopupId, window: &mut Window, cx: &mut App) {
+/// A press outside popup `id`, or on its close control: it closes, as
+/// Escape does, unless it keeps itself open now ([`Popup::may_close`]).
+pub fn ask_close(frame: &Entity<AppFrame>, id: PopupId, window: &mut Window, cx: &mut App) {
     let popup = frame.read(cx).popup(id).cloned();
     if popup.is_some_and(|p| p.lets_close(window, cx)) {
         frame.update(cx, |f, cx| f.close_popup(id, cx));
@@ -622,17 +622,13 @@ fn notice_column(frame: &Entity<AppFrame>, most: f32, cx: &mut App) -> Option<gp
                     }),
             );
         }
-        if failure {
-            let frame = frame.downgrade();
-            notice = notice.child(
-                kit::button(&t, "status-close", "×", kit::Kind::Quiet)
-                    .debug_selector(|| "status-close".into())
-                    .tooltip(kit::tip("Close"))
-                    .on_click(move |_, _, cx| {
-                        let _ = frame.update(cx, |f, cx| f.withdraw(at, cx));
-                    }),
-            );
-        }
+        // Every word on it closes, a failure and words not yet stale alike.
+        let frame = frame.downgrade();
+        notice = notice.child(
+            kit::close(&t, "status-close", None).on_click(move |_, _, cx| {
+                let _ = frame.update(cx, |f, cx| f.withdraw(at, cx));
+            }),
+        );
         column = column.child(notice);
     }
     Some(column.children(toast))
@@ -725,30 +721,50 @@ fn render_popup(
         Content::View(view) => view.clone().into_any_element(),
     };
     let viewport = window.viewport_size();
+    let t = theme(cx).clone();
+    let close = {
+        let frame = frame.clone();
+        kit::close(&t, "popup-close", None)
+            .m(px(CLOSE_INSET))
+            .on_click(move |_, window, cx| ask_close(&frame, id, window, cx))
+    };
     let mut cover = div().absolute().inset_0().occlude();
     if popup.outside == Outside::Close {
         for button in [MouseButton::Left, MouseButton::Right] {
             let frame = frame.clone();
             cover = cover.on_mouse_down(button, move |_, window, cx| {
-                press_outside(&frame, id, window, cx)
+                ask_close(&frame, id, window, cx)
             });
         }
     }
     deferred(
         cover.child(
             popup::beside(popup.spot, viewport).child(
-                pane::scroll(id.element("popup"))
+                // The shell's frame, its content and its close control
+                // at the top right, where it stays as the content scrolls.
+                kit::panel(&t)
+                    .id(id.element("popup-frame"))
                     .debug_selector(|| "popup".into())
                     .occlude()
                     .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
                     .on_mouse_down(MouseButton::Right, |_, _, cx| cx.stop_propagation())
-                    // Never larger than the window it is kept inside: a
-                    // drawn popup gives way to it ([`popup::form`] keeps
-                    // its actions in view), and anything else taller
-                    // scrolls there.
-                    .max_w(viewport.width - px(2. * size::POPUP_EDGE))
-                    .max_h(viewport.height - px(2. * size::POPUP_EDGE))
-                    .child(content)
+                    .flex()
+                    .items_start()
+                    .child(
+                        pane::scroll(id.element("popup"))
+                            // Never larger than the window it is kept
+                            // inside: a drawn popup gives way to it
+                            // ([`popup::form`] keeps its actions in
+                            // view), and anything else taller scrolls
+                            // there.
+                            .max_w(
+                                viewport.width
+                                    - px(2. * size::POPUP_EDGE + size::CLOSE + 2. * CLOSE_INSET),
+                            )
+                            .max_h(viewport.height - px(2. * size::POPUP_EDGE))
+                            .child(content),
+                    )
+                    .child(close)
                     .with_animation(
                         id.element("popup-in"),
                         Animation::new(Duration::from_millis(motion::PANEL_IN))
@@ -764,14 +780,13 @@ fn render_popup(
     .into_any_element()
 }
 
+/// The room between a popup's close control and its frame's corner.
+const CLOSE_INSET: f32 = 2.;
+
 /// A menu's rows.
 fn render_menu(frame: &Entity<AppFrame>, depth: usize, menu: &Menu, cx: &mut App) -> AnyElement {
     let t = theme(cx).clone();
-    let mut list = kit::panel(&t)
-        .min_w(px(size::MENU))
-        .py(px(4.))
-        .flex()
-        .flex_col();
+    let mut list = div().min_w(px(size::MENU)).py(px(4.)).flex().flex_col();
     for (i, row) in menu.rows.iter().enumerate() {
         if row.is_rule() {
             list = list.child(div().my(px(4.)).child(kit::rule(&t)));

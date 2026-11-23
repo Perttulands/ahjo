@@ -195,7 +195,19 @@ impl Render for KeysPanel {
                     .flex()
                     .flex_col()
                     .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
-                    .child(div().p(px(size::HEAD_PAD)).child(self.search.clone()))
+                    .child(
+                        div()
+                            .p(px(size::HEAD_PAD))
+                            .flex()
+                            .items_center()
+                            .gap(px(size::HEAD_GAP))
+                            .child(div().flex_1().min_w_0().child(self.search.clone()))
+                            .child({
+                                let host = self.host.clone();
+                                kit::close(&t, "keys-close", Some("Esc"))
+                                    .on_click(move |_, _, cx| host.close_layer(LAYER, cx))
+                            }),
+                    )
                     .child(kit::rule(&t))
                     .child(head)
                     .child(list)

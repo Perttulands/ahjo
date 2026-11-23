@@ -51,6 +51,7 @@ impl Render for CloseGuard {
         let loses = format!("Closing Ahjo Swarm now loses: {}.", self.unsaved.join(", "));
         let outside = self.host.clone();
         let stay = self.host.clone();
+        let shut = self.host.clone();
         let shell = self.shell.clone();
         div()
             .id("close-guard")
@@ -72,7 +73,17 @@ impl Render for CloseGuard {
                     .flex_col()
                     .gap(px(board::GAP))
                     .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
-                    .child(div().child(title))
+                    .child(
+                        div()
+                            .flex()
+                            .items_start()
+                            .gap(px(board::GAP))
+                            .child(div().flex_1().child(title))
+                            .child(
+                                kit::close(&t, "close-guard-close", Some("Esc: keep editing"))
+                                    .on_click(move |_, _, cx| shut.close_layer(LAYER, cx)),
+                            ),
+                    )
                     .child(kit::note(&t, loses, None))
                     .child(
                         div()

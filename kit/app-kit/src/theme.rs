@@ -53,6 +53,11 @@ pub mod size {
     /// it keeps from the window's edges.
     pub const POPUP_GAP: f32 = 4.;
     pub const POPUP_EDGE: f32 = 8.;
+    /// The close control every surface shows ([`crate::widgets::kit::close`]):
+    /// the square a pointer hits, the cross drawn in it, and its stroke.
+    pub const CLOSE: f32 = 24.;
+    pub const CLOSE_GLYPH: f32 = 9.;
+    pub const CLOSE_LINE: f32 = 1.5;
     /// The side panel at the window's left (sessions, files), and the
     /// edge it leaves when put away.
     pub const SIDE: f32 = 260.;

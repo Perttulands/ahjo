@@ -343,8 +343,7 @@ impl FilesPage {
                         )
                     })
                     .child(
-                        pane::act(t, "files-infile-close", "\u{00d7}")
-                            .tooltip(kit::tip("Esc"))
+                        kit::close(t, "files-infile-close", Some("Esc"))
                             .on_click(cx.listener(|p, _, w, cx| p.close_infile(w, cx))),
                     ),
             );

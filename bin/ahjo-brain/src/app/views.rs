@@ -345,7 +345,7 @@ impl BrainApp {
                     .into_any_element(),
             );
         };
-        let close = button("end-replay", "×".into())
+        let close = kit::close(t, "end-replay", None)
             .on_click(cx.listener(|me, _, _, cx| me.toggle_replay(cx)));
         let bar = div()
             .absolute()
@@ -677,11 +677,8 @@ impl BrainApp {
             .w(px(self.recent_width().min(search::INBOX_W)))
             .max_h(px(self.size.1 - chrome::INSET * 3. - search::FIELD_HEIGHT))
             .py(px(4.))
-            .rounded(px(chrome::RADIUS))
-            // A popup over the page read as well as the sky: its own ground.
-            .bg(t.surface)
-            .border_1()
-            .border_color(t.divider)
+            // The popup's frame, its ground and close control, are the
+            // shell's.
             .on_scroll(|_, _, cx| cx.stop_propagation());
         let label = |words: String| {
             kit::label(t, words)
@@ -1048,7 +1045,7 @@ impl BrainApp {
                 )
             })
             .child(
-                glyph("close", false, "Close the page (Esc)")
+                kit::close(t, "close", Some("Esc"))
                     .on_click(cx.listener(|me, _, _, cx| me.close(cx))),
             );
         let me = cx.entity().downgrade();

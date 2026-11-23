@@ -9,7 +9,7 @@ use crate::store::sessions::{self, Key};
 use crate::store::workspace::{MAX_WINDOWS, Workspace, tab_label};
 use crate::term::paint::{self, Look};
 use crate::theme::{Theme, size, theme};
-use ahjo_app_kit::widgets::kit::{self, Kind};
+use ahjo_app_kit::widgets::kit;
 use ahjo_app_kit::widgets::pane;
 use gpui::{
     AnyElement, ContentMask, Context, FontWeight, KeyDownEvent, MouseButton, MouseDownEvent,
@@ -434,8 +434,7 @@ impl Terminals {
                             .child(format!("Overview · {} sessions", list.len())),
                     )
                     .child(
-                        kit::button(&t, "ov-close", "Close", Kind::Quiet)
-                            .tooltip(kit::tip("Esc; arrow keys choose a session, Enter opens it"))
+                        kit::close(&t, "ov-close", Some("Esc"))
                             .on_click(cx.listener(|s, _, _, cx| s.close(surface::OVERVIEW, cx))),
                     ),
             )

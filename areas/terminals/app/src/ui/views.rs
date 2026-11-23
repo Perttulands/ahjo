@@ -281,7 +281,7 @@ impl Terminals {
             )
         };
         Some(
-            kit::panel(&t)
+            div()
                 .debug_selector(|| "view-name".into())
                 .w(px(300.))
                 .p(px(10.))

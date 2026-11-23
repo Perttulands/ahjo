@@ -72,11 +72,9 @@ impl DeskApp {
                     .child(kit::page_title(t, "Settings"))
                     .child(div().flex_1())
                     .child(
-                        button(t, "settings-done", "Done", Kind::Primary)
-                            .tooltip(kit::tip("Esc"))
-                            .on_click(cx.listener(|app, _: &ClickEvent, window, cx| {
-                                app.toggle_settings(window, cx)
-                            })),
+                        kit::close(t, "settings-done", Some("Esc")).on_click(cx.listener(
+                            |app, _: &ClickEvent, window, cx| app.toggle_settings(window, cx),
+                        )),
                     ),
             )
             .child(self.reading(t, cx))

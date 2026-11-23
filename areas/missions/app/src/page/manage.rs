@@ -608,7 +608,7 @@ impl MissionsPage {
             )
             .child(go);
         Some(
-            popup::form(t, "mission-form-fields", fields, actions)
+            popup::form("mission-form-fields", fields, actions)
                 .debug_selector(|| "mission-form".into())
                 // Room to draft a mission in.
                 .w(px(size::MEASURE))

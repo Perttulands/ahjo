@@ -252,7 +252,15 @@ impl Render for Picker {
                     .flex()
                     .flex_col()
                     .gap(px(board::GAP))
-                    .child(kit::label(&t, self.title))
+                    .child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .child(kit::label(&t, self.title).flex_1())
+                            .child(kit::close(&t, "path-picker-close", Some("Esc")).on_click(
+                                cx.listener(|picker, _, _, cx| picker.host.close_layer(LAYER, cx)),
+                            )),
+                    )
                     .child(kit::note(
                         &t,
                         if self.folders {

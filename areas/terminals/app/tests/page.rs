@@ -2478,6 +2478,25 @@ fn peek_keyboard_dismisses_and_restores_focus_after_a_leader_action(cx: &mut Tes
         shown(cx).contains("peek-escape-restored")
     });
 
+    // Its close control closes it as Shift+Escape does, and the keys go
+    // back to the terminal.
+    cx.simulate_keystrokes("ctrl-shift-space /");
+    cx.simulate_keystrokes("ctrl-a");
+    cx.simulate_input("beta");
+    cx.simulate_keystrokes("enter");
+    until(cx, "keyboard opens Peek for its close control", |cx| {
+        cx.debug_bounds("peek-attach").is_some()
+    });
+    click(cx, "peek-close".into());
+    until(cx, "its × closes Peek", |cx| {
+        cx.debug_bounds("peek-attach").is_none()
+    });
+    cx.simulate_input("echo peek-close-restored");
+    cx.simulate_keystrokes("enter");
+    until(cx, "typing returns to the terminal after the ×", |cx| {
+        shown(cx).contains("peek-close-restored")
+    });
+
     cx.simulate_keystrokes("ctrl-shift-space /");
     cx.simulate_keystrokes("ctrl-a");
     cx.simulate_input("beta");
@@ -2629,6 +2648,21 @@ fn overview_keyboard_dismisses_selects_and_routes_leader(cx: &mut TestAppContext
     cx.simulate_keystrokes("ctrl-shift-space v");
     until(cx, "leader closes overview", |cx| {
         cx.debug_bounds("overview-grid").is_none()
+    });
+
+    // Its close control closes it, and the keys go back to the window.
+    cx.simulate_keystrokes("alt-v");
+    until(cx, "overview reopened for its close control", |cx| {
+        cx.debug_bounds("overview-grid").is_some()
+    });
+    click(cx, "ov-close".into());
+    until(cx, "its × closes overview", |cx| {
+        cx.debug_bounds("overview-grid").is_none()
+    });
+    cx.simulate_input("echo overview-close-restored");
+    cx.simulate_keystrokes("enter");
+    until(cx, "typing reaches the window after the ×", |cx| {
+        shown(cx).contains("overview-close-restored")
     });
 
     cx.simulate_keystrokes("alt-v");

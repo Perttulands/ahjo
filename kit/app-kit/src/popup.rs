@@ -10,8 +10,8 @@
 use crate::chords::Run;
 use crate::menu::Menu;
 use crate::pointer;
-use crate::theme::{Theme, size};
-use crate::widgets::{kit, pane};
+use crate::theme::size;
+use crate::widgets::pane;
 use gpui::{
     Anchor, Anchored, AnyElement, AnyView, App, AppContext, Bounds, Context, Div, ElementId,
     Entity, FocusHandle, IntoElement, Pixels, Point, Render, Size, Subscription, WeakEntity,
@@ -192,14 +192,10 @@ pub fn beside(spot: Spot, viewport: Size<Pixels>) -> Anchored {
 /// A small form in a popup: its `fields` scroll when the window is too
 /// short for them, and its `actions` (Cancel and the form's verb) stand
 /// under them, always in view. Both come styled by the page (padding,
-/// gaps); `id` names the fields' scroll.
-pub fn form(
-    t: &Theme,
-    id: impl Into<ElementId>,
-    fields: impl IntoElement,
-    actions: impl IntoElement,
-) -> Div {
-    kit::panel(t)
+/// gaps); `id` names the fields' scroll. The popup's frame and its close
+/// control are the shell's.
+pub fn form(id: impl Into<ElementId>, fields: impl IntoElement, actions: impl IntoElement) -> Div {
+    div()
         .min_h_0()
         .flex()
         .flex_col()

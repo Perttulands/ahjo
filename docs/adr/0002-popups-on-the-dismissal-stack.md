@@ -15,6 +15,15 @@ stays the page's. Only a decision about the whole window is centred.
 - **Escape** closes the top surface on the stack. A layer that keeps Escape for
   its content (`Layer::keeps_escape`) does not close on it. Peek is that layer:
   plain Escape goes to the session's program, and Shift+Escape closes Peek.
+- **The close control.** Every surface that opens shows the same small ×
+  (`kit::close`, with a "Close" tip naming its keys), so Escape is not the
+  only way to close it. The shell draws it on every popup (menus and
+  confirms among them) at the frame's top right, on the panel's header and
+  on the status line; a layer, and what opens in place, put it at their
+  head. A click on it closes that surface as Escape does, a popup's
+  `may_close` included, and the keyboard settles as below. No page draws a
+  close button of its own; a × that takes something away without closing
+  a surface is the same drawing (`kit::cross`) with its own tip.
 - **A press outside** either closes the popup or leaves it, as the popup
   declares (`Outside`). Either way it reaches nothing underneath. A popup may
   refuse to close (`may_close`).
@@ -58,7 +67,11 @@ stays the page's. Only a decision about the whole window is centred.
 the thing the operator is trying to close, and nothing else. Escape also
 matters to a terminal program, which is why a layer over a terminal (Peek)
 keeps it; so Escape is not the only way to close: every surface that opens
-also shows a small close button.
+also shows a small close button. Before ahjo-6yx (2026-11-24) the surfaces
+that had one each drew their own: the word Close on the panel, Overview,
+Peek and Missions' attempts, a font × on the status line (failures only)
+and Missions' note paper, a drawn cross on Brain's reading sheet, Done on
+Desk's settings; menus, confirms, the keys panel and most forms had none.
 
 **Not recorded:** why a press outside never reaches the page underneath.
 4a79cf95 and e6e53c2d state the rule without a reason.

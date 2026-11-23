@@ -1553,7 +1553,7 @@ impl MissionsPage {
                     .debug_selector(|| "run-start".into())
                     .on_click(cx.listener(|p, _, _, cx| p.start_run(cx))),
             );
-            let dialog = popup::form(t, "start-fields", form, actions)
+            let dialog = popup::form("start-fields", form, actions)
                 .debug_selector(|| "start-dialog".into())
                 .w(px(size::NOTICE))
                 .max_h(px(START_FORM_MAX));
@@ -1569,7 +1569,7 @@ impl MissionsPage {
             return None;
         }
         let mission = self.run.frozen.as_ref().or(self.state.mission.as_ref());
-        let mut body = kit::panel(t)
+        let mut body = div()
             .id("stop-run")
             .debug_selector(|| "stop-run".into())
             .w(px(size::NOTICE))
@@ -1699,11 +1699,6 @@ impl MissionsPage {
                     })),
                 );
             }
-            bar = bar.child(
-                kit::button(t, "attempts-close", "Close", Kind::Plain)
-                    .debug_selector(|| "attempts-close".into())
-                    .on_click(cx.listener(|p, _, _, cx| p.end_attempts(cx))),
-            );
             let mut panel = div()
                 .id("attempts-window")
                 .track_focus(&self.run.attempts_focus)
@@ -1925,7 +1920,7 @@ impl MissionsPage {
             // Wide enough to read two attempts side by side, and never
             // wider or taller than the window keeps room for.
             return Some(
-                kit::panel(t)
+                div()
                     .w(px(ATTEMPTS_W).min(room.width - px(2. * size::POPUP_EDGE)))
                     .max_h(px(ATTEMPTS_H).min(room.height - px(2. * size::POPUP_EDGE)))
                     .flex()

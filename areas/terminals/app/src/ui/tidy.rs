@@ -104,8 +104,7 @@ impl Terminals {
                         })),
                 )
                 .child(
-                    kit::button(&t, "tidy-later", "×", Kind::Quiet)
-                        .debug_selector(|| "tidy-later".into())
+                    kit::cross(&t, "tidy-later")
                         .tooltip(kit::tip("Not now: asks again when there is more"))
                         .on_click(
                             cx.listener(|s, _, window, cx| s.act(Act::TidyLater, window, cx)),

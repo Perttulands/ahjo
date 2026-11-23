@@ -1088,13 +1088,9 @@ impl Terminals {
                 )
             })
             .child(
-                div()
-                    .id(("tag-remove", id))
-                    .flex_none()
-                    .px(px(4.))
-                    .text_color(t.dim)
-                    .hover(|d| d.text_color(t.text))
-                    .child("×")
+                kit::cross(t, format!("tag-remove-{id}"))
+                    .size(px(20.))
+                    .tooltip(kit::tip("Remove from window"))
                     // The remove control is not the tag: it neither shows
                     // the session nor starts a drag.
                     .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())

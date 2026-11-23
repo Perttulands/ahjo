@@ -1123,7 +1123,15 @@ impl Render for Editor {
                     "Back to reading (Esc)"
                 }))
                 .on_click(cx.listener(|_, _, _, cx| cx.emit(EditorEvent::Leave))),
-            );
+            )
+            // A note is a surface opened over the window: it shows the
+            // close every surface shows, which files it as Done does.
+            .when(note, |d| {
+                d.child(
+                    kit::close(&t, "note-close", Some("Esc"))
+                        .on_click(cx.listener(|_, _, _, cx| cx.emit(EditorEvent::Leave))),
+                )
+            });
         let head = self.showing_head.then(|| {
             // Its lines, or the rows they wrap to as last drawn.
             let head = self.head.read(cx);

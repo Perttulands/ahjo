@@ -1041,22 +1041,13 @@ impl Terminals {
                         )
                     })
                     .child(
-                        div()
-                            .id(("send-drop", i))
+                        kit::cross(t, format!("send-drop-{i}"))
                             .debug_selector({
                                 let name = k.name.clone();
                                 move || format!("send-drop-{name}")
                             })
                             .size(px(20.))
-                            .flex()
-                            .items_center()
-                            .justify_center()
-                            .rounded_full()
-                            .text_color(t.text2)
-                            .cursor_pointer()
-                            .hover(|d| d.text_color(t.text).bg(t.accent_soft()))
                             .tooltip(kit::tip("Not to this one"))
-                            .child("×")
                             .on_click(cx.listener(move |s, _, _, cx| s.send_drop(&gone, cx))),
                     ),
             );

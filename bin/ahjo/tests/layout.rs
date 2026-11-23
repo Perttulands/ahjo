@@ -349,6 +349,25 @@ const HAND_ROLLED: &[HandRolled] = &[
         instead: "a popup's Outside::Close or Outside::Keep",
     },
     HandRolled {
+        what: "a close control drawn by hand (a × glyph or a Close word)",
+        finds: |line| {
+            let glyph = [
+                "\"×\"",
+                "\"\\u{00d7}\"",
+                "\"\\u{d7}\"",
+                "\"✕\"",
+                "\"\\u{2715}\"",
+            ]
+            .iter()
+            .any(|glyph| line.contains(glyph));
+            let word =
+                line.contains("\"Close\"") && (line.contains("button(") || line.contains("act("));
+            glyph || word
+        },
+        home: &["kit/app-kit/src/widgets/kit.rs"],
+        instead: "kit::close, which every surface shows (docs/adr/0002), or kit::cross for a remove",
+    },
+    HandRolled {
         what: "a type size written as a number",
         finds: |line| literal_px(line, "text_size") || literal_px(line, "line_height"),
         home: &[],
@@ -376,6 +395,13 @@ const HAND_ROLLED: &[HandRolled] = &[
 /// debt, with the reason it stands. One that no longer finds anything is
 /// refused too, so the list only shrinks.
 const ALLOWED: &[(&str, &str, &str)] = &[
+    (
+        "areas/files/app/src/view/tabs.rs",
+        "a close control drawn by hand (a × glyph or a Close word)",
+        "a file's tab shows its unsaved dot where its × stands, one control \
+         in two states that appears on hover, as an editor's tab does; \
+         kit::cross has no second state",
+    ),
     (
         "areas/terminals/app/src/ui/tiles.rs",
         "something drawn over the page by hand (deferred)",

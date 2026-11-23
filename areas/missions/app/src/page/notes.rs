@@ -632,14 +632,8 @@ impl MissionsPage {
                         .child(title.to_owned()),
                 )
                 .child(
-                    kit::button(
-                        t,
-                        SharedString::from(close_selector.clone()),
-                        "×",
-                        Kind::Quiet,
-                    )
-                    .debug_selector(move || close_selector.clone())
-                    .on_click(cx.listener(|page, _, _, cx| page.close_canvas_note(cx))),
+                    kit::close(t, close_selector, None)
+                        .on_click(cx.listener(|page, _, _, cx| page.close_canvas_note(cx))),
                 ),
         )
         .child(list)

@@ -12,6 +12,7 @@ use crate::model::{Ask, Mark};
 use crate::paper::{self, Extra, Followed, Kind as Block, Level, Piece, Rect, Shown, Style};
 use crate::tokens::{self, paper as P};
 use ahjo_app_kit::theme::{FAMILY, Theme, alpha, rgb, rgba};
+use ahjo_app_kit::widgets::kit;
 use gpui::{
     AnyElement, ClickEvent, Context, Div, FontStyle, FontWeight, HighlightStyle, Hsla, MouseButton,
     MouseDownEvent, MouseMoveEvent, MouseUpEvent, PathBuilder, Pixels, SharedString,
@@ -793,10 +794,19 @@ impl DeskApp {
                 )
             })
             .child(
-                pen_button(t, k, "pen-close", "\u{2715}", Some("Esc"), false)
+                kit::close(&on_paper(t, k), "pen-close", Some("Esc"))
                     .on_click(cx.listener(|app, _: &ClickEvent, _, cx| app.close_paper(cx))),
             )
     }
+}
+
+/// The theme as it reads on the paper, whose inks are its own whatever
+/// the theme: for a kit control drawn on it.
+fn on_paper(t: &Theme, k: &Inks) -> Theme {
+    let mut paper = t.clone();
+    paper.text2 = k.ink;
+    paper.raised = k.wash;
+    paper
 }
 
 /// A pen in the tray: its name and key; in the grader's red when it is

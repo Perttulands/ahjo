@@ -2,7 +2,7 @@
 //! (a file, an issue, the brain, Send, a search) stands in it, one at a
 //! time, at the window's edge. The shell owns it: it makes room for it, so
 //! the page beside squeezes and nothing is covered; it draws its one
-//! header (Back where it applies, the content's head, Close) and its edge,
+//! header (Back where it applies, the content's head, close control) and its edge,
 //! dragged to size it and kept. Close, Escape with the keyboard in it,
 //! Ctrl+B and the content's own key put it away; a click outside it takes
 //! the keyboard away and leaves it open. What opened over another goes
@@ -184,7 +184,7 @@ type Sized = Rc<dyn Fn(f32, bool, &mut Window, &mut App)>;
 
 /// A column at the window's edge, as the kit draws it everywhere: Swarm's
 /// panel, and a standalone app's own column (Desk's list of asks). One
-/// header (Back where it applies, the content's head, Close), the content
+/// header (Back where it applies, the content's head, its close control), the content
 /// under it, sized by the grip on its inner edge ([`kit::grip`]), sliding
 /// in and out ([`Slide`]). Escape with the keyboard in it closes it. It
 /// takes the place it is put in a row; the page beside gives way.
@@ -266,13 +266,10 @@ impl EdgeColumn {
                             .gap(px(crate::theme::size::HEAD_GAP))
                             .child(head),
                     )
-                    .child({
-                        let selector = format!("{id}-close");
-                        pane::act(t, format!("{id}-close"), "Close")
-                            .debug_selector(move || selector)
-                            .tooltip(kit::tip(close_keys))
-                            .on_click(move |_, window, cx| close(window, cx))
-                    }),
+                    .child(
+                        kit::close(t, format!("{id}-close"), Some(close_keys))
+                            .on_click(move |_, window, cx| close(window, cx)),
+                    ),
             )
             .child(div().flex_1().min_h_0().flex().flex_col().child(content));
         // The grip lies outside the frame, which clips its column as it

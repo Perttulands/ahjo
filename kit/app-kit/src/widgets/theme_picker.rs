@@ -242,7 +242,7 @@ impl Render for ThemePicker {
                     .on_click(cx.listener(move |p, _, window, cx| p.keep(choice, window, cx))),
             );
         }
-        kit::panel(&t)
+        div()
             .id("theme-picker")
             .debug_selector(|| "theme-picker".into())
             .track_focus(&self.focus)

@@ -98,8 +98,7 @@ impl Pad {
     fn open_tall(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let view = popup::drawn(
             &cx.entity(),
-            |_: &mut Self, _, cx| {
-                let t = ahjo_app_kit::theme::theme(cx).clone();
+            |_: &mut Self, _, _| {
                 let fields =
                     div().children((0..40).map(|i| div().h(px(40.)).child(format!("Field {i}"))));
                 let actions = div()
@@ -107,7 +106,7 @@ impl Pad {
                     .h(px(36.))
                     .child("Create");
                 Some(
-                    popup::form(&t, "tall-fields", fields, actions)
+                    popup::form("tall-fields", fields, actions)
                         .w(px(400.))
                         .into_any_element(),
                 )
@@ -434,4 +433,63 @@ fn a_form_taller_than_the_window_keeps_its_actions_in_view(cx: &mut TestAppConte
         actions.top() >= popup.top() && actions.bottom() <= popup.bottom(),
         "{actions:?} stand in {popup:?}, not scrolled past its foot"
     );
+}
+
+/// Every popup shows the kit's close control at its frame's top right
+/// (docs/adr/0002): a click on it closes that popup only, asks it as
+/// Escape does, and the keyboard goes back where it was.
+#[gpui::test]
+fn its_close_control_closes_that_popup_only_and_the_keys_go_back(cx: &mut TestAppContext) {
+    let (shell, cx, pad) = start(cx);
+    let term = pad.read_with(cx, |p, _| p.term.clone());
+
+    click(cx, "open-near");
+    click(cx, "inner-open");
+    assert_eq!(open_popups(&shell, cx), 2);
+    let inner = drawn(cx, "inner").expect("the inner popup");
+    let close = drawn(cx, "popup-close").expect("the top popup's ×");
+    assert!(
+        close.left() >= inner.right() && close.top() <= inner.top() + px(8.),
+        "{close:?} at the top right of {inner:?}"
+    );
+    click(cx, "popup-close");
+    assert!(drawn(cx, "inner").is_none(), "the top one closed");
+    assert!(drawn(cx, "form").is_some(), "the one under it stays");
+    cx.simulate_keystrokes("a");
+    assert_eq!(
+        pad.read_with(cx, |p, cx| p.keys_of("form", cx)),
+        1,
+        "the keys went back to the form"
+    );
+
+    // A popup that may not close now stays, as through Escape.
+    pad.read_with(cx, |p, _| p.may_close.set(false));
+    click(cx, "popup-close");
+    assert!(drawn(cx, "form").is_some(), "it said not now");
+    pad.read_with(cx, |p, _| p.may_close.set(true));
+    click(cx, "popup-close");
+    assert!(drawn(cx, "form").is_none());
+    assert_eq!(open_popups(&shell, cx), 0);
+    assert!(
+        cx.update(|window, _| term.is_focused(window)),
+        "the keys went back to the terminal"
+    );
+
+    // A menu shows it too, and it closes the menu without running a row.
+    let ran = Rc::new(Cell::new(false));
+    let row = {
+        let ran = ran.clone();
+        ahjo_app_kit::menu::MenuRow::new("Do it", move |_, _| ran.set(true))
+    };
+    cx.update(|_, cx| {
+        pad.read(cx)
+            .host
+            .clone()
+            .menu(vec![row], point(px(600.), px(300.)), cx)
+    });
+    assert!(drawn(cx, "menu-label-Do it").is_some(), "the menu opened");
+    click(cx, "popup-close");
+    assert!(drawn(cx, "menu-label-Do it").is_none(), "its × closed it");
+    assert!(!ran.get(), "and ran nothing");
+    assert!(cx.update(|window, _| term.is_focused(window)));
 }

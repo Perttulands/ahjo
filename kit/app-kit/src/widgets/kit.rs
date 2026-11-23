@@ -300,6 +300,65 @@ pub fn button(
     }
 }
 
+/// The one close control: a small drawn ×, saying "Close" and the keys
+/// that close it too (`keys`, when there are any) on hover. Every surface
+/// that opens shows it (docs/adr/0002): the kit's popups, panel and status
+/// line draw it themselves, and a layer or a thing opened in place puts
+/// it at its head, wired to close itself.
+pub fn close(t: &Theme, id: impl Into<SharedString>, keys: Option<&str>) -> Stateful<Div> {
+    let why = match keys {
+        Some(keys) => format!("Close ({keys})"),
+        None => "Close".to_string(),
+    };
+    cross(t, id).tooltip(tip(why))
+}
+
+/// The close control's ×, for something taken away that is not a surface
+/// closing (a session off a tab, a target off Send): the caller says what
+/// it does in its tip. It is [`size::CLOSE`] square; a caller in a tight
+/// place may size it smaller, down to the cross.
+pub fn cross(t: &Theme, id: impl Into<SharedString>) -> Stateful<Div> {
+    let id: SharedString = id.into();
+    let selector = id.clone();
+    let (ink, raised) = (t.text2, t.raised);
+    div()
+        .id(ElementId::Name(id))
+        .debug_selector(move || selector.to_string())
+        .flex_none()
+        .size(px(size::CLOSE))
+        .relative()
+        .flex()
+        .items_center()
+        .justify_center()
+        .rounded(px(size::RADIUS))
+        .cursor_pointer()
+        .hover(move |s| s.bg(raised))
+        // A press here quiets its tooltip, as on every kit button.
+        .child(crate::pointer::watch())
+        // Drawn, not the font's ×: that sits at a third of its size and
+        // on the text's baseline rather than the middle.
+        .child(
+            gpui::canvas(
+                |_, _, _| {},
+                move |b: gpui::Bounds<gpui::Pixels>, _, window, _| {
+                    let o = b.origin;
+                    let at = |x: f32, y: f32| gpui::point(o.x + px(x), o.y + px(y));
+                    let g = size::CLOSE_GLYPH;
+                    let mut path = gpui::PathBuilder::stroke(px(size::CLOSE_LINE));
+                    path.move_to(at(0., 0.));
+                    path.line_to(at(g, g));
+                    path.move_to(at(g, 0.));
+                    path.line_to(at(0., g));
+                    if let Ok(path) = path.build() {
+                        window.paint_path(path, ink);
+                    }
+                },
+            )
+            .flex_none()
+            .size(px(size::CLOSE_GLYPH)),
+        )
+}
+
 /// One option of a choice (Settings' choices, Work's layouts, a form's
 /// sessions and schedule): the chosen one filled as the primary button
 /// is, the others outlined, so what is chosen reads at a glance.

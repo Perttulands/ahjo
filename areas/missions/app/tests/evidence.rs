@@ -294,7 +294,7 @@ fn evidence_links_and_attempt_images(cx: &mut TestAppContext) {
     until(cx, "flow attempts window", |cx| {
         cx.debug_bounds("attempts-window").is_some()
     });
-    click(cx, "attempts-close");
+    click(cx, "popup-close");
     until(cx, "flow attempts closed", |cx| {
         cx.debug_bounds("attempts-window").is_none()
     });
