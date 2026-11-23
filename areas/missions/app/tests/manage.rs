@@ -119,15 +119,30 @@ fn creates_and_renames_a_mission_with_cancel_and_conflict_guard(cx: &mut TestApp
         click(cx, &row);
     };
     until(cx, "release shown", |cx| has(cx, "pane-title-Release"));
+    // The name is edited where it stands, in the head.
     menu(cx, "Rename…");
-    until(cx, "rename form", |cx| has(cx, "mission-form-name"));
-    cx.simulate_keystrokes("ctrl-a backspace");
-    click(cx, "mission-form-submit");
+    until(cx, "rename in the head", |cx| has(cx, "mission-form-name"));
+    let field = cx.debug_bounds("mission-form-name").unwrap();
+    let head = cx.debug_bounds("mission-more").unwrap();
+    assert!(
+        (field.center().y - head.center().y).abs() < gpui::px(12.),
+        "{field:?} on the head's line with {head:?}"
+    );
+    assert!(!has(cx, "mission-form"), "no form for a rename");
+    // Esc lets it go, keeping the name.
+    cx.simulate_input(" draft");
+    cx.simulate_keystrokes("escape");
+    until(cx, "rename let go", |cx| !has(cx, "mission-form-name"));
+    until(cx, "name kept", |cx| has(cx, "pane-title-Release"));
+    menu(cx, "Rename…");
+    until(cx, "rename in the head again", |cx| {
+        has(cx, "mission-form-name")
+    });
+    cx.simulate_keystrokes("ctrl-a backspace enter");
     until(cx, "name required", |cx| has(cx, "mission-form-error"));
-    click(cx, "mission-form-name");
     cx.simulate_input("Renamed");
-    click(cx, "mission-form-submit");
-    until(cx, "renamed", |cx| !has(cx, "mission-form"));
+    cx.simulate_keystrokes("enter");
+    until(cx, "renamed", |cx| !has(cx, "mission-form-name"));
     let runtime = tokio::runtime::Runtime::new().unwrap();
     let read = || {
         runtime.block_on(async {
@@ -144,6 +159,7 @@ fn creates_and_renames_a_mission_with_cancel_and_conflict_guard(cx: &mut TestApp
     assert_eq!(read()["mission"]["title"], "Renamed");
     menu(cx, "Rename…");
     until(cx, "rename again", |cx| has(cx, "mission-form-name"));
+    cx.simulate_keystrokes("ctrl-a");
     cx.simulate_input("Draft name");
     runtime.block_on(async {
         let client = NodeClient::new(Some(&format!("{}/", running.url))).unwrap();
@@ -152,7 +168,7 @@ fn creates_and_renames_a_mission_with_cancel_and_conflict_guard(cx: &mut TestApp
         .await
         .unwrap();
     });
-    click(cx, "mission-form-submit");
+    cx.simulate_keystrokes("enter");
     until(cx, "stale rename refused", |cx| {
         has(cx, "mission-form-error")
     });
@@ -165,8 +181,10 @@ fn creates_and_renames_a_mission_with_cancel_and_conflict_guard(cx: &mut TestApp
         Some("Draft name")
     );
     assert_eq!(read()["mission"]["title"], "External");
-    click(cx, "mission-form-cancel");
-    until(cx, "stale form canceled", |cx| !has(cx, "mission-form"));
+    cx.simulate_keystrokes("escape");
+    until(cx, "stale rename let go", |cx| {
+        !has(cx, "mission-form-name")
+    });
     click(cx, "new-mission");
     until(cx, "second create form", |cx| has(cx, "mission-form-name"));
     cx.simulate_input("Scratch");
@@ -178,6 +196,14 @@ fn creates_and_renames_a_mission_with_cancel_and_conflict_guard(cx: &mut TestApp
     until(cx, "archive confirmation", |cx| {
         has(cx, "mission-archive-explanation")
     });
+    // Beside the "…" it was asked for from, not across the window.
+    let form = cx.debug_bounds("mission-form").unwrap();
+    let more = cx.debug_bounds("mission-more").unwrap();
+    assert!(
+        (form.top() - more.bottom()).abs() < gpui::px(12.)
+            && (form.right() - more.right()).abs() < gpui::px(12.),
+        "{form:?} under {more:?}, at its right edge"
+    );
     click(cx, "mission-form-cancel");
     until(cx, "archive canceled", |cx| !has(cx, "mission-form"));
     menu(cx, "Delete…");

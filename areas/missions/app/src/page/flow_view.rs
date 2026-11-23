@@ -201,7 +201,10 @@ impl MissionsPage {
             kit::button(t, "prepare-run", "Start", Kind::Primary)
                 .debug_selector(|| "prepare-run".into())
                 .tooltip(kit::tip("Give it what it asks for and set it off"))
-                .on_click(cx.listener(|p, _, _, cx| p.prepare_run(cx)))
+                .on_click(cx.listener(|p, _, window, cx| {
+                    p.run.start_at = Some(Spot::here(window, cx));
+                    p.prepare_run(cx)
+                }))
                 .into_any_element()
         } else {
             let todo = self.todo(mission).len();
@@ -226,7 +229,7 @@ impl MissionsPage {
         };
         pane::head(t)
             .child(
-                pane::title(t, title)
+                self.mission_title(t, title)
                     .child(div().debug_selector(move || {
                         if complete {
                             "mission-validation-complete".into()
@@ -369,8 +372,9 @@ impl MissionsPage {
                         rows.push(MenuRow::new("Rename…", move |window, cx| {
                             let _ = rename.update(cx, |p, cx| p.open_mission_rename(window, cx));
                         }));
+                        let at = Spot::at(e.position(), cx);
                         rows.push(MenuRow::new("Delete…", move |window, cx| {
-                            let _ = page.update(cx, |p, cx| p.open_mission_archive(window, cx));
+                            let _ = page.update(cx, |p, cx| p.open_mission_archive(at, window, cx));
                         }));
                         p.host.menu(rows, e.position(), cx);
                     })),

@@ -4,6 +4,7 @@
 
 use super::page::{Act, Geo, MenuItem, PEEK_SLOT, Terminals};
 use super::place;
+use super::surface::NameAt;
 use crate::remote::SharedScreen;
 use crate::remotes::PaneAt;
 use crate::store::layout::{self, Axis, Side as Edge, Split};
@@ -1050,11 +1051,14 @@ impl Terminals {
                     .and_then(|s| super::rail::running_mark(t, s, cx)),
             )
             // The name keeps its room; badges give way before it.
-            .child(
+            .child(if self.renaming_at(&key, NameAt::Window(i)) {
+                self.name_field().into_any_element()
+            } else {
                 super::rail::clipped_name(&sessions::rail_name(&key.name, size::RAIL_NAME_COLUMNS))
                     .flex_none()
-                    .whitespace_nowrap(),
-            )
+                    .whitespace_nowrap()
+                    .into_any_element()
+            })
             // What a terminal does not show is said for the one on screen;
             // in a narrow window the badges give way, never the name or ×.
             .children(session.iter().filter(|_| active).map(|s| {
@@ -1202,7 +1206,10 @@ impl Terminals {
         }
         items.push(MenuItem::rule());
         if live {
-            items.push(MenuItem::new("Rename session…", Act::Rename(key.clone())));
+            items.push(MenuItem::new(
+                "Rename session…",
+                Act::Rename(key.clone(), NameAt::Window(i)),
+            ));
             items.push(self.copy_row(key));
             items.push(MenuItem::new(
                 "Copy folder path",
@@ -1251,7 +1258,10 @@ impl Terminals {
         }
         items.extend(self.zoom_row(i));
         items.push(MenuItem::rule());
-        items.push(MenuItem::new("Rename session…", Act::Rename(key.clone())));
+        items.push(MenuItem::new(
+            "Rename session…",
+            Act::Rename(key.clone(), NameAt::Window(i)),
+        ));
         items.push(self.copy_row(key));
         items.push(MenuItem::new(
             "Copy folder path",

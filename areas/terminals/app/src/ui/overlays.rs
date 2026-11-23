@@ -1,10 +1,10 @@
 //! What the page draws on the app's tab bar, its tabs, and the surfaces
-//! that open over it: the rename dialogs, Overview and the scrollback
-//! search.
+//! that open over it: Overview and the scrollback search. A tab's or a
+//! session's name is edited where it is shown.
 
 use super::chords::Action;
 use super::page::{Act, MenuItem, Terminals};
-use super::surface::{self, Surface};
+use super::surface::{self, NameAt, Surface};
 use crate::store::sessions::{self, Key};
 use crate::store::workspace::{MAX_WINDOWS, Workspace, tab_label};
 use crate::term::paint::{self, Look};
@@ -13,7 +13,7 @@ use ahjo_app_kit::widgets::kit::{self, Kind};
 use ahjo_app_kit::widgets::pane;
 use gpui::{
     AnyElement, ContentMask, Context, FontWeight, KeyDownEvent, MouseButton, MouseDownEvent,
-    Window, canvas, deferred, div, prelude::*, px,
+    Window, canvas, div, prelude::*, px,
 };
 use std::collections::HashMap;
 
@@ -221,37 +221,23 @@ impl Terminals {
         )
     }
 
-    /// The rename dialog for the surface of this `kind`: a tab or a session.
-    pub(super) fn render_rename(
-        &mut self,
-        kind: &'static str,
-        title: String,
-        note: &'static str,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        let t = theme(cx).clone();
-        deferred(
-            self.scrim(kind, cx)
-                .flex()
-                .justify_center()
-                .items_start()
-                .pt(px(140.))
-                .child(
-                    kit::panel(&t)
-                        .w(px(360.))
-                        .h_auto()
-                        .p(px(16.))
-                        .flex()
-                        .flex_col()
-                        .gap(px(10.))
-                        .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
-                        .child(kit::label(&t, title))
-                        .child(self.rename_field.clone())
-                        .child(kit::note(&t, note, Some(t.dim))),
-                ),
-        )
-        .with_priority(5)
-        .into_any_element()
+    /// Whether session `key`'s name is being edited `at` this place.
+    pub(super) fn renaming_at(&self, key: &Key, at: NameAt) -> bool {
+        matches!(self.surfaces.last(), Some(Surface::RenameSession(k, a)) if k == key && *a == at)
+    }
+
+    /// The field a session's name is edited in, where the name was. A
+    /// press in it selects text instead of showing or dragging the row or
+    /// tag it stands in.
+    pub(super) fn name_field(&self) -> gpui::Stateful<gpui::Div> {
+        div()
+            .id("session-name-field")
+            .debug_selector(|| "session-name-field".into())
+            .flex_none()
+            .w(px(size::TAB_FIELD))
+            .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+            .on_click(|_, _, cx| cx.stop_propagation())
+            .child(self.rename_field.clone())
     }
 
     pub(super) fn render_overview(

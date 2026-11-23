@@ -11,6 +11,7 @@ mod run_view;
 mod staffing;
 mod validation;
 use crate::store::{Frame, Store, canvas as board, undo};
+use ahjo_app_kit::widgets::popover::{Spot, popover};
 use ahjo_app_kit::{
     Host, Page,
     theme::{size, theme},
@@ -1623,10 +1624,10 @@ impl Render for MissionsPage {
                 },
             )
         };
-        let form = self.mission_form(&t, cx);
+        let form = self.mission_form(&t, window, cx);
         let start_form = self.run_start_form(&t, window, cx);
         let attempts_form = self.attempts_form(&t, cx);
-        let stop_form = self.stop_form(&t, cx);
+        let stop_form = self.stop_form(&t, window, cx);
         pane::page(&t, list, detail)
             .id("missions-root")
             .track_focus(&self.focus)
@@ -1706,7 +1707,7 @@ impl Render for MissionsPage {
                                     .on_click(cx.listener(|p, _, _, cx| p.save_step(cx))),
                             ))
                         .when(ed.deleting, |d| d.child(div().child("Delete this card? Its wires go with it; Undo brings both back.").child(left(kit::button(&t, "delete-keep", "Keep", Kind::Quiet).debug_selector(|| "delete-keep".into()).on_click(cx.listener(|p, _, _, cx| { if let Some(ed) = &mut p.editor { ed.deleting = false; } cx.notify(); })))).child(left(kit::button(&t, "delete-yes", "Delete", Kind::Quiet).debug_selector(|| "delete-yes".into()).on_click(cx.listener(|p, _, _, cx| p.delete_card(cx)))))))
-                        .when(matches!(ed.kind, EditKind::Step), |d| { let id = ed.id.clone(); d.child(left(kit::button(&t, "run-step", "Run this step", Kind::Quiet).on_click(cx.listener(move |p, _, _, cx| p.prepare_step_run(id.clone(), cx))))) })
+                        .when(matches!(ed.kind, EditKind::Step), |d| { let id = ed.id.clone(); d.child(left(kit::button(&t, "run-step", "Run this step", Kind::Quiet).on_click(cx.listener(move |p, _, window, cx| { p.run.start_at = Some(Spot::here(window, cx)); p.prepare_step_run(id.clone(), cx) })))) })
                         .when(matches!(ed.kind, EditKind::Step), |mut d| {
                             if let Some((node, slug)) = &self.state.selected && let Some(feed) = self.state.nodes.get(node) {
                                 for seat in feed.runs.values().filter(|run| &run.mission_slug == slug).flat_map(crate::store::seats::seats).filter(|seat| seat.step == ed.id && seat.state == crate::store::seats::State::Live) {

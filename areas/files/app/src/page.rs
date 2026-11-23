@@ -89,6 +89,14 @@ enum Part {
     Inside,
 }
 
+/// Where a rename edits the name: the list's line it was asked from, or
+/// the open file's name over the viewer.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum RenameIn {
+    Line(Pick),
+    Viewer,
+}
+
 /// The row the keyboard is on in the list.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Pick {
@@ -135,6 +143,10 @@ pub struct FilesPage {
     pending_line: Option<usize>,
     pub drafts: HashMap<(String, String), Draft>,
     pub naming: Option<Naming>,
+    /// Where the name being renamed is edited.
+    pub naming_in: Option<RenameIn>,
+    /// What the menu open now was opened from.
+    menu_from: Option<RenameIn>,
     pub name_field: Entity<TextField>,
     pub confirm_discard: bool,
     pub conflict: bool,
@@ -607,6 +619,16 @@ impl FilesPage {
             }
         })
         .detach();
+        // A rename in its row is let go by a click elsewhere, keeping the
+        // name; the keyboard stays where that click put it.
+        let name_focus = gpui::Focusable::focus_handle(name_field.read(cx), cx);
+        cx.on_blur(&name_focus, window, |page, _, cx| {
+            if matches!(page.naming, Some(Naming::Rename(_))) {
+                page.naming = None;
+                cx.notify();
+            }
+        })
+        .detach();
         host.guard_close(
             &cx.entity(),
             |page: &FilesPage, _| {
@@ -641,6 +663,8 @@ impl FilesPage {
             pending_line: None,
             drafts: HashMap::new(),
             naming: None,
+            naming_in: None,
+            menu_from: None,
             name_field,
             confirm_discard: false,
             conflict: false,
@@ -2252,8 +2276,20 @@ impl FilesPage {
             .picked_path()
             .filter(|p| self.tree.row(p).is_some_and(|r| r.depth > 0))
         {
-            self.start_naming(Naming::Rename(path), window, cx);
+            let picked = self.pick.clone().map(RenameIn::Line);
+            self.start_rename_in(path, picked, window, cx);
         }
+    }
+    /// Renames `path` where `place` shows its name.
+    fn start_rename_in(
+        &mut self,
+        path: String,
+        place: Option<RenameIn>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.naming_in = place;
+        self.start_naming(Naming::Rename(path), window, cx);
     }
     pub fn stop_naming(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.naming = None;
@@ -2568,8 +2604,10 @@ impl FilesPage {
         path: String,
         folder: bool,
         at: gpui::Point<gpui::Pixels>,
+        from: Option<Pick>,
         cx: &mut Context<Self>,
     ) {
+        self.menu_from = from.map(RenameIn::Line);
         let rows = self.menu_rows(path, folder);
         self.host.menu(rows, at, cx);
     }
@@ -2579,6 +2617,7 @@ impl FilesPage {
         let Some(path) = self.opened.as_ref().map(|o| o.path.clone()) else {
             return;
         };
+        self.menu_from = Some(RenameIn::Viewer);
         let me = self.me.clone();
         let wraps = self.code.read(cx).wraps();
         let mut rows = vec![
@@ -2677,7 +2716,10 @@ impl FilesPage {
             if !root {
                 rows.push(MenuRow::new(
                     "Rename",
-                    with(|p, path, w, cx| p.start_naming(Naming::Rename(path), w, cx)),
+                    with(|p, path, w, cx| {
+                        let from = p.menu_from.clone();
+                        p.start_rename_in(path, from, w, cx)
+                    }),
                 ));
                 rows.push(
                     MenuRow::new("Delete", with(|p, path, _, cx| p.delete(path, cx))).danger(),

@@ -38,6 +38,10 @@ pub mod size {
     /// The keys panel and a menu: their widths.
     pub const KEYS: f32 = 520.;
     pub const MENU: f32 = 220.;
+    /// A popover's gap from the thing it stands beside, and the least room
+    /// it keeps from the window's edges.
+    pub const POPOVER_GAP: f32 = 4.;
+    pub const POPOVER_EDGE: f32 = 8.;
     /// The side panel at the window's left (sessions, files), and the
     /// edge it leaves when put away.
     pub const SIDE: f32 = 260.;

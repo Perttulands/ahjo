@@ -73,7 +73,7 @@ pub enum Act {
     Send(Key),
     Attach(Key, usize),
     Unassign(Key),
-    Rename(Key),
+    Rename(Key, super::surface::NameAt),
     /// The same harness again, in the session's folder (CHROTE's Copy).
     Copy(Key),
     Kill(Key),
@@ -634,7 +634,7 @@ impl Terminals {
             let name = s.rename_field.read(cx).text.clone();
             match s.surfaces.last().cloned() {
                 Some(Surface::RenameTab(_)) => s.keep_tab_name(cx),
-                Some(Surface::RenameSession(k)) => {
+                Some(Surface::RenameSession(k, _)) => {
                     s.close(surface::RENAME_SESSION, cx);
                     s.rename_session(k, name.trim());
                 }
@@ -655,10 +655,12 @@ impl Terminals {
         // A tab's name is kept when its field loses focus, as CHROTE's input
         // commits on blur; Escape closes it first, keeping the old name.
         let rename_focus = self.rename_field.read(cx).focus_handle(cx);
-        cx.on_blur(&rename_focus, window, |s, _, cx| {
-            if matches!(s.surfaces.last(), Some(Surface::RenameTab(_))) {
-                s.keep_tab_name(cx);
-            }
+        // A session's name is kept only by Enter: a click elsewhere leaves
+        // it as it was.
+        cx.on_blur(&rename_focus, window, |s, _, cx| match s.surfaces.last() {
+            Some(Surface::RenameTab(_)) => s.keep_tab_name(cx),
+            Some(Surface::RenameSession(..)) => s.close(surface::RENAME_SESSION, cx),
+            _ => {}
         })
         .detach();
     }
@@ -1108,7 +1110,7 @@ impl Terminals {
                 self.find_query.focus_handle(cx)
             }
             Surface::Peek => self.peek_focus.clone(),
-            Surface::RenameTab(_) | Surface::RenameSession(_) | Surface::ViewName(..) => {
+            Surface::RenameTab(_) | Surface::RenameSession(..) | Surface::ViewName(..) => {
                 self.rename_field.focus_handle(cx)
             }
         };
@@ -1352,10 +1354,10 @@ impl Terminals {
                     }
                 }
             }
-            Act::Rename(k) => {
+            Act::Rename(k, at) => {
                 self.rename_field
                     .update(cx, |f, cx| f.set(&k.name, true, cx));
-                self.open(Surface::RenameSession(k), window, cx);
+                self.open(Surface::RenameSession(k, at), window, cx);
                 return;
             }
             Act::Copy(k) => self.copy_session(&k),

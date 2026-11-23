@@ -6,5 +6,6 @@ pub mod kit;
 pub mod markdown;
 pub mod pane;
 pub mod path_picker;
+pub mod popover;
 pub mod select;
 pub mod syntax;

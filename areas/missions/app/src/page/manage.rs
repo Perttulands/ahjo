@@ -1,8 +1,9 @@
-//! Mission create and rename dialog, adapted from the original navigator.
+//! Creating, renaming and deleting a mission: New and Delete open beside
+//! the button they came from, a rename edits the name in the mission's head.
 use super::*;
 use ahjo_app_kit::theme::Theme;
 use ahjo_missions_contract::commands::{MissionCreate, MissionDelete, MissionEdited};
-use gpui::{FontWeight, MouseButton, SharedString};
+use gpui::{AnyElement, Focusable, FontWeight, SharedString};
 
 enum Receipt {
     Created {
@@ -47,6 +48,11 @@ struct Form {
     example: Option<&'static ahjo_missions_contract::Example>,
     problem: Option<String>,
     busy: bool,
+    /// What New or Delete was opened from; a rename is drawn in the head.
+    at: Option<Spot>,
+    /// A rename closes when its field loses focus, as a click outside a
+    /// form closes it.
+    _blur: Option<gpui::Subscription>,
 }
 #[derive(Default)]
 pub(super) struct Manage {
@@ -71,6 +77,7 @@ impl MissionsPage {
         .then(|| "New mission".into())
     }
     pub(super) fn open_mission_create(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let at = Some(Spot::here(window, cx));
         if self.unsaved(cx).is_some() {
             self.state.error = Some("Save or discard the current draft first.".into());
             cx.notify();
@@ -81,7 +88,7 @@ impl MissionsPage {
             cx.notify();
             return;
         };
-        self.open_manage(Doing::Create { node }, "", window, cx);
+        self.open_manage(Doing::Create { node }, "", at, window, cx);
     }
     pub(super) fn open_mission_rename(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if self.unsaved(cx).is_some() {
@@ -108,11 +115,19 @@ impl MissionsPage {
                 etag,
             },
             &title,
+            None,
             window,
             cx,
         );
     }
-    pub(super) fn open_mission_archive(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    /// Asks to delete the mission, beside `at`, the button its menu came
+    /// from.
+    pub(super) fn open_mission_archive(
+        &mut self,
+        at: Spot,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         if self.unsaved(cx).is_some() {
             self.state.error = Some("Save or discard the current draft first.".into());
             cx.notify();
@@ -137,6 +152,7 @@ impl MissionsPage {
                 etag,
             },
             &title,
+            Some(at),
             window,
             cx,
         );
@@ -145,6 +161,7 @@ impl MissionsPage {
         &mut self,
         doing: Doing,
         title: &str,
+        at: Option<Spot>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
@@ -204,6 +221,10 @@ impl MissionsPage {
         if !matches!(doing, Doing::Archive { .. }) {
             ahjo_app_kit::widgets::field::focus(&name, window, cx);
         }
+        let blur = matches!(doing, Doing::Rename { .. }).then(|| {
+            let focus = name.read(cx).focus_handle(cx);
+            cx.on_blur(&focus, window, |page, _, cx| page.close_manage(cx))
+        });
         self.manage.form = Some(Form {
             doing,
             name,
@@ -212,6 +233,8 @@ impl MissionsPage {
             example: None,
             problem: None,
             busy: false,
+            at,
+            _blur: blur,
         });
         self.state.error = None;
         cx.notify();
@@ -219,8 +242,16 @@ impl MissionsPage {
     pub(super) fn manage_is_open(&self) -> bool {
         self.manage.form.is_some()
     }
+    /// Esc or a press outside. A form with a draft in it stays and says
+    /// so; a rename in place is let go, keeping the name, as a tab's or a
+    /// session's is.
     pub(super) fn close_manage(&mut self, cx: &mut Context<Self>) {
-        if self.manage_unsaved(cx).is_some() {
+        let renaming = self
+            .manage
+            .form
+            .as_ref()
+            .is_some_and(|f| matches!(f.doing, Doing::Rename { .. }));
+        if !renaming && self.manage_unsaved(cx).is_some() {
             if let Some(form) = self.manage.form.as_mut() {
                 form.problem = Some("Save or cancel the mission name draft first.".into());
             }
@@ -441,17 +472,19 @@ impl MissionsPage {
         }
         list
     }
-    pub(super) fn mission_form(&self, t: &Theme, cx: &mut Context<Self>) -> Option<Div> {
+    /// New or Delete, beside the button it was opened from.
+    pub(super) fn mission_form(
+        &self,
+        t: &Theme,
+        window: &Window,
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
         let form = self.manage.form.as_ref()?;
-        let title = match &form.doing {
-            Doing::Create { .. } => "New mission",
-            Doing::Rename { .. } => "Rename mission",
-            Doing::Archive { .. } => "Delete mission",
-        };
-        let action = match &form.doing {
-            Doing::Create { .. } => "Create",
-            Doing::Rename { .. } => "Rename",
-            Doing::Archive { .. } => "Delete",
+        let at = form.at?;
+        let (title, action) = match &form.doing {
+            Doing::Create { .. } => ("New mission", "Create"),
+            Doing::Archive { .. } => ("Delete mission", "Delete"),
+            Doing::Rename { .. } => return None,
         };
         let mut go = kit::button(
             t,
@@ -463,26 +496,18 @@ impl MissionsPage {
         if !form.busy {
             go = go.on_click(cx.listener(|page, _, _, cx| page.submit_manage(cx)));
         }
-        Some(
-            div()
-                .absolute()
-                .inset_0()
-                .occlude()
-                .bg(ahjo_app_kit::theme::alpha(t.bg, SCRIM))
-                .flex()
-                .justify_center()
-                .items_start()
-                .pt(px(size::TAB_BAR))
-                .on_mouse_down(
-                    MouseButton::Left,
-                    cx.listener(|page, _, _, cx| page.close_manage(cx)),
-                )
-                .child(
-                    kit::panel(t)
+        let page = cx.entity().downgrade();
+        Some(popover(
+            at,
+            window,
+            move |_, cx| {
+                let _ = page.update(cx, |page, cx| page.close_manage(cx));
+            },
+            kit::panel(t)
                         .id("mission-form")
                         .debug_selector(|| "mission-form".into())
-                        // Room to draft a mission in; a rename or a delete
-                        // needs only a line.
+                        // Room to draft a mission in; a delete needs only
+                        // a line.
                         .w(px(if matches!(form.doing, Doing::Create { .. }) {
                             size::MEASURE
                         } else {
@@ -492,7 +517,6 @@ impl MissionsPage {
                         .flex()
                         .flex_col()
                         .gap(px(PAD))
-                        .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
                         .child(div().font_weight(FontWeight::SEMIBOLD).child(title))
                         .when(matches!(form.doing, Doing::Archive { .. }), |d| {
                             let Doing::Archive { title, .. } = &form.doing else {
@@ -562,8 +586,43 @@ impl MissionsPage {
                                 )
                                 .child(go),
                         ),
-                ),
-        )
+        ))
+    }
+
+    /// The mission's name in its head, or the field it is renamed in there.
+    pub(super) fn mission_title(&self, t: &Theme, title: String) -> Div {
+        let Some(form) = self
+            .manage
+            .form
+            .as_ref()
+            .filter(|f| matches!(f.doing, Doing::Rename { .. }))
+        else {
+            return pane::title(t, title);
+        };
+        div()
+            .flex_1()
+            .min_w_0()
+            .flex()
+            .items_center()
+            .gap(px(TAB_GAP))
+            .child(
+                div()
+                    .debug_selector(|| "mission-form-name".into())
+                    .w(px(size::NOTICE))
+                    .flex_shrink_1()
+                    .min_w_0()
+                    .child(form.name.clone()),
+            )
+            .when_some(form.problem.clone(), |d, problem| {
+                d.child(
+                    div()
+                        .debug_selector(|| "mission-form-error".into())
+                        .min_w_0()
+                        .truncate()
+                        .text_color(t.error)
+                        .child(problem),
+                )
+            })
     }
 }
 

@@ -406,6 +406,15 @@ fn starts_a_run_sees_active_step_answers_gate_and_shows_admission_findings(
     until(cx, "stop confirmation", |cx| {
         cx.debug_bounds("stop-run").is_some()
     });
+    // It stands beside Stop, over or under it, not in the window's middle.
+    let abort = cx.debug_bounds("run-abort").unwrap();
+    let form = cx.debug_bounds("stop-run").unwrap();
+    assert!(
+        (form.top() >= abort.bottom() && form.top() - abort.bottom() < px(16.))
+            || (form.bottom() <= abort.top() && abort.top() - form.bottom() < px(16.)),
+        "{form:?} beside {abort:?}"
+    );
+    assert!(form.left() <= abort.right() && form.right() >= abort.left());
     click(cx, "stop-reason");
     cx.simulate_input("Checking the stop dialog");
     click(cx, "stop-keep");

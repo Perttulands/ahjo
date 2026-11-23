@@ -6,7 +6,7 @@ mod tabs;
 mod zoomed;
 
 use crate::open::Show;
-use crate::page::{FilesPage, Pick, Rename};
+use crate::page::{FilesPage, Naming, Pick, Rename, RenameIn};
 use crate::store::Side;
 use crate::store::{format, paths, tree::Row};
 use ahjo_app_kit::theme::{Theme, size, theme};
@@ -513,6 +513,7 @@ impl FilesPage {
                 self.file_row(
                     t,
                     SharedString::from(format!("recent-{}", c.path)),
+                    Pick::Recent(c.path.clone()),
                     picked,
                     &name,
                     detail,
@@ -533,7 +534,12 @@ impl FilesPage {
                 .tooltip(kit::tip(tip))
                 .on_mouse_down(
                     MouseButton::Right,
-                    self.menu_at(c.path.clone(), c.files.is_some(), cx),
+                    self.menu_at(
+                        Pick::Recent(c.path.clone()),
+                        c.path.clone(),
+                        c.files.is_some(),
+                        cx,
+                    ),
                 )
                 .on_click(cx.listener(move |p, e: &gpui::ClickEvent, w, cx| {
                     p.set_pick(Pick::Recent(path.clone()), cx);
@@ -613,6 +619,7 @@ impl FilesPage {
                     None => self.file_row(
                         t,
                         SharedString::from(format!("hit-{i}")),
+                        Pick::Hit(i),
                         picked,
                         &name,
                         Some(("", &place)),
@@ -625,7 +632,17 @@ impl FilesPage {
                     .tooltip(kit::tip(hit.path.clone()))
                     .on_mouse_down(
                         MouseButton::Right,
-                        self.menu_at(hit.path.clone(), false, cx),
+                        // A line inside a file is renamed in its file's
+                        // heading, where the name is.
+                        self.menu_at(
+                            match hit.line {
+                                Some(_) => Pick::HitFile(hit.path.clone()),
+                                None => Pick::Hit(i),
+                            },
+                            hit.path.clone(),
+                            false,
+                            cx,
+                        ),
                     )
                     .on_click(cx.listener(move |p, _, w, cx| {
                         p.set_pick(Pick::Hit(i), cx);
@@ -654,6 +671,7 @@ impl FilesPage {
                 self.file_row(
                     t,
                     SharedString::from(format!("hit-file-{path}")),
+                    Pick::HitFile(path.clone()),
                     picked,
                     &name,
                     Some(("", &folder)),
@@ -663,7 +681,10 @@ impl FilesPage {
                 )
                 .debug_selector(move || selector.clone())
                 .tooltip(kit::tip(path.clone()))
-                .on_mouse_down(MouseButton::Right, self.menu_at(path.clone(), false, cx))
+                .on_mouse_down(
+                    MouseButton::Right,
+                    self.menu_at(Pick::HitFile(path.clone()), path.clone(), false, cx),
+                )
                 .on_click(cx.listener(move |p, e: &gpui::ClickEvent, w, cx| {
                     p.set_pick(Pick::HitFile(open.clone()), cx);
                     p.activate_as(e.click_count() > 1, w, cx);
@@ -712,13 +733,19 @@ impl FilesPage {
         &self,
         t: &Theme,
         id: SharedString,
+        pick: Pick,
         picked: bool,
         name: &str,
         detail: Option<(&str, &str)>,
         room: usize,
         age: Option<String>,
-        _cx: &mut Context<Self>,
+        cx: &mut Context<Self>,
     ) -> gpui::Stateful<Div> {
+        if self.rename_place() == Some(RenameIn::Line(pick)) {
+            return pane::row(t, id, picked)
+                .h(px(size::ROW))
+                .child(self.name_field_in_row(cx));
+        }
         let shown = pane::middle(name, room);
         let left = room.saturating_sub(shown.chars().count() + 1);
         pane::row(t, id, picked)
@@ -813,14 +840,21 @@ impl FilesPage {
                     .child(disclosure),
             )
             .child(
-                div()
-                    .flex_1()
-                    .min_w_0()
-                    .overflow_hidden()
-                    .whitespace_nowrap()
-                    .when_some(state_colour, |d, c| d.text_color(c))
-                    .when(state == Some('D'), |d| d.line_through())
-                    .child(pane::middle(&row.name, room.saturating_sub(2))),
+                if place == Place::List
+                    && self.rename_place() == Some(RenameIn::Line(Pick::Node(row.path.clone())))
+                {
+                    self.name_field_in_row(cx).into_any_element()
+                } else {
+                    div()
+                        .flex_1()
+                        .min_w_0()
+                        .overflow_hidden()
+                        .whitespace_nowrap()
+                        .when_some(state_colour, |d, c| d.text_color(c))
+                        .when(state == Some('D'), |d| d.line_through())
+                        .child(pane::middle(&row.name, room.saturating_sub(2)))
+                        .into_any_element()
+                },
             )
             .when(row.reading, |r| r.child(pane::meta(t, "…", None)))
             .when_some(state, |r, s| {
@@ -848,7 +882,10 @@ impl FilesPage {
             });
         match place {
             Place::List => line
-                .on_mouse_down(MouseButton::Right, self.menu_at(path.clone(), folder, cx))
+                .on_mouse_down(
+                    MouseButton::Right,
+                    self.menu_at(Pick::Node(path.clone()), path.clone(), folder, cx),
+                )
                 .on_click(cx.listener(move |p, e: &gpui::ClickEvent, w, cx| {
                     w.focus(&p.focus, cx);
                     p.set_pick(Pick::Node(path.clone()), cx);
@@ -868,34 +905,69 @@ impl FilesPage {
         .into_any_element()
     }
 
+    /// The menu of `path`, from its line `from`, where a rename edits it.
     fn menu_at(
         &self,
+        from: Pick,
         path: String,
         folder: bool,
         cx: &mut Context<Self>,
     ) -> impl Fn(&gpui::MouseDownEvent, &mut Window, &mut gpui::App) + 'static {
         cx.listener(move |p, e: &gpui::MouseDownEvent, window, cx| {
             window.focus(&p.focus, cx);
-            p.row_menu(path.clone(), folder, e.position, cx);
+            p.row_menu(path.clone(), folder, e.position, Some(from.clone()), cx);
             cx.stop_propagation();
         })
     }
 
-    /// The list column: its head holds the find (or the name being given)
-    /// and New; under it the lines.
+    /// The field a name is given in: Enter keeps it, Esc lets it go.
+    fn name_field(&self, cx: &mut Context<Self>) -> gpui::Stateful<Div> {
+        div()
+            .id("files-name")
+            .debug_selector(|| "files-name".into())
+            .on_key_down(cx.listener(|page, e: &gpui::KeyDownEvent, w, cx| {
+                if e.keystroke.key == "escape" {
+                    page.stop_naming(w, cx);
+                    cx.stop_propagation();
+                }
+            }))
+            .child(self.name_field.clone())
+    }
+
+    /// The name field in a line of the list: a press in it selects text
+    /// instead of picking or opening the line.
+    fn name_field_in_row(&self, cx: &mut Context<Self>) -> gpui::Stateful<Div> {
+        self.name_field(cx)
+            .flex_1()
+            .min_w_0()
+            .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+            .on_click(|_, _, cx| cx.stop_propagation())
+    }
+
+    /// Where the name being renamed is edited: the line or the viewer it
+    /// was asked from while it shows the name, else the list's head.
+    fn rename_place(&self) -> Option<RenameIn> {
+        let Some(Naming::Rename(path)) = &self.naming else {
+            return None;
+        };
+        match &self.naming_in {
+            Some(RenameIn::Line(
+                Pick::Node(_) | Pick::Recent(_) | Pick::HitFile(_) | Pick::Hit(_),
+            )) => self.naming_in.clone(),
+            Some(RenameIn::Viewer) if self.opened.as_ref().is_some_and(|o| &o.path == path) => {
+                Some(RenameIn::Viewer)
+            }
+            _ => None,
+        }
+    }
+
+    /// The list column: its head holds the find (or a new file's or
+    /// folder's name) and New; under it the lines, where a rename is made.
     fn list_column(&self, t: &Theme, cx: &mut Context<Self>) -> Div {
-        let field = match &self.naming {
-            Some(_) => div()
-                .id("files-name")
-                .debug_selector(|| "files-name".into())
-                .on_key_down(cx.listener(|page, e: &gpui::KeyDownEvent, w, cx| {
-                    if e.keystroke.key == "escape" {
-                        page.stop_naming(w, cx);
-                        cx.stop_propagation();
-                    }
-                }))
-                .child(self.name_field.clone()),
-            None => div()
+        let in_head = self.naming.is_some() && self.rename_place().is_none();
+        let field = match in_head {
+            true => self.name_field(cx),
+            false => div()
                 .id("files-search")
                 .debug_selector(|| "files-search".into())
                 .on_key_down(
@@ -905,7 +977,7 @@ impl FilesPage {
         };
         let mut head = pane::list_head(t, Some(field.into_any_element()))
             .child(measure(self.list_room.clone()));
-        if let Some(naming) = &self.naming {
+        if let Some(naming) = self.naming.as_ref().filter(|_| in_head) {
             head = head.child(
                 pane::act(t, "files-name-apply", naming.verb())
                     .debug_selector(|| "files-name-apply".into())
@@ -920,7 +992,7 @@ impl FilesPage {
                     ))
                     .on_click(cx.listener(|p, e: &gpui::ClickEvent, _, cx| {
                         if let Some(folder) = p.tree.folder_here() {
-                            p.row_menu(folder, true, e.position(), cx);
+                            p.row_menu(folder, true, e.position(), None, cx);
                         }
                     })),
             );
@@ -1024,12 +1096,15 @@ impl FilesPage {
                 .when(!folder.is_empty() && folder_fits, |d| {
                     d.child(self.crumbs(&folder, t, cx))
                 })
-                .child(
+                .child(if self.rename_place() == Some(RenameIn::Viewer) {
+                    self.name_field(cx).flex_1().min_w_0().into_any_element()
+                } else {
                     div()
                         .flex_none()
                         .font_weight(gpui::FontWeight::SEMIBOLD)
-                        .child(name),
-                )
+                        .child(name)
+                        .into_any_element()
+                })
                 .children(self.symbol_crumb(t, cx)),
         );
         let text = matches!(o.show, Show::Text { .. });

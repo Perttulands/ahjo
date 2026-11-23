@@ -942,10 +942,14 @@ impl MissionsPage {
                     } else {
                         "Start a run (it needs work first)"
                     }))
+                    .relative()
                     .child("▶")
+                    // Noted as pressed, so the start form stands beside it.
+                    .child(ahjo_app_kit::pointer::watch())
                     .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
-                    .on_click(cx.listener(move |page, _, _, cx| {
+                    .on_click(cx.listener(move |page, _, window, cx| {
                         cx.stop_propagation();
+                        page.run.start_at = Some(Spot::here(window, cx));
                         page.prepare_card_run(&card_id, cx);
                     })),
             )

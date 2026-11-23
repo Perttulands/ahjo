@@ -191,7 +191,7 @@ impl MissionsPage {
                         page.run
                             .stop_reason
                             .update(cx, |field, cx| field.set("", false, cx));
-                        page.run.abort_armed = true;
+                        page.run.stop_asked = Some(Spot::here(window, cx));
                         ahjo_app_kit::widgets::field::focus(&page.run.stop_reason, window, cx);
                         cx.notify();
                     })),
@@ -222,7 +222,10 @@ impl MissionsPage {
                 pane::act(t, "run-again", "Run again")
                     .debug_selector(|| "run-again".into())
                     .tooltip(kit::tip("Start this mission again with the same inputs"))
-                    .on_click(cx.listener(move |p, _, _, cx| p.run_again(&card, &inputs, cx))),
+                    .on_click(cx.listener(move |p, _, window, cx| {
+                        p.run.start_at = Some(Spot::here(window, cx));
+                        p.run_again(&card, &inputs, cx)
+                    })),
             );
         }
         if !run.repository.is_empty() {

@@ -45,7 +45,8 @@ pub enum Surface {
     Peek,
     /// Its field is drawn in the tab itself.
     RenameTab(usize),
-    RenameSession(Key),
+    /// Its field is drawn where the session's name was right-clicked.
+    RenameSession(Key, NameAt),
     /// Naming the view kept on a number key, where the menu was: keeping
     /// the arrangement on screen there, or only renaming it.
     ViewName(Point<Pixels>, u8, bool),
@@ -59,18 +60,27 @@ impl Surface {
             Surface::Find => FIND,
             Surface::Peek => PEEK,
             Surface::RenameTab(_) => RENAME_TAB,
-            Surface::RenameSession(_) => RENAME_SESSION,
+            Surface::RenameSession(..) => RENAME_SESSION,
             Surface::ViewName(..) => VIEW_NAME,
         }
     }
 
-    /// The drawers and Peek cover the page; the small dialogs the window.
+    /// The drawers and Peek cover the page; naming a view the window.
     pub fn cover(&self) -> Cover {
         match self {
-            Surface::RenameSession(_) | Surface::ViewName(..) => Cover::Window,
+            Surface::ViewName(..) => Cover::Window,
             _ => Cover::Page,
         }
     }
+}
+
+/// Where a session's name is renamed: the place its menu was opened from.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum NameAt {
+    /// Its row in the rail.
+    Rail,
+    /// Its tag in window `n` of the shown tab.
+    Window(usize),
 }
 
 /// The layer's view: it draws the page's surface `name`, again whenever the
@@ -119,14 +129,10 @@ impl Terminals {
             Surface::Overview => Some(self.render_overview(window, cx)),
             Surface::Find => Some(self.render_find(window, cx)),
             Surface::Peek => self.render_peek(window, cx),
-            Surface::RenameTab(_) => None,
-            Surface::RenameSession(k) => Some(self.render_rename(
-                RENAME_SESSION,
-                format!("Rename session {}", k.name),
-                "Enter renames · Esc keeps the name",
-                cx,
-            )),
-            Surface::ViewName(at, key, rename) => Some(self.render_view_name(at, key, rename, cx)),
+            Surface::RenameTab(_) | Surface::RenameSession(..) => None,
+            Surface::ViewName(at, key, rename) => {
+                Some(self.render_view_name(at, key, rename, window, cx))
+            }
         }
     }
 }

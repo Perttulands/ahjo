@@ -8,7 +8,7 @@ use ahjo_missions_contract::{
     commands::{MissionRun, MissionStarted},
     run_commands::{RunAbort, RunApprove, RunPick, RunReject, RunShow},
 };
-use gpui::{FocusHandle, KeyDownEvent, SharedString, Subscription};
+use gpui::{AnyElement, FocusHandle, KeyDownEvent, SharedString, Subscription};
 use std::collections::BTreeMap;
 
 pub(super) struct RunUi {
@@ -16,6 +16,9 @@ pub(super) struct RunUi {
     pub(super) reveal_step: Option<String>,
     pub(super) frozen: Option<Mission>,
     pub(super) starting: bool,
+    /// What the start form was opened from; none (an ask from another
+    /// page) centres it.
+    pub(super) start_at: Option<Spot>,
     pub(super) start_keys_ready: bool,
     pub(super) start_subs: Vec<Subscription>,
     pub(super) target: Option<String>,
@@ -30,7 +33,8 @@ pub(super) struct RunUi {
     pub(super) paths: Entity<TextField>,
     keep_sessions: bool,
     pub(super) busy: bool,
-    pub(super) abort_armed: bool,
+    /// Stop was pressed here: its confirmation stands beside it.
+    pub(super) stop_asked: Option<Spot>,
     pub(super) stop_reason: Entity<TextField>,
     /// The start form shows its rarely needed fields.
     pub(super) start_more: bool,
@@ -68,6 +72,7 @@ impl RunUi {
             reveal_step: None,
             frozen: None,
             starting: false,
+            start_at: None,
             start_keys_ready: false,
             start_subs: Vec::new(),
             target: None,
@@ -82,7 +87,7 @@ impl RunUi {
             paths: cx.new(|cx| TextField::new(cx, "Context paths, one per line").prose()),
             keep_sessions: false,
             busy: false,
-            abort_armed: false,
+            stop_asked: None,
             stop_reason: cx.new(|cx| TextField::new(cx, "Why (optional)")),
             start_more: false,
             ticking: false,
@@ -168,7 +173,7 @@ impl MissionsPage {
         self.canvas.invalidate_fit();
         self.run.selected = Some(run.clone());
         self.run.reveal_step = None;
-        self.run.abort_armed = false;
+        self.run.stop_asked = None;
         self.run.starting = false;
         self.run.frozen = None;
         self.run.attempts = None;
@@ -463,6 +468,8 @@ impl MissionsPage {
     /// The start form of the open mission, its first input holding `value`.
     pub(super) fn start_with(&mut self, value: &str, folder: &str, cx: &mut Context<Self>) {
         self.prepare_run(cx);
+        // Asked for from another page: nothing here was clicked.
+        self.run.start_at = None;
         if !folder.is_empty() {
             self.run
                 .cwd
@@ -606,8 +613,8 @@ impl MissionsPage {
             cx.notify();
             return true;
         }
-        if self.run.abort_armed {
-            self.run.abort_armed = false;
+        if self.run.stop_asked.is_some() {
+            self.run.stop_asked = None;
             cx.notify();
             return true;
         }
@@ -1212,7 +1219,7 @@ impl MissionsPage {
         t: &Theme,
         window: &Window,
         cx: &mut Context<Self>,
-    ) -> Option<Div> {
+    ) -> Option<AnyElement> {
         if self.run.starting {
             let title = self
                 .run
@@ -1443,8 +1450,20 @@ impl MissionsPage {
             );
             let available = (f32::from(window.viewport_size().height) - size::TAB_BAR * 2. - PAD)
                 .clamp(size::CONTROL * 3., START_FORM_MAX);
-            return Some(
-                div()
+            let dialog = kit::panel(t)
+                .id("start-dialog")
+                .debug_selector(|| "start-dialog".into())
+                .w(px(size::NOTICE))
+                .max_h(px(available))
+                .flex()
+                .flex_col()
+                .child(form.id("start-fields").min_h_0().overflow_y_scroll())
+                .child(actions);
+            // Beside what started it; a press outside leaves what was
+            // typed, as before, and Cancel or Esc closes it.
+            return Some(match self.run.start_at {
+                Some(at) => popover(at, window, |_, _| {}, dialog),
+                None => div()
                     .absolute()
                     .inset_0()
                     .occlude()
@@ -1453,25 +1472,19 @@ impl MissionsPage {
                     .justify_center()
                     .items_start()
                     .pt(px(size::TAB_BAR))
-                    .child(
-                        kit::panel(t)
-                            .id("start-dialog")
-                            .debug_selector(|| "start-dialog".into())
-                            .w(px(size::NOTICE))
-                            .max_h(px(available))
-                            .flex()
-                            .flex_col()
-                            .child(form.id("start-fields").min_h_0().overflow_y_scroll())
-                            .child(actions),
-                    ),
-            );
+                    .child(dialog)
+                    .into_any_element(),
+            });
         }
         None
     }
-    pub(super) fn stop_form(&self, t: &Theme, cx: &mut Context<Self>) -> Option<Div> {
-        if !self.run.abort_armed {
-            return None;
-        }
+    pub(super) fn stop_form(
+        &self,
+        t: &Theme,
+        window: &Window,
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
+        let at = self.run.stop_asked?;
         let run = self.selected_run()?;
         if run.r#final {
             return None;
@@ -1485,7 +1498,6 @@ impl MissionsPage {
             .flex()
             .flex_col()
             .gap(px(PAD))
-            .on_mouse_down(gpui::MouseButton::Left, |_, _, cx| cx.stop_propagation())
             .child(format!(
                 "Stop {}?",
                 mission
@@ -1521,7 +1533,7 @@ impl MissionsPage {
                 kit::button(t, "stop-keep", "Keep running", Kind::Plain)
                     .debug_selector(|| "stop-keep".into())
                     .on_click(cx.listener(|page, _, _, cx| {
-                        page.run.abort_armed = false;
+                        page.run.stop_asked = None;
                         cx.notify();
                     })),
             )
@@ -1530,7 +1542,7 @@ impl MissionsPage {
                     .debug_selector(|| "stop-confirm".into())
                     .on_click(cx.listener(|page, _, _, cx| {
                         let reason = page.run.stop_reason.read(cx).text.trim().to_owned();
-                        page.run.abort_armed = false;
+                        page.run.stop_asked = None;
                         page.run_command(
                             |run| RunAbort {
                                 run,
@@ -1541,25 +1553,18 @@ impl MissionsPage {
                         );
                     })),
             );
-        Some(
-            div()
-                .absolute()
-                .inset_0()
-                .occlude()
-                .bg(ahjo_app_kit::theme::alpha(t.bg, SCRIM))
-                .flex()
-                .justify_center()
-                .items_start()
-                .pt(px(size::TAB_BAR))
-                .on_mouse_down(
-                    gpui::MouseButton::Left,
-                    cx.listener(|page, _, _, cx| {
-                        page.run.abort_armed = false;
-                        cx.notify();
-                    }),
-                )
-                .child(body),
-        )
+        let page = cx.entity().downgrade();
+        Some(popover(
+            at,
+            window,
+            move |_, cx| {
+                let _ = page.update(cx, |page, cx| {
+                    page.run.stop_asked = None;
+                    cx.notify();
+                });
+            },
+            body,
+        ))
     }
     pub(super) fn attempts_form(&self, t: &Theme, cx: &mut Context<Self>) -> Option<Div> {
         let run = self.selected_run()?.clone();

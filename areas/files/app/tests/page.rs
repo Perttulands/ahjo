@@ -1906,6 +1906,17 @@ fn create_rename_delete_and_diff_in_the_files_page(cx: &mut TestAppContext) {
     });
     menu_on(cx, "file-row-tracked.txt");
     menu(cx, "Rename");
+    // Renamed in its row, where its name was; the find stays in the head.
+    until(cx, "the name's field", |cx| {
+        cx.debug_bounds("files-name").is_some()
+    });
+    let field = cx.debug_bounds("files-name").unwrap();
+    let row = cx.debug_bounds("file-row-tracked.txt").unwrap();
+    assert!(
+        row.contains(&field.center()),
+        "{field:?} in its row {row:?}"
+    );
+    assert!(cx.debug_bounds("files-search").is_some(), "the find stays");
     cx.simulate_keystrokes("ctrl-a");
     cx.simulate_input("renamed.txt");
     cx.simulate_keystrokes("enter");
@@ -1916,6 +1927,27 @@ fn create_rename_delete_and_diff_in_the_files_page(cx: &mut TestAppContext) {
             && cx.debug_bounds("file-row-tracked.txt").is_none()
             && cx.debug_bounds("files-name").is_none()
     });
+    // From the viewer's "…", the open file's name is edited over it; Esc
+    // keeps it.
+    click(cx, "files-more");
+    until(cx, "file menu", |cx| {
+        cx.debug_bounds("menu-label-Rename").is_some()
+    });
+    menu(cx, "Rename");
+    until(cx, "the name's field", |cx| {
+        cx.debug_bounds("files-name").is_some()
+    });
+    let field = cx.debug_bounds("files-name").unwrap();
+    let viewer = cx.debug_bounds("file-view-renamed.txt").unwrap();
+    assert!(
+        viewer.contains(&field.center()),
+        "{field:?} over the viewer {viewer:?}"
+    );
+    cx.simulate_keystrokes("escape");
+    until(cx, "rename let go", |cx| {
+        cx.debug_bounds("files-name").is_none()
+    });
+    assert!(root.join("renamed.txt").is_file());
     click(cx, "files-new");
     menu(cx, "New file");
     cx.simulate_input("new.txt");

@@ -78,6 +78,13 @@ him into a form, a fixed set of options, or a structure he did not ask for.
 opened beside a terminal resizes it, takes its keys, or moves it. Things open
 beside, not over.
 
+**Act where it is.** An action opened from a thing happens at that thing:
+a rename edits the name where it is shown, and a small form opens beside
+what was clicked, moved to stay on screen. The eye and hand stay put, the
+place says what it acts on, so it needs no title, and it covers the
+neighbours, not the work. Only a decision about the whole window sits
+centred.
+
 **Fast and forgiving.** A page shows what it has at once and fills in. Every
 search finds as one types and forgives a slipped letter. The same gesture
 does the same thing everywhere: one way to find, one way to send, one way to

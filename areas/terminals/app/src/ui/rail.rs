@@ -9,6 +9,7 @@
 use super::page::{Act, MenuItem, PEEK_SLOT, Terminals};
 use super::place;
 use super::session_acts::Gesture;
+use super::surface::NameAt;
 use super::tiles::{DragPreview, Dragged};
 use crate::store::devices;
 use crate::store::sessions::{self, Key};
@@ -411,11 +412,14 @@ impl Terminals {
                             .flex_col()
                             .overflow_hidden()
                             .whitespace_nowrap()
-                            .child(
+                            .child(if self.renaming_at(&key, NameAt::Rail) {
+                                self.name_field().into_any_element()
+                            } else {
                                 name_label(&s.name, &found, t)
                                     .id(gpui::SharedString::from(format!("name-{}", key.text())))
-                                    .tooltip(kit::tip(name.clone())),
-                            )
+                                    .tooltip(kit::tip(name.clone()))
+                                    .into_any_element()
+                            })
                             .children(asks.as_ref().map(|question| {
                                 let question = question.lines().find(|l| !l.trim().is_empty());
                                 div()
@@ -532,7 +536,7 @@ impl Terminals {
             MenuItem::new("Peek", Act::Peek(key.clone())),
             MenuItem::new(sees, Act::Sees(key.clone())),
             MenuItem::new("Send…", Act::Send(key.clone())).chord("Alt+S"),
-            MenuItem::new("Rename…", Act::Rename(key.clone())),
+            MenuItem::new("Rename…", Act::Rename(key.clone(), NameAt::Rail)),
             self.copy_row(key),
             MenuItem::new("Copy folder path", Act::CopyPath(key.clone())),
         ];

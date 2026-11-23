@@ -10,9 +10,10 @@ use crate::store::views::VIEW_KEYS;
 use crate::store::workspace::{Arrange, MAX_WINDOWS, Workspace};
 use crate::theme::{size, theme};
 use ahjo_app_kit::widgets::kit;
+use ahjo_app_kit::widgets::popover::{Spot, popover};
 use gpui::{
-    AnyElement, Context, MouseButton, MouseDownEvent, Pixels, Point, Window, anchored, deferred,
-    div, point, prelude::*, px,
+    AnyElement, Context, MouseButton, MouseDownEvent, Pixels, Point, Window, div, point,
+    prelude::*, px,
 };
 
 /// The chord a view is kept on, as menus show it.
@@ -273,6 +274,7 @@ impl Terminals {
         at: Point<Pixels>,
         key: u8,
         rename: bool,
+        window: &Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let t = theme(cx).clone();
@@ -284,27 +286,23 @@ impl Terminals {
                 view_chord(key)
             )
         };
-        deferred(
-            self.scrim(surface::VIEW_NAME, cx).child(
-                anchored()
-                    .position(point(at.x, at.y))
-                    .snap_to_window_with_margin(px(8.))
-                    .child(
-                        kit::panel(&t)
-                            .w(px(300.))
-                            .p(px(10.))
-                            .flex()
-                            .flex_col()
-                            .gap(px(6.))
-                            .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
-                            .child(kit::label(&t, format!("View {key}")))
-                            .child(self.rename_field.clone())
-                            .child(kit::note(&t, note, Some(t.dim))),
-                    ),
-            ),
+        let page = cx.entity().downgrade();
+        popover(
+            Spot::at(at, cx),
+            window,
+            move |_, cx| {
+                let _ = page.update(cx, |p, cx| p.close(surface::VIEW_NAME, cx));
+            },
+            kit::panel(&t)
+                .w(px(300.))
+                .p(px(10.))
+                .flex()
+                .flex_col()
+                .gap(px(6.))
+                .child(kit::label(&t, format!("View {key}")))
+                .child(self.rename_field.clone())
+                .child(kit::note(&t, note, Some(t.dim))),
         )
-        .with_priority(10)
-        .into_any_element()
     }
 
     /// The focused window's menu, from the keyboard (Alt+M): its session's

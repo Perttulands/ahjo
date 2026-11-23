@@ -201,7 +201,10 @@ impl FilesPage {
                 },
                 None,
             ))
-            .on_mouse_down(MouseButton::Right, self.menu_at(path.clone(), true, cx))
+            .on_mouse_down(
+                MouseButton::Right,
+                self.menu_at(Pick::Group(path.clone()), path.clone(), true, cx),
+            )
             .on_click(cx.listener(move |p, _, w, cx| {
                 p.set_pick(Pick::Group(path.clone()), cx);
                 p.activate(w, cx);
