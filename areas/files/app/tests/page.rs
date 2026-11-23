@@ -375,6 +375,18 @@ fn a_printed_path_opens_the_one_files_panel_and_the_windows_make_room(cx: &mut T
             .parse::<u32>()
             .unwrap()
     };
+    // The windows widen again once the panel is gone: the width to compare
+    // with is the one tmux holds after that claim lands, not the narrow one
+    // it may still hold while the widening settles.
+    until(cx, "the session's window widened", |cx| {
+        cx.executor().advance_clock(Duration::from_millis(200));
+        let claimed = terminal.read_with(cx, |p, _| {
+            let at = p.slot_pane(0)?;
+            let claim = p.fleet.claimed(&at.node, at.pane)?;
+            p.resizing.is_empty().then_some(u32::from(claim.cols))
+        });
+        claimed.is_some_and(|cols| width() == cols)
+    });
     let wide = width();
     let path = file.to_string_lossy().into_owned();
     tmux.run(&[
