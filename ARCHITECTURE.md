@@ -204,9 +204,13 @@ and refuses pages that share an id or a frame kind, take a kind `core`
 reserves, or whose `everywhere` chords share a key, naming both;
 `bin/ahjo-swarm/tests/pages.rs` mounts the real list.
 
-- **Host and Hub.** A `Host` is a cheap handle on the `Hub`, the state the
-  shell and every page share: the fleet link, settings, status line, toast and
-  the stack of popups and layers. Through it a page lists live nodes and where
+- **Host, Hub and AppFrame.** A `Host` is a cheap handle on the `Hub`, the
+  state the shell and every page share: the fleet link and the settings in
+  `app.json`, beside the window's `AppFrame` (`Hub::frame`). The frame is
+  the half with no node behind it: the stack of popups, menus and layers,
+  the status line and the toast, and the functions that draw them and work
+  their keys. Ahjo Brain and Ahjo Desk each hold an `AppFrame` of their own
+  and no hub, so a gesture behaves the same in all three. Through the Host a page lists live nodes and where
   each device is, makes HTTP requests, sends frames, turns channels on,
   reports, opens popups, menus and layers, posts desktop notifications (the shell
   owns the one click handler and runs the page's click), redials, keeps its
@@ -263,7 +267,9 @@ reserves, or whose `everywhere` chords share a key, naming both;
   is kept in `app.json`; whether it is open is not. Every edge dragged to
   size what it edges (the panel, Issues' list) is `kit::grip`: one hit
   width, the release caught by the window rather than a cover over it,
-  and a double click back to the first width. Only Peek still opens
+  and a double click back to the first width. The panel's column (head,
+  Back, Close, grip, slide) is `panel::EdgeColumn`, which Desk's list of
+  asks uses too. Only Peek still opens
   over the page, a glance that any click outside closes. Why one panel:
   four kinds of side surface (a view over the terminals, a drawer that
   held the keyboard, a squeezing Files panel, a page's own column) each
@@ -326,7 +332,10 @@ reserves, or whose `everywhere` chords share a key, naming both;
   watches `app.json` (`Hub::watch`): an edit made outside it, as an agent
   makes, applies at once and each page whose section changed hears
   `settings_changed`; the app's own writes are not edits, and a file that
-  does not read is reported while the last good settings stay.
+  does not read is reported while the last good settings stay. That file
+  is a `SettingsFile`, the kit's, as Desk's `desk.json` and Brain's
+  `settings.json` are: one way to read, write, set aside a broken file and
+  pick up an outside edit, whichever app holds it (`KeepsSettings`).
 - **Read models.** What one page knows that others show (the Sessions page's session
   list) is a plain type in its area's `contract`, published by that page
   (`Host::publish`) and read and observed by any page (`Host::model`), built in
@@ -346,7 +355,13 @@ one Windows build checkout.
 
 The app kit and area contracts give standalone apps their shared UI and wire
 types. For example, Brain uses the Brain contract to read a remote node's
-corpus. The build holds this boundary (`bin/ahjo/tests/layout.rs`). Revisit
+corpus. A standalone app takes from the kit what Swarm's shell does, short of
+the node: its `AppFrame` (popups, menus, layers, status, toast, and Escape
+closing only the top one), its settings as a `SettingsFile`, the theme
+picker (`widgets::theme_picker`, which in Brain and Desk can follow Swarm's
+theme), the edge column and grip, and its errors as `ahjo_core::Error`. An
+app keeps its own Escape for its own modes (Desk's drawing, Brain's open
+page) only for when the frame's stack is empty. The build holds this boundary (`bin/ahjo/tests/layout.rs`). Revisit
 this when a product gets users outside this machine with its own release
 rhythm, or when the kit has been stable long enough to version.
 
