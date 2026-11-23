@@ -528,6 +528,52 @@ fn an_ask_that_names_a_session_aims_send_at_it_not_at_the_focused_one(cx: &mut T
     let _ = std::fs::remove_dir_all(settings.parent().expect("its folder"));
 }
 
+/// The session an ask names has gone: Send opens with no target and asks
+/// for one, rather than sending to the focused session (ahjo-x3w, ADR 0004).
+#[gpui::test]
+fn an_ask_whose_named_session_has_gone_asks_for_a_target(cx: &mut TestAppContext) {
+    let Some(running) = start("terminals-page-target-gone") else {
+        return;
+    };
+    let (shell, cx, settings) = open_with_alpha(&running, "target-gone", cx);
+    let page = PAGE.with(|p| p.borrow().clone()).expect("the page");
+    until(cx, "beta listed", |cx| {
+        page.read_with(cx, |p, _| p.fleet.all.iter().any(|s| s.name == "beta"))
+    });
+    tmux(&running, &["kill-session", "-t", "beta"]);
+    until(cx, "beta gone from the list", |cx| {
+        page.read_with(cx, |p, _| !p.fleet.all.iter().any(|s| s.name == "beta"))
+    });
+    click(cx, "tab-toy".into());
+    until(cx, "the toy page to show", |cx| {
+        shell.read_with(cx, |s, _| s.shown_page()) == Some("toy")
+    });
+    click(cx, "toy-send-beta".into());
+    until(cx, "the Send drawer", |cx| {
+        cx.debug_bounds("send-go").is_some()
+    });
+    assert!(
+        page.read_with(cx, |p, _| p.send_targets.is_empty()),
+        "alpha has the focus, but the ask named beta"
+    );
+    assert!(cx.debug_bounds("send-aimed-none").is_some(), "it asks");
+    // Send with no target goes nowhere: it asks again.
+    click(cx, "send-go".into());
+    assert!(page.read_with(cx, |p, _| p.send.sending.is_empty()));
+    assert!(cx.debug_bounds("send-go").is_some(), "Send stays open");
+    // The focused session's pane did not get the reference: a marker sent
+    // after it arrives alone.
+    tmux(
+        &running,
+        &["send-keys", "-t", "alpha", "echo after-$((1+1))", "Enter"],
+    );
+    until(cx, "the marker in alpha", |_| {
+        tmux(&running, &["capture-pane", "-p", "-t", "alpha"]).contains("after-2")
+    });
+    assert!(!tmux(&running, &["capture-pane", "-p", "-t", "alpha"]).contains("sent-42"));
+    let _ = std::fs::remove_dir_all(settings.parent().expect("its folder"));
+}
+
 /// What another page shows in the window's panel.
 struct Note(gpui::FocusHandle);
 

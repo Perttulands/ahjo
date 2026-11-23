@@ -4,8 +4,11 @@
 //! Alt+S in its terminal) it is aimed at that session, listed with the
 //! others; the line naming it goes only to another session picked instead.
 //! Another page opens it through [`Terminals::handoff`] with a reference to
-//! what it was showing; the reference is shown, not edited, and the note
-//! under it is the operator's. It sends to one session or several, found
+//! what it was showing, aimed at the session the ask names; an ask naming
+//! none is aimed at the focused window's session. A named session that is
+//! no longer listed leaves Send with no target, asking for one, never
+//! falling back to the focused session. The reference is shown, not
+//! edited, and the note under it is the operator's. It sends to one session or several, found
 //! and marked in the shared finder ([`ahjo_app_kit::widgets::finder`]):
 //! Enter takes the lit one, Tab marks another. Enter in the note sends
 //! (paste and submit), Shift+Enter breaks the line, Ctrl+Enter or Paste

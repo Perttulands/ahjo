@@ -1323,10 +1323,10 @@ impl Issue {
     }
     pub fn send(&mut self, _: &mut Window, cx: &mut Context<Self>) {
         if let Some(line) = self.line() {
-            // The terminals choose the target by their own rule (the
-            // terminal this item sits beside, else the last one sent to),
-            // never by guessing from the item's folder. Issue stays shown,
-            // with Send in the panel beside it.
+            // The terminals choose the target by their own rule (with no
+            // session named, the focused window's; ADR 0004), never by
+            // guessing from the item's folder. Issue stays shown, with
+            // Send in the panel beside it.
             let _ = self.host.ask(
                 Ask::Send {
                     reference: line,

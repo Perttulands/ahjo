@@ -8,7 +8,9 @@ use ahjo_core::NodeId;
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Ask {
     /// Hand a reference to a session, as Send to Session does: the one
-    /// `target` names, or else the one the answering page has in focus.
+    /// `target` names, or with none named the one the answering page has
+    /// in focus. A named session that has gone is not replaced: Send asks
+    /// for a target (ADR 0004).
     Send {
         reference: String,
         target: Option<SessionTarget>,

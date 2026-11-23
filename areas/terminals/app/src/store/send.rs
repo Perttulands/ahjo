@@ -176,12 +176,17 @@ pub fn launch_paste(all: &[Session], node: &str, sid: &str) -> Option<(Key, bool
 }
 
 /// The session Send opens aimed at, by one rule the operator can predict:
-/// the session a page names when it asks for one (a run's own seat), else
-/// the session of the terminal window that last had focus. Only a session
-/// still listed in `all`, and never one picked by the list's order.
+/// the session a page names when it asks for one (a run's own seat); with
+/// none named, the session of the terminal window that last had focus.
+/// Only a session still listed in `all`, and never one picked by the
+/// list's order. A named session that has gone leaves no target, so Send
+/// asks: sending elsewhere would be a guessed target (ADR 0004).
 pub fn first_target(all: &[Session], named: Option<&Key>, focused: Option<&Key>) -> Option<Key> {
     let live = |k: &&Key| crate::store::sessions::find(all, k).is_some();
-    named.filter(live).or(focused.filter(live)).cloned()
+    match named {
+        Some(named) => Some(named).filter(live).cloned(),
+        None => focused.filter(live).cloned(),
+    }
 }
 
 /// An attachment's size in 1024s: B, KB, MB, GB, TB; one decimal below 10.
@@ -210,7 +215,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn send_aims_at_the_named_else_the_focused_window() {
+    fn send_aims_at_the_named_session_else_with_none_named_the_focused_one() {
         let session = |name: &str| Session {
             node: "n".into(),
             name: name.into(),
@@ -230,6 +235,11 @@ mod tests {
         // the list.
         assert_eq!(first_target(&all, None, None), None);
         assert_eq!(first_target(&all[..1], None, Some(&key("mine"))), None);
+        // A named session that has gone: no target, not the focused one.
+        assert_eq!(
+            first_target(&all[..2], Some(&key("seat")), Some(&key("mine"))),
+            None
+        );
     }
 
     #[test]

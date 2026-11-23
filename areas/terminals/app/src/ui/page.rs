@@ -2007,8 +2007,8 @@ impl Page for Terminals {
     }
 
     /// Send to Session with what another page hands over, aimed at the
-    /// session the ask names, else at the focused window's; or a launch
-    /// another page asks for.
+    /// session the ask names (with no target if it has gone), or with none
+    /// named at the focused window's; or a launch another page asks for.
     fn answer(&mut self, ask: Ask, _: &'static str, window: &mut Window, cx: &mut Context<Self>) {
         match ask {
             Ask::Send { reference, target } => {
