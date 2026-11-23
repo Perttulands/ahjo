@@ -4,7 +4,7 @@
 
 use super::page::{Act, Geo, MenuItem, PEEK_SLOT, Terminals};
 use super::place;
-use super::surface::NameAt;
+use super::surface::{NameAt, Surface};
 use crate::remote::SharedScreen;
 use crate::remotes::PaneAt;
 use crate::store::layout::{self, Axis, Side as Edge, Split};
@@ -942,7 +942,7 @@ impl Terminals {
                             kit::button(t, ("send", i), "Send", Kind::Quiet)
                                 .debug_selector(move || format!("window-send-{i}"))
                                 .on_click(cx.listener(move |s, _, window, cx| {
-                                    s.send_from(send_key.clone(), window, cx);
+                                    s.open_send(send_key.clone(), window, cx);
                                 })),
                         )
                         .child(kit::button(t, ("menu", i), "…", Kind::Quiet).on_click(
@@ -1459,11 +1459,13 @@ impl Terminals {
         let entity = cx.entity();
         let geo = self.geo.clone();
         // Peek takes what is typed while it is on top; a window while
-        // nothing is open over the page.
+        // nothing but Send, which lies beside the windows, is open over
+        // the page.
         let (focus, take_input) = if i == PEEK_SLOT {
             (self.peek_focus.clone(), self.peek_on_top())
         } else {
-            (self.term_focus.clone(), focused && self.surfaces.is_empty())
+            let beside_only = (self.surfaces.iter()).all(|s| matches!(s, Surface::Send));
+            (self.term_focus.clone(), focused && beside_only)
         };
         let font = self.font_of(i);
         // Peek zoomed draws at its own size, never resizing the session:

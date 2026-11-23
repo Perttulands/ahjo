@@ -240,7 +240,7 @@ impl Terminals {
             }
             Action::Send => {
                 if let Some(source) = self.focused_key() {
-                    self.send_from(source, window, cx);
+                    self.open_send(source, window, cx);
                 } else {
                     self.handoff(None, None, window, cx);
                 }

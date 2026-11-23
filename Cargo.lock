@@ -769,6 +769,7 @@ dependencies = [
  "ahjo-core",
  "ahjo-files",
  "ahjo-files-app",
+ "ahjo-files-contract",
  "ahjo-issue-app",
  "ahjo-issue-contract",
  "ahjo-node-kit",

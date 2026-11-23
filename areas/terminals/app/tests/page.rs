@@ -3252,8 +3252,10 @@ fn terminal_send_carries_source_reference_to_another_session(cx: &mut TestAppCon
     let _ = std::fs::remove_dir_all(settings.parent().unwrap());
 }
 
+/// A window's Send hands its session over to another session picked
+/// instead of it: the line naming it goes there.
 #[gpui::test]
-fn window_send_uses_the_clicked_window_as_source(cx: &mut TestAppContext) {
+fn window_send_hands_its_session_to_another_picked_instead(cx: &mut TestAppContext) {
     let Some(running) = start("window-send-source") else {
         return;
     };
@@ -3270,48 +3272,212 @@ fn window_send_uses_the_clicked_window_as_source(cx: &mut TestAppContext) {
     );
     let (_shell, cx, settings) = open_with_alpha(&running, "window-send-source", cx);
     let page = PAGE.with(|p| p.borrow().clone()).unwrap();
-    let beta = Key {
-        node: running.node.clone(),
-        user: String::new(),
-        name: "beta".into(),
-    };
     until(cx, "beta is listed", |cx| {
         page.read_with(cx, |p, _| p.fleet.all.iter().any(|s| s.name == "beta"))
     });
-    cx.update(|window, cx| page.update(cx, |p, cx| p.place(beta.clone(), window, cx)));
-    until(cx, "beta focused beside alpha", |cx| {
-        page.read_with(cx, |p, _| p.settings.workspace.focus == 1)
-    });
     click(cx, "window-send-0".into());
-    until(cx, "source picker", |cx| {
-        cx.debug_bounds("send-go").is_some()
+    until(cx, "Send aimed at alpha", |cx| {
+        cx.debug_bounds("send-aimed-alpha").is_some()
     });
-    page.read_with(cx, |p, _| {
-        assert!(
-            p.send
-                .reference
-                .as_deref()
-                .is_some_and(|r| r.starts_with("session alpha on ")),
-            "the source named by its name and where it runs: {:?}",
-            p.send.reference
-        );
-        assert!(
-            p.send_targets.is_empty(),
-            "a window must not target itself by default"
-        );
-    });
-    let alpha = format!("send-target-{}::alpha", running.node);
-    let selector: &'static str = Box::leak(alpha.into_boxed_str());
-    assert!(
-        cx.debug_bounds(selector).is_none(),
-        "the source is not offered as a target"
-    );
     let target = format!("send-target-{}::beta", running.node);
     click(cx, target);
+    until(cx, "Send aimed at beta instead", |cx| {
+        cx.debug_bounds("send-aimed-beta").is_some()
+    });
+    assert!(
+        cx.debug_bounds("send-reference").is_some(),
+        "the line naming alpha goes to beta"
+    );
     click(cx, "send-go".into());
     until(cx, "source reference reaches beta", |_| {
         std::fs::read_to_string(&received).is_ok_and(|s| s.contains("session alpha on "))
     });
+    let _ = std::fs::remove_dir_all(settings.parent().unwrap());
+}
+
+/// What is on alpha's screen now, read from tmux.
+fn alpha_screen(running: &Running) -> String {
+    tmux(running, &["capture-pane", "-p", "-t", "alpha"])
+}
+
+/// Send opened from a session (its window's Send, Alt+S in its terminal)
+/// is aimed at that session, lists it with the others, and sends into its
+/// pane: the session it came from never has to be picked.
+#[gpui::test]
+fn send_opened_from_a_session_is_aimed_at_it_and_delivers_there(cx: &mut TestAppContext) {
+    let Some(running) = start("send-from-session") else {
+        return;
+    };
+    let (_shell, cx, settings) = open_with_alpha(&running, "send-from-session", cx);
+    let alpha: &'static str =
+        Box::leak(format!("send-target-{}::alpha", running.node).into_boxed_str());
+    click(cx, "window-send-0".into());
+    until(cx, "Send aimed at alpha", |cx| {
+        cx.debug_bounds("send-aimed-alpha").is_some()
+    });
+    assert!(cx.debug_bounds(alpha).is_some(), "alpha is listed");
+    assert!(
+        cx.debug_bounds("send-reference").is_none(),
+        "alpha is not sent its own name"
+    );
+    cx.simulate_input("echo window-sent-$((6*7))");
+    cx.simulate_keystrokes("enter");
+    until(cx, "the message run in alpha's pane", |_| {
+        alpha_screen(&running).contains("window-sent-42")
+    });
+    until(cx, "the drawer to close once sent", |cx| {
+        cx.debug_bounds("send-go").is_none()
+    });
+    // Alt+S in alpha's terminal opens it the same way.
+    cx.simulate_keystrokes("alt-s");
+    until(cx, "Send aimed at alpha again", |cx| {
+        cx.debug_bounds("send-aimed-alpha").is_some()
+    });
+    cx.simulate_input("echo chord-sent-$((6*7))");
+    cx.simulate_keystrokes("enter");
+    until(cx, "the second message run in alpha's pane", |_| {
+        alpha_screen(&running).contains("chord-sent-42")
+    });
+    let _ = std::fs::remove_dir_all(settings.parent().unwrap());
+}
+
+/// A point in the Send drawer where nothing but the drawer is: below what
+/// its body holds.
+fn send_blank(cx: &mut VisualTestContext) -> gpui::Point<gpui::Pixels> {
+    let body = cx.debug_bounds("send-body").expect("the Send drawer");
+    gpui::point(body.center().x, body.bottom() - px(24.))
+}
+
+/// Send lies beside the windows and never traps the keyboard: a click on a
+/// terminal gives it every key, Escape too, while Send stays open with its
+/// draft; a click back in Send goes on with the draft.
+#[gpui::test]
+fn a_terminal_clicked_beside_send_takes_the_keys_and_send_keeps_its_draft(cx: &mut TestAppContext) {
+    let Some(running) = start("send-beside") else {
+        return;
+    };
+    let (_shell, cx, settings) = open_with_alpha(&running, "send-beside", cx);
+    let page = PAGE.with(|p| p.borrow().clone()).unwrap();
+    let note =
+        |cx: &mut VisualTestContext| page.read_with(cx, |p, cx| p.send_note.read(cx).text.clone());
+    click(cx, "window-send-0".into());
+    until(cx, "the Send drawer", |cx| {
+        cx.debug_bounds("send-go").is_some()
+    });
+    cx.update(|window, cx| {
+        page.update(cx, |p, cx| {
+            ahjo_app_kit::widgets::field::focus(&p.send_note, window, cx)
+        })
+    });
+    cx.simulate_input("half a thought");
+    assert_eq!(note(cx), "half a thought");
+    let body = page
+        .read_with(cx, |p, _| p.geo.borrow()[0].body)
+        .expect("alpha's window");
+    cx.simulate_click(body.center(), Modifiers::none());
+    cx.simulate_input("echo beside-$((6*7))");
+    cx.simulate_keystrokes("enter");
+    until(cx, "what was typed run in alpha", |_| {
+        alpha_screen(&running).contains("beside-42")
+    });
+    cx.simulate_keystrokes("escape");
+    cx.run_until_parked();
+    assert!(
+        cx.debug_bounds("send-go").is_some(),
+        "Escape in the terminal is the program's: Send stays open"
+    );
+    assert_eq!(note(cx), "half a thought", "the draft is kept");
+    let blank = send_blank(cx);
+    cx.simulate_click(blank, Modifiers::none());
+    cx.simulate_input(", finished");
+    assert_eq!(note(cx), "half a thought, finished");
+    let _ = std::fs::remove_dir_all(settings.parent().unwrap());
+}
+
+/// Files dropped on Send are attached: one from this computer (the
+/// system's drop) is copied to the target's node, one dragged from the
+/// Files panel goes as its path there; both paths follow into the session.
+#[gpui::test]
+fn files_dropped_on_send_are_attached_and_reach_the_session(cx: &mut TestAppContext) {
+    let Some(running) = start_config("send-drops", false, false, true, false) else {
+        return;
+    };
+    let received = running.fixture.join("received");
+    let on_node = running.fixture.join("on-node.txt");
+    std::fs::write(&on_node, "on the node").unwrap();
+    let computer = std::env::temp_dir().join(format!("ahjo-send-drops-{}", std::process::id()));
+    std::fs::create_dir_all(&computer).unwrap();
+    let local = computer.join("from-computer.txt");
+    std::fs::write(&local, "from the computer").unwrap();
+    tmux(
+        &running,
+        &[
+            "send-keys",
+            "-t",
+            "alpha",
+            &format!("cat > '{}'", received.display()),
+            "Enter",
+        ],
+    );
+    let (_shell, cx, settings) = open_pages_with_alpha(
+        &running,
+        "send-drops",
+        &[terminals, toy, ahjo_files_app::build],
+        cx,
+    );
+    cx.simulate_resize(gpui::size(px(1440.), px(900.)));
+    let page = PAGE.with(|p| p.borrow().clone()).unwrap();
+    let attached = |cx: &mut VisualTestContext| page.read_with(cx, |p, _| p.send.files.len());
+    click(cx, "window-send-0".into());
+    until(cx, "the Send drawer", |cx| {
+        cx.debug_bounds("send-go").is_some()
+    });
+    let at = send_blank(cx);
+    cx.simulate_event(gpui::FileDropEvent::Entered {
+        position: at,
+        paths: gpui::ExternalPaths(std::iter::once(local.clone()).collect()),
+    });
+    cx.simulate_event(gpui::FileDropEvent::Submit { position: at });
+    until(cx, "the computer's file attached", |cx| attached(cx) == 1);
+    until(cx, "the node's file in the Files panel", |cx| {
+        cx.debug_bounds("side-file-on-node.txt").is_some()
+    });
+    let from = cx.debug_bounds("side-file-on-node.txt").unwrap().center();
+    let at = send_blank(cx);
+    cx.simulate_mouse_down(from, gpui::MouseButton::Left, Modifiers::none());
+    cx.simulate_mouse_move(
+        gpui::point(from.x - px(40.), from.y + px(10.)),
+        gpui::MouseButton::Left,
+        Modifiers::none(),
+    );
+    cx.simulate_mouse_move(at, gpui::MouseButton::Left, Modifiers::none());
+    cx.simulate_mouse_up(at, gpui::MouseButton::Left, Modifiers::none());
+    until(cx, "the node's file attached", |cx| attached(cx) == 2);
+    click(cx, "send-go".into());
+    let on_node_line = format!("- {}", on_node.display());
+    let mut copied = std::path::PathBuf::new();
+    until(cx, "both paths in the session", |_| {
+        let Ok(text) = std::fs::read_to_string(&received) else {
+            return false;
+        };
+        let Some(path) = text
+            .lines()
+            .filter_map(|line| line.strip_prefix("- "))
+            .find(|p| {
+                p.ends_with("from-computer.txt") && !p.starts_with(&*computer.to_string_lossy())
+            })
+        else {
+            return false;
+        };
+        copied = path.into();
+        text.lines().any(|line| line == on_node_line)
+    });
+    assert_eq!(
+        std::fs::read_to_string(&copied).unwrap(),
+        "from the computer",
+        "the computer's file copied to the node"
+    );
+    let _ = std::fs::remove_dir_all(computer);
     let _ = std::fs::remove_dir_all(settings.parent().unwrap());
 }
 

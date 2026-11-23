@@ -1,15 +1,24 @@
 //! Send to Session, the one hand-off (CHROTE's `SendDrawer`): a drawer at
 //! the right of the windows, which make room for it, so it never covers a
-//! session. Every surface opens it through [`Terminals::handoff`] with a
-//! reference to what it was showing; the reference is shown, not edited,
-//! and the note under it is the operator's. It sends to one session or
-//! several, found and marked in the shared finder
-//! ([`ahjo_app_kit::widgets::finder`]): Enter takes the lit one, Tab marks
-//! another. Enter in the note sends (paste and submit), Shift+Enter breaks
-//! the line, Ctrl+Enter or Paste only pastes. Files dropped on the drawer
-//! or attached land on each target's node and their paths follow the note.
-//! "New agent…" launches one and pastes the message into it without
+//! session. Opened from a session (its window's Send, Peek's, its menu's,
+//! Alt+S in its terminal) it is aimed at that session, listed with the
+//! others; the line naming it goes only to another session picked instead.
+//! Another page opens it through [`Terminals::handoff`] with a reference to
+//! what it was showing; the reference is shown, not edited, and the note
+//! under it is the operator's. It sends to one session or several, found
+//! and marked in the shared finder ([`ahjo_app_kit::widgets::finder`]):
+//! Enter takes the lit one, Tab marks another. Enter in the note sends
+//! (paste and submit), Shift+Enter breaks the line, Ctrl+Enter or Paste
+//! only pastes. Files dropped on the drawer (from the computer, or from
+//! Files) or attached land on each target's node and their paths follow
+//! the note; a file already on that node goes as its own path. "New
+//! agent…" launches one and pastes the message into it without
 //! submitting, once the node finds it ready for a paste.
+//!
+//! It lies beside the windows and never traps the keyboard: a click on a
+//! terminal gives that terminal every key, Escape included, while the
+//! drawer stays open with its draft, and a click back in the drawer goes
+//! on with it (`Layer::beside`).
 //!
 //! A send that arrived everywhere closes the drawer; where one failed the
 //! drawer stays, keeps only the sessions it did not reach and says why for
@@ -27,6 +36,7 @@ use crate::http;
 use crate::store::send;
 use crate::store::sessions::{self, Key};
 use crate::theme::{alpha, size, theme};
+use ahjo_app_kit::drag::NodeFile;
 use ahjo_app_kit::widgets::finder::{self, Choice, FinderEvent, Lead};
 use ahjo_app_kit::widgets::kit::{self, Kind};
 use ahjo_app_kit::widgets::pane;
@@ -53,7 +63,8 @@ const WAITING: &str = "waiting";
 pub struct Draft {
     /// The one line naming the object handed over.
     pub reference: Option<String>,
-    /// The originating session, excluded from this handoff's targets.
+    /// The session Send was opened from: it is aimed at it, and the line
+    /// naming it goes only to other sessions picked instead.
     pub source: Option<Key>,
     /// The reference is the line naming a session (`send::session_reference`).
     pub names_a_session: bool,
@@ -93,24 +104,29 @@ pub struct Draft {
     pub back: Option<gpui::WeakFocusHandle>,
 }
 
-/// A local file or a clipboard image kept in memory until sent.
+/// A local file, a clipboard image kept in memory until sent, or a file
+/// on a node (dragged from Files), by its path there.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Attachment {
     File(PathBuf),
     Image { name: String, bytes: Vec<u8> },
+    OnNode(NodeFile),
 }
 
 impl Terminals {
-    /// Opens Send with the focused terminal as the source, aimed at `target`.
-    pub fn open_send(&mut self, target: Option<Key>, window: &mut Window, cx: &mut Context<Self>) {
-        let reference = self.focused_key().map(|key| self.session_reference(&key));
-        self.handoff_from(reference, target, None, true, window, cx);
-    }
-
-    /// Sends the named window's session as the source to a different target.
-    pub fn send_from(&mut self, source: Key, window: &mut Window, cx: &mut Context<Self>) {
-        let reference = Some(self.session_reference(&source));
-        self.handoff_from(reference, None, Some(source), true, window, cx);
+    /// Opens Send from session `session` (a window's Send, Peek's, its
+    /// menu's, Alt+S in its terminal), aimed at it. The line naming it
+    /// goes along only to another session picked instead.
+    pub fn open_send(&mut self, session: Key, window: &mut Window, cx: &mut Context<Self>) {
+        let reference = Some(self.session_reference(&session));
+        self.handoff_from(
+            reference,
+            Some(session.clone()),
+            Some(session),
+            true,
+            window,
+            cx,
+        );
     }
 
     /// The line naming session `key` in a message: its name and where it
@@ -126,18 +142,12 @@ impl Terminals {
         )
     }
 
-    /// The sessions Send can go to: every one but the source, recent
-    /// targets first, as the finder offers them.
+    /// The sessions Send can go to, recent targets first, as the finder
+    /// offers them.
     fn send_choices(&self) -> Vec<Choice> {
         let focused = self.focused_key();
         sessions::targets(&self.fleet.all, &self.settings.recent_targets)
             .into_iter()
-            .filter(|s| {
-                self.send
-                    .source
-                    .as_ref()
-                    .is_none_or(|source| !sessions::is(s, source))
-            })
             .map(|s| {
                 let key = Key::of(s);
                 let program = match sessions::running(s) {
@@ -216,19 +226,42 @@ impl Terminals {
             self.open(Surface::Send, window, cx);
             return;
         }
+        // Opened again while open, it keeps what the operator wrote and
+        // attached, and where the keyboard was before it first opened.
+        let open = self.is_open(surface::SEND);
+        let (files, back) = match open {
+            true => (std::mem::take(&mut self.send.files), self.send.back.take()),
+            false => (vec![], window.focused(cx).map(|f| f.downgrade())),
+        };
         let launch_grid = self.launch_grids.borrow()[self.settings.workspace.focus];
         self.send = Draft {
             reference,
             source,
             names_a_session,
+            files,
             launch_grid,
-            back: window.focused(cx).map(|f| f.downgrade()),
+            back,
             ..Default::default()
         };
         self.send_targets = target.into_iter().collect();
         self.send_finder.update(cx, |f, cx| f.clear(cx));
-        self.send_note.update(cx, |f, cx| f.set("", false, cx));
+        if !open {
+            self.send_note.update(cx, |f, cx| f.set("", false, cx));
+        }
         self.open(Surface::Send, window, cx);
+    }
+
+    /// The operator came back to the drawer: the keyboard goes to the
+    /// message, or to the sessions while none is picked.
+    pub(super) fn send_resume(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if !self.is_open(surface::SEND) {
+            return;
+        }
+        if self.send_targets.is_empty() && !self.send.new_agent {
+            finder::focus(&self.send_finder, window, cx);
+        } else {
+            ahjo_app_kit::widgets::field::focus(&self.send_note, window, cx);
+        }
     }
 
     /// The drawer closed: the keyboard goes back to the view beside the
@@ -325,7 +358,21 @@ impl Terminals {
             finder::focus(&self.send_finder, window, cx);
             return;
         }
+        // The session Send came from is not told its own name: with no
+        // note or file, there is nothing for it.
+        if !self.send_targets.iter().any(|k| self.has_words_for(k, cx)) {
+            return;
+        }
         self.deliver(self.send_targets.clone(), enter, false, cx);
+    }
+
+    /// Target `k` gets something: a note, a file or the reference.
+    fn has_words_for(&self, k: &Key, cx: &Context<Self>) -> bool {
+        let note = &self.send_note.read(cx).text;
+        !self.send.files.is_empty()
+            || !send::message(self.reference_to(k), note, &[])
+                .trim()
+                .is_empty()
     }
 
     fn draft_text(&self, cx: &Context<Self>) -> String {
@@ -334,8 +381,12 @@ impl Terminals {
         send::message(reference, &note, &[])
     }
 
-    /// The reference as target `k` gets it (`send::reference_for`).
+    /// The reference as target `k` gets it (`send::reference_for`); the
+    /// session Send was opened from is not told its own name.
     fn reference_to(&self, k: &Key) -> Option<&str> {
+        if self.send.source.as_ref() == Some(k) {
+            return None;
+        }
         send::reference_for(
             self.send.reference.as_deref(),
             self.send.names_a_session,
@@ -421,6 +472,10 @@ impl Terminals {
             false => self.reference_to(&k),
         };
         let text = send::message(reference, &note, &files);
+        if text.trim().is_empty() {
+            // Nothing for it (`has_words_for`): only the others are sent to.
+            return;
+        }
         // A launched agent may still be starting: the node waits until it
         // is ready for the paste (#242).
         match self.fleet.paste_to(&k.node, pane, &text, enter, launched) {
@@ -569,6 +624,22 @@ impl Terminals {
             } else if !self.send.files.contains(&Attachment::File(p.clone())) {
                 self.send.files.push(Attachment::File(p.clone()));
             }
+        }
+        cx.notify();
+    }
+
+    /// A file on a node, dragged from Files. An empty node is the serving
+    /// node's, named here so it compares with each target's.
+    fn send_attach_node(&mut self, file: &NodeFile, cx: &mut Context<Self>) {
+        let mut file = file.clone();
+        if file.node.as_str().is_empty()
+            && let Some(here) = self.host.nodes(cx).into_iter().next()
+        {
+            file.node = here.id;
+        }
+        let file = Attachment::OnNode(file);
+        if !self.send.files.contains(&file) {
+            self.send.files.push(file);
         }
         cx.notify();
     }
@@ -745,12 +816,25 @@ impl Terminals {
             .flex()
             .bg(t.surface)
             .border_color(t.divider)
-            .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+            // A click back in the drawer goes on with the draft, where the
+            // click itself gave the keyboard to nothing in it.
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(|s, _, window, cx| {
+                    cx.stop_propagation();
+                    if !s.send_area.contains_focused(window, cx) {
+                        s.send_resume(window, cx);
+                    }
+                }),
+            )
             .on_key_down(cx.listener(|s, e: &KeyDownEvent, _, cx| s.anyway_key(e, cx)))
+            .track_focus(&self.send_area)
             .drag_over::<ExternalPaths>(move |d, _, _, _| d.bg(alpha(t.accent, 0.08)))
+            .drag_over::<NodeFile>(move |d, _, _, _| d.bg(alpha(t.accent, 0.08)))
             .on_drop(
                 cx.listener(|s, paths: &ExternalPaths, _, cx| s.send_attach(paths.paths(), cx)),
             )
+            .on_drop(cx.listener(|s, file: &NodeFile, _, cx| s.send_attach_node(file, cx)))
             .child(
                 div()
                     .id("send-grip")
@@ -843,9 +927,13 @@ impl Terminals {
         let Some(r) = &self.send.reference else {
             return vec![];
         };
+        // Aimed only at the session it names, it goes nowhere: not shown.
+        let others = self.send_others().count();
+        if others == 0 && !self.send_targets.is_empty() && !self.send.new_agent {
+            return vec![];
+        }
         let left_out = self.send_left_out();
-        let dropped =
-            !left_out.is_empty() && !self.send.anyway && left_out.len() == self.send_targets.len();
+        let dropped = !left_out.is_empty() && !self.send.anyway && left_out.len() == others;
         let mut out = vec![
             div()
                 .id("send-reference")
@@ -924,13 +1012,16 @@ impl Terminals {
         if self.send.new_agent || self.send.reference.is_none() {
             return vec![];
         }
-        let targets: Vec<_> = self
-            .send_targets
-            .iter()
-            .map(|k| self.fleet.session(k))
-            .collect();
-        let names: Vec<&str> = self.send_targets.iter().map(|k| k.name.as_str()).collect();
+        let others: Vec<&Key> = self.send_others().collect();
+        let targets: Vec<_> = others.iter().map(|k| self.fleet.session(k)).collect();
+        let names: Vec<&str> = others.iter().map(|k| k.name.as_str()).collect();
         send::left_out(self.send.names_a_session, &targets, &names)
+    }
+
+    /// The targets other than the session Send was opened from: those the
+    /// reference may go to.
+    fn send_others(&self) -> impl Iterator<Item = &Key> {
+        (self.send_targets.iter()).filter(|k| self.send.source.as_ref() != Some(*k))
     }
 
     /// Send anyway, or Leave it out again.
@@ -1107,6 +1198,13 @@ impl Terminals {
                 Attachment::Image { name, bytes } => {
                     (name.clone(), send::bytes(bytes.len() as u64))
                 }
+                // Where it is, for a file copied from another node.
+                Attachment::OnNode(file) => (
+                    file.name().to_string(),
+                    (self.where_is(file.node.as_str()))
+                        .map(|p| p.device)
+                        .unwrap_or_default(),
+                ),
             };
             list = list.child(
                 div()
@@ -1133,7 +1231,8 @@ impl Terminals {
 }
 
 /// Writes each file on the target's node, in order: their paths there, or
-/// why one could not be.
+/// why one could not be. A file already on that node goes as its own path;
+/// one on another node is read there first.
 async fn write_drops(
     page: &WeakEntity<Terminals>,
     node: &NodeId,
@@ -1144,6 +1243,21 @@ async fn write_drops(
     let mut paths = vec![];
     for f in files {
         let (name, bytes) = match f {
+            Attachment::OnNode(file) if &file.node == node => {
+                paths.push(file.path.clone());
+                continue;
+            }
+            Attachment::OnNode(file) => {
+                let name = file.name().to_string();
+                let task = page
+                    .update(cx, |s, cx| {
+                        s.host.request(http::file_bytes(&file.node, &file.path), cx)
+                    })
+                    .map_err(|_| "the page closed".to_string())?;
+                let bytes = http::bytes_read(task.await)
+                    .map_err(|e| format!("{name} could not be read: {e}"))?;
+                (name, bytes)
+            }
             Attachment::File(path) => {
                 let name = path
                     .file_name()

@@ -1,4 +1,5 @@
-//! HTTP upload for Send attachments.
+//! HTTP for Send attachments: a file read from the node it is on, and
+//! written on the target's.
 
 use ahjo_app_kit::host::{Answer, Request};
 use ahjo_core::{Error, NodeId};
@@ -34,6 +35,25 @@ pub fn drop_file(node: &NodeId, user: &str, name: &str, bytes: Vec<u8>) -> Reque
     let mut r = Request::new("POST", node.clone(), path).within(DROP_WITHIN);
     r.body = Some(("application/octet-stream".into(), bytes));
     r
+}
+
+/// Reads the file at `path` on `node` (Files' own route).
+pub fn file_bytes(node: &NodeId, path: &str) -> Request {
+    let route = format!(
+        "{}?path={}",
+        ahjo_files_contract::FILE_BYTES_PATH,
+        enc(path)
+    );
+    Request::get(node.clone(), route).within(DROP_WITHIN)
+}
+
+/// The bytes read, or why there are none.
+pub fn bytes_read(answer: Result<Answer, Error>) -> Result<Vec<u8>, String> {
+    match answer {
+        Ok(a) if a.ok() => Ok(a.body),
+        Ok(a) => Err(a.error_text()),
+        Err(e) => Err(e.message),
+    }
 }
 
 /// The dropped file's path on its node, or why there is none.

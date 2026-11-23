@@ -341,6 +341,8 @@ pub struct Terminals {
     /// The sessions Send sends to, in the order they were chosen.
     pub send_targets: Vec<Key>,
     pub send: super::send::Draft,
+    /// The Send drawer's area: the keyboard is Send's while it is within.
+    pub send_area: gpui::FocusHandle,
     pub find_query: Entity<TextField>,
     pub find_cursor: usize,
     /// The hit last opened, which Enter steps on from.
@@ -481,6 +483,7 @@ impl Terminals {
             put_away: vec![],
             beside_open: false,
             beside_focus: cx.focus_handle(),
+            send_area: cx.focus_handle(),
             beside_resizing: None,
             surfaces: vec![],
             said,
@@ -1126,6 +1129,11 @@ impl Terminals {
         if matches!(s, Surface::Peek) {
             layer = layer.keeps_escape();
         }
+        // Send lies beside the windows: a click on one gives it the
+        // keyboard, and the drawer keeps its draft until it is clicked.
+        if matches!(s, Surface::Send) {
+            layer = layer.beside(self.send_area.clone());
+        }
         self.host.layer(layer, cx);
         window.focus(&focus, cx);
         cx.notify();
@@ -1315,7 +1323,7 @@ impl Terminals {
                 return;
             }
             Act::Send(k) => {
-                self.open_send(Some(k), window, cx);
+                self.open_send(k, window, cx);
                 return;
             }
             Act::Sees(k) => {

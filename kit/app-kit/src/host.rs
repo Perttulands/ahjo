@@ -162,6 +162,11 @@ pub struct Layer {
     /// Escape is its content's (a terminal's program), so it does not
     /// close it; it says on screen how it closes.
     pub keeps_escape: bool,
+    /// It lies beside the page rather than over it (Send), drawn within
+    /// this area: it takes the keyboard as it opens, but a click elsewhere
+    /// takes the keyboard away while it stays open, and Escape is its only
+    /// while the keyboard is in the area.
+    pub beside: Option<FocusHandle>,
 }
 
 impl Layer {
@@ -173,7 +178,24 @@ impl Layer {
             focus: None,
             dismiss: None,
             keeps_escape: false,
+            beside: None,
         }
+    }
+
+    /// Lies beside the page, drawn within `area` (see [`Layer::beside`]).
+    pub fn beside(mut self, area: FocusHandle) -> Self {
+        self.beside = Some(area);
+        self
+    }
+
+    /// The keyboard is in this layer: in its focus, or within the area of
+    /// a layer beside the page.
+    pub fn has_keyboard(&self, window: &gpui::Window, cx: &App) -> bool {
+        self.focus.as_ref().is_some_and(|f| f.is_focused(window))
+            || self
+                .beside
+                .as_ref()
+                .is_some_and(|a| a.contains_focused(window, cx))
     }
 
     pub fn keeps_escape(mut self) -> Self {

@@ -19,6 +19,16 @@ use gpui::{
 use std::collections::{HashMap, HashSet};
 use std::time::{Duration, Instant};
 
+/// Why the shell gives the keyboard out again.
+#[derive(Clone, Copy)]
+enum Refocus {
+    /// Layers opened or closed: whether a closed one's dismiss moved the
+    /// keyboard itself, and whether the keyboard was in one that closed.
+    Layers { moved: bool, lost: bool },
+    /// Another page shows.
+    PageShown,
+}
+
 /// How long the keys a chord was typed with stay on screen.
 const ECHO: Duration = Duration::from_millis(900);
 
@@ -302,7 +312,7 @@ impl Shell {
         }
         self.sync_channels(i, cx);
         self.pages[i].shown(true, window, cx);
-        self.refocus(false, window, cx);
+        self.refocus(Refocus::PageShown, window, cx);
         cx.notify();
     }
 
@@ -394,6 +404,12 @@ impl Shell {
             }
             HubEvent::Layers { closed } => {
                 let before = window.focused(cx);
+                // The keyboard was in a layer that closed, or nowhere.
+                let lost = before.is_none()
+                    || closed.iter().any(|s| match s {
+                        Surface::Layer(l) => l.has_keyboard(window, cx),
+                        Surface::Menu(_) => false,
+                    });
                 for s in closed {
                     if let Surface::Layer(Layer {
                         dismiss: Some(run), ..
@@ -403,7 +419,7 @@ impl Shell {
                     }
                 }
                 let moved = window.focused(cx) != before;
-                self.refocus(moved, window, cx);
+                self.refocus(Refocus::Layers { moved, lost }, window, cx);
             }
             HubEvent::Link { node, state } => {
                 for p in &self.pages {
@@ -444,25 +460,36 @@ impl Shell {
         window.remove_window();
     }
 
-    /// The keyboard goes to the top layer that takes it, or to the page.
     /// Gives the keyboard to the top layer that takes it, else to the shown
-    /// page. A closed layer's dismiss that `moved` the keyboard itself (Send
+    /// page. A closed layer's dismiss that moved the keyboard itself (Send
     /// handing it back to the view beside it came from) keeps it there
-    /// while no layer is left to take it.
-    fn refocus(&mut self, moved: bool, window: &mut Window, cx: &mut Context<Self>) {
+    /// while no layer is left to take it. A layer beside the page (Send)
+    /// does not take the keyboard from where the operator put it: only
+    /// what lost it, from a layer that closed, comes back to it; and a
+    /// page that shows takes it unless that layer has it.
+    fn refocus(&mut self, why: Refocus, window: &mut Window, cx: &mut Context<Self>) {
         let top = self.hub.read(cx).stack.iter().rev().find_map(|s| match s {
-            Surface::Layer(l) => l.focus.clone(),
+            Surface::Layer(l) => l.focus.clone().map(|f| (f, l.clone())),
             Surface::Menu(_) => None,
         });
-        if top.is_none() && moved {
-            return;
-        }
         let page = || {
             self.shown
                 .and_then(|i| self.pages[i].focus(cx))
                 .unwrap_or_else(|| self.focus.clone())
         };
-        let to = top.unwrap_or_else(page);
+        let to = match (top, why) {
+            (None, Refocus::Layers { moved: true, .. }) => return,
+            (None, _) => page(),
+            (Some((_, l)), _) if l.beside.is_some() && l.has_keyboard(window, cx) => return,
+            (Some((f, l)), Refocus::Layers { lost, .. }) if l.beside.is_some() => {
+                if !lost {
+                    return;
+                }
+                f
+            }
+            (Some((_, l)), Refocus::PageShown) if l.beside.is_some() => page(),
+            (Some((f, _)), _) => f,
+        };
         window.focus(&to, cx);
     }
 
@@ -565,11 +592,17 @@ impl Shell {
         }
         let all = self.chords(cx);
         let hub = self.hub.read(cx);
+        // A layer beside the page has Escape only while it has the keyboard:
+        // typed into a terminal beside Send, Escape is the program's.
+        let top = hub.stack.top().filter(|s| match s {
+            Surface::Layer(l) => l.beside.is_none() || l.has_keyboard(window, cx),
+            Surface::Menu(_) => true,
+        });
         let keyboard = Keyboard {
             on: hub.settings.keys,
             leader: self.leader,
-            surfaces: hub.stack.top().is_some_and(|s| s.escape_closes()),
-            kept: hub.stack.top().is_some_and(|s| !s.escape_closes()),
+            surfaces: top.is_some_and(|s| s.escape_closes()),
+            kept: top.is_some_and(|s| !s.escape_closes()),
         };
         match chords::route(&k, &keyboard, &all, Instant::now()) {
             Verdict::Pass => {}

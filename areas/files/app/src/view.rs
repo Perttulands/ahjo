@@ -9,9 +9,11 @@ use crate::open::Show;
 use crate::page::{FilesPage, Naming, Pick, Rename, RenameIn};
 use crate::store::Side;
 use crate::store::{format, paths, tree::Row};
+use ahjo_app_kit::drag::NodeFile;
 use ahjo_app_kit::theme::{Theme, size, theme};
 use ahjo_app_kit::widgets::kit::{self, Kind};
 use ahjo_app_kit::widgets::pane;
+use ahjo_core::NodeId;
 use ahjo_files_contract::{Changed, Match};
 use gpui::{
     AnyElement, Context, Div, MouseButton, MouseMoveEvent, Render, ScrollDelta, SharedString,
@@ -879,6 +881,14 @@ impl FilesPage {
                     p.upload_paths(destination.clone(), dropped.paths(), cx);
                     cx.stop_propagation();
                 }))
+            })
+            // A file goes where it is dragged as itself: Send attaches it.
+            .when(!folder, |r| {
+                let file = NodeFile {
+                    node: NodeId(self.tree.node.clone()),
+                    path: path.clone(),
+                };
+                r.on_drag(file, |file, _, _, cx| cx.new(|_| file.clone()))
             });
         match place {
             Place::List => line

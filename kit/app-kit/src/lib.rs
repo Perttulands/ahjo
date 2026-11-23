@@ -6,6 +6,7 @@ pub mod ask;
 pub mod chords;
 pub mod clock;
 pub mod declared;
+pub mod drag;
 pub mod host;
 pub mod hub;
 pub mod layers;

@@ -636,7 +636,7 @@ impl Terminals {
                 kit::button(&t, "peek-send", "Send", Kind::Primary).on_click(cx.listener(
                     move |s, _, window, cx| {
                         s.close(super::surface::PEEK, cx);
-                        s.open_send(Some(k2.clone()), window, cx);
+                        s.open_send(k2.clone(), window, cx);
                     },
                 )),
             )

@@ -1,6 +1,7 @@
 //! What opens over the page, each a layer on the app's one stack: the app
 //! draws it, closes it on Escape or a click outside, and gives it the
-//! keyboard; the page keeps its state and draws its content.
+//! keyboard (Send, which lies beside the windows, only until a terminal is
+//! clicked); the page keeps its state and draws its content.
 
 use super::page::Terminals;
 use crate::store::sessions::Key;
