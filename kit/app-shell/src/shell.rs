@@ -48,13 +48,11 @@ pub struct Shell {
     pub(crate) veils: crate::veil::Veils,
     /// The wheel's part of a step toward the app's zoom.
     pub(crate) app_wheel: std::rc::Rc<std::cell::Cell<ahjo_app_kit::zoom::Wheel>>,
-    /// The panel as last drawn: open or not, and when it last began to
-    /// slide open or away.
-    pub(crate) panel_drawn: Option<bool>,
+    /// How the panel slides as it opens and goes.
+    pub(crate) panel_slide: ahjo_app_kit::panel::Slide,
     /// What the open panel showed when the hub last said so: when it goes
     /// with the keyboard in it, the keyboard goes where it can be used.
     panel_was: Option<String>,
-    pub(crate) panel_moved: Option<Instant>,
     /// The panel's area: the keyboard is in the panel while it is within.
     pub(crate) panel_focus: FocusHandle,
     /// This app's updates, when it runs from an install (`update`).
@@ -220,9 +218,8 @@ impl Shell {
             page_keys,
             veils: Default::default(),
             app_wheel: Default::default(),
-            panel_drawn: None,
+            panel_slide: Default::default(),
             panel_was: None,
-            panel_moved: None,
             panel_focus: cx.focus_handle(),
             updates: None,
             _subscriptions: subscriptions,

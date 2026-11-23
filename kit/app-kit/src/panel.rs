@@ -10,8 +10,15 @@
 
 use crate::chords::Run;
 use crate::hub::SideOn;
-use gpui::{AnyElement, AnyView, App, Context, Entity, FocusHandle, Render, Window};
+use crate::theme::{Theme, motion};
+use crate::widgets::kit::{self, GripEdge, Phase};
+use crate::widgets::pane;
+use gpui::{
+    AnyElement, AnyView, App, Context, Entity, FocusHandle, KeyDownEvent, Render, Window, deferred,
+    div, ease_out_quint, prelude::*, px,
+};
 use std::rc::Rc;
+use std::time::{Duration, Instant};
 
 type Head = Rc<dyn Fn(&mut Window, &mut App) -> AnyElement>;
 type MayClose = Rc<dyn Fn(&mut Window, &mut App) -> bool>;
@@ -136,6 +143,188 @@ impl Panel {
     /// Whether it stands while page `shown` shows.
     pub fn shows_on(&self, shown: &str) -> bool {
         self.on.stands(self.page, shown)
+    }
+}
+
+/// How a column at the window's edge slides as it opens and goes: it
+/// remembers whether it was drawn open and when that last changed.
+#[derive(Default)]
+pub struct Slide {
+    drawn: Option<bool>,
+    moved: Option<Instant>,
+}
+
+impl Slide {
+    /// The share of its width the column shows this frame, while `open`:
+    /// all of it once it has slid in, none once it has slid out (`None`:
+    /// nothing to draw). A change of `open` since the last frame starts a
+    /// slide, which follows the clock on the wall a frame at a time.
+    pub fn share(&mut self, open: bool, window: &mut Window) -> Option<f32> {
+        let slide = Duration::from_millis(motion::PANEL_SLIDE);
+        if self.drawn != Some(open) {
+            if self.drawn.is_some() {
+                self.moved = Some(Instant::now());
+            }
+            self.drawn = Some(open);
+        }
+        let Some(at) = self.moved.filter(|at| at.elapsed() < slide) else {
+            return open.then_some(1.);
+        };
+        // Drawn again each frame until the slide ends, so a column put
+        // away is gone once it has slid out.
+        window.request_animation_frame();
+        let x = ease_out_quint()(at.elapsed().as_secs_f32() / slide.as_secs_f32());
+        Some(if open { x } else { 1. - x })
+    }
+}
+
+/// What a press on one of its controls does.
+pub type Act = Rc<dyn Fn(&mut Window, &mut App)>;
+type Sized = Rc<dyn Fn(f32, bool, &mut Window, &mut App)>;
+
+/// A column at the window's edge, as the kit draws it everywhere: Swarm's
+/// panel, and a standalone app's own column (Desk's list of asks). One
+/// header (Back where it applies, the content's head, Close), the content
+/// under it, sized by the grip on its inner edge ([`kit::grip`]), sliding
+/// in and out ([`Slide`]). Escape with the keyboard in it closes it. It
+/// takes the place it is put in a row; the page beside gives way.
+pub struct EdgeColumn {
+    /// Names its elements: `panel` is Swarm's.
+    pub id: &'static str,
+    /// At the window's left edge, its grip on its right.
+    pub left: bool,
+    pub width: f32,
+    /// The least and most it is dragged to.
+    pub range: (f32, f32),
+    /// The width a double click on its grip puts back.
+    pub first_width: f32,
+    pub head: AnyElement,
+    pub content: AnyElement,
+    /// What has the keyboard while it is within.
+    pub focus: FocusHandle,
+    /// Back, when it applies.
+    pub back: Option<Act>,
+    pub close: Act,
+    /// The keys that close it, in Close's tip.
+    pub close_keys: &'static str,
+    /// The width dragged, and whether to keep it (the grip let go).
+    pub sized: Sized,
+}
+
+impl EdgeColumn {
+    /// The column, `share` of it shown as it slides ([`Slide::share`]).
+    pub fn render(self, t: &Theme, share: f32, window: &mut Window, cx: &mut App) -> AnyElement {
+        let Self {
+            id,
+            left,
+            width,
+            range,
+            first_width,
+            head,
+            content,
+            focus,
+            back,
+            close,
+            close_keys,
+            sized,
+        } = self;
+        let on_escape = close.clone();
+        let column = div()
+            .id(format!("{id}-content"))
+            .track_focus(&focus)
+            .key_context("Panel")
+            .size_full()
+            .flex()
+            .flex_col()
+            .bg(t.surface)
+            .when(left, |d| d.border_r_1())
+            .when(!left, |d| d.border_l_1())
+            .border_color(t.divider)
+            .on_key_down(move |e: &KeyDownEvent, window, cx| {
+                if e.keystroke.key == "escape" && !e.keystroke.modifiers.modified() {
+                    cx.stop_propagation();
+                    on_escape(window, cx);
+                }
+            })
+            .child(
+                pane::head(t)
+                    .when_some(back, |d, back| {
+                        let selector = format!("{id}-back");
+                        d.child(
+                            pane::act(t, format!("{id}-back"), "Back")
+                                .debug_selector(move || selector)
+                                .on_click(move |_, window, cx| back(window, cx)),
+                        )
+                    })
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .h_full()
+                            .flex()
+                            .items_center()
+                            .gap(px(crate::theme::size::HEAD_GAP))
+                            .child(head),
+                    )
+                    .child({
+                        let selector = format!("{id}-close");
+                        pane::act(t, format!("{id}-close"), "Close")
+                            .debug_selector(move || selector)
+                            .tooltip(kit::tip(close_keys))
+                            .on_click(move |_, window, cx| close(window, cx))
+                    }),
+            )
+            .child(div().flex_1().min_h_0().flex().flex_col().child(content));
+        // The grip lies outside the frame, which clips its column as it
+        // slides, and is drawn over the page beside.
+        let grip_id = format!("{id}-grip");
+        let grip = kit::grip(
+            t,
+            (gpui::SharedString::from(grip_id.clone()), left as usize),
+            if left {
+                GripEdge::Right
+            } else {
+                GripEdge::Left
+            },
+            width,
+            range,
+            window,
+            cx,
+            move |width, phase, window, cx| {
+                let (width, keep) = match phase {
+                    Phase::Moving => (width, false),
+                    Phase::Kept => (width, true),
+                    Phase::Reset => (first_width, true),
+                };
+                sized(width, keep, window, cx);
+            },
+        )
+        .debug_selector(move || grip_id);
+        let frame = div()
+            .id((gpui::SharedString::from(id), left as usize))
+            .debug_selector(move || format!("{id}-{}", if left { "left" } else { "right" }))
+            .flex_none()
+            .h_full()
+            .relative()
+            .overflow_hidden()
+            .w(px(width * share))
+            .child(
+                div()
+                    .absolute()
+                    .top_0()
+                    .bottom_0()
+                    .w(px(width))
+                    .when(left, |d| d.right_0())
+                    .when(!left, |d| d.left_0())
+                    .child(column),
+            );
+        div()
+            .flex_none()
+            .h_full()
+            .relative()
+            .child(frame)
+            .child(deferred(grip))
+            .into_any_element()
     }
 }
 

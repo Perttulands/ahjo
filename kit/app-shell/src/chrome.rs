@@ -7,15 +7,14 @@ use ahjo_app_kit::frame::{self, Cover};
 use ahjo_app_kit::hub::{Edge, SideOn};
 use ahjo_app_kit::link::client::LinkState;
 use ahjo_app_kit::menu::MenuRow;
-use ahjo_app_kit::theme::{self, Theme, motion, size, theme};
-use ahjo_app_kit::widgets::kit::{GripEdge, Phase};
-use ahjo_app_kit::widgets::{boundary, kit, pane};
+use ahjo_app_kit::panel::{Act, EdgeColumn};
+use ahjo_app_kit::theme::{self, Theme, size, theme};
+use ahjo_app_kit::widgets::{boundary, kit};
 use ahjo_app_kit::zoom::Zoom;
 use gpui::{
-    AnyElement, Context, MouseButton, MouseDownEvent, Window, deferred, div, ease_out_quint, point,
-    prelude::*, px,
+    AnyElement, Context, MouseButton, MouseDownEvent, Window, deferred, div, point, prelude::*, px,
 };
-use std::time::{Duration, Instant};
+use std::rc::Rc;
 
 /// The padding of the words at the bar's right end (Keys, a link that is
 /// not open).
@@ -450,144 +449,43 @@ impl Shell {
         });
         let open = hub.panel.open && top.is_some();
         let back = top.as_ref().is_some_and(|p| p.can_go_back(cx)) || hub.panel.has_under();
-        // A change of open since the last frame starts a slide; while one
-        // runs, a panel put away is still drawn, narrowing.
-        let slide = Duration::from_millis(motion::PANEL_SLIDE);
-        if self.panel_drawn != Some(open) {
-            if self.panel_drawn.is_some() {
-                self.panel_moved = Some(Instant::now());
-            }
-            self.panel_drawn = Some(open);
-        }
-        let moving = self.panel_moved.filter(|at| at.elapsed() < slide);
-        // Drawn again each frame until the slide ends, so a panel put away
-        // is gone once it has slid out.
-        if moving.is_some() {
-            window.request_animation_frame();
-        }
+        let share = self.panel_slide.share(open, window);
         let top = top?;
-        if !open && moving.is_none() {
-            return None;
-        }
-        let left = edge == Edge::Left;
-        let head = div()
-            .flex_1()
-            .min_w_0()
-            .h_full()
-            .flex()
-            .items_center()
-            .gap(px(size::HEAD_GAP))
-            .child(top.head(window, cx));
-        let column = div()
-            .id("panel-content")
-            .track_focus(&self.panel_focus)
-            .key_context("Panel")
-            .size_full()
-            .flex()
-            .flex_col()
-            .bg(t.surface)
-            .when(left, |d| d.border_r_1())
-            .when(!left, |d| d.border_l_1())
-            .border_color(t.divider)
-            .on_key_down(cx.listener(|s, e: &gpui::KeyDownEvent, window, cx| {
-                if e.keystroke.key == "escape" && !e.keystroke.modifiers.modified() {
-                    cx.stop_propagation();
-                    s.put_panel_away(window, cx);
-                }
-            }))
-            .child(
-                pane::head(t)
-                    .when(back, |d| {
-                        d.child(
-                            pane::act(t, "panel-back", "Back")
-                                .debug_selector(|| "panel-back".into())
-                                .on_click(cx.listener(|s, _, window, cx| s.panel_back(window, cx))),
-                        )
-                    })
-                    .child(head)
-                    .child(
-                        pane::act(t, "panel-close", "Close")
-                            .debug_selector(|| "panel-close".into())
-                            .tooltip(kit::tip("Esc, Ctrl+B"))
-                            .on_click(cx.listener(|s, _, window, cx| s.put_panel_away(window, cx))),
-                    ),
-            )
-            .child(
-                div()
-                    .flex_1()
-                    .min_h_0()
-                    .flex()
-                    .flex_col()
-                    .child(top.view.clone()),
-            );
-        // The grip lies outside the frame, which clips its panel as it
-        // slides, and is drawn over the page beside.
+        let share = share?;
         let room = window.viewport_size().width / px(1.);
-        let side = if self.hub.read(cx).settings.side_open {
+        let side = if hub.settings.side_open {
             size::SIDE
         } else {
             size::SIDE_SHUT
         };
         let most = size::PANEL_MAX.min(room - side - size::PANEL_PAGE_MIN);
+        let shell = cx.entity().downgrade();
+        let (back_to, close) = (shell.clone(), shell);
         let hub = self.hub.clone();
-        let grip = kit::grip(
-            t,
-            ("panel-grip", left as usize),
-            if left {
-                GripEdge::Right
-            } else {
-                GripEdge::Left
-            },
+        let column = EdgeColumn {
+            id: "panel",
+            left: edge == Edge::Left,
             width,
-            (size::PANEL_MIN, most),
-            window,
-            cx,
-            move |width, phase, _, cx| {
-                let (width, keep) = match phase {
-                    Phase::Moving => (width, false),
-                    Phase::Kept => (width, true),
-                    Phase::Reset => (size::PANEL, true),
-                };
+            range: (size::PANEL_MIN, most),
+            first_width: size::PANEL,
+            head: top.head(window, cx),
+            content: top.view.clone().into_any_element(),
+            focus: self.panel_focus.clone(),
+            back: back.then(|| {
+                let back: Act = Rc::new(move |window, cx| {
+                    let _ = back_to.update(cx, |s, cx| s.panel_back(window, cx));
+                });
+                back
+            }),
+            close: Rc::new(move |window, cx| {
+                let _ = close.update(cx, |s, cx| s.put_panel_away(window, cx));
+            }),
+            close_keys: "Esc, Ctrl+B",
+            sized: Rc::new(move |width, keep, _, cx| {
                 hub.update(cx, |h, cx| h.set_panel_width(width, keep, cx));
-            },
-        )
-        .debug_selector(|| "panel-grip".into());
-        let frame = div()
-            .id(("panel", left as usize))
-            .debug_selector(move || format!("panel-{}", if left { "left" } else { "right" }))
-            .flex_none()
-            .h_full()
-            .relative()
-            .overflow_hidden()
-            .child(
-                div()
-                    .absolute()
-                    .top_0()
-                    .bottom_0()
-                    .w(px(width))
-                    .when(left, |d| d.right_0())
-                    .when(!left, |d| d.left_0())
-                    .child(column),
-            );
-        // The slide follows the clock on the wall, a frame at a time, so
-        // it ends when its time is up wherever it is drawn.
-        let shown = match moving {
-            Some(at) => {
-                let x = ease_out_quint()(at.elapsed().as_secs_f32() / slide.as_secs_f32());
-                width * if open { x } else { 1. - x }
-            }
-            None => width,
+            }),
         };
-        let frame = frame.w(px(shown)).into_any_element();
-        Some(
-            div()
-                .flex_none()
-                .h_full()
-                .relative()
-                .child(frame)
-                .child(deferred(grip))
-                .into_any_element(),
-        )
+        Some(column.render(t, share, window, cx))
     }
 }
 
