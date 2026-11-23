@@ -1,0 +1,13 @@
+# Every test runs in a process of its own, many at once: `cargo nextest run`.
+# A test that cannot share the machine with the others joins a test group
+# below rather than making the whole suite serial.
+
+[profile.default]
+# A flake is fixed where it lives, never retried into a pass.
+retries = 0
+# Said slow at 30 s, stopped at 2 min: the slowest test takes under 30 s.
+slow-timeout = { period = "30s", terminate-after = 4 }
+
+[profile.ci]
+fail-fast = false
+failure-output = "immediate-final"

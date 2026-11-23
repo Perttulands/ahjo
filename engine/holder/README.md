@@ -77,8 +77,9 @@ for the holder's lifetime.
 ## Checks
 
 The holder runs on Windows. Its plain logic (handshake, flow control, screen,
-words) builds and is tested by the workspace's `cargo test` on Linux. On a
-Windows machine with WSL, `crates/ahjo-holder/check-windows.sh` copies the
+words) builds and is tested with the rest of the workspace on Linux. CI's
+`windows` job runs clippy and every test on `windows-latest`. On a
+Windows machine with WSL, `engine/holder/check-windows.sh` copies the
 crate to a scratch directory under `%TEMP%` and runs fmt, clippy and every
 test there with the Windows toolchain. Set `AHJO_HOLDER_SCRATCH` to a unique
 directory name when other agents may run it at the same time. Each test starts

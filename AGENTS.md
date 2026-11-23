@@ -64,8 +64,9 @@ is good.
 ## Checks
 
 Before pushing: `cargo fmt --check`, then `cargo clippy --all-targets -- -D warnings` and
-`AHJO_REQUIRE_TMUX=1 cargo test` for the crates you changed (`-p <crate>`).
-If `tmux` on `PATH` is a wrapper that refuses `kill-server`, set `AHJO_TMUX` to
-the real binary. Write a test for behaviour that could break again, not for how
+`AHJO_REQUIRE_TMUX=1 cargo nextest run` for the crates you changed (`-p <crate>`),
+as CI does: every test in a process of its own, many at once
+(`.config/nextest.toml`). If `tmux` on `PATH` is a wrapper that refuses
+`kill-server`, set `AHJO_TMUX` to the real binary. Write a test for behaviour that could break again, not for how
 something looks. Chase a flake by reading the code and writing a deterministic
 test, not by rerunning.

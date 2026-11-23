@@ -12,6 +12,7 @@ jobs:
         with:
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
+      - uses: taiki-e/install-action@nextest
       - run: sudo apt-get update && sudo apt-get install -y tmux
       - run: cargo fmt --check
       # The app crates (the kit's ahjo-app-kit and ahjo-app-shell, the apps
@@ -19,7 +20,7 @@ jobs:
       # ahjo-<area>-app) have their own job, with the GUI toolkit's
       # libraries; a new area's app crate needs no edit here.
       - run: cargo clippy --workspace --exclude 'ahjo-app*' --exclude 'ahjo-*-app' --all-targets -- -D warnings
-      - run: cargo test --workspace --exclude 'ahjo-app*' --exclude 'ahjo-*-app'
+      - run: cargo nextest run --profile ci --workspace --exclude 'ahjo-app*' --exclude 'ahjo-*-app'
         env:
           AHJO_REQUIRE_TMUX: "1"
 
@@ -31,6 +32,7 @@ jobs:
         with:
           components: clippy
       - uses: Swatinem/rust-cache@v2
+      - uses: taiki-e/install-action@nextest
       # gpui's X11 platform and its font stack; the tests draw on gpui's
       # test platform and need no display. The page tests drive tmux.
       - run: >
@@ -38,12 +40,14 @@ jobs:
           libxcb1-dev libx11-xcb-dev libxkbcommon-dev libxkbcommon-x11-dev
           libwayland-dev libfontconfig1-dev libfreetype-dev
       - run: cargo clippy -p 'ahjo-app*' -p 'ahjo-*-app' --all-targets -- -D warnings
-      - run: cargo test -p 'ahjo-app*' -p 'ahjo-*-app'
+      - run: cargo nextest run --profile ci -p 'ahjo-app*' -p 'ahjo-*-app'
         env:
           AHJO_REQUIRE_TMUX: "1"
 
   # The Windows session holder: its tests are `#![cfg(windows)]` and run only
-  # here. PowerShell 7 is on the runner image.
+  # here. PowerShell 7 is on the runner image. Plain `cargo test` runs one
+  # binary at a time, so the flood and memory measurements do not load the
+  # four cores under each other.
   windows:
     runs-on: windows-latest
     steps:

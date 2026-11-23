@@ -44,7 +44,7 @@ real one, and the app crates the system `pkg-config`:
 export AHJO_REQUIRE_TMUX=1 AHJO_TMUX=/home/linuxbrew/.linuxbrew/bin/tmux PKG_CONFIG=/usr/bin/pkg-config
 cargo fmt --check
 heavy run --memory 8 -- cargo clippy -p <crate> --all-targets -- -D warnings
-heavy run --memory 8 -- cargo test -p <crate>
+heavy run --memory 8 -- cargo nextest run -p <crate>
 ```
 
 When they pass, `git fetch origin && git rebase origin/main`, then
