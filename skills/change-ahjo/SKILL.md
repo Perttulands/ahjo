@@ -165,23 +165,21 @@ heavy run --memory 8 -- /mnt/c/Users/pertt/.cargo/bin/cargo.exe build --release 
 
 The apps run from `C:\Users\pertt\Ahjo`, each started bare, as the install
 script starts them, so the Start menu, a taskbar pin and `Ahjo.cmd` start the
-same app the same way. Their settings are in `%APPDATA%\Ahjo`: `app.json`
+same app the same way. `install.json` beside them names the local node
+(`http://127.0.0.1:7310/`), so they update themselves like the laptop's: after
+an upgrade with `--windows-apps`, each app shows Update in its top bar when the
+node hands out another build, and the operator presses it. Do not copy builds
+over them or close his windows to deploy. Their settings are in `%APPDATA%\Ahjo`: `app.json`
 (Swarm, naming the node `http://127.0.0.1:7310`) and `desk.json` (Desk);
 Brain's are in `%APPDATA%\ahjo-brain\settings.json`. Each app keeps its log
 beside its settings (`app.log`, `desk.log`), with every panic's message,
-place and backtrace; the `.pdb` beside each exe names the frames. Replacing
-an app closes its window, so do it when he asked for the new app. A node whose protocol changed (`protocol` in
+place and backtrace; the `.pdb` beside each exe names the frames. A node whose protocol changed (`protocol` in
 `/api/health`) needs the app built from the same commit.
 
 Windows programs are not on this host's `PATH`; `W=/mnt/c/Windows/System32`.
 
-```sh
-$W/taskkill.exe /F /IM ahjo-swarm.exe
-cp /mnt/c/Users/pertt/ahjo-build/target/release/{ahjo-swarm.exe,ahjo_swarm.pdb} /mnt/c/Users/pertt/Ahjo/
-```
-
-WSL runs in Windows session 0, where a started window never shows. Start the
-app on his desktop through a one-off scheduled task, then delete it:
+WSL runs in Windows session 0, where a started window never shows. To start
+an app on his desktop (only when he asks), use a one-off scheduled task, then delete it:
 
 ```sh
 $W/schtasks.exe /Create /F /TN ahjo-swarm-start /SC ONCE /ST 23:59 /IT /TR "C:\Users\pertt\Ahjo\Ahjo.cmd"
