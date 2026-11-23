@@ -371,7 +371,7 @@ is `widgets::pane`.
 | Escape and the stack | Escape closes only the top popup, menu or layer; an app's own Escape is for its own modes, when the stack is empty | `frame::key`, `frame::dismiss_top` |
 | Panel | content opened beside the page (a file, a card, Send): a `PanelView` with its head, Back and `may_close` | `Host::show_panel`, `panel::Panel`, `panel::PanelView` |
 | Edge column | a column at the window's edge in an app without the shell (Desk's asks): head, Close, grip, slide | `panel::EdgeColumn` |
-| Side section | a page's part of the shell's left column, on every page | `Host::lend_side` |
+| Side section | a page's part of the shell's left column, shown on the pages its `SideOn` names | `Host::lend_side` |
 | Grip | an edge dragged to size what it edges; double click puts the first width back | `kit::grip` |
 | Scroll area | content scrolling down, across, or both (a picture, a board) | `pane::scroll`, `pane::scroll_x`, `pane::scroll_both` |
 | Long list | a scrolling list of equal-height rows, rendered as they come into view | `pane::long_list` |
