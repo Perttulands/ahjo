@@ -14,7 +14,7 @@ use crate::store::workspace::{Arrange, LinkState, MAX_WINDOWS, TileState};
 use crate::term::screen::Screen;
 use ahjo_app_kit::Host;
 use ahjo_app_kit::chords::Chord;
-use ahjo_app_kit::host::Status;
+use ahjo_app_kit::frame::Status;
 use ahjo_app_kit::menu::MenuRow;
 use ahjo_app_kit::popup::{self, Popup, Spot};
 use ahjo_app_kit::settings::Place;
@@ -1119,7 +1119,7 @@ impl Terminals {
         };
         let view = surface::view(self.me.clone(), name, cx);
         let page = self.me.clone();
-        let mut layer = ahjo_app_kit::host::Layer::new(name, view)
+        let mut layer = ahjo_app_kit::frame::Layer::new(name, view)
             .focus(focus.clone())
             .on_dismiss(move |_, cx| {
                 let _ = page.update(cx, |p, cx| p.closed(name, cx));

@@ -5,7 +5,7 @@ use super::*;
 use crate::store::run_state::{self, CardState};
 use crate::store::seats::{self, Seat, State};
 use crate::store::{attempts, words};
-use ahjo_app_kit::host::Status;
+use ahjo_app_kit::frame::Status;
 use ahjo_app_kit::{
     Ask,
     theme::{FAMILY, Theme},

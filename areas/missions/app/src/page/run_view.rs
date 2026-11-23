@@ -790,7 +790,7 @@ impl MissionsPage {
                         cx,
                     ) {
                         host.report(
-                            ahjo_app_kit::host::Status::failure(format!(
+                            ahjo_app_kit::frame::Status::failure(format!(
                                 "Not shown: {}",
                                 error.message
                             )),

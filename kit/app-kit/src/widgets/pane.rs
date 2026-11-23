@@ -18,7 +18,8 @@
 //! and all; a page without anything chosen fills the detail with [`empty`].
 
 use crate::ask::Ask;
-use crate::host::{Host, Status};
+use crate::frame::Status;
+use crate::host::Host;
 use crate::theme::{Theme, art, size, theme, ty};
 use gpui::{
     AnyElement, App, Axis, Bounds, Div, ElementId, FontWeight, Hsla, Pixels, Point, ScrollHandle,

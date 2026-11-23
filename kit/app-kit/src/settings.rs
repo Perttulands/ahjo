@@ -4,15 +4,15 @@
 //! `$XDG_CONFIG_HOME/ahjo/app.json`), or the file `AHJO_SWARM_CONFIG` names.
 //! A file that doesn't read is reported and set aside, never silently
 //! replaced; what it holds that this app does not know is kept as it reads.
-//! The running app watches the file: an edit made outside it applies at once
-//! (`Hub::watch`).
+//! The running app keeps it as a [`crate::settings_file::SettingsFile`]: an
+//! edit made outside it applies at once (`Hub::watch`).
 
 use ahjo_core::Error;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 use std::collections::BTreeMap;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 /// The node of the app's own environment, on its default port: a Windows
 /// node listens on 7301 so it can sit beside a WSL node on 7300.
@@ -108,36 +108,15 @@ pub fn path() -> Option<PathBuf> {
     Some(dir.join("app.json"))
 }
 
-impl Settings {
-    /// Reads the file; a missing one is the defaults. A broken one is moved
-    /// to `app.json.broken` and named in the returned notice.
-    pub fn load(path: &Path) -> (Self, Option<String>) {
-        let text = match std::fs::read_to_string(path) {
-            Ok(t) => t,
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return (Self::default(), None),
-            Err(e) => {
-                return (
-                    Self::default(),
-                    Some(format!("Settings could not be read: {e}")),
-                );
-            }
-        };
-        match Self::parse(&text) {
-            Some(s) => (s, None),
-            None => {
-                let aside = path.with_extension("json.broken");
-                let _ = std::fs::rename(path, &aside);
-                (
-                    Self::default(),
-                    Some(format!(
-                        "Settings did not read; kept as {}",
-                        aside.display()
-                    )),
-                )
-            }
-        }
-    }
+/// The settings Ahjo Swarm keeps on this device, as they read now: for
+/// an app of the kit that runs on its own (Desk, Brain) and follows
+/// Swarm's node, theme or size. None when there are none or they do not
+/// read; the file is only read.
+pub fn swarm() -> Option<Settings> {
+    Settings::parse(&std::fs::read_to_string(path()?).ok()?)
+}
 
+impl Settings {
     pub fn parse(text: &str) -> Option<Self> {
         serde_json::from_str(text).ok()
     }
@@ -186,22 +165,6 @@ impl Settings {
             section.insert(key.to_string(), value);
         }
     }
-
-    /// The file's text for these settings.
-    pub fn text(&self) -> String {
-        serde_json::to_string_pretty(self).expect("settings hold only JSON values")
-    }
-
-    /// Writes `text` through a temporary file, so a crash never leaves half
-    /// a file.
-    pub fn write(path: &Path, text: &str) -> std::io::Result<()> {
-        if let Some(dir) = path.parent() {
-            std::fs::create_dir_all(dir)?;
-        }
-        let tmp = path.with_extension("json.tmp");
-        std::fs::write(&tmp, text)?;
-        std::fs::rename(tmp, path)
-    }
 }
 
 #[cfg(test)]
@@ -239,20 +202,5 @@ mod tests {
         assert_eq!(again["font_size"], 16);
         assert_eq!(again["places"]["n"]["sessions"][0]["name"], "a");
         assert!(Settings::parse("[1]").is_none());
-    }
-
-    #[test]
-    fn a_broken_file_is_set_aside_not_lost() {
-        let dir = std::env::temp_dir().join(format!("ahjo-app-settings-{}", std::process::id()));
-        std::fs::create_dir_all(&dir).unwrap();
-        let p = dir.join("app.json");
-        std::fs::write(&p, "{not json").unwrap();
-        let (s, notice) = Settings::load(&p);
-        assert_eq!(s, Settings::default());
-        assert!(notice.unwrap().contains("app.json.broken"));
-        assert!(dir.join("app.json.broken").exists());
-        Settings::write(&p, &Settings::default().text()).unwrap();
-        assert_eq!(Settings::load(&p).0, Settings::default());
-        std::fs::remove_dir_all(&dir).unwrap();
     }
 }

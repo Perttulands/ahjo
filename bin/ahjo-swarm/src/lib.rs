@@ -59,7 +59,10 @@ fn migrate_page_preferences(path: &Path) -> std::io::Result<()> {
             }
         }
         if changed {
-            Settings::write(path, &settings.text())?;
+            ahjo_app_kit::settings_file::write(
+                path,
+                &ahjo_app_kit::settings_file::text(&settings),
+            )?;
         }
     }
     Ok(())

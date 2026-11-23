@@ -39,7 +39,7 @@ pub fn start(
     cx: &mut Context<Shell>,
 ) -> Shell {
     let (tx, rx) = async_channel::unbounded();
-    let hub = cx.new(|_| Hub::new(Net::start(), tx, settings));
+    let hub = cx.new(|cx| Hub::new(Net::start(), tx, settings, cx));
     hub.update(cx, |h, cx| h.apply_theme(cx));
     let weak = hub.downgrade();
     window

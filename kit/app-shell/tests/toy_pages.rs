@@ -7,7 +7,8 @@
 //! whose area every node turned off, has no tab; a fourth never has one.
 
 use ahjo_app_kit::chords::Chord;
-use ahjo_app_kit::host::{Layer, Request};
+use ahjo_app_kit::frame::Layer;
+use ahjo_app_kit::host::Request;
 use ahjo_app_kit::link::client::LinkState;
 use ahjo_app_kit::link::socket::Tap;
 use ahjo_app_kit::menu::MenuRow;
@@ -509,6 +510,8 @@ fn status(shell: &Entity<Shell>, cx: &mut VisualTestContext) -> String {
     shell.read_with(cx, |s, cx| {
         s.hub()
             .read(cx)
+            .frame
+            .read(cx)
             .status
             .as_ref()
             .map(|s| s.text.clone())
@@ -631,11 +634,13 @@ fn two_toy_pages_plug_in_through_their_host(cx: &mut TestAppContext) {
 
     // Its layer, on the one stack: Escape closes it and runs its dismiss.
     click(cx, "toy-layer");
-    assert!(shell.read_with(cx, |s, cx| !s.hub().read(cx).stack.is_empty()));
+    assert!(shell.read_with(cx, |s, cx| {
+        !s.hub().read(cx).frame.read(cx).stack.is_empty()
+    }));
     cx.simulate_keystrokes("escape");
     cx.run_until_parked();
     assert!(a.read_with(cx, |a, _| a.dismissed));
-    assert!(shell.read_with(cx, |s, cx| s.hub().read(cx).stack.is_empty()));
+    assert!(shell.read_with(cx, |s, cx| s.hub().read(cx).frame.read(cx).stack.is_empty()));
 
     // Opened beside Alpha by Beta, Alpha staying shown.
     click(cx, "toy-open");
@@ -888,7 +893,8 @@ fn an_agents_edit_to_app_json_reaches_the_page_and_the_apps_own_writes_do_not(
     let mut edited = in_app(cx);
     edited.set_value("toy-a", "loud", serde_json::json!(true));
     let at = Instant::now();
-    std::fs::write(&settings, edited.text()).expect("the agent's edit");
+    std::fs::write(&settings, ahjo_app_kit::settings_file::text(&edited))
+        .expect("the agent's edit");
     until(cx, "Alpha to hear the edit", |cx| {
         a.read_with(cx, |a, _| a.changed == 1)
     });
@@ -937,7 +943,14 @@ fn an_agents_edit_to_app_json_reaches_the_page_and_the_apps_own_writes_do_not(
         status(&shell, cx).contains("does not read")
     });
     assert!(shell.read_with(cx, |s, cx| {
-        s.hub().read(cx).status.as_ref().unwrap().failure
+        s.hub()
+            .read(cx)
+            .frame
+            .read(cx)
+            .status
+            .as_ref()
+            .unwrap()
+            .failure
     }));
     assert_eq!(
         in_app(cx).value("toy-a", "loud"),

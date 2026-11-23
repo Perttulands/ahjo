@@ -3,18 +3,17 @@
 //! chord was typed with.
 
 use crate::shell::Shell;
-use ahjo_app_kit::host::{Cover, Status};
-use ahjo_app_kit::hub::{Edge, SideOn, Surface, Toast};
+use ahjo_app_kit::frame::{self, Cover};
+use ahjo_app_kit::hub::{Edge, SideOn};
 use ahjo_app_kit::link::client::LinkState;
-use ahjo_app_kit::menu::{Menu, MenuRow, Pick};
-use ahjo_app_kit::popup::{self, Content, Outside, Popup};
-use ahjo_app_kit::theme::{self, Theme, alpha, motion, size, theme};
+use ahjo_app_kit::menu::MenuRow;
+use ahjo_app_kit::theme::{self, Theme, motion, size, theme};
 use ahjo_app_kit::widgets::kit::{GripEdge, Phase};
 use ahjo_app_kit::widgets::{boundary, kit, pane};
 use ahjo_app_kit::zoom::Zoom;
 use gpui::{
-    Animation, AnimationExt, AnyElement, Context, ElementId, MouseButton, MouseDownEvent, Window,
-    deferred, div, ease_out_quint, point, prelude::*, px,
+    AnyElement, Context, MouseButton, MouseDownEvent, Window, deferred, div, ease_out_quint, point,
+    prelude::*, px,
 };
 use std::time::{Duration, Instant};
 
@@ -28,13 +27,8 @@ const OWN_TABS_LEAST: f32 = 130.;
 const MORE: &str = "More";
 /// What follows the shown page's name when More's place carries it.
 const MORE_MARK: &str = " …";
-/// How long words that are not a failure stay up.
-const NOTICE_SHOWN_S: u64 = 8;
-/// The order of what draws over the page: the notices, then everything
-/// on the stack (each over what opened before it), then the keys a chord
-/// was typed with.
-const NOTICES: usize = 25;
-const STACK: usize = 40;
+/// The keys a chord was typed with draw over everything, the frame's
+/// notices and stack ([`frame::NOTICES`], [`frame::STACK`]) too.
 const ECHO: usize = 1000;
 /// What the leader says with keys off.
 pub(crate) const KEYS_OFF_HINT: &str =
@@ -280,97 +274,18 @@ impl Shell {
         self.hub.update(cx, |h, cx| {
             let on = on.unwrap_or(!h.settings.keys);
             h.settings.keys = on;
-            if on && h.status.as_ref().is_some_and(|s| s.text == KEYS_OFF_HINT) {
-                h.status = None;
+            let hint = h
+                .frame
+                .read(cx)
+                .status
+                .as_ref()
+                .filter(|s| s.text == KEYS_OFF_HINT);
+            if let Some(at) = hint.filter(|_| on).map(|s| s.at) {
+                h.withdraw(at, cx);
             }
             h.save(cx);
             h.toast(if on { "Shortcuts on" } else { "Shortcuts off" }, cx);
         });
-    }
-
-    /// What the app has to say, at the window's bottom right over the
-    /// page: the last report (a failure stays until it is closed or
-    /// replaced, other words go after a while) and a toast. Nothing when
-    /// all is well.
-    fn render_notices(&mut self, cx: &mut Context<Self>) -> Option<AnyElement> {
-        let t = theme(cx).clone();
-        let hub = self.hub.read(cx);
-        let status = hub.status.clone().filter(|s| {
-            s.failure
-                || s.at
-                    .elapsed()
-                    .is_ok_and(|age| age < Duration::from_secs(NOTICE_SHOWN_S))
-        });
-        let toast = hub.toast.as_ref().map(|toast| render_toast(&t, toast));
-        if let Some(s) = &status
-            && !s.failure
-            && self.status_expiry.as_ref().map(|(at, _)| *at) != Some(s.at)
-        {
-            let left = Duration::from_secs(NOTICE_SHOWN_S)
-                .saturating_sub(s.at.elapsed().unwrap_or_default());
-            let task = cx.spawn(async move |this, cx| {
-                cx.background_executor().timer(left).await;
-                let _ = this.update(cx, |_, cx| cx.notify());
-            });
-            self.status_expiry = Some((s.at, task));
-        }
-        if status.is_none() && toast.is_none() {
-            return None;
-        }
-        let mut stack = div()
-            .absolute()
-            .right(px(size::HEAD_PAD))
-            .bottom(px(size::HEAD_PAD))
-            .max_w(px(size::NOTICE))
-            .flex()
-            .flex_col()
-            .items_end()
-            .gap(px(size::HEAD_GAP));
-        if let Some(Status {
-            at,
-            text,
-            failure,
-            action,
-        }) = status
-        {
-            let mut notice = kit::panel(&t)
-                .id("status")
-                .px(px(size::HEAD_PAD))
-                .py(px(size::HEAD_GAP))
-                .flex()
-                .items_center()
-                .gap(px(size::HEAD_GAP))
-                .child(
-                    div()
-                        .id("status-text")
-                        .debug_selector(|| "status-text".into())
-                        .min_w_0()
-                        .text_color(if failure { t.error } else { t.text })
-                        .child(text),
-                );
-            if let Some((label, run)) = action {
-                notice = notice.child(
-                    kit::button(&t, "status-action", label, kit::Kind::Plain).on_click(
-                        move |_, window, cx| {
-                            let run = run.clone();
-                            window.defer(cx, move |window, cx| run(window, cx));
-                        },
-                    ),
-                );
-            }
-            if failure {
-                notice = notice.child(
-                    kit::button(&t, "status-close", "×", kit::Kind::Quiet)
-                        .tooltip(kit::tip("Close"))
-                        .on_click(cx.listener(move |s, _, _, cx| {
-                            s.hub.update(cx, |h, cx| h.withdraw(at, cx));
-                        })),
-                );
-            }
-            stack = stack.child(notice);
-        }
-        stack = stack.children(toast);
-        Some(deferred(stack).with_priority(NOTICES).into_any_element())
     }
 
     /// The page shown, inside its error boundary: a page that fails to
@@ -409,195 +324,6 @@ impl Shell {
         boundary::failed(&t, meta.title, &why, retry)
     }
 
-    /// What is on the stack over `cover`, bottom first, each over what
-    /// opened before it: the layers covering it, and with the window the
-    /// popups.
-    fn render_stack(
-        &mut self,
-        cover: Cover,
-        window: &Window,
-        cx: &mut Context<Self>,
-    ) -> Vec<AnyElement> {
-        let stack: Vec<Surface> = self.hub.read(cx).stack.iter().cloned().collect();
-        let mut out = vec![];
-        for (depth, s) in stack.into_iter().enumerate() {
-            match s {
-                Surface::Layer(l) if l.cover == cover => {
-                    let id = l.view.entity_id().as_u64() as usize;
-                    out.push(
-                        deferred(
-                            div().absolute().inset_0().child(l.view).with_animation(
-                                ("layer-in", id),
-                                Animation::new(Duration::from_millis(motion::PANEL_IN))
-                                    .with_easing(ease_out_quint()),
-                                |d, x| d.opacity(x),
-                            ),
-                        )
-                        .with_priority(STACK + depth)
-                        .into_any_element(),
-                    )
-                }
-                Surface::Popup(p) if cover == Cover::Window => {
-                    out.push(self.render_popup(depth, p, window, cx))
-                }
-                _ => {}
-            }
-        }
-        out
-    }
-
-    /// A popup beside what it was opened from ([`popup::beside`]), over a
-    /// cover that takes every press outside it: one that closes it, or one
-    /// that only keeps the press from what is under it.
-    fn render_popup(
-        &mut self,
-        depth: usize,
-        popup: Popup,
-        window: &Window,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        let id = popup.id();
-        let content = match &popup.content {
-            Content::Menu(menu) => self.render_menu(depth, menu, cx),
-            Content::View(view) => view.clone().into_any_element(),
-        };
-        let viewport = window.viewport_size();
-        let mut cover = div().absolute().inset_0().occlude();
-        if popup.outside == Outside::Close {
-            for button in [MouseButton::Left, MouseButton::Right] {
-                cover = cover.on_mouse_down(
-                    button,
-                    cx.listener(move |s, _, window, cx| s.press_outside(id, window, cx)),
-                );
-            }
-        }
-        deferred(
-            cover.child(
-                popup::beside(popup.spot, viewport).child(
-                    pane::scroll(id.element("popup"))
-                        .debug_selector(|| "popup".into())
-                        .occlude()
-                        .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
-                        .on_mouse_down(MouseButton::Right, |_, _, cx| cx.stop_propagation())
-                        // Never larger than the window it is kept inside: a
-                        // drawn popup gives way to it ([`popup::form`] keeps
-                        // its actions in view), and anything else taller
-                        // scrolls there.
-                        .max_w(viewport.width - px(2. * size::POPUP_EDGE))
-                        .max_h(viewport.height - px(2. * size::POPUP_EDGE))
-                        .child(content)
-                        .with_animation(
-                            id.element("popup-in"),
-                            Animation::new(Duration::from_millis(motion::PANEL_IN))
-                                .with_easing(ease_out_quint()),
-                            // A fade only: it stands where it will stay from
-                            // its first frame.
-                            |d, x| d.opacity(x),
-                        ),
-                ),
-            ),
-        )
-        .with_priority(STACK + depth)
-        .into_any_element()
-    }
-
-    /// A menu's rows.
-    fn render_menu(&mut self, depth: usize, menu: &Menu, cx: &mut Context<Self>) -> AnyElement {
-        let t = theme(cx).clone();
-        let mut list = kit::panel(&t)
-            .min_w(px(size::MENU))
-            .py(px(4.))
-            .flex()
-            .flex_col();
-        for (i, row) in menu.rows.iter().enumerate() {
-            if row.is_rule() {
-                list = list.child(div().my(px(4.)).child(kit::rule(&t)));
-                continue;
-            }
-            let armed = menu.armed == Some(i);
-            let keyed = menu.cursor == Some(i);
-            let label = if armed {
-                format!("{}? Click again", row.label)
-            } else {
-                row.label.clone()
-            };
-            let inert = row.inert();
-            let colour = if inert {
-                t.dim
-            } else if row.danger {
-                t.error
-            } else {
-                t.text
-            };
-            let line = div()
-                .h(px(size::ROW))
-                .flex()
-                .items_center()
-                .gap(px(12.))
-                .child(div().w(px(12.)).text_color(t.accent).child(if row.checked {
-                    "✓"
-                } else {
-                    ""
-                }))
-                .child({
-                    let name = format!("menu-label-{}", row.label);
-                    div().flex_1().debug_selector(move || name).child(label)
-                })
-                .children(
-                    row.chord
-                        .clone()
-                        .map(|c| div().text_size(px(size::SMALL)).text_color(t.dim).child(c)),
-                );
-            list = list.child(
-                div()
-                    .id(("menu", depth * 100 + i))
-                    .debug_selector(|| format!("menu-row-{i}"))
-                    .px(px(12.))
-                    .flex()
-                    .flex_col()
-                    .text_color(colour)
-                    .when(!inert, |d| {
-                        d.cursor_pointer().hover(|d| d.bg(t.accent_light()))
-                    })
-                    .when(keyed && !armed, |d| d.bg(t.accent_light()))
-                    .when(armed, |d| d.bg(alpha(t.error, 0.15)))
-                    .child(line)
-                    .children(row.hint.clone().map(|h| {
-                        div()
-                            .max_w(px(280.))
-                            .pl(px(24.))
-                            .pb(px(6.))
-                            .text_size(px(size::SMALL))
-                            .text_color(t.dim)
-                            .child(h)
-                    }))
-                    .on_click(cx.listener(move |s, _, window, cx| s.menu_pick(i, window, cx))),
-            );
-        }
-        list.into_any_element()
-    }
-
-    /// A click on row `i` of the menu on top, or Enter on its keyboard row.
-    pub(crate) fn menu_pick(&mut self, i: usize, window: &mut Window, cx: &mut Context<Self>) {
-        let pick = self.hub.update(cx, |h, cx| {
-            let pick = match h.stack.top_mut() {
-                Some(Surface::Popup(Popup {
-                    content: Content::Menu(m),
-                    ..
-                })) => m.pick(i),
-                _ => Pick::Nothing,
-            };
-            match pick {
-                Pick::Run(_) => h.close_menu(cx),
-                _ => cx.notify(),
-            }
-            pick
-        });
-        if let Pick::Run(run) = pick {
-            window.defer(cx, move |window, cx| run(window, cx));
-        }
-    }
-
     fn render_echo(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let t = theme(cx);
         let caps = self.echo.as_ref()?;
@@ -621,38 +347,6 @@ impl Shell {
             .with_priority(ECHO)
             .into_any_element(),
         )
-    }
-}
-
-/// A toast: a word that something happened, fading on its own.
-fn render_toast(t: &Theme, toast: &Toast) -> AnyElement {
-    let fade_at = Duration::from_millis(motion::TOAST_IN + motion::TOAST_SHOWN);
-    let leaving = toast.at.elapsed() >= fade_at;
-    let panel = kit::panel(t)
-        .id("toast")
-        .debug_selector(|| "toast".into())
-        .px(px(size::HEAD_PAD))
-        .py(px(size::HEAD_GAP))
-        .child(toast.text.clone());
-    // Each toast rises in, and fades as it goes.
-    let id = ElementId::Name(format!("toast-{:?}-{leaving}", toast.at).into());
-    if leaving {
-        panel
-            .with_animation(
-                id,
-                Animation::new(Duration::from_millis(motion::TOAST_OUT)),
-                |d, x| d.opacity(1. - x),
-            )
-            .into_any_element()
-    } else {
-        panel
-            .with_animation(
-                id,
-                Animation::new(Duration::from_millis(motion::TOAST_IN))
-                    .with_easing(ease_out_quint()),
-                |d, x| d.opacity(x).mt(px(motion::PANEL_DROP * (1. - x))),
-            )
-            .into_any_element()
     }
 }
 
@@ -906,6 +600,7 @@ impl Render for Shell {
         let side = self.render_side(&t, cx);
         let left = self.render_panel(Edge::Left, &t, window, cx);
         let right = self.render_panel(Edge::Right, &t, window, cx);
+        let frame = self.hub.read(cx).frame.clone();
         div()
             .id("shell")
             .key_context("Shell")
@@ -937,12 +632,12 @@ impl Render for Shell {
                             .relative()
                             .child(page)
                             .children(self.veils.page())
-                            .children(self.render_stack(Cover::Page, window, cx)),
+                            .children(frame::stack(&frame, Cover::Page, window, cx)),
                     )
                     .children(right),
             )
-            .children(self.render_notices(cx))
-            .children(self.render_stack(Cover::Window, window, cx))
+            .children(frame::notices(&frame, cx))
+            .children(frame::stack(&frame, Cover::Window, window, cx))
             .children(self.render_echo(cx))
             .children(self.veils.theme())
             .child(ahjo_app_kit::zoom::app_catch(self.app_wheel.clone(), {

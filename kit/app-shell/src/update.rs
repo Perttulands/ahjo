@@ -6,7 +6,7 @@
 //! closing the window does.
 
 use crate::shell::Shell;
-use ahjo_app_kit::host::Status;
+use ahjo_app_kit::frame::Status;
 use ahjo_app_kit::link::client::LinkState;
 use ahjo_app_kit::theme::Theme;
 use ahjo_app_kit::update::{Badge, State, Tone, Updates};

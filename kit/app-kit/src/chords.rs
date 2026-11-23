@@ -122,6 +122,21 @@ pub struct KeyLike {
     pub platform: bool,
 }
 
+impl KeyLike {
+    /// The key a key-down event reports.
+    pub fn of(e: &gpui::KeyDownEvent) -> Self {
+        let k = &e.keystroke;
+        Self {
+            key: k.key.clone(),
+            ch: k.key_char.clone(),
+            alt: k.modifiers.alt,
+            ctrl: k.modifiers.control,
+            shift: k.modifiers.shift,
+            platform: k.modifiers.platform,
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug)]
 pub struct Direct {
     key: &'static str,

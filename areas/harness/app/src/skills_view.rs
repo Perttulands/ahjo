@@ -133,7 +133,7 @@ impl HarnessPage {
     pub(crate) fn catalog_open(&mut self, path: String, cx: &mut Context<Self>) {
         if self.shape.editing {
             self.host.report(
-                ahjo_app_kit::host::Status::failure(
+                ahjo_app_kit::frame::Status::failure(
                     "Save or discard the open file first (Ctrl+S, Escape)",
                 ),
                 cx,

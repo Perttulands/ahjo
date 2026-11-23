@@ -13,7 +13,7 @@ fn the_listed_pages_mount_together(cx: &mut TestAppContext) {
     let cx = cx.add_empty_window();
     let (tx, _rx) = async_channel::unbounded();
     let mounted = cx.update(|window, cx| {
-        let hub = cx.new(|_| Hub::new(Net::start(), tx, None));
+        let hub = cx.new(|cx| Hub::new(Net::start(), tx, None, cx));
         mount(ahjo_app_swarm::PAGES, &hub, window, cx).map(|pages| (pages.len(), pages[0].meta.id))
     });
     // Each listed page, and the shell's Settings page.
@@ -37,7 +37,7 @@ fn a_settings_file_from_the_brain_tab_still_opens(cx: &mut TestAppContext) {
     let (tx, _rx) = async_channel::unbounded();
     let settings = path.clone();
     let (tabs, theme, brain) = cx.update(|window, cx| {
-        let hub = cx.new(|_| Hub::new(Net::start(), tx, Some(settings)));
+        let hub = cx.new(|cx| Hub::new(Net::start(), tx, Some(settings), cx));
         let pages = mount(ahjo_app_swarm::PAGES, &hub, window, cx).unwrap();
         let settings = &hub.read(cx).settings;
         (

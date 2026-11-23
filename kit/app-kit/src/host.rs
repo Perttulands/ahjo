@@ -4,8 +4,8 @@
 //! the page's own update is over.
 
 use crate::ask::Ask;
-use crate::chords::Run;
-use crate::hub::{Hub, HubEvent, Surface};
+use crate::frame::{AppFrame, Layer, Status, Surface};
+use crate::hub::{Hub, HubEvent};
 use crate::link::client::LinkState;
 use crate::link::http;
 use crate::link::socket::Tap;
@@ -14,9 +14,7 @@ use crate::popup::{Popup, PopupId, Spot};
 use crate::settings::Place;
 use ahjo_core::frame::{Kinds, owns};
 use ahjo_core::{Error, NodeId, TypedCommand};
-use gpui::{
-    AnyView, App, Context, Entity, FocusHandle, Pixels, Point, SystemNotification, Task, WeakEntity,
-};
+use gpui::{AnyView, App, Context, Entity, Pixels, Point, SystemNotification, Task, WeakEntity};
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 use std::collections::BTreeMap;
@@ -106,104 +104,6 @@ impl Answer {
     }
 }
 
-/// A line for the status line: what happened, whether it failed, and a
-/// button that acts on it.
-#[derive(Clone)]
-pub struct Status {
-    pub at: SystemTime,
-    pub text: String,
-    pub failure: bool,
-    pub action: Option<(String, Run)>,
-}
-
-impl Status {
-    pub fn new(text: impl Into<String>) -> Self {
-        Self {
-            at: SystemTime::now(),
-            text: text.into(),
-            failure: false,
-            action: None,
-        }
-    }
-
-    pub fn failure(text: impl Into<String>) -> Self {
-        Self {
-            failure: true,
-            ..Self::new(text)
-        }
-    }
-
-    pub fn action(
-        mut self,
-        label: impl Into<String>,
-        run: impl Fn(&mut gpui::Window, &mut App) + 'static,
-    ) -> Self {
-        self.action = Some((label.into(), Rc::new(run)));
-        self
-    }
-}
-
-/// Where a layer draws: over the page, under the tab bar and above the
-/// status line, or over the whole window.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Cover {
-    Page,
-    Window,
-}
-
-/// A page's layer on the one dismissal stack: what it draws, what has the
-/// keyboard while it is on top, and what closing it does.
-#[derive(Clone)]
-pub struct Layer {
-    pub name: String,
-    pub view: AnyView,
-    pub cover: Cover,
-    pub focus: Option<FocusHandle>,
-    pub dismiss: Option<Run>,
-    /// Escape is its content's (a terminal's program), so it does not
-    /// close it; it says on screen how it closes.
-    pub keeps_escape: bool,
-}
-
-impl Layer {
-    pub fn new(name: impl Into<String>, view: impl Into<AnyView>) -> Self {
-        Self {
-            name: name.into(),
-            view: view.into(),
-            cover: Cover::Page,
-            focus: None,
-            dismiss: None,
-            keeps_escape: false,
-        }
-    }
-
-    /// The keyboard is in this layer's focus.
-    pub fn has_keyboard(&self, window: &gpui::Window) -> bool {
-        self.focus.as_ref().is_some_and(|f| f.is_focused(window))
-    }
-
-    pub fn keeps_escape(mut self) -> Self {
-        self.keeps_escape = true;
-        self
-    }
-
-    pub fn cover(mut self, cover: Cover) -> Self {
-        self.cover = cover;
-        self
-    }
-
-    pub fn focus(mut self, focus: FocusHandle) -> Self {
-        self.focus = Some(focus);
-        self
-    }
-
-    /// What closing it does, by Escape, a click outside or a close.
-    pub fn on_dismiss(mut self, run: impl Fn(&mut gpui::Window, &mut App) + 'static) -> Self {
-        self.dismiss = Some(Rc::new(run));
-        self
-    }
-}
-
 impl Host {
     /// The shell's own handle on `hub`; pages get theirs from [`crate::mount`].
     pub fn new(hub: &Entity<Hub>) -> Self {
@@ -237,6 +137,23 @@ impl Host {
         f: impl FnOnce(&mut Hub, &mut Context<Hub>) -> R,
     ) -> Option<R> {
         self.hub.update(cx, f).ok()
+    }
+
+    /// The window's frame: its stack, status line and toast.
+    pub fn frame(&self, cx: &App) -> Option<Entity<AppFrame>> {
+        self.read(cx, |h| h.frame.clone())
+    }
+
+    fn read_frame<R>(&self, cx: &App, f: impl FnOnce(&AppFrame) -> R) -> Option<R> {
+        self.frame(cx).map(|frame| f(frame.read(cx)))
+    }
+
+    fn update_frame<R>(
+        &self,
+        cx: &mut App,
+        f: impl FnOnce(&mut AppFrame, &mut Context<AppFrame>) -> R,
+    ) -> Option<R> {
+        self.frame(cx).map(|frame| frame.update(cx, f))
     }
 
     /// The nodes that answer now, serving node first.
@@ -374,36 +291,37 @@ impl Host {
 
     /// Says something on the status line.
     pub fn report(&self, status: Status, cx: &mut App) {
-        self.update(cx, |h, cx| h.report(status, cx));
+        self.update_frame(cx, |f, cx| f.report(status, cx));
     }
 
     /// Takes back what was said on the status line `at` (its `Status::at`),
     /// once it is no longer true; anything said since stays.
     pub fn withdraw(&self, at: SystemTime, cx: &mut App) {
-        self.update(cx, |h, cx| h.withdraw(at, cx));
+        self.update_frame(cx, |f, cx| f.withdraw(at, cx));
     }
 
     /// A moment's word in the status line.
     pub fn toast(&self, text: &str, cx: &mut App) {
-        self.update(cx, |h, cx| h.toast(text, cx));
+        self.update_frame(cx, |f, cx| f.toast(text, cx));
     }
 
     /// Opens `popup` over the others; the shell places it, closes it and
     /// gives the keyboard back ([`crate::popup`]).
     pub fn popup(&self, popup: Popup, cx: &mut App) -> Option<PopupId> {
         let page = self.page;
-        self.update(cx, |h, cx| h.open_popup(page, popup, cx))
+        self.update_frame(cx, |f, cx| f.open_popup(page, popup, cx))
     }
 
     /// Closes popup `id`, running its dismiss, and whatever opened above
     /// it; nothing when it is already closed.
     pub fn close_popup(&self, id: PopupId, cx: &mut App) {
-        self.update(cx, |h, cx| h.close_popup(id, cx));
+        self.update_frame(cx, |f, cx| f.close_popup(id, cx));
     }
 
     /// Opens a menu beside `at`: the button pressed there, else the point.
     pub fn menu(&self, rows: Vec<MenuRow>, at: Point<Pixels>, cx: &mut App) {
-        self.popup(Popup::menu(Spot::at(at, cx), Menu::new(rows)), cx);
+        let page = self.page;
+        self.update_frame(cx, |f, cx| f.menu(page, rows, at, false, cx));
     }
 
     /// Opens a menu beside `at` with its danger row `armed` already: a key
@@ -416,53 +334,49 @@ impl Host {
     /// Opens a menu beside `at` for the keyboard: its first row it can pick
     /// is chosen, so Enter runs it and the arrows move on.
     pub fn menu_keyed(&self, rows: Vec<MenuRow>, at: Point<Pixels>, cx: &mut App) {
-        let menu = Menu::new(rows).keyed();
-        self.popup(Popup::menu(Spot::at(at, cx), menu), cx);
+        let page = self.page;
+        self.update_frame(cx, |f, cx| f.menu(page, rows, at, true, cx));
     }
 
     /// Asks before `row` runs, beside `spot`: its one row, a danger armed
     /// already, runs on a click or Enter; Escape or a press outside lets
     /// it go. Its hint says what is lost.
     pub fn confirm(&self, spot: Spot, row: MenuRow, cx: &mut App) -> Option<PopupId> {
-        let menu = Menu::new(vec![row.danger()]).armed(0);
-        self.popup(Popup::menu(spot, menu), cx)
+        let page = self.page;
+        self.update_frame(cx, |f, cx| f.confirm(page, spot, row, cx))
     }
 
     /// Opens this page's layer `layer.name` over the others; one of that
     /// name already open moves to the top.
     pub fn layer(&self, mut layer: Layer, cx: &mut App) {
         layer.name = self.layer_name(&layer.name);
-        self.update(cx, |h, cx| h.open(Surface::Layer(layer), cx));
+        self.update_frame(cx, |f, cx| f.open(Surface::Layer(layer), cx));
     }
 
     /// Closes this page's layer `name` and whatever opened above it.
     pub fn close_layer(&self, name: &str, cx: &mut App) {
         let kind = self.layer_name(name);
-        self.update(cx, |h, cx| h.close(&kind, cx));
+        self.update_frame(cx, |f, cx| f.close(&kind, cx));
     }
 
     pub fn is_open(&self, name: &str, cx: &App) -> bool {
         let kind = self.layer_name(name);
-        self.read(cx, |h| h.stack.is_open(&kind)).unwrap_or(false)
+        self.read_frame(cx, |f| f.stack.is_open(&kind))
+            .unwrap_or(false)
     }
 
     /// Something this page opened, other than a menu, is on the stack.
     pub fn has_open(&self, cx: &App) -> bool {
         let prefix = format!("{}/", self.page);
-        self.read(cx, |h| {
-            h.stack.iter().any(|s| {
-                !crate::layers::Layer::passing(s)
-                    && crate::layers::Layer::kind(s).starts_with(&prefix)
-            })
-        })
-        .unwrap_or(false)
+        self.read_frame(cx, |f| f.has_open(&prefix))
+            .unwrap_or(false)
     }
 
     /// Popup `id` is open and nothing, not even a menu, opened over it.
     pub fn is_popup_top(&self, id: PopupId, cx: &App) -> bool {
-        self.read(
+        self.read_frame(
             cx,
-            |h| matches!(h.stack.top(), Some(Surface::Popup(p)) if p.id() == id),
+            |f| matches!(f.stack.top(), Some(Surface::Popup(p)) if p.id() == id),
         )
         .unwrap_or(false)
     }
@@ -471,8 +385,8 @@ impl Host {
     /// a menu, opened over it.
     pub fn is_top(&self, name: &str, cx: &App) -> bool {
         let kind = self.layer_name(name);
-        self.read(cx, |h| {
-            h.stack
+        self.read_frame(cx, |f| {
+            f.stack
                 .top()
                 .is_some_and(|s| crate::layers::Layer::kind(s) == kind)
         })

@@ -225,7 +225,9 @@ fn drawn(cx: &mut VisualTestContext, selector: &'static str) -> Option<Bounds<Pi
 }
 
 fn open_popups(shell: &Entity<Shell>, cx: &mut VisualTestContext) -> usize {
-    shell.read_with(cx, |s, cx| s.hub().read(cx).stack.iter().count())
+    shell.read_with(cx, |s, cx| {
+        s.hub().read(cx).frame.read(cx).stack.iter().count()
+    })
 }
 
 fn start(cx: &mut TestAppContext) -> (Entity<Shell>, &mut VisualTestContext, Entity<Pad>) {

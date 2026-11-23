@@ -1230,7 +1230,7 @@ fn a_page_starts_a_session_in_a_folder_through_launch(cx: &mut TestAppContext) {
         .expect("the Sessions page answers it");
     cx.run_until_parked();
     let said = shell.read_with(cx, |s, cx| {
-        let status = s.hub().read(cx).status.clone();
+        let status = s.hub().read(cx).frame.read(cx).status.clone();
         status.map(|s| (s.text, s.failure))
     });
     assert_eq!(
@@ -2067,9 +2067,16 @@ fn reveal_session_shows_the_requested_session_and_pane(cx: &mut TestAppContext) 
     .unwrap();
     until(cx, "missing session reported", |cx| {
         shell.read_with(cx, |s, cx| {
-            s.hub().read(cx).status.as_ref().is_some_and(|status| {
-                status.failure && status.text == format!("no session missing on {}", running.node)
-            })
+            s.hub()
+                .read(cx)
+                .frame
+                .read(cx)
+                .status
+                .as_ref()
+                .is_some_and(|status| {
+                    status.failure
+                        && status.text == format!("no session missing on {}", running.node)
+                })
         })
     });
     assert_eq!(
@@ -2092,6 +2099,8 @@ fn reveal_session_shows_the_requested_session_and_pane(cx: &mut TestAppContext) 
     until(cx, "missing pane reported", |cx| {
         shell.read_with(cx, |s, cx| {
             s.hub()
+                .read(cx)
+                .frame
                 .read(cx)
                 .status
                 .as_ref()
@@ -2285,10 +2294,16 @@ fn late_launch_success_does_not_replace_a_newer_failure(cx: &mut TestAppContext)
     .unwrap();
     until(cx, "newer failure reported", |cx| {
         shell.read_with(cx, |s, cx| {
-            s.hub().read(cx).status.as_ref().is_some_and(|status| {
-                status.failure
-                    && status.text == "Could not start lost: its node is not in the fleet"
-            })
+            s.hub()
+                .read(cx)
+                .frame
+                .read(cx)
+                .status
+                .as_ref()
+                .is_some_and(|status| {
+                    status.failure
+                        && status.text == "Could not start lost: its node is not in the fleet"
+                })
         })
     });
     tmux(&running, &["wait-for", "-S", "launch-status-release"]);
@@ -2299,7 +2314,7 @@ fn late_launch_success_does_not_replace_a_newer_failure(cx: &mut TestAppContext)
         std::fs::read_to_string(running.fixture.join("runs"))
             .is_ok_and(|runs| runs.lines().count() == 1)
     });
-    let status = shell.read_with(cx, |s, cx| s.hub().read(cx).status.clone());
+    let status = shell.read_with(cx, |s, cx| s.hub().read(cx).frame.read(cx).status.clone());
     assert_eq!(
         status.map(|s| (s.text, s.failure)),
         Some((
@@ -4202,7 +4217,13 @@ fn launcher_completes_a_folder_outside_files_roots(cx: &mut TestAppContext) {
             break;
         }
         let status = shell.read_with(cx, |s, cx| {
-            s.hub().read(cx).status.as_ref().map(|s| s.text.clone())
+            s.hub()
+                .read(cx)
+                .frame
+                .read(cx)
+                .status
+                .as_ref()
+                .map(|s| s.text.clone())
         });
         assert!(
             Instant::now() < deadline,
@@ -4254,6 +4275,8 @@ fn a_failed_launch_is_not_offered_again(cx: &mut TestAppContext) {
     until(cx, "the node refused", |cx| {
         shell.read_with(cx, |s, cx| {
             s.hub()
+                .read(cx)
+                .frame
                 .read(cx)
                 .status
                 .as_ref()

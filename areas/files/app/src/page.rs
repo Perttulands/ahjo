@@ -6,7 +6,8 @@ use crate::{
 };
 use ahjo_app_kit::{
     Answers, Ask, Host, Page,
-    host::{Request, Status},
+    frame::Status,
+    host::Request,
     link::client::LinkState,
     menu::MenuRow,
     widgets::{

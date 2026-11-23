@@ -58,8 +58,9 @@ fn page(cx: &mut TestAppContext) -> (Entity<Issue>, &mut VisualTestContext) {
     });
     let (work, cx) = cx.add_window_view(|window, cx| {
         let (tx, _) = async_channel::unbounded();
-        let hub =
-            cx.new(|_| ahjo_app_kit::Hub::new(ahjo_app_kit::link::socket::Net::start(), tx, None));
+        let hub = cx.new(|cx| {
+            ahjo_app_kit::Hub::new(ahjo_app_kit::link::socket::Net::start(), tx, None, cx)
+        });
         Issue::new(ahjo_app_kit::Host::new(&hub), window, cx)
     });
     cx.update(|window, cx| {
@@ -519,8 +520,9 @@ fn the_time_page_draws_before_any_work_is_read(cx: &mut TestAppContext) {
     cx.update(ahjo_app_shell::prepare);
     let (work, cx) = cx.add_window_view(|window, cx| {
         let (tx, _) = async_channel::unbounded();
-        let hub =
-            cx.new(|_| ahjo_app_kit::Hub::new(ahjo_app_kit::link::socket::Net::start(), tx, None));
+        let hub = cx.new(|cx| {
+            ahjo_app_kit::Hub::new(ahjo_app_kit::link::socket::Net::start(), tx, None, cx)
+        });
         let mut w = Issue::new(ahjo_app_kit::Host::new(&hub), window, cx);
         w.set_layout(crate::Layout::Time, false, cx);
         w

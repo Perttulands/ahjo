@@ -34,7 +34,7 @@ pub fn build(host: Host, window: &mut gpui::Window, cx: &mut App) -> Mounted {
     let symbols = include_bytes!("../assets/fonts/chrote-term-symbols.ttf");
     if let Err(e) = cx.text_system().add_fonts(vec![symbols.as_slice().into()]) {
         let why = format!("The terminal's symbols font did not load: {e}");
-        host.report(ahjo_app_kit::host::Status::failure(why), cx);
+        host.report(ahjo_app_kit::frame::Status::failure(why), cx);
     }
     mount(host, window, cx, Terminals::new)
 }

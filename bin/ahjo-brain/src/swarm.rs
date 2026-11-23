@@ -18,19 +18,18 @@ const WAIT: Duration = Duration::from_secs(8);
 
 /// The node Ahjo Swarm on this device is set to.
 pub fn node() -> String {
-    settings::path()
-        .filter(|p| p.exists())
-        .map(|p| Settings::load(&p).0.node)
+    settings::swarm()
+        .map(|s| s.node)
         .unwrap_or_else(|| DEFAULT_NODE.to_string())
 }
 
 /// The other machines Ahjo Swarm knows, one a device, by name: each read
 /// through the first of its nodes with an address.
 pub fn places() -> Vec<Remote> {
-    let Some(path) = settings::path().filter(|p| p.exists()) else {
+    let Some(settings) = settings::swarm() else {
         return vec![];
     };
-    others(&Settings::load(&path).0, this_machine().as_deref())
+    others(&settings, this_machine().as_deref())
 }
 
 fn others(s: &Settings, here: Option<&str>) -> Vec<Remote> {

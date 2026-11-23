@@ -382,6 +382,8 @@ fn work_column_and_terminal_links_open_cards_and_hand_off(cx: &mut TestAppContex
                 shell
                     .hub()
                     .read(cx)
+                    .frame
+                    .read(cx)
                     .status
                     .as_ref()
                     .map(|s| (s.text.clone(), s.failure))

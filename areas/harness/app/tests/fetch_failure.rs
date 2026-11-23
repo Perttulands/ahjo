@@ -142,6 +142,8 @@ fn failed_fetch_is_reported_once_without_marking_available_harnesses_broken(
         shell.read_with(cx, |shell, cx| shell
             .hub()
             .read(cx)
+            .frame
+            .read(cx)
             .status
             .as_ref()
             .is_none_or(|status| !status.text.contains("could not read Username"))),

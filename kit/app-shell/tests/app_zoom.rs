@@ -92,8 +92,9 @@ fn ui(cx: &mut VisualTestContext) -> f32 {
 
 fn toast(shell: &Entity<Shell>, cx: &mut VisualTestContext) -> String {
     shell.read_with(cx, |s, cx| {
-        let hub = s.hub().read(cx);
-        hub.toast
+        let frame = s.hub().read(cx).frame.read(cx);
+        frame
+            .toast
             .as_ref()
             .map(|t| t.text.clone())
             .unwrap_or_default()
@@ -189,7 +190,7 @@ fn a_size_kept_is_drawn_from_the_start(cx: &mut TestAppContext) {
         size: 130,
         ..Default::default()
     };
-    std::fs::write(&settings, kept.text()).expect("the kept settings");
+    std::fs::write(&settings, ahjo_app_kit::settings_file::text(&kept)).expect("the kept settings");
     let (shell, cx) = start(settings.clone(), cx);
     cx.run_until_parked();
     assert_eq!((size(&shell, cx), ui(cx)), (130, 1.3));

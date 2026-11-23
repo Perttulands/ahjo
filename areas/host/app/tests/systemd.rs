@@ -167,6 +167,8 @@ fn disposable_systemd_service_and_host_health_journey(cx: &mut TestAppContext) {
         shell.read_with(cx, |s, cx| {
             s.hub()
                 .read(cx)
+                .frame
+                .read(cx)
                 .status
                 .as_ref()
                 .is_some_and(|v| v.text.contains("restarted"))
@@ -252,9 +254,9 @@ fn disposable_systemd_service_and_host_health_journey(cx: &mut TestAppContext) {
         cx.debug_bounds(config_row).is_some()
     });
     let settings = temp.join("app.json");
-    let mut edited = shell.read_with(cx, |s, cx| s.hub().read(cx).settings.clone());
+    let mut edited = shell.read_with(cx, |s, cx| (*s.hub().read(cx).settings).clone());
     edited.keys = false;
-    std::fs::write(&settings, edited.text()).unwrap();
+    std::fs::write(&settings, ahjo_app_kit::settings_file::text(&edited)).unwrap();
     until(cx, "external settings edit", |cx| {
         shell.read_with(cx, |s, cx| !s.hub().read(cx).settings.keys)
     });

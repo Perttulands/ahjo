@@ -1,5 +1,6 @@
 //! The state the shell and every page share: the link to the nodes, the
-//! settings, the status line and toast, and the one stack of layers. Pages
+//! settings, and the window's frame ([`AppFrame`]: the status line and
+//! toast, and the one stack of popups and layers). Pages
 //! reach it through their [`Host`](crate::Host); the shell holds it and
 //! hears its [`HubEvent`]s. The hub never calls a page, so a page may use
 //! its Host from inside its own update.
@@ -7,84 +8,25 @@
 use crate::ask::{Answers, Ask};
 use crate::chords::Run;
 use crate::clock::hhmm;
-use crate::host::{Layer, Node, Status};
-use crate::layers::{self, Stack};
+use crate::frame::{AppFrame, Status};
+use crate::host::Node;
 use crate::link::client::{LinkState, Notice};
 use crate::link::devices;
 use crate::link::fleet::Fleet;
 use crate::link::socket::{Event, Net};
-use crate::popup::{Popup, PopupId};
 use crate::settings::Settings;
-use crate::theme::{Direction, Theme, motion};
+use crate::settings_file::{self, KeepsSettings, SettingsFile};
+use crate::theme::{Direction, Theme};
 use ahjo_core::{Error, NodeId};
 use gpui::{
     AnyEntity, AnyView, AnyWeakEntity, App, AppContext, Context, Entity, EventEmitter,
-    SystemNotification, Task,
+    SystemNotification,
 };
 use std::any::{TypeId, type_name};
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::PathBuf;
 use std::rc::Rc;
-use std::time::{Duration, Instant, SystemTime};
-
-pub struct Toast {
-    pub text: String,
-    pub at: Instant,
-}
-
-/// What is on the dismissal stack: a popup (a menu among them), or a
-/// layer over the page or the window.
-#[derive(Clone)]
-pub enum Surface {
-    Popup(Popup),
-    Layer(Layer),
-}
-
-impl Surface {
-    /// Escape closes it when it is on top; a layer that keeps Escape for
-    /// its content does not close on it.
-    pub fn escape_closes(&self) -> bool {
-        match self {
-            Surface::Popup(_) => true,
-            Surface::Layer(l) => !l.keeps_escape,
-        }
-    }
-
-    /// The keyboard is in it.
-    pub fn has_keyboard(&self, window: &gpui::Window, cx: &App) -> bool {
-        match self {
-            Surface::Popup(p) => p.has_keyboard(window, cx),
-            Surface::Layer(l) => l.has_keyboard(window),
-        }
-    }
-
-    /// What has the keyboard while it is on top.
-    pub fn focus(&self) -> Option<&gpui::FocusHandle> {
-        match self {
-            Surface::Popup(p) => p.focus.as_ref(),
-            Surface::Layer(l) => l.focus.as_ref(),
-        }
-    }
-
-    pub fn dismiss(&self) -> Option<&Run> {
-        match self {
-            Surface::Popup(p) => p.dismiss.as_ref(),
-            Surface::Layer(l) => l.dismiss.as_ref(),
-        }
-    }
-}
-
-impl layers::Layer for Surface {
-    fn kind(&self) -> &str {
-        match self {
-            Surface::Popup(p) => &p.name,
-            Surface::Layer(l) => &l.name,
-        }
-    }
-    fn passing(&self) -> bool {
-        matches!(self, Surface::Popup(p) if p.is_menu())
-    }
-}
+use std::time::SystemTime;
 
 /// The pages a page's section of the side panel shows on.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -145,9 +87,6 @@ pub enum HubEvent {
     },
     /// Show this page.
     Show(&'static str),
-    /// The stack changed: the keyboard goes to the top surface that takes
-    /// it, or back to where it was, and what closed runs its dismiss.
-    Layers { closed: Vec<Surface> },
     /// A setting page `page` declares was changed for it.
     SettingChanged(&'static str),
     /// `app.json` was edited outside the app and read again: these pages'
@@ -166,24 +105,10 @@ pub enum HubEvent {
 
 pub struct Hub {
     pub fleet: Fleet,
-    pub settings: Settings,
-    settings_path: Option<PathBuf>,
-    save_task: Option<Task<()>>,
-    /// The file's text as the app last wrote or read it: an event that
-    /// finds it so is the app's own write.
-    known: Option<String>,
-    /// The app is writing the file: what is there until it is done is not
-    /// an edit.
-    writing: bool,
-    /// Watches the settings' folder while the hub lives.
-    watcher: Option<notify::RecommendedWatcher>,
-    watch_task: Option<Task<()>>,
-    pub status: Option<Status>,
-    pub toast: Option<Toast>,
-    toast_task: Option<Task<()>>,
-    pub stack: Stack<Surface>,
-    /// The number the next popup opened is known by.
-    next_popup: u64,
+    /// `app.json`, as the app holds it.
+    pub settings: SettingsFile<Settings>,
+    /// The window's stack, status line and toast.
+    pub frame: Entity<AppFrame>,
     /// The asks each page answers, by page id.
     answers: Vec<(&'static str, &'static [Answers])>,
     /// Nodes whose link is open, as last tracked.
@@ -239,28 +164,25 @@ impl Hub {
         net: Net,
         events: async_channel::Sender<Event>,
         settings_path: Option<PathBuf>,
+        cx: &mut Context<Self>,
     ) -> Self {
-        let (settings, notice) = match &settings_path {
-            Some(p) => Settings::load(p),
-            None => (
-                Settings::default(),
-                Some("No config folder; settings will not be kept.".into()),
-            ),
+        let notice = match &settings_path {
+            None => Some("No config folder; settings will not be kept.".to_string()),
+            Some(_) => None,
         };
+        let (settings, broken) = SettingsFile::load(settings_path);
+        let notice = notice.or(broken.map(|e| e.message));
+        let frame = cx.new(|cx| {
+            let mut frame = AppFrame::default();
+            if let Some(notice) = notice {
+                frame.report(Status::failure(notice), cx);
+            }
+            frame
+        });
         Self {
             fleet: Fleet::new(net, events),
             settings,
-            settings_path,
-            save_task: None,
-            known: None,
-            writing: false,
-            watcher: None,
-            watch_task: None,
-            status: notice.map(Status::failure),
-            toast: None,
-            toast_task: None,
-            stack: Stack::default(),
-            next_popup: 1,
+            frame,
             answers: vec![],
             heard: HashSet::new(),
             away: HashSet::new(),
@@ -356,10 +278,13 @@ impl Hub {
         if was != here.state && here.state == LinkState::Refused {
             let why = here.reason.clone().unwrap_or_default();
             let (label, run) = Self::reconnect(cx);
-            self.status = Some(Status {
-                action: Some((label, run)),
-                ..Status::failure(why)
-            });
+            self.report(
+                Status {
+                    action: Some((label, run)),
+                    ..Status::failure(why)
+                },
+                cx,
+            );
         }
         cx.notify();
     }
@@ -380,7 +305,7 @@ impl Hub {
                     .map(|p| format!("{} ({})", p.device, p.environment))
                     .unwrap_or(through);
                 let text = format!("{} is away; trying {name}", self.home_name());
-                self.status = Some(Status::failure(text));
+                self.report(Status::failure(text), cx);
             }
             Notice::Opened if Some(node.as_str()) != self.fleet.here_id() => {}
             Notice::Opened => {
@@ -392,12 +317,18 @@ impl Hub {
                         }
                         // Connected as asked: nothing to say, unless it
                         // follows a failure the operator saw.
-                        None if self.status.as_ref().is_some_and(|s| s.failure) => {
+                        None if self
+                            .frame
+                            .read(cx)
+                            .status
+                            .as_ref()
+                            .is_some_and(|s| s.failure) =>
+                        {
                             format!("Connected to {to}")
                         }
                         None => return,
                     };
-                    self.status = Some(Status::new(text));
+                    self.report(Status::new(text), cx);
                 }
             }
         }
@@ -522,259 +453,40 @@ impl Hub {
             if serving.as_deref() == Some(device.as_str()) {
                 status.action = Some(Self::reconnect(cx));
             }
-            self.status = Some(status);
+            self.report(status, cx);
             self.away.insert(device);
         }
         for device in came {
             if self.away.remove(&device) && serving.as_deref() != Some(device.as_str()) {
-                self.status = Some(Status::new(format!("{device} is back")));
+                self.report(Status::new(format!("{device} is back")), cx);
             }
         }
     }
 
+    /// Says something on the status line.
     pub fn report(&mut self, status: Status, cx: &mut Context<Self>) {
-        self.status = Some(status);
-        cx.notify();
+        self.frame.update(cx, |f, cx| f.report(status, cx));
     }
 
     /// Takes back the status said `at`, if nothing has replaced it.
     pub fn withdraw(&mut self, at: SystemTime, cx: &mut Context<Self>) {
-        if self.status.as_ref().is_some_and(|s| s.at == at) {
-            self.status = None;
-            cx.notify();
-        }
+        self.frame.update(cx, |f, cx| f.withdraw(at, cx));
     }
 
+    /// A moment's word.
     pub fn toast(&mut self, text: &str, cx: &mut Context<Self>) {
-        let at = Instant::now();
-        self.toast = Some(Toast {
-            text: text.to_string(),
-            at,
-        });
-        self.toast_task = Some(cx.spawn(async move |this, cx| {
-            // Two wakes: one to start fading, one to go.
-            cx.background_executor()
-                .timer(Duration::from_millis(
-                    motion::TOAST_IN + motion::TOAST_SHOWN,
-                ))
-                .await;
-            let _ = this.update(cx, |_, cx| cx.notify());
-            cx.background_executor()
-                .timer(Duration::from_millis(motion::TOAST_OUT))
-                .await;
-            let _ = this.update(cx, |h, cx| {
-                if h.toast.as_ref().is_some_and(|t| t.at == at) {
-                    h.toast = None;
-                }
-                cx.notify();
-            });
-        }));
-        cx.notify();
+        self.frame.update(cx, |f, cx| f.toast(text, cx));
     }
 
     /// Writes the settings soon: a burst of changes is one write.
     pub fn save(&mut self, cx: &mut Context<Self>) {
-        let Some(path) = self.settings_path.clone() else {
-            return;
-        };
-        self.save_task = Some(cx.spawn(async move |this, cx| {
-            cx.background_executor()
-                .timer(Duration::from_millis(250))
-                .await;
-            let Ok(text) = this.update(cx, |h, _| {
-                let text = h.settings.text();
-                h.known = Some(text.clone());
-                h.writing = true;
-                text
-            }) else {
-                return;
-            };
-            let saved = cx
-                .background_executor()
-                .spawn(async move { Settings::write(&path, &text) })
-                .await;
-            let _ = this.update(cx, |h, _| h.writing = false);
-            if let Err(e) = saved {
-                let _ = this.update(cx, |h, cx| {
-                    h.report(
-                        Status::failure(format!("Settings could not be saved: {e}")),
-                        cx,
-                    );
-                });
-            }
-        }));
+        settings_file::save(self, cx);
     }
 
     /// Reads the settings again whenever their file changes on disk, as an
-    /// agent edits it. Only the file's own events wake it.
+    /// agent edits it.
     pub fn watch(&mut self, cx: &mut Context<Self>) {
-        use notify::Watcher;
-        let Some(path) = self.settings_path.clone() else {
-            return;
-        };
-        let (Some(dir), Some(name)) = (path.parent(), path.file_name()) else {
-            return;
-        };
-        let name = name.to_os_string();
-        // One pending wake is enough: the reload reads the file as it is.
-        let (tx, rx) = async_channel::bounded::<()>(1);
-        let watched = std::fs::create_dir_all(dir)
-            .map_err(notify::Error::io)
-            .and_then(|_| {
-                let mut w =
-                    notify::recommended_watcher(move |ev: notify::Result<notify::Event>| {
-                        // Reading the file is an event too: only a change wakes it.
-                        let changed = |ev: &notify::Event| {
-                            !ev.kind.is_access()
-                                && ev.paths.iter().any(|p| p.file_name() == Some(&name))
-                        };
-                        if ev.is_ok_and(|ev| changed(&ev)) {
-                            let _ = tx.try_send(());
-                        }
-                    })?;
-                w.watch(dir, notify::RecursiveMode::NonRecursive)?;
-                Ok(w)
-            });
-        match watched {
-            Ok(w) => self.watcher = Some(w),
-            Err(e) => {
-                let text = format!(
-                    "{} is not watched ({e}); edits to it apply at the next start",
-                    path.display()
-                );
-                self.report(Status::failure(text), cx);
-                return;
-            }
-        }
-        self.watch_task = Some(cx.spawn(async move |this, cx| {
-            while rx.recv().await.is_ok() {
-                if this.update(cx, |h, cx| h.reload(cx)).is_err() {
-                    break;
-                }
-            }
-        }));
-    }
-
-    /// Reads the settings file again. An edit made outside the app replaces
-    /// the settings: the node is dialled if it changed and every page whose
-    /// section changed hears it. A file that does not read is reported and
-    /// the settings stay as they were.
-    fn reload(&mut self, cx: &mut Context<Self>) {
-        let Some(path) = self.settings_path.clone().filter(|_| !self.writing) else {
-            return;
-        };
-        let text = match std::fs::read_to_string(&path) {
-            Ok(text) => text,
-            // Gone, or between a write and its rename: nothing to read.
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return,
-            Err(e) => {
-                let text = format!("{} could not be read: {e}", path.display());
-                return self.report(Status::failure(text), cx);
-            }
-        };
-        if self.known.as_deref() == Some(text.as_str()) {
-            return;
-        }
-        let new: Settings = match serde_json::from_str(&text) {
-            Ok(new) => new,
-            Err(e) => {
-                let text = format!(
-                    "{} does not read ({e}); the settings stay as they were",
-                    path.display()
-                );
-                return self.report(Status::failure(text), cx);
-            }
-        };
-        self.known = Some(text);
-        if new == self.settings {
-            return;
-        }
-        let old = std::mem::replace(&mut self.settings, new);
-        let changed: Vec<&'static str> = self
-            .answers
-            .iter()
-            .map(|(id, _)| *id)
-            .filter(|id| old.sections.get(*id) != self.settings.sections.get(*id))
-            .collect();
-        if old.node != self.settings.node {
-            self.connect(cx);
-        }
-        if old.theme != self.settings.theme {
-            self.apply_theme(cx);
-        }
-        cx.emit(HubEvent::SettingsReloaded(changed));
-        self.report(
-            Status::new(format!("Settings read again from {}", path.display())),
-            cx,
-        );
-    }
-
-    /// Opens a surface over the others.
-    pub fn open(&mut self, s: Surface, cx: &mut Context<Self>) {
-        let closed: Vec<Surface> = self
-            .stack
-            .iter()
-            .filter(|x| layers::Layer::passing(*x))
-            .cloned()
-            .collect();
-        self.stack.open(s);
-        cx.emit(HubEvent::Layers { closed });
-        cx.notify();
-    }
-
-    /// Closes the surface of this kind and whatever opened above it.
-    pub fn close(&mut self, kind: &str, cx: &mut Context<Self>) {
-        let closed = self.stack.close(kind);
-        if !closed.is_empty() {
-            cx.emit(HubEvent::Layers { closed });
-            cx.notify();
-        }
-    }
-
-    /// Opens `popup` over the others, named `<page>/popup/<n>`.
-    pub fn open_popup(&mut self, page: &str, mut popup: Popup, cx: &mut Context<Self>) -> PopupId {
-        let id = PopupId(self.next_popup);
-        self.next_popup += 1;
-        popup.id = id;
-        popup.name = format!("{page}/popup/{}", id.0);
-        self.open(Surface::Popup(popup), cx);
-        id
-    }
-
-    /// Closes popup `id` and whatever opened above it, if it is open.
-    pub fn close_popup(&mut self, id: PopupId, cx: &mut Context<Self>) {
-        if let Some(name) = self.popup(id).map(|p| p.name.clone()) {
-            self.close(&name, cx);
-        }
-    }
-
-    /// Popup `id`, while it is open.
-    pub fn popup(&self, id: PopupId) -> Option<&Popup> {
-        self.stack.iter().find_map(|s| match s {
-            Surface::Popup(p) if p.id == id => Some(p),
-            _ => None,
-        })
-    }
-
-    /// Closes the open menu, if one is.
-    pub fn close_menu(&mut self, cx: &mut Context<Self>) {
-        let menu = self.stack.iter().find_map(|s| match s {
-            Surface::Popup(p) if p.is_menu() => Some(p.name.clone()),
-            _ => None,
-        });
-        if let Some(name) = menu {
-            self.close(&name, cx);
-        }
-    }
-
-    /// Escape: the top surface closes. False when nothing was open.
-    pub fn dismiss(&mut self, cx: &mut Context<Self>) -> bool {
-        let Some(top) = self.stack.dismiss() else {
-            return false;
-        };
-        cx.emit(HubEvent::Layers { closed: vec![top] });
-        cx.notify();
-        true
+        settings_file::watch(self, cx);
     }
 
     /// The read model `T`, made empty by whichever page reaches it first.
@@ -1031,5 +743,42 @@ impl Hub {
             .filter(|a| hellos.iter().all(|h| h.off.contains(a)))
             .cloned()
             .collect()
+    }
+}
+
+impl KeepsSettings for Hub {
+    type Value = Settings;
+
+    fn settings_file(&mut self) -> &mut SettingsFile<Settings> {
+        &mut self.settings
+    }
+
+    fn settings_failed(&mut self, error: Error, cx: &mut Context<Self>) {
+        self.report(Status::failure(error.message), cx);
+    }
+
+    /// An edit made outside the app replaced the settings: the node is
+    /// dialled if it changed, the theme drawn, and every page whose
+    /// section changed hears it.
+    fn settings_reloaded(&mut self, old: Settings, cx: &mut Context<Self>) {
+        let changed: Vec<&'static str> = self
+            .answers
+            .iter()
+            .map(|(id, _)| *id)
+            .filter(|id| old.sections.get(*id) != self.settings.sections.get(*id))
+            .collect();
+        if old.node != self.settings.node {
+            self.connect(cx);
+        }
+        if old.theme != self.settings.theme {
+            self.apply_theme(cx);
+        }
+        cx.emit(HubEvent::SettingsReloaded(changed));
+        let path = self
+            .settings
+            .path()
+            .map(|p| p.display().to_string())
+            .unwrap_or_default();
+        self.report(Status::new(format!("Settings read again from {path}")), cx);
     }
 }

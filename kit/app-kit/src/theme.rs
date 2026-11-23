@@ -595,10 +595,7 @@ fn picture(format: ImageFormat, bytes: &[u8]) -> Arc<Image> {
 /// or settings that do not read, give the default; so does a theme no
 /// direction is called, with a notice that says so. The file is only read.
 pub fn chosen() -> (Theme, Option<String>) {
-    let settings = crate::settings::path()
-        .and_then(|p| std::fs::read_to_string(p).ok())
-        .and_then(|text| crate::settings::Settings::parse(&text));
-    let Some(settings) = settings else {
+    let Some(settings) = crate::settings::swarm() else {
         return (Theme::default(), None);
     };
     match Direction::from_key(&settings.theme) {
@@ -618,10 +615,7 @@ pub fn chosen() -> (Theme, Option<String>) {
 /// [`chosen`] reads the theme, for a window of the kit that runs on its own:
 /// what its window's measures are multiplied by.
 pub fn chosen_scale() -> f32 {
-    let size = crate::settings::path()
-        .and_then(|p| std::fs::read_to_string(p).ok())
-        .and_then(|text| crate::settings::Settings::parse(&text))
-        .map_or(crate::zoom::app::DEFAULT, |s| s.size);
+    let size = crate::settings::swarm().map_or(crate::zoom::app::DEFAULT, |s| s.size);
     crate::zoom::app::scale(size)
 }
 

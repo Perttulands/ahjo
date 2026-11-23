@@ -126,6 +126,8 @@ fn status(shell: &gpui::Entity<ahjo_app_shell::Shell>, cx: &mut VisualTestContex
     shell.read_with(cx, |s, cx| {
         s.hub()
             .read(cx)
+            .frame
+            .read(cx)
             .status
             .as_ref()
             .map(|s| s.text.clone())

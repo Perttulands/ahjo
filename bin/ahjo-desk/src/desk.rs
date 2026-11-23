@@ -122,9 +122,7 @@ impl Config {
         if !self.node.trim().is_empty() {
             return self.node.trim().trim_end_matches('/').to_string();
         }
-        ahjo_app_kit::settings::path()
-            .and_then(|p| std::fs::read_to_string(p).ok())
-            .and_then(|t| ahjo_app_kit::settings::Settings::parse(&t))
+        ahjo_app_kit::settings::swarm()
             .map(|s| s.node)
             .unwrap_or_else(|| ahjo_app_kit::settings::DEFAULT_NODE.into())
             .trim_end_matches('/')

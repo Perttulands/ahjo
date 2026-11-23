@@ -152,6 +152,8 @@ fn reports_file_to_beads_and_github_with_context_and_escape_discards(cx: &mut Te
         shell.read_with(cx, |s, cx| {
             s.hub()
                 .read(cx)
+                .frame
+                .read(cx)
                 .status
                 .as_ref()
                 .is_some_and(|s| s.text.starts_with("Filed reporttest-"))
@@ -183,6 +185,8 @@ fn reports_file_to_beads_and_github_with_context_and_escape_discards(cx: &mut Te
     until(cx, "GitHub filed", |cx| {
         shell.read_with(cx, |s, cx| {
             s.hub()
+                .read(cx)
+                .frame
                 .read(cx)
                 .status
                 .as_ref()

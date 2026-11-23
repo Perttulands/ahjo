@@ -31,7 +31,7 @@ mod tokens {
     pub const SKILL_W: f32 = 180.;
     pub const KEY_W: f32 = 220.;
 }
-use ahjo_app_kit::host::Status;
+use ahjo_app_kit::frame::Status;
 use ahjo_app_kit::link::client::LinkState;
 use ahjo_app_kit::theme::Theme;
 use ahjo_app_kit::widgets::kit::{self, Kind};

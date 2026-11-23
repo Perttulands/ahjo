@@ -1,5 +1,6 @@
 //! Native file picking with an in-app fallback when the desktop has no picker.
-use crate::host::{Host, Layer};
+use crate::frame::Layer;
+use crate::host::Host;
 use crate::theme::{board, size, theme};
 use crate::widgets::field::{FieldEvent, TextField};
 use crate::widgets::kit::{self, Kind};
@@ -335,7 +336,7 @@ mod tests {
             crate::widgets::field::bind_keys(cx);
         });
         let (tx, _rx) = async_channel::unbounded();
-        let hub = cx.new(|_| crate::Hub::new(crate::link::socket::Net::start(), tx, None));
+        let hub = cx.new(|cx| crate::Hub::new(crate::link::socket::Net::start(), tx, None, cx));
         let host = Host::new(&hub);
         let received = Rc::new(RefCell::new(Vec::new()));
         let selected = received.clone();

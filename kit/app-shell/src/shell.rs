@@ -8,10 +8,9 @@ use crate::keys::KeysPanel;
 use crate::settings_page::SettingsPage;
 use crate::view_control::{self, ViewControl};
 use ahjo_app_kit::chords::{self, Chord, KeyLike, Keyboard, Run, Verdict};
-use ahjo_app_kit::host::{Cover, Layer};
-use ahjo_app_kit::hub::{HubEvent, Surface};
+use ahjo_app_kit::frame::{self, Cover, FrameEvent, Layer};
+use ahjo_app_kit::hub::HubEvent;
 use ahjo_app_kit::page::Meta;
-use ahjo_app_kit::popup::{Content, Popup, PopupId};
 use ahjo_app_kit::{Build, Error, Host, Hub, Mounted, declared, mount as mount_page};
 use ahjo_core::frame::{overlap, reserved};
 use gpui::{
@@ -19,24 +18,6 @@ use gpui::{
 };
 use std::collections::{HashMap, HashSet};
 use std::time::{Duration, Instant};
-
-/// Why the shell gives the keyboard out again.
-#[derive(Clone)]
-enum Refocus {
-    /// Surfaces opened or closed: whether a closed one's dismiss moved the
-    /// keyboard itself, whether the keyboard was in one that closed, and
-    /// where it was before a closed popup opened.
-    Layers {
-        moved: bool,
-        lost: bool,
-        back: Option<FocusHandle>,
-    },
-    /// Another page shows.
-    PageShown,
-    /// The panel was put away, or what it showed went, with the keyboard
-    /// in it.
-    PanelGone,
-}
 
 /// How long the keys a chord was typed with stay on screen.
 const ECHO: Duration = Duration::from_millis(900);
@@ -63,8 +44,6 @@ pub struct Shell {
     /// Each page's own chord, made once from its key: the page, the
     /// leader's key, the Alt key and whether Shift goes with Alt.
     page_keys: Vec<(usize, &'static str, &'static str, bool)>,
-    /// The status line's next redraw, when its words go stale.
-    pub(crate) status_expiry: Option<(std::time::SystemTime, Task<()>)>,
     /// The fades after a page or a theme is chosen.
     pub(crate) veils: crate::veil::Veils,
     /// The wheel's part of a step toward the app's zoom.
@@ -197,12 +176,15 @@ impl Shell {
         cx: &mut Context<Self>,
     ) -> Self {
         let host = Host::new(&hub);
+        let frame = hub.read(cx).frame.clone();
         let mut subscriptions = vec![
             cx.subscribe_in(&hub, window, Self::hub_event),
+            cx.subscribe_in(&frame, window, Self::frame_event),
             cx.observe_in(&hub, window, |s, _, window, cx| {
                 s.apply_size(window, cx);
                 cx.notify();
             }),
+            cx.observe(&frame, |_, _, cx| cx.notify()),
         ];
         let me = cx.entity_id();
         subscriptions.extend(pages.iter().map(|p| p.redraws(me, cx)));
@@ -236,7 +218,6 @@ impl Shell {
             channels_on: HashSet::new(),
             leaving: false,
             page_keys,
-            status_expiry: None,
             veils: Default::default(),
             app_wheel: Default::default(),
             panel_drawn: None,
@@ -349,7 +330,7 @@ impl Shell {
         }
         self.sync_channels(i, cx);
         self.pages[i].shown(true, window, cx);
-        self.refocus(Refocus::PageShown, window, cx);
+        self.refocus(window, cx);
         cx.notify();
     }
 
@@ -429,7 +410,7 @@ impl Shell {
                 {
                     match now.and_then(|p| p.focus(cx)) {
                         Some(focus) => window.focus(&focus, cx),
-                        None => self.refocus(Refocus::PanelGone, window, cx),
+                        None => self.refocus(window, cx),
                     }
                 }
             }
@@ -447,44 +428,6 @@ impl Shell {
                     }
                 }
             }
-            HubEvent::Layers { closed } => {
-                let before = window.focused(cx);
-                // A popup just opened remembers what had the keyboard, to
-                // give it back when it closes.
-                self.hub.update(cx, |h, _| {
-                    for s in h.stack.iter_mut() {
-                        if let Surface::Popup(p) = s
-                            && p.back.is_none()
-                        {
-                            p.back = Some(
-                                before
-                                    .as_ref()
-                                    .map_or_else(|| self.focus.downgrade(), |f| f.downgrade()),
-                            );
-                        }
-                    }
-                });
-                // The keyboard was in a surface that closed, or nowhere.
-                let lost = before.is_none() || closed.iter().any(|s| s.has_keyboard(window, cx));
-                // Where it was before the first of the closed popups opened.
-                // The window itself (a press on the tab bar leaves it
-                // there) is no place to go back to: the page takes it.
-                let back = closed
-                    .iter()
-                    .rev()
-                    .find_map(|s| match s {
-                        Surface::Popup(p) => p.back.as_ref().and_then(|b| b.upgrade()),
-                        Surface::Layer(_) => None,
-                    })
-                    .filter(|f| *f != self.focus);
-                for s in closed {
-                    if let Some(run) = s.dismiss() {
-                        run(window, cx);
-                    }
-                }
-                let moved = window.focused(cx) != before;
-                self.refocus(Refocus::Layers { moved, lost, back }, window, cx);
-            }
             HubEvent::Link { node, state } => {
                 for p in &self.pages {
                     p.link(node, *state, window, cx);
@@ -492,6 +435,28 @@ impl Shell {
             }
         }
         cx.notify();
+    }
+
+    /// The stack changed: the keyboard goes where [`frame::settle`] says,
+    /// the shown page taking it when nothing else does.
+    fn frame_event(
+        &mut self,
+        frame: &Entity<frame::AppFrame>,
+        ev: &FrameEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let FrameEvent::Layers { closed } = ev;
+        let page = self.page_focus(cx);
+        frame::settle(frame, closed, &self.focus, |_| page, window, cx);
+        cx.notify();
+    }
+
+    /// Where the keyboard goes on the shown page.
+    fn page_focus(&self, cx: &App) -> FocusHandle {
+        self.shown
+            .and_then(|i| self.pages[i].focus(cx))
+            .unwrap_or_else(|| self.focus.clone())
     }
 
     /// Whether the window may close: yes when no guarded view holds unsaved
@@ -524,31 +489,12 @@ impl Shell {
         window.remove_window();
     }
 
-    /// Gives the keyboard to the top surface that takes it. With none left
-    /// to: a closed popup that had the keyboard gives it back to where it
-    /// was as it opened; a closed surface's dismiss that moved the keyboard
-    /// itself keeps it there; a surface closing with the keyboard elsewhere
-    /// leaves it there; else it goes to the shown page.
-    fn refocus(&mut self, why: Refocus, window: &mut Window, cx: &mut Context<Self>) {
-        let top = self
-            .hub
-            .read(cx)
-            .stack
-            .iter()
-            .rev()
-            .find_map(|s| s.focus().cloned());
-        let page = || {
-            self.shown
-                .and_then(|i| self.pages[i].focus(cx))
-                .unwrap_or_else(|| self.focus.clone())
-        };
-        let to = match (top, why) {
-            (Some(f), _) => f,
-            (None, Refocus::Layers { moved: true, .. }) => return,
-            (None, Refocus::Layers { lost: false, .. }) => return,
-            (None, Refocus::Layers { back: Some(f), .. }) => f,
-            (None, _) => page(),
-        };
+    /// Another page shows, or the panel went with the keyboard in it: the
+    /// keyboard goes to the top surface that takes it, else to the shown
+    /// page. (A change of the stack settles it itself: [`frame::settle`].)
+    fn refocus(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let top = self.hub.read(cx).frame.read(cx).top_focus();
+        let to = top.unwrap_or_else(|| self.page_focus(cx));
         window.focus(&to, cx);
     }
 
@@ -628,30 +574,19 @@ impl Shell {
         self.host.layer(layer, cx);
     }
 
-    fn key_like(e: &KeyDownEvent) -> KeyLike {
-        let k = &e.keystroke;
-        KeyLike {
-            key: k.key.clone(),
-            ch: k.key_char.clone(),
-            alt: k.modifiers.alt,
-            ctrl: k.modifiers.control,
-            shift: k.modifiers.shift,
-            platform: k.modifiers.platform,
-        }
-    }
-
     /// Every key passes here first, wherever focus is; `chords::route`
     /// decides what becomes of it.
     pub fn capture_key(&mut self, e: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
-        let k = Self::key_like(e);
-        if self.menu_key(&k, window, cx) {
+        let k = KeyLike::of(e);
+        let frame = self.hub.read(cx).frame.clone();
+        if frame::menu_key(&frame, &k, window, cx) {
             cx.stop_propagation();
             cx.notify();
             return;
         }
         let all = self.chords(cx);
         let hub = self.hub.read(cx);
-        let top = hub.stack.top();
+        let top = hub.frame.read(cx).stack.top();
         let keyboard = Keyboard {
             on: hub.settings.keys,
             leader: self.leader,
@@ -665,13 +600,13 @@ impl Shell {
                 if chords::leader_waiting(self.leader, Instant::now()) {
                     self.leader = None;
                 }
-                self.dismiss_top(window, cx);
+                frame::dismiss_top(&frame, window, cx);
             }
             Verdict::KeysOffHint => {
                 // The leader still answers with keys off, to say how to turn
                 // them back on, and nothing else.
                 self.host.report(
-                    ahjo_app_kit::host::Status::new(crate::chrome::KEYS_OFF_HINT),
+                    ahjo_app_kit::frame::Status::new(crate::chrome::KEYS_OFF_HINT),
                     cx,
                 );
             }
@@ -712,70 +647,6 @@ impl Shell {
             }
         }
         cx.notify();
-    }
-
-    /// Escape: the top surface closes, unless it is a popup that keeps
-    /// itself open now ([`Popup::may_close`]).
-    fn dismiss_top(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let top = self.hub.read(cx).stack.top().cloned();
-        if let Some(Surface::Popup(p)) = &top
-            && !p.lets_close(window, cx)
-        {
-            return;
-        }
-        self.hub.update(cx, |h, cx| h.dismiss(cx));
-    }
-
-    /// A press outside popup `id` that closes it, unless it keeps itself
-    /// open now.
-    pub(crate) fn press_outside(
-        &mut self,
-        id: PopupId,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        let popup = self.hub.read(cx).popup(id).cloned();
-        if popup.is_some_and(|p| p.lets_close(window, cx)) {
-            self.hub.update(cx, |h, cx| h.close_popup(id, cx));
-        }
-    }
-
-    /// The keys of a menu on top: Up and Down move its keyboard row, Enter,
-    /// Space or Right picks it. True if the key was the menu's.
-    fn menu_key(&mut self, k: &KeyLike, window: &mut Window, cx: &mut Context<Self>) -> bool {
-        if k.alt || k.ctrl || k.shift || k.platform {
-            return false;
-        }
-        let cursor = match self.hub.read(cx).stack.top() {
-            Some(Surface::Popup(Popup {
-                content: Content::Menu(m),
-                ..
-            })) => m.cursor,
-            _ => return false,
-        };
-        let by = match k.key.as_str() {
-            "down" => 1,
-            "up" => -1,
-            "enter" | "space" | "right" => {
-                let Some(i) = cursor else {
-                    return false;
-                };
-                self.menu_pick(i, window, cx);
-                return true;
-            }
-            _ => return false,
-        };
-        self.hub.update(cx, |h, cx| {
-            if let Some(Surface::Popup(Popup {
-                content: Content::Menu(m),
-                ..
-            })) = h.stack.top_mut()
-            {
-                m.step(by);
-            }
-            cx.notify();
-        });
-        true
     }
 
     /// Runs a chord once this update is over, so it may use anything,
