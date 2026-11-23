@@ -143,17 +143,12 @@ impl Render for KeysPanel {
         let tallest = window.viewport_size().height - top - px(size::TAB_BAR);
         let rows = self.rows(cx);
         let cursor = self.cursor.min(rows.len().saturating_sub(1));
-        let mut list = div()
-            .id("keys-list")
+        let mut list = pane::scroll("keys-list")
             // The rows take what the window leaves; they scroll only when
             // they do not fit.
             .flex_1()
-            .min_h_0()
-            .overflow_y_scroll()
             .track_scroll(&self.scroll)
-            .py(px(size::ROW_INSET))
-            .flex()
-            .flex_col();
+            .py(px(size::ROW_INSET));
         for (i, r) in rows.iter().enumerate() {
             list = list.child(self.row(i, r, i == cursor, cx));
         }
@@ -203,16 +198,7 @@ impl Render for KeysPanel {
                     .child(div().p(px(size::HEAD_PAD)).child(self.search.clone()))
                     .child(kit::rule(&t))
                     .child(head)
-                    .child(
-                        div()
-                            .relative()
-                            .flex_1()
-                            .min_h_0()
-                            .flex()
-                            .flex_col()
-                            .child(list)
-                            .child(pane::scrollbar(&t, &self.scroll)),
-                    )
+                    .child(list)
                     // Zoom is no chord but the same everywhere it applies.
                     .child(kit::rule(&t))
                     .child(

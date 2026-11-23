@@ -575,10 +575,8 @@ impl FilesPage {
             .pl(px(size::PAD + size::HEAD_GAP))
             .debug_selector(|| "files-markdown-content".into())
             .child(content);
-        let scrolled = div()
-            .id("files-markdown-scroll")
+        let scrolled = pane::scroll("files-markdown-scroll")
             .size_full()
-            .overflow_y_scroll()
             .track_scroll(&self.md_scroll)
             .debug_selector(|| "files-markdown-rendered".into())
             .on_mouse_down(
@@ -624,7 +622,7 @@ impl FilesPage {
         marks: &[Option<ahjo_app_kit::widgets::code::Mark>],
         blocks: usize,
         cx: &mut Context<Self>,
-    ) -> gpui::Stateful<Div> {
+    ) -> pane::Scroll {
         let top = self.md_scroll.bounds().top() + px(GO_ROOM + 1.);
         let laid = self.md_blocks.borrow();
         let reading = headings
@@ -632,8 +630,7 @@ impl FilesPage {
             .rposition(|(i, _, _)| laid.get(*i).is_some_and(|b| b.top() <= top))
             .unwrap_or(0);
         let least = headings.iter().map(|h| h.1).min().unwrap_or(1);
-        let mut list = div()
-            .id("files-outline")
+        let mut list = pane::scroll("files-outline")
             .debug_selector(|| "files-outline".into())
             .absolute()
             .top_0()
@@ -641,9 +638,6 @@ impl FilesPage {
             .w(px(OUTLINE_W))
             .pt(px(size::PAD))
             .pr(px(size::HEAD_PAD))
-            .overflow_y_scroll()
-            .flex()
-            .flex_col()
             .text_size(px(size::SMALL));
         for (n, (i, level, text)) in headings.iter().enumerate() {
             let end = headings.get(n + 1).map_or(blocks, |h| h.0);
@@ -943,13 +937,10 @@ impl FilesPage {
                     .child(markdown::render(&look, "place-readme", blocks)),
             );
         }
-        let scrolled = div()
-            .id("files-place")
+        let scrolled = pane::scroll("files-place")
             .debug_selector(|| "files-place".into())
             .size_full()
-            .overflow_y_scroll()
-            .flex()
-            .justify_center()
+            .items_center()
             .child(body);
         pane::detail_frame(head, scrolled).debug_selector(|| "files-viewer".into())
     }

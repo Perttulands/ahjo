@@ -1444,14 +1444,9 @@ impl MissionsPage {
         }
         let t = theme(cx).clone();
         let ed = self.editor.as_ref()?;
-        let body = div()
-            .id("step-editor")
+        let body = pane::scroll("step-editor")
             .flex_1()
-            .min_h_0()
-            .overflow_y_scroll()
             .p(px(PAD))
-            .flex()
-            .flex_col()
             .gap(px(TAB_GAP))
             .when(ed.deleting, |d| {
                 d.child(
@@ -2250,12 +2245,9 @@ impl Render for MissionsPage {
                         .flex()
                         .flex_col()
                         .child(
-                            div()
-                                .id("missions-run-graph")
+                            pane::scroll_both("missions-run-graph")
                                 .debug_selector(|| "missions-run-graph".into())
                                 .flex_1()
-                                .min_h_0()
-                                .overflow_scroll()
                                 .child(self.render_canvas(&t, &m, true, cx)),
                         )
                         .children(error),
@@ -2296,28 +2288,26 @@ impl Render for MissionsPage {
                 } else {
                     self.mission_activity(&t, &m, cx)
                 };
-                div()
-                    .id(gpui::SharedString::from(format!(
-                        "missions-detail-{}",
-                        m.slug
-                    )))
-                    .debug_selector(|| "missions-flow".into())
-                    .track_scroll(&self.flow_scroll)
-                    .flex_none()
-                    .w(px(FLOW_W))
-                    .h_full()
-                    .overflow_y_scroll()
-                    .border_l_1()
-                    .border_color(t.divider)
-                    .bg(t.surface)
-                    .child(
-                        div()
-                            .p(px(size::PAD))
-                            .flex()
-                            .flex_col()
-                            .gap(px(size::SECTION_GAP))
-                            .child(body),
-                    )
+                pane::scroll(gpui::SharedString::from(format!(
+                    "missions-detail-{}",
+                    m.slug
+                )))
+                .debug_selector(|| "missions-flow".into())
+                .track_scroll(&self.flow_scroll)
+                .flex_none()
+                .w(px(FLOW_W))
+                .h_full()
+                .border_l_1()
+                .border_color(t.divider)
+                .bg(t.surface)
+                .child(
+                    div()
+                        .p(px(size::PAD))
+                        .flex()
+                        .flex_col()
+                        .gap(px(size::SECTION_GAP))
+                        .child(body),
+                )
             });
             pane::detail_frame(head, div().size_full().flex().child(board).children(flow))
         } else if let Some(error) = error {

@@ -52,12 +52,7 @@ impl Render for ScheduledPage {
         {
             self.scroll.scroll_to_item(at);
         }
-        let rows = rows
-            .id("scheduled-list")
-            .flex_1()
-            .min_h_0()
-            .overflow_y_scroll()
-            .track_scroll(&self.scroll);
+        let rows = rows.flex_1().track_scroll(&self.scroll);
         let list = pane::list_wide_frame(&t, list_head, rows);
         let detail = if self.state.form.is_some() {
             self.form(&t, cx)
@@ -178,10 +173,10 @@ impl ScheduledPage {
         t: &Theme,
         chosen: Option<(&str, &str)>,
         cx: &mut Context<Self>,
-    ) -> (Div, Option<usize>) {
+    ) -> (pane::Scroll, Option<usize>) {
         let now = Timestamp::now();
         let nodes = self.host.nodes(cx);
-        let mut out = div().flex().flex_col();
+        let mut out = pane::scroll("scheduled-list");
         let (mut count, mut chosen_at) = (0, None);
         for node in &nodes {
             let id = node.id.as_str();

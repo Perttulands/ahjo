@@ -13,7 +13,7 @@ use crate::theme::theme;
 use ahjo_app_kit::Host;
 use ahjo_app_kit::widgets::field::{FieldEvent, TextField};
 use ahjo_app_kit::widgets::finder::marked_letters;
-use ahjo_app_kit::widgets::kit;
+use ahjo_app_kit::widgets::{kit, pane};
 use ahjo_core::NodeId;
 use ahjo_terminals_contract::commands::{ListProjects, SessionListFolders};
 use gpui::{Context, Entity, EventEmitter, Window, div, prelude::*, px};
@@ -392,12 +392,7 @@ impl Render for FolderField {
         } else {
             rows.len().clamp(1, ROWS)
         };
-        let mut body = div()
-            .id(("folder-rows", self.id))
-            .h(px(ROW_H * shown_rows as f32))
-            .overflow_y_scroll()
-            .flex()
-            .flex_col();
+        let mut body = pane::scroll(("folder-rows", self.id)).h(px(ROW_H * shown_rows as f32));
         if rows.is_empty() {
             body = body.child(kit::note(&t, self.note(&list), None));
         }

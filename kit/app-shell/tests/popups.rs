@@ -5,7 +5,7 @@
 //! closes the keyboard goes back where it was: to a terminal, which then
 //! gets its keys again. A toy page, made here, with a stand-in terminal.
 
-use ahjo_app_kit::popup::{Outside, Popup, PopupId, Spot};
+use ahjo_app_kit::popup::{self, Outside, Popup, PopupId, Spot};
 use ahjo_app_kit::{Build, Host, Mounted, Page, mount};
 use ahjo_app_shell::Shell;
 use gpui::{
@@ -93,6 +93,31 @@ impl Pad {
         }
     }
 
+    /// A form taller than the window, drawn by the page as Missions' New
+    /// mission is.
+    fn open_tall(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let view = popup::drawn(
+            &cx.entity(),
+            |_: &mut Self, _, cx| {
+                let t = ahjo_app_kit::theme::theme(cx).clone();
+                let fields =
+                    div().children((0..40).map(|i| div().h(px(40.)).child(format!("Field {i}"))));
+                let actions = div()
+                    .debug_selector(|| "tall-actions".into())
+                    .h(px(36.))
+                    .child("Create");
+                Some(
+                    popup::form(&t, "tall-fields", fields, actions)
+                        .w(px(400.))
+                        .into_any_element(),
+                )
+            },
+            cx,
+        );
+        self.host
+            .popup(Popup::beside(Spot::here(window, cx), view), cx);
+    }
+
     /// The keys the newest popup called `name` got.
     fn keys_of(&self, name: &str, cx: &App) -> usize {
         self.forms
@@ -149,6 +174,17 @@ impl Render for Pad {
                 corner_button("open-kept", Outside::Keep)
                     .top(px(10.))
                     .left(px(200.)),
+            )
+            .child(
+                div()
+                    .id("open-tall")
+                    .debug_selector(|| "open-tall".into())
+                    .absolute()
+                    .top(px(10.))
+                    .left(px(400.))
+                    .w(px(80.))
+                    .h(px(28.))
+                    .on_click(cx.listener(|p, _, window, cx| p.open_tall(window, cx))),
             )
     }
 }
@@ -380,4 +416,20 @@ fn the_theme_picker_is_a_popup_beside_its_control(cx: &mut TestAppContext) {
     cx.simulate_keystrokes("enter");
     assert!(drawn(cx, "theme-picker").is_none());
     assert_eq!(theme(cx), tried, "Enter kept it");
+}
+
+#[gpui::test]
+fn a_form_taller_than_the_window_keeps_its_actions_in_view(cx: &mut TestAppContext) {
+    let (_, cx, _) = start(cx);
+    click(cx, "open-tall");
+    let popup = drawn(cx, "popup").expect("the form opened");
+    let actions = drawn(cx, "tall-actions").expect("its actions are drawn");
+    assert!(
+        popup.bottom() <= px(768.),
+        "{popup:?} is kept inside the window"
+    );
+    assert!(
+        actions.top() >= popup.top() && actions.bottom() <= popup.bottom(),
+        "{actions:?} stand in {popup:?}, not scrolled past its foot"
+    );
 }

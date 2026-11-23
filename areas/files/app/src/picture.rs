@@ -7,6 +7,7 @@ use crate::page::FilesPage;
 use crate::store::zoom::{self, Px};
 use ahjo_app_kit::theme::{Theme, size};
 use ahjo_app_kit::widgets::kit::{self, Kind};
+use ahjo_app_kit::widgets::pane;
 use gpui::{AnyElement, App, Context, Div, RenderImage, Window, canvas, div, img, prelude::*, px};
 use std::cell::Cell;
 use std::rc::Rc;
@@ -265,11 +266,9 @@ impl FilesPage {
             .relative()
             .child(measure(room))
             .child(
-                div()
-                    .id("picture")
+                pane::scroll_both("picture")
                     .absolute()
                     .inset_0()
-                    .overflow_scroll()
                     .child(stage.flex_none().child(picture)),
             )
             .into_any_element()

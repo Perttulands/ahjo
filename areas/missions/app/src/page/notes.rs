@@ -579,13 +579,9 @@ impl MissionsPage {
             .shadow_sm()
             .text_size(px(CARD_TEXT * z))
             .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation());
-        let mut list = div()
-            .id(SharedString::from(format!("canvas-note-thread-{target}")))
-            .flex()
-            .flex_col()
+        let mut list = pane::scroll(SharedString::from(format!("canvas-note-thread-{target}")))
             .gap(px(GAP * z))
-            .max_h(px(size::NOTICE * z))
-            .overflow_y_scroll();
+            .max_h(px(size::NOTICE * z));
         for note in entries {
             let (_, name) = author(&note.author);
             let edit_id = note.id.clone();

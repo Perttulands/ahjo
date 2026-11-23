@@ -218,14 +218,9 @@ impl Issue {
                 self.list_scroll.scroll_to_item(at);
             }
             body = body.child(
-                div()
-                    .id("issue-list")
+                pane::scroll("issue-list")
                     .flex_1()
-                    .min_h_0()
-                    .overflow_y_scroll()
                     .track_scroll(&self.list_scroll)
-                    .flex()
-                    .flex_col()
                     .children(rows),
             );
         } else if self.entries.is_empty() {

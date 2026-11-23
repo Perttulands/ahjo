@@ -480,13 +480,9 @@ impl Issue {
             .border_r_1()
             .border_color(t.divider)
             .child(
-                div()
-                    .id("issue-facets")
+                pane::scroll("issue-facets")
                     .size_full()
-                    .overflow_y_scroll()
                     .py(px(size::ROW_INSET))
-                    .flex()
-                    .flex_col()
                     .children(rows),
             )
     }

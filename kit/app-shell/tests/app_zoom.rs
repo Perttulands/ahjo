@@ -3,6 +3,7 @@
 //! surface that claims its Ctrl+wheel keeps it; the Settings page steps and
 //! resets it; a size kept in app.json is drawn from the start.
 
+use ahjo_app_kit::widgets::pane;
 use ahjo_app_kit::{Host, Mounted, Page, mount, zoom};
 use ahjo_app_shell::Shell;
 use ahjo_testkit::app::until;
@@ -35,11 +36,9 @@ impl Render for Form {
             .flex()
             .flex_col()
             .child(
-                div()
-                    .id("plain")
+                pane::scroll("plain")
                     .debug_selector(|| "plain".into())
                     .h(px(120.))
-                    .overflow_y_scroll()
                     .child(div().h(px(600.))),
             )
             .child(

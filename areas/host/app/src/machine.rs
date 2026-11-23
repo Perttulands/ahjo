@@ -512,11 +512,9 @@ fn lower_first(s: &str) -> String {
 fn frame(head: Div, body: impl IntoElement) -> Div {
     pane::detail_frame(
         head,
-        div()
-            .id("host-detail")
+        pane::scroll("host-detail")
             .absolute()
             .inset_0()
-            .overflow_y_scroll()
             .child(div().w_full().p(px(size::PAD)).child(body)),
     )
 }

@@ -42,14 +42,9 @@ impl Render for HostPage {
         {
             self.list_scroll.scroll_to_item(at);
         }
-        let rows = div()
-            .id("host-list")
+        let rows = pane::scroll("host-list")
             .flex_1()
-            .min_h_0()
-            .overflow_y_scroll()
             .track_scroll(&self.list_scroll)
-            .flex()
-            .flex_col()
             .children(rows);
         let head = pane::list_head(&t, None).child(
             pane::act(&t, "services-refresh", "Refresh")

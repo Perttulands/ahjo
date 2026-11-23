@@ -130,14 +130,10 @@ impl Terminals {
                     None => (false, None),
                 },
             );
-        let mut list = div()
-            .id("rail-list")
-            .size_full()
-            .overflow_y_scroll()
+        let mut list = pane::scroll("rail-list")
+            .flex_1()
             .track_scroll(&self.rail_scroll)
-            .py(px(8.))
-            .flex()
-            .flex_col();
+            .py(px(8.));
         // The app's link says why the serving node does not answer.
         let here = self.fleet.here_id().and_then(|n| self.fleet.get(n));
         let note = match here.map(|c| c.state) {
@@ -212,14 +208,7 @@ impl Terminals {
             .child(header)
             .children(search)
             .children(tidy)
-            .child(
-                div()
-                    .relative()
-                    .flex_1()
-                    .min_h_0()
-                    .child(list)
-                    .child(pane::scrollbar(&t, &self.rail_scroll)),
-            )
+            .child(list)
             .into_any_element()
     }
 

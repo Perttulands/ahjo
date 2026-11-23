@@ -285,12 +285,21 @@ reserves, or whose `everywhere` chords share a key, naming both;
   (`MenuRow`) that the shell draws and steps through with the keys;
   anything else opening closes it. A danger confirm is a one-row menu,
   already armed (`Host::confirm`). Its content is a view; a page draws it
-  through `popup::drawn`, which redraws with the page. What opens in place
+  through `popup::drawn`, which redraws with the page. A form in one is
+  `popup::form`: its fields scroll when the window is short and its
+  actions stand under them, always in view. What opens in place
   stays the page's (a rename in a head or a tab, a mission's note paper,
   the files palette). Only a decision about the whole window is centred
   (the close guard), per DESIGN.md's Act where it is. Layers are the
   stack's other kind: Overview and Peek, which cover the page, and a
   rename in place while it holds the keyboard.
+- **Scroll areas.** Everything that scrolls is `pane::scroll` (down),
+  `scroll_x` (a strip) or `scroll_both` (a picture, a board): a column
+  that gives way in its parent and draws its own thumb, keeping its place
+  unless the page holds its handle. A scroll area built by hand as a row
+  stretched its content to its own height, so nothing past it was
+  measured (Desk's document did not scroll); `bin/ahjo/tests/layout.rs`
+  refuses one outside `pane.rs`.
 - **Window sizes.** A shared session's terminal windows change size only for
   the operator's own act: opening the panel or putting it away (as a path
   he clicks, Send or an item's card opens it), dragging an edge. What

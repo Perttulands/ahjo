@@ -684,13 +684,9 @@ impl HarnessPage {
                     .child(self.reader_pane(t, &shape, true, window, cx))
             } else {
                 div().size_full().child(
-                    div()
-                        .id("shape-anatomy")
+                    pane::scroll("shape-anatomy")
                         .size_full()
-                        .overflow_y_scroll()
                         .p(px(size::PAD))
-                        .flex()
-                        .flex_col()
                         .gap(px(size::SECTION_GAP))
                         .child(self.anatomy(t, &shape, cx)),
                 )
@@ -703,15 +699,11 @@ impl HarnessPage {
             .size_full()
             .flex()
             .child(
-                div()
-                    .id("shape-anatomy")
+                pane::scroll("shape-anatomy")
                     .w(relative(tokens::ANATOMY))
                     .min_w(px(tokens::ANATOMY_MIN))
                     .h_full()
-                    .overflow_y_scroll()
                     .p(px(size::PAD))
-                    .flex()
-                    .flex_col()
                     .gap(px(size::SECTION_GAP))
                     .child(anatomy),
             )
@@ -1301,11 +1293,8 @@ impl HarnessPage {
                 };
                 let blocks = markdown::parse(sh::without_front_matter(&file.text));
                 out.child(
-                    div()
-                        .id("shape-read")
+                    pane::scroll("shape-read")
                         .flex_1()
-                        .min_h_0()
-                        .overflow_y_scroll()
                         .p(px(size::PAD))
                         .font_family(t.ty.reading)
                         .text_size(px(t.ty.read))

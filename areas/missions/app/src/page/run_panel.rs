@@ -68,14 +68,9 @@ impl MissionsPage {
                     div().debug_selector(move || selector).child(words)
                 })
         };
-        let mut body = div()
-            .id("run-card-panel")
+        let mut body = pane::scroll("run-card-panel")
             .flex_1()
-            .min_h_0()
-            .overflow_y_scroll()
             .p(px(PAD))
-            .flex()
-            .flex_col()
             .gap(px(TAB_GAP));
         if let Some(gate) = mission.gate(id) {
             body = body.children(self.gate_run_part(&t, id, cx));

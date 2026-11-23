@@ -12,6 +12,7 @@ use crate::text::fuzzy;
 use crate::theme::{Theme, size, theme};
 use crate::widgets::field::{FieldEvent, TextField};
 use crate::widgets::kit::{self, Kind};
+use crate::widgets::pane;
 use gpui::{
     AnyElement, App, Context, Entity, EventEmitter, FontWeight, HighlightStyle, InteractiveElement,
     IntoElement, ParentElement, Render, ScrollHandle, SharedString, StatefulInteractiveElement,
@@ -383,8 +384,7 @@ impl Render for Finder {
             .map(|(c, at)| (c.clone(), at))
             .collect();
         let words = self.words.clone();
-        let mut list = div()
-            .id((self.name, usize::MAX))
+        let mut list = pane::scroll((self.name, usize::MAX))
             .debug_selector({
                 let s = format!("{}-list", self.name);
                 move || s.clone()
@@ -392,10 +392,7 @@ impl Render for Finder {
             .track_scroll(&self.scroll)
             .flex_none()
             // Whole rows, so the last one shown is never cut through.
-            .max_h(px(self.rows as f32 * size::ROW))
-            .overflow_y_scroll()
-            .flex()
-            .flex_col();
+            .max_h(px(self.rows as f32 * size::ROW));
         let mut i = 0;
         if let Some(first) = self.first.clone() {
             list = list.child(self.row(i, &first, &[], true, &t, cx));

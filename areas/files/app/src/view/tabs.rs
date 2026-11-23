@@ -33,14 +33,10 @@ impl FilesPage {
             .iter()
             .map(|t| paths::base_name(&t.key.1))
             .collect();
-        let mut strip = div()
-            .id("files-tabs")
+        let mut strip = pane::scroll_x("files-tabs")
             .debug_selector(|| "files-tabs".into())
             .flex_1()
-            .min_w_0()
-            .flex()
             .items_stretch()
-            .overflow_x_scroll()
             .track_scroll(&self.tabs_scroll);
         for (i, tab) in self.tabs.open.iter().enumerate() {
             let key = tab.key.clone();
@@ -421,8 +417,7 @@ impl FilesPage {
         }
         let least = self.symbols.iter().map(|s| s.depth).min().unwrap_or(0);
         let marks = self.code.read(cx).marks().to_vec();
-        let mut list = div()
-            .id("files-code-outline")
+        let mut list = pane::scroll("files-code-outline")
             .debug_selector(|| "files-code-outline".into())
             .flex_none()
             .w(px(OUTLINE_W))
@@ -431,10 +426,7 @@ impl FilesPage {
             .pr(px(size::HEAD_PAD))
             .border_l_1()
             .border_color(t.divider)
-            .overflow_y_scroll()
             .track_scroll(&self.outline_scroll)
-            .flex()
-            .flex_col()
             .text_size(px(size::SMALL));
         for (n, s) in self.symbols.iter().enumerate() {
             let end = self.symbols.get(n + 1).map_or(usize::MAX, |s| s.line);

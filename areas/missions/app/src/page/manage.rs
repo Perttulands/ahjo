@@ -553,72 +553,72 @@ impl MissionsPage {
         if !form.busy {
             go = go.on_click(cx.listener(|page, _, _, cx| page.submit_manage(cx)));
         }
+        let fields = div()
+            .p(px(PAD))
+            .flex()
+            .flex_col()
+            .gap(px(PAD))
+            .child(div().font_weight(FontWeight::SEMIBOLD).child("New mission"))
+            .child(pane::meta(
+                t,
+                "Ctrl+Enter creates it from any field.",
+                Some(t.text2),
+            ))
+            .child(kit::label(t, "Name"))
+            .child(
+                div()
+                    .debug_selector(|| "mission-form-name".into())
+                    .child(form.name.clone()),
+            )
+            // Start empty, or from an example that is staffed and
+            // wired already.
+            // What it is for and its rough steps: a sketch an
+            // agent turns into a mission that runs.
+            .child(kit::label(t, "What are you making?"))
+            .child(
+                div()
+                    .debug_selector(|| "mission-form-intent".into())
+                    .child(form.intent.clone()),
+            )
+            .when(form.example.is_none(), |d| {
+                d.child(kit::label(t, "Rough steps")).child(
+                    div()
+                        .debug_selector(|| "mission-form-steps".into())
+                        .child(form.steps.clone()),
+                )
+            })
+            .child(kit::label(t, "Or start from"))
+            .child(self.example_choice(t, form.example, cx))
+            .when_some(form.problem.clone(), |d, problem| {
+                d.child(
+                    div()
+                        .debug_selector(|| "mission-form-error".into())
+                        .text_color(t.error)
+                        .child(problem),
+                )
+            });
+        let actions = div()
+            .debug_selector(|| "mission-form-actions".into())
+            .p(px(PAD))
+            .flex()
+            .justify_end()
+            .gap(px(TAB_GAP))
+            .child(
+                kit::button(
+                    t,
+                    SharedString::from("mission-form-cancel"),
+                    "Cancel",
+                    Kind::Plain,
+                )
+                .debug_selector(|| "mission-form-cancel".into())
+                .on_click(cx.listener(|page, _, _, cx| page.cancel_manage(cx))),
+            )
+            .child(go);
         Some(
-            kit::panel(t)
-                .id("mission-form")
+            popup::form(t, "mission-form-fields", fields, actions)
                 .debug_selector(|| "mission-form".into())
                 // Room to draft a mission in.
                 .w(px(size::MEASURE))
-                .p(px(PAD))
-                .flex()
-                .flex_col()
-                .gap(px(PAD))
-                .child(div().font_weight(FontWeight::SEMIBOLD).child("New mission"))
-                .child(pane::meta(
-                    t,
-                    "Ctrl+Enter creates it from any field.",
-                    Some(t.text2),
-                ))
-                .child(kit::label(t, "Name"))
-                .child(
-                    div()
-                        .debug_selector(|| "mission-form-name".into())
-                        .child(form.name.clone()),
-                )
-                // Start empty, or from an example that is staffed and
-                // wired already.
-                // What it is for and its rough steps: a sketch an
-                // agent turns into a mission that runs.
-                .child(kit::label(t, "What are you making?"))
-                .child(
-                    div()
-                        .debug_selector(|| "mission-form-intent".into())
-                        .child(form.intent.clone()),
-                )
-                .when(form.example.is_none(), |d| {
-                    d.child(kit::label(t, "Rough steps")).child(
-                        div()
-                            .debug_selector(|| "mission-form-steps".into())
-                            .child(form.steps.clone()),
-                    )
-                })
-                .child(kit::label(t, "Or start from"))
-                .child(self.example_choice(t, form.example, cx))
-                .when_some(form.problem.clone(), |d, problem| {
-                    d.child(
-                        div()
-                            .debug_selector(|| "mission-form-error".into())
-                            .text_color(t.error)
-                            .child(problem),
-                    )
-                })
-                .child(
-                    div()
-                        .flex()
-                        .justify_end()
-                        .gap(px(TAB_GAP))
-                        .child(
-                            kit::button(
-                                t,
-                                SharedString::from("mission-form-cancel"),
-                                "Cancel",
-                                Kind::Plain,
-                            )
-                            .debug_selector(|| "mission-form-cancel".into())
-                            .on_click(cx.listener(|page, _, _, cx| page.cancel_manage(cx))),
-                        )
-                        .child(go),
-                )
                 .into_any_element(),
         )
     }

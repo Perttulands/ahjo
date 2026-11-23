@@ -90,13 +90,9 @@ impl MissionsPage {
         );
         // A long list scrolls inside a few lines' height, so the board
         // above keeps its room.
-        let mut list = div()
-            .id("canvas-findings-list")
+        let mut list = pane::scroll("canvas-findings-list")
             .debug_selector(|| "canvas-findings-list".into())
-            .max_h(px(size::ROW * TODO_ROWS))
-            .overflow_y_scroll()
-            .flex()
-            .flex_col();
+            .max_h(px(size::ROW * TODO_ROWS));
         for (line, found) in lines {
             let shown = format!("validation-display-{line}");
             let mut row = div()

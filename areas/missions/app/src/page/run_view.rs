@@ -1105,11 +1105,9 @@ impl MissionsPage {
                             .debug_selector(move || format!("gate-source-{source}")),
                     )
                     .child(
-                        div()
-                            .id(SharedString::from(format!("gate-input-{seq}")))
+                        pane::scroll(SharedString::from(format!("gate-input-{seq}")))
                             .debug_selector(|| "gate-input-quote".into())
                             .max_h(px(size::NOTICE))
-                            .overflow_y_scroll()
                             .pl(px(size::ROW_PAD))
                             .border_l_1()
                             .border_color(t.divider)

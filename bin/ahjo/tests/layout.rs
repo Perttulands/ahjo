@@ -184,3 +184,45 @@ fn an_areas_tests_build_no_binary() {
         }
     }
 }
+
+/// Every scroll area is `pane::scroll` (or `scroll_x`): a column that
+/// gives way in its parent and shows its thumb. One built by hand in a
+/// row measures nothing past its height, as Desk's document once did.
+#[test]
+fn every_scroll_area_is_the_kits() {
+    fn sources(dir: &Path, out: &mut Vec<PathBuf>) {
+        for entry in fs::read_dir(dir).unwrap() {
+            let path = entry.unwrap().path();
+            let name = path.file_name().unwrap().to_string_lossy();
+            if path.is_dir() {
+                if name != "target" && !name.starts_with('.') {
+                    sources(&path, out);
+                }
+            } else if name.ends_with(".rs") {
+                out.push(path);
+            }
+        }
+    }
+    let root = root();
+    let the_one = root.join("kit/app-kit/src/widgets/pane.rs");
+    let mut files = vec![];
+    for top in ["kit", "areas", "bin", "engine"] {
+        sources(&root.join(top), &mut files);
+    }
+    // Spelled in parts, so this file is not found by its own words.
+    let bare = ["y_scroll", "x_scroll", "scroll()"].map(|end| format!("overflow_{end}"));
+    let mut found = vec![];
+    for file in files.iter().filter(|file| **file != the_one) {
+        let text = fs::read_to_string(file).unwrap();
+        for (n, line) in text.lines().enumerate() {
+            if bare.iter().any(|bare| line.contains(bare.as_str())) {
+                let shown = file.strip_prefix(&root).unwrap().display();
+                found.push(format!("{shown}:{}", n + 1));
+            }
+        }
+    }
+    assert!(
+        found.is_empty(),
+        "scroll areas built by hand, not with pane::scroll: {found:?}"
+    );
+}

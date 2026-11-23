@@ -294,11 +294,8 @@ impl HarnessPage {
                 };
                 let blocks = markdown::parse(sh::without_front_matter(&f.text));
                 body = body.child(
-                    div()
-                        .id("skill-read")
+                    pane::scroll("skill-read")
                         .flex_1()
-                        .min_h_0()
-                        .overflow_y_scroll()
                         .p(px(size::PAD))
                         .font_family(t.ty.reading)
                         .text_size(px(t.ty.read))

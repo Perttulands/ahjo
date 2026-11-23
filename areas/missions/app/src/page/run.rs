@@ -641,11 +641,7 @@ impl MissionsPage {
             .take()
             .or_else(|| self.run.start_button.get().map(Spot))
             .unwrap_or_else(|| Spot::point(gpui::point(px(size::PAD), px(size::TAB_BAR))));
-        let view = popup::drawn(
-            &cx.entity(),
-            |p: &mut Self, window, cx| p.run_start_form(window, cx),
-            cx,
-        );
+        let view = popup::drawn(&cx.entity(), |p: &mut Self, _, cx| p.run_start_form(cx), cx);
         let (asked, closed) = (cx.entity().downgrade(), cx.entity().downgrade());
         let mut start = Popup::beside(spot, view)
             .outside(Outside::Keep)
@@ -1329,7 +1325,7 @@ impl MissionsPage {
         any.then_some(row)
     }
     /// The start form, in its popup.
-    fn run_start_form(&mut self, window: &Window, cx: &mut Context<Self>) -> Option<AnyElement> {
+    fn run_start_form(&mut self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let t = &theme(cx).clone();
         if self.run.starting {
             let title = self
@@ -1557,17 +1553,10 @@ impl MissionsPage {
                     .debug_selector(|| "run-start".into())
                     .on_click(cx.listener(|p, _, _, cx| p.start_run(cx))),
             );
-            let available = (f32::from(window.viewport_size().height) - size::TAB_BAR * 2. - PAD)
-                .clamp(size::CONTROL * 3., START_FORM_MAX);
-            let dialog = kit::panel(t)
-                .id("start-dialog")
+            let dialog = popup::form(t, "start-fields", form, actions)
                 .debug_selector(|| "start-dialog".into())
                 .w(px(size::NOTICE))
-                .max_h(px(available))
-                .flex()
-                .flex_col()
-                .child(form.id("start-fields").min_h_0().overflow_y_scroll())
-                .child(actions);
+                .max_h(px(START_FORM_MAX));
             return Some(dialog.into_any_element());
         }
         None
@@ -1939,10 +1928,9 @@ impl MissionsPage {
                 kit::panel(t)
                     .w(px(ATTEMPTS_W).min(room.width - px(2. * size::POPUP_EDGE)))
                     .max_h(px(ATTEMPTS_H).min(room.height - px(2. * size::POPUP_EDGE)))
-                    .id("attempts-body")
-                    .overflow_y_scroll()
-                    .p(px(PAD))
-                    .child(panel)
+                    .flex()
+                    .flex_col()
+                    .child(pane::scroll("attempts-body").p(px(PAD)).child(panel))
                     .into_any_element(),
             );
         }

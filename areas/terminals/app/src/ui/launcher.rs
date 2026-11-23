@@ -13,6 +13,7 @@ use crate::theme::{size, theme};
 use ahjo_app_kit::host::Host;
 use ahjo_app_kit::widgets::field::{FieldEvent, TextField};
 use ahjo_app_kit::widgets::kit::{self, Kind};
+use ahjo_app_kit::widgets::pane;
 use ahjo_core::NodeId;
 use ahjo_terminals_contract::{Launch, commands::SessionListLaunchFlags};
 use gpui::{Context, Entity, FocusHandle, ScrollHandle, WeakEntity, Window, div, prelude::*, px};
@@ -690,13 +691,7 @@ impl Render for Launcher {
                 .on_click(cx.listener(move |l, _, _, cx| l.reset_flags(&h, &default_flags, cx)))
         });
         let panel = self.panel_open.then(|| {
-            let mut list = div()
-                .id(("flag-list", i))
-                .max_h(px(200.))
-                .overflow_y_scroll()
-                .flex()
-                .flex_col()
-                .gap(px(4.));
+            let mut list = pane::scroll(("flag-list", i)).max_h(px(200.)).gap(px(4.));
             let query = self.search.read(cx).text.trim().to_lowercase();
             match &self.catalogue {
                 None => {
@@ -813,19 +808,14 @@ impl Render for Launcher {
         });
         // The fields scroll inside the panel when the window is short; the
         // launch button stays at its foot, always in view.
-        let fields = div()
-            .id(("launcher-fields", i))
+        let fields = pane::scroll(("launcher-fields", i))
             .debug_selector(move || format!("launcher-fields-{i}"))
             // Its own height first, so the room above the panel gives way
             // before the fields scroll.
             .flex_auto()
-            .min_h_0()
-            .overflow_y_scroll()
             .track_scroll(&self.fields_scroll)
             .p(px(16.))
             .pb(px(8.))
-            .flex()
-            .flex_col()
             .gap(px(8.))
             .children(places)
             .child(kit::label(&t, "Launch"))

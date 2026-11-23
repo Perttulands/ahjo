@@ -728,15 +728,10 @@ impl DeskApp {
                     .flex()
                     .flex_col()
                     .child(
-                        div()
-                            .id("rail")
+                        pane::scroll("rail")
                             .track_scroll(&self.rail)
                             .flex_1()
-                            .min_h_0()
-                            .overflow_y_scroll()
                             .p(px(tokens::LIST_PAD))
-                            .flex()
-                            .flex_col()
                             .gap(px(tokens::LIST_PAD / 2.))
                             .children(rows)
                             .when(queue.is_empty(), |d| {
@@ -999,13 +994,10 @@ impl DeskApp {
                     .flex()
                     .flex_col()
                     .child(
-                        div()
-                            .id("turns")
+                        pane::scroll("turns")
                             .debug_selector(|| "turns".into())
                             .track_scroll(&self.turns)
                             .flex_initial()
-                            .min_h_0()
-                            .overflow_y_scroll()
                             .children(rounds),
                     )
                     .children(fades(&self.turns, t.bg)),
@@ -1264,10 +1256,8 @@ impl DeskApp {
                     }),
             )
             .child(
-                div()
-                    .id("marks")
+                pane::scroll("marks")
                     .max_h(px(tokens::MARKS_MAX_H))
-                    .overflow_y_scroll()
                     .child(rows),
             )
             .into_any_element()

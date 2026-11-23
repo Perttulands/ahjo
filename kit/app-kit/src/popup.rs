@@ -10,11 +10,12 @@
 use crate::chords::Run;
 use crate::menu::Menu;
 use crate::pointer;
-use crate::theme::size;
+use crate::theme::{Theme, size};
+use crate::widgets::{kit, pane};
 use gpui::{
-    Anchor, Anchored, AnyElement, AnyView, App, AppContext, Bounds, Context, Entity, FocusHandle,
-    IntoElement, Pixels, Point, Render, Size, Subscription, WeakEntity, WeakFocusHandle, Window,
-    anchored, div, point, prelude::*, px,
+    Anchor, Anchored, AnyElement, AnyView, App, AppContext, Bounds, Context, Div, ElementId,
+    Entity, FocusHandle, IntoElement, Pixels, Point, Render, Size, Subscription, WeakEntity,
+    WeakFocusHandle, Window, anchored, div, point, prelude::*, px,
 };
 use std::rc::Rc;
 
@@ -188,6 +189,24 @@ pub fn beside(spot: Spot, viewport: Size<Pixels>) -> Anchored {
         .snap_to_window_with_margin(px(size::POPUP_EDGE))
 }
 
+/// A small form in a popup: its `fields` scroll when the window is too
+/// short for them, and its `actions` (Cancel and the form's verb) stand
+/// under them, always in view. Both come styled by the page (padding,
+/// gaps); `id` names the fields' scroll.
+pub fn form(
+    t: &Theme,
+    id: impl Into<ElementId>,
+    fields: impl IntoElement,
+    actions: impl IntoElement,
+) -> Div {
+    kit::panel(t)
+        .min_h_0()
+        .flex()
+        .flex_col()
+        .child(pane::scroll(id).child(fields))
+        .child(div().flex_none().child(actions))
+}
+
 type MayClose = Rc<dyn Fn(&mut Window, &mut App) -> bool>;
 
 type Draw<V> = Rc<dyn Fn(&mut V, &mut Window, &mut Context<V>) -> Option<AnyElement>>;
@@ -217,7 +236,10 @@ pub fn drawn<V: 'static>(
 impl<V: 'static> Render for Drawn<V> {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let draw = self.draw.clone();
-        div().children(
+        // It gives way to the window the popup is kept inside: a
+        // [`form`] keeps its actions in view, and anything else that is
+        // taller scrolls.
+        pane::scroll("popup-drawn").children(
             self.page
                 .update(cx, |page, cx| draw(page, window, cx))
                 .ok()

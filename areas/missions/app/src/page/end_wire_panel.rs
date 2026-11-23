@@ -164,14 +164,9 @@ impl MissionsPage {
                     .on_click(cx.listener(move |p, _, _, cx| p.edit_step(&card, cx))),
             )
         };
-        let body = div()
-            .id("wire-panel")
+        let body = pane::scroll("wire-panel")
             .flex_1()
-            .min_h_0()
-            .overflow_y_scroll()
             .p(px(PAD))
-            .flex()
-            .flex_col()
             .gap(px(TAB_GAP))
             .child(kit::label(&t, "From"))
             .child(end("wire-from", from_words, from))

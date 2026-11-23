@@ -146,22 +146,11 @@ impl Panel {
         {
             self.list_scroll.scroll_to_item(at);
         }
-        div()
+        pane::scroll("brain-results")
             .flex_1()
-            .min_h_0()
-            .relative()
-            .child(
-                div()
-                    .id("brain-results")
-                    .size_full()
-                    .py(px(size::ROW_INSET))
-                    .overflow_y_scroll()
-                    .track_scroll(&self.list_scroll)
-                    .flex()
-                    .flex_col()
-                    .children(rows),
-            )
-            .child(pane::scrollbar(t, &self.list_scroll))
+            .py(px(size::ROW_INSET))
+            .track_scroll(&self.list_scroll)
+            .children(rows)
     }
 
     /// The list's rows, and which of them is marked (an index into the

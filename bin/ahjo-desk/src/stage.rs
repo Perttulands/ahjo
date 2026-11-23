@@ -16,6 +16,7 @@ use crate::tokens::{self, CAP_TEXT, GAP, GAP_SMALL, META};
 use crate::views::{button, icon_button};
 use ahjo_app_kit::theme::{FAMILY, Theme, alpha, rgb, theme};
 use ahjo_app_kit::widgets::kit::{self, Kind};
+use ahjo_app_kit::widgets::pane;
 use gpui::{
     AnyElement, App, BorderStyle, Bounds, ClickEvent, ContentMask, Context, Corners, Font,
     FontWeight, Hsla, MouseButton, MouseDownEvent, MouseMoveEvent, ObjectFit, PathBuilder, Pixels,
@@ -767,17 +768,13 @@ impl DeskApp {
         let Some(sheet) = self.paper_sheet(t, cx) else {
             return quiet("The document is empty".into(), t.dim);
         };
-        let room = div()
-            .id("doc")
+        let room = pane::scroll("doc")
             .debug_selector(|| "doc".into())
             .track_scroll(&self.doc_scroll)
             .size_full()
-            .overflow_y_scroll()
             .bg(t.bg)
             // A column: in a row the page would be stretched to the
             // room's height, and what runs past it would never scroll.
-            .flex()
-            .flex_col()
             .px(px(tokens::PAD))
             .pt(px(tokens::PAD))
             .child(sheet);
@@ -1151,14 +1148,10 @@ impl DeskApp {
             // Many pictures scroll along the strip; how it is shown keeps
             // its place at the right.
             .child(
-                div()
-                    .id("film")
+                pane::scroll_x("film")
                     .flex_1()
-                    .min_w_0()
                     .h_full()
-                    .flex()
                     .gap(px(GAP_SMALL))
-                    .overflow_x_scroll()
                     .children(thumbs),
             )
             .child(

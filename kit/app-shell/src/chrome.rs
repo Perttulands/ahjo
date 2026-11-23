@@ -474,19 +474,17 @@ impl Shell {
         deferred(
             cover.child(
                 popup::beside(popup.spot, viewport).child(
-                    div()
-                        .id(id.element("popup"))
+                    pane::scroll(id.element("popup"))
                         .debug_selector(|| "popup".into())
                         .occlude()
                         .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
                         .on_mouse_down(MouseButton::Right, |_, _, cx| cx.stop_propagation())
-                        // Never larger than the window it is kept inside: what
-                        // is taller scrolls there.
+                        // Never larger than the window it is kept inside: a
+                        // drawn popup gives way to it ([`popup::form`] keeps
+                        // its actions in view), and anything else taller
+                        // scrolls there.
                         .max_w(viewport.width - px(2. * size::POPUP_EDGE))
                         .max_h(viewport.height - px(2. * size::POPUP_EDGE))
-                        .overflow_y_scroll()
-                        .flex()
-                        .flex_col()
                         .child(content)
                         .with_animation(
                             id.element("popup-in"),

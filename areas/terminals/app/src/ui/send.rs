@@ -650,15 +650,10 @@ impl Terminals {
         let t = theme(cx).clone();
         let busy = self.busy();
         self.offer_send_targets(cx);
-        let mut body = div()
-            .id("send-body")
+        let mut body = pane::scroll("send-body")
             .debug_selector(|| "send-body".into())
             .flex_1()
-            .min_h_0()
-            .overflow_y_scroll()
             .p(px(12.))
-            .flex()
-            .flex_col()
             .gap(px(8.))
             .child(self.render_send_aimed(&t, cx))
             .child(self.send_finder.clone());

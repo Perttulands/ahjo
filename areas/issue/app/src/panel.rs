@@ -286,12 +286,10 @@ impl Issue {
 
 /// The panel's find (or nothing) over its rows, which scroll.
 fn panel_frame(head: Div, rows: Div) -> Div {
-    div().size_full().flex().flex_col().child(head).child(
-        div()
-            .id("issue-panel-rows")
-            .flex_1()
-            .min_h_0()
-            .overflow_y_scroll()
-            .child(rows),
-    )
+    div()
+        .size_full()
+        .flex()
+        .flex_col()
+        .child(head)
+        .child(pane::scroll("issue-panel-rows").flex_1().child(rows))
 }

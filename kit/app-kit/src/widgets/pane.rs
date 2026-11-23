@@ -19,50 +19,173 @@
 
 use crate::ask::Ask;
 use crate::host::{Host, Status};
-use crate::theme::{Theme, art, size, ty};
+use crate::theme::{Theme, art, size, theme, ty};
 use gpui::{
-    AnyElement, Bounds, Div, ElementId, FontWeight, Hsla, Pixels, ScrollHandle, SharedString,
-    Stateful, canvas, div, fill, img, point, prelude::*, px, relative,
+    AnyElement, App, Axis, Bounds, Div, ElementId, FontWeight, Hsla, Pixels, Point, ScrollHandle,
+    SharedString, Stateful, Window, canvas, div, fill, img, point, prelude::*, px, relative,
 };
 
-/// Where a list scrolled by `handle` is and that it scrolls: a thin thumb
-/// at its right edge, drawn over it, sized to the share of the list shown.
-/// Nothing shows while the list fits. Put it after the list in a parent
-/// laid out `relative()`; it reads the handle as it paints, so it follows
-/// a scroll without the view drawing again.
-pub fn scrollbar(t: &Theme, handle: &ScrollHandle) -> impl IntoElement {
-    let handle = handle.clone();
-    let colour = crate::theme::alpha(t.dim, 0.55);
+/// A scroll area, the one every page scrolls in. It lays its children out
+/// in a column (a row would stretch them to its height, so what runs past
+/// it would never be measured or reached), gives way in a parent column
+/// (`min_h_0`), and shows where it is and that it scrolls: a thin thumb at
+/// its right edge, over its rows, sized to the share shown. Nothing shows
+/// while it fits. Size it as its place needs (`flex_1`, `size_full`, a
+/// `max_h`); it keeps its own place in the list unless the page holds it
+/// with [`Scroll::track_scroll`].
+pub fn scroll(id: impl Into<ElementId>) -> Scroll {
+    Scroll::new(id.into(), Axis::Vertical)
+        .flex()
+        .flex_col()
+        .min_h_0()
+        .overflow_y_scroll()
+}
+
+/// [`scroll`] across: a strip of tabs or pictures laid out in a row,
+/// giving way in a parent row (`min_w_0`), its thumb along its bottom.
+pub fn scroll_x(id: impl Into<ElementId>) -> Scroll {
+    Scroll::new(id.into(), Axis::Horizontal)
+        .flex()
+        .flex_row()
+        .min_w_0()
+        .overflow_x_scroll()
+}
+
+/// [`scroll`] both ways, for what is panned rather than read down: a
+/// picture larger than its pane, a board. A thumb on each edge it
+/// scrolls along.
+pub fn scroll_both(id: impl Into<ElementId>) -> Scroll {
+    let mut both = Scroll::new(id.into(), Axis::Vertical)
+        .flex()
+        .flex_col()
+        .min_h_0()
+        .min_w_0()
+        .overflow_scroll();
+    both.axes = &[Axis::Vertical, Axis::Horizontal];
+    both
+}
+
+/// A scroll area ([`scroll`], [`scroll_x`], [`scroll_both`]), styled and
+/// filled as a `div`.
+#[derive(IntoElement)]
+pub struct Scroll {
+    id: ElementId,
+    div: Stateful<Div>,
+    axes: &'static [Axis],
+    handle: Option<ScrollHandle>,
+}
+
+impl Scroll {
+    fn new(id: ElementId, axis: Axis) -> Self {
+        Self {
+            div: div().id(id.clone()),
+            id,
+            axes: match axis {
+                Axis::Vertical => &[Axis::Vertical],
+                Axis::Horizontal => &[Axis::Horizontal],
+            },
+            handle: None,
+        }
+    }
+
+    /// The page holds where it is scrolled, to bring a row into view or go
+    /// back to the top.
+    pub fn track_scroll(mut self, handle: &ScrollHandle) -> Self {
+        self.handle = Some(handle.clone());
+        self
+    }
+}
+
+impl Styled for Scroll {
+    fn style(&mut self) -> &mut gpui::StyleRefinement {
+        self.div.style()
+    }
+}
+
+impl ParentElement for Scroll {
+    fn extend(&mut self, elements: impl IntoIterator<Item = AnyElement>) {
+        self.div.extend(elements)
+    }
+}
+
+impl InteractiveElement for Scroll {
+    fn interactivity(&mut self) -> &mut gpui::Interactivity {
+        self.div.interactivity()
+    }
+}
+
+impl StatefulInteractiveElement for Scroll {}
+
+impl RenderOnce for Scroll {
+    fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
+        let handle = match self.handle {
+            Some(handle) => handle,
+            None => window
+                .use_keyed_state(self.id, cx, |_, _| ScrollHandle::new())
+                .read(cx)
+                .clone(),
+        };
+        let colour = crate::theme::alpha(theme(cx).dim, 0.55);
+        // Last, so it is drawn over the rows; it paints where the area
+        // is, wherever its own place among the rows scrolled to.
+        self.div
+            .track_scroll(&handle)
+            .child(scrollbar(handle, self.axes, colour))
+    }
+}
+
+fn scrollbar(handle: ScrollHandle, axes: &'static [Axis], colour: Hsla) -> impl IntoElement {
     canvas(
         |_, _, _| (),
         move |_, _, window, _| {
-            if let Some(thumb) = thumb(handle.bounds(), handle.max_offset().y, handle.offset().y) {
-                window.paint_quad(fill(thumb, colour).corner_radii(px(SCROLLBAR_W / 2.)));
+            for axis in axes {
+                let found = thumb(*axis, handle.bounds(), handle.max_offset(), handle.offset());
+                if let Some(thumb) = found {
+                    window.paint_quad(fill(thumb, colour).corner_radii(px(SCROLLBAR_W / 2.)));
+                }
             }
         },
     )
+    // No room of its own where the rows start, so it adds nothing to what
+    // the area measures: across the area, it would make every padded area
+    // scroll by its padding.
     .absolute()
-    .inset_0()
+    .size_0()
 }
 
 const SCROLLBAR_W: f32 = 4.;
 const SCROLLBAR_LEAST: f32 = 24.;
 
-/// The thumb of a list shown in `view` that scrolls `most` further, now
-/// scrolled by `offset` (negative going down).
-fn thumb(view: Bounds<Pixels>, most: Pixels, offset: Pixels) -> Option<Bounds<Pixels>> {
-    if most <= px(0.5) || view.size.height <= px(0.) {
+/// The thumb of what is shown in `view` along `axis`, which scrolls `most`
+/// further, now scrolled by `offset` (negative going down or right).
+fn thumb(
+    axis: Axis,
+    view: Bounds<Pixels>,
+    most: Point<Pixels>,
+    offset: Point<Pixels>,
+) -> Option<Bounds<Pixels>> {
+    let (len, most, offset) = match axis {
+        Axis::Vertical => (view.size.height, most.y, offset.y),
+        Axis::Horizontal => (view.size.width, most.x, offset.x),
+    };
+    if most <= px(0.5) || len <= px(0.) {
         return None;
     }
-    let h = view.size.height;
-    let len = (h * (h / (h + most))).max(px(SCROLLBAR_LEAST)).min(h);
-    let at = (-offset).clamp(px(0.), most) / most;
-    let top = view.top() + (h - len) * at;
-    let left = view.right() - px(SCROLLBAR_W + 2.);
-    Some(Bounds::new(
-        point(left, top),
-        gpui::size(px(SCROLLBAR_W), len),
-    ))
+    let long = (len * (len / (len + most)))
+        .max(px(SCROLLBAR_LEAST))
+        .min(len);
+    let start = (len - long) * ((-offset).clamp(px(0.), most) / most);
+    let edge = px(SCROLLBAR_W + 2.);
+    Some(match axis {
+        Axis::Vertical => Bounds::new(
+            point(view.right() - edge, view.top() + start),
+            gpui::size(px(SCROLLBAR_W), long),
+        ),
+        Axis::Horizontal => Bounds::new(
+            point(view.left() + start, view.bottom() - edge),
+            gpui::size(long, px(SCROLLBAR_W)),
+        ),
+    })
 }
 
 /// The page: the list beside the detail, filling the page's area.
@@ -92,15 +215,8 @@ pub fn list_wide_frame(t: &Theme, head: Div, body: impl IntoElement) -> Div {
         .min_w(px(size::LIST))
 }
 
-fn scrolling(id: impl Into<ElementId>, rows: impl IntoElement) -> Stateful<Div> {
-    div()
-        .id(id)
-        .flex_1()
-        .min_h_0()
-        .overflow_y_scroll()
-        .flex()
-        .flex_col()
-        .child(rows)
+fn scrolling(id: impl Into<ElementId>, rows: impl IntoElement) -> Scroll {
+    scroll(id).flex_1().child(rows)
 }
 
 fn frame(t: &Theme, width: f32, head: Div, body: impl IntoElement) -> Div {
@@ -130,13 +246,13 @@ fn frame(t: &Theme, width: f32, head: Div, body: impl IntoElement) -> Div {
 /// head spans the detail, so a detail's actions stand at its right edge on
 /// every page, however wide the body. `id` names its scroll.
 pub fn detail(t: &Theme, id: impl Into<ElementId>, head: Div, body: impl IntoElement) -> Div {
-    reading(t, head, div().id(id), body)
+    reading(t, head, scroll(id), body)
 }
 
 /// [`detail`] whose body uses the detail's whole width: for what is
 /// read as lines that are long by nature (paths, addresses), not prose.
 pub fn detail_wide(t: &Theme, id: impl Into<ElementId>, head: Div, body: impl IntoElement) -> Div {
-    framed(t, Some(head), div().id(id), body, None)
+    framed(t, Some(head), scroll(id), body, None)
 }
 
 /// [`detail`] whose scroll the page holds, to go back to the top or to a
@@ -144,11 +260,11 @@ pub fn detail_wide(t: &Theme, id: impl Into<ElementId>, head: Div, body: impl In
 pub fn detail_scrolled(
     t: &Theme,
     id: impl Into<ElementId>,
-    scroll: &ScrollHandle,
+    held: &ScrollHandle,
     head: Div,
     body: impl IntoElement,
 ) -> Div {
-    reading(t, head, div().id(id).track_scroll(scroll), body)
+    reading(t, head, scroll(id).track_scroll(held), body)
 }
 
 /// [`detail`] with a second column: `body` is what the thing says, kept to
@@ -168,7 +284,7 @@ pub fn detail_beside(
     framed(
         t,
         Some(head),
-        div().id(id),
+        scroll(id),
         beside(body, aside, narrow),
         Some(size::MEASURE + size::ASIDE_GAP + size::ASIDE_MAX),
     )
@@ -221,7 +337,7 @@ pub enum Narrow {
     Below,
 }
 
-fn reading(t: &Theme, head: Div, scroller: Stateful<Div>, body: impl IntoElement) -> Div {
+fn reading(t: &Theme, head: Div, scroller: Scroll, body: impl IntoElement) -> Div {
     framed(t, Some(head), scroller, body, Some(size::READING))
 }
 
@@ -231,12 +347,12 @@ fn reading(t: &Theme, head: Div, scroller: Stateful<Div>, body: impl IntoElement
 pub fn panel_detail(
     t: &Theme,
     id: impl Into<ElementId>,
-    scroll: Option<&ScrollHandle>,
+    held: Option<&ScrollHandle>,
     body: impl IntoElement,
 ) -> Div {
-    let scroller = div().id(id);
-    let scroller = match scroll {
-        Some(scroll) => scroller.track_scroll(scroll),
+    let scroller = scroll(id);
+    let scroller = match held {
+        Some(handle) => scroller.track_scroll(handle),
         None => scroller,
     };
     framed(t, None, scroller, body, Some(size::READING))
@@ -247,7 +363,7 @@ pub fn panel_detail(
 fn framed(
     t: &Theme,
     head: Option<Div>,
-    scroller: Stateful<Div>,
+    scroller: Scroll,
     body: impl IntoElement,
     widest: Option<f32>,
 ) -> Div {
@@ -267,7 +383,7 @@ fn framed(
                 .child(head.border_0().h_full().w_full().px(px(size::PAD)))
         }))
         .child(
-            scroller.flex_1().min_h_0().overflow_y_scroll().child(
+            scroller.flex_1().child(
                 div()
                     .w_full()
                     .when_some(widest, |d, w| d.max_w(px(w)))
@@ -606,20 +722,36 @@ mod tests {
     #[test]
     fn the_thumb_shows_the_share_shown_and_where() {
         let view = Bounds::new(point(px(0.), px(100.)), gpui::size(px(200.), px(400.)));
-        assert_eq!(
-            thumb(view, px(0.), px(0.)),
-            None,
-            "a list that fits has none"
-        );
-        let top = thumb(view, px(400.), px(0.)).unwrap();
+        let down = |most: f32, at: f32| {
+            thumb(
+                Axis::Vertical,
+                view,
+                point(px(0.), px(most)),
+                point(px(0.), px(at)),
+            )
+        };
+        assert_eq!(down(0., 0.), None, "a list that fits has none");
+        let top = down(400., 0.).unwrap();
         assert_eq!((top.top(), top.size.height), (px(100.), px(200.)));
-        let end = thumb(view, px(400.), px(-400.)).unwrap();
+        let end = down(400., -400.).unwrap();
         assert_eq!(end.bottom(), px(500.));
-        let long = thumb(view, px(40_000.), px(-20_000.)).unwrap();
+        let long = down(40_000., -20_000.).unwrap();
         assert_eq!(
             long.size.height,
             px(SCROLLBAR_LEAST),
             "a long list's thumb stays findable"
+        );
+        let across = thumb(
+            Axis::Horizontal,
+            view,
+            point(px(200.), px(0.)),
+            point(px(-200.), px(0.)),
+        )
+        .unwrap();
+        assert_eq!(
+            (across.right(), across.size.width),
+            (px(200.), px(100.)),
+            "a strip's thumb runs along its bottom"
         );
     }
 

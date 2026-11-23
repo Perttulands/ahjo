@@ -578,7 +578,7 @@ impl MissionsPage {
 
 /// What a live seat's session shows, in the terminal's own colours, its
 /// newest lines in view.
-fn screen_view(t: &Theme, seat: &str, screen: &SeatScreen) -> gpui::Stateful<Div> {
+fn screen_view(t: &Theme, seat: &str, screen: &SeatScreen) -> pane::Scroll {
     let selector = format!("run-seat-screen-{seat}");
     let body = match &screen.text {
         None => div().text_color(t.dim).child("Reading its screen…"),
@@ -603,11 +603,9 @@ fn screen_view(t: &Theme, seat: &str, screen: &SeatScreen) -> gpui::Stateful<Div
             lines
         }
     };
-    div()
-        .id(SharedString::from(selector.clone()))
+    pane::scroll(SharedString::from(selector.clone()))
         .debug_selector(move || selector.clone())
         .max_h(px(SCREEN_H))
-        .overflow_y_scroll()
         .track_scroll(&screen.scroll)
         .p(px(TAB_GAP))
         .rounded(px(size::RADIUS))

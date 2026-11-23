@@ -30,12 +30,8 @@ impl Terminals {
         // The tabs shrink and scroll when the bar is short of room, so the
         // other pages' tabs show, but not below one tab; `+` stays in reach
         // beside them.
-        let mut bar = div()
-            .id("terminal-tabs")
-            .flex()
+        let mut bar = pane::scroll_x("terminal-tabs")
             .items_stretch()
-            .min_w_0()
-            .overflow_x_scroll()
             .track_scroll(&self.tab_scroll);
         // The active tab is brought into view whenever it, the number of
         // tabs or the window's width changes; the strip otherwise stays where
@@ -277,14 +273,14 @@ impl Terminals {
         )
         .absolute()
         .inset_0();
-        let mut grid = div()
-            .id("overview-grid")
+        let mut grid = pane::scroll("overview-grid")
             .debug_selector(|| "overview-grid".into())
             .size_full()
-            .overflow_y_scroll()
             .track_scroll(&self.overview_scroll)
             .p(px(OVERVIEW_PAD))
-            .flex()
+            // Cards in wrapped lines, each line as tall as its cards, so
+            // the lines below the window are measured and reached.
+            .flex_row()
             .flex_wrap()
             .content_start()
             .gap(px(OVERVIEW_GAP))
@@ -449,8 +445,7 @@ impl Terminals {
                     .flex_1()
                     .min_h_0()
                     .child(measure)
-                    .child(grid)
-                    .child(pane::scrollbar(&t, &self.overview_scroll)),
+                    .child(grid),
             )
             .into_any_element()
     }
@@ -489,14 +484,9 @@ impl Terminals {
 
     pub(super) fn render_find(&mut self, cx: &mut Context<Self>) -> AnyElement {
         let t = theme(cx).clone();
-        let mut results = div()
-            .id("find-results")
+        let mut results = pane::scroll("find-results")
             .track_scroll(&self.find_scroll)
-            .flex_1()
-            .min_h_0()
-            .overflow_y_scroll()
-            .flex()
-            .flex_col();
+            .flex_1();
         let found = self.fleet.found();
         // Nothing searched yet says nothing: the field says what it does.
         let summary = found.as_ref().map(|(matches, done)| match *done {

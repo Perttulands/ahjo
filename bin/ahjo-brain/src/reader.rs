@@ -11,8 +11,8 @@ use crate::app::{BrainApp, Data};
 use crate::corpus;
 use crate::tokens::reader as r;
 use ahjo_app_kit::theme::{FAMILY, Theme, alpha, theme};
-use ahjo_app_kit::widgets::kit;
 use ahjo_app_kit::widgets::markdown::{Block, Span, inline, parse};
+use ahjo_app_kit::widgets::{kit, pane};
 use gpui::{
     AnyElement, Context, Div, ElementId, FontStyle, FontWeight, HighlightStyle, Hsla,
     InteractiveText, IntoElement, MouseButton, ParentElement, Render, ScrollHandle, SharedString,
@@ -686,10 +686,8 @@ fn merge(
 impl Render for Reader {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let t = theme(cx).clone();
-        let sheet = div()
-            .id("reader")
+        let sheet = pane::scroll("reader")
             .size_full()
-            .overflow_y_scroll()
             .track_scroll(&self.scroll);
         let (Some(data), Some(p)) = (self.data.clone(), self.page) else {
             return sheet;

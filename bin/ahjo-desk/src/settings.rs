@@ -8,6 +8,7 @@ use crate::tokens::{self, GAP, GAP_SMALL, META, PAD};
 use crate::views::{button, chip};
 use ahjo_app_kit::theme::{Direction, Theme, alpha};
 use ahjo_app_kit::widgets::kit::{self, Kind};
+use ahjo_app_kit::widgets::pane;
 use ahjo_app_kit::zoom::{Zoom, app as zoom};
 
 use gpui::{
@@ -48,12 +49,8 @@ impl DeskApp {
             .child(self.answering(t, cx))
             .child(self.telling(t, cx))
             .child(self.desks_kept(t));
-        div()
-            .id("settings")
+        pane::scroll("settings")
             .size_full()
-            .overflow_y_scroll()
-            .flex()
-            .flex_col()
             .items_center()
             .child(page.flex_none())
             .into_any_element()
