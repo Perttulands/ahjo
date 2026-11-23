@@ -36,10 +36,10 @@ pub const ICON_BUTTON: f32 = 32.;
 /// The three columns: the list of asks, the answer, and the surface,
 /// in that order. The list and the answer stand at these until he drags
 /// their edges; then at what he dragged them to. At its narrowest the
-/// list's head still reads whole: Waiting, Answered and its two buttons.
+/// list's head still reads whole: Waiting, Answered, the menu and Close.
 pub const LIST: f32 = 340.;
 pub const LIST_SHARE: f32 = 0.18;
-pub const LIST_MIN: f32 = 256.;
+pub const LIST_MIN: f32 = 296.;
 pub const LIST_MAX: f32 = 560.;
 pub const TALK: f32 = 680.;
 pub const TALK_SHARE: f32 = 0.34;

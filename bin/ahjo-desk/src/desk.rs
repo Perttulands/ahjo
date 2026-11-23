@@ -7,7 +7,9 @@
 //! of that and the agents' side never changes.
 
 use crate::model::Ask;
+use ahjo_app_kit::Error;
 use ahjo_app_kit::link::http;
+use ahjo_app_kit::settings_file::SettingsFile;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -130,15 +132,6 @@ impl Config {
     }
 }
 
-/// Writes the settings to `desk.json`, whole.
-pub fn write_config(config: &Config) -> Result<(), String> {
-    let Some(path) = config_path() else {
-        return Err("there is no place for the Desk's settings".into());
-    };
-    let text = serde_json::to_string_pretty(config).map_err(|e| e.to_string())?;
-    write_drafts(&path, &text)
-}
-
 /// `AHJO_DESK_CONFIG`, else `desk.json` beside Ahjo Swarm's `app.json`
 /// (`%APPDATA%\Ahjo`, `$XDG_CONFIG_HOME/ahjo`).
 pub fn config_path() -> Option<PathBuf> {
@@ -205,32 +198,19 @@ pub fn write_size(path: &std::path::Path, size: u16) -> Result<(), String> {
     write_drafts(path, &text)
 }
 
-/// What the Desk starts from: its settings as `desk.json` keeps them, the
-/// desks it opens on, and whether the file read (or was never written), so
-/// a change can be written back without losing anything.
+/// What the Desk starts from: its settings as `desk.json` keeps them (a
+/// file that does not read is set aside, and said), and the desks it
+/// opens on.
 pub struct Loaded {
-    pub config: Config,
+    pub config: SettingsFile<Config>,
     pub places: Vec<Place>,
-    pub notice: Option<String>,
-    pub kept: bool,
+    pub notice: Option<Error>,
 }
 
 /// The settings in `desk.json`, and the desks named by `--desk`
 /// (repeated), else `AHJO_DESK_DESKS` (comma separated), else the file's.
 pub fn load(args: &[String]) -> Loaded {
-    let (config, notice, kept) = match config_path().map(std::fs::read_to_string) {
-        Some(Ok(text)) => match serde_json::from_str::<Config>(&text) {
-            Ok(c) => (c, None, true),
-            Err(e) => (
-                Config::default(),
-                Some(format!(
-                    "desk.json does not read, so settings are not kept: {e}"
-                )),
-                false,
-            ),
-        },
-        _ => (Config::default(), None, true),
-    };
+    let (config, notice) = SettingsFile::<Config>::load(config_path());
     let given: Vec<Place> = args
         .windows(2)
         .filter(|w| w[0] == "--desk")
@@ -250,7 +230,6 @@ pub fn load(args: &[String]) -> Loaded {
         config,
         places,
         notice,
-        kept,
     }
 }
 

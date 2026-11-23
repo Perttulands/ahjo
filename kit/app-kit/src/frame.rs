@@ -560,22 +560,49 @@ pub fn menu_pick(frame: &Entity<AppFrame>, i: usize, window: &mut Window, cx: &m
 /// the status line (a failure stays until it is closed or replaced, other
 /// words go after a while) and a toast. Nothing when all is well.
 pub fn notices(frame: &Entity<AppFrame>, cx: &mut App) -> Option<AnyElement> {
-    let t = theme(cx).clone();
-    let f = frame.read(cx);
-    let status = f.status_shown().cloned();
-    let toast = f.toast.as_ref().map(|toast| render_toast(&t, toast));
-    if status.is_none() && toast.is_none() {
-        return None;
-    }
-    let mut column = div()
+    let column = notice_column(frame, size::NOTICE, cx)?
         .absolute()
         .right(px(size::HEAD_PAD))
         .bottom(px(size::HEAD_PAD))
-        .max_w(px(size::NOTICE))
+        .items_end();
+    Some(deferred(column).with_priority(NOTICES).into_any_element())
+}
+
+/// The same notices at the top of the strip of the window from `left`,
+/// `width` wide, `top` down: for an app whose corner something drawn
+/// outside the window can cover (Desk's page, shown in a view of its own).
+pub fn notices_over(
+    frame: &Entity<AppFrame>,
+    (left, width): (f32, f32),
+    top: f32,
+    cx: &mut App,
+) -> Option<AnyElement> {
+    // Within the strip, however narrow: its words wrap rather than run
+    // over what is beside it.
+    let most = size::NOTICE.min(width - 2. * size::HEAD_PAD).max(0.);
+    let column = notice_column(frame, most, cx)?.items_center();
+    let strip = div()
+        .absolute()
+        .top(px(top))
+        .left(px(left))
+        .w(px(width))
+        .px(px(size::HEAD_PAD))
         .flex()
-        .flex_col()
-        .items_end()
-        .gap(px(size::HEAD_GAP));
+        .justify_center()
+        .child(column);
+    Some(deferred(strip).with_priority(NOTICES).into_any_element())
+}
+
+/// The notices, each at most `most` wide.
+fn notice_column(frame: &Entity<AppFrame>, most: f32, cx: &mut App) -> Option<gpui::Div> {
+    let t = theme(cx).clone();
+    let f = frame.read(cx);
+    let status = f.status_shown().cloned();
+    let toast = f.toast.as_ref().map(|toast| render_toast(&t, toast, most));
+    if status.is_none() && toast.is_none() {
+        return None;
+    }
+    let mut column = div().flex().flex_col().gap(px(size::HEAD_GAP));
     if let Some(Status {
         at,
         text,
@@ -584,6 +611,7 @@ pub fn notices(frame: &Entity<AppFrame>, cx: &mut App) -> Option<AnyElement> {
     }) = status
     {
         let mut notice = kit::panel(&t)
+            .max_w(px(most))
             .id("status")
             .px(px(size::HEAD_PAD))
             .py(px(size::HEAD_GAP))
@@ -621,15 +649,15 @@ pub fn notices(frame: &Entity<AppFrame>, cx: &mut App) -> Option<AnyElement> {
         }
         column = column.child(notice);
     }
-    column = column.children(toast);
-    Some(deferred(column).with_priority(NOTICES).into_any_element())
+    Some(column.children(toast))
 }
 
 /// A toast: a word that something happened, fading on its own.
-fn render_toast(t: &Theme, toast: &Toast) -> AnyElement {
+fn render_toast(t: &Theme, toast: &Toast, most: f32) -> AnyElement {
     let fade_at = Duration::from_millis(motion::TOAST_IN + motion::TOAST_SHOWN);
     let leaving = toast.at.elapsed() >= fade_at;
     let panel = kit::panel(t)
+        .max_w(px(most))
         .id("toast")
         .debug_selector(|| "toast".into())
         .px(px(size::HEAD_PAD))

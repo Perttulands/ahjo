@@ -12,7 +12,13 @@ use crate::page::{self, FromPage};
 use crate::player::{Out, Player};
 use crate::tokens;
 use crate::video::Clip;
+use ahjo_app_kit::Error;
+use ahjo_app_kit::frame::{self, AppFrame, Cover, FrameEvent, Layer, Status};
+use ahjo_app_kit::menu::MenuRow;
+use ahjo_app_kit::popup::Spot;
+use ahjo_app_kit::settings_file::{self, KeepsSettings, SettingsFile};
 use ahjo_app_kit::widgets::field::{self, AttachmentEvent, FieldEvent, TextField};
+use ahjo_app_kit::widgets::theme_picker::{self, Picker};
 use gpui::{
     App, AppContext, AsyncApp, Bounds, ClipboardEntry, ClipboardItem, Context, Entity, FocusHandle,
     Focusable, ImageFormat, KeyDownEvent, Pixels, Point, RenderImage, Subscription, WeakEntity,
@@ -23,7 +29,7 @@ use std::collections::{HashMap, VecDeque};
 use std::rc::Rc;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::time::Duration;
+use std::time::{Duration, SystemTime};
 
 /// Where a desk's asks stand.
 pub enum Reach {
@@ -180,24 +186,6 @@ pub enum Grip {
     Talk,
 }
 
-/// An edge being dragged: which, where the pointer took it, and the
-/// column's width then.
-#[derive(Clone, Copy, Debug)]
-pub struct Drag {
-    pub grip: Grip,
-    pub from: f32,
-    pub width: f32,
-}
-
-/// What a row of the settings menu does.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum MenuAct {
-    Order(desk::Order),
-    Fold,
-    Refresh,
-    Settings,
-}
-
 /// Where the keyboard goes once the window is drawn next.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Aim {
@@ -208,8 +196,15 @@ pub enum Aim {
     Surface,
 }
 
+/// What owns the Desk's popups and layers on its frame.
+const SETTINGS: &str = "desk-settings";
+const MENU: &str = "desk-menu";
+const THEME: &str = "desk-theme";
+
 pub struct DeskApp {
     pub focus: FocusHandle,
+    /// The window's popups, menus and layers, its status line and toasts.
+    pub frame: Entity<AppFrame>,
     /// Its updates from the node it was installed from, if it was.
     pub updates: gpui::Entity<ahjo_app_kit::update::Updates>,
     pub desks: Vec<DeskState>,
@@ -243,19 +238,17 @@ pub struct DeskApp {
     /// His words: always there, the keyboard's home.
     pub words: Entity<TextField>,
     _words: Vec<Subscription>,
-    /// How he set the Desk up (`desk.json`), and whether it can be written
-    /// back (it read, or was never written).
-    pub config: desk::Config,
-    config_kept: bool,
-    /// The Settings view is in front of the asks.
-    pub settings_open: bool,
-    /// The settings menu, open where it was asked for, and its row under
-    /// the keyboard.
-    pub menu: Option<(Point<Pixels>, usize)>,
+    /// Enter changed what it does outside the Desk: his words' field is
+    /// made anew as the window draws next.
+    words_stale: bool,
+    /// How he set the Desk up (`desk.json`), read again as it changes.
+    pub config: SettingsFile<desk::Config>,
     /// The surface alone in the window, to look and mark at its largest.
     pub full: bool,
-    /// A column's edge being dragged.
-    pub drag: Option<Drag>,
+    /// How the list slides as it is put away and brought back.
+    pub list_slide: ahjo_app_kit::panel::Slide,
+    /// What has the keyboard while it is in the list.
+    pub list_focus: FocusHandle,
     /// Settings' field for the node that reaches sessions.
     pub node_field: Entity<TextField>,
     /// What the node said when last checked from Settings.
@@ -276,13 +269,12 @@ pub struct DeskApp {
     /// anywhere but a picture, and the zoom keys.
     pub app_size: u16,
     app_wheel: Rc<Cell<ahjo_app_kit::zoom::Wheel>>,
-    pub toast: Option<(String, bool)>,
-    toast_gen: u64,
-    /// An answer waiting out its undo before it is posted.
+    /// An answer waiting out its undo before it is posted, and when the
+    /// status line began to say so.
     pub pending_answer: Option<PendingAnswer>,
+    pending_said: Option<SystemTime>,
     undo_gen: u64,
     pub sending: bool,
-    pub notice: Option<String>,
     live: Arc<AtomicU64>,
     /// Where each surface panel was laid out, where its picture was drawn
     /// in it, and the clip's track.
@@ -322,12 +314,19 @@ impl DeskApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
-        let desk::Loaded {
-            config,
-            places,
-            kept: config_kept,
-            ..
-        } = loaded;
+        let desk::Loaded { config, places, .. } = loaded;
+        let frame = cx.new(|_| AppFrame::default());
+        cx.observe(&frame, |_, _, cx| cx.notify()).detach();
+        cx.subscribe_in(&frame, window, |app, frame, e, window, cx| {
+            let FrameEvent::Layers { closed } = e;
+            // What closed runs its dismiss, which may reach the app: done
+            // once the app is no longer being updated.
+            let (frame, closed, focus) = (frame.clone(), closed.clone(), app.focus.clone());
+            window.defer(cx, move |window, cx| {
+                frame::settle(&frame, &closed, &focus, |_| focus.clone(), window, cx);
+            });
+        })
+        .detach();
         let (words, _words) = Self::words_field(config.enter_sends, window, cx);
         let node_field = cx.new(|cx| {
             let mut f = TextField::new(cx, &config.node());
@@ -384,7 +383,7 @@ impl DeskApp {
         updates.update(cx, |u, cx| {
             // Unsent answers are kept before the restart, as at closing.
             u.set_guard(std::rc::Rc::new(move |_, cx| {
-                let _ = me.update(cx, |app, _| app.keep_drafts_now());
+                let _ = me.update(cx, |app, _| app.keep_drafts_last());
                 true
             }));
             u.check(cx);
@@ -416,13 +415,17 @@ impl DeskApp {
             },
             None => (HashMap::new(), None, notice),
         };
+        if let Some(notice) = notice {
+            frame.update(cx, |f, cx| f.report(Status::failure(notice), cx));
+        }
         let this = cx.weak_entity();
         window.on_window_should_close(cx, move |_, cx| {
-            let _ = this.update(cx, |app, _| app.keep_drafts_now());
+            let _ = this.update(cx, |app, _| app.keep_drafts_last());
             true
         });
         let mut app = Self {
             focus: cx.focus_handle(),
+            frame,
             updates,
             desks: places
                 .into_iter()
@@ -450,12 +453,11 @@ impl DeskApp {
             clip_loading: None,
             words,
             _words,
+            words_stale: false,
             config,
-            config_kept,
-            settings_open: false,
-            menu: None,
             full: false,
-            drag: None,
+            list_slide: Default::default(),
+            list_focus: cx.focus_handle(),
             node_field,
             node_check: None,
             pasting: 0,
@@ -468,12 +470,10 @@ impl DeskApp {
             aim: Some(Aim::Words),
             app_size: (window.ui_scale() * 100.).round() as u16,
             app_wheel: Rc::default(),
-            toast: None,
-            toast_gen: 0,
             pending_answer: None,
+            pending_said: None,
             undo_gen: 0,
             sending: false,
-            notice,
             live: Arc::new(AtomicU64::new(0)),
             rooms: Rc::new(RefCell::new(vec![])),
             drawn_at: Rc::new(RefCell::new(vec![])),
@@ -496,6 +496,7 @@ impl DeskApp {
         app.discover(cx);
         app.refresh_all(cx);
         app.follow(true, cx);
+        settings_file::watch(&mut app, cx);
         app
     }
 
@@ -612,7 +613,9 @@ impl DeskApp {
                 .timer(Duration::from_millis(tokens::KEEP_DRAFTS_MS))
                 .await;
             let _ = this.update(cx, |app, cx| {
-                app.keep_drafts_now();
+                if let Err(e) = app.keep_drafts_now() {
+                    app.fail(e.message, cx);
+                }
                 app.drafts_keeping = false;
                 cx.notify();
             });
@@ -621,14 +624,27 @@ impl DeskApp {
     }
 
     /// Writes the drafts as they are now.
-    fn keep_drafts_now(&mut self) {
-        let Some(path) = &self.drafts_at else { return };
+    fn keep_drafts_now(&mut self) -> Result<(), Error> {
+        let Some(path) = &self.drafts_at else {
+            return Ok(());
+        };
         if !self.drafts_changed {
-            return;
+            return Ok(());
         }
         self.drafts_changed = false;
-        if let Err(e) = desk::write_drafts(path, &answer::keep(&self.drafts)) {
-            self.notice = Some(format!("Your unsent answers could not be kept: {e}"));
+        desk::write_drafts(path, &answer::keep(&self.drafts)).map_err(|e| {
+            Error::new(
+                "drafts_unwritable",
+                format!("Your unsent answers could not be kept: {e}"),
+            )
+        })
+    }
+
+    /// The drafts kept as the window closes or the app restarts: what
+    /// fails then has no window left to say it in, so it goes to the log.
+    fn keep_drafts_last(&mut self) {
+        if let Err(e) = self.keep_drafts_now() {
+            log::error!("{e}");
         }
     }
 
@@ -648,6 +664,9 @@ impl DeskApp {
     /// Moves the keyboard where it was aimed; the window calls it as it
     /// draws.
     pub fn take_aim(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.words_stale {
+            self.remake_words(window, cx);
+        }
         match self.aim.take() {
             // Alone in the window, the surface has no words beside it.
             Some(Aim::Words) if self.full => window.focus(&self.focus, cx),
@@ -1694,6 +1713,7 @@ impl DeskApp {
         }
         // Answering on before the undo ran out lets the waiting one go.
         if let Some(waiting) = self.pending_answer.take() {
+            self.unsay_pending(cx);
             self.post(waiting, cx);
         }
         let Some(key) = self.current.clone() else {
@@ -1706,7 +1726,7 @@ impl DeskApp {
         let marks = draft.marks(&ask).to_vec();
         let payload = match answer::payload(&ask, &draft, verdict, marks.len()) {
             Ok(p) => p,
-            Err(why) => return self.say(why, true, cx),
+            Err(why) => return self.fail(why, cx),
         };
         let queue = self.queue();
         let next = queue
@@ -1729,6 +1749,15 @@ impl DeskApp {
         self.undo_gen += 1;
         let generation = self.undo_gen;
         let next = answer.next.clone();
+        let me = cx.weak_entity();
+        let waiting = Status::new(format!("Answered elsewhere · {}", answer.title)).action(
+            "Undo",
+            move |_, cx| {
+                let _ = me.update(cx, |app, cx| app.undo_answer(cx));
+            },
+        );
+        self.pending_said = Some(waiting.at);
+        self.frame.update(cx, |f, cx| f.report(waiting, cx));
         self.pending_answer = Some(answer);
         self.open(next, cx);
         cx.spawn(async move |this, cx| {
@@ -1739,6 +1768,7 @@ impl DeskApp {
                 if app.undo_gen == generation
                     && let Some(answer) = app.pending_answer.take()
                 {
+                    app.unsay_pending(cx);
                     app.post(answer, cx);
                 }
             });
@@ -1752,8 +1782,16 @@ impl DeskApp {
         let Some(answer) = self.pending_answer.take() else {
             return;
         };
+        self.unsay_pending(cx);
         self.open(Some(answer.key), cx);
-        self.say(format!("Still open · {}", answer.title), false, cx);
+        self.toast(format!("Still open · {}", answer.title), cx);
+    }
+
+    /// The status line no longer says an answer is waiting.
+    fn unsay_pending(&mut self, cx: &mut Context<Self>) {
+        if let Some(at) = self.pending_said.take() {
+            self.frame.update(cx, |f, cx| f.withdraw(at, cx));
+        }
     }
 
     fn post(&mut self, answer: PendingAnswer, cx: &mut Context<Self>) {
@@ -1789,7 +1827,7 @@ impl DeskApp {
                         let url = &app.desks[key.0].place.url;
                         app.drafts.retain(|k, _| !(&k.0 == url && k.1 == key.1));
                         app.drafts_changed = true;
-                        app.say(format!("Sent · {title}"), false, cx);
+                        app.toast(format!("Sent · {title}"), cx);
                         if let Some(a) = app.ask(&key).cloned() {
                             app.tell(&a, cx);
                         }
@@ -1797,7 +1835,7 @@ impl DeskApp {
                             app.open(next.filter(|n| app.ask(n).is_some_and(|a| a.is_open())), cx);
                         }
                     }
-                    Err(e) => app.say(format!("Not sent: {e}"), true, cx),
+                    Err(e) => app.fail(format!("Not sent: {e}"), cx),
                 }
             });
         })
@@ -1821,8 +1859,8 @@ impl DeskApp {
         self.app_size = to;
         window.set_ui_scale(app::scale(to), cx);
         match desk::size_path().map(|p| desk::write_size(&p, to)) {
-            Some(Err(e)) => self.say(format!("{} · not kept: {e}", app::words(to)), true, cx),
-            _ => self.say(app::words(to), false, cx),
+            Some(Err(e)) => self.fail(format!("{} · not kept: {e}", app::words(to)), cx),
+            _ => self.toast(app::words(to), cx),
         }
     }
 
@@ -1830,23 +1868,18 @@ impl DeskApp {
         self.app_wheel.clone()
     }
 
-    pub fn say(&mut self, words: impl Into<String>, error: bool, cx: &mut Context<Self>) {
-        self.toast = Some((words.into(), error));
-        self.toast_gen += 1;
-        let generation = self.toast_gen;
-        cx.spawn(async move |this, cx| {
-            cx.background_executor()
-                .timer(Duration::from_millis(tokens::TOAST_MS))
-                .await;
-            let _ = this.update(cx, |app, cx| {
-                if app.toast_gen == generation {
-                    app.toast = None;
-                    cx.notify();
-                }
-            });
-        })
-        .detach();
-        cx.notify();
+    /// A moment's word, fading on its own.
+    pub fn toast(&mut self, words: impl Into<String>, cx: &mut Context<Self>) {
+        let words = words.into();
+        self.frame.update(cx, |f, cx| f.toast(&words, cx));
+    }
+
+    /// Something that went wrong: it stays until he closes it or another
+    /// replaces it.
+    pub fn fail(&mut self, words: impl Into<String>, cx: &mut Context<Self>) {
+        let words = words.into();
+        self.frame
+            .update(cx, |f, cx| f.report(Status::failure(words), cx));
     }
 
     // ---- The desks ----
@@ -1951,7 +1984,7 @@ impl DeskApp {
         };
         let Some(ask) = self.ask(&key) else { return };
         if !ask.is_open() {
-            return self.say("This ask is answered: nothing more goes with it", true, cx);
+            return self.fail("This ask is answered: nothing more goes with it", cx);
         }
         let mut pasted = vec![];
         for entry in item.entries() {
@@ -1995,7 +2028,7 @@ impl DeskApp {
                                 .push(a.id);
                             app.drafts_changed = true;
                         }
-                        Err(e) => app.say(format!("The picture did not go: {e}"), true, cx),
+                        Err(e) => app.fail(format!("The picture did not go: {e}"), cx),
                     }
                     cx.notify();
                 });
@@ -2079,7 +2112,7 @@ impl DeskApp {
             let _ = this.update(cx, |app, cx| {
                 if let Err(e) = got {
                     app.checking.remove(&key);
-                    app.say(format!("The check did not start: {e}"), true, cx);
+                    app.fail(format!("The check did not start: {e}"), cx);
                 }
                 app.refresh(key.0, cx);
             });
@@ -2101,12 +2134,12 @@ impl DeskApp {
                 Some(c) if c.running => {}
                 Some(c) if c.ok || !ask.is_open() => {
                     self.checking.remove(&key);
-                    self.say(format!("Done · {} · {}", ask.title, c.summary), false, cx);
+                    self.toast(format!("Done · {} · {}", ask.title, c.summary), cx);
                     self.tell(&ask, cx);
                 }
                 Some(c) => {
                     self.checking.remove(&key);
-                    self.say(format!("The check did not pass: {}", c.summary), true, cx);
+                    self.fail(format!("The check did not pass: {}", c.summary), cx);
                 }
                 None => {}
             }
@@ -2130,12 +2163,12 @@ impl DeskApp {
                 .unwrap_or_else(|e| Err(e.to_string()));
             let _ = this.update(cx, |app, cx| match got {
                 Ok(()) => {
-                    if let Some((words, false)) = &app.toast {
-                        let words = format!("{words} · {session} told");
-                        app.say(words, false, cx);
+                    let said = app.frame.read(cx).toast.as_ref().map(|t| t.text.clone());
+                    if let Some(words) = said {
+                        app.toast(format!("{words} · {session} told"), cx);
                     }
                 }
-                Err(e) => app.say(format!("Sent, but {session} was not told: {e}"), true, cx),
+                Err(e) => app.fail(format!("Sent, but {session} was not told: {e}"), cx),
             });
         })
         .detach();
@@ -2143,38 +2176,68 @@ impl DeskApp {
 
     // ---- Settings ----
 
-    pub fn toggle_settings(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        self.settings_open = !self.settings_open;
-        if self.settings_open {
-            window.focus(&self.focus, cx);
-        } else {
-            self.aim(Aim::Words, cx);
+    /// Settings stand in front of the asks.
+    pub fn settings_open(&self, cx: &App) -> bool {
+        self.frame.read(cx).has_open(SETTINGS)
+    }
+
+    /// Opens Settings over the window, or closes them: a layer on the
+    /// frame, which Escape closes.
+    pub fn toggle_settings(&mut self, _: &mut Window, cx: &mut Context<Self>) {
+        if self.settings_open(cx) {
+            self.frame.update(cx, |f, cx| f.close(SETTINGS, cx));
+            return;
         }
+        let app = cx.entity();
+        let view = cx.new(|cx| crate::settings::SettingsLayer::new(app, cx));
+        let focus = view.read(cx).focus.clone();
+        let me = cx.weak_entity();
+        let layer = Layer::new(SETTINGS, view)
+            .cover(Cover::Window)
+            .focus(focus)
+            .on_dismiss(move |_, cx| {
+                let _ = me.update(cx, |app, cx| app.aim(Aim::Words, cx));
+            });
+        self.frame
+            .update(cx, |f, cx| f.open(frame::Surface::Layer(layer), cx));
         cx.notify();
     }
 
-    /// Writes the settings, unless `desk.json` did not read: then writing
-    /// would lose what it holds, and the notice says so.
+    /// Writes the settings a moment after a change.
     fn keep_config(&mut self, cx: &mut Context<Self>) {
-        if !self.config_kept {
-            return;
-        }
-        if let Err(e) = desk::write_config(&self.config) {
-            self.say(format!("Settings are not kept: {e}"), true, cx);
-        }
+        settings_file::save(self, cx);
+    }
+
+    /// Opens the theme picker beside the theme's control.
+    pub fn pick_theme(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let now = ahjo_app_kit::theme::Direction::from_key(&self.config.theme);
+        let me = cx.weak_entity();
+        theme_picker::open(
+            &self.frame,
+            THEME,
+            Spot::here(window, cx),
+            Picker::new(now, true),
+            move |d, _, cx| {
+                let _ = me.update(cx, |app, cx| app.set_theme(d, cx));
+            },
+            window,
+            cx,
+        );
     }
 
     /// Draws the whole app in theme `d` and keeps it; none, as in Ahjo
     /// Swarm.
     pub fn set_theme(&mut self, d: Option<ahjo_app_kit::theme::Direction>, cx: &mut Context<Self>) {
-        let theme = match d {
-            Some(d) => ahjo_app_kit::theme::Theme::new(d),
-            None => ahjo_app_kit::theme::chosen().0,
-        };
         self.config.theme = d.map(|d| d.key().to_string()).unwrap_or_default();
-        cx.set_global(theme);
-        cx.refresh_windows();
+        self.draw_theme(cx);
         self.keep_config(cx);
+    }
+
+    /// Draws the whole app in the theme the settings name.
+    fn draw_theme(&mut self, cx: &mut Context<Self>) {
+        let d = ahjo_app_kit::theme::Direction::from_key(&self.config.theme);
+        cx.set_global(theme_picker::drawn(d));
+        cx.refresh_windows();
     }
 
     pub fn set_order(&mut self, order: desk::Order, cx: &mut Context<Self>) {
@@ -2194,7 +2257,7 @@ impl DeskApp {
     /// answer.
     pub fn toggle_full(&mut self, cx: &mut Context<Self>) {
         self.full = !self.full && self.current.is_some();
-        self.menu = None;
+        self.frame.update(cx, |f, cx| f.close_menu(cx));
         cx.notify();
     }
 
@@ -2208,64 +2271,50 @@ impl DeskApp {
         )
     }
 
-    /// Starts dragging a column's edge from `x`.
-    pub fn grab(&mut self, grip: Grip, x: f32, wide: f32, cx: &mut Context<Self>) {
+    /// The least and most a column is dragged to in a window `wide`,
+    /// leaving the surface its least beside the other column.
+    pub fn column_range(&self, grip: Grip, wide: f32) -> (f32, f32) {
         let (list, talk) = self.columns(wide);
-        let width = match grip {
-            Grip::List => list,
-            Grip::Talk => talk,
-        };
-        self.drag = Some(Drag {
-            grip,
-            from: x,
-            width,
-        });
-        cx.notify();
-    }
-
-    /// The dragged edge follows the pointer to `x`.
-    pub fn drag_to(&mut self, x: f32, wide: f32, cx: &mut Context<Self>) {
-        let Some(d) = self.drag else { return };
-        let (list, talk) = self.columns(wide);
-        let want = d.width + x - d.from;
-        match d.grip {
-            Grip::List => {
-                self.config.list_w = Some(tokens::dragged(
-                    want,
+        match grip {
+            Grip::List => (
+                tokens::LIST_MIN,
+                tokens::dragged(
+                    tokens::LIST_MAX,
                     tokens::LIST_MIN,
                     tokens::LIST_MAX,
                     wide,
                     talk,
-                ))
-            }
-            Grip::Talk => {
-                self.config.talk_w = Some(tokens::dragged(
-                    want,
+                ),
+            ),
+            Grip::Talk => (
+                tokens::TALK_MIN,
+                tokens::dragged(
+                    tokens::TALK_MAX,
                     tokens::TALK_MIN,
                     tokens::TALK_MAX,
                     wide,
                     list,
-                ))
-            }
-        }
-        cx.notify();
-    }
-
-    /// The edge is let go: its width is kept.
-    pub fn let_go(&mut self, cx: &mut Context<Self>) {
-        if self.drag.take().is_some() {
-            self.keep_config(cx);
-            cx.notify();
+                ),
+            ),
         }
     }
 
-    /// A column back at the width it takes before he drags it.
-    pub fn reset_width(&mut self, grip: Grip, cx: &mut Context<Self>) {
+    /// A column dragged to `width` (none: back at the share of the window
+    /// it takes before he drags it); kept once let go.
+    pub fn size_column(
+        &mut self,
+        grip: Grip,
+        width: Option<f32>,
+        keep: bool,
+        cx: &mut Context<Self>,
+    ) {
         match grip {
-            Grip::List => self.config.list_w = None,
-            Grip::Talk => self.config.talk_w = None,
+            Grip::List => self.config.list_w = width,
+            Grip::Talk => self.config.talk_w = width,
         }
-        self.keep_config(cx);
+        if keep {
+            self.keep_config(cx);
+        }
         cx.notify();
     }
 
@@ -2279,62 +2328,89 @@ impl DeskApp {
     /// with what he had written in it.
     pub fn toggle_enter_sends(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.config.enter_sends = !self.config.enter_sends;
-        let (words, subs) = Self::words_field(self.config.enter_sends, window, cx);
-        self.words = words;
-        self._words = subs;
-        self.point_words(cx);
+        self.remake_words(window, cx);
         self.keep_config(cx);
         cx.notify();
     }
 
-    /// The settings menu's rows that act, in order.
-    pub fn menu_acts(&self) -> Vec<MenuAct> {
-        desk::Order::ALL
-            .into_iter()
-            .map(MenuAct::Order)
-            .chain([MenuAct::Fold, MenuAct::Refresh, MenuAct::Settings])
-            .collect()
+    /// His words' field made anew for what Enter does now, with what he
+    /// had written in it.
+    pub fn remake_words(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.words_stale = false;
+        let (words, subs) = Self::words_field(self.config.enter_sends, window, cx);
+        self.words = words;
+        self._words = subs;
+        self.point_words(cx);
     }
 
-    /// Opens the settings menu at `at` (none: shuts it).
-    pub fn open_menu(&mut self, at: Option<Point<Pixels>>, cx: &mut Context<Self>) {
-        self.menu = at.map(|p| (p, 0));
-        // Its keys come to the window, not to his words.
-        self.aim(
-            if self.menu.is_some() {
-                Aim::Surface
-            } else {
-                Aim::Words
-            },
-            cx,
+    /// Opens the settings menu beside `at`: the desks and how they stand,
+    /// the list's order, and the few things done to the whole Desk.
+    pub fn open_menu(&mut self, at: Point<Pixels>, cx: &mut Context<Self>) {
+        let me = cx.weak_entity();
+        let act = |run: fn(&mut DeskApp, &mut Window, &mut Context<DeskApp>)| {
+            let me = me.clone();
+            move |window: &mut Window, cx: &mut App| {
+                let _ = me.update(cx, |app, cx| run(app, window, cx));
+            }
+        };
+        let mut rows = vec![MenuRow::note("Desks")];
+        for d in &self.desks {
+            let n = d.asks.iter().filter(|a| a.is_open()).count();
+            let state = match &d.reach {
+                Reach::Ok if n == 0 => "nothing waiting".to_string(),
+                Reach::Ok => format!("{n} waiting"),
+                Reach::Loading => "reaching…".to_string(),
+                Reach::Away(_) => "not running".to_string(),
+                Reach::Failed(_) => "answers wrongly".to_string(),
+            };
+            let row = MenuRow::note(d.name()).chord(&state);
+            rows.push(match &d.reach {
+                Reach::Failed(e) => row.hint(e.clone()),
+                _ => row.hint(d.place.url.clone()),
+            });
+        }
+        rows.push(MenuRow::rule());
+        for o in desk::Order::ALL {
+            let me = me.clone();
+            rows.push(
+                MenuRow::new(o.label(), move |_, cx| {
+                    let _ = me.update(cx, |app, cx| app.set_order(o, cx));
+                })
+                .checked(self.config.order == o),
+            );
+        }
+        rows.push(MenuRow::rule());
+        let fold = if self.config.fold_list {
+            "Show the list"
+        } else {
+            "Put the list away"
+        };
+        rows.push(MenuRow::new(fold, act(|app, _, cx| app.toggle_fold(cx))).chord("Ctrl B"));
+        rows.push(
+            MenuRow::new(
+                "Read the desks again",
+                act(|app, _, cx| app.refresh_all(cx)),
+            )
+            .chord("R"),
         );
-        cx.notify();
+        rows.push(
+            MenuRow::new(
+                "Settings",
+                act(|app, window, cx| app.toggle_settings(window, cx)),
+            )
+            .chord("Ctrl ,"),
+        );
+        self.frame
+            .update(cx, |f, cx| f.menu(MENU, rows, at, false, cx));
     }
 
-    pub fn run_menu(&mut self, act: MenuAct, window: &mut Window, cx: &mut Context<Self>) {
-        self.menu = None;
-        match act {
-            MenuAct::Order(o) => self.set_order(o, cx),
-            MenuAct::Fold => self.toggle_fold(cx),
-            MenuAct::Refresh => self.refresh_all(cx),
-            MenuAct::Settings => return self.toggle_settings(window, cx),
-        }
-        self.aim(Aim::Words, cx);
-    }
-
-    /// The menu's keys: Up and Down move, Enter acts, Escape shuts it.
-    fn menu_key(&mut self, key: &str, window: &mut Window, cx: &mut Context<Self>) {
-        let Some((at, i)) = self.menu else { return };
-        let acts = self.menu_acts();
-        let n = acts.len();
-        match key {
-            "down" | "tab" => self.menu = Some((at, (i + 1) % n)),
-            "up" => self.menu = Some((at, (i + n - 1) % n)),
-            "enter" | "space" => return self.run_menu(acts[i.min(n - 1)], window, cx),
-            "escape" => return self.open_menu(None, cx),
-            _ => {}
-        }
-        cx.notify();
+    /// The settings menu is open.
+    pub fn menu_open(&self, cx: &App) -> bool {
+        self.frame
+            .read(cx)
+            .stack
+            .iter()
+            .any(|s| matches!(s, frame::Surface::Popup(p) if p.name().starts_with(MENU)))
     }
 
     /// Asks the node whether it is there, for Settings to say.
@@ -2425,18 +2501,12 @@ impl DeskApp {
         }
         let key = e.keystroke.key.as_str();
         let m = &e.keystroke.modifiers;
-        if self.menu.is_some() {
-            cx.stop_propagation();
-            return self.menu_key(key, window, cx);
-        }
         if m.control && !m.alt && key == "," {
             return self.toggle_settings(window, cx);
         }
-        // Settings stand in front of the asks: their keys wait.
-        if self.settings_open {
-            if key == "escape" {
-                self.toggle_settings(window, cx);
-            }
+        // Settings, or a popup, stand in front of the asks: their keys
+        // wait.
+        if !self.frame.read(cx).stack.is_empty() {
             return;
         }
         if m.control && !m.alt {
@@ -2602,6 +2672,41 @@ impl DeskApp {
             .map(|(_, p)| p.clip.fps.round() as i64)
             .unwrap_or(1)
             .max(1)
+    }
+}
+
+impl KeepsSettings for DeskApp {
+    type Value = desk::Config;
+
+    fn settings_file(&mut self) -> &mut SettingsFile<desk::Config> {
+        &mut self.config
+    }
+
+    fn settings_failed(&mut self, error: Error, cx: &mut Context<Self>) {
+        self.fail(error.message, cx);
+    }
+
+    /// `desk.json` was edited outside the Desk: what it changed applies
+    /// now. The desks it names are read at the next start, as `--desk`
+    /// and `AHJO_DESK_DESKS` may stand in for them.
+    fn settings_reloaded(&mut self, old: desk::Config, cx: &mut Context<Self>) {
+        if old.theme != self.config.theme {
+            self.draw_theme(cx);
+        }
+        if old.enter_sends != self.config.enter_sends {
+            self.words_stale = true;
+        }
+        if old.node != self.config.node {
+            let node = self.config.node.clone();
+            self.node_field.update(cx, |f, cx| f.set(&node, false, cx));
+            self.node_check = None;
+        }
+        let path = self.config.path().map(|p| p.display().to_string());
+        self.toast(
+            format!("Settings read again from {}", path.unwrap_or_default()),
+            cx,
+        );
+        cx.notify();
     }
 }
 

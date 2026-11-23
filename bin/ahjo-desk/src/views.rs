@@ -10,19 +10,21 @@
 //! aid: he can lean to one, but his words are the answer.
 
 use crate::answer::Gist;
-use crate::app::{Aim, DeskApp, Grip, List, MenuAct, Reach, Reached};
+use crate::app::{Aim, DeskApp, Grip, List, Reach, Reached};
 use crate::icons::Icon;
 use crate::marks;
 use crate::model::{self, Ask, Form, MediaKind};
 use crate::tokens::{self, CAP_TEXT, GAP, GAP_SMALL, META};
+use ahjo_app_kit::frame::{self, Cover};
+use ahjo_app_kit::panel::EdgeColumn;
 use ahjo_app_kit::theme::{FAMILY, Theme, alpha, rgb, theme, ty};
-use ahjo_app_kit::widgets::kit::{self, Kind};
+use ahjo_app_kit::widgets::kit::{self, GripEdge, Kind, Phase};
 use ahjo_app_kit::widgets::pane;
 use gpui::{
-    AnyElement, ClickEvent, Context, Div, FontWeight, Hsla, IntoElement, MouseButton,
-    MouseDownEvent, MouseMoveEvent, ObjectFit, Render, SharedString, Stateful, StyledImage, Window,
-    anchored, deferred, div, img, point, prelude::*, px, relative,
+    AnyElement, ClickEvent, Context, Div, FontWeight, Hsla, IntoElement, ObjectFit, Render,
+    SharedString, Stateful, StyledImage, Window, deferred, div, img, prelude::*, px, relative,
 };
+use std::rc::Rc;
 
 impl Render for DeskApp {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
@@ -36,18 +38,22 @@ impl Render for DeskApp {
         self.words.update(cx, |f, _| f.set_max_lines(lines));
         let shown = self.current_ask().cloned();
         let looked = shown.is_some() && !self.items().is_empty();
-        let full = self.full && looked && !self.settings_open;
+        let settings = self.settings_open(cx);
+        let full = self.full && looked && !settings;
         // Where a notice stands: over the answer, which nothing covers (a
         // page shown inside the window lies over the surface).
-        let notice_over = if full || self.settings_open {
+        let notice_over = if full || settings {
             (0., wide)
         } else if looked {
             (list_w, talk_w)
         } else {
             (list_w, wide - list_w)
         };
-        let body = if self.settings_open {
-            self.settings_view(&t, window, cx)
+        let body = if settings {
+            // Settings stand over the window: nothing of the surface is
+            // drawn under them, as a page shown inside it would show
+            // through.
+            div().size_full().into_any_element()
         } else if self.desks.is_empty() {
             no_desks(&t)
         } else if full {
@@ -79,7 +85,7 @@ impl Render for DeskApp {
                             .h_full()
                             .child(self.conversation(&t, &ask, window, cx)),
                     )
-                    .child(self.grip(&t, Grip::Talk, wide, cx))
+                    .child(self.talk_edge(&t, talk_w, wide, window, cx))
                     .child(
                         div()
                             .flex_1()
@@ -92,20 +98,21 @@ impl Render for DeskApp {
             div()
                 .size_full()
                 .flex()
-                .when(list_w > 0., |d| {
-                    d.child(self.side_panel(&t, list_w, cx)).child(self.grip(
-                        &t,
-                        Grip::List,
-                        wide,
-                        cx,
-                    ))
-                })
+                .children(self.list_column(&t, wide, window, cx))
                 .child(div().flex_1().min_w_0().h_full().child(main))
                 .into_any_element()
         };
+        let frame = self.frame.clone();
         div()
             .id("desk")
             .track_focus(&self.focus)
+            // The frame's keys first: the open menu's, and Escape closing
+            // what stands on top, wherever the keyboard is.
+            .capture_key_down(cx.listener(|app, e, window, cx| {
+                if frame::key(&app.frame, e, window, cx) {
+                    cx.stop_propagation();
+                }
+            }))
             .on_key_down(cx.listener(|app, e, window, cx| app.on_key(e, window, cx)))
             .size_full()
             .bg(t.bg)
@@ -114,9 +121,13 @@ impl Render for DeskApp {
             .text_size(px(META))
             .relative()
             .child(body)
-            .children(self.toast_view(&t, notice_over, cx))
-            .children(self.menu_view(&t, cx))
-            .children(self.drag_cover(cx))
+            .children(frame::stack(&frame, Cover::Window, window, cx))
+            .children(frame::notices_over(
+                &frame,
+                notice_over,
+                tokens::TOOLS + GAP_SMALL,
+                cx,
+            ))
             // Ctrl+wheel a picture did not take sizes the whole app.
             .child(ahjo_app_kit::zoom::app_catch(self.app_wheel_handle(), {
                 let me = cx.entity().downgrade();
@@ -132,191 +143,7 @@ impl Render for DeskApp {
 }
 
 impl DeskApp {
-    // ---- The frame: notices, the menu, the column edges ----
-
-    /// A notice, a moment over the column given (its left and width).
-    fn toast_view(
-        &self,
-        t: &Theme,
-        (left, width): (f32, f32),
-        cx: &mut Context<Self>,
-    ) -> Option<AnyElement> {
-        // An answer waiting out its undo says so until it goes.
-        let waiting = self
-            .pending_answer
-            .as_ref()
-            .map(|a| format!("Answered elsewhere · {}", a.title));
-        let (words, error) = match waiting.clone() {
-            Some(w) => (w, false),
-            None => self.toast.clone()?,
-        };
-        let undo = waiting.is_some().then(|| {
-            button(t, "undo", "Undo", Kind::Quiet)
-                .debug_selector(|| "undo".into())
-                .on_click(cx.listener(|app, _: &ClickEvent, _, cx| app.undo_answer(cx)))
-        });
-        Some(
-            div()
-                .absolute()
-                .top(px(tokens::TOOLS + GAP_SMALL))
-                .left(px(left))
-                .w(px(width))
-                .px(px(GAP))
-                .flex()
-                .justify_center()
-                .child(
-                    div()
-                        .id("toast")
-                        .max_w_full()
-                        .truncate()
-                        .px(px(GAP))
-                        .py(px(GAP_SMALL))
-                        .rounded(px(tokens::RADIUS + 2.))
-                        .border_1()
-                        .border_color(if error {
-                            alpha(t.error, 0.5)
-                        } else {
-                            t.divider
-                        })
-                        .bg(if error {
-                            t.surface.blend(alpha(t.error, 0.18))
-                        } else {
-                            t.raised
-                        })
-                        .shadow_md()
-                        .text_color(if error { t.error } else { t.text })
-                        .flex()
-                        .items_center()
-                        .gap(px(GAP))
-                        .child(div().min_w_0().truncate().child(words))
-                        .children(undo),
-                )
-                .into_any_element(),
-        )
-    }
-
-    /// The settings menu: the desks and how they stand, the list's order,
-    /// and the few things done to the whole Desk. Up, Down and Enter work
-    /// it; Escape or a click beside it shuts it.
-    fn menu_view(&mut self, t: &Theme, cx: &mut Context<Self>) -> Option<AnyElement> {
-        let (at, sel) = self.menu?;
-        let acts = self.menu_acts();
-        let label = |words: &str| {
-            div()
-                .px(px(GAP))
-                .pt(px(GAP_SMALL + 2.))
-                .pb(px(2.))
-                .text_size(px(CAP_TEXT))
-                .text_color(t.dim)
-                .child(t.label_case(words))
-        };
-        let rule = || div().my(px(4.)).h(px(1.)).bg(t.divider);
-        let mut card = div()
-            .id("menu")
-            .occlude()
-            .w(px(tokens::MENU_W))
-            .py(px(4.))
-            .flex()
-            .flex_col()
-            .rounded(px(tokens::RADIUS + 2.))
-            .border_1()
-            .border_color(t.divider)
-            .bg(t.raised)
-            .shadow_lg()
-            .text_size(px(META))
-            .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
-            .child(label("Desks"));
-        for d in &self.desks {
-            let n = d.asks.iter().filter(|a| a.is_open()).count();
-            let (dot, state, ink) = match &d.reach {
-                Reach::Ok if n == 0 => (t.done, "nothing waiting".to_string(), t.dim),
-                Reach::Ok => (t.needs, format!("{n} waiting"), t.text2),
-                Reach::Loading => (t.dim, "reaching…".to_string(), t.dim),
-                Reach::Away(_) => (t.dim, "not running".to_string(), t.dim),
-                Reach::Failed(e) => (t.error, e.clone(), t.error),
-            };
-            card = card.child(
-                div()
-                    .id(SharedString::from(format!("menu-desk-{}", d.place.url)))
-                    .h(px(tokens::CAP + 8.))
-                    .px(px(GAP))
-                    .flex()
-                    .items_center()
-                    .gap(px(GAP_SMALL))
-                    .tooltip(kit::tip(d.place.url.clone()))
-                    .child(div().size(px(tokens::DOT)).rounded_full().bg(dot))
-                    .child(div().flex_none().child(d.name()))
-                    .child(div().flex_1())
-                    .child(div().min_w_0().truncate().text_color(ink).child(state)),
-            );
-        }
-        card = card.child(rule()).child(label("Waiting list"));
-        for (i, act) in acts.iter().copied().enumerate() {
-            let (words, key, checked) = match act {
-                MenuAct::Order(o) => (o.label().to_string(), None, self.config.order == o),
-                MenuAct::Fold if self.config.fold_list => {
-                    ("Show the list".to_string(), Some("Ctrl B"), false)
-                }
-                MenuAct::Fold => ("Put the list away".to_string(), Some("Ctrl B"), false),
-                MenuAct::Refresh => ("Read the desks again".to_string(), Some("R"), false),
-                MenuAct::Settings => ("Settings".to_string(), Some("Ctrl ,"), false),
-            };
-            if act == MenuAct::Fold {
-                card = card.child(rule());
-            }
-            let row = div()
-                .id(("menu-row", i))
-                .mx(px(4.))
-                .h(px(tokens::CAP + 10.))
-                .px(px(GAP - 4.))
-                .flex()
-                .items_center()
-                .gap(px(GAP_SMALL))
-                .rounded(px(tokens::RADIUS))
-                .cursor_pointer()
-                .when(i == sel, |d| d.bg(t.accent_light()))
-                .hover(|d| d.bg(t.accent_soft()))
-                .child(
-                    div()
-                        .w(px(14.))
-                        .flex_none()
-                        .text_color(t.accent)
-                        .child(if checked { "✓" } else { "" }),
-                )
-                .child(div().flex_1().min_w_0().truncate().child(words))
-                .children(key.map(|k| {
-                    div()
-                        .flex_none()
-                        .text_size(px(CAP_TEXT))
-                        .text_color(t.dim)
-                        .child(k)
-                }))
-                .on_click(cx.listener(move |app, _: &ClickEvent, window, cx| {
-                    app.run_menu(act, window, cx)
-                }));
-            card = card.child(row);
-        }
-        Some(
-            deferred(
-                div()
-                    .id("menu-shade")
-                    .absolute()
-                    .inset_0()
-                    .on_mouse_down(
-                        MouseButton::Left,
-                        cx.listener(|app, _, _, cx| app.open_menu(None, cx)),
-                    )
-                    .child(
-                        anchored()
-                            .position(point(at.x, at.y + px(GAP_SMALL)))
-                            .snap_to_window_with_margin(px(GAP))
-                            .child(card),
-                    ),
-            )
-            .with_priority(2)
-            .into_any_element(),
-        )
-    }
+    // ---- The menu, the column edges ----
 
     /// The button that opens the settings menu where it is. A desk that
     /// is not running while another answers is a small dot on it, named
@@ -336,9 +163,12 @@ impl DeskApp {
                 rest.join(", ")
             ),
         };
-        icon_button(t, "menu-open", Icon::Settings, self.menu.is_some())
+        let open = self.menu_open(cx);
+        icon_button(t, "menu-open", Icon::Settings, open)
+            .debug_selector(|| "menu-open".into())
             .relative()
-            .when(!away.is_empty() && self.menu.is_none(), |d| {
+            .child(ahjo_app_kit::pointer::watch())
+            .when(!away.is_empty() && !open, |d| {
                 d.child(
                     div()
                         .absolute()
@@ -350,15 +180,8 @@ impl DeskApp {
                 )
             })
             // Not over the menu it opened.
-            .when(self.menu.is_none(), |d| d.tooltip(kit::tip(tip)))
-            .on_click(cx.listener(|app, e: &ClickEvent, _, cx| {
-                let at = if app.menu.is_some() {
-                    None
-                } else {
-                    Some(e.position())
-                };
-                app.open_menu(at, cx)
-            }))
+            .when(!open, |d| d.tooltip(kit::tip(tip)))
+            .on_click(cx.listener(|app, e: &ClickEvent, _, cx| app.open_menu(e.position(), cx)))
     }
 
     /// Update, when the node it was installed from hands out another
@@ -395,80 +218,84 @@ impl DeskApp {
             .on_click(cx.listener(|app, _: &ClickEvent, _, cx| app.toggle_fold(cx)))
     }
 
-    /// A column's edge: a line, caught a little either side of it, that
-    /// drags the column wider or narrower; a double click puts it back.
-    fn grip(&self, t: &Theme, grip: Grip, wide: f32, cx: &mut Context<Self>) -> Div {
-        let name = match grip {
-            Grip::List => "grip-list",
-            Grip::Talk => "grip-talk",
-        };
-        let on = self.drag.is_some_and(|d| d.grip == grip);
-        let lit = t.accent_soft();
-        let hit = div()
-            .id(name)
-            .debug_selector(move || name.into())
-            .group(name)
-            .absolute()
-            .top_0()
-            .bottom_0()
-            .left(px(-tokens::GRIP_HIT / 2.))
-            .w(px(tokens::GRIP_HIT))
-            .flex()
-            .justify_center()
-            .cursor_col_resize()
-            .child(
-                div()
-                    .w(px(3.))
-                    .h_full()
-                    .when(on, |d| d.bg(lit))
-                    .group_hover(name, |d| d.bg(lit)),
-            )
-            .on_mouse_down(
-                MouseButton::Left,
-                cx.listener(move |app, e: &MouseDownEvent, _, cx| {
-                    cx.stop_propagation();
-                    if e.click_count == 2 {
-                        app.reset_width(grip, cx);
-                    } else {
-                        app.grab(grip, f32::from(e.position.x), wide, cx);
-                    }
-                }),
-            );
+    /// The edge between the answer and the surface: a line whose kit grip
+    /// drags the answer wider or narrower; a double click puts it back.
+    fn talk_edge(
+        &self,
+        t: &Theme,
+        talk_w: f32,
+        wide: f32,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Div {
+        let me = cx.entity().downgrade();
+        let grip = kit::grip(
+            t,
+            "grip-talk",
+            GripEdge::Right,
+            talk_w,
+            self.column_range(Grip::Talk, wide),
+            window,
+            cx,
+            move |width, phase, _, cx| {
+                let _ = me.update(cx, |app, cx| match phase {
+                    Phase::Moving => app.size_column(Grip::Talk, Some(width), false, cx),
+                    Phase::Kept => app.size_column(Grip::Talk, Some(width), true, cx),
+                    Phase::Reset => app.size_column(Grip::Talk, None, true, cx),
+                });
+            },
+        )
+        .debug_selector(|| "grip-talk".into());
         div()
             .w(px(1.))
             .h_full()
             .flex_none()
             .bg(t.divider)
             .relative()
-            .child(deferred(hit))
+            .child(deferred(grip))
     }
 
-    /// While an edge is dragged, the whole window follows the pointer, so
-    /// it never slips off the thin edge.
-    fn drag_cover(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
-        self.drag?;
-        Some(
-            deferred(
-                div()
-                    .id("drag-cover")
-                    .absolute()
-                    .inset_0()
-                    .cursor_col_resize()
-                    .on_mouse_move(cx.listener(|app, e: &MouseMoveEvent, window, cx| {
-                        if e.pressed_button != Some(MouseButton::Left) {
-                            return app.let_go(cx);
-                        }
-                        let wide = f32::from(window.viewport_size().width);
-                        app.drag_to(f32::from(e.position.x), wide, cx)
-                    }))
-                    .on_mouse_up(
-                        MouseButton::Left,
-                        cx.listener(|app, _, _, cx| app.let_go(cx)),
-                    ),
-            )
-            .with_priority(3)
-            .into_any_element(),
-        )
+    /// The list of asks at the window's left, as the kit draws a column at
+    /// the window's edge: its head (what waits, what he answered, the
+    /// menu) and Close, which puts it away (Ctrl+B); dragged by its edge;
+    /// sliding as it goes and comes back.
+    fn list_column(
+        &mut self,
+        t: &Theme,
+        wide: f32,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
+        let open = !self.config.fold_list;
+        let share = self.list_slide.share(open, window)?;
+        let width = tokens::columns(wide, true, self.config.list_w, self.config.talk_w).0;
+        let range = self.column_range(Grip::List, wide);
+        let first = tokens::columns(wide, true, None, self.config.talk_w).0;
+        let (close, sized) = (cx.entity().downgrade(), cx.entity().downgrade());
+        let column = EdgeColumn {
+            id: "list",
+            left: true,
+            width,
+            range,
+            first_width: first,
+            head: self.lists(t, cx).into_any_element(),
+            content: self.side_panel(t, width, cx),
+            focus: self.list_focus.clone(),
+            back: None,
+            close: Rc::new(move |_, cx| {
+                let _ = close.update(cx, |app, cx| app.toggle_fold(cx));
+            }),
+            close_keys: "Esc, Ctrl+B",
+            sized: Rc::new(move |width, keep, _, cx| {
+                let _ = sized.update(cx, |app, cx| {
+                    // A double click puts it back at its share of the
+                    // window, which follows the window as it is sized.
+                    let width = (!keep || (width - first).abs() > 0.5).then_some(width);
+                    app.size_column(Grip::List, width, keep, cx)
+                });
+            }),
+        };
+        Some(column.render(t, share, window, cx))
     }
 
     /// Nothing to answer: every desk read and none waiting, the desks
@@ -487,7 +314,6 @@ impl DeskApp {
             .collect();
         let trouble = failed
             .into_iter()
-            .chain(self.notice.clone())
             .map(|f| div().text_color(t.error).child(f).into_any_element());
         let lines = |d: Div| {
             d.flex()
@@ -712,14 +538,10 @@ impl DeskApp {
             })
             .collect();
         div()
-            .id("list")
-            .w(px(width))
-            .flex_none()
-            .h_full()
+            .id("list-asks")
+            .size_full()
             .flex()
             .flex_col()
-            .bg(t.surface)
-            .child(self.lists(t, cx))
             .child(
                 div()
                     .flex_1()
@@ -779,8 +601,8 @@ impl DeskApp {
             .into_any_element()
     }
 
-    /// The list's head: what waits on him and what he answered, the
-    /// menu, and the way to put the list away.
+    /// The list's head: what waits on him and what he answered, and the
+    /// menu; the column's Close puts the list away.
     fn lists(&mut self, t: &Theme, cx: &mut Context<Self>) -> Div {
         let waiting = self.queue().len();
         let known = self.reached() == Reached::Some;
@@ -810,14 +632,12 @@ impl DeskApp {
                 })
         };
         div()
-            .flex_none()
-            .h(px(tokens::TOOLS))
-            .px(px(GAP_SMALL))
+            .flex_1()
+            .min_w_0()
+            .h_full()
             .flex()
             .items_center()
             .gap(px(2.))
-            .border_b_1()
-            .border_color(t.divider)
             .text_size(px(META))
             // In a narrow list the tabs give way; the buttons stay.
             .child(
@@ -869,7 +689,6 @@ impl DeskApp {
                     ),
             )
             .child(self.menu_button(t, cx))
-            .child(self.list_button(t, cx))
     }
 
     // ---- The conversation ----

@@ -1,19 +1,54 @@
 //! Settings: how the Desk looks and behaves, set where he answers and kept
-//! in `desk.json`. A theme is a card drawn in its own colours; a click
-//! draws the whole Desk in it at once and keeps it.
+//! in `desk.json`, a layer over the window that Escape closes. The theme
+//! is chosen with the kit's picker, as in Ahjo Swarm.
 
 use crate::app::{DeskApp, Reach};
 use crate::desk::{self, Order};
 use crate::tokens::{self, GAP, GAP_SMALL, META, PAD};
 use crate::views::{button, chip};
-use ahjo_app_kit::theme::{Direction, Theme, alpha};
+use ahjo_app_kit::theme::{Direction, Theme, theme};
 use ahjo_app_kit::widgets::kit::{self, Kind};
-use ahjo_app_kit::widgets::pane;
+use ahjo_app_kit::widgets::{pane, theme_picker};
 use ahjo_app_kit::zoom::{Zoom, app as zoom};
 
 use gpui::{
-    AnyElement, ClickEvent, Context, Div, FontWeight, SharedString, Window, div, prelude::*, px,
+    AnyElement, ClickEvent, Context, Div, Entity, FocusHandle, FontWeight, IntoElement, Render,
+    SharedString, Window, div, prelude::*, px,
 };
+
+/// Settings as a layer on the Desk's frame: drawn from the app's state,
+/// over the whole window, with the keyboard in it.
+pub struct SettingsLayer {
+    app: Entity<DeskApp>,
+    pub focus: FocusHandle,
+}
+
+impl SettingsLayer {
+    pub fn new(app: Entity<DeskApp>, cx: &mut Context<Self>) -> Self {
+        cx.observe(&app, |_, _, cx| cx.notify()).detach();
+        Self {
+            app,
+            focus: cx.focus_handle(),
+        }
+    }
+}
+
+impl Render for SettingsLayer {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let t = theme(cx).clone();
+        let page = self
+            .app
+            .update(cx, |app, cx| app.settings_view(&t, window, cx));
+        div()
+            .id("settings-layer")
+            .debug_selector(|| "settings-layer".into())
+            .track_focus(&self.focus)
+            .size_full()
+            .bg(t.bg)
+            .text_color(t.text)
+            .child(page)
+    }
+}
 
 impl DeskApp {
     pub fn settings_view(
@@ -44,7 +79,6 @@ impl DeskApp {
                             })),
                     ),
             )
-            .child(self.themes(t, cx))
             .child(self.reading(t, cx))
             .child(self.answering(t, cx))
             .child(self.telling(t, cx))
@@ -56,31 +90,25 @@ impl DeskApp {
             .into_any_element()
     }
 
-    fn themes(&mut self, t: &Theme, cx: &mut Context<Self>) -> Div {
-        let chosen = Direction::from_key(&self.config.theme);
-        let swarm = ahjo_app_kit::theme::chosen().0;
-        let mut grid = div().flex().flex_wrap().gap(px(GAP));
-        grid = grid.child(
-            theme_card(t, &swarm, "As in Swarm", chosen.is_none(), "swarm")
-                .on_click(cx.listener(|app, _: &ClickEvent, _, cx| app.set_theme(None, cx))),
-        );
-        for d in Direction::ALL {
-            let th = Theme::new(d);
-            grid = grid.child(
-                theme_card(t, &th, d.label(), chosen == Some(d), d.key()).on_click(
-                    cx.listener(move |app, _: &ClickEvent, _, cx| app.set_theme(Some(d), cx)),
-                ),
-            );
-        }
-        section(
+    /// The theme's row: the kit's picker, which can follow Ahjo Swarm.
+    fn theme_row(&mut self, t: &Theme, cx: &mut Context<Self>) -> Div {
+        let follows = Direction::from_key(&self.config.theme).is_none();
+        row(
             t,
             "Theme",
-            Some("A click draws the Desk in it and keeps it."),
+            if follows {
+                "As in Ahjo Swarm: the Desk follows the theme chosen there."
+            } else {
+                "The Desk's own. Up and Down try one, Enter keeps it."
+            },
+            theme_picker::button(t, "theme-open").on_click(
+                cx.listener(|app, _: &ClickEvent, window, cx| app.pick_theme(window, cx)),
+            ),
         )
-        .child(grid)
     }
 
     fn reading(&mut self, t: &Theme, cx: &mut Context<Self>) -> Div {
+        let theme = self.theme_row(t, cx);
         let size = self.app_size;
         let step = |id: &'static str, words: &'static str, z: Zoom| {
             button(t, id, words, Kind::Plain).on_click(
@@ -101,6 +129,7 @@ impl DeskApp {
             );
         }
         section(t, "Reading", None)
+            .child(theme)
             .child(row(
                 t,
                 "Size",
@@ -279,87 +308,4 @@ fn row(t: &Theme, name: &str, about: &str, control: impl IntoElement) -> Div {
                 ),
         )
         .child(div().flex_none().child(control))
-}
-
-/// A theme as a card: a small desk drawn in its colours (a waiting row,
-/// a line of words, its accent's Send), its name under it.
-fn theme_card(t: &Theme, th: &Theme, name: &str, on: bool, id: &str) -> gpui::Stateful<Div> {
-    let line = |w: f32, c| div().w(px(w)).h(px(5.)).rounded_full().bg(c);
-    let accent = t.accent;
-    let selector = format!("theme-{id}");
-    div()
-        .id(SharedString::from(selector.clone()))
-        .debug_selector(move || selector)
-        .w(px(tokens::THEME_CARD))
-        .flex()
-        .flex_col()
-        .gap(px(6.))
-        .p(px(6.))
-        .rounded(px(tokens::RADIUS + 2.))
-        .border_2()
-        .border_color(if on { t.accent } else { alpha(t.divider, 0.0) })
-        .cursor_pointer()
-        .hover(move |d| d.border_color(alpha(accent, 0.5)))
-        .child(
-            div()
-                .h(px(72.))
-                .rounded(px(tokens::RADIUS))
-                .border_1()
-                .border_color(th.divider)
-                .bg(th.bg)
-                .overflow_hidden()
-                .flex()
-                .child(
-                    // The waiting list, one row in front.
-                    div()
-                        .w(px(46.))
-                        .h_full()
-                        .bg(th.surface)
-                        .border_r_1()
-                        .border_color(th.divider)
-                        .p(px(5.))
-                        .flex()
-                        .flex_col()
-                        .gap(px(5.))
-                        .child(div().h(px(10.)).rounded(px(2.)).bg(alpha(th.accent, 0.25)))
-                        .child(line(28., th.dim))
-                        .child(line(32., th.dim)),
-                )
-                .child(
-                    div()
-                        .flex_1()
-                        .p(px(7.))
-                        .flex()
-                        .flex_col()
-                        .gap(px(5.))
-                        .child(
-                            div()
-                                .flex()
-                                .items_center()
-                                .gap(px(4.))
-                                .child(div().size(px(6.)).rounded_full().bg(th.needs))
-                                .child(line(44., th.text)),
-                        )
-                        .child(line(60., th.text2))
-                        .child(line(38., th.text2))
-                        .child(div().flex_1())
-                        .child(
-                            div()
-                                .flex()
-                                .justify_end()
-                                .child(div().w(px(26.)).h(px(10.)).rounded(px(3.)).bg(th.accent)),
-                        ),
-                ),
-        )
-        .child(
-            div()
-                .flex()
-                .items_center()
-                .gap(px(4.))
-                .text_size(px(META))
-                .text_color(if on { t.text } else { t.text2 })
-                .when(on, |d| d.font_weight(FontWeight::SEMIBOLD))
-                .child(div().min_w_0().truncate().child(name.to_string()))
-                .when(on, |d| d.child(div().text_color(t.accent).child("✓"))),
-        )
 }

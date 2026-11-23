@@ -59,7 +59,8 @@ fn answered_elsewhere_waits_out_an_undo(cx: &mut gpui::TestAppContext) {
         desk.posts().is_empty(),
         "nothing is posted while it can be undone"
     );
-    click(cx, "undo");
+    // The status line says it waits, with its Undo.
+    click(cx, "status-action");
     assert_eq!(
         current(cx),
         Some(first.clone()),

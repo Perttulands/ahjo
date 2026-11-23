@@ -66,7 +66,11 @@ pub fn run() {
                 Some(d) => (Theme::new(d), None),
                 None => ahjo_app_kit::theme::chosen(),
             };
-            let notice = loaded.notice.clone().or(unknown);
+            let notice = loaded
+                .notice
+                .as_ref()
+                .map(|e| e.message.clone())
+                .or(unknown);
             cx.set_global(theme);
             field::bind_keys(cx);
             cx.set_app_identity("io.ahjo.desk", "Ahjo Desk");

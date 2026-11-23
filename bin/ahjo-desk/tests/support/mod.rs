@@ -6,16 +6,18 @@
 
 use ahjo_app_desk::app::DeskApp;
 use ahjo_app_desk::desk::{Config, Loaded, Place};
+use ahjo_app_kit::settings_file::SettingsFile;
 use gpui::{Entity, Modifiers, TestAppContext, VisualTestContext, point};
 use serde_json::{Value, json};
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::TcpListener;
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant};
 
 #[derive(Default)]
 pub struct State {
     pub asks: Vec<Value>,
+    /// Every POST is refused, as a desk restarting does.
+    pub refuse: bool,
     /// Every POST: its path and body.
     pub posts: Vec<(String, Value)>,
 }
@@ -31,7 +33,7 @@ impl FakeDesk {
         let url = format!("http://{}", listener.local_addr().expect("its address"));
         let state = Arc::new(Mutex::new(State {
             asks,
-            posts: vec![],
+            ..Default::default()
         }));
         let shared = state.clone();
         std::thread::spawn(move || {
@@ -88,6 +90,10 @@ fn route(method: &str, path: &str, body: &[u8], state: &Mutex<State>) -> (&'stat
     match (method, path) {
         ("GET", "/api/asks") => ("200 OK", Value::Array(s.asks.clone())),
         ("GET", "/api/desks") => ("200 OK", json!([])),
+        ("POST", _) if s.refuse => (
+            "503 Service Unavailable",
+            json!({"error": "The desk is restarting"}),
+        ),
         ("POST", p) if p.starts_with("/api/asks/") => {
             let payload: Value = serde_json::from_slice(body).unwrap_or(Value::Null);
             s.posts.push((p.to_string(), payload.clone()));
@@ -182,14 +188,13 @@ pub fn open<'a>(
         cx.set_global(ahjo_app_kit::theme::Theme::default());
         ahjo_app_kit::widgets::field::bind_keys(cx);
     });
+    let (mut config, notice) = SettingsFile::<Config>::load(Some(dir.join("desk.json")));
+    assert!(notice.is_none(), "{notice:?}");
+    config.tell_session = false;
     let loaded = Loaded {
-        config: Config {
-            tell_session: false,
-            ..Default::default()
-        },
+        config,
         places: vec![Place::parse(&format!("Test={}", desk.url))],
         notice: None,
-        kept: false,
     };
     let (app, cx) = cx.add_window_view(move |window, cx| DeskApp::new(loaded, None, window, cx));
     until(cx, "the asks", |cx| {
@@ -198,21 +203,7 @@ pub fn open<'a>(
     (app, cx)
 }
 
-pub fn until(
-    cx: &mut VisualTestContext,
-    what: &str,
-    mut ok: impl FnMut(&mut VisualTestContext) -> bool,
-) {
-    let deadline = Instant::now() + Duration::from_secs(10);
-    loop {
-        cx.run_until_parked();
-        if ok(cx) {
-            return;
-        }
-        assert!(Instant::now() < deadline, "timed out waiting for {what}");
-        std::thread::sleep(Duration::from_millis(20));
-    }
-}
+pub use ahjo_testkit::app::until;
 
 /// The centre of what `selector` draws, in the platform's pixels.
 pub fn centre(cx: &mut VisualTestContext, selector: &'static str) -> gpui::Point<gpui::Pixels> {

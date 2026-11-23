@@ -173,6 +173,7 @@ name = "ahjo-app-desk"
 version = "0.0.1"
 dependencies = [
  "ahjo-app-kit",
+ "ahjo-testkit",
  "async-channel",
  "embed-resource",
  "gpui-pre",
