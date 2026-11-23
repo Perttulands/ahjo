@@ -79,6 +79,23 @@ a scratch folder `$S`:
    clicks, keys and typing are what show focus, order and dead ends.
 5. Stop what you started: the app, Xvfb, the node, and your tmux session.
 
+## Lead the work
+
+Work that runs in parallel goes to lanes: one agent owns one outcome end to
+end. A lane's brief stands on its own and names:
+
+- the outcome and why, in the operator's words where he gave them;
+- what is known (files, commits, beads) and what is ruled out;
+- the kit elements to use, so the lane extends the kit rather than its page;
+- that the lane looks at its screens on a private display, lands on main
+  when green, chases any red run to its cause, and does not deploy;
+- what to report: commits, screenshots, what it did not check.
+
+Pick the model by the work: the strongest for design, hard bugs and review;
+a cheaper one for mechanical moves across many files. The lead reads each
+lane's screenshots before deploying, and deploys in batches, once or twice
+a day or when the operator asks, with one short note of what to try.
+
 ## Upgrade the operator's node
 
 The node is the systemd user unit `ahjo`, listening on `127.0.0.1:7310`

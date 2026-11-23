@@ -35,6 +35,11 @@ is good.
   break one, the design is wrong: stop and say so.
 - In the native app every visual value is a token, and stores stay apart from
   views.
+- Every interaction (popup, menu, confirm, side panel, resize grip, scroll
+  area, rename, search, notice, settings file) is the kit's element, as
+  `ARCHITECTURE.md` (Kit) lists them. Where one falls short, extend it in
+  `kit/`; a page-local copy is a defect, and the source checks in
+  `bin/ahjo/tests` refuse the known ones.
 - Land a rename or reshape whole: no shims, aliases or dead code.
 - Errors carry a code and a message in the one shape `kit/core` defines.
 
@@ -68,5 +73,5 @@ Before pushing: `cargo fmt --check`, then `cargo clippy --all-targets -- -D warn
 as CI does: every test in a process of its own, many at once
 (`.config/nextest.toml`). If `tmux` on `PATH` is a wrapper that refuses
 `kill-server`, set `AHJO_TMUX` to the real binary. Write a test for behaviour that could break again, not for how
-something looks. Chase a flake by reading the code and writing a deterministic
-test, not by rerunning.
+something looks. A red CI run is never rerun to green: chase a flake by reading the code and
+making the test deterministic, whoever's change it surfaced on.
