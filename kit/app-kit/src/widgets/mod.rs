@@ -9,4 +9,5 @@ pub mod pane;
 pub mod path_picker;
 pub mod select;
 pub mod syntax;
+pub mod theme_picker;
 pub mod undo;

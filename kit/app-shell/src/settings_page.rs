@@ -8,18 +8,18 @@
 //! shows, and shown as named settings; it changes by editing its file.
 //! Typing in the search shows every setting that matches, from every group.
 
-use crate::theme_picker::{self, Key, Picker};
 use ahjo_app_kit::ask::{Answers, Ask};
 use ahjo_app_kit::frame::Status;
 use ahjo_app_kit::link::client::LinkState;
 use ahjo_app_kit::page::Meta;
-use ahjo_app_kit::popup::{self, Popup, PopupId, Spot};
+use ahjo_app_kit::popup::Spot;
 use ahjo_app_kit::settings::DEFAULT_NODE;
 use ahjo_app_kit::text::fuzzy;
 use ahjo_app_kit::theme::{Direction, Theme, size, theme};
 use ahjo_app_kit::widgets::field::{self, FieldEvent, TextField};
 use ahjo_app_kit::widgets::kit::{self, Kind};
 use ahjo_app_kit::widgets::pane;
+use ahjo_app_kit::widgets::theme_picker::{self, Picker, ThemePicker};
 use ahjo_app_kit::zoom::Zoom;
 use ahjo_app_kit::{Control, Host, Hub, Page, Setting};
 use ahjo_core::{
@@ -27,8 +27,8 @@ use ahjo_core::{
     commands::{ConfigShow, ConfigShown},
 };
 use gpui::{
-    AnyElement, App, AppContext, Context, Div, Entity, FocusHandle, Focusable, KeyDownEvent,
-    SharedString, Subscription, Window, div, prelude::*, px,
+    AnyElement, App, AppContext, Context, Div, Entity, FocusHandle, Focusable, SharedString,
+    Subscription, WeakEntity, Window, div, prelude::*, px,
 };
 use serde_json::Value;
 use std::collections::HashMap;
@@ -90,11 +90,8 @@ pub struct SettingsPage {
     /// A field for each text setting.
     fields: HashMap<(Owner, &'static str), Entity<TextField>>,
     _fields: Vec<Subscription>,
-    /// The theme picker, while it is open, its popup, and what has the
-    /// keyboard then.
-    picker: Option<Picker>,
-    picker_popup: Option<PopupId>,
-    picker_focus: FocusHandle,
+    /// The theme picker, while it is open.
+    picker: Option<WeakEntity<ThemePicker>>,
 }
 
 impl Page for SettingsPage {
@@ -106,8 +103,8 @@ impl Page for SettingsPage {
     /// The fields show what is kept now, and the node's config is read.
     fn shown(&mut self, shown: bool, _: &mut Window, cx: &mut Context<Self>) {
         self.shown = shown;
-        if !shown && let Some(id) = self.picker_popup {
-            self.host.close_popup(id, cx);
+        if !shown && let Some(picker) = self.picker.take() {
+            let _ = picker.update(cx, |p, cx| p.close(cx));
         }
         if shown {
             self.refresh(cx);
@@ -228,8 +225,6 @@ impl SettingsPage {
             fields,
             _fields: subscriptions,
             picker: None,
-            picker_popup: None,
-            picker_focus: cx.focus_handle(),
         }
     }
 
@@ -243,76 +238,31 @@ impl SettingsPage {
 
     /// Opens the picker beside the theme's control, the keyboard in it.
     fn picker_open(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if self.picker.is_some() {
+        if self.picker.as_ref().is_some_and(|p| p.is_upgradable()) {
             return;
         }
-        let now = ahjo_app_kit::theme::theme(cx).direction;
-        self.picker = Some(Picker::open(now));
-        let spot = Spot::here(window, cx);
-        let view = popup::drawn(&cx.entity(), |p: &mut Self, _, cx| p.picker_list(cx), cx);
-        let page = cx.entity().downgrade();
-        self.picker_popup = self.host.popup(
-            Popup::beside(spot, view)
-                .focus(self.picker_focus.clone())
-                .on_dismiss(move |_, cx| {
-                    let _ = page.update(cx, |p, cx| p.picker_back(cx));
-                }),
-            cx,
-        );
-        cx.notify();
-    }
-
-    /// The whole app drawn in `d` while the picker tries it; nothing kept.
-    fn picker_try(&mut self, d: Direction, cx: &mut Context<Self>) {
-        if theme(cx).direction != d {
-            cx.set_global(Theme::new(d));
-            cx.refresh_windows();
-        }
-        cx.notify();
-    }
-
-    /// Keeps `d` and closes the picker.
-    pub(crate) fn picker_keep(&mut self, d: Direction, cx: &mut Context<Self>) {
-        if let Some(p) = self.picker.as_mut() {
-            p.was = d;
-        }
-        self.write(Owner::App, "theme", Value::from(d.key()), cx);
-        if let Some(id) = self.picker_popup {
-            self.host.close_popup(id, cx);
-        }
-    }
-
-    /// The picker closed (Escape, a press outside, or kept): the theme is
-    /// the one it was, or the one kept.
-    fn picker_back(&mut self, cx: &mut Context<Self>) {
-        self.picker_popup = None;
-        if let Some(p) = self.picker.take() {
-            self.picker_try(p.was, cx);
-        }
-    }
-
-    pub(crate) fn picker_key(&mut self, e: &KeyDownEvent, cx: &mut Context<Self>) {
-        let Some(picker) = self.picker.as_mut() else {
+        let Some(frame) = self.host.frame(cx) else {
             return;
         };
-        match picker.key(&e.keystroke.key) {
-            Key::Try(d) => self.picker_try(d, cx),
-            Key::Keep(d) => self.picker_keep(d, cx),
-            Key::Nothing => return,
-        }
-        cx.stop_propagation();
-    }
-
-    /// The open picker's list, in its popup.
-    fn picker_list(&mut self, cx: &mut Context<Self>) -> Option<AnyElement> {
-        let t = theme(cx).clone();
-        let picker = self.picker.as_ref()?;
-        Some(theme_picker::list(
-            &t,
-            picker,
-            &self.picker_focus,
-            cx.entity().downgrade(),
-        ))
+        let now = ahjo_app_kit::theme::theme(cx).direction;
+        let spot = Spot::here(window, cx);
+        let page = cx.entity().downgrade();
+        let picker = theme_picker::open(
+            &frame,
+            ID,
+            spot,
+            Picker::new(Some(now), false),
+            move |d, _, cx| {
+                let key = d.map_or("", |d| d.key());
+                let _ = page.update(cx, |p, cx| {
+                    p.write(Owner::App, "theme", Value::from(key), cx)
+                });
+            },
+            window,
+            cx,
+        );
+        self.picker = Some(picker.downgrade());
+        cx.notify();
     }
 
     /// The theme's control: the theme drawn now, which opens the picker.
