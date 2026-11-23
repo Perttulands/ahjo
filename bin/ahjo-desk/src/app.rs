@@ -88,6 +88,19 @@ impl DeskState {
 /// An ask: its desk and its number.
 pub type Key = (usize, String);
 
+/// An answer made and not yet posted: what goes to the desk, and the ask
+/// to open after.
+pub struct PendingAnswer {
+    pub key: Key,
+    pub title: String,
+    revision: u64,
+    marks: Vec<model::Mark>,
+    /// His marks differ from the desk's, so they go first.
+    changed: bool,
+    payload: serde_json::Value,
+    next: Option<Key>,
+}
+
 /// Which asks the list on the left shows: those waiting on him, or those
 /// he answered, to look at again.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -259,6 +272,9 @@ pub struct DeskApp {
     app_wheel: Rc<Cell<ahjo_app_kit::zoom::Wheel>>,
     pub toast: Option<(String, bool)>,
     toast_gen: u64,
+    /// An answer waiting out its undo before it is posted.
+    pub pending_answer: Option<PendingAnswer>,
+    undo_gen: u64,
     pub sending: bool,
     pub notice: Option<String>,
     live: Arc<AtomicU64>,
@@ -429,6 +445,8 @@ impl DeskApp {
             app_wheel: Rc::default(),
             toast: None,
             toast_gen: 0,
+            pending_answer: None,
+            undo_gen: 0,
             sending: false,
             notice,
             live: Arc::new(AtomicU64::new(0)),
@@ -645,6 +663,11 @@ impl DeskApp {
                 .set_offset(gpui::point(gpui::px(0.), gpui::px(0.)));
             self.doc_scroll
                 .set_offset(gpui::point(gpui::px(0.), gpui::px(0.)));
+        }
+        if let Some(answer) = &self.pending_answer
+            && key.as_ref() == Some(&answer.key)
+        {
+            self.pending_answer = None;
         }
         self.current = key;
         self.view = View::default();
@@ -1403,13 +1426,13 @@ impl DeskApp {
         &mut self,
         _: &Entity<TextField>,
         e: &FieldEvent,
-        window: &mut Window,
+        _: &mut Window,
         cx: &mut Context<Self>,
     ) {
         match e {
             FieldEvent::Changed => self.words_changed(cx),
             // Enter sends when he chose it (the field is then not prose).
-            FieldEvent::SubmitAlt | FieldEvent::Submit => self.send(Verdict::Send, window, cx),
+            FieldEvent::SubmitAlt | FieldEvent::Submit => self.send(Verdict::Send, cx),
             _ => {}
         }
     }
@@ -1469,7 +1492,7 @@ impl DeskApp {
         &mut self,
         _: &Entity<TextField>,
         e: &FieldEvent,
-        window: &mut Window,
+        _: &mut Window,
         cx: &mut Context<Self>,
     ) {
         match e {
@@ -1491,7 +1514,7 @@ impl DeskApp {
                 self.aim(Aim::Surface, cx);
             }
             FieldEvent::Submit => self.aim(Aim::Words, cx),
-            FieldEvent::SubmitAlt => self.send(Verdict::Send, window, cx),
+            FieldEvent::SubmitAlt => self.send(Verdict::Send, cx),
             _ => {}
         }
     }
@@ -1582,10 +1605,16 @@ impl DeskApp {
     }
 
     /// Sends his answer (his marks first when he changed them), and opens
-    /// the next ask while the desk keeps it.
-    pub fn send(&mut self, verdict: Verdict, window: &mut Window, cx: &mut Context<Self>) {
+    /// the next ask while the desk keeps it. Answered elsewhere waits out
+    /// a short undo before anything is posted: it says nothing of its own,
+    /// so a slip would close a round on nothing.
+    pub fn send(&mut self, verdict: Verdict, cx: &mut Context<Self>) {
         if self.sending || self.read_only() {
             return;
+        }
+        // Answering on before the undo ran out lets the waiting one go.
+        if let Some(waiting) = self.pending_answer.take() {
+            self.post(waiting, cx);
         }
         let Some(key) = self.current.clone() else {
             return;
@@ -1599,18 +1628,67 @@ impl DeskApp {
             Ok(p) => p,
             Err(why) => return self.say(why, true, cx),
         };
-        let changed = draft.marks.as_ref().is_some_and(|m| *m != ask.marks);
-        self.sending = true;
         let queue = self.queue();
         let next = queue
             .iter()
             .position(|k| *k == key)
             .and_then(|i| queue.get(i + 1).or_else(|| queue.get(i.wrapping_sub(1))))
             .cloned();
+        let answer = PendingAnswer {
+            changed: draft.marks.as_ref().is_some_and(|m| *m != ask.marks),
+            key,
+            title: ask.title.clone(),
+            revision: ask.revision,
+            marks,
+            payload,
+            next,
+        };
+        if verdict != Verdict::Elsewhere {
+            return self.post(answer, cx);
+        }
+        self.undo_gen += 1;
+        let generation = self.undo_gen;
+        let next = answer.next.clone();
+        self.pending_answer = Some(answer);
+        self.open(next, cx);
+        cx.spawn(async move |this, cx| {
+            cx.background_executor()
+                .timer(Duration::from_millis(tokens::UNDO_MS))
+                .await;
+            let _ = this.update(cx, |app, cx| {
+                if app.undo_gen == generation
+                    && let Some(answer) = app.pending_answer.take()
+                {
+                    app.post(answer, cx);
+                }
+            });
+        })
+        .detach();
+    }
+
+    /// Takes back an answer still waiting out its undo, and opens its ask
+    /// again as he left it.
+    pub fn undo_answer(&mut self, cx: &mut Context<Self>) {
+        let Some(answer) = self.pending_answer.take() else {
+            return;
+        };
+        self.open(Some(answer.key), cx);
+        self.say(format!("Still open · {}", answer.title), false, cx);
+    }
+
+    fn post(&mut self, answer: PendingAnswer, cx: &mut Context<Self>) {
+        let PendingAnswer {
+            key,
+            title,
+            revision,
+            marks,
+            changed,
+            payload,
+            next,
+        } = answer;
+        self.sending = true;
         let base = self.desks[key.0].place.url.clone();
-        let title = ask.title.clone();
-        let revision = ask.revision;
-        cx.spawn_in(window, async move |this, cx| {
+        cx.spawn(async move |this, cx| {
             let id = key.1.clone();
             let sent = desk::runtime()
                 .spawn(async move {
@@ -1621,7 +1699,7 @@ impl DeskApp {
                 })
                 .await
                 .unwrap_or_else(|e| Err(e.to_string()));
-            let _ = this.update_in(cx, |app, _, cx| {
+            let _ = this.update(cx, |app, cx| {
                 app.sending = false;
                 match sent {
                     Ok(now) => {
@@ -2286,7 +2364,7 @@ impl DeskApp {
                 "pagedown" => return self.step_ask(1, cx),
                 "pageup" => return self.step_ask(-1, cx),
                 "b" => return self.toggle_fold(cx),
-                "enter" if !self.typing(window, cx) => return self.send(Verdict::Send, window, cx),
+                "enter" if !self.typing(window, cx) => return self.send(Verdict::Send, cx),
                 // Pasted anywhere, a picture goes with the answer and words
                 // go into it.
                 "v" if !self.typing(window, cx) && !self.read_only() => {

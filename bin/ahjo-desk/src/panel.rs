@@ -378,7 +378,8 @@ impl DeskApp {
     }
 
     /// His answer: a card holding his words, the pictures he pasted, and
-    /// at its foot the way out at the left and Send at the right, last.
+    /// at its foot the ways to answer, Send last at the right. (Answered
+    /// elsewhere stands at the top, away from them.)
     pub fn answer_card(
         &mut self,
         t: &Theme,
@@ -419,9 +420,7 @@ impl DeskApp {
         )
         .when(self.sending, |d| d.opacity(0.5))
         .tooltip(kit::tip(format!("{key}{told}")))
-        .on_click(
-            cx.listener(|app, _: &ClickEvent, window, cx| app.send(Verdict::Send, window, cx)),
-        );
+        .on_click(cx.listener(|app, _: &ClickEvent, _, cx| app.send(Verdict::Send, cx)));
         let running = ask.check.as_ref().is_some_and(|c| c.running);
         let done = hands.then(|| {
             big(
@@ -448,24 +447,19 @@ impl DeskApp {
                 .tooltip(kit::tip(
                     "Accept it as it is; your words, if any, go with it",
                 ))
-                .on_click(cx.listener(|app, _: &ClickEvent, window, cx| {
-                    app.send(Verdict::LooksGood, window, cx)
-                }))
+                .on_click(
+                    cx.listener(|app, _: &ClickEvent, _, cx| app.send(Verdict::LooksGood, cx)),
+                )
         });
         let rest = grill.then(|| {
             big(button(t, "rest", "Rest as recommended", Kind::Plain), t)
                 .tooltip(kit::tip(
                     "Every question you left takes the agent's recommendation",
                 ))
-                .on_click(cx.listener(|app, _: &ClickEvent, window, cx| {
-                    app.send(Verdict::GrillRest, window, cx)
-                }))
+                .on_click(
+                    cx.listener(|app, _: &ClickEvent, _, cx| app.send(Verdict::GrillRest, cx)),
+                )
         });
-        let elsewhere = quiet(t, "elsewhere", "Answered elsewhere")
-            .tooltip(kit::tip(
-                "You told the agent in its session or by voice: this closes the ask with your words as a note",
-            ))
-            .on_click(cx.listener(|app, _: &ClickEvent, window, cx| app.send(Verdict::Elsewhere, window, cx)));
         // Hands: the job's folders, above the card.
         let links: Vec<AnyElement> = if hands {
             [("in", "Open in/"), ("out", "Open out/"), ("guide", "Guide")]
@@ -522,7 +516,6 @@ impl DeskApp {
             .gap(px(GAP_SMALL))
             .px(px(tokens::FOOT_PAD))
             .pb(px(tokens::FOOT_PAD))
-            .child(elsewhere)
             .child(div().flex_1())
             .children(rest)
             .children(good)

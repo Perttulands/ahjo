@@ -143,6 +143,9 @@ pub fn kept(pan: f32, size: f32, room: f32) -> f32 {
 pub const STAGE_PAD: f32 = 16.;
 /// How long a notice stays.
 pub const TOAST_MS: u64 = 3200;
+/// How long an answer that says nothing of its own (answered elsewhere)
+/// waits for an undo before it is posted.
+pub const UNDO_MS: u64 = 6000;
 /// How soon after a change his unsent answers are written to disk.
 pub const KEEP_DRAFTS_MS: u64 = 400;
 

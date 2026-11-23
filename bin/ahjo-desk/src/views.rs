@@ -114,7 +114,7 @@ impl Render for DeskApp {
             .text_size(px(META))
             .relative()
             .child(body)
-            .children(self.toast_view(&t, notice_over))
+            .children(self.toast_view(&t, notice_over, cx))
             .children(self.menu_view(&t, cx))
             .children(self.drag_cover(cx))
             // Ctrl+wheel a picture did not take sizes the whole app.
@@ -135,8 +135,26 @@ impl DeskApp {
     // ---- The frame: notices, the menu, the column edges ----
 
     /// A notice, a moment over the column given (its left and width).
-    fn toast_view(&self, t: &Theme, (left, width): (f32, f32)) -> Option<AnyElement> {
-        let (words, error) = self.toast.clone()?;
+    fn toast_view(
+        &self,
+        t: &Theme,
+        (left, width): (f32, f32),
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
+        // An answer waiting out its undo says so until it goes.
+        let waiting = self
+            .pending_answer
+            .as_ref()
+            .map(|a| format!("Answered elsewhere · {}", a.title));
+        let (words, error) = match waiting.clone() {
+            Some(w) => (w, false),
+            None => self.toast.clone()?,
+        };
+        let undo = waiting.is_some().then(|| {
+            button(t, "undo", "Undo", Kind::Quiet)
+                .debug_selector(|| "undo".into())
+                .on_click(cx.listener(|app, _: &ClickEvent, _, cx| app.undo_answer(cx)))
+        });
         Some(
             div()
                 .absolute()
@@ -167,7 +185,11 @@ impl DeskApp {
                         })
                         .shadow_md()
                         .text_color(if error { t.error } else { t.text })
-                        .child(words),
+                        .flex()
+                        .items_center()
+                        .gap(px(GAP))
+                        .child(div().min_w_0().truncate().child(words))
+                        .children(undo),
                 )
                 .into_any_element(),
         )
@@ -929,6 +951,20 @@ impl DeskApp {
                     .join(" · "),
                 ),
             )
+            // Up here, away from the answer's own buttons: it closes the
+            // round on no words of the agent's, and waits out an undo.
+            .when(open, |d| {
+                d.child(
+                    button(t, "elsewhere", "Answered elsewhere", Kind::Quiet)
+                        .debug_selector(|| "elsewhere".into())
+                        .tooltip(kit::tip(
+                            "You told the agent in its session or by voice: this closes the ask with your words as a note, after a moment to undo",
+                        ))
+                        .on_click(cx.listener(|app, _: &ClickEvent, _, cx| {
+                            app.send(crate::answer::Verdict::Elsewhere, cx)
+                        })),
+                )
+            })
             .child(
                 icon_button(t, "web", Icon::External, false)
                     .tooltip(kit::tip("Open on the web desk · O"))
