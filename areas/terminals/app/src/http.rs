@@ -28,7 +28,7 @@ pub fn enc(s: &str) -> String {
 /// Writes `bytes` as `name` on `node`, readable by the session's Unix
 /// `user` (empty is the node's own).
 pub fn drop_file(node: &NodeId, user: &str, name: &str, bytes: Vec<u8>) -> Request {
-    let mut path = format!("/api/drops?name={}", enc(name));
+    let mut path = format!("{}?name={}", ahjo_files_contract::DROPS_PATH, enc(name));
     if !user.is_empty() {
         path.push_str(&format!("&user={}", enc(user)));
     }

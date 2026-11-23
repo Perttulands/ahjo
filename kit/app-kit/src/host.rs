@@ -39,6 +39,32 @@ pub struct Node {
     pub environment: String,
 }
 
+/// What the window shows and runs, as a report names it.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct WindowState {
+    /// The app's build; empty when its binary named none.
+    pub app_build: &'static str,
+    /// The node the app is served by: its id, address and build, once it
+    /// has said hello.
+    pub node_id: String,
+    pub node_url: String,
+    pub node_build: String,
+    /// The page shown.
+    pub page: Option<&'static str>,
+    /// The panel's content on top (`<page>/<name>`), and whether the panel
+    /// is open with it or put away.
+    pub panel: Option<String>,
+    pub panel_is_open: bool,
+    /// Whether the side panel at the left is open or put away to its edge.
+    pub side_is_open: bool,
+    /// The popups and layers open over the page, oldest first.
+    pub surfaces: Vec<String>,
+    /// The window's size in its own pixels, and the display's scale.
+    pub width: f32,
+    pub height: f32,
+    pub scale: f32,
+}
+
 /// An HTTP request to a node, through the serving node.
 #[derive(Clone, Debug)]
 pub struct Request {
@@ -537,6 +563,52 @@ impl Host {
     pub fn panel_width(&self, cx: &App) -> f32 {
         self.read(cx, |h| h.settings.panel_width)
             .unwrap_or(crate::theme::size::PANEL)
+    }
+
+    /// What the window shows now: its page, panel and open surfaces,
+    /// the app's and node's builds, and its size.
+    pub fn window_state(&self, window: &gpui::Window, cx: &App) -> WindowState {
+        let size = window.viewport_size();
+        let surfaces = self
+            .read_frame(cx, |f| {
+                f.stack
+                    .iter()
+                    .map(|s| crate::layers::Layer::kind(s).to_string())
+                    .collect()
+            })
+            .unwrap_or_default();
+        let mut state = self
+            .read(cx, |h| {
+                let here = h.fleet.here();
+                let hello = here.hello.as_ref();
+                WindowState {
+                    app_build: h.build,
+                    node_id: hello.map(|h| h.node.clone()).unwrap_or_default(),
+                    node_url: here.base.clone(),
+                    node_build: hello.map(|h| h.version.clone()).unwrap_or_default(),
+                    page: h.shown(),
+                    panel: h.panel.top().map(|p| p.name.clone()),
+                    panel_is_open: h.panel.open,
+                    side_is_open: h.settings.side_open,
+                    ..WindowState::default()
+                }
+            })
+            .unwrap_or_default();
+        state.surfaces = surfaces;
+        state.width = f32::from(size.width);
+        state.height = f32::from(size.height);
+        state.scale = window.scale_factor();
+        state
+    }
+
+    /// The window's pixels as it shows now ([`crate::capture`]).
+    pub fn capture(
+        &self,
+        window: &gpui::Window,
+        cx: &App,
+    ) -> Result<crate::capture::Picture, Error> {
+        let capture = self.read(cx, |h| h.capture).unwrap_or(crate::capture::none);
+        capture(window)
     }
 
     /// The page the window shows.

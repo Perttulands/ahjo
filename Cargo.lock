@@ -200,6 +200,7 @@ dependencies = [
  "gpui-pre",
  "log",
  "notify",
+ "png 0.18.1",
  "serde",
  "serde_json",
  "sha2 0.10.9",
@@ -236,6 +237,7 @@ dependencies = [
  "ahjo-app-kit",
  "ahjo-app-shell",
  "ahjo-brain-app",
+ "ahjo-core",
  "ahjo-files-app",
  "ahjo-harness-app",
  "ahjo-host-app",
@@ -248,7 +250,10 @@ dependencies = [
  "gpui-pre",
  "gpui-pre-platform",
  "log",
+ "raw-window-handle",
  "serde_json",
+ "windows 0.62.2",
+ "x11rb",
 ]
 
 [[package]]
@@ -517,6 +522,8 @@ dependencies = [
  "ahjo-app-kit",
  "ahjo-app-shell",
  "ahjo-core",
+ "ahjo-files",
+ "ahjo-files-contract",
  "ahjo-issue",
  "ahjo-issue-contract",
  "ahjo-node-kit",

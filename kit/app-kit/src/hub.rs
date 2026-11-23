@@ -128,6 +128,11 @@ pub struct Hub {
     shown: Option<&'static str>,
     /// The views that may hold unsaved work, each with the page it is from.
     guards: Vec<Guard>,
+    /// The app's own build (`AHJO_VERSION`), as its binary names it; empty
+    /// when it named none.
+    pub build: &'static str,
+    /// How the window is captured: the platform's window, or a test's.
+    pub capture: crate::capture::Capture,
 }
 
 /// What a guarded view holds unsaved now: `None` when all is saved or the
@@ -192,6 +197,8 @@ impl Hub {
             panel: Default::default(),
             shown: None,
             guards: vec![],
+            build: "",
+            capture: crate::capture::none,
         }
     }
 

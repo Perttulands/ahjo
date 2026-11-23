@@ -166,7 +166,7 @@ impl IntoResponse for FilesError {
 
 fn drop_routes(drops: Arc<Drops>) -> Router {
     Router::new()
-        .route("/api/drops", post(drop_file))
+        .route(ahjo_files_contract::DROPS_PATH, post(drop_file))
         .layer(DefaultBodyLimit::max(super::drops::MAX_BYTES))
         .with_state(drops)
 }

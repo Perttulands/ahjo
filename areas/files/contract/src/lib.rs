@@ -7,6 +7,10 @@ pub mod commands;
 /// HTTP route serving the bytes of a file.
 pub const FILE_BYTES_PATH: &str = "/api/files/file";
 
+/// HTTP route writing an attachment ([`DropAt`]) for an agent on the node
+/// to read by the path it answers ([`Dropped`]).
+pub const DROPS_PATH: &str = "/api/drops";
+
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq, JsonSchema)]
 pub struct Entry {
     pub name: String,

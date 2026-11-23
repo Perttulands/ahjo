@@ -11,6 +11,7 @@ workspace = true
 [dependencies]
 ahjo-app-kit = { path = "../../../kit/app-kit" }
 ahjo-core = { path = "../../../kit/core" }
+ahjo-files-contract = { path = "../../files/contract" }
 ahjo-issue-contract = { path = "../contract" }
 ahjo-terminals-contract = { path = "../../terminals/contract" }
 gpui = { package = "gpui-pre", version = "=0.3.12" }
@@ -21,6 +22,7 @@ jiff = "0.2"
 
 [dev-dependencies]
 ahjo-app-shell = { path = "../../../kit/app-shell" }
+ahjo-files = { path = "../../files/node" }
 ahjo-issue = { path = "../node" }
 ahjo-testkit = { path = "../../../kit/testkit", features = ["app"] }
 ahjo-node-kit = { path = "../../../kit/node-kit" }

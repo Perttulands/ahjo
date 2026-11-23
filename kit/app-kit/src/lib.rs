@@ -3,6 +3,7 @@
 
 pub mod app_log;
 pub mod ask;
+pub mod capture;
 pub mod chords;
 pub mod clock;
 pub mod declared;

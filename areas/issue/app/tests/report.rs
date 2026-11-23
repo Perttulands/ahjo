@@ -137,8 +137,8 @@ fn reports_file_to_beads_and_github_with_context_and_escape_discards(cx: &mut Te
         cx.notify();
     });
     cx.simulate_keystrokes("alt-r");
-    until(cx, "context", |cx| {
-        cx.debug_bounds("report-context-Context: alpha").is_some()
+    until(cx, "what goes with it", |cx| {
+        cx.debug_bounds("report-evidence").is_some()
     });
     assert_eq!(shell.read_with(cx, |s, _| s.shown_page()), Some("toy"));
     until(cx, "project", |cx| {
@@ -165,10 +165,15 @@ fn reports_file_to_beads_and_github_with_context_and_escape_discards(cx: &mut Te
         std::fs::read_to_string(filed.join("title")).unwrap(),
         "Title"
     );
-    assert_eq!(
-        std::fs::read_to_string(filed.join("description")).unwrap(),
-        "Body\n\nContext: alpha"
+    // gpui's test platform has no pixels to capture, and the node has no
+    // terminals: the report says so rather than failing.
+    let description = std::fs::read_to_string(filed.join("description")).unwrap();
+    assert!(
+        description.starts_with("Body\n\nFiled from Ahjo Swarm's report.\nScreenshot: not taken: "),
+        "{description}"
     );
+    assert!(description.contains("\nFocused session: alpha on node node, user user\n"));
+    assert!(description.contains("\nIts screen was not read: "));
     assert_eq!(std::fs::read_to_string(filed.join("type")).unwrap(), "bug");
     cx.simulate_keystrokes("alt-r");
     until(cx, "GitHub project", |cx| {
@@ -193,9 +198,12 @@ fn reports_file_to_beads_and_github_with_context_and_escape_discards(cx: &mut Te
                 .is_some_and(|s| s.text == "Filed 51")
         })
     });
-    assert_eq!(
-        std::fs::read_to_string(&args).unwrap(),
-        "issue\ncreate\n--repo\no/r\n--title\nGitHub title\n--body\nGitHub body\n\nContext: alpha\n"
+    let args = std::fs::read_to_string(&args).unwrap();
+    assert!(
+        args.starts_with(
+            "issue\ncreate\n--repo\no/r\n--title\nGitHub title\n--body\nGitHub body\n\nFiled from Ahjo Swarm's report.\n"
+        ),
+        "{args}"
     );
     assert_eq!(shell.read_with(cx, |s, _| s.shown_page()), Some("toy"));
     cx.simulate_keystrokes("alt-r");

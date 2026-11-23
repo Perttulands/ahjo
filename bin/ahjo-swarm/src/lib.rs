@@ -1,6 +1,8 @@
 //! Ahjo Swarm's native app: the shell (`ahjo-app-shell`) in a window, holding
 //! the pages listed here. Each area's page is listed here, and nowhere else.
 
+mod capture;
+
 use ahjo_app_kit::Build;
 use ahjo_app_shell::start;
 use gpui::{App, AppContext, Bounds, WindowBounds, WindowOptions, point, px, size};
@@ -109,6 +111,10 @@ pub fn run() {
             |window, cx| {
                 cx.new(|cx| {
                     let mut shell = start(PAGES, node, settings, window, cx);
+                    shell.hub().update(cx, |hub, _| {
+                        hub.build = env!("AHJO_VERSION");
+                        hub.capture = capture::window;
+                    });
                     shell.offer_updates(env!("AHJO_VERSION"), window, cx);
                     shell
                 })

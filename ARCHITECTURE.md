@@ -384,6 +384,7 @@ is `widgets::pane`.
 | Markdown | prose drawn in the theme, its links handed to the page | `widgets::markdown` |
 | Selectable text | prose selected and copied across a column | `widgets::select::Selectable` |
 | Tokens | every colour, size, corner, type size and motion | `theme` (`size`, `ty`, `board`, `fade`, `motion`), and a page's own tokens beside it |
+| Window evidence | what a report attaches: the window's own pixels (`PrintWindow` on Windows, the X window's image on X11; Wayland says it cannot), and its page, panel, open surfaces, builds and size | `Host::capture` (`capture::Picture`; the binary names how, as Swarm's `capture` does), `Host::window_state` |
 | AppFrame and Hub | `AppFrame` is a window's stack, status and toast, with no node; Swarm's `Hub` holds one beside the fleet and settings; Brain and Desk hold an `AppFrame` alone (App pages, Host, Hub and AppFrame) | `frame::AppFrame`, `hub::Hub` |
 
 `bin/ahjo/tests/layout.rs` refuses the hand-rolled forms outside the kit:
