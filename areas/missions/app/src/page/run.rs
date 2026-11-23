@@ -8,8 +8,12 @@ use ahjo_missions_contract::{
     commands::{MissionRun, MissionStarted},
     run_commands::{RunAbort, RunApprove, RunPick, RunReject, RunShow},
 };
-use gpui::{AnyElement, FocusHandle, KeyDownEvent, SharedString, Subscription};
+use gpui::{AnyElement, FocusHandle, Focusable, KeyDownEvent, SharedString, Subscription};
 use std::collections::BTreeMap;
+
+/// The attempts' popup at its largest.
+const ATTEMPTS_W: f32 = 900.;
+const ATTEMPTS_H: f32 = 650.;
 
 pub(super) struct RunUi {
     pub(super) selected: Option<String>,
@@ -18,9 +22,13 @@ pub(super) struct RunUi {
     pub(super) reveal_step: Option<String>,
     pub(super) frozen: Option<Mission>,
     pub(super) starting: bool,
-    /// What the start form was opened from; none (an ask from another
-    /// page) centres it.
+    /// What the start form is opened from; none (an ask from another
+    /// page) opens it beside the mission's Start.
     pub(super) start_at: Option<Spot>,
+    /// Where the mission's Start was last drawn.
+    pub(super) start_button: std::rc::Rc<std::cell::Cell<Option<gpui::Bounds<gpui::Pixels>>>>,
+    /// The start form's popup, while it is open.
+    pub(super) start_popup: Option<PopupId>,
     pub(super) start_keys_ready: bool,
     pub(super) start_subs: Vec<Subscription>,
     pub(super) target: Option<String>,
@@ -35,8 +43,8 @@ pub(super) struct RunUi {
     pub(super) paths: Entity<TextField>,
     keep_sessions: bool,
     pub(super) busy: bool,
-    /// Stop was pressed here: its confirmation stands beside it.
-    pub(super) stop_asked: Option<Spot>,
+    /// Stop's confirmation, beside Stop, while it is open.
+    pub(super) stop_popup: Option<PopupId>,
     pub(super) stop_reason: Entity<TextField>,
     /// The start form shows its rarely needed fields.
     pub(super) start_more: bool,
@@ -51,6 +59,9 @@ pub(super) struct RunUi {
     pub(super) findings: Vec<String>,
     pub(super) attempts: Option<RunAttempts>,
     pub(super) attempt_window: Option<crate::store::attempts::AttemptsWindow>,
+    /// What the attempts were asked for from, and their popup once read.
+    pub(super) attempts_from: Option<Spot>,
+    pub(super) attempts_popup: Option<PopupId>,
     pub(super) attempts_focus: FocusHandle,
     pub(super) attempt_reason: Entity<TextField>,
     pub(super) attempts_at: Option<usize>,
@@ -76,6 +87,8 @@ impl RunUi {
             frozen: None,
             starting: false,
             start_at: None,
+            start_button: Default::default(),
+            start_popup: None,
             start_keys_ready: false,
             start_subs: Vec::new(),
             target: None,
@@ -90,7 +103,7 @@ impl RunUi {
             paths: cx.new(|cx| TextField::new(cx, "Context paths, one per line").prose()),
             keep_sessions: false,
             busy: false,
-            stop_asked: None,
+            stop_popup: None,
             stop_reason: cx.new(|cx| TextField::new(cx, "Why (optional)")),
             start_more: false,
             ticking: false,
@@ -101,6 +114,8 @@ impl RunUi {
             findings: vec![],
             attempts: None,
             attempt_window: None,
+            attempts_from: None,
+            attempts_popup: None,
             attempts_focus: cx.focus_handle(),
             attempt_reason: cx.new(|cx| TextField::new(cx, "Why this attempt?")),
             attempts_at: None,
@@ -176,11 +191,11 @@ impl MissionsPage {
         self.canvas.invalidate_fit();
         self.run.selected = Some(run.clone());
         self.run.reveal_step = None;
-        self.run.stop_asked = None;
-        self.run.starting = false;
+        self.end_stop(cx);
+        self.end_start(cx);
         self.run.frozen = None;
         self.run.attempts = None;
-        self.run.attempt_window = None;
+        self.end_attempts(cx);
         self.run.attempts_at = None;
         self.run.pending_attempt = None;
         self.run.evidence = Default::default();
@@ -449,6 +464,7 @@ impl MissionsPage {
         self.run.error = None;
         self.run.start_keys_ready = false;
         self.run.starting = true;
+        self.open_start(cx);
         cx.notify();
     }
     /// Open another mission with a run's output as its first input and
@@ -470,9 +486,9 @@ impl MissionsPage {
     }
     /// The start form of the open mission, its first input holding `value`.
     pub(super) fn start_with(&mut self, value: &str, folder: &str, cx: &mut Context<Self>) {
-        self.prepare_run(cx);
         // Asked for from another page: nothing here was clicked.
         self.run.start_at = None;
+        self.prepare_run(cx);
         if !folder.is_empty() {
             self.run
                 .cwd
@@ -548,14 +564,11 @@ impl MissionsPage {
         self.run.start_keys_ready = false;
         self.run.starting = true;
         self.editor = None;
+        self.open_start(cx);
         cx.notify();
     }
-    pub(super) fn setup_start_keys(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if !self.run.starting || self.run.start_keys_ready {
-            return;
-        }
-        self.run.start_keys_ready = true;
-        self.run.start_subs.clear();
+    /// The start form's fields in the order Tab goes through them.
+    fn start_order(&self) -> Vec<Entity<TextField>> {
         let mut order: Vec<Entity<TextField>> = self
             .state
             .mission
@@ -583,6 +596,15 @@ impl MissionsPage {
             self.run.base.clone(),
             self.run.paths.clone(),
         ]);
+        order
+    }
+    pub(super) fn setup_start_keys(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if !self.run.starting || self.run.start_keys_ready {
+            return;
+        }
+        self.run.start_keys_ready = true;
+        self.run.start_subs.clear();
+        let order = self.start_order();
         for (index, field) in order.iter().enumerate() {
             let order = order.clone();
             self.run.start_subs.push(cx.subscribe_in(
@@ -599,29 +621,118 @@ impl MissionsPage {
                 },
             ));
         }
-        if let Some(first) = order.first() {
-            ahjo_app_kit::widgets::field::focus(first, window, cx);
+    }
+    /// Opens the start form beside what started it, or the mission's
+    /// Start, the keyboard in its first field. A press outside leaves what
+    /// was typed; Escape or Cancel closes it, but not while its start is
+    /// unanswered.
+    fn open_start(&mut self, cx: &mut Context<Self>) {
+        if self.run.start_popup.is_some() {
+            return;
+        }
+        let spot = self
+            .run
+            .start_at
+            .take()
+            .or_else(|| self.run.start_button.get().map(Spot))
+            .unwrap_or_else(|| Spot::point(gpui::point(px(size::PAD), px(size::TAB_BAR))));
+        let view = popup::drawn(
+            &cx.entity(),
+            |p: &mut Self, window, cx| p.run_start_form(window, cx),
+            cx,
+        );
+        let (asked, closed) = (cx.entity().downgrade(), cx.entity().downgrade());
+        let mut start = Popup::beside(spot, view)
+            .outside(Outside::Keep)
+            .may_close(move |_, cx| {
+                asked
+                    .read_with(cx, |p, _| !p.run.busy && p.run.uncertain.is_none())
+                    .unwrap_or(true)
+            })
+            .on_dismiss(move |_, cx| {
+                let _ = closed.update(cx, |p, cx| p.start_closed(cx));
+            });
+        if let Some(first) = self.start_order().first() {
+            start = start.focus(first.read(cx).focus_handle(cx));
+        }
+        self.run.start_popup = self.host.popup(start, cx);
+    }
+    /// The start form's popup closed: what was typed goes.
+    fn start_closed(&mut self, cx: &mut Context<Self>) {
+        if self.run.start_popup.take().is_none() {
+            return;
+        }
+        self.run.starting = false;
+        self.run.fields.clear();
+        self.run.error = None;
+        self.run.findings.clear();
+        cx.notify();
+    }
+    /// The start form is done with: it closes, keeping nothing open.
+    pub(super) fn end_start(&mut self, cx: &mut Context<Self>) {
+        self.run.starting = false;
+        if let Some(id) = self.run.start_popup.take() {
+            self.host.close_popup(id, cx);
         }
     }
-    pub(super) fn escape_run(&mut self, cx: &mut Context<Self>) -> bool {
-        if self.run.attempt_window.take().is_some() {
-            cx.notify();
-            return true;
+    /// Stop pressed: its confirmation beside it, the keyboard in its
+    /// reason.
+    pub(super) fn open_stop(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.run
+            .stop_reason
+            .update(cx, |field, cx| field.set("", false, cx));
+        let view = popup::drawn(&cx.entity(), |p: &mut Self, _, cx| p.stop_form(cx), cx);
+        let page = cx.entity().downgrade();
+        self.run.stop_popup = self.host.popup(
+            Popup::beside(Spot::here(window, cx), view)
+                .focus(self.run.stop_reason.read(cx).focus_handle(cx))
+                .on_dismiss(move |_, cx| {
+                    let _ = page.update(cx, |p, _| p.run.stop_popup = None);
+                }),
+            cx,
+        );
+    }
+    fn end_stop(&mut self, cx: &mut Context<Self>) {
+        if let Some(id) = self.run.stop_popup.take() {
+            self.host.close_popup(id, cx);
         }
-        if self.run.starting && !self.run.busy && self.run.uncertain.is_none() {
-            self.run.starting = false;
-            self.run.fields.clear();
-            self.run.error = None;
-            self.run.findings.clear();
-            cx.notify();
-            return true;
+    }
+    /// The attempts, read, beside what asked for them; a press outside
+    /// leaves the reason typed for a pick.
+    fn open_attempts(&mut self, cx: &mut Context<Self>) {
+        if self.run.attempts_popup.is_some() {
+            return;
         }
-        if self.run.stop_asked.is_some() {
-            self.run.stop_asked = None;
-            cx.notify();
-            return true;
+        let spot = self
+            .run
+            .attempts_from
+            .take()
+            .unwrap_or_else(|| Spot::point(gpui::point(px(size::PAD), px(size::TAB_BAR))));
+        let view = popup::drawn(
+            &cx.entity(),
+            |p: &mut Self, window, cx| p.attempts_form(window, cx),
+            cx,
+        );
+        let page = cx.entity().downgrade();
+        self.run.attempts_popup = self.host.popup(
+            Popup::beside(spot, view)
+                .focus(self.run.attempts_focus.clone())
+                .outside(Outside::Keep)
+                .on_dismiss(move |_, cx| {
+                    let _ = page.update(cx, |p, cx| {
+                        p.run.attempts_popup = None;
+                        p.run.attempt_window = None;
+                        cx.notify();
+                    });
+                }),
+            cx,
+        );
+    }
+    pub(super) fn end_attempts(&mut self, cx: &mut Context<Self>) {
+        self.run.attempt_window = None;
+        if let Some(id) = self.run.attempts_popup.take() {
+            self.host.close_popup(id, cx);
         }
-        false
     }
     pub(super) fn start_run(&mut self, cx: &mut Context<Self>) {
         if self.run.busy {
@@ -749,7 +860,7 @@ impl MissionsPage {
                 match start_answer(result) {
                     StartAnswer::Started(id) => {
                         page.run.uncertain = None;
-                        page.run.starting = false;
+                        page.end_start(cx);
                         page.show_run(id, cx);
                     }
                     StartAnswer::Refused(error) => {
@@ -1060,6 +1171,7 @@ impl MissionsPage {
                                     window.toggle_compare();
                                 }
                                 page.run.attempt_window = Some(window);
+                                page.open_attempts(cx);
                             }
                             page.load_attempt_images(cx);
                         }
@@ -1081,7 +1193,7 @@ impl MissionsPage {
         cx: &mut Context<Self>,
     ) {
         self.run.pending_attempt = Some((step.to_owned(), false));
-        window.focus(&self.run.attempts_focus, cx);
+        self.run.attempts_from = Some(Spot::here(window, cx));
         self.attempts(cx);
     }
     /// The old attempts window's shortcuts move the focused attempt or the
@@ -1120,12 +1232,6 @@ impl MissionsPage {
                 }
             }
             "c" if numbers.len() > 1 => open.toggle_compare(),
-            "escape" => {
-                self.run.attempt_window = None;
-                cx.stop_propagation();
-                cx.notify();
-                return;
-            }
             digit if digit.len() == 1 && digit.bytes().all(|c| c.is_ascii_digit()) => {
                 let n = digit.parse::<i64>().unwrap_or(0);
                 if !numbers.contains(&n) {
@@ -1217,12 +1323,9 @@ impl MissionsPage {
         }
         any.then_some(row)
     }
-    pub(super) fn run_start_form(
-        &self,
-        t: &Theme,
-        window: &Window,
-        cx: &mut Context<Self>,
-    ) -> Option<AnyElement> {
+    /// The start form, in its popup.
+    fn run_start_form(&mut self, window: &Window, cx: &mut Context<Self>) -> Option<AnyElement> {
+        let t = &theme(cx).clone();
         if self.run.starting {
             let title = self
                 .run
@@ -1438,11 +1541,9 @@ impl MissionsPage {
                     kit::button(t, "run-cancel", "Cancel", Kind::Quiet)
                         .debug_selector(|| "run-cancel".into())
                         .on_click(cx.listener(|page, _, _, cx| {
-                            page.run.starting = false;
-                            page.run.fields.clear();
-                            page.run.error = None;
-                            page.run.findings.clear();
-                            cx.notify();
+                            if let Some(id) = page.run.start_popup {
+                                page.host.close_popup(id, cx);
+                            }
                         })),
                 );
             }
@@ -1462,32 +1563,13 @@ impl MissionsPage {
                 .flex_col()
                 .child(form.id("start-fields").min_h_0().overflow_y_scroll())
                 .child(actions);
-            // Beside what started it; a press outside leaves what was
-            // typed, as before, and Cancel or Esc closes it.
-            return Some(match self.run.start_at {
-                Some(at) => popover(at, window, |_, _| {}, dialog),
-                None => div()
-                    .absolute()
-                    .inset_0()
-                    .occlude()
-                    .bg(ahjo_app_kit::theme::alpha(t.bg, SCRIM))
-                    .flex()
-                    .justify_center()
-                    .items_start()
-                    .pt(px(size::TAB_BAR))
-                    .child(dialog)
-                    .into_any_element(),
-            });
+            return Some(dialog.into_any_element());
         }
         None
     }
-    pub(super) fn stop_form(
-        &self,
-        t: &Theme,
-        window: &Window,
-        cx: &mut Context<Self>,
-    ) -> Option<AnyElement> {
-        let at = self.run.stop_asked?;
+    /// Stop's confirmation, in its popup.
+    fn stop_form(&mut self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        let t = &theme(cx).clone();
         let run = self.selected_run()?;
         if run.r#final {
             return None;
@@ -1535,17 +1617,14 @@ impl MissionsPage {
             .child(
                 kit::button(t, "stop-keep", "Keep running", Kind::Plain)
                     .debug_selector(|| "stop-keep".into())
-                    .on_click(cx.listener(|page, _, _, cx| {
-                        page.run.stop_asked = None;
-                        cx.notify();
-                    })),
+                    .on_click(cx.listener(|page, _, _, cx| page.end_stop(cx))),
             )
             .child(
                 kit::button(t, "stop-confirm", "Stop run", Kind::Primary)
                     .debug_selector(|| "stop-confirm".into())
                     .on_click(cx.listener(|page, _, _, cx| {
                         let reason = page.run.stop_reason.read(cx).text.trim().to_owned();
-                        page.run.stop_asked = None;
+                        page.end_stop(cx);
                         page.run_command(
                             |run| RunAbort {
                                 run,
@@ -1556,20 +1635,12 @@ impl MissionsPage {
                         );
                     })),
             );
-        let page = cx.entity().downgrade();
-        Some(popover(
-            at,
-            window,
-            move |_, cx| {
-                let _ = page.update(cx, |page, cx| {
-                    page.run.stop_asked = None;
-                    cx.notify();
-                });
-            },
-            body,
-        ))
+        Some(body.into_any_element())
     }
-    pub(super) fn attempts_form(&self, t: &Theme, cx: &mut Context<Self>) -> Option<Div> {
+    /// The attempts of a step, side by side, in their popup.
+    fn attempts_form(&mut self, room: &Window, cx: &mut Context<Self>) -> Option<AnyElement> {
+        let t = &theme(cx).clone();
+        let room = room.viewport_size();
         let run = self.selected_run()?.clone();
         let (node, _) = self.state.selected.clone()?;
         if let Some(window) = &self.run.attempt_window {
@@ -1637,10 +1708,7 @@ impl MissionsPage {
             bar = bar.child(
                 kit::button(t, "attempts-close", "Close", Kind::Plain)
                     .debug_selector(|| "attempts-close".into())
-                    .on_click(cx.listener(|p, _, _, cx| {
-                        p.run.attempt_window = None;
-                        cx.notify();
-                    })),
+                    .on_click(cx.listener(|p, _, _, cx| p.end_attempts(cx))),
             );
             let mut panel = div()
                 .id("attempts-window")
@@ -1860,24 +1928,17 @@ impl MissionsPage {
                         })),
                     );
             }
+            // Wide enough to read two attempts side by side, and never
+            // wider or taller than the window keeps room for.
             return Some(
-                div()
-                    .absolute()
-                    .inset_0()
-                    .occlude()
-                    .bg(ahjo_app_kit::theme::alpha(t.bg, SCRIM))
-                    .flex()
-                    .justify_center()
-                    .items_center()
-                    .child(
-                        kit::panel(t)
-                            .w(px(900.))
-                            .max_h(px(650.))
-                            .id("attempts-body")
-                            .overflow_y_scroll()
-                            .p(px(PAD))
-                            .child(panel),
-                    ),
+                kit::panel(t)
+                    .w(px(ATTEMPTS_W).min(room.width - px(2. * size::POPUP_EDGE)))
+                    .max_h(px(ATTEMPTS_H).min(room.height - px(2. * size::POPUP_EDGE)))
+                    .id("attempts-body")
+                    .overflow_y_scroll()
+                    .p(px(PAD))
+                    .child(panel)
+                    .into_any_element(),
             );
         }
         None

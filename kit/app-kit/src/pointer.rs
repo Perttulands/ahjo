@@ -1,5 +1,5 @@
 //! The button the pointer last pressed, so what it opens is not covered
-//! by its own tooltip and a menu it opens stands under it, clear of its
+//! by its own tooltip and a popup it opens stands beside it, clear of its
 //! neighbours (every [`crate::widgets::kit::button`] reports itself here).
 
 use gpui::{
@@ -11,9 +11,6 @@ use gpui::{
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct Pressed {
     pub bounds: Option<Bounds<Pixels>>,
-    /// It stands in the window's right half: what it opens aligns to its
-    /// right edge.
-    pub right: bool,
 }
 
 impl Global for Pressed {}
@@ -23,11 +20,10 @@ pub fn pressed(cx: &App) -> Option<Bounds<Pixels>> {
     cx.try_global::<Pressed>().and_then(|p| p.bounds)
 }
 
-/// The button last pressed, if `at` (where a menu was asked for) is on it.
-pub fn pressed_at(at: gpui::Point<Pixels>, cx: &App) -> Option<Pressed> {
-    cx.try_global::<Pressed>()
-        .copied()
-        .filter(|p| p.bounds.is_some_and(|b| b.contains(&at)))
+/// The bounds of the button last pressed, if `at` (where a popup was
+/// asked for) is on it.
+pub fn pressed_at(at: gpui::Point<Pixels>, cx: &App) -> Option<Bounds<Pixels>> {
+    pressed(cx).filter(|b| b.contains(&at))
 }
 
 /// Whether a tooltip shown now would cover what its button just opened:
@@ -59,10 +55,8 @@ pub fn watch() -> impl IntoElement {
                         && e.button == MouseButton::Left
                         && hitbox.is_hovered(window)
                     {
-                        let right = bounds.center().x > window.viewport_size().width / 2.;
                         cx.set_global(Pressed {
                             bounds: Some(bounds),
-                            right,
                         });
                     }
                 });

@@ -247,7 +247,7 @@ impl Terminals {
                 return;
             }
             Action::Overview => {
-                if self.is_open(surface::OVERVIEW) {
+                if self.is_open(surface::OVERVIEW, cx) {
                     self.close(surface::OVERVIEW, cx);
                 } else {
                     self.open(Surface::Overview, window, cx);
@@ -276,7 +276,7 @@ impl Terminals {
         }
         self.sync(cx);
         self.save(cx);
-        if self.surfaces.is_empty() && self.shown {
+        if !self.host.has_open(cx) && self.shown {
             window.focus(&self.term_focus, cx);
         }
         cx.notify();

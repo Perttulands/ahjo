@@ -86,15 +86,12 @@ impl MenuRow {
     }
 }
 
-/// An open menu: its rows, where it stands, and the danger row armed.
+/// An open menu's rows, the danger row armed and the keyboard's row; a
+/// popup ([`crate::popup::Popup::menu`]) says where it stands.
 #[derive(Clone)]
 pub struct Menu {
     pub rows: Vec<MenuRow>,
-    pub at: gpui::Point<gpui::Pixels>,
     pub armed: Option<usize>,
-    /// The button it opened from, when a press on one opened it: the menu
-    /// stands under it, clear of the buttons beside it.
-    pub under: Option<crate::pointer::Pressed>,
     /// The row the keyboard is on: Up and Down move it, Enter or Right
     /// picks it. None until a key moves it, or from a key that opened it.
     pub cursor: Option<usize>,
@@ -111,6 +108,29 @@ pub enum Pick {
 }
 
 impl Menu {
+    pub fn new(rows: Vec<MenuRow>) -> Self {
+        Self {
+            rows,
+            armed: None,
+            cursor: None,
+        }
+    }
+
+    /// Opened from a key: its first row it can pick is the keyboard's, so
+    /// Enter runs it and the arrows move on.
+    pub fn keyed(mut self) -> Self {
+        self.step(1);
+        self
+    }
+
+    /// Row `index`, a danger row, armed already: one click or Enter runs
+    /// it, as when a key asked for the danger.
+    pub fn armed(mut self, index: usize) -> Self {
+        self.armed = Some(index);
+        self.cursor = Some(index);
+        self
+    }
+
     /// Moves the keyboard's row `by` rows over the rows it can pick,
     /// round the ends; from none, Down takes the first and Up the last.
     pub fn step(&mut self, by: isize) {
@@ -163,22 +183,16 @@ mod tests {
 
     #[test]
     fn a_danger_row_runs_on_the_second_click_and_a_sub_row_opens_in_place() {
-        let mut m = Menu {
-            rows: vec![
-                MenuRow::note("Says"),
-                MenuRow::new("Kill", |_, _| {}).danger(),
-                MenuRow::sub(
-                    "Windows",
-                    Some("2".into()),
-                    vec![MenuRow::new("1", |_, _| {})],
-                ),
-                MenuRow::new("Claim", |_, _| {}).refused("Nothing to claim."),
-            ],
-            at: Default::default(),
-            armed: None,
-            under: None,
-            cursor: None,
-        };
+        let mut m = Menu::new(vec![
+            MenuRow::note("Says"),
+            MenuRow::new("Kill", |_, _| {}).danger(),
+            MenuRow::sub(
+                "Windows",
+                Some("2".into()),
+                vec![MenuRow::new("1", |_, _| {})],
+            ),
+            MenuRow::new("Claim", |_, _| {}).refused("Nothing to claim."),
+        ]);
         assert!(matches!(m.pick(0), Pick::Nothing));
         assert!(matches!(m.pick(3), Pick::Nothing), "refused");
         assert!(matches!(m.pick(1), Pick::Stays));
@@ -192,23 +206,17 @@ mod tests {
 
     #[test]
     fn the_keyboard_steps_over_rows_it_cannot_pick_and_goes_on_into_a_sub_menu() {
-        let mut m = Menu {
-            rows: vec![
-                MenuRow::note("Says"),
-                MenuRow::new("Split", |_, _| {}),
-                MenuRow::rule(),
-                MenuRow::new("Claim", |_, _| {}).refused("Nothing to claim."),
-                MenuRow::sub(
-                    "Windows",
-                    None,
-                    vec![MenuRow::note("Pick one"), MenuRow::new("1", |_, _| {})],
-                ),
-            ],
-            at: Default::default(),
-            armed: None,
-            under: None,
-            cursor: None,
-        };
+        let mut m = Menu::new(vec![
+            MenuRow::note("Says"),
+            MenuRow::new("Split", |_, _| {}),
+            MenuRow::rule(),
+            MenuRow::new("Claim", |_, _| {}).refused("Nothing to claim."),
+            MenuRow::sub(
+                "Windows",
+                None,
+                vec![MenuRow::note("Pick one"), MenuRow::new("1", |_, _| {})],
+            ),
+        ]);
         m.step(1);
         assert_eq!(m.cursor, Some(1));
         m.step(1);

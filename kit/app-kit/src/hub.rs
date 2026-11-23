@@ -13,7 +13,7 @@ use crate::link::client::{LinkState, Notice};
 use crate::link::devices;
 use crate::link::fleet::Fleet;
 use crate::link::socket::{Event, Net};
-use crate::menu::Menu;
+use crate::popup::{Popup, PopupId};
 use crate::settings::Settings;
 use crate::theme::{Direction, Theme, motion};
 use ahjo_core::{Error, NodeId};
@@ -32,23 +32,44 @@ pub struct Toast {
     pub at: Instant,
 }
 
-/// What is on the dismissal stack: a menu, or a layer.
+/// What is on the dismissal stack: a popup (a menu among them), or a
+/// layer over the page or the window.
 #[derive(Clone)]
 pub enum Surface {
-    Menu(Menu),
+    Popup(Popup),
     Layer(Layer),
 }
-
-/// The stack's name for the one open menu.
-const MENU: &str = "menu";
 
 impl Surface {
     /// Escape closes it when it is on top; a layer that keeps Escape for
     /// its content does not close on it.
     pub fn escape_closes(&self) -> bool {
         match self {
-            Surface::Menu(_) => true,
+            Surface::Popup(_) => true,
             Surface::Layer(l) => !l.keeps_escape,
+        }
+    }
+
+    /// The keyboard is in it.
+    pub fn has_keyboard(&self, window: &gpui::Window, cx: &App) -> bool {
+        match self {
+            Surface::Popup(p) => p.has_keyboard(window, cx),
+            Surface::Layer(l) => l.has_keyboard(window),
+        }
+    }
+
+    /// What has the keyboard while it is on top.
+    pub fn focus(&self) -> Option<&gpui::FocusHandle> {
+        match self {
+            Surface::Popup(p) => p.focus.as_ref(),
+            Surface::Layer(l) => l.focus.as_ref(),
+        }
+    }
+
+    pub fn dismiss(&self) -> Option<&Run> {
+        match self {
+            Surface::Popup(p) => p.dismiss.as_ref(),
+            Surface::Layer(l) => l.dismiss.as_ref(),
         }
     }
 }
@@ -56,12 +77,12 @@ impl Surface {
 impl layers::Layer for Surface {
     fn kind(&self) -> &str {
         match self {
-            Surface::Menu(_) => MENU,
+            Surface::Popup(p) => &p.name,
             Surface::Layer(l) => &l.name,
         }
     }
     fn passing(&self) -> bool {
-        matches!(self, Surface::Menu(_))
+        matches!(self, Surface::Popup(p) if p.is_menu())
     }
 }
 
@@ -124,8 +145,8 @@ pub enum HubEvent {
     },
     /// Show this page.
     Show(&'static str),
-    /// The stack changed: the keyboard goes to the top layer, or back to
-    /// the page, and what closed runs its dismiss.
+    /// The stack changed: the keyboard goes to the top surface that takes
+    /// it, or back to where it was, and what closed runs its dismiss.
     Layers { closed: Vec<Surface> },
     /// A setting page `page` declares was changed for it.
     SettingChanged(&'static str),
@@ -161,6 +182,8 @@ pub struct Hub {
     pub toast: Option<Toast>,
     toast_task: Option<Task<()>>,
     pub stack: Stack<Surface>,
+    /// The number the next popup opened is known by.
+    next_popup: u64,
     /// The asks each page answers, by page id.
     answers: Vec<(&'static str, &'static [Answers])>,
     /// Nodes whose link is open, as last tracked.
@@ -237,6 +260,7 @@ impl Hub {
             toast: None,
             toast_task: None,
             stack: Stack::default(),
+            next_popup: 1,
             answers: vec![],
             heard: HashSet::new(),
             away: HashSet::new(),
@@ -707,9 +731,40 @@ impl Hub {
         }
     }
 
+    /// Opens `popup` over the others, named `<page>/popup/<n>`.
+    pub fn open_popup(&mut self, page: &str, mut popup: Popup, cx: &mut Context<Self>) -> PopupId {
+        let id = PopupId(self.next_popup);
+        self.next_popup += 1;
+        popup.id = id;
+        popup.name = format!("{page}/popup/{}", id.0);
+        self.open(Surface::Popup(popup), cx);
+        id
+    }
+
+    /// Closes popup `id` and whatever opened above it, if it is open.
+    pub fn close_popup(&mut self, id: PopupId, cx: &mut Context<Self>) {
+        if let Some(name) = self.popup(id).map(|p| p.name.clone()) {
+            self.close(&name, cx);
+        }
+    }
+
+    /// Popup `id`, while it is open.
+    pub fn popup(&self, id: PopupId) -> Option<&Popup> {
+        self.stack.iter().find_map(|s| match s {
+            Surface::Popup(p) if p.id == id => Some(p),
+            _ => None,
+        })
+    }
+
     /// Closes the open menu, if one is.
     pub fn close_menu(&mut self, cx: &mut Context<Self>) {
-        self.close(MENU, cx)
+        let menu = self.stack.iter().find_map(|s| match s {
+            Surface::Popup(p) if p.is_menu() => Some(p.name.clone()),
+            _ => None,
+        });
+        if let Some(name) = menu {
+            self.close(&name, cx);
+        }
     }
 
     /// Escape: the top surface closes. False when nothing was open.

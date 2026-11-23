@@ -232,20 +232,20 @@ fn canvas_ports_drag_move_zoom_and_undo(cx: &mut TestAppContext) {
     cx.simulate_mouse_down(at, MouseButton::Right, Modifiers::none());
     cx.simulate_mouse_up(at, MouseButton::Right, Modifiers::none());
     until(cx, "context menu", |cx| {
-        cx.debug_bounds("canvas-new-gate").is_some()
+        cx.debug_bounds("menu-label-Gate").is_some()
     });
     cx.simulate_keystrokes("escape");
     until(cx, "menu closed with Escape", |cx| {
-        cx.debug_bounds("canvas-new-gate").is_none()
+        cx.debug_bounds("menu-label-Gate").is_none()
     });
     let canvas = cx.debug_bounds("mission-canvas").unwrap();
     let at = point(canvas.origin.x + px(20.), canvas.origin.y + px(20.));
     cx.simulate_mouse_down(at, MouseButton::Right, Modifiers::none());
     cx.simulate_mouse_up(at, MouseButton::Right, Modifiers::none());
     until(cx, "context menu reopened", |cx| {
-        cx.debug_bounds("canvas-new-gate").is_some()
+        cx.debug_bounds("menu-label-Gate").is_some()
     });
-    click(cx, "canvas-new-gate");
+    click(cx, "menu-label-Gate");
     let deadline = Instant::now() + Duration::from_secs(10);
     loop {
         let doc = rt

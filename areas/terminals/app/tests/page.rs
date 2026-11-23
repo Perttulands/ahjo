@@ -24,7 +24,9 @@ use ahjo_terminals_app::store::workspace::MAX_WINDOWS;
 use ahjo_terminals_contract::SessionList;
 use ahjo_testkit::node::Node;
 use ahjo_testkit::tmux::Server;
-use gpui::{Entity, Modifiers, TestAppContext, VisualTestContext, Window, div, prelude::*, px};
+use gpui::{
+    Entity, Focusable, Modifiers, TestAppContext, VisualTestContext, Window, div, prelude::*, px,
+};
 
 const AREAS: &[Listing] = &[ahjo_terminals::LISTING];
 const AREAS_WITH_FILES: &[Listing] = &[ahjo_terminals::LISTING, ahjo_files::LISTING];
@@ -2324,7 +2326,7 @@ fn leader_and_escape_route_around_an_attached_terminal(cx: &mut TestAppContext) 
     until(cx, "Escape closes Send", |cx| {
         cx.debug_bounds("send-body").is_none()
     });
-    assert!(!page.read_with(cx, |p, _| p.is_open("send")));
+    assert!(!page.read_with(cx, |p, cx| p.is_open("send", cx)));
     let escape_file = running.fixture.join("escape-byte");
     tmux(
         &running,
@@ -3146,6 +3148,52 @@ fn arrange_tabs_view_drag_and_sizing_on_a_live_node(cx: &mut TestAppContext) {
                 .all(|s| s.seat == Some(ahjo_terminals_contract::SizingPane::Mine))
         })
     });
+    // Renaming the view from the tab's menu: a popup beside where the menu
+    // was asked for. Escape lets it go, its name kept, and the keyboard is
+    // back in the terminal it was in, which a closed popup never takes.
+    let term = page.read_with(cx, |p, _| p.term_focus.clone());
+    cx.update(|window, cx| window.focus(&term, cx));
+    let tab = cx.debug_bounds("tab-sessions-0").unwrap().center();
+    cx.simulate_mouse_down(tab, gpui::MouseButton::Right, Modifiers::none());
+    cx.simulate_mouse_up(tab, gpui::MouseButton::Right, Modifiers::none());
+    click(cx, "menu-label-Views".into());
+    click(cx, "menu-label-Rename view".into());
+    click(cx, "menu-label-1  Morning".into());
+    until(cx, "view name popup", |cx| {
+        cx.debug_bounds("view-name").is_some()
+    });
+    let popup = cx.debug_bounds("popup").unwrap();
+    assert!(
+        popup.top() >= tab.y
+            && popup.top() - tab.y < px(24.)
+            && (popup.left() - tab.x).abs() < px(24.),
+        "{popup:?} beside the tab's menu at {tab:?}"
+    );
+    assert!(
+        cx.update(|window, cx| page
+            .read(cx)
+            .rename_field
+            .focus_handle(cx)
+            .is_focused(window)),
+        "the popup has the keys"
+    );
+    cx.simulate_keystrokes("x escape");
+    until(cx, "view name let go", |cx| {
+        cx.debug_bounds("view-name").is_none()
+    });
+    assert_eq!(
+        page.read_with(cx, |p, _| p
+            .settings
+            .workspace
+            .view(1)
+            .map(|v| v.name.clone())),
+        Some("Morning".into()),
+        "Escape keeps the name"
+    );
+    assert!(
+        cx.update(|window, _| term.is_focused(window)),
+        "the keys are the terminal's again"
+    );
     let _ = std::fs::remove_dir_all(settings.parent().unwrap());
 }
 

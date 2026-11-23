@@ -4,17 +4,13 @@
 //! the layout: split, move, close.
 
 use super::page::{Act, MenuItem, Terminals};
-use super::surface;
 use crate::store::layout::Side;
 use crate::store::views::VIEW_KEYS;
 use crate::store::workspace::{Arrange, MAX_WINDOWS, Workspace};
 use crate::theme::{size, theme};
 use ahjo_app_kit::widgets::kit;
-use ahjo_app_kit::widgets::popover::{Spot, popover};
-use gpui::{
-    AnyElement, Context, MouseButton, MouseDownEvent, Pixels, Point, Window, div, point,
-    prelude::*, px,
-};
+
+use gpui::{AnyElement, Context, MouseButton, MouseDownEvent, Window, div, point, prelude::*, px};
 
 /// The chord a view is kept on, as menus show it.
 pub fn view_chord(key: u8) -> String {
@@ -268,15 +264,13 @@ impl Terminals {
             .into_any_element()
     }
 
-    /// Naming a view, in a panel where the menu stood.
+    /// Naming a view, in its popup where the menu stood.
     pub(super) fn render_view_name(
         &mut self,
-        at: Point<Pixels>,
         key: u8,
         rename: bool,
-        window: &Window,
         cx: &mut Context<Self>,
-    ) -> AnyElement {
+    ) -> Option<AnyElement> {
         let t = theme(cx).clone();
         let note = if rename {
             "Enter renames · Esc cancels".to_string()
@@ -286,14 +280,9 @@ impl Terminals {
                 view_chord(key)
             )
         };
-        let page = cx.entity().downgrade();
-        popover(
-            Spot::at(at, cx),
-            window,
-            move |_, cx| {
-                let _ = page.update(cx, |p, cx| p.close(surface::VIEW_NAME, cx));
-            },
+        Some(
             kit::panel(&t)
+                .debug_selector(|| "view-name".into())
                 .w(px(300.))
                 .p(px(10.))
                 .flex()
@@ -301,7 +290,8 @@ impl Terminals {
                 .gap(px(6.))
                 .child(kit::label(&t, format!("View {key}")))
                 .child(self.rename_field.clone())
-                .child(kit::note(&t, note, Some(t.dim))),
+                .child(kit::note(&t, note, Some(t.dim)))
+                .into_any_element(),
         )
     }
 

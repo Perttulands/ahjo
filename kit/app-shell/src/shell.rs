@@ -11,6 +11,7 @@ use ahjo_app_kit::chords::{self, Chord, KeyLike, Keyboard, Run, Verdict};
 use ahjo_app_kit::host::{Cover, Layer};
 use ahjo_app_kit::hub::{HubEvent, Surface};
 use ahjo_app_kit::page::Meta;
+use ahjo_app_kit::popup::{Content, Popup, PopupId};
 use ahjo_app_kit::{Build, Error, Host, Hub, Mounted, declared, mount as mount_page};
 use ahjo_core::frame::{overlap, reserved};
 use gpui::{
@@ -20,11 +21,16 @@ use std::collections::{HashMap, HashSet};
 use std::time::{Duration, Instant};
 
 /// Why the shell gives the keyboard out again.
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 enum Refocus {
-    /// Layers opened or closed: whether a closed one's dismiss moved the
-    /// keyboard itself, and whether the keyboard was in one that closed.
-    Layers { moved: bool, lost: bool },
+    /// Surfaces opened or closed: whether a closed one's dismiss moved the
+    /// keyboard itself, whether the keyboard was in one that closed, and
+    /// where it was before a closed popup opened.
+    Layers {
+        moved: bool,
+        lost: bool,
+        back: Option<FocusHandle>,
+    },
     /// Another page shows.
     PageShown,
     /// The panel was put away, or what it showed went, with the keyboard
@@ -443,22 +449,41 @@ impl Shell {
             }
             HubEvent::Layers { closed } => {
                 let before = window.focused(cx);
-                // The keyboard was in a layer that closed, or nowhere.
-                let lost = before.is_none()
-                    || closed.iter().any(|s| match s {
-                        Surface::Layer(l) => l.has_keyboard(window),
-                        Surface::Menu(_) => false,
-                    });
+                // A popup just opened remembers what had the keyboard, to
+                // give it back when it closes.
+                self.hub.update(cx, |h, _| {
+                    for s in h.stack.iter_mut() {
+                        if let Surface::Popup(p) = s
+                            && p.back.is_none()
+                        {
+                            p.back = Some(
+                                before
+                                    .as_ref()
+                                    .map_or_else(|| self.focus.downgrade(), |f| f.downgrade()),
+                            );
+                        }
+                    }
+                });
+                // The keyboard was in a surface that closed, or nowhere.
+                let lost = before.is_none() || closed.iter().any(|s| s.has_keyboard(window, cx));
+                // Where it was before the first of the closed popups opened.
+                // The window itself (a press on the tab bar leaves it
+                // there) is no place to go back to: the page takes it.
+                let back = closed
+                    .iter()
+                    .rev()
+                    .find_map(|s| match s {
+                        Surface::Popup(p) => p.back.as_ref().and_then(|b| b.upgrade()),
+                        Surface::Layer(_) => None,
+                    })
+                    .filter(|f| *f != self.focus);
                 for s in closed {
-                    if let Surface::Layer(Layer {
-                        dismiss: Some(run), ..
-                    }) = s
-                    {
+                    if let Some(run) = s.dismiss() {
                         run(window, cx);
                     }
                 }
                 let moved = window.focused(cx) != before;
-                self.refocus(Refocus::Layers { moved, lost }, window, cx);
+                self.refocus(Refocus::Layers { moved, lost, back }, window, cx);
             }
             HubEvent::Link { node, state } => {
                 for p in &self.pages {
@@ -499,29 +524,30 @@ impl Shell {
         window.remove_window();
     }
 
-    /// Gives the keyboard to the top layer that takes it, else to the shown
-    /// page. A closed layer's dismiss that moved the keyboard itself keeps
-    /// it there while no layer is left to take it. A layer closing with
-    /// the keyboard elsewhere (in the panel) leaves it there.
+    /// Gives the keyboard to the top surface that takes it. With none left
+    /// to: a closed popup that had the keyboard gives it back to where it
+    /// was as it opened; a closed surface's dismiss that moved the keyboard
+    /// itself keeps it there; a surface closing with the keyboard elsewhere
+    /// leaves it there; else it goes to the shown page.
     fn refocus(&mut self, why: Refocus, window: &mut Window, cx: &mut Context<Self>) {
-        let top = self.hub.read(cx).stack.iter().rev().find_map(|s| match s {
-            Surface::Layer(l) => l.focus.clone(),
-            Surface::Menu(_) => None,
-        });
+        let top = self
+            .hub
+            .read(cx)
+            .stack
+            .iter()
+            .rev()
+            .find_map(|s| s.focus().cloned());
         let page = || {
             self.shown
                 .and_then(|i| self.pages[i].focus(cx))
                 .unwrap_or_else(|| self.focus.clone())
         };
         let to = match (top, why) {
-            (None, Refocus::Layers { moved: true, .. }) => return,
-            (None, Refocus::Layers { lost: false, .. })
-                if self.panel_focus.contains_focused(window, cx) =>
-            {
-                return;
-            }
-            (None, _) => page(),
             (Some(f), _) => f,
+            (None, Refocus::Layers { moved: true, .. }) => return,
+            (None, Refocus::Layers { lost: false, .. }) => return,
+            (None, Refocus::Layers { back: Some(f), .. }) => f,
+            (None, _) => page(),
         };
         window.focus(&to, cx);
     }
@@ -639,7 +665,7 @@ impl Shell {
                 if chords::leader_waiting(self.leader, Instant::now()) {
                     self.leader = None;
                 }
-                self.hub.update(cx, |h, cx| h.dismiss(cx));
+                self.dismiss_top(window, cx);
             }
             Verdict::KeysOffHint => {
                 // The leader still answers with keys off, to say how to turn
@@ -688,6 +714,32 @@ impl Shell {
         cx.notify();
     }
 
+    /// Escape: the top surface closes, unless it is a popup that keeps
+    /// itself open now ([`Popup::may_close`]).
+    fn dismiss_top(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let top = self.hub.read(cx).stack.top().cloned();
+        if let Some(Surface::Popup(p)) = &top
+            && !p.lets_close(window, cx)
+        {
+            return;
+        }
+        self.hub.update(cx, |h, cx| h.dismiss(cx));
+    }
+
+    /// A press outside popup `id` that closes it, unless it keeps itself
+    /// open now.
+    pub(crate) fn press_outside(
+        &mut self,
+        id: PopupId,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let popup = self.hub.read(cx).popup(id).cloned();
+        if popup.is_some_and(|p| p.lets_close(window, cx)) {
+            self.hub.update(cx, |h, cx| h.close_popup(id, cx));
+        }
+    }
+
     /// The keys of a menu on top: Up and Down move its keyboard row, Enter,
     /// Space or Right picks it. True if the key was the menu's.
     fn menu_key(&mut self, k: &KeyLike, window: &mut Window, cx: &mut Context<Self>) -> bool {
@@ -695,7 +747,10 @@ impl Shell {
             return false;
         }
         let cursor = match self.hub.read(cx).stack.top() {
-            Some(Surface::Menu(m)) => m.cursor,
+            Some(Surface::Popup(Popup {
+                content: Content::Menu(m),
+                ..
+            })) => m.cursor,
             _ => return false,
         };
         let by = match k.key.as_str() {
@@ -711,7 +766,11 @@ impl Shell {
             _ => return false,
         };
         self.hub.update(cx, |h, cx| {
-            if let Some(Surface::Menu(m)) = h.stack.top_mut() {
+            if let Some(Surface::Popup(Popup {
+                content: Content::Menu(m),
+                ..
+            })) = h.stack.top_mut()
+            {
                 m.step(by);
             }
             cx.notify();

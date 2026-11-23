@@ -401,7 +401,7 @@ pub fn state_dot(colour: Hsla) -> Div {
         .bg(colour)
 }
 
-/// A popover's frame: raised surface, hairline, shadow.
+/// A popup's frame: raised surface, hairline, shadow.
 pub fn panel(t: &Theme) -> Div {
     div()
         .bg(t.surface)

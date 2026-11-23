@@ -1,18 +1,14 @@
 //! The theme picker on the Settings page: the theme drawn now, which opens
 //! a list of every theme, the app's own ravens first, then the well-known
 //! ones, each with a swatch of its ground, its ink, its accent and its
-//! state colours. Up and Down try a theme on the whole app, Enter keeps
-//! it, Escape (or a click outside) goes back to the one there was; a
-//! click on a row keeps that one.
+//! state colours, in a popup beside it. Up and Down try a theme on the
+//! whole app, Enter keeps it, Escape (or a click outside) closes the popup
+//! back in the one there was; a click on a row keeps that one.
 
 use crate::settings_page::SettingsPage;
-use ahjo_app_kit::theme::{Direction, FAMILY, Theme, motion, size};
+use ahjo_app_kit::theme::{Direction, FAMILY, Theme, size};
 use ahjo_app_kit::widgets::kit;
-use gpui::{
-    Animation, AnimationExt, AnyElement, Div, FocusHandle, SharedString, Stateful, WeakEntity,
-    anchored, deferred, div, ease_out_quint, prelude::*, px,
-};
-use std::time::Duration;
+use gpui::{AnyElement, Div, FocusHandle, SharedString, Stateful, WeakEntity, div, prelude::*, px};
 
 /// The list's width, and the swatch's.
 const WIDTH: f32 = 300.;
@@ -35,7 +31,6 @@ pub(crate) enum Key {
     /// Try this one.
     Try(Direction),
     Keep(Direction),
-    Back(Direction),
     Nothing,
 }
 
@@ -56,7 +51,6 @@ impl Picker {
             "home" => -(Direction::ALL.len() as isize),
             "end" => Direction::ALL.len() as isize,
             "enter" => return Key::Keep(self.at),
-            "escape" => return Key::Back(self.was),
             _ => return Key::Nothing,
         };
         let i = Direction::ALL
@@ -119,20 +113,22 @@ pub(crate) fn button(t: &Theme, id: &str) -> Stateful<Div> {
         .cursor_pointer()
         .text_color(t.text)
         .hover(move |s| s.border_color(accent))
+        .relative()
+        // Its press is reported: the picker opens beside it.
+        .child(ahjo_app_kit::pointer::watch())
         .child(swatch(t))
         .child(t.direction.label())
         .child(div().text_color(t.dim).child("▾"))
 }
 
-/// The open list, over the page below its button: put it in the button's
-/// place, after the button.
+/// The open list, the popup's content.
 pub(crate) fn list(
     t: &Theme,
     picker: &Picker,
     focus: &FocusHandle,
     page: WeakEntity<SettingsPage>,
 ) -> AnyElement {
-    let (keys, outside) = (page.clone(), page.clone());
+    let keys = page.clone();
     let mut rows = div().flex().flex_col().py(px(4.));
     let mut last_own = true;
     for (i, th) in picker.themes.iter().enumerate() {
@@ -178,44 +174,28 @@ pub(crate) fn list(
                 }),
         );
     }
-    deferred(
-        anchored().snap_to_window_with_margin(px(8.)).child(
-            kit::panel(t)
-                .id("theme-picker")
-                .debug_selector(|| "theme-picker".into())
-                .occlude()
-                .track_focus(focus)
-                .on_key_down(move |e, _, cx| {
-                    keys.update(cx, |p, cx| p.picker_key(e, cx)).ok();
-                })
-                .on_mouse_down_out(move |_, _, cx| {
-                    outside.update(cx, |p, cx| p.picker_back(cx)).ok();
-                })
-                .mt(px(4.))
-                .w(px(WIDTH))
-                .child(rows)
-                // How the keys work, said where they work: under the list,
-                // not over it.
-                .child(
-                    div()
-                        .px(px(size::ROW_PAD))
-                        .py(px(6.))
-                        .border_t_1()
-                        .border_color(t.divider)
-                        .text_size(px(size::SMALL))
-                        .text_color(t.dim)
-                        .child("↑ ↓ try  ·  Enter keeps  ·  Esc goes back"),
-                )
-                .with_animation(
-                    "theme-picker-in",
-                    Animation::new(Duration::from_millis(motion::PANEL_IN))
-                        .with_easing(ease_out_quint()),
-                    |d, x| d.opacity(x),
-                ),
-        ),
-    )
-    .with_priority(20)
-    .into_any_element()
+    kit::panel(t)
+        .id("theme-picker")
+        .debug_selector(|| "theme-picker".into())
+        .track_focus(focus)
+        .on_key_down(move |e, _, cx| {
+            keys.update(cx, |p, cx| p.picker_key(e, cx)).ok();
+        })
+        .w(px(WIDTH))
+        .child(rows)
+        // How the keys work, said where they work: under the list, not
+        // over it.
+        .child(
+            div()
+                .px(px(size::ROW_PAD))
+                .py(px(6.))
+                .border_t_1()
+                .border_color(t.divider)
+                .text_size(px(size::SMALL))
+                .text_color(t.dim)
+                .child("↑ ↓ try  ·  Enter keeps  ·  Esc goes back"),
+        )
+        .into_any_element()
 }
 
 #[cfg(test)]
@@ -223,7 +203,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn keys_try_keep_and_go_back() {
+    fn keys_try_and_keep() {
         let mut p = Picker::open(Direction::Night);
         assert_eq!(p.key("down"), Key::Try(Direction::Saga));
         assert_eq!(p.key("up"), Key::Try(Direction::Night));
@@ -232,7 +212,6 @@ mod tests {
         assert_eq!(p.key("home"), Key::Try(Direction::Night));
         assert_eq!(p.key("end"), Key::Try(Direction::GithubLight));
         assert_eq!(p.key("enter"), Key::Keep(Direction::GithubLight));
-        assert_eq!(p.key("escape"), Key::Back(Direction::Night));
         assert_eq!(p.key("x"), Key::Nothing);
     }
 }

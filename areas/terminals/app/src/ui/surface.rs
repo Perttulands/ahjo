@@ -1,15 +1,16 @@
-//! What opens over the page, each a layer on the app's one stack: the app
-//! draws it, closes it on Escape or a click outside, and gives it the
-//! keyboard; the page keeps its state and draws its content. Send and the
-//! output search are content of the window's panel instead, beside the
-//! page, drawn by the same view.
+//! What opens over the page, each a layer or a popup on the app's one
+//! stack: the app draws it, closes it on Escape or a click outside, and
+//! gives it the keyboard; the stack says what is open, the page keeps what
+//! it is about and draws its content. Send and the output search are
+//! content of the window's panel instead, beside the page, drawn by the
+//! same view.
 
 use super::page::Terminals;
 use crate::store::sessions::Key;
-use ahjo_app_kit::host::Cover;
+use ahjo_app_kit::popup::PopupId;
 use gpui::{
-    AnyElement, App, AppContext, Context, Entity, Focusable, IntoElement, Pixels, Point, Render,
-    Subscription, WeakEntity, Window, div,
+    AnyElement, App, AppContext, Context, Entity, Focusable, IntoElement, Render, Subscription,
+    WeakEntity, Window, div,
 };
 
 pub const SEND: &str = "send";
@@ -18,9 +19,8 @@ pub const FIND: &str = "find";
 pub const PEEK: &str = "peek";
 pub const RENAME_TAB: &str = "rename-tab";
 pub const RENAME_SESSION: &str = "rename-session";
-pub const VIEW_NAME: &str = "view-name";
 
-/// A surface over the page, and what it is about.
+/// A layer to open over the page, and what it is about.
 #[derive(Clone, Debug)]
 pub enum Surface {
     Overview,
@@ -29,9 +29,6 @@ pub enum Surface {
     RenameTab(usize),
     /// Its field is drawn where the session's name was right-clicked.
     RenameSession(Key, NameAt),
-    /// Naming the view kept on a number key, where the menu was: keeping
-    /// the arrangement on screen there, or only renaming it.
-    ViewName(Point<Pixels>, u8, bool),
 }
 
 impl Surface {
@@ -41,17 +38,24 @@ impl Surface {
             Surface::Peek => PEEK,
             Surface::RenameTab(_) => RENAME_TAB,
             Surface::RenameSession(..) => RENAME_SESSION,
-            Surface::ViewName(..) => VIEW_NAME,
         }
     }
+}
 
-    /// Overview and Peek cover the page; naming a view the window.
-    pub fn cover(&self) -> Cover {
-        match self {
-            Surface::ViewName(..) => Cover::Window,
-            _ => Cover::Page,
-        }
-    }
+/// What the page's one name field names while it is open.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Naming {
+    /// A tab, in the tab itself.
+    Tab(usize),
+    /// A session, where its name was right-clicked.
+    Session(Key, NameAt),
+    /// The view kept on a number key, in a popup beside its menu: keeping
+    /// the arrangement on screen there, or only renaming it.
+    View {
+        popup: PopupId,
+        key: u8,
+        rename: bool,
+    },
 }
 
 /// Where a session's name is renamed: the place its menu was opened from.
@@ -128,14 +132,13 @@ impl Terminals {
             FIND => return Some(self.render_find(cx)),
             _ => {}
         }
-        let s = self.surfaces.iter().find(|s| s.name() == name)?.clone();
-        match s {
-            Surface::Overview => Some(self.render_overview(window, cx)),
-            Surface::Peek => self.render_peek(window, cx),
-            Surface::RenameTab(_) | Surface::RenameSession(..) => None,
-            Surface::ViewName(at, key, rename) => {
-                Some(self.render_view_name(at, key, rename, window, cx))
-            }
+        if !self.host.is_open(name, cx) {
+            return None;
+        }
+        match name {
+            OVERVIEW => Some(self.render_overview(window, cx)),
+            PEEK => self.render_peek(window, cx),
+            _ => None,
         }
     }
 

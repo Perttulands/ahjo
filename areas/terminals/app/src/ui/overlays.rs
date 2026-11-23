@@ -4,7 +4,7 @@
 
 use super::chords::Action;
 use super::page::{Act, MenuItem, Terminals};
-use super::surface::{self, NameAt, Surface};
+use super::surface::{self, NameAt, Naming};
 use crate::store::sessions::{self, Key};
 use crate::store::workspace::{MAX_WINDOWS, Workspace, tab_label};
 use crate::term::paint::{self, Look};
@@ -68,8 +68,8 @@ impl Terminals {
             }
         }
         let ws = &self.settings.workspace;
-        let renaming = match self.surfaces.last() {
-            Some(Surface::RenameTab(i)) => Some(*i),
+        let renaming = match self.naming {
+            Some(Naming::Tab(i)) => Some(i),
             _ => None,
         };
         for (i, tb) in ws.shown_tabs().iter().enumerate() {
@@ -214,7 +214,7 @@ pub(super) fn tab_menu(ws: &Workspace, i: usize) -> Vec<MenuItem> {
 impl Terminals {
     /// Whether session `key`'s name is being edited `at` this place.
     pub(super) fn renaming_at(&self, key: &Key, at: NameAt) -> bool {
-        matches!(self.surfaces.last(), Some(Surface::RenameSession(k, a)) if k == key && *a == at)
+        matches!(&self.naming, Some(Naming::Session(k, a)) if k == key && *a == at)
     }
 
     /// The field a session's name is edited in, where the name was. A

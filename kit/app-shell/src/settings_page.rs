@@ -13,6 +13,7 @@ use ahjo_app_kit::ask::{Answers, Ask};
 use ahjo_app_kit::host::Status;
 use ahjo_app_kit::link::client::LinkState;
 use ahjo_app_kit::page::Meta;
+use ahjo_app_kit::popup::{self, Popup, PopupId, Spot};
 use ahjo_app_kit::settings::DEFAULT_NODE;
 use ahjo_app_kit::theme::{Direction, Theme, size, theme};
 use ahjo_app_kit::widgets::field::{self, FieldEvent, TextField};
@@ -88,8 +89,10 @@ pub struct SettingsPage {
     /// A field for each text setting.
     fields: HashMap<(Owner, &'static str), Entity<TextField>>,
     _fields: Vec<Subscription>,
-    /// The theme picker, while it is open, and what has the keyboard then.
+    /// The theme picker, while it is open, its popup, and what has the
+    /// keyboard then.
     picker: Option<Picker>,
+    picker_popup: Option<PopupId>,
     picker_focus: FocusHandle,
 }
 
@@ -102,8 +105,8 @@ impl Page for SettingsPage {
     /// The fields show what is kept now, and the node's config is read.
     fn shown(&mut self, shown: bool, _: &mut Window, cx: &mut Context<Self>) {
         self.shown = shown;
-        if !shown {
-            self.picker_back(cx);
+        if !shown && let Some(id) = self.picker_popup {
+            self.host.close_popup(id, cx);
         }
         if shown {
             self.refresh(cx);
@@ -159,13 +162,10 @@ impl Page for SettingsPage {
         cx.notify();
     }
 
-    /// The picker while it is open, else the search: typing finds a
-    /// setting, and the arrows there step through the groups.
+    /// The search: typing finds a setting, and the arrows there step
+    /// through the groups.
     fn focus(&self, cx: &App) -> Option<FocusHandle> {
-        Some(match self.picker {
-            Some(_) => self.picker_focus.clone(),
-            None => self.search.focus_handle(cx),
-        })
+        Some(self.search.focus_handle(cx))
     }
 }
 
@@ -227,6 +227,7 @@ impl SettingsPage {
             fields,
             _fields: subscriptions,
             picker: None,
+            picker_popup: None,
             picker_focus: cx.focus_handle(),
         }
     }
@@ -239,10 +240,24 @@ impl SettingsPage {
         self.chosen = groups[to].0;
     }
 
+    /// Opens the picker beside the theme's control, the keyboard in it.
     fn picker_open(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.picker.is_some() {
+            return;
+        }
         let now = ahjo_app_kit::theme::theme(cx).direction;
         self.picker = Some(Picker::open(now));
-        window.focus(&self.picker_focus, cx);
+        let spot = Spot::here(window, cx);
+        let view = popup::drawn(&cx.entity(), |p: &mut Self, _, cx| p.picker_list(cx), cx);
+        let page = cx.entity().downgrade();
+        self.picker_popup = self.host.popup(
+            Popup::beside(spot, view)
+                .focus(self.picker_focus.clone())
+                .on_dismiss(move |_, cx| {
+                    let _ = page.update(cx, |p, cx| p.picker_back(cx));
+                }),
+            cx,
+        );
         cx.notify();
     }
 
@@ -257,12 +272,19 @@ impl SettingsPage {
 
     /// Keeps `d` and closes the picker.
     pub(crate) fn picker_keep(&mut self, d: Direction, cx: &mut Context<Self>) {
-        self.picker = None;
+        if let Some(p) = self.picker.as_mut() {
+            p.was = d;
+        }
         self.write(Owner::App, "theme", Value::from(d.key()), cx);
+        if let Some(id) = self.picker_popup {
+            self.host.close_popup(id, cx);
+        }
     }
 
-    /// Closes the picker, back in the theme there was.
-    pub(crate) fn picker_back(&mut self, cx: &mut Context<Self>) {
+    /// The picker closed (Escape, a press outside, or kept): the theme is
+    /// the one it was, or the one kept.
+    fn picker_back(&mut self, cx: &mut Context<Self>) {
+        self.picker_popup = None;
         if let Some(p) = self.picker.take() {
             self.picker_try(p.was, cx);
         }
@@ -275,32 +297,27 @@ impl SettingsPage {
         match picker.key(&e.keystroke.key) {
             Key::Try(d) => self.picker_try(d, cx),
             Key::Keep(d) => self.picker_keep(d, cx),
-            Key::Back(_) => self.picker_back(cx),
             Key::Nothing => return,
         }
         cx.stop_propagation();
     }
 
-    /// The theme's control: the theme drawn now, and the picker under it
-    /// while it is open.
+    /// The open picker's list, in its popup.
+    fn picker_list(&mut self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        let t = theme(cx).clone();
+        let picker = self.picker.as_ref()?;
+        Some(theme_picker::list(
+            &t,
+            picker,
+            &self.picker_focus,
+            cx.entity().downgrade(),
+        ))
+    }
+
+    /// The theme's control: the theme drawn now, which opens the picker.
     fn theme_control(&self, t: &Theme, cx: &mut Context<Self>) -> AnyElement {
-        let button = theme_picker::button(t, "setting-app-theme").on_click(cx.listener(
-            |p, _, window, cx| {
-                if p.picker.is_none() {
-                    p.picker_open(window, cx);
-                }
-            },
-        ));
-        let list = self.picker.as_ref().map(|picker| {
-            theme_picker::list(t, picker, &self.picker_focus, cx.entity().downgrade())
-        });
-        div()
-            .flex()
-            .flex_col()
-            .child(button)
-            // gpui places an anchored element absolutely, at its parent's
-            // corner: this empty holder puts that corner under the button.
-            .child(div().children(list))
+        theme_picker::button(t, "setting-app-theme")
+            .on_click(cx.listener(|p, _, window, cx| p.picker_open(window, cx)))
             .into_any_element()
     }
 

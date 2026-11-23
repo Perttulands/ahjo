@@ -43,6 +43,13 @@ fn creates_and_renames_a_mission_with_cancel_and_conflict_guard(cx: &mut TestApp
     click(cx, "new-mission");
     until(cx, "create form", |cx| has(cx, "mission-form-name"));
     cx.simulate_input("Abandoned");
+    // A draft is not lost to Escape or a stray press: the form says so.
+    cx.simulate_keystrokes("escape");
+    until(cx, "draft kept", |cx| has(cx, "mission-form-error"));
+    let form = cx.debug_bounds("mission-form").unwrap();
+    let outside = gpui::point(form.right() + gpui::px(40.), form.bottom() + gpui::px(40.));
+    cx.simulate_click(outside, gpui::Modifiers::none());
+    assert!(has(cx, "mission-form"), "a press outside keeps the draft");
     click(cx, "mission-form-cancel");
     until(cx, "form canceled", |cx| !has(cx, "mission-form"));
     click(cx, "new-mission");
@@ -138,26 +145,27 @@ fn creates_and_renames_a_mission_with_cancel_and_conflict_guard(cx: &mut TestApp
     let listed = format!("mission-{}-scratch", running.id);
     until(cx, "scratch shown", |cx| has(cx, "pane-title-Scratch"));
     menu(cx, "Delete…");
-    until(cx, "archive confirmation", |cx| {
-        has(cx, "mission-archive-explanation")
+    until(cx, "delete asked", |cx| {
+        has(cx, "menu-label-Delete mission")
     });
     // Beside the "…" it was asked for from, not across the window.
-    let form = cx.debug_bounds("mission-form").unwrap();
+    let asked = cx.debug_bounds("popup").unwrap();
     let more = cx.debug_bounds("mission-more").unwrap();
     assert!(
-        (form.top() - more.bottom()).abs() < gpui::px(12.)
-            && (form.right() - more.right()).abs() < gpui::px(12.),
-        "{form:?} under {more:?}, at its right edge"
+        (asked.top() - more.bottom()).abs() < gpui::px(12.)
+            && (asked.right() - more.right()).abs() < gpui::px(12.),
+        "{asked:?} under {more:?}, at its right edge"
     );
-    click(cx, "mission-form-cancel");
-    until(cx, "archive canceled", |cx| !has(cx, "mission-form"));
+    cx.simulate_keystrokes("escape");
+    until(cx, "delete let go", |cx| !has(cx, "popup"));
+    assert!(has(cx, &listed), "Escape deletes nothing");
     menu(cx, "Delete…");
-    until(cx, "archive confirmation reopened", |cx| {
-        has(cx, "mission-archive-explanation")
+    until(cx, "delete asked again", |cx| {
+        has(cx, "menu-label-Delete mission")
     });
-    click(cx, "mission-form-submit");
-    until(cx, "mission archived", |cx| {
-        !has(cx, "mission-form") && !has(cx, &listed)
+    click(cx, "menu-label-Delete mission");
+    until(cx, "mission deleted", |cx| {
+        !has(cx, "popup") && !has(cx, &listed)
     });
     runtime.block_on(async {
         let client = NodeClient::new(Some(&format!("{}/", running.url))).unwrap();

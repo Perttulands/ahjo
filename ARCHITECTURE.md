@@ -206,17 +206,17 @@ reserves, or whose `everywhere` chords share a key, naming both;
 
 - **Host and Hub.** A `Host` is a cheap handle on the `Hub`, the state the
   shell and every page share: the fleet link, settings, status line, toast and
-  the stack of menus and layers. Through it a page lists live nodes and where
+  the stack of popups and layers. Through it a page lists live nodes and where
   each device is, makes HTTP requests, sends frames, turns channels on,
-  reports, opens menus and layers, posts desktop notifications (the shell
+  reports, opens popups, menus and layers, posts desktop notifications (the shell
   owns the one click handler and runs the page's click), redials, keeps its
   section of `app.json`, and asks.
 - **Taps.** A page whose frames are too many for the UI thread (terminal
   screens) registers a tap: the network thread hands it every frame of the
   page's own kinds first, and the page wakes itself at most once per paint.
 - **Events.** The hub never calls a page. A frame of a page's kinds, a link
-  to a node opening or going, an ask it answers or a closed layer's dismiss
-  reaches the shell as a hub event after the update that caused it, so a page
+  to a node opening or going, an ask it answers or a closed popup's or
+  layer's dismiss reaches the shell as a hub event after the update that caused it, so a page
   may use its Host inside its own update.
 - **Tabs and chords.** A page may draw its own part of the tab bar (the
   Sessions page, the terminals area's, draws its workspace tabs there). A chord marked `everywhere`
@@ -268,6 +268,29 @@ reserves, or whose `everywhere` chords share a key, naming both;
   four kinds of side surface (a view over the terminals, a drawer that
   held the keyboard, a squeezing Files panel, a page's own column) each
   had its own look, keys and bugs; one panel has one of each.
+- **Popups.** Every menu, confirm and small form a page opens over itself
+  is a popup on the dismissal stack (`Host::popup`, `app-kit`'s `popup`),
+  and the shell does everything but its content, the same on every page.
+  It stands beside what was clicked (`Spot`: the pressed button, else the
+  point), below it and turned to the side with room, flipped over it and
+  kept inside the window by one function (`popup::beside`), and never
+  larger than the window. Escape closes the top one only; a press outside
+  closes it (`Outside::Close`) or leaves it (`Outside::Keep`, a form
+  holding what was typed), and reaches nothing under it either way. A
+  popup may say not now (`Popup::may_close`: a start not yet answered, a
+  draft), its page closing it is never asked. It takes the keyboard into
+  its declared focus, and when it closes with the keyboard in it the
+  keyboard goes back where it was when it opened, a terminal included, or
+  to the page when that was only the window. A menu is a popup of rows
+  (`MenuRow`) that the shell draws and steps through with the keys;
+  anything else opening closes it. A danger confirm is a one-row menu,
+  already armed (`Host::confirm`). Its content is a view; a page draws it
+  through `popup::drawn`, which redraws with the page. What opens in place
+  stays the page's (a rename in a head or a tab, a mission's note paper,
+  the files palette). Only a decision about the whole window is centred
+  (the close guard), per DESIGN.md's Act where it is. Layers are the
+  stack's other kind: Overview and Peek, which cover the page, and a
+  rename in place while it holds the keyboard.
 - **Window sizes.** A shared session's terminal windows change size only for
   the operator's own act: opening the panel or putting it away (as a path
   he clicks, Send or an item's card opens it), dragging an edge. What

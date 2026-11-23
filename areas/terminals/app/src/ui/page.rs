@@ -4,7 +4,7 @@
 //! fields) is a layer on the app's stack, drawn by [`super::surface`].
 
 use super::launcher::Launcher;
-use super::surface::{self, Surface};
+use super::surface::{self, Naming, Surface};
 use crate::remote::Notice;
 use crate::remotes::{PaneAt, Remotes};
 use crate::store::layout::Side;
@@ -16,6 +16,7 @@ use ahjo_app_kit::Host;
 use ahjo_app_kit::chords::Chord;
 use ahjo_app_kit::host::Status;
 use ahjo_app_kit::menu::MenuRow;
+use ahjo_app_kit::popup::{self, Popup, Spot};
 use ahjo_app_kit::settings::Place;
 use ahjo_app_kit::widgets::field::{self, FieldEvent, TextField};
 use ahjo_app_kit::{Answers, Ask, Page, Setting};
@@ -286,8 +287,8 @@ pub struct Terminals {
     /// The diagram last shown in the window's panel, for its chip to take
     /// away again.
     pub diagram: Option<gpui::WeakEntity<super::diagram::DiagramView>>,
-    /// What is open over the page, bottom first, as this page opened it.
-    pub surfaces: Vec<Surface>,
+    /// What the name field names, while it is open.
+    pub naming: Option<Naming>,
     /// Status lines said since the page last handed them to the app.
     said: Vec<Status>,
     pub geo: Rc<RefCell<[Geo; SLOTS]>>,
@@ -476,7 +477,7 @@ impl Terminals {
             shown: false,
             diagram: None,
             send_area: cx.focus_handle(),
-            surfaces: vec![],
+            naming: None,
             said,
             geo: Rc::new(RefCell::new([Geo::default(); SLOTS])),
             chips: Rc::default(),
@@ -626,14 +627,16 @@ impl Terminals {
                 return;
             }
             let name = s.rename_field.read(cx).text.clone();
-            match s.surfaces.last().cloned() {
-                Some(Surface::RenameTab(_)) => s.keep_tab_name(cx),
-                Some(Surface::RenameSession(k, _)) => {
+            match s.naming.clone() {
+                Some(Naming::Tab(_)) => s.keep_tab_name(cx),
+                Some(Naming::Session(k, _)) => {
+                    s.naming = None;
                     s.close(surface::RENAME_SESSION, cx);
                     s.rename_session(k, name.trim());
                 }
-                Some(Surface::ViewName(_, key, rename)) => {
-                    s.close(surface::VIEW_NAME, cx);
+                Some(Naming::View { popup, key, rename }) => {
+                    s.naming = None;
+                    s.host.close_popup(popup, cx);
                     if rename {
                         s.settings.workspace.rename_view(key, &name);
                         s.save(cx);
@@ -651,9 +654,9 @@ impl Terminals {
         let rename_focus = self.rename_field.read(cx).focus_handle(cx);
         // A session's name is kept only by Enter: a click elsewhere leaves
         // it as it was.
-        cx.on_blur(&rename_focus, window, |s, _, cx| match s.surfaces.last() {
-            Some(Surface::RenameTab(_)) => s.keep_tab_name(cx),
-            Some(Surface::RenameSession(..)) => s.close(surface::RENAME_SESSION, cx),
+        cx.on_blur(&rename_focus, window, |s, _, cx| match s.naming {
+            Some(Naming::Tab(_)) => s.keep_tab_name(cx),
+            Some(Naming::Session(..)) => s.close(surface::RENAME_SESSION, cx),
             _ => {}
         })
         .detach();
@@ -982,7 +985,7 @@ impl Terminals {
         }
         // Overview draws every session as it is, colours and all: their
         // screens stream while it is open, sizing nothing, as Peek's does.
-        if self.surfaces.iter().any(|s| matches!(s, Surface::Overview)) {
+        if self.host.is_open(surface::OVERVIEW, cx) {
             for s in &self.fleet.all {
                 if let Some(p) = s.panes.first() {
                     panes.entry(s.node.clone()).or_default().insert(p.id);
@@ -1071,33 +1074,39 @@ impl Terminals {
 
     // ---- surfaces ----
 
-    pub fn is_open(&self, name: &str) -> bool {
-        self.surfaces.iter().any(|s| s.name() == name)
+    /// This page's layer `name` is on the app's stack.
+    pub fn is_open(&self, name: &str, cx: &App) -> bool {
+        self.host.is_open(name, cx)
+    }
+
+    /// The name field now names `naming`; what it named before closes.
+    fn name_in_field(&mut self, naming: Naming, cx: &mut Context<Self>) {
+        match self.naming.replace(naming) {
+            Some(Naming::Tab(_)) => self.host.close_layer(surface::RENAME_TAB, cx),
+            Some(Naming::Session(..)) => self.host.close_layer(surface::RENAME_SESSION, cx),
+            Some(Naming::View { popup, .. }) => self.host.close_popup(popup, cx),
+            None => {}
+        }
     }
 
     /// Opens `s` over the page, as a layer on the app's stack.
     pub fn open(&mut self, s: Surface, window: &mut Window, cx: &mut Context<Self>) {
         let name = s.name();
-        self.surfaces.retain(|x| x.name() != name);
-        self.surfaces.push(s.clone());
         let focus = match &s {
-            Surface::Overview => {
-                self.host
-                    .channel(ahjo_terminals_contract::OVERVIEW, true, cx);
-                self.overview_cursor = 0;
-                self.overview_scroll.scroll_to_item(1);
-                self.sync(cx);
-                self.focus.clone()
-            }
+            Surface::Overview => self.focus.clone(),
             Surface::Peek => self.peek_focus.clone(),
-            Surface::RenameTab(_) | Surface::RenameSession(..) | Surface::ViewName(..) => {
+            Surface::RenameTab(i) => {
+                self.name_in_field(Naming::Tab(*i), cx);
+                self.rename_field.focus_handle(cx)
+            }
+            Surface::RenameSession(key, at) => {
+                self.name_in_field(Naming::Session(key.clone(), *at), cx);
                 self.rename_field.focus_handle(cx)
             }
         };
         let view = surface::view(self.me.clone(), name, cx);
         let page = self.me.clone();
         let mut layer = ahjo_app_kit::host::Layer::new(name, view)
-            .cover(s.cover())
             .focus(focus.clone())
             .on_dismiss(move |_, cx| {
                 let _ = page.update(cx, |p, cx| p.closed(name, cx));
@@ -1107,7 +1116,50 @@ impl Terminals {
             layer = layer.keeps_escape();
         }
         self.host.layer(layer, cx);
+        if matches!(s, Surface::Overview) {
+            self.host
+                .channel(ahjo_terminals_contract::OVERVIEW, true, cx);
+            self.overview_cursor = 0;
+            self.overview_scroll.scroll_to_item(1);
+            self.sync(cx);
+        }
         window.focus(&focus, cx);
+        cx.notify();
+    }
+
+    /// Names the view kept on number `key` in a popup beside the menu it
+    /// was asked for from: keeping the arrangement on screen there, or
+    /// only renaming it.
+    fn open_view_name(&mut self, key: u8, rename: bool, cx: &mut Context<Self>) {
+        let view = popup::drawn(
+            &cx.entity(),
+            move |p: &mut Self, _, cx| p.render_view_name(key, rename, cx),
+            cx,
+        );
+        let page = self.me.clone();
+        let Some(id) = self.host.popup(
+            Popup::beside(Spot::at(self.menu_at, cx), view)
+                .focus(self.rename_field.focus_handle(cx))
+                .on_dismiss(move |_, cx| {
+                    let _ = page.update(cx, |p, cx| {
+                        if matches!(p.naming, Some(Naming::View { key: k, .. }) if k == key) {
+                            p.naming = None;
+                            cx.notify();
+                        }
+                    });
+                }),
+            cx,
+        ) else {
+            return;
+        };
+        self.name_in_field(
+            Naming::View {
+                popup: id,
+                key,
+                rename,
+            },
+            cx,
+        );
         cx.notify();
     }
 
@@ -1116,8 +1168,8 @@ impl Terminals {
     /// which closes the rename itself, drops it.
     pub fn close(&mut self, name: &'static str, cx: &mut Context<Self>) {
         if name != surface::RENAME_TAB
-            && self.is_open(name)
-            && matches!(self.surfaces.last(), Some(Surface::RenameTab(_)))
+            && self.is_open(name, cx)
+            && self.host.is_top(surface::RENAME_TAB, cx)
         {
             self.keep_tab_name(cx);
         }
@@ -1159,18 +1211,14 @@ impl Terminals {
 
     /// The app closed the surface named `name`.
     fn closed(&mut self, name: &str, cx: &mut Context<Self>) {
-        let Some(i) = self.surfaces.iter().position(|s| s.name() == name) else {
-            return;
-        };
-        let s = self.surfaces.remove(i);
-        match s {
-            Surface::Overview => {
+        match name {
+            surface::OVERVIEW => {
                 self.host
                     .channel(ahjo_terminals_contract::OVERVIEW, false, cx);
                 self.fleet.overview_off();
                 self.sync(cx);
             }
-            Surface::Peek => {
+            surface::PEEK => {
                 self.peek = None;
                 self.leave_history(PEEK_SLOT, cx);
                 if self.mouse_down_in.is_some_and(|(i, _)| i == PEEK_SLOT) {
@@ -1179,6 +1227,12 @@ impl Terminals {
                 self.geo.borrow_mut()[PEEK_SLOT] = Geo::default();
                 self.chips.borrow_mut()[PEEK_SLOT].clear();
                 self.sync(cx);
+            }
+            surface::RENAME_TAB if matches!(self.naming, Some(Naming::Tab(_))) => {
+                self.naming = None;
+            }
+            surface::RENAME_SESSION if matches!(self.naming, Some(Naming::Session(..))) => {
+                self.naming = None;
             }
             _ => {}
         }
@@ -1246,7 +1300,7 @@ impl Terminals {
                     None => ws.view_name(),
                 };
                 self.rename_field.update(cx, |f, cx| f.set(&name, true, cx));
-                self.open(Surface::ViewName(self.menu_at, key, rename), window, cx);
+                self.open_view_name(key, rename, cx);
                 return;
             }
             Act::RecallView(key) => {
@@ -1434,14 +1488,14 @@ impl Terminals {
     }
 
     /// Peek is open and on top: it has the keyboard.
-    pub fn peek_on_top(&self) -> bool {
-        matches!(self.surfaces.last(), Some(Surface::Peek)) && self.peek.is_some()
+    pub fn peek_on_top(&self, cx: &App) -> bool {
+        self.peek.is_some() && self.host.is_top(surface::PEEK, cx)
     }
 
     /// The terminal that takes what is typed: Peek while it is on top,
     /// else the focused window.
-    pub fn active_slot(&self) -> usize {
-        if self.peek_on_top() {
+    pub fn active_slot(&self, cx: &App) -> usize {
+        if self.peek_on_top(cx) {
             PEEK_SLOT
         } else {
             self.settings.workspace.focus
@@ -1487,7 +1541,8 @@ impl Terminals {
 
     /// Keeps the name typed in the tab bar for the tab being renamed.
     fn keep_tab_name(&mut self, cx: &mut Context<Self>) {
-        if let Some(Surface::RenameTab(i)) = self.surfaces.last().cloned() {
+        if let Some(Naming::Tab(i)) = self.naming {
+            self.naming = None;
             let name = self.rename_field.read(cx).text.clone();
             self.settings.workspace.rename_tab(i, &name);
             self.close(surface::RENAME_TAB, cx);
@@ -1930,12 +1985,10 @@ impl Page for Terminals {
     fn shown(&mut self, shown: bool, _: &mut Window, cx: &mut Context<Self>) {
         self.shown = shown;
         if !shown {
-            let glances: Vec<Surface> = (self.surfaces.iter())
-                .filter(|s| matches!(s, Surface::Peek | Surface::Overview))
-                .cloned()
-                .collect();
-            for s in &glances {
-                self.close(s.name(), cx);
+            for glance in [surface::PEEK, surface::OVERVIEW] {
+                if self.is_open(glance, cx) {
+                    self.close(glance, cx);
+                }
             }
         }
         cx.notify();
@@ -2004,7 +2057,7 @@ impl Render for Terminals {
             .filter(|_| self.settings.workspace.shown(w).is_none())
             .cloned();
         let nowhere = window.focused(cx).is_none();
-        if self.shown && self.surfaces.is_empty() {
+        if self.shown && !self.host.has_open(cx) {
             match launcher {
                 Some(l) if nowhere || self.term_focus.is_focused(window) => {
                     l.update(cx, |l, cx| l.focus_first(window, cx));

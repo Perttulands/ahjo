@@ -190,7 +190,8 @@ impl MissionsPage {
         } else {
             mission.title.clone()
         };
-        let ready = self.mission_run_ready();
+        // Start stays while its form is open beside it.
+        let ready = self.mission_run_ready() || (self.run.starting && self.run.selected.is_none());
         let complete = self.validation_complete();
         let busy = self.writing;
         // An empty mission's board already says how to begin.
@@ -198,9 +199,18 @@ impl MissionsPage {
         // Start only when it can run; until then, how much it still lacks,
         // listed under the board.
         let start = if ready {
+            // Where it stands is kept: a start asked for from another page
+            // opens its form beside it.
+            let at = self.run.start_button.clone();
             kit::button(t, "prepare-run", "Start", Kind::Primary)
                 .debug_selector(|| "prepare-run".into())
                 .tooltip(kit::tip("Give it what it asks for and set it off"))
+                .child(
+                    div().absolute().inset_0().child(
+                        gpui::canvas(move |bounds, _, _| at.set(Some(bounds)), |_, _, _, _| {})
+                            .size_full(),
+                    ),
+                )
                 .on_click(cx.listener(|p, _, window, cx| {
                     p.run.start_at = Some(Spot::here(window, cx));
                     p.prepare_run(cx)

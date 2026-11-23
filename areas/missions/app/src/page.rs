@@ -15,7 +15,7 @@ mod run_view;
 mod staffing;
 mod validation;
 use crate::store::{Frame, Store, canvas as board, undo};
-use ahjo_app_kit::widgets::popover::{Spot, popover};
+use ahjo_app_kit::popup::{self, Outside, Popup, PopupId, Spot};
 use ahjo_app_kit::{
     Host, Page,
     theme::{size, theme},
@@ -42,8 +42,6 @@ const TAB_GAP: f32 = 6.;
 const EDGE: f32 = 2.;
 /// How long after the last keystroke the drawer applies an edit.
 const APPLY_AFTER: std::time::Duration = std::time::Duration::from_millis(600);
-/// How much a dialog's backdrop dims the page behind it.
-const SCRIM: f32 = 0.7;
 /// Flow, the mission in words, as a panel beside its board.
 const FLOW_W: f32 = 380.;
 /// The least a detail opens with Flow beside the board in: the board keeps
@@ -2372,10 +2370,6 @@ impl Render for MissionsPage {
                 },
             )
         };
-        let form = self.mission_form(&t, window, cx);
-        let start_form = self.run_start_form(&t, window, cx);
-        let attempts_form = self.attempts_form(&t, cx);
-        let stop_form = self.stop_form(&t, window, cx);
         pane::page(&t, list, detail)
             .id("missions-root")
             .track_focus(&self.focus)
@@ -2410,13 +2404,12 @@ impl Render for MissionsPage {
                     cx.stop_propagation();
                     cx.notify();
                 } else if key.key == "escape" {
-                    if page.canvas.close_menu() {
-                        cx.notify();
-                    } else if page.manage_is_open() {
-                        page.close_manage(cx);
+                    // What is open in place on the page; what opened over
+                    // it is the shell's to close.
+                    if page.is_renaming() {
+                        page.cancel_manage(cx);
                     } else if page.note_paper.open.is_some() {
                         page.close_canvas_note(cx);
-                    } else if page.escape_run(cx) {
                     } else if page.is_card_panel_open() {
                         page.close_editor(window, cx);
                     }
@@ -2424,10 +2417,6 @@ impl Render for MissionsPage {
                 }
             }))
             .text_color(t.text)
-            .children(start_form)
-            .children(form)
-            .children(attempts_form)
-            .children(stop_form)
     }
 }
 

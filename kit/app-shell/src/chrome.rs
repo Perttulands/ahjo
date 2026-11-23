@@ -1,5 +1,5 @@
 //! What the shell draws around and over the page: the tab bar, the status
-//! line with its toast, the layers and menus on the stack, and the keys a
+//! line with its toast, the layers and popups on the stack, and the keys a
 //! chord was typed with.
 
 use crate::shell::Shell;
@@ -7,13 +7,14 @@ use ahjo_app_kit::host::{Cover, Status};
 use ahjo_app_kit::hub::{Edge, SideOn, Surface, Toast};
 use ahjo_app_kit::link::client::LinkState;
 use ahjo_app_kit::menu::{Menu, MenuRow, Pick};
+use ahjo_app_kit::popup::{self, Content, Outside, Popup};
 use ahjo_app_kit::theme::{self, Theme, alpha, motion, size, theme};
 use ahjo_app_kit::widgets::kit::{GripEdge, Phase};
 use ahjo_app_kit::widgets::{boundary, kit, pane};
 use ahjo_app_kit::zoom::Zoom;
 use gpui::{
-    Anchor, Animation, AnimationExt, AnyElement, Context, ElementId, MouseButton, MouseDownEvent,
-    Window, anchored, deferred, div, ease_out_quint, point, prelude::*, px,
+    Animation, AnimationExt, AnyElement, Context, ElementId, MouseButton, MouseDownEvent, Window,
+    deferred, div, ease_out_quint, point, prelude::*, px,
 };
 use std::time::{Duration, Instant};
 
@@ -29,6 +30,12 @@ const MORE: &str = "More";
 const MORE_MARK: &str = " …";
 /// How long words that are not a failure stay up.
 const NOTICE_SHOWN_S: u64 = 8;
+/// The order of what draws over the page: the notices, then everything
+/// on the stack (each over what opened before it), then the keys a chord
+/// was typed with.
+const NOTICES: usize = 25;
+const STACK: usize = 40;
+const ECHO: usize = 1000;
 /// What the leader says with keys off.
 pub(crate) const KEYS_OFF_HINT: &str =
     "Shortcuts are off: Keys off, at the tab bar's right, turns them on.";
@@ -363,7 +370,7 @@ impl Shell {
             stack = stack.child(notice);
         }
         stack = stack.children(toast);
-        Some(deferred(stack).with_priority(25).into_any_element())
+        Some(deferred(stack).with_priority(NOTICES).into_any_element())
     }
 
     /// The page shown, inside its error boundary: a page that fails to
@@ -402,8 +409,15 @@ impl Shell {
         boundary::failed(&t, meta.title, &why, retry)
     }
 
-    /// The layers on the stack that cover `cover`, bottom first.
-    fn render_layers(&mut self, cover: Cover, cx: &mut Context<Self>) -> Vec<AnyElement> {
+    /// What is on the stack over `cover`, bottom first, each over what
+    /// opened before it: the layers covering it, and with the window the
+    /// popups.
+    fn render_stack(
+        &mut self,
+        cover: Cover,
+        window: &Window,
+        cx: &mut Context<Self>,
+    ) -> Vec<AnyElement> {
         let stack: Vec<Surface> = self.hub.read(cx).stack.iter().cloned().collect();
         let mut out = vec![];
         for (depth, s) in stack.into_iter().enumerate() {
@@ -419,12 +433,12 @@ impl Shell {
                                 |d, x| d.opacity(x),
                             ),
                         )
-                        .with_priority(5 + depth)
+                        .with_priority(STACK + depth)
                         .into_any_element(),
                     )
                 }
-                Surface::Menu(m) if cover == Cover::Window => {
-                    out.push(self.render_menu(depth, &m, cx))
+                Surface::Popup(p) if cover == Cover::Window => {
+                    out.push(self.render_popup(depth, p, window, cx))
                 }
                 _ => {}
             }
@@ -432,6 +446,64 @@ impl Shell {
         out
     }
 
+    /// A popup beside what it was opened from ([`popup::beside`]), over a
+    /// cover that takes every press outside it: one that closes it, or one
+    /// that only keeps the press from what is under it.
+    fn render_popup(
+        &mut self,
+        depth: usize,
+        popup: Popup,
+        window: &Window,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let id = popup.id();
+        let content = match &popup.content {
+            Content::Menu(menu) => self.render_menu(depth, menu, cx),
+            Content::View(view) => view.clone().into_any_element(),
+        };
+        let viewport = window.viewport_size();
+        let mut cover = div().absolute().inset_0().occlude();
+        if popup.outside == Outside::Close {
+            for button in [MouseButton::Left, MouseButton::Right] {
+                cover = cover.on_mouse_down(
+                    button,
+                    cx.listener(move |s, _, window, cx| s.press_outside(id, window, cx)),
+                );
+            }
+        }
+        deferred(
+            cover.child(
+                popup::beside(popup.spot, viewport).child(
+                    div()
+                        .id(id.element("popup"))
+                        .debug_selector(|| "popup".into())
+                        .occlude()
+                        .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                        .on_mouse_down(MouseButton::Right, |_, _, cx| cx.stop_propagation())
+                        // Never larger than the window it is kept inside: what
+                        // is taller scrolls there.
+                        .max_w(viewport.width - px(2. * size::POPUP_EDGE))
+                        .max_h(viewport.height - px(2. * size::POPUP_EDGE))
+                        .overflow_y_scroll()
+                        .flex()
+                        .flex_col()
+                        .child(content)
+                        .with_animation(
+                            id.element("popup-in"),
+                            Animation::new(Duration::from_millis(motion::PANEL_IN))
+                                .with_easing(ease_out_quint()),
+                            // A fade only: it stands where it will stay from
+                            // its first frame.
+                            |d, x| d.opacity(x),
+                        ),
+                ),
+            ),
+        )
+        .with_priority(STACK + depth)
+        .into_any_element()
+    }
+
+    /// A menu's rows.
     fn render_menu(&mut self, depth: usize, menu: &Menu, cx: &mut Context<Self>) -> AnyElement {
         let t = theme(cx).clone();
         let mut list = kit::panel(&t)
@@ -504,48 +576,17 @@ impl Shell {
                     .on_click(cx.listener(move |s, _, window, cx| s.menu_pick(i, window, cx))),
             );
         }
-        let close = cx.listener(|s, _, _, cx| s.hub.update(cx, |h, cx| h.close_menu(cx)));
-        let close_right = cx.listener(|s, _, _, cx| s.hub.update(cx, |h, cx| h.close_menu(cx)));
-        deferred(
-            div()
-                .absolute()
-                .inset_0()
-                .occlude()
-                .on_mouse_down(MouseButton::Left, close)
-                .on_mouse_down(MouseButton::Right, close_right)
-                .child(
-                    // Under the button it opened from, aligned to its
-                    // nearer edge; else where it was asked for.
-                    match menu.under.and_then(|p| Some((p.bounds?, p.right))) {
-                        Some((b, true)) => anchored()
-                            .position(b.bottom_right())
-                            .anchor(Anchor::TopRight),
-                        Some((b, false)) => anchored().position(b.bottom_left()),
-                        None => anchored().position(point(menu.at.x, menu.at.y)),
-                    }
-                    .snap_to_window_with_margin(px(8.))
-                    .child(
-                        div()
-                            .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
-                            .child(list)
-                            .with_animation(
-                                ("menu-in", depth),
-                                Animation::new(Duration::from_millis(motion::PANEL_IN))
-                                    .with_easing(ease_out_quint()),
-                                |d, x| d.opacity(x).mt(px(-motion::PANEL_DROP * (1. - x))),
-                            ),
-                    ),
-                ),
-        )
-        .with_priority(20)
-        .into_any_element()
+        list.into_any_element()
     }
 
-    /// A click on row `i` of the open menu, or Enter on its keyboard row.
+    /// A click on row `i` of the menu on top, or Enter on its keyboard row.
     pub(crate) fn menu_pick(&mut self, i: usize, window: &mut Window, cx: &mut Context<Self>) {
         let pick = self.hub.update(cx, |h, cx| {
             let pick = match h.stack.top_mut() {
-                Some(Surface::Menu(m)) => m.pick(i),
+                Some(Surface::Popup(Popup {
+                    content: Content::Menu(m),
+                    ..
+                })) => m.pick(i),
                 _ => Pick::Nothing,
             };
             match pick {
@@ -579,7 +620,7 @@ impl Shell {
                             .child(kit::caps(t, caps)),
                     ),
             )
-            .with_priority(30)
+            .with_priority(ECHO)
             .into_any_element(),
         )
     }
@@ -898,12 +939,12 @@ impl Render for Shell {
                             .relative()
                             .child(page)
                             .children(self.veils.page())
-                            .children(self.render_layers(Cover::Page, cx)),
+                            .children(self.render_stack(Cover::Page, window, cx)),
                     )
                     .children(right),
             )
             .children(self.render_notices(cx))
-            .children(self.render_layers(Cover::Window, cx))
+            .children(self.render_stack(Cover::Window, window, cx))
             .children(self.render_echo(cx))
             .children(self.veils.theme())
             .child(ahjo_app_kit::zoom::app_catch(self.app_wheel.clone(), {

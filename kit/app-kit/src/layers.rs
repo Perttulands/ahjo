@@ -3,7 +3,8 @@
 //! closes the top one, and a key reaches the page under them only when
 //! the stack is empty. A layer of a kind already open moves to the top
 //! rather than opening twice, and a passing one (a menu) closes when
-//! anything else opens.
+//! anything else opens. The app's stack holds popups
+//! ([`crate::popup`]) and layers over the page or the window.
 
 pub trait Layer {
     /// Which layer this is; the stack holds one of each.
@@ -61,6 +62,10 @@ impl<T: Layer> Stack<T> {
     /// Bottom first, the order they draw in.
     pub fn iter(&self) -> impl DoubleEndedIterator<Item = &T> {
         self.0.iter()
+    }
+
+    pub fn iter_mut(&mut self) -> impl DoubleEndedIterator<Item = &mut T> {
+        self.0.iter_mut()
     }
 }
 

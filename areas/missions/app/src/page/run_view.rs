@@ -187,14 +187,7 @@ impl MissionsPage {
                 pane::act(t, "run-abort", "Stop")
                     .debug_selector(|| "run-abort".into())
                     .tooltip(kit::tip("Stop the run; its seats close"))
-                    .on_click(cx.listener(|page, _, window, cx| {
-                        page.run
-                            .stop_reason
-                            .update(cx, |field, cx| field.set("", false, cx));
-                        page.run.stop_asked = Some(Spot::here(window, cx));
-                        ahjo_app_kit::widgets::field::focus(&page.run.stop_reason, window, cx);
-                        cx.notify();
-                    })),
+                    .on_click(cx.listener(|page, _, window, cx| page.open_stop(window, cx))),
             );
         }
         if let Some(value) = primary_output(run) {
@@ -1217,7 +1210,7 @@ impl MissionsPage {
                         .on_click(cx.listener(
                             move |page, _, window, cx| {
                                 page.run.pending_attempt = Some((step.clone(), true));
-                                window.focus(&page.run.attempts_focus, cx);
+                                page.run.attempts_from = Some(Spot::here(window, cx));
                                 page.attempts(cx);
                             },
                         )),

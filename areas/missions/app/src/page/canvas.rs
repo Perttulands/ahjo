@@ -2,6 +2,7 @@
 use super::*;
 use crate::store::gate_art;
 use crate::store::run_state::CardState;
+use ahjo_app_kit::menu::MenuRow;
 use ahjo_app_kit::widgets::boundary;
 use ahjo_missions_contract::{
     Effort, EndOutcome, Formation, GateKind, HumanChannel, LayoutCard, Mission, SeatSettings,
@@ -80,7 +81,6 @@ pub(super) struct View {
     zoom: f32,
     pan: (f32, f32),
     drag: Option<Drag>,
-    menu: Option<(f32, f32)>,
     bounds: Rc<Cell<(f32, f32, f32, f32)>>,
     /// The window's size when the board was last drawn.
     window: Rc<Cell<(f32, f32)>>,
@@ -100,7 +100,6 @@ impl Default for View {
             zoom: 1.,
             pan: (PAD, PAD),
             drag: None,
-            menu: None,
             bounds: Rc::new(Cell::new((0., 0., 0., 0.))),
             window: Rc::new(Cell::new((0., 0.))),
             fitted: false,
@@ -143,9 +142,6 @@ impl View {
     pub(super) fn step(&mut self, inward: bool) {
         let center = self.center();
         self.zoom_at(if inward { ZOOM_STEP } else { 1. / ZOOM_STEP }, center);
-    }
-    pub(super) fn close_menu(&mut self) -> bool {
-        self.menu.take().is_some()
     }
     fn zoom_at(&mut self, factor: f32, at: (f32, f32)) {
         self.follow = None;
@@ -380,7 +376,6 @@ impl MissionsPage {
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(|p, e: &MouseDownEvent, _, cx| {
-                    p.canvas.menu = None;
                     p.canvas.drag = Some(Drag::Pan(e.position, p.canvas.pan));
                     p.canvas.follow = None;
                     cx.notify();
@@ -390,8 +385,7 @@ impl MissionsPage {
                 d.on_mouse_down(
                     MouseButton::Right,
                     cx.listener(|p, e: &MouseDownEvent, _, cx| {
-                        p.canvas.menu = Some(p.canvas.world(e.position));
-                        cx.notify();
+                        p.open_canvas_menu(e.position, cx);
                     }),
                 )
             })
@@ -482,7 +476,6 @@ impl MissionsPage {
                     p.canvas.fitted = true;
                     p.canvas.touched = true;
                 }
-                p.canvas.menu = None;
                 cx.notify();
             }))
             // Its Ctrl+wheel is the board's zoom, not the whole app's.
@@ -664,9 +657,6 @@ impl MissionsPage {
                     .child("!")
                     .tooltip(kit::tip(message)),
             );
-        }
-        if !running && let Some(at) = view.menu {
-            layer = layer.child(self.canvas_menu(t, mission, at, &view, cx));
         }
         let fit = board.clone();
         // The board's own controls, in one quiet row in its corner: out,
@@ -1051,7 +1041,6 @@ impl MissionsPage {
         rendered.on_mouse_down(
             MouseButton::Left,
             cx.listener(move |p, e: &MouseDownEvent, _, cx| {
-                p.canvas.menu = None;
                 p.canvas.drag = Some(Drag::Card {
                     id: id.clone(),
                     at: e.position,
@@ -1111,7 +1100,6 @@ impl MissionsPage {
                 MouseButton::Left,
                 cx.listener(move |p, _, _, cx| {
                     cx.stop_propagation();
-                    p.canvas.menu = None;
                     p.canvas.drag = if out {
                         Some(Drag::Wire {
                             from: endpoint.clone(),
@@ -1258,46 +1246,29 @@ impl MissionsPage {
         .detach();
         cx.notify();
     }
-    fn canvas_menu(
-        &self,
-        t: &ahjo_app_kit::theme::Theme,
-        mission: &Mission,
-        at: (f32, f32),
-        view: &View,
-        cx: &mut Context<Self>,
-    ) -> Div {
-        let item = |id: &'static str, label: &'static str, patch: MissionChange| {
-            div()
-                .id(id)
-                .debug_selector(move || id.into())
-                .px(px(PAD))
-                .py(px(size::RADIUS))
-                .cursor_pointer()
-                .child(label)
-                .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
-                .on_click(cx.listener(move |p, _, _, cx| {
-                    p.canvas.menu = None;
-                    p.write_board(patch.clone(), WriteMode::Edit, cx);
-                }))
+    /// The board's New menu, beside where it was right-clicked: a card
+    /// of each kind, placed there.
+    fn open_canvas_menu(&mut self, at: gpui::Point<gpui::Pixels>, cx: &mut Context<Self>) {
+        let Some(mission) = self.state.mission.as_ref() else {
+            return;
         };
-        let x = at.0.round() as i64;
-        let y = at.1.round() as i64;
-        div()
-            .absolute()
-            .occlude()
-            .left(px(at.0 * view.zoom + view.pan.0))
-            .top(px(at.1 * view.zoom + view.pan.1))
-            .w(px(size::MENU))
-            .bg(t.raised)
-            .border_1()
-            .border_color(t.divider)
-            .rounded(px(size::RADIUS))
-            .shadow_lg()
-            .child(kit::label(t, "New"))
-            .children(
-                new_card_items(x, y, mission.input_cards.is_empty())
-                    .map(|(id, label, patch)| item(id, label, patch)),
-            )
+        let (x, y) = self.canvas.world(at);
+        let page = cx.entity().downgrade();
+        let rows = new_card_items(
+            x.round() as i64,
+            y.round() as i64,
+            mission.input_cards.is_empty(),
+        )
+        .map(|(label, patch)| {
+            let page = page.clone();
+            MenuRow::new(label, move |_, cx| {
+                let _ = page.update(cx, |p, cx| {
+                    p.write_board(patch.clone(), WriteMode::Edit, cx)
+                });
+            })
+        })
+        .collect();
+        self.host.menu(rows, at, cx);
     }
 }
 
@@ -2421,28 +2392,18 @@ fn new_card_items(
     x: i64,
     y: i64,
     show_input: bool,
-) -> impl Iterator<Item = (&'static str, &'static str, MissionChange)> {
+) -> impl Iterator<Item = (&'static str, MissionChange)> {
     [
-        ("canvas-new-input", "Input card", new_input(x, y)),
+        ("Input card", new_input(x, y)),
+        ("Solo step", new_step(Formation::Solo, "New step", x, y)),
         (
-            "canvas-new-solo",
-            "Solo step",
-            new_step(Formation::Solo, "New step", x, y),
-        ),
-        (
-            "canvas-new-orch",
             "Orchestrated step",
             new_step(Formation::Orchestrated, "New step", x, y),
         ),
-        ("canvas-new-gate", "Gate", new_gate("Review gate", x, y)),
-        ("canvas-new-limit", "Limit", new_limit("", x, y)),
+        ("Gate", new_gate("Review gate", x, y)),
+        ("Limit", new_limit("", x, y)),
+        ("End · done", new_end("Done", EndOutcome::Done, x, y)),
         (
-            "canvas-new-done",
-            "End · done",
-            new_end("Done", EndOutcome::Done, x, y),
-        ),
-        (
-            "canvas-new-rejected",
             "End · rejected",
             new_end("Rejected", EndOutcome::Rejected, x, y),
         ),
@@ -2527,7 +2488,7 @@ mod tests {
     fn canvas_card_and_wire_patches_decode() {
         let menu: Vec<_> = new_card_items(10, 20, true).collect();
         assert_eq!(menu.len(), 7);
-        for (_, _, patch) in menu {
+        for (_, patch) in menu {
             super::super::assert_patch_decodes(&patch);
         }
         for kind in [

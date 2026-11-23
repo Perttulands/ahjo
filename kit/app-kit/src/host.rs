@@ -10,6 +10,7 @@ use crate::link::client::LinkState;
 use crate::link::http;
 use crate::link::socket::Tap;
 use crate::menu::{Menu, MenuRow};
+use crate::popup::{Popup, PopupId, Spot};
 use crate::settings::Place;
 use ahjo_core::frame::{Kinds, owns};
 use ahjo_core::{Error, NodeId, TypedCommand};
@@ -387,41 +388,44 @@ impl Host {
         self.update(cx, |h, cx| h.toast(text, cx));
     }
 
-    /// Opens a menu at `at`.
-    pub fn menu(&self, rows: Vec<MenuRow>, at: Point<Pixels>, cx: &mut App) {
-        self.open_menu(rows, at, None, cx);
+    /// Opens `popup` over the others; the shell places it, closes it and
+    /// gives the keyboard back ([`crate::popup`]).
+    pub fn popup(&self, popup: Popup, cx: &mut App) -> Option<PopupId> {
+        let page = self.page;
+        self.update(cx, |h, cx| h.open_popup(page, popup, cx))
     }
 
-    /// Opens a menu at `at` with its danger row `armed` already: a key
+    /// Closes popup `id`, running its dismiss, and whatever opened above
+    /// it; nothing when it is already closed.
+    pub fn close_popup(&self, id: PopupId, cx: &mut App) {
+        self.update(cx, |h, cx| h.close_popup(id, cx));
+    }
+
+    /// Opens a menu beside `at`: the button pressed there, else the point.
+    pub fn menu(&self, rows: Vec<MenuRow>, at: Point<Pixels>, cx: &mut App) {
+        self.popup(Popup::menu(Spot::at(at, cx), Menu::new(rows)), cx);
+    }
+
+    /// Opens a menu beside `at` with its danger row `armed` already: a key
     /// that asked for the danger opens it one confirmation away.
     pub fn menu_armed(&self, rows: Vec<MenuRow>, at: Point<Pixels>, armed: usize, cx: &mut App) {
-        self.open_menu(rows, at, Some(armed), cx);
+        let menu = Menu::new(rows).armed(armed);
+        self.popup(Popup::menu(Spot::at(at, cx), menu), cx);
     }
 
-    /// Opens a menu at `at` for the keyboard: its first row it can pick
+    /// Opens a menu beside `at` for the keyboard: its first row it can pick
     /// is chosen, so Enter runs it and the arrows move on.
     pub fn menu_keyed(&self, rows: Vec<MenuRow>, at: Point<Pixels>, cx: &mut App) {
-        let mut menu = Menu {
-            rows,
-            at,
-            armed: None,
-            under: None,
-            cursor: None,
-        };
-        menu.step(1);
-        self.update(cx, |h, cx| h.open(Surface::Menu(menu), cx));
+        let menu = Menu::new(rows).keyed();
+        self.popup(Popup::menu(Spot::at(at, cx), menu), cx);
     }
 
-    fn open_menu(&self, rows: Vec<MenuRow>, at: Point<Pixels>, armed: Option<usize>, cx: &mut App) {
-        let under = crate::pointer::pressed_at(at, cx);
-        let menu = Menu {
-            rows,
-            at,
-            armed,
-            under,
-            cursor: None,
-        };
-        self.update(cx, |h, cx| h.open(Surface::Menu(menu), cx));
+    /// Asks before `row` runs, beside `spot`: its one row, a danger armed
+    /// already, runs on a click or Enter; Escape or a press outside lets
+    /// it go. Its hint says what is lost.
+    pub fn confirm(&self, spot: Spot, row: MenuRow, cx: &mut App) -> Option<PopupId> {
+        let menu = Menu::new(vec![row.danger()]).armed(0);
+        self.popup(Popup::menu(spot, menu), cx)
     }
 
     /// Opens this page's layer `layer.name` over the others; one of that
@@ -440,6 +444,27 @@ impl Host {
     pub fn is_open(&self, name: &str, cx: &App) -> bool {
         let kind = self.layer_name(name);
         self.read(cx, |h| h.stack.is_open(&kind)).unwrap_or(false)
+    }
+
+    /// Something this page opened, other than a menu, is on the stack.
+    pub fn has_open(&self, cx: &App) -> bool {
+        let prefix = format!("{}/", self.page);
+        self.read(cx, |h| {
+            h.stack.iter().any(|s| {
+                !crate::layers::Layer::passing(s)
+                    && crate::layers::Layer::kind(s).starts_with(&prefix)
+            })
+        })
+        .unwrap_or(false)
+    }
+
+    /// Popup `id` is open and nothing, not even a menu, opened over it.
+    pub fn is_popup_top(&self, id: PopupId, cx: &App) -> bool {
+        self.read(
+            cx,
+            |h| matches!(h.stack.top(), Some(Surface::Popup(p)) if p.id() == id),
+        )
+        .unwrap_or(false)
     }
 
     /// This page's layer `name` is on top of the stack: nothing, not even

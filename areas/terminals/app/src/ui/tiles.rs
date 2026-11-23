@@ -1443,9 +1443,9 @@ impl Terminals {
         // Peek takes what is typed while it is on top; a window while
         // nothing is open over the page.
         let (focus, take_input) = if i == PEEK_SLOT {
-            (self.peek_focus.clone(), self.peek_on_top())
+            (self.peek_focus.clone(), self.peek_on_top(cx))
         } else {
-            (self.term_focus.clone(), focused && self.surfaces.is_empty())
+            (self.term_focus.clone(), focused && !self.host.has_open(cx))
         };
         let font = self.font_of(i);
         // Peek zoomed draws at its own size, never resizing the session:
@@ -1781,15 +1781,15 @@ impl Terminals {
         Some((self.fleet.screen(&at.node, at.pane)?, Some(at)))
     }
 
-    fn focused_pane(&self) -> Option<PaneAt> {
-        self.slot_pane(self.active_slot())
+    fn focused_pane(&self, cx: &gpui::App) -> Option<PaneAt> {
+        self.slot_pane(self.active_slot(cx))
     }
 
     /// Bytes for the program of the terminal that has the keyboard (Peek,
     /// or the focused window). A history being read stays open: the
     /// program's input is docked below it.
     pub fn send_input(&mut self, bytes: &[u8], cx: &mut Context<Self>) {
-        let Some(pane) = self.focused_pane() else {
+        let Some(pane) = self.focused_pane(cx) else {
             return;
         };
         if let Some(s) = self.fleet.screen(&pane.node, pane.pane) {
@@ -1797,7 +1797,7 @@ impl Terminals {
         }
         self.fleet.input(&pane.node, pane.pane, bytes);
         self.flush(cx);
-        if let Some(k) = self.slot_key(self.active_slot()) {
+        if let Some(k) = self.slot_key(self.active_slot(cx)) {
             self.answered(&k, cx);
         }
     }
@@ -1904,7 +1904,7 @@ impl Terminals {
         let Some(text) = cx.read_from_clipboard().and_then(|c| c.text()) else {
             return;
         };
-        let Some(pane) = self.focused_pane() else {
+        let Some(pane) = self.focused_pane(cx) else {
             return;
         };
         let bracketed = self
@@ -1950,7 +1950,7 @@ impl Terminals {
     pub fn term_key(&mut self, e: &KeyDownEvent, _: &mut Window, cx: &mut Context<Self>) {
         let k = &e.keystroke;
         let m = &k.modifiers;
-        let w = self.active_slot();
+        let w = self.active_slot(cx);
         // Escape is the program's in Peek; Shift+Escape, which closes it,
         // is the app's (`chords::route`) wherever focus is.
         if m.control && m.shift && k.key == "c" {
@@ -1987,7 +1987,7 @@ impl Terminals {
         }
         // A window with no session (its launcher) has no program to type
         // into: its keys go on, so Ctrl+B there reaches the app.
-        if e.prefer_character_input || self.focused_pane().is_none() {
+        if e.prefer_character_input || self.focused_pane(cx).is_none() {
             return;
         }
         let app_cursor = self
@@ -2589,10 +2589,10 @@ impl EntityInputHandler for Terminals {
         _: Range<usize>,
         _: Bounds<Pixels>,
         _: &mut Window,
-        _: &mut Context<Self>,
+        cx: &mut Context<Self>,
     ) -> Option<Bounds<Pixels>> {
         // The candidate window opens at the focused terminal's cursor.
-        let w = self.active_slot();
+        let w = self.active_slot(cx);
         let g = self.geo.borrow()[w];
         let (o, cell) = (g.origin?, g.cell?);
         let (screen, _) = self.shown_screen(w)?;

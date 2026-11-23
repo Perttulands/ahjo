@@ -15,6 +15,7 @@ pub mod menu;
 pub mod page;
 pub mod panel;
 pub mod pointer;
+pub mod popup;
 pub mod settings;
 pub mod text;
 pub mod theme;
