@@ -193,6 +193,7 @@ name = "ahjo-app-kit"
 version = "0.0.1"
 dependencies = [
  "ahjo-core",
+ "ahjo-testkit",
  "async-channel",
  "futures-util",
  "gpui-pre",

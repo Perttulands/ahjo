@@ -1,7 +1,8 @@
 //! The one text field: single line or a wrapping note, with IME, the
-//! clipboard and word moves. It owns its text and reports what happened;
-//! what Enter or Up means is its owner's business.
+//! clipboard, word moves and undo. It owns its text and reports what
+//! happened; what Enter or Up means is its owner's business.
 
+use super::undo::{TextEdit, TextHistory, TextState, starts_word};
 use crate::theme::{FAMILY, alpha, size, theme};
 use gpui::{
     App, Bounds, ClipboardItem, ContentMask, Context, CursorStyle, ElementId, ElementInputHandler,
@@ -11,6 +12,7 @@ use gpui::{
     WrappedLine, actions, div, fill, point, prelude::*, px, relative, size as sz,
 };
 use std::ops::Range;
+use std::time::Instant;
 use unicode_segmentation::UnicodeSegmentation;
 
 actions!(
@@ -41,6 +43,8 @@ actions!(
         Up,
         Down,
         Tab,
+        Undo,
+        Redo,
     ]
 );
 
@@ -77,6 +81,9 @@ pub fn bind_keys(cx: &mut App) {
         KeyBinding::new("up", Up, c),
         KeyBinding::new("down", Down, c),
         KeyBinding::new("tab", Tab, c),
+        KeyBinding::new("ctrl-z", Undo, c),
+        KeyBinding::new("ctrl-shift-z", Redo, c),
+        KeyBinding::new("ctrl-y", Redo, c),
     ]);
 }
 
@@ -141,6 +148,7 @@ pub struct TextField {
     /// Drawn without its own box: what holds it draws the edge and the
     /// focus, as a composer card does.
     bare: bool,
+    history: TextHistory,
 }
 
 impl EventEmitter<FieldEvent> for TextField {}
@@ -180,6 +188,7 @@ impl TextField {
             selecting: false,
             was_focused: false,
             bare: false,
+            history: TextHistory::default(),
         }
     }
 
@@ -268,7 +277,11 @@ impl TextField {
     }
 
     /// Replaces the text, cursor at the end, all of it selected if asked.
+    /// The field starts a new history: what it held before is another
+    /// draft (another card's title, a message already sent), and undo
+    /// never brings it back.
     pub fn set(&mut self, text: &str, select: bool, cx: &mut Context<Self>) {
+        self.history.clear();
         self.text = text.to_string();
         self.selected = if select {
             0..self.text.len()
@@ -377,36 +390,99 @@ impl TextField {
             .unwrap_or(self.text.len())
     }
 
-    fn insert(&mut self, s: &str, cx: &mut Context<Self>) {
-        let r = self.marked.take().unwrap_or(self.selected.clone());
-        self.text.replace_range(r.clone(), s);
+    fn state(&self) -> TextState {
+        TextState {
+            text: self.text.clone(),
+            selected: self.selected.clone(),
+            reversed: self.reversed,
+        }
+    }
+
+    /// Puts `s` in place of the selection, or of the text being composed,
+    /// which finishes it. A key's one character joins the word being
+    /// typed in the undo ring; anything else, or a `whole` edit (a paste),
+    /// is a step of its own.
+    fn insert(&mut self, s: &str, whole: bool, cx: &mut Context<Self>) {
+        let composed = self.marked.take();
+        let r = composed.clone().unwrap_or(self.selected.clone());
         let at = r.start + s.len();
+        // Composing noted the step when it began.
+        if composed.is_none() {
+            let edit = if whole || s.graphemes(true).count() != 1 {
+                TextEdit::Whole
+            } else {
+                TextEdit::Type {
+                    caret: at,
+                    starts_word: starts_word(&self.text, r.start, s),
+                }
+            };
+            self.history.record(self.state(), edit, Instant::now());
+        }
+        self.text.replace_range(r, s);
         self.selected = at..at;
         self.reversed = false;
         self.goal_x = None;
         self.changed(cx);
     }
 
-    fn backspace(&mut self, _: &Backspace, _: &mut Window, cx: &mut Context<Self>) {
-        if self.selected.is_empty() {
-            let p = self.previous(self.cursor());
-            self.select_to(p, cx);
+    /// Deletes the selection, or from the caret to `to`. One key's
+    /// character joins the keys typed in the undo ring; a selection or a
+    /// `whole` edit (a word, a cut) is a step of its own.
+    fn erase(&mut self, to: usize, whole: bool, cx: &mut Context<Self>) {
+        let r = if self.selected.is_empty() {
+            let c = self.cursor();
+            c.min(to)..c.max(to)
+        } else {
+            self.selected.clone()
+        };
+        if r.is_empty() {
+            return;
         }
-        self.insert("", cx);
+        let edit = if whole || !self.selected.is_empty() {
+            TextEdit::Whole
+        } else {
+            TextEdit::Erase { caret: r.start }
+        };
+        self.history.record(self.state(), edit, Instant::now());
+        self.marked = None;
+        self.text.replace_range(r.clone(), "");
+        self.selected = r.start..r.start;
+        self.reversed = false;
+        self.goal_x = None;
+        self.changed(cx);
+    }
+
+    fn backspace(&mut self, _: &Backspace, _: &mut Window, cx: &mut Context<Self>) {
+        let to = self.previous(self.cursor());
+        self.erase(to, false, cx);
     }
     fn backspace_word(&mut self, _: &BackspaceWord, _: &mut Window, cx: &mut Context<Self>) {
-        if self.selected.is_empty() {
-            let p = self.word_left(self.cursor());
-            self.select_to(p, cx);
-        }
-        self.insert("", cx);
+        let to = self.word_left(self.cursor());
+        self.erase(to, true, cx);
     }
     fn delete(&mut self, _: &Delete, _: &mut Window, cx: &mut Context<Self>) {
-        if self.selected.is_empty() {
-            let n = self.next(self.cursor());
-            self.select_to(n, cx);
-        }
-        self.insert("", cx);
+        let to = self.next(self.cursor());
+        self.erase(to, false, cx);
+    }
+
+    /// Back to the text as it was before the last step, its selection
+    /// with it.
+    fn undo(&mut self, _: &Undo, _: &mut Window, cx: &mut Context<Self>) {
+        let back = self.history.undo(self.state());
+        self.restore(back, cx);
+    }
+    fn redo(&mut self, _: &Redo, _: &mut Window, cx: &mut Context<Self>) {
+        let on = self.history.redo(self.state());
+        self.restore(on, cx);
+    }
+    fn restore(&mut self, state: Option<TextState>, cx: &mut Context<Self>) {
+        let Some(state) = state else { return };
+        self.text = state.text;
+        self.selected = state.selected;
+        self.reversed = state.reversed;
+        self.marked = None;
+        self.goal_x = None;
+        self.changed(cx);
     }
     fn left(&mut self, _: &Left, _: &mut Window, cx: &mut Context<Self>) {
         let at = if self.selected.is_empty() {
@@ -488,7 +564,7 @@ impl TextField {
             } else {
                 t.replace(['\r', '\n'], " ")
             };
-            self.insert(&t, cx);
+            self.insert(&t, true, cx);
         }
     }
     fn copy(&mut self, _: &Copy, _: &mut Window, cx: &mut Context<Self>) {
@@ -503,18 +579,18 @@ impl TextField {
             cx.write_to_clipboard(ClipboardItem::new_string(
                 self.text[self.selected.clone()].to_string(),
             ));
-            self.insert("", cx);
+            self.erase(self.cursor(), true, cx);
         }
     }
     fn enter(&mut self, _: &Enter, _: &mut Window, cx: &mut Context<Self>) {
         if self.prose {
-            return self.insert("\n", cx);
+            return self.insert("\n", false, cx);
         }
         cx.emit(FieldEvent::Submit);
     }
     fn shift_enter(&mut self, _: &ShiftEnter, _: &mut Window, cx: &mut Context<Self>) {
         if self.multiline {
-            self.insert("\n", cx);
+            self.insert("\n", false, cx);
         } else {
             cx.emit(FieldEvent::Submit);
         }
@@ -759,10 +835,16 @@ impl EntityInputHandler for TextField {
             return;
         }
         if let Some(r) = r {
-            self.marked = None;
-            self.selected = self.range_from16(&r);
+            let r = self.range_from16(&r);
+            // What is being composed ends as this text; anything else
+            // typed over a range is an edit like a key's.
+            if self.marked.is_some() {
+                self.marked = Some(r);
+            } else {
+                self.selected = r;
+            }
         }
-        self.insert(text, cx);
+        self.insert(text, false, cx);
     }
     fn replace_and_mark_text_in_range(
         &mut self,
@@ -772,6 +854,11 @@ impl EntityInputHandler for TextField {
         _: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if self.marked.is_none() {
+            // Composing starts a step: undo goes back to before it.
+            self.history
+                .record(self.state(), TextEdit::Whole, Instant::now());
+        }
         let r = r
             .map(|r| self.range_from16(&r))
             .or(self.marked.clone())
@@ -1176,6 +1263,8 @@ impl Render for TextField {
             .on_action(cx.listener(Self::up))
             .on_action(cx.listener(Self::down))
             .on_action(cx.listener(Self::tab))
+            .on_action(cx.listener(Self::undo))
+            .on_action(cx.listener(Self::redo))
             .on_mouse_down(MouseButton::Left, cx.listener(Self::mouse_down))
             .on_mouse_up(MouseButton::Left, cx.listener(Self::mouse_up))
             .on_mouse_up_out(MouseButton::Left, cx.listener(Self::mouse_up))
@@ -1217,7 +1306,7 @@ mod tests {
             assert_eq!(f.word_left(12), 6);
             assert_eq!(f.word_right(0), 5);
             f.selected = 6..6;
-            f.insert("new ", cx);
+            f.insert("new ", false, cx);
             assert_eq!(f.text, "hello new brave world");
             assert_eq!(f.to_utf16(f.text.len()), 21);
         });

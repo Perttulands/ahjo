@@ -9,3 +9,4 @@ pub mod path_picker;
 pub mod popover;
 pub mod select;
 pub mod syntax;
+pub mod undo;

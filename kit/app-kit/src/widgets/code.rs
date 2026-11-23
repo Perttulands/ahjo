@@ -6,6 +6,7 @@
 //! (`cx.new(Code::new)`) and hear its [`CodeEvent`]s.
 
 use super::syntax::{self, Carry, Lang, Token};
+use super::undo::{TextEdit, TextHistory, TextState, starts_word};
 use crate::theme::{FAMILY, Theme, alpha, size, theme};
 use gpui::{
     App, Bounds, ClipboardItem, Context, CursorStyle, ElementId, ElementInputHandler, Entity,
@@ -15,15 +16,12 @@ use gpui::{
     relative, size as sz,
 };
 use std::ops::Range;
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
 /// A tab shows as this many spaces.
 const TAB_SHOWN: usize = 4;
 /// Tab inserts this (CHROTE Editor.tsx).
 const INDENT: &str = "  ";
-/// Typing within this long of the last edit undoes together.
-const UNDO_GROUP: Duration = Duration::from_millis(700);
-const UNDO_DEPTH: usize = 200;
 /// Lines kept in view above a line gone to.
 const GO_TO_CONTEXT: usize = 3;
 /// A change mark's width beside the line numbers, and the wash a new
@@ -107,9 +105,7 @@ pub struct Code {
     /// is a line, or with `wrap` one stretch of a long line.
     top: f32,
     left: Pixels,
-    undo: Vec<(String, Range<usize>)>,
-    redo: Vec<(String, Range<usize>)>,
-    last_edit: Option<Instant>,
+    history: TextHistory,
     selecting: bool,
     /// Show the last lines once the view knows how many it holds.
     end_pending: bool,
@@ -254,9 +250,7 @@ impl Code {
             marked: None,
             top: 0.,
             left: px(0.),
-            undo: vec![],
-            redo: vec![],
-            last_edit: None,
+            history: TextHistory::default(),
             selecting: false,
             end_pending: false,
             area: None,
@@ -352,7 +346,7 @@ impl Code {
         if !self.editable || ranges.is_empty() {
             return;
         }
-        self.snapshot(false);
+        self.snapshot(TextEdit::Whole);
         for r in ranges.iter().rev() {
             if r.end <= self.text.len() {
                 self.text.replace_range(r.clone(), with);
@@ -368,7 +362,7 @@ impl Code {
         let len = self.text.len();
         self.selected = sel.start.min(len)..sel.end.min(len);
         self.reversed = false;
-        self.last_edit = None;
+        self.history.seal();
         self.reveal();
         cx.emit(CodeEvent::Changed);
         cx.notify();
@@ -388,7 +382,7 @@ impl Code {
     fn indent_lines(&mut self, out: bool, cx: &mut Context<Self>) {
         let lines = self.touched_lines();
         let caret = self.selected.is_empty();
-        self.snapshot(false);
+        self.snapshot(TextEdit::Whole);
         let (mut start, mut end) = (self.selected.start, self.selected.end);
         // From the last line up, so the earlier lines' starts still hold.
         for n in lines.rev() {
@@ -448,7 +442,7 @@ impl Code {
             })
             .min()
             .unwrap_or(0);
-        self.snapshot(false);
+        self.snapshot(TextEdit::Whole);
         let (mut start, mut end) = (self.selected.start, self.selected.end);
         for &n in filled.iter().rev() {
             let r = self.line_range(n);
@@ -627,8 +621,7 @@ impl Code {
         self.top = 0.;
         self.left = px(0.);
         self.end_pending = false;
-        self.undo.clear();
-        self.redo.clear();
+        self.history.clear();
         cx.notify();
     }
 
@@ -884,16 +877,18 @@ impl Code {
         r.start + from_shown(&self.text[r.clone()], col)
     }
 
-    fn snapshot(&mut self, grouped: bool) {
-        let fresh = self.last_edit.is_none_or(|t| t.elapsed() > UNDO_GROUP);
-        if !grouped || fresh {
-            self.undo.push((self.text.clone(), self.selected.clone()));
-            if self.undo.len() > UNDO_DEPTH {
-                self.undo.remove(0);
-            }
-            self.redo.clear();
+    /// Notes the text as it stands before `edit` changes it.
+    fn text_state(&self) -> TextState {
+        TextState {
+            text: self.text.clone(),
+            selected: self.selected.clone(),
+            reversed: self.reversed,
         }
-        self.last_edit = Some(Instant::now());
+    }
+
+    /// Notes the text as it stands before `edit` changes it.
+    fn snapshot(&mut self, edit: TextEdit) {
+        self.history.record(self.text_state(), edit, Instant::now());
     }
 
     fn replace(&mut self, r: Range<usize>, s: &str, cx: &mut Context<Self>) {
@@ -911,8 +906,15 @@ impl Code {
         if !self.editable {
             return;
         }
-        self.snapshot(s.chars().count() == 1 && s != "\n");
         let r = self.marked.take().unwrap_or(self.selected.clone());
+        self.snapshot(if s.chars().count() == 1 && s != "\n" {
+            TextEdit::Type {
+                caret: r.start + s.len(),
+                starts_word: starts_word(&self.text, r.start, s),
+            }
+        } else {
+            TextEdit::Whole
+        });
         self.replace(r, s, cx);
     }
 
@@ -929,28 +931,32 @@ impl Code {
         if r.is_empty() {
             return;
         }
-        self.snapshot(true);
+        // One key's character joins the keys typed; a word or a selection
+        // is a step of its own.
+        self.snapshot(if self.text[r.clone()].chars().count() == 1 {
+            TextEdit::Erase { caret: r.start }
+        } else {
+            TextEdit::Whole
+        });
         self.replace(r, "", cx);
     }
 
     fn restore(&mut self, back: bool, cx: &mut Context<Self>) {
-        let (from, to) = if back {
-            (&mut self.undo, &mut self.redo)
+        let now = self.text_state();
+        let restored = if back {
+            self.history.undo(now)
         } else {
-            (&mut self.redo, &mut self.undo)
+            self.history.redo(now)
         };
-        if let Some((text, sel)) = from.pop() {
-            to.push((
-                std::mem::replace(&mut self.text, text),
-                self.selected.clone(),
-            ));
-            self.reindex();
-            self.selected = sel.start.min(self.text.len())..sel.end.min(self.text.len());
-            self.last_edit = None;
-            self.reveal();
-            cx.emit(CodeEvent::Changed);
-            cx.notify();
-        }
+        let Some(state) = restored else { return };
+        self.text = state.text;
+        self.selected = state.selected;
+        self.reversed = state.reversed;
+        self.marked = None;
+        self.reindex();
+        self.reveal();
+        cx.emit(CodeEvent::Changed);
+        cx.notify();
     }
 
     fn copy(&self, cx: &mut Context<Self>) {
@@ -995,7 +1001,7 @@ impl Code {
             }
             ("v", true, false) if self.editable => {
                 if let Some(t) = cx.read_from_clipboard().and_then(|c| c.text()) {
-                    self.snapshot(false);
+                    self.snapshot(TextEdit::Whole);
                     let r = self.selected.clone();
                     self.replace(r, &t.replace("\r\n", "\n"), cx);
                 }
@@ -1003,7 +1009,7 @@ impl Code {
             }
             ("insert", false, false) if shift && self.editable => {
                 if let Some(t) = cx.read_from_clipboard().and_then(|c| c.text()) {
-                    self.snapshot(false);
+                    self.snapshot(TextEdit::Whole);
                     let r = self.selected.clone();
                     self.replace(r, &t.replace("\r\n", "\n"), cx);
                 }
@@ -1929,7 +1935,7 @@ mod tests {
             c.selected = at..at;
             c.insert(INDENT, cx);
             assert_eq!(c.text(), "one\n  two\nthree");
-            c.last_edit = None;
+            c.history.seal();
             c.move_to(c.vertical(1), false, cx);
             assert_eq!(c.line_of(c.cursor()), 2);
             c.erase(c.previous(c.cursor()), cx);
