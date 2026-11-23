@@ -40,18 +40,30 @@ const MAX_WAIT: u64 = 90;
 /// How long `handoff reply` waits to see the agent take the reply.
 const REPLY_WAIT: Duration = Duration::from_secs(20);
 
-/// How long a question must stay on a starting agent's screen before
-/// `handoff launch` stops waiting to send the brief and says so.
-const ASKS_FOR: Duration = Duration::from_millis(1500);
-
 /// How many lines of the screen a status shows, from the bottom.
 const TAIL: usize = 40;
 
 /// The most projects `project search` lists.
 const FOUND: usize = 12;
 
-/// How often a wait looks again, besides when the sessions change.
-const LOOK_EVERY: Duration = Duration::from_millis(500);
+/// A handoff's waits that a test may want shorter than a person needs.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct HandoffTimings {
+    /// How long a question must stay on a starting agent's screen before
+    /// `handoff launch` stops waiting to send the brief and says so.
+    pub asks_for: Duration,
+    /// How often a wait looks again, besides when the sessions change.
+    pub look_every: Duration,
+}
+
+impl Default for HandoffTimings {
+    fn default() -> HandoffTimings {
+        HandoffTimings {
+            asks_for: Duration::from_millis(1500),
+            look_every: Duration::from_millis(500),
+        }
+    }
+}
 
 /// One look at a session.
 struct Look {
@@ -195,8 +207,8 @@ fn last_output(info: &SessionInfo) -> Option<u64> {
 
 /// Waits for the next change to the sessions or the next look, whichever
 /// is first.
-async fn next_look(changed: &mut tokio::sync::watch::Receiver<u64>) {
-    let _ = timeout(LOOK_EVERY, changed.changed()).await;
+async fn next_look(ctx: &Ctx, changed: &mut tokio::sync::watch::Receiver<u64>) {
+    let _ = timeout(ctx.timings.handoff.look_every, changed.changed()).await;
 }
 
 /// The newest `lines` lines of a screen.
@@ -394,11 +406,11 @@ pub async fn start(ctx: Arc<Ctx>, args: HandoffLaunch) -> Result<HandoffStarted>
                     }
                 });
             }
-            () = next_look(&mut changed) => {
+            () = next_look(&ctx, &mut changed) => {
                 let now = look(&ctx, &session, pane, kind);
                 match (now.state, asked_since) {
                     (State::Gone, _) => break Err("the session ended before it took the brief".into()),
-                    (State::NeedsInput, Some(since)) if since.elapsed() >= ASKS_FOR => {
+                    (State::NeedsInput, Some(since)) if since.elapsed() >= ctx.timings.handoff.asks_for => {
                         break Err("the agent asks something before it can take the brief".into());
                     }
                     (State::NeedsInput, None) => asked_since = Some(Instant::now()),
@@ -416,7 +428,7 @@ pub async fn start(ctx: Arc<Ctx>, args: HandoffLaunch) -> Result<HandoffStarted>
     let mut now = look(&ctx, &session, pane, kind);
     if sent.is_ok() {
         while now.state == State::Idle && Instant::now() < deadline {
-            next_look(&mut changed).await;
+            next_look(&ctx, &mut changed).await;
             now = look(&ctx, &session, pane, kind);
         }
     }
@@ -500,7 +512,7 @@ pub async fn status(ctx: Arc<Ctx>, args: HandoffShow) -> Result<HandoffStatusRes
     let mut now = look(&ctx, &info.id, pane, None);
     while now.state == State::Working && Instant::now() < deadline {
         tokio::select! {
-            () = next_look(&mut changed) => {}
+            () = next_look(&ctx, &mut changed) => {}
             () = sleep_until(deadline) => {}
         }
         now = look(&ctx, &info.id, pane, None);
@@ -555,12 +567,12 @@ pub async fn reply(ctx: Arc<Ctx>, args: HandoffReply) -> Result<HandoffReplied> 
         && now.state != State::Working
         && Instant::now() < deadline
     {
-        next_look(&mut changed).await;
+        next_look(&ctx, &mut changed).await;
         now = look(&ctx, &info.id, pane, None);
     }
     // A moment more for a menu's answer to be drawn over.
     if pressed && now.state == State::NeedsInput {
-        sleep(LOOK_EVERY).await;
+        sleep(ctx.timings.handoff.look_every).await;
         now = look(&ctx, &info.id, pane, None);
     }
     Ok(HandoffReplied {

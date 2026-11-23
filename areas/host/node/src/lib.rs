@@ -35,7 +35,30 @@ struct HostArea {
     node: String,
     events: Arc<ahjo_node_kit::events::Log>,
 }
+/// How often the host is read, while someone looks (`every`) and while
+/// nobody does (`idle`); a test may want them shorter than a node's.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct HostTimings {
+    pub every: std::time::Duration,
+    pub idle: std::time::Duration,
+}
+
+impl Default for HostTimings {
+    fn default() -> HostTimings {
+        HostTimings {
+            every: host::EVERY,
+            idle: host::IDLE,
+        }
+    }
+}
+
 pub fn build(setup: &Setup) -> anyhow::Result<Built> {
+    build_timed(setup, HostTimings::default())
+}
+
+/// [`build`] with the caller's [`HostTimings`]: a test lists the area with
+/// a `build` of its own that calls this.
+pub fn build_timed(setup: &Setup, timings: HostTimings) -> anyhow::Result<Built> {
     let section: Section = setup.config.section("host")?;
     let catalog = section
         .catalog
@@ -44,8 +67,8 @@ pub fn build(setup: &Setup) -> anyhow::Result<Built> {
         .unwrap_or_else(|| setup.dir.join("services.json"));
     Built::now(HostArea {
         host: Arc::new(host::Host::start(
-            host::EVERY,
-            host::IDLE,
+            timings.every,
+            timings.idle,
             setup.events.clone(),
         )),
         services: Arc::new(

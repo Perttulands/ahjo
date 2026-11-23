@@ -61,6 +61,21 @@ const MAX_GRID: u16 = 10000;
 /// A session counts as active for this long after its last output.
 const ACTIVE_FOR: Duration = Duration::from_secs(5);
 
+/// The engine's waits that a test may want shorter than a person needs.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct EngineTimings {
+    /// A session counts as active for this long after its last output.
+    pub active_for: Duration,
+}
+
+impl Default for EngineTimings {
+    fn default() -> EngineTimings {
+        EngineTimings {
+            active_for: ACTIVE_FOR,
+        }
+    }
+}
+
 /// Output this soon after a session's window changed size, with nothing
 /// typed since, is the programs redrawing for it, and leaves the session's
 /// last output where it was.
@@ -124,6 +139,7 @@ pub struct Engine {
 struct Shared {
     backend: Arc<dyn Backend>,
     lazy: bool,
+    timings: EngineTimings,
     state: Mutex<State>,
     /// Bumped whenever the set of sessions or panes changes.
     generation: watch::Sender<u64>,
@@ -344,19 +360,25 @@ impl Engine {
     /// Starts following the sessions on `backend`. Returns immediately;
     /// sessions show up in [`Engine::snapshot`] as they are found.
     pub fn start(backend: impl Backend) -> Engine {
-        Self::start_mode(backend, false)
+        Self::start_mode(backend, false, EngineTimings::default())
     }
 
     /// Lists sessions without attaching until a consumer needs pane output.
     pub fn start_lazy(backend: impl Backend) -> Engine {
-        Self::start_mode(backend, true)
+        Self::start_mode(backend, true, EngineTimings::default())
     }
 
-    fn start_mode(backend: impl Backend, lazy: bool) -> Engine {
+    /// [`Engine::start_lazy`] with waits of the caller's.
+    pub fn start_lazy_timed(backend: impl Backend, timings: EngineTimings) -> Engine {
+        Self::start_mode(backend, true, timings)
+    }
+
+    fn start_mode(backend: impl Backend, lazy: bool, timings: EngineTimings) -> Engine {
         let (generation, _) = watch::channel(0);
         let shared = Arc::new(Shared {
             backend: Arc::new(backend),
             lazy,
+            timings,
             state: Mutex::new(State::default()),
             generation,
             renamed: broadcast::channel(16).0,
@@ -1198,7 +1220,10 @@ fn discover_unfollowed(shared: &Shared, session: &str, name: &str, found: &Disco
         entry.activity.last_output = activity;
         changed = true;
     }
-    let active = activity.is_some_and(|at| at.elapsed().is_ok_and(|elapsed| elapsed < ACTIVE_FOR));
+    let active = activity.is_some_and(|at| {
+        at.elapsed()
+            .is_ok_and(|elapsed| elapsed < shared.timings.active_for)
+    });
     if entry.activity.active != active {
         entry.activity.active = active;
         changed = true;
@@ -1575,7 +1600,8 @@ async fn follow_inner(
     let mut skipped_redraw = false;
     // Text taken for a redraw arrived: read the facts at the next look.
     let mut facts_after_look = false;
-    let quiet = tokio::time::sleep(ACTIVE_FOR);
+    let active_for = shared.timings.active_for;
+    let quiet = tokio::time::sleep(active_for);
     tokio::pin!(quiet);
     // A look at our panes' screens for a waiting prompt is due.
     let mut looking = false;
@@ -1712,7 +1738,7 @@ async fn follow_inner(
                         last_output = tokio::time::Instant::now();
                         if !active {
                             active = true;
-                            quiet.as_mut().reset(last_output + ACTIVE_FOR);
+                            quiet.as_mut().reset(last_output + active_for);
                             if let Some(entry) = state.sessions.get_mut(session) {
                                 entry.activity = Activity { active: true, last_output: Some(SystemTime::now()) };
                             }
@@ -1775,7 +1801,7 @@ async fn follow_inner(
                 }
             }
             () = &mut quiet, if active => {
-                let due = last_output + ACTIVE_FOR;
+                let due = last_output + active_for;
                 if due > tokio::time::Instant::now() {
                     quiet.as_mut().reset(due);
                 } else {

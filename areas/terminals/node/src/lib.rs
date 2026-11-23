@@ -39,7 +39,9 @@ use axum::Router;
 use serde::Deserialize;
 
 use agent_events::hooks::{self, Hooks};
+pub use ahjo_term::engine::EngineTimings;
 use commands::Ctx;
+pub use handoff::HandoffTimings;
 use hub::{Hub, Server};
 use launcher::Launcher;
 
@@ -94,9 +96,23 @@ struct Terminals {
     ctx: Arc<Ctx>,
 }
 
+/// The area's waits that a test may want shorter than a person needs; a
+/// node's are the defaults.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Timings {
+    pub engine: EngineTimings,
+    pub handoff: HandoffTimings,
+}
+
 /// Builds the area from `[terminals]`, and provides the node's
 /// [`ahjo_term::Sessions`].
 pub fn build(setup: &Setup) -> Result<Built> {
+    build_timed(setup, Timings::default())
+}
+
+/// [`build`] with waits of the caller's: a test lists the area with a
+/// `build` of its own that calls this.
+pub fn build_timed(setup: &Setup, timings: Timings) -> Result<Built> {
     let section: Section = setup.config.section(NAME)?;
     if section.socket.is_some() && section.socket_name.is_some() {
         bail!("{NAME}: give socket or socket_name, not both");
@@ -109,7 +125,7 @@ pub fn build(setup: &Setup) -> Result<Built> {
         None => setup.dir.join("launch.conf"),
     };
     let launcher = Arc::new(Launcher::load(launch_path)?);
-    let hub = Hub::new(servers(&section, setup)?)?;
+    let hub = Hub::new(servers(&section, setup, timings.engine)?)?;
     let hooks = std::env::current_exe()
         .context("finding this binary")
         .and_then(|exe| {
@@ -138,12 +154,13 @@ pub fn build(setup: &Setup) -> Result<Built> {
             projects: Arc::new(projects::Projects::new(launcher.clone())),
             flags: Arc::new(flags::Catalogue::new(launcher.clone())),
             launcher,
+            timings,
         }),
     })
 }
 
 /// The servers `[terminals]` names, the service user's own first.
-fn servers(section: &Section, setup: &Setup) -> Result<Vec<Server>> {
+fn servers(section: &Section, setup: &Setup, timings: EngineTimings) -> Result<Vec<Server>> {
     let socket = match (&section.socket, &section.socket_name) {
         (Some(path), _) => Socket::Path(setup.config.path(path)),
         (None, Some(name)) => Socket::Name(name.clone()),
@@ -169,7 +186,7 @@ fn servers(section: &Section, setup: &Setup) -> Result<Vec<Server>> {
         .chain(users)
         .map(|(user, socket)| Server {
             user,
-            engine: Arc::new(Engine::start_lazy(socket)),
+            engine: Arc::new(Engine::start_lazy_timed(socket, timings)),
         })
         .collect())
 }

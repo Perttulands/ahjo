@@ -28,6 +28,7 @@ pub(crate) struct Ctx {
     pub launcher: Arc<Launcher>,
     pub projects: Arc<crate::projects::Projects>,
     pub flags: Arc<crate::flags::Catalogue>,
+    pub timings: crate::Timings,
 }
 
 fn command<Input, Output, Fut>(

@@ -8,13 +8,14 @@
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
+use ahjo_node_kit::{Built, Listing, Setup};
 use ahjo_testkit::node::Node;
 use ahjo_testkit::tmux::{Server, write_script};
 use serde_json::{Value, json};
 
 /// A stand-in coding agent. At its prompt it has bracketed paste on, as
-/// Claude Code and Codex have; a message is worked on for a few seconds
-/// of output, and one that says "menu" is first asked about with a
+/// Claude Code and Codex have; a message is worked on for a second of
+/// output, and one that says "menu" is first asked about with a
 /// numbered menu, answered by a key, and drawn over once answered as
 /// theirs are. With `--ask-first` it asks before its
 /// first prompt, as a harness asks to trust a folder.
@@ -34,11 +35,31 @@ while IFS= read -r line; do
   line=${line//$'\e[201~'/}
   echo "got: $line"
   [[ $line == *menu* ]] && menu
-  for i in 1 2 3 4 5 6; do echo "working $i"; sleep 0.5; done
+  for i in 1 2 3 4 5 6; do echo "working $i"; sleep 0.2; done
   echo "done: $line"
   prompt
 done
 "#;
+
+/// The area with its waits shortened to what the stand-in needs: it
+/// writes at least every 0.2 s while it works, so a second's quiet is idle.
+const TERMINALS: Listing = Listing {
+    build,
+    ..ahjo_terminals::LISTING
+};
+
+fn build(setup: &Setup) -> anyhow::Result<Built> {
+    let timings = ahjo_terminals::Timings {
+        engine: ahjo_terminals::EngineTimings {
+            active_for: Duration::from_secs(1),
+        },
+        handoff: ahjo_terminals::HandoffTimings {
+            asks_for: Duration::from_millis(500),
+            look_every: Duration::from_millis(100),
+        },
+    };
+    ahjo_terminals::build_timed(setup, timings)
+}
 
 struct Handoff {
     node: Node,
@@ -71,9 +92,7 @@ impl Handoff {
             tmux.socket_path(),
             launch
         );
-        let node = Node::start(&[ahjo_terminals::LISTING], &config)
-            .await
-            .unwrap();
+        let node = Node::start(&[TERMINALS], &config).await.unwrap();
         Some(Handoff {
             node,
             projects,

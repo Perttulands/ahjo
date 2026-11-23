@@ -1669,8 +1669,10 @@ async fn nobody_looking_runs_nothing() {
 
     let looking = engine.look();
     let before = count();
-    tokio::time::sleep(Duration::from_millis(2500)).await;
-    assert!(count() > before, "nothing listed while someone looked");
+    eventually("a listing while someone looks", || {
+        (count() > before).then_some(())
+    })
+    .await;
     drop(looking);
     engine.stop().await;
 }

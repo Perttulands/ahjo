@@ -2,7 +2,7 @@
 use std::time::Duration;
 
 use ahjo_host_contract::{self as contract, ReadingFrame, State, commands::ServicesListed};
-use ahjo_node_kit::{NodeClient, cli};
+use ahjo_node_kit::{Listing, NodeClient, cli};
 use ahjo_testkit::node::Node;
 use axum::http::{Method, StatusCode};
 use futures_util::{SinkExt, StreamExt};
@@ -236,9 +236,19 @@ async fn read(socket: &mut Socket) -> tokio_tungstenite::tungstenite::Bytes {
         .into_data()
 }
 
+/// The area reading the host every second while someone looks.
+const QUICK: Listing = Listing {
+    build: |setup| {
+        let every = Duration::from_secs(1);
+        let idle = ahjo_host::HostTimings::default().idle;
+        ahjo_host::build_timed(setup, ahjo_host::HostTimings { every, idle })
+    },
+    ..ahjo_host::LISTING
+};
+
 #[tokio::test(flavor = "multi_thread")]
 async fn socket_subscription_starts_with_state_streams_readings_and_stops() {
-    let node = start().await;
+    let node = Node::start(&[QUICK], "").await.unwrap();
     let (mut socket, _) = tokio_tungstenite::connect_async(node.ws()).await.unwrap();
     let hello = socket.next().await.unwrap().unwrap();
     assert!(matches!(hello, Message::Binary(_)));
@@ -321,9 +331,9 @@ async fn socket_subscription_starts_with_state_streams_readings_and_stops() {
         .send(Message::Binary(contract::encode_on(false).into()))
         .await
         .unwrap();
-    // The next sampling tick passes while the subscription is off.
+    // Two sampling ticks pass while the subscription is off.
     assert!(
-        tokio::time::timeout(Duration::from_secs(7), socket.next())
+        tokio::time::timeout(Duration::from_millis(2500), socket.next())
             .await
             .is_err()
     );
