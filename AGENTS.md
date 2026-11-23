@@ -63,7 +63,7 @@ is good.
 
 ## Checks
 
-Before pushing: `cargo fmt --check`, then `cargo clippy -- -D warnings` and
+Before pushing: `cargo fmt --check`, then `cargo clippy --all-targets -- -D warnings` and
 `AHJO_REQUIRE_TMUX=1 cargo test` for the crates you changed (`-p <crate>`).
 If `tmux` on `PATH` is a wrapper that refuses `kill-server`, set `AHJO_TMUX` to
 the real binary. Write a test for behaviour that could break again, not for how
