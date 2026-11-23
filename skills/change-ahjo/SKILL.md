@@ -118,9 +118,8 @@ irm http://landmass.tail1f2f3b.ts.net:7300/install.ps1 | iex
 
 `[node] desk` in `~/.config/ahjo/config.toml` is the desk the installed
 Desk opens on, as the laptop reaches it
-(`http://landmass.tail1f2f3b.ts.net:18782`). Never run the install script
-on this machine: it would put the Start-menu entries over the operator's.
-Try it with `AHJO_INSTALL_DIR`, `AHJO_CONFIG_DIR` and `AHJO_START_MENU`
+(`http://landmass.tail1f2f3b.ts.net:18782`). The operator's own apps on
+this machine are such an install; try a changed script with `AHJO_INSTALL_DIR`, `AHJO_CONFIG_DIR` and `AHJO_START_MENU`
 set to a scratch folder, against a node of your own.
 
 Where the install lives:
@@ -163,9 +162,9 @@ cd /mnt/c/Users/pertt/ahjo-build && git pull --ff-only
 heavy run --memory 8 -- /mnt/c/Users/pertt/.cargo/bin/cargo.exe build --release -p ahjo-app-swarm
 ```
 
-The apps run from `C:\Users\pertt\Ahjo`, each started bare, as the install
-script starts them, so the Start menu, a taskbar pin and `Ahjo.cmd` start the
-same app the same way. `install.json` beside them names the local node
+The apps are installed as any machine's are, by the node's install script, in
+`%LOCALAPPDATA%\Ahjo` with Start-menu entries, each started bare, so the Start
+menu and a taskbar pin start the same app the same way. `install.json` beside them names the local node
 (`http://127.0.0.1:7310/`), so they update themselves like the laptop's: after
 an upgrade with `--windows-apps`, each app shows Update in its top bar when the
 node hands out another build, and the operator presses it. Do not copy builds
@@ -173,7 +172,7 @@ over them or close his windows to deploy. Their settings are in `%APPDATA%\Ahjo`
 (Swarm, naming the node `http://127.0.0.1:7310`) and `desk.json` (Desk);
 Brain's are in `%APPDATA%\ahjo-brain\settings.json`. Each app keeps its log
 beside its settings (`app.log`, `desk.log`), with every panic's message,
-place and backtrace; the `.pdb` beside each exe names the frames. A node whose protocol changed (`protocol` in
+place and backtrace; the `.pdb` files in `C:\Users\pertt\ahjo-build\target\release` name the frames. A node whose protocol changed (`protocol` in
 `/api/health`) needs the app built from the same commit.
 
 Windows programs are not on this host's `PATH`; `W=/mnt/c/Windows/System32`.
@@ -182,7 +181,7 @@ WSL runs in Windows session 0, where a started window never shows. To start
 an app on his desktop (only when he asks), use a one-off scheduled task, then delete it:
 
 ```sh
-$W/schtasks.exe /Create /F /TN ahjo-swarm-start /SC ONCE /ST 23:59 /IT /TR "C:\Users\pertt\Ahjo\Ahjo.cmd"
+$W/schtasks.exe /Create /F /TN ahjo-swarm-start /SC ONCE /ST 23:59 /IT /TR "C:\Users\pertt\AppData\Local\Ahjo\ahjo-swarm.exe"
 $W/schtasks.exe /Run /TN ahjo-swarm-start
 $W/schtasks.exe /Delete /F /TN ahjo-swarm-start
 ```
