@@ -130,17 +130,6 @@ pub fn on_page(id: String, media: &str, selector: &str, quote: &str, x: f64, y: 
     }
 }
 
-/// A note on the document's passage from `start` to `end` (characters).
-pub fn on_text(id: String, start: usize, end: usize) -> Mark {
-    Mark {
-        id,
-        kind: "note".into(),
-        start: Some(start),
-        end: Some(end),
-        ..Default::default()
-    }
-}
-
 /// Whether the mark shows on this media now: a clip's mark on its frame
 /// only.
 pub fn shows_on(m: &Mark, media: &str, frame: Option<usize>) -> bool {
@@ -195,70 +184,6 @@ fn clip(s: &str, n: usize) -> String {
     } else {
         format!("{}…", s.chars().take(n).collect::<String>().trim_end())
     }
-}
-
-/// Where the words he selected in the rendered document are in its text,
-/// as characters (`start..end`), though the rendering dropped the markup
-/// and joined lines: matched with markup and runs of space set aside, and
-/// a long passage by its first and last words when the middle differs.
-pub fn locate(doc: &str, selected: &str) -> Option<(usize, usize)> {
-    let (plain, at) = flatten(doc);
-    let (want, _) = flatten(selected);
-    let want: Vec<char> = trim(&want);
-    if want.is_empty() {
-        return None;
-    }
-    let span = |from: usize, len: usize| (at[from], at[from + len - 1] + 1);
-    if let Some(i) = find(&plain, &want, 0) {
-        return Some(span(i, want.len()));
-    }
-    const ENDS: usize = 24;
-    if want.len() < 2 * ENDS {
-        return None;
-    }
-    let head = &want[..ENDS];
-    let tail = &want[want.len() - ENDS..];
-    let i = find(&plain, head, 0)?;
-    let j = find(&plain, tail, i + ENDS)?;
-    Some((at[i], at[j + ENDS - 1] + 1))
-}
-
-/// The text without markup, one space for any run of space, with each
-/// kept character's place in the original.
-fn flatten(s: &str) -> (Vec<char>, Vec<usize>) {
-    let mut out = vec![];
-    let mut at = vec![];
-    let mut space = false;
-    for (i, c) in s.chars().enumerate() {
-        if matches!(c, '*' | '_' | '`' | '#' | '>' | '[' | ']') {
-            continue;
-        }
-        if c.is_whitespace() {
-            space = true;
-            continue;
-        }
-        if space && !out.is_empty() {
-            out.push(' ');
-            at.push(i - 1);
-        }
-        space = false;
-        out.push(c);
-        at.push(i);
-    }
-    (out, at)
-}
-
-fn trim(s: &[char]) -> Vec<char> {
-    let start = s.iter().position(|c| *c != ' ').unwrap_or(s.len());
-    let end = s.iter().rposition(|c| *c != ' ').map_or(start, |e| e + 1);
-    s[start..end].to_vec()
-}
-
-fn find(hay: &[char], needle: &[char], from: usize) -> Option<usize> {
-    if needle.len() > hay.len() {
-        return None;
-    }
-    (from..=hay.len() - needle.len()).find(|&i| hay[i..i + needle.len()] == *needle)
 }
 
 #[cfg(test)]
@@ -321,36 +246,9 @@ mod tests {
 
     #[test]
     fn ids_are_free_and_in_the_stores_alphabet() {
-        let taken = [on_text("d1".into(), 0, 1), on_text("d3".into(), 0, 1)];
+        let taken = [text_note("d1", 0, 1), text_note("d3", 0, 1)];
         assert_eq!(next_id(&taken), "d2");
         assert_eq!(next_id(&[]), "d1");
-    }
-
-    #[test]
-    fn a_selected_passage_is_found_in_the_markdown_it_was_rendered_from() {
-        let doc = "# Clearing\n\nThe clearing is **where the\nwolves** rest at dusk.\n\n- A `fire` burns low\n";
-        let (s, e) = locate(doc, "where the wolves rest").unwrap();
-        let found: String = doc.chars().skip(s).take(e - s).collect();
-        assert_eq!(found, "where the\nwolves** rest");
-        let (s, e) = locate(doc, "  A fire burns ").unwrap();
-        assert_eq!(
-            doc.chars().skip(s).take(e - s).collect::<String>(),
-            "A `fire` burns"
-        );
-        assert_eq!(locate(doc, "not in it"), None);
-        assert_eq!(locate(doc, "   "), None);
-        // Characters, not bytes, as the store counts them.
-        let (s, _) = locate("Ää ö clearing", "clearing").unwrap();
-        assert_eq!(s, 5);
-    }
-
-    #[test]
-    fn a_long_passage_is_found_by_its_ends_when_its_middle_was_drawn_otherwise() {
-        let doc = "Start. The old road runs along the lake | a table cell | and ends at the ferry landing by the shed. End.";
-        let picked = "The old road runs along the lake\ta table cell\tand ends at the ferry landing by the shed";
-        let (s, e) = locate(doc, picked).unwrap();
-        let found: String = doc.chars().skip(s).take(e - s).collect();
-        assert!(found.starts_with("The old road") && found.ends_with("by the shed"));
     }
 
     #[test]
@@ -366,7 +264,17 @@ mod tests {
         assert_eq!(what(&b, None), "Arrow at 1:01.5");
         let p = on_page("d2".into(), "m4", "main > h2", "Choose your path", 0.5, 0.2);
         assert_eq!(what(&p, None), "On “Choose your path”");
-        let t = on_text("d3".into(), 4, 9);
+        let t = text_note("d3", 4, 9);
         assert_eq!(what(&t, Some("The clearing")), "“clear”");
+    }
+
+    fn text_note(id: &str, start: usize, end: usize) -> Mark {
+        Mark {
+            id: id.into(),
+            kind: "note".into(),
+            start: Some(start),
+            end: Some(end),
+            ..Default::default()
+        }
     }
 }

@@ -5,8 +5,8 @@
 //! goes between fit and 1:1, and a clip plays, scrubs and steps by the
 //! frame. With a drawing tool a press marks instead: a pin, a box, an arrow
 //! or a line, on a paused clip's frame. A page renders here (Windows) and a
-//! click in Comment mode marks its element; the document reads here and
-//! selecting words marks the passage.
+//! click in Comment mode marks its element; the document is a paper he
+//! grades (`sheet`).
 
 use crate::app::{DeskApp, Drawing, Item, Pic, fit_scale};
 use crate::icons::Icon;
@@ -16,7 +16,6 @@ use crate::tokens::{self, CAP_TEXT, GAP, GAP_SMALL, META};
 use crate::views::{button, icon_button};
 use ahjo_app_kit::theme::{FAMILY, Theme, alpha, rgb, theme};
 use ahjo_app_kit::widgets::kit::{self, Kind};
-use ahjo_app_kit::widgets::{markdown, select};
 use gpui::{
     AnyElement, App, BorderStyle, Bounds, ClickEvent, ContentMask, Context, Corners, Font,
     FontWeight, Hsla, MouseButton, MouseDownEvent, MouseMoveEvent, ObjectFit, PathBuilder, Pixels,
@@ -765,42 +764,45 @@ impl DeskApp {
 
     /// The document, to read and to mark by selecting its words.
     fn doc_surface(&mut self, t: &Theme, cx: &mut Context<Self>) -> AnyElement {
-        let Some(blocks) = self.doc_blocks() else {
+        let Some(sheet) = self.paper_sheet(t, cx) else {
             return quiet("The document is empty".into(), t.dim);
         };
-        let look = markdown::Look {
-            t,
-            refs: false,
-            on_link: None,
-            select: Some(self.doc_select.clone()),
-        };
-        let column = markdown::render(&look, "doc", &blocks);
-        let this = cx.entity().downgrade();
-        let body = div()
+        let room = div()
             .id("doc")
             .debug_selector(|| "doc".into())
             .track_scroll(&self.doc_scroll)
             .size_full()
             .overflow_y_scroll()
             .bg(t.bg)
-            .cursor_text()
             // A column: in a row the page would be stretched to the
             // room's height, and what runs past it would never scroll.
             .flex()
             .flex_col()
-            .items_center()
-            .child(
+            .px(px(tokens::PAD))
+            .pt(px(tokens::PAD))
+            .child(sheet);
+        let tray = self.paper_tray(t, cx);
+        let lift = if tray.is_some() {
+            tokens::paper::TRAY_ROOM
+        } else {
+            0.
+        };
+        div()
+            .size_full()
+            .relative()
+            .child(room.pb(px(lift)))
+            .children(tray.map(|tray| {
                 div()
-                    .w_full()
-                    .max_w(px(tokens::READING))
-                    .px(px(tokens::PAD))
-                    .py(px(tokens::PAD))
-                    .child(column),
-            );
-        select::track(body, &self.doc_select, cx.entity_id(), move |text, cx| {
-            let _ = this.update(cx, |app, cx| app.mark_passage(text, cx));
-        })
-        .into_any_element()
+                    .absolute()
+                    .bottom(px(tokens::PAD))
+                    .left_0()
+                    .right_0()
+                    .px(px(tokens::PAD * 2.))
+                    .flex()
+                    .justify_center()
+                    .child(tray)
+            }))
+            .into_any_element()
     }
 
     /// The page the agent made: inside the window where the system has a

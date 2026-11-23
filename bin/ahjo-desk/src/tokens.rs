@@ -215,6 +215,56 @@ pub fn dragged(want: f32, least: f32, most: f32, wide: f32, others: f32) -> f32 
 }
 
 /// A mark's ink as the store keeps it (`#rrggbb`), else [`MARK_INK`].
+/// The paper a document is graded on: light paper on every theme, as on
+/// the web desk (`/srv/desk/web/style.css`, "Paper"), so the grader's red
+/// reads as a grader's red and nothing else. These colours live only on
+/// the sheet; the theme's meanings hold everywhere around it.
+pub mod paper {
+    /// The sheet, its words, its quieter words and its rules.
+    pub const PAPER: u32 = 0xfbf7ec;
+    pub const INK: u32 = 0x221d17;
+    pub const SOFT: u32 = 0x5d5447;
+    pub const RULE: u32 = 0xd8ccb2;
+    pub const EDGE: u32 = 0xd6cbb3;
+    /// The grader's hand, and its wash behind a chosen passage.
+    pub const GRADE: u32 = 0xc22a1d;
+    pub const GRADE_WASH: f32 = 0.12;
+    /// The last round's marks, fainter.
+    pub const GRADE_OLD: f32 = 0.38;
+    /// Words new since the round he marked, and words taken out.
+    pub const NEW: u32 = 0xe8be40;
+    pub const NEW_WASH: f32 = 0.34;
+    pub const GONE: u32 = 0x8d8374;
+    /// The grader's handwriting (Caveat, at the web desk's weight).
+    pub const HAND: &str = "Caveat";
+    pub const HAND_FILE: &[u8] = include_bytes!("../assets/fonts/Caveat.ttf");
+    /// The sheet's words, a heading's, and the hand's (which runs small).
+    pub const TEXT: f32 = 17.;
+    pub const LEADING: f32 = 1.62;
+    pub const H1: f32 = 28.;
+    pub const H2: f32 = 22.;
+    pub const H3: f32 = 19.;
+    pub const HAND_TEXT: f32 = 22.;
+    pub const STAMP: f32 = 40.;
+    /// The page's margins, the column the notes stand in, and the room
+    /// between blocks.
+    pub const PAD_X: f32 = 44.;
+    pub const PAD_Y: f32 = 30.;
+    pub const MARGIN: f32 = 200.;
+    pub const MARGIN_GAP: f32 = 26.;
+    pub const BLOCK_GAP: f32 = 12.;
+    /// The sheet: text and margin.
+    pub const WIDTH: f32 = 960.;
+    /// A sheet at least this wide writes notes in its margin.
+    pub const WIDE: f32 = 820.;
+    /// Room kept under the sheet's end while the pens stand over it.
+    pub const TRAY_ROOM: f32 = 120.;
+    /// How thick the hand's strokes are: a line, a tick, the old round's.
+    pub const STROKE: f32 = 2.1;
+    pub const TICK: f32 = 2.8;
+    pub const STROKE_OLD: f32 = 1.8;
+}
+
 pub fn ink(color: Option<&str>) -> u32 {
     color
         .and_then(|c| c.strip_prefix('#'))

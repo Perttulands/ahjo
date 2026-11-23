@@ -15,8 +15,10 @@ pub mod marks;
 pub mod model;
 pub mod page;
 pub mod panel;
+pub mod paper;
 pub mod player;
 pub mod settings;
+pub mod sheet;
 pub mod stage;
 pub mod tokens;
 pub mod video;
@@ -53,6 +55,7 @@ pub fn run() {
         .run(move |cx: &mut App| {
             let fonts = ahjo_app_kit::theme::FONT_FILES
                 .iter()
+                .chain([&tokens::paper::HAND_FILE])
                 .map(|f| Cow::Borrowed(*f))
                 .collect();
             if let Err(e) = cx.text_system().add_fonts(fonts) {

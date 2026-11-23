@@ -391,6 +391,10 @@ impl DeskApp {
         let form = ask.form();
         let grill = form == Form::Grill;
         let hands = form == Form::Hands;
+        // A document to grade is answered as the web desk answers it: move
+        // on, or another round on what he marked and wrote.
+        let paper =
+            form == Form::Open && ask.doc.is_some() && ask.options.is_empty() && ask.kind != "do";
         let elsewhere_q = grill && draft.at.is_some();
         let focused = self.words.read(cx).is_focused(window);
         let key = if self.config.enter_sends {
@@ -406,6 +410,8 @@ impl DeskApp {
             format!("Send {} of {}", draft.answered(ask), ask.questions.len())
         } else if hands {
             "Send back".into()
+        } else if paper {
+            "Send my marks only".into()
         } else {
             "Send".into()
         };
@@ -414,10 +420,17 @@ impl DeskApp {
                 t,
                 "send",
                 send_word,
-                if hands { Kind::Plain } else { Kind::Primary },
+                if paper {
+                    Kind::Quiet
+                } else if hands {
+                    Kind::Plain
+                } else {
+                    Kind::Primary
+                },
             ),
             t,
         )
+        .debug_selector(|| "send".into())
         .when(self.sending, |d| d.opacity(0.5))
         .tooltip(kit::tip(format!("{key}{told}")))
         .on_click(cx.listener(|app, _: &ClickEvent, _, cx| app.send(Verdict::Send, cx)));
@@ -443,13 +456,28 @@ impl DeskApp {
             .on_click(cx.listener(|app, _: &ClickEvent, _, cx| app.hands_done(cx)))
         });
         let good = (form == Form::Open).then(|| {
-            big(button(t, "good", "Looks good", Kind::Plain), t)
+            big(
+                button(
+                    t,
+                    "good",
+                    if paper { "Move on" } else { "Looks good" },
+                    if paper { Kind::Primary } else { Kind::Plain },
+                ),
+                t,
+            )
+            .debug_selector(|| "good".into())
+            .tooltip(kit::tip(
+                "Accept it as it is; your words and marks, if any, go with it",
+            ))
+            .on_click(cx.listener(|app, _: &ClickEvent, _, cx| app.send(Verdict::LooksGood, cx)))
+        });
+        let again = paper.then(|| {
+            big(button(t, "again", "Another round", Kind::Plain), t)
+                .debug_selector(|| "again".into())
                 .tooltip(kit::tip(
-                    "Accept it as it is; your words, if any, go with it",
+                    "Send it back to be worked on, as your marks and words say",
                 ))
-                .on_click(
-                    cx.listener(|app, _: &ClickEvent, _, cx| app.send(Verdict::LooksGood, cx)),
-                )
+                .on_click(cx.listener(|app, _: &ClickEvent, _, cx| app.send(Verdict::SendBack, cx)))
         });
         let rest = grill.then(|| {
             big(button(t, "rest", "Rest as recommended", Kind::Plain), t)
@@ -518,9 +546,13 @@ impl DeskApp {
             .pb(px(tokens::FOOT_PAD))
             .child(div().flex_1())
             .children(rest)
-            .children(good)
-            .children(done)
-            .child(send);
+            .map(|d| {
+                if paper {
+                    d.child(send).children(again).children(good)
+                } else {
+                    d.children(good).children(done).child(send)
+                }
+            });
         div()
             .flex_none()
             .flex()
@@ -603,7 +635,9 @@ impl DeskApp {
     /// His marks, at the head of his answer: each its number as the
     /// picture draws it and his words on it; the one chosen open to write.
     fn mark_rows(&mut self, t: &Theme, ask: &Ask, cx: &mut Context<Self>) -> Option<Div> {
-        let numbered = self.numbered();
+        // Marks on the document's words are on the paper, not listed.
+        let mut numbered = self.numbered();
+        numbered.retain(|(_, m)| !m.on_text());
         if numbered.is_empty() {
             return None;
         }

@@ -207,6 +207,8 @@ pub enum Verdict {
     Send,
     /// The work is right as it is (a document: move on), words optional.
     LooksGood,
+    /// Not yet: another round, as his words and marks say.
+    SendBack,
     /// A grill: every question he left takes its recommendation.
     GrillRest,
     /// He answered in the agent's session or by voice; any words say how.
@@ -279,6 +281,12 @@ pub fn payload(ask: &Ask, draft: &Draft, verdict: Verdict, marks: usize) -> Resu
         },
         Form::Open => match verdict {
             Verdict::LooksGood => Ok(with("accept", vec![])),
+            // A document goes back for another round on what he wrote or
+            // marked on it, as the web desk sends it.
+            Verdict::SendBack if !words.is_empty() || marks > 0 => Ok(with("send back", vec![])),
+            Verdict::SendBack => {
+                Err("Mark the page or write a word, then press Another round again".into())
+            }
             _ => match draft.pick.and_then(|i| ask.options.get(i)) {
                 Some(o) => Ok(with("pick", vec![o.name.clone()])),
                 None if !words.is_empty() || marks > 0 => Ok(with("marks", vec![])),

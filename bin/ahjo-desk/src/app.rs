@@ -13,8 +13,6 @@ use crate::player::{Out, Player};
 use crate::tokens;
 use crate::video::Clip;
 use ahjo_app_kit::widgets::field::{self, AttachmentEvent, FieldEvent, TextField};
-use ahjo_app_kit::widgets::markdown::{self, Block};
-use ahjo_app_kit::widgets::select::Selectable;
 use gpui::{
     App, AppContext, AsyncApp, Bounds, ClipboardEntry, ClipboardItem, Context, Entity, FocusHandle,
     Focusable, ImageFormat, KeyDownEvent, Pixels, Point, RenderImage, Subscription, WeakEntity,
@@ -205,6 +203,8 @@ pub enum MenuAct {
 pub enum Aim {
     Words,
     MarkNote,
+    /// The pen on the paper, writing a rewrite or a note.
+    Pen,
     Surface,
 }
 
@@ -292,9 +292,14 @@ pub struct DeskApp {
     chosen: bool,
     /// The list on the left.
     pub list: List,
-    /// The document's text as selectable blocks, kept per ask and round.
-    pub doc_select: Rc<RefCell<Selectable>>,
-    pub doc_blocks: Option<(String, Rc<Vec<Block>>)>,
+    /// The document as a paper to grade, read once per ask and round.
+    pub paper: Option<(String, Rc<crate::paper::Paper>)>,
+    /// What he has in hand on the paper.
+    pub grading: crate::paper::Grading,
+    /// How wide the paper was last drawn.
+    pub paper_width: Rc<Cell<f32>>,
+    /// The pen's words on the paper: a rewrite or a note.
+    pub pen: Entity<TextField>,
     /// The page view and what the page says to the app.
     #[cfg(windows)]
     pub page: Rc<RefCell<Option<page::WebPage>>>,
@@ -348,6 +353,18 @@ impl DeskApp {
         });
         cx.subscribe_in(&mark_note, window, Self::on_mark_note)
             .detach();
+        let pen = cx.new(|cx| {
+            TextField::new(cx, "")
+                .bare()
+                .multiline()
+                .min_lines(1)
+                .face(
+                    tokens::paper::HAND,
+                    ahjo_app_kit::theme::rgb(tokens::paper::GRADE),
+                )
+                .text_size(tokens::paper::HAND_TEXT)
+        });
+        cx.subscribe_in(&pen, window, Self::on_pen).detach();
         cx.observe_window_activation(window, |this, window, cx| {
             this.follow(window.is_window_active(), cx);
             if window.is_window_active() {
@@ -458,8 +475,10 @@ impl DeskApp {
             play_gen: 0,
             chosen: false,
             list: List::Waiting,
-            doc_select: Rc::default(),
-            doc_blocks: None,
+            paper: None,
+            grading: Default::default(),
+            paper_width: Rc::default(),
+            pen,
             #[cfg(windows)]
             page: Rc::new(RefCell::new(None)),
             page_said,
@@ -626,6 +645,7 @@ impl DeskApp {
             Some(Aim::Words) if self.full => window.focus(&self.focus, cx),
             Some(Aim::Words) => field::focus(&self.words, window, cx),
             Some(Aim::MarkNote) => field::focus(&self.mark_note, window, cx),
+            Some(Aim::Pen) => field::focus(&self.pen, window, cx),
             Some(Aim::Surface) => window.focus(&self.focus, cx),
             None => {}
         }
@@ -663,6 +683,7 @@ impl DeskApp {
                 .set_offset(gpui::point(gpui::px(0.), gpui::px(0.)));
             self.doc_scroll
                 .set_offset(gpui::point(gpui::px(0.), gpui::px(0.)));
+            self.grading = Default::default();
         }
         if let Some(answer) = &self.pending_answer
             && key.as_ref() == Some(&answer.key)
@@ -794,15 +815,22 @@ impl DeskApp {
     }
 
     /// The document's blocks, parsed once per ask and round.
-    pub fn doc_blocks(&mut self) -> Option<Rc<Vec<Block>>> {
+    /// The ask's document as a paper, with the round he marked before.
+    pub fn paper(&mut self) -> Option<Rc<crate::paper::Paper>> {
         let ask = self.current_ask()?;
         let doc = ask.doc.as_ref()?;
         let key = format!("{}/{}", ask.id, ask.round());
-        if self.doc_blocks.as_ref().map(|(k, _)| k) != Some(&key) {
-            let blocks = Rc::new(markdown::parse(&doc.text));
-            self.doc_blocks = Some((key, blocks));
+        if self.paper.as_ref().map(|(k, _)| k) != Some(&key) {
+            let before = ask
+                .history
+                .iter()
+                .rev()
+                .find(|r| r.doc.is_some() && r.marks.iter().any(|m| m.on_text()))
+                .and_then(|r| Some((r.round(), r.doc.as_ref()?.text.as_str(), r.marks.as_slice())));
+            let paper = Rc::new(crate::paper::Paper::new(&doc.text, before));
+            self.paper = Some((key, paper));
         }
-        self.doc_blocks.as_ref().map(|(_, b)| b.clone())
+        self.paper.as_ref().map(|(_, p)| p.clone())
     }
 
     // ---- Marks ----
@@ -815,7 +843,7 @@ impl DeskApp {
         }
     }
 
-    fn edit_marks(&mut self, f: impl FnOnce(&mut Vec<Mark>)) {
+    pub fn edit_marks(&mut self, f: impl FnOnce(&mut Vec<Mark>)) {
         let Some(ask) = self.current_ask().cloned() else {
             return;
         };
@@ -981,24 +1009,6 @@ impl DeskApp {
                 self.aim(Aim::MarkNote, cx);
             }
             None => self.add_mark(marks::whole(String::new(), &item.media.id, at), cx),
-        }
-    }
-
-    /// The document's words he selected: a mark on that passage.
-    pub fn mark_passage(&mut self, selected: String, cx: &mut Context<Self>) {
-        let Some(doc) = self.current_ask().and_then(|a| a.doc.clone()) else {
-            return;
-        };
-        if selected.trim().is_empty() {
-            return;
-        }
-        match marks::locate(&doc.text, &selected) {
-            Some((start, end)) => self.add_mark(marks::on_text(String::new(), start, end), cx),
-            None => self.say(
-                "That passage could not be found in the document's text: say it in your words",
-                true,
-                cx,
-            ),
         }
     }
 
@@ -1515,6 +1525,19 @@ impl DeskApp {
             }
             FieldEvent::Submit => self.aim(Aim::Words, cx),
             FieldEvent::SubmitAlt => self.send(Verdict::Send, cx),
+            _ => {}
+        }
+    }
+
+    fn on_pen(
+        &mut self,
+        _: &Entity<TextField>,
+        e: &FieldEvent,
+        _: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        match e {
+            FieldEvent::Submit | FieldEvent::SubmitAlt => self.put_pen_down(cx),
             _ => {}
         }
     }
@@ -2396,6 +2419,9 @@ impl DeskApp {
         }
         if self.typing(window, cx) {
             if key == "escape" {
+                if self.grading.writing.is_some() {
+                    self.grading.writing = None;
+                }
                 self.aim(Aim::Surface, cx);
             }
             return;
@@ -2412,6 +2438,10 @@ impl DeskApp {
                 "p" | "b" | "a" | "d" | "n" | "delete" | "backspace" | "enter" | "tab"
             )
         {
+            return;
+        }
+        // A passage chosen on the paper: the grader's pens.
+        if self.grading.chosen.is_some() && self.paper_key(key, cx) {
             return;
         }
         let writes = self.read_only() && e.keystroke.key_char.is_some();
@@ -2504,7 +2534,9 @@ impl DeskApp {
     }
 
     fn typing(&self, window: &Window, cx: &App) -> bool {
-        self.words.read(cx).is_focused(window) || self.mark_note.read(cx).is_focused(window)
+        self.words.read(cx).is_focused(window)
+            || self.mark_note.read(cx).is_focused(window)
+            || self.pen.read(cx).is_focused(window)
     }
 
     fn fps_frames(&self) -> i64 {

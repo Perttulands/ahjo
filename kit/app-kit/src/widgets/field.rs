@@ -5,10 +5,10 @@
 use crate::theme::{FAMILY, alpha, size, theme};
 use gpui::{
     App, Bounds, ClipboardItem, ContentMask, Context, CursorStyle, ElementId, ElementInputHandler,
-    Entity, EntityInputHandler, EventEmitter, FocusHandle, Focusable, GlobalElementId, KeyBinding,
-    LayoutId, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, PaintQuad, Pixels, Point,
-    SharedString, Style, TextRun, UTF16Selection, UnderlineStyle, Window, WrappedLine, actions,
-    div, fill, point, prelude::*, px, relative, size as sz,
+    Entity, EntityInputHandler, EventEmitter, FocusHandle, Focusable, GlobalElementId, Hsla,
+    KeyBinding, LayoutId, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, PaintQuad,
+    Pixels, Point, SharedString, Style, TextRun, UTF16Selection, UnderlineStyle, Window,
+    WrappedLine, actions, div, fill, point, prelude::*, px, relative, size as sz,
 };
 use std::ops::Range;
 use unicode_segmentation::UnicodeSegmentation;
@@ -109,6 +109,9 @@ pub struct TextField {
     prose: bool,
     /// Written in the theme's reading face, for prose, not the mono face.
     reading: bool,
+    /// Written in this face and ink instead of the theme's (a hand on a
+    /// paper, say).
+    face: Option<(&'static str, Hsla)>,
     /// A mono, smaller field for paths and flags looks like the rest.
     text_size: f32,
     /// A text area at least this many lines high, empty or not: three
@@ -157,6 +160,7 @@ impl TextField {
             attachments: false,
             prose: false,
             reading: false,
+            face: None,
             text_size: size::TEXT,
             min_lines: 3,
             lines: vec![],
@@ -222,6 +226,12 @@ impl TextField {
     /// Prose in the theme's reading face rather than the mono face.
     pub fn reading(mut self) -> Self {
         self.reading = true;
+        self
+    }
+
+    /// Written in `family` and `ink`, whatever the theme's faces are.
+    pub fn face(mut self, family: &'static str, ink: Hsla) -> Self {
+        self.face = Some((family, ink));
         self
     }
 
@@ -815,9 +825,13 @@ impl TextElement {
         let (text, color) = if f.text.is_empty() && f.marked.is_none() {
             (f.placeholder.to_string(), t.dim)
         } else {
-            (f.text.clone(), t.text)
+            (f.text.clone(), f.face.map_or(t.text, |(_, ink)| ink))
         };
-        let family = if f.reading { t.ty.reading } else { FAMILY };
+        let family = match f.face {
+            Some((family, _)) => family,
+            None if f.reading => t.ty.reading,
+            None => FAMILY,
+        };
         let font = gpui::font(family);
         let mut runs = vec![];
         let base = TextRun {
