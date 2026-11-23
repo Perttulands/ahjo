@@ -21,6 +21,7 @@ mod source;
 mod swarm;
 mod tokens;
 
+use ahjo_app_kit::settings_file::{self, SettingsFile};
 use ahjo_app_kit::theme::{Direction, FONT_FILES, Theme};
 use app::{Bench, Start};
 use gpui::App;
@@ -42,12 +43,13 @@ pub fn run() {
         return;
     }
     let path = source::settings_path();
-    let (settings, broken) = match path.as_deref().map(source::read_settings) {
-        Some(Ok(s)) => (s, None),
-        Some(Err(e)) => (source::Settings::default(), Some(e)),
-        None => (source::Settings::default(), None),
-    };
     if args.iter().any(|a| a == "--where") {
+        // Read only: a file that does not read is left where it is.
+        let settings = path
+            .as_deref()
+            .and_then(|p| settings_file::read::<source::Settings>(p).ok().flatten())
+            .map(|(s, _)| s)
+            .unwrap_or_default();
         let here = source::find(&args);
         let place = match source::asked_from(&args, &settings) {
             Some(remote) => here.reading(remote),
@@ -76,12 +78,13 @@ pub fn run() {
         "ahjo-brain",
         path.as_ref().map(|p| p.with_file_name("app.log")),
     );
+    let (settings, notice) = SettingsFile::<source::Settings>::load(path);
     // The theme: as asked, else as chosen here, else as chosen in Ahjo Swarm.
     let direction = flag.or_else(|| Direction::from_key(&settings.theme));
     let start = Start {
         place: source::find(&args),
         from: source::asked_from(&args, &settings),
-        settings: (path, settings, broken),
+        settings: (settings, notice),
         query: value(&args, "--search"),
         open: value(&args, "--open"),
         bench,

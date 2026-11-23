@@ -34,6 +34,6 @@ embed-resource = "3"
 
 [dev-dependencies]
 ahjo-brain = { path = "../../areas/brain/node" }
-ahjo-testkit = { path = "../../kit/testkit" }
+ahjo-testkit = { path = "../../kit/testkit", features = ["app"] }
 tokio = { version = "1", features = ["full"] }
 gpui = { package = "gpui-pre", version = "=0.3.12", features = ["test-support"] }

@@ -306,8 +306,6 @@ pub mod motion {
     pub const WHEEL_ZOOM: f32 = 1.12;
     /// Pixels a key press pans.
     pub const KEY_PAN: f32 = 80.;
-    /// How long a word the app says (a zoom) stays.
-    pub const SAID: u64 = 1800;
 }
 
 /// The search over the sky.
@@ -457,8 +455,8 @@ pub mod chrome {
     pub const TEXT: f32 = super::ty::TITLE;
     pub const SWITCH_PAD_X: f32 = 12.;
     pub const SWITCH_HEIGHT: f32 = 30.;
-    /// Room kept for the theme button beside the search in a narrow window.
-    pub const SWITCH_ROOM: f32 = 180.;
+    /// Between the chips at the top right, and within one.
+    pub const CHIP_GAP: f32 = 6.;
     /// The search is never narrower than this.
     pub const SEARCH_LEAST: f32 = 220.;
     /// How much of the theme's window picture shows behind a launch.

@@ -25,15 +25,22 @@ use crate::reader::{self, Reader};
 use crate::sky::{self, Rect, Role, Sky};
 use crate::source::{self, Where};
 use crate::tokens::{self, chrome, lift, motion, search, sky as k, veil};
+use ahjo_app_kit::Error;
+use ahjo_app_kit::frame::{self, AppFrame, Cover, FrameEvent, Layer, Status};
+use ahjo_app_kit::menu::MenuRow;
+use ahjo_app_kit::pointer;
+use ahjo_app_kit::popup::{self, Popup, PopupId, Spot};
+use ahjo_app_kit::settings_file::{self, KeepsSettings, SettingsFile};
 use ahjo_app_kit::theme::{Direction, FAMILY, Theme, alpha, art, size, theme, ty};
 use ahjo_app_kit::widgets::field::{self, FieldEvent, TextField};
+use ahjo_app_kit::widgets::theme_picker::{self, Picker};
 use ahjo_app_kit::widgets::{kit, pane};
 use ahjo_app_kit::zoom::{self, Zoom};
 use gpui::{
     AnyElement, AnyView, App, AppContext, Bounds, Context, Entity, FocusHandle, Focusable,
     FontWeight, Hsla, KeyDownEvent, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent,
     PathBuilder, Pixels, ScrollDelta, ScrollEvent, ScrollHandle, SharedString, StyleRefinement,
-    Window, canvas, div, img, point, prelude::*, px,
+    Subscription, WeakEntity, Window, canvas, div, img, point, prelude::*, px,
 };
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
@@ -225,13 +232,71 @@ impl Bench {
     }
 }
 
+/// The frame's owner name for what the app opens on it.
+const OWNER: &str = "brain";
+/// The note over the sky, on the frame's stack.
+const NOTE: &str = "brain/note";
+/// The folded actions' chip, beside the theme's mark.
+const MORE: &str = "▾";
+
+/// What stands at the top right, beside the search.
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum Action {
+    Inbox,
+    Note,
+    Today,
+    Theme,
+}
+
+impl Action {
+    fn words(self) -> &'static str {
+        match self {
+            Action::Inbox => "Inbox",
+            Action::Note => "New note",
+            Action::Today => "Today",
+            Action::Theme => "Theme",
+        }
+    }
+}
+
+/// What the app draws over the whole window on the frame's stack (a
+/// note), drawn again whenever the app changes.
+struct Over {
+    app: WeakEntity<BrainApp>,
+    _app: Subscription,
+}
+
+impl Over {
+    fn new(app: &Entity<BrainApp>, cx: &mut Context<Self>) -> Self {
+        Self {
+            app: app.downgrade(),
+            _app: cx.observe(app, |_, _, cx| cx.notify()),
+        }
+    }
+}
+
+impl Render for Over {
+    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let note = self
+            .app
+            .update(cx, |me, cx| {
+                let t = theme(cx).clone();
+                let ed = me.note.clone()?;
+                Some(me.note_pane(&t, &ed, cx).into_any_element())
+            })
+            .ok()
+            .flatten();
+        div().size_full().children(note)
+    }
+}
+
 /// What the app is told at launch.
 pub struct Start {
     pub place: Where,
     /// Another machine's brain to read instead of this one's.
     pub from: Option<Remote>,
-    /// The app's settings file, what it held, and why it did not read.
-    pub settings: (Option<PathBuf>, source::Settings, Option<String>),
+    /// The app's settings, and why their file did not read.
+    pub settings: (SettingsFile<source::Settings>, Option<Error>),
     pub query: Option<String>,
     pub open: Option<String>,
     pub bench: Option<Bench>,
@@ -244,10 +309,8 @@ pub struct BrainApp {
     place: Where,
     /// This machine's brain, as the launch found it.
     here: Where,
-    /// The other machines a brain can be read from, as Swarm last saw them,
-    /// and whether their list is open.
+    /// The other machines a brain can be read from, as Swarm last saw them.
     others: Vec<Remote>,
-    choosing: bool,
     /// Another machine's copy is being brought up to date.
     syncing: bool,
     /// Why the copy read is as last copied: the other machine did not
@@ -300,20 +363,20 @@ pub struct BrainApp {
     /// Evidence left out of a page's orbit, counted at its edge.
     fold_evidence: bool,
     replay: Option<Replaying>,
-    settings_path: Option<PathBuf>,
-    settings: source::Settings,
-    settings_seen: Option<SystemTime>,
-    /// Why the settings file did not read; while it does not, it is not
-    /// written over.
-    settings_broken: Option<String>,
+    /// The app's own settings, kept in their file and read again when it
+    /// is edited.
+    settings: SettingsFile<source::Settings>,
+    /// The window's popups and layers, its status line and its toast.
+    frame: Entity<AppFrame>,
+    _keys: Subscription,
+    /// The theme the sky's colours were mixed for: another drawn (one
+    /// chosen, or tried in the picker) mixes them again.
+    styled: Direction,
     /// The reader's body size, zoomed by the one zoom rule.
     reader_text: f32,
     reader_wheel: Rc<std::cell::Cell<zoom::Wheel>>,
     /// The results' list, scrolled to the row stood on.
     results_scroll: ScrollHandle,
-    /// A word the app says for a moment (the zoom), and which saying it is.
-    said: Option<String>,
-    said_gen: u64,
     /// The whole app's size in percent, by the one zoom rule: Ctrl+wheel
     /// and the zoom keys anywhere but the page read.
     app_size: u16,
@@ -326,11 +389,45 @@ pub struct BrainApp {
     filing: Vec<Entity<Editor>>,
     /// A note closed that its save did not file: Ctrl+N brings it back.
     held: Option<Entity<Editor>>,
-    /// The inbox's list is open, and the row stood on.
+    /// The inbox's list is open, and the row stood on; its popup, and what
+    /// has the keyboard in it.
     inbox: Option<usize>,
+    inbox_popup: Option<PopupId>,
+    inbox_focus: FocusHandle,
     /// The notes caught here that agents filed, as the brain's history last
     /// told it, or why it did not.
     filed: Option<Result<Vec<inbox::Filed>, String>>,
+}
+
+impl KeepsSettings for BrainApp {
+    type Value = source::Settings;
+
+    fn settings_file(&mut self) -> &mut SettingsFile<source::Settings> {
+        &mut self.settings
+    }
+
+    fn settings_failed(&mut self, error: Error, cx: &mut Context<Self>) {
+        self.fail(format!("Settings: {}", error.message), cx);
+    }
+
+    /// An edit to the file outside the app: its theme and the reader's
+    /// size apply at once.
+    fn settings_reloaded(&mut self, old: source::Settings, cx: &mut Context<Self>) {
+        if old.theme != self.settings.theme {
+            self.restyle(self.theme_kept(), cx);
+        }
+        if old.reader_text != self.settings.reader_text {
+            self.reader_text = reader_size(&self.settings);
+            let text = self.reader_text;
+            self.reader.update(cx, |r, cx| r.set_text(text, cx));
+            self.replanned = true;
+        }
+        if let Some(path) = self.settings.path() {
+            let words = format!("Settings read again from {}", path.display());
+            self.say(words, cx);
+        }
+        cx.notify();
+    }
 }
 
 impl Focusable for BrainApp {
@@ -376,7 +473,38 @@ impl BrainApp {
         if let Some(q) = &start.query {
             field.update(cx, |f, cx| f.set(q, false, cx));
         }
-        let (settings_path, settings, settings_broken) = start.settings;
+        let (settings, notice) = start.settings;
+        let frame = cx.new(|_| AppFrame::default());
+        if let Some(e) = notice {
+            frame.update(cx, |f, cx| f.report(Status::failure(e.message), cx));
+        }
+        cx.observe(&frame, |_, _, cx| cx.notify()).detach();
+        // The frame's keys come first, before a field's or the page's own:
+        // Escape closes the top popup or layer, and an open menu takes its
+        // arrows and Enter.
+        let keys = cx.intercept_keystrokes({
+            let frame = frame.clone();
+            move |e, window, cx| {
+                let key = KeyDownEvent {
+                    keystroke: e.keystroke.clone(),
+                    is_held: false,
+                    prefer_character_input: false,
+                };
+                if frame::key(&frame, &key, window, cx) {
+                    cx.stop_propagation();
+                }
+            }
+        });
+        cx.subscribe_in(&frame, window, |me, frame, event, window, cx| {
+            let FrameEvent::Layers { closed } = event;
+            // Settled once this update is over: what closed may run its
+            // dismiss on the app.
+            let (frame, closed, page) = (frame.clone(), closed.clone(), me.focus.clone());
+            window.defer(cx, move |window, cx| {
+                frame::settle(&frame, &closed, &page.clone(), |_| page, window, cx);
+            });
+        })
+        .detach();
         let reader_text = reader_size(&settings);
         reader.update(cx, |r, cx| r.set_text(reader_text, cx));
         // Its own size once zoomed here, else the one chosen in Swarm.
@@ -392,14 +520,12 @@ impl BrainApp {
             reader_text,
             reader_wheel: Rc::default(),
             results_scroll: ScrollHandle::new(),
-            said: None,
-            said_gen: 0,
-            settings_seen: settings_path.as_deref().and_then(source::changed),
             fold_evidence: true,
             replay: None,
-            settings_path,
             settings,
-            settings_broken,
+            frame,
+            _keys: keys,
+            styled: theme(cx).direction,
             here: start.place.clone(),
             place: match start.from {
                 // Named as Swarm names it, when Swarm knows it.
@@ -413,7 +539,6 @@ impl BrainApp {
                 None => start.place,
             },
             others,
-            choosing: false,
             syncing: false,
             away_from: None,
             data: None,
@@ -464,8 +589,11 @@ impl BrainApp {
             filing: vec![],
             held: None,
             inbox: None,
+            inbox_popup: None,
+            inbox_focus: cx.focus_handle(),
             filed: None,
         };
+        settings_file::watch(&mut app, cx);
         app.load(cx);
         app
     }
@@ -603,10 +731,9 @@ impl BrainApp {
         .detach();
     }
 
-    /// The window came forward: if the settings file or the brain's Git
-    /// index moved, read them again.
+    /// The window came forward, or a note was filed: if the brain's Git
+    /// index moved, read it again.
     fn look_again(&mut self, cx: &mut Context<Self>) {
-        self.settings_again(cx);
         let Some(root) = self.place.brain.clone() else {
             return;
         };
@@ -628,7 +755,6 @@ impl BrainApp {
     /// Reads the brain of `remote`, or this machine's: the sky, the lists and
     /// the search start again from it.
     fn read_from(&mut self, remote: Option<Remote>, cx: &mut Context<Self>) {
-        self.choosing = false;
         if self.place.from == remote {
             cx.notify();
             return;
@@ -658,13 +784,29 @@ impl BrainApp {
         cx.notify();
     }
 
-    /// Opens or closes the list of machines whose brain can be read.
-    fn choose_from(&mut self, cx: &mut Context<Self>) {
-        self.choosing = !self.choosing;
-        if self.choosing {
-            self.others = crate::swarm::places();
+    /// Opens the list of machines whose brain can be read, beside the
+    /// switch: this one, and the others Ahjo Swarm knows.
+    fn choose_from(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.others = crate::swarm::places();
+        let me = cx.entity().downgrade();
+        let pick = |remote: Option<Remote>| {
+            let me = me.clone();
+            move |_: &mut Window, cx: &mut App| {
+                let _ = me.update(cx, |me, cx| me.read_from(remote.clone(), cx));
+            }
+        };
+        let mut rows =
+            vec![MenuRow::new("This machine", pick(None)).checked(self.place.from.is_none())];
+        for r in &self.others {
+            let here = self.place.from.as_ref() == Some(r);
+            rows.push(MenuRow::new(r.name.clone(), pick(Some(r.clone()))).checked(here));
         }
-        cx.notify();
+        if self.others.is_empty() {
+            rows.push(MenuRow::note("Ahjo Swarm knows no other machine."));
+        }
+        let at = window.mouse_position();
+        self.frame
+            .update(cx, |f, cx| f.menu(OWNER, rows, at, false, cx));
     }
 
     /// Brings another machine's copy up to date, and reads it again when
@@ -914,49 +1056,31 @@ impl BrainApp {
 
     // ---- The theme.
 
-    fn settings_again(&mut self, cx: &mut Context<Self>) {
-        let Some(path) = self.settings_path.clone() else {
-            return;
-        };
-        let now = source::changed(&path);
-        if now == self.settings_seen {
-            return;
-        }
-        self.settings_seen = now;
-        match source::read_settings(&path) {
-            Ok(s) => {
-                self.settings_broken = None;
-                let want = Direction::from_key(&s.theme);
-                self.reader_text = reader_size(&s);
-                let text = self.reader_text;
-                self.reader.update(cx, |r, cx| r.set_text(text, cx));
-                self.settings = s;
-                if let Some(d) = want {
-                    self.restyle(d, cx);
-                }
-            }
-            Err(e) => self.settings_broken = Some(e),
-        }
-        cx.notify();
+    /// The theme kept here: one of the directions, or none, following
+    /// Ahjo Swarm's.
+    fn theme_kept(&self) -> theme_picker::Choice {
+        Direction::from_key(&self.settings.theme)
     }
 
-    /// The next of the theme's directions, kept in the settings.
-    fn next_theme(&mut self, cx: &mut Context<Self>) {
-        let next = theme(cx).direction.step(1);
-        self.restyle(next, cx);
-        if self.settings_broken.is_some() {
-            return;
-        }
-        let Some(path) = self.settings_path.clone() else {
-            return;
-        };
-        self.settings.theme = next.key().into();
-        match source::write_settings(&path, &self.settings) {
-            Ok(()) => self.settings_seen = source::changed(&path),
-            Err(e) => {
-                self.settings_broken = Some(format!("{} was not written: {e}", path.display()))
-            }
-        }
+    /// Opens the theme picker beside `spot`: Up and Down try a theme on
+    /// the whole app, the sky with it; Enter or a click keeps it.
+    fn pick_theme(&mut self, spot: Spot, window: &mut Window, cx: &mut Context<Self>) {
+        let me = cx.entity().downgrade();
+        theme_picker::open(
+            &self.frame,
+            OWNER,
+            spot,
+            Picker::new(self.theme_kept(), true),
+            move |choice, _, cx| {
+                let _ = me.update(cx, |me, cx| {
+                    me.settings.theme = choice.map_or("", |d| d.key()).into();
+                    settings_file::save(me, cx);
+                    me.restyle(choice, cx);
+                });
+            },
+            window,
+            cx,
+        );
     }
 
     /// How much the reader is zoomed from its own size.
@@ -986,7 +1110,7 @@ impl BrainApp {
         // The orbit gives the wider sheet its room.
         self.replanned = true;
         self.settings.reader_text = (to != tokens::reader::BODY).then_some(to);
-        self.keep_settings();
+        settings_file::save(self, cx);
         cx.notify();
     }
 
@@ -1001,48 +1125,8 @@ impl BrainApp {
         self.say(zoom::app::words(to), cx);
         self.replanned = true;
         self.settings.app_size = Some(to);
-        self.keep_settings();
+        settings_file::save(self, cx);
         cx.notify();
-    }
-
-    /// What the app says for a moment, low in the middle of what it is
-    /// about: the page read, else the window.
-    fn said_view(&self, t: &Theme) -> Option<gpui::Div> {
-        self.said.clone().map(|words| {
-            div()
-                .absolute()
-                .bottom(px(chrome::INSET * 2.))
-                .left_0()
-                .right_0()
-                .flex()
-                .justify_center()
-                .child(
-                    div()
-                        .px(px(chrome::SWITCH_PAD_X))
-                        .py(px(6.))
-                        .rounded(px(chrome::RADIUS))
-                        .bg(t.raised)
-                        .border_1()
-                        .border_color(t.divider)
-                        .text_size(px(size::TEXT))
-                        .text_color(t.text)
-                        .child(words),
-                )
-        })
-    }
-
-    /// Writes the settings, unless the file did not read.
-    fn keep_settings(&mut self) {
-        if self.settings_broken.is_none()
-            && let Some(path) = self.settings_path.clone()
-        {
-            match source::write_settings(&path, &self.settings) {
-                Ok(()) => self.settings_seen = source::changed(&path),
-                Err(e) => {
-                    self.settings_broken = Some(format!("{} was not written: {e}", path.display()))
-                }
-            }
-        }
     }
 
     /// The pointer is over the page read, where zooming sizes its text.
@@ -1054,42 +1138,37 @@ impl BrainApp {
 
     /// Says `words` for a moment.
     fn say(&mut self, words: String, cx: &mut Context<Self>) {
-        self.said = Some(words);
-        self.said_gen += 1;
-        cx.notify();
-        let said = self.said_gen;
-        cx.spawn(async move |me, cx| {
-            cx.background_executor()
-                .timer(std::time::Duration::from_millis(motion::SAID))
-                .await;
-            let _ = me.update(cx, |me, cx| {
-                if me.said_gen == said {
-                    me.said = None;
-                    cx.notify();
-                }
-            });
-        })
-        .detach();
+        self.frame.update(cx, |f, cx| f.toast(&words, cx));
     }
 
-    /// The app in another of the theme's directions: its colours, its
-    /// letters and the sky's character.
-    fn restyle(&mut self, d: Direction, cx: &mut Context<Self>) {
-        if theme(cx).direction == d {
-            return;
+    /// Says what went wrong, until it is closed or something else is said.
+    fn fail(&mut self, words: String, cx: &mut Context<Self>) {
+        self.frame
+            .update(cx, |f, cx| f.report(Status::failure(words), cx));
+    }
+
+    /// The app drawn in `choice`, a theme or Ahjo Swarm's: its colours, its
+    /// letters and, as it is drawn next, the sky's character.
+    fn restyle(&mut self, choice: theme_picker::Choice, cx: &mut Context<Self>) {
+        let th = theme_picker::drawn(choice);
+        if theme(cx).direction != th.direction {
+            cx.set_global(th);
+            cx.refresh_windows();
         }
-        cx.set_global(Theme::new(d));
-        let t = theme(cx).clone();
+    }
+
+    /// The sky's colours mixed again for the theme drawn now.
+    fn recolour(&mut self, t: &Theme, cx: &mut Context<Self>) {
+        self.styled = t.direction;
         if let Some(old) = &self.data {
             let mut data = (**old).clone();
-            data.hues = Data::hues(&data.corpus, &t);
+            data.hues = Data::hues(&data.corpus, t);
             let data = Rc::new(data);
             self.data = Some(data.clone());
             if let Some(p) = self.reading {
                 self.reader.update(cx, |r, cx| r.show(data, p, cx));
             }
         }
-        cx.refresh_windows();
     }
 
     // ---- Search.
@@ -1293,7 +1372,11 @@ impl BrainApp {
         cx.spawn(async move |me, cx| {
             let words = match sent.await {
                 Ok(()) => "In Ahjo Swarm's Send: pick the session there.".to_string(),
-                Err(e) => format!("Not sent: {e}"),
+                Err(e) => {
+                    let words = format!("Not sent: {e}");
+                    let _ = me.update(cx, |me, cx| me.fail(words, cx));
+                    return;
+                }
             };
             let _ = me.update(cx, |me, cx| me.say(words, cx));
         })
@@ -1346,7 +1429,7 @@ impl BrainApp {
                     let (base, draft) = match read {
                         Ok(r) => r,
                         Err(e) => {
-                            me.say(format!("This page did not read: {e}"), cx);
+                            me.fail(format!("This page did not read: {e}"), cx);
                             return;
                         }
                     };
@@ -1418,7 +1501,7 @@ impl BrainApp {
         if !self.may_write(cx) {
             return;
         }
-        self.inbox = None;
+        self.close_inbox(cx);
         if self.note.is_some() {
             self.leave_note(window, cx);
         }
@@ -1501,7 +1584,7 @@ impl BrainApp {
         let Some(file) = self.file_of(&path) else {
             return;
         };
-        self.inbox = None;
+        self.close_inbox(cx);
         if self.note.is_some() {
             self.leave_note(window, cx);
         }
@@ -1524,7 +1607,7 @@ impl BrainApp {
             Ok(b) => String::from_utf8_lossy(&b).into_owned(),
             Err(e) if e.kind() == std::io::ErrorKind::NotFound && start.is_some() => String::new(),
             Err(e) => {
-                self.say(format!("This note did not read: {e}"), cx);
+                self.fail(format!("This note did not read: {e}"), cx);
                 return;
             }
         };
@@ -1587,7 +1670,7 @@ impl BrainApp {
                 if let Some(i) = me.filing.iter().position(|f| f == ed) {
                     me.filing.remove(i);
                     me.held = Some(ed.clone());
-                    me.say(
+                    me.fail(
                         "Your note was not filed, and is kept: Ctrl+N opens it again.".into(),
                         cx,
                     );
@@ -1603,6 +1686,20 @@ impl BrainApp {
         let code = ed.read(cx).code.clone();
         ahjo_app_kit::widgets::code::Code::focus(&code, window, cx);
         self.note = Some(ed);
+        // Over the whole window, on the stack: a popup opened from it
+        // stands over it. Escape is the note's own (it closes a list of
+        // links first, then the note).
+        let me = cx.entity();
+        let over = cx.new(|cx| Over::new(&me, cx));
+        let weak = me.downgrade();
+        let layer = Layer::new(NOTE, over)
+            .cover(Cover::Window)
+            .keeps_escape()
+            .on_dismiss(move |window, cx| {
+                let _ = weak.update(cx, |me, cx| me.leave_note(window, cx));
+            });
+        self.frame
+            .update(cx, |f, cx| f.open(frame::Surface::Layer(layer), cx));
         cx.notify();
     }
 
@@ -1613,6 +1710,7 @@ impl BrainApp {
         let Some(ed) = self.note.take() else {
             return;
         };
+        self.frame.update(cx, |f, cx| f.close(NOTE, cx));
         ed.update(cx, |ed, cx| {
             ed.keep(cx);
             if ed.written(cx) {
@@ -1636,17 +1734,31 @@ impl BrainApp {
 
     /// Opens the inbox's list, reading again which notes agents filed, or
     /// closes it.
-    fn toggle_inbox(&mut self, cx: &mut Context<Self>) {
-        if self.inbox.take().is_some() {
-            cx.notify();
+    fn toggle_inbox(&mut self, spot: Spot, cx: &mut Context<Self>) {
+        if self.inbox_popup.is_some() {
+            self.close_inbox(cx);
             return;
         }
         let Some(data) = self.data.clone() else {
             return;
         };
         self.inbox = Some(0);
-        // The list takes the keys, not the search.
-        self.leave_field = true;
+        let me = cx.entity();
+        let list = popup::drawn(&me, |me, _, cx| Some(me.inbox_list(cx)), cx);
+        let weak = me.downgrade();
+        let popup = Popup::beside(spot, list)
+            .focus(self.inbox_focus.clone())
+            .on_dismiss(move |_, cx| {
+                let _ = weak.update(cx, |me, cx| {
+                    me.inbox = None;
+                    me.inbox_popup = None;
+                    cx.notify();
+                });
+            });
+        self.inbox_popup = Some(
+            self.frame
+                .update(cx, |f, cx| f.open_popup(OWNER, popup, cx)),
+        );
         if self.place.from.is_none() {
             let root = data.root.clone();
             let read = cx.background_spawn(async move { inbox::read(&root) });
@@ -1660,6 +1772,14 @@ impl BrainApp {
             .detach();
         }
         cx.notify();
+    }
+
+    /// Closes the inbox's list, if it is open.
+    fn close_inbox(&mut self, cx: &mut Context<Self>) {
+        if let Some(id) = self.inbox_popup.take() {
+            self.frame.update(cx, |f, cx| f.close_popup(id, cx));
+        }
+        self.inbox = None;
     }
 
     /// The inbox's rows: the notes waiting, then those filed, each with
@@ -1682,7 +1802,7 @@ impl BrainApp {
     }
 
     fn pick_inbox(&mut self, row: InboxRow, window: &mut Window, cx: &mut Context<Self>) {
-        self.inbox = None;
+        self.close_inbox(cx);
         let Some(data) = self.data.clone() else {
             return;
         };
@@ -1820,17 +1940,87 @@ impl BrainApp {
 
     // ---- The camera.
 
-    /// The search, narrower in a narrow window so the switch still fits,
+    /// The sky's width beside the page read, or the window's.
+    fn sky_width(&self) -> f32 {
+        if self.reading.is_some() {
+            self.size.0 - reader::sheet_width(self.size.0, self.reader_k())
+        } else {
+            self.size.0
+        }
+    }
+
+    /// The actions at the top right, as chips: what each says, and whether
+    /// it shows its count.
+    fn actions(&self) -> Vec<Action> {
+        let mut shown = vec![];
+        if self.data.is_some() {
+            shown.push(Action::Inbox);
+        }
+        if self.place.from.is_none() && self.data.is_some() {
+            shown.push(Action::Note);
+            shown.push(Action::Today);
+        }
+        shown.push(Action::Theme);
+        shown
+    }
+
+    /// How wide the actions stand: their chips side by side, or folded
+    /// into the one that opens them as a menu.
+    fn actions_width(&self, folded: bool) -> f32 {
+        let chip = |words: f32| words + chrome::SWITCH_PAD_X * 2.;
+        if folded {
+            return chip(chrome::MARK + chrome::CHIP_GAP + words_width(MORE));
+        }
+        let waiting = self.data.as_ref().map_or(0, |d| d.waiting.len());
+        let widths: Vec<f32> = self
+            .actions()
+            .into_iter()
+            .map(|a| match a {
+                Action::Inbox if waiting > 0 => chip(
+                    words_width(a.words()) + chrome::CHIP_GAP + words_width(&waiting.to_string()),
+                ),
+                Action::Theme => {
+                    chip(chrome::MARK + chrome::CHIP_GAP + words_width(self.styled.label()))
+                }
+                a => chip(words_width(a.words())),
+            })
+            .collect();
+        widths.iter().sum::<f32>() + chrome::CHIP_GAP * (widths.len().saturating_sub(1)) as f32
+    }
+
+    /// The actions fold into one chip when side by side they leave the
+    /// search less than its least.
+    fn actions_folded(&self) -> bool {
+        self.sky_width() - chrome::INSET * 3. - self.actions_width(false) < chrome::SEARCH_LEAST
+    }
+
+    /// Where the actions stand, for what opens from them by a key.
+    fn actions_spot(&self) -> Spot {
+        let w = self.actions_width(self.actions_folded());
+        let right = self.size.0 - self.sky_width() + chrome::INSET;
+        Spot(Bounds::new(
+            point(
+                px(self.size.0 - right - w),
+                px(chrome::INSET + (search::FIELD_HEIGHT - chrome::SWITCH_HEIGHT) / 2.),
+            ),
+            gpui::size(px(w), px(chrome::SWITCH_HEIGHT)),
+        ))
+    }
+
+    /// The search: as wide as it likes, never under the actions beside it,
     /// and narrow beside an orbit.
     fn search_width(&self) -> f32 {
-        if self.aside() {
+        let beside =
+            self.sky_width() - chrome::INSET * 3. - self.actions_width(self.actions_folded());
+        let rail = if self.aside() {
             // Beside an orbit, as wide as the orbit's room leaves.
-            if let Some(rail) = rail_beside_orbit(self.size.0, self.reader_k()) {
-                return rail;
-            }
-        }
-        (self.size.0 - chrome::INSET * 3. - chrome::SWITCH_ROOM)
-            .clamp(chrome::SEARCH_LEAST, search::WIDTH)
+            rail_beside_orbit(self.size.0, self.reader_k())
+        } else {
+            None
+        };
+        rail.unwrap_or(search::WIDTH)
+            .min(beside)
+            .max(chrome::SEARCH_LEAST)
     }
 
     /// What changed lately, as wide as its longest row needs, while the sky
@@ -2083,19 +2273,14 @@ impl BrainApp {
         if self.note.is_some() {
             return;
         }
-        // The inbox's list takes the arrows, Enter and Esc while it is open;
-        // Ctrl+I opens it.
-        if self.inbox.is_some() && !typing && self.inbox_key(ks.key.as_str(), m, window, cx) {
-            cx.stop_propagation();
-            return;
-        }
+        // Ctrl+I opens the inbox's list, or closes it.
         if (m.control || m.platform)
             && !m.alt
             && !m.shift
             && ks.key == "i"
             && self.editing.is_none()
         {
-            self.toggle_inbox(cx);
+            self.toggle_inbox(self.actions_spot(), cx);
             cx.stop_propagation();
             return;
         }
@@ -2144,7 +2329,7 @@ impl BrainApp {
         }
         if m.control || m.platform {
             if ks.key == "t" {
-                self.next_theme(cx);
+                self.pick_theme(self.actions_spot(), window, cx);
                 cx.stop_propagation();
             }
             if ks.key == "r" {
@@ -3379,6 +3564,9 @@ impl Render for BrainApp {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let began = Instant::now();
         let t = theme(cx).clone();
+        if t.direction != self.styled {
+            self.recolour(&t, cx);
+        }
         let vs = window.viewport_size();
         let size = (f32::from(vs.width), f32::from(vs.height));
         if size != self.size {
@@ -3489,7 +3677,7 @@ impl Render for BrainApp {
             .child(sky);
 
         root = root.child(self.search_panel(&t, typing, cx));
-        root = root.child(self.theme_button(&t, cx));
+        root = root.child(self.actions_row(&t, cx));
         if let Some(status) = &self.status {
             root = root.child(div().absolute().inset_0().child(pane::vacant(
                 &t,
@@ -3558,32 +3746,15 @@ impl Render for BrainApp {
         if let Some(chip) = self.evidence_chip(&t, cx) {
             root = root.child(chip);
         }
-        if let Some(e) = &self.settings_broken {
-            root = root.child(
-                div()
-                    .absolute()
-                    .left(px(chrome::INSET))
-                    .bottom(px(chrome::INSET + chrome::FOOT))
-                    .max_w(px(self.search_width()))
-                    .text_size(px(chrome::TEXT))
-                    .text_color(t.error)
-                    .child(format!("Settings: {e}")),
-            );
-        }
         if self.reading.is_some() {
             root = root.child(self.sheet(&t, cx));
             if let Some(ed) = &self.editing {
                 root = root.child(self.source_pane(ed));
             }
-        } else {
-            root = root.children(self.said_view(&t));
         }
-        if self.inbox.is_some() {
-            root = root.child(self.inbox_panel(&t, cx));
-        }
-        if let Some(ed) = &self.note {
-            root = root.child(self.note_pane(&t, &ed.clone(), cx));
-        }
+        root = root
+            .children(frame::stack(&self.frame, Cover::Window, window, cx))
+            .children(frame::notices(&self.frame, cx));
         // Ctrl+wheel the page read did not take sizes the whole app.
         let me = cx.entity().downgrade();
         root.child(zoom::app_catch(
@@ -3655,6 +3826,8 @@ impl BrainApp {
             .occlude()
             .child(
                 div()
+                    .id("search")
+                    .debug_selector(|| "search".into())
                     .w(px(self.search_width()))
                     .h(px(search::FIELD_HEIGHT))
                     .flex()
@@ -3692,16 +3865,18 @@ impl BrainApp {
                             .rounded(px(7.))
                             .bg(t.error),
                     )
-                    .child(match &self.place.from {
-                        Some(r) => format!(
-                            "{}'s search is not answering, so only titles and aliases \
+                    .child(
+                        div().flex_1().min_w_0().child(match &self.place.from {
+                            Some(r) => format!(
+                                "{}'s search is not answering, so only titles and aliases \
                              are matched here.",
-                            r.name
-                        ),
-                        None => "Citadel is not answering, so only titles and aliases are \
+                                r.name
+                            ),
+                            None => "Citadel is not answering, so only titles and aliases are \
                                  matched here."
-                            .to_string(),
-                    }),
+                                .to_string(),
+                        }),
+                    ),
             );
         }
         if self.results.is_empty() && self.answered == self.asked {
@@ -4175,89 +4350,27 @@ impl BrainApp {
             Some(e) => format!("{e}. Read another machine's brain"),
             None => "Read another machine's brain".to_string(),
         };
-        let row = |id: SharedString, words: String, here: bool| {
-            div()
-                .id(id)
-                .h(px(chrome::SWITCH_HEIGHT))
-                .px(px(chrome::SWITCH_PAD_X))
-                .flex()
-                .items_center()
-                .gap(px(8.))
-                .rounded(px(chrome::RADIUS))
-                .cursor_pointer()
-                .text_color(if here { t.text } else { t.text2 })
-                .hover(|s| s.text_color(t.text).bg(t.raised))
-                .child(
-                    div()
-                        .size(px(6.))
-                        .rounded(px(6.))
-                        .when(here, |d| d.bg(t.accent)),
-                )
-                .child(words)
-        };
-        let mut list = div()
-            .absolute()
-            .left_0()
-            .bottom(px(chrome::SWITCH_HEIGHT + 4.))
-            .min_w(px(220.))
-            .flex()
-            .flex_col()
-            .p(px(4.))
-            .rounded(px(chrome::RADIUS))
-            .bg(t.raised)
-            .border_1()
-            .border_color(t.divider);
-        if self.choosing {
-            list = list.child(
-                row(
-                    "from-here".into(),
-                    "This machine".into(),
-                    self.place.from.is_none(),
-                )
-                .on_click(cx.listener(|me, _, _, cx| me.read_from(None, cx))),
-            );
-            for (i, r) in self.others.iter().enumerate() {
-                let here = self.place.from.as_ref() == Some(r);
-                let remote = r.clone();
-                list = list.child(
-                    row(format!("from-{i}").into(), r.name.clone(), here).on_click(
-                        cx.listener(move |me, _, _, cx| me.read_from(Some(remote.clone()), cx)),
-                    ),
-                );
-            }
-            if self.others.is_empty() {
-                list = list.child(
-                    div()
-                        .px(px(chrome::SWITCH_PAD_X))
-                        .py(px(4.))
-                        .text_color(t.dim)
-                        .child("Ahjo Swarm knows no other machine."),
-                );
-            }
-        }
         div()
+            .id("from")
+            .debug_selector(|| "from".into())
             .relative()
             .occlude()
-            .when(self.choosing, |d| d.child(list))
-            .child(
-                div()
-                    .id("from")
-                    .h(px(chrome::SWITCH_HEIGHT))
-                    .px(px(chrome::SWITCH_PAD_X))
-                    .flex()
-                    .items_center()
-                    .rounded(px(chrome::RADIUS))
-                    .bg(veil(t, chrome::PANEL_ALPHA))
-                    .cursor_pointer()
-                    .text_color(t.text2)
-                    .hover(|s| s.text_color(t.text).bg(t.raised))
-                    .tooltip(kit::tip(tip))
-                    .when(self.away_from.is_some(), |d| {
-                        d.child(div().mr(px(8.)).size(px(7.)).rounded(px(7.)).bg(t.error))
-                    })
-                    .on_click(cx.listener(|me, _, _, cx| me.choose_from(cx)))
-                    .child(label),
-            )
+            .h(px(chrome::SWITCH_HEIGHT))
+            .px(px(chrome::SWITCH_PAD_X))
+            .flex()
+            .items_center()
+            .rounded(px(chrome::RADIUS))
+            .bg(veil(t, chrome::PANEL_ALPHA))
+            .cursor_pointer()
+            .text_color(t.text2)
+            .hover(|s| s.text_color(t.text).bg(t.raised))
+            .tooltip(kit::tip(tip))
+            .child(pointer::watch())
+            .when(self.away_from.is_some(), |d| {
+                d.child(div().mr(px(8.)).size(px(7.)).rounded(px(7.)).bg(t.error))
+            })
+            .on_click(cx.listener(|me, _, window, cx| me.choose_from(window, cx)))
+            .child(label)
     }
 
     /// Update, beside whose brain is read, when the node this app was
@@ -4295,22 +4408,16 @@ impl BrainApp {
         )
     }
 
-    /// The inbox's keys while its list is open; answers whether it took
-    /// the key.
-    fn inbox_key(
-        &mut self,
-        key: &str,
-        m: &gpui::Modifiers,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) -> bool {
+    /// The inbox's keys while its list has them: Up and Down stand on a
+    /// row, Enter picks it. Escape is the frame's, closing the list.
+    fn inbox_key(&mut self, e: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
+        let (key, m) = (e.keystroke.key.as_str(), &e.keystroke.modifiers);
         if m.control || m.alt || m.platform {
-            return false;
+            return;
         }
         let rows = self.inbox_rows();
         let n = rows.len();
         match key {
-            "escape" => self.inbox = None,
             "down" if n > 0 => self.inbox = self.inbox.map(|i| (i + 1) % n),
             "up" if n > 0 => self.inbox = self.inbox.map(|i| (i + n - 1) % n),
             "enter" => {
@@ -4318,20 +4425,19 @@ impl BrainApp {
                     self.pick_inbox(row, window, cx);
                 }
             }
-            _ => return false,
+            _ => return,
         }
+        cx.stop_propagation();
         cx.notify();
-        true
     }
 
-    /// The notes caught here: those waiting in the inbox for an agent, and
-    /// those agents filed, with where each went.
+    /// The notes caught here, in the inbox's popup: those waiting in the
+    /// inbox for an agent, and those agents filed, with where each went.
+    fn inbox_list(&mut self, cx: &mut Context<Self>) -> AnyElement {
+        self.inbox_panel(&theme(cx).clone(), cx).into_any_element()
+    }
+
     fn inbox_panel(&self, t: &Theme, cx: &mut Context<Self>) -> impl IntoElement {
-        let right = if self.reading.is_some() {
-            reader::sheet_width(self.size.0, self.reader_k()) + chrome::INSET
-        } else {
-            chrome::INSET
-        };
         let now = SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map(|d| d.as_nanos() as u64)
@@ -4345,17 +4451,17 @@ impl BrainApp {
             .count();
         let filed = rows.len() - waiting;
         let mut list = pane::scroll("inbox")
-            .absolute()
-            .top(px(chrome::INSET + search::FIELD_HEIGHT + search::LIST_GAP))
-            .right(px(right))
+            .debug_selector(|| "inbox-list".into())
+            .track_focus(&self.inbox_focus)
+            .on_key_down(cx.listener(Self::inbox_key))
             .w(px(self.recent_width().min(search::INBOX_W)))
             .max_h(px(self.size.1 - chrome::INSET * 3. - search::FIELD_HEIGHT))
             .py(px(4.))
             .rounded(px(chrome::RADIUS))
-            .bg(veil(t, chrome::PANEL_ALPHA))
+            // A popup over the page read as well as the sky: its own ground.
+            .bg(t.surface)
             .border_1()
             .border_color(t.divider)
-            .occlude()
             .on_scroll(|_, _, cx| cx.stop_propagation());
         let label = |words: String| {
             kit::label(t, words)
@@ -4529,19 +4635,21 @@ impl BrainApp {
         list
     }
 
-    fn theme_button(&self, t: &Theme, cx: &mut Context<Self>) -> impl IntoElement {
-        let right = if self.reading.is_some() {
-            reader::sheet_width(self.size.0, self.reader_k()) + chrome::INSET
-        } else {
-            chrome::INSET
-        };
+    /// The actions at the top right, beside the search and never over it:
+    /// the inbox, a new note, the day's note and the theme, as chips side
+    /// by side; folded into one chip that opens them as a menu when the sky
+    /// beside the page read leaves too little room for them and the search.
+    fn actions_row(&self, t: &Theme, cx: &mut Context<Self>) -> impl IntoElement {
+        let right = self.size.0 - self.sky_width() + chrome::INSET;
         let chip = |id: &'static str| {
             div()
                 .id(id)
+                .debug_selector(move || id.into())
+                .relative()
                 .h(px(chrome::SWITCH_HEIGHT))
                 .flex()
                 .items_center()
-                .gap(px(6.))
+                .gap(px(chrome::CHIP_GAP))
                 .px(px(chrome::SWITCH_PAD_X))
                 .rounded(px(chrome::RADIUS))
                 .bg(veil(t, chrome::PANEL_ALPHA))
@@ -4549,55 +4657,102 @@ impl BrainApp {
                 .text_size(px(chrome::TEXT))
                 .text_color(t.text2)
                 .hover(|s| s.text_color(t.text).bg(t.raised))
+                .child(pointer::watch())
         };
-        let writable = self.place.from.is_none() && self.data.is_some();
-        div()
+        let mark = || img(t.art.mark.clone()).size(px(chrome::MARK));
+        let mut row = div()
+            .id("actions")
+            .debug_selector(|| "actions".into())
             .absolute()
             .top(px(
                 chrome::INSET + (search::FIELD_HEIGHT - chrome::SWITCH_HEIGHT) / 2.
             ))
             .right(px(right))
             .flex()
-            .gap(px(6.))
-            .occlude()
-            .when(self.data.is_some(), |d| {
-                let waiting = self.data.as_ref().map_or(0, |d| d.waiting.len());
-                d.child(
-                    chip("inbox")
-                        .when(self.inbox.is_some(), |c| c.text_color(t.text).bg(t.raised))
+            .gap(px(chrome::CHIP_GAP))
+            .occlude();
+        if self.actions_folded() {
+            return row.child(
+                chip("more")
+                    .tooltip(kit::tip("The inbox, notes and the theme"))
+                    .on_click(cx.listener(|me, _, window, cx| me.actions_menu(window, cx)))
+                    .child(mark())
+                    .child(MORE),
+            );
+        }
+        let waiting = self.data.as_ref().map_or(0, |d| d.waiting.len());
+        for action in self.actions() {
+            row =
+                row.child(match action {
+                    Action::Inbox => chip("inbox")
+                        .when(self.inbox_popup.is_some(), |c| {
+                            c.text_color(t.text).bg(t.raised)
+                        })
                         .tooltip(kit::tip(
                             "The notes waiting in the inbox, and where agents filed them (Ctrl+I)",
                         ))
-                        .on_click(cx.listener(|me, _, _, cx| me.toggle_inbox(cx)))
-                        .child("Inbox")
+                        .on_click(cx.listener(|me, _, window, cx| {
+                            me.toggle_inbox(Spot::here(window, cx), cx)
+                        }))
+                        .child(action.words())
                         .when(waiting > 0, |c| {
                             c.child(div().text_color(t.dim).child(waiting.to_string()))
                         }),
-                )
-            })
-            .when(writable, |d| {
-                d.child(
-                    chip("note")
+                    Action::Note => chip("note")
                         .tooltip(kit::tip(
                             "A new note, filed in the inbox when you close it (Ctrl+N)",
                         ))
                         .on_click(cx.listener(|me, _, window, cx| me.catch_note(window, cx)))
-                        .child("New note"),
-                )
-                .child(
-                    chip("today")
+                        .child(action.words()),
+                    Action::Today => chip("today")
                         .tooltip(kit::tip("Today's note (Ctrl+D)"))
                         .on_click(cx.listener(|me, _, window, cx| me.day_note(window, cx)))
-                        .child("Today"),
-                )
+                        .child(action.words()),
+                    Action::Theme => chip("theme")
+                        .tooltip(kit::tip("The theme (Ctrl+T)"))
+                        .on_click(cx.listener(|me, _, window, cx| {
+                            me.pick_theme(Spot::here(window, cx), window, cx)
+                        }))
+                        .child(mark())
+                        .child(t.direction.label()),
+                });
+        }
+        row
+    }
+
+    /// The folded actions, as a menu beside their chip.
+    fn actions_menu(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let me = cx.entity().downgrade();
+        let waiting = self.data.as_ref().map_or(0, |d| d.waiting.len());
+        let rows = self
+            .actions()
+            .into_iter()
+            .map(|action| {
+                let me = me.clone();
+                let run = move |window: &mut Window, cx: &mut App| {
+                    let _ = me.update(cx, |me, cx| match action {
+                        Action::Inbox => me.toggle_inbox(me.actions_spot(), cx),
+                        Action::Note => me.catch_note(window, cx),
+                        Action::Today => me.day_note(window, cx),
+                        Action::Theme => me.pick_theme(me.actions_spot(), window, cx),
+                    });
+                };
+                match action {
+                    Action::Inbox if waiting > 0 => {
+                        MenuRow::new(format!("Inbox · {waiting}"), run).chord("Ctrl+I")
+                    }
+                    Action::Inbox => MenuRow::new(action.words(), run).chord("Ctrl+I"),
+                    Action::Note => MenuRow::new(action.words(), run).chord("Ctrl+N"),
+                    Action::Today => MenuRow::new(action.words(), run).chord("Ctrl+D"),
+                    Action::Theme => {
+                        MenuRow::new(format!("Theme: {}", self.styled.label()), run).chord("Ctrl+T")
+                    }
+                }
             })
-            .child(
-                chip("theme")
-                    .tooltip(kit::tip("Next theme (Ctrl+T)"))
-                    .on_click(cx.listener(|me, _, _, cx| me.next_theme(cx)))
-                    .child(img(t.art.mark.clone()).size(px(chrome::MARK)))
-                    .child(t.direction.label()),
-            )
+            .collect();
+        let at = window.mouse_position();
+        self.frame
+            .update(cx, |f, cx| f.menu(OWNER, rows, at, false, cx));
     }
 
     fn sheet(&self, t: &Theme, cx: &mut Context<Self>) -> impl IntoElement {
@@ -4673,7 +4828,6 @@ impl BrainApp {
                 glyph("close", false, "Close the page (Esc)")
                     .on_click(cx.listener(|me, _, _, cx| me.close(cx))),
             );
-        let said = self.said_view(t);
         let me = cx.entity().downgrade();
         div()
             .absolute()
@@ -4708,7 +4862,6 @@ impl BrainApp {
                 });
             }))
             .child(bar)
-            .children(said)
     }
 }
 
@@ -4895,6 +5048,9 @@ fn window_bounds(cx: &App) -> gpui::Bounds<gpui::Pixels> {
         _ => gpui::Bounds::centered(None, gpui::size(px(1456.), px(939.)), cx),
     }
 }
+
+#[cfg(test)]
+mod journey;
 
 #[cfg(test)]
 mod tests {

@@ -219,8 +219,8 @@ pub fn save(cache: &Path, kept: Kept) -> std::io::Result<()> {
     std::fs::rename(&tmp, cache.join(KEPT))
 }
 
-/// What the app remembers of its own choices. A file that does not read is
-/// reported and left as it is, never replaced; what it holds that this app
+/// What the app remembers of its own choices, kept in their file as the
+/// kit keeps every app's (`settings_file`); what it holds that this app
 /// does not know is kept.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
@@ -255,32 +255,6 @@ pub fn settings_path() -> Option<PathBuf> {
             .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".config")))
     };
     base.map(|b| b.join("ahjo-brain").join("settings.json"))
-}
-
-/// The settings in `path`; none written yet reads as the defaults.
-pub fn read_settings(path: &Path) -> Result<Settings, String> {
-    match std::fs::read(path) {
-        Ok(bytes) => serde_json::from_slice(&bytes)
-            .map_err(|e| format!("{} does not read: {e}", path.display())),
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(Settings::default()),
-        Err(e) => Err(format!("{}: {e}", path.display())),
-    }
-}
-
-/// Writes beside and renames, so a crash never leaves half a file.
-pub fn write_settings(path: &Path, settings: &Settings) -> std::io::Result<()> {
-    if let Some(dir) = path.parent() {
-        std::fs::create_dir_all(dir)?;
-    }
-    let tmp = path.with_extension(format!("json.{}", std::process::id()));
-    let bytes = serde_json::to_vec_pretty(settings).map_err(std::io::Error::other)?;
-    std::fs::write(&tmp, bytes)?;
-    std::fs::rename(&tmp, path)
-}
-
-/// When a file last changed, as a cheap sign to read it again.
-pub fn changed(path: &Path) -> Option<std::time::SystemTime> {
-    std::fs::metadata(path).and_then(|m| m.modified()).ok()
 }
 
 /// A cheap sign that the brain changed: its Git index moves with every
@@ -344,26 +318,24 @@ mod tests {
     }
 
     #[test]
-    fn settings_keep_what_they_do_not_know_and_refuse_a_broken_file() {
+    fn settings_keep_what_they_do_not_know() {
+        use ahjo_app_kit::settings_file::{read, text, write};
         let dir = std::env::temp_dir().join(format!("ahjo-brain-settings-{}", std::process::id()));
         let path = dir.join("settings.json");
-        assert_eq!(read_settings(&path).unwrap(), Settings::default());
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(&path, r#"{"theme":"saga","later":1}"#).unwrap();
-        let mut s = read_settings(&path).unwrap();
+        let (mut s, _) = read::<Settings>(&path).unwrap().unwrap();
         assert_eq!(s.theme, "saga");
         assert_eq!(s.reader_text, None);
         s.theme = "signal".into();
         s.reader_text = Some(18.5);
         s.app_size = Some(115);
-        write_settings(&path, &s).unwrap();
-        let back = read_settings(&path).unwrap();
+        write(&path, &text(&s)).unwrap();
+        let (back, _) = read::<Settings>(&path).unwrap().unwrap();
         assert_eq!(back.theme, "signal");
         assert_eq!(back.reader_text, Some(18.5));
         assert_eq!(back.app_size, Some(115));
         assert_eq!(back.rest["later"], 1);
-        std::fs::write(&path, "{not json").unwrap();
-        assert!(read_settings(&path).is_err());
         std::fs::remove_dir_all(&dir).unwrap();
     }
 
