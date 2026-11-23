@@ -130,16 +130,10 @@ pub struct MissionsPage {
     /// The operator asked to run this mission while it could not: what it
     /// still lacks now reads as a problem rather than as a to-do.
     run_tried: bool,
-    /// Staffing picks made while another write was in flight, at most one
-    /// per seat, each on the seat it was made for; written in turn as writes end.
-    staff_pending: Vec<StaffPick>,
+    /// What was picked for each seat while another write was in flight, one
+    /// entry per seat, put on that seat in turn as writes end.
+    staff_pending: Vec<staffing::StaffPick>,
     seen_run_snapshots: std::collections::BTreeSet<String>,
-}
-/// A seat's staffing, picked while another write was in flight.
-struct StaffPick {
-    step_id: String,
-    seat_id: String,
-    staffing: crate::store::staffing::Staffing,
 }
 #[derive(Clone, Copy)]
 enum EditKind {
@@ -151,6 +145,9 @@ enum EditKind {
 #[derive(Clone, Copy)]
 enum WriteMode {
     Edit,
+    /// A staffing pick written after the write it waited for: the notice
+    /// that write left stays.
+    Queued,
 }
 /// A value each run supplies, as an input's panel edits it.
 struct InputDraft {
@@ -968,7 +965,7 @@ impl MissionsPage {
                             layout: Some(v.layout_etag.clone()),
                         });
                         match mode {
-                            WriteMode::Edit => page.history.record(entry),
+                            WriteMode::Edit | WriteMode::Queued => page.history.record(entry),
                         }
                         if page
                             .editor
@@ -988,7 +985,9 @@ impl MissionsPage {
                         page.state.mission_etag = Some(v.definition.etag);
                         page.state.mission = Some(v.definition.mission);
                         page.state.set_layout(v.layout, v.layout_etag, true);
-                        page.state.error = None;
+                        if matches!(mode, WriteMode::Edit) {
+                            page.state.error = None;
+                        }
                         page.created_step(&mission, cx);
                     }
                     Err(e) => page.state.error = Some(format!("{}: {}", e.code, e.message)),
@@ -1334,15 +1333,6 @@ impl MissionsPage {
         };
         let patch = edits::environment_patch(&ed.id, &self.extra.read(cx).text);
         self.write_board(patch, WriteMode::Edit, cx);
-    }
-    /// Every write's end calls this once `writing` is false: a staffing
-    /// pick made while it was in flight is written now, on its own seat.
-    pub(super) fn staff_picked_meanwhile(&mut self, cx: &mut Context<Self>) {
-        if !self.staff_pending.is_empty() {
-            let pick = self.staff_pending.remove(0);
-            let patch = pick.staffing.assign(&pick.step_id, &pick.seat_id);
-            self.write_board(patch, WriteMode::Edit, cx);
-        }
     }
     /// Arrange: the places go back to Arrange's own, so the board lays its
     /// cards out in reading rows for its room, in run order, each keeping

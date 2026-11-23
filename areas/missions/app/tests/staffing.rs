@@ -239,17 +239,60 @@ fn catalog_pickers_offer_sorted_agents_and_model_efforts_and_save_the_choice(
         read().1.model == ahjo_missions_contract::HARNESS_DEFAULT_MODEL
     });
 
-    // A pick made while an undo is writing is written after it. Both clicks
-    // go in one turn, so the undo's answer cannot come between them. The
-    // undo puts gpt-6 back; the pick then asks for the agent's model.
-    until(cx, "undo ready after harness default", |cx| {
+    // A pick made while an undo is writing goes on the seat as the undo
+    // leaves it: the agent the undo puts back stays, with the model picked.
+    // Both clicks go in one turn, so the undo's answer cannot come between.
+    click(cx, "staffing-agent-reviewer");
+    until(cx, "reviewer saved", |_| read().1.agent == "reviewer");
+    until(cx, "undo ready after the agent change", |cx| {
         cx.debug_bounds("undo").is_some()
     });
     let (before, _) = read();
-    let undo = cx.debug_bounds("undo").unwrap().center();
-    let pick = cx.debug_bounds("staffing-model-default").unwrap().center();
+    click_in_one_turn(cx, &["undo", "staffing-model-default"]);
+    until(cx, "pick during the undo saved after it", |cx| {
+        let (now, seat) = read();
+        now == before + 2
+            && seat.agent == "planner"
+            && seat.model.is_empty()
+            && cx.debug_bounds("undo").is_some()
+    });
+
+    // When the node refuses the undo, its notice stays after the pick made
+    // meanwhile is saved.
+    let (before, _) = read();
+    rt.block_on(common::call(
+        &client,
+        "mission_edit",
+        json!({
+            "mission": "hello", "rev": before,
+            "change": {"update_step": {"id": "fmn_work", "title": "Renamed elsewhere"}}
+        }),
+    ))
+    .unwrap();
+    click_in_one_turn(cx, &["undo", "staffing-model-harness-default"]);
+    until(
+        cx,
+        "pick saved after the refused undo, its notice kept",
+        |cx| {
+            let (now, seat) = read();
+            now == before + 2
+                && seat.agent == "planner"
+                && seat.model == ahjo_missions_contract::HARNESS_DEFAULT_MODEL
+                && cx.debug_bounds("undo").is_some()
+                && cx.debug_bounds("missions-error").is_some()
+        },
+    );
+}
+
+/// Clicks each element in turn within one update, so no answer from the node
+/// is taken in between.
+fn click_in_one_turn(cx: &mut VisualTestContext, selectors: &[&'static str]) {
+    let points: Vec<_> = selectors
+        .iter()
+        .map(|selector| cx.debug_bounds(selector).expect(selector).center())
+        .collect();
     cx.update(|window, cx| {
-        for position in [undo, pick] {
+        for position in points {
             let down = gpui::MouseDownEvent {
                 position,
                 modifiers: Modifiers::none(),
@@ -267,8 +310,5 @@ fn catalog_pickers_offer_sorted_agents_and_model_efforts_and_save_the_choice(
             window.dispatch_event(gpui::PlatformInput::MouseUp(up), cx);
         }
     });
-    until(cx, "pick during the undo saved after it", |_| {
-        let (now, seat) = read();
-        now == before + 2 && seat.model.is_empty()
-    });
+    cx.run_until_parked();
 }

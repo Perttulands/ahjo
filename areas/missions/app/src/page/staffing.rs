@@ -5,11 +5,36 @@ use ahjo_app_kit::theme::Theme;
 use gpui::{SharedString, Stateful};
 
 #[derive(Clone, Copy)]
-enum Part {
+pub(super) enum Part {
     Agent,
     Harness,
     Model,
     Effort,
+}
+
+/// The staffing parts picked for one seat while another write was in flight,
+/// in the order they were picked.
+pub(super) struct StaffPick {
+    step_id: String,
+    seat_id: String,
+    picks: Vec<(Part, String)>,
+}
+
+/// Put one picked value on a staffing; false when it does not parse.
+fn apply(staff: &mut Staffing, part: Part, id: &str) -> bool {
+    match part {
+        Part::Agent => staff.agent = id.to_owned(),
+        Part::Harness => match id.parse() {
+            Ok(harness) => staff.harness = harness,
+            Err(_) => return false,
+        },
+        Part::Model => staff.model = id.to_owned(),
+        Part::Effort => match id.parse() {
+            Ok(effort) => staff.effort = effort,
+            Err(_) => return false,
+        },
+    }
+    true
 }
 
 /// A choice from the old staffing menu, with the current choice highlighted.
@@ -128,20 +153,35 @@ impl MissionsPage {
     }
     fn pick_staffing(&mut self, part: Part, id: &str, cx: &mut Context<Self>) {
         let mut staff = self.draft_staffing(cx);
-        match part {
-            Part::Agent => staff.agent = id.to_owned(),
-            Part::Harness => {
-                let Ok(harness) = id.parse() else { return };
-                staff.harness = harness;
-            }
-            Part::Model => {
-                staff.model = id.to_owned();
-            }
-            Part::Effort => {
-                let Ok(effort) = id.parse() else { return };
-                staff.effort = effort;
-            }
+        if !apply(&mut staff, part, id) {
+            return;
         }
+        self.show_staffing(&staff, cx);
+        cx.notify();
+        let (Some(editor), Some(seat_id)) = (&self.editor, &self.seat) else {
+            return;
+        };
+        let (step_id, seat_id) = (editor.id.clone(), seat_id.clone());
+        // A pick staffs the seat at once. A pick during a write keeps only
+        // what was picked, to put on the seat as that write leaves it.
+        if !self.writing {
+            self.write_board(staff.assign(&step_id, &seat_id), WriteMode::Edit, cx);
+        } else if let Some(pending) = self
+            .staff_pending
+            .iter_mut()
+            .find(|pending| pending.step_id == step_id && pending.seat_id == seat_id)
+        {
+            pending.picks.push((part, id.to_owned()));
+        } else {
+            self.staff_pending.push(StaffPick {
+                step_id,
+                seat_id,
+                picks: vec![(part, id.to_owned())],
+            });
+        }
+    }
+
+    fn show_staffing(&self, staff: &Staffing, cx: &mut Context<Self>) {
         for (field, value) in [
             (&self.agent, staff.agent.as_str()),
             (&self.harness, staff.harness.as_str()),
@@ -152,25 +192,47 @@ impl MissionsPage {
                 field.update(cx, |f, cx| f.set(value, false, cx));
             }
         }
-        // A pick staffs the seat at once. A pick during a write follows it,
-        // replacing an earlier pick for the same seat.
-        let (Some(editor), Some(seat_id)) = (&self.editor, &self.seat) else {
+    }
+
+    /// Every write's end calls this once `writing` is false: the picks made
+    /// for a seat while it was in flight go on that seat as the write left
+    /// it. With no mission to write them on, the operator is told they were
+    /// not saved.
+    pub(super) fn staff_picked_meanwhile(&mut self, cx: &mut Context<Self>) {
+        if self.staff_pending.is_empty() {
+            return;
+        }
+        let pending = self.staff_pending.remove(0);
+        let seat = self
+            .state
+            .mission
+            .as_ref()
+            .and_then(|mission| mission.steps.iter().find(|step| step.id == pending.step_id))
+            .and_then(|step| step.seats.iter().find(|seat| seat.id == pending.seat_id));
+        let (Some(seat), Some(_)) = (seat, &self.state.mission_etag) else {
+            self.staff_pending.clear();
+            let lost = "The staffing picked meanwhile was not saved; pick it again.";
+            self.state.error = Some(match self.state.error.take() {
+                Some(error) => format!("{error} {lost}"),
+                None => lost.to_owned(),
+            });
             cx.notify();
             return;
         };
-        let (step_id, seat_id) = (editor.id.clone(), seat_id.clone());
-        if self.writing {
-            self.staff_pending
-                .retain(|pick| (&pick.step_id, &pick.seat_id) != (&step_id, &seat_id));
-            self.staff_pending.push(StaffPick {
-                step_id,
-                seat_id,
-                staffing: staff,
-            });
-        } else {
-            self.write_board(staff.assign(&step_id, &seat_id), WriteMode::Edit, cx);
+        let mut staff = Staffing::from(seat);
+        for (part, id) in &pending.picks {
+            apply(&mut staff, *part, id);
         }
-        cx.notify();
+        let shown = self
+            .editor
+            .as_ref()
+            .is_some_and(|editor| editor.id == pending.step_id)
+            && self.seat.as_deref() == Some(pending.seat_id.as_str());
+        if shown {
+            self.show_staffing(&staff, cx);
+        }
+        let patch = staff.assign(&pending.step_id, &pending.seat_id);
+        self.write_board(patch, WriteMode::Queued, cx);
     }
 }
 
