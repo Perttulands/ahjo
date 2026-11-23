@@ -443,11 +443,9 @@ impl Updates {
 mod tests {
     use super::*;
 
-    fn dir(name: &str) -> PathBuf {
-        let d = std::env::temp_dir().join(format!("ahjo-update-{name}-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&d);
-        std::fs::create_dir_all(&d).unwrap();
-        d
+    /// A scratch folder, removed when the test ends.
+    fn dir() -> tempfile::TempDir {
+        tempfile::tempdir().unwrap()
     }
 
     fn manifest(names: &[&str]) -> Manifest {
@@ -466,16 +464,17 @@ mod tests {
 
     #[test]
     fn an_install_names_its_node() {
-        let d = dir("install");
-        assert_eq!(Install::at(&d), None);
+        let scratch = dir();
+        let d = scratch.path();
+        assert_eq!(Install::at(d), None);
         std::fs::write(d.join(INSTALL), "\u{feff}{}").unwrap();
-        assert_eq!(Install::at(&d), None, "a byte-order mark does not read");
+        assert_eq!(Install::at(d), None, "a byte-order mark does not read");
         std::fs::write(
             d.join(INSTALL),
             r#"{ "from": "http://rig.tail1.ts.net:7300/" }"#,
         )
         .unwrap();
-        let install = Install::at(&d).unwrap();
+        let install = Install::at(d).unwrap();
         assert_eq!(install.from, "http://rig.tail1.ts.net:7300");
         assert_eq!(install.node_name(), "rig");
         let local = Install {
@@ -487,7 +486,8 @@ mod tests {
 
     #[test]
     fn a_swap_puts_every_file_in_place_and_the_old_aside() {
-        let d = dir("swap");
+        let scratch = dir();
+        let d = scratch.path();
         let staging = d.join(".update-1");
         std::fs::create_dir_all(&staging).unwrap();
         for (name, old, new) in [("a.exe", "old a", "new a"), ("b.exe", "old b", "new b")] {
@@ -495,7 +495,7 @@ mod tests {
             std::fs::write(staging.join(name), new).unwrap();
         }
         std::fs::write(staging.join("c.exe"), "new c").unwrap();
-        swap(&d, &staging, &manifest(&["a.exe", "b.exe", "c.exe"])).unwrap();
+        swap(d, &staging, &manifest(&["a.exe", "b.exe", "c.exe"])).unwrap();
         for name in ["a", "b", "c"] {
             assert_eq!(
                 std::fs::read_to_string(d.join(format!("{name}.exe"))).unwrap(),
@@ -514,21 +514,22 @@ mod tests {
                 })
                 .count()
         };
-        assert_eq!(aside(&d), 2);
-        tidy(&d);
-        assert_eq!(aside(&d), 0);
+        assert_eq!(aside(d), 2);
+        tidy(d);
+        assert_eq!(aside(d), 0);
     }
 
     #[test]
     fn a_swap_that_fails_half_way_leaves_the_apps_as_they_were() {
-        let d = dir("half");
+        let scratch = dir();
+        let d = scratch.path();
         let staging = d.join(".update-1");
         std::fs::create_dir_all(&staging).unwrap();
         std::fs::write(d.join("a.exe"), "old a").unwrap();
         std::fs::write(staging.join("a.exe"), "new a").unwrap();
         std::fs::write(d.join("b.exe"), "old b").unwrap();
         // b.exe never arrived in staging.
-        let failed = swap(&d, &staging, &manifest(&["a.exe", "b.exe"]));
+        let failed = swap(d, &staging, &manifest(&["a.exe", "b.exe"]));
         assert!(failed.is_err());
         assert_eq!(std::fs::read_to_string(d.join("a.exe")).unwrap(), "old a");
         assert_eq!(std::fs::read_to_string(d.join("b.exe")).unwrap(), "old b");
@@ -538,7 +539,7 @@ mod tests {
     fn nothing_is_offered_outside_an_install() {
         let u = Updates::with(None, "1");
         assert!(u.badge().is_none());
-        let mut u = Updates::with(Install::at(&dir("none")), "1");
+        let mut u = Updates::with(Install::at(dir().path()), "1");
         assert!(!u.installed());
         u.state = State::Offered(manifest(&[]));
         assert!(u.badge().is_none());
