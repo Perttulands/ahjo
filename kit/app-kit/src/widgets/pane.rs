@@ -23,8 +23,11 @@ use crate::host::Host;
 use crate::theme::{Theme, art, size, theme, ty};
 use gpui::{
     AnyElement, App, Axis, Bounds, Div, ElementId, FontWeight, Hsla, Pixels, Point, ScrollHandle,
-    SharedString, Stateful, Window, canvas, div, fill, img, point, prelude::*, px, relative,
+    SharedString, Stateful, UniformList, UniformListDecoration, UniformListScrollHandle, Window,
+    canvas, div, fill, img, point, prelude::*, px, relative, uniform_list,
 };
+
+use std::ops::Range;
 
 /// A scroll area, the one every page scrolls in. It lays its children out
 /// in a column (a row would stretch them to its height, so what runs past
@@ -40,6 +43,36 @@ pub fn scroll(id: impl Into<ElementId>) -> Scroll {
         .flex_col()
         .min_h_0()
         .overflow_y_scroll()
+}
+
+/// A long list of equal-height rows. Only visible rows are rendered, with
+/// the same thumb as [`scroll`]. The page holds the handle to reveal rows.
+pub fn long_list<R: IntoElement>(
+    id: impl Into<ElementId>,
+    count: usize,
+    handle: &UniformListScrollHandle,
+    rows: impl 'static + Fn(Range<usize>, &mut Window, &mut App) -> Vec<R>,
+) -> UniformList {
+    uniform_list(id, count, rows)
+        .track_scroll(handle)
+        .with_decoration(ListThumb(handle.0.borrow().base_handle.clone()))
+}
+
+struct ListThumb(ScrollHandle);
+
+impl UniformListDecoration for ListThumb {
+    fn compute(
+        &self,
+        _: Range<usize>,
+        _: Bounds<Pixels>,
+        _: Point<Pixels>,
+        _: Pixels,
+        _: usize,
+        _: &mut Window,
+        _: &mut App,
+    ) -> AnyElement {
+        scrollbar(self.0.clone(), &[Axis::Vertical]).into_any_element()
+    }
 }
 
 /// [`scroll`] across: a strip of tabs or pictures laid out in a row,
@@ -126,19 +159,19 @@ impl RenderOnce for Scroll {
                 .read(cx)
                 .clone(),
         };
-        let colour = crate::theme::alpha(theme(cx).dim, 0.55);
         // Last, so it is drawn over the rows; it paints where the area
         // is, wherever its own place among the rows scrolled to.
         self.div
             .track_scroll(&handle)
-            .child(scrollbar(handle, self.axes, colour))
+            .child(scrollbar(handle, self.axes))
     }
 }
 
-fn scrollbar(handle: ScrollHandle, axes: &'static [Axis], colour: Hsla) -> impl IntoElement {
+fn scrollbar(handle: ScrollHandle, axes: &'static [Axis]) -> impl IntoElement {
     canvas(
         |_, _, _| (),
-        move |_, _, window, _| {
+        move |_, _, window, cx| {
+            let colour = crate::theme::alpha(theme(cx).dim, 0.55);
             for axis in axes {
                 let found = thumb(*axis, handle.bounds(), handle.max_offset(), handle.offset());
                 if let Some(thumb) = found {

@@ -122,9 +122,10 @@ impl FilesPage {
         let left = self.diff_left.get().min(most_left);
         self.diff_left.set(left);
         let shown = Rc::new(laid.shown);
-        let list = uniform_list(
+        let list = pane::long_list(
             "files-diff-rows",
             shown.len(),
+            &self.diff_scroll,
             cx.processor(move |p, range: std::ops::Range<usize>, _, cx| {
                 let t = theme(cx).clone();
                 let Some(sides) = p.opened.as_ref().and_then(|o| o.sides.clone()) else {
@@ -146,7 +147,6 @@ impl FilesPage {
                     .collect()
             }),
         )
-        .track_scroll(&self.diff_scroll)
         .size_full();
         div()
             .relative()

@@ -312,10 +312,11 @@ reserves, or whose `everywhere` chords share a key, naming both;
   what was typed, Escape puts the name back. It tells its page once,
   `Committed(name)` or `Reverted`; a name the page or node refuses goes on
   being edited (`resume`) beside the reason.
-- **Scroll areas.** Everything that scrolls is `pane::scroll` (down),
-  `scroll_x` (a strip) or `scroll_both` (a picture, a board): a column
-  that gives way in its parent and draws its own thumb, keeping its place
-  unless the page holds its handle. A scroll area built by hand as a row
+- **Scroll areas.** Use `pane::scroll` for a column, `scroll_x` for a
+  strip and `scroll_both` for a picture or board. Each draws its own
+  thumb and keeps its place unless the page holds its handle. For long
+  lists of equal-height rows, `pane::long_list` renders the visible range
+  and draws the same thumb. A scroll area built by hand as a row
   stretched its content to its own height, so nothing past it was
   measured (Desk's document did not scroll); `bin/ahjo/tests/layout.rs`
   refuses one outside `pane.rs`.
@@ -372,7 +373,8 @@ is `widgets::pane`.
 | Edge column | a column at the window's edge in an app without the shell (Desk's asks): head, Close, grip, slide | `panel::EdgeColumn` |
 | Side section | a page's part of the shell's left column, on every page | `Host::lend_side` |
 | Grip | an edge dragged to size what it edges; double click puts the first width back | `kit::grip` |
-| Scroll area | everything that scrolls: down, across, or both (a picture, a board) | `pane::scroll`, `pane::scroll_x`, `pane::scroll_both` |
+| Scroll area | content scrolling down, across, or both (a picture, a board) | `pane::scroll`, `pane::scroll_x`, `pane::scroll_both` |
+| Long list | a scrolling list of equal-height rows, rendered as they come into view | `pane::long_list` |
 | Page skeleton | a list beside the thing, its heads, rows, tables, lines, empty states and Send | `pane::page`, `list`, `detail`, `row`, `table`, `empty`, `send` |
 | Text field | any typed text, one line or a wrapping note, with undo | `widgets::field::TextField` (`widgets::undo`) |
 | Code | a file's text: line numbers, syntax, find, edits when asked | `widgets::code::Code` |

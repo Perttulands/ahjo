@@ -18,7 +18,7 @@ use ahjo_app_kit::widgets::pane;
 use ahjo_app_kit::widgets::select;
 use gpui::{
     AnyElement, ClickEvent, Context, Div, FontWeight, Hsla, MouseButton, MouseDownEvent,
-    SharedString, Stateful, Window, div, prelude::*, px, uniform_list,
+    SharedString, Stateful, Window, div, prelude::*, px,
 };
 use std::rc::Rc;
 
@@ -238,9 +238,10 @@ impl Issue {
             }
             let n = self.entries.len();
             body = body.child(
-                uniform_list(
+                pane::long_list(
                     "issue-list",
                     n,
+                    &self.rows_scroll,
                     cx.processor(move |w, range: std::ops::Range<usize>, _, cx| {
                         let t = theme(cx).clone();
                         let shown = w.shown_row();
@@ -268,7 +269,6 @@ impl Issue {
                             .collect::<Vec<_>>()
                     }),
                 )
-                .track_scroll(&self.rows_scroll)
                 .flex_1(),
             );
         }

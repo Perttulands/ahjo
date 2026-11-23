@@ -316,6 +316,12 @@ const HAND_ROLLED: &[HandRolled] = &[
         instead: "pane::scroll, pane::scroll_x or pane::scroll_both",
     },
     HandRolled {
+        what: "a virtualized list built by hand",
+        finds: |line| line.contains("uniform_list("),
+        home: &["kit/app-kit/src/widgets/pane.rs"],
+        instead: "pane::long_list",
+    },
+    HandRolled {
         what: "a scrollbar drawn by hand",
         finds: |line| {
             let lower = line.to_lowercase();

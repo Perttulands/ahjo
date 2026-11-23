@@ -17,7 +17,7 @@ use ahjo_core::NodeId;
 use ahjo_files_contract::{Changed, Match};
 use gpui::{
     AnyElement, Context, Div, MouseButton, MouseMoveEvent, Render, ScrollDelta, SharedString,
-    Window, div, img, prelude::*, px, uniform_list,
+    Window, div, img, prelude::*, px,
 };
 
 /// Under each of these widths a file's header leaves out one more of its
@@ -982,9 +982,10 @@ impl FilesPage {
             self.list_head(t, cx)
         };
         let n = lines(self).len();
-        let body = uniform_list(
+        let body = pane::long_list(
             "files-list",
             n,
+            &self.list_scroll,
             cx.processor(|p, range: std::ops::Range<usize>, _, cx| {
                 let t = theme(cx).clone();
                 let all = lines(p);
@@ -1002,7 +1003,6 @@ impl FilesPage {
                     .collect::<Vec<_>>()
             }),
         )
-        .track_scroll(&self.list_scroll)
         .flex_1()
         .debug_selector(|| "files-list".into());
         let drop_into = self.tree.folder_here();
