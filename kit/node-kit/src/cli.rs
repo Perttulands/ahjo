@@ -978,7 +978,8 @@ fn typed(key: &str, spec: &Value, raw: &str) -> Result<Value> {
 /// fields as tab-separated `key=value`, and whatever an item nests indented
 /// under its row. Text of several lines follows its key as it is. Nulls and
 /// empty values are left out. Epoch milliseconds in timestamp fields are
-/// rendered in local time. A list the answer is about (a top-level one) that
+/// rendered in local time. A short list of plain values stays on its key's
+/// line (`efforts: low, medium, high`). A list the answer is about (a top-level one) that
 /// is empty reads `key: none`, so an answer with nothing in it still says
 /// what there is none of. `--json` prints the value itself instead.
 fn render(value: &Value) -> String {
@@ -1008,6 +1009,23 @@ fn plain(value: &Value) -> bool {
         Value::String(s) => s.trim_end().lines().count() <= 1,
         _ => true,
     }
+}
+
+/// A short list of plain values, written on one line: `low, medium, high`.
+/// A list that would run long, or whose items contain a comma, keeps one
+/// line per item.
+fn inline_list(value: &Value) -> Option<String> {
+    const LONGEST_LINE: usize = 100;
+    let items = value.as_array()?;
+    if items.is_empty() || !items.iter().all(|item| plain(item) && has_content(item)) {
+        return None;
+    }
+    let items: Vec<String> = items.iter().map(scalar).collect();
+    if items.iter().any(|item| item.contains(',')) {
+        return None;
+    }
+    let line = items.join(", ");
+    (line.len() <= LONGEST_LINE).then_some(line)
 }
 
 fn scalar(value: &Value) -> String {
@@ -1062,10 +1080,13 @@ fn render_value(value: &Value, indent: usize, out: &mut String) {
                         let (row, nested): (Vec<_>, Vec<_>) = fields
                             .iter()
                             .filter(|(_, v)| has_content(v))
-                            .partition(|(_, v)| plain(v));
+                            .partition(|(_, v)| plain(v) || inline_list(v).is_some());
                         let row: Vec<String> = row
                             .iter()
-                            .map(|(key, value)| format!("{key}={}", field_scalar(key, value)))
+                            .map(|(key, value)| match inline_list(value) {
+                                Some(list) => format!("{key}={list}"),
+                                None => format!("{key}={}", field_scalar(key, value)),
+                            })
                             .collect();
                         out.push_str(if row.is_empty() { "-" } else { "" });
                         out.push_str(&row.join("\t"));
@@ -1101,6 +1122,10 @@ fn render_field(key: &str, value: &Value, indent: usize, out: &mut String) {
         out.push_str(": ");
         out.push_str(&field_scalar(key, value));
         out.push('\n');
+    } else if let Some(list) = inline_list(value) {
+        out.push_str(": ");
+        out.push_str(&list);
+        out.push('\n');
     } else if value.is_string() {
         // Text of several lines (a diff, a file) stays as it was written,
         // so its lines can be read and matched as they are.
@@ -1134,6 +1159,22 @@ fn render_text(text: &str, indent: usize, out: &mut String) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_short_list_of_plain_values_stays_on_one_line() {
+        let harnesses = serde_json::json!({"harnesses": [{
+            "id": "openai-codex",
+            "models": [{"id": "gpt-6.2-sol", "efforts": ["low", "medium", "high"]}],
+            "paths": ["/a,b", "/c"],
+        }], "efforts": ["low", "high"]});
+        assert_eq!(
+            render(&harnesses),
+            "harnesses:\n  id=openai-codex\n    models:\n      id=gpt-6.2-sol\tefforts=low, medium, high\n    paths:\n      - /a,b\n      - /c\nefforts: low, high\n"
+        );
+        let long: Vec<String> = (0..40).map(|n| format!("item-{n}")).collect();
+        let text = render(&serde_json::json!({"items": long}));
+        assert_eq!(text.lines().count(), 41, "{text}");
+    }
 
     fn parse(schema: &Value, args: &[String]) -> Result<Value> {
         read(schema, args).map(|line| line.arguments)
