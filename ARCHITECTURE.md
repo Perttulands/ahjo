@@ -229,11 +229,12 @@ reserves, or whose `everywhere` chords share a key, naming both;
   beside ask (open a path beside, or a reveal marked `beside`, as an issue
   named in a terminal opens its card) leaves the asker shown: the answering page
   hands it a view (`Host::show_beside`), which the asker draws where its
-  layout has room (`Host::beside`), as the terminals draw a file a link
-  named.
+  layout has room (`Host::beside`), as the terminals draw an issue's card.
+  Files answers a beside ask its own way: the path opens in its edge panel
+  (below), which it opens.
 - **Views beside.** A page may also open a view of its own beside the
   terminals without being asked, toggled by an `everywhere` chord (Work's
-  on Alt+B, Files' find on Alt+O, Brain's on Alt+L): the same
+  on Alt+B, Brain's on Alt+L): the same
   `Host::show_beside`, so it lies over the terminal windows and no shared
   session changes size. While a view a page lent is open beside another,
   that page's channels stay on, as while it shows.
@@ -247,20 +248,23 @@ reserves, or whose `everywhere` chords share a key, naming both;
   Sessions), so a page's own lists stay its own. A section says where it
   shows (`SideOn`).
 - **Edge panel.** A page may lend one panel to an edge of the window
-  (`Host::lend_panel`), beside the page rather than over it: Files lends its
-  tree, at the right unless its setting says left, on the other pages only,
-  since on Files the list holds the same tree. One switch shows and hides
-  every edge panel, Ctrl+B as in VS Code and Files' chord (Alt+E, VS Code's
-  Explorer key), sliding in and out; its width is dragged at its inner
-  edge. Both are kept
-  in `app.json`. Ctrl+B is the shell's only when what has the keyboard did
-  not take it: a terminal always takes it (tmux's prefix, a harness's
-  background key, readline), so Alt+E is the way from a terminal. A file
-  picked in it opens beside the terminals on Sessions and on the Files page
-  elsewhere.
+  (`Host::lend_panel`), beside the page rather than over it. Files lends the
+  window's one Files panel, at the right unless its setting says left, on
+  the other pages only, since on Files the page itself holds the same: a
+  Files of its own in one column, its list (find, recent changes, folders,
+  every act on them) or the file opened from it. Every way to Files beside
+  another page opens it: its chords, a path clicked in a terminal, a beside
+  ask from any page. One switch shows and hides every edge panel, Ctrl+B as
+  in VS Code and Files' chord (Alt+E, VS Code's Explorer key; Alt+O brings it
+  at the focused session's folder with its find), sliding in and out; its
+  width is dragged at its inner edge. Both are kept in `app.json`. Ctrl+B is
+  the shell's only when what has the keyboard did not take it: a terminal
+  always takes it (tmux's prefix, a harness's background key, readline), so
+  Alt+E is the way from a terminal. A panel put away with the keyboard in
+  it gives the keyboard back to the page.
 - **Window sizes.** A shared session's terminal windows change size only for
-  the operator's own act: putting a panel away or bringing it back,
-  dragging an edge, opening Send. A page showing, a view beside, the
+  the operator's own act: putting a panel away or bringing it back (as a
+  path he clicks brings the Files panel), dragging an edge, opening Send. A page showing, a view beside, the
   output search or Peek never resizes them; they lie over the windows.
   Resizes settle before they reach tmux, so a sliding panel sends one.
 - **Unsaved work.** The shell owns the window's one close handler. A page

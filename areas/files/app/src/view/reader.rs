@@ -459,7 +459,7 @@ impl FilesPage {
     /// in the Reader the find, which has no list to sit in.
     pub(super) fn head_lead(&self, t: &Theme, cx: &mut Context<Self>) -> Vec<AnyElement> {
         let mut lead = vec![];
-        if self.side == Side::Hidden && !self.beside {
+        if self.side == Side::Hidden && !self.is_panel {
             lead.push(
                 pane::act(t, "files-find", "Find")
                     .debug_selector(|| "files-find".into())
@@ -734,7 +734,7 @@ impl FilesPage {
             div()
                 .flex()
                 .flex_col()
-                .children((!self.beside).then(|| {
+                .children((!self.is_panel).then(|| {
                     div()
                         .flex_none()
                         .flex()

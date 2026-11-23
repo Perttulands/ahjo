@@ -80,7 +80,7 @@ impl FilesPage {
     /// Back and Forward through where the reader was, and up to the
     /// folder.
     fn history_acts(&self, t: &Theme, cx: &mut Context<Self>) -> Option<Div> {
-        if self.beside {
+        if self.is_panel {
             return None;
         }
         let mut acts = div()
@@ -565,7 +565,7 @@ impl FilesPage {
 
     /// Hidden side: the act that shows it again, before the tabs.
     pub(super) fn side_show(&self, t: &Theme, cx: &mut Context<Self>) -> Option<AnyElement> {
-        (self.side == Side::Hidden && !self.beside && self.split_of.is_none()).then(|| {
+        (self.side == Side::Hidden && !self.is_panel && self.split_of.is_none()).then(|| {
             div()
                 .flex_none()
                 .flex()

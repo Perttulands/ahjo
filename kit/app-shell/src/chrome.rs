@@ -847,7 +847,8 @@ impl Shell {
                     } else {
                         size::SIDE_SHUT
                     };
-                    let width = if left { x - side } else { room - x };
+                    let width = if left { x - side } else { room - x }
+                        .min(room - side - size::PANEL_PAGE_MIN);
                     s.hub
                         .update(cx, |h, cx| h.set_panel_width(width, false, cx));
                 }))

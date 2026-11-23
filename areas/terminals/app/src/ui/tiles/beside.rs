@@ -1,12 +1,12 @@
 //! A view another page (or this one) opens beside the windows: a picture,
-//! a file, a diagram, a work item, a brain page. It lies over the windows
+//! a diagram, a work item, a brain page. It lies over the windows
 //! by the one rule ([`surface::at_edge`]): at their right edge, its grip on
 //! its left, so no session changes size for it. Every view opens at half
 //! the room; its edge (a grip) is dragged to size it and the width is kept;
 //! the view's Expand gives it the whole area and back. Its Close, Esc once
 //! it has the keyboard and the key that opened it take it away. A view
 //! opened by its key has the keyboard in its field; one opened from a
-//! terminal (a printed path, a picture) leaves it there until clicked.
+//! terminal (a picture) leaves it there until clicked.
 //! Closed, the terminal has the keyboard back.
 
 use super::super::page::Terminals;

@@ -636,10 +636,10 @@ impl FilesPage {
             "t" if ctrl && shift && !alt => self.reopen_closed(window, cx),
             "left" | "right" if alt && !ctrl && !shift => self.travel(k.key == "left", window, cx),
             "up" if alt && !ctrl && !shift => self.up(window, cx),
-            "b" if ctrl && !alt && !shift && self.split_of.is_none() && !self.beside => {
+            "b" if ctrl && !alt && !shift && self.split_of.is_none() && !self.is_panel => {
                 self.toggle_side(window, cx)
             }
-            "e" if ctrl && shift && !alt && self.split_of.is_none() && !self.beside => {
+            "e" if ctrl && shift && !alt && self.split_of.is_none() && !self.is_panel => {
                 self.focus_folders(window, cx)
             }
             "p" | "e" if ctrl && !alt && !shift => {
@@ -656,7 +656,7 @@ impl FilesPage {
             "h" if ctrl && !alt && !shift && self.opened.is_some() => {
                 self.find_in_file(true, window, cx)
             }
-            "\\" if ctrl && !alt && !shift && self.split_of.is_none() && !self.beside => {
+            "\\" if ctrl && !alt && !shift && self.split_of.is_none() && !self.is_panel => {
                 self.split_open(None, window, cx)
             }
             "f3" if self.infile.is_some() => self.infile_step(!shift, cx),

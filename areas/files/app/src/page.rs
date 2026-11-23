@@ -38,8 +38,6 @@ const WATCH: Duration = Duration::from_secs(2);
 const RECENT_AGAIN: Duration = Duration::from_secs(60);
 /// A pause in typing this long sends the find.
 const TYPED: Duration = Duration::from_millis(90);
-/// The page the Files panel opens beside.
-const PANEL_BESIDE: &str = "sessions";
 
 pub(crate) enum Rename {
     From(String),
@@ -151,7 +149,8 @@ pub struct FilesPage {
     pub confirm_discard: bool,
     pub conflict: bool,
     copy_ordinal: usize,
-    pub confirm_close_beside: bool,
+    /// The panel asked to close with unsaved edits: what to do with them.
+    pub confirm_close_panel: bool,
     pub drawn: Vec<std::sync::Arc<gpui::RenderImage>>,
     /// The pictures the open Markdown shows, by node, the Markdown's path
     /// and the picture's, read once while it is open.
@@ -162,19 +161,9 @@ pub struct FilesPage {
     pub(crate) name_room: crate::view::Width,
     pub(crate) list_room: crate::view::Width,
     pub list_scroll: UniformListScrollHandle,
-    /// Whether this is the page's own view, which lends the window its
-    /// Files panel; and that panel's scroll.
-    pub(crate) lends_side: bool,
-    /// The panel this page lends, to lend again at another edge.
-    pub(crate) panel_view: Option<gpui::AnyView>,
     /// A folder Down was pressed on before its contents came: the pick
     /// steps into it when they do.
     step_due: Option<String>,
-    pub(crate) side_scroll: UniformListScrollHandle,
-    /// The pick the side panel's section last brought into view.
-    pub(crate) side_scrolled_to: Option<Pick>,
-    /// The folder the side panel's section was last seen to start at.
-    side_at: Option<String>,
     /// A row to scroll to once its folder is read.
     scroll_pending: bool,
     /// The pick is a folder shown for what is in it: it scrolls to the
@@ -198,11 +187,12 @@ pub struct FilesPage {
     reveal_pending: Option<String>,
     /// Folders asked for and not answered yet.
     listing: std::collections::HashSet<String>,
-    pub beside: bool,
+    /// This is the window's Files panel, not the page.
+    pub is_panel: bool,
     pub shown: bool,
-    beside_view: Option<Entity<FilesPage>>,
+    /// The page's: the Files panel it lends the other pages.
+    pub panel: Option<Entity<FilesPage>>,
     restored: bool,
-    pub(crate) beside_from: &'static str,
     pub(crate) me: WeakEntity<FilesPage>,
     pub(crate) sessions: Option<Entity<ahjo_terminals_contract::SessionList>>,
     /// The sessions as last told, for the views that group by them.
@@ -374,21 +364,18 @@ impl Page for FilesPage {
     fn chords(&self, _: &App) -> Vec<ahjo_app_kit::chords::Chord> {
         let me = self.me.clone();
         vec![
-            ahjo_app_kit::chords::Chord::new("o", "Files beside, to find a file", {
+            ahjo_app_kit::chords::Chord::new("o", "Files panel, to find a file", {
                 let me = me.clone();
                 move |window, cx| {
-                    let _ = me.update(cx, |page, cx| page.toggle_panel(window, cx));
+                    let _ = me.update(cx, |page, cx| page.toggle_panel(true, window, cx));
                 }
             })
             .alt("o", Some(false))
             .everywhere(),
             // VS Code's Explorer key; Ctrl+B too, where a terminal does
             // not have the keyboard.
-            ahjo_app_kit::chords::Chord::new("e", "Files panel", move |_, cx| {
-                let _ = me.update(cx, |page, cx| {
-                    let open = page.host.panel_open(cx);
-                    page.host.set_panel_open(!open, cx);
-                });
+            ahjo_app_kit::chords::Chord::new("e", "Files panel", move |window, cx| {
+                let _ = me.update(cx, |page, cx| page.toggle_panel(false, window, cx));
             })
             .alt("e", Some(false))
             .everywhere(),
@@ -428,9 +415,10 @@ impl Page for FilesPage {
             cx.notify();
             return;
         }
-        if let Some(view) = &self.beside_view {
+        if let Some(view) = &self.panel {
             view.update(cx, |page, cx| {
                 page.start(cx);
+                page.refresh_recent(cx);
                 if let Some(path) = page
                     .opened
                     .as_ref()
@@ -444,11 +432,8 @@ impl Page for FilesPage {
         if self.shown {
             self.start(cx);
             self.refresh_recent(cx);
-        } else if self.lends_side {
-            // Its tree shows in the side panel before the page does.
-            self.start(cx);
         }
-        if !self.beside && !self.restored {
+        if !self.restored {
             self.restored = true;
             let kept: store::Kept = self.host.setting(cx).unwrap_or_default();
             let here = self.tree.node.clone();
@@ -460,30 +445,19 @@ impl Page for FilesPage {
                 self.open(file, window, cx);
                 self.tab_into_view_soon(window, cx);
             }
-            if kept.beside_open {
-                let view = self.panel(window, cx);
-                view.update(cx, |p, cx| {
-                    p.beside_from = PANEL_BESIDE;
-                    if let Some(file) = kept.beside_file {
-                        p.open(file, window, cx);
-                    }
+            if let (Some(panel), Some(file)) = (&self.panel, kept.panel_file) {
+                panel.update(cx, |p, cx| {
+                    p.open(file, window, cx);
                     p.watch(window, cx);
                 });
-                self.host.show_beside(PANEL_BESIDE, view.into(), cx);
             }
         }
     }
-    fn answer(
-        &mut self,
-        ask: Ask,
-        from: &'static str,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
+    fn answer(&mut self, ask: Ask, _: &'static str, window: &mut Window, cx: &mut Context<Self>) {
         match ask {
             Ask::OpenPath { node, path, beside } => {
                 if beside {
-                    self.open_beside(from, node, path, None, window, cx);
+                    self.open_in_panel(node, path, None, window, cx);
                 } else {
                     self.on_node(node.as_str(), cx);
                     self.show_in_tree(&path, cx);
@@ -502,7 +476,7 @@ impl Page for FilesPage {
                 let line = line.parse().ok();
                 if beside {
                     let node = node.unwrap_or_else(|| NodeId(self.tree.node.clone()));
-                    self.open_beside(from, node, id, line, window, cx);
+                    self.open_in_panel(node, id, line, window, cx);
                 } else {
                     if let Some(n) = node {
                         self.on_node(n.as_str(), cx);
@@ -531,14 +505,6 @@ impl FilesPage {
                 p.live = list.read(cx).sessions.clone();
                 if p.shown && p.side == Side::Changes {
                     p.ask_session_status(cx);
-                }
-                // The side panel's tree follows the focused session, and
-                // shows the pick in each new folder.
-                let at = p.side_root(cx).map(|r| r.path);
-                if at != p.side_at {
-                    p.side_at = at;
-                    p.side_scrolled_to = None;
-                    p.read_unread(cx);
                 }
                 cx.notify()
             })
@@ -669,19 +635,14 @@ impl FilesPage {
             confirm_discard: false,
             conflict: false,
             copy_ordinal: 1,
-            confirm_close_beside: false,
+            confirm_close_panel: false,
             drawn: Vec::new(),
             md_pictures: Default::default(),
             head_room: Default::default(),
             name_room: Default::default(),
             list_room: Default::default(),
             list_scroll: UniformListScrollHandle::new(),
-            lends_side: false,
-            panel_view: None,
             step_due: None,
-            side_scroll: UniformListScrollHandle::new(),
-            side_scrolled_to: None,
-            side_at: None,
             scroll_pending: false,
             pick_at_top: false,
             newest_due: false,
@@ -691,12 +652,11 @@ impl FilesPage {
             before_find: None,
             reveal_pending: None,
             listing: Default::default(),
-            beside: false,
+            is_panel: false,
             shown: false,
-            beside_view: None,
+            panel: None,
             no_node: false,
             restored: false,
-            beside_from: "",
             me: cx.weak_entity(),
             live: sessions
                 .as_ref()
@@ -763,89 +723,79 @@ impl FilesPage {
         self.host.report(Status::failure(text), cx);
     }
 
-    /// Files beside the terminals (Alt+O): this page's view beside them,
-    /// at the focused session's folder, or away again. It is the same view
-    /// a printed path opens, over the windows, so no session changes size.
-    fn toggle_panel(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if let Some(view) = self.beside_view.clone().filter(|v| {
-            self.host
-                .beside_of(PANEL_BESIDE, cx)
-                .is_some_and(|b| b.entity_id() == v.entity_id())
-        }) {
-            view.update(cx, |p, cx| p.close_beside(cx));
+    /// The window's Files panel: a Files of its own in one column (the
+    /// list, or the file opened from it), which the page lends the other
+    /// pages at the edge its setting says.
+    pub fn panel(host: Host, window: &mut Window, cx: &mut Context<Self>) -> Self {
+        let kept: store::Kept = host.setting(cx).unwrap_or_default();
+        let mut panel = Self::new(host, window, cx);
+        panel.is_panel = true;
+        panel.tree = Tree::from_kept(&kept.panel_tree);
+        panel
+    }
+
+    /// Alt+E, and Alt+O for its find: the Files panel opens, or is put
+    /// away. Opened for its find, it shows the focused session's folder
+    /// and the find has the keyboard. On the Files page, whose list holds
+    /// the same, Alt+O finds there.
+    fn toggle_panel(&mut self, find: bool, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(panel) = self.panel.clone() else {
+            return;
+        };
+        if find && self.host.shown_page(cx) == Some(<Self as Page>::ID) {
+            ahjo_app_kit::widgets::field::focus(&self.query, window, cx);
+            return;
+        }
+        if self.host.panel_open(cx) && !find {
+            panel.update(cx, |p, cx| p.close_panel(cx));
+            return;
+        }
+        // Open with its find in hand, the find's key puts it away; open
+        // with the keyboard elsewhere, it takes the keyboard to the find.
+        if find && panel.read(cx).seen_now(cx) && panel.read(cx).query.read(cx).is_focused(window) {
+            panel.update(cx, |p, cx| p.close_panel(cx));
             return;
         }
         // A session outside the roots leaves the panel where it was.
         let folder = self.session_folder(cx).filter(|(_, f)| {
             self.tree.roots.is_empty() || paths::root_of(&self.tree.roots, f).is_some()
         });
-        let view = self.panel(window, cx);
-        view.update(cx, |p, cx| {
-            p.beside_from = PANEL_BESIDE;
-            if let Some((node, folder)) = folder {
+        panel.update(cx, |p, cx| {
+            if let Some((node, folder)) = folder.filter(|_| find || p.opened.is_none()) {
                 p.on_node(&node, cx);
                 p.opened = None;
                 p.show_folder(folder, cx);
+            } else if find {
+                // The find stands over the list, not the file.
+                p.back_to_list(cx);
             }
             p.refresh_recent(cx);
             p.watch(window, cx);
         });
-        self.keep_beside_open(true, cx);
-        // Opened by its key, the panel has the keyboard: in its find, or
-        // on the file it shows.
-        let (query, focus, file) = {
-            let p = view.read(cx);
-            (p.query.clone(), p.focus.clone(), p.opened.is_some())
+        self.host.set_panel_open(true, cx);
+        let (query, focus) = {
+            let p = panel.read(cx);
+            (p.query.clone(), p.focus.clone())
         };
-        self.host.show_beside(PANEL_BESIDE, view.into(), cx);
-        self.host.for_page(PANEL_BESIDE, &[]).show(cx);
-        if file {
-            window.focus(&focus, cx);
-        } else {
+        if find {
             ahjo_app_kit::widgets::field::focus(&query, window, cx);
+        } else {
+            window.focus(&focus, cx);
         }
     }
 
     /// Lends the window the Files panel, at the edge the settings say.
     pub(crate) fn lend_panel(&self, cx: &mut App) {
-        let Some(view) = self.panel_view.clone() else {
+        let Some(panel) = self.panel.clone() else {
             return;
         };
         let kept: store::Kept = self.host.setting(cx).unwrap_or_default();
         self.host.lend_panel(
-            view,
+            panel.into(),
             ahjo_app_kit::hub::SideOn::OtherPages,
             kept.panel_edge(),
             cx,
         );
-    }
-
-    /// The view this page opens beside another, made the first time.
-    fn panel(&mut self, window: &mut Window, cx: &mut Context<Self>) -> Entity<FilesPage> {
-        if let Some(view) = &self.beside_view {
-            return view.clone();
-        }
-        let host = self.host.clone();
-        let kept: store::Kept = host.setting(cx).unwrap_or_default();
-        let view = cx.new(|cx| FilesPage::new(host, window, cx));
-        view.update(cx, |p, cx| {
-            p.beside = true;
-            p.tree = Tree::from_kept(&kept.beside);
-            p.start(cx);
-            p.refresh_recent(cx);
-        });
-        self.beside_view = Some(view.clone());
-        view
-    }
-
-    /// Whether the panel beside the terminals is open, kept for the next
-    /// run.
-    fn keep_beside_open(&self, open: bool, cx: &mut Context<Self>) {
-        let mut kept: store::Kept = self.host.setting(cx).unwrap_or_default();
-        if kept.beside_open != open {
-            kept.beside_open = open;
-            let _ = self.host.set_setting(&kept, cx);
-        }
     }
 
     /// The node and folder of the session in the focused terminal tile.
@@ -861,97 +811,48 @@ impl FilesPage {
             })
             .and_then(|s| Some((s.node.clone(), s.cwd.clone()?)))
     }
-    /// The folder the side panel's Files section starts at: the focused
-    /// session's, while that session is on this tree's device and works
-    /// inside its roots. A session elsewhere (a shell in a home folder the
-    /// roots leave out) leaves the roots shown: that is not a failure.
-    pub(crate) fn side_root(&self, cx: &App) -> Option<ahjo_files_contract::Root> {
-        if !self.lends_side {
-            return None;
-        }
-        let (node, folder) = self.session_folder(cx)?;
-        let inside =
-            self.tree.roots.is_empty() || paths::root_of(&self.tree.roots, &folder).is_some();
-        (node == self.tree.node && inside).then(|| ahjo_files_contract::Root {
-            name: paths::base_name(&folder).to_owned(),
-            path: folder,
-        })
-    }
-    /// A row clicked in the Files panel: the page is not shown, so a
-    /// folder opens or closes in place (the panel's first one stays open)
-    /// and a file opens beside the terminals while they show, as a path
-    /// clicked in one does, else on the page.
-    pub(crate) fn side_pick(
+
+    /// A file asked for beside another page (a path clicked in a
+    /// terminal, evidence in a run): it opens in the Files panel, at
+    /// `line` when one is named, and the panel opens, the page beside
+    /// making room for it.
+    fn open_in_panel(
         &mut self,
-        path: &str,
-        folder: bool,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        self.tree.select(path);
-        self.pick = Some(Pick::Node(path.to_owned()));
-        if !folder && self.host.shown_page(cx) == Some(PANEL_BESIDE) {
-            let node = NodeId(self.tree.node.clone());
-            self.open_beside(PANEL_BESIDE, node, path.to_owned(), None, window, cx);
-        } else if !folder {
-            let ask = Ask::OpenPath {
-                node: NodeId(self.tree.node.clone()),
-                path: path.to_owned(),
-                beside: false,
-            };
-            if let Err(e) = self.host.ask(ask, cx) {
-                self.fail(e.message, cx);
-            }
-        } else if self.side_root(cx).is_none_or(|r| r.path != path) && self.tree.toggle(path) {
-            self.list(path.to_owned(), cx);
-        }
-        self.keep(cx);
-        cx.notify();
-    }
-    fn open_beside(
-        &mut self,
-        from: &'static str,
         node: NodeId,
         path: String,
         line: Option<usize>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let view = self.panel(window, cx);
-        view.update(cx, |p, cx| {
-            p.beside_from = from;
+        let Some(panel) = self.panel.clone() else {
+            return;
+        };
+        panel.update(cx, |p, cx| {
             p.on_node(node.as_str(), cx);
             p.show_in_tree(&path, cx);
             p.open_at(path, line, window, cx);
             p.watch(window, cx);
         });
-        if from == PANEL_BESIDE {
-            self.keep_beside_open(true, cx);
-        }
-        self.host.show_beside(from, view.into(), cx);
+        self.host.set_panel_open(true, cx);
     }
-    pub fn close_beside(&mut self, cx: &mut Context<Self>) {
+    /// The panel's Close, Esc: put away, its unsaved edits asked about
+    /// first.
+    pub fn close_panel(&mut self, cx: &mut Context<Self>) {
         if !self.drafts.is_empty() {
-            self.confirm_close_beside = true;
+            self.confirm_close_panel = true;
             cx.notify();
             return;
         }
-        self.close_beside_now(cx);
+        self.host.set_panel_open(false, cx);
     }
-    pub fn cancel_close_beside(&mut self, cx: &mut Context<Self>) {
-        self.confirm_close_beside = false;
+    pub fn cancel_close_panel(&mut self, cx: &mut Context<Self>) {
+        self.confirm_close_panel = false;
         cx.notify();
     }
-    pub fn discard_and_close_beside(&mut self, cx: &mut Context<Self>) {
+    pub fn discard_and_close_panel(&mut self, cx: &mut Context<Self>) {
         self.drafts.clear();
-        self.confirm_close_beside = false;
-        self.close_beside_now(cx);
-    }
-    fn close_beside_now(&self, cx: &mut Context<Self>) {
-        if self.beside_from == PANEL_BESIDE {
-            self.keep_beside_open(false, cx);
-        }
-        self.host.close_beside(self.beside_from, cx);
+        self.confirm_close_panel = false;
+        self.host.set_panel_open(false, cx);
     }
     fn request(
         &self,
@@ -1041,8 +942,7 @@ impl FilesPage {
     }
     /// Reads every open folder not yet read.
     fn read_unread(&mut self, cx: &mut Context<Self>) {
-        let side = self.side_root(cx);
-        for folder in self.tree.unread(side.as_ref()) {
+        for folder in self.tree.unread() {
             if !self.listing.contains(&folder) {
                 self.list(folder, cx);
             }
@@ -1052,7 +952,7 @@ impl FilesPage {
         if self.recent_asked || self.tree.node.is_empty() {
             return;
         }
-        if self.side == Side::Changes && !self.beside {
+        if self.side == Side::Changes && !self.is_panel {
             self.ask_session_status(cx);
         }
         self.recent_asked = true;
@@ -1073,7 +973,7 @@ impl FilesPage {
                 if first && matches!(p.pick, Some(Pick::Node(_))) {
                     p.scroll_to_pick();
                 }
-                p.newest_due = first && !p.beside && p.opened.is_none();
+                p.newest_due = first && !p.is_panel && p.opened.is_none();
                 match p.recent_inside.as_ref().map(|(folder, _)| folder.clone()) {
                     Some(folder) if p.recent_folder(&folder) => p.read_recent_inside(folder, cx),
                     _ => p.recent_inside = None,
@@ -1171,7 +1071,7 @@ impl FilesPage {
         self.keep(cx);
         cx.notify();
     }
-    /// Beside another page: from the file back to the list, the file
+    /// In the panel: from the file back to the list, the file
     /// picked in it.
     pub fn back_to_list(&mut self, cx: &mut Context<Self>) {
         if let Some(o) = self.opened.take() {
@@ -1600,7 +1500,7 @@ impl FilesPage {
             self.restore(kept, window, cx);
             return;
         }
-        self.jump_due = self.side == Side::Changes && !self.beside;
+        self.jump_due = self.side == Side::Changes && !self.is_panel;
         self.md_go.set(None);
         self.md_scroll.set_offset(gpui::Point::default());
         self.md_select.borrow_mut().selection.clear();
@@ -1616,8 +1516,8 @@ impl FilesPage {
         self.seen.remove(&path);
         self.symbols.clear();
         self.opened = Some(Opened::reading(node.clone(), path.clone()));
-        // Beside, the file takes the list's place: the keys go with it.
-        if self.beside && self.query.read(cx).is_focused(window) {
+        // In the panel, the file takes the list's place: the keys go with it.
+        if self.is_panel && self.query.read(cx).is_focused(window) {
             window.focus(&self.focus, cx);
         }
         self.follow_open(&path);
@@ -1872,8 +1772,8 @@ impl FilesPage {
     }
     pub(crate) fn finish_edit(&mut self, w: &mut Window, cx: &mut Context<Self>) {
         if self.opened.as_ref().is_some_and(|o| !o.editing) {
-            if self.beside {
-                self.close_beside(cx);
+            if self.is_panel {
+                self.close_panel(cx);
             } else {
                 w.focus(&self.focus, cx);
             }
@@ -2063,13 +1963,13 @@ impl FilesPage {
         );
     }
     pub fn search_key(&mut self, e: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
-        // Beside another page, Esc in an empty find takes the view away.
+        // In the panel, Esc in an empty find puts the panel away.
         if e.keystroke.key == "escape"
-            && self.beside
+            && self.is_panel
             && self.query.read(cx).is_focused(window)
             && self.query.read(cx).text.is_empty()
         {
-            self.close_beside(cx);
+            self.close_panel(cx);
             cx.stop_propagation();
             return;
         }
@@ -2186,10 +2086,10 @@ impl FilesPage {
                 self.find_anywhere(window, cx)
             }
             "f2" => self.start_rename(window, cx),
-            // Beside another page, Esc takes the view away (its drafts are
+            // In the panel, Esc puts it away (its drafts are
             // asked about first), with a find under the file shown too.
-            "escape" if self.beside && (self.find.is_none() || self.opened.is_some()) => {
-                self.close_beside(cx);
+            "escape" if self.is_panel && (self.find.is_none() || self.opened.is_some()) => {
+                self.close_panel(cx);
             }
             "escape" => {
                 if self.find.is_some() {
@@ -2390,6 +2290,7 @@ impl FilesPage {
                 p.list(folder.clone(), cx);
                 p.tree.select(&made);
                 p.pick = Some(Pick::Node(made.clone()));
+                p.refresh_recent(cx);
                 p.keep(cx);
                 // A new file opens, to be written.
                 if file {
@@ -2693,26 +2594,7 @@ impl FilesPage {
             } else {
                 paths::parent(&path)
             };
-            let with_here =
-                |f: fn(&mut FilesPage, String, &mut Window, &mut Context<FilesPage>)| {
-                    let me = me.clone();
-                    let here = here.clone();
-                    move |window: &mut Window, cx: &mut App| {
-                        let _ = me.update(cx, |p, cx| f(p, here.clone(), window, cx));
-                    }
-                };
-            rows.push(MenuRow::new(
-                "New file",
-                with_here(|p, here, w, cx| p.start_naming(Naming::File(here), w, cx)),
-            ));
-            rows.push(MenuRow::new(
-                "New folder",
-                with_here(|p, here, w, cx| p.start_naming(Naming::Folder(here), w, cx)),
-            ));
-            rows.push(MenuRow::new(
-                "Upload…",
-                with_here(|p, here, w, cx| p.pick_uploads(here, w, cx)),
-            ));
+            rows.extend(self.new_rows(here));
             if !root {
                 rows.push(MenuRow::new(
                     "Rename",
@@ -2727,6 +2609,44 @@ impl FilesPage {
             }
         }
         rows
+    }
+
+    /// What can be made in `folder`: a file, a folder, an upload.
+    fn new_rows(&self, folder: String) -> Vec<MenuRow> {
+        let me = self.me.clone();
+        let in_folder = |f: fn(&mut FilesPage, String, &mut Window, &mut Context<FilesPage>)| {
+            let me = me.clone();
+            let folder = folder.clone();
+            move |window: &mut Window, cx: &mut App| {
+                let _ = me.update(cx, |p, cx| f(p, folder.clone(), window, cx));
+            }
+        };
+        vec![
+            MenuRow::new(
+                "New file",
+                in_folder(|p, here, w, cx| p.start_naming(Naming::File(here), w, cx)),
+            ),
+            MenuRow::new(
+                "New folder",
+                in_folder(|p, here, w, cx| p.start_naming(Naming::Folder(here), w, cx)),
+            ),
+            MenuRow::new(
+                "Upload…",
+                in_folder(|p, here, w, cx| p.pick_uploads(here, w, cx)),
+            ),
+        ]
+    }
+    /// New, over the list: what can be made in the folder picked, and
+    /// nothing done to that folder itself.
+    pub fn new_menu(
+        &mut self,
+        folder: String,
+        at: gpui::Point<gpui::Pixels>,
+        cx: &mut Context<Self>,
+    ) {
+        self.menu_from = None;
+        let rows = self.new_rows(folder);
+        self.host.menu(rows, at, cx);
     }
 
     pub(crate) fn download_path(&mut self, node: NodeId, path: String, cx: &mut Context<Self>) {
@@ -2865,9 +2785,9 @@ impl FilesPage {
             return;
         }
         let mut k: store::Kept = self.host.setting(cx).unwrap_or_default();
-        if self.beside {
-            k.beside = self.tree.kept();
-            k.beside_file = self.opened.as_ref().map(|o| o.path.clone());
+        if self.is_panel {
+            k.panel_tree = self.tree.kept();
+            k.panel_file = self.opened.as_ref().map(|o| o.path.clone());
         } else {
             k.tree = self.tree.kept();
             k.file = self
@@ -2896,10 +2816,8 @@ impl FilesPage {
                 p.split.is_some() && p.seen_now(cx)
             });
         }
-        if self.beside {
-            self.host
-                .beside_of(self.beside_from, cx)
-                .is_some_and(|v| Some(v.entity_id()) == self.me.upgrade().map(|e| e.entity_id()))
+        if self.is_panel {
+            self.host.panel_open(cx) && self.host.shown_page(cx) != Some(<Self as Page>::ID)
         } else {
             self.shown
         }
@@ -2920,10 +2838,6 @@ impl FilesPage {
                     if !p.seen_now(cx) {
                         p.watching = false;
                         p.seen.clear();
-                        // Closed by the page it was beside (its Esc).
-                        if p.beside && p.beside_from == PANEL_BESIDE {
-                            p.keep_beside_open(false, cx);
-                        }
                         return false;
                     }
                     if window.is_window_active() {
@@ -2947,8 +2861,8 @@ impl FilesPage {
         {
             asked.push(o.path.clone());
         }
-        // Beside, the list is seen only while no file is open.
-        if !self.beside || self.opened.is_none() {
+        // In the panel, the list is seen only while no file is open.
+        if !self.is_panel || self.opened.is_none() {
             asked.extend(
                 self.tree
                     .open_folders()
@@ -3035,7 +2949,7 @@ impl FilesPage {
     /// The find takes the keyboard: in the list, or (Reader) opened over
     /// the file.
     pub fn find_anywhere(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if self.side == Side::Hidden && !self.beside {
+        if self.side == Side::Hidden && !self.is_panel {
             self.palette = true;
         }
         ahjo_app_kit::widgets::field::focus(&self.query, window, cx);

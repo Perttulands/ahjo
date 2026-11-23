@@ -86,6 +86,18 @@ fn start_with_terminal(root: std::path::PathBuf, socket: Option<std::path::PathB
     })
 }
 
+/// After the edge panel is opened or put away: it slides over real time and
+/// draws its last frame on a timer, so wait out the slide, run the timer and
+/// draw again.
+fn slid(cx: &mut VisualTestContext) {
+    cx.run_until_parked();
+    std::thread::sleep(Duration::from_millis(
+        ahjo_app_kit::theme::motion::PANEL_SLIDE + 40,
+    ));
+    cx.executor().advance_clock(Duration::from_millis(500));
+    cx.update(|window, _| window.refresh());
+    cx.run_until_parked();
+}
 fn leak(s: String) -> &'static str {
     Box::leak(s.into_boxed_str())
 }
@@ -147,10 +159,11 @@ fn modified(path: &std::path::Path, seconds_ago: u64) {
         .unwrap();
 }
 
-/// Alt+O opens Files beside the terminals, from any page: the
-/// same view a printed path opens, which browses, sends and remembers.
+/// Alt+O opens the Files panel on the page shown, its find to hand: the
+/// one Files panel, which a printed path opens too, and which browses,
+/// sends and remembers.
 #[gpui::test]
-fn files_panel_browses_sends_and_remembers_beside_the_terminals(cx: &mut TestAppContext) {
+fn the_files_panel_browses_sends_and_remembers_on_any_page(cx: &mut TestAppContext) {
     let root = ahjo_testkit::fresh_dir("files-dock");
     std::fs::create_dir(root.join("folder")).unwrap();
     let file = root.join("folder/note.txt");
@@ -178,17 +191,32 @@ fn files_panel_browses_sends_and_remembers_beside_the_terminals(cx: &mut TestApp
     assert!(shell.update(cx, |s, cx| {
         ahjo_app_kit::chords::rows(&s.chords(cx))
             .iter()
-            .any(|row| row.label == "Files beside, to find a file")
+            .any(|row| row.label == "Files panel, to find a file")
     }));
+    // Wide enough that the file's head holds Send.
+    shell.update(cx, |s, cx| {
+        s.hub()
+            .update(cx, |h, cx| h.set_panel_width(480., false, cx))
+    });
+    // Put away first, so Alt+O is what brings it.
+    cx.simulate_keystrokes("alt-e");
+    slid(cx);
+    until(cx, "the panel put away", |cx| {
+        cx.debug_bounds("panel-right").is_none()
+    });
     cx.simulate_keystrokes("alt-o");
+    slid(cx);
     tree(cx, "file-row-folder");
     assert_eq!(
         shell.read_with(cx, |s, _| s.shown_page()),
-        Some("sessions"),
-        "the terminals come forward with the panel beside them"
+        Some("toy"),
+        "the panel opens beside the page shown"
     );
-    assert!(cx.debug_bounds("dock-files").is_none(), "no dock column");
-    assert!(cx.debug_bounds("files-close-beside").is_some(), "Close");
+    assert!(
+        cx.debug_bounds("panel-right").is_some(),
+        "at the window's edge"
+    );
+    assert!(cx.debug_bounds("files-close-panel").is_some(), "Close");
     click(cx, "file-row-folder");
     tree(cx, "file-row-note.txt");
     click(cx, "file-row-note.txt");
@@ -204,29 +232,56 @@ fn files_panel_browses_sends_and_remembers_beside_the_terminals(cx: &mut TestApp
         SENT.with(|sent| sent.borrow().clone()),
         Some(format!("path {}", file.display()))
     );
-    cx.simulate_keystrokes("alt-o");
-    cx.run_until_parked();
-    assert!(cx.debug_bounds("file-view-note.txt").is_none(), "closed");
-    assert!(!kept(&shell, cx).beside_open);
-    cx.simulate_keystrokes("alt-o");
+    let panel_open = |cx: &mut VisualTestContext| {
+        shell.read_with(cx, |s, cx| s.hub().read(cx).settings.panel_open)
+    };
+    // With the keyboard in the panel, its key puts it away.
+    cx.simulate_keystrokes("alt-e");
+    slid(cx);
+    until(cx, "closed", |cx| {
+        cx.debug_bounds("file-view-note.txt").is_none()
+    });
+    assert!(!panel_open(cx));
+    assert_eq!(
+        kept(&shell, cx).panel_file.as_deref(),
+        Some(file.to_str().unwrap())
+    );
+    // The keyboard was in the panel: it comes back to the page, so the
+    // panel's key still brings it back, showing the file it held.
+    cx.simulate_keystrokes("alt-e");
+    slid(cx);
     until(cx, "remembered file", |cx| {
         cx.debug_bounds("file-view-note.txt").is_some() && cx.debug_bounds("files-send").is_some()
     });
-    assert!(kept(&shell, cx).beside_open);
+    assert!(panel_open(cx));
     click(cx, "files-back");
     until(cx, "back to the tree, the file picked", |cx| {
         cx.debug_bounds("picked-note.txt").is_some() && cx.debug_bounds("files-send").is_none()
+    });
+    // Alt+O over a file opened brings the find over the list; again, with
+    // the find in hand, it puts the panel away.
+    click(cx, "file-row-note.txt");
+    tree(cx, "file-view-note.txt");
+    cx.simulate_keystrokes("alt-o");
+    until(cx, "the find over the list", |cx| {
+        cx.debug_bounds("files-search").is_some() && cx.debug_bounds("file-view-note.txt").is_none()
+    });
+    cx.simulate_keystrokes("alt-o");
+    slid(cx);
+    until(cx, "put away", |cx| {
+        cx.debug_bounds("panel-right").is_none()
     });
     drop(running);
     std::fs::remove_dir_all(root).unwrap();
 }
 
-/// The Files panel opens over the terminals at the focused session's
-/// folder; a find there reaches names and text; a path the session prints
-/// opens in the same panel.
+/// The Files panel opens beside the terminals at the focused session's
+/// folder; a find there reaches names and text. A path the session prints
+/// opens in that same panel, the one Files beside the terminals, and the
+/// terminal windows make room for it: the session's tmux window narrows.
 #[cfg(unix)]
 #[gpui::test]
-fn terminal_panel_search_and_printed_path_open_beside(cx: &mut TestAppContext) {
+fn a_printed_path_opens_the_one_files_panel_and_the_windows_make_room(cx: &mut TestAppContext) {
     let Some(tmux) = ahjo_testkit::tmux::Server::start_in("files-finish-terminal") else {
         assert!(std::env::var_os("AHJO_REQUIRE_TMUX").is_none());
         return;
@@ -280,8 +335,14 @@ fn terminal_panel_search_and_printed_path_open_beside(cx: &mut TestAppContext) {
     until(cx, "terminal painted", |cx| {
         terminal.read_with(cx, |p, _| p.geo.borrow()[0].origin.is_some())
     });
-    // The panel opens at the session's folder, picked.
+    // Put away, then opened for its find: at the session's folder, picked.
+    cx.simulate_keystrokes("alt-e");
+    slid(cx);
+    until(cx, "the panel put away", |cx| {
+        cx.debug_bounds("panel-right").is_none()
+    });
     cx.simulate_keystrokes("alt-o");
+    slid(cx);
     until(cx, "the panel at the session's folder", |cx| {
         cx.debug_bounds("file-row-note.txt").is_some() && cx.debug_bounds("picked-sub").is_some()
     });
@@ -313,10 +374,18 @@ fn terminal_panel_search_and_printed_path_open_beside(cx: &mut TestAppContext) {
         cx.debug_bounds("file-view-note.txt").is_some()
             && cx.debug_bounds("files-code-top-9").is_some()
     });
-    cx.simulate_keystrokes("alt-o");
+    cx.simulate_keystrokes("alt-e");
+    slid(cx);
     until(cx, "the panel closed", |cx| {
-        cx.debug_bounds("terminals-beside").is_none()
+        cx.debug_bounds("panel-right").is_none()
     });
+    let width = || {
+        tmux.display("alpha", "#{window_width}")
+            .trim()
+            .parse::<u32>()
+            .unwrap()
+    };
+    let wide = width();
     let path = file.to_string_lossy().into_owned();
     tmux.run(&[
         "send-keys",
@@ -348,11 +417,33 @@ fn terminal_panel_search_and_printed_path_open_beside(cx: &mut TestAppContext) {
         )
     });
     cx.simulate_click(position, Modifiers::none());
-    until(cx, "path viewer beside terminal", |cx| {
-        cx.debug_bounds("terminals-beside").is_some()
+    slid(cx);
+    until(cx, "the path in the Files panel, slid in", |cx| {
+        cx.debug_bounds("panel-right")
+            .is_some_and(|panel| panel.size.width > gpui::px(0.))
             && cx.debug_bounds("file-view-note.txt").is_some()
     });
     assert_eq!(shell.read_with(cx, |s, _| s.shown_page()), Some("sessions"));
+    assert!(
+        cx.debug_bounds("terminals-beside").is_none(),
+        "no second Files over the windows"
+    );
+    let panel = cx.debug_bounds("panel-right").unwrap();
+    let viewer = cx.debug_bounds("files-viewer").unwrap();
+    assert!(panel.contains(&viewer.center()), "{viewer:?} in {panel:?}");
+    // The windows narrow beside the panel, and the shared session with
+    // them once the resize settles.
+    until(cx, "the window beside the panel", |cx| {
+        terminal.read_with(cx, |p, _| {
+            p.geo.borrow()[0]
+                .body
+                .is_some_and(|body| body.right() <= panel.left())
+        })
+    });
+    until(cx, "the session's window narrowed", |cx| {
+        cx.executor().advance_clock(Duration::from_millis(200));
+        width() < wide
+    });
     // A path as agents print it, relative to the pane's folder and with
     // its line and column, opens at that line.
     let printed = "edited note.txt:30:7";
@@ -2320,16 +2411,18 @@ fn repository(name: &str, files: &[(&str, &str)], changed: &[(&str, &str)]) -> s
     root
 }
 
-/// The side panel's Files section is the page's own tree: on another page
-/// it shows the same marks and opens a file on the page; on the page it
-/// gives way to the list.
+/// The Files panel beside another page makes, renames, deletes and
+/// uploads through the node, as the page does: every act its menus offer
+/// reaches the disk, and the page beside stays shown.
 #[gpui::test]
-fn the_side_panel_shows_the_pages_tree_on_the_other_pages(cx: &mut TestAppContext) {
+fn every_file_act_in_the_files_panel_reaches_the_disk(cx: &mut TestAppContext) {
     let root = repository(
-        "files-side",
+        "files-panel-acts",
         &[("a.rs", "a\n"), ("sub/b.txt", "b\n")],
         &[("a.rs", "changed\n")],
     );
+    let outside = ahjo_testkit::fresh_dir("files-panel-acts-upload");
+    std::fs::write(outside.join("dropped.txt"), "dropped").unwrap();
     let running = start(root.clone());
     cx.executor().allow_parking();
     cx.update(ahjo_app_shell::prepare);
@@ -2337,38 +2430,82 @@ fn the_side_panel_shows_the_pages_tree_on_the_other_pages(cx: &mut TestAppContex
     let (shell, cx) = cx.add_window_view(move |window, cx| {
         ahjo_app_shell::start(&[toy, ahjo_files_app::build], Some(url), None, window, cx)
     });
+    until(cx, "the panel beside the toy page, marked", |cx| {
+        cx.debug_bounds("panel-right").is_some()
+            && cx.debug_bounds("file-row-sub").is_some()
+            && cx.debug_bounds("state-a.rs-M").is_some()
+    });
+    // New, over the list, makes things in the folder picked and offers
+    // nothing done to that folder.
+    click(cx, "files-new");
+    until(cx, "New's menu", |cx| {
+        cx.debug_bounds("menu-label-New folder").is_some()
+    });
+    assert!(cx.debug_bounds("menu-label-Delete").is_none());
+    assert!(cx.debug_bounds("menu-label-Rename").is_none());
+    cx.simulate_keystrokes("escape");
+    menu_on(cx, "file-row-sub");
+    menu(cx, "New folder");
+    until(cx, "the name's field", |cx| {
+        cx.debug_bounds("files-name").is_some()
+    });
+    cx.simulate_input("made");
+    cx.simulate_keystrokes("enter");
+    until(cx, "the folder made", |cx| {
+        root.join("sub/made").is_dir() && cx.debug_bounds("file-row-made").is_some()
+    });
+    menu_on(cx, "file-row-a.rs");
+    menu(cx, "Rename");
+    until(cx, "the name's field", |cx| {
+        cx.debug_bounds("files-name").is_some()
+    });
+    cx.simulate_keystrokes("ctrl-a");
+    cx.simulate_input("renamed.rs");
+    cx.simulate_keystrokes("enter");
+    until(cx, "renamed", |cx| {
+        root.join("renamed.rs").is_file()
+            && !root.join("a.rs").exists()
+            && cx.debug_bounds("file-row-renamed.rs").is_some()
+    });
+    menu_on(cx, "file-row-sub");
+    menu(cx, "New file");
+    cx.simulate_input("new.txt");
+    cx.simulate_keystrokes("enter");
+    until(cx, "a new file, open in the panel", |cx| {
+        root.join("sub/new.txt").is_file()
+            && cx.debug_bounds("file-view-new.txt").is_some()
+            && cx.debug_bounds("files-edit").is_some()
+    });
+    click(cx, "files-edit");
+    cx.simulate_input("written");
+    cx.simulate_keystrokes("ctrl-s");
+    until(cx, "saved", |_| {
+        std::fs::read_to_string(root.join("sub/new.txt"))
+            .ok()
+            .as_deref()
+            == Some("written")
+    });
+    click(cx, "files-discard");
+    click(cx, "files-back");
+    tree(cx, "file-row-new.txt");
+    menu_on(cx, "file-row-new.txt");
+    menu(cx, "Delete");
+    assert!(root.join("sub/new.txt").exists(), "asked once more");
+    menu(cx, "Delete");
+    until(cx, "deleted", |cx| {
+        !root.join("sub/new.txt").exists() && cx.debug_bounds("file-row-new.txt").is_none()
+    });
+    drop_files(cx, "file-row-sub", vec![outside.join("dropped.txt")]);
+    until(cx, "uploaded into the folder dropped on", |_| {
+        std::fs::read_to_string(root.join("sub/dropped.txt"))
+            .ok()
+            .as_deref()
+            == Some("dropped")
+    });
     assert_eq!(shell.read_with(cx, |s, _| s.shown_page()), Some("toy"));
-    until(cx, "the tree beside the toy page, marked", |cx| {
-        cx.debug_bounds("side-file-a.rs").is_some() && cx.debug_bounds("state-a.rs-M").is_some()
-    });
-    click(cx, "side-file-a.rs");
-    until(cx, "a.rs open on the Files page", |cx| {
-        cx.debug_bounds("file-view-a.rs").is_some()
-    });
-    assert_eq!(shell.read_with(cx, |s, _| s.shown_page()), Some("files"));
-    assert!(
-        cx.debug_bounds("picked-a.rs").is_some(),
-        "picked in the list"
-    );
-    assert!(
-        cx.debug_bounds("side-files-section").is_none(),
-        "one tree on the Files page"
-    );
-    click(cx, "tab-toy");
-    until(cx, "the same pick beside the toy page", |cx| {
-        cx.debug_bounds("side-picked-a.rs").is_some()
-    });
-    // A folder opened there is open on the page too.
-    click(cx, "side-file-sub");
-    until(cx, "sub opened in the panel", |cx| {
-        cx.debug_bounds("side-file-b.txt").is_some()
-    });
-    click(cx, "tab-files");
-    until(cx, "and on the page", |cx| {
-        cx.debug_bounds("file-row-b.txt").is_some()
-    });
     drop(running);
     std::fs::remove_dir_all(root).unwrap();
+    std::fs::remove_dir_all(outside).unwrap();
 }
 
 /// Changes lists what git says is not committed in a repository, a file

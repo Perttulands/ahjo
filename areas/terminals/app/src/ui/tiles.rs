@@ -230,7 +230,7 @@ impl Terminals {
             .flex_row()
             .capture_any_mouse_down(cx.listener(|s, _, _, _| s.acted = true))
             .capture_key_down(cx.listener(|s, _, _, _| s.acted = true));
-        // What another page opened beside the terminals (a file a link
+        // What another page opened beside the terminals (an issue a link
         // named, a diagram) lies over the windows from the rail's edge: the
         // windows keep their layout and size under it, so no session that
         // other clients share is reflowed for a glance at a picture.
@@ -2267,7 +2267,7 @@ impl Terminals {
     }
 
     /// A link was clicked: an address opens in the browser, a path in the
-    /// file viewer beside, on the device of the window's session, at the
+    /// Files panel, on the device of the window's session, at the
     /// line named after it, and a diagram drawn beside. A relative path is
     /// the folder's of the pane the window shows, which tmux is asked for,
     /// as the session's own folder is its active pane's.
@@ -2666,8 +2666,8 @@ fn peek_view(
     (pan, most, Some(cursor))
 }
 
-/// Opens a file beside the page, at `line` if one is named: as Files
-/// reveals a path at a part of it.
+/// Opens a file in the Files panel beside the page, at `line` if one is
+/// named: as Files reveals a path at a part of it.
 fn open_path(node: NodeId, path: String, line: Option<u32>) -> Ask {
     match line {
         None => Ask::OpenPath {

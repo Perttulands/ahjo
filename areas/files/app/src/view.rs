@@ -21,7 +21,7 @@ use gpui::{
 };
 
 /// Under each of these widths a file's header leaves out one more of its
-/// least needed words. A view beside the terminals opens about 420 wide,
+/// least needed words. The Files panel is often about 420 wide,
 /// where the name needs the room the zoom steps would take.
 const HEAD_NARROW: [f32; 3] = [640., 520., 440.];
 /// JetBrains Mono's advance, as a share of its size: how many letters of a
@@ -173,7 +173,7 @@ pub fn lines(p: &FilesPage) -> Vec<Line> {
         }
         return out;
     }
-    let main = !p.beside;
+    let main = !p.is_panel;
     if main && p.side == Side::Changes {
         return reader::review_lines(p);
     }
@@ -271,22 +271,6 @@ fn tree_lines(p: &FilesPage, rows: Vec<Row>) -> Vec<Line> {
 
 /// The lines of the side panel's Files section: the tree from the focused
 /// session's folder, or from the roots.
-pub fn side_lines(p: &FilesPage, cx: &gpui::App) -> Vec<Line> {
-    let rows = match p.side_root(cx) {
-        Some(root) => p.tree.rows_in(&root),
-        None => p.tree.rows(),
-    };
-    tree_lines(p, rows)
-}
-
-/// Where a tree row is drawn: in the page's list, or in its section of
-/// the side panel on the other pages.
-#[derive(Clone, Copy, PartialEq, Eq)]
-pub enum Place {
-    List,
-    Side,
-}
-
 /// The lines found inside files from `first` on, under a line for each
 /// file they are in, with how many.
 fn group_by_file(out: &mut Vec<Line>, first: usize) {
@@ -432,7 +416,7 @@ impl FilesPage {
         letters(width)
     }
 
-    fn line(&self, line: Line, place: Place, t: &Theme, cx: &mut Context<Self>) -> AnyElement {
+    fn line(&self, line: Line, t: &Theme, cx: &mut Context<Self>) -> AnyElement {
         let picked = line.pick().is_some_and(|l| self.pick.as_ref() == Some(&l));
         match line {
             Line::Label(text) => {
@@ -662,7 +646,7 @@ impl FilesPage {
                     p.activate(w, cx);
                 }))
                 .into_any_element(),
-            Line::Node(row) => self.tree_row(row, picked, place, t, cx),
+            Line::Node(row) => self.tree_row(row, picked, t, cx),
             Line::Group(folder, newest) => self.group_row(folder, newest, picked, t, cx),
             Line::HitFile(path, n) => {
                 let name = paths::base_name(&path).to_owned();
@@ -781,37 +765,17 @@ impl FilesPage {
             .children(age.map(|a| pane::meta(t, a, None)))
     }
 
-    fn tree_row(
-        &self,
-        row: Row,
-        picked: bool,
-        place: Place,
-        t: &Theme,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
+    fn tree_row(&self, row: Row, picked: bool, t: &Theme, cx: &mut Context<Self>) -> AnyElement {
         let indent = row.depth as f32 * INDENT;
-        let room = match place {
-            Place::List => self.row_letters(indent + DISCLOSURE),
-            Place::Side => {
-                letters(self.host.panel_width(cx) - 2. * size::ROW_PAD - indent - DISCLOSURE)
-            }
-        };
+        let room = self.row_letters(indent + DISCLOSURE);
         let reading = self
             .opened
             .as_ref()
             .is_some_and(|o| o.path == row.path && o.node == self.tree.node);
         let path = row.path.clone();
         let folder = row.folder;
-        let (selector, id) = match place {
-            Place::List => (
-                format!("file-row-{}", row.name),
-                format!("node-{}", row.path),
-            ),
-            Place::Side => (
-                format!("side-file-{}", row.name),
-                format!("side-{}", row.path),
-            ),
-        };
+        let selector = format!("file-row-{}", row.name);
+        let id = format!("node-{}", row.path);
         let state = self.states.get(&row.path).copied();
         let holds = row.folder && self.holding.contains(&row.path);
         let state_colour = state.map(|s| state_colour(t, s));
@@ -826,10 +790,7 @@ impl FilesPage {
             .debug_selector(move || selector.clone())
             .when(reading && !picked, |r| r.text_color(t.text))
             .when(picked, |r| {
-                let id = match place {
-                    Place::List => format!("picked-{}", row.name),
-                    Place::Side => format!("side-picked-{}", row.name),
-                };
+                let id = format!("picked-{}", row.name);
                 r.child(div().absolute().debug_selector(move || id))
             })
             .child(div().flex_none().w(px(indent)))
@@ -842,9 +803,7 @@ impl FilesPage {
                     .child(disclosure),
             )
             .child(
-                if place == Place::List
-                    && self.rename_place() == Some(RenameIn::Line(Pick::Node(row.path.clone())))
-                {
+                if self.rename_place() == Some(RenameIn::Line(Pick::Node(row.path.clone()))) {
                     self.name_field_in_row(cx).into_any_element()
                 } else {
                     div()
@@ -890,28 +849,20 @@ impl FilesPage {
                 };
                 r.on_drag(file, |file, _, _, cx| cx.new(|_| file.clone()))
             });
-        match place {
-            Place::List => line
-                .on_mouse_down(
-                    MouseButton::Right,
-                    self.menu_at(Pick::Node(path.clone()), path.clone(), folder, cx),
-                )
-                .on_click(cx.listener(move |p, e: &gpui::ClickEvent, w, cx| {
-                    w.focus(&p.focus, cx);
-                    p.set_pick(Pick::Node(path.clone()), cx);
-                    // A click on a folder opens or closes it; a file
-                    // previews, and a second click keeps it open.
-                    if folder && e.click_count() > 1 {
-                        return;
-                    }
-                    p.activate_as(e.click_count() > 1, w, cx);
-                })),
-            // The page is not drawn: a folder opens or closes in place, a
-            // file beside the terminals or on the page.
-            Place::Side => line.on_click(cx.listener(move |p, _, window, cx| {
-                p.side_pick(&path, folder, window, cx);
-            })),
-        }
+        line.on_mouse_down(
+            MouseButton::Right,
+            self.menu_at(Pick::Node(path.clone()), path.clone(), folder, cx),
+        )
+        .on_click(cx.listener(move |p, e: &gpui::ClickEvent, w, cx| {
+            w.focus(&p.focus, cx);
+            p.set_pick(Pick::Node(path.clone()), cx);
+            // A click on a folder opens or closes it; a file
+            // previews, and a second click keeps it open.
+            if folder && e.click_count() > 1 {
+                return;
+            }
+            p.activate_as(e.click_count() > 1, w, cx);
+        }))
         .into_any_element()
     }
 
@@ -1002,12 +953,12 @@ impl FilesPage {
                     ))
                     .on_click(cx.listener(|p, e: &gpui::ClickEvent, _, cx| {
                         if let Some(folder) = p.tree.folder_here() {
-                            p.row_menu(folder, true, e.position(), None, cx);
+                            p.new_menu(folder, e.position(), cx);
                         }
                     })),
             );
         }
-        head = head.children(self.beside_acts(t, cx));
+        head = head.children(self.panel_acts(t, cx));
         let n = lines(self).len();
         let body = uniform_list(
             "files-list",
@@ -1023,7 +974,7 @@ impl FilesPage {
                             .w_full()
                             .flex()
                             .flex_col()
-                            .child(p.line(line, Place::List, &t, cx))
+                            .child(p.line(line, &t, cx))
                             .into_any_element()
                     })
                     .collect::<Vec<_>>()
@@ -1033,7 +984,7 @@ impl FilesPage {
         .flex_1()
         .debug_selector(|| "files-list".into());
         let drop_into = self.tree.folder_here();
-        let side = (!self.beside && !self.palette).then(|| self.side_switch(t, cx));
+        let side = (!self.is_panel && !self.palette).then(|| self.side_switch(t, cx));
         let body = div()
             .flex_1()
             .min_h_0()
@@ -1041,13 +992,13 @@ impl FilesPage {
             .flex_col()
             .children(side)
             .child(body);
-        let frame = if !self.beside && (self.side == Side::Changes || self.finding.get()) {
+        let frame = if !self.is_panel && (self.side == Side::Changes || self.finding.get()) {
             pane::list_wide_frame(t, head, body)
         } else {
             pane::list_frame(t, head, body)
         };
         frame
-            .when(self.beside, |l| l.flex_1().min_w_0().border_r_0())
+            .when(self.is_panel, |l| l.flex_1().min_w_0().border_r_0())
             .on_drop(cx.listener(move |p, dropped: &gpui::ExternalPaths, _, cx| {
                 if let Some(folder) = drop_into.clone() {
                     p.upload_paths(folder, dropped.paths(), cx);
@@ -1063,7 +1014,7 @@ impl FilesPage {
             .h(px(size::CONTROL + size::HEAD_GAP))
             .relative()
             .child(measure(self.head_room.clone()));
-        if self.beside {
+        if self.is_panel {
             head = head.child(
                 pane::act(t, "files-back", "Back")
                     .debug_selector(|| "files-back".into())
@@ -1071,7 +1022,7 @@ impl FilesPage {
                     .on_click(cx.listener(|p, _, _, cx| p.back_to_list(cx))),
             );
         }
-        if !self.beside {
+        if !self.is_panel {
             head = head.children(self.head_lead(t, cx));
         }
         let Some(o) = &self.opened else {
@@ -1158,7 +1109,7 @@ impl FilesPage {
             let path = o.path.clone();
             head = head.children(self.provenance(&path, t, cx));
         }
-        if narrow < 3 || !self.beside {
+        if narrow < 3 || !self.is_panel {
             head = head.child(
                 pane::act(t, "files-send", "Send")
                     .debug_selector(|| "files-send".into())
@@ -1206,32 +1157,18 @@ impl FilesPage {
                     cx.listener(|p, e: &gpui::ClickEvent, _, cx| p.file_menu(e.position(), cx)),
                 ),
         );
-        head.children(self.beside_acts(t, cx))
+        head.children(self.panel_acts(t, cx))
     }
 
-    /// Beside another page: Expand (where that page can give its whole
-    /// room) and Close.
-    fn beside_acts(&self, t: &Theme, cx: &mut Context<Self>) -> Vec<gpui::AnyElement> {
-        if !self.beside {
-            return vec![];
-        }
-        let from = self.beside_from;
-        let mut acts: Vec<gpui::AnyElement> = vec![];
-        if let Some(whole) = self.host.whole_beside(from, cx) {
-            acts.push(
-                kit::whole_button(t, whole)
-                    .on_click(cx.listener(move |p, _, _, cx| p.host.toggle_whole_beside(from, cx)))
-                    .into_any_element(),
-            );
-        }
-        acts.push(
-            pane::act(t, "files-close-beside", "Close")
-                .debug_selector(|| "files-close-beside".into())
-                .tooltip(kit::tip("Esc"))
-                .on_click(cx.listener(|p, _, _, cx| p.close_beside(cx)))
-                .into_any_element(),
-        );
-        acts
+    /// In the panel: Close, which puts it away.
+    fn panel_acts(&self, t: &Theme, cx: &mut Context<Self>) -> Option<gpui::AnyElement> {
+        self.is_panel.then(|| {
+            pane::act(t, "files-close-panel", "Close")
+                .debug_selector(|| "files-close-panel".into())
+                .tooltip(kit::tip("Esc, Alt+E"))
+                .on_click(cx.listener(|p, _, _, cx| p.close_panel(cx)))
+                .into_any_element()
+        })
     }
 
     /// A decision the page waits on, on a line under the viewer's head.
@@ -1290,17 +1227,17 @@ impl FilesPage {
                 ),
             );
         }
-        if self.confirm_close_beside {
+        if self.confirm_close_panel {
             return Some(
                 line("Closing loses your unsaved changes.".into())
                     .child(
                         kit::button(t, "files-close-discard", "Discard and close", Kind::Primary)
                             .debug_selector(|| "files-close-discard".into())
-                            .on_click(cx.listener(|p, _, _, cx| p.discard_and_close_beside(cx))),
+                            .on_click(cx.listener(|p, _, _, cx| p.discard_and_close_panel(cx))),
                     )
                     .child(
                         pane::act(t, "files-close-cancel", "Keep editing")
-                            .on_click(cx.listener(|p, _, _, cx| p.cancel_close_beside(cx))),
+                            .on_click(cx.listener(|p, _, _, cx| p.cancel_close_panel(cx))),
                     ),
             );
         }
@@ -1498,7 +1435,7 @@ impl FilesPage {
                     .child(self.viewer_body(t, cx))
                     .child(self.zoom_catch(cx)),
             );
-        let tabs = (!self.beside).then(|| {
+        let tabs = (!self.is_panel).then(|| {
             div()
                 .flex_none()
                 .flex()
@@ -1518,77 +1455,6 @@ impl FilesPage {
                     .min_h_0()
                     .debug_selector(|| "files-viewer".into()),
             )
-            .when(self.beside, |d| d.border_r_1().border_color(t.divider))
-    }
-}
-
-impl FilesPage {
-    /// This page's panel, drawn on the other pages: the same tree as its
-    /// list, from the focused session's folder, under a head that puts the
-    /// panel away.
-    pub fn render_side(&mut self, cx: &mut Context<Self>) -> AnyElement {
-        let t = theme(cx).clone();
-        self.no_node = self.tree.node.is_empty() && self.host.offline(cx);
-        let lines = side_lines(self, cx);
-        let n = lines.len();
-        // A new pick (a file opened on the page, most often) is brought into
-        // view here as well, once it is among the rows.
-        if self.side_scrolled_to != self.pick
-            && let Some(at) = lines
-                .iter()
-                .position(|l| l.pick().is_some() && l.pick() == self.pick)
-        {
-            self.side_scrolled_to = self.pick.clone();
-            self.side_scroll
-                .scroll_to_item(at, gpui::ScrollStrategy::Nearest);
-        }
-        let list = uniform_list(
-            "side-files",
-            n,
-            cx.processor(|p, range: std::ops::Range<usize>, _, cx| {
-                let t = theme(cx).clone();
-                let all = side_lines(p, cx);
-                range
-                    .filter_map(|at| all.get(at).cloned())
-                    .map(|line| {
-                        div()
-                            .w_full()
-                            .flex()
-                            .flex_col()
-                            .child(p.line(line, Place::Side, &t, cx))
-                            .into_any_element()
-                    })
-                    .collect::<Vec<_>>()
-            }),
-        )
-        .track_scroll(&self.side_scroll)
-        .flex_1()
-        .pb(px(8.));
-        div()
-            .debug_selector(|| "side-files-section".into())
-            .size_full()
-            .flex()
-            .flex_col()
-            .child(
-                div()
-                    .pl(px(size::ROW_PAD))
-                    .pr(px(4.))
-                    .pt(px(size::LABEL_TOP))
-                    .pb(px(size::LABEL_BOTTOM))
-                    .flex()
-                    .items_center()
-                    .child(kit::group_label(&t, "Files").flex_1().text_color(t.text))
-                    .child(
-                        kit::button(&t, "files-panel-hide", "×", Kind::Quiet)
-                            .debug_selector(|| "files-panel-hide".into())
-                            .tooltip(kit::tip("Hide files  Ctrl+B"))
-                            .on_click(cx.listener(|p, _, _, cx| {
-                                p.host.set_panel_open(false, cx);
-                            })),
-                    ),
-            )
-            .child(list)
-            .into_any_element()
     }
 }
 
@@ -1621,7 +1487,7 @@ impl Render for FilesPage {
             cx.defer_in(window, |page, window, cx| page.finish_edit(window, cx));
         }
         self.finding.set(
-            !self.beside
+            !self.is_panel
                 && (self.find.is_some()
                     || self.jump.is_some()
                     || self.query.read(cx).is_focused(window)),
@@ -1642,8 +1508,8 @@ impl Render for FilesPage {
                 .child(self.viewer(&t, cx))
                 .children(self.switcher(&t));
         }
-        if self.beside {
-            // Beside another page it is one column: the list, or the file
+        if self.is_panel {
+            // In the panel it is one column: the list, or the file
             // opened from it.
             return root.flex().child(if self.opened.is_some() {
                 self.viewer(&t, cx)

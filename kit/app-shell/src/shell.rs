@@ -27,6 +27,8 @@ enum Refocus {
     Layers { moved: bool, lost: bool },
     /// Another page shows.
     PageShown,
+    /// The panels were put away with the keyboard in one.
+    PanelPutAway,
 }
 
 /// How long the keys a chord was typed with stay on screen.
@@ -67,6 +69,9 @@ pub struct Shell {
     /// The panels as last drawn: open or not, and when they last began to
     /// slide open or away.
     pub(crate) panel_drawn: Option<bool>,
+    /// Whether the panels were open when the hub last said so: putting
+    /// them away hands the keyboard back if it was in one.
+    panel_was_open: bool,
     pub(crate) panel_moved: Option<Instant>,
     /// A panel's inner edge is being dragged.
     pub(crate) panel_dragging: bool,
@@ -211,6 +216,7 @@ impl Shell {
             cx.defer_in(window, move |s, window, cx| s.show(first, window, cx));
         }
         let size = hub.read(cx).settings.size;
+        let panel_was_open = hub.read(cx).settings.panel_open;
         window.set_ui_scale(ahjo_app_kit::zoom::app::scale(size), cx);
         Self {
             hub,
@@ -233,6 +239,7 @@ impl Shell {
             app_wheel: Default::default(),
             over: None,
             panel_drawn: None,
+            panel_was_open,
             panel_moved: None,
             panel_dragging: false,
             updates: None,
@@ -386,6 +393,17 @@ impl Shell {
             HubEvent::Lent(id) => {
                 if let Some(i) = self.index_of(id) {
                     self.sync_channels(i, cx);
+                }
+                // A panel put away with the keyboard in it would take the
+                // keyboard with it, and no key would reach a chord: it goes
+                // back to the page, or the layer on top.
+                let open = self.hub.read(cx).settings.panel_open;
+                if std::mem::replace(&mut self.panel_was_open, open) && !open {
+                    let page = self.shown.and_then(|i| self.pages[i].focus(cx));
+                    let in_page = page.is_some_and(|f| f.contains_focused(window, cx));
+                    if !in_page {
+                        self.refocus(Refocus::PanelPutAway, window, cx);
+                    }
                 }
             }
             HubEvent::SettingChanged(id) => {

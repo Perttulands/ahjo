@@ -595,9 +595,10 @@ fn other_pages_read_the_sessions_and_open_views_beside_them(cx: &mut TestAppCont
 /// What the operator opens on the page lies over the windows: the
 /// scrollback search and Overview, and a view beside them opened, its edge
 /// dragged, given the whole area and closed with Esc, all leave every
-/// session at the size it had, here and for every other client. Send is
-/// the one the windows make room for
-/// (`send_drawer_makes_room_beside_a_lone_window`).
+/// session at the size it had, here and for every other client, as does
+/// what opens in the Files panel already open at the window's edge. Send
+/// and putting a panel away or back are the ones the windows make room
+/// for (`send_drawer_makes_room_beside_a_lone_window`).
 #[gpui::test]
 fn nothing_opened_on_the_page_resizes_a_session(cx: &mut TestAppContext) {
     let Some(running) = start_config("terminals-opened-size", false, false, true, false) else {
@@ -749,21 +750,24 @@ fn nothing_opened_on_the_page_resizes_a_session(cx: &mut TestAppContext) {
     );
     unchanged(cx, "after it closed");
 
-    // Files opens beside the windows by every route, and lies over them
-    // too: the Files panel (Alt+O), ...
+    // Files is the panel at the window's edge, open here as the operator
+    // left it: its find (Alt+O) and a path the session printed, clicked,
+    // open in it and change no window's size. Putting it away is the
+    // operator's own act, and resizes.
+    assert!(
+        cx.debug_bounds("panel-right").is_some(),
+        "the Files panel open"
+    );
     cx.simulate_keystrokes("alt-o");
-    until(cx, "the Files panel over the windows", |cx| {
-        cx.debug_bounds("terminals-beside").is_some()
-            && cx.debug_bounds("files-close-beside").is_some()
+    until(cx, "the Files panel's find", |cx| {
+        cx.debug_bounds("files-search").is_some()
     });
-    unchanged(cx, "with the Files panel open");
-    cx.simulate_keystrokes("alt-o");
-    until(cx, "the Files panel closed", |cx| {
-        cx.debug_bounds("terminals-beside").is_none()
-    });
-    unchanged(cx, "after the Files panel closed");
+    assert!(
+        cx.debug_bounds("terminals-beside").is_none(),
+        "nothing over"
+    );
+    unchanged(cx, "with the Files panel's find");
 
-    // ... a path the session printed, clicked, ...
     let command = format!("printf '\\033[2J\\033[Hmade {}\\n'", picture.display());
     tmux(&running, &["send-keys", "-t", "alpha", &command, "Enter"]);
     until(cx, "the printed picture drawn small", |cx| {
@@ -771,13 +775,16 @@ fn nothing_opened_on_the_page_resizes_a_session(cx: &mut TestAppContext) {
     });
     let chip = page.read_with(cx, |p, _| p.chips.borrow()[0][0].bounds);
     cx.simulate_click(chip.center(), Modifiers::none());
-    until(cx, "the printed path open in Files beside", |cx| {
-        cx.debug_bounds("terminals-beside").is_some()
-            && cx.debug_bounds("file-view-plan.svg").is_some()
+    until(cx, "the printed path open in the Files panel", |cx| {
+        cx.debug_bounds("file-view-plan.svg").is_some()
     });
-    unchanged(cx, "with a printed path open beside");
+    assert!(
+        cx.debug_bounds("terminals-beside").is_none(),
+        "nothing over"
+    );
+    unchanged(cx, "with a printed path open in the Files panel");
     // Back in the terminal, Esc is the terminal's (agents need it) and the
-    // picture stays; the key that opens Files takes it away.
+    // picture stays.
     let window = cx.debug_bounds("window-0").expect("the window");
     cx.simulate_click(
         gpui::point(window.left() + px(20.), window.bottom() - px(20.)),
@@ -793,12 +800,8 @@ fn nothing_opened_on_the_page_resizes_a_session(cx: &mut TestAppContext) {
     );
     // The shell took the Esc as a prefix; a fresh line for what follows.
     cx.simulate_keystrokes("ctrl-c");
-    cx.simulate_keystrokes("alt-o");
-    until(cx, "the printed path closed by Alt+O", |cx| {
-        cx.debug_bounds("terminals-beside").is_none()
-    });
 
-    // Work lies over the windows the same way: its panel (Alt+B), ...
+    // Work lies over the windows: its panel (Alt+B), ...
     {
         let (keys, drawn, what) = ("alt-b", "issue-panel", "the Work panel");
         cx.simulate_keystrokes(keys);
@@ -3440,9 +3443,9 @@ fn files_dropped_on_send_are_attached_and_reach_the_session(cx: &mut TestAppCont
     cx.simulate_event(gpui::FileDropEvent::Submit { position: at });
     until(cx, "the computer's file attached", |cx| attached(cx) == 1);
     until(cx, "the node's file in the Files panel", |cx| {
-        cx.debug_bounds("side-file-on-node.txt").is_some()
+        cx.debug_bounds("file-row-on-node.txt").is_some()
     });
-    let from = cx.debug_bounds("side-file-on-node.txt").unwrap().center();
+    let from = cx.debug_bounds("file-row-on-node.txt").unwrap().center();
     let at = send_blank(cx);
     cx.simulate_mouse_down(from, gpui::MouseButton::Left, Modifiers::none());
     cx.simulate_mouse_move(
