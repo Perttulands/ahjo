@@ -327,6 +327,7 @@ impl MissionsPage {
             if mode == Mode::Edit && self.editor.is_none() {
                 self.resolve_wanted(cx);
             }
+            self.staff_picked_meanwhile(cx);
             cx.notify();
         }
     }
@@ -363,6 +364,7 @@ impl MissionsPage {
                     page.state.error = Some("Could not reload the mission and layout after the failed edit. Reopen the mission before editing.".into());
                 }
                 page.writing = false;
+                page.staff_picked_meanwhile(cx);
                 cx.notify();
             });
         })

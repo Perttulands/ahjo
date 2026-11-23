@@ -377,6 +377,7 @@ impl MissionsPage {
                             editor.busy = false;
                             editor.error = Some(format!("{}: {}", error.code, error.message));
                         }
+                        page.staff_picked_meanwhile(cx);
                         cx.notify();
                         return;
                     }
@@ -400,6 +401,7 @@ impl MissionsPage {
                             editor.busy = false;
                             editor.error = Some(problems.join("; "));
                         }
+                        page.staff_picked_meanwhile(cx);
                         cx.notify();
                     }
                     Ok(steps) if steps.is_empty() => {
@@ -415,6 +417,7 @@ impl MissionsPage {
                         } else if let Some(editor) = &mut page.editor {
                             editor.busy = false;
                         }
+                        page.staff_picked_meanwhile(cx);
                         cx.notify();
                     }
                     Ok(steps) => page.write_editor_steps(node, slug, steps, draft, cx),

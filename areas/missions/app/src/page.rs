@@ -130,9 +130,16 @@ pub struct MissionsPage {
     /// The operator asked to run this mission while it could not: what it
     /// still lacks now reads as a problem rather than as a to-do.
     run_tried: bool,
-    /// A staffing pick made while another write was in flight.
-    staff_pending: bool,
+    /// Staffing picks made while another write was in flight, at most one
+    /// per seat, each on the seat it was made for; written in turn as writes end.
+    staff_pending: Vec<StaffPick>,
     seen_run_snapshots: std::collections::BTreeSet<String>,
+}
+/// A seat's staffing, picked while another write was in flight.
+struct StaffPick {
+    step_id: String,
+    seat_id: String,
+    staffing: crate::store::staffing::Staffing,
 }
 #[derive(Clone, Copy)]
 enum EditKind {
@@ -259,7 +266,7 @@ impl MissionsPage {
             flow_places: Default::default(),
             new_step: None,
             run_tried: false,
-            staff_pending: false,
+            staff_pending: Vec::new(),
             seen_run_snapshots: Default::default(),
         };
         for field in [
@@ -983,12 +990,10 @@ impl MissionsPage {
                         page.state.set_layout(v.layout, v.layout_etag, true);
                         page.state.error = None;
                         page.created_step(&mission, cx);
-                        if std::mem::take(&mut page.staff_pending) {
-                            page.staff_seat(cx);
-                        }
                     }
                     Err(e) => page.state.error = Some(format!("{}: {}", e.code, e.message)),
                 }
+                page.staff_picked_meanwhile(cx);
                 page.refresh_selected_if_newer(cx);
                 cx.notify();
             });
@@ -1330,12 +1335,14 @@ impl MissionsPage {
         let patch = edits::environment_patch(&ed.id, &self.extra.read(cx).text);
         self.write_board(patch, WriteMode::Edit, cx);
     }
-    pub(super) fn staff_seat(&mut self, cx: &mut Context<Self>) {
-        let (Some(ed), Some(seat)) = (&self.editor, &self.seat) else {
-            return;
-        };
-        let patch = self.draft_staffing(cx).assign(&ed.id, seat);
-        self.write_board(patch, WriteMode::Edit, cx);
+    /// Every write's end calls this once `writing` is false: a staffing
+    /// pick made while it was in flight is written now, on its own seat.
+    pub(super) fn staff_picked_meanwhile(&mut self, cx: &mut Context<Self>) {
+        if !self.staff_pending.is_empty() {
+            let pick = self.staff_pending.remove(0);
+            let patch = pick.staffing.assign(&pick.step_id, &pick.seat_id);
+            self.write_board(patch, WriteMode::Edit, cx);
+        }
     }
     /// Arrange: the places go back to Arrange's own, so the board lays its
     /// cards out in reading rows for its room, in run order, each keeping

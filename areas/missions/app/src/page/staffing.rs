@@ -152,11 +152,23 @@ impl MissionsPage {
                 field.update(cx, |f, cx| f.set(value, false, cx));
             }
         }
-        // A pick staffs the seat at once. A pick during a write follows it.
+        // A pick staffs the seat at once. A pick during a write follows it,
+        // replacing an earlier pick for the same seat.
+        let (Some(editor), Some(seat_id)) = (&self.editor, &self.seat) else {
+            cx.notify();
+            return;
+        };
+        let (step_id, seat_id) = (editor.id.clone(), seat_id.clone());
         if self.writing {
-            self.staff_pending = true;
+            self.staff_pending
+                .retain(|pick| (&pick.step_id, &pick.seat_id) != (&step_id, &seat_id));
+            self.staff_pending.push(StaffPick {
+                step_id,
+                seat_id,
+                staffing: staff,
+            });
         } else {
-            self.staff_seat(cx);
+            self.write_board(staff.assign(&step_id, &seat_id), WriteMode::Edit, cx);
         }
         cx.notify();
     }

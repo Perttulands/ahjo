@@ -228,8 +228,8 @@ fn catalog_pickers_offer_sorted_agents_and_model_efforts_and_save_the_choice(
     click(cx, "undo");
     until(cx, "staffing undo saved", |_| read().0 == rev + 2);
     assert_eq!(read().1, original, "undo must restore the exact seat");
-    // The node has the undo before the page has its answer; a pick made
-    // meanwhile waits for a write that has already gone.
+    // The node has the undo before the page has its answer; this pick waits
+    // for it. A pick made during the undo's write is tried at the end.
     until(cx, "redo ready after the undo", |cx| {
         cx.debug_bounds("redo").is_some()
     });
@@ -237,5 +237,38 @@ fn catalog_pickers_offer_sorted_agents_and_model_efforts_and_save_the_choice(
     click(cx, "staffing-model-harness-default");
     until(cx, "harness default saved", |_| {
         read().1.model == ahjo_missions_contract::HARNESS_DEFAULT_MODEL
+    });
+
+    // A pick made while an undo is writing is written after it. Both clicks
+    // go in one turn, so the undo's answer cannot come between them. The
+    // undo puts gpt-6 back; the pick then asks for the agent's model.
+    until(cx, "undo ready after harness default", |cx| {
+        cx.debug_bounds("undo").is_some()
+    });
+    let (before, _) = read();
+    let undo = cx.debug_bounds("undo").unwrap().center();
+    let pick = cx.debug_bounds("staffing-model-default").unwrap().center();
+    cx.update(|window, cx| {
+        for position in [undo, pick] {
+            let down = gpui::MouseDownEvent {
+                position,
+                modifiers: Modifiers::none(),
+                button: gpui::MouseButton::Left,
+                click_count: 1,
+                first_mouse: false,
+            };
+            let up = gpui::MouseUpEvent {
+                position,
+                modifiers: Modifiers::none(),
+                button: gpui::MouseButton::Left,
+                click_count: 1,
+            };
+            window.dispatch_event(gpui::PlatformInput::MouseDown(down), cx);
+            window.dispatch_event(gpui::PlatformInput::MouseUp(up), cx);
+        }
+    });
+    until(cx, "pick during the undo saved after it", |_| {
+        let (now, seat) = read();
+        now == before + 2 && seat.model.is_empty()
     });
 }
