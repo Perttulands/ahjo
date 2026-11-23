@@ -106,4 +106,13 @@ fn the_list_opens_the_latest_run_and_reaches_every_run_of_a_mission(cx: &mut Tes
     until(cx, "filtered run", |cx| {
         selector(cx, &oldest) && !selector(cx, &latest)
     });
+    // A slipped letter still finds the mission, and its runs with it.
+    cx.simulate_keystrokes("ctrl-a backspace");
+    cx.simulate_input("hlelo");
+    until(cx, "found despite the slip", |cx| {
+        selector(cx, &title) && selector(cx, &latest)
+    });
+    cx.simulate_keystrokes("ctrl-a backspace");
+    cx.simulate_input("zebra");
+    until(cx, "nothing else is", |cx| !selector(cx, &title));
 }

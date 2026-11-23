@@ -297,16 +297,16 @@ pub fn route(k: &KeyLike, s: &Keyboard, chords: &[Chord], now: Instant) -> Verdi
     Verdict::Pass
 }
 
-/// Rows whose label or caps hold every word typed, in any order.
+/// Rows whose label or keys hold every word typed, in any order, a
+/// slipped letter forgiven; best first, in the table's order with nothing
+/// typed.
 pub fn filter(list: &[Row], query: &str) -> Vec<Row> {
-    let words: Vec<String> = query.split_whitespace().map(str::to_lowercase).collect();
-    list.iter()
-        .filter(|r| {
-            let text = format!("{} {} {}", r.caps.join("+"), r.leader, r.label).to_lowercase();
-            words.iter().all(|w| text.contains(w.as_str()))
-        })
-        .cloned()
-        .collect()
+    crate::text::fuzzy::filter(query, list, |r| {
+        vec![r.label.clone(), r.caps.join("+"), r.leader.clone()]
+    })
+    .into_iter()
+    .map(|found| list[found.index].clone())
+    .collect()
 }
 
 #[cfg(test)]

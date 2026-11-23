@@ -9,6 +9,9 @@
 //! after a separator counts most, letters that follow each other count
 //! more than letters apart. What matched is returned with the score, so a
 //! list can mark the letters that found it.
+//!
+//! A page's list filters through [`filter`] (or [`matches`] for one
+//! thing): what was typed as it stands ranks above letters apart.
 
 /// How a text matched: its score and the characters (by index in the
 /// text) that matched.
@@ -202,6 +205,115 @@ pub fn rank<'a>(query: &str, texts: impl IntoIterator<Item = &'a str>) -> Vec<(u
     found
 }
 
+/// How a thing a page filters by its fields matched: its score and the
+/// matched characters of each field, in the fields' order, for marking.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Found {
+    /// Where the thing stands in the list filtered.
+    pub index: usize,
+    pub score: i64,
+    pub at: Vec<Vec<usize>>,
+}
+
+/// How `word` is found close enough in `field` to say something, so a
+/// word does not match letters strewn across a long description: as typed
+/// with its letters within twice its length, else with a slipped letter
+/// left out and the rest together in one word, one gap at most.
+fn near(word: &str, field: &str) -> Option<Hit> {
+    let span = |hit: &Hit| hit.at.last().map_or(0, |l| l + 1 - hit.at[0]);
+    let w: Vec<char> = word.chars().collect();
+    let t: Vec<char> = field.chars().collect();
+    if let Some(hit) = exact(&w, &t).filter(|h| span(h) <= 2 * w.len() + 2) {
+        return Some(hit);
+    }
+    if w.len() < 4 {
+        return None;
+    }
+    (0..w.len())
+        .filter_map(|skip| {
+            let mut fewer = w.clone();
+            fewer.remove(skip);
+            exact(&fewer, &t).filter(|h| {
+                span(h) <= fewer.len() + 1
+                    && !t[h.at[0]..=h.at[h.at.len() - 1]]
+                        .iter()
+                        .any(|c| c.is_whitespace())
+            })
+        })
+        .max_by_key(|h| h.score)
+        .map(|h| Hit {
+            score: h.score - 12,
+            ..h
+        })
+}
+
+/// How `query` matches a thing a page lists by its `fields`, its name
+/// first: each word found in one field (a slipped letter forgiven), and
+/// the whole query as typed counting most, in the name above all. `None`
+/// when a word is not there; an empty query matches with no score.
+pub fn matches<S: AsRef<str>>(query: &str, fields: &[S]) -> Option<FieldsHit> {
+    let mut all = FieldsHit {
+        score: 0,
+        at: vec![vec![]; fields.len()],
+    };
+    for w in query.split_whitespace() {
+        let (field, score, at) = fields
+            .iter()
+            .enumerate()
+            .filter_map(|(i, f)| near(w, f.as_ref()).map(|h| (i, h)))
+            .map(|(i, h)| (i, h.score - if i == 0 { 0 } else { 4 }, h.at))
+            // The best, the first field of those as good.
+            .rev()
+            .max_by_key(|(_, score, _)| *score)?;
+        all.score += score;
+        all.at[field].extend(at);
+    }
+    for at in &mut all.at {
+        at.sort_unstable();
+        at.dedup();
+    }
+    let typed = query
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .to_lowercase();
+    if !typed.is_empty() {
+        let lowered: Vec<String> = fields.iter().map(|f| f.as_ref().to_lowercase()).collect();
+        all.score += match lowered.split_first() {
+            Some((name, _)) if *name == typed => 300,
+            Some((name, _)) if name.starts_with(&typed) => 200,
+            Some((name, _)) if name.contains(&typed) => 100,
+            Some((_, rest)) if rest.iter().any(|f| f.contains(&typed)) => 50,
+            _ => 0,
+        };
+    }
+    Some(all)
+}
+
+/// The things of `items` that `query` matches by the `fields` each is
+/// known by (its name first), best first: what was typed as it stands
+/// before letters apart or a slip, ties in the list's order. An empty
+/// query keeps them all, in order.
+pub fn filter<T, S: AsRef<str>>(
+    query: &str,
+    items: &[T],
+    fields: impl Fn(&T) -> Vec<S>,
+) -> Vec<Found> {
+    let mut found: Vec<Found> = items
+        .iter()
+        .enumerate()
+        .filter_map(|(index, item)| {
+            matches(query, &fields(item)).map(|h| Found {
+                index,
+                score: h.score,
+                at: h.at,
+            })
+        })
+        .collect();
+    found.sort_by_key(|f| (std::cmp::Reverse(f.score), f.index));
+    found
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -284,5 +396,49 @@ mod tests {
         assert_eq!(find("", "anything").unwrap().at, Vec::<usize>::new());
         // Two words that use the same letter mark it once.
         assert_eq!(find("ha ha", "harbour").unwrap().at, vec![0, 1]);
+    }
+
+    fn filtered(query: &str, items: &[(&str, &str)]) -> Vec<String> {
+        filter(query, items, |(name, about)| vec![*name, *about])
+            .into_iter()
+            .map(|f| items[f.index].0.to_string())
+            .collect()
+    }
+
+    #[test]
+    fn a_filter_puts_what_was_typed_before_letters_apart_and_slips() {
+        let items = [
+            ("my-image-gen", ""),
+            ("migration", ""),
+            ("db-migrate", "moves the schema"),
+            ("notes", "about migrate"),
+        ];
+        // A prefix beats the same letters apart.
+        assert_eq!(filtered("mig", &items)[0], "migration");
+        // As typed in the name, then in another field.
+        assert_eq!(
+            filtered("migrate", &items),
+            ["db-migrate", "notes", "migration"]
+        );
+        // A slipped letter still finds it.
+        assert_eq!(filtered("mirgate", &items)[0], "db-migrate");
+        // Letters strewn across a description are not a match, nor is a
+        // slip with what is left of the word strewn.
+        assert!(filtered("zoom", &[("x", "zebras on our map")]).is_empty());
+        assert_eq!(
+            filtered(
+                "thmee",
+                &[
+                    ("Node", "The node this app talks to"),
+                    ("Panel", "The edge"),
+                    ("Theme", "")
+                ]
+            ),
+            ["Theme"]
+        );
+        // Nothing typed keeps them all, in order.
+        assert_eq!(filtered(" ", &items).len(), 4);
+        let marked = filter("schema", &items, |(n, a)| vec![*n, *a]);
+        assert_eq!(marked[0].at, vec![vec![], (10..16).collect::<Vec<_>>()]);
     }
 }

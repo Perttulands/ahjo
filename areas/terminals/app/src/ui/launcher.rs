@@ -11,6 +11,7 @@ use crate::store::workspace::LinkState;
 use crate::store::{devices, launch, launch_flags};
 use crate::theme::{size, theme};
 use ahjo_app_kit::host::Host;
+use ahjo_app_kit::text::fuzzy;
 use ahjo_app_kit::widgets::field::{FieldEvent, TextField};
 use ahjo_app_kit::widgets::kit::{self, Kind};
 use ahjo_app_kit::widgets::pane;
@@ -701,18 +702,16 @@ impl Render for Launcher {
                     list = list.child(format!("Could not read flags: {error}"));
                 }
                 Some(Ok(entries)) => {
-                    for (n, flag) in entries.iter().enumerate() {
-                        if !format!(
-                            "{} {} {}",
-                            flag.name,
-                            flag.short.as_deref().unwrap_or(""),
-                            flag.description
-                        )
-                        .to_lowercase()
-                        .contains(&query)
-                        {
-                            continue;
-                        }
+                    // Best first while something is typed, a slip forgiven.
+                    let found = fuzzy::filter(&query, entries, |flag| {
+                        vec![
+                            flag.name.clone(),
+                            flag.short.clone().unwrap_or_default(),
+                            flag.description.clone(),
+                        ]
+                    });
+                    for n in found.into_iter().map(|found| found.index) {
+                        let flag = &entries[n];
                         let selected = launch_flags::has(&flags, flag);
                         let chosen = flag.clone();
                         let name = format!(

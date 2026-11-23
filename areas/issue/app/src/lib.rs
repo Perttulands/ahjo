@@ -17,6 +17,7 @@ mod view;
 mod words;
 
 use ahjo_app_kit::ask::{Answers, Ask};
+use ahjo_app_kit::text::fuzzy;
 use ahjo_app_kit::widgets::field::{self, FieldEvent, TextField};
 use ahjo_app_kit::widgets::select::Selectable;
 use ahjo_app_kit::{Host, Mounted, Page, mount};
@@ -666,25 +667,21 @@ impl Issue {
         self.projects_named(&needle)
     }
 
-    /// Every project `needle` is part of the name of, most open work first.
+    /// Every project `needle` names (by its name or its folder, a slipped
+    /// letter forgiven), the best match first, then most open work.
     fn projects_named(&self, needle: &str) -> Vec<usize> {
         let open = outline::open_counts(&self.board);
-        let mut order: Vec<usize> = (0..self.board.projects.len())
-            .filter(|&p| {
-                let info = &self.board.projects[p];
-                needle.is_empty()
-                    || info.label.to_lowercase().contains(needle)
-                    || info.path.to_lowercase().contains(needle)
-            })
-            .collect();
-        order.sort_by(|&a, &b| {
-            open[b].cmp(&open[a]).then_with(|| {
-                self.board.projects[a]
-                    .label
-                    .cmp(&self.board.projects[b].label)
-            })
+        let projects = &self.board.projects;
+        let mut found = fuzzy::filter(needle, projects, |info| {
+            vec![info.label.clone(), info.path.clone()]
         });
-        order
+        found.sort_by(|a, b| {
+            b.score
+                .cmp(&a.score)
+                .then_with(|| open[b.index].cmp(&open[a.index]))
+                .then_with(|| projects[a.index].label.cmp(&projects[b.index].label))
+        });
+        found.into_iter().map(|f| f.index).collect()
     }
 
     /// What the list holds now: a search's matches, else what the layout

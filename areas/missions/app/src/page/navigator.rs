@@ -2,6 +2,7 @@
 //! lately, then the missions to set off.
 use super::*;
 use crate::store::{navigator as model, words};
+use ahjo_app_kit::text::fuzzy;
 use ahjo_app_kit::theme::Theme;
 use ahjo_app_kit::widgets::pane;
 use gpui::SharedString;
@@ -36,9 +37,7 @@ impl Listing {
         let mut running = Vec::new();
         let mut finished = Vec::new();
         for group in &groups {
-            let title_hit = query.is_empty()
-                || group.title.to_lowercase().contains(query)
-                || group.slug.to_lowercase().contains(query);
+            let title_hit = fuzzy::matches(query, &[&group.title, &group.slug]).is_some();
             for row in &group.runs {
                 if !(title_hit || model::matches(query, row)) {
                     continue;
@@ -62,13 +61,10 @@ impl Listing {
         if query.is_empty() {
             finished.truncate(RECENT);
         }
-        let missions = groups
+        // Best first while something is typed, else by title.
+        let missions = fuzzy::filter(query, &groups, |g| vec![g.title.clone(), g.slug.clone()])
             .into_iter()
-            .filter(|g| {
-                query.is_empty()
-                    || g.title.to_lowercase().contains(query)
-                    || g.slug.to_lowercase().contains(query)
-            })
+            .map(|found| groups[found.index].clone())
             .collect();
         Self {
             needs,

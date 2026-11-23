@@ -5,6 +5,7 @@
 
 use crate::HarnessPage;
 use crate::shape_state::{self as sh, Load, Pick, Shape};
+use ahjo_app_kit::text::fuzzy;
 use ahjo_app_kit::theme::{Theme, size};
 use ahjo_app_kit::widgets::kit::{self, Kind};
 use ahjo_app_kit::widgets::{markdown, pane};
@@ -76,11 +77,13 @@ pub(crate) fn entries(shapes: &[Shape]) -> Vec<Entry> {
     out
 }
 
-/// Whether a skill answers `find`: every word in its name or description.
-pub(crate) fn matches(e: &Entry, find: &str) -> bool {
-    let hay = format!("{} {}", e.name, e.description).to_lowercase();
-    find.split_whitespace()
-        .all(|w| hay.contains(&w.to_lowercase()))
+/// The skills `find` answers, best first: every word in a skill's name or
+/// description, a slipped letter forgiven.
+pub(crate) fn matching<'a>(all: &'a [Entry], find: &str) -> Vec<&'a Entry> {
+    fuzzy::filter(find, all, |e| vec![e.name.clone(), e.description.clone()])
+        .into_iter()
+        .map(|found| &all[found.index])
+        .collect()
 }
 
 impl HarnessPage {
@@ -147,7 +150,7 @@ impl HarnessPage {
     pub(crate) fn catalog_rows(&self, t: &Theme, cx: &mut Context<Self>) -> Div {
         let find = self.inputs.find.read(cx).text.clone();
         let all = entries(&self.catalog.shapes);
-        let shown: Vec<&Entry> = all.iter().filter(|e| matches(e, &find)).collect();
+        let shown = matching(&all, &find);
         let mut rows = div().flex().flex_col();
         rows = rows.child(
             div()
@@ -351,7 +354,8 @@ mod tests {
         ]);
         assert_eq!(all.len(), 1);
         assert_eq!(all[0].seen, ["Claude Code", "Codex"]);
-        assert!(matches(&all[0], "hand LEAVE"));
-        assert!(!matches(&all[0], "deploy"));
+        assert_eq!(matching(&all, "hand LEAVE").len(), 1);
+        assert_eq!(matching(&all, "hnadoff").len(), 1, "a slip forgiven");
+        assert!(matching(&all, "deploy").is_empty());
     }
 }

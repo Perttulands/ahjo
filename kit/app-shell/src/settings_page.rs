@@ -15,6 +15,7 @@ use ahjo_app_kit::link::client::LinkState;
 use ahjo_app_kit::page::Meta;
 use ahjo_app_kit::popup::{self, Popup, PopupId, Spot};
 use ahjo_app_kit::settings::DEFAULT_NODE;
+use ahjo_app_kit::text::fuzzy;
 use ahjo_app_kit::theme::{Direction, Theme, size, theme};
 use ahjo_app_kit::widgets::field::{self, FieldEvent, TextField};
 use ahjo_app_kit::widgets::kit::{self, Kind};
@@ -982,7 +983,8 @@ impl Render for SettingsPage {
             pane::list_head(&t, Some(self.search.clone().into_any_element())),
             rows,
         );
-        let matches = |words: &str| query.is_empty() || words.to_lowercase().contains(&query);
+        // A slipped letter is forgiven; the settings keep their order.
+        let matches = |words: &str| fuzzy::matches(&query, &[words]).is_some();
         let (title, body) = if query.is_empty() {
             let name = groups
                 .iter()

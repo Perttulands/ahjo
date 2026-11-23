@@ -1,6 +1,7 @@
 //! The symbols a file defines, found line by line: functions, types and
 //! their kin in code, headings in Markdown. A light scan, not a parser: it
 //! finds what starts a line, which is where most definitions stand.
+use ahjo_app_kit::text::fuzzy;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Symbol {
@@ -190,27 +191,14 @@ pub fn at(symbols: &[Symbol], line: usize) -> Option<&Symbol> {
     symbols.iter().rev().find(|s| s.line <= line)
 }
 
-/// The symbols whose name has `query` in it, closest first: a name that
-/// starts with it before one that only has it.
+/// The symbols `query` finds by name, closest first: a name that starts
+/// with it before one that only has it, before letters apart or a slip.
 pub fn matching<'a>(symbols: &'a [Symbol], query: &str) -> Vec<&'a Symbol> {
-    let q = query.trim().to_lowercase();
-    let mut found: Vec<(usize, &Symbol)> = symbols
-        .iter()
-        .filter_map(|s| {
-            let name = s.name.to_lowercase();
-            if q.is_empty() {
-                Some((1, s))
-            } else if name.starts_with(&q) {
-                Some((0, s))
-            } else {
-                name.contains(&q).then_some((1, s))
-            }
-        })
-        .collect();
-    if !q.is_empty() {
-        found.sort_by_key(|(rank, s)| (*rank, s.line));
-    }
-    found.into_iter().map(|(_, s)| s).collect()
+    // Nothing typed keeps the file's order; ties stay in it.
+    fuzzy::filter(query.trim(), symbols, |s| vec![s.name.clone()])
+        .into_iter()
+        .map(|found| &symbols[found.index])
+        .collect()
 }
 
 #[cfg(test)]
@@ -284,5 +272,10 @@ mod tests {
             .map(|s| s.name.as_str())
             .collect();
         assert_eq!(found, ["open", "reopen"]);
+        let slipped: Vec<_> = matching(&s, "colse")
+            .iter()
+            .map(|s| s.name.as_str())
+            .collect();
+        assert_eq!(slipped, ["close"], "a slipped letter is forgiven");
     }
 }

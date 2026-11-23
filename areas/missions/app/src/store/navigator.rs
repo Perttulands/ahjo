@@ -1,5 +1,6 @@
 //! Mission navigator rows: groups, stable run numbering and attention order.
 use super::{Store, words};
+use ahjo_app_kit::text::fuzzy;
 use ahjo_missions_contract::RunProjection;
 
 #[derive(Clone)]
@@ -92,18 +93,21 @@ pub fn groups(store: &Store) -> Vec<Group> {
     });
     groups
 }
+/// Whether a run answers `query`: what it is about, its number, its id or
+/// its state, a slipped letter forgiven.
 pub fn matches(query: &str, row: &Row) -> bool {
-    query.is_empty()
-        || format!(
-            "run {} {} {} {} {}",
-            row.number,
-            row.run.run_id,
-            row.about,
-            row.run.status,
-            words::state_word(&row.run.status)
-        )
-        .to_lowercase()
-        .contains(query)
+    let number = format!("run {}", row.number);
+    fuzzy::matches(
+        query,
+        &[
+            row.about.as_str(),
+            &number,
+            &row.run.run_id,
+            &row.run.status,
+            words::state_word(&row.run.status),
+        ],
+    )
+    .is_some()
 }
 
 #[cfg(test)]
